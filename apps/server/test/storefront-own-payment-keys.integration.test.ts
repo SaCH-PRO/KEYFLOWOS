@@ -57,6 +57,36 @@
  *           knows (verified with the platform's app, as before) settles none
  *           of the storefront orders its other units name
  *
+ * Review repairs (W11-STORE-OWN-PAYMENT-KEYS review, at fc23ff18):
+ *   OPK-08  (SEC-W11OPK-1) a PayPal capture settles an INVOICE only when the
+ *           webhook was verified with the PayPal app that invoice's business
+ *           takes PayPal with (its own when it holds any PayPal setting of its
+ *           own, else the platform's): (a) the review's repro: an order event
+ *           verified with store A's own app (unit 1 = A's storefront order)
+ *           whose second unit names business B's SENT invoice settles A's
+ *           order only, B's invoice stays SENT with no payment; (b) PROBE-P2:
+ *           unit 1 = A's own invoice (verified with A's own PayPal settings),
+ *           unit 2 = B's invoice: A's invoice is PAID, B's stays SENT; (c) an
+ *           order event verified with the platform's app (unit 1 names
+ *           nothing KeyFlow knows) records nothing for an invoice of a
+ *           business that holds its own PayPal; an invoice of a business with
+ *           no PayPal of its own is still settled by the platform's app (the
+ *           invoice pay link's PayPal, as built: OPK-05's deviation)
+ *   OPK-09  (SEC-W11OPK-2, OPK-COR-1) the storefront Stripe checkout D-138
+ *           starts on the store's own account settles with that account's
+ *           own event: checkout.session.completed signed with the store's own
+ *           webhook secret (with a different platform STRIPE_* env, and with
+ *           none) settles the order once through the paid door; a redelivery
+ *           writes nothing; an event naming one store's order signed with
+ *           another store's own secret is refused 400 and settles nothing
+ *   OPK-10  (SEC-W11OPK-3, the half the Release 0 cases allow) the platform's
+ *           STRIPE_WEBHOOK_SECRET does not settle the order of a store that
+ *           holds its own complete Stripe set (its sessions are made on its
+ *           own account): 400, the order UNPAID, nothing recorded, one
+ *           refusal row; the order of a store with no Stripe of its own is
+ *           still settled by a platform-signed session, as built (Release 0
+ *           case MP-06d requires it; a deviation recorded for an owner ruling)
+ *
  * Nothing on the money path or the authorization boundary is mocked:
  * PrismaService, PublicRateLimitGuard (real Redis, this suite's namespace),
  * SiteService, StoreOrderService (the paid door), PaymentsService,
@@ -79,6 +109,7 @@
  */
 import 'reflect-metadata';
 import path from 'path';
+import { createHmac } from 'crypto';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
@@ -116,6 +147,13 @@ const ID = {
   invLink: `${P}inv_link`,
   invCapture: `${P}inv_capture`,
   contactPlatform: `${P}contact_platform`,
+  // OPK-08 (SEC-W11OPK-1): SENT USD invoices a PayPal order's later purchase unit names.
+  contactMixed: `${P}contact_mixed`,
+  contactOwn: `${P}contact_own`,
+  invVictim: `${P}inv_victim`, // bizMixed (no PayPal of its own)
+  invOwn: `${P}inv_own`, // bizOwn (its own PayPal)
+  invOwnLater: `${P}inv_own_later`, // bizOwn
+  invPlatformLater: `${P}inv_platform_later`, // bizPlatform (no PayPal of its own)
 };
 const SLUG = { platform: `${P}store-platform`, mixed: `${P}store-mixed`, own: `${P}store-own` };
 const PAY_TOKEN = `${P}pay_link_token`;
@@ -144,6 +182,12 @@ const OWN_STRIPE = {
   stripePublishableKey: fake('own', 'stripe', 'publishable'),
   stripeSecretKey: fake('own', 'stripe', 'secret'),
   stripeWebhookSecret: fake('own', 'stripe', 'webhook'),
+};
+/** Another store's own complete Stripe set (OPK-09: its webhook secret signs only its own orders' events). */
+const MIXED_STRIPE = {
+  stripePublishableKey: fake('mixed', 'stripe', 'publishable'),
+  stripeSecretKey: fake('mixed', 'stripe', 'secret'),
+  stripeWebhookSecret: fake('mixed', 'stripe', 'webhook'),
 };
 
 const STRIPE_REDIRECT = 'https://checkout.stripe.com/c/pay/v61b-session';
@@ -363,6 +407,61 @@ async function orderState(orderId: string) {
   return `${stored.status}/${stored.paymentStatus}/${stored.paymentRef ?? ''}`;
 }
 
+/** OPK-08: an invoice's status and its payments (`provider:providerPaymentId:status:amount@businessId`), as one comparable value. */
+async function invoiceState(invoiceId: string) {
+  const stored = await db.invoice.findUnique({ where: { id: invoiceId } });
+  const rows = await db.payment.findMany({ where: { invoiceId }, orderBy: { createdAt: 'asc' } });
+  return {
+    status: stored.status,
+    payments: rows.map((p: any) => `${p.provider}:${p.providerPaymentId}:${p.status}:${Number(p.amount)}@${p.businessId}`),
+  };
+}
+
+/** OPK-09 / OPK-10: a Stripe delivery to POST /payments/stripe/webhook, signed (t=, v1= HMAC-SHA256 of `t.raw`) with `secret`. */
+async function stripeWebhook(event: Record<string, unknown>, secret: string) {
+  await clearRateLimits();
+  const raw = JSON.stringify(event);
+  const t = Math.floor(Date.now() / 1000);
+  const v1 = createHmac('sha256', secret).update(`${t}.${raw}`).digest('hex');
+  const res = await agent()
+    .post('/payments/stripe/webhook')
+    .set('content-type', 'application/json')
+    .set('stripe-signature', `t=${t},v1=${v1}`)
+    .send(raw);
+  await settle();
+  return res;
+}
+
+/** Stripe's checkout.session.completed of a storefront order's paid session, as createStorePayment makes the session. */
+function sessionCompleted(eventId: string, sessionId: string, orderId: string, businessId: string) {
+  return {
+    id: eventId,
+    type: 'checkout.session.completed',
+    data: {
+      object: {
+        id: sessionId,
+        object: 'checkout.session',
+        client_reference_id: orderId,
+        metadata: { orderId, businessId },
+        amount_total: ORDER_TOTAL * 100,
+        currency: 'usd',
+        payment_status: 'paid',
+      },
+    },
+  };
+}
+
+/** The storefront order's settlement through the paid door: its one invoice's status and payments. */
+async function orderInvoice(orderId: string, businessId: string) {
+  const stored = await db.marketplaceOrder.findUnique({ where: { id: orderId } });
+  const invoices = await db.invoice.findMany({ where: { businessId, invoiceNumber: { contains: stored.orderNumber } } });
+  const rows = invoices.length ? await db.payment.findMany({ where: { invoiceId: { in: invoices.map((i: any) => i.id) } } }) : [];
+  return {
+    invoices: invoices.map((i: any) => i.status),
+    payments: rows.map((p: any) => `${p.provider}:${p.providerPaymentId}:${p.status}:${Number(p.amount)}`),
+  };
+}
+
 beforeAll(async () => {
   process.env.RATE_LIMIT_KEY_NAMESPACE = RATE_LIMIT_NS;
   delete process.env.WIPAY_API_KEY;
@@ -553,6 +652,31 @@ beforeAll(async () => {
     });
   }
   await db.paymentLink.create({ data: { token: PAY_TOKEN, invoiceId: ID.invLink, businessId: ID.bizPlatform, active: true } });
+  // OPK-08 (SEC-W11OPK-1): each business's SENT USD invoice of the order total, with a contact of its own.
+  for (const [id, businessId] of [[ID.contactMixed, ID.bizMixed], [ID.contactOwn, ID.bizOwn]] as const) {
+    const email = `${P}${id.slice(P.length)}@test.local`;
+    await db.contact.create({ data: { id, businessId, firstName: 'Vee', lastName: 'SixtyOne', email, emailNormalized: email } });
+  }
+  for (const [id, businessId, contactId, number] of [
+    [ID.invVictim, ID.bizMixed, ID.contactMixed, 'INV-V61B-3'],
+    [ID.invOwn, ID.bizOwn, ID.contactOwn, 'INV-V61B-4'],
+    [ID.invOwnLater, ID.bizOwn, ID.contactOwn, 'INV-V61B-5'],
+    [ID.invPlatformLater, ID.bizPlatform, ID.contactPlatform, 'INV-V61B-6'],
+  ] as const) {
+    await db.invoice.create({
+      data: {
+        id,
+        businessId,
+        contactId,
+        invoiceNumber: `${P}${number}`,
+        status: 'SENT',
+        currency: 'USD',
+        subtotal: ORDER_TOTAL,
+        total: ORDER_TOTAL,
+        items: { create: [{ id: `${id}_item1`, description: 'v61b item', quantity: 1, unitPrice: ORDER_TOTAL, total: ORDER_TOTAL }] },
+      },
+    });
+  }
 }, 90_000);
 
 beforeEach(async () => {
@@ -886,5 +1010,148 @@ describe('W11-STORE-OWN-PAYMENT-KEYS (D-138): a storefront offers PayPal and Str
     // At the base: the store's order PAID through the paid door on a capture into the platform's account.
     expect(await orderState(orderC), "(b): the platform's app settles no store's order").toBe('PENDING/UNPAID/');
     expect(await counts(ID.bizOwn), '(b): nothing recorded for the store').toEqual({ ...beforeC, webhookEvents: beforeC.webhookEvents + 1 });
+  });
+
+  it("OPK-08 (review SEC-W11OPK-1) a PayPal capture settles an invoice only when the webhook was verified with the PayPal app that invoice's business takes PayPal with: (a) an order event verified with store A's own app (unit 1 = A's storefront order) whose second unit names business B's SENT invoice settles A's order only, B's invoice stays SENT with no payment; (b) unit 1 = A's own invoice (verified with A's own PayPal settings), unit 2 = B's invoice: A's invoice is PAID, B's stays SENT; (c) an order event verified with the platform's app records nothing for an invoice of a business that holds its own PayPal, and still settles one of a business with no PayPal of its own (the invoice pay link's PayPal, as built)", async () => {
+    setEnv({ ...PLATFORM_PAYPAL, ...PLATFORM_PAYPAL_WEBHOOK });
+    const ownApp = basic(OWN_PAYPAL.paypalClientId, OWN_PAYPAL.paypalClientSecret);
+    const untouched = { status: 'SENT', payments: [] };
+    expect(await invoiceState(ID.invVictim), "B's invoice (business B holds no PayPal of its own)").toEqual(untouched);
+
+    // (a) The review's repro: store A pays itself on its own app; the second unit names B's invoice.
+    const orderA = await seedOrder(ID.bizOwn, ID.prodOwn, 'PAYPAL');
+    const beforeB = await counts(ID.bizMixed);
+    requests = [];
+    const res = await paypalWebhook(
+      multiUnitOrderCompleted(`${P}WH_8a`, `${P}pp_8a`, [[orderA, `${P}cap_8a_own`], [ID.invVictim, `${P}cap_8a_victim`]]),
+    );
+    expect(res.status, `(a): ${JSON.stringify(res.body)}`).toBe(201);
+    expect(res.body).toMatchObject({ processed: 'CHECKOUT.ORDER.COMPLETED' });
+    expect(paypalRequests()[0]?.authorization, "(a): verified with store A's own app").toBe(ownApp);
+    expect(await orderState(orderA), "(a): A's own order is settled").toBe(`CONFIRMED/PAID/${P}cap_8a_own`);
+    // At fc23ff18: B's invoice PAID, with paypal:v61b_cap_8a_victim:SUCCESSFUL:80 under business B (the money in A's account).
+    expect(await invoiceState(ID.invVictim), "(a): B's invoice is not settled by A's app").toEqual(untouched);
+    expect(await counts(ID.bizMixed), '(a): nothing recorded for B (the event claim is the only new row)').toEqual({ ...beforeB, webhookEvents: beforeB.webhookEvents + 1 });
+
+    // (b) PROBE-P2: unit 1 is A's own invoice, so A's own PayPal settings verify the event.
+    requests = [];
+    const res2 = await paypalWebhook(
+      multiUnitOrderCompleted(`${P}WH_8b`, `${P}pp_8b`, [[ID.invOwn, `${P}cap_8b_own`], [ID.invVictim, `${P}cap_8b_victim`]]),
+    );
+    expect(res2.status, `(b): ${JSON.stringify(res2.body)}`).toBe(201);
+    expect(paypalRequests()[0]?.authorization, "(b): verified with A's own PayPal settings").toBe(ownApp);
+    expect(await invoiceState(ID.invOwn), "(b): A's own invoice is settled").toEqual({
+      status: 'PAID',
+      payments: [`paypal:${P}cap_8b_own:SUCCESSFUL:${ORDER_TOTAL}@${ID.bizOwn}`],
+    });
+    // At fc23ff18 (and at 5872f8f7): B's invoice PAID with paypal:v61b_cap_8b_victim under business B.
+    expect(await invoiceState(ID.invVictim), "(b): B's invoice is not settled by A's app").toEqual(untouched);
+    expect(await counts(ID.bizMixed), '(b): nothing recorded for B (the two event claims are the only new rows)').toEqual({ ...beforeB, webhookEvents: beforeB.webhookEvents + 2 });
+
+    // (c) Unit 1 names nothing KeyFlow knows: the platform's app verifies the event (the env-level check, as before).
+    requests = [];
+    const res3 = await paypalWebhook(
+      multiUnitOrderCompleted(`${P}WH_8c`, `${P}pp_8c`, [
+        [`${P}unknown_ref_8c`, `${P}cap_8c_unknown`],
+        [ID.invOwnLater, `${P}cap_8c_own`],
+        [ID.invPlatformLater, `${P}cap_8c_platform`],
+      ]),
+    );
+    expect(res3.status, `(c): ${JSON.stringify(res3.body)}`).toBe(201);
+    expect(paypalRequests()[0]?.authorization, "(c): the platform's app verified it").toBe(
+      basic(PLATFORM_PAYPAL.PAYPAL_CLIENT_ID, PLATFORM_PAYPAL.PAYPAL_CLIENT_SECRET),
+    );
+    // At fc23ff18: A's invoice PAID on a capture into the platform's account.
+    expect(await invoiceState(ID.invOwnLater), "(c): the platform's app settles no invoice of a business with its own PayPal").toEqual(untouched);
+    // As built (OPK-05's deviation, for an owner ruling): the platform's app is the pay-link PayPal of a business with none of its own.
+    expect(await invoiceState(ID.invPlatformLater), '(c): a business with no PayPal of its own, as built').toEqual({
+      status: 'PAID',
+      payments: [`paypal:${P}cap_8c_platform:SUCCESSFUL:${ORDER_TOTAL}@${ID.bizPlatform}`],
+    });
+  });
+
+  it("OPK-09 (review SEC-W11OPK-2, OPK-COR-1) the storefront Stripe checkout D-138 starts on the store's own account settles with that account's own event: checkout.session.completed signed with the store's own webhook secret settles the order once through the paid door, with a different platform STRIPE_* env and with none; a redelivery writes nothing; an event naming one store's order signed with another store's own secret is refused 400 and settles nothing", async () => {
+    setEnv({ ...PLATFORM_STRIPE, NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: PLATFORM_STRIPE.STRIPE_PUBLISHABLE_KEY });
+
+    // (a) The public checkout makes the session on the store's own account; that account's event settles the order.
+    const st = await checkout(SLUG.own, ID.prodOwn, 'STRIPE');
+    expect(st.status, JSON.stringify(st.body)).toBe(201);
+    expect(stripeRequests().map((r) => r.authorization), "the session is made on the store's own account").toEqual([`Bearer ${OWN_STRIPE.stripeSecretKey}`]);
+    const orderId: string = st.body.order.id;
+    const sessionId: string = st.body.payment.paymentId;
+    expect(await orderState(orderId)).toBe('PENDING/UNPAID/');
+    requests = [];
+    const event = sessionCompleted(`${P}evt_9a`, sessionId, orderId, ID.bizOwn);
+    const res = await stripeWebhook(event, OWN_STRIPE.stripeWebhookSecret);
+    // At fc23ff18: 400 'Invalid Stripe webhook signature' (only the platform's secret or an invoice's business's is tried).
+    expect(res.status, `(a): ${JSON.stringify(res.body)}`).toBe(201);
+    expect(res.body).toMatchObject({ ok: true, received: true, processed: 'checkout.session.completed' });
+    expect(await orderState(orderId), '(a): settled').toBe(`CONFIRMED/PAID/${sessionId}`);
+    const settled = { invoices: ['PAID'], payments: [`stripe:${sessionId}:SUCCESSFUL:${ORDER_TOTAL}`] };
+    expect(await orderInvoice(orderId, ID.bizOwn), '(a): one PAID invoice, one payment').toEqual(settled);
+    const again = await stripeWebhook(event, OWN_STRIPE.stripeWebhookSecret);
+    expect(again.status, `(a) redelivery: ${JSON.stringify(again.body)}`).toBe(201);
+    expect(again.body, '(a): the redelivery is acknowledged, not processed').not.toHaveProperty('processed');
+    expect(await orderInvoice(orderId, ID.bizOwn), '(a): the redelivery writes nothing').toEqual(settled);
+
+    // (b) No platform Stripe in the env at all: the store's own account still settles its order.
+    setEnv({});
+    const orderB = await seedOrder(ID.bizOwn, ID.prodOwn, 'STRIPE');
+    const resB = await stripeWebhook(sessionCompleted(`${P}evt_9b`, `${P}cs_9b`, orderB, ID.bizOwn), OWN_STRIPE.stripeWebhookSecret);
+    // At fc23ff18: 400 'Invalid Stripe webhook signature'.
+    expect(resB.status, `(b): ${JSON.stringify(resB.body)}`).toBe(201);
+    expect(await orderState(orderB), '(b): settled').toBe(`CONFIRMED/PAID/${P}cs_9b`);
+
+    // (c) A store's own secret signs only its own orders' events (the secret is chosen by the order the event names).
+    setEnv({ ...PLATFORM_STRIPE });
+    await setSettings(ID.bizMixed, { ...MIXED_STRIPE });
+    const orderOwn = await seedOrder(ID.bizOwn, ID.prodOwn, 'STRIPE');
+    const orderMixed = await seedOrder(ID.bizMixed, ID.prodMixed, 'STRIPE');
+    const before = { own: await counts(ID.bizOwn), mixed: await counts(ID.bizMixed) };
+    for (const [label, signed, secret] of [
+      ["store B's order, store A's secret", sessionCompleted(`${P}evt_9c_b`, `${P}cs_9c_b`, orderMixed, ID.bizMixed), OWN_STRIPE.stripeWebhookSecret],
+      ["store A's order, store B's secret", sessionCompleted(`${P}evt_9c_a`, `${P}cs_9c_a`, orderOwn, ID.bizOwn), MIXED_STRIPE.stripeWebhookSecret],
+    ] as const) {
+      const r = await stripeWebhook(signed, secret);
+      expect(r.status, `(c) ${label}: ${JSON.stringify(r.body)}`).toBe(400);
+      expect(r.body, `(c) ${label}`).toMatchObject({ message: 'Invalid Stripe webhook signature' });
+    }
+    expect(await orderState(orderOwn), "(c): A's order").toBe('PENDING/UNPAID/');
+    expect(await orderState(orderMixed), "(c): B's order").toBe('PENDING/UNPAID/');
+    expect({ own: await counts(ID.bizOwn), mixed: await counts(ID.bizMixed) }, '(c): nothing recorded').toEqual(before);
+    expect(requests, 'no provider request at settlement (after the checkout)').toEqual([]);
+  });
+
+  it("OPK-10 (review SEC-W11OPK-3, the half the Release 0 cases allow) the platform's STRIPE_WEBHOOK_SECRET does not settle the order of a store that holds its own complete Stripe set (its sessions are made on its own account): 400, the order UNPAID, nothing recorded, one refusal row (a retry adds none); the order of a store with no Stripe of its own is still settled by a platform-signed session, as built (Release 0 MP-06d)", async () => {
+    setEnv({ ...PLATFORM_STRIPE });
+
+    // (a) A store with its own complete Stripe set: a platform-signed session naming its order is refused.
+    const orderOwn = await seedOrder(ID.bizOwn, ID.prodOwn, 'STRIPE');
+    const before = await counts(ID.bizOwn);
+    const event = sessionCompleted(`${P}evt_10a`, `${P}cs_10a`, orderOwn, ID.bizOwn);
+    const res = await stripeWebhook(event, PLATFORM_STRIPE.STRIPE_WEBHOOK_SECRET);
+    // At fc23ff18: 201 processed and the order CONFIRMED/PAID/v61b_cs_10a.
+    expect(res.status, `(a): ${JSON.stringify(res.body)}`).toBe(400);
+    expect(res.body).toMatchObject({ message: 'Stripe event does not match the order' });
+    expect(await orderState(orderOwn), '(a): not settled').toBe('PENDING/UNPAID/');
+    const kept = async () =>
+      (await db.webhookEvent.findMany({ where: { providerEventId: `${P}evt_10a` } })).map(
+        (w: any) => `${w.provider}:${w.eventType}@${w.businessId}`,
+      );
+    expect(await kept(), '(a): one refusal row').toEqual([`stripe-refused:checkout.session.completed:business@${ID.bizOwn}`]);
+    const retry = await stripeWebhook(event, PLATFORM_STRIPE.STRIPE_WEBHOOK_SECRET);
+    expect(retry.status, `(a) retry: ${JSON.stringify(retry.body)}`).toBe(400);
+    expect(await kept(), '(a): a retry adds no row').toHaveLength(1);
+    expect(await counts(ID.bizOwn), '(a): nothing recorded but the refusal').toEqual({ ...before, webhookEvents: before.webhookEvents + 1 });
+
+    // (b) As built (Release 0 case MP-06d requires it; a deviation recorded for an owner ruling): a store with no
+    // Stripe of its own (D-138 offers it none) is still settled by a platform-signed session naming its order.
+    const orderPlatform = await seedOrder(ID.bizPlatform, ID.prodPlatform, 'STRIPE');
+    const res2 = await stripeWebhook(
+      sessionCompleted(`${P}evt_10b`, `${P}cs_10b`, orderPlatform, ID.bizPlatform),
+      PLATFORM_STRIPE.STRIPE_WEBHOOK_SECRET,
+    );
+    expect(res2.status, `(b): ${JSON.stringify(res2.body)}`).toBe(201);
+    expect(await orderState(orderPlatform), '(b): as built').toBe(`CONFIRMED/PAID/${P}cs_10b`);
   });
 });
