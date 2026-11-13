@@ -85,6 +85,15 @@ export class FinanceController {
   ) {}
 
   // ---------- Manual Journal Entries ----------
+  // PR195-JOURNAL-SCOPE (review finding CR-P195-4): a manual journal writes the books, so it needs
+  // revenue write, the module of the Books (owner ruling D-57: no module key of their own; their reads,
+  // GET journal-entries included, need revenue read, and the credit notes, the other manual Books write
+  // on this controller, revenue write). ModuleScopeGuard refuses a member below it with 403 before the
+  // handler, so nothing is posted; ensureAccess still refuses a platform SUPER_ADMIN who is not a member
+  // (D-46, FOLLOW3-A5), whom the guard passes. The derived KEY tool table follows the decorator
+  // (job-role-tool-families.spec.ts): finance_post_journal_entry is revenue write there.
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('journal-entries')
   async createJournalEntry(
     @Param('businessId') businessId: string,
@@ -620,6 +629,10 @@ export class FinanceController {
   }
 
   // ---------- Recurring Journal Entries ----------
+  // PR195-JOURNAL-SCOPE (CR-P195-4): a template is a manual journal that posts itself (run posts one
+  // ADJUSTMENT at once, the scheduler posts the rest), so every write of one needs revenue write, as
+  // POST journal-entries does; otherwise a member below it creates a template and runs it. ensureAccess
+  // stays (D-46). The reads are unchanged.
   @Get('recurring-journal-entries')
   async listRecurringJournals(@Param('businessId') businessId: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
@@ -627,6 +640,8 @@ export class FinanceController {
     return { items };
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('recurring-journal-entries')
   async createRecurringJournal(
     @Param('businessId') businessId: string,
@@ -647,6 +662,8 @@ export class FinanceController {
     return this.recurringJournals.get(businessId, id);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Patch('recurring-journal-entries/:id')
   async updateRecurringJournal(
     @Param('businessId') businessId: string,
@@ -658,6 +675,8 @@ export class FinanceController {
     return this.recurringJournals.update(businessId, id, body);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('recurring-journal-entries/:id/run')
   async runRecurringJournal(
     @Param('businessId') businessId: string,
@@ -668,6 +687,8 @@ export class FinanceController {
     return this.recurringJournals.runOnce(businessId, id);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('recurring-journal-entries/:id/cancel')
   async cancelRecurringJournal(
     @Param('businessId') businessId: string,
@@ -678,6 +699,8 @@ export class FinanceController {
     return this.recurringJournals.cancel(businessId, id);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Delete('recurring-journal-entries/:id')
   async deleteRecurringJournal(
     @Param('businessId') businessId: string,

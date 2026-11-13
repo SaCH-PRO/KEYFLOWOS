@@ -949,6 +949,8 @@ describe('V1-21b review 2 — KEY never exceeds HTTP on the same scope map (K2)'
           'operations:payroll_mark_paid',
           'operations:procurement_issue_po',
           'revenue:commerce_delete_invoice',
+          // PR195-JOURNAL-SCOPE (CR-P195-4): POST finance journal-entries needs revenue write; the tool is tier 3
+          'revenue:finance_post_journal_entry',
           'revenue:payments_refund_charge',
           'team:structure_create_delegation_rule',
           'team:structure_update_delegation_rule',

@@ -1676,16 +1676,26 @@ export class FlowOrchestratorService {
     // memberScopeRefusal refuses a call with). Review CR-W8KRG-1: a tool whose money write depends on
     // its arguments (update_status_with_confirmation, which also moves contact statuses) stays offered,
     // and its call is judged by its arguments when it runs.
+    // PR195-JOURNAL-SCOPE (review finding CR-P195-4 and the PR195-PORT repair's open item): finance_post_journal_entry
+    // is a revenue write in the derived table now that its route needs revenue write, so the revenue rule above
+    // withholds it from a member below revenue write (a non-member SUPER_ADMIN included: no membership is none, D-46);
+    // and a tool whose authority map entry names an extra scope beside its own module (keyMemberExtraScopes:
+    // payroll_mark_paid's expenses write) is offered only when the member holds it, as memberScopeRefusal refuses
+    // its call.
     if (!envelope && principalUserId) {
       const level = await this.memberOperationsLevel(businessId, principalUserId);
       // Imported at call time: plan-step-authority imports graph-actions.controller, which imports this file.
-      const { keyRevenueMenuLevel, memberRevenueLevel } = await import('./plan-step-authority');
+      const { keyMemberExtraScopes, keyRevenueMenuLevel, memberExtraScopeReader, memberRevenueLevel } = await import('./plan-step-authority');
       const revenue = candidates.some((t) => keyRevenueMenuLevel(t.function.name))
         ? await memberRevenueLevel(this.prisma, businessId, principalUserId)
         : 'none';
+      const extraRefusal = candidates.some((t) => keyMemberExtraScopes(t.function.name).length > 0)
+        ? await memberExtraScopeReader(this.prisma, businessId, principalUserId)
+        : () => null;
       candidates = candidates.filter((t) => {
         const required = operationsLevelFor(t.function.name);
         if (required && rankOf(level) < LEVEL_RANK[required]) return false;
+        if (extraRefusal(t.function.name)) return false;
         const money = keyRevenueMenuLevel(t.function.name);
         return !money || rankOf(revenue) >= LEVEL_RANK[money];
       });
@@ -3544,7 +3554,12 @@ ${triage.standingContext}`;
     const memberId = memberRevenueGateMember(action);
     if (!memberId) return null;
     // Imported at call time: plan-step-authority imports graph-actions.controller, which imports this file.
-    const { memberRevenueWriteRefusal } = await import('./plan-step-authority');
+    const { memberExtraScopeRefusal, memberRevenueWriteRefusal } = await import('./plan-step-authority');
+    // PR195-JOURNAL-SCOPE (the PR195-PORT repair's open item; SEC-P195-3): and the authority map's extra
+    // scope a money write needs beside its own module (payroll_mark_paid: expenses write), refused here,
+    // before dispatch, for the same member, as PayrollService would refuse it inside dispatch.
+    const extra = await memberExtraScopeRefusal(this.prisma, businessId, memberId, toolName);
+    if (extra) return extra;
     return memberRevenueWriteRefusal(this.prisma, businessId, memberId, toolName, args);
   }
 
@@ -6841,6 +6856,11 @@ ${triage.standingContext}`;
         return { aging, vendors };
       }
       case 'finance_post_journal_entry': {
+        // PR195-JOURNAL-SCOPE (CR-P195-4): who may run this at all is held before dispatch, as for the other
+        // revenue writes: its route (POST finance journal-entries) needs revenue write, so the derived table
+        // holds it there and the revenue gate refuses a member-driven call below it (memberScopeRefusal); the
+        // plan queue, approved proposals and the graph route hold the member to it (memberToolRunAuthority,
+        // assertMayRunGraphAction; D-46), and a run with no member is refused (noMemberToolRefusal, D-73).
         const result = await this.getPosting().post({
           businessId,
           type: args.type,

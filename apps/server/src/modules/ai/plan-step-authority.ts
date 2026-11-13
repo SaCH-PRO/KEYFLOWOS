@@ -1,5 +1,5 @@
 import { ForbiddenException } from '@nestjs/common';
-import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+import { LEVEL_RANK, defaultScopesForRole, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
 import type { PrismaService } from '../../core/prisma/prisma.service';
 import { CANONICAL_MODULE_TOOLS, GOVERNED_UNGRANTED } from '../structure/job-role-policy.service';
 import { keyOrganToolAuthority } from '../key-cortex/key-cortex-organ-tool-authority';
@@ -7,9 +7,11 @@ import {
   NO_MEMBER_LEDGER_WRITE_TOOLS,
   assertMayRunGraphAction,
   graphActionBoundByContactVisibility,
+  graphActionExtraScopes,
   graphActionReadsContacts,
   graphActionRequirement,
   isExplicitScopeMap,
+  type GraphActionScope,
 } from './graph-actions.controller';
 
 /**
@@ -411,4 +413,72 @@ export async function memberRevenueWriteRefusal(
   const level = await memberRevenueLevel(prisma, businessId, memberId);
   if (rankOf(level) >= LEVEL_RANK[required]) return null;
   return `Insufficient permissions: revenue requires ${required} access (you have ${level}); KEY runs "${toolName}" for a member only with the revenue access the routes require (D-98)`;
+}
+
+/**
+ * PR195-JOURNAL-SCOPE (the PR195-PORT repair's open item; review SEC-P195-3): the module scopes a member
+ * driving KEY needs for `toolName` beyond the two the chat gates already read (the operations scope, D-40;
+ * the revenue write of KEY's money-writing tools, D-98, which keyRevenueWriteLevel judges with the call's
+ * arguments): the authority map's extra scopes (graphActionExtraScopes) other than revenue. Today one:
+ * payroll_mark_paid needs expenses write beside its route's operations write, since marking a run paid
+ * posts it to the ledger (PayrollService holds REST and every KEY dispatch to the same pair). Empty for
+ * every other tool.
+ */
+export function keyMemberExtraScopes(toolName: string): ReadonlyArray<GraphActionScope> {
+  return graphActionExtraScopes(toolName).filter((s) => s.module !== 'revenue');
+}
+
+/**
+ * PR195-JOURNAL-SCOPE: reads `userId`'s membership of `businessId` once and answers, for any tool, why
+ * KEY may not run it for them for want of an extra scope (keyMemberExtraScopes), or null. The rule is
+ * PayrollService.markRunPaid's for the member a run is for: a Membership of this business (D-46: a
+ * platform SUPER_ADMIN who is not a member is refused; one who is a member passes, as ModuleScopeGuard
+ * lets one through), and each extra scope at its level, read as ModuleScopeGuard reads a membership
+ * (memberModuleLevel: the explicit map, a missing key being none, else the role's defaults). The words
+ * are the guard's, so a member and the model read KEY's refusal as the service's. Used for the FLOW
+ * chat menu (FlowOrchestratorService.selectToolsForRequest), so one turn reads the membership once.
+ */
+export async function memberExtraScopeReader(
+  prisma: PrismaService,
+  businessId: string,
+  userId: string,
+): Promise<(toolName: string) => string | null> {
+  const [membership, user] = await Promise.all([
+    prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId, businessId } },
+      select: { role: true, permissionScopes: true },
+    }),
+    prisma.client.user.findUnique({ where: { id: userId }, select: { role: true } }),
+  ]);
+  return (toolName: string) => {
+    const extra = keyMemberExtraScopes(toolName);
+    if (!extra.length) return null;
+    if (!membership) {
+      return `Not a member of this business: KEY runs "${toolName}" only for a member of the business whose books it writes (D-46)`;
+    }
+    if (user?.role === 'SUPER_ADMIN') return null;
+    for (const { module, minLevel } of extra) {
+      const level = memberModuleLevel(membership, module);
+      if (rankOf(level) < LEVEL_RANK[minLevel]) {
+        return `Insufficient permissions: ${module} requires ${minLevel} access (you have ${level}); KEY runs "${toolName}" for a member only with every module scope its authority map names`;
+      }
+    }
+    return null;
+  };
+}
+
+/**
+ * PR195-JOURNAL-SCOPE: memberExtraScopeReader's answer for one call, read from the database only when
+ * the tool has an extra scope. FlowOrchestratorService.memberScopeRefusal asks it for the member a
+ * member-driven surface runs the call for (memberRevenueGateMember: member chat, a plan run over HTTP, a
+ * KEY-cortex turn's bridged call), so the call is refused before dispatch, as the menu withholds it.
+ */
+export async function memberExtraScopeRefusal(
+  prisma: PrismaService,
+  businessId: string,
+  memberId: string,
+  toolName: string,
+): Promise<string | null> {
+  if (!keyMemberExtraScopes(toolName).length) return null;
+  return (await memberExtraScopeReader(prisma, businessId, memberId))(toolName);
 }

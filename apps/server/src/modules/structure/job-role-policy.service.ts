@@ -138,6 +138,9 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
     // finance_view_receivables: GET receivables/aging and customers/:contactId/balance (FOLLOW3-A6, D-57)
     finance_balance_sheet: 'read', finance_cashflow: 'read', finance_profit_and_loss: 'read',
     finance_revenue_breakdown: 'read', finance_tax_summary: 'read',
+    // finance_post_journal_entry: POST finance journal-entries requires revenue write (PR195-JOURNAL-SCOPE,
+    // review finding CR-P195-4), so the legacy `finance` key no longer reaches it
+    finance_post_journal_entry: 'write',
     payments_create_link: 'write',
     payments_list_gateways: 'read', payments_list_links: 'read', payments_list_transactions: 'read',
     payments_refund_charge: 'write', payments_revoke_link: 'write',

@@ -10,6 +10,18 @@ import { getStoredBusinessId } from "@/lib/workspace";
 import { fetchRecurringJournals, createRecurringJournal, updateRecurringJournal, deleteRecurringJournal, runRecurringJournal, fetchChartOfAccounts, type RecurringJournalEntry, type ChartOfAccount } from "@/lib/api/finance";
 import { fetchFinanceSettings } from "@/lib/client";
 
+/**
+ * PR195-JOURNAL-SCOPE (CR-P195-4): a template's writes need revenue write on the server, as POST
+ * journal-entries does (Run posts a journal at once). The API helpers answer a refusal as
+ * { error, status } rather than throwing, so each write reads its answer: a refusal is said (a 403
+ * names the access it needs), and nothing claims success or drops a row the server kept.
+ */
+function writeRefusal(res: { error?: string | null; status?: number } | null | undefined, fallback: string): string | null {
+  if (!res || !res.error) return null;
+  if (res.status === 403) return `You can't change recurring journals in this business: they post to the books, which needs revenue write access. ${res.error}`;
+  return res.error || fallback;
+}
+
 export default function RecurringJournalsPage() {
   const businessId = getStoredBusinessId() ?? "";
   const [entries, setEntries] = useState<RecurringJournalEntry[]>([]);
@@ -91,6 +103,11 @@ export default function RecurringJournalsPage() {
         endDate: endDate || null,
         entries,
       });
+      const refused = writeRefusal(res, "Failed to create recurring journal");
+      if (refused) {
+        toast.error(refused);
+        return;
+      }
       const created = res.data;
       if (created) {
         setEntries((prev) => [...prev, created]);
@@ -113,6 +130,11 @@ export default function RecurringJournalsPage() {
     if (!businessId) return;
     try {
       const res = await updateRecurringJournal(businessId, entry.id, { isActive: !entry.isActive });
+      const refused = writeRefusal(res, "Failed to update entry");
+      if (refused) {
+        toast.error(refused);
+        return;
+      }
       const updated = res.data;
       if (updated) {
         setEntries((prev) => prev.map((e) => (e.id === entry.id ? updated : e)));
@@ -127,7 +149,11 @@ export default function RecurringJournalsPage() {
     if (!businessId) return;
     if (!window.confirm("Are you sure? This cannot be undone.")) return;
     try {
-      await deleteRecurringJournal(businessId, id);
+      const refused = writeRefusal(await deleteRecurringJournal(businessId, id), "Failed to delete entry");
+      if (refused) {
+        toast.error(refused);
+        return;
+      }
       setEntries((prev) => prev.filter((e) => e.id !== id));
       toast.success("Entry deleted");
     } catch (e) {
@@ -139,7 +165,11 @@ export default function RecurringJournalsPage() {
     if (!businessId) return;
     setRunning(id);
     try {
-      await runRecurringJournal(businessId, id);
+      const refused = writeRefusal(await runRecurringJournal(businessId, id), "Failed to run entry");
+      if (refused) {
+        toast.error(refused);
+        return;
+      }
       toast.success("Journal entry executed");
       load();
     } catch (e) {
@@ -288,6 +318,8 @@ export default function RecurringJournalsPage() {
                   <button
                     onClick={() => handleDelete(entry.id)}
                     className="p-1 rounded hover:bg-red-500/10 transition-colors"
+                    title="Delete"
+                    aria-label="Delete"
                   >
                     <Trash2 className="w-3.5 h-3.5 text-red-500" />
                   </button>

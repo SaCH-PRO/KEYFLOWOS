@@ -12,7 +12,12 @@
  *   - the ledger keeps cash per chart row (V1-34): the door takes no
  *     FinancialAccount, so the PR's per-line account picker is not ported;
  *   - a refused journal read (403: revenue read, D-57; 503) says so, rather
- *     than showing an empty journal, and offers no New Entry.
+ *     than showing an empty journal, and offers no New Entry;
+ *   - posting needs revenue write (PR195-JOURNAL-SCOPE, CR-P195-4). The client
+ *     cannot know the member's scopes cheaply before it posts (no route
+ *     answers the caller's own module levels; the team list needs team read,
+ *     which STAFF lacks), so a refused post (403) is said as a refusal: an
+ *     alert, the form closed and New Entry withdrawn, never a silent toast.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -47,6 +52,12 @@ interface JournalFormLine {
 
 const emptyLine = (): JournalFormLine => ({ accountId: "", debit: "", credit: "", memo: "" });
 
+/** Why a journal post was refused, as the member should hear it, when the refusal is the member's access (403); else null. */
+function postRefusal(res: { error?: string | null; status?: number } | null | undefined): string | null {
+  if (!res || !res.error || res.status !== 403) return null;
+  return `You can't post journal entries in this business: posting to the books needs revenue write access. ${res.error}`;
+}
+
 /** Why the journal could not be read, as the member should hear it; null when it was read. */
 function journalRefusal(res: { error?: string | null; status?: number } | null | undefined): string | null {
   if (!res || !res.error) return null;
@@ -68,6 +79,8 @@ function JournalBody({ businessId }: { businessId: string }) {
   const [accounts, setAccounts] = useState<ChartOfAccountRow[]>([]);
   const [currency, setCurrency] = useState<string>("TTD");
   const [refusal, setRefusal] = useState<string | null>(null);
+  /** The server refused this member's post (403): they may read the journal, not write it. */
+  const [writeRefusal, setWriteRefusal] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -126,6 +139,12 @@ function JournalBody({ businessId }: { businessId: string }) {
     });
     setSaving(false);
 
+    const refusedPost = postRefusal(res as { error?: string | null; status?: number });
+    if (refusedPost) {
+      setWriteRefusal(refusedPost);
+      setShowForm(false);
+      return;
+    }
     if (res.error) {
       toast.error(res.error);
       return;
@@ -155,7 +174,7 @@ function JournalBody({ businessId }: { businessId: string }) {
           <h2 className="text-sm font-semibold">General Journal</h2>
           <p className="text-xs text-muted-foreground">Manual double-entry adjustments</p>
         </div>
-        {!refusal && (
+        {!refusal && !writeRefusal && (
           <button
             onClick={() => setShowForm((v) => !v)}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border/40 bg-card/50 px-2.5 py-1.5 text-xs font-medium hover:bg-card/80"
@@ -172,7 +191,14 @@ function JournalBody({ businessId }: { businessId: string }) {
         </div>
       )}
 
-      {!refusal && showForm && (
+      {!refusal && writeRefusal && (
+        <div role="alert" className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-300">
+          <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>{writeRefusal}</span>
+        </div>
+      )}
+
+      {!refusal && !writeRefusal && showForm && (
         <div className="rounded-xl border border-border/40 bg-card/40 p-4 space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <div>

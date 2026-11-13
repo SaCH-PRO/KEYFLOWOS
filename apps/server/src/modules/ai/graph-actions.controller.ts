@@ -183,6 +183,16 @@ const GRAPH_ACTION_EXTRA_SCOPES: Readonly<Record<string, ReadonlyArray<GraphActi
 };
 
 /**
+ * PR195-JOURNAL-SCOPE (the PR195-PORT repair's open item on the FLOW chat menu): the module scopes
+ * GRAPH_ACTION_EXTRA_SCOPES names for `toolName` beside its own, or none. KEY member chat reads them
+ * (plan-step-authority keyMemberExtraScopes), so its menu and its calls hold the same pair the
+ * authority map holds the plan queue, approved proposals and this route to.
+ */
+export function graphActionExtraScopes(toolName: string): ReadonlyArray<GraphActionScope> {
+  return Object.prototype.hasOwnProperty.call(GRAPH_ACTION_EXTRA_SCOPES, toolName) ? GRAPH_ACTION_EXTRA_SCOPES[toolName] : [];
+}
+
+/**
  * PR195-PORT (D-73, D-46): tools that write the ledger though their own module scope is neither revenue nor
  * expenses. A KEY plan or monitor with no member principal runs none of them (noMemberToolRefusal), and a
  * platform SUPER_ADMIN who is not a member of the business runs none of them (assertMayRunGraphAction; review
