@@ -19,5 +19,6 @@ For every review:
 
 Repository context:
 - Read the root `AGENTS.md` for current architecture, runtime gotchas, execution-control rules, and safety boundaries.
+- Read `docs/reconstruction/BUILD-MAP-001.md` for the owner rulings (section (g), D-01 onward) and the reconstruction build map; a change that contradicts a recorded ruling is a finding.
 - Control-plane work must follow `docs/development/EXECUTION_CONTROL_STANDARD.md` and `docs/development/AGENT_CONTROL_PLANE.md`.
-- `.agent-control/programme-state.yaml` is the canonical live programme state when control-plane work is involved.
+- Control-state precedence (`docs/development/AGENT_CONTROL_PLANE.md`, "Control-state precedence"): repository, PR and CI evidence is implementation truth (what actually exists: merged or open PRs, branches, main, exact-head CI); the newest valid ChatGPT `DIRECTIVE` / `REVIEW` / `HOLD` / `RESUME` on issue #80 is execution authority (what may happen now); `.agent-control/programme-state.yaml` is a derived machine projection of those two that may be stale: it may accelerate a decision, never override one.
