@@ -689,12 +689,19 @@ Owner PR #195, ported onto the head's money rules (PR195-PORT). Connects payroll
 
 ```
 POST /payroll/businesses/:businessId/runs/:runId/mark-paid   (operations write; body paymentAccountId | paymentMethod)
-  (or KEY tool payroll_mark_paid via FlowOrchestratorService.executeToolAction: actor key_ai, initiatedBy = the member)
+  (or KEY tool payroll_mark_paid via FlowOrchestratorService.executeToolAction: actor key_ai, initiatedBy = the member;
+   KEY's authority map holds it to operations write AND expenses write, and refuses a non-member SUPER_ADMIN, D-46)
   → PayrollController.markRunPaid()  (actor = req.user.id)
       → PayrollService.markRunPaid(businessId, runId, { paymentAccountId | paymentMethod, actorId, initiatedBy })
-          → 503 without ExpensePostingService; 400 without an account or a cash-class method
+          → 503 without ExpensePostingService
+          → assertMayPostPayroll: the member the posting is for (actorId on REST, initiatedBy on KEY) must hold a
+            Membership of this business with expenses write (memberModuleLevel, ModuleScopeGuard's reading);
+            none named (D-73), no Membership (a platform SUPER_ADMIN who is not a member, D-46) or no expenses
+            write (review SEC-P195-3, restrictive pick) → 403, nothing read or written
+          → 400 without an account or a cash-class method
           → prisma.client.$transaction(async (tx) => ...)
-              1. Reads the PayrollRun by (id, businessId); DRAFT/VOID → 400
+              1. Reads the PayrollRun by (id, businessId); DRAFT/VOID → 400; the run or an item not in the
+                 business currency → 400 (D-13, review CR-P195-1), before the claim
               2. Payment account (when given): this business's, active, CASH|BANK|PAYMENT_PROCESSOR, in the
                  run's currency, its chart row this business's cash-class system row → that chart row id;
                  a method → the system chart row for it (resolvePaymentCoa)
@@ -712,23 +719,30 @@ POST /payroll/businesses/:businessId/runs/:runId/mark-paid   (operations write; 
 
 A PAID run asked again (double click, KEY retry) is not moved; the door's key answers its first posting. A PAID run with no posting (paid before mark-paid posted) is posted dated its own paidAt, which a CLOSED period refuses.
 
+Rates and runs are in the business currency (D-13): `setRate` with no currency stores the business currency (it was the literal TTD), and `generateRun` labels the run with it and refuses 400, before writing anything, rates in any other currency.
+
 Treasury and KEY context read path:
 
 ```
 SafeToSpendService.calculate(businessId)               (GET finance/.../safe-to-spend, revenue read, D-57)
   → CashPositionService.getCashPosition() (ledger cash, business currency; other currencies apart)
-  → payrollReserved = DRAFT + APPROVED runs in the business currency; other currencies named apart
+  → payrollReserved = DRAFT + APPROVED runs in the business currency, drafts named on their own line;
+    other currencies named apart
 BusinessGraphService.getSnapshot(businessId, forceRefresh, { viewerId })
   → full snapshot cached per business (2 min, and a newer finance-accounting.util revision forces a refresh)
   → treasury (ledger cash, unpaid bills, committed payroll, alert) only for revenue read; pipeline for crm read;
-    support for operations read (keyContextSight); no viewer (REST graph routes, other services): none
+    support for operations read (keyContextSight, read by ModuleScopeGuard's own rule, memberModuleLevel:
+    a stored array is an explicit map in which every module is none); no viewer (REST graph routes, other
+    services): none
 FlowOrchestratorService.chat / streamChat → getSnapshot(businessId, false, { viewerId: userId }) → buildContextString
 ```
 
 Key files:
 
 - `apps/server/src/modules/payroll/payroll.module.ts` — imports `FinanceModule`
-- `apps/server/src/modules/payroll/payroll.service.ts` — `markRunPaid()`, `disbursementChartRow()`
+- `apps/server/src/modules/payroll/payroll.service.ts` — `markRunPaid()`, `assertMayPostPayroll()`, `assertRunInBusinessCurrency()`, `disbursementChartRow()`, `setRate()`, `generateRun()`
+- `apps/server/src/core/authority/module-vocabulary.ts` — `memberModuleLevel()` (ModuleScopeGuard's reading of a membership, shared)
+- `apps/server/src/modules/ai/graph-actions.controller.ts` — `GRAPH_ACTION_EXTRA_SCOPES.payroll_mark_paid`, `NO_MEMBER_LEDGER_WRITE_TOOLS`
 - `apps/server/src/modules/payroll/payroll.controller.ts` — `markRunPaid()`
 - `apps/server/src/modules/finance/expense-posting.service.ts` — `onPayrollRunPaid()`, `PAYROLL_DISBURSEMENT_METHODS`
 - `apps/server/src/modules/finance/posting.service.ts` — `post()`, `reverse()` (revision bump after commit)

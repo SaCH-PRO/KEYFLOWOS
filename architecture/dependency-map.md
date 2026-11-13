@@ -124,7 +124,11 @@ expense-posting.service.ts              → finance/posting.service.ts (PostingS
 posting.service.ts                      → finance/finance-accounting.util.ts (snapshot revision bump)
 safe-to-spend.service.ts                → finance/cash-position.service.ts (ledger cash)
 ai/business-graph.service.ts            → finance/cash-position.service.ts, finance/finance-accounting.util.ts,
-                                          core/authority/module-vocabulary.ts (keyContextSight)
+                                          core/authority/module-vocabulary.ts (keyContextSight: memberModuleLevel)
+payroll.service.ts                      → core/authority/module-vocabulary.ts (memberModuleLevel),
+                                          core/auth/system-actor.ts (KEY_SYSTEM_ACTOR_ID)
+core/auth/module-scope.guard.ts         → core/authority/module-vocabulary.ts (memberModuleLevel, shared with the above
+                                          and business-genome/key-genome/genome-finance-scope.ts)
 ```
 
 ## External Integration Dependencies

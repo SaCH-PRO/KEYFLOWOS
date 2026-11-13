@@ -3306,7 +3306,7 @@
       "extension": "",
       "lines": 1,
       "path": ".git",
-      "size_bytes": 54
+      "size_bytes": 56
     },
     {
       "extension": ".yml",
@@ -4109,9 +4109,9 @@
         "@nestjs/common",
         "@nestjs/core"
       ],
-      "lines": 150,
+      "lines": 146,
       "path": "apps/server/src/core/auth/module-scope.guard.ts",
-      "size_bytes": 7013
+      "size_bytes": 7038
     },
     {
       "exports": [
@@ -4388,15 +4388,16 @@
         "isCanonicalModule",
         "isCrmSubPermission",
         "isTier4Scope",
+        "memberModuleLevel",
         "rankOf",
         "strongest",
         "weakest"
       ],
       "extension": ".ts",
       "imports": [],
-      "lines": 192,
+      "lines": 215,
       "path": "apps/server/src/core/authority/module-vocabulary.ts",
-      "size_bytes": 7953
+      "size_bytes": 9149
     },
     {
       "exports": [],
@@ -7744,12 +7745,13 @@
       "exports": [],
       "extension": ".ts",
       "imports": [
+        "../../core/auth/module-scope.guard",
         "./business-graph.service",
         "vitest"
       ],
-      "lines": 277,
+      "lines": 311,
       "path": "apps/server/src/modules/ai/business-graph.service.spec.ts",
-      "size_bytes": 14040
+      "size_bytes": 16278
     },
     {
       "exports": [
@@ -7770,9 +7772,9 @@
         "../finance/posting.service",
         "@nestjs/common"
       ],
-      "lines": 903,
+      "lines": 902,
       "path": "apps/server/src/modules/ai/business-graph.service.ts",
-      "size_bytes": 36569
+      "size_bytes": 36598
     },
     {
       "exports": [
@@ -8539,9 +8541,9 @@
         "@prisma/client",
         "crypto"
       ],
-      "lines": 8480,
+      "lines": 8481,
       "path": "apps/server/src/modules/ai/flow-orchestrator.service.ts",
-      "size_bytes": 397207
+      "size_bytes": 397398
     },
     {
       "exports": [],
@@ -8667,6 +8669,7 @@
         "GraphActionScope",
         "GraphActionsController",
         "GraphPlanReadScope",
+        "NO_MEMBER_LEDGER_WRITE_TOOLS",
         "PLAN_APPROVER_ROLES",
         "PlanStepView",
         "graphActionBoundByContactVisibility",
@@ -8703,9 +8706,9 @@
         "@prisma/client",
         "express"
       ],
-      "lines": 1403,
+      "lines": 1424,
       "path": "apps/server/src/modules/ai/graph-actions.controller.ts",
-      "size_bytes": 72776
+      "size_bytes": 74207
     },
     {
       "exports": [],
@@ -9345,9 +9348,9 @@
         "./graph-actions.controller",
         "@nestjs/common"
       ],
-      "lines": 407,
+      "lines": 414,
       "path": "apps/server/src/modules/ai/plan-step-authority.ts",
-      "size_bytes": 26939
+      "size_bytes": 27496
     },
     {
       "exports": [
@@ -12723,9 +12726,9 @@
         "./genome-signal.service",
         "./key-genome.types"
       ],
-      "lines": 125,
+      "lines": 121,
       "path": "apps/server/src/modules/business-genome/key-genome/genome-finance-scope.ts",
-      "size_bytes": 6120
+      "size_bytes": 5898
     },
     {
       "exports": [],
@@ -21585,9 +21588,9 @@
         "./safe-to-spend.service",
         "vitest"
       ],
-      "lines": 119,
+      "lines": 145,
       "path": "apps/server/src/modules/finance/safe-to-spend.service.spec.ts",
-      "size_bytes": 5358
+      "size_bytes": 6714
     },
     {
       "exports": [
@@ -21603,9 +21606,9 @@
         "./posting.service",
         "@nestjs/common"
       ],
-      "lines": 188,
+      "lines": 202,
       "path": "apps/server/src/modules/finance/safe-to-spend.service.ts",
-      "size_bytes": 8297
+      "size_bytes": 8913
     },
     {
       "exports": [],
@@ -30929,9 +30932,9 @@
         "@nestjs/common/constants",
         "vitest"
       ],
-      "lines": 120,
+      "lines": 170,
       "path": "apps/server/src/modules/payroll/payroll-mark-paid-authority.spec.ts",
-      "size_bytes": 6636
+      "size_bytes": 10180
     },
     {
       "exports": [
@@ -30945,9 +30948,9 @@
         "./payroll.service",
         "@nestjs/common"
       ],
-      "lines": 77,
+      "lines": 81,
       "path": "apps/server/src/modules/payroll/payroll.controller.ts",
-      "size_bytes": 2534
+      "size_bytes": 2836
     },
     {
       "exports": [
@@ -30969,13 +30972,14 @@
       "exports": [],
       "extension": ".ts",
       "imports": [
+        "../../core/auth/system-actor",
         "./payroll.service",
         "@nestjs/common",
         "vitest"
       ],
-      "lines": 246,
+      "lines": 454,
       "path": "apps/server/src/modules/payroll/payroll.service.spec.ts",
-      "size_bytes": 12124
+      "size_bytes": 24042
     },
     {
       "exports": [
@@ -30986,6 +30990,8 @@
       ],
       "extension": ".ts",
       "imports": [
+        "../../core/auth/system-actor",
+        "../../core/authority/module-vocabulary",
         "../../core/prisma/prisma.service",
         "../finance/expense-posting.service",
         "../finance/finance-accounting.util",
@@ -30993,9 +30999,9 @@
         "@nestjs/common",
         "@prisma/client"
       ],
-      "lines": 393,
+      "lines": 491,
       "path": "apps/server/src/modules/payroll/payroll.service.ts",
-      "size_bytes": 16149
+      "size_bytes": 22755
     },
     {
       "exports": [
@@ -37676,13 +37682,14 @@
       "extension": ".ts",
       "imports": [
         "./helpers/sql-like.js",
+        "@nestjs/core",
         "dotenv",
         "path",
         "vitest"
       ],
-      "lines": 460,
+      "lines": 694,
       "path": "apps/server/test/payroll-financial-truth.integration.test.ts",
-      "size_bytes": 21649
+      "size_bytes": 34727
     },
     {
       "exports": [],
@@ -65036,12 +65043,6 @@
       "size_bytes": 963
     },
     {
-      "extension": ".tsbuildinfo",
-      "lines": 1,
-      "path": "apps/web/tsconfig.tsbuildinfo",
-      "size_bytes": 1130849
-    },
-    {
       "exports": [],
       "extension": ".ts",
       "imports": [
@@ -65083,9 +65084,9 @@
     },
     {
       "extension": ".json",
-      "lines": 1651,
+      "lines": 1655,
       "path": "architecture/architecture.json",
-      "size_bytes": 53939
+      "size_bytes": 54666
     },
     {
       "extension": ".yaml",
@@ -65109,13 +65110,13 @@
       "extension": ".json",
       "lines": 0,
       "path": "architecture/dependencies.json",
-      "size_bytes": 4235942
+      "size_bytes": 5018717
     },
     {
       "extension": ".md",
-      "lines": 146,
+      "lines": 151,
       "path": "architecture/dependency-map.md",
-      "size_bytes": 9945
+      "size_bytes": 10365
     },
     {
       "extension": ".yaml",
@@ -65125,15 +65126,15 @@
     },
     {
       "extension": ".md",
-      "lines": 737,
+      "lines": 755,
       "path": "architecture/execution-paths.md",
-      "size_bytes": 36809
+      "size_bytes": 39268
     },
     {
       "extension": ".json",
-      "lines": 63802,
+      "lines": 71580,
       "path": "architecture/inventory.json",
-      "size_bytes": 1651826
+      "size_bytes": 1870234
     },
     {
       "extension": ".md",
@@ -71562,7 +71563,7 @@
       ".template": 1,
       ".toml": 2,
       ".ts": 2449,
-      ".tsbuildinfo": 2,
+      ".tsbuildinfo": 1,
       ".tsv": 1,
       ".tsx": 1309,
       ".txt": 7,
@@ -71574,7 +71575,7 @@
     "root": ".",
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3868,
-    "total_files": 4926,
-    "total_lines": 1494066
+    "total_files": 4925,
+    "total_lines": 1502581
   }
 }

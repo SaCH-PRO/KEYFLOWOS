@@ -32,6 +32,10 @@
       {
         "date": "2026-11-08",
         "change": "PR #195 (ported as PR195-PORT): module:payroll and path:payroll-ledger nodes and module:payroll -> module:finance dependency edge added for payroll disbursement ledger posting through the ledger door, the committed-payroll reserve on the ledger cash position, and KEY treasury sight held to the viewer's REST read rules (execution-paths.md section 14); inventory.json and dependencies.json regenerated with the codebase-architect scanners at the port head"
+      },
+      {
+        "date": "2026-11-13",
+        "change": "PR195-PORT review repair: no node or edge added. Payroll mark-paid is held to a Membership of the business with expenses write (a non-member SUPER_ADMIN refused, D-46) and to the business currency (D-13); rates and runs take the business currency; ModuleScopeGuard, KEY's standing-context sight, the D-128 genome helper and mark-paid share one reading of a membership's scope map (execution-paths.md section 14); inventory.json and dependencies.json regenerated with the codebase-architect scanners"
       }
     ],
     "root": "C:/Users/sachd/Downloads/KEYFLOWOS",

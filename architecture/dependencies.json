@@ -8718,6 +8718,13 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/ai/business-graph.service.spec.ts",
+      "specifier": "../../core/auth/module-scope.guard",
+      "target": "apps/server/src/core/auth/module-scope.guard.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/ai/business-graph.service.spec.ts",
       "specifier": "./business-graph.service",
       "target": "apps/server/src/modules/ai/business-graph.service.ts",
       "type": "relative"
@@ -58901,6 +58908,13 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/payroll/payroll.service.spec.ts",
+      "specifier": "../../core/auth/system-actor",
+      "target": "apps/server/src/core/auth/system-actor.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/payroll/payroll.service.spec.ts",
       "specifier": "./payroll.service",
       "target": "apps/server/src/modules/payroll/payroll.service.ts",
       "type": "relative"
@@ -58925,6 +58939,20 @@
       "specifier": "@prisma/client",
       "target": "@prisma/client",
       "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/payroll/payroll.service.ts",
+      "specifier": "../../core/auth/system-actor",
+      "target": "apps/server/src/core/auth/system-actor.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/payroll/payroll.service.ts",
+      "specifier": "../../core/authority/module-vocabulary",
+      "target": "apps/server/src/core/authority/module-vocabulary.ts",
+      "type": "relative"
     },
     {
       "resolved": true,
@@ -75675,6 +75703,13 @@
       "source": "apps/server/test/payments-webhooks.service.test.ts",
       "specifier": "vitest",
       "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/test/payroll-financial-truth.integration.test.ts",
+      "specifier": "@nestjs/core",
+      "target": "@nestjs/core",
       "type": "external"
     },
     {
@@ -132652,7 +132687,7 @@
     }
   ],
   "meta": {
-    "edges": 18950,
+    "edges": 18955,
     "nodes": 4294,
     "root": ".",
     "scanner": "codebase-architect/dependency_scan.py"
