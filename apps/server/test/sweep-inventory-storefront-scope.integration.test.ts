@@ -27,6 +27,14 @@
  * CommerceIntegrationService). Every request carries its own x-forwarded-for address, so
  * CrmRateLimitGuard's per-address buckets never cap the case count.
  *
+ * The REST scope census (docs/reconstruction/REST-SCOPE-CENSUS-2026-11-13.md) found the same defect
+ * at the other doors that move stock: the continental-ops stock counts (adjust), goods receipts (post)
+ * and delivery notes (fulfil) write InventoryStock, and the Google Drive inventory sheet's apply
+ * writes it from a pulled sheet; every one ran AuthGuard and BusinessGuard only. Their writes, and
+ * the inventory-sheet sync configuration (create, link, unlink, push), need storefront write too
+ * (cases INV-C03, INV-10, INV-11; the drive service is a recorder there: the claim is that the
+ * refusal comes before it).
+ *
  * Requires DATABASE_URL. Every seeded row carries the `v99i_` prefix and is hard-deleted by raw SQL
  * (sqlLikePrefix) in beforeAll and afterAll. Cases tagged RED-BEFORE fail on the unmodified code.
  */
@@ -64,10 +72,15 @@ let db: any;
 let app: any;
 let MODULE_SCOPE_KEY = '';
 let MarketplaceControllerClass: any;
+const stockControllers: Record<string, any> = {};
+const driveCalls: string[] = [];
 
 async function cleanup() {
   for (const sql of [
     `DELETE FROM stock_movements WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM stock_counts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM goods_receipts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM delivery_notes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM inventory_stocks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM marketplace_listings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM shipping_zones WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -106,6 +119,9 @@ async function writableState() {
     movements: await rows('stock_movements'),
     listings: await rows('marketplace_listings'),
     zones: await rows('shipping_zones'),
+    stockCounts: await rows('stock_counts'),
+    goodsReceipts: await rows('goods_receipts'),
+    deliveryNotes: await rows('delivery_notes'),
     meta,
   };
 }
@@ -162,12 +178,33 @@ beforeAll(async () => {
   const { FulfillmentRoutingService } = await import('../src/modules/marketplace/fulfillment-routing.service');
   const { TransactionalEmailService } = await import('../src/modules/notifications/transactional-email.service');
   const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
+  const { StockCountController } = await import('../src/modules/continental-ops/stock-count.controller');
+  const { StockCountService } = await import('../src/modules/continental-ops/stock-count.service');
+  const { GoodsReceiptController } = await import('../src/modules/continental-ops/goods-receipt.controller');
+  const { GoodsReceiptService } = await import('../src/modules/continental-ops/goods-receipt.service');
+  const { DeliveryNoteController } = await import('../src/modules/continental-ops/delivery-note.controller');
+  const { DeliveryNoteService } = await import('../src/modules/continental-ops/delivery-note.service');
+  const { GoogleDriveController } = await import('../src/modules/google-drive/google-drive.controller');
+  const { GoogleDriveService } = await import('../src/modules/google-drive/google-drive.service');
+  const { GeneratedDocumentService } = await import('../src/modules/google-drive/generated-document.service');
+  Object.assign(stockControllers, { StockCountController, GoodsReceiptController, DeliveryNoteController, GoogleDriveController });
+  /** The drive service as a recorder of the inventory-sheet calls (the claim: a refusal comes first). */
+  const driveRecorder = Object.fromEntries(
+    ['createInventorySheet', 'linkInventorySheet', 'unlinkInventorySheet', 'pushInventoryToSheet', 'applyPulledInventory', 'getInventorySheetSyncStatus'].map(
+      (m) => [m, async (businessId: string) => { driveCalls.push(`${m}:${businessId}`); return { ok: true }; }],
+    ),
+  );
 
   Logger.overrideLogger(false);
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [MarketplaceController],
+    controllers: [MarketplaceController, StockCountController, GoodsReceiptController, DeliveryNoteController, GoogleDriveController],
     providers: [
+      StockCountService,
+      GoodsReceiptService,
+      DeliveryNoteService,
+      { provide: GoogleDriveService, useValue: driveRecorder },
+      { provide: GeneratedDocumentService, useValue: {} },
       PrismaService,
       AuthGuard,
       BusinessGuard,
@@ -343,5 +380,74 @@ describe('census family: the store configuration writes need storefront write', 
   it('[INV-09] the owner still configures the store', async () => {
     expect((await send('post', `${base()}/shipping-zones`, ID.owner, { name: `${P}zone3` })).status).toBe(201);
     expect((await send('put', `${base()}/delivery-config`, ID.owner, { pickup: true })).status).toBe(200);
+  });
+});
+
+describe('BUG-015 family (REST scope census): the other doors that move stock need storefront write', () => {
+  const STOCK_DOORS: Record<string, string[]> = {
+    StockCountController: ['create', 'update', 'adjust', 'remove'],
+    GoodsReceiptController: ['create', 'update', 'post', 'remove'],
+    DeliveryNoteController: ['create', 'update', 'fulfill', 'cancel', 'remove'],
+    GoogleDriveController: ['createInventorySheet', 'linkInventorySheet', 'unlinkInventorySheet', 'pushInventoryToSheet', 'applyPulledInventory'],
+  };
+
+  it('[INV-C03] RED-BEFORE: every stock-count, goods-receipt and delivery-note write and every inventory-sheet write runs AuthGuard, BusinessGuard, then ModuleScopeGuard and requires storefront write', () => {
+    const problems: string[] = [];
+    for (const [cls, handlers] of Object.entries(STOCK_DOORS)) {
+      const routes = census(stockControllers[cls]);
+      for (const handler of handlers) {
+        const r = routes.find((x) => x.handler === handler);
+        if (!r) { problems.push(`${cls}.${handler} is not a route`); continue; }
+        for (const g of ['AuthGuard', 'BusinessGuard', 'ModuleScopeGuard']) if (!r.guards.includes(g)) problems.push(`${r.key} does not run ${g}`);
+        if (r.guards.indexOf('ModuleScopeGuard') >= 0 && r.guards.indexOf('ModuleScopeGuard') < r.guards.indexOf('BusinessGuard')) problems.push(`${r.key} runs ModuleScopeGuard before BusinessGuard`);
+        if (r.scope?.module !== 'storefront' || r.scope?.minLevel !== 'write') problems.push(`${r.key} requires ${r.scope ? `${r.scope.module}:${r.scope.minLevel}` : 'no module scope'}, not storefront:write`);
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('[INV-10] RED-BEFORE: a storefront-read member is refused 403 creating, adjusting, posting or fulfilling a stock count, goods receipt or delivery note; nothing is written', async () => {
+    const before = await writableState();
+    const ops = `/continental-ops/businesses/${ID.bizA}`;
+    const writes: Array<[Verb, string, unknown?]> = [
+      ['post', `${ops}/stock-counts`, { countNumber: `${P}SC-1`, items: [{ productId: ID.product, description: 'Widget', systemQty: 10, countedQty: 2 }] }],
+      ['post', `${ops}/stock-counts/${P}sc_any/adjust`],
+      ['post', `${ops}/goods-receipts`, { grNumber: `${P}GR-1`, items: [] }],
+      ['post', `${ops}/goods-receipts/${P}gr_any/post`],
+      ['post', `${ops}/delivery-notes`, { dnNumber: `${P}DN-1`, items: [] }],
+      ['post', `${ops}/delivery-notes/${P}dn_any/fulfill`],
+    ];
+    for (const [verb, url, body] of writes) {
+      const res = await send(verb, url, ID.staffDefault, body);
+      expect(res.status, `${verb.toUpperCase()} ${url}`).toBe(403);
+    }
+    expect(await writableState()).toEqual(before);
+  });
+
+  it('[INV-11] RED-BEFORE: a storefront-read member is refused applying a pulled inventory sheet (and the sheet sync setup) before the drive service is reached', async () => {
+    driveCalls.length = 0;
+    const drive = `/drive/businesses/${ID.bizA}/inventory-sheet`;
+    const writes: Array<[Verb, string, unknown?]> = [
+      ['post', `${drive}/apply`, { rows: [{ SKU: 'W-1', 'Quantity On Hand': '999' }] }],
+      ['post', `${drive}/push`],
+      ['post', `${drive}/create`, { title: 'Stock' }],
+      ['post', `${drive}/link`, { sheetId: 's', sheetName: 'n' }],
+      ['delete', `${drive}/unlink`],
+    ];
+    for (const [verb, url, body] of writes) {
+      const res = await send(verb, url, ID.staffDefault, body);
+      expect(res.status, `${verb.toUpperCase()} ${url}`).toBe(403);
+    }
+    expect(driveCalls).toEqual([]);
+    // the status read stays open to members
+    expect((await send('get', `${drive}/status`, ID.staffDefault)).status).toBe(200);
+  });
+
+  it('[INV-12] storefront write admits: the owner records a stock count and applies a sheet', async () => {
+    const sc = await send('post', `/continental-ops/businesses/${ID.bizA}/stock-counts`, ID.owner, { countNumber: `${P}SC-OWNER`, items: [] });
+    expect(sc.status).toBe(201);
+    driveCalls.length = 0;
+    expect((await send('post', `/drive/businesses/${ID.bizA}/inventory-sheet/apply`, ID.storeWrite, { rows: [] })).status).toBe(201);
+    expect(driveCalls).toEqual([`applyPulledInventory:${ID.bizA}`]);
   });
 });
