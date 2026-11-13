@@ -4,6 +4,8 @@ Status: PLANNING
 Created: 2026-10-05
 Baseline main: 6fdffc26c7c7748d5c09900535c97c197864ab54
 
+> **Historical note (2026-11-12, convergence tie-off).** This plan was never adopted; its status is still PLANNING and nothing in it is binding. Since it was written: R0-00 implemented the resource-isolation half (a database and Redis index per worktree packet, with a fixture-prefix registry); the reconstruction ran parallel worktree packets under `docs/reconstruction/BUILD-MAP-001.md`, not through the planned #80 multi-worker dispatcher; and ACTION-001 has merged. The "Current repository reality", "Existing open-PR convergence map" (with its "Hard rule") and "Immediate next action" sections are superseded by BUILD-MAP-001 section (e) and the 2026-11-12/13 convergence tie-off. The claims model, conflict classes and structured epistemic claim protocol are kept as reference material only.
+
 ## Objective
 
 Reduce KEYFLOWOS completion time by safely scaling from the current single local
