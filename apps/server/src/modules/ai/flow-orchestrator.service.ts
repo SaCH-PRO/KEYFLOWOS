@@ -110,6 +110,7 @@ import {
 } from '../key-cortex/cognitive-triage.service';
 import { UnifiedMemoryRetrievalService } from '../key-cortex/unified-memory-retrieval.service';
 import {
+  BUSINESS_WIDE_MEMORY_SOURCES,
   PROMPT_MEMORY_HEADROOM,
   promptMemoryReader,
   readersOwnPromptMemory,
@@ -1350,11 +1351,12 @@ export class FlowOrchestratorService {
       // nobody: a turn that names no member (the Chatwoot support desk and the staff bridge pass no
       // user) used to read EVERY member's execution and action logs, since an absent userId left them
       // unnarrowed, and a platform SUPER_ADMIN who is no member has no memory of their own here. Of
-      // what is read, readersOwnPromptMemory keeps no KEY tool call's record from the business-wide
-      // stores (another member's tool answer and typed input) and a cognition row (what a member
-      // typed and KEY's whole answer to them) only when it is the reader's own; a member-less row is
-      // nobody's. The read asks for the window plus the shared headroom so that what is left out does
-      // not leave the reader's own rows unread (CR-W10CCS-1).
+      // what is read, readersOwnPromptMemory keeps no KEY tool call's or KEY turn's record from the
+      // business-wide stores (another member's tool answer and typed input, their typed chat and KEY's
+      // answer to them: review SEC-W11FPS-1/2) and a cognition row (what a member typed and KEY's whole
+      // answer to them) only when it is the reader's own; a member-less row is nobody's. The read asks
+      // for the window plus the shared headroom so that what is left out does not leave the reader's
+      // own rows unread (CR-W10CCS-1).
       const window = tier === 'deliberate' ? 12 : 6;
       const perceive = async () => {
         const reader = await promptMemoryReader(this.prisma, businessId, userId, this.logger, 'perception');
@@ -1381,9 +1383,12 @@ export class FlowOrchestratorService {
           // missing.
           // Personally-attributed memory is narrowed to the reader. Without this
           // one member's execution history — including the rationale for why they
-          // asked — renders into another member's prompt. No reader, no episodic
-          // store at all (fail closed).
-          ...(reader ? { userId: reader } : { includeEpisodic: false }),
+          // asked — renders into another member's prompt. No reader, no personal
+          // store at all (fail closed): the read names the business-wide stores
+          // instead. Review CR-W11FPS-1: not includeEpisodic false, which also
+          // dropped every business event (an overdue invoice) from the support
+          // desk, the staff bridge and a SUPER_ADMIN who is no member.
+          ...(reader ? { userId: reader } : { sourceTypes: [...BUSINESS_WIDE_MEMORY_SOURCES] }),
           limit: window + PROMPT_MEMORY_HEADROOM,
           // 0.3 was decorative — it could not reject a single row.
           //
