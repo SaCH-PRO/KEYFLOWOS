@@ -1325,6 +1325,21 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
     ]));
   });
 
+  it('[CEN-10f] (round 2, CW-4) a connector whose provider check records a binding is named in CONNECTORS_BINDING_ON_CHECK, so POST smoke/:type holds it to the Connect rule: every connector class whose smokeTest reaches a credential or binding write on the call graph', () => {
+    const g = credentialGraph();
+    const file = join(SRC, 'core/connectors/connector-binding.ts');
+    const named = existsSync(file) ? new Set([...readFileSync(file, 'utf8').matchAll(/new Set\(\[([^\]]*)\]\)/g)].flatMap((m) => [...m[1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]))) : new Set<string>();
+    const binding = [...g.reaches.keys()].filter((id) => id.endsWith('.smokeTest')).map((id) => id.slice(0, -'.smokeTest'.length));
+    expect(binding, 'guards the guard: the WhatsApp check records a binding').toContain('WhatsAppConnector');
+    const problems: string[] = [];
+    for (const cls of binding) {
+      const text = readFileSync(join(SRC, g.classes.get(cls)!.file), 'utf8');
+      const type = /const CONNECTOR_TYPE\s*=\s*'([a-z_]+)'/.exec(text)?.[1] ?? /\btype:\s*'([a-z_]+)'/.exec(text)?.[1];
+      if (!type || !named.has(type)) problems.push(`${cls} (${type ?? 'no type'}): its smoke test reaches ${g.reaches.get(`${cls}.smokeTest`)!.join(' -> ')}`);
+    }
+    expect(problems).toEqual([]);
+  });
+
   it('[CEN-11] (round 2, CLASS A: WHP-1, WHP-2) every route (member or public, any verb) and every KEY module action that reaches a send of the business\'s people or money rows to an account outside the server reaches it only through the export read check (or the owner rule) that dominates the call, or the send is a pinned destination every reader of those rows may receive', () => {
     const g = exportGraph();
     const exports = [...g.leaves].filter(([, l]) => l.length).map(([id]) => id);

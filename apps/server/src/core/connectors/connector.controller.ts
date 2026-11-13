@@ -15,6 +15,8 @@ import type { ConnectorType, ConnectorCredentialField } from './connector.interf
 import { UpdateInboxConfigDto } from '../../modules/ingestion/dto/ingestion-item.dto';
 import { resolveGmailService } from './google-suite.service';
 import { assertGoogleConnectOwner } from './google-suite.controller';
+import { assertMayBindExport } from './connector-exports';
+import { CONNECTORS_BINDING_ON_CHECK } from './connector-binding';
 
 type ConnectorRequest = { user?: { id: string; role?: string } };
 
@@ -135,6 +137,22 @@ export class ConnectorController {
     await assertMemberModuleLevel(this.prisma, businessId, req.user, 'settings', 'admin');
   }
 
+  /**
+   * SWEEP-P0-SCOPES round 2 class repair (CLASS B; finding CW-4): who may start or resume a
+   * connector's binding. Connect (POST authenticate/:type on a connector that is not connected) is a
+   * binding write for WhatsApp (its connected verification record lifts the explicit disconnect only
+   * settings admin may write) and the start of one for the OAuth connectors (it answers their consent
+   * start); a passed smoke test is one for the connectors whose check records a binding
+   * (CONNECTORS_BINDING_ON_CHECK). The rule is the disconnect's: settings admin, and for gmail and the
+   * Google Suite connections their owner rules (D-11, D-42; D-99), answered first.
+   */
+  private async assertConnectorBindingAuthority(businessId: string, type: string, req: ConnectorRequest, door: 'connect' | 'check'): Promise<void> {
+    if (door === 'check' && !CONNECTORS_BINDING_ON_CHECK.has(type)) return;
+    if (type === 'gmail') return this.assertBusinessMailboxAuthority(businessId, type, req);
+    if (GOOGLE_SUITE_CONNECTOR_TYPES.has(type)) return assertGoogleConnectOwner(this.prisma, businessId, req.user);
+    await assertMemberModuleLevel(this.prisma, businessId, req.user, 'settings', 'admin');
+  }
+
   @Get('businesses/:businessId/dashboard')
   async getDashboard(@Param('businessId') businessId: string) {
     return this.registry.getDashboard(businessId);
@@ -194,11 +212,22 @@ export class ConnectorController {
     }
   }
 
+  /**
+   * SWEEP-P0-SCOPES round 2 class repair (CW-4): a connector that is already connected gets its status
+   * answer, as before, from any member ({ connected: true }; R0-CMF6-K04 pins it for gmail). Otherwise
+   * this is Connect, which binds (WhatsApp) or starts a binding (the OAuth connectors' consent start):
+   * assertConnectorBindingAuthority first. It answered every member and let a STAFF member with every
+   * module none reconnect the WhatsApp connector a settings admin had disconnected.
+   */
   @Post('businesses/:businessId/authenticate/:type')
   async authenticate(
     @Param('businessId') businessId: string,
     @Param('type') type: string,
+    @Req() req: ConnectorRequest,
   ) {
+    const health = await this.registry.getHealth(type as ConnectorType, businessId).catch(() => null);
+    if (health?.status === 'connected') return { connected: true };
+    await this.assertConnectorBindingAuthority(businessId, type, req, 'connect');
     try {
       return await this.registry.authenticateConnector(type as ConnectorType, businessId);
     } catch (err: unknown) {
@@ -244,6 +273,8 @@ export class ConnectorController {
     @Req() req: ConnectorRequest,
   ) {
     await this.assertBusinessMailboxAuthority(businessId, type, req);
+    // Round 2 (CW-4): for a connector whose passed check records a binding (WhatsApp), the smoke test is Connect.
+    await this.assertConnectorBindingAuthority(businessId, type, req, 'check');
     try {
       return await this.registry.smokeTestConnector(type as ConnectorType, businessId);
     } catch (err: unknown) {
@@ -366,9 +397,14 @@ export class ConnectorController {
     @Param('businessId') businessId: string,
     @Param('type') type: string,
     @Body() body: { values?: Record<string, string>; accountLabel?: string },
+    @Req() req: ConnectorRequest,
   ) {
     const connector = this.registry.get(type as ConnectorType);
     if (!connector) throw new NotFoundException(`Connector ${type} not found`);
+    // SWEEP-P0-SCOPES round 2 class repair (CLASS A; WHP-1, WHP-2): the account of an export connector
+    // receives the business's records, so its binder reads them (CONNECTOR_EXPORT_READS), and is recorded
+    // as the receiver every push is checked against.
+    await assertMayBindExport(this.prisma, businessId, req.user, type);
     const schema: ConnectorCredentialField[] = connector.meta.credentialFields ?? [];
     if (!schema.length) {
       throw new BadRequestException(`${connector.meta.name} does not accept credential input`);
@@ -391,6 +427,7 @@ export class ConnectorController {
     const accountLabel = body.accountLabel?.trim() || merged.accountLabel || merged.realmName || merged.tenantName || merged.account || null;
     await this.credentials.setCredentials(businessId, type as ConnectorType, merged, {
       accountLabel: accountLabel ?? undefined,
+      boundBy: req.user?.id,
     });
     const health = await this.registry.getHealth(type as ConnectorType, businessId);
     return { success: true, health };

@@ -39,12 +39,18 @@ export const WEBHOOK_PERSON_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Columns only a person row carries (a Contact's identity and CRM columns, a User's credentials): a row
- * with any of them is delivered as the person view wherever it sits, whatever its key.
+ * Columns only a person ROW carries (a Contact's derived and CRM columns, a User's identity columns): a
+ * row with any of them is delivered as the person view wherever it sits, whatever its key.
+ *
+ * Round 2 repair (WHP-3): a name is not a marker. firstName and lastName also name the recipient in the
+ * event record's own JSON columns (a store order's shippingAddress and billingAddress, its metadata),
+ * which the round 1 rule reduced to { firstName, lastName }: a fulfilment receiver lost the street,
+ * city and phone the storefront-read routes show its subscriber. Those columns are the record's own and
+ * are delivered as read; a person row is told by the columns no address or JSON blob carries.
  */
 const PERSON_ROW_MARKERS = [
-  'firstName', 'lastName', 'emailNormalized', 'phoneNormalized', 'visibility', 'notesInternal', 'lifetimeValue',
-  'averageSpend', 'paymentReliability', 'riskFlags', 'leadScore', 'passwordHash', 'supabaseId', 'supabaseUserId',
+  'emailNormalized', 'phoneNormalized', 'visibility', 'notesInternal', 'lifetimeValue', 'averageSpend',
+  'paymentReliability', 'riskFlags', 'leadScore', 'passwordHash', 'supabaseId', 'supabaseUserId',
 ];
 
 /** A credential, or a contact's private CRM field or money signal (D-100): never delivered, at any depth. */

@@ -474,11 +474,20 @@ export class ConnectController {
     return this.bp.listLocations(businessId, accountId);
   }
 
+  /**
+   * SWEEP-P0-SCOPES round 2 class repair (CLASS B; finding CW-3; owner ruling D-99): the account and
+   * location the owner's Google Business Profile tokens act on (Business.bpAccountId, bpLocationId) are
+   * the owner's to move, as calendarId is on the calendar settings doors: assertGoogleConnectOwner, 403
+   * GOOGLE_CONNECT_OWNER_ONLY, before anything is written. Any member (an ADMIN on role defaults
+   * included) moved the binding of the owner's Google connection.
+   */
   @Post('businesses/:businessId/business-profile/active-location')
-  setBpActiveLocation(
+  async setBpActiveLocation(
     @Param('businessId') businessId: string,
     @Body() body: { accountId: string; locationId: string },
+    @Req() req?: { user?: { id: string; role?: string } },
   ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req?.user);
     return this.bp.setActiveLocation(businessId, body.accountId, body.locationId);
   }
 

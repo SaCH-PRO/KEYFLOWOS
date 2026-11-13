@@ -45,35 +45,43 @@ access to a module wrote it because the route ran `AuthGuard` and `BusinessGuard
 
 ## Summary
 
-- Member routes without an enforced scope at this head: **761**: 758 write routes and 3
+- Member routes without an enforced scope at this head: **754**: 751 write routes and 3
   credential-binding GETs (the Google Calendar, Gmail and Drive consent starts, each with its
   owner check). 760 write routes under modules/ at 2c49a539; the first review repair read core/
   too (+11 ConnectorController and GoogleSuiteController routes, -2 newly applied, +2 for the D-85
   plan doors that keep their service check alone): 771 at 6f4935f1; the second review repair
   applied 8 (the channel and social connection writes, SV-2: -8) and added the binding GETs (+3);
   the round 1 class repair applied 5 credential writers the call graph found (-5: Shopify connect,
-  the three supplier connection writes, the channel sync from social).
-  - exempt-check: 58
+  the three supplier connection writes, the channel sync from social); the round 2 class repair
+  applied 7 (-7: the BYOK keys, CW-1; the destination writes, CW-2; the accounting and marketing
+  pushes and the campaign trigger, WHP-1, WHP-2) and moved 2 open rows to exempt-check (the Business
+  Profile location, CW-3; connector Connect, CW-4).
+  - exempt-check: 60
   - exempt-guard: 23
   - exempt-own: 13
   - exempt-ruled: 17
   - deferred: 63 (three of them `held:` credential writers, the bank connections)
-  - open: 587
-- Routes gated by this packet (applied): **85**: 84 write routes and one credential-binding GET (the
-  Outlook contacts consent start, SV-3); and 20 reads of the same controllers. Beside these, the
+  - open: 578
+- Routes gated by this packet (applied): **92**: 91 write routes and one credential-binding GET (the
+  Outlook contacts consent start, SV-3); and 25 reads of the same controllers (round 2: the
+  accounting summary, unsynced invoices and chart of accounts need revenue read). Beside these, the
   round 1 class repair added a settings admin check to routes that already enforced another scope
   (IntegrationHubController connect and disconnect keep `connect:write` and check settings admin in
   the handler) or a check (KeyConnectorController connect and disconnect, the Outlook branch of
-  ConnectController.disconnectSource); see "Credential writers".
-- Secret-bearing reads reviewed: **14**.
+  ConnectController.disconnectSource); see "Credential writers"; and round 2 added the export
+  receiver rule to the connector credentials route (an export connector's binder reads what it
+  receives); see "Round 2 class repair".
+- Secret-bearing reads reviewed: **15**.
 
 Applied in this packet, with real-DB tests through the HTTP routes:
 
 | family | scope | suite |
 | --- | --- | --- |
 | webhooks (BUG-001) | settings read / write; the secret in the create answer and, in the list, to settings admin only (review CR-5); the receiver URL is its origin below settings write (SEC-3); every subscribed event needs read on its module, at create and when turned back on (SEC-2), and a contact event revenue read too (second review SV-1, D-100); per webhook, the secret and the full URL go only to a reader who may receive its events (SV-5); URL through the outbound-address guard | sweep-webhooks-api-keys-settings |
-| webhook deliveries, every family (round 1 class repair, CLASS A; RC-1 invoice.*) | one door projects every delivery (WebhookDispatcherService.dispatch, webhook-payload.ts): every person row is the fixed person view { id, firstName, lastName, email } (name for a member or staff row), a row of a module the subscriber was not checked for is its id, no credential or contact-private key at any depth; the events are derived from the dispatcher's @OnEvent metadata and the source's emitters, every family has a read rule | sweep-webhook-payload-projection |
+| webhook deliveries, every family (round 1 class repair, CLASS A; RC-1 invoice.*) | one door projects every delivery (WebhookDispatcherService.dispatch, webhook-payload.ts): every person row is the fixed person view { id, firstName, lastName, email } (name for a member or staff row), a row of a module the subscriber was not checked for is its id, no credential or contact-private key at any depth; the events are derived from the dispatcher's @OnEvent metadata and the source's emitters, every family has a read rule; round 2 (WHP-3): a person row is told by the columns only a Contact or a User row carries, never by a name, so the event record's own JSON columns (an order's shipping and billing address) go out as read | sweep-webhook-payload-projection |
 | provider credential writers the call graph found (round 1 class repair, CLASS B; RC-2 Shopify) | settings admin: Shopify connect; supplier connection create / update / deactivate; the channel sync from social; the Outlook contacts disconnect; the KEY action social.connect_account / disconnect_account; settings admin added to what was there: integration hub connect / disconnect and KEY settings.configure_integration (connect write kept), KEY connector connect / disconnect (D-111 role kept, settings admin by the map, D-114) | sweep-credential-writers-scope, sweep-channel-connections-scope, key-connector-authority, settings-adapter.service.spec, social-adapter.service.spec |
+| integration pushes, every export connector (round 2 class repair, CLASS A; WHP-1, WHP-2) | binding QuickBooks, Xero, Mailchimp or Klaviyo needs, beside settings admin, read on what the account receives (CONNECTOR_EXPORT_READS: revenue and crm; crm), and records the binder as the receiver; the accounting push is revenue write and the marketing push content write, each with read on what it sends, and each sends only the contacts the pushing member and the binder may both open (a legacy binding with no recorded binder is read as a non-owner's); the accounting reads need revenue read; Mailchimp's host is pinned to a data center | sweep-export-receivers-scope |
+| credential writers the schema-led call graph found (round 2 class repair, CLASS B; CW-1..CW-4) | settings admin: the BYOK keys (AI preferences), the channel destination writes (a destination read answers no token); D-99 owner: the Business Profile account and location; Connect (POST authenticate on a connector not yet connected): settings admin or the Google owner rules; WhatsApp's smoke test (its passed check is Connect): settings admin | sweep-credential-writers-r2-scope, business-profile-active-location-refusal (web) |
 | API keys (BUG-013) | settings read / admin (revoke: settings admin, review CR-3) | sweep-webhooks-api-keys-settings |
 | connector credentials and the inbound form webhook secret (review SEC-1) | settings admin (webhook-info, POST / DELETE credentials, disconnect, reconnect; gmail and Google keep their owner rules); the handler checks read a stored JSON array as the guard does, every module none (second review SV-4) | sweep-connector-credentials-scope |
 | channel and social connections (second review SV-2), the Outlook contacts consent start (SV-3) | settings admin (communications connection create / update / delete and WhatsApp connect; social manual connect, OAuth start and callback, delete; GET connect/microsoft auth-url); a channel connection's create and update write its own fields only (a businessId in the body moved the connection to another business) | sweep-channel-connections-scope |
@@ -143,11 +151,33 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
    provider credential written by any member (ensureAccess checks membership). finance.controller.ts
    is held for the merge with pkt/PR195-JOURNAL-SCOPE, so they are `deferred` rows naming `held:`;
    after the merge they need settings admin (the call graph, CEN-10b, names them).
-9. Connector authenticate (`ConnectorController.authenticate`) stays open, as do sync, test and
-   smoke of non-Google connectors (existing tests pin them open). Second review repair SV-3 found
-   its Outlook answer is only a pointer to the consent start, which now needs settings admin, as
-   the social one (a POST oauth/start) does; no connector's authenticate signs a state itself
-   today. Should authenticate also be settings admin, so a future connector that does is covered?
+9. Connector authenticate (`ConnectorController.authenticate`): answered by the round 2 class repair
+   (CW-4). A connector already connected still gets its status answer from any member (R0-CMF6-K04);
+   otherwise authenticate is Connect, which for WhatsApp writes the connected verification that lifts
+   an explicit disconnect and for the OAuth connectors answers their consent start: settings admin, the
+   Gmail and Google Suite owner rules first. sync and test stay open; smoke stays open except for a
+   connector whose passed check records a binding (WhatsApp; question 15).
+13. Integration push receivers (round 2 class repair, CLASS A; WHP-1, WHP-2). An export connector's
+   binder is now recorded (ConnectorStatus metadata.boundBy) when it saves the credentials, and every
+   push sends only the contacts the pushing member and the binder may both open. Accounts bound before
+   this repair have no recorded binder; their pushes are read as going to a non-owner (no PRIVATE
+   contact, and no invoice of one) until a settings admin who reads them saves the credentials again.
+   Is that the wanted migration, or should the owner be assumed the binder of every existing account?
+   And may a PRIVATE contact ever go to an account an ADMIN bound (today only when that ADMIN may open
+   the contact: its owner, or an explicit share)?
+14. AI preferences (round 2, CW-1): the whole PUT .../ai/preferences is now settings admin, the
+   routing mode, writing style and budget caps with the BYOK keys. Split it (settings write for the
+   mode, settings admin for the keys)? A BYOK key also makes its holder's provider account the
+   receiver of every AI call of the business, prompts carrying CRM and revenue context (CLASS A's
+   receiver question for AI): should binding a BYOK key need read on every module, as a webhook does
+   for its events, or be the owner's (D-11)?
+15. WhatsApp smoke test (round 2, CW-4): POST smoke/whatsapp is now settings admin, because a passed
+   check records connected and lifts an explicit disconnect (PR196-WHATSAPP-HEALTH's rule: "an explicit
+   disconnect wins until Connect, Reconnect or a passed smoke test"). Keep it so, or have the smoke test
+   report its check without lifting an explicit disconnect (then it can be open to members again)?
+16. Marketing push default segment (seen in round 2, not changed): it selects `doNotContact: { not:
+   true }`, which in SQL also excludes every contact whose flag was never set (NULL), so a default push
+   skips most contacts. Count NULL as "may contact"?
 
 ## KEY follow-ups and seams
 
@@ -185,6 +215,9 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
+| `AccountingController.pushCustomers` | POST | `/accounting/businesses/:businessId/customers/push` | applied | `revenue:write` (round 2 class repair, CLASS A, finding WHP-1): and read on what it sends, revenue and crm (check:assertMayExport, CONNECTOR_EXPORT_READS), for the member pushing and the member who bound the account (exportAudience); it sends only the contacts both may open (contactIdsEveryReceiverMayOpen) |
+| `AccountingController.pushInvoice` | POST | `/accounting/businesses/:businessId/invoices/push` | applied | `revenue:write` (round 2 class repair, CLASS A, finding WHP-1): and read on what it sends, revenue and crm (check:assertMayExport), for the member pushing and the account's binder; an invoice whose contact either may not open is not sent |
+| `AiController.updateAiPreferences` | PUT | `/ai/businesses/:businessId/ai/preferences` | applied | `settings:admin` (round 2 class repair, CLASS B, finding CW-1, found by the schema-led call graph: it writes, replaces and clears the business's BYOK provider keys, ai_memories settings / ai_preferences; every AI call then runs on the stored key) |
 | `AnalyticsController.assessMaturity` | POST | `/api/businesses/:businessId/analytics/maturity/assess` | applied | `analytics:write` |
 | `AnalyticsController.dismissInsight` | POST | `/api/businesses/:businessId/analytics/insights/:id/dismiss` | applied | `analytics:write` |
 | `AnalyticsController.generateContactProjection` | POST | `/api/businesses/:businessId/analytics/projections/contacts` | applied | `analytics:write` |
@@ -195,8 +228,10 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | `ApiKeysController.revoke` | DELETE | `/api/businesses/:businessId/api-keys/:keyId` | applied | `settings:admin` |
 | `CommunicationsController.connectWhatsApp` | POST | `/communications/businesses/:businessId/whatsapp/connect` | applied | `settings:admin` (second review repair SV-2: it sets, replaces or clears the business's channel credential; the SEC-1 class) |
 | `CommunicationsController.createConnection` | POST | `/communications/businesses/:businessId/connections` | applied | `settings:admin` (second review repair SV-2: it sets, replaces or clears the business's channel credential; the SEC-1 class); the body writes the connection's own fields only |
+| `CommunicationsController.createDestination` | POST | `/communications/businesses/:businessId/connections/:connectionId/destinations` | applied | `settings:admin` (round 2 class repair, CLASS B, finding CW-2: it adds a page under the business's credentialed connection or replaces a page's own access token, ChannelDestination.destinationMeta); the body writes the destination's own fields only, and the answer carries no token |
 | `CommunicationsController.deleteConnection` | DELETE | `/communications/businesses/:businessId/connections/:id` | applied | `settings:admin` (second review repair SV-2: it sets, replaces or clears the business's channel credential; the SEC-1 class) |
 | `CommunicationsController.syncFromSocial` | POST | `/communications/businesses/:businessId/connections/sync-from-social` | applied | `settings:admin` (round 1 class repair, CLASS B, found by the call graph: it copies every social connection's token over the business's channel connection of that provider) |
+| `CommunicationsController.toggleDestination` | PATCH | `/communications/businesses/:businessId/destinations/:destId/toggle` | applied | `settings:admin` (round 2 class repair, CLASS B, finding CW-2: it turns a send destination on or off) |
 | `CommunicationsController.updateConnection` | PATCH | `/communications/businesses/:businessId/connections/:id` | applied | `settings:admin` (second review repair SV-2: it sets, replaces or clears the business's channel credential; the SEC-1 class); the body writes the connection's own fields only (a businessId or id in it moved or renamed the connection) |
 | `ConnectorController.saveCredentials` | POST | `/connectors/businesses/:businessId/credentials/:type` | applied | `settings:admin` (review repair SEC-1: it replaces the account a connector syncs with) |
 | `DeliveryNoteController.cancel` | POST | `/continental-ops/businesses/:businessId/delivery-notes/:id/cancel` | applied | `storefront:write` |
@@ -213,6 +248,8 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | `GoogleDriveController.linkInventorySheet` | POST | `/drive/businesses/:businessId/inventory-sheet/link` | applied | `storefront:write` |
 | `GoogleDriveController.pushInventoryToSheet` | POST | `/drive/businesses/:businessId/inventory-sheet/push` | applied | `storefront:write` |
 | `GoogleDriveController.unlinkInventorySheet` | DELETE | `/drive/businesses/:businessId/inventory-sheet/unlink` | applied | `storefront:write` |
+| `MarketingSyncController.pushContacts` | POST | `/marketing/businesses/:businessId/lists/push-contacts` | applied | `content:write` (round 2 class repair, CLASS A, finding WHP-2): and crm read (check:assertMayExport), for the member pushing and the account's binder; only the contacts both may open are sent; Mailchimp's host is pinned to a data center (mailchimpDataCenter) |
+| `MarketingSyncController.triggerCampaign` | POST | `/marketing/businesses/:businessId/lists/campaigns/:provider/:campaignId/trigger` | applied | `content:write` (round 2 class repair: the marketing routes now enforce their module; the lists and campaigns reads are content read) |
 | `MarketplaceController.adjustInventory` | POST | `/marketplace/businesses/:businessId/inventory/adjust` | applied | `storefront:write` |
 | `MarketplaceController.createListing` | POST | `/marketplace/businesses/:businessId/listings` | applied | `storefront:write` |
 | `MarketplaceController.createProjectForBundleOrder` | POST | `/marketplace/businesses/:businessId/orders/:orderId/create-project` | applied | `projects:write` (review repair SEC-4: it creates a Project, the BUG-014 rule) |
@@ -285,6 +322,7 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | `SupplierController.getConnection` | GET | `/supplier/businesses/:businessId/connections/:connectionId` | secret-read | credentials removed (SupplierService.getSupplierConnection) |
 | `CommunicationsController.listConnections` | GET | `/communications/businesses/:businessId/connections` | secret-read | stripSecrets on every row (ChannelConnectionService.list) |
 | `CommunicationsController.getConnection` | GET | `/communications/businesses/:businessId/connections/:id` | secret-read | stripSecrets (ChannelConnectionService.get) |
+| `CommunicationsController.listDestinations` | GET | `/communications/businesses/:businessId/destinations` | secret-read | every credential key of a destination's destinationMeta (a page's own access token) is stripped, as the connection's token is (stripSecretsFromDestination; round 2 class repair CW-2: GET destinations answered the page token to every member) |
 | `KeyConnectorController.getConnections` | GET | `/key-connector/connections` | secret-read | check:connectionView (no credential leaves the connection view) |
 | `FinanceController.listBankConnections` | GET | `/finance/businesses/:businessId/bank-connections` | secret-read | BankConnectionService.strip on every row (bank-connection-secret suite); deferred to pkt/PR195-JOURNAL-SCOPE for the scope |
 | `WhatsAppController.getConfig` | GET | `/whatsapp/businesses/:businessId/config` | secret-read | tokens masked (R0-SEC2, whatsapp-config-authority suite) |
@@ -378,6 +416,87 @@ Not covered by the reader:
 - dynamic `moduleRef.get` resolution whose result is called through a local not named by a unique
   method.
 
+## Round 2 class repair (CLASS A integration pushes, CLASS B schema-led call graph)
+
+**CLASS B (CW-5).** The round 1 graph's leaves were a fixed list of models and columns, its calls
+resolved through `this`, typed properties, helpers and connector dispatch only, and its raw SQL rule
+matched access_token and refresh_token. The round 2 hunt put ten shapes through it and each passed
+CEN-*; CW-1..CW-3 were live instances. Now (rest-scope-census.spec.ts):
+- the leaves are every schema column whose name says it holds a secret (SECRET_COLUMN over
+  packages/db/prisma/schema.prisma: token, secret, password, api_key, credential, refresh, auth_data,
+  encrypted), less the app-issued tokens excused by name with a reason (NOT_PROVIDER_CREDENTIALS:
+  PaymentLink, PortalAccess, Quote.viewToken, ContactExportJob, SitePageDraft.previewToken, the Drive and
+  People sync cursors, the webhook signing secret, trade-secret text), plus BINDING_RULES: the account,
+  location and calendar ids the owner's Google tokens act on (Business.bpAccountId, bpLocationId,
+  calendarId), a channel destination's meta and its creation, deletion or deactivation, a channel
+  connection's providerMeta, the BYOK keys in ai_memories, and a ConnectorStatus row's deletion,
+  deactivation or metadata replacement; a new secret-named column joins with no edit here (CEN-10e);
+- BINDING_WRITERS pins the writes that bind by what they record (WhatsAppConnector.recordConnected);
+- raw SQL, tagged or called, execute or query, is a leaf when it SETs a credential column or a JSON
+  column naming a credential key, or deletes, inserts or deactivates a credential row;
+- the graph follows chained receivers (`this.registry.get(t)!.disconnect()`), local, destructured and
+  class aliases of a Prisma delegate, events (an emit goes to every `@OnEvent` listener of it), and a
+  distinctive method name a few classes define (`resolved.connector.pushInvoice()`);
+- CEN-10d parses the hunt's shapes beside the real source and fails if the reader misses one or
+  reports its settings-admin twin; CEN-10f requires every connector whose smoke test reaches a binding
+  write to be named in CONNECTORS_BINDING_ON_CHECK.
+
+What the schema-led graph found (each fixed here with a real-DB test, sweep-credential-writers-r2-scope):
+
+| route | wrote | now |
+| --- | --- | --- |
+| AiController.updateAiPreferences (CW-1) | the BYOK provider keys (ai_memories settings / ai_preferences) | settings admin |
+| CommunicationsController.createDestination, toggleDestination (CW-2) | ChannelDestination.destinationMeta (a page's own access token), a new destination, isActive | settings admin; GET destinations answers no token |
+| ConnectController.setBpActiveLocation (CW-3) | Business.bpAccountId, bpLocationId | the D-99 owner rule (GOOGLE_CONNECT_OWNER_ONLY) |
+| ConnectorController.authenticate (CW-4) | WhatsApp's connected verification (lifts an explicit disconnect) | not yet connected: settings admin, Google owner rules first; connected: the status answer, open |
+| ConnectorController.smoke for WhatsApp (CW-4) | the same verification | settings admin (CONNECTORS_BINDING_ON_CHECK) |
+
+The full CLASS B inventory at this head (every route the graph reaches, member or public, any verb;
+the KEY entries SettingsAdapterService.execute and SocialAdapterService.execute are guarded): settings
+admin enforced on the route (connector credentials save and webhook-info, Shopify connect, the channel
+connection writes and WhatsApp connect, the destination writes, the social connection writes, the
+supplier connection writes, the Outlook consent start, the AI preferences); a pinned check in the
+handler or its service (assertConnectorSettingsAdmin: connector delete, disconnect, reconnect;
+assertConnectorBindingAuthority: authenticate, smoke; assertGoogleConnectOwner: the Calendar, Drive and
+Google Suite starts, settings and disconnects, the Google Contacts source, the Business Profile location;
+assertConnectAuthority: the Gmail start and confirm, the mailbox disconnect; assertBusinessOwner: the
+business profile's payment secrets; assertConfigOwner: WhatsApp config; assertConnectorOwner: GA4 and
+Search Console; assertMemberModuleLevel settings admin: the integration hub, the Outlook source
+disconnect; requireConnectorAdmin: KEY connector connect and disconnect; verifyState and
+consumeOAuthSession: the public callbacks); `held:` (the bank connections, FinanceController).
+
+**CLASS A (WHP-1, WHP-2, WHP-3).** The dispatcher's one door (round 1) covers every webhook family:
+the events are the dispatcher's 17 `@OnEvent` listeners (contact.created, contact.updated,
+contact.merged, booking.created, booking.confirmed, booking.completed, invoice.paid, invoice.reopened,
+invoice.sent, invoice.overdue, post.published, store_order.created, store_order.paid,
+store_order.shipped, store_order.delivered, store_order.cancelled; derived from Nest's metadata and
+the source, WPP-01) and every webhook-family event the source emits (WPP-03 subscribes one webhook to
+all of them); each family maps to its module in webhook-events.ts (WPP-02). WHP-3: the projector told a
+person row by a name, which also names the recipient in an order's own address; it now tells one by
+the columns only a Contact or User row carries (WPP-07, WPP-08).
+
+The integration pushes sat outside that door. The census spec now follows every route to the code that
+sends people or money rows out (an outbound POST, PUT or PATCH in a method that reads a Contact,
+Invoice, Booking, order, payment or quote: the export graph, CEN-11). What it finds, and the rule each
+send now answers to:
+
+| send | destination | rule |
+| --- | --- | --- |
+| QuickbooksConnector.pushInvoice, pushCustomer | the realm in the stored credentials | export: binding needs revenue and crm read (assertMayBindExport) and records the binder; POST accounting .../push is revenue write, assertMayExport, and sends only the contacts the pusher and the binder may both open |
+| XeroConnector.pushInvoice, pushCustomer | the tenant in the stored credentials | the same |
+| MailchimpConnector.subscribeContacts | the account of the stored key, at <dc>.api.mailchimp.com (dc validated) | export: binding needs crm read; POST marketing .../push-contacts is content write, assertMayExport, the same contact filter |
+| KlaviyoConnector.subscribeContacts | the account of the stored key | the same |
+| GoogleContactsSyncService.pushContact | the owner's Google account | destination pinned (OUTBOUND_DESTINATIONS): D-99, the owner reads every contact |
+| OutlookContactsSyncService.pushContact | the Outlook account a settings admin connected | destination pinned: it sends back only contacts the sync mapped, under its principals' write rule |
+| PaymentsService.createStripeCheckout, createWipayCheckout | the business's own payment account | destination pinned: a payer's checkout; the keys are the owner's profile secrets (D-11) or the platform's |
+
+Other outbound senders carry no people or money rows to a member-chosen account: the social publishers
+(the business's own posts, to destinations a settings admin binds), the WhatsApp and email sends (to
+the contact they name), the Google Calendar sync (the owner's account, D-99), the AI providers (the
+BYOK keys are settings admin now; question 14), the KEY connector health checks (the Mailchimp server
+prefix is pinned to a data center like the connector's), Chatwoot and diagnostics (platform hosts) and
+SlackService (no caller).
+
 ## Census by controller
 
 ### ActionsController (`actions/actions.controller.ts`)
@@ -443,7 +562,6 @@ Not covered by the reader:
 | `AiController.triggerJourney` | POST | `/ai/businesses/:businessId/journeys/:key/trigger` | exempt-check | check:assertJourneyContactsVisible (CRM visibility of every contact the journey touches) |
 | `AiController.undoPlanStep` | POST | `/ai/businesses/:businessId/ai/plans/:planId/steps/:stepId/undo` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
 | `AiController.updateAgentConfig` | PUT | `/ai/businesses/:businessId/ai/agent-config` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
-| `AiController.updateAiPreferences` | PUT | `/ai/businesses/:businessId/ai/preferences` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
 | `AiController.updateAutopilotRule` | PUT | `/ai/businesses/:businessId/autopilot-rules/:ruleId` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
 | `AiController.updateBusinessPlan` | PUT | `/ai/businesses/:businessId/ai/business-plan/:planId` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
 | `AiController.updateGoal` | PUT | `/ai/businesses/:businessId/goals/:goalId` | open | membership only; follow-up SWEEP-CENSUS: ai write (governance, routing, agent config and preferences: settings write); KEY surfaces; tools run through the member authority map (D-119, D-131) but these routes check membership only |
@@ -701,13 +819,6 @@ Not covered by the reader:
 | `ChangeOrderController.delete` | DELETE | `/change-orders/businesses/:businessId/:id` | open | membership only; follow-up SWEEP-CENSUS: projects write |
 | `ChangeOrderController.update` | PATCH | `/change-orders/businesses/:businessId/:id` | open | membership only; follow-up SWEEP-CENSUS: projects write |
 
-### AccountingController (`commerce/accounting.controller.ts`)
-
-| route | verb | path | disposition | reason |
-| --- | --- | --- | --- | --- |
-| `AccountingController.pushCustomers` | POST | `/accounting/businesses/:businessId/customers/push` | open | membership only; follow-up SWEEP-CENSUS: revenue write; pushes invoices to the external accounting system |
-| `AccountingController.pushInvoice` | POST | `/accounting/businesses/:businessId/invoices/push` | open | membership only; follow-up SWEEP-CENSUS: revenue write; pushes invoices to the external accounting system |
-
 ### CommerceInsightsController (`commerce/commerce-insights.controller.ts`)
 
 | route | verb | path | disposition | reason |
@@ -759,7 +870,6 @@ Not covered by the reader:
 | `CommunicationsController.aiSuggestTime` | POST | `/communications/businesses/:businessId/content-ai/suggest-time` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.cancel` | POST | `/communications/businesses/:businessId/deliveries/:deliveryId/cancel` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.createContent` | POST | `/communications/businesses/:businessId/content` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
-| `CommunicationsController.createDestination` | POST | `/communications/businesses/:businessId/connections/:connectionId/destinations` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.deleteContent` | DELETE | `/communications/businesses/:businessId/content/:id` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.expandAudience` | POST | `/communications/businesses/:businessId/audience/expand` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.healthCheck` | POST | `/communications/businesses/:businessId/connections/:id/health-check` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
@@ -769,7 +879,6 @@ Not covered by the reader:
 | `CommunicationsController.retry` | POST | `/communications/businesses/:businessId/deliveries/:deliveryId/retry` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.retryAllFailed` | POST | `/communications/businesses/:businessId/content/:id/retry-all` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.schedule` | POST | `/communications/businesses/:businessId/content/:id/schedule` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
-| `CommunicationsController.toggleDestination` | PATCH | `/communications/businesses/:businessId/destinations/:destId/toggle` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.updateContent` | PATCH | `/communications/businesses/:businessId/content/:id` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.upsertVariant` | POST | `/communications/businesses/:businessId/content/:id/variants` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
 | `CommunicationsController.validateEmailSend` | POST | `/communications/businesses/:businessId/email/validate-send` | open | membership only; follow-up SWEEP-CENSUS: content write (connections: connect write) |
@@ -861,9 +970,9 @@ reviewed secret read (above).
 | `ConnectorController.deleteCredentials` | DELETE | `/connectors/businesses/:businessId/credentials/:type` | exempt-check | check:assertConnectorSettingsAdmin (settings admin, review repair SEC-1: it clears the connector's stored credentials); gmail and the Google Suite connections keep their owner rules first (GMAIL_OWNER_ONLY D-11, GOOGLE_CONNECT_OWNER_ONLY D-99) |
 | `ConnectorController.disconnect` | POST | `/connectors/businesses/:businessId/disconnect/:type` | exempt-check | check:assertConnectorSettingsAdmin (settings admin: a connector's disconnect clears its stored credentials, QuickBooksConnector.disconnect); gmail and the Google Suite connections keep their owner rules first |
 | `ConnectorController.reconnect` | POST | `/connectors/businesses/:businessId/reconnect/:type` | exempt-check | check:assertConnectorSettingsAdmin (settings admin: it disconnects first); gmail and the Google Suite connections keep their owner rules first |
-| `ConnectorController.authenticate` | POST | `/connectors/businesses/:businessId/authenticate/:type` | open | membership only; follow-up SWEEP-CENSUS: settings admin with the per-provider OAuth start routes (an OAuth start binds the business to the account that completes it); gmail-connect-binding R0-CMF6-K04 pins it open for gmail's status answer |
+| `ConnectorController.authenticate` | POST | `/connectors/businesses/:businessId/authenticate/:type` | exempt-check | check:assertConnectorBindingAuthority (round 2 class repair, finding CW-4): a connector that is already connected gets its status answer from any member (R0-CMF6-K04); otherwise Connect binds (WhatsApp's connected verification lifts an explicit disconnect) or starts a binding (the OAuth consent start it answers): settings admin, gmail's and the Google Suite connections' owner rules first (D-11, D-42, D-99) |
 | `ConnectorController.runHealthCheck` | POST | `/connectors/businesses/:businessId/health-check/run` | open | membership only; follow-up SWEEP-CENSUS: settings read; it runs provider checks and writes health rows, no credential |
-| `ConnectorController.smoke` | POST | `/connectors/businesses/:businessId/smoke/:type` | open | membership only (gmail: check GMAIL_OWNER_ONLY, D-11); follow-up SWEEP-CENSUS: settings write; a provider self-test, R0-CMF6-K05 pins it open for other connectors |
+| `ConnectorController.smoke` | POST | `/connectors/businesses/:businessId/smoke/:type` | open | membership only for the connectors whose check binds nothing (R0-CMF6-K05 pins it open); gmail: GMAIL_OWNER_ONLY (D-11); a connector whose passed check records a binding (CONNECTORS_BINDING_ON_CHECK: WhatsApp, round 2 CW-4) takes Connect's rule, assertConnectorBindingAuthority (settings admin); follow-up SWEEP-CENSUS: settings write for the rest |
 | `ConnectorController.sync` | POST | `/connectors/businesses/:businessId/sync/:type` | open | membership only (gmail and Google Suite: owner rules, D-11, D-99); follow-up SWEEP-CENSUS: the synced module's write (crm for contact sources, revenue for accounting); R0-CMF6-K05 and V94D-F02 pin it open for other connectors |
 | `ConnectorController.test` | POST | `/connectors/businesses/:businessId/test/:type` | open | membership only; follow-up SWEEP-CENSUS: settings read; a credential check, no write (R0-CMF6-K04, V94D-F02 pin it open) |
 | `ConnectorController.updateInboxConfig` | PATCH | `/connectors/businesses/:businessId/inbox-config/:type` | open | membership only; follow-up SWEEP-CENSUS: settings write; Key Inbox processing settings only (R0-CMF6-M02 decided it open) |
@@ -905,7 +1014,7 @@ Every other route is applied (above).
 | `ConnectController.saveFormMapping` | POST | `/connect/businesses/:businessId/forms/:formId/mapping` | open | membership only; follow-up SWEEP-CENSUS: connect write |
 | `ConnectController.saveOutlookRules` | PUT | `/connect/businesses/:businessId/outlook-contacts/mapping-rules` | open | membership only; follow-up SWEEP-CENSUS: connect write |
 | `ConnectController.scheduleBpPost` | POST | `/connect/businesses/:businessId/business-profile/scheduled-posts` | open | membership only; follow-up SWEEP-CENSUS: connect write |
-| `ConnectController.setBpActiveLocation` | POST | `/connect/businesses/:businessId/business-profile/active-location` | open | membership only; follow-up SWEEP-CENSUS: connect write |
+| `ConnectController.setBpActiveLocation` | POST | `/connect/businesses/:businessId/business-profile/active-location` | exempt-check | check:assertGoogleConnectOwner (D-99; round 2 class repair, finding CW-3: it moves the account and location the owner's Google Business Profile tokens act on, Business.bpAccountId and bpLocationId, as calendarId is the owner's on the calendar settings doors) |
 | `ConnectController.setSignatureParsing` | PUT | `/connect/businesses/:businessId/contact-sources/signature-parsing` | open | membership only; follow-up SWEEP-CENSUS: connect write |
 | `ConnectController.syncAllSources` | POST | `/connect/businesses/:businessId/contact-sources/sync-all` | exempt-check | check:assertGoogleConnectOwner (D-99) |
 | `ConnectController.syncContacts` | POST | `/connect/businesses/:businessId/contacts/sync` | exempt-check | check:assertGoogleConnectOwner (D-99) |
@@ -1033,13 +1142,6 @@ Every other route is applied (above).
 | `MarketingAiController.aiStrategy` | POST | `/marketing/businesses/:businessId/marketing/ai-strategy` | open | membership only; follow-up SWEEP-CENSUS: content write |
 | `MarketingAiController.aiSubjectLines` | POST | `/marketing/businesses/:businessId/marketing/ai-subject-lines` | open | membership only; follow-up SWEEP-CENSUS: content write |
 | `MarketingAiController.submitMarketingBrief` | POST | `/marketing/businesses/:businessId/marketing/submit-brief` | open | membership only; follow-up SWEEP-CENSUS: content write |
-
-### MarketingSyncController (`email-marketing/marketing-sync.controller.ts`)
-
-| route | verb | path | disposition | reason |
-| --- | --- | --- | --- | --- |
-| `MarketingSyncController.pushContacts` | POST | `/marketing/businesses/:businessId/lists/push-contacts` | open | membership only; follow-up SWEEP-CENSUS: content write |
-| `MarketingSyncController.triggerCampaign` | POST | `/marketing/businesses/:businessId/lists/campaigns/:provider/:campaignId/trigger` | open | membership only; follow-up SWEEP-CENSUS: content write |
 
 ### EventsController (`events/events.controller.ts`)
 

@@ -8,13 +8,29 @@ function stripSecrets(conn: NonNullable<ConnectionRecord>) {
   return safe;
 }
 
-function stripSecretsFromDestination(dest: Record<string, unknown>) {
-  if (dest.connection && typeof dest.connection === 'object' && dest.connection !== null) {
-    const { token, refreshToken, ...safeConn } = dest.connection as Record<string, unknown>;
-    return { ...dest, connection: safeConn };
-  }
-  return dest;
+/**
+ * SWEEP-P0-SCOPES round 2 class repair (CW-2): a destination's own credential (a page's access token in
+ * destinationMeta, written by syncFromSocial and by the destination writes) is never answered. GET
+ * destinations answered it to every member.
+ */
+const DESTINATION_SECRET_KEY = /token|secret|password|api_?key|credential/i;
+function stripDestinationMeta(meta: unknown): unknown {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return meta;
+  return Object.fromEntries(Object.entries(meta as Record<string, unknown>).filter(([key]) => !DESTINATION_SECRET_KEY.test(key)));
 }
+
+function stripSecretsFromDestination(dest: Record<string, unknown>) {
+  const out: Record<string, unknown> = { ...dest };
+  if ('destinationMeta' in out) out.destinationMeta = stripDestinationMeta(out.destinationMeta);
+  if (out.connection && typeof out.connection === 'object' && out.connection !== null) {
+    const { token, refreshToken, ...safeConn } = out.connection as Record<string, unknown>;
+    out.connection = safeConn;
+  }
+  return out;
+}
+
+/** The fields a destination write may set (the body is handed over whole: an id or a connection in it is not written). */
+const DESTINATION_CREATE_FIELDS = ['platform', 'platformId', 'displayName', 'avatarUrl', 'capabilities', 'destinationMeta'] as const;
 
 /**
  * SWEEP-P0-SCOPES second review repair (finding SV-2): the fields a create or an update of a channel
@@ -149,7 +165,7 @@ export class ChannelConnectionService {
     });
 
     if (existing) {
-      return this.prisma.client.channelDestination.update({
+      const updated = await this.prisma.client.channelDestination.update({
         where: { id: existing.id },
         data: {
           displayName: data.displayName ?? existing.displayName,
@@ -158,11 +174,13 @@ export class ChannelConnectionService {
           destinationMeta: (data.destinationMeta ?? existing.destinationMeta) ?? undefined,
         },
       });
+      return stripSecretsFromDestination(updated as unknown as Record<string, unknown>);
     }
 
-    return this.prisma.client.channelDestination.create({
-      data: { ...data, connectionId, businessId },
+    const created = await this.prisma.client.channelDestination.create({
+      data: { ...(pickFields(data, DESTINATION_CREATE_FIELDS) as typeof data), connectionId, businessId },
     });
+    return stripSecretsFromDestination(created as unknown as Record<string, unknown>);
   }
 
   async listDestinations(businessId: string, opts?: { platform?: string; activeOnly?: boolean }) {
@@ -573,10 +591,11 @@ export class ChannelConnectionService {
     });
     if (!dest) throw new NotFoundException('Destination not found');
 
-    return this.prisma.client.channelDestination.update({
+    const updated = await this.prisma.client.channelDestination.update({
       where: { id: destId },
       data: { isActive },
     });
+    return stripSecretsFromDestination(updated as unknown as Record<string, unknown>);
   }
 
   async connectWhatsApp(businessId: string, input: {

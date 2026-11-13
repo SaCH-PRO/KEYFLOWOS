@@ -109,7 +109,16 @@ export class CommunicationsController {
     return this.connections.runHealthCheck(businessId, id);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * SWEEP-P0-SCOPES round 2 class repair (CLASS B; finding CW-2): settings admin, as the connection
+   * writes are (SV-2). A destination is where every send goes (a page and its own access token,
+   * ChannelDestination.destinationMeta): adding one, replacing its token, or turning the owner's off is a
+   * binding write. Both ran AuthGuard and BusinessGuard only: any member replaced the token on the
+   * owner's page, added a page of their own under the owner's credentialed connection, and turned the
+   * owner's page off. A destination read answers no token (ChannelConnectionService).
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Patch('businesses/:businessId/destinations/:destId/toggle')
   toggleDestination(@Param('businessId') businessId: string, @Param('destId') destId: string, @Body() body: { isActive: boolean }) {
     return this.connections.toggleDestination(businessId, destId, body.isActive);
@@ -127,7 +136,8 @@ export class CommunicationsController {
     return this.connections.listDestinations(businessId, { platform, activeOnly: activeOnly === 'true' });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/connections/:connectionId/destinations')
   createDestination(
     @Param('businessId') businessId: string,

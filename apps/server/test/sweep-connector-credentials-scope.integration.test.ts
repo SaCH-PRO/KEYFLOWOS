@@ -219,7 +219,8 @@ beforeAll(async () => {
   await m(ID.staffNone, ID.bizA, 'STAFF', { crm: 'read', settings: 'none', team: 'none', ai: 'none', connect: 'none', revenue: 'none', expenses: 'none' });
   await m(ID.staffDefault, ID.bizA, 'STAFF');
   await m(ID.settingsWrite, ID.bizA, 'STAFF', { settings: 'write' });
-  await m(ID.settingsAdmin, ID.bizA, 'STAFF', { settings: 'admin' });
+  // Round 2 class repair (CLASS A, WHP-1): binding QuickBooks (an export connector) also needs revenue and crm read.
+  await m(ID.settingsAdmin, ID.bizA, 'STAFF', { settings: 'admin', revenue: 'read', crm: 'read' });
   await m(ID.outsider, ID.bizB, 'OWNER');
 }, 120_000);
 
