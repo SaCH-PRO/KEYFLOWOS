@@ -135,6 +135,24 @@ export class MergeRecordConflict extends Error {
 }
 
 /**
+ * What the control room already says about one merge: the trusted comments
+ * that ARE its record, and the trusted comments that carry its marker and are
+ * not. Shared by the recorder and by the audit (lib/merge-record-audit.mjs),
+ * so "is this merge recorded" has one answer.
+ */
+export function existingRecordsFor(record, existing) {
+  const records = [];
+  const conflicts = [];
+  for (const c of existing) {
+    if (typeof c?.body !== 'string' || !c.body.includes(record.marker) || !trusted(c)) continue;
+    const problems = recordProblems(c.body, record);
+    if (problems.length === 0) records.push(c);
+    else conflicts.push({ comment_id: c.id ?? null, author: c.user.login, url: c.html_url ?? null, problems });
+  }
+  return { records, conflicts };
+}
+
+/**
  * Record a merge once. `listComments` returns EVERY control-room comment and
  * `createComment` posts one and returns what was stored; both throw on
  * failure, and so does this. It returns only when the record for this merge
@@ -149,14 +167,7 @@ export async function recordMerge(result, { listComments, createComment }) {
   const existing = await listComments();
   if (!Array.isArray(existing)) throw new Error('the control-room comments could not be read as a list');
 
-  const records = [];
-  const conflicts = [];
-  for (const c of existing) {
-    if (typeof c?.body !== 'string' || !c.body.includes(record.marker) || !trusted(c)) continue;
-    const problems = recordProblems(c.body, record);
-    if (problems.length === 0) records.push(c);
-    else conflicts.push({ comment_id: c.id ?? null, author: c.user.login, url: c.html_url ?? null, problems });
-  }
+  const { records, conflicts } = existingRecordsFor(record, existing);
 
   let outcome = RECORD_OUTCOMES.ALREADY_RECORDED;
   let stored = records[0] || null;

@@ -673,8 +673,8 @@ negative_controls:
       that reconciled nothing.
     mutation:
       file: .github/workflows/agent-control-autopilot.yml
-      find: "| .number')\"; then"
-      replace: "| .number' || true)\"; then"
+      find: "list-open-impl-prs.mjs)\"; then"
+      replace: "list-open-impl-prs.mjs || true)\"; then"
     proof_command: node --test --test-name-pattern="a failed PR listing" scripts/agent-control/tests/autopilot-workflow.spec.mjs
     timeout_ms: 120000
 
@@ -874,6 +874,83 @@ negative_controls:
               cancel-in-progress: false
       replace: "# run beside a per-PR event-driven merge."
     proof_command: node --test --test-name-pattern="holds the one mutation lock" scripts/agent-control/tests/autopilot-workflow.spec.mjs
+    timeout_ms: 120000
+
+  # --- the audit that looks again for a missing AUTO_MERGE record -------------
+
+  - id: NC-MERGE-AUDIT-MISSING-DETECTED
+    claim: >
+      An autopilot merge with no record on the control room is reported as
+      missing. An audit that calls everything recorded audits nothing.
+    mutation:
+      file: scripts/agent-control/lib/merge-record-audit.mjs
+      find: "    const state = conflicts.length ? AUDIT_STATES.CONFLICT : records.length ? AUDIT_STATES.RECORDED : AUDIT_STATES.MISSING;"
+      replace: "    const state = AUDIT_STATES.RECORDED;"
+    proof_command: node --test --test-name-pattern="with no record is MISSING" scripts/agent-control/tests/merge-record-audit.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-AUDIT-ONLY-AUTOPILOT-MERGES
+    claim: >
+      Only a merge the workflow token made owes a record. Treating a person's
+      merge as the autopilot's would post AUTO_MERGE records for merges the
+      autopilot never made.
+    mutation:
+      file: scripts/agent-control/lib/merge-record-audit.mjs
+      find: "    && String(pr?.merged_by?.login || '') === AUTOPILOT_MERGER"
+      replace: "    && true"
+    proof_command: node --test --test-name-pattern="a merge by a person, or of a non-implementation branch" scripts/agent-control/tests/merge-record-audit.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-AUDIT-DETECTION-NEVER-WRITES
+    claim: >
+      Without --reconcile the audit only reads.
+    mutation:
+      file: scripts/agent-control/audit-merge-records.mjs
+      find: "  if (reconcile && audit.missing.length) {"
+      replace: "  if (audit.missing.length) {"
+    proof_command: node --test --test-name-pattern="without --reconcile, nothing is posted" scripts/agent-control/tests/merge-record-audit.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-AUDIT-READS-EVERY-PAGE
+    claim: >
+      The audit reads every page of closed PRs and of the control room. One
+      page would miss an old merge, or miss its record and post a second.
+    mutation:
+      file: scripts/agent-control/audit-merge-records.mjs
+      find: "    if (batch.length < PER_PAGE) return items;"
+      replace: "    return items;"
+    proof_command: node --test --test-name-pattern="beyond the first page of closed PRs" scripts/agent-control/tests/merge-record-audit.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-AUDIT-EXIT-STATUS
+    claim: >
+      A missing record or a conflict leaves the audit with a failing status.
+    mutation:
+      file: scripts/agent-control/audit-merge-records.mjs
+      find: "    process.exit(report.clean ? 0 : report.conflicts.length ? 4 : 5);"
+      replace: "    process.exit(0);"
+    proof_command: node --test --test-name-pattern="a missing record is exit 5" scripts/agent-control/tests/merge-record-audit.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-AUDIT-RUNS-AFTER-A-FAILED-SWEEP
+    claim: >
+      The audit step runs when the sweep before it failed. A sweep that failed
+      because a record could not be posted is the case the audit repairs.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: "        if: ${{ !cancelled() }}"
+      replace: "        if: ${{ success() }}"
+    proof_command: node --test --test-name-pattern="even when the sweep failed" scripts/agent-control/tests/merge-record-audit.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-MERGE-AUDIT-STEP-FAILS-THE-JOB
+    claim: >
+      A record still missing after reconciliation fails the job.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: "after reconciliation\"; exit 1 ;;"
+      replace: "after reconciliation\"; exit 0 ;;"
+    proof_command: node --test --test-name-pattern="the audit step fails the job" scripts/agent-control/tests/merge-record-audit.spec.mjs
     timeout_ms: 120000
 
   # --- source precedence (CG-DIRECTIVE-META-STATE-RECONCILE-001) ------------
@@ -1659,6 +1736,23 @@ negative_controls:
       replace: |-
         export const COPILOT_UNAVAILABLE = /(?!)/;
     proof_command: node --test --test-name-pattern="real PR 103 Copilot reviews" scripts/agent-control/tests/semantic-review.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SR-COPILOT-INSUFFICIENT-QUOTA-UNRECOGNIZED
+    claim: >
+      The bot's current unavailable wording, "insufficient remaining quota"
+      (PR 155 reviews 5636247931 and 5636727516), derives the machine reason
+      quota_exhausted, so a truthfully recorded quota NOT_RUN is evidenced
+      live and the approved fallback can be judged
+      (KF-META-AI-REVIEW-QUOTA-WORDING-001). With the entry removed the body
+      is NOT_RUN with no reason, as it was before the correction.
+    mutation:
+      file: scripts/agent-control/lib/semantic-review.mjs
+      find: |-
+        Object.freeze({ pattern: /\binsufficient remaining quota\b/i, reason: 'quota_exhausted' }),
+      replace: |-
+        // (entry removed by the negative control)
+    proof_command: node --test --test-name-pattern="PR 155 Copilot wording" scripts/agent-control/tests/semantic-review.spec.mjs
     timeout_ms: 120000
 
   - id: NC-SR-STALE-HEAD
@@ -3893,4 +3987,73 @@ negative_controls:
       find: "if (!token || !repo || !prNumber) {"
       replace: "if (process.argv[1].endsWith('auto-merge-admitted.mjs') && (!token || !repo || !prNumber)) {"
     proof_command: node --test --test-name-pattern="NC CLI load" scripts/agent-control/tests/merge-cli.spec.mjs
+    timeout_ms: 180000
+
+  # --- the hourly sweep's candidate list (KF-META-AUTOPILOT-SWEEP-COVERAGE-001)
+
+  - id: NC-SWEEP-DEFAULT-LIMIT-RESTORED
+    claim: >
+      The hourly sweep lists its candidates through the paged lister, never
+      through `gh pr list`, whose default page of 30 hid 14 of the 21 open
+      impl/* PRs on 2026-10-24 while the sweep reported a clean run.
+    mutation:
+      file: .github/workflows/agent-control-autopilot.yml
+      find: "if ! listing=\"$(node scripts/agent-control/list-open-impl-prs.mjs)\"; then"
+      replace: "if ! listing=\"$(gh pr list --state open --json number,headRefName --jq '.[] | select(.headRefName | startswith(\"impl/\")) | .number')\"; then"
+    proof_command: node --test --test-name-pattern="the candidates come from the paged lister" scripts/agent-control/tests/autopilot-workflow.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SWEEP-TOTALCOUNT-UNCHECKED
+    claim: >
+      An enumeration that collected fewer pull requests than the API's own
+      totalCount is incomplete and fails. Without the check, a short read is a
+      shorter candidate list and the sweep is clean having missed PRs.
+    mutation:
+      file: scripts/agent-control/list-open-impl-prs.mjs
+      find: "if (nodes.length !== totalCount) {"
+      replace: "if (false) {"
+    proof_command: node --test --test-name-pattern="fewer nodes than totalCount" scripts/agent-control/tests/list-open-impl-prs.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SWEEP-PAGE-ERROR-PARTIAL
+    claim: >
+      A failed page after a successful one fails the whole listing. Nothing
+      collected so far is printed: a partial list would reconcile the first
+      page and silently skip the rest.
+    mutation:
+      file: scripts/agent-control/list-open-impl-prs.mjs
+      find: "const page = await fetchPage(fetchImpl, { token, owner, name, cursor });"
+      replace: |-
+        let page;
+            try { page = await fetchPage(fetchImpl, { token, owner, name, cursor }); } catch { return { totalCount: nodes.length, nodes, pages }; }
+    proof_command: node --test --test-name-pattern="HTTP failure on the second page" scripts/agent-control/tests/list-open-impl-prs.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SWEEP-DUPLICATES-COUNTED
+    claim: >
+      A pull request number seen twice is churn or a re-read page and fails
+      the enumeration. Skipping the repeat instead would let a duplicated page
+      deduplicate to exactly totalCount and pass as complete.
+    mutation:
+      file: scripts/agent-control/list-open-impl-prs.mjs
+      find: "if (seenNumbers.has(node.number)) throw new ListingError(LISTING_ERRORS.DUPLICATE, `PR #${node.number} listed twice`);"
+      replace: "if (seenNumbers.has(node.number)) continue;"
+    proof_command: node --test --test-name-pattern="duplicated page cannot be deduplicated" scripts/agent-control/tests/list-open-impl-prs.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-SWEEP-FORCED-EXIT-TRUNCATES-STDOUT
+    claim: >
+      The lister ends by natural termination (process.exitCode), so the
+      candidate list it wrote drains into the stdout pipe before the process
+      ends. A forced process.exit right after the write can end the process
+      with part of the list unwritten and exit 0 (SWEEP-IO-001; 65,536 of
+      85,000 bytes on Linux). On Windows the native stdout pipe is blocking
+      and cannot show the loss, so there this control is live through the
+      test's modeled asynchronous stdout leg; on Linux both legs fail with
+      the defect restored.
+    mutation:
+      file: scripts/agent-control/list-open-impl-prs.mjs
+      find: "main().then((code) => { process.exitCode = code; });"
+      replace: "main().then((code) => process.exit(code));"
+    proof_command: node --test --test-name-pattern="drains its stdout pipe before it exits" scripts/agent-control/tests/list-open-impl-prs.spec.mjs
     timeout_ms: 180000
