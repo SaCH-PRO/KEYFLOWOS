@@ -48,6 +48,92 @@ function methodBody(src: string, name: string): string {
   throw new Error(`could not find the end of ${name}()`);
 }
 
+/** The text of a brace-balanced `{ ... }` starting at src[open]. */
+function balanced(src: string, open: number): string {
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === '{') depth++;
+    else if (src[i] === '}') {
+      depth--;
+      if (depth === 0) return src.slice(open, i + 1);
+    }
+  }
+  throw new Error('unbalanced braces');
+}
+
+/** The top-level comma-separated entries of an object literal's text. */
+function entries(objectText: string): string[] {
+  const inner = objectText.slice(1, -1);
+  const out: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i];
+    if (c === '{' || c === '[' || c === '(') depth++;
+    else if (c === '}' || c === ']' || c === ')') depth--;
+    else if (c === ',' && depth === 0) {
+      out.push(inner.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  out.push(inner.slice(start).trim());
+  return out.filter(Boolean);
+}
+
+/** The parameter list of a named async method. */
+function methodParams(src: string, name: string): string {
+  const at = src.indexOf(`async ${name}(`);
+  expect(at, `${name}() not found — was it renamed?`).toBeGreaterThan(-1);
+  return src.slice(at + `async ${name}(`.length, src.indexOf(')', at));
+}
+
+/**
+ * Every BusinessGoal write a where clause can scope (update, updateMany,
+ * upsert, delete, deleteMany) in the named method must:
+ *   - take an object literal, so its where clause can be read here (a
+ *     variable argument hides it);
+ *   - name `businessId` in that where clause as the shorthand `businessId` or
+ *     as `businessId: businessId`, i.e. bound to the method's own parameter.
+ *     `businessId: undefined` is not a scope: Prisma drops an undefined
+ *     filter, so the write reaches every tenant whenever no tenant context is
+ *     set (a job or scheduler calling the service). Any other value is not
+ *     the caller's tenant.
+ * The method must also take `businessId: string` and never rebind it.
+ * Returns one line per violation; empty means scoped.
+ */
+function unscopedGoalWrites(src: string, name: string): string[] {
+  const problems: string[] = [];
+  if (!/\bbusinessId\s*:\s*string\b/.test(methodParams(src, name))) {
+    problems.push(`${name} does not take businessId: string`);
+  }
+  const body = methodBody(src, name);
+  if (/\b(?:const|let|var)\s+(?:\{[^}]*\b)?businessId\b|(?<![.\w])businessId\s*=(?![=>])/.test(body)) {
+    problems.push(`${name} rebinds businessId, so the where clause no longer names the caller's tenant`);
+  }
+  const writes = [...body.matchAll(/businessGoal\.(update|updateMany|upsert|delete|deleteMany)\s*\(\s*/g)];
+  if (writes.length === 0) problems.push(`${name} has no BusinessGoal write to check`);
+  for (const write of writes) {
+    const method = write[1];
+    const argAt = write.index! + write[0].length;
+    if (body[argAt] !== '{') {
+      problems.push(`${name}: businessGoal.${method} takes a non-literal argument; its where clause cannot be checked`);
+      continue;
+    }
+    const arg = balanced(body, argAt);
+    const whereAt = /\bwhere\s*:\s*\{/.exec(arg);
+    if (!whereAt) {
+      problems.push(`${name}: businessGoal.${method} has no where object`);
+      continue;
+    }
+    const where = entries(balanced(arg, whereAt.index + whereAt[0].length - 1));
+    const scoped = where.some((e) => e === 'businessId' || /^businessId\s*:\s*businessId$/.test(e));
+    if (!scoped) {
+      problems.push(`${name}: businessGoal.${method} where { ${where.join(', ')} } does not bind businessId to the parameter`);
+    }
+  }
+  return problems;
+}
+
 describe('a record id from a request is not a tenant scope', () => {
   it('goal-tracker updateGoal scopes its write by businessId', () => {
     const body = methodBody(read('modules/ai/goal-tracker.service.ts'), 'updateGoal');
@@ -68,28 +154,56 @@ describe('a record id from a request is not a tenant scope', () => {
   });
 
   it('goal-tracker updateProgress keeps every BusinessGoal mutation tenant-scoped', () => {
-    const body = methodBody(read('modules/ai/goal-tracker.service.ts'), 'updateProgress');
-    const writes = [...body.matchAll(/businessGoal\.(update|updateMany|delete|deleteMany)\s*\(\s*\{([\s\S]*?)\n\s*\}\s*\)/g)];
-
-    expect(writes.length, 'updateProgress should persist calculated progress').toBeGreaterThan(0);
-    for (const write of writes) {
-      expect(
-        /where:\s*\{[^}]*businessId/.test(write[2]),
-        `updateProgress has an unscoped BusinessGoal ${write[1]} mutation`,
-      ).toBe(true);
-    }
+    expect(unscopedGoalWrites(read('modules/ai/goal-tracker.service.ts'), 'updateProgress')).toEqual([]);
   });
 
   it('goal-tracker suggestActions keeps every BusinessGoal mutation tenant-scoped', () => {
-    const body = methodBody(read('modules/ai/goal-tracker.service.ts'), 'suggestActions');
-    const writes = [...body.matchAll(/businessGoal\.(update|updateMany|delete|deleteMany)\s*\(\s*\{([\s\S]*?)\n\s*\}\s*\)/g)];
+    expect(unscopedGoalWrites(read('modules/ai/goal-tracker.service.ts'), 'suggestActions')).toEqual([]);
+  });
 
-    expect(writes.length, 'suggestActions should persist suggested actions').toBeGreaterThan(0);
-    for (const write of writes) {
-      expect(
-        /where:\s*\{[^}]*businessId/.test(write[2]),
-        `suggestActions has an unscoped BusinessGoal ${write[1]} mutation`,
-      ).toBe(true);
+  // The guard above must fail on the shapes that look scoped but are not.
+  // Each mutant is the real method with one write changed.
+  it('the BusinessGoal scope guard rejects writes that only look scoped', () => {
+    const src = read('modules/ai/goal-tracker.service.ts');
+    const progressWrite = 'where: { id: goalId, businessId },\n      data: { currentValue }';
+    const actionsWrite = 'where: { id: goalId, businessId },\n      data: { actions';
+    const achievedWhere = "where: { id: goalId, businessId, status: 'active' }";
+    for (const needle of [progressWrite, actionsWrite, achievedWhere]) {
+      expect(src.includes(needle), `goal-tracker changed shape; update this guard's mutants (${needle})`).toBe(true);
+    }
+    const mutants: Array<[string, string, string]> = [
+      ['updateProgress', 'undefined tenant filter', src.replace(progressWrite, progressWrite.replace('businessId }', 'businessId: undefined }'))],
+      ['suggestActions', 'undefined tenant filter', src.replace(actionsWrite, actionsWrite.replace('businessId }', 'businessId: undefined }'))],
+      ['updateProgress', 'another value as the tenant', src.replace(achievedWhere, "where: { id: goalId, businessId: goal.businessId, status: 'active' }")],
+      ['updateProgress', 'tenant only in a comment', src.replace(achievedWhere, "where: { id: goalId /* businessId */, status: 'active' }")],
+      [
+        'updateProgress',
+        'arguments passed as a variable',
+        src.replace(
+          'const progressUpdate = await this.prisma.client.businessGoal.updateMany({',
+          'const progressArgs = { where: { id: goalId }, data: { currentValue } };\n    const progressUpdate = await this.prisma.client.businessGoal.updateMany(progressArgs);\n    void ({',
+        ),
+      ],
+      [
+        'suggestActions',
+        'an unscoped upsert',
+        src.replace(
+          'const stored = await this.prisma.client.businessGoal.updateMany({',
+          'await this.prisma.client.businessGoal.upsert({ where: { id: goalId }, update: {}, create: {} as any });\n    const stored = await this.prisma.client.businessGoal.updateMany({',
+        ),
+      ],
+      [
+        'suggestActions',
+        'businessId rebound',
+        src.replace(
+          'async suggestActions(businessId: string, goalId: string): Promise<GoalAction[]> {',
+          'async suggestActions(businessId: string, goalId: string): Promise<GoalAction[]> {\n    businessId = undefined as any;',
+        ),
+      ],
+    ];
+    for (const [method, label, mutant] of mutants) {
+      expect(mutant, `mutant "${label}" did not apply`).not.toBe(src);
+      expect(unscopedGoalWrites(mutant, method).length, `the guard accepted ${method} with ${label}`).toBeGreaterThan(0);
     }
   });
 
