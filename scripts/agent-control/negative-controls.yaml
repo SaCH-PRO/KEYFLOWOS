@@ -3692,3 +3692,56 @@ negative_controls:
       replace: "the existing review carries over"
     proof_command: node --test --test-name-pattern="the only repair it names keeps the fresh review" scripts/agent-control/tests/stale-gates.spec.mjs
     timeout_ms: 120000
+
+  # --- branch divergence: a captured failure is re-raised (#114 part 1) -------
+  # The divergence check is continue-on-error so its summary and report still
+  # render; "Fail when thresholds exceeded" re-raises it. Proof:
+  # tests/workflow-integrity.spec.mjs, read per job from the parsed workflow.
+
+  - id: NC-DIVERGENCE-PUSH-RERAISE-NEUTRALIZED
+    claim: >
+      Each job that captures the divergence status re-raises it itself. The
+      push job's re-raise exiting 0 lets a drifted branch push go green, and
+      the PR job's intact re-raise must not cover for it.
+    mutation:
+      file: .github/workflows/branch-divergence.yml
+      find: |-
+        for guidance, or add an override in .github/branch-divergence-overrides.yml."
+                  exit 1
+
+          # ---------------------------------------------------------------------------
+          # Manual job: runs only on workflow_dispatch. Lets a maintainer pass an
+      replace: |-
+        for guidance, or add an override in .github/branch-divergence-overrides.yml."
+                  exit 0
+
+          # ---------------------------------------------------------------------------
+          # Manual job: runs only on workflow_dispatch. Lets a maintainer pass an
+    proof_command: node --test --test-name-pattern="NC captured failure" scripts/agent-control/tests/workflow-integrity.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-DIVERGENCE-RERAISE-FAIL-OPEN
+    claim: >
+      The re-raise fails closed: it runs on any recorded status but 0, an
+      empty one included. A condition that runs only on status 1 lets a check
+      that crashed (status 2, or no status recorded) conclude green.
+    mutation:
+      file: .github/workflows/branch-divergence.yml
+      find: "if: steps.check.outputs.status != '0'"
+      replace: "if: steps.check.outputs.status == '1'"
+      # Both capturing jobs carry this condition and the claim covers both.
+      replace_all: true
+    proof_command: node --test --test-name-pattern="NC captured failure" scripts/agent-control/tests/workflow-integrity.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-DIVERGENCE-JOB-SOFT-GATE
+    claim: >
+      No job that captures the divergence status is itself continue-on-error;
+      a job-level continue-on-error swallows the re-raise and the PR check
+      concludes green past the thresholds.
+    mutation:
+      file: .github/workflows/branch-divergence.yml
+      find: "name: Check divergence vs main (PR)"
+      replace: "name: Check divergence vs main (PR)\n    continue-on-error: true"
+    proof_command: node --test --test-name-pattern="NC captured failure" scripts/agent-control/tests/workflow-integrity.spec.mjs
+    timeout_ms: 120000

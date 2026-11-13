@@ -282,11 +282,41 @@ test('NC setup doc: no operator doc says a PR runs DAST (HawkScan) or tells anyo
 });
 
 // ------------------------------------- CAPTURED FAILURES ARE RE-RAISED
-// Ported from #114 (impl/kf-meta-proof-integrity-001, caebaa12).
+// Ported from #114 (impl/kf-meta-proof-integrity-001, caebaa12), and read per
+// job: one job's re-raise cannot stand in for another's.
 
-test('capture-and-reraise remains explicit for Branch divergence', () => {
-  const divergence = read('.github/workflows/branch-divergence.yml');
-  const tolerated = (divergence.match(/continue-on-error:\s*true/g) || []).length;
-  assert.ok(tolerated >= 1, 'branch divergence intentionally captures command status to render evidence');
-  assert.match(divergence, /Fail when thresholds exceeded[\s\S]*?exit 1/, 'captured divergence failure must be re-raised explicitly');
+const DIVERGENCE = 'Branch divergence';
+const RERAISE = 'Fail when thresholds exceeded';
+
+test('NC captured failure: every continue-on-error step of Branch divergence is re-raised by "Fail when thresholds exceeded"', () => {
+  // The divergence check is continue-on-error so that the summary and the
+  // report still render when it fails. That is a soft gate unless a later
+  // step of the same job fails the job on the captured status. Read from the
+  // parsed workflow, so a comment cannot satisfy the rule, and per job, so the
+  // PR job's re-raise does not cover a push job that lost its own.
+  const wf = workflowNamed(DIVERGENCE);
+  let captured = 0;
+  for (const [job, spec] of Object.entries(wf.doc.jobs || {})) {
+    assert.ok(!('continue-on-error' in spec), `job "${job}" of "${DIVERGENCE}" must not declare continue-on-error; it would swallow the re-raise too`);
+    const list = spec.steps || [];
+    list.forEach((step, index) => {
+      if (!('continue-on-error' in step)) return;
+      captured += 1;
+      const where = `step "${step.name}" of job "${job}"`;
+      assert.ok(typeof step.id === 'string' && step.id, `${where} is continue-on-error, so it needs an id its re-raise can read`);
+      const reraise = list.slice(index + 1).filter((s) => s.name === RERAISE);
+      assert.equal(reraise.length, 1, `${where} must be followed, in job "${job}", by exactly one "${RERAISE}" step`);
+      const [fail] = reraise;
+      // Fail closed: any status but 0, an empty one included, fails the job.
+      assert.equal(
+        String(fail.if ?? '').trim(),
+        `steps.${step.id}.outputs.status != '0'`,
+        `"${RERAISE}" in job "${job}" must run whenever step ${step.id} did not record status 0`,
+      );
+      assert.ok(!('continue-on-error' in fail), `"${RERAISE}" in job "${job}" must not itself be continue-on-error`);
+      const last = String(fail.run ?? '').trim().split('\n').at(-1).trim();
+      assert.equal(last, 'exit 1', `"${RERAISE}" in job "${job}" must end with exit 1`);
+    });
+  }
+  assert.ok(captured >= 1, 'branch divergence intentionally captures command status to render evidence');
 });
