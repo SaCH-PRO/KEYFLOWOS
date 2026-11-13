@@ -36,7 +36,7 @@
  *
  * Dry runs only: nothing here writes a row.
  */
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, onTestFinished, type ExpectStatic } from 'vitest';
 import { spawn } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
@@ -91,11 +91,12 @@ function runCommand(command: string, cwd: string, env: NodeJS.ProcessEnv): Promi
 /** `pnpm <name>` from apps/server: the package.json command, run as pnpm runs it. */
 function runPackageScript(name: string, env: NodeJS.ProcessEnv): Promise<Run> {
   const command = PACKAGE_SCRIPTS[name];
-  expect(command, `apps/server/package.json has no "${name}" script`).toBeTruthy();
+  if (!command) throw new Error(`apps/server/package.json has no "${name}" script`);
   return runCommand(command, SERVER_DIR, env);
 }
 
-function expectCleanDryRun(run: Run, countLines: RegExp[]): void {
+/** `expect` is the test's own (concurrent tests must not share the global one). */
+function expectCleanDryRun(expect: ExpectStatic, run: Run, countLines: RegExp[]): void {
   const all = `${run.out}\n${run.err}`;
   expect(run.code, all).toBe(0);
   expect(run.out, all).toMatch(/DRY RUN/);
@@ -136,12 +137,15 @@ afterAll(async () => {
   await new Promise<void>((ok) => (gotrue ? gotrue.close(() => ok()) : ok()));
 });
 
-describe('operator scripts run the documented way (pnpm <name> from apps/server, DATABASE_URL only)', () => {
+// Concurrent: each run lingers about 30 s after printing its counts (the
+// @keyflow/db pg pool's idleTimeoutMillis keeps the process alive after
+// $disconnect), so the five runs share that wait instead of queueing on it.
+describe.concurrent('operator scripts run the documented way (pnpm <name> from apps/server, DATABASE_URL only)', () => {
   it(
     '[BSC-01] pnpm backfill:owner-memberships: dry run exits 0 and prints its counts',
-    async () => {
+    async ({ expect }) => {
       const run = await runPackageScript('backfill:owner-memberships', operatorEnv());
-      expectCleanDryRun(run, [
+      expectCleanDryRun(expect, run, [
         /businesses_scanned\s+\d+/,
         /owner_is_member\s+\d+/,
         /missing_owner_membership\s+\d+/,
@@ -154,13 +158,13 @@ describe('operator scripts run the documented way (pnpm <name> from apps/server,
 
   it(
     '[BSC-02] pnpm backfill:google-identities: dry run (GoTrue stand-in on 127.0.0.1) exits 0 and prints its counts',
-    async () => {
+    async ({ expect }) => {
       const before = gotrueListReads;
       const run = await runPackageScript(
         'backfill:google-identities',
         operatorEnv({ SUPABASE_URL: gotrueUrl, SUPABASE_SERVICE_ROLE_KEY: 'bsc-gotrue-stand-in-not-a-key' }),
       );
-      expectCleanDryRun(run, [
+      expectCleanDryRun(expect, run, [
         /gotrue_users_scanned\s+0\b/,
         /gotrue_pages_read\s+1\b/,
         /would_write\s+0\b/,
@@ -173,9 +177,9 @@ describe('operator scripts run the documented way (pnpm <name> from apps/server,
 
   it(
     '[BSC-03] pnpm backfill:timeline-contacts: dry run exits 0 and prints its counts',
-    async () => {
+    async ({ expect }) => {
       const run = await runPackageScript('backfill:timeline-contacts', operatorEnv());
-      expectCleanDryRun(run, [
+      expectCleanDryRun(expect, run, [
         /invoice_sent_unlinked\s+\d+/,
         /intake_approved_unlinked\s+\d+/,
         /invoice_sent_would_link\s+\d+/,
@@ -187,25 +191,19 @@ describe('operator scripts run the documented way (pnpm <name> from apps/server,
 
   it(
     '[BSC-04] pnpm cleanup:custom-field-values: dry run exits 0 and prints its counts',
-    async () => {
+    async ({ expect }) => {
       const run = await runPackageScript('cleanup:custom-field-values', operatorEnv());
-      expectCleanDryRun(run, [/cross_bound_values\s+\d+/, /contacts_affected\s+\d+/, /businesses_affected\s+\d+/]);
+      expectCleanDryRun(expect, run, [/cross_bound_values\s+\d+/, /contacts_affected\s+\d+/, /businesses_affected\s+\d+/]);
     },
     SCRIPT_TIMEOUT_MS,
   );
-});
 
-describe('the production API image shape (docs/development/owner-membership-backfill.md)', () => {
-  let scratch = '';
-
-  afterAll(() => {
-    if (scratch) rmSync(scratch, { recursive: true, force: true });
-  });
-
+  // The production API image shape (docs/development/owner-membership-backfill.md).
   it(
     '[BSC-05] the owner-membership script alone, no tsconfig.json above it, @keyflow/db through node_modules only: `npx tsx scripts/backfill-owner-memberships.ts` dry run exits 0',
-    async () => {
-      scratch = mkdtempSync(join(tmpdir(), 'bsc-image-'));
+    async ({ expect }) => {
+      const scratch = mkdtempSync(join(tmpdir(), 'bsc-image-'));
+      onTestFinished(() => rmSync(scratch, { recursive: true, force: true }));
       // Nothing above the scratch app may hold a tsconfig.json: tsx would apply it.
       for (let dir = scratch; ; dir = dirname(dir)) {
         expect(existsSync(join(dir, 'tsconfig.json')), `${dir}/tsconfig.json would be applied by tsx`).toBe(false);
@@ -222,7 +220,7 @@ describe('the production API image shape (docs/development/owner-membership-back
       copyFileSync(join(SERVER_DIR, 'scripts', 'backfill-owner-memberships.ts'), join(app, 'scripts', 'backfill-owner-memberships.ts'));
 
       const run = await runCommand('tsx scripts/backfill-owner-memberships.ts', app, operatorEnv());
-      expectCleanDryRun(run, [/businesses_scanned\s+\d+/, /would_write\s+\d+/]);
+      expectCleanDryRun(expect, run, [/businesses_scanned\s+\d+/, /would_write\s+\d+/]);
     },
     SCRIPT_TIMEOUT_MS,
   );

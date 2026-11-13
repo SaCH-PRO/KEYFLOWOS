@@ -1,0 +1,38 @@
+{
+  // tsx configuration for the one-off operator scripts in this directory
+  // (apps/server/package.json backfill:* and cleanup:*, which pass it with
+  // `tsx --tsconfig scripts/tsconfig.json`). It is NOT used by the server's
+  // build or typecheck: those read apps/server/tsconfig.json, unchanged.
+  //
+  // Why a separate file: apps/server/tsconfig.json maps '@keyflow/db' to
+  // packages/db/dist/src/client.d.ts for tsc, and tsx applies `paths` at run
+  // time, so under it `import { db } from '@keyflow/db'` loaded a declaration
+  // file with no runtime code: `db` was undefined and every run died with
+  // "Cannot read properties of undefined (reading '$disconnect')". This file
+  // has no `paths` and no `baseUrl`, so '@keyflow/db' resolves as Node does:
+  // node_modules -> packages/db, its package.json main dist/src/client.js
+  // (build it with `pnpm --filter @keyflow/db build`), the same file the
+  // production API image runs.
+  //
+  // Self-contained (no `extends`), so it also works where only this directory
+  // exists, as in the production API image (docs/development/owner-membership-backfill.md).
+  // `include` covers ../src so the server modules a script imports (the Google
+  // identity backfill imports SupabaseAdminService and the RISC service) are
+  // compiled with the server's decorator settings: tsx applies compilerOptions
+  // only to files a tsconfig includes.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "strictPropertyInitialization": false,
+    "types": ["node"],
+    "noEmit": true
+  },
+  "include": ["./**/*.ts", "../src/**/*.ts"]
+}
