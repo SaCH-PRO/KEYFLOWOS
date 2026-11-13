@@ -1,6 +1,6 @@
 packet_id: KF-MEMORY-CONTEXT-GENOME-PLAN-001
 title: KEY Memory / Context Genome convergence plan
-state: PLANNING
+state: DEFER_V1_PLUS  # was PLANNING (2026-10-05); see historical_note_2026_11_12
 health: GREEN
 scope_changed: false
 production_touched: false
@@ -86,3 +86,24 @@ next_action: >-
   memory stores or authority seams, then release only the read-only
   KF-MEMORY-TRUTH-AUDIT-001 forensic packet. Do not begin schema/runtime
   implementation before the audit and semantic contract converge.
+
+# Added 2026-11-12 by the convergence tie-off. Everything above is the
+# 2026-10-05 planning record; only `state` was changed (from PLANNING).
+historical_note_2026_11_12:
+  status: DEFER_V1_PLUS
+  disposition_source: docs/reconstruction/BUILD-MAP-001.md section (e), PR #148 row (PRS-M35)
+  verified_against_main: f5d58ef7
+  corrections:
+    - >-
+      Consolidation is not destructive in practice. MemoryConsolidationService.resolveConflicts()
+      groups AiMemory by category:key, but AiMemory is @@unique([businessId, category, key]),
+      so no group holds two rows and its delete is dead code. The material finding
+      "current consolidation deletes weaker conflicting AiMemory rows" above is wrong as
+      a statement about behaviour.
+    - >-
+      IngestionOrchestrator.computeDedupeHash() falls back to new Date() when an item has
+      no receivedAt, so such items never dedupe by hash.
+    - >-
+      The Living System Atlas and Mission Control read model this plan builds on (#141 to
+      #146, baseline branch impl/kf-mission-control-atlas-readmodel-001) are not on main;
+      BUILD-MAP-001 classes that chain NONE.

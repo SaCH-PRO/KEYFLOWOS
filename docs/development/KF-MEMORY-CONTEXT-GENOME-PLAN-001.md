@@ -5,6 +5,8 @@ Health: GREEN
 Scope changed: false
 Production touched: false
 
+> **Historical note (2026-11-12, convergence tie-off).** Status: **DEFER V1+** (`docs/reconstruction/BUILD-MAP-001.md` section (e), PR #148 row; finding PRS-M35). This plan, written 2026-10-05, was brought to main as a planning record only; nothing in it is released. Corrections verified against main `f5d58ef7`: (1) Consolidation is not destructive in practice: `MemoryConsolidationService.resolveConflicts()` groups `AiMemory` rows by `category:key`, but `AiMemory` is `@@unique([businessId, category, key])` (`packages/db/prisma/schema.prisma`), so no group ever holds two rows and its `delete` is dead code. So the claim in `architecture/memory/KEY-MEMORY-CONTEXT-GENOME.md` (section 3.8 and section 20) that current consolidation deletes lower-confidence memory is wrong as a statement about behaviour; lineage-preserving semantics remain the target. (2) The ingestion dedupe hash is weaker than described: `IngestionOrchestrator.computeDedupeHash()` falls back to `new Date()` when an item has no `receivedAt`, so such items never dedupe by hash at all. (3) The Living System Atlas and Mission Control read model this plan builds on (the #141 to #146 chain, including its baseline branch `impl/kf-mission-control-atlas-readmodel-001`) are not on main, and BUILD-MAP-001 classes that chain NONE; Atlas and Mission Control references below point to unmerged work.
+
 ## Objective
 
 Converge KEYFLOWOS memory, Business Genome, ingestion, evidence, temporal memory,
