@@ -56,3 +56,7 @@ screenshot-home.png
 
 # agent-control worker runtime state (locks, logs, processed-directive cursor)
 .agent-control/.worker/
+
+# Project thread harvester output (scripts/intelligence/README-project-thread-harvester.md);
+# it holds exported conversation text and must stay local.
+.artifacts/thread-harvest/
