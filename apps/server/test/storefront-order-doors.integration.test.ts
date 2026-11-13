@@ -218,6 +218,26 @@
  *           on both routes with nothing written and no event (D-136); at
  *           bb316619 both wrote CANCELLED over it
  *
+ * W11-ORDER-CANCEL-RELEASE review repairs, through the routes and guards (each
+ * red at 3fdf2399, the packet head):
+ *
+ *   V87-19  SEC-W11OCR-1: a cancel spelled with spaces (' cancelled ') was
+ *           released and announced cancelled but stored with its spaces,
+ *           which isClosedStorefrontOrder (upper-cased, not trimmed) does not
+ *           read as closed: PATCH paid / PAID then recorded a PAID invoice, a
+ *           SUCCESSFUL payment and store_order.paid on the cancelled STANDARD
+ *           order, and complete-offline did the same on a cancelled CASH
+ *           storefront order. Now the status is stored trimmed (its case as
+ *           sent) and both payments are 409 with nothing written
+ *   V87-20  OCR-COR-1: an open order stored with a spelling outside the
+ *           transition table's case-sensitive vocabulary ('processing',
+ *           'Processing', 'on_hold', written by PATCH /marketplace as sent)
+ *           was refused 400 by both status edits (and by the fulfil cancel),
+ *           so no route could cancel it. Now it is cancelled (its route
+ *           CANCELLED, one store_order.cancelled, a paid order's payment
+ *           kept); a closed spelling ('Shipped') is still 400 on both routes
+ *           with nothing written (control)
+ *
  * Fixtures: prefix `v87c_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted by raw SQL (patterns built by sqlLikePrefix) in dependency order
  * in beforeAll and afterAll; no $transaction wrapping.
@@ -1807,4 +1827,158 @@ describe('W11-ORDER-CANCEL-RELEASE (F-35, D-136): a status edit that cancels an 
       events: [],
     });
   }, 30_000);
+});
+
+describe('W11-ORDER-CANCEL-RELEASE review repairs (SEC-W11OCR-1, OCR-COR-1): a status-edit cancel, through the routes', () => {
+  let routing: any;
+  beforeAll(async () => {
+    const { FulfillmentRoutingService } = await import('../src/modules/marketplace/fulfillment-routing.service');
+    routing = app.get(FulfillmentRoutingService);
+  });
+  const routesOf = async (orderId: string) =>
+    (await db.fulfillmentRoute.findMany({ where: { businessId: ID.bizA, orderId }, orderBy: { createdAt: 'asc' } })).map(
+      (r: any) => `${r.strategy}:${r.status}`,
+    );
+  const storedOf = async (orderId: string) => {
+    const o = await db.marketplaceOrder.findUnique({ where: { id: orderId } });
+    return `${o.status}/${o.paymentStatus}`;
+  };
+  /** A route's answer: '<HTTP status>: <status>/<paymentStatus>' of the order returned, else '<HTTP status>: <message>'. */
+  const answerOf = (res: any) =>
+    `${res.status}: ${res.body?.status !== undefined && res.body?.paymentStatus !== undefined ? `${res.body.status}/${res.body.paymentStatus}` : res.body?.message}`;
+  /** A STANDARD order the owner created unpaid through POST /marketplace/businesses/:businessId/orders: placed / UNPAID. */
+  async function placedStandardOrder() {
+    const res = await marketCreate(ID.owner, {
+      paymentOnCreation: false,
+      paymentMethod: 'CASH',
+      customerName: 'Vee EightySeven',
+      customerEmail: CUSTOMER_EMAIL,
+      currency: 'TTD',
+      items: [{ productId: ID.prodA, quantity: QUANTITY }],
+    });
+    await settle();
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(`${res.body.type}/${res.body.status}/${res.body.paymentStatus}`).toBe('STANDARD/placed/UNPAID');
+    return res.body as { id: string; orderNumber: string };
+  }
+
+  it("V87-19 (review SEC-W11OCR-1) a cancel spelled with spaces is stored trimmed, so the closed-order money guards refuse a later payment: (a) a routed STANDARD order PATCHed ' cancelled ' (200, stored 'cancelled', route CANCELLED, one store_order.cancelled), then PATCH paid / PAID is 409 with no invoice, payment, posting or event; (b) a CASH storefront order PATCHed ' Cancelled ' by a revenue:read member (200, stored 'Cancelled'), then the owner's complete-offline is 409 with nothing written", async () => {
+    const order = await placedStandardOrder();
+    expect((await routing.routeOrder(ID.bizA, order.id)).length, 'routed').toBe(1);
+    seen = [];
+    const cancel = await marketStatus(ID.owner, order.id, { status: ' cancelled ' });
+    await settle();
+    // At 3fdf2399: 200 ' cancelled ' / UNPAID, stored with its spaces (route CANCELLED, store_order.cancelled emitted).
+    // Soft, so that a run where it fails still shows what the payment below does.
+    expect.soft({ answer: answerOf(cancel), stored: await storedOf(order.id), routes: await routesOf(order.id), events: storeEvents() }).toEqual({
+      answer: '200: cancelled/UNPAID',
+      stored: 'cancelled/UNPAID',
+      routes: ['LOCAL_STOCK:CANCELLED'],
+      events: ['store_order.cancelled'],
+    });
+    const book = await bookState(order);
+    const before = await counts();
+    seen = [];
+    const paid = await marketStatus(ID.owner, order.id, { status: 'paid', paymentStatus: 'PAID' });
+    await settle();
+    // At 3fdf2399: 200 paid/PAID: INV-<orderNumber> PAID, SUCCESSFUL:80 and store_order.paid on the cancelled order.
+    expect({ answer: answerOf(paid), book: await bookState(order), counts: await counts(), events: storeEvents() }).toEqual({
+      answer: '409: This order is cancelled and cannot be completed',
+      book,
+      counts: before,
+      events: [],
+    });
+
+    const placed = await placeOrder('CASH');
+    expect(await storedOf(placed.id)).toBe('PENDING/PENDING');
+    seen = [];
+    const staffCancel = await marketStatus(ID.staffRead, placed.id, { status: ' Cancelled ' });
+    await settle();
+    expect.soft({ answer: answerOf(staffCancel), stored: await storedOf(placed.id), events: storeEvents() }).toEqual({
+      answer: '200: Cancelled/PENDING',
+      stored: 'Cancelled/PENDING',
+      events: ['store_order.cancelled'],
+    });
+    const placedBook = await bookState(placed);
+    const placedBefore = await counts();
+    seen = [];
+    const offline = await completeOffline(ID.owner, placed.id);
+    await settle();
+    // At 3fdf2399: 201 CONFIRMED/PAID: INV-<orderNumber> PAID, SUCCESSFUL:80 and store_order.paid.
+    expect({ answer: answerOf(offline), book: await bookState(placed), counts: await counts(), events: storeEvents() }).toEqual({
+      answer: '409: This order is cancelled and cannot be completed',
+      book: placedBook,
+      counts: placedBefore,
+      events: [],
+    });
+  }, 30_000);
+
+  it("V87-20 (review OCR-COR-1) an open order stored with a spelling outside the transition table's case-sensitive vocabulary is cancelled through the routes: (a) a routed STANDARD order PATCHed 'processing', 'Processing' or 'on_hold', then 'cancelled' (route CANCELLED, one store_order.cancelled); (b) one PATCHed processing / PAID through the paid door, then 'cancelled' (its payment kept); (c) a PENDING storefront order PATCHed 'processing' on /marketplace, then CANCELLED on /site; control: one PATCHed 'Shipped' is still 400 on both routes with nothing written and no event", async () => {
+    for (const spelling of ['processing', 'Processing', 'on_hold']) {
+      const order = await placedStandardOrder();
+      expect((await routing.routeOrder(ID.bizA, order.id)).length, 'routed').toBe(1);
+      const moved = await marketStatus(ID.owner, order.id, { status: spelling });
+      expect(answerOf(moved), spelling).toBe(`200: ${spelling}/UNPAID`);
+      seen = [];
+      const res = await marketStatus(ID.owner, order.id, { status: 'cancelled' });
+      await settle();
+      // At 3fdf2399: 400 'Cannot cancel order in <spelling> status', the order left open with its route RESERVED.
+      expect({ answer: answerOf(res), stored: await storedOf(order.id), routes: await routesOf(order.id), events: storeEvents() }, spelling).toEqual({
+        answer: '200: cancelled/UNPAID',
+        stored: 'cancelled/UNPAID',
+        routes: ['LOCAL_STOCK:CANCELLED'],
+        events: ['store_order.cancelled'],
+      });
+    }
+
+    const paidOrder = await placedStandardOrder();
+    const paidMove = await marketStatus(ID.owner, paidOrder.id, { status: 'processing', paymentStatus: 'PAID' });
+    await settle();
+    expect(answerOf(paidMove)).toBe('200: processing/PAID');
+    const paidBook = await bookState(paidOrder);
+    expect(paidBook.payments, 'paid through the paid door').toEqual([`SUCCESSFUL:${ORDER_TOTAL}`]);
+    seen = [];
+    const paidCancel = await marketStatus(ID.owner, paidOrder.id, { status: 'cancelled' });
+    await settle();
+    // At 3fdf2399: 400 'Cannot cancel order in processing status'.
+    expect({ answer: answerOf(paidCancel), book: await bookState(paidOrder), events: storeEvents() }).toEqual({
+      answer: '200: cancelled/PAID',
+      book: { ...paidBook, order: paidBook.order.replace(/^processing\//, 'cancelled/') },
+      events: ['store_order.cancelled'],
+    });
+
+    const placed = await placeOrder('CASH');
+    expect(answerOf(await marketStatus(ID.owner, placed.id, { status: 'processing' }))).toBe('200: processing/PENDING');
+    seen = [];
+    const siteCancel = await siteStatus(ID.owner, placed.id, 'CANCELLED');
+    await settle();
+    // At 3fdf2399: 400 'Cannot cancel order in processing status'.
+    expect({ answer: answerOf(siteCancel), stored: await storedOf(placed.id), events: storeEvents() }).toEqual({
+      answer: '200: CANCELLED/PENDING',
+      stored: 'CANCELLED/PENDING',
+      events: ['store_order.cancelled'],
+    });
+
+    // Control (D-136): a closed status in any case is not cancelled by either status edit.
+    const shipped = await placedStandardOrder();
+    expect((await routing.routeOrder(ID.bizA, shipped.id)).length, 'routed').toBe(1);
+    expect(answerOf(await marketStatus(ID.owner, shipped.id, { status: 'Shipped' }))).toBe('200: Shipped/UNPAID');
+    await settle();
+    const row = await db.marketplaceOrder.findUnique({ where: { id: shipped.id } });
+    seen = [];
+    const refused = [await marketStatus(ID.owner, shipped.id, { status: 'cancelled' }), await siteStatus(ID.owner, shipped.id, 'CANCELLED')];
+    await settle();
+    const after = await db.marketplaceOrder.findUnique({ where: { id: shipped.id } });
+    expect({
+      answers: refused.map(answerOf),
+      row: `${after.status}/${after.paymentStatus}/${after.updatedAt.toISOString()}`,
+      routes: await routesOf(shipped.id),
+      events: storeEvents(),
+    }).toEqual({
+      answers: ['400: Cannot cancel order in Shipped status', '400: Cannot cancel order in Shipped status'],
+      row: `${row.status}/${row.paymentStatus}/${row.updatedAt.toISOString()}`,
+      routes: ['LOCAL_STOCK:RESERVED'],
+      events: [],
+    });
+  }, 60_000);
 });

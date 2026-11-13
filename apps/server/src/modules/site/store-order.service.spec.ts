@@ -28,7 +28,17 @@
  *          it; a SHIPPED order's CANCELLED is 400 with no status written and no
  *          event. At bb316619 CANCELLED was a plain update outside any
  *          transaction (SHIPPED included); the real-database proof is
- *          test/marketplace-routing-concurrency.integration.test.ts RC-42
+ *          test/marketplace-routing-concurrency.integration.test.ts RC-42.
+ *          Review OCR-COR-2: the status is written compare-and-set on the
+ *          status the claim read (updateMany where status), not by id alone
+ *   SO-07  W11-ORDER-CANCEL-RELEASE review OCR-COR-2 (D-136): a status that
+ *          changed between the claim's read and the cancel's write (a ship
+ *          that takes no claim committed meanwhile) is 409 with no event; at
+ *          3fdf2399 CANCELLED was written over it by id (RC-44)
+ *   SO-08  W11-ORDER-CANCEL-RELEASE review OCR-COR-1: an open order stored in
+ *          a spelling outside canTransitionOrder's case-sensitive vocabulary
+ *          ('processing', 'pending', 'on_hold') is cancelled; at 3fdf2399 it
+ *          was 400 'Cannot cancel order in processing status' (RC-43)
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { StoreOrderService } from './store-order.service';
@@ -64,6 +74,8 @@ function order(over: Record<string, unknown> = {}) {
 
 function build(stored: ReturnType<typeof order>) {
   const emitted: Emitted[] = [];
+  // The order row as the transaction sees it: a cancel's compare-and-set (updateMany) writes it when its status matches.
+  let current: Record<string, unknown> = { ...stored };
   const events = { emit: vi.fn((name: string, payload: any) => { emitted.push({ name, payload }); return true; }) };
   const writes: string[] = [];
 
@@ -79,6 +91,13 @@ function build(stored: ReturnType<typeof order>) {
     marketplaceOrder: {
       findFirst: vi.fn(async () => stored),
       update: vi.fn(async ({ data }: any) => { writes.push('order.update'); return { ...stored, ...data }; }),
+      updateMany: vi.fn(async ({ where, data }: any) => {
+        writes.push('order.updateMany');
+        if (where.id !== current.id || where.businessId !== current.businessId || where.status !== current.status) return { count: 0 };
+        current = { ...current, ...data };
+        return { count: 1 };
+      }),
+      findFirstOrThrow: vi.fn(async () => current),
     },
     // W11-ORDER-CANCEL-RELEASE: a cancel's claim, release and timeline step on the transaction.
     fulfillmentRoute: {
@@ -123,7 +142,17 @@ function build(stored: ReturnType<typeof order>) {
     revenuePosting as any,
     expensePosting as any,
   );
-  return { svc, emitted, writes, tx, client, revenuePosting, expensePosting };
+  return {
+    svc,
+    emitted,
+    writes,
+    tx,
+    client,
+    revenuePosting,
+    expensePosting,
+    /** Moves the stored row as a writer outside the cancel's transaction would (a ship that takes no claim). */
+    moveStored: (data: Record<string, unknown>) => { current = { ...current, ...data }; },
+  };
 }
 
 describe('V1-18 StoreOrderService: CONFIRMED is not paid', () => {
@@ -199,8 +228,13 @@ describe('W11-ORDER-CANCEL-RELEASE StoreOrderService: CANCELLED releases the ord
     expect(h.client.$transaction).toHaveBeenCalledTimes(1);
     expect(h.client.$transaction.mock.calls[0][1]).toEqual({ maxWait: 5_000, timeout: 20_000 });
     // The claim (an advisory lock), the routes cancelled, the cancelled step, then the status: all on the transaction.
-    expect(h.writes).toEqual(['tx.executeRaw', 'routes.cancel', 'tx.executeRaw', 'order.update']);
-    expect(h.tx.marketplaceOrder.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'CANCELLED' } }));
+    expect(h.writes).toEqual(['tx.executeRaw', 'routes.cancel', 'tx.executeRaw', 'order.updateMany']);
+    // Review OCR-COR-2: compare-and-set on the status the claim read.
+    expect(h.tx.marketplaceOrder.updateMany).toHaveBeenCalledWith({
+      where: { id: 'ord_v18_1', businessId: BIZ, status: 'CONFIRMED' },
+      data: { status: 'CANCELLED' },
+    });
+    expect(h.tx.marketplaceOrder.update).not.toHaveBeenCalled();
     expect(h.client.marketplaceOrder.update).not.toHaveBeenCalled();
     expect(out.status).toBe('CANCELLED');
     expect(out.paymentStatus, 'the payment kept').toBe('PAID');
@@ -214,5 +248,37 @@ describe('W11-ORDER-CANCEL-RELEASE StoreOrderService: CANCELLED releases the ord
     expect(shipped.writes.filter((w) => w !== 'tx.executeRaw'), 'no status, route or step written').toEqual([]);
     expect(shipped.client.marketplaceOrder.update).not.toHaveBeenCalled();
     expect(shipped.emitted).toEqual([]);
+  });
+
+  it('SO-07 (review OCR-COR-2; D-136) a status that changed between the claim read and the cancel write (a ship committed meanwhile) is 409 with no event: nothing is written over it', async () => {
+    const h = build(order({ status: 'CONFIRMED', paymentStatus: 'PAID' }));
+    // The ship commits after the claim's read (CONFIRMED) and before the cancel's write.
+    h.tx.fulfillmentRoute.updateMany.mockImplementationOnce(async () => {
+      h.writes.push('routes.cancel');
+      h.moveStored({ status: 'SHIPPED' });
+      return { count: 0 };
+    });
+    await expect(h.svc.updateOrderStatus('ord_v18_1', 'CANCELLED', BIZ)).rejects.toMatchObject({
+      status: 409,
+      message:
+        "This order's status changed while it was being cancelled (it was shipped or edited meanwhile): nothing was written. " +
+        'Reload the order and cancel it again if it can still be cancelled',
+    });
+    expect(h.tx.marketplaceOrder.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ status: 'CONFIRMED' }) }));
+    expect(h.tx.marketplaceOrder.update).not.toHaveBeenCalled();
+    expect(h.emitted).toEqual([]);
+  });
+
+  it("SO-08 (review OCR-COR-1) an open order stored in a spelling outside canTransitionOrder's case-sensitive vocabulary ('processing', 'pending', 'on_hold') is cancelled, its status compare-and-set on the spelling read", async () => {
+    for (const status of ['processing', 'pending', 'on_hold']) {
+      const h = build(order({ status, paymentStatus: 'PAID' }));
+      const out = await h.svc.updateOrderStatus('ord_v18_1', 'CANCELLED', BIZ);
+      expect(out.status, status).toBe('CANCELLED');
+      expect(h.tx.marketplaceOrder.updateMany, status).toHaveBeenCalledWith({
+        where: { id: 'ord_v18_1', businessId: BIZ, status },
+        data: { status: 'CANCELLED' },
+      });
+      expect(h.emitted.map((e) => e.name), status).toEqual(['store_order.cancelled']);
+    }
   });
 });
