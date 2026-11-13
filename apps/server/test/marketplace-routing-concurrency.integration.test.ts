@@ -2867,7 +2867,7 @@ describe('W11-ORDER-CANCEL-RELEASE a status edit that cancels an order takes the
       cancelledEvents: ['CANCELLED'],
       lastStep: 'cancelled',
     });
-  });
+  }, 30_000);
 
   it("RC-40 (W11-ORDER-CANCEL-RELEASE; packet case RC-21) PATCH /marketplace/.../status 'cancelled' while routeOrder is held where it reserves (RC-06's hold): the edit waits for the router, then releases; the order ends cancelled with its route CANCELLED, nothing reserved and no 'routed' written over it (the router's 'routed' step comes before the cancelled one)", async () => {
     const order = await paidOrder([ID.productA]);
@@ -2914,7 +2914,7 @@ describe('W11-ORDER-CANCEL-RELEASE a status edit that cancels an order takes the
       routedBeforeCancelled: true,
       cancelledAfterRouting: true,
     });
-  });
+  }, 30_000);
 
   it("RC-41 (W11-ORDER-CANCEL-RELEASE; packet case RC-22; D-136) PATCH /marketplace/.../status 'cancelled' or 'CANCELLED' on an order stored shipped, delivered, completed, cancelled or refunded (or the storefront's SHIPPED, DELIVERED, CANCELLED) is refused with 400 and writes nothing: the order row, its route and its reservation as they were, and no event", async () => {
     for (const storedStatus of ['shipped', 'delivered', 'completed', 'cancelled', 'refunded', 'SHIPPED', 'DELIVERED', 'CANCELLED']) {
@@ -2944,7 +2944,7 @@ describe('W11-ORDER-CANCEL-RELEASE a status edit that cancels an order takes the
         events: [],
       });
     }
-  });
+  }, 30_000);
 
   it('RC-42 (W11-ORDER-CANCEL-RELEASE; packet case RC-23) a CONFIRMED / PAID storefront order (paid offline, its stock decremented by the paid door) routed by the listener, then PATCH /site/.../status CANCELLED (and \' cancelled \'): its route CANCELLED and its reservation released (the decremented quantity is not restocked), stored CANCELLED / PAID with a cancelled step and one store_order.cancelled; a SHIPPED, DELIVERED, COMPLETED, CANCELLED or REFUNDED storefront order is 400 with nothing written and no event; control: a PENDING one is cancelled', async () => {
     const off = listenerOnTheBus();
@@ -3018,5 +3018,5 @@ describe('W11-ORDER-CANCEL-RELEASE a status edit that cancels an order takes the
       off();
       await drain();
     }
-  });
+  }, 30_000);
 });

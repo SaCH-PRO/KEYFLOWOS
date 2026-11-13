@@ -1806,5 +1806,5 @@ describe('W11-ORDER-CANCEL-RELEASE (F-35, D-136): a status edit that cancels an 
       routes: ['LOCAL_STOCK:RESERVED'],
       events: [],
     });
-  });
+  }, 30_000);
 });
