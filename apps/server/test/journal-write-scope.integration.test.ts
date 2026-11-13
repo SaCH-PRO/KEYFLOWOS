@@ -41,6 +41,21 @@
  *                       OWNER's and an ADMIN's run, a plan with no member is refused (D-73), a non-member
  *                       SUPER_ADMIN is refused (D-46)
  *
+ * PR195-BOOKS-DOORS (the review of this packet):
+ *   JWS-12  RED-BEFORE  (SEC-P195JS-3) KEY's post is the General Journal's: an ADJUSTMENT authored by the member
+ *                       it runs for (createdById), its amount the lines' debits; a type other than ADJUSTMENT
+ *                       is refused 400 and nothing is posted
+ *   JWS-15  RED-BEFORE  (SEC-P195JS-4) a chat turn that names no member (the Chatwoot support desk calls chat
+ *                       with no user) is refused the journal before the ledger door (D-73), and its menu does
+ *                       not offer it
+ *   JWS-16  RED-BEFORE  (SEC-P195JS-5, CRR-P195JS-1) a platform SUPER_ADMIN who holds a STAFF membership with
+ *                       revenue read posts a journal over REST (ModuleScopeGuard admits them, ensureAccess finds
+ *                       the membership) and, as REST does, through KEY chat and its menu
+ *   JWS-17  RED-BEFORE  (SEC-P195JS-6) a recurring template naming another business's chart rows is refused 404
+ *                       on create and on edit, in the words an id that exists nowhere gets; nothing is written.
+ *                       The ledger door answers a foreign id as it answers an unknown one (no existence oracle),
+ *                       on REST and on KEY
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard, ModuleScopeGuard,
  * TenantInterceptor, FinanceController, PostingService, AccountingPeriodService,
  * ChartOfAccountsSeederService and RecurringJournalEntryService run against DATABASE_URL; KEY is the real
@@ -80,7 +95,10 @@ const ID = {
   staffWrite: `${P}staffWrite`, // STAFF { crm: 'read', revenue: 'write' }
   opsWriteExpRead: `${P}opsExpRead`, // STAFF { operations: 'write', expenses: 'read' }
   superAdmin: `${P}super`, // platform SUPER_ADMIN, no Membership
+  superMember: `${P}superMember`, // platform SUPER_ADMIN holding a STAFF membership { revenue: 'read' }
   biz: `${P}biz`,
+  bizB: `${P}bizB`, // another business, owned by ownerB, with its own chart
+  ownerB: `${P}ownerB`,
   planStaff: `${P}plan_staff`,
   planOwner: `${P}plan_owner`,
   planAdmin: `${P}plan_admin`,
@@ -103,6 +121,8 @@ let gates: {
 let keyPrisma: any;
 /** The business's CASH and OWNER_EQUITY chart-of-account rows. */
 const ACC: Record<string, string> = {};
+/** Business B's CASH and OWNER_EQUITY chart rows. */
+const ACC_B: Record<string, string> = {};
 
 async function cleanup() {
   for (const sql of [
@@ -296,7 +316,7 @@ beforeAll(async () => {
 
   for (const [id, role] of [
     [ID.owner, 'USER'], [ID.admin, 'USER'], [ID.staffDefault, 'USER'], [ID.staffRead, 'USER'], [ID.staffNone, 'USER'],
-    [ID.staffWrite, 'USER'], [ID.opsWriteExpRead, 'USER'], [ID.superAdmin, 'SUPER_ADMIN'],
+    [ID.staffWrite, 'USER'], [ID.opsWriteExpRead, 'USER'], [ID.superAdmin, 'SUPER_ADMIN'], [ID.superMember, 'SUPER_ADMIN'], [ID.ownerB, 'USER'],
   ] as const) {
     await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, name: id, role } });
   }
@@ -310,9 +330,16 @@ beforeAll(async () => {
   await m(ID.staffNone, 'STAFF', { crm: 'read' });
   await m(ID.staffWrite, 'STAFF', { crm: 'read', revenue: 'write' });
   await m(ID.opsWriteExpRead, 'STAFF', { operations: 'write', expenses: 'read' });
+  await m(ID.superMember, 'STAFF', { crm: 'read', revenue: 'read' });
   await coa.ensureDefaults(ID.biz);
   ACC.cash = (await coa.getBySystemKey(ID.biz, 'CASH')).id;
   ACC.equity = (await coa.getBySystemKey(ID.biz, 'OWNER_EQUITY')).id;
+  // Business B, with its own chart (SEC-P195JS-6).
+  await db.business.create({ data: { id: ID.bizB, name: 'V98J Biz B', slug: `${P}bizb`, ownerId: ID.ownerB, currency: 'TTD' } });
+  await db.membership.create({ data: { id: `${P}m_ownerB`, userId: ID.ownerB, businessId: ID.bizB, role: 'OWNER' } });
+  await coa.ensureDefaults(ID.bizB);
+  ACC_B.cash = (await coa.getBySystemKey(ID.bizB, 'CASH')).id;
+  ACC_B.equity = (await coa.getBySystemKey(ID.bizB, 'OWNER_EQUITY')).id;
 
   // KEY plans: one per member under test, and one no member wrote (as a journey or an agent trigger writes them).
   for (const [id, userId] of [
@@ -329,7 +356,7 @@ afterAll(async () => {
 
 describe('fixture sanity (real rows)', () => {
   it('the business has its OWNER, an ADMIN, STAFF members on role defaults and on explicit maps, its chart, and no posting yet', async () => {
-    expect(await db.membership.count({ where: { businessId: ID.biz } })).toBe(7);
+    expect(await db.membership.count({ where: { businessId: ID.biz } })).toBe(8);
     expect(await db.membership.count({ where: { userId: ID.superAdmin } })).toBe(0);
     expect(ACC.cash && ACC.equity).toBeTruthy();
     expect(await bookCounts()).toEqual({ transactions: 0, entries: 0 });
@@ -448,15 +475,28 @@ describe('KEY: finance_post_journal_entry needs the member\'s revenue write on c
     expect(await db.financialTransaction.count({ where: { businessId: ID.biz, description: 'v98j key super' } })).toBe(0);
   });
 
-  it('JWS-12 CONTROL: the OWNER\'s and an ADMIN\'s chat call each post one ADJUSTMENT', async () => {
+  it('JWS-12 RED-BEFORE (SEC-P195JS-3): the OWNER\'s and an ADMIN\'s chat call each post one ADJUSTMENT authored by that member, its amount the debits', async () => {
     for (const as of [ID.owner, ID.admin]) {
       const before = await bookCounts();
       const result = await keyChat(as, `v98j key ${as}`);
       expect(result.alreadyPosted, as).toBe(false);
       expect(await bookCounts(), as).toEqual({ transactions: before.transactions + 1, entries: before.entries + 2 });
       const tx = await db.financialTransaction.findUnique({ where: { id: result.transactionId } });
-      expect(tx).toMatchObject({ businessId: ID.biz, type: 'ADJUSTMENT', status: 'POSTED', description: `v98j key ${as}` });
+      expect(tx).toMatchObject({ businessId: ID.biz, type: 'ADJUSTMENT', status: 'POSTED', description: `v98j key ${as}`, createdById: as });
+      expect(Number(tx.amount)).toBe(30);
     }
+  });
+
+  it('JWS-12 RED-BEFORE (SEC-P195JS-3): a KEY post of another type (INCOME, OPENING_BALANCE) is refused 400 and nothing is posted', async () => {
+    for (const type of ['INCOME', 'OPENING_BALANCE']) {
+      const before = await bookCounts();
+      await expect(
+        orchestrator.executeToolDirectly(ID.biz, TOOL, { ...keyArgs(`v98j key ${type}`), type }, undefined, { surface: 'CHAT', principalUserId: ID.owner }),
+        type,
+      ).rejects.toThrow(/posts ADJUSTMENT journals only/);
+      expect(await bookCounts(), type).toEqual(before);
+    }
+    expect(await db.financialTransaction.count({ where: { businessId: ID.biz, type: { not: 'ADJUSTMENT' } } })).toBe(0);
   });
 
   it('JWS-13 RED-BEFORE: the chat menu offers finance_post_journal_entry to the OWNER only among these, and payroll_mark_paid to no member without expenses write', async () => {
@@ -491,5 +531,79 @@ describe('KEY: the plan, proposal and graph paths hold the same rule (the author
     await expect(gates.assertMayRunGraphAction(keyPrisma, ID.biz, { id: ID.superAdmin, role: 'SUPER_ADMIN' }, TOOL, null)).rejects.toThrow(/\(D-46\)/);
     await expect(gates.assertMayRunGraphAction(keyPrisma, ID.biz, { id: ID.owner, role: 'USER' }, TOOL, ID.owner)).resolves.toBeUndefined();
     await expect(gates.assertMayRunGraphAction(keyPrisma, ID.biz, { id: ID.staffWrite, role: 'USER' }, TOOL, ID.staffWrite)).resolves.toBeUndefined();
+  });
+});
+
+describe('PR195-BOOKS-DOORS: KEY with no member, a SUPER_ADMIN who is a member, and foreign chart rows', () => {
+  it('JWS-15 RED-BEFORE (SEC-P195JS-4, D-73): a chat turn that names no member is refused the journal before the ledger door, and is not offered it', async () => {
+    const before = await bookCounts();
+    for (const action of [
+      { surface: 'CHAT', principalUserId: null },
+      { surface: 'CHAT_STREAM', principalUserId: null },
+      { surface: 'PLAN_HTTP', principalUserId: null },
+    ]) {
+      await expect(
+        orchestrator.executeToolDirectly(ID.biz, TOOL, keyArgs('v98j key nobody'), undefined, action),
+        action.surface,
+      ).rejects.toThrow(/names no member .*\(D-73\)/);
+    }
+    expect(await bookCounts()).toEqual(before);
+    expect(await db.financialTransaction.count({ where: { businessId: ID.biz, description: 'v98j key nobody' } })).toBe(0);
+    for (const who of [null, undefined]) {
+      const tools = await orchestrator.selectToolsForRequest(ID.biz, [], 'post a journal entry in finance; mark the payroll run paid', undefined, who);
+      const names = tools.map((t: { function: { name: string } }) => t.function.name);
+      expect(names, String(who)).not.toContain(TOOL);
+      expect(names, String(who)).not.toContain('payroll_mark_paid');
+    }
+  });
+
+  it('JWS-16 RED-BEFORE (SEC-P195JS-5, CRR-P195JS-1): a SUPER_ADMIN who is a member with revenue read posts over REST, and so through KEY chat and its menu', async () => {
+    const rest = await postJournal(ID.superMember, 'v98j super member rest');
+    expect(rest.status, JSON.stringify(rest.body)).toBe(201);
+    const before = await bookCounts();
+    const result = await keyChat(ID.superMember, 'v98j super member key');
+    expect(result.alreadyPosted).toBe(false);
+    expect(await bookCounts()).toEqual({ transactions: before.transactions + 1, entries: before.entries + 2 });
+    const tx = await db.financialTransaction.findUnique({ where: { id: result.transactionId } });
+    expect(tx).toMatchObject({ type: 'ADJUSTMENT', createdById: ID.superMember });
+    expect(await chatMenu(ID.superMember)).toContain(TOOL);
+  });
+
+  it('JWS-17 RED-BEFORE (SEC-P195JS-6): a recurring template naming another business\'s chart rows is refused 404, in the words an id that exists nowhere gets; nothing is written', async () => {
+    const nowhere = `${P}no_such_account`;
+    const bodyWith = (cash: string, equity: string) => ({ ...recurringBody('v98j foreign template'), entries: [{ accountId: cash, debit: 12 }, { accountId: equity, credit: 12 }] });
+    const before = await db.recurringJournalEntry.count({ where: { businessId: ID.biz } });
+
+    const foreign = await http().post(fin('recurring-journal-entries')).set(HEADER, ID.owner).send(bodyWith(ACC_B.cash, ACC_B.equity));
+    const unknown = await http().post(fin('recurring-journal-entries')).set(HEADER, ID.owner).send(bodyWith(nowhere, ACC.equity));
+    expect(foreign.status, JSON.stringify(foreign.body)).toBe(404);
+    expect(unknown.status, JSON.stringify(unknown.body)).toBe(404);
+    expect(foreign.body.message).toBe(`Chart-of-account id(s) not found in this business: ${ACC_B.cash}, ${ACC_B.equity}`);
+    expect(unknown.body.message).toBe(`Chart-of-account id(s) not found in this business: ${nowhere}`);
+    expect(await db.recurringJournalEntry.count({ where: { businessId: ID.biz } })).toBe(before);
+
+    // Edit: the OWNER's own template, re-pointed at B's rows, is refused the same way and left as it was.
+    const own = await http().post(fin('recurring-journal-entries')).set(HEADER, ID.owner).send(recurringBody('v98j own template'));
+    expect(own.status, JSON.stringify(own.body)).toBe(201);
+    const stored = await db.recurringJournalEntry.findUnique({ where: { id: own.body.id } });
+    const edit = await http().patch(fin(`recurring-journal-entries/${own.body.id}`)).set(HEADER, ID.owner).send({ entries: bodyWith(ACC_B.cash, ACC.equity).entries });
+    expect(edit.status, JSON.stringify(edit.body)).toBe(404);
+    expect(edit.body.message).toBe(`Chart-of-account id(s) not found in this business: ${ACC_B.cash}`);
+    expect(await db.recurringJournalEntry.findUnique({ where: { id: own.body.id } })).toEqual(stored);
+  });
+
+  it('JWS-17 RED-BEFORE (SEC-P195JS-6): the ledger door answers a foreign chart row as it answers an unknown one, on REST and on KEY', async () => {
+    const nowhere = `${P}no_such_account`;
+    const before = await bookCounts();
+    const foreignRest = await http().post(fin('journal-entries')).set(HEADER, ID.owner).send({ ...journalBody('v98j foreign rest'), entries: [{ accountId: ACC_B.cash, debit: 30 }, { accountId: ACC.equity, credit: 30 }] });
+    const unknownRest = await http().post(fin('journal-entries')).set(HEADER, ID.owner).send({ ...journalBody('v98j unknown rest'), entries: [{ accountId: nowhere, debit: 30 }, { accountId: ACC.equity, credit: 30 }] });
+    expect(foreignRest.status, JSON.stringify(foreignRest.body)).toBe(400);
+    expect(unknownRest.status, JSON.stringify(unknownRest.body)).toBe(400);
+    expect(foreignRest.body.message).toBe(`Unknown chart-of-account id(s) for this business: ${ACC_B.cash}`);
+    expect(unknownRest.body.message).toBe(`Unknown chart-of-account id(s) for this business: ${nowhere}`);
+    await expect(
+      orchestrator.executeToolDirectly(ID.biz, TOOL, { ...keyArgs('v98j foreign key'), entries: [{ accountId: ACC_B.cash, debit: 30 }, { accountId: ACC.equity, credit: 30 }] }, undefined, { surface: 'CHAT', principalUserId: ID.owner }),
+    ).rejects.toThrow(`Unknown chart-of-account id(s) for this business: ${ACC_B.cash}`);
+    expect(await bookCounts()).toEqual(before);
   });
 });

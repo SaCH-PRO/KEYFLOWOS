@@ -858,6 +858,11 @@
       "packet": "V1-98 (PR195-JOURNAL-SCOPE)"
     },
     {
+      "prefix": "v98b_",
+      "owner": "apps/server/test/books-write-scope.integration.test.ts",
+      "packet": "V1-98 (PR195-BOOKS-DOORS)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true

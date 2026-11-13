@@ -28,6 +28,17 @@
  *   J-06  a 403 on post is an alert naming the refusal, the form closes and
  *         New Entry goes; nothing says "posted"
  *   J-07  any other refusal (400) keeps the form and says why
+ *
+ * PR195-BOOKS-DOORS (review finding CRR-P195JS-2): only ModuleScopeGuard's
+ * refusal of revenue ("Insufficient permissions: revenue requires write
+ * access (you have read)") is the member's lack of revenue write. Any other 403
+ * (BusinessGuard's transient "Unable to verify business access" or "Service
+ * unavailable" when its membership lookup fails, "No access to this business")
+ * says nothing about the member's scopes: an OWNER who hit one was told they
+ * lack revenue write and lost the composer until a reload.
+ *   J-08  a 403 that is not the revenue refusal is a toast with the server's
+ *         words; the form stays open with the drafted lines and New Entry
+ *         stays; no alert claims the member lacks revenue write
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
@@ -205,6 +216,29 @@ describe("General Journal (PR195-PORT)", () => {
     await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("Journal entry requires at least 2 lines"));
     expect(screen.getByText("Post Entry")).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it.each([
+    "Unable to verify business access",
+    "Service unavailable",
+    "No access to this business",
+    "Insufficient permissions: operations requires write access (you have read)",
+  ])("J-08 PR195-BOOKS-DOORS (CRR-P195JS-2): a 403 that is not the revenue refusal (%s) keeps the form and New Entry and says what the server said", async (error) => {
+    createJournalEntryMock.mockResolvedValue({ data: null, error, status: 403 });
+    render(<BooksJournalTab />);
+    await waitFor(() => expect(screen.getByText("Prior USD adjustment")).toBeTruthy());
+    fireEvent.click(screen.getByText("New Entry"));
+    fillBalancedEntry();
+    fireEvent.click(screen.getByText("Post Entry"));
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledTimes(1));
+    expect(String(toastErrorMock.mock.calls[0][0])).toContain(error);
+    expect(String(toastErrorMock.mock.calls[0][0])).not.toMatch(/needs revenue write/);
+    expect(screen.queryByRole("alert")).toBeNull();
+    // The form is still open with the drafted entry, and the member can retry.
+    expect(screen.getByText("Post Entry")).toBeTruthy();
+    expect((screen.getByPlaceholderText("e.g. Adjust prepaid insurance") as HTMLInputElement).value).toBe("Transfer payroll funding");
+    expect(screen.getByText("Cancel")).toBeTruthy();
+    expect(toastSuccessMock).not.toHaveBeenCalled();
   });
 
   it("J-05 /app/finance/journal is the General Journal page, not a redirect", async () => {

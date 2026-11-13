@@ -11,6 +11,14 @@
  *   RJ-02  a 403 on Delete keeps the row and says why; no "deleted"
  *   RJ-03  a 403 on Deactivate keeps the row as it was and says why
  *   RJ-04  CONTROL: an allowed Run still says "executed"
+ *
+ * PR195-BOOKS-DOORS:
+ *   RJ-05  (CRR-P195JS-2) a 403 that is not ModuleScopeGuard's revenue refusal
+ *          (BusinessGuard's "Unable to verify business access") is said in the
+ *          server's words, not as "needs revenue write access"
+ *   RJ-06  (SEC-P195JS-2) the template list now needs revenue read: a refused
+ *          read is a refusal naming it, not an empty list, and offers no Add
+ *          Entry; a 5xx says the list could not be loaded
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
@@ -133,5 +141,43 @@ describe("Recurring Journals: a refused write is said, never shown as done (PR19
     fireEvent.click(screen.getByTitle("Run now"));
     await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledWith("Journal entry executed"));
     expect(toastErrorMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("Recurring Journals: refusals are said in the server's words (PR195-BOOKS-DOORS)", () => {
+  it("RJ-05 (CRR-P195JS-2) a 403 that is not the revenue refusal is said in the server's words, not as needing revenue write", async () => {
+    runRecurringJournalMock.mockResolvedValue({ data: null, error: "Unable to verify business access", status: 403 });
+    await renderPage();
+    fireEvent.click(screen.getByTitle("Run now"));
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalled());
+    const said = String(toastErrorMock.mock.calls[0][0]);
+    expect(said).toContain("Unable to verify business access");
+    expect(said).not.toMatch(/needs revenue write/);
+    expect(toastSuccessMock).not.toHaveBeenCalled();
+  });
+
+  it("RJ-06 (SEC-P195JS-2) a refused template read is a refusal naming revenue read, not an empty list, and offers no Add Entry", async () => {
+    fetchRecurringJournalsMock.mockResolvedValue({
+      data: null,
+      error: "Insufficient permissions: revenue requires read access (you have none)",
+      status: 403,
+    });
+    const { default: RecurringJournalsPage } = await import("../page");
+    render(<RecurringJournalsPage />);
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+    const alert = screen.getByRole("alert").textContent ?? "";
+    expect(alert).toMatch(/revenue requires read access/);
+    expect(alert).toMatch(/You don.t have access to recurring journals/);
+    expect(screen.queryByText("Monthly depreciation")).toBeNull();
+    expect(screen.queryByText(/No recurring journal entries/i)).toBeNull();
+    expect(screen.queryByText("Add Entry")).toBeNull();
+  });
+
+  it("RJ-06 a template list that fails for another reason (503) says it could not be loaded, not that there are none", async () => {
+    fetchRecurringJournalsMock.mockResolvedValue({ data: null, error: "Service unavailable", status: 503 });
+    const { default: RecurringJournalsPage } = await import("../page");
+    render(<RecurringJournalsPage />);
+    await waitFor(() => expect(screen.getByText(/Service unavailable/)).toBeTruthy());
+    expect(screen.queryByText(/No recurring journal entries/i)).toBeNull();
   });
 });
