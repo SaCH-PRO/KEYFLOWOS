@@ -1,4 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
+import {
+  JOURNEYS_DIR,
+  JOURNEY_TEST_MATCH,
+  JOURNEY_VIEWPORTS,
+  legGrepInvert,
+  legSelectionFromEnv,
+} from "./e2e/journeys/harness-settings";
 
 const PORT = Number(process.env.E2E_PORT ?? 5000);
 const BASE_URL = process.env.E2E_BASE_URL ?? `http://localhost:${PORT}`;
@@ -11,6 +18,12 @@ const BASE_URL = process.env.E2E_BASE_URL ?? `http://localhost:${PORT}`;
  * browser has nothing to call off localhost. Without E2E_LIVE every spec runs
  * against `http://api.test.local`, which the mocked specs fulfil with
  * page.route() and the live specs skip.
+ *
+ * GATE-HARNESS: the v1 journeys (e2e/journeys/, README.md there) and
+ * release0-live.spec.ts also run in the "phone" and "desktop" projects below,
+ * live, against a production build; E2E_VARIANT names how the API runs
+ * (ai-disabled, key-disabled, ai-on). e2e-live.yml runs them with
+ * --project=phone --project=desktop.
  */
 const LIVE = process.env.E2E_LIVE === "1";
 const API_URL = process.env.E2E_API_URL ?? "http://localhost:3001";
@@ -21,6 +34,18 @@ const API_URL = process.env.E2E_API_URL ?? "http://localhost:3001";
  * Unset in CI, where `playwright install` provides the browser.
  */
 const CHROMIUM_EXECUTABLE = process.env.PW_CHROMIUM_EXECUTABLE?.trim() || undefined;
+const CHROMIUM_LAUNCH = CHROMIUM_EXECUTABLE
+  ? { launchOptions: { executablePath: CHROMIUM_EXECUTABLE, args: ["--no-sandbox"] } }
+  : {};
+
+/**
+ * GATE-HARNESS: which journey legs this run leaves out. E2E_VARIANT
+ * (ai-disabled, the default; key-disabled; ai-on) names how the API runs and
+ * E2E_STAGING / E2E_SCHEDULERS say a staging stack or the schedulers are
+ * there; a leg tagged for a stack this run does not have is not run
+ * (e2e/journeys/harness-settings.ts). An unknown E2E_VARIANT stops the run here.
+ */
+const JOURNEY_GREP_INVERT = legGrepInvert(legSelectionFromEnv(process.env));
 
 /**
  * The production web server (R0-15c). next.config.ts builds with
@@ -94,12 +119,42 @@ export default defineConfig({
   },
   projects: [
     {
+      // The mocked specs (ci-cd.yml e2e-mocked) and, run by name, the live ones.
+      // The journey folder belongs to the journey projects below.
       name: "chromium",
+      testIgnore: JOURNEYS_DIR,
       use: {
         ...devices["Desktop Chrome"],
-        ...(CHROMIUM_EXECUTABLE
-          ? { launchOptions: { executablePath: CHROMIUM_EXECUTABLE, args: ["--no-sandbox"] } }
-          : {}),
+        ...CHROMIUM_LAUNCH,
+      },
+    },
+    // GATE-HARNESS: the v1 journey gate (e2e/journeys/README.md). Each journey
+    // spec, and release0-live.spec.ts unedited, runs once on a phone and once
+    // on a desktop, in Chromium, against a production build (the preflight in
+    // journey-helpers.ts refuses `next dev`). Legs tagged @staging, @scheduler
+    // or @ai-on run only where their stack does (JOURNEY_GREP_INVERT).
+    {
+      name: "phone",
+      testMatch: JOURNEY_TEST_MATCH,
+      grepInvert: JOURNEY_GREP_INVERT,
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: JOURNEY_VIEWPORTS.phone,
+        deviceScaleFactor: 2,
+        isMobile: true,
+        hasTouch: true,
+        userAgent: devices["Pixel 5"].userAgent,
+        ...CHROMIUM_LAUNCH,
+      },
+    },
+    {
+      name: "desktop",
+      testMatch: JOURNEY_TEST_MATCH,
+      grepInvert: JOURNEY_GREP_INVERT,
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: JOURNEY_VIEWPORTS.desktop,
+        ...CHROMIUM_LAUNCH,
       },
     },
   ],
