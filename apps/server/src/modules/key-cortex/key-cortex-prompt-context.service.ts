@@ -27,6 +27,12 @@ const TOOL_CALL_RECORD_HEADROOM = 100;
  * TOOL_CALL_RECORD_HEADROOM it is the rule the pipeline's CHAT_MEMORY_HEADROOM (150) encodes.
  */
 const COGNITION_MEMORY_HEADROOM = 50;
+/**
+ * W11-FLOW-PERCEPTION-SCOPE (review SEC-W11MC-3, D-130): what a prompt's memory read asks for on top of the fragments
+ * it renders, so that leaving out every tool-call record and every cognition row that is not the reader's own
+ * (readersOwnPromptMemory) still fills it. Shared by buildMemoryContext and the /ai flow chat's perception block.
+ */
+export const PROMPT_MEMORY_HEADROOM = TOOL_CALL_RECORD_HEADROOM + COGNITION_MEMORY_HEADROOM;
 /** The bus events of one KEY tool call (the registry's tool.*, the lifecycle's cortex.action_*). */
 const TOOL_CALL_EVENT_TYPES = new Set([
   'tool.executed',
@@ -92,6 +98,57 @@ export async function readersOwnCognitionMemory(
     );
     return new Set();
   }
+}
+
+/**
+ * W9-KEY-CORTEX-AUDIT, shared by W11-FLOW-PERCEPTION-SCOPE (review SEC-W11MC-3, D-130): the member whose own memory a
+ * prompt may read. The requester when they own the business or hold a membership in it (BusinessGuard's own predicate,
+ * userCanAccessBusiness), else nobody. No user (a turn that names no member: the Chatwoot support desk, the staff
+ * bridge), a user who is no member (a platform SUPER_ADMIN passes BusinessGuard without one; a removed member), no
+ * client to check with, or a check that cannot be made: nobody, so no per-member memory is read (fail closed).
+ */
+export async function promptMemoryReader(
+  prisma: PrismaService | undefined,
+  businessId: string,
+  userId: string | null | undefined,
+  logger: Pick<Logger, 'warn'> = cognitionMemoryLogger,
+  logTag = 'promptMemory',
+): Promise<string | null> {
+  if (!userId || !prisma) return null;
+  try {
+    return (await userCanAccessBusiness(prisma, userId, businessId)) ? userId : null;
+  } catch (err: unknown) {
+    logger.warn(
+      `[${logTag}][${businessId}] membership check failed, no episodic memory read: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return null;
+  }
+}
+
+/**
+ * W11-FLOW-PERCEPTION-SCOPE (review SEC-W11MC-3, D-130): the fragments of a business-wide memory read that may render
+ * into `reader`'s prompt, at most `limit` of them, in the order read. No KEY tool call's record from the business-wide
+ * stores (isToolCallRecord: another member's tool answer and typed input; a call is in its member's own episodic rows),
+ * and a cognition fragment only when its row is the reader's own (readersOwnCognitionMemory; a member-less row is
+ * nobody's own, and no reader reads none). The read is expected to have asked for `limit` plus PROMPT_MEMORY_HEADROOM.
+ *
+ * The one rule of KeyCortexPromptContextService.buildMemoryContext (POST /cortex/chat) and of
+ * FlowOrchestratorService.buildPerceptionSection (POST /ai/businesses/:id/flow/chat and its stream).
+ */
+export async function readersOwnPromptMemory<F extends Pick<MemoryFragment, 'id' | 'sourceType' | 'entityType' | 'title'>>(
+  prisma: PrismaService | undefined,
+  businessId: string,
+  reader: string | null,
+  fragments: ReadonlyArray<F>,
+  limit: number,
+  logger: Pick<Logger, 'warn'> = cognitionMemoryLogger,
+  logTag = 'promptMemory',
+): Promise<F[]> {
+  const withoutToolCalls = fragments.filter((fragment) => !isToolCallRecord(fragment));
+  const own = await readersOwnCognitionMemory(prisma, businessId, reader, withoutToolCalls, logger, logTag);
+  return withoutToolCalls
+    .filter((fragment) => fragment.sourceType !== 'cognition_memory' || own.has(fragment.id))
+    .slice(0, limit);
 }
 
 /**
@@ -254,24 +311,23 @@ export class KeyCortexPromptContextService {
         // reader's own (readersOwnCognitionMemory, the pipeline's chatMemoryFragments rule); a member-less
         // row is nobody's own, and a reader who is no member reads none. The cognition headroom keeps the
         // fragment count when another member's rows are left out (CR-W10CCS-1).
-        const fragments = (
-          await this.unifiedMemory.retrieveContext(businessId, {
-            query: currentQuery,
-            limit: PROMPT_MEMORY_FRAGMENTS + TOOL_CALL_RECORD_HEADROOM + COGNITION_MEMORY_HEADROOM,
-            ...(reader ? { userId: reader } : { includeEpisodic: false }),
-          })
-        ).filter((fragment) => !isToolCallRecord(fragment));
-        const own = await readersOwnCognitionMemory(
+        //
+        // W11-FLOW-PERCEPTION-SCOPE (SEC-W11MC-3): both rules and the headroom are readersOwnPromptMemory and
+        // PROMPT_MEMORY_HEADROOM, which the /ai flow chat's perception block keeps too.
+        const fragments = await this.unifiedMemory.retrieveContext(businessId, {
+          query: currentQuery,
+          limit: PROMPT_MEMORY_FRAGMENTS + PROMPT_MEMORY_HEADROOM,
+          ...(reader ? { userId: reader } : { includeEpisodic: false }),
+        });
+        const kept = await readersOwnPromptMemory(
           this.prisma,
           businessId,
           reader,
           fragments,
+          PROMPT_MEMORY_FRAGMENTS,
           this.logger,
           'buildMemoryContext',
         );
-        const kept = fragments
-          .filter((fragment) => fragment.sourceType !== 'cognition_memory' || own.has(fragment.id))
-          .slice(0, PROMPT_MEMORY_FRAGMENTS);
 
         if (kept.length > 0) {
           memoryContext.aiMemory = this.formatUnifiedMemory(kept);
@@ -320,18 +376,11 @@ export class KeyCortexPromptContextService {
    * SEC-W11MC-1: not the session's user) when they own the business or hold a membership in it
    * (BusinessGuard's own predicate, userCanAccessBusiness), else nobody. No user, a user who is no member
    * (a platform SUPER_ADMIN passes BusinessGuard without one; a removed member), or a check that cannot
-   * be made: nobody, so no episodic memory is read.
+   * be made: nobody, so no episodic memory is read. W11-FLOW-PERCEPTION-SCOPE: promptMemoryReader, shared
+   * with the /ai flow chat's perception block.
    */
-  private async episodicMemoryReader(businessId: string, userId: string | undefined): Promise<string | null> {
-    if (!userId || !this.prisma) return null;
-    try {
-      return (await userCanAccessBusiness(this.prisma, userId, businessId)) ? userId : null;
-    } catch (err: unknown) {
-      this.logger.warn(
-        `[buildMemoryContext][${businessId}] membership check failed, no episodic memory read: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      return null;
-    }
+  private episodicMemoryReader(businessId: string, userId: string | undefined): Promise<string | null> {
+    return promptMemoryReader(this.prisma, businessId, userId, this.logger, 'buildMemoryContext');
   }
 
   formatUnifiedMemory(fragments: any[]): string {

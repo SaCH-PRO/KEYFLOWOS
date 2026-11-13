@@ -109,6 +109,11 @@ import {
   type TriageVerdict,
 } from '../key-cortex/cognitive-triage.service';
 import { UnifiedMemoryRetrievalService } from '../key-cortex/unified-memory-retrieval.service';
+import {
+  PROMPT_MEMORY_HEADROOM,
+  promptMemoryReader,
+  readersOwnPromptMemory,
+} from '../key-cortex/key-cortex-prompt-context.service';
 import { KeyCortexConsciousnessService } from '../key-cortex/key-cortex-consciousness.service';
 import { ProcurementService } from '../procurement/procurement.service';
 import {
@@ -1339,47 +1344,65 @@ export class FlowOrchestratorService {
           new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
         ]);
 
-      const fragments = await withDeadline(
-        memory.retrieveContext(businessId, {
-        // `query` is deliberately NOT passed.
-        //
-        // retrieveContext runs its own semanticMemory.search when given one
-        // (unified-memory-retrieval.service.ts), and search() calls
-        // generateEmbedding — a real embedding API request. The orchestrator
-        // already performed exactly that search on this same message forty
-        // lines above, so passing the query here bought a SECOND embedding
-        // call per chat message for a result the prompt already contained.
-        //
-        // Caught auditing this after it shipped. It survived its own tests
-        // because they stub retrieveContext wholesale, so the stub never
-        // exercised what the real implementation does — testing a mock of the
-        // thing rather than the thing.
-        //
-        // What this call is actually for is the eight STRUCTURED stores
-        // (cognitive events, business events, genome, temporal flow, cognition
-        // memory, execution and action logs) that the semantic path does not
-        // read. Those run as one parallel batch, each bounded to 50 rows and
-        // a 90-day window, and they are the half of perception the chat was
-        // missing.
-        // Personally-attributed memory is narrowed to the caller. Without this
-        // one member's execution history — including the rationale for why they
-        // asked — renders into another member's prompt.
-        userId,
-        limit: tier === 'deliberate' ? 12 : 6,
-        // 0.3 was decorative — it could not reject a single row.
-        //
-        // rankScore = relevance*0.45 + recency*0.35 + sourceWeight*0.2, and
-        // with no similarity score relevance floors at 0.5 while sourceWeight
-        // floors at 0.75. So even a maximally stale, minimally trusted fragment
-        // scores 0.5*0.45 + 0*0.35 + 0.75*0.2 = 0.375. Nothing was ever below
-        // the "quality floor".
-        //
-        // 0.5 sits inside the real 0.375–1.0 range, so it drops the stale
-        // low-confidence band while keeping anything recent or well-evidenced.
+      // W11-FLOW-PERCEPTION-SCOPE (review SEC-W11MC-3, owner ruling D-130): this block renders into one
+      // person's prompt by buildMemoryContext's rules (POST /cortex/chat), through the same helpers.
+      // Its reader is the caller while they are a member of the business (promptMemoryReader), else
+      // nobody: a turn that names no member (the Chatwoot support desk and the staff bridge pass no
+      // user) used to read EVERY member's execution and action logs, since an absent userId left them
+      // unnarrowed, and a platform SUPER_ADMIN who is no member has no memory of their own here. Of
+      // what is read, readersOwnPromptMemory keeps no KEY tool call's record from the business-wide
+      // stores (another member's tool answer and typed input) and a cognition row (what a member
+      // typed and KEY's whole answer to them) only when it is the reader's own; a member-less row is
+      // nobody's. The read asks for the window plus the shared headroom so that what is left out does
+      // not leave the reader's own rows unread (CR-W10CCS-1).
+      const window = tier === 'deliberate' ? 12 : 6;
+      const perceive = async () => {
+        const reader = await promptMemoryReader(this.prisma, businessId, userId, this.logger, 'perception');
+        const read = await memory.retrieveContext(businessId, {
+          // `query` is deliberately NOT passed.
+          //
+          // retrieveContext runs its own semanticMemory.search when given one
+          // (unified-memory-retrieval.service.ts), and search() calls
+          // generateEmbedding — a real embedding API request. The orchestrator
+          // already performed exactly that search on this same message forty
+          // lines above, so passing the query here bought a SECOND embedding
+          // call per chat message for a result the prompt already contained.
+          //
+          // Caught auditing this after it shipped. It survived its own tests
+          // because they stub retrieveContext wholesale, so the stub never
+          // exercised what the real implementation does — testing a mock of the
+          // thing rather than the thing.
+          //
+          // What this call is actually for is the eight STRUCTURED stores
+          // (cognitive events, business events, genome, temporal flow, cognition
+          // memory, execution and action logs) that the semantic path does not
+          // read. Those run as one parallel batch, each bounded to 50 rows and
+          // a 90-day window, and they are the half of perception the chat was
+          // missing.
+          // Personally-attributed memory is narrowed to the reader. Without this
+          // one member's execution history — including the rationale for why they
+          // asked — renders into another member's prompt. No reader, no episodic
+          // store at all (fail closed).
+          ...(reader ? { userId: reader } : { includeEpisodic: false }),
+          limit: window + PROMPT_MEMORY_HEADROOM,
+          // 0.3 was decorative — it could not reject a single row.
+          //
+          // rankScore = relevance*0.45 + recency*0.35 + sourceWeight*0.2, and
+          // with no similarity score relevance floors at 0.5 while sourceWeight
+          // floors at 0.75. So even a maximally stale, minimally trusted fragment
+          // scores 0.5*0.45 + 0*0.35 + 0.75*0.2 = 0.375. Nothing was ever below
+          // the "quality floor".
+          //
+          // 0.5 sits inside the real 0.375–1.0 range, so it drops the stale
+          // low-confidence band while keeping anything recent or well-evidenced.
           minRankScore: 0.5,
-        }),
-        PERCEPTION_DEADLINE_MS,
-      );
+        });
+        return readersOwnPromptMemory(this.prisma, businessId, reader, read, window, this.logger, 'perception');
+      };
+
+      // The membership check, the read and the owner check of its cognition rows
+      // share the one deadline.
+      const fragments = await withDeadline(perceive(), PERCEPTION_DEADLINE_MS);
       if (!fragments || fragments.length === 0) return '';
 
       const lines = fragments.map(
