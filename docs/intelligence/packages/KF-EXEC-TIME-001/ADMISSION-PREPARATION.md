@@ -4,6 +4,8 @@ Status: **read-only preparation. Not a characterization return, not a release, n
 Prepared: 2026-10-11, against `main` `98ee0202499ba87fa4ee13d58a2a9075016225bd`.
 Packet definition: `docs/intelligence/execution/KF-EXEC-TIME-001-WORK-OCCURRENCE-ADOPTION.md` on branch `docs/keyflow-intelligence-foundation` (see `docs/intelligence/CANONICAL-SOURCE.md`).
 
+> **Historical note (2026-11-12, convergence tie-off).** This preparation is dated 2026-10-11 against main `98ee0202`; KF-EXEC-TIME-001 was never released. The "one claimant, already violated" finding on the `ScheduledAgentJob` poller (section 4) was fixed by V1-35 under owner ruling D-29: the poller now selects only its own job types and claims each job with a conditional `updateMany` (`apps/server/src/modules/flow/cross-module-agent.service.ts`; `apps/server/test/cross-module-job-poller.integration.test.ts`). The PR #155 blocker in section 3 is also gone: #155's change was ported as V1-02 (D-17). The current plan is `docs/reconstruction/BUILD-MAP-001.md`.
+
 Each statement is marked **verified** (read or run against the ref above) or **not established**.
 
 ## 1. What the packet is

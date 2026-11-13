@@ -4,7 +4,17 @@ Status: pointer and provenance record. It holds no programme state and grants no
 Original inventory verified: 2026-10-11, against `main` `98ee0202499ba87fa4ee13d58a2a9075016225bd`.
 Routing and integration disposition reviewed: 2026-10-17, from PR #173 `842aa4acfd110c9595bb7229c4788dcb6394d771`. The original inventory below remains dated; the October 17 route supplies newer intent and evidence. Re-resolve current main, exact PR heads and valid #80 authority before acting.
 
-## Why this file exists
+## Current route (refreshed 2026-11-12, convergence tie-off)
+
+Read this section first. Everything after it is dated 2026-10-11 or 2026-10-17 and is **historical**.
+
+- **Current working plan:** `docs/reconstruction/BUILD-MAP-001.md`, with its machine-readable queue `docs/reconstruction/BUILD-QUEUE-001.json` and the owner rulings recorded there (D-1 onward). PR #197 landed that plan on main `f5d58ef7`. The product-first sources it cites are in `docs/reconstruction/` and `docs/reconstruction/product/`.
+- **What may happen now, and live control state:** unchanged. Read the newest valid #80 authority, then run `node scripts/agent-control/status.mjs --verify`. `.agent-control/programme-state.yaml` is still a reviewed checkpoint, not live state.
+- **The intelligence corpus:** in the 2026-11-12/13 tie-off rulings the owner ruled that the `docs/intelligence` research corpus comes into main, marked historical. Where those files are present under `docs/intelligence/` on main, read them in place, as dated history. The branch tables, `git fetch` and `git show` recipes below pin revisions on branches and PRs that the tie-off closes or archives. They work only while those refs or their archive tags stay reachable.
+- **Historical sections:** the October 11 three-branch inventory, the October 17 roadmap and evidence route (PR #180 at `9e222e8e`), the October 17 load path, and the integration-ownership and divergence notes for PRs #157, #173, #180 and #150. None of them names current work. The tie-off disposes of those PRs separately.
+- **`CLAUDE.md` does not point here.** The tie-off brought this file but not #173's one-line `CLAUDE.md` pointer. Changing bootstrap text needs ChatGPT on #80 or the owner to confirm it. Statements below that `CLAUDE.md` "points here" describe PR #173 as proposed, not main.
+
+## Why this file exists (historical, 2026-10-11)
 
 `CLAUDE.md` requires intelligence context before substantial work. At `main` `98ee0202`, the only file under `docs/intelligence/` is the K12 characterization receipt. PR #173 adds this pointer and a separate TIME-001 admission preparation. The broader intelligence documents remain on their recorded branches; this pointer gives an agent starting from main a precise path to them.
 
@@ -26,7 +36,7 @@ From `docs/development/AGENT_CONTROL_PLANE.md`, "Control-state precedence". Read
 
 `.agent-control/active-packet.yaml` and `.agent-control/claude-return.yaml` on `main` are whatever the last merged `impl/` PR left. They are per-PR admission artifacts, read by the gate at a PR's head and never from `main`. They describe a merged packet and are not a pointer to the active one.
 
-## Dated intelligence inventory
+## Dated intelligence inventory (historical, 2026-10-11)
 
 The following original three-branch inventory was verified on October 11. All three fork from `e1203b34` (2026-09-03). Their recorded state is historical, not live authority.
 
@@ -47,7 +57,7 @@ The following original three-branch inventory was verified on October 11. All th
 | `docs/intelligence/execution/IMPLEMENTATION-WAVE-EXECUTION-BOARD.md` | identical on all three (`b4e5bb54`, 2026-09-28) | Topology and gates: yes. Its counts are stale: it says 4 checkpointed and ACTION-001 active; the live fold says 5 and `KF-EXEC-AUTH-FAIL-CLOSED-001`. |
 | `docs/intelligence/execution/MULTI-AGENT-EXECUTION-PROTOCOL.md` | identical on all three (`b4e5bb54`, 2026-09-28) | Roles and envelopes: yes. It predates typed `control_effect`; `AGENT_CONTROL_PLANE.md` on `main` governs those. |
 
-## Load path from `main`
+## Load path from `main` (historical, 2026-10-17; superseded by the current route above)
 
 1. Read `AGENTS.md`, `docs/development/EXECUTION_CONTROL_STANDARD.md` and `docs/development/AGENT_CONTROL_PLANE.md` at current main.
 2. Resolve live programme state with `node scripts/agent-control/status.mjs --verify`, and read the newest valid issue #80 authority. These outrank handoff snapshots.
@@ -55,7 +65,7 @@ The following original three-branch inventory was verified on October 11. All th
 4. Read PR #157's pinned START-HERE for orientation, with its October 7 state sections treated as historical. Its stale references to PR #159 and prior PR #155 heads do not control current execution.
 5. Read the affected packet definitions, process documents and history from the recorded foundation revision, then resolve exact active PR artifacts.
 
-### October 17 roadmap and evidence route
+### October 17 roadmap and evidence route (historical)
 
 | Document | Pinned source | Interpretation |
 |---|---|---|
@@ -80,7 +90,7 @@ git show f406d15c12d56e3758b517161f8e7c2ddc30424a:docs/intelligence/execution/IM
 
 Handoff files record what was known when written. Preserve historical observations, including a snapshot that predates a later ACK. Use the newest verified followthrough record for continuity and live #80 authority for execution.
 
-## Integration ownership and remaining debt
+## Integration ownership and remaining debt (historical, 2026-10-17)
 
 - **PR #173 owns the main entrypoint.** Its existing `CLAUDE.md` change points here. Adding the October 17 route changes this file only within that existing scope. The revised head still needs independent integration review and applicable checks; a pointer is not admission.
 - **PR #157 owns START-HERE/CURRENT/HANDOFF/ROLLOVER continuity.** Its [recorded freeze](https://github.com/SaCH-PRO/KEYFLOWOS/pull/157#issuecomment-6025536547) names unresolved branch-role/base-aware convergence and proposes a fresh current-main extraction of PR #107's semantics, not wholesale integration of the stale branch. No explicit lifting of that freeze was found in the inspected PR comments. PR #107 remains a draft proposal, not an admitted policy exception.
