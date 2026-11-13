@@ -4,13 +4,27 @@ import { KeyCortexCircadianService } from './key-cortex-circadian.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { keyCronsDisabled } from '../../core/config/env';
 
+/** The AiMemory rows promotion writes: category, key prefix and source. */
+const PROMOTED_CATEGORY = 'learning';
+const PROMOTED_KEY_PREFIX = 'learned:';
+const PROMOTED_SOURCE = 'key_cortex_learning';
+/** How much of a cognition row's recommendation promotion copies. */
+const PROMOTED_VALUE_LENGTH = 500;
+
+/** The business-wide AiMemory key a cognition row of `functionId` is promoted into. */
+function promotedKey(functionId: string | null): string {
+  return `${PROMOTED_KEY_PREFIX}${functionId ?? 'general'}`;
+}
+
 /**
  * Nightly-style memory consolidation job.
  *
  * Foundation implementation:
  *  - Decays old low-confidence memories.
  *  - Resolves conflicts by confidence/recency.
- *  - Promotes high-confidence facts into structured AiMemory.
+ *  - Promotes high-confidence facts into structured AiMemory: only facts that
+ *    belong to no member (W11-MEMORY-PROMOTE-SCOPE), withdrawing any an earlier
+ *    run promoted from a member's own row.
  */
 @Injectable()
 export class MemoryConsolidationService {
@@ -79,7 +93,7 @@ export class MemoryConsolidationService {
         this.consolidatedOn.set(business.id, localDay);
         this.logger.log(
           `[consolidation] ${business.id}: decayed ${result.decayed}, promoted ${result.promoted}, ` +
-            `resolved ${result.conflictsResolved}`,
+            `withdrawn ${result.withdrawn}, resolved ${result.conflictsResolved}`,
         );
       } catch (err: unknown) {
         // One tenant failing must not stop the rest of the estate's night.
@@ -102,6 +116,7 @@ export class MemoryConsolidationService {
   async run(businessId: string): Promise<{
     decayed: number;
     promoted: number;
+    withdrawn: number;
     conflictsResolved: number;
   }> {
     const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
@@ -109,11 +124,12 @@ export class MemoryConsolidationService {
     const decayed = await this.decayOldMemories(businessId, cutoff);
     const conflictsResolved = await this.resolveConflicts(businessId);
     const promoted = await this.promoteFacts(businessId);
+    const withdrawn = await this.withdrawMemberPromotions(businessId);
 
     this.logger.log(
-      `[run][${businessId}] decayed=${decayed} promoted=${promoted} conflicts=${conflictsResolved}`,
+      `[run][${businessId}] decayed=${decayed} promoted=${promoted} withdrawn=${withdrawn} conflicts=${conflictsResolved}`,
     );
-    return { decayed, promoted, conflictsResolved };
+    return { decayed, promoted, withdrawn, conflictsResolved };
   }
 
   private async decayOldMemories(businessId: string, cutoff: Date): Promise<number> {
@@ -160,32 +176,107 @@ export class MemoryConsolidationService {
     return resolved;
   }
 
+  /**
+   * W11-MEMORY-PROMOTE-SCOPE (review SEC-W11MC-2, owner ruling D-130): promotion
+   * writes the business-wide AiMemory row learning:learned:<functionId>, and every
+   * reader of the business's AI memory renders it to every member (KEY chat's
+   * memory block and chatMemoryFragments as [ai_memory], AiMemoryService behind
+   * GET /businesses/:id/ai/memory and its context block). Only a cognition row that
+   * names no member is business-wide (KEY's own outcome rows). A member's row
+   * (CognitionMemory.userId) is what they typed and KEY's whole answer to them,
+   * which D-130 keeps to that member, so it is not promoted. AiMemory has no
+   * per-member shape, so nothing is promoted for a member.
+   */
   private async promoteFacts(businessId: string): Promise<number> {
     const highConfidence = await this.prisma.client.cognitionMemory.findMany({
-      where: { businessId, confidence: { gte: 0.9 }, userResponse: 'accepted' },
+      where: { businessId, userId: null, confidence: { gte: 0.9 }, userResponse: 'accepted' },
       take: 50,
     });
 
     let promoted = 0;
     for (const memory of highConfidence) {
-      const key = `learned:${memory.functionId ?? 'general'}`;
+      const key = promotedKey(memory.functionId);
       await this.prisma.client.aiMemory.upsert({
-        where: { businessId_category_key: { businessId, category: 'learning', key } },
+        where: { businessId_category_key: { businessId, category: PROMOTED_CATEGORY, key } },
         create: {
           businessId,
-          category: 'learning',
+          category: PROMOTED_CATEGORY,
           key,
-          value: memory.recommendation.slice(0, 500),
-          source: 'key_cortex_learning',
+          value: memory.recommendation.slice(0, PROMOTED_VALUE_LENGTH),
+          source: PROMOTED_SOURCE,
           confidence: memory.confidence,
         },
         update: {
-          value: memory.recommendation.slice(0, 500),
+          value: memory.recommendation.slice(0, PROMOTED_VALUE_LENGTH),
           confidence: memory.confidence,
         },
       });
       promoted++;
     }
     return promoted;
+  }
+
+  /**
+   * W11-MEMORY-PROMOTE-SCOPE (review SEC-W11MC-2): before the packet, promotion
+   * copied a member's accepted row too, and those rows stay in AiMemory (served by
+   * every reader above; none reads by key, so a reader cannot skip them) until
+   * something removes them. This run withdraws each row promotion wrote
+   * (learning:learned:<functionId>, source key_cortex_learning) whose value is what
+   * promotion takes from a member's row of that function (the first 500 characters
+   * of its recommendation) and from no member-less row of it: a provable copy of a
+   * member's conversation. Whatever the source row's confidence or response is now
+   * (it may have decayed below the bar since); the source row itself is untouched,
+   * and stays its member's own memory. Rows promoted from member-less rows, and
+   * learning memories anyone else wrote, are kept.
+   */
+  private async withdrawMemberPromotions(businessId: string): Promise<number> {
+    const promotedRows = await this.prisma.client.aiMemory.findMany({
+      where: {
+        businessId,
+        category: PROMOTED_CATEGORY,
+        source: PROMOTED_SOURCE,
+        key: { startsWith: PROMOTED_KEY_PREFIX },
+      },
+      select: { id: true, key: true, value: true },
+    });
+
+    let withdrawn = 0;
+    for (const row of promotedRows) {
+      const functionId = row.key.slice(PROMOTED_KEY_PREFIX.length);
+      // A value shorter than the promoted length is a whole recommendation; one of
+      // that length is the start of a longer one. Prisma's startsWith is a SQL LIKE
+      // prefix that escapes nothing (%, _ and \ in the value would widen or miss the
+      // match), so it reads only the value's leading run free of those characters;
+      // the exact comparison is made below.
+      const recommendation =
+        row.value.length < PROMOTED_VALUE_LENGTH
+          ? { equals: row.value }
+          : { startsWith: row.value.split(/[\\%_]/, 1)[0] };
+      const sources = await this.prisma.client.cognitionMemory.findMany({
+        where: {
+          businessId,
+          ...(functionId === 'general'
+            ? { OR: [{ functionId: null }, { functionId: 'general' }] }
+            : { functionId }),
+          recommendation,
+        },
+        select: { userId: true, functionId: true, recommendation: true },
+      });
+      const promotedFrom = sources.filter(
+        (s) =>
+          promotedKey(s.functionId) === row.key &&
+          s.recommendation.slice(0, PROMOTED_VALUE_LENGTH) === row.value,
+      );
+      const fromAMember = promotedFrom.some((s) => s.userId !== null);
+      const fromNoMember = promotedFrom.some((s) => s.userId === null);
+      if (!fromAMember || fromNoMember) continue;
+
+      // Only the row as read: one rewritten since (by a member-less promotion) stays.
+      const removed = await this.prisma.client.aiMemory.deleteMany({
+        where: { id: row.id, businessId, source: PROMOTED_SOURCE, value: row.value },
+      });
+      withdrawn += removed.count;
+    }
+    return withdrawn;
   }
 }
