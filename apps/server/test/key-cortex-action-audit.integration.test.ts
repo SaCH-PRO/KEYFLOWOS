@@ -160,7 +160,9 @@
  * (memory-consolidation.service.ts) promotes only member-less cognition rows into the business-wide AiMemory row
  * learning:learned:<functionId>; a member's accepted row (what they typed and KEY's answer to them) stays theirs and
  * reaches no other member's memory block or key:chat prompt. A learned:* row an earlier run promoted from a member's
- * row is withdrawn by the next run (every reader of the business's AI memory renders it; none reads by key).
+ * row is withdrawn by the next run (every reader of the business's AI memory renders it; none reads by key). Its
+ * review repair (SEC-W11MPS-1) withdraws the row's semantic copies too (ai_memory_embeddings, written by POST
+ * .../agent/memory/backfill and read back by GET .../agent/memory/search and the memory block's semantic search).
  *
  * Every seeded row carries the `v19c_` prefix (business, user, session,
  * command and correlation ids) and is hard-deleted by raw SQL with
@@ -1238,14 +1240,21 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
   // session has no message, so no query, and no embedding request is made).
   // W11-CORTEX-MEMORY-COGNITION (D-130): with the real learning service too, so the learned-lessons block
   // the same call builds (KeyCortexLearningService.retrieveLessons over cognition_memories) is read as well.
-  async function memoryContextFor(userId: string | undefined): Promise<{ aiMemory: string; lessons?: string }> {
+  // W11-MEMORY-PROMOTE-SCOPE review SEC-W11MPS-1: `asking` gives the session one message of the member's (the turn's
+  // query) and the semantic store to search with it, so the block's semantic fragments ([ai_memory_embedding], what
+  // loadSemanticMemory reads from ai_memory_embeddings) are read as well.
+  async function memoryContextFor(
+    userId: string | undefined,
+    asking?: { question: string; semantic: unknown },
+  ): Promise<{ aiMemory: string; lessons?: string }> {
     const { UnifiedMemoryRetrievalService } = await import('../src/modules/key-cortex/unified-memory-retrieval.service');
     const { KeyCortexPromptContextService } = await import('../src/modules/key-cortex/key-cortex-prompt-context.service');
     const { KeyCortexLearningService } = await import('../src/modules/key-cortex/key-cortex-learning.service');
-    const unified = new UnifiedMemoryRetrievalService(prisma, {} as any);
+    const unified = new UnifiedMemoryRetrievalService(prisma, (asking?.semantic ?? {}) as any);
     // Positionally, as Nest constructs it: context service, unified memory, learning service, prisma.
     const promptContext = new (KeyCortexPromptContextService as any)({} as any, unified, new KeyCortexLearningService(prisma), prisma);
-    const session = { id: `${P}sess_mem_chat`, businessId: ID.memBiz, userId, messages: [] } as any;
+    const messages = asking ? [{ role: 'user', content: asking.question, timestamp: new Date() }] : [];
+    const session = { id: `${P}sess_mem_chat`, businessId: ID.memBiz, userId, messages } as any;
     // W11-CORTEX-MEMORY-COGNITION review SEC-W11MC-1: the requester is the session's own member here.
     const memory = await promptContext.buildMemoryContext(ID.memBiz, session, userId);
     return { aiMemory: memory.aiMemory ?? '', lessons: memory.lessons };
@@ -2090,6 +2099,8 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
   async function removeMpsRows() {
     await db.$executeRawUnsafe('DELETE FROM cognition_memories WHERE business_id = $1', ID.memBiz);
     await db.$executeRawUnsafe(`DELETE FROM ai_memories WHERE business_id = $1 AND category = 'learning'`, ID.memBiz);
+    // W11-MEMORY-PROMOTE-SCOPE review SEC-W11MPS-1: the semantic copies POST .../agent/memory/backfill writes.
+    await db.$executeRawUnsafe('DELETE FROM ai_memory_embeddings WHERE business_id = $1', ID.memBiz);
     // KeyCortexLearningService.recordFeedback's outcome logs.
     await db.$executeRawUnsafe('DELETE FROM genome_recommendation_outcomes WHERE business_id = $1', ID.memBiz);
     await db.$executeRawUnsafe('DELETE FROM key_evolution_logs WHERE business_id = $1', ID.memBiz);
@@ -2156,6 +2167,90 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
     return { memories, close: () => http.close() };
   }
   const values = (rows: Array<{ value: string }>) => rows.map((m) => m.value).join('\n');
+
+  /** W11-MEMORY-PROMOTE-SCOPE review SEC-W11MPS-1: every embedding is this one vector, so every copy matches any query. */
+  const UNIT_VECTOR = Array.from({ length: 1536 }, (_, i) => (i === 0 ? 1 : 0));
+
+  /**
+   * W11-MEMORY-PROMOTE-SCOPE review SEC-W11MPS-1: the semantic copy of the business's AI memory. The real
+   * SemanticMemoryService over the real ai_memory_embeddings table (pgvector); its one provider call
+   * (AiUsageService.trackEmbedding) is a stand-in that answers UNIT_VECTOR, after `beforeEmbedding(text)` (which may
+   * hold one text back), so no request leaves the process. Over HTTP, on the real AgentController behind its real
+   * AuthGuard and BusinessGuard (identity attachment as in aiMemoryOverHttp): POST
+   * /ai/businesses/:businessId/agent/memory/backfill, which any member may send (it copies every AiMemory row of the
+   * business into ai_memory_embeddings: source_type 'memory', source_id the row's id), and GET
+   * /ai/businesses/:businessId/agent/memory/search, which answers any member the matching copies.
+   */
+  async function semanticMemoryOverHttp(beforeEmbedding: (text: string) => Promise<void> | void = () => undefined) {
+    const { Test } = await import('@nestjs/testing');
+    const { default: request } = await import('supertest');
+    const { EventEmitter2 } = await import('@nestjs/event-emitter');
+    const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { AuthGuard } = await import('../src/core/auth/auth.guard');
+    const { BusinessGuard } = await import('../src/core/auth/business.guard');
+    const { AgentController } = await import('../src/modules/ai/agent.controller');
+    const { SemanticMemoryService } = await import('../src/modules/ai/semantic-memory.service');
+    const usage = {
+      trackEmbedding: async (_businessId: string, _userId: unknown, _operation: string, texts: string[]) => {
+        for (const text of texts) await beforeEmbedding(text);
+        return texts.map(() => UNIT_VECTOR);
+      },
+    };
+    const semantic = new SemanticMemoryService(prisma, new EventEmitter2(), usage as any);
+    const OFF_ROUTE = new Set([
+      'AgentStateMachineService', 'AgentBusService', 'PatternDetectorService', 'UndoService',
+      'CalendarIntelligenceService', 'DocumentIntelligenceService',
+    ]);
+    const moduleRef = await Test.createTestingModule({
+      controllers: [AgentController],
+      providers: [
+        PrismaService,
+        AuthGuard,
+        BusinessGuard,
+        { provide: EventEmitter2, useValue: new EventEmitter2() },
+        { provide: SemanticMemoryService, useValue: semantic },
+      ],
+    })
+      .useMocker((token: any) => (OFF_ROUTE.has(typeof token === 'function' ? token.name : String(token)) ? {} : undefined))
+      .compile();
+    const http = moduleRef.createNestApplication();
+    http.use(async (req: any, _res: any, next: any) => {
+      const id = req.headers['x-v19c-user'];
+      if (typeof id === 'string' && id.startsWith(P)) {
+        const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+        if (user) req.user = { id: user.id, email: user.email, role: user.role };
+      }
+      next();
+    });
+    http.useGlobalFilters(new GlobalHttpExceptionFilter());
+    await http.init();
+    const backfill = async (userId: string): Promise<number> => {
+      const res = await request(http.getHttpServer()).post(`/ai/businesses/${ID.memBiz}/agent/memory/backfill`).set('x-v19c-user', userId);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      return res.body.backfilled;
+    };
+    const search = async (userId: string, q: string): Promise<string> => {
+      const res = await request(http.getHttpServer())
+        .get(`/ai/businesses/${ID.memBiz}/agent/memory/search`)
+        .query({ q, limit: '50' })
+        .set('x-v19c-user', userId);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      return (res.body.results as Array<{ content: string }>).map((r) => r.content).join('\n');
+    };
+    return { semantic, backfill, search, close: () => http.close() };
+  }
+
+  /** W11-MEMORY-PROMOTE-SCOPE review SEC-W11MPS-1: the distinct contents of ID.memBiz's semantic copies of its AI memory. */
+  const memoryCopies = async (): Promise<string[]> =>
+    (
+      await db.$queryRawUnsafe(
+        `SELECT DISTINCT content FROM ai_memory_embeddings WHERE business_id = $1 AND source_type = 'memory'`,
+        ID.memBiz,
+      )
+    )
+      .map((r: { content: string }) => r.content)
+      .sort();
 
   // W11-MEMORY-PROMOTE-SCOPE (review SEC-W11MC-2, D-130): was an it.todo (W11-CORTEX-MEMORY-COGNITION review residual,
   // reproduced: the owner's promoted "net profit" answer in the STAFF member's memory block). The hourly consolidation
@@ -2373,6 +2468,170 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
       expect(await db.cognitionMemory.count({ where: { businessId: ID.memBiz } })).toBe(3);
     } finally {
       if (overHttp) await overHttp.close();
+      await removeMpsRows();
+    }
+  }, 60_000);
+
+  // W11-MEMORY-PROMOTE-SCOPE review SEC-W11MPS-1 (reproduced by the review on the real database): a promoted row has a
+  // second, semantic copy. POST /ai/businesses/:id/agent/memory/backfill (any member may send it) copies every AiMemory
+  // row of the business into ai_memory_embeddings (source_type 'memory', source_id the row's id, content
+  // `learning: learned:<fn> = <value>`), and every member reads those copies back: GET .../agent/memory/search, and
+  // KEY's memory block as [ai_memory_embedding] (buildMemoryContext and chatMemoryFragments search with the turn's
+  // query). Withdrawing the row left its copy, so the owner's promoted answer was still served to the STAFF member.
+  // The copies withdrawn here: (1) a withdrawn row's own copies; (2) a copy whose row still exists but no longer holds
+  // the member's answer (the member-less row of the same function is promoted into the same key in place, before the
+  // withdrawal reads it; the base's nightly promotion overwrote such rows the same way); (3) a copy written after its
+  // row was withdrawn (a backfill that read the row before the withdrawal and wrote its copy after: held back here at
+  // the embedding call), removed by the next run. A member-less row's copy, a user's learning memory's copy and the
+  // business fact's copy are kept. Every embedding is the stand-in vector (no outbound request).
+  it("W11-MEMORY-PROMOTE-SCOPE review SEC-W11MPS-1: the semantic copies of a promoted member row (what POST .../agent/memory/backfill writes into ai_memory_embeddings) are withdrawn with it, so GET .../agent/memory/search and the STAFF member's memory block stop serving the owner's answer: a withdrawn row's copies, a copy of the member's answer whose row a member-less promotion rewrote in place, and a copy a racing backfill wrote after the withdrawal (on the next run); a member-less row's, a user's learning memory's and a fact's copies are kept", async () => {
+    const realFetch = globalThis.fetch;
+    const outbound: string[] = [];
+    globalThis.fetch = (async (input: unknown) => {
+      outbound.push(String(input));
+      throw new Error('v19c: no outbound traffic in this case');
+    }) as typeof fetch;
+    const { MemoryConsolidationService } = await import('../src/modules/key-cortex/memory-consolidation.service');
+    const EMB = {
+      OWNER: 'V19C-MPS-EMB-OWNER: net profit this quarter is 48213 after the private payroll plan',
+      MEMBER: 'V19C-MPS-EMB-MEMBER: I am interviewing elsewhere, keep it between us',
+      SHARED_NOBODY: 'V19C-MPS-EMB-SHARED-NOBODY: crm.mps_rota_follow_up',
+      NOBODY: 'V19C-MPS-EMB-NOBODY: invoices.mps_send',
+      USER: 'V19C-MPS-EMB-USER: always quote in TTD',
+      RACE: 'V19C-MPS-EMB-RACE-OWNER: the owner plans to sell the delivery van',
+    };
+    const QUESTION = 'how is the business doing?';
+    const cognition = (userId: string | null, functionId: string, recommendation: string, confidence: number) => ({
+      businessId: ID.memBiz,
+      ...(userId ? { userId, sessionId: `${P}sess_mps_emb_${functionId}` } : { roleId: 'key_cortex' }),
+      functionId,
+      query: `${functionId}: what next?`,
+      recommendation,
+      userResponse: 'accepted',
+      confidence,
+    });
+    // What the base's promoteFacts wrote (learned:<functionId>, the recommendation, its confidence).
+    const promotion = (functionId: string, recommendation: string) => ({
+      businessId: ID.memBiz,
+      category: 'learning',
+      key: `learned:${functionId}`,
+      value: recommendation,
+      source: 'key_cortex_learning',
+      confidence: 0.95,
+    });
+    const copyOf = (key: string, value: string) => `learning: ${key} = ${value}`;
+    // beforeAll's business-wide fact, as the backfill copies it.
+    const FACT_COPY = `fact: ${P}shared_fact = v19c memory: a business-wide fact`;
+    let release: () => void = () => undefined;
+    let reachedRace: () => void = () => undefined;
+    const raceReached = new Promise<void>((resolve) => (reachedRace = resolve));
+    const raceReleased = new Promise<void>((resolve) => (release = resolve));
+    let holdRace = false;
+    let http: Awaited<ReturnType<typeof semanticMemoryOverHttp>> | undefined;
+    try {
+      await removeMpsRows();
+      await db.cognitionMemory.createMany({
+        data: [
+          cognition(ID.owner, 'v19c_mps_emb_owner', EMB.OWNER, 0.95),
+          cognition(ID.member, 'v19c_mps_emb_shared', EMB.MEMBER, 0.95),
+          // Eligible for promotion, into the same key as the member's row.
+          cognition(null, 'v19c_mps_emb_shared', EMB.SHARED_NOBODY, 1),
+          // Decayed below the bar since its promotion: its promoted row and copy stay.
+          cognition(null, 'v19c_mps_emb_nobody', EMB.NOBODY, 0.6),
+          cognition(ID.owner, 'v19c_mps_emb_race', EMB.RACE, 0.95),
+        ],
+      });
+      await db.aiMemory.createMany({
+        data: [
+          promotion('v19c_mps_emb_owner', EMB.OWNER),
+          promotion('v19c_mps_emb_shared', EMB.MEMBER),
+          promotion('v19c_mps_emb_nobody', EMB.NOBODY),
+          // Written through PUT /businesses/:id/ai/memory (source user): nobody promoted it.
+          { businessId: ID.memBiz, category: 'learning', key: 'v19c_mps_emb_user', value: EMB.USER, source: 'user', confidence: 1 },
+        ],
+      });
+      http = await semanticMemoryOverHttp(async (text) => {
+        if (holdRace && text.includes('V19C-MPS-EMB-RACE')) {
+          reachedRace();
+          await raceReleased;
+        }
+      });
+      const asking = { question: QUESTION, semantic: http.semantic };
+
+      // The STAFF member backfills the business's semantic memory: one copy of every AiMemory row.
+      expect(await http.backfill(ID.member)).toBe(await db.aiMemory.count({ where: { businessId: ID.memBiz } }));
+      expect(await memoryCopies()).toEqual(
+        [
+          FACT_COPY,
+          copyOf('learned:v19c_mps_emb_nobody', EMB.NOBODY),
+          copyOf('learned:v19c_mps_emb_owner', EMB.OWNER),
+          copyOf('learned:v19c_mps_emb_shared', EMB.MEMBER),
+          copyOf('v19c_mps_emb_user', EMB.USER),
+        ].sort(),
+      );
+      // Served before the run: the owner's answer to the STAFF member, the member's to the owner.
+      expect(await http.search(ID.member, QUESTION), 'before the run').toContain('V19C-MPS-EMB-OWNER');
+      expect(await http.search(ID.owner, QUESTION), 'before the run').toContain('V19C-MPS-EMB-MEMBER');
+      expect((await memoryContextFor(ID.member, asking)).aiMemory, 'before the run').toContain('V19C-MPS-EMB-OWNER');
+
+      const consolidation = new MemoryConsolidationService(prisma);
+      await consolidation.run(ID.memBiz);
+
+      // The rows: the owner's promotion withdrawn; the shared key now holds the member-less row's answer.
+      expect(await learningMemories()).toEqual([
+        { key: 'learned:v19c_mps_emb_nobody', value: EMB.NOBODY, source: 'key_cortex_learning', confidence: 0.95 },
+        { key: 'learned:v19c_mps_emb_shared', value: EMB.SHARED_NOBODY, source: 'key_cortex_learning', confidence: 1 },
+        { key: 'v19c_mps_emb_user', value: EMB.USER, source: 'user', confidence: 1 },
+      ]);
+      // The copies: the withdrawn row's, and the member's answer under the rewritten key, are gone; the rest are kept.
+      expect(await memoryCopies()).toEqual(
+        [FACT_COPY, copyOf('learned:v19c_mps_emb_nobody', EMB.NOBODY), copyOf('v19c_mps_emb_user', EMB.USER)].sort(),
+      );
+      const staffSearch = await http.search(ID.member, QUESTION);
+      expect(staffSearch).not.toContain('V19C-MPS-EMB-OWNER');
+      expect(staffSearch).toContain(EMB.NOBODY);
+      expect(staffSearch).toContain(EMB.USER);
+      expect(await http.search(ID.owner, QUESTION)).not.toContain('V19C-MPS-EMB-MEMBER');
+      const staffBlock = (await memoryContextFor(ID.member, asking)).aiMemory;
+      expect(staffBlock).not.toContain('V19C-MPS-EMB-OWNER');
+      expect(staffBlock).toContain('[ai_memory_embedding]');
+      expect((await memoryContextFor(ID.owner, asking)).aiMemory).not.toContain('V19C-MPS-EMB-MEMBER');
+
+      // A backfill racing the withdrawal: it reads the owner's promoted RACE row (as the base wrote it) and writes the
+      // row's copy only after the run has withdrawn the row.
+      await db.aiMemory.create({ data: promotion('v19c_mps_emb_race', EMB.RACE) });
+      holdRace = true;
+      const racing = http.backfill(ID.member);
+      await raceReached;
+      await consolidation.run(ID.memBiz);
+      expect(await db.aiMemory.count({ where: { businessId: ID.memBiz, key: 'learned:v19c_mps_emb_race' } })).toBe(0);
+      release();
+      await racing;
+      // The late copy is served until the next run...
+      expect(await memoryCopies()).toContain(copyOf('learned:v19c_mps_emb_race', EMB.RACE));
+      expect(await http.search(ID.member, QUESTION), 'the late copy').toContain('V19C-MPS-EMB-RACE');
+      // ...which withdraws it.
+      await consolidation.run(ID.memBiz);
+      expect(await memoryCopies()).toEqual(
+        [
+          FACT_COPY,
+          copyOf('learned:v19c_mps_emb_nobody', EMB.NOBODY),
+          copyOf('learned:v19c_mps_emb_shared', EMB.SHARED_NOBODY),
+          copyOf('v19c_mps_emb_user', EMB.USER),
+        ].sort(),
+      );
+      const staffAfter = await http.search(ID.member, QUESTION);
+      expect(staffAfter).not.toContain('V19C-MPS-EMB-RACE');
+      expect(staffAfter).not.toContain('V19C-MPS-EMB-OWNER');
+      expect((await memoryContextFor(ID.member, asking)).aiMemory).not.toContain('V19C-MPS-EMB-RACE');
+
+      // The sources are untouched: each member keeps their own row.
+      expect(await db.cognitionMemory.count({ where: { businessId: ID.memBiz } })).toBe(5);
+      expect(outbound, 'no outbound request').toEqual([]);
+    } finally {
+      release();
+      globalThis.fetch = realFetch;
+      if (http) await http.close();
       await removeMpsRows();
     }
   }, 60_000);
