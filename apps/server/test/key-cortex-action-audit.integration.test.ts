@@ -145,9 +145,14 @@
  *
  * W11-CORTEX-MEMORY-COGNITION review repairs: buildMemoryContext's reader is the requester, not the member the
  * session names (SEC-W11MC-1: a turn on another member's session, as the WS key:chat handler allows, read that
- * member's memory and lessons). Three residuals outside the write set are it.todo below: key:chat session
+ * member's memory and lessons). Three residuals outside the write set were it.todo below: key:chat session
  * ownership (SEC-W11MC-1 root cause), promoted cognition rows (SEC-W11MC-2), the /ai flow chat's perception
  * block (SEC-W11MC-3).
+ *
+ * W11-KEY-CHAT-SESSION-BIND turned the SEC-W11MC-1 residual it.todo live: over the WS gateway (REAL database and
+ * the REAL Redis session cache at REDIS_URL), a member's key:chat naming another member's session, or a session of
+ * another business, runs on a new session of the member's own, with neither session's running summary nor its
+ * messages in the prompt, and the socket receives what it receives for an id that names no session.
  *
  * Every seeded row carries the `v19c_` prefix (business, user, session,
  * command and correlation ids) and is hard-deleted by raw SQL with
@@ -159,6 +164,7 @@ import { readdirSync, readFileSync, statSync } from 'fs';
 import * as ts from 'typescript';
 import { config as loadEnv } from 'dotenv';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { Redis } from 'ioredis';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
@@ -261,6 +267,8 @@ async function cleanup() {
     `DELETE FROM cognition_memories WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     // W11-BRIDGED-ORGAN-AUDIT-MEMBER: the plans the plan-queue cases dispatch.
     `DELETE FROM ai_plans WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // W11-KEY-CHAT-SESSION-BIND: the KEY sessions the key:chat case seeds and the turns it starts.
+    `DELETE FROM cortex_sessions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
   ]) {
@@ -1682,20 +1690,276 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
     }
   });
 
+  /**
+   * W11-KEY-CHAT-SESSION-BIND: KeyCortexGateway as the app wires key:chat, over a socket of ID.member (a STAFF
+   * member of ID.memBiz). REAL: the gateway (handleConnection, the live re-check, handleChat),
+   * KeyCortexReasoningService.streamReasoning and the query pipeline (processQuery) behind it,
+   * KeyCortexSessionService over the real database and the real Redis at REDIS_URL (the session cache
+   * getOrCreateSession reads before the database), KeyCortexPromptContextService (buildMemoryContext and
+   * buildMessages: the session's running summary and its last 10 messages) over the real memory store and
+   * learning service, and the membership half of the socket's connect decision
+   * (KeyCortexWsAuthService.verifyBusinessMembership). Stand-ins: the token half of that decision
+   * (authenticateSocket answers ID.member), the model provider (records the prompt it is handed), and the
+   * collaborators chatTurnFor stands in. `prompts` holds every prompt the provider was handed; `visible` every
+   * event the socket received (to the socket, and to its user and business rooms).
+   */
+  async function keyChatSocket(redis: Redis) {
+    const { RedisService } = await import('../src/core/redis/redis.service');
+    const { KeyCortexSessionService } = await import('../src/modules/key-cortex/key-cortex-session.service');
+    const { KeyCortexGateway } = await import('../src/modules/key-cortex/key-cortex.gateway');
+    const { KeyCortexWsAuthService } = await import('../src/modules/key-cortex/key-cortex-ws-auth.service');
+    const { KeyCortexReasoningService } = await import('../src/modules/key-cortex/key-cortex-reasoning.service');
+    const { KeyCortexQueryPipelineService } = await import('../src/modules/key-cortex/key-cortex-query-pipeline.service');
+    const { KeyCortexMemoryRetrievalService } = await import('../src/modules/key-cortex/key-cortex-memory-retrieval.service');
+    const { UnifiedMemoryRetrievalService } = await import('../src/modules/key-cortex/unified-memory-retrieval.service');
+    const { KeyCortexPromptContextService } = await import('../src/modules/key-cortex/key-cortex-prompt-context.service');
+    const { KeyCortexLearningService } = await import('../src/modules/key-cortex/key-cortex-learning.service');
+
+    const prompts: Array<Array<{ role: string; content: string }>> = [];
+    const sessionService = new KeyCortexSessionService(prisma, new RedisService(redis as any));
+    const contextService = {
+      buildContextSnapshot: async () => ({ businessId: ID.memBiz, genomeStage: 'startup', executiveReadiness: 50 }),
+      formatContextForPrompt: () => '',
+    };
+    // Positionally, as Nest constructs it: context service, unified memory, learning service, prisma.
+    const promptContext = new (KeyCortexPromptContextService as any)(
+      contextService,
+      new UnifiedMemoryRetrievalService(prisma, { search: async () => [] } as any),
+      new KeyCortexLearningService(prisma),
+      prisma,
+    );
+    const route = {
+      taskCategory: 'general', layers: ['reasoning'], promptVariant: 'standard', includeGenomeContext: false, includeMemoryContext: true,
+      includeActions: false, complexity: 'simple', domain: 'general', urgency: 'low', emotionalWeight: 'low', timeHorizon: 'tactical', dataRequirement: 'none',
+    };
+    const pipeline = new KeyCortexQueryPipelineService(
+      {
+        complete: async (request: { messages: Array<{ role: string; content: string }> }) => {
+          prompts.push(request.messages.map((m) => ({ role: m.role, content: String(m.content ?? '') })));
+          return { content: 'v19c answer', provider: 'openai', model: 'stand-in', usage: { totalTokens: 1, estimatedCost: 0 }, fallbackUsed: false };
+        },
+      } as any,
+      prisma,
+      { get: async () => null, setex: async () => undefined } as any,
+      {
+        getPersonalityConfig: () => ({ persona: 'jarvis', temperature: 0.5 }),
+        buildSystemPrompt: () => 'You are KEY.',
+        buildValueBlock: async () => '',
+        classifyPersona: async () => undefined,
+        selectTone: async () => ({ tone: '', temperatureAdjustment: 0 }),
+      } as any,
+      contextService as any,
+      { buildToolDefinitions: async () => [], executeActions: async () => [] } as any,
+      sessionService,
+      promptContext,
+      { handleToolCalls: async () => null } as any,
+      { detectActions: () => [] } as any,
+      { generateSuggestions: async () => [] } as any,
+      {} as any,
+      { buildV2SystemPrompt: () => 'V2', buildV3SystemPrompt: () => 'V3', enrichSnapshotFromV2: () => undefined, enrichSnapshotFromGenome: () => undefined } as any,
+      {
+        classifyTaskCategory: () => 'general',
+        buildStructuredOutputInstructions: () => '',
+        parseStructuredResponse: () => ({ role: 'assistant', recommendation: 'v19c answer', confidence: 80 }),
+      } as any,
+      { detectMood: () => 'casual' } as any,
+      new KeyCortexMemoryRetrievalService(new UnifiedMemoryRetrievalService(prisma, { search: async () => [] } as any)),
+      { route: async () => route } as any,
+    );
+    // Positionally, as Nest constructs it: model gateway, prisma, redis, personality, context, actions, session,
+    // prompt context, tool loop, action detection, legacy insight, provider selection, structured output, mood
+    // detection, suggestion, genome context, system prompt, interaction, command execution, query pipeline; the
+    // optional v2/v3 layers absent (streamReasoning -> processQuery -> the query pipeline).
+    const reasoning = new (KeyCortexReasoningService as any)(
+      ...Array.from({ length: 19 }, () => ({})),
+      pipeline,
+    );
+    const membership = new KeyCortexWsAuthService({} as any, prisma, {} as any);
+    const wsAuth = {
+      authenticateSocket: async () => ({ userId: ID.member, email: null, role: 'USER' }),
+      verifyBusinessMembership: (userId: string, role: string, businessId: unknown) =>
+        membership.verifyBusinessMembership(userId, role, businessId),
+    };
+    // Positionally, as Nest constructs it: reasoning, approval, event, executor, ws auth and (W11-KEY-CHAT-SESSION-BIND)
+    // the session service key:chat resolves the client's session id through.
+    const gateway = new (KeyCortexGateway as any)(reasoning, {}, { emit: () => undefined }, {}, wsAuth, sessionService);
+    const visible: unknown[][] = [];
+    (gateway as any).server = { to: (room: string) => ({ emit: (event: string, payload: unknown) => visible.push(['room', room, event, payload]) }) };
+    const socket = {
+      id: `${P}kcsb_socket`,
+      handshake: { auth: { token: `${P}kcsb_stand_in`, businessId: ID.memBiz }, headers: {}, query: {} },
+      join: () => undefined,
+      emit: (event: string, payload: unknown) => visible.push(['socket', event, payload]),
+      disconnect: vi.fn(),
+      to: () => ({ emit: () => undefined }),
+    };
+    await gateway.handleConnection(socket as any);
+    expect(socket.disconnect, 'the member of ID.memBiz connects').not.toHaveBeenCalled();
+    expect(visible.map((v) => v[1])).toEqual(['key:connected']);
+
+    /** One key:chat turn naming `sessionId`: the prompt the provider was handed, and what the socket received (no timestamps). */
+    const chat = async (sessionId: unknown) => {
+      prompts.length = 0;
+      visible.length = 0;
+      await gateway.handleChat({ text: KCSB_TURN, sessionId } as any, socket as any);
+      expect(prompts, `one prompt for ${String(sessionId)}: ${JSON.stringify(visible)}`).toHaveLength(1);
+      const received = JSON.parse(JSON.stringify(visible, (key, value) => (key === 'timestamp' ? undefined : value)));
+      return { prompt: prompts[0], received };
+    };
+    return { chat };
+  }
+
+  // W11-KEY-CHAT-SESSION-BIND: what the seeded sessions hold, so a prompt that renders one is visible.
+  const KCSB_TURN = 'v19c kcsb: what should I do next';
+  const KCSB = {
+    otherBiz: `${P}biz_kcsb_other`,
+    ownerSession: `${P}sess_kcsb_owner`,
+    otherBizSession: `${P}sess_kcsb_other_biz`,
+    memberSession: `${P}sess_kcsb_member`,
+    nowhere: `${P}sess_kcsb_nowhere`,
+  };
+  const kcsbMessages = (marker: string, n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `${P}kcsb_msg_${marker}_${i}`,
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      content: `${marker}-MSG-${i}`,
+      timestamp: '2026-11-12T00:00:00.000Z',
+    }));
+
+  /** The parts of a prompt that only a session can put there: its running summary and its history (the turn's own text excluded). */
+  function sessionPart(prompt: Array<{ role: string; content: string }>) {
+    const history = prompt.slice(0, -1).filter((m) => m.role === 'user' || m.role === 'assistant');
+    const summary = prompt.filter((m) => m.content.includes('=== CONVERSATION SUMMARY ==='));
+    return { summary, history };
+  }
+
+  // W11-KEY-CHAT-SESSION-BIND (review SEC-W11MC-1 residual, D-130): was an it.todo. The WS key:chat handler
+  // (key-cortex.gateway.ts handleChat) handed streamReasoning the client's sessionId unchecked, and
+  // KeyCortexSessionService.getOrCreateSession loads any session by id (its Redis entry first, then the database,
+  // which no tenant context scopes on a socket), so a member naming another member's session id, or a session of
+  // another business, had that session's running summary and its last 10 messages in their prompt
+  // (buildMemoryContext and buildMessages render the session they are handed), and their turn was appended to it.
+  // key:chat now resolves the client's id by the session ownership rule the HTTP routes apply (moved from
+  // KeyCortexController.ownSessionId into key-cortex-session.service.ts): the member's own session in the socket's
+  // business, else a new session for the member, exactly as for an id that names no session, so nothing the socket
+  // receives tells a foreign id from an unknown one.
+  it("W11-KEY-CHAT-SESSION-BIND (review SEC-W11MC-1 residual, D-130, was it.todo): over the WS gateway, a STAFF member's key:chat naming the owner's session of the same business, or a session of another business, runs on a new session of the member's own: the prompt handed to the model holds neither session's running summary nor its messages, neither session is written, and the socket receives exactly what it receives for an id that names no session; read from the database and from the Redis session cache alike. The member's own session id is honoured", async () => {
+    const redis = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
+    const realFetch = globalThis.fetch;
+    const outbound: string[] = [];
+    globalThis.fetch = (async (input: unknown) => {
+      outbound.push(String(input));
+      throw new Error('v19c: no outbound traffic in this case');
+    }) as typeof fetch;
+    const sessionKeys = async () =>
+      (await db.cortexSession.findMany({ where: { businessId: { in: [ID.memBiz, KCSB.otherBiz] } }, select: { id: true } })).map(
+        (s: { id: string }) => `cortex:session:${s.id}`,
+      );
+    try {
+      await db.business.create({ data: { id: KCSB.otherBiz, name: 'V19C KCSB Other Biz', ownerId: ID.outsider } });
+      await db.membership.create({ data: { userId: ID.outsider, businessId: KCSB.otherBiz, role: 'OWNER' } });
+      await db.cortexSession.createMany({
+        data: [
+          {
+            id: KCSB.ownerSession, businessId: ID.memBiz, userId: ID.owner, status: 'active',
+            runningSummary: 'V19C-KCSB-OWNER-SUMMARY: the owner discussed the private payroll plan',
+            messages: kcsbMessages('V19C-KCSB-OWNER', 12),
+          },
+          {
+            id: KCSB.otherBizSession, businessId: KCSB.otherBiz, userId: ID.outsider, status: 'active',
+            runningSummary: 'V19C-KCSB-OTHERBIZ-SUMMARY: another business discussed its supplier terms',
+            messages: kcsbMessages('V19C-KCSB-OTHERBIZ', 12),
+          },
+          {
+            id: KCSB.memberSession, businessId: ID.memBiz, userId: ID.member, status: 'active',
+            runningSummary: 'V19C-KCSB-MEMBER-SUMMARY: the member asked about their rota',
+            messages: kcsbMessages('V19C-KCSB-MEMBER', 3),
+          },
+        ],
+      });
+      await redis.del(...Object.values(KCSB).map((id) => `cortex:session:${id}`));
+      const foreignRows = () =>
+        db.cortexSession.findMany({
+          where: { id: { in: [KCSB.ownerSession, KCSB.otherBizSession] } },
+          select: { id: true, businessId: true, userId: true, messages: true, runningSummary: true, updatedAt: true },
+          orderBy: { id: 'asc' },
+        });
+      const foreignBefore = await foreignRows();
+      const membersNewSessions = () =>
+        db.cortexSession.findMany({
+          where: { businessId: ID.memBiz, userId: ID.member, id: { not: KCSB.memberSession } },
+          select: { id: true, messages: true, runningSummary: true },
+          orderBy: { createdAt: 'asc' },
+        });
+      const newBefore = (await membersNewSessions()).length;
+
+      const { chat } = await keyChatSocket(redis);
+      const unknown = await chat(KCSB.nowhere);
+      expect(sessionPart(unknown.prompt)).toEqual({ summary: [], history: [] });
+      const leaked = (prompt: Array<{ role: string; content: string }>) =>
+        prompt.map((m) => m.content).filter((c) => c.includes('V19C-KCSB-OWNER') || c.includes('V19C-KCSB-OTHERBIZ'));
+
+      // The foreign sessions as they sit in the database only, then as their own traffic leaves them in the
+      // Redis session cache (what getOrCreateSession caches: the row).
+      for (const where of ['database', 'cache'] as const) {
+        if (where === 'cache') {
+          for (const row of await db.cortexSession.findMany({ where: { id: { in: [KCSB.ownerSession, KCSB.otherBizSession] } } })) {
+            await redis.set(`cortex:session:${row.id}`, JSON.stringify(row), 'EX', 600);
+          }
+        }
+        const cachedBefore = await redis.mget(`cortex:session:${KCSB.ownerSession}`, `cortex:session:${KCSB.otherBizSession}`);
+        for (const foreign of [KCSB.ownerSession, KCSB.otherBizSession]) {
+          const turn = await chat(foreign);
+          const label = `${where}: ${foreign}`;
+          expect(leaked(turn.prompt), label).toEqual([]);
+          expect(sessionPart(turn.prompt), label).toEqual({ summary: [], history: [] });
+          expect(JSON.stringify(turn.received), label).not.toContain('V19C-KCSB');
+          expect(JSON.stringify(turn.received), label).not.toMatch(/not found/i);
+          // A refused foreign id does not reveal whether it exists: the socket gets what it gets for an unknown id.
+          expect(turn.received, label).toEqual(unknown.received);
+        }
+        expect(await foreignRows(), `${where}: neither foreign session is written`).toEqual(foreignBefore);
+        expect(
+          await redis.mget(`cortex:session:${KCSB.ownerSession}`, `cortex:session:${KCSB.otherBizSession}`),
+          `${where}: neither cached foreign session is rewritten`,
+        ).toEqual(cachedBefore);
+      }
+
+      // Each foreign or unknown turn ran on a new session of the member's own in ID.memBiz, holding that turn only.
+      const created = (await membersNewSessions()).slice(newBefore);
+      expect(created).toHaveLength(5);
+      for (const s of created) {
+        expect((s.messages as Array<{ content: string }>).map((m) => m.content)).toEqual([KCSB_TURN, 'v19c answer']);
+        expect(String(s.runningSummary)).not.toContain('V19C-KCSB');
+      }
+
+      // The member's own session id is honoured: its running summary and history are in the prompt, and the turn is appended to it.
+      const own = await chat(KCSB.memberSession);
+      const ownPart = sessionPart(own.prompt);
+      expect(ownPart.summary.map((m) => m.content).join('\n')).toContain('V19C-KCSB-MEMBER-SUMMARY');
+      expect(ownPart.history.map((m) => m.content)).toEqual(['V19C-KCSB-MEMBER-MSG-0', 'V19C-KCSB-MEMBER-MSG-1', 'V19C-KCSB-MEMBER-MSG-2']);
+      expect(leaked(own.prompt)).toEqual([]);
+      const ownRow = await db.cortexSession.findUnique({ where: { id: KCSB.memberSession }, select: { messages: true } });
+      expect((ownRow.messages as Array<{ content: string }>).map((m) => m.content).slice(-2)).toEqual([KCSB_TURN, 'v19c answer']);
+      expect((await membersNewSessions()).length - newBefore, 'no new session for the own id').toBe(5);
+
+      expect(outbound, 'no outbound request').toEqual([]);
+    } finally {
+      globalThis.fetch = realFetch;
+      const keys = await sessionKeys();
+      if (keys.length > 0) await redis.del(...keys);
+      await redis.del(...Object.values(KCSB).map((id) => `cortex:session:${id}`));
+      await db.$executeRawUnsafe(`DELETE FROM cortex_sessions WHERE business_id LIKE ${sqlLikePrefix(P)}`);
+      await db.$executeRawUnsafe('DELETE FROM memberships WHERE business_id = $1', KCSB.otherBiz);
+      await db.$executeRawUnsafe('DELETE FROM businesses WHERE id = $1', KCSB.otherBiz);
+      redis.disconnect();
+    }
+  }, 60_000);
+
   // W11-CORTEX-MEMORY-COGNITION review residuals (D-130), each reproduced on this database at the repair and kept as an
   // it.todo: the fix of each is outside the W11-CORTEX-MEMORY-COGNITION write set (the three key-cortex files
   // key-cortex-prompt-context.service.ts, key-cortex-learning.service.ts and key-cortex-query-pipeline.service.ts).
-  it.todo(
-    'W11-CORTEX-MEMORY-COGNITION review SEC-W11MC-1 residual (D-130; follow-up packet, outside the write set): the WS ' +
-      'key:chat handler (key-cortex.gateway.ts handleChat) hands streamReasoning the client\'s sessionId unchecked, and ' +
-      'KeyCortexSessionService.getOrCreateSession loads any session by id, so a member (or a member of another business) ' +
-      'naming another member\'s session id still has that session\'s running summary and its last 10 messages in their ' +
-      'prompt (buildMemoryContext and buildMessages render the session they are handed), and their turn is appended to ' +
-      'it. buildMemoryContext now reads its memory and lessons for the requester (SEC-W11MC-1 repaired); resolving the ' +
-      'client\'s sessionId through the controller\'s ownSessionId rule (the actor\'s own session in the guarded business, ' +
-      'else a new session) on key:chat closes it.',
-  );
-
+  // SEC-W11MC-1's residual (key:chat session ownership) is live above (W11-KEY-CHAT-SESSION-BIND).
   it.todo(
     'W11-CORTEX-MEMORY-COGNITION review SEC-W11MC-2 (D-130; follow-up packet, outside the write set): ' +
       'memory-consolidation.service.ts promoteFacts copies a member\'s accepted cognition row with confidence >= 0.9 ' +
