@@ -858,6 +858,16 @@
       "packet": "V1-99 (SWEEP-P0-SCOPES round 1 class repair, CLASS B credential writers)"
     },
     {
+      "prefix": "v99x_",
+      "owner": "apps/server/test/sweep-export-receivers-scope.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-SCOPES round 2 class repair, CLASS A integration push receivers)"
+    },
+    {
+      "prefix": "v99y_",
+      "owner": "apps/server/test/sweep-credential-writers-r2-scope.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-SCOPES round 2 class repair, CLASS B credential writers CW-1..CW-4)"
+    },
+    {
       "prefix": "v97f_",
       "owner": "apps/server/test/order-shipping-expense.integration.test.ts",
       "packet": "V1-97 (W11-SHIPPING-EXPENSE-ONCE)"

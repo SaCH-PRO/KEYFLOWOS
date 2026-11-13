@@ -381,4 +381,39 @@ describe('CLASS A: one choke point projects every delivery (RC-1 and its sibling
     expect(mine.find((d) => d.event === 'contact.merged')?.body.data.mergedContactId).toBe(`${P}c_dup`);
     await db.webhook.delete({ where: { id: wh.id } });
   });
+  it('[WPP-07] RED-BEFORE (round 2, WHP-3): the event record\'s own JSON columns are delivered as read: a store order\'s shipping and billing address that names its recipient keeps its street, city and phone (only a person row is the person view; an address is not one)', async () => {
+    const wh = await db.webhook.create({ data: { id: `${P}wh_ord`, businessId: ID.bizA, name: `${P}orders`, url: 'https://203.0.113.94/v99p-ord', events: ['store_order.created', 'store_order.shipped'], secret: `${P}whsecret_${'e'.repeat(40)}`, isActive: true } });
+    const shippingAddress = { street: '1 Private Lane', city: 'POS', firstName: 'Private', lastName: 'Client', phone: '+18685551234' };
+    const billingAddress = { line1: '2 Billing Road', city: 'San Fernando', firstName: 'Bill', lastName: 'Payer', postalCode: '00000' };
+    const order = { ...(await db.marketplaceOrder.findUnique({ where: { id: ID.order }, include: { items: true } })), shippingAddress, billingAddress, metadata: { giftNote: 'For Private Client', recipient: { firstName: 'Private', lastName: 'Client', phone: '+18685551234' } } };
+    const sent = await capture(async () => {
+      await events.emitAsync('store_order.created', { order, businessId: ID.bizA });
+      await events.emitAsync('store_order.shipped', { order, businessId: ID.bizA });
+    });
+    const mine = sent.filter((s) => s.webhookId === wh.id);
+    expect(mine.map((s) => s.event).sort()).toEqual(['store_order.created', 'store_order.shipped']);
+    for (const d of mine) {
+      expect(d.body.data.order.shippingAddress, d.event).toEqual(shippingAddress);
+      expect(d.body.data.order.billingAddress, d.event).toEqual(billingAddress);
+      expect(d.body.data.order.metadata.giftNote, d.event).toBe('For Private Client');
+      // a person key inside the record is still the person view
+      expect(d.body.data.order.metadata.recipient, d.event).toEqual({ firstName: 'Private', lastName: 'Client' });
+    }
+    await db.webhook.delete({ where: { id: wh.id } });
+  });
+
+  it('[WPP-08] (round 2) a Contact row under a key that is not a person key (read whole, as an include reads it) is still the person view: the Contact-only columns mark it', async () => {
+    const wh = await db.webhook.create({ data: { id: `${P}wh_ord2`, businessId: ID.bizA, name: `${P}orders2`, url: 'https://203.0.113.95/v99p-ord2', events: ['store_order.delivered'], secret: `${P}whsecret_${'f'.repeat(40)}`, isActive: true } });
+    const contact = await db.contact.findUnique({ where: { id: ID.contact } });
+    const order = { ...(await db.marketplaceOrder.findUnique({ where: { id: ID.order } })), buyerRecord: contact, linkedRows: [contact] };
+    const sent = await capture(async () => {
+      await events.emitAsync('store_order.delivered', { order, businessId: ID.bizA });
+    });
+    const mine = sent.filter((s) => s.webhookId === wh.id);
+    expect(mine.length).toBe(1);
+    expect(mine[0].body.data.order.buyerRecord).toEqual({ id: ID.contact, firstName: 'Private', lastName: 'Client', email: `${P}private@client.example` });
+    expect(mine[0].body.data.order.linkedRows).toEqual([{ id: ID.contact, firstName: 'Private', lastName: 'Client', email: `${P}private@client.example` }]);
+    expect(leaksIn(mine[0].body, contactOnlyKeys())).toEqual([]);
+    await db.webhook.delete({ where: { id: wh.id } });
+  });
 });
