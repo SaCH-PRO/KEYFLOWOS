@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 
@@ -7,6 +8,9 @@ MODULE_PATH = Path(__file__).with_name("project_thread_harvester.py")
 spec = importlib.util.spec_from_file_location("project_thread_harvester", MODULE_PATH)
 module = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
+# dataclasses resolves string annotations through sys.modules[cls.__module__];
+# register the module before executing it, or collection fails.
+sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 
 
