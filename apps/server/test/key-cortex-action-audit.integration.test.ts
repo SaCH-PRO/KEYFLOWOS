@@ -152,7 +152,9 @@
  * W11-KEY-CHAT-SESSION-BIND turned the SEC-W11MC-1 residual it.todo live: over the WS gateway (REAL database and
  * the REAL Redis session cache at REDIS_URL), a member's key:chat naming another member's session, or a session of
  * another business, runs on a new session of the member's own, with neither session's running summary nor its
- * messages in the prompt, and the socket receives what it receives for an id that names no session.
+ * messages in the prompt, and the socket receives what it receives for an id that names no session. Its review
+ * (SEC-W11KCSB-2) adds the business half of that rule: the member's OWN session of another business the member
+ * belongs to is refused on a socket of this business alike (and honoured on a socket of its own business).
  *
  * Every seeded row carries the `v19c_` prefix (business, user, session,
  * command and correlation ids) and is hard-deleted by raw SQL with
@@ -1692,7 +1694,7 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
 
   /**
    * W11-KEY-CHAT-SESSION-BIND: KeyCortexGateway as the app wires key:chat, over a socket of ID.member (a STAFF
-   * member of ID.memBiz). REAL: the gateway (handleConnection, the live re-check, handleChat),
+   * member of ID.memBiz and of ID.toolBiz) connected to `businessId` (ID.memBiz unless named). REAL: the gateway (handleConnection, the live re-check, handleChat),
    * KeyCortexReasoningService.streamReasoning and the query pipeline (processQuery) behind it,
    * KeyCortexSessionService over the real database and the real Redis at REDIS_URL (the session cache
    * getOrCreateSession reads before the database), KeyCortexPromptContextService (buildMemoryContext and
@@ -1703,7 +1705,7 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
    * collaborators chatTurnFor stands in. `prompts` holds every prompt the provider was handed; `visible` every
    * event the socket received (to the socket, and to its user and business rooms).
    */
-  async function keyChatSocket(redis: Redis) {
+  async function keyChatSocket(redis: Redis, businessId: string = ID.memBiz) {
     const { RedisService } = await import('../src/core/redis/redis.service');
     const { KeyCortexSessionService } = await import('../src/modules/key-cortex/key-cortex-session.service');
     const { KeyCortexGateway } = await import('../src/modules/key-cortex/key-cortex.gateway');
@@ -1718,7 +1720,7 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
     const prompts: Array<Array<{ role: string; content: string }>> = [];
     const sessionService = new KeyCortexSessionService(prisma, new RedisService(redis as any));
     const contextService = {
-      buildContextSnapshot: async () => ({ businessId: ID.memBiz, genomeStage: 'startup', executiveReadiness: 50 }),
+      buildContextSnapshot: async () => ({ businessId, genomeStage: 'startup', executiveReadiness: 50 }),
       formatContextForPrompt: () => '',
     };
     // Positionally, as Nest constructs it: context service, unified memory, learning service, prisma.
@@ -1787,14 +1789,14 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
     (gateway as any).server = { to: (room: string) => ({ emit: (event: string, payload: unknown) => visible.push(['room', room, event, payload]) }) };
     const socket = {
       id: `${P}kcsb_socket`,
-      handshake: { auth: { token: `${P}kcsb_stand_in`, businessId: ID.memBiz }, headers: {}, query: {} },
+      handshake: { auth: { token: `${P}kcsb_stand_in`, businessId }, headers: {}, query: {} },
       join: () => undefined,
       emit: (event: string, payload: unknown) => visible.push(['socket', event, payload]),
       disconnect: vi.fn(),
       to: () => ({ emit: () => undefined }),
     };
     await gateway.handleConnection(socket as any);
-    expect(socket.disconnect, 'the member of ID.memBiz connects').not.toHaveBeenCalled();
+    expect(socket.disconnect, `the member of ${businessId} connects`).not.toHaveBeenCalled();
     expect(visible.map((v) => v[1])).toEqual(['key:connected']);
 
     /** One key:chat turn naming `sessionId`: the prompt the provider was handed, and what the socket received (no timestamps). */
@@ -1817,6 +1819,8 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
     otherBizSession: `${P}sess_kcsb_other_biz`,
     memberSession: `${P}sess_kcsb_member`,
     nowhere: `${P}sess_kcsb_nowhere`,
+    /** Review SEC-W11KCSB-2: ID.member's OWN session, of ID.toolBiz (ID.member is STAFF of ID.memBiz and of ID.toolBiz). */
+    memberOtherBizSession: `${P}sess_kcsb_member_other_biz`,
   };
   const kcsbMessages = (marker: string, n: number) =>
     Array.from({ length: n }, (_, i) => ({
@@ -1952,6 +1956,103 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
       await db.$executeRawUnsafe(`DELETE FROM cortex_sessions WHERE business_id LIKE ${sqlLikePrefix(P)}`);
       await db.$executeRawUnsafe('DELETE FROM memberships WHERE business_id = $1', KCSB.otherBiz);
       await db.$executeRawUnsafe('DELETE FROM businesses WHERE id = $1', KCSB.otherBiz);
+      redis.disconnect();
+    }
+  }, 60_000);
+
+  // W11-KEY-CHAT-SESSION-BIND review SEC-W11KCSB-2: the business half of the session ownership rule on key:chat.
+  // Every foreign session the case above names also belongs to another member, so a rule that compared the member
+  // alone (`session.userId === actorId`) passed it, the gateway spec and every real-database KEY session suite. This
+  // case names the member's OWN session of another business the member belongs to (ID.member is STAFF of ID.memBiz
+  // and of ID.toolBiz): only the business comparison refuses it on a socket of ID.memBiz. Before the packet, its
+  // running summary and messages reached the prompt and the turn was appended to the ID.toolBiz row.
+  it("W11-KEY-CHAT-SESSION-BIND review SEC-W11KCSB-2: over the WS gateway, a member of ID.memBiz and ID.toolBiz on a socket of ID.memBiz naming their own session of ID.toolBiz runs on a new session of their own in ID.memBiz: the prompt holds neither that session's running summary nor its messages, neither its row nor its cached entry is written, and the socket receives exactly what it receives for an id that names no session; read from the database and from the Redis session cache alike. On a socket of ID.toolBiz the same id is honoured", async () => {
+    const redis = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
+    const realFetch = globalThis.fetch;
+    const outbound: string[] = [];
+    globalThis.fetch = (async (input: unknown) => {
+      outbound.push(String(input));
+      throw new Error('v19c: no outbound traffic in this case');
+    }) as typeof fetch;
+    const key = `cortex:session:${KCSB.memberOtherBizSession}`;
+    const sessionKeys = async () =>
+      (await db.cortexSession.findMany({ where: { businessId: { in: [ID.memBiz, ID.toolBiz] } }, select: { id: true } })).map(
+        (s: { id: string }) => `cortex:session:${s.id}`,
+      );
+    try {
+      await db.cortexSession.create({
+        data: {
+          id: KCSB.memberOtherBizSession, businessId: ID.toolBiz, userId: ID.member, status: 'active',
+          runningSummary: 'V19C-KCSB-MEMBER-OTHERBIZ-SUMMARY: the member discussed the other business supplier rota',
+          messages: kcsbMessages('V19C-KCSB-MEMBER-OTHERBIZ', 12),
+        },
+      });
+      await redis.del(key, `cortex:session:${KCSB.nowhere}`);
+      const row = () =>
+        db.cortexSession.findUnique({
+          where: { id: KCSB.memberOtherBizSession },
+          select: { id: true, businessId: true, userId: true, messages: true, runningSummary: true, updatedAt: true, lastAccessedAt: true },
+        });
+      const rowBefore = await row();
+      const membersSessions = (businessId: string) =>
+        db.cortexSession.findMany({
+          where: { businessId, userId: ID.member },
+          select: { id: true, messages: true, runningSummary: true },
+          orderBy: { createdAt: 'asc' },
+        });
+      const memBizBefore = (await membersSessions(ID.memBiz)).length;
+      const leaked = (prompt: Array<{ role: string; content: string }>) =>
+        prompt.map((m) => m.content).filter((c) => c.includes('V19C-KCSB-MEMBER-OTHERBIZ'));
+
+      const onMemBiz = await keyChatSocket(redis);
+      const unknown = await onMemBiz.chat(KCSB.nowhere);
+      expect(sessionPart(unknown.prompt)).toEqual({ summary: [], history: [] });
+
+      for (const where of ['database', 'cache'] as const) {
+        if (where === 'cache') {
+          // As the member's own traffic on ID.toolBiz leaves it (what getOrCreateSession caches: the row).
+          await redis.set(key, JSON.stringify(await db.cortexSession.findUnique({ where: { id: KCSB.memberOtherBizSession } })), 'EX', 600);
+        }
+        const cachedBefore = await redis.get(key);
+        const turn = await onMemBiz.chat(KCSB.memberOtherBizSession);
+        expect(leaked(turn.prompt), where).toEqual([]);
+        expect(sessionPart(turn.prompt), where).toEqual({ summary: [], history: [] });
+        expect(JSON.stringify(turn.received), where).not.toContain('V19C-KCSB');
+        // The socket cannot tell the member's session of another business from an id that names nothing.
+        expect(turn.received, where).toEqual(unknown.received);
+        expect(await row(), `${where}: the ID.toolBiz session is not written`).toEqual(rowBefore);
+        expect(await redis.get(key), `${where}: its cached entry is not rewritten`).toBe(cachedBefore);
+      }
+
+      // Each turn ran on a new session of the member's own in ID.memBiz, holding that turn only; ID.toolBiz got none.
+      const created = (await membersSessions(ID.memBiz)).slice(memBizBefore);
+      expect(created).toHaveLength(3);
+      for (const s of created) {
+        expect((s.messages as Array<{ content: string }>).map((m) => m.content)).toEqual([KCSB_TURN, 'v19c answer']);
+        expect(String(s.runningSummary)).not.toContain('V19C-KCSB');
+      }
+      expect((await membersSessions(ID.toolBiz)).map((s: { id: string }) => s.id)).toEqual([KCSB.memberOtherBizSession]);
+
+      // Positive control: the session IS the member's own, so on a socket of ID.toolBiz it is honoured (its running
+      // summary and its history in the prompt, the turn appended to it).
+      const onToolBiz = await keyChatSocket(redis, ID.toolBiz);
+      const own = await onToolBiz.chat(KCSB.memberOtherBizSession);
+      const ownPart = sessionPart(own.prompt);
+      expect(ownPart.summary.map((m) => m.content).join('\n')).toContain('V19C-KCSB-MEMBER-OTHERBIZ-SUMMARY');
+      const history = ownPart.history.map((m) => m.content);
+      expect(history.length).toBeGreaterThan(0);
+      expect(history).toContain('V19C-KCSB-MEMBER-OTHERBIZ-MSG-11');
+      for (const content of history) expect(content).toMatch(/^V19C-KCSB-MEMBER-OTHERBIZ-MSG-\d+$/);
+      const after = await db.cortexSession.findUnique({ where: { id: KCSB.memberOtherBizSession }, select: { messages: true } });
+      expect((after.messages as Array<{ content: string }>).map((m) => m.content).slice(-2)).toEqual([KCSB_TURN, 'v19c answer']);
+
+      expect(outbound, 'no outbound request').toEqual([]);
+    } finally {
+      globalThis.fetch = realFetch;
+      const keys = await sessionKeys();
+      if (keys.length > 0) await redis.del(...keys);
+      await redis.del(key, `cortex:session:${KCSB.nowhere}`);
+      await db.$executeRawUnsafe(`DELETE FROM cortex_sessions WHERE business_id LIKE ${sqlLikePrefix(P)}`);
       redis.disconnect();
     }
   }, 60_000);

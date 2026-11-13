@@ -908,6 +908,8 @@ describe('W11-KEY-CHAT-SESSION-BIND — key:chat runs only on the member’s own
     sess_mine: { id: 'sess_mine', businessId: 'b1', userId: 'u1', runningSummary: 'my summary', messages: [] },
     sess_teammate: { id: 'sess_teammate', businessId: 'b1', userId: 'u2', runningSummary: 'teammate private', messages: [] },
     sess_other_biz: { id: 'sess_other_biz', businessId: 'b2', userId: 'u3', runningSummary: 'other business private', messages: [] },
+    // Review SEC-W11KCSB-2: the member's OWN session, of another business the member also belongs to.
+    sess_mine_other_biz: { id: 'sess_mine_other_biz', businessId: 'b2', userId: 'u1', runningSummary: 'my other business private', messages: [] },
   };
   let reasoning: any;
   let stores: ReturnType<typeof sessionServiceOver>;
@@ -984,5 +986,33 @@ describe('W11-KEY-CHAT-SESSION-BIND — key:chat runs only on the member’s own
     expect(query.sessionId).toBeUndefined();
     expect(stores.redis.get).not.toHaveBeenCalled();
     expect(stores.prisma.client.cortexSession.findUnique).not.toHaveBeenCalled();
+  });
+
+  // Review SEC-W11KCSB-2: the business half of the rule. Every foreign session above also has another member, so a
+  // rule that compared the member alone passed them all; this one is the member's own session, of another business
+  // the member belongs to, and only the business comparison refuses it on a socket of b1.
+  it("SEC-W11KCSB-2: the member's own session of another business they belong to starts a new session in the socket's business, read from the database and from the cache alike, and the socket receives the same as for an id that names no session; on a socket of that business the same id is honoured", async () => {
+    const socket = await connected();
+    const unknown = await chat(socket, 'sess_nowhere');
+    for (const where of ['database', 'cache'] as const) {
+      if (where === 'cache') {
+        stores.cache.set('cortex:session:sess_mine_other_biz', JSON.stringify(ROWS.sess_mine_other_biz));
+      }
+      const turn = await chat(socket, 'sess_mine_other_biz');
+      expect(turn.query, where).toMatchObject({ userId: 'u1', businessId: 'b1', message: 'hi' });
+      expect(turn.query.sessionId, where).toBeUndefined();
+      expect(turn.received, where).toEqual(unknown.received);
+      expect(JSON.stringify(turn.received), where).not.toMatch(/private|not found/i);
+    }
+    // The check reads; it writes nothing (the entry put in the cache above is the only one).
+    expect(stores.redis.setex).not.toHaveBeenCalled();
+    expect([...stores.cache.keys()]).toEqual(['cortex:session:sess_teammate', 'cortex:session:sess_mine_other_biz']);
+
+    // Positive control: the session is the member's own, so on a socket of its business it is honoured.
+    const b2Socket = fakeSocket('s2', { authToken: 't', businessId: 'b2' });
+    await gateway.handleConnection(b2Socket);
+    expect(b2Socket.disconnect, 'connect control (b2)').not.toHaveBeenCalled();
+    const own = await chat(b2Socket, 'sess_mine_other_biz');
+    expect(own.query).toMatchObject({ userId: 'u1', businessId: 'b2', sessionId: 'sess_mine_other_biz', message: 'hi' });
   });
 });
