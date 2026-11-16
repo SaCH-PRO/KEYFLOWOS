@@ -1006,6 +1006,11 @@
       "prefix": "v63y_",
       "owner": "apps/server/test/provider-outage-connect.integration.test.ts",
       "packet": "V1-63 (W11-PROVIDER-OUTAGE-CONNECT)"
+    },
+    {
+      "prefix": "v62a_",
+      "owner": "apps/server/test/census-hidden.integration.test.ts",
+      "packet": "V1-62 (SWP-CENSUS-HIDDEN)"
     }
   ],
   "pendingRenames": [],

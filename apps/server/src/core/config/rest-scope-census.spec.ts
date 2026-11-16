@@ -99,6 +99,15 @@
  *          SWEEP-P0-FOLLOWUP (WH3-1): a queued outbound delivery (an outbound delivery row) is a send through the channel
  *          connection's account, held to channelRecipients; the channel senders are EXPORT_ACCOUNTS of type
  *          channel_messaging.
+ *   CEN-12 (SWP-CENSUS-HIDDEN, V1-62; D-152) the controllers of the modules v1 hides carry one write gate,
+ *          @HiddenModuleWrites(<module>, <scope>) (core/auth/hidden-module-writes.decorator.ts), as their outermost
+ *          decorator. The route reader applies its rule: every POST, PUT, PATCH or DELETE handler of such a class
+ *          whose chain runs AuthGuard or BusinessGuard requires <scope> at write (unless it declares its own scope)
+ *          and runs ModuleScopeGuard after them. CEN-12a: the pinned controllers carry it, naming a module of
+ *          packages/shared/src/v1-modules.ts and a canonical scope, and no other controller does; CEN-12b: every
+ *          row of those controllers is `applied` (a GET, which the gate does not touch, and a route no member guard
+ *          runs, keep their rows), and a row the gate applied says so; CEN-12c: on controllers built for the check,
+ *          the reader and the real decorator agree handler by handler.
  */
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -122,7 +131,13 @@ interface Route {
   guards: string[];
   scope?: { module: string; minLevel: string };
   body: string;
+  /** CEN-12: the class's @HiddenModuleWrites(<module>, <scope>), and whether this handler's scope came from it. */
+  hidden?: { module: string; scope: string; outermost: boolean };
+  scopedByHidden?: boolean;
 }
+
+/** CEN-12: the guards that make a handler a member route for @HiddenModuleWrites (an OptionalAuthGuard route admits anonymous callers). */
+const HIDDEN_MEMBER_GUARDS = ['AuthGuard', 'BusinessGuard'];
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -164,6 +179,10 @@ function routes(files: Parsed[] = parsed()): Route[] {
       if (!controller) continue;
       const prefix = unquote(args(controller)[0] ?? '');
       const classGuards = classDecorators.filter((d) => name(d) === 'UseGuards').flatMap(args);
+      const hiddenDecorator = classDecorators.find((d) => name(d) === 'HiddenModuleWrites');
+      const hidden = hiddenDecorator
+        ? { module: unquote(args(hiddenDecorator)[0] ?? ''), scope: unquote(args(hiddenDecorator)[1] ?? ''), outermost: classDecorators[0] === hiddenDecorator }
+        : undefined;
       for (const member of node.members) {
         if (!ts.isMethodDeclaration(member)) continue;
         const ds = decorators(member);
@@ -171,14 +190,28 @@ function routes(files: Parsed[] = parsed()): Route[] {
         if (!http) continue;
         const scopeDecorator = ds.find((d) => name(d) === 'RequireModuleScope');
         const scopeArgs = scopeDecorator ? args(scopeDecorator).map(unquote) : [];
+        const verb = HTTP_VERBS[name(http)];
+        let guards = [...classGuards, ...ds.filter((d) => name(d) === 'UseGuards').flatMap(args)];
+        let scope = scopeDecorator ? { module: scopeArgs[0], minLevel: scopeArgs[1] ?? 'read' } : undefined;
+        let scopedByHidden = false;
+        // CEN-12: @HiddenModuleWrites' rule (core/auth/hidden-module-writes.decorator.ts), checked against the real decorator in CEN-12c.
+        if (hidden && WRITE_VERBS.has(verb) && guards.some((g) => HIDDEN_MEMBER_GUARDS.includes(g))) {
+          if (!scope) {
+            scope = { module: hidden.scope, minLevel: 'write' };
+            scopedByHidden = true;
+          }
+          if (!guards.includes('ModuleScopeGuard')) guards = [...guards, 'ModuleScopeGuard'];
+        }
         out.push({
           key: `${node.name.getText(sf)}.${member.name.getText(sf)}`,
           file: relative(SRC, file),
-          verb: HTTP_VERBS[name(http)],
+          verb,
           path: '/' + [prefix, unquote(args(http)[0] ?? '')].filter(Boolean).join('/'),
-          guards: [...classGuards, ...ds.filter((d) => name(d) === 'UseGuards').flatMap(args)],
-          scope: scopeDecorator ? { module: scopeArgs[0], minLevel: scopeArgs[1] ?? 'read' } : undefined,
+          guards,
+          scope,
           body: member.body?.getText(sf) ?? '',
+          hidden,
+          scopedByHidden,
         });
       }
     }
@@ -2832,5 +2865,254 @@ export class Cen11dHunt {
     const hunt = audienceSendCalls([{ file, text: scratch, sf: ts.createSourceFile(file, scratch, ts.ScriptTarget.Latest, true) }]);
     expect(hunt.filter((c) => !c.namesSender && !c.passThrough).map((c) => c.at).sort()).toEqual(['Cen11dHunt.noSender', 'Cen11dHunt.nullSender', 'Cen11dHunt.threeArgs']);
     expect(problems).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+// CEN-12 (SWP-CENSUS-HIDDEN, V1-62; owner ruling D-152): the hidden-module controllers' write gate.
+// ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The controllers of the modules v1 hides, each with its module (packages/shared/src/v1-modules.ts) and the scope
+ * its writes need (the census doc's SWP-CENSUS-HIDDEN section says why each). Removing a controller's gate fails here.
+ */
+const HIDDEN_CONTROLLERS: Record<string, [module: string, scope: string]> = {
+  AccountingController: ['accounting_sync', 'revenue'],
+  AutomationController: ['automations', 'automations'],
+  AutopilotController: ['automations', 'automations'],
+  BusinessAssetsController: ['assets', 'content'],
+  ChangeOrderController: ['projects', 'projects'],
+  CommunicationsController: ['marketing', 'content'],
+  CommunityController: ['community', 'content'],
+  ConnectController: ['connectors', 'settings'],
+  ContentOpsController: ['content', 'content'],
+  ConversionController: ['referrals', 'crm'],
+  CrmSequenceController: ['sequences', 'crm'],
+  DeviceController: ['capture', 'crm'],
+  DocumentsController: ['legal', 'operations'],
+  EducationController: ['community', 'content'],
+  EmailMarketingController: ['marketing', 'content'],
+  EventsController: ['events', 'bookings'],
+  EvidenceController: ['evidence', 'operations'],
+  FlowController: ['automations', 'automations'],
+  FlowSignalController: ['key_flows', 'automations'],
+  GamificationController: ['settings_insights', 'analytics'],
+  GoogleDriveController: ['connectors', 'operations'],
+  GovernanceController: ['governance', 'operations'],
+  HelpdeskController: ['helpdesk', 'operations'],
+  KeystoreAdminController: ['community', 'storefront'],
+  KeystoreController: ['community', 'storefront'],
+  MarketingAiController: ['marketing', 'content'],
+  MarketingController: ['marketing', 'content'],
+  MarketingSyncController: ['marketing', 'content'],
+  MessageIntakeController: ['inbox', 'crm'],
+  OmnichannelController: ['key_inbox', 'crm'],
+  PhoneVoiceController: ['key_voice', 'crm'],
+  PortalController: ['portal', 'crm'],
+  ReceiptController: ['continental_ops', 'revenue'],
+  RetainerController: ['retainers', 'revenue'],
+  ShopifyController: ['connectors', 'settings'],
+  SocialController: ['social', 'content'],
+  SopController: ['operations', 'operations'],
+  SupplierController: ['suppliers', 'storefront'],
+  TaskAssignmentController: ['projects', 'team'],
+  TemporalFlowController: ['flow_hubs', 'bookings'],
+  TimeEntryController: ['time_tracking', 'projects'],
+  VoiceController: ['key_voice', 'ai'],
+};
+
+/** CEN-12c: controllers written for the check, as source (for the reader) and built below with the real decorators. */
+const CEN12_SOURCE = `
+import { Controller, Delete, Get, Patch, Post, Put, UseGuards } from '@nestjs/common';
+
+@HiddenModuleWrites('helpdesk', 'operations')
+@Controller('cen12')
+@UseGuards(AuthGuard)
+export class Cen12MemberController {
+  @Get('businesses/:businessId/a')
+  read() {}
+
+  @Post('businesses/:businessId/b')
+  write() {}
+
+  @UseGuards(BusinessGuard)
+  @Patch('businesses/:businessId/c')
+  patch() {}
+
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
+  @Delete('businesses/:businessId/d')
+  own() {}
+
+  @Put('businesses/:businessId/e')
+  put() {}
+}
+
+@HiddenModuleWrites('social', 'content')
+@Controller('cen12p')
+export class Cen12MixedController {
+  @Post('webhook')
+  hook() {}
+
+  @UseGuards(OptionalAuthGuard)
+  @Post('view')
+  view() {}
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/x')
+  post() {}
+
+  @UseGuards(BusinessGuard, ModuleScopeGuard)
+  @Delete('businesses/:businessId/y')
+  del() {}
+
+  @UseGuards(AuthGuard)
+  @Get('businesses/:businessId/z')
+  get() {}
+}
+
+@HiddenModuleWrites('events', 'bookings')
+@UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+@Controller('cen12g')
+export class Cen12ClassScopeController {
+  @Post('businesses/:businessId/q')
+  q() {}
+
+  @RequireModuleScope('bookings', 'admin')
+  @Patch('businesses/:businessId/r')
+  r() {}
+}
+`;
+
+describe('CEN-12 (SWP-CENSUS-HIDDEN): the hidden-module controllers carry one write gate', () => {
+  const all = routes();
+
+  it('[CEN-12a] each pinned controller carries @HiddenModuleWrites as its outermost decorator, naming a module of v1-modules.ts and a canonical scope; no other controller carries it', async () => {
+    const { V1_HIDDEN_MODULE_KEYS } = await import('../../../../../packages/shared/src/v1-modules');
+    const { CANONICAL_MODULES } = await import('../authority/module-vocabulary');
+    const problems: string[] = [];
+    const carriers = new Map<string, NonNullable<Route['hidden']>>();
+    for (const r of all) if (r.hidden) carriers.set(r.key.split('.')[0], r.hidden);
+    for (const [cls, [module, scope]] of Object.entries(HIDDEN_CONTROLLERS)) {
+      const h = carriers.get(cls);
+      if (!h) { problems.push(`${cls} carries no @HiddenModuleWrites('${module}', '${scope}')`); continue; }
+      if (h.module !== module || h.scope !== scope) problems.push(`${cls} carries @HiddenModuleWrites('${h.module}', '${h.scope}'), not ('${module}', '${scope}')`);
+      if (!h.outermost) problems.push(`${cls}: @HiddenModuleWrites is not its outermost decorator (it must run after @Controller and @UseGuards)`);
+      if (!(V1_HIDDEN_MODULE_KEYS as readonly string[]).includes(h.module)) problems.push(`${cls}: '${h.module}' is not a module of packages/shared/src/v1-modules.ts`);
+      if (!(CANONICAL_MODULES as readonly string[]).includes(h.scope)) problems.push(`${cls}: '${h.scope}' is not a canonical permission scope`);
+    }
+    for (const cls of carriers.keys()) if (!Object.hasOwn(HIDDEN_CONTROLLERS, cls)) problems.push(`${cls} carries @HiddenModuleWrites but is not pinned in HIDDEN_CONTROLLERS`);
+    expect(problems).toEqual([]);
+    // guards the guard: the reader sees both kinds of handler of a gated class
+    const byKey = new Map(all.map((r) => [r.key, r]));
+    expect(byKey.get('HelpdeskController.createTicket')?.scopedByHidden).toBe(true);
+    expect(byKey.get('ShopifyController.connect')?.scopedByHidden).toBe(false);
+  });
+
+  it('[CEN-12b] every census row of a gated controller is applied, except a GET (the gate leaves reads alone) and a route no member guard runs; a row the gate applied names it', () => {
+    const byKey = new Map(all.map((r) => [r.key, r]));
+    const problems: string[] = [];
+    let applied = 0;
+    for (const row of censusRows()) {
+      const cls = row.key.split('.')[0];
+      if (!Object.hasOwn(HIDDEN_CONTROLLERS, cls)) continue;
+      const r = byKey.get(row.key);
+      if (!r) continue; // CEN-03 reports it
+      if (row.disposition === 'applied') {
+        applied++;
+        if (r.scopedByHidden && !/HiddenModuleWrites/.test(row.reason)) problems.push(`line ${row.line}: ${row.key} is gated by @HiddenModuleWrites and its reason does not say so`);
+        continue;
+      }
+      const memberRoute = r.guards.some((g) => HIDDEN_MEMBER_GUARDS.includes(g));
+      if (r.verb === 'GET' || !memberRoute) continue;
+      problems.push(`line ${row.line}: ${row.key} (${r.verb} ${r.path}) is ${row.disposition}: a member write of a hidden-module controller is applied`);
+    }
+    expect(problems).toEqual([]);
+    expect(applied).toBeGreaterThan(300);
+  });
+
+  it('[CEN-12c] the reader applies the real decorator\'s rule: on controllers built for the check they agree on every handler\'s guards and scope, and the decorator refuses to run before @Controller or with a scope that is not canonical', async () => {
+    await import('reflect-metadata');
+    const { HiddenModuleWrites } = await import('../auth/hidden-module-writes.decorator');
+    const { Controller, Delete, Get, Patch, Post, Put, UseGuards, RequestMethod } = await import('@nestjs/common');
+    const { GUARDS_METADATA, METHOD_METADATA, PATH_METADATA } = await import('@nestjs/common/constants');
+    const { AuthGuard } = await import('../auth/auth.guard');
+    const { OptionalAuthGuard } = await import('../auth/optional-auth.guard');
+    const { BusinessGuard } = await import('../auth/business.guard');
+    const { ModuleScopeGuard, RequireModuleScope, MODULE_SCOPE_KEY } = await import('../auth/module-scope.guard');
+
+    type Dec = ClassDecorator | MethodDecorator;
+    const build = (name: string, classDecs: Dec[], methods: Array<[string, Dec[]]>) => {
+      const cls = { [name]: class {} }[name] as any;
+      for (const [m, decs] of methods) {
+        Object.defineProperty(cls.prototype, m, { value: function handler() {}, writable: true, configurable: true });
+        const out = Reflect.decorate(decs as MethodDecorator[], cls.prototype, m, Object.getOwnPropertyDescriptor(cls.prototype, m)!);
+        if (out) Object.defineProperty(cls.prototype, m, out);
+      }
+      return Reflect.decorate(classDecs as ClassDecorator[], cls) as any;
+    };
+    const built = [
+      build('Cen12MemberController', [HiddenModuleWrites('helpdesk', 'operations'), Controller('cen12'), UseGuards(AuthGuard)], [
+        ['read', [Get('businesses/:businessId/a')]],
+        ['write', [Post('businesses/:businessId/b')]],
+        ['patch', [UseGuards(BusinessGuard), Patch('businesses/:businessId/c')]],
+        ['own', [UseGuards(ModuleScopeGuard), RequireModuleScope('settings', 'admin'), Delete('businesses/:businessId/d')]],
+        ['put', [Put('businesses/:businessId/e')]],
+      ]),
+      build('Cen12MixedController', [HiddenModuleWrites('social', 'content'), Controller('cen12p')], [
+        ['hook', [Post('webhook')]],
+        ['view', [UseGuards(OptionalAuthGuard), Post('view')]],
+        ['post', [UseGuards(AuthGuard, BusinessGuard), Post('businesses/:businessId/x')]],
+        ['del', [UseGuards(BusinessGuard, ModuleScopeGuard), Delete('businesses/:businessId/y')]],
+        ['get', [UseGuards(AuthGuard), Get('businesses/:businessId/z')]],
+      ]),
+      build('Cen12ClassScopeController', [HiddenModuleWrites('events', 'bookings'), UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard), Controller('cen12g')], [
+        ['q', [Post('businesses/:businessId/q')]],
+        ['r', [RequireModuleScope('bookings', 'admin'), Patch('businesses/:businessId/r')]],
+      ]),
+    ];
+    const runtime = built.flatMap((cls) => {
+      const classGuards: any[] = Reflect.getMetadata(GUARDS_METADATA, cls) ?? [];
+      return Object.getOwnPropertyNames(cls.prototype)
+        .filter((m) => m !== 'constructor' && Reflect.getMetadata(PATH_METADATA, cls.prototype[m]) !== undefined)
+        .map((m) => {
+          const fn = cls.prototype[m];
+          const scope = Reflect.getMetadata(MODULE_SCOPE_KEY, fn);
+          return {
+            key: `${cls.name}.${m}`,
+            verb: RequestMethod[Reflect.getMetadata(METHOD_METADATA, fn)],
+            guards: [...classGuards, ...(Reflect.getMetadata(GUARDS_METADATA, fn) ?? [])].map((g: any) => g.name),
+            scope: scope ? `${scope.module}:${scope.minLevel}` : 'none',
+          };
+        });
+    });
+    const file = join(SRC, 'modules/cen12-hunt/cen12-hunt.controller.ts');
+    const statik = routes([{ file, text: CEN12_SOURCE, sf: ts.createSourceFile(file, CEN12_SOURCE, ts.ScriptTarget.Latest, true) }]).map((r) => ({
+      key: r.key,
+      verb: r.verb,
+      guards: r.guards,
+      scope: r.scope ? `${r.scope.module}:${r.scope.minLevel}` : 'none',
+    }));
+    const byKey = (xs: Array<{ key: string }>) => [...xs].sort((a, b) => a.key.localeCompare(b.key));
+    expect(byKey(statik)).toEqual(byKey(runtime));
+    // guards the guard: what the rule does on these controllers
+    const scopes = Object.fromEntries(runtime.map((r) => [r.key, `${r.scope} ${r.guards.join('>')}`]));
+    expect(scopes).toEqual({
+      'Cen12MemberController.read': 'none AuthGuard',
+      'Cen12MemberController.write': 'operations:write AuthGuard>ModuleScopeGuard',
+      'Cen12MemberController.patch': 'operations:write AuthGuard>BusinessGuard>ModuleScopeGuard',
+      'Cen12MemberController.own': 'settings:admin AuthGuard>ModuleScopeGuard',
+      'Cen12MemberController.put': 'operations:write AuthGuard>ModuleScopeGuard',
+      'Cen12MixedController.hook': 'none ',
+      'Cen12MixedController.view': 'none OptionalAuthGuard',
+      'Cen12MixedController.post': 'content:write AuthGuard>BusinessGuard>ModuleScopeGuard',
+      'Cen12MixedController.del': 'content:write BusinessGuard>ModuleScopeGuard',
+      'Cen12MixedController.get': 'none AuthGuard',
+      'Cen12ClassScopeController.q': 'bookings:write AuthGuard>BusinessGuard>ModuleScopeGuard',
+      'Cen12ClassScopeController.r': 'bookings:admin AuthGuard>BusinessGuard>ModuleScopeGuard',
+    });
+    // it refuses to read a class before @Controller has recorded it, and a scope that is not canonical
+    expect(() => build('Cen12Inner', [Controller('x'), HiddenModuleWrites('helpdesk', 'operations')], [['w', [Post('businesses/:businessId/w')]]])).toThrow(/outermost/);
+    expect(() => HiddenModuleWrites('helpdesk', 'helpdesk' as any)).toThrow(/not a permission scope/);
   });
 });
