@@ -16,7 +16,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import type { ContactInsightSnapshot, ContactRevenueSummary } from "@/lib/client";
-import { buildWhatsAppLink } from "@/lib/whatsapp";
+import { buildWhatsAppLink, ownBusinessCountry } from "@/lib/whatsapp";
 import { useCompose } from "@/components/email/compose-context";
 
 interface ContactInsightCardProps {
@@ -167,7 +167,7 @@ export function ContactInsightCard({
         case "send_whatsapp": {
           const phone = contact.whatsappNumber ?? contact.phone ?? "";
           if (phone) {
-            const link = buildWhatsAppLink(phone, action.prefill?.message ?? "");
+            const link = buildWhatsAppLink({ to: phone, text: action.prefill?.message ?? "", country: ownBusinessCountry() });
             window.open(link, "_blank", "noopener,noreferrer");
           } else {
             await onAddTask?.(action.prefill?.taskTitle ?? action.label, {

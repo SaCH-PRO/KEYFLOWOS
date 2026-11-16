@@ -72,6 +72,7 @@ import {
   User,
   Receipt,
 } from "lucide-react";
+import { buildWhatsAppLink } from "@/lib/whatsapp";
 
 type Business = {
   id: string;
@@ -1451,7 +1452,7 @@ function TokenPaymentPageInner() {
             )}
             {business.whatsapp && (
               <a
-                href={`https://wa.me/${business.whatsapp.replace(/\D/g, "")}`}
+                href={buildWhatsAppLink({ to: business.whatsapp, country: business.country })}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-8 h-8 rounded-full flex items-center justify-center bg-white/[0.04] border border-white/[0.08] hover:bg-white/[0.08] transition-colors"

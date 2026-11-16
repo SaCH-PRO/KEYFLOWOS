@@ -23,7 +23,7 @@ import {
   ListTodo,
   Zap,
 } from "lucide-react";
-import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
+import { buildWhatsAppLink, getContactPhone, ownBusinessCountry } from "@/lib/whatsapp";
 import type { ContactDetailData, DetailQuickAction } from "./contact-detail";
 import { DataQualityBadge } from "./data-quality-badge";
 import { ContactAvatar } from "./contact-avatar";
@@ -463,7 +463,7 @@ export function ContactDetailHeader({
           )}
           {waPhone ? (
             <a
-              href={buildWhatsAppLink(waPhone, `Hi ${contact.firstName || ""},`)}
+              href={buildWhatsAppLink({ to: waPhone, text: `Hi ${contact.firstName || ""},`, country: ownBusinessCountry() })}
               target="_blank"
               rel="noopener noreferrer"
               className={`${channelStyles("whatsapp", primaryChannel === "whatsapp")} hover:bg-emerald-500/10 ${primaryChannel === "whatsapp" ? `bg-emerald-500/5 ${channelRingColor("whatsapp")}` : ""}`}

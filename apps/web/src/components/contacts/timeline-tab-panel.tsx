@@ -38,7 +38,7 @@ import {
   Star,
   UserPlus,
 } from "lucide-react";
-import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
+import { buildWhatsAppLink, getContactPhone, ownBusinessCountry } from "@/lib/whatsapp";
 import type { ContactDetailData, ContactEvent, ContactNote, ContactTask } from "./contact-detail";
 import { fetchCrossModuleLinks, type CrossJourneyResponse, type CrossModuleLinks } from "@/lib/client";
 import {
@@ -251,7 +251,7 @@ export function TimelineTabPanel({
 
   const handleShareWa = (text: string) => {
     if (!waPhone) return;
-    window.open(buildWhatsAppLink(waPhone, text), "_blank");
+    window.open(buildWhatsAppLink({ to: waPhone, text, country: ownBusinessCountry() }), "_blank");
   };
 
   const entries = useMemo<UnifiedEntry[]>(() => {

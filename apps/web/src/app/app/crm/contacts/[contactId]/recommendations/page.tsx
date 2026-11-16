@@ -11,7 +11,7 @@ import {
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { useCompose } from "@/components/email/compose-context";
-import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
+import { buildWhatsAppLink, getContactPhone, ownBusinessCountry } from "@/lib/whatsapp";
 import { Card, Button } from "@keyflow/ui";
 import {
   Lightbulb,
@@ -110,7 +110,7 @@ export default function ContactRecommendationsPage() {
           case "send_whatsapp":
             action = () => {
               if (!phone) { toast.error("No phone number available"); return; }
-              window.open(buildWhatsAppLink(phone, sa.prefill?.message ?? ""), "_blank", "noopener,noreferrer");
+              window.open(buildWhatsAppLink({ to: phone, text: sa.prefill?.message ?? "", country: ownBusinessCountry() }), "_blank", "noopener,noreferrer");
             };
             break;
           case "schedule_call":

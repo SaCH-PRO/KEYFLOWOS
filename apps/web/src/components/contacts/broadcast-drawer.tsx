@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence, type PanInfo } from "framer-motion";
 import { X, MessageCircle, Send, Copy, Check, AlertCircle } from "lucide-react";
-import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
+import { buildWhatsAppLink, getContactPhone, ownBusinessCountry } from "@/lib/whatsapp";
 import type { ContactCardData } from "./contact-card";
 
 const BROADCAST_TEMPLATES = [
@@ -40,7 +40,7 @@ export function BroadcastDrawer({ isOpen, onClose, selectedContacts, onDeselectA
       const phone = getContactPhone(contact);
       if (!phone) continue;
       const personalMessage = message.replace(/\{name\}/g, contact.firstName || "there");
-      window.open(buildWhatsAppLink(phone, personalMessage), "_blank");
+      window.open(buildWhatsAppLink({ to: phone, text: personalMessage, country: ownBusinessCountry() }), "_blank");
       await new Promise((r) => setTimeout(r, 800));
     }
 

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Phone, Mail, MapPin, MessageCircle, Send } from "lucide-react";
 import type { Business } from "./types";
+import { buildWhatsAppLink } from "@/lib/whatsapp";
 
 type Props = {
   business: Business;
@@ -43,9 +44,8 @@ export function ContactSection({
 
   if (!hasContact) return null;
 
-  const waPhone = business.whatsapp?.replace(/[^0-9+]/g, "").replace(/^\+/, "") || "";
   const waLink = business.whatsapp
-    ? `https://wa.me/${waPhone}?text=${encodeURIComponent(`Hi ${business.name}, I'd like to get in touch.`)}`
+    ? buildWhatsAppLink({ to: business.whatsapp, text: `Hi ${business.name}, I'd like to get in touch.`, country: business.country })
     : null;
 
   return (

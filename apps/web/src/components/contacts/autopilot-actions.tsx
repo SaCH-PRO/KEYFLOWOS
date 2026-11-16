@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { generateAutopilotDraft, executeAutopilotAction } from "@/lib/client";
 import type { AutopilotDraft } from "@/lib/client";
+import { buildWhatsAppLink, ownBusinessCountry } from "@/lib/whatsapp";
 
 export interface AutopilotAction {
   id: string;
@@ -194,9 +195,7 @@ const ApprovalCard = React.memo(function ApprovalCard({
   const handleSendWhatsApp = useCallback(async () => {
     if (!draft) return;
     setSending(true);
-    const phone = (action.contactPhone || "").replace(/[^0-9+]/g, "");
-    const text = encodeURIComponent(draft.message);
-    window.open(`https://wa.me/${phone}?text=${text}`, "_blank");
+    window.open(buildWhatsAppLink({ to: action.contactPhone, text: draft.message, country: ownBusinessCountry() }), "_blank");
     onExecute(action, "whatsapp", draft.message);
     setSending(false);
     setDone(true);

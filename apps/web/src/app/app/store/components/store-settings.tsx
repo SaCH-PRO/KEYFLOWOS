@@ -14,6 +14,7 @@ import {
 import { apiGet } from "@/lib/api";
 import QRCode from "qrcode";
 import Image from "next/image";
+import { buildWhatsAppLink } from "@/lib/whatsapp";
 
 type Props = {
   businessId: string;
@@ -80,8 +81,7 @@ export function StoreSettings({
 
   const handleWhatsAppShare = useCallback(() => {
     if (!publicUrl) return;
-    const text = encodeURIComponent(`Check out my online store! Book services and shop here: ${publicUrl}`);
-    window.open(`https://wa.me/?text=${text}`, "_blank");
+    window.open(buildWhatsAppLink({ text: "Check out my online store! Book services and shop here:", link: publicUrl }), "_blank");
   }, [publicUrl]);
 
   const downloadQr = useCallback(() => {

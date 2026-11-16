@@ -44,6 +44,7 @@ import { apiDelete } from "@/lib/api";
 import { invoiceBalanceOfStoredRows, invoicePaidPercent } from "@keyflow/shared";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { useCompose } from "@/components/email/compose-context";
+import { buildWhatsAppLink, ownBusinessCountry, readSavedWhatsAppNumber } from "@/lib/whatsapp";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { formatAmount, getDaysUntilDue } from "../utils/commerce-utils";
 import { INVOICE_STATUS_FILTERS, BILLING_SORT_OPTIONS, BillingSortKey } from "../components/commerce-types";
@@ -232,6 +233,15 @@ export default function InvoicesHubPage() {
     return null;
   };
 
+  // The share carries the invoice's bearer link: only the WhatsApp number the business saved
+  // (read by id alongside the link, not from the loaded list), else the chooser.
+  const shareWhatsApp = async (inv: Invoice) => {
+    const savedNumber = readSavedWhatsAppNumber(businessId, inv.contactId);
+    const url = await buildPublicUrl(inv);
+    if (!url) return;
+    window.open(buildWhatsAppLink({ to: await savedNumber, text: "Your invoice:", link: url, country: ownBusinessCountry() }), "_blank");
+  };
+
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="max-w-6xl mx-auto pb-12">
       {/* Header */}
@@ -366,7 +376,7 @@ export default function InvoicesHubPage() {
                                 <DropdownItem icon={CheckCircle2} label="Mark paid" onClick={() => handleMarkPaid(inv.id)} show={inv.status === "DRAFT" || inv.status === "SENT"} loading={actionLoading[inv.id] === "paid"} />
                                 <DropdownItem icon={Receipt} label="Resend receipt" onClick={() => resendInvoiceReceipt(businessId!, inv.id, {}).then(r => r.data?.success ? toast.success("Resent") : toast.error(r.error ?? "Failed"))} show={!!(inv.status === "PAID" && gmailStatus?.connected)} />
                                 <DropdownItem icon={Files} label="Duplicate" onClick={() => handleDuplicate(inv)} show />
-                                <DropdownItem icon={MessageCircle} label="Share WhatsApp" onClick={() => buildPublicUrl(inv).then(url => { if (url) window.open(`https://wa.me/?text=${encodeURIComponent(`Your invoice: ${url}`)}`, "_blank"); })} show />
+                                <DropdownItem icon={MessageCircle} label="Share WhatsApp" onClick={() => { void shareWhatsApp(inv); }} show />
                                 <DropdownItem icon={Ban} label="Void" onClick={() => handleVoid(inv.id)} show={inv.status !== "VOID" && inv.status !== "PAID"} loading={actionLoading[inv.id] === "void"} />
                                 <div className="border-t border-border my-1" />
                                 <DropdownItem icon={Trash2} label="Delete" destructive onClick={() => handleDelete(inv.id)} show={inv.status === "DRAFT" || inv.status === "VOID"} />

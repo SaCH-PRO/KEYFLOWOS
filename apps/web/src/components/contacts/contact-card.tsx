@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import React from "react";
 import { motion } from "framer-motion";
 import { Phone, Tag, Trash2, MessageCircle, MoreHorizontal, Receipt, Calendar, FileSignature, TrendingUp, Clock, AlertCircle, DollarSign, UserPlus } from "lucide-react";
-import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
+import { buildWhatsAppLink, getContactPhone, ownBusinessCountry } from "@/lib/whatsapp";
 import { relativeTime, getScoreStyle } from "@/lib/crm-utils";
 import { ContactAvatar } from "./contact-avatar";
 
@@ -232,7 +232,7 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
           )}
           {waPhone && (
             <a
-              href={buildWhatsAppLink(waPhone, `Hi ${contact.firstName || ""}, `)}
+              href={buildWhatsAppLink({ to: waPhone, text: `Hi ${contact.firstName || ""}, `, country: ownBusinessCountry() })}
               target="_blank"
               rel="noopener noreferrer"
               onClick={(e) => e.stopPropagation()}

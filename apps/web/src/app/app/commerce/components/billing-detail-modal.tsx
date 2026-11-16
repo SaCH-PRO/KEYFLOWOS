@@ -40,6 +40,7 @@ import { DetailAIActions } from "./detail-parts/detail-ai-actions";
 import { DetailLineItems } from "./detail-parts/detail-line-items";
 import { DetailNotes } from "./detail-parts/detail-notes";
 import { DetailViewPrint } from "./detail-parts/detail-view-print";
+import { buildWhatsAppLink, ownBusinessCountry, readSavedWhatsAppNumber, toE164 } from "@/lib/whatsapp";
 
 export interface BusinessDataForPreview {
   name: string;
@@ -73,6 +74,12 @@ interface BillingDetailModalProps {
     phone?: string | null;
   } | null;
   contactId?: string | null;
+  /**
+   * The business the document belongs to. With `contactId` the panel reads the
+   * customer by id for their WhatsApp number: the operator invoice and quote
+   * reads serve no phone (OPERATOR_*_CONTACT_SELECT).
+   */
+  businessId?: string | null;
   total: number;
   currency: string;
   items: Array<{
@@ -208,6 +215,7 @@ export function BillingDetailModal({
   lifecycleStep,
   contact,
   contactId,
+  businessId,
   total,
   currency,
   items,
@@ -241,6 +249,27 @@ export function BillingDetailModal({
   const printTemplateRef = useRef<HTMLDivElement>(null);
   const dialogId = `billing-detail-${type}-${number}`;
   const [showTemplatePreview, setShowTemplatePreview] = useState(false);
+
+  // The customer's WhatsApp, as the quote and invoice shares open it: the
+  // number the business saved on the contact, read by id (a phone alone may
+  // have come from a public form; it is not offered on a document).
+  // Keyed by the customer it was read for, so another document's customer never shows a stale number.
+  const customerKey = `${businessId ?? ""}/${contactId ?? ""}`;
+  const [savedRead, setSavedRead] = useState<{ key: string; number: string | null } | null>(null);
+  useEffect(() => {
+    let live = true;
+    void readSavedWhatsAppNumber(businessId, contactId).then((number) => {
+      if (live) setSavedRead({ key: customerKey, number });
+    });
+    return () => {
+      live = false;
+    };
+  }, [businessId, contactId, customerKey]);
+  const savedWhatsApp = savedRead?.key === customerKey ? savedRead.number : null;
+  const whatsAppCountry = ownBusinessCountry();
+  const whatsAppHref = savedWhatsApp && toE164(savedWhatsApp, whatsAppCountry)
+    ? buildWhatsAppLink({ to: savedWhatsApp, country: whatsAppCountry })
+    : null;
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -479,11 +508,11 @@ export function BillingDetailModal({
                       </a>
                     </>
                   )}
-                  {contact.phone && (
+                  {whatsAppHref && (
                     <>
                       <div className="w-px h-5 bg-border/30" />
                       <a
-                        href={`https://wa.me/${contact.phone.replace(/\D/g, "")}`}
+                        href={whatsAppHref}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex-1 flex items-center justify-center gap-1.5 py-2.5 hover:bg-emerald-500/10 transition-colors text-xs text-emerald-400"

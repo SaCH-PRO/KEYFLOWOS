@@ -34,6 +34,7 @@ import { loadCart, saveCart, typeBadge } from "../../components/utils";
 import { CartDrawer } from "../../components/cart-drawer";
 import { Breadcrumbs } from "../../components/category-nav";
 import { ProductSchema, BreadcrumbListSchema } from "../../components/structured-data";
+import { buildWhatsAppLink } from "@/lib/whatsapp";
 
 export default function ProductDetailPage() {
   const params = useParams();
@@ -247,10 +248,8 @@ export default function ProductDetailPage() {
 
   const itemColor = item.itemType === "service" ? primaryColor : item.itemType === "product" ? secondaryColor : accentColor;
   const badge = typeBadge(item.itemType, primaryColor, secondaryColor, accentColor);
-  const cleanPhone = business.whatsapp?.replace(/[^0-9+]/g, "").replace(/^\+/, "") || "";
-  const waPhone = cleanPhone.startsWith("1") || cleanPhone.length > 10 ? cleanPhone : `1868${cleanPhone}`;
   const waLink = business.whatsapp
-    ? `https://wa.me/${waPhone}?text=${encodeURIComponent(`Hi, I'm interested in ${item.name}`)}`
+    ? buildWhatsAppLink({ to: business.whatsapp, text: `Hi, I'm interested in ${item.name}`, country: business.country })
     : null;
 
   const deliveryInfo = item.itemType === "service"

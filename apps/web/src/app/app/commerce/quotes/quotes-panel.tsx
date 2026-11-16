@@ -80,6 +80,7 @@ import { useCompose } from "@/components/email/compose-context";
 import { quoteConvertDefaults, quoteConvertRequest, type QuoteConvertForm } from "../../finance/components/quote-convert-modal";
 import { newPaymentAttemptKey } from "../../finance/components/payment-record-modal";
 import { ArrowRightLeft, Eye } from "lucide-react";
+import { buildWhatsAppLink, ownBusinessCountry, readSavedWhatsAppNumber } from "@/lib/whatsapp";
 
 type QuoteBulkAction = "send" | "reject" | "delete";
 /** One row the bulk route left as it is (V1-50 / V1-QUOTE-CHAIN-finish bulk contract). */
@@ -705,6 +706,8 @@ export default function QuotesPanel({
   }
 
   async function shareQuoteViaWhatsApp(quote: Quote) {
+    // The customer's number, read by id alongside the link (not from the loaded list).
+    const savedNumber = readSavedWhatsAppNumber(businessId, quote.contactId);
     const { url, forbidden, error } = await fetchQuoteLink(quote);
     if (!url) {
       const shareable = quote.status !== "DRAFT" && !quote.invoiceId;
@@ -716,7 +719,12 @@ export default function QuotesPanel({
         description: "Sharing the customer link needs revenue write access.",
       });
     }
-    window.open(`https://wa.me/?text=${encodeURIComponent(shareMessage(quote, url))}`, "_blank", "noopener,noreferrer");
+    // The share carries the quote's bearer link: only the WhatsApp number the business saved, else the chooser.
+    window.open(
+      buildWhatsAppLink({ to: await savedNumber, text: shareMessage(quote, url), country: ownBusinessCountry() }),
+      "_blank",
+      "noopener,noreferrer",
+    );
   }
 
   async function handleConvert() {
@@ -1337,6 +1345,7 @@ export default function QuotesPanel({
             lifecycleStep={selectedQuote.lifecycleStep}
             contact={selectedQuote.contact ?? null}
             contactId={selectedQuote.contactId}
+            businessId={businessId}
             total={Number(selectedQuote.total)}
             currency={selectedQuote.currency}
             items={(selectedQuote.items ?? []) as Array<{ id?: string; description?: string | null; quantity?: number; unitPrice?: number; total?: number; productId?: string | null }>}
