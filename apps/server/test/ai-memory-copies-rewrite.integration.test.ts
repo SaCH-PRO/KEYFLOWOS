@@ -40,6 +40,25 @@
  * controllers' collaborators for routes no case calls. globalThis.fetch is a tap that refuses and records every
  * outbound request: none is made.
  *
+ * Review repair (FU-MEMORY-COPIES-REWRITE review, all minor):
+ *   - COR-V71I-1 (V71I-10): a second rewrite that lands while the first one's re-copy is being embedded finds no copy to
+ *     drop and starts no re-copy, and the first re-copy is refused (the row holds another value): the row was left with
+ *     no copy. The re-copy now copies what the row holds when its insert is refused.
+ *   - COR-V71I-3 (V71I-06, V71I-15): every writer through the door re-copies a row it rewrote, not only
+ *     AiMemoryService.upsert (the consolidation's promotion, KEY's self-tuning, the proactive suggestions).
+ *   - COR-V71I-4 (V71I-11): the re-copy runs after the rewrite answers; the answer does not wait on the embedding
+ *     provider. KEY's writer indexing a row whose re-copy is in flight waits for it and adds no duplicate.
+ *   - SEC-FUMCR-1, SEC-FUMCR-2, COR-V71I-2 (V71I-12, V71I-13, V71I-14): a settings row (ModelGatewayService's
+ *     ai_preferences, holding the BYOK provider keys as ciphertext; its routing table; the governance autonomy
+ *     settings) is configuration, not memory. No member reads it through the AI memory routes or KEY's memory block,
+ *     no copy of it is made (the backfill does not send it to the embedding provider), none made before is served, and
+ *     the cleanup command deletes those (reason settings_row). Its writers stay outside the door (V71I-09): with no
+ *     copy, a rotation of the owner's key leaves nothing of the old ciphertext in ai_memory_embeddings.
+ *   - The harness: V71I-05's lock waits are the ones its own transactions block (pg_blocking_pids), not any statement
+ *     of the database waiting on a lock (a parallel suite's DELETE on ai_memory_embeddings satisfied the old check and
+ *     let the held backfill write before the rewrite: 'the held backfill wrote nothing: expected 1 to be +0'); every
+ *     case waits for the re-copies to finish (settle) before it reads the copies.
+ *
  * Every seeded row carries the `v71i_` prefix (users, businesses, memory keys, cognition functions, copy ids) and is
  * hard-deleted by raw SQL with sqlLikePrefix() in beforeAll and afterAll; ai_memory_embeddings rows go with their
  * business. The cleanup command is only ever applied with --business=<a v71i_ business>.
@@ -48,6 +67,7 @@ import 'reflect-metadata';
 import path from 'path';
 import { spawn } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'fs';
+import { randomBytes } from 'node:crypto';
 import * as ts from 'typescript';
 import { config as loadEnv } from 'dotenv';
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
@@ -164,6 +184,16 @@ function hold(match: string) {
   };
 }
 
+/**
+ * Waits for the re-copies the rewrites so far started (review COR-V71I-4: a rewrite answers before its re-copy has
+ * run; SemanticMemoryService.recopiesSettled). Before the review repair the re-copy ran inside the rewrite, so there
+ * is nothing to wait for; V71I-11 asserts the method exists.
+ */
+async function settle(semantic: unknown): Promise<void> {
+  const settled = (semantic as { recopiesSettled?: () => Promise<void> }).recopiesSettled;
+  if (typeof settled === 'function') await settled.call(semantic);
+}
+
 /** The embedding path: on (the stand-in provider), off for want of an OpenAI key, or off by KEY_DISABLED. */
 type EmbeddingPath = 'on' | 'no_key' | 'key_disabled';
 const PATH_ENV = ['AI_INTEGRATIONS_OPENAI_API_KEY', 'OPENAI_API_KEY', 'KEY_DISABLED'] as const;
@@ -224,7 +254,8 @@ async function memoryApp() {
   // the blueprint serve other methods.
   const memory = new (AiMemoryService as any)(prisma, {} as any, {} as any, semantic);
   const writer = new UnifiedMemoryWriterService(memory, semantic);
-  const suggestions = new ProactiveSuggestionService(prisma, {} as any, {} as any, new EventEmitter2());
+  // Positionally, as Nest constructs it (the re-copier last, as AiModule provides it).
+  const suggestions = new (ProactiveSuggestionService as any)(prisma, {} as any, {} as any, new EventEmitter2(), semantic);
 
   const OFF_ROUTE = new Set([
     // AiController's collaborators no case calls.
@@ -287,6 +318,13 @@ async function memoryApp() {
       expect(res.status, JSON.stringify(res.body)).toBe(200);
       return (res.body.memories as Array<{ value: string }>).map((m) => m.value).join('\n');
     },
+    /** GET /ai/businesses/:id/ai/memory[?category=]: the rows the route answers that member. */
+    memoryRows: async (userId: string, category?: string, businessId = ID.biz) => {
+      const req = request(server).get(`/ai/businesses/${businessId}/ai/memory`).set('x-v71i-user', userId);
+      const res = category === undefined ? await req : await req.query({ category });
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      return res.body.memories as Array<{ id: string; category: string; key: string; value: string }>;
+    },
     /** POST .../agent/memory/backfill: the number of copies the route says it wrote. */
     backfill: async (userId: string, businessId = ID.biz) => {
       const res = await request(server).post(`/ai/businesses/${businessId}/agent/memory/backfill`).set('x-v71i-user', userId);
@@ -323,6 +361,7 @@ async function memoryApp() {
       return h;
     },
     close: async () => {
+      await settle(semantic);
       realUsage.onModuleDestroy();
       await http.close();
     },
@@ -403,23 +442,35 @@ async function seedCopy(id: string, businessId: string, content: string, sourceI
   );
 }
 
-/** The statements waiting on a lock right now, in this database. */
-const lockWaits = async (): Promise<string[]> =>
+/** A statement waiting on a lock: its backend, its text and the backends it waits on (pg_blocking_pids). */
+type LockWait = { pid: number; query: string; blockers: number[] };
+
+/**
+ * The statements waiting on a lock right now, in this database, with the backends blocking each. Other suites run in
+ * parallel against the same database, so a case names the waits it means by who blocks them, not by their text alone.
+ */
+const lockWaits = async (): Promise<LockWait[]> =>
   (
     await db.$queryRawUnsafe(
-      `SELECT query FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND pid <> pg_backend_pid()`,
+      `SELECT pid, query, pg_blocking_pids(pid) AS blockers FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock' AND pid <> pg_backend_pid()`,
     )
-  ).map((r: { query: string }) => r.query);
+  ).map((r: { pid: number; query: string; blockers: number[] | null }) => ({
+    pid: Number(r.pid),
+    query: r.query,
+    blockers: (r.blockers ?? []).map(Number),
+  }));
 
-/** Resolves true once `pred` holds over the statements waiting on a lock, false once `settled` has settled first or after `ms`. */
-async function untilLockWait(pred: (query: string) => boolean, settled: { done: boolean }, ms = 8_000): Promise<boolean> {
+/** The first wait `pred` holds over, once one is there; null once `settled` has settled first or after `ms`. */
+async function untilLockWait(pred: (wait: LockWait) => boolean, settled: { done: boolean }, ms = 8_000): Promise<LockWait | null> {
   const until = Date.now() + ms;
   while (Date.now() < until) {
-    if ((await lockWaits()).some(pred)) return true;
-    if (settled.done) return false;
+    const found = (await lockWaits()).find(pred);
+    if (found) return found;
+    if (settled.done) return null;
     await new Promise((r) => setTimeout(r, 25));
   }
-  return false;
+  return null;
 }
 
 const track = <T>(p: Promise<T>) => {
@@ -460,6 +511,7 @@ describe('FU-MEMORY-COPIES-REWRITE: a row rewritten in place drops the copies of
       const rewritten = await app.api.put(ID.owner, { category: 'goals', key: KEY, value: NEW });
       expect(rewritten.id, 'the same row, rewritten in place').toBe(row.id);
       expect(rewritten.value).toBe(NEW);
+      await settle(app.semantic);
 
       // At rest: no copy of the old text in this business (the other business's row was not rewritten).
       expect(await copiesOf(row.id), "the row's copies: one per form, of the new value").toEqual([backfillCopy('goals', KEY, NEW), NEW].sort());
@@ -511,6 +563,7 @@ describe('FU-MEMORY-COPIES-REWRITE: a row rewritten in place drops the copies of
         { category: 'priorities', key: `${P}c`, value: SAME, confidence: 0.5 },
       ]);
       expect(rows.map((r) => r.id)).toEqual([a.id, b.id, c.id]);
+      await settle(app.semantic);
 
       expect(await atRest('V71I-02-OLD'), 'copies of the old values left').toBe(0);
       expect(await copiesOf(a.id)).toEqual([backfillCopy('priorities', `${P}a`, 'V71I-02-NEW-A: invoices are current')]);
@@ -550,6 +603,7 @@ describe('FU-MEMORY-COPIES-REWRITE: a row rewritten in place drops the copies of
         const rewritten = await app.api.put(ID.owner, { category: 'goals', key: KEY, value: NEW });
         expect(rewritten.id).toBe(row.id);
         expect(rewritten.value).toBe(NEW);
+        await settle(app.semantic); // before the path is switched back on: the re-copy saw it off
         expect(await atRest(`${MARK}-OLD`), `${mode}: the old copy at rest`).toBe(0);
         expect(await copiesOf(row.id), `${mode}: no copy of the new value without the embedding path`).toEqual([]);
         expect(app.embedded.length, `${mode}: nothing reached the stand-in provider`).toBe(embeddedBefore);
@@ -590,12 +644,14 @@ describe('FU-MEMORY-COPIES-REWRITE: a row rewritten in place drops the copies of
 
       let embeddedBefore = app.embedded.length;
       await app.writer.storeDocumentExtraction(ID.biz, DOC, NEW, { indexSemantic: true });
+      await settle(app.semantic);
       expect(await copiesOf(row.id), 'one copy per form, of the new extraction').toEqual([backfillCopy('document_extraction', DOC, NEW), NEW].sort());
       expect(app.embedded.length - embeddedBefore, 'one embedding per form: the writer finds its copy already made').toBe(2);
       expect(await atRest('V71I-04-OLD')).toBe(0);
 
       embeddedBefore = app.embedded.length;
       await app.writer.storeDocumentExtraction(ID.biz, DOC, NEWER);
+      await settle(app.semantic);
       expect(await copiesOf(row.id)).toEqual([backfillCopy('document_extraction', DOC, NEWER), NEWER].sort());
       expect(app.embedded.length - embeddedBefore).toBe(2);
       expect(await atRest('V71I-04-NEW-EXTRACT')).toBe(0);
@@ -634,30 +690,44 @@ describe('FU-MEMORY-COPIES-REWRITE: a row rewritten in place drops the copies of
       const backfill = track(app.api.backfill(ID.member));
       await held.reached;
 
-      let locked: () => void = () => undefined;
-      const lockTaken = new Promise<void>((resolve) => (locked = resolve));
+      let locked: (pid: number) => void = () => undefined;
+      const lockTaken = new Promise<number>((resolve) => (locked = resolve));
       lockTx = db.$transaction(
         async (tx: any) => {
           await tx.$queryRawUnsafe(`SELECT id FROM ai_memory_embeddings WHERE id = $1 FOR UPDATE`, existing);
-          locked();
+          const [{ pid }] = await tx.$queryRawUnsafe(`SELECT pg_backend_pid() AS pid`);
+          locked(Number(pid));
           await lockReleased;
         },
         { timeout: 30_000, maxWait: 10_000 },
       );
-      await lockTaken;
+      const lockPid = await lockTaken;
 
-      // The owner's rewrite: its deletion of the old copy waits on the held lock, the row rewritten and not committed.
+      // The owner's rewrite: its deletion of the old copy waits on the held lock (this case's lock, not another
+      // suite's), the row rewritten and not committed.
       const rewrite = track(app.api.put(ID.owner, { category: 'goals', key: KEY, value: NEW }));
-      const deletionWaits = await untilLockWait((q) => /delete/i.test(q) && q.includes('ai_memory_embeddings'), rewrite.state);
+      const deletion = await untilLockWait(
+        (w) => /delete/i.test(w.query) && w.query.includes('ai_memory_embeddings') && w.blockers.includes(lockPid),
+        rewrite.state,
+      );
 
-      // The held backfill writes its copy of the old value now: it must wait on the rewritten row.
+      // The held backfill writes its copy of the old value now: it must wait on the rewritten row, that is on the
+      // rewrite's transaction.
       held.release();
-      const writeWaits = await untilLockWait((q) => /insert/i.test(q) && q.includes('ai_memory_embeddings'), backfill.state);
+      const write = deletion
+        ? await untilLockWait(
+            (w) => /insert/i.test(w.query) && w.query.includes('ai_memory_embeddings') && w.blockers.includes(deletion.pid),
+            backfill.state,
+          )
+        : null;
+      const deletionWaits = deletion !== null;
+      const writeWaits = write !== null;
 
       releaseLock();
       await lockTx;
       expect((await rewrite.promise).value).toBe(NEW);
       const written = await backfill.promise;
+      await settle(app.semantic);
 
       expect(await atRest('V71I-05-OLD'), 'no copy of the old value survives the rewrite').toBe(0);
       expect(await copiesOf(row.id), 'the rewrite copied the new value').toEqual([backfillCopy('goals', KEY, NEW)]);
@@ -672,7 +742,7 @@ describe('FU-MEMORY-COPIES-REWRITE: a row rewritten in place drops the copies of
     }
   }, 60_000);
 
-  it("V71I-06 the in-place writers outside AiMemoryService drop the copies of the old value too: memory consolidation promoting a changed member-less recommendation into learning:learned:<fn> (the same row), and KEY's self-tuning rewriting an evolution_tuning row; a promotion that does not change the value keeps the copy", async () => {
+  it("V71I-06 the in-place writers outside AiMemoryService drop the copies of the old value too, and copy the row again with its new value (review COR-V71I-3): memory consolidation promoting a changed member-less recommendation into learning:learned:<fn> (the same row), and KEY's self-tuning rewriting an evolution_tuning row; search serves the new values with no backfill run; a promotion that does not change the value keeps the copy and embeds nothing", async () => {
     const app = await memoryApp();
     try {
       const { MemoryConsolidationService } = await import('../src/modules/key-cortex/memory-consolidation.service');
@@ -681,34 +751,288 @@ describe('FU-MEMORY-COPIES-REWRITE: a row rewritten in place drops the copies of
       const cognition = await db.cognitionMemory.create({
         data: { businessId: ID.biz, roleId: 'key_cortex', functionId: fn, query: 'what next?', recommendation: 'V71I-06-OLD-PROMOTED: call the Arima leads first', userResponse: 'accepted', confidence: 0.95 },
       });
-      const consolidation = new MemoryConsolidationService(prisma);
+      // Positionally, as Nest constructs them, with the re-copier KeyCortexModule provides (AiModule's
+      // SemanticMemoryService) last.
+      const consolidation = new (MemoryConsolidationService as any)(prisma, undefined, app.semantic);
       await consolidation.run(ID.biz);
       const promoted = await db.aiMemory.findFirstOrThrow({ where: { businessId: ID.biz, category: 'learning', key: `learned:${fn}` } });
-      const evolution = new KeyCortexEvolutionService(prisma, {} as any, {} as any, {} as any);
+      const evolution = new (KeyCortexEvolutionService as any)(prisma, {} as any, {} as any, {} as any, undefined, undefined, app.semantic);
       await (evolution as any).applyTuningAdjustment(ID.biz, { parameter: 'personality_tone', newValue: 'V71I-06-OLD-TONE: formal' });
       const tuning = await db.aiMemory.findFirstOrThrow({ where: { businessId: ID.biz, category: 'evolution_tuning', key: 'personality_tone' } });
       expect(await app.api.backfill(ID.member)).toBe(2);
       expect(await atRest('V71I-06-OLD')).toBe(2);
 
-      // The same recommendation promoted again: the value does not change, the copy stays.
+      // The same recommendation promoted again: the value does not change, the copy stays, nothing is embedded.
       const promotedCopy = await copyIdsOf(promoted.id);
+      let embeddedBefore = app.embedded.length;
       await consolidation.run(ID.biz);
+      await settle(app.semantic);
       expect(await copyIdsOf(promoted.id)).toEqual(promotedCopy);
+      expect(app.embedded.length).toBe(embeddedBefore);
 
       await db.cognitionMemory.update({ where: { id: cognition.id }, data: { recommendation: 'V71I-06-NEW-PROMOTED: call the Chaguanas leads first' } });
       await consolidation.run(ID.biz);
       await (evolution as any).applyTuningAdjustment(ID.biz, { parameter: 'personality_tone', newValue: 'V71I-06-NEW-TONE: warm' });
-      expect((await db.aiMemory.findUniqueOrThrow({ where: { id: promoted.id } })).value).toContain('V71I-06-NEW-PROMOTED');
-      expect((await db.aiMemory.findUniqueOrThrow({ where: { id: tuning.id } })).value).toContain('V71I-06-NEW-TONE');
+      await settle(app.semantic);
+      const promotedNow = await db.aiMemory.findUniqueOrThrow({ where: { id: promoted.id } });
+      const tuningNow = await db.aiMemory.findUniqueOrThrow({ where: { id: tuning.id } });
+      expect(promotedNow.value).toContain('V71I-06-NEW-PROMOTED');
+      expect(tuningNow.value).toContain('V71I-06-NEW-TONE');
 
       expect(await atRest('V71I-06-OLD'), 'copies of the old values left').toBe(0);
-      expect(await copiesOf(promoted.id)).toEqual([]);
-      expect(await copiesOf(tuning.id)).toEqual([]);
+      // Each row is copied again, in the form it had (the backfill's), with its new value: no backfill needed.
+      expect(await copiesOf(promoted.id), 'the promoted row, copied again').toEqual([backfillCopy('learning', `learned:${fn}`, promotedNow.value)]);
+      expect(await copiesOf(tuning.id), 'the tuning row, copied again').toEqual([backfillCopy('evolution_tuning', 'personality_tone', tuningNow.value)]);
+      embeddedBefore = app.embedded.length;
       const search = await app.api.search(ID.member);
       expect(search).not.toContain('V71I-06-OLD');
-      // The next backfill copies what the rows hold.
-      expect(await app.api.backfill(ID.member)).toBe(2);
-      expect(await app.api.search(ID.member)).toContain('V71I-06-NEW-PROMOTED');
+      expect(search, 'served with no backfill run').toContain('V71I-06-NEW-PROMOTED');
+      expect(search, 'served with no backfill run').toContain('V71I-06-NEW-TONE');
+      expect(app.embedded.length - embeddedBefore, 'only the question').toBe(1);
+    } finally {
+      await app.close();
+    }
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// 1b. Review repair: the re-copy (COR-V71I-1, COR-V71I-4)
+// ---------------------------------------------------------------------------
+
+describe('FU-MEMORY-COPIES-REWRITE review repair: the re-copy of a rewritten row', () => {
+  it("V71I-10 (COR-V71I-1) two rewrites of one row close together leave it copied with the value it holds: the second lands while the first one's re-copy is being embedded (it finds no copy to drop, so it starts no re-copy), the first re-copy's insert is refused (the row holds another value) and it copies what the row holds now; no copy of either earlier value remains, and search and KEY's memory block serve the last value", async () => {
+    const app = await memoryApp();
+    let held: ReturnType<typeof hold> | undefined;
+    try {
+      const KEY = `${P}twice`;
+      const V0 = 'V71I-10-V0: the owner opens on Sundays';
+      const V1 = 'V71I-10-V1: the owner opens on Saturdays';
+      const V2 = 'V71I-10-V2: the owner closes on weekends';
+      const row = await app.api.put(ID.owner, { category: 'goals', key: KEY, value: V0 });
+      expect(await app.api.backfill(ID.member)).toBe(1);
+
+      // The first rewrite's re-copy is held while it embeds its copy of V1.
+      held = app.holdEmbedding('V71I-10-V1');
+      const first = track(app.api.put(ID.owner, { category: 'goals', key: KEY, value: V1 }));
+      await held.reached;
+      expect(await atRest('V71I-10-V0'), 'the first rewrite dropped the copy of V0').toBe(0);
+
+      // The second rewrite (the owner's here; KEY's writers go through the same door) finds no copy to drop.
+      const second = await app.api.put(ID.owner, { category: 'goals', key: KEY, value: V2 });
+      expect(second.id).toBe(row.id);
+      expect(second.value).toBe(V2);
+
+      held.release();
+      expect((await first.promise).value).toBe(V1);
+      await settle(app.semantic);
+
+      expect(await copiesOf(row.id), 'one copy, in the form the row had, of the value it holds').toEqual([backfillCopy('goals', KEY, V2)]);
+      expect(await atRest('V71I-10-V0')).toBe(0);
+      expect(await atRest('V71I-10-V1')).toBe(0);
+      const search = await app.api.search(ID.member);
+      expect(search).toContain(backfillCopy('goals', KEY, V2));
+      expect(search).not.toContain('V71I-10-V1');
+      expect((await memoryBlockFor(ID.member, app.semantic)).copies, "KEY's memory block's semantic copies").toContain('V71I-10-V2');
+    } finally {
+      held?.release();
+      await app.close();
+    }
+  }, 60_000);
+
+  it("V71I-11 (COR-V71I-4) the rewrite answers without waiting on its re-copy: with the re-copy's embedding held, PUT .../ai/memory answers 200 with the new value and the old copies already gone; the copies of the new value are written once the embedding returns, each form embedded once; KEY's writer indexing the row meanwhile waits for that re-copy and adds no duplicate", async () => {
+    const app = await memoryApp();
+    let held: ReturnType<typeof hold> | undefined;
+    let rewrite: { promise: Promise<any>; state: { done: boolean } } | undefined;
+    try {
+      const KEY = `${P}slow`;
+      const OLD = 'V71I-11-OLD: the van is leased';
+      const NEW = 'V71I-11-NEW: the van is owned';
+      const row = await app.api.put(ID.owner, { category: 'goals', key: KEY, value: OLD });
+      await app.writer.store(ID.biz, 'goals' as any, KEY, OLD, { indexSemantic: true, source: 'explicit' });
+      expect(await app.api.backfill(ID.member)).toBe(1);
+      expect(await copiesOf(row.id)).toEqual([backfillCopy('goals', KEY, OLD), OLD].sort());
+
+      // The re-copy's first embedding (a form of the new value) is held: a slow provider.
+      held = app.holdEmbedding('V71I-11-NEW');
+      rewrite = track(app.api.put(ID.owner, { category: 'goals', key: KEY, value: NEW }));
+      await held.reached;
+      const answered = await Promise.race([
+        rewrite.promise.then(() => true),
+        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 3_000)),
+      ]);
+      expect(answered, 'the PUT answered while its re-copy was embedding').toBe(true);
+      const rewritten = await rewrite.promise;
+      expect(rewritten.id).toBe(row.id);
+      expect(rewritten.value).toBe(NEW);
+      expect(await atRest('V71I-11-OLD'), 'the old copies were dropped before the answer').toBe(0);
+      expect(await copiesOf(row.id), 'no copy of the new value yet').toEqual([]);
+
+      // KEY's writer indexes the row now (its copy is the value form): it waits for the row's re-copy.
+      const indexed = track(app.writer.store(ID.biz, 'goals' as any, KEY, NEW, { indexSemantic: true, source: 'explicit' }));
+      await new Promise((r) => setTimeout(r, 300));
+      expect(indexed.state.done, "KEY's writer waits for the row's re-copy in flight").toBe(false);
+
+      held.release();
+      await indexed.promise;
+      await settle(app.semantic);
+      expect(await copiesOf(row.id), 'one copy per form of the new value, no duplicate').toEqual([backfillCopy('goals', KEY, NEW), NEW].sort());
+      expect(app.embedded.filter((t) => t.includes('V71I-11-NEW')).sort(), 'each form embedded once').toEqual([backfillCopy('goals', KEY, NEW), NEW].sort());
+      expect(await app.api.search(ID.member)).not.toContain('V71I-11-OLD');
+      expect(typeof (app.semantic as any).recopiesSettled, 'SemanticMemoryService.recopiesSettled (the harness waits on it)').toBe('function');
+    } finally {
+      held?.release();
+      if (rewrite) await rewrite.promise.catch(() => undefined);
+      await app.close();
+    }
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// 1c. Review repair: a settings row is configuration, not memory (SEC-FUMCR-1, SEC-FUMCR-2, COR-V71I-2)
+// ---------------------------------------------------------------------------
+
+/**
+ * The real ModelGatewayService (its updatePreferences writes settings / ai_preferences, encrypting each BYOK key with
+ * AES-256-GCM under a key derived from BYOK_ENCRYPTION_SECRET), with a secret built at runtime for its construction
+ * and restored right after. Its collaborators serve other methods.
+ */
+async function byokGateway(): Promise<{ updatePreferences: (businessId: string, updates: Record<string, unknown>) => Promise<unknown> }> {
+  const { ModelGatewayService } = await import('../src/modules/ai/model-gateway.service');
+  const saved = process.env.BYOK_ENCRYPTION_SECRET;
+  process.env.BYOK_ENCRYPTION_SECRET = [P, 'enc', randomBytes(12).toString('hex')].join('-');
+  try {
+    return new (ModelGatewayService as any)(prisma, {} as any, {} as any);
+  } finally {
+    if (saved === undefined) delete process.env.BYOK_ENCRYPTION_SECRET;
+    else process.env.BYOK_ENCRYPTION_SECRET = saved;
+  }
+}
+
+/** A BYOK key for the owner to set, built at runtime. */
+const byokKey = (tag: string) => [P, 'byok', tag, randomBytes(8).toString('hex')].join('-');
+
+/** The owner's AI preferences row (settings / ai_preferences) and the OpenAI key's ciphertext it stores. */
+async function preferencesRow(businessId = ID.biz): Promise<{ row: { id: string; value: string }; ciphertext: string }> {
+  const row = await db.aiMemory.findUniqueOrThrow({
+    where: { businessId_category_key: { businessId, category: 'settings', key: 'ai_preferences' } },
+  });
+  return { row, ciphertext: JSON.parse(row.value).byokOpenai as string };
+}
+
+describe('FU-MEMORY-COPIES-REWRITE review repair: a settings row is configuration, not memory', () => {
+  it("V71I-12 (SEC-FUMCR-2) the owner's AI preferences row (settings / ai_preferences, the BYOK keys as ciphertext, written by the real ModelGatewayService.updatePreferences) is read by no AI memory reader: GET /ai/businesses/:id/ai/memory lists it to neither the STAFF member nor the owner, ?category=settings answers none, and KEY's memory block holds none of it; the business's memory rows are still served", async () => {
+    const app = await memoryApp();
+    try {
+      const gateway = await byokGateway();
+      const key = byokKey('first');
+      await gateway.updatePreferences(ID.biz, { byokOpenai: key });
+      const { row: settings, ciphertext } = await preferencesRow();
+      expect(ciphertext).toMatch(/^[0-9a-f]+:[0-9a-f]+:[0-9a-f]+$/);
+      expect(settings.value, 'the key is stored as ciphertext').not.toContain(key);
+      const GOAL = 'V71I-12-GOAL: open a second shop in the spring';
+      await app.api.put(ID.owner, { category: 'goals', key: `${P}goal12`, value: GOAL });
+
+      for (const userId of [ID.member, ID.owner]) {
+        const rows = await app.api.memoryRows(userId);
+        expect(rows.map((r) => r.value), `${userId}: GET .../ai/memory serves the memory rows`).toContain(GOAL);
+        expect(rows.filter((r) => r.category === 'settings'), `${userId}: GET .../ai/memory lists no settings row`).toEqual([]);
+        expect(JSON.stringify(rows), `${userId}: GET .../ai/memory`).not.toContain(ciphertext);
+        expect(await app.api.memoryRows(userId, 'settings'), `${userId}: GET .../ai/memory?category=settings`).toEqual([]);
+      }
+      const { block } = await memoryBlockFor(ID.member, app.semantic);
+      expect(block, "KEY's memory block serves the memory rows").toContain('V71I-12-GOAL');
+      expect(block, "KEY's memory block").not.toContain(ciphertext);
+      expect(block, "KEY's memory block").not.toContain('ai_preferences');
+    } finally {
+      await app.close();
+    }
+  }, 60_000);
+
+  it("V71I-13 (SEC-FUMCR-1, SEC-FUMCR-2, COR-V71I-2) no copy of a settings row is made or served: the STAFF member's backfill copies the memory rows and not the preferences row (the embedding provider is never sent its ciphertext); SemanticMemoryService.store of it embeds and writes nothing; a copy of it a backfill made before this repair, holding what the row holds, is not served by search or KEY's memory block", async () => {
+    const app = await memoryApp();
+    try {
+      const gateway = await byokGateway();
+      await gateway.updatePreferences(ID.biz, { byokOpenai: byokKey('first') });
+      const { row: settings, ciphertext } = await preferencesRow();
+      const GOAL = 'V71I-13-GOAL: hire a second technician';
+      const goal = await app.api.put(ID.owner, { category: 'goals', key: `${P}goal13`, value: GOAL });
+
+      let embeddedBefore = app.embedded.length;
+      expect(await app.api.backfill(ID.member), 'the backfill copies the memory row only').toBe(1);
+      expect(app.embedded.slice(embeddedBefore), 'what the backfill sent the embedding provider').toEqual([backfillCopy('goals', `${P}goal13`, GOAL)]);
+      expect(await copiesOf(settings.id), 'no copy of the settings row').toEqual([]);
+      expect(await copiesOf(goal.id)).toEqual([backfillCopy('goals', `${P}goal13`, GOAL)]);
+
+      // The other writer of copies (KEY's, UnifiedMemoryWriterService through store) makes none either, in either form.
+      embeddedBefore = app.embedded.length;
+      for (const content of [settings.value, backfillCopy('settings', 'ai_preferences', settings.value)]) {
+        await app.semantic.store({ businessId: ID.biz, content, sourceType: 'memory', sourceId: settings.id, metadata: {} });
+      }
+      expect(await copiesOf(settings.id), 'store writes no copy of a settings row').toEqual([]);
+      expect(app.embedded.slice(embeddedBefore), 'store sends the provider nothing of it').toEqual([]);
+      expect(await atRest(ciphertext)).toBe(0);
+
+      // A copy a backfill made before this repair, holding what the row holds.
+      await seedCopy(`${P}e13_settings`, ID.biz, backfillCopy('settings', 'ai_preferences', settings.value), settings.id);
+      for (const userId of [ID.member, ID.owner]) {
+        const search = await app.api.search(userId);
+        expect(search, `${userId}: search serves the memory rows`).toContain('V71I-13-GOAL');
+        expect(search, `${userId}: search`).not.toContain(ciphertext);
+      }
+      const { block } = await memoryBlockFor(ID.member, app.semantic);
+      expect(block, "KEY's memory block").not.toContain(ciphertext);
+    } finally {
+      await app.close();
+    }
+  }, 60_000);
+
+  it("V71I-14 (SEC-FUMCR-1) after the owner rotates the BYOK key (the real ModelGatewayService.updatePreferences, a writer outside the door) the cleanup command leaves no copy of the old or the new ciphertext at rest: its dry run lists the preferences row's copies made before this repair (reason settings_row, no content) and its stale set is exactly the 'memory' copies search does not serve; --apply deletes them and keeps the memory row's copy", async () => {
+    const app = await memoryApp();
+    try {
+      const gateway = await byokGateway();
+      await gateway.updatePreferences(ID.biz, { byokOpenai: byokKey('first') });
+      const first = await preferencesRow();
+      const GOAL = 'V71I-14-GOAL: quote within a day';
+      const goal = await app.api.put(ID.owner, { category: 'goals', key: `${P}goal14`, value: GOAL });
+      await seedCopy(`${P}e14_goal`, ID.biz, backfillCopy('goals', `${P}goal14`, GOAL), goal.id);
+      // Copies a backfill made before this repair: of the preferences with the first key, and, after the rotation,
+      // with the second (each held what the row held when it was made).
+      await seedCopy(`${P}e14_settings_first`, ID.biz, backfillCopy('settings', 'ai_preferences', first.row.value), first.row.id);
+      await gateway.updatePreferences(ID.biz, { byokOpenai: byokKey('second') });
+      const second = await preferencesRow();
+      expect(second.row.id, 'the same row, rewritten in place').toBe(first.row.id);
+      expect(second.ciphertext).not.toBe(first.ciphertext);
+      await seedCopy(`${P}e14_settings_second`, ID.biz, backfillCopy('settings', 'ai_preferences', second.row.value), second.row.id);
+      expect(await atRest(first.ciphertext)).toBe(1);
+      expect(await atRest(second.ciphertext)).toBe(1);
+
+      const { main } = await import('../scripts/cleanup-stale-memory-copies');
+      const out: string[] = [];
+      const err: string[] = [];
+      const log = (...a: unknown[]) => out.push(a.join(' '));
+      const error = (...a: unknown[]) => err.push(a.join(' '));
+      expect(await main([`--business=${ID.biz}`], { db, log, error }), err.join('\n')).toBe(0);
+      const dry = out.join('\n');
+      expect(dry).toMatch(/stale_settings_row\s+2\b/);
+      expect(dry).toMatch(/would_delete\s+2\b/);
+      expect(dry).toMatch(new RegExp(`${P}e14_settings_first\\s+settings_row`));
+      expect(dry).toMatch(new RegExp(`${P}e14_settings_second\\s+settings_row`));
+      expect(dry).not.toContain(`${P}e14_goal`);
+      expect(dry, 'no content is printed').not.toContain(first.ciphertext);
+      expect(dry, 'no content is printed').not.toContain(second.ciphertext);
+
+      // The script's stale set is exactly what search does not serve.
+      const served = await app.api.searchIds(ID.member);
+      expect(served).toEqual([`${P}e14_goal`]);
+      expect((await memoryCopyIds()).filter((id) => !served.includes(id))).toEqual([`${P}e14_settings_first`, `${P}e14_settings_second`].sort());
+
+      out.length = 0;
+      expect(await main(['--apply', `--business=${ID.biz}`], { db, log, error }), err.join('\n')).toBe(0);
+      expect(out.join('\n')).toMatch(/deleted\s+2\b/);
+      expect(await atRest(first.ciphertext), 'the old key\'s ciphertext at rest').toBe(0);
+      expect(await atRest(second.ciphertext), 'the new key\'s ciphertext at rest').toBe(0);
+      expect(await memoryCopyIds()).toEqual([`${P}e14_goal`]);
+      expect(await app.api.searchIds(ID.member)).toEqual(served);
     } finally {
       await app.close();
     }
@@ -898,7 +1222,8 @@ const DOOR = { file: 'modules/ai/ai-memory.service.ts', fn: 'upsertAiMemoryDropp
  * The named exceptions: the settings rows (configuration JSON, not memory). ModelGatewayService's two writes are
  * pinned by model-gateway.service.spec.ts, a suite the Release 0 manifest optional-services-fail-visibly binds (every
  * case required), which mocks the client's aiMemory.upsert; AiOversightService's by ai-oversight-fails-closed.spec.ts.
- * A settings row's copy of an old value is not served (W1F-MEMORY-COPIES) and the cleanup command removes it.
+ * A settings row has no semantic copy for a rewrite to leave behind (review SEC-FUMCR-1, COR-V71I-2: no copy of it is
+ * made or served, V71I-13; the cleanup command deletes the ones made before, V71I-14).
  */
 const SETTINGS_WRITERS: Record<string, string[]> = {
   'modules/ai/model-gateway.service.ts': ['updatePreferences', 'updateRoutingConfig'],
@@ -974,5 +1299,48 @@ describe('FU-MEMORY-COPIES-REWRITE static: every AiMemory rewrite in apps/server
     // The exceptions are exact: each named writer still writes (one upsert each), so the list cannot outlive them.
     const named = Object.entries(SETTINGS_WRITERS).flatMap(([file, fns]) => fns.map((fn) => `${file} ${fn}`)).sort();
     expect(settings.map((w) => `${w.file} ${w.fn}`).sort()).toEqual(named);
+  });
+});
+
+/** Every call of the door in production source: its site, its enclosing function and how many arguments it passes. */
+function doorCalls(): Array<{ site: string; fn: string | undefined; args: ts.NodeArray<ts.Expression> }> {
+  const out: Array<{ site: string; fn: string | undefined; args: ts.NodeArray<ts.Expression> }> = [];
+  for (const file of sourceFiles(SRC)) {
+    const text = readFileSync(file, 'utf8');
+    if (!text.includes(DOOR.fn)) continue;
+    const rel = path.relative(SRC, file).split(path.sep).join('/');
+    const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+    const enclosing = (node: ts.Node): string | undefined => {
+      for (let n: ts.Node | undefined = node.parent; n; n = n.parent) {
+        if ((ts.isFunctionDeclaration(n) || ts.isMethodDeclaration(n)) && n.name && ts.isIdentifier(n.name)) return n.name.text;
+      }
+      return undefined;
+    };
+    const visit = (node: ts.Node) => {
+      if (ts.isCallExpression(node)) {
+        const callee = node.expression;
+        const name = ts.isIdentifier(callee) ? callee.text : ts.isPropertyAccessExpression(callee) ? callee.name.text : undefined;
+        if (name === DOOR.fn) {
+          out.push({ site: `${rel}:${sf.getLineAndCharacterOfPosition(node.getStart()).line + 1}`, fn: enclosing(node), args: node.arguments });
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+  }
+  return out;
+}
+
+describe('FU-MEMORY-COPIES-REWRITE review repair, static: every writer through the door copies the row it rewrote again', () => {
+  it('V71I-15 (COR-V71I-3) every call of upsertAiMemoryDroppingStaleCopies in apps/server/src passes it the re-copier (its fifth argument, not undefined): AiMemoryService.upsert, ProactiveSuggestionService.generateSuggestions and blockCategory, MemoryConsolidationService.promoteFacts and KeyCortexEvolutionService.applyTuningAdjustment', () => {
+    const calls = doorCalls();
+    expect(calls.map((c) => c.fn).sort()).toEqual(
+      expect.arrayContaining(['applyTuningAdjustment', 'blockCategory', 'generateSuggestions', 'promoteFacts', 'upsert']),
+    );
+    const withoutRecopier = calls.filter((c) => {
+      const recopier = c.args[4];
+      return !recopier || recopier.kind === ts.SyntaxKind.UndefinedKeyword || (ts.isIdentifier(recopier) && recopier.text === 'undefined');
+    });
+    expect(withoutRecopier.map((c) => `${c.site} ${c.fn}`), 'door calls that do not pass the re-copier').toEqual([]);
   });
 });
