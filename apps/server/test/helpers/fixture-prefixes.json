@@ -943,6 +943,11 @@
       "packet": "V1-98 (PR195-KEY-GATES)"
     },
     {
+      "prefix": "v63d_",
+      "owner": "apps/server/test/team-invite-email-case.integration.test.ts",
+      "packet": "V1-63 (SWP-TEAM-INVITE-SERVER)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
