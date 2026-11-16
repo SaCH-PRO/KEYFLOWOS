@@ -4,8 +4,12 @@ import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import {
   BUSINESS_SETTING_INVALID,
+  advancedSettingsChanges,
+  advancedSettingsWriteOf,
   applyBusinessSettingsWrites,
   businessSettingsWriteOf,
+  depthAfterWrite,
+  lockBusinessMeta,
   mergeBusinessSettingsWrites,
   omitBusinessSettingsKeys,
   readBusinessSettings,
@@ -23,6 +27,7 @@ import {
   CRM_SUBPERMISSION_VALUES,
   DEFAULT_APPROVAL_TIERS as CANONICAL_APPROVAL_TIERS,
   ROLE_DEFAULT_SCOPES,
+  memberModuleLevel,
   rankOf,
 } from '../../core/authority/module-vocabulary';
 import { membershipApprovalTier } from '../../core/authority/approval-tier';
@@ -133,6 +138,19 @@ function applyPaymentSecretWrites(
  * for a PATCH queued behind another holder of the business row.
  */
 const PROFILE_PATCH_TX_OPTIONS = { maxWait: 5_000, timeout: 15_000 } as const;
+
+/**
+ * BIZ-SETTINGS-ADMIN-DOOR (owner ruling D-150): the 403 code
+ * PATCH /identity/businesses/:businessId/advanced-settings refuses a member
+ * who is neither the owner nor an ADMIN holding settings admin.
+ */
+export const BUSINESS_ADVANCED_SETTINGS_FORBIDDEN = 'BUSINESS_ADVANCED_SETTINGS_FORBIDDEN';
+
+/** BIZ-SETTINGS-ADMIN-DOOR: the standing the door admitted an actor by, as its audit row records it. */
+export type AdvancedSettingsStanding = 'OWNER' | 'ADMIN' | 'SUPER_ADMIN';
+
+/** BIZ-SETTINGS-ADMIN-DOOR: the team_activity_logs action of a write through the door. */
+export const ADVANCED_SETTINGS_AUDIT_ACTION = 'advanced_settings_changed';
 
 /**
  * The CRM ownership authority a membership's scope map confers (level, crm_view,
@@ -429,6 +447,46 @@ export class IdentityService {
   }
 
   /**
+   * BIZ-SETTINGS-ADMIN-DOOR (owner ruling D-150 'hubs', adopting the
+   * product-audit Settings hub text: the Advanced CRM switch and the other
+   * advanced depth choices are a server-side business setting that only the
+   * owner or an admin can change). Who may write advancedCrm and depth
+   * through PATCH /identity/businesses/:businessId/advanced-settings:
+   *   - a platform SUPER_ADMIN (the bypass BusinessGuard and the profile
+   *     PATCH's owner check grant);
+   *   - the owner: an OWNER membership of this business (the D-11 owner rule,
+   *     isBusinessOwnerMember; owner rulings D-104, D-116, D-125);
+   *   - an ADMIN membership whose settings level is admin, read by
+   *     ModuleScopeGuard's rule (memberModuleLevel: the explicit permission
+   *     map, where a missing key is none, else the ADMIN preset, which holds
+   *     settings admin; an explicit map binds an ADMIN too, D-114).
+   * Anyone else is refused 403 BUSINESS_ADVANCED_SETTINGS_FORBIDDEN: a STAFF
+   * member whatever its scopes (settings admin included: the ruling names an
+   * admin), an ADMIN whose map holds settings below admin. No actor is 401.
+   * It reads nothing but the actor's membership, so it runs before the body
+   * is read.
+   */
+  async assertAdvancedSettingsWriter(
+    businessId: string,
+    actor: { id?: string; role?: string } | null | undefined,
+  ): Promise<{ actorId: string; standing: AdvancedSettingsStanding }> {
+    if (!actor?.id) throw new UnauthorizedException('Authentication required');
+    if (actor.role === 'SUPER_ADMIN') return { actorId: actor.id, standing: 'SUPER_ADMIN' };
+    if (await isBusinessOwnerMember(this.prisma.client, businessId, actor.id)) return { actorId: actor.id, standing: 'OWNER' };
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: actor.id, businessId } },
+      select: { role: true, permissionScopes: true },
+    });
+    if (membership?.role === 'ADMIN' && memberModuleLevel(membership, 'settings') === 'admin') {
+      return { actorId: actor.id, standing: 'ADMIN' };
+    }
+    throw new ForbiddenException({
+      code: BUSINESS_ADVANCED_SETTINGS_FORBIDDEN,
+      message: 'Only the business owner, or an admin with settings admin access, can change the Advanced CRM switch and hub depth.',
+    });
+  }
+
+  /**
    * The generic profile write. It does not write onboardingComplete (R0-09, CF-22):
    * completion goes through the onboarding concierge's gated path. It returns the
    * updated row through sanitizeBusiness, like getBusiness: no OAuth token column
@@ -717,6 +775,65 @@ export class IdentityService {
     // token column; GET already redacts them, so the PATCH response and the
     // KEY settings adapter's connector result must too. V1-63: and it answers
     // the v1 settings as GET does.
+    return { ...sanitizeBusiness(result), ...readBusinessSettings(result.metaData) };
+  }
+
+  /**
+   * BIZ-SETTINGS-ADMIN-DOOR (owner ruling D-150): the owner-or-admin door for
+   * the Advanced CRM switch and the depth of each hub,
+   * PATCH /identity/businesses/:businessId/advanced-settings. What the
+   * business sells is not written here: it stays on the owner-only profile
+   * PATCH (D-11), which keeps taking all three settings from the owner.
+   *
+   * In order, so a refused caller learns nothing and nothing is written:
+   *   1. assertAdvancedSettingsWriter: the owner, an ADMIN holding settings
+   *      admin, or SUPER_ADMIN (401 with no actor, 403 otherwise), before the
+   *      body is read;
+   *   2. advancedSettingsWriteOf: the body names advancedCrm, depth or both,
+   *      with values the profile PATCH would accept, and nothing else (sells
+   *      included): 400 BUSINESS_SETTING_INVALID with bounded problems;
+   *   3. one transaction: lockBusinessMeta (the business row lock every
+   *      metaData writer takes first, so neither this write nor a concurrent
+   *      one is lost), the two keys set on the copy read under the lock (a
+   *      depth merges per hub, as the profile PATCH merges it), the write, and
+   *      one team_activity_logs row naming the actor, its standing and each
+   *      named setting before and after, so no change commits without its
+   *      actor row.
+   * It answers what GET answers. The body is the request's as sent: the route
+   * declares it Record<string, unknown>, so the global whitelist pipe drops
+   * no key this door must refuse.
+   */
+  async updateAdvancedSettings(businessId: string, body: unknown, actor: { id?: string; role?: string } | null | undefined) {
+    const { actorId, standing } = await this.assertAdvancedSettingsWriter(businessId, actor);
+    const { write, problems } = advancedSettingsWriteOf(body);
+    if (problems.length > 0) {
+      throw new BadRequestException({ code: BUSINESS_SETTING_INVALID, message: problems.join('; '), problems });
+    }
+    const result = await this.prisma.client.$transaction(async (tx) => {
+      const locked = await lockBusinessMeta(tx, businessId);
+      if (!locked) throw new NotFoundException('Business not found');
+      const stored = (locked.metaData as Record<string, unknown> | null) ?? {};
+      const nextMeta: Record<string, unknown> = { ...stored };
+      if (write.advancedCrm !== undefined) nextMeta.advancedCrm = write.advancedCrm;
+      if (write.depth !== undefined) nextMeta.depth = depthAfterWrite(stored.depth, write.depth);
+      const updated = await tx.business.update({
+        where: { id: businessId },
+        data: { metaData: nextMeta as Prisma.InputJsonValue },
+      });
+      await tx.teamActivityLog.create({
+        data: {
+          businessId,
+          userId: actorId,
+          module: 'settings',
+          action: ADVANCED_SETTINGS_AUDIT_ACTION,
+          entityType: 'business',
+          entityId: businessId,
+          title: 'Changed the Advanced CRM switch or hub depth',
+          meta: { actorStanding: standing, changes: advancedSettingsChanges(stored, write) } as unknown as Prisma.InputJsonValue,
+        },
+      });
+      return updated;
+    }, PROFILE_PATCH_TX_OPTIONS);
     return { ...sanitizeBusiness(result), ...readBusinessSettings(result.metaData) };
   }
 
