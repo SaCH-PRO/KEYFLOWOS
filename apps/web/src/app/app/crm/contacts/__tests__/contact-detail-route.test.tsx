@@ -18,19 +18,36 @@
  *      `searchParams` as Promises; Next's own redirect() (not a mock) throws
  *      its NEXT_REDIRECT error, and the URL is read back with Next's helpers;
  *   2. the URL it names is mounted as Next mounts it: the [contactId] layout
- *      with the Overview page as its child, the segment from that URL handed
+ *      with that tab's page as its child, the segment from that URL handed
  *      to useParams(), on the real ContactDetailProvider and the real client.
  * Only `fetch` and the client router hooks are stubbed.
  *
  * The doors: the address itself; Cmd/Ctrl+K (the command palette mounted by
  * KeyAgent; its customer result pushes /app/crm/contacts/<id>); the hrefs the
- * other in-app doors build with a query (the Customers list's Refer action,
- * ?action=refer; a project's client tab, ?tab=...); the CRM dashboard, data
- * quality, People Flow, Intelligence and Network build the bare address the
- * first case opens. Journey C4 drives the same doors in a
- * browser (e2e/journeys/c-customer.spec.ts); its list, Today and invoice steps
- * also need those screens to link the customer at all, which is not this page.
+ * other in-app doors build with a query; the CRM dashboard, data quality,
+ * People Flow, Intelligence and Network build the bare address the first case
+ * opens.
+ *
+ * The query doors (review FCP-COR-2). A project's client tab links 'Messages'
+ * (?tab=communications) and 'Invoices' (?tab=invoices), and the project
+ * overview's 'Comms' link the first: names from the single-page contact detail
+ * the tabbed layout replaced. The redirect dropped every query, so both opened
+ * the Overview, not the Timeline or Quotes & Invoices tab their label names.
+ * ?tab= now picks the tab (a tab's own name, or the older name's tab; anything
+ * else is the Overview) and the rest of the query is passed on unchanged. The
+ * Customers list's 'Refer / Link' builds ?action=refer: the single page opened
+ * its refer dialog from it, and nothing on the tabbed page reads it today (the
+ * dialog is mounted nowhere), so that door opens the Overview with
+ * ?action=refer kept for the page that will read it. That reader is not this
+ * page (an open issue for the contact pages).
+ *
+ * Journey C4 drives the doors in a browser (e2e/journeys/c-customer.spec.ts);
+ * its list, Cmd/Ctrl+K (the palette lists the customer as a button; the
+ * journey looks for an option or a link), Today and invoice steps need those
+ * screens changed, which is not this page.
  */
+import fs from "node:fs";
+import path from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { ReactNode } from "react";
 import { render, screen, waitFor, cleanup, fireEvent } from "@testing-library/react";
@@ -78,6 +95,8 @@ vi.mock("@/components/email/compose-context", () => ({ useCompose: () => ({ open
 import ContactDetailIndex from "../[contactId]/page";
 import ContactDetailLayout from "../[contactId]/layout";
 import ContactOverviewPage from "../[contactId]/overview/page";
+import ContactTimelinePage from "../[contactId]/timeline/page";
+import ContactQuotesInvoicesPage from "../[contactId]/quotes-invoices/page";
 import { CommandPalette } from "@/components/command-palette";
 
 /** The business the signed-in member belongs to (seeded as kf_business_id). */
@@ -85,9 +104,27 @@ const MEMBER_BUSINESS = "biz_1";
 const CONTACT_ID = "cm3contact0ada0lovelace01";
 const NAME = "Ada Lovelace";
 const DETAIL_PATH = `/crm/businesses/${MEMBER_BUSINESS}/contacts/${CONTACT_ID}`;
+const EVENTS_PATH = `${DETAIL_PATH}/events`;
+const INVOICES_PATH = `/commerce/businesses/${MEMBER_BUSINESS}/invoices`;
+const QUOTES_PATH = `/commerce/businesses/${MEMBER_BUSINESS}/quotes`;
 const SEARCH_PATH = `/api/flows/businesses/${MEMBER_BUSINESS}/search`;
 /** lib/api/_defaults.ts MISSING_ID: what the client answers for an 'undefined' id, sending nothing. */
 const MISSING_ID = "Missing id";
+/** What this customer's Quotes & Invoices and Timeline tabs list (and nothing else on the page names). */
+const INVOICE_NUMBER = "INV-0042";
+const CALL_SUBJECT = "Called about the kitchen repaint";
+
+/**
+ * The customer's tabs: each is a folder with a page.tsx beside the index page
+ * (layout.tsx draws one link per tab). Read from the tree, so a tab added later
+ * is held to the same rule.
+ */
+const CONTACT_ROUTE_DIR = path.resolve(__dirname, "../[contactId]");
+const TAB_IDS = fs
+  .readdirSync(CONTACT_ROUTE_DIR, { withFileTypes: true })
+  .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(CONTACT_ROUTE_DIR, entry.name, "page.tsx")))
+  .map((entry) => entry.name)
+  .sort();
 
 function jsonResponse(status: number, body: unknown, statusText = "OK"): Response {
   const text = JSON.stringify(body);
@@ -129,34 +166,64 @@ const searchResult = () =>
   });
 
 /**
- * The server, as its guards answer: another business is refused, the contact
- * detail read and the palette search answer, anything else is a 404. Returns
- * the pathnames asked for.
+ * The server, as its guards answer: another business is refused; the contact
+ * detail read, this customer's events, invoices and quotes, and the palette
+ * search answer; anything else is a 404. Returns the pathnames asked for and
+ * the full URLs.
  */
 function stubServer() {
   const requested: string[] = [];
+  const urls: URL[] = [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-      const { pathname } = new URL(url, "http://localhost");
+      const parsed = new URL(url, "http://localhost");
+      const { pathname } = parsed;
       requested.push(pathname);
+      urls.push(parsed);
       const tenant = pathname.match(/\/businesses\/([^/]+)\//)?.[1];
       if (tenant && tenant !== MEMBER_BUSINESS) {
         return jsonResponse(403, { statusCode: 403, message: "No access to this business", error: "Forbidden" }, "Forbidden");
       }
       if (pathname.endsWith(DETAIL_PATH)) return contactDetail();
+      if (pathname.endsWith(EVENTS_PATH)) {
+        return jsonResponse(200, [
+          { id: "ev_call_1", contactId: CONTACT_ID, type: "call", data: { subject: CALL_SUBJECT }, createdAt: "2026-11-10T10:00:00.000Z" },
+        ]);
+      }
+      const ofThisCustomer = parsed.searchParams.get("contactId") === CONTACT_ID;
+      if (pathname.endsWith(INVOICES_PATH)) {
+        return jsonResponse(200, {
+          data: ofThisCustomer ? [{ id: "inv_1", invoiceNumber: INVOICE_NUMBER, status: "SENT", total: 200, currency: "TTD" }] : [],
+        });
+      }
+      if (pathname.endsWith(QUOTES_PATH)) return jsonResponse(200, { data: [] });
       if (pathname.endsWith(SEARCH_PATH)) return searchResult();
       return jsonResponse(404, { message: "Not stubbed" }, "Not Found");
     }),
   );
-  return { requested };
+  return { requested, urls };
 }
 
 type ServerPage = (props: {
   params: Promise<Record<string, string>>;
-  searchParams: Promise<Record<string, string>>;
+  searchParams: Promise<Record<string, string | string[]>>;
 }) => unknown;
+
+/**
+ * A query as Next hands it to a page: one key per name, a repeated name as an
+ * array of its values in order, on an object with no prototype (so a name such
+ * as `__proto__` is an own key, as in Next's parsed query).
+ */
+function nextSearchParams(search: URLSearchParams): Record<string, string | string[]> {
+  const out = Object.create(null) as Record<string, string | string[]>;
+  for (const key of new Set(search.keys())) {
+    const all = search.getAll(key);
+    out[key] = all.length > 1 ? all : all[0];
+  }
+  return out;
+}
 
 /**
  * Hop 1: Next 16 serving /app/crm/contacts/<segment>[?query] with the index
@@ -170,27 +237,32 @@ async function serveContactIndex(href: string): Promise<string> {
   try {
     await page({
       params: Promise.resolve({ contactId: segment as string }),
-      searchParams: Promise.resolve(Object.fromEntries(url.searchParams)),
+      searchParams: Promise.resolve(nextSearchParams(url.searchParams)),
     });
   } catch (err) {
     if (isRedirectError(err)) return getURLFromRedirectError(err);
     throw err;
   }
-  throw new Error(`${href}: the index page rendered instead of redirecting to the customer's Overview`);
+  throw new Error(`${href}: the index page rendered instead of redirecting to one of the customer's tabs`);
 }
 
-/** Hop 2: mount the URL the redirect names, as Next mounts /app/crm/contacts/[contactId]/overview. */
+/** The tab pages this test mounts, by the tab segment of the URL. */
+const TAB_PAGES = new Map<string, () => ReactNode>([
+  ["overview", () => <ContactOverviewPage />],
+  ["timeline", () => <ContactTimelinePage />],
+  ["quotes-invoices", () => <ContactQuotesInvoicesPage />],
+]);
+
+/** Hop 2: mount the URL the redirect names, as Next mounts /app/crm/contacts/[contactId]/<tab>. */
 function mountContactPage(href: string) {
   const { pathname } = new URL(href, "http://localhost");
-  const segment = pathname.match(/^\/app\/crm\/contacts\/([^/]+)\/overview$/)?.[1];
-  expect(segment, `${href} is a customer's Overview`).toBeTruthy();
-  nav.params = { contactId: segment as string };
+  const [, segment, tab] = pathname.match(/^\/app\/crm\/contacts\/([^/]+)\/([^/]+)$/) ?? [];
+  expect(segment, `${href} is one of a customer's tabs, /app/crm/contacts/<id>/<tab>`).toBeTruthy();
+  const tabPage = TAB_PAGES.get(tab);
+  if (!tabPage) throw new Error(`${href}: this test does not mount the '${tab}' tab`);
+  nav.params = { contactId: segment };
   nav.pathname = pathname;
-  return render(
-    <ContactDetailLayout>
-      <ContactOverviewPage />
-    </ContactDetailLayout>,
-  );
+  return render(<ContactDetailLayout>{tabPage()}</ContactDetailLayout>);
 }
 
 /** Open an href the way a click on it does, and wait until the customer's page has settled. */
@@ -202,13 +274,22 @@ async function openCustomer(href: string): Promise<string> {
   return target;
 }
 
-/** The customer's page is open: not 'Missing id', the heading names them, and the read was theirs. */
-function expectCustomerOpen(target: string, requested: string[]) {
+/**
+ * The customer's page is open on the tab the door names: not 'Missing id', the
+ * heading names them, the redirect named `expectedTarget` (their Overview
+ * unless the door asked for a tab), and the read was theirs.
+ */
+function expectCustomerOpen(target: string, requested: string[], expectedTarget = `/app/crm/contacts/${CONTACT_ID}/overview`) {
   expect(screen.queryByText(MISSING_ID), "the customer's page does not say 'Missing id'").not.toBeInTheDocument();
   expect(screen.queryByText("Could not load this contact")).not.toBeInTheDocument();
   expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(NAME);
-  expect(target, "the redirect names this customer's Overview").toBe(`/app/crm/contacts/${CONTACT_ID}/overview`);
+  expect(target, "the redirect names this customer's tab the door asked for").toBe(expectedTarget);
   expect(requested.filter((p) => p.includes("/contacts/")), "the page read this customer").toContain(DETAIL_PATH);
+}
+
+/** The tab selector (the phone's; the desktop row highlights the same tab) shows `label`. */
+function expectTabSelected(label: string) {
+  expect(screen.getByDisplayValue(label), `the customer's page is on its ${label} tab`).toBeInTheDocument();
 }
 
 describe("/app/crm/contacts/<id> opens the customer (BUG-038, journey C4)", () => {
@@ -252,14 +333,32 @@ describe("/app/crm/contacts/<id> opens the customer (BUG-038, journey C4)", () =
     expectCustomerOpen(target, requested);
   });
 
-  it.each([
-    ["the Customers list's Refer action", `/app/crm/contacts/${CONTACT_ID}?action=refer`],
-    ["a project's client tab (communications)", `/app/crm/contacts/${CONTACT_ID}?tab=communications`],
-    ["a project's client tab (invoices)", `/app/crm/contacts/${CONTACT_ID}?tab=invoices`],
-  ])("%s: %s opens the customer", async (_door, href) => {
+  it("a project's client tab 'Invoices' (?tab=invoices) opens the customer on Quotes & Invoices, their invoice listed", async () => {
+    const { requested, urls } = stubServer();
+    const target = await openCustomer(`/app/crm/contacts/${CONTACT_ID}?tab=invoices`);
+    expectCustomerOpen(target, requested, `/app/crm/contacts/${CONTACT_ID}/quotes-invoices`);
+    expectTabSelected("Quotes & Invoices");
+    expect(await screen.findByText(INVOICE_NUMBER), "this customer's invoice is listed").toBeInTheDocument();
+    expect(
+      urls.some((u) => u.pathname.endsWith(INVOICES_PATH) && u.searchParams.get("contactId") === CONTACT_ID),
+      "the tab read this customer's invoices",
+    ).toBe(true);
+  });
+
+  it("a project's 'Messages' and 'Comms' links (?tab=communications) open the customer on the Timeline, their call listed", async () => {
     const { requested } = stubServer();
-    const target = await openCustomer(href);
-    expectCustomerOpen(target, requested);
+    const target = await openCustomer(`/app/crm/contacts/${CONTACT_ID}?tab=communications`);
+    expectCustomerOpen(target, requested, `/app/crm/contacts/${CONTACT_ID}/timeline`);
+    expectTabSelected("Timeline");
+    expect(await screen.findByText(CALL_SUBJECT), "this customer's call is listed").toBeInTheDocument();
+    expect(requested, "the tab read this customer's events").toContain(EVENTS_PATH);
+  });
+
+  it("the Customers list's 'Refer / Link' (?action=refer) opens the customer on the Overview, ?action=refer kept for the page", async () => {
+    const { requested } = stubServer();
+    const target = await openCustomer(`/app/crm/contacts/${CONTACT_ID}?action=refer`);
+    expectCustomerOpen(target, requested, `/app/crm/contacts/${CONTACT_ID}/overview?action=refer`);
+    expectTabSelected("Overview");
   });
 
   it("a customer the server does not find says 'Contact not found', not 'Missing id' (the route hands the server the real id)", async () => {
@@ -280,5 +379,41 @@ describe("/app/crm/contacts/<id> opens the customer (BUG-038, journey C4)", () =
     expect(screen.queryByText(MISSING_ID)).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Contact not found"));
     expect(requested, "the server was asked about this customer").toContain(DETAIL_PATH);
+  });
+});
+
+describe("/app/crm/contacts/<id>?tab=... opens that tab; the rest of the query is passed on (review FCP-COR-2)", () => {
+  const index = `/app/crm/contacts/${CONTACT_ID}`;
+
+  it("every tab of the customer's page, named in ?tab=, opens that tab", async () => {
+    expect(TAB_IDS.length, `the customer's page has its tabs (found: ${TAB_IDS.join(", ")})`).toBeGreaterThanOrEqual(9);
+    expect(TAB_IDS).toEqual(expect.arrayContaining(["overview", "timeline", "quotes-invoices", "notes", "tasks"]));
+    for (const tab of TAB_IDS) {
+      expect(await serveContactIndex(`${index}?tab=${tab}`), `?tab=${tab}`).toBe(`${index}/${tab}`);
+    }
+  });
+
+  it("an unknown name, an empty one, or a name every object inherits opens the Overview, and ?tab= is not passed on", async () => {
+    for (const tab of ["deals", "", "constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"]) {
+      expect(await serveContactIndex(`${index}?tab=${encodeURIComponent(tab)}`), `?tab=${tab}`).toBe(`${index}/overview`);
+    }
+  });
+
+  it("a repeated ?tab= takes its first value", async () => {
+    expect(await serveContactIndex(`${index}?tab=invoices&tab=notes`)).toBe(`${index}/quotes-invoices`);
+  });
+
+  it("the rest of the query is passed on as given: every value, repeats in order, each encoded", async () => {
+    // A value that, written out unencoded, would add a parameter of its own.
+    const from = "today&tab=notes&x=1";
+    const target = await serveContactIndex(
+      `${index}?tab=communications&action=refer&from=${encodeURIComponent(from)}&tag=vip&tag=new`,
+    );
+    const url = new URL(target, "http://localhost");
+    expect(url.pathname).toBe(`${index}/timeline`);
+    expect(url.searchParams.get("action")).toBe("refer");
+    expect(url.searchParams.get("from")).toBe(from);
+    expect(url.searchParams.getAll("tag")).toEqual(["vip", "new"]);
+    expect([...url.searchParams.keys()], "?tab= is spent on the tab; nothing else is added").toEqual(["action", "from", "tag", "tag"]);
   });
 });
