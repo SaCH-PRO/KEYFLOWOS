@@ -112,6 +112,36 @@
  *   RF-05  control: an invoice's refund naming only its capture keeps its path
  *          (the platform's app for a business with no PayPal of its own)
  *
+ * PR210 review repairs (at 813031ae; D-121, D-138):
+ *   RF-01  (COR-PR210-1, SEC-PR210-4) the full refund / reversal also refunds
+ *          the order: REFUNDED once, metadata.refundedTotal and a 'refunded'
+ *          step naming PayPal's refund, one store_order.refunded naming the
+ *          invoice (no Expense beside it); a redelivery or resend adds none
+ *   RF-06  (COR-PR210-1) an order settled by CHECKOUT.ORDER.COMPLETED and
+ *          refunded by two PayPal partial refunds (30 + 50) shows each: after
+ *          the 30 it is PAID with refundedTotal 30 and a 'partially_refunded'
+ *          step (no store_order.refunded); after the 50 it is REFUNDED once,
+ *          the store's revenue (orders summary) no longer counts it
+ *   RF-07  (COR-PR210-2 a) a partial refund the owner recorded by hand (the
+ *          D-121 fulfil door), then PayPal's notice of it: not recorded again
+ *          (one -30, one posting), a resend neither; a second PayPal refund of
+ *          the same amount the owner made in PayPal alone is recorded
+ *   RF-08  (COR-PR210-2 b) PayPal's partial refund first, then the owner's hand
+ *          refund of the same amount: 409, nothing written (also when it is
+ *          what is left); the owner's full refund takes the rest, and PayPal's
+ *          notice of that rest is not recorded again
+ *   RF-09  (COR-PR210-2) a hand refund and PayPal's notice of it racing: one
+ *          refund recorded, whichever wins
+ *   RF-10  (SEC-PR210-1) a failed read of the refunded capture's payment fails
+ *          the delivery (500, claim released); PayPal's redelivery records it
+ *   RF-11  (SEC-PR210-3, COR-PR210-4) a store-signed refund that arrives before
+ *          its capture is recorded fails the delivery (409, claim released);
+ *          its redelivery after the capture records it
+ *   RF-12  (SEC-PR210-2, COR-PR210-3) a store order whose PayPal capture the
+ *          platform's app settled before D-138 (its store holds no PayPal
+ *          setting of its own): the platform-signed refund is verified with the
+ *          platform's app and recorded, as at the base
+ *
  * Nothing on the money path or the authorization boundary is mocked:
  * PrismaService, PublicRateLimitGuard (real Redis, this suite's namespace),
  * SiteService, StoreOrderService (the paid door), PaymentsService,
@@ -121,7 +151,12 @@
  * CrmService read and write real rows. Stand-ins off the money path: the CRM
  * timeline, stats, lists, flow and custom-field caches, SubscriptionsService,
  * PublicEventsService, PromoCodeService, InventoryRiskService,
- * TransactionalEmailService, ExpensesService and the timeline. No provider is
+ * TransactionalEmailService, ExpensesService (a recorder: store_order.refunded
+ * books one when it names no invoice) and the timeline. The PR210 review cases
+ * also drive the owner's fulfil route (the REAL MarketplaceController, D-121's
+ * refund door); the only identity stand-in is a middleware that attaches the
+ * seeded user named by `x-test-user`, as AuthMiddleware does after token
+ * verification (no guard is overridden). No provider is
  * called: the PayPal SDK client is stubbed at getPaypalClient (it records the
  * credentials it is built from), and global fetch is a tap that records every
  * request and answers only Stripe's Checkout Session API and PayPal's sandbox
@@ -222,9 +257,15 @@ let db: any;
 let app: any;
 let redis: any;
 let payments: any;
+/** PR210 review (RF-12): the paid door, as the pre-D-138 PayPal webhook settled a store order with it. */
+let storeOrders: any;
+/** PR210 review (RF-10): the PrismaService the services share (a read is made to fail once through it). */
+let prismaService: any;
 
 /** store_order.* events in emit order. */
 let seen: string[] = [];
+/** PR210 review: the Expenses store_order.refunded booked (ExpensesService.createExpense recorder), by business. */
+let expenses: Array<{ businessId: string; amount: number }> = [];
 /** Listener work started by an emit, awaited by settle(). */
 const inflight: Promise<unknown>[] = [];
 
@@ -628,6 +669,51 @@ async function invoiceBooks(invoiceId: string | null) {
   };
 }
 
+/** PR210 review: a PayPal refund resource's amount (the refund, not the capture), for captureRefund's `extra`. */
+const refunding = (value: number) => ({ amount: { value: value.toFixed(2), currency_code: 'USD' } });
+
+/**
+ * PR210 review (D-121): what the order shows of its refunds: metadata.refundedTotal, and its 'refunded' /
+ * 'partially_refunded' timeline steps as `status:refundAmount:refundedTotal:by:refund` (by: the provider, or 'hand' for
+ * the owner's fulfil refund; refund: the provider's refund id).
+ */
+async function orderRefunds(orderId: string) {
+  const stored = await db.marketplaceOrder.findUnique({ where: { id: orderId } });
+  const meta = (stored.metadata ?? {}) as Record<string, any>;
+  const timeline: any[] = Array.isArray(meta.statusTimeline) ? meta.statusTimeline : [];
+  return {
+    refundedTotal: meta.refundedTotal ?? null,
+    steps: timeline
+      .filter((s) => s?.status === 'refunded' || s?.status === 'partially_refunded')
+      .map((s) => `${s.status}:${s.refundAmount}:${s.refundedTotal ?? ''}:${s.provider ?? 'hand'}:${s.providerRefundId ?? ''}`),
+  };
+}
+
+/** PR210 review (D-121): the owner's fulfil call, POST /marketplace/businesses/:businessId/orders/:orderId/fulfill. */
+async function fulfil(orderId: string, body: Record<string, unknown>, businessId = ID.bizOwn) {
+  const res = await agent().post(`/marketplace/businesses/${businessId}/orders/${orderId}/fulfill`).set('x-test-user', ID.owner).send(body);
+  await settle();
+  return res;
+}
+
+/** PR210 review (COR-PR210-1): the store's revenue as Sales > Orders states it (GET /site/businesses/:id/orders/summary). */
+async function storeRevenue(businessId = ID.bizOwn): Promise<number> {
+  const res = await agent().get(`/site/businesses/${businessId}/orders/summary`).set('x-test-user', ID.owner);
+  expect(res.status, JSON.stringify(res.body)).toBe(200);
+  return Number(res.body.totalRevenue);
+}
+
+/** PR210 review: the hand-recorded refund rows on the order's checkout invoice (the D-121 door's manual_refund_ rows). */
+async function handRefunds(orderId: string): Promise<string[]> {
+  const stored = await db.marketplaceOrder.findUnique({ where: { id: orderId } });
+  const invoice = await db.invoice.findFirst({ where: { businessId: stored.businessId, invoiceNumber: `INV-${stored.orderNumber}` } });
+  const rows = await db.payment.findMany({
+    where: { invoiceId: invoice.id, providerPaymentId: { startsWith: 'manual_refund_' } },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+  });
+  return rows.map((p: any) => `${p.providerPaymentId}:${p.status}:${Number(p.amount)}`);
+}
+
 beforeAll(async () => {
   process.env.RATE_LIMIT_KEY_NAMESPACE = RATE_LIMIT_NS;
   delete process.env.WIPAY_API_KEY;
@@ -685,6 +771,7 @@ beforeAll(async () => {
   const { ExpensesService } = await import('../src/modules/expenses/expenses.service');
   const { TransactionalEmailService } = await import('../src/modules/notifications/transactional-email.service');
   const { MarketplaceService } = await import('../src/modules/marketplace/marketplace.service');
+  const { MarketplaceController } = await import('../src/modules/marketplace/marketplace.controller');
   const { FulfillmentRoutingService } = await import('../src/modules/marketplace/fulfillment-routing.service');
   const { CommerceService } = await import('../src/modules/commerce/commerce.service');
   const { CommerceStatsService } = await import('../src/modules/commerce/commerce-stats.service');
@@ -698,7 +785,8 @@ beforeAll(async () => {
 
   const moduleRef = await Test.createTestingModule({
     imports: [EventEmitterModule.forRoot({ wildcard: true, delimiter: '.', maxListeners: 50 })],
-    controllers: [SiteController, PaymentsController],
+    // PR210 review: MarketplaceController for the owner's fulfil refund (the D-121 door).
+    controllers: [SiteController, PaymentsController, MarketplaceController],
     providers: [
       PrismaService,
       AuthGuard,
@@ -736,7 +824,15 @@ beforeAll(async () => {
       },
       { provide: PromoCodeService, useValue: stub },
       { provide: InventoryRiskService, useValue: { evaluateProduct: async () => null } },
-      { provide: ExpensesService, useValue: { createExpense: async () => null } },
+      {
+        provide: ExpensesService,
+        useValue: {
+          createExpense: async (input: { businessId: string; amount: number }) => {
+            expenses.push({ businessId: input.businessId, amount: input.amount });
+            return null;
+          },
+        },
+      },
       { provide: TransactionalEmailService, useValue: { send: async () => undefined } },
       { provide: CommerceStatsService, useValue: { invalidateCache: () => undefined } },
       { provide: SubscriptionsService, useValue: { checkLimit: async () => ({ allowed: true }) } },
@@ -752,11 +848,24 @@ beforeAll(async () => {
 
   // The PayPal webhook reads the raw body, as in production (app-bootstrap.ts).
   app = moduleRef.createNestApplication({ rawBody: true });
+  // PR210 review: identity attachment only, for the seeded v61b_ owner (as AuthMiddleware does after token verification).
+  // No guard is overridden.
+  app.use(async (req: any, _res: any, next: any) => {
+    const header = req.headers['x-test-user'];
+    const id = typeof header === 'string' ? header : undefined;
+    if (id && id.startsWith(P)) {
+      const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+      if (user) req.user = { id: user.id, email: user.email, role: user.role };
+    }
+    next();
+  });
   app.useGlobalFilters(new GlobalHttpExceptionFilter());
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   await app.init();
 
   payments = app.get(PaymentsService);
+  storeOrders = app.get(StoreOrderService);
+  prismaService = app.get(PrismaService);
   // Fulfilment routing runs un-awaited after a paid order; it is off the money path and held here.
   vi.spyOn(app.get(MarketplaceService) as any, 'autoRouteOrder').mockImplementation(() => undefined);
 
@@ -849,6 +958,7 @@ beforeEach(async () => {
   await settle();
   await clearRateLimits();
   seen = [];
+  expenses = [];
   setEnv({});
   await setSettings(ID.bizPlatform, null);
   await setSettings(ID.bizMixed, null);
@@ -1350,23 +1460,29 @@ describe("PR210-PAYPAL-STORE-REFUND (D-138; Codex P1 on PR #210): a store's own 
 
       const refundId = `${R}rf_rf01_${label}`;
       const event = captureRefund(eventType, `${R}WH_rf01_${label}`, refundId, captureId, names);
+      seen = [];
       const res = await paypalWebhook(event);
       // At the base: 400 'Invalid PayPal webhook signature': the refund names no invoice and no order, so it was checked
       // with the platform's app and webhook id, which did not sign it (PayPal keeps redelivering; nothing is recorded).
       expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(201);
       expect(res.body, label).toEqual({ ok: true, received: true, processed: eventType });
       expect(paypalChecks(), `${label}: checked with the store's own app and webhook id only`).toEqual(checkedWith(OWN_APP));
-      // The order row itself keeps CONFIRMED/PAID: only StoreOrderService.refundOrder moves it to REFUNDED, and it takes a
-      // member with revenue write (a provider's refund names none). Recorded as an open issue of this packet.
+      // Review COR-PR210-1 / SEC-PR210-4 (D-121): the order is refunded with its books. At 813031ae it stayed
+      // CONFIRMED/PAID, with no refundedTotal, no step and no store_order.refunded, while its invoice was SENT.
       const refunded = {
-        order: 'CONFIRMED/PAID',
+        order: 'REFUNDED/REFUNDED',
         invoice: 'SENT',
         payments: [capture, `paypal:${refundId}:REFUNDED:-${ORDER_TOTAL}@${ID.bizOwn}`],
         postings: [`INCOME:REVERSED:${ORDER_TOTAL}`, `REVERSAL:POSTED:${ORDER_TOTAL}`],
       };
-      expect(await orderBooks(orderId), `${label}: recorded once on the order's checkout invoice`).toEqual(refunded);
+      expect(await orderBooks(orderId), `${label}: recorded once on the order's checkout invoice, and the order refunded`).toEqual(refunded);
+      const shown = { refundedTotal: ORDER_TOTAL, steps: [`refunded:${ORDER_TOTAL}:${ORDER_TOTAL}:paypal:${refundId}`] };
+      expect(await orderRefunds(orderId), `${label}: the order shows PayPal's refund`).toEqual(shown);
+      expect(seen, `${label}: one store_order.refunded`).toEqual(['store_order.refunded']);
+      expect(expenses, `${label}: it names the invoice, so no Expense is booked beside the refund`).toEqual([]);
 
       requests = [];
+      seen = [];
       const again = await paypalWebhook(event);
       expect(again.status, `${label} redelivery: ${JSON.stringify(again.body)}`).toBe(201);
       expect(again.body, `${label}: the redelivery is acknowledged, not processed`).toEqual({ ok: true, received: true });
@@ -1375,6 +1491,8 @@ describe("PR210-PAYPAL-STORE-REFUND (D-138; Codex P1 on PR #210): a store's own 
       const resent = await paypalWebhook({ ...event, id: `${R}WH_rf01_${label}_resent` });
       expect(resent.status, `${label} resent: ${JSON.stringify(resent.body)}`).toBe(201);
       expect(await orderBooks(orderId), `${label}: the same refund under a new event id records nothing (deduped on the refund id)`).toEqual(refunded);
+      expect(await orderRefunds(orderId), `${label}: and adds no step`).toEqual(shown);
+      expect(seen, `${label}: and emits nothing`).toEqual([]);
     }
   });
 
@@ -1483,5 +1601,282 @@ describe("PR210-PAYPAL-STORE-REFUND (D-138; Codex P1 on PR #210): a store's own 
     const again = await paypalWebhook(event);
     expect(again.body, 'the redelivery is acknowledged, not processed').toEqual({ ok: true, received: true });
     expect(await invoiceBooks(invoice.invoiceId), 'the redelivery records nothing').toEqual(refunded);
+  });
+
+  it("RF-06 (review COR-PR210-1; D-121): an order settled by CHECKOUT.ORDER.COMPLETED and refunded by two PayPal partial refunds (30, then 50) shows each: after the 30 it stays PAID with refundedTotal 30 and a 'partially_refunded' step naming PayPal's refund, and nothing announces a refund; after the 50 it is REFUNDED once (one store_order.refunded naming the invoice, no Expense) and Sales > Orders no longer counts its revenue; a resend adds nothing", async () => {
+    setEnv({ ...PLATFORM_PAYPAL, ...PLATFORM_PAYPAL_WEBHOOK });
+    const orderId = await seedOrder(ID.bizOwn, ID.prodOwn, 'PAYPAL');
+    const captureId = `${R}cap_rf06`;
+    paypalSigner = OWN_APP;
+    const settled = await paypalWebhook(orderCompleted(`${R}WH_ord_rf06`, `${R}pp_rf06`, captureId, orderId));
+    expect(settled.status, JSON.stringify(settled.body)).toBe(201);
+    expect(await orderState(orderId), 'settled by the order event').toBe(`CONFIRMED/PAID/${captureId}`);
+    const capture = `paypal:${captureId}:SUCCESSFUL:${ORDER_TOTAL}@${ID.bizOwn}`;
+    const revenueBefore = await storeRevenue();
+
+    seen = [];
+    const first = `${R}rf_rf06_1`;
+    const res = await paypalWebhook(captureRefund('PAYMENT.CAPTURE.REFUNDED', `${R}WH_rf06_1`, first, captureId, 'related_ids', refunding(30)));
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(await orderBooks(orderId), 'the 30 is recorded on the checkout invoice').toMatchObject({
+      order: 'CONFIRMED/PAID',
+      invoice: 'PARTIALLY_PAID',
+      payments: [capture, `paypal:${first}:REFUNDED:-30@${ID.bizOwn}`],
+    });
+    // At 813031ae: refundedTotal null and no step: nothing on the order said it was partly refunded.
+    expect(await orderRefunds(orderId), 'the order shows it is partly refunded').toEqual({
+      refundedTotal: 30,
+      steps: [`partially_refunded:30:30:paypal:${first}`],
+    });
+    expect(seen, 'partly refunded: no store_order.refunded').toEqual([]);
+    expect(await storeRevenue(), 'still a paid order').toBe(revenueBefore);
+
+    const second = `${R}rf_rf06_2`;
+    const event = captureRefund('PAYMENT.CAPTURE.REFUNDED', `${R}WH_rf06_2`, second, captureId, 'related_ids', refunding(50));
+    const res2 = await paypalWebhook(event);
+    expect(res2.status, JSON.stringify(res2.body)).toBe(201);
+    const refunded = await orderBooks(orderId);
+    // At 813031ae: the invoice SENT and the order still CONFIRMED/PAID.
+    expect(refunded, 'the rest is recorded and the order refunded').toMatchObject({
+      order: 'REFUNDED/REFUNDED',
+      invoice: 'SENT',
+      payments: [capture, `paypal:${first}:REFUNDED:-30@${ID.bizOwn}`, `paypal:${second}:REFUNDED:-50@${ID.bizOwn}`],
+    });
+    const shown = {
+      refundedTotal: ORDER_TOTAL,
+      steps: [`partially_refunded:30:30:paypal:${first}`, `refunded:50:${ORDER_TOTAL}:paypal:${second}`],
+    };
+    expect(await orderRefunds(orderId)).toEqual(shown);
+    expect(seen, 'one store_order.refunded').toEqual(['store_order.refunded']);
+    expect(expenses, 'it names the invoice: no Expense beside the refund').toEqual([]);
+    // At 813031ae: the same total before and after (the order stayed PAID).
+    expect(await storeRevenue(), "Sales > Orders no longer counts the refunded order's revenue").toBe(revenueBefore - ORDER_TOTAL);
+
+    seen = [];
+    const resent = await paypalWebhook({ ...event, id: `${R}WH_rf06_2_resent` });
+    expect(resent.status, JSON.stringify(resent.body)).toBe(201);
+    expect(await orderBooks(orderId), 'a resend records nothing').toEqual(refunded);
+    expect(await orderRefunds(orderId), 'adds no step').toEqual(shown);
+    expect(seen, 'and emits nothing').toEqual([]);
+  });
+
+  it("RF-07 (review COR-PR210-2, the owner first; D-121): a partial refund the owner records by hand (the fulfil refund door, which does not call PayPal), then PayPal's notice of the refund the owner makes in PayPal for it, is recorded once: the notice is paired with the hand-recorded refund and adds no row, posting or step (nor does its resend); a second PayPal refund of the same amount, made in PayPal alone, is its own refund and is recorded", async () => {
+    setEnv({ ...PLATFORM_PAYPAL, ...PLATFORM_PAYPAL_WEBHOOK });
+    const { orderId, captureId } = await settledPaypalOrder(ID.bizOwn, ID.prodOwn, OWN_APP, 'rf07');
+    const byHand = await fulfil(orderId, { action: 'refund', refundAmount: 30, reason: 'damaged item' });
+    expect(byHand.status, JSON.stringify(byHand.body)).toBe(201);
+    const recorded = await orderBooks(orderId);
+    expect(recorded, 'the hand refund of 30').toMatchObject({ order: 'CONFIRMED/PAID', invoice: 'PARTIALLY_PAID' });
+    expect(await handRefunds(orderId)).toEqual([expect.stringMatching(/^manual_refund_.+_part_[0-9a-f]{32}:REFUNDED:-30$/)]);
+    expect(recorded.payments, 'the capture and the hand refund only').toHaveLength(2);
+    const shown = { refundedTotal: 30, steps: ['partially_refunded:30:30:hand:'] };
+    expect(await orderRefunds(orderId)).toEqual(shown);
+
+    seen = [];
+    const notice = captureRefund('PAYMENT.CAPTURE.REFUNDED', `${R}WH_rf07_1`, `${R}rf_rf07_1`, captureId, 'related_ids', refunding(30));
+    const res = await paypalWebhook(notice);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toEqual({ ok: true, received: true, processed: 'PAYMENT.CAPTURE.REFUNDED' });
+    // At 813031ae: a second -30 row (PayPal's) and a second refund posting: 60 of 80 refunded, the order saying 30.
+    expect(await orderBooks(orderId), "PayPal's notice of the hand-recorded refund records nothing new").toEqual(recorded);
+    expect(await orderRefunds(orderId), 'nor adds a step').toEqual(shown);
+    expect(seen).toEqual([]);
+    const resent = await paypalWebhook({ ...notice, id: `${R}WH_rf07_1_resent` });
+    expect(resent.status, JSON.stringify(resent.body)).toBe(201);
+    expect(await orderBooks(orderId), 'nor does its resend').toEqual(recorded);
+
+    // A second refund of 30, made in PayPal alone (nothing recorded by hand for it), is recorded.
+    const second = `${R}rf_rf07_2`;
+    const res2 = await paypalWebhook(captureRefund('PAYMENT.CAPTURE.REFUNDED', `${R}WH_rf07_2`, second, captureId, 'related_ids', refunding(30)));
+    expect(res2.status, JSON.stringify(res2.body)).toBe(201);
+    expect(await orderBooks(orderId)).toMatchObject({
+      order: 'CONFIRMED/PAID',
+      invoice: 'PARTIALLY_PAID',
+      payments: [...recorded.payments, `paypal:${second}:REFUNDED:-30@${ID.bizOwn}`],
+    });
+    expect(await orderRefunds(orderId)).toEqual({
+      refundedTotal: 60,
+      steps: ['partially_refunded:30:30:hand:', `partially_refunded:30:60:paypal:${second}`],
+    });
+  });
+
+  it("RF-08 (review COR-PR210-2, PayPal first; D-121): after PayPal's partial refund of 30 is recorded (and shown on the order), the owner's hand refund of the same 30 is refused 409 with nothing written; the owner's full refund takes what is left (50) and refunds the order once, and PayPal's notice of that 50 is then not recorded again; a hand refund equal to a PayPal refund already recorded is refused even when it is all that is left (it is not taken as the full refund)", async () => {
+    setEnv({ ...PLATFORM_PAYPAL, ...PLATFORM_PAYPAL_WEBHOOK });
+    const { orderId, captureId } = await settledPaypalOrder(ID.bizOwn, ID.prodOwn, OWN_APP, 'rf08');
+    const capture = `paypal:${captureId}:SUCCESSFUL:${ORDER_TOTAL}@${ID.bizOwn}`;
+    const first = `${R}rf_rf08_1`;
+    const res = await paypalWebhook(captureRefund('PAYMENT.CAPTURE.REFUNDED', `${R}WH_rf08_1`, first, captureId, 'related_ids', refunding(30)));
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const afterPaypal = await orderBooks(orderId);
+    expect(afterPaypal.payments).toEqual([capture, `paypal:${first}:REFUNDED:-30@${ID.bizOwn}`]);
+    const shown = { refundedTotal: 30, steps: [`partially_refunded:30:30:paypal:${first}`] };
+    // At 813031ae: refundedTotal null, which invited the owner to record the refund again.
+    expect(await orderRefunds(orderId), "the order shows PayPal's partial refund").toEqual(shown);
+
+    seen = [];
+    const same = await fulfil(orderId, { action: 'refund', refundAmount: 30, reason: 'damaged item' });
+    // At 813031ae: 201, a hand-recorded -30 beside PayPal's: 60 of 80 refunded, refundedTotal 60.
+    expect(same.status, JSON.stringify(same.body)).toBe(409);
+    expect(String(same.body.message), 'the refusal names PayPal').toMatch(/PayPal/);
+    expect(await orderBooks(orderId), 'nothing written').toEqual(afterPaypal);
+    expect(await orderRefunds(orderId)).toEqual(shown);
+    expect(await handRefunds(orderId)).toEqual([]);
+    expect(seen).toEqual([]);
+
+    const rest = await fulfil(orderId, { action: 'refund' });
+    expect(rest.status, JSON.stringify(rest.body)).toBe(201);
+    const refunded = await orderBooks(orderId);
+    expect(refunded, 'the full refund takes what is left').toMatchObject({ order: 'REFUNDED/REFUNDED', invoice: 'SENT' });
+    expect(await handRefunds(orderId)).toEqual([expect.stringMatching(/^manual_refund_.+:REFUNDED:-50$/)]);
+    expect(seen, 'refunded once').toEqual(['store_order.refunded']);
+    const shownRefunded = await orderRefunds(orderId);
+    expect(shownRefunded.refundedTotal).toBe(ORDER_TOTAL);
+
+    seen = [];
+    const restNotice = await paypalWebhook(captureRefund('PAYMENT.CAPTURE.REFUNDED', `${R}WH_rf08_2`, `${R}rf_rf08_2`, captureId, 'related_ids', refunding(50)));
+    expect(restNotice.status, JSON.stringify(restNotice.body)).toBe(201);
+    expect(await orderBooks(orderId), "PayPal's notice of the rest records nothing new").toEqual(refunded);
+    expect(await orderRefunds(orderId)).toEqual(shownRefunded);
+    expect(seen).toEqual([]);
+
+    // PayPal's 40 recorded, then the owner's hand refund of 40, which is all that is left: the same refund, refused.
+    const other = await settledPaypalOrder(ID.bizOwn, ID.prodOwn, OWN_APP, 'rf08_left');
+    const left = await paypalWebhook(captureRefund('PAYMENT.CAPTURE.REFUNDED', `${R}WH_rf08_3`, `${R}rf_rf08_3`, other.captureId, 'related_ids', refunding(40)));
+    expect(left.status, JSON.stringify(left.body)).toBe(201);
+    const leftBooks = await orderBooks(other.orderId);
+    const leftShown = await orderRefunds(other.orderId);
+    expect(leftShown.refundedTotal).toBe(40);
+    const all = await fulfil(other.orderId, { action: 'refund', refundAmount: 40, reason: 'damaged item' });
+    // At 813031ae: 201 as the full refund of what was left: the order REFUNDED, 80 refunded of which PayPal returned 40.
+    expect(all.status, JSON.stringify(all.body)).toBe(409);
+    expect(await orderBooks(other.orderId), 'nothing written').toEqual(leftBooks);
+    expect(await orderRefunds(other.orderId)).toEqual(leftShown);
+  });
+
+  it("RF-09 (review COR-PR210-2, racing): the owner's hand refund of 30 and PayPal's notice of the same 30 arriving together record one refund of 30, whichever is first (the hand refund is refused, or the notice is paired with it)", async () => {
+    setEnv({ ...PLATFORM_PAYPAL, ...PLATFORM_PAYPAL_WEBHOOK });
+    for (const n of [1, 2, 3]) {
+      const { orderId, captureId } = await settledPaypalOrder(ID.bizOwn, ID.prodOwn, OWN_APP, `rf09_${n}`);
+      const [byHand, notice] = await Promise.all([
+        fulfil(orderId, { action: 'refund', refundAmount: 30, reason: 'damaged item' }),
+        paypalWebhook(captureRefund('PAYMENT.CAPTURE.REFUNDED', `${R}WH_rf09_${n}`, `${R}rf_rf09_${n}`, captureId, 'related_ids', refunding(30))),
+      ]);
+      expect([201, 409], `race ${n}: ${JSON.stringify(byHand.body)}`).toContain(byHand.status);
+      expect(notice.status, `race ${n}: ${JSON.stringify(notice.body)}`).toBe(201);
+      const books = await orderBooks(orderId);
+      const refunds = books.payments.filter((p: string) => p.includes(':REFUNDED:'));
+      // At 813031ae: two refunds of 30, the hand-recorded one and PayPal's.
+      expect(refunds, `race ${n}: one refund recorded (${JSON.stringify(books)})`).toHaveLength(1);
+      expect(refunds[0]).toMatch(/:REFUNDED:-30@/);
+      expect((await orderRefunds(orderId)).refundedTotal, `race ${n}`).toBe(30);
+    }
+  });
+
+  it("RF-10 (review SEC-PR210-1; V1-15c): a failed read of the refunded capture's payment fails the delivery (500) and gives its claim back, nothing recorded, so PayPal's redelivery records the refund; at 813031ae it was acknowledged as processed with nothing recorded and every redelivery acked as a duplicate", async () => {
+    setEnv({ ...PLATFORM_PAYPAL, ...PLATFORM_PAYPAL_WEBHOOK });
+    const { orderId, captureId } = await settledPaypalOrder(ID.bizOwn, ID.prodOwn, OWN_APP, 'rf10');
+    const paid = await orderBooks(orderId);
+    const eventId = `${R}WH_rf10`;
+    const event = captureRefund('PAYMENT.CAPTURE.REFUNDED', eventId, `${R}rf_rf10`, captureId, 'related_ids');
+    // One read fails: the refund processor's read of the capture's payment (the one that selects its amount).
+    const real = prismaService.client;
+    let failed = 0;
+    const payment = new Proxy(real.payment, {
+      get(target: any, key: string | symbol) {
+        const value = Reflect.get(target, key);
+        if (key !== 'findUnique') return typeof value === 'function' ? value.bind(target) : value;
+        return (args: any) => {
+          if (failed === 0 && args?.where?.providerPaymentId === captureId && args?.select?.amount) {
+            failed += 1;
+            return Promise.reject(new Error('v61b: the read of the capture payment failed'));
+          }
+          return value.call(target, args);
+        };
+      },
+    });
+    prismaService.client = new Proxy(real, {
+      get(target: any, key: string | symbol) {
+        if (key === 'payment') return payment;
+        const value = Reflect.get(target, key);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    let res: any;
+    try {
+      res = await paypalWebhook(event);
+    } finally {
+      prismaService.client = real;
+    }
+    expect(failed, 'the read was made to fail once').toBe(1);
+    // At 813031ae: 201 processed (the failed read taken as no capture, the refund refused as not the store's), the claim kept.
+    expect(res.status, JSON.stringify(res.body)).toBe(500);
+    expect(await db.webhookEvent.count({ where: { providerEventId: eventId } }), 'the claim is given back').toBe(0);
+    expect(await orderBooks(orderId), 'nothing recorded').toEqual(paid);
+
+    const again = await paypalWebhook(event);
+    expect(again.status, JSON.stringify(again.body)).toBe(201);
+    expect(again.body, "PayPal's redelivery is processed").toEqual({ ok: true, received: true, processed: 'PAYMENT.CAPTURE.REFUNDED' });
+    expect(await orderBooks(orderId), 'and records the refund').toMatchObject({ order: 'REFUNDED/REFUNDED', invoice: 'SENT' });
+  });
+
+  it("RF-11 (review SEC-PR210-3 / COR-PR210-4; V1-15c): a refund signed with a store's own app that names its order (custom_id) and a capture KeyFlow has not recorded yet fails the delivery (409) and gives its claim back, nothing recorded; once the capture settles the order, PayPal's redelivery of the refund records it and refunds the order", async () => {
+    setEnv({ ...PLATFORM_PAYPAL, ...PLATFORM_PAYPAL_WEBHOOK });
+    const orderId = await seedOrder(ID.bizOwn, ID.prodOwn, 'PAYPAL');
+    const captureId = `${R}cap_rf11`;
+    const eventId = `${R}WH_rf11`;
+    const refundId = `${R}rf_rf11`;
+    const event = captureRefund('PAYMENT.CAPTURE.REFUNDED', eventId, refundId, captureId, 'related_ids', { custom_id: orderId });
+    paypalSigner = OWN_APP;
+    const before = await counts(ID.bizOwn);
+    const early = await paypalWebhook(event);
+    // At 813031ae: 201 processed with nothing recorded and the claim kept, so the redelivery below was acked as a duplicate.
+    expect(early.status, JSON.stringify(early.body)).toBe(409);
+    expect(paypalChecks(), "verified with the store's own app").toEqual(checkedWith(OWN_APP));
+    expect(await db.webhookEvent.count({ where: { providerEventId: eventId } }), 'the claim is given back').toBe(0);
+    expect(await counts(ID.bizOwn), 'nothing recorded').toEqual(before);
+
+    const settled = await paypalWebhook(captureCompleted(`${R}WH_cap_rf11`, captureId, orderId));
+    expect(settled.status, JSON.stringify(settled.body)).toBe(201);
+    expect(await orderState(orderId)).toBe(`CONFIRMED/PAID/${captureId}`);
+    const again = await paypalWebhook(event);
+    expect(again.status, JSON.stringify(again.body)).toBe(201);
+    expect(again.body).toEqual({ ok: true, received: true, processed: 'PAYMENT.CAPTURE.REFUNDED' });
+    expect(await orderBooks(orderId), 'the redelivery records the refund').toEqual({
+      order: 'REFUNDED/REFUNDED',
+      invoice: 'SENT',
+      payments: [`paypal:${captureId}:SUCCESSFUL:${ORDER_TOTAL}@${ID.bizOwn}`, `paypal:${refundId}:REFUNDED:-${ORDER_TOTAL}@${ID.bizOwn}`],
+      postings: [`INCOME:REVERSED:${ORDER_TOTAL}`, `REVERSAL:POSTED:${ORDER_TOTAL}`],
+    });
+  });
+
+  it("RF-12 (review SEC-PR210-2 / COR-PR210-3; D-138): a store order whose PayPal capture the platform's app settled before D-138 (its store holds no PayPal setting of its own, so the capture is in the platform's account): the platform-signed refund naming only that capture is verified with the platform's app and webhook id and recorded, the order refunded, as the base recorded it; a store holding a PayPal setting of its own is never checked with the platform's app (RF-02, RF-03)", async () => {
+    setEnv({ ...PLATFORM_PAYPAL, ...PLATFORM_PAYPAL_WEBHOOK });
+    const orderId = await seedOrder(ID.bizPlatform, ID.prodPlatform, 'PAYPAL');
+    const captureId = `${R}cap_rf12`;
+    // What the pre-D-138 PayPal webhook recorded for a platform-verified capture naming the order (the paid door).
+    await storeOrders.updatePaymentStatus(orderId, 'PAID', captureId, 'paypal');
+    await settle();
+    const capture = `paypal:${captureId}:SUCCESSFUL:${ORDER_TOTAL}@${ID.bizPlatform}`;
+    expect(await orderBooks(orderId), 'settled by the platform before D-138').toEqual({
+      order: 'CONFIRMED/PAID',
+      invoice: 'PAID',
+      payments: [capture],
+      postings: [`INCOME:POSTED:${ORDER_TOTAL}`],
+    });
+    paypalSigner = PLATFORM_APP;
+    seen = [];
+    const refundId = `${R}rf_rf12`;
+    const res = await paypalWebhook(captureRefund('PAYMENT.CAPTURE.REFUNDED', `${R}WH_rf12`, refundId, captureId, 'related_ids'));
+    // At 813031ae: 400 'Invalid PayPal webhook signature' before any request (checked with the store's own set, of which
+    // it has none), on every redelivery: the refund the platform's account made was never recorded.
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(paypalChecks(), "checked with the platform's app and webhook id").toEqual(checkedWith(PLATFORM_APP));
+    expect(await orderBooks(orderId), 'recorded, the order refunded').toEqual({
+      order: 'REFUNDED/REFUNDED',
+      invoice: 'SENT',
+      payments: [capture, `paypal:${refundId}:REFUNDED:-${ORDER_TOTAL}@${ID.bizPlatform}`],
+      postings: [`INCOME:REVERSED:${ORDER_TOTAL}`, `REVERSAL:POSTED:${ORDER_TOTAL}`],
+    });
+    expect(seen).toEqual(['store_order.refunded']);
   });
 });
