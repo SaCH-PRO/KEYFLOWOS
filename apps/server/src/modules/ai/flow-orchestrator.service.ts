@@ -111,9 +111,12 @@ import {
 import { UnifiedMemoryRetrievalService } from '../key-cortex/unified-memory-retrieval.service';
 import {
   BUSINESS_WIDE_MEMORY_SOURCES,
+  NO_MODULE_SIGHT,
   PROMPT_MEMORY_HEADROOM,
+  moduleSightOf,
   promptMemoryReader,
   readersOwnPromptMemory,
+  type ModuleSight,
 } from '../key-cortex/key-cortex-prompt-context.service';
 import { KeyCortexConsciousnessService } from '../key-cortex/key-cortex-consciousness.service';
 import { ProcurementService } from '../procurement/procurement.service';
@@ -346,6 +349,10 @@ export interface FlowServerContext {
    * W9-KEY-DISPATCH-INCLUDES (review CR-W7CTC-2; owner rulings D-73, D-88): the holder of a
    * membership-backed staff position, as JobRolePolicyService.holderForPosition resolved it; null
    * or absent for a contact-only position. Read only by chatToolAction.
+   *
+   * W1F-PERCEPTION-MODULE-SCOPE review (SEC-W1FPMS-2): not the perception reader. What the turn perceives is what the
+   * policy resolved for the position whose envelope governs it (JobRolePolicyService.perceptionOf(jobRoleEnvelope)):
+   * the holder reads their own history only when the message came from their own phone.
    */
   positionHolderUserId?: string | null;
 }
@@ -1377,22 +1384,33 @@ export class FlowOrchestratorService {
       // own rows unread (CR-W10CCS-1).
       const window = tier === 'deliberate' ? 12 : 6;
       // W1F-PERCEPTION-MODULE-SCOPE, owner ruling D-202 (`bridgememory`: "give them their own history too, only their
-      // own"): the staff WhatsApp/SMS bridge's turn names no member, but its position's verified holder
-      // (FlowServerContext.positionHolderUserId, which JobRolePolicyService.holderForPosition resolved for a
-      // membership-backed position) is its reader, on an envelope the policy issued (the bridge's own turn), and only
-      // while promptMemoryReader finds them a member. Their own episodic and cognition rows, and the business-wide events
-      // their own module scopes allow (readersOwnPromptMemory). It is the reader and nothing else (D-73/D-88): chat()
-      // still runs the turn with no principal, no standing-context viewer and no conversation owner, and chatToolAction
-      // still reads the holder for call_create_task alone. A member in the app is their own reader.
-      const candidate = userId ?? (() => {
-        const holder = server?.positionHolderUserId;
-        if (!server || !holder) return undefined;
-        try {
-          return this.getJobRolePolicy().isIssued(server.jobRoleEnvelope) ? holder : undefined;
-        } catch {
-          return undefined;
-        }
-      })();
+      // own"): the staff WhatsApp/SMS bridge's turn names no member. Its reader, and the modules whose events it sees, are
+      // what JobRolePolicyService resolved for the position whose envelope governs the turn (perceptionOf, registered by
+      // envelopeForPosition), on an envelope the policy issued (the bridge's own turn); a member in the app is their own
+      // reader, by their own membership.
+      // Review SEC-W1FPMS-2: the reader is the position's holder only when the message came from the holder's own
+      // account phone and no other member's; the phone a position carries is set by whoever may change the position and
+      // is never bound to the holder, so FlowServerContext.positionHolderUserId (the holder whatever phone texted) is no
+      // longer the reader: another member, or no member at all, texting from that phone read the holder's own history.
+      // Review COR-W1FPMS-2: the modules follow the position as its tools do (its JobRole map capped by the holder's and
+      // every phone member's membership); a turn with no reader (a contact-only position) sees no contacts and no money
+      // (D-73/D-93), and otherwise what its map grants, where it saw no module-named event at all. It is the reader and
+      // nothing else (D-73/D-88): chat() still runs the turn with no principal, no standing-context viewer and no
+      // conversation owner, and chatToolAction still reads the holder for call_create_task alone.
+      let candidate: string | undefined = userId;
+      let positionModules: readonly string[] | undefined;
+      if (!userId && server) {
+        const perception = (() => {
+          try {
+            const policy = this.getJobRolePolicy();
+            return policy.isIssued(server.jobRoleEnvelope) ? policy.perceptionOf(server.jobRoleEnvelope) : null;
+          } catch {
+            return null;
+          }
+        })();
+        candidate = perception?.readerUserId ?? undefined;
+        positionModules = perception?.modules ?? [];
+      }
       const perceive = async () => {
         const reader = await promptMemoryReader(this.prisma, businessId, candidate, this.logger, 'perception');
         const read = await memory.retrieveContext(businessId, {
@@ -1425,8 +1443,9 @@ export class FlowOrchestratorService {
           // who is no member and a contact-only staff position.
           // W1F-PERCEPTION-MODULE-SCOPE (SEC-W11FPS-3): of those business events,
           // readersOwnPromptMemory keeps only what the reader's module scopes
-          // allow; no reader has no module, so it keeps only the business-wide
-          // records (a GOVERNANCE_DECISION proposal, a record naming no module).
+          // allow (a staff position's turn: its position's modules); no reader
+          // has no module, so it keeps only GOVERNANCE_DECISION proposals (a
+          // record naming no module needs every module: review SEC-W1FPMS-1).
           ...(reader ? { userId: reader } : { sourceTypes: [...BUSINESS_WIDE_MEMORY_SOURCES] }),
           limit: window + PROMPT_MEMORY_HEADROOM,
           // 0.3 was decorative — it could not reject a single row.
@@ -1441,7 +1460,11 @@ export class FlowOrchestratorService {
           // low-confidence band while keeping anything recent or well-evidenced.
           minRankScore: 0.5,
         });
-        return readersOwnPromptMemory(this.prisma, businessId, reader, read, window, this.logger, 'perception');
+        // A position's turn sees its position's modules; when the reader it names is not found a member (removed since),
+        // none (fail closed). Any other turn sees by its reader's membership (readersOwnPromptMemory's own read).
+        const sight: ModuleSight | undefined =
+          positionModules === undefined ? undefined : candidate && reader !== candidate ? NO_MODULE_SIGHT : moduleSightOf(positionModules);
+        return readersOwnPromptMemory(this.prisma, businessId, reader, read, window, this.logger, 'perception', sight);
       };
 
       // The membership check, the read and the owner check of its cognition rows

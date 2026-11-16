@@ -3,8 +3,10 @@ import type { JobRole, Membership, User } from '@prisma/client';
 import { FLOW_TOOLS } from '../ai/flow-tool-registry';
 import { defaultCrmAccessForLevel } from '../crm/crm-permissions.helper';
 import {
+  CANONICAL_MODULES,
   LEVEL_RANK,
   defaultScopesForRole,
+  rankOf,
   type AccessLevel,
   type CanonicalModule,
 } from '../../core/authority/module-vocabulary';
@@ -519,6 +521,77 @@ export function positionHolder(position: StaffPosition | null | undefined): stri
 }
 
 /**
+ * The scope maps a staff position is capped by, as envelopeForPosition caps its tools: on the membership path the
+ * holder's membership HTTP reads here (an empty map when it is not shown to be the holder's here with an active account),
+ * and every phone member's (V1-21b review 4 IC3-1, review 5 INP4-1, review 6 INP5-1, review 7 INP4-2 / INP4-3).
+ */
+function capsOf(position: StaffPosition): Array<Record<string, unknown>> {
+  const caps: Array<Record<string, unknown>> = [];
+  if (position.membershipId || position.userId || position.membership) {
+    const membership = position.membership;
+    caps.push(membership && isHoldersMembershipHere(position, membership) && holderMayAuthenticate(membership) ? effectiveScopes(membership) : {});
+  }
+  for (const member of position.phoneMembers ?? []) {
+    caps.push(isMembershipHere(position, member) && holderMayAuthenticate(member) ? effectiveScopes(member) : {});
+  }
+  return caps;
+}
+
+/**
+ * W1F-PERCEPTION-MODULE-SCOPE review (SEC-W1FPMS-2, COR-W1FPMS-2; owner rulings D-202 `bridgememory`, D-73/D-93): what
+ * a staff position's KEY turn perceives (FlowOrchestratorService.buildPerceptionSection's "WHAT YOU HAVE OBSERVED").
+ *  - `readerUserId`: the member whose own history the turn reads (their cognition, CortexActionLog and AiExecutionLog
+ *    rows, D-202). The position's holder (positionHolder), and only when the phone the message came from is the
+ *    holder's own account phone and no other member's (phoneMembers is the holder alone). OrgAssignment.contactPhone is
+ *    set by whoever may change the position and is never bound to the holder, so a holder named whatever phone texted
+ *    let another member, or someone who is no member at all, read the holder's history. null otherwise.
+ *  - `modules`: the modules whose business events the turn sees, as its tools are scoped: the JobRole map, read exactly
+ *    as ModuleScopeGuard reads a map (a canonical key and level; a legacy tool-family key grants no module), capped by
+ *    every map envelopeForPosition caps the tools by (capsOf). A turn with no reader is a memberless turn: no contacts
+ *    (D-73/D-93: no member principal reads contacts) and no money (no member, no figure: PR195-KEY-GATES, D-145).
+ */
+export interface PositionPerception {
+  readerUserId: string | null;
+  modules: readonly CanonicalModule[];
+}
+
+/** What a memberless turn never perceives: contacts (D-73/D-93) and money (PR195-KEY-GATES, D-145, D-146). */
+const MEMBERLESS_UNSEEN: ReadonlySet<CanonicalModule> = new Set<CanonicalModule>(['crm', 'revenue', 'expenses']);
+
+/** Whether a scope map reads `module`: its exact key at an exact level of read or above, as ModuleScopeGuard reads it. */
+function mapReads(scopes: unknown, module: CanonicalModule): boolean {
+  if (!scopes || typeof scopes !== 'object' || Array.isArray(scopes)) return false;
+  const level = Object.prototype.hasOwnProperty.call(scopes, module) ? (scopes as Record<string, unknown>)[module] : undefined;
+  return typeof level === 'string' && rankOf(level) >= LEVEL_RANK.read;
+}
+
+/** W1F-PERCEPTION-MODULE-SCOPE review (SEC-W1FPMS-2, COR-W1FPMS-2): what a staff position's turn perceives (PositionPerception). */
+export function perceptionForPosition(position: StaffPosition | null | undefined): PositionPerception {
+  if (!position) return { readerUserId: null, modules: [] };
+  const holder = positionHolder(position);
+  const phoneMembers = position.phoneMembers ?? [];
+  const ownPhone =
+    !!holder &&
+    phoneMembers.length > 0 &&
+    phoneMembers.every((member) => member.userId === holder && isMembershipHere(position, member) && holderMayAuthenticate(member));
+  const readerUserId = ownPhone ? holder : null;
+  const caps = capsOf(position);
+  const modules = CANONICAL_MODULES.filter(
+    (module) =>
+      mapReads(position.jobRole?.permissions, module) &&
+      caps.every((cap) => mapReads(cap, module)) &&
+      (readerUserId !== null || !MEMBERLESS_UNSEEN.has(module)),
+  );
+  return { readerUserId, modules };
+}
+
+/**
+ * The perception of each envelope envelopeForPosition issued (perceptionOf). Keyed by the issued envelope, so only the
+ * envelope that governs a position's turn carries one: a copy, or a JobRole's own envelope, carries none.
+ */
+const PERCEPTIONS = new WeakMap<object, PositionPerception>();
+
+/**
  * W9-KEY-DISPATCH-INCLUDES (review CR-W7CTC-2; D-73, D-88): the tools that record the member the
  * command runs for, and so run on the staff bridge only for a position's holder (positionHolder).
  * A position with no holder is not offered them: the model is never handed a tool the dispatcher
@@ -669,23 +742,27 @@ export class JobRolePolicyService {
   envelopeForPosition(position: StaffPosition | null | undefined): JobRoleEnvelope {
     const scoped = this.envelopeForJobRole(position?.jobRole ?? NO_JOB_ROLE);
     if (!position) return scoped;
-    const caps: Array<Record<string, unknown>> = [];
-    if (position.membershipId || position.userId || position.membership) {
-      const membership = position.membership;
-      caps.push(membership && isHoldersMembershipHere(position, membership) && holderMayAuthenticate(membership) ? effectiveScopes(membership) : {});
-    }
-    for (const member of position.phoneMembers ?? []) {
-      caps.push(isMembershipHere(position, member) && holderMayAuthenticate(member) ? effectiveScopes(member) : {});
-    }
     let envelope = scoped;
-    for (const held of caps) {
+    for (const held of capsOf(position)) {
       envelope = boundBy(
         envelope,
         this.envelopeForJobRole({ id: scoped.jobRoleId, name: scoped.jobRoleName, permissions: held as JobRole['permissions'] }),
       );
     }
     const capped = envelope === scoped ? scoped : issue(envelope);
-    return positionHolder(position) ? capped : withoutHolderOnlyTools(capped);
+    const governing = positionHolder(position) ? capped : withoutHolderOnlyTools(capped);
+    // W1F-PERCEPTION-MODULE-SCOPE review (SEC-W1FPMS-2, COR-W1FPMS-2): what the turn this envelope governs perceives.
+    PERCEPTIONS.set(governing, perceptionForPosition(position));
+    return governing;
+  }
+
+  /**
+   * W1F-PERCEPTION-MODULE-SCOPE review (SEC-W1FPMS-2, COR-W1FPMS-2): what the staff position's turn governed by
+   * `envelope` perceives (perceptionForPosition, registered by envelopeForPosition). null for any other object: a JobRole's
+   * own envelope, a copy, or a lookalike a client sent (the turn then reads nobody's history and sees no module).
+   */
+  perceptionOf(envelope: unknown): PositionPerception | null {
+    return typeof envelope === 'object' && envelope !== null ? PERCEPTIONS.get(envelope) ?? null : null;
   }
 
   /** The member a staff position's KEY turn runs call_create_task for, or null (positionHolder; CR-W7CTC-2, D-73, D-88). */
