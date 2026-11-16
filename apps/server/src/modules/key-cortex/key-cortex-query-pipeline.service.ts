@@ -61,8 +61,7 @@ import { KeyCortexLearningService } from './key-cortex-learning.service';
 import { KeyCortexSessionService } from './key-cortex-session.service';
 import {
   KeyCortexPromptContextService,
-  isPersonalKeyRecord,
-  readersOwnCognitionMemory,
+  readersOwnPromptMemory,
 } from './key-cortex-prompt-context.service';
 import { userCanAccessBusiness } from '../../core/auth/business.guard';
 import { defaultScopesForRole } from '../../core/authority/module-vocabulary';
@@ -2038,22 +2037,22 @@ export class KeyCortexQueryPipelineService {
    * Review CR-W10CCS-1: by buildMemoryContext's whole rule, its headroom included: it asks for
    * CHAT_MEMORY_FRAGMENTS + CHAT_MEMORY_HEADROOM and keeps the first CHAT_MEMORY_FRAGMENTS of what it may
    * render, so an active business's recent tool-call records no longer leave the prompt with no memory.
+   *
+   * W1F-PERCEPTION-MODULE-SCOPE (review SEC-W11FPS-3; D-71/D-146, D-57): the whole rule is now the one helper
+   * buildMemoryContext and the /ai flow chat's perception block call (readersOwnPromptMemory), which also keeps a
+   * business-wide event only when the requester may read every module it names: a member whose expenses or revenue
+   * scope is none no longer reads an owner's expense, a payment or an invoice total here. Its headroom bounds the
+   * events that rule leaves out too (they come from the same two stores).
    */
   private async chatMemoryFragments(query: CortexQuery): Promise<MemoryFragment[]> {
     if (!this.memoryRetrieval) return [];
     const reader = await this.episodicMemoryReader(query.businessId, query.userId);
-    const fragments = (
-      await this.memoryRetrieval.retrieveContext(query.businessId, {
-        query: query.text,
-        limit: CHAT_MEMORY_FRAGMENTS + CHAT_MEMORY_HEADROOM,
-        ...(reader ? { userId: reader } : { includeEpisodic: false }),
-      })
-    ).filter((fragment) => !isPersonalKeyRecord(fragment));
-    // W11-CORTEX-MEMORY-COGNITION (D-130): the shared rule, which buildMemoryContext applies to the same prompt.
-    const own = await readersOwnCognitionMemory(this.prisma, query.businessId, reader, fragments, this.logger, 'chatMemory');
-    return fragments
-      .filter((fragment) => fragment.sourceType !== 'cognition_memory' || own.has(fragment.id))
-      .slice(0, CHAT_MEMORY_FRAGMENTS);
+    const fragments = await this.memoryRetrieval.retrieveContext(query.businessId, {
+      query: query.text,
+      limit: CHAT_MEMORY_FRAGMENTS + CHAT_MEMORY_HEADROOM,
+      ...(reader ? { userId: reader } : { includeEpisodic: false }),
+    });
+    return readersOwnPromptMemory(this.prisma, query.businessId, reader, fragments, CHAT_MEMORY_FRAGMENTS, this.logger, 'chatMemory');
   }
 
   /**

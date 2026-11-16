@@ -449,6 +449,9 @@ describe('W10-CORTEX-CHAT-SCOPE: the chat reads episodic memory as the requestin
   // stores, and the ledger's ACTION_* rows have copies there under other subjects (EventEmitterFlowBridgeService's
   // 'Tool_execution'; the approval orchestrator's key_action_proposal). None of them reaches the system prompt, for a
   // member or for a requester who is no member; a business-wide KEY event that is no such record still does.
+  // W1F-PERCEPTION-MODULE-SCOPE review (SEC-W1FPMS-1): the business-wide event that stays for both is a
+  // GOVERNANCE_DECISION proposal; a record that names no module (insight.generated) needs read on every module (fails
+  // closed): the member here (an OWNER on role defaults) holds it, the requester who is no member does not.
   it.each(['processQuery', 'streamQuery'] as const)(
     'W11-FLOW-PERCEPTION-SCOPE review (SEC-W11FPS-1/2) %s: no business-wide record of one person\'s KEY turn or action reaches the system prompt',
     async (path) => {
@@ -463,6 +466,7 @@ describe('W10-CORTEX-CHAT-SCOPE: the chat reads episodic memory as the requestin
         fragment('mf_bridged_ce', 'cognitive_event', 'ACTION_EXECUTED', 'v96r bridged cognitive answer'),
         fragment('mf_proposal', 'business_event', 'ACTION_EXECUTED', 'v96r approved proposal result', 'key_action_proposal'),
         fragment('mf_insight', 'business_event', 'insight.generated', 'v96r a KEY insight about the business', 'KEY_CORTEX_EVENT'),
+        fragment('mf_proposal_pending', 'business_event', 'GOVERNANCE_DECISION', 'v96r a pending KEY proposal', 'key_action_proposal'),
       ];
       for (const access of [{ id: 'biz-1' }, null]) {
         mockPromptContextService.buildMessages.mockClear();
@@ -476,7 +480,9 @@ describe('W10-CORTEX-CHAT-SCOPE: the chat reads episodic memory as the requestin
         const systemPrompt = mockPromptContextService.buildMessages.mock.calls[0][2] as string;
         const label = access ? 'member' : 'no member';
         expect(systemPrompt, label).toContain('v96r business-wide fact');
-        expect(systemPrompt, label).toContain('v96r a KEY insight about the business');
+        expect(systemPrompt, label).toContain('v96r a pending KEY proposal');
+        if (access) expect(systemPrompt, label).toContain('v96r a KEY insight about the business');
+        else expect(systemPrompt, label).not.toContain('v96r a KEY insight about the business');
         for (const leaked of [
           'typed this turn', 'KEY answered another member', 'another member session', 'action answer', 'action error',
           'bridged ledger answer', 'bridged cognitive answer', 'approved proposal result',

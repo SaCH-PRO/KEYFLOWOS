@@ -583,6 +583,11 @@
       "packet": "V1-70 (W1F-MEMORY-COPIES)"
     },
     {
+      "prefix": "v70c_",
+      "owner": "apps/server/test/perception-module-scope.integration.test.ts",
+      "packet": "V1-70 (W1F-PERCEPTION-MODULE-SCOPE)"
+    },
+    {
       "prefix": "v70h_",
       "owner": "apps/server/test/key-cortex-conscious-answer.integration.test.ts",
       "packet": "V1-70 (W1F-KEY-EVIDENCE-WRITE)"
