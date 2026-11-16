@@ -10,6 +10,7 @@ import {
   isStale,
   missingRequiredFields,
   normalizeToE164,
+  phoneFlagFor,
   severityFor,
   validateEmail,
 } from './crm-data-quality.util';
@@ -94,6 +95,7 @@ export class CrmDataQualityService {
       id: string;
       email: string | null;
       phone: string | null;
+      whatsappNumber: string | null;
       firstName: string | null;
       lastName: string | null;
       companyName: string | null;
@@ -112,6 +114,7 @@ export class CrmDataQualityService {
           id: true,
           email: true,
           phone: true,
+          whatsappNumber: true,
           firstName: true,
           lastName: true,
           companyName: true,
@@ -164,6 +167,21 @@ export class CrmDataQualityService {
             message: 'Phone number can be reformatted to E.164.',
             recommendedFix: { action: 'replace_phone', value: phoneRes.suggestedFix },
           });
+        } else {
+          // WA-E164-SERVER: the write paths flag a WhatsApp number that does not
+          // read under the business's country (CrmService.syncPhoneFlag); the
+          // scan reads it the same way, so it keeps that flag open.
+          const whatsappFlag = phoneFlagFor({ whatsappNumber: contact.whatsappNumber }, business.country);
+          if (whatsappFlag) {
+            drafts.push({
+              contactId: contact.id,
+              kind: 'invalid_phone',
+              severity: severityFor('invalid_phone'),
+              field: whatsappFlag.field,
+              message: whatsappFlag.message,
+              recommendedFix: whatsappFlag.recommendedFix,
+            });
+          }
         }
 
         const missing = missingRequiredFields(contact);

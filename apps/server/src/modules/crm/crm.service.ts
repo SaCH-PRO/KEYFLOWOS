@@ -21,7 +21,8 @@ import { contactWhereBase, contactWhereWithId } from './crm.helpers';
 import { buildContactWhere, findSearchTags } from './contact-filters.helper';
 import { resolveCrmAccess, visibilityClause, type CrmAccess } from './crm-permissions.helper';
 import { resolveTimelineViewer } from '../timeline/timeline-visibility';
-import { normalizeEmail, normalizePhone, findExistingBulk, findPhoneKeyMatch } from './crm-duplicate.util';
+import { normalizeEmail, normalizePhone, findExistingBulk, findPhoneKeyMatch, samePhoneKey } from './crm-duplicate.util';
+import { contactPhoneForStorage, phoneFlagFor, severityFor, type PhoneFlagField } from './crm-data-quality.util';
 import { CONTACT_EVENT } from '@keyflow/shared';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
 
@@ -161,6 +162,37 @@ export function contactIdentityViolation(err: unknown): 'email' | 'phone' | null
   return names.some((n) => CONTACT_IDENTITY_UNIQUE.email.includes(n)) ? 'email'
     : names.some((n) => CONTACT_IDENTITY_UNIQUE.phone.includes(n)) ? 'phone'
       : null;
+}
+
+/**
+ * A contact write whose phone a live contact of the tenant already holds under
+ * another key (WA-E164-SERVER): a number stored before phones were kept in
+ * E.164 ('868-555-0160', key '8685550160') is the same number as the E.164 key
+ * the write would store ('+18685550160'), but the identity unique only sees
+ * equal keys. Raised inside the write's transaction, before anything is
+ * written; rejectContactIdentityTaken answers it as the same bounded 409
+ * contact_phone_taken a P2002 on the phone unique gets.
+ */
+class ContactPhoneHeldError extends Error {
+  constructor(readonly holderIds: readonly string[]) {
+    super('contact_phone_taken');
+    this.name = 'ContactPhoneHeldError';
+  }
+}
+
+/** The fewest trailing digits two spellings of one phone number share (a national number, as samePhoneKey reads it). */
+const PHONE_TAIL_DIGITS = 7;
+
+/**
+ * The identity key a contact write stores for its phone (Contact.phoneNormalized,
+ * normalizePhone's digits-and-'+'), or null when the phone has no digit
+ * (WA-E164-SERVER): such a phone ('ask at the front desk') is kept as typed
+ * and flagged, and its key was '', which the identity unique read as one
+ * number, so a second contact so written answered 409.
+ */
+function phoneIdentityKey(phone: string | null | undefined): string | null {
+  const key = normalizePhone(phone);
+  return key && /\d/.test(key) ? key : null;
 }
 
 /**
@@ -654,15 +686,20 @@ export class CrmService {
     identity: { emailNormalized?: string | null; phoneNormalized?: string | null },
     actorUserId?: string | null,
   ): Promise<never> {
-    const field = contactIdentityViolation(err);
+    // WA-E164-SERVER: a live holder of the same number under another key
+    // (ContactPhoneHeldError, raised before the write) is the same conflict.
+    const held = err instanceof ContactPhoneHeldError ? err : null;
+    const field = held ? 'phone' : contactIdentityViolation(err);
     if (!field) throw err;
 
     const value = field === 'email' ? identity.emailNormalized : identity.phoneNormalized;
     let existing: { id: string } | null = null;
-    if (value) {
-      const where: Prisma.ContactWhereInput = field === 'email'
-        ? { ...contactWhereBase(businessId), emailNormalized: value }
-        : { ...contactWhereBase(businessId), phoneNormalized: value };
+    if (held || value) {
+      const where: Prisma.ContactWhereInput = held
+        ? { ...contactWhereBase(businessId), id: { in: [...held.holderIds] } }
+        : field === 'email'
+          ? { ...contactWhereBase(businessId), emailNormalized: value }
+          : { ...contactWhereBase(businessId), phoneNormalized: value };
       if (actorUserId) {
         const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
         const visClause = visibilityClause(access, actorUserId);
@@ -675,6 +712,89 @@ export class CrmService {
       code: field === 'email' ? 'contact_email_taken' : 'contact_phone_taken',
       message: `A contact with this ${label} already exists in this business`,
       existingContactId: existing?.id ?? null,
+    });
+  }
+
+  /**
+   * Business.country as written, the country a contact's phone typed without
+   * its country code is read under (WA-E164-SERVER; unset reads as Trinidad
+   * and Tobago, see resolvePhoneCountry). Read through the write's own client
+   * (its transaction), so it is decided with the write.
+   */
+  private async businessPhoneCountry(
+    client: Pick<PrismaService['client'], 'business'>,
+    businessId: string,
+  ): Promise<string | null> {
+    const business = await client.business.findUnique({ where: { id: businessId }, select: { country: true } });
+    return business?.country ?? null;
+  }
+
+  /**
+   * The live contacts of the tenant, other than `exceptId`, that hold the
+   * number `e164` under ANOTHER key (WA-E164-SERVER): a contact stored before
+   * phones were kept in E.164 keeps the key of its spelling (no backfill in
+   * v1), and SWP-CRM-SEARCH's reading (samePhoneKey) says whether that key is
+   * this number: '8685550160' and '18685550160' are +18685550160, a bare
+   * seven-digit '5550160' is not. A holder under the E.164 key itself is left
+   * to the identity unique (the database decides; rejectContactIdentityTaken
+   * maps its P2002). Tenant-wide: the caller bounds what it discloses.
+   */
+  private async phoneHoldersUnderAnotherKey(
+    client: Pick<PrismaService['client'], 'contact'>,
+    businessId: string,
+    e164: string,
+    exceptId?: string,
+  ): Promise<string[]> {
+    const tail = e164.replace(/\D/g, '').slice(-PHONE_TAIL_DIGITS);
+    const rows = await client.contact.findMany({
+      where: {
+        ...contactWhereBase(businessId),
+        phoneNormalized: { endsWith: tail, not: e164 },
+        ...(exceptId ? { id: { not: exceptId } } : {}),
+      },
+      select: { id: true, phoneNormalized: true },
+      orderBy: { createdAt: 'asc' },
+      take: 200,
+    });
+    return rows.filter((row) => samePhoneKey(row.phoneNormalized, e164)).map((row) => row.id);
+  }
+
+  /**
+   * The contact's phone flag (WA-E164-SERVER): a phone or WhatsApp number that
+   * does not read under the business's country is kept as typed and flagged,
+   * never dropped, as the open 'invalid_phone' data-quality issue the scan
+   * writes for it (CrmDataQualityService keeps it). Written through the
+   * write's own client, so it commits with the contact or not at all. When
+   * the numbers written (`touched`) read, an open phone flag on those fields
+   * is resolved.
+   */
+  private async syncPhoneFlag(
+    client: Pick<PrismaService['client'], 'contactDataIssue'>,
+    businessId: string,
+    contact: { id: string; phone: string | null; whatsappNumber: string | null },
+    country: string | null,
+    touched: readonly PhoneFlagField[],
+  ): Promise<void> {
+    const flag = phoneFlagFor(contact, country);
+    if (flag) {
+      const fields = {
+        severity: severityFor('invalid_phone'),
+        field: flag.field,
+        message: flag.message,
+        recommendedFix: flag.recommendedFix as Prisma.InputJsonValue,
+        status: 'open',
+      };
+      await client.contactDataIssue.upsert({
+        where: { contactId_kind: { contactId: contact.id, kind: 'invalid_phone' } },
+        create: { businessId, contactId: contact.id, kind: 'invalid_phone', ...fields },
+        update: { ...fields, resolvedAt: null, resolvedBy: null },
+      });
+      return;
+    }
+    if (touched.length === 0) return;
+    await client.contactDataIssue.updateMany({
+      where: { businessId, contactId: contact.id, kind: 'invalid_phone', status: 'open', field: { in: [...touched] } },
+      data: { status: 'resolved', resolvedAt: new Date(), resolvedBy: 'system' },
     });
   }
 
@@ -769,12 +889,27 @@ export class CrmService {
     const firstName = sanitize(normalizeString(input.firstName));
     const lastName = sanitize(normalizeString(input.lastName));
     const email = normalizeString(input.email);
-    const phone = normalizeString(input.phone);
+    const typedPhone = normalizeString(input.phone);
+    const typedWhatsapp = normalizeString(input.whatsappNumber);
     const emailNormalized = normalizeEmail(email);
-    const phoneNormalized = normalizePhone(phone);
+    // The phone key the write stores; set in the transaction, read by the 409 mapping.
+    let phoneNormalized: string | null = null;
     const tags = this.normalizeTags(input.tags);
 
     const contact = await this.prisma.client.$transaction(async (tx) => {
+      // WA-E164-SERVER: the phone and WhatsApp number are stored in E.164, read
+      // under the business's country (contactPhoneForStorage); one that does
+      // not read is kept as typed and flagged below.
+      const country = typedPhone || typedWhatsapp ? await this.businessPhoneCountry(tx, input.businessId) : null;
+      const phone = contactPhoneForStorage(typedPhone, country);
+      const whatsapp = contactPhoneForStorage(typedWhatsapp, country);
+      phoneNormalized = phoneIdentityKey(phone.value);
+      if (phone.e164) {
+        // A live contact holding this number under another key (stored before
+        // E.164) is the same identity: refused before anything is written.
+        const holders = await this.phoneHoldersUnderAnotherKey(tx, input.businessId, phone.e164);
+        if (holders.length > 0) throw new ContactPhoneHeldError(holders);
+      }
       const created = await tx.contact.create({
         data: {
           businessId: input.businessId,
@@ -782,7 +917,7 @@ export class CrmService {
           lastName,
           email,
           emailNormalized,
-          phone,
+          phone: phone.value,
           phoneNormalized,
           status: input.status ?? 'LEAD',
           source: input.source ?? 'manual',
@@ -792,7 +927,7 @@ export class CrmService {
           displayName: normalizeString(input.displayName),
           secondaryEmail: normalizeString(input.secondaryEmail),
           secondaryPhone: normalizeString(input.secondaryPhone),
-          whatsappNumber: normalizeString(input.whatsappNumber),
+          whatsappNumber: whatsapp.value,
           preferredChannel: normalizeString(input.preferredChannel),
           addressLine1: normalizeString(input.addressLine1),
           addressLine2: normalizeString(input.addressLine2),
@@ -823,6 +958,9 @@ export class CrmService {
           archivedAt: this.parseDateOrNull(input.archivedAt),
         },
       });
+      if (phone.unreadable || whatsapp.unreadable) {
+        await this.syncPhoneFlag(tx, input.businessId, created, country, []);
+      }
 
       // W3-V1-55c (CR-V155b-1, D-08): the feed's one row for this contact is
       // ActivityEventListener's 'New contact', from the contact.created emit
@@ -931,16 +1069,31 @@ export class CrmService {
       return trimmed ? trimmed : null;
     };
     const email = normalizeString(input.email);
-    const phone = normalizeString(input.phone);
+    const typedPhone = normalizeString(input.phone);
+    // WA-E164-SERVER: the phone as createContact stores it (E.164 under the
+    // business's country, or as typed when it does not read), so the match
+    // below and the contact created or merged into agree on one key.
+    const phoneCountry = typedPhone ? await this.businessPhoneCountry(this.prisma.client, businessId) : null;
+    const phoneRead = contactPhoneForStorage(typedPhone, phoneCountry);
+    const phone = phoneRead.value;
     const emailNormalized = normalizeEmail(email);
-    const phoneNormalized = normalizePhone(phone);
+    const phoneNormalized = phoneIdentityKey(phone);
     const tags = this.normalizeTags(input.tags);
 
-    const matched = await this.entityResolution.findContactIdByMatch(businessId, {
+    let matched = await this.entityResolution.findContactIdByMatch(businessId, {
       source: input.source ?? null,
       email,
       phone,
     });
+    if (!matched && phoneRead.e164) {
+      // A contact stored before E.164 under another spelling of this number
+      // (no backfill in v1) is this customer, as createContact's identity
+      // check reads it: merged into, not duplicated. EntityResolutionService
+      // matches on the exact key; its default match order reads the phone
+      // (configureMergeRules has no caller).
+      const [holderId] = await this.phoneHoldersUnderAnotherKey(this.prisma.client, businessId, phoneRead.e164);
+      if (holderId) matched = { contactId: holderId, matchedOn: 'phone' };
+    }
 
     return this.prisma.client.$transaction(async (tx) => {
       if (matched) {
@@ -953,6 +1106,8 @@ export class CrmService {
             lastName: input.lastName,
             email,
             phone,
+            phoneUnreadable: phoneRead.unreadable,
+            phoneCountry,
             companyName: input.companyName,
             source: input.source,
             sourceDetail: input.sourceDetail,
@@ -1011,7 +1166,11 @@ export class CrmService {
       firstName?: string | null;
       lastName?: string | null;
       email?: string | null;
+      /** As createContact stores it (findOrCreateContact reads it under the business's country). */
       phone?: string | null;
+      /** The phone did not read under `phoneCountry`: it is kept as typed and flagged (WA-E164-SERVER). */
+      phoneUnreadable?: boolean;
+      phoneCountry?: string | null;
       companyName?: string | null;
       source?: string | null;
       sourceDetail?: string | null;
@@ -1028,7 +1187,7 @@ export class CrmService {
     }
     if (input.phone && !existing.phone) {
       data.phone = input.phone;
-      data.phoneNormalized = normalizePhone(input.phone);
+      data.phoneNormalized = phoneIdentityKey(input.phone);
     }
     if (input.companyName && !existing.companyName) data.companyName = sanitize(input.companyName);
     if (input.source && !existing.source) data.source = input.source;
@@ -1040,10 +1199,19 @@ export class CrmService {
     if (Object.keys(data).length === 0) {
       return existing;
     }
+    // A phone filled in that does not read is flagged with the change (WA-E164-SERVER).
+    const flagsPhone = data.phone !== undefined && input.phoneUnreadable === true;
     if (!audit) {
-      return this.prisma.client.contact.update({
-        where: { id: existing.id },
-        data,
+      if (!flagsPhone) {
+        return this.prisma.client.contact.update({
+          where: { id: existing.id },
+          data,
+        });
+      }
+      return this.prisma.client.$transaction(async (tx) => {
+        const updated = await tx.contact.update({ where: { id: existing.id }, data });
+        await this.syncPhoneFlag(tx, businessId, updated, input.phoneCountry ?? null, []);
+        return updated;
       });
     }
     // Its own transaction, as the update had its own statement before: the
@@ -1053,6 +1221,7 @@ export class CrmService {
         where: { id: existing.id },
         data,
       });
+      if (flagsPhone) await this.syncPhoneFlag(tx, businessId, updated, input.phoneCountry ?? null, []);
       await this.auditContact({
         businessId,
         contactId: existing.id,
@@ -1143,9 +1312,13 @@ export class CrmService {
       return trimmed ? trimmed : null;
     };
     const email = trimOptional(input.email);
-    const phone = trimOptional(input.phone);
+    // WA-E164-SERVER: the phone and WhatsApp number as typed; what is stored
+    // (E.164 under the business's country) is decided in the transaction.
+    const typedPhone = trimOptional(input.phone);
+    const typedWhatsapp = trimOptional(input.whatsappNumber);
     const emailNormalized = email !== undefined ? normalizeEmail(email) : undefined;
-    const phoneNormalized = phone !== undefined ? normalizePhone(phone) : undefined;
+    // The phone key the write stores; set in the transaction, read by the 409 mapping.
+    let phoneNormalized: string | null | undefined;
     const tags = input.tags !== undefined ? this.normalizeTags(input.tags) : undefined;
 
     const sanitizeOptional = (value?: string | null) => {
@@ -1180,8 +1353,6 @@ export class CrmService {
       lastName: sanitizeOptional(trimOptional(input.lastName)),
       email,
       emailNormalized,
-      phone,
-      phoneNormalized,
       status: input.status ?? undefined,
       source: input.source ?? undefined,
       tags,
@@ -1190,7 +1361,6 @@ export class CrmService {
       displayName: trimOptional(input.displayName),
       secondaryEmail: trimOptional(input.secondaryEmail),
       secondaryPhone: trimOptional(input.secondaryPhone),
-      whatsappNumber: trimOptional(input.whatsappNumber),
       preferredChannel: trimOptional(input.preferredChannel),
       addressLine1: trimOptional(input.addressLine1),
       addressLine2: trimOptional(input.addressLine2),
@@ -1248,10 +1418,38 @@ export class CrmService {
         await this.assertNewOwnerIsMember(input.businessId, input.ownerId as string, 'ownerId', tx);
       }
 
+      // WA-E164-SERVER: a phone or WhatsApp number written is stored in E.164
+      // under the business's country (one that does not read is kept as typed
+      // and flagged below); a new phone a live contact holds under another key
+      // (stored before E.164) is refused as contact_phone_taken before the write.
+      const phonesTouched: PhoneFlagField[] = [];
+      let phoneCountry: string | null = null;
+      if (typedPhone !== undefined || typedWhatsapp !== undefined) {
+        phoneCountry = await this.businessPhoneCountry(tx, input.businessId);
+      }
+      if (typedPhone !== undefined) {
+        const phone = contactPhoneForStorage(typedPhone, phoneCountry);
+        phoneNormalized = phoneIdentityKey(phone.value);
+        data.phone = phone.value;
+        data.phoneNormalized = phoneNormalized;
+        phonesTouched.push('phone');
+        if (phone.e164 && phone.e164 !== existingContact.phoneNormalized) {
+          const holders = await this.phoneHoldersUnderAnotherKey(tx, input.businessId, phone.e164, input.contactId);
+          if (holders.length > 0) throw new ContactPhoneHeldError(holders);
+        }
+      }
+      if (typedWhatsapp !== undefined) {
+        data.whatsappNumber = contactPhoneForStorage(typedWhatsapp, phoneCountry).value;
+        phonesTouched.push('whatsappNumber');
+      }
+
       const updatedContact = await tx.contact.update({
         where: { id: input.contactId },
         data,
       });
+      if (phonesTouched.length > 0) {
+        await this.syncPhoneFlag(tx, input.businessId, updatedContact, phoneCountry, phonesTouched);
+      }
       // D-25 (TOF-CONTACT-AUDIT-AWAIT): the entry commits with the change or
       // neither does. An ownership change is a "reassigned" entry; everything
       // else is a generic "updated" entry with the diff.
