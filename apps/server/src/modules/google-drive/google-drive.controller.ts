@@ -278,33 +278,44 @@ export class GoogleDriveController {
     return this.driveService.getInventorySheetSyncStatus(businessId);
   }
 
-  // SWEEP-P0-SCOPES (REST scope census, BUG-015 family): the inventory sheet sync moves stock; storefront write.
+  /**
+   * SWEEP-P0-FOLLOWUP (round 3 recheck CW3-1; owner ruling D-99): which spreadsheet the inventory sync reads
+   * (GET pull, diff) and clears (POST push) is a binding of the owner's Google Drive credential
+   * (Business.inventoryLinkedSheetId), as calendarId and the Business Profile location are: create, link and
+   * unlink are the owner's (assertGoogleConnectOwner, 403 GOOGLE_CONNECT_OWNER_ONLY), after the storefront write
+   * the sync's stock moves need. Any member with storefront write pointed the owner's token at any sheet.
+   */
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/inventory-sheet/create')
-  createInventorySheet(
+  async createInventorySheet(
     @Param('businessId') businessId: string,
     @Body() body: { title?: string },
+    @Req() req: { user?: GoogleConnectActor },
   ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     return this.driveService.createInventorySheet(businessId, body.title || 'Inventory Sync');
   }
 
-  // SWEEP-P0-SCOPES (REST scope census, BUG-015 family): the inventory sheet sync moves stock; storefront write.
+  // SWEEP-P0-FOLLOWUP (CW3-1, D-99): see createInventorySheet.
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/inventory-sheet/link')
-  linkInventorySheet(
+  async linkInventorySheet(
     @Param('businessId') businessId: string,
     @Body() body: { sheetId: string; sheetName: string },
+    @Req() req: { user?: GoogleConnectActor },
   ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     return this.driveService.linkInventorySheet(businessId, body.sheetId, body.sheetName);
   }
 
-  // SWEEP-P0-SCOPES (REST scope census, BUG-015 family): the inventory sheet sync moves stock; storefront write.
+  // SWEEP-P0-FOLLOWUP (CW3-1, D-99): see createInventorySheet.
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('storefront', 'write')
   @Delete('businesses/:businessId/inventory-sheet/unlink')
-  unlinkInventorySheet(@Param('businessId') businessId: string) {
+  async unlinkInventorySheet(@Param('businessId') businessId: string, @Req() req: { user?: GoogleConnectActor }) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     return this.driveService.unlinkInventorySheet(businessId);
   }
 

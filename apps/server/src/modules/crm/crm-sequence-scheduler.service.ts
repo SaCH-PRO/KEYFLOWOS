@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { channelRecipients } from '../communications/channel-audience';
 import { CrmTimelineService } from './crm-timeline.service';
 import { CONTACT_EVENT } from '@keyflow/shared';
 import {
@@ -729,6 +730,11 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
     });
     if (!connection || connection.destinations.length === 0) {
       return { queued: false, reason: `no active ${channel} channel is connected` };
+    }
+    // SWEEP-P0-FOLLOWUP (WH3-1): the enrolled contact goes through the sending account only if its binder may open it.
+    const reachable = await channelRecipients(this.prisma, businessId, [connection], null, [enrollment.contactId]);
+    if (!reachable.has(enrollment.contactId)) {
+      return { queued: false, reason: "the sending account's binder may not open this contact" };
     }
 
     const content = await this.prisma.client.outboundContent.create({

@@ -117,7 +117,8 @@ function roleDefaults(level: (key: string) => string): Record<string, string> {
 const DEFAULT_SCOPES: Record<string, Record<string, string>> = {
   OWNER: roleDefaults(() => "admin"),
   ADMIN: roleDefaults((key) => (key === "team" ? "write" : "admin")),
-  STAFF: roleDefaults((key) => (STAFF_DENIED.includes(key) ? "none" : "read")),
+  // SWEEP-P0-FOLLOWUP, staffbookings ruling: staff handle bookings by default (bookings write), as on the server.
+  STAFF: roleDefaults((key) => (STAFF_DENIED.includes(key) ? "none" : key === "bookings" ? "write" : "read")),
 };
 
 const DEFAULT_TIERS: Record<string, number> = { OWNER: 4, ADMIN: 3, STAFF: 0 };

@@ -883,6 +883,21 @@
       "packet": "V1-99 (SWEEP-P0-SCOPES round 3 class repair, CLASS A Outlook push and Drive share receivers, CLASS B channel health lift)"
     },
     {
+      "prefix": "v99a_",
+      "owner": "apps/server/test/sweep-followup-bindings-scope.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-FOLLOWUP: CW3-1, CW3-2, bank connections, integration hub binding, staffbookings, staffkeyplans, byokkeys, whatsappsmoke)"
+    },
+    {
+      "prefix": "v99b_",
+      "owner": "apps/server/test/sweep-followup-audience-export.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-FOLLOWUP: WH3-1 audience export through channel connections, owner question 16)"
+    },
+    {
+      "prefix": "v99d_",
+      "owner": "apps/server/test/sweep-followup-repair-audience.integration.test.ts",
+      "packet": "V1-99 (SWEEP-P0-FOLLOWUP repair: SEC-FU-1 sync-from-social, SEC-FU-2 receiver rule at send and re-send, COR-1 KEY broadcast member, COR-2 rebind on change only, SEC-FU-3 audience preview)"
+    },
+    {
       "prefix": "v97f_",
       "owner": "apps/server/test/order-shipping-expense.integration.test.ts",
       "packet": "V1-97 (W11-SHIPPING-EXPENSE-ONCE)"
@@ -936,6 +951,16 @@
       "prefix": "v98k_",
       "owner": "apps/server/test/books-read-doors.integration.test.ts",
       "packet": "V1-98 (PR195-KEY-GATES)"
+    },
+    {
+      "prefix": "v63d_",
+      "owner": "apps/server/test/team-invite-email-case.integration.test.ts",
+      "packet": "V1-63 (SWP-TEAM-INVITE-SERVER)"
+    },
+    {
+      "prefix": "v63e_",
+      "owner": "apps/server/test/business-v1-settings.integration.test.ts",
+      "packet": "V1-63 (BIZ-SETTINGS-SERVER)"
     },
     {
       "prefix": "zz_credit_",

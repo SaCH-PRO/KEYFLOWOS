@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Inject, Param, Post, Put, Query, Req, UseGuards, BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Post, Put, Query, Req, UseGuards, BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { Request } from 'express';
 import { AgentStateMachineService, type AgentStateSnapshot } from './agent-state-machine.service';
 import { AgentBusService } from './agent-bus.service';
@@ -36,6 +37,12 @@ export class AgentController {
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
+  /** SWEEP-P0-FOLLOWUP (staffkeyplans): 404 unless the plan is this business's. */
+  private async assertOwnPlan(businessId: string, planId: string): Promise<void> {
+    const plan = await this.prisma.client.aiPlan.findFirst({ where: { id: planId, businessId }, select: { id: true } });
+    if (!plan) throw new NotFoundException('Plan not found');
+  }
+
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/agent/states')
   async getActiveAgentStates(@Param('businessId') businessId: string) {
@@ -55,7 +62,14 @@ export class AgentController {
     return snapshot;
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * SWEEP-P0-FOLLOWUP, staffkeyplans ruling (recommended option; REST scope census owner question 5): pausing,
+   * resuming or aborting a KEY plan needs ai write (owners and admins by role default; STAFF only when given KEY
+   * access). They checked membership only. And a plan is controlled only through its own business: the routes
+   * took any plan id, so a member of one business paused or aborted another business's plan (assertOwnPlan, 404).
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/agent/states/:planId/pause')
   async pausePlan(
     @Param('businessId') businessId: string,
@@ -64,11 +78,14 @@ export class AgentController {
   ) {
     const userId = req.user?.id;
     if (!userId) return { error: 'Authentication required' };
+    await this.assertOwnPlan(businessId, planId);
     const ok = await this.stateMachine.pausePlan(planId, userId);
     return { success: ok };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  // SWEEP-P0-FOLLOWUP (staffkeyplans): ai write, and the plan of this business only; see pausePlan.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/agent/states/:planId/resume')
   async resumePlan(
     @Param('businessId') businessId: string,
@@ -77,11 +94,14 @@ export class AgentController {
   ) {
     const userId = req.user?.id;
     if (!userId) return { error: 'Authentication required' };
+    await this.assertOwnPlan(businessId, planId);
     const ok = await this.stateMachine.resumePlan(planId, userId);
     return { success: ok };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  // SWEEP-P0-FOLLOWUP (staffkeyplans): ai write, and the plan of this business only; see pausePlan.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('ai', 'write')
   @Post('businesses/:businessId/agent/states/:planId/abort')
   async abortPlan(
     @Param('businessId') businessId: string,
@@ -90,6 +110,7 @@ export class AgentController {
   ) {
     const userId = req.user?.id;
     if (!userId) return { error: 'Authentication required' };
+    await this.assertOwnPlan(businessId, planId);
     const ok = await this.stateMachine.abortPlan(planId, userId);
     return { success: ok };
   }

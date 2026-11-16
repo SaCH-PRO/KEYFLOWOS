@@ -2,6 +2,15 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import { skipTenantIsolation } from '@keyflow/db';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import {
+  BUSINESS_SETTING_INVALID,
+  applyBusinessSettingsWrites,
+  businessSettingsWriteOf,
+  mergeBusinessSettingsWrites,
+  omitBusinessSettingsKeys,
+  readBusinessSettings,
+} from '../../core/prisma/business-meta';
+import { isBusinessOwnerMember } from '../../core/auth/business-owner';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { DefaultTriggersService } from '../ai/default-triggers.service';
 import { BUSINESS_META_PAYMENT_SECRET_KEYS, sanitizeBusiness } from '../../core/security/sanitize-business';
@@ -239,12 +248,19 @@ export class IdentityService {
     return items.map((b) => sanitizeBusiness(b));
   }
 
+  /**
+   * V1-63 BIZ-SETTINGS-SERVER: the read also answers the per-business v1
+   * settings as top-level sells, advancedCrm and depth (every hub), each
+   * absent or invalid stored key at its default (readBusinessSettings,
+   * core/prisma/business-meta.ts). Every member reads them; only the owner
+   * writes them (updateBusiness).
+   */
   async getBusiness(businessId: string) {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
     });
     if (!business) throw new NotFoundException('Business not found');
-    return sanitizeBusiness(business);
+    return { ...sanitizeBusiness(business), ...readBusinessSettings(business.metaData) };
   }
 
   private static readonly PUBLIC_BUSINESS_FIELDS = {
@@ -398,26 +414,17 @@ export class IdentityService {
    * (PATCH /identity/businesses/:businessId) is OWNER only, regardless of granted
    * scopes — settings:write or settings:admin does not admit a STAFF or ADMIN.
    *
-   * The owner is the OWNER membership or the distinguished owner (Business.ownerId)
-   * holding an OWNER membership (owner rulings D-116 / D-125: a recorded owner
-   * holding only ADMIN or STAFF is that role). A SUPER_ADMIN keeps the platform
-   * bypass BusinessGuard already grants it on this route; nothing here widens that.
+   * The owner is a member holding an OWNER membership of this business, the one
+   * owner rule core/auth/business-owner.ts isBusinessOwnerMember states (owner
+   * rulings D-104, D-116, D-125: a co-owner holding OWNER is the owner;
+   * Business.ownerId grants nothing on its own, and a recorded owner holding
+   * only ADMIN or STAFF is that role; W11-OWNER-HELPER-D11). A SUPER_ADMIN keeps
+   * the platform bypass BusinessGuard already grants it on this route; nothing
+   * here widens that.
    */
   async assertBusinessOwner(businessId: string, actor: { id: string; role?: string }): Promise<void> {
     if (actor.role === 'SUPER_ADMIN') return;
-    const membership = await this.prisma.client.membership.findUnique({
-      where: { userId_businessId: { userId: actor.id, businessId } },
-      select: { role: true },
-    });
-    if (membership?.role === 'OWNER') return;
-    const owned = await this.prisma.client.business.findFirst({
-      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row.
-      // Owner rulings D-116 / D-125 (W11-D116-PROFILE-OWNER; review SEC-W10OM-4 answered): only an
-      // OWNER-role one. A recorded owner holding only ADMIN or STAFF is that role and is refused here.
-      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id, role: 'OWNER' } } },
-      select: { id: true },
-    });
-    if (owned) return;
+    if (await isBusinessOwnerMember(this.prisma.client, businessId, actor.id)) return;
     throw new ForbiddenException('Only the business owner can edit the business profile');
   }
 
@@ -472,6 +479,11 @@ export class IdentityService {
     preferredProjectTypes?: string[];
     budgetFit?: string;
     positioningStatement?: string;
+    // V1-63 BIZ-SETTINGS-SERVER: checked here (businessSettingsWriteOf), not trusted
+    // from the type: an in-process caller (the KEY settings adapter) passes no pipe.
+    sells?: unknown;
+    advancedCrm?: unknown;
+    depth?: unknown;
   }) {
     // R0-SEC2b: a reserved metaData key (present at all, null included) refuses
     // the whole PATCH before anything is read or written (W3-D12b review
@@ -500,6 +512,22 @@ export class IdentityService {
       }
     }
 
+    // V1-63 BIZ-SETTINGS-SERVER (owner ruling D-150 'hubs'): what the business
+    // sells, the Advanced CRM switch and the depth of each hub are metaData keys
+    // (core/prisma/business-meta.ts). Each is checked wherever the caller names
+    // it, the field (the body pipe checked it already on the HTTP path) and the
+    // metaData bag alike, and an unknown value (null included) refuses the whole
+    // PATCH before anything is read or written. The field wins over the bag; a
+    // depth merges per hub. They are written below, under the row lock.
+    const fromFields = businessSettingsWriteOf(input);
+    const fromBag = businessSettingsWriteOf(input.metaData, 'metaData.');
+    const settingsProblems = [...fromFields.problems, ...fromBag.problems];
+    if (settingsProblems.length > 0) {
+      throw new BadRequestException({ code: BUSINESS_SETTING_INVALID, message: settingsProblems.join('; '), problems: settingsProblems });
+    }
+    const settingsWrite = mergeBusinessSettingsWrites(fromBag.write, fromFields.write);
+    const writesSettings = Object.keys(settingsWrite).length > 0;
+
     if (input.slug) {
       const existing = await this.prisma.client.business.findFirst({
         where: { slug: input.slug.trim(), NOT: { id: businessId } },
@@ -511,8 +539,10 @@ export class IdentityService {
       lastHealthCheck, metaData,
       skills, interests, preferredProjectTypes,
       acceptingWork, currentCapacity, leadTime, budgetFit, positioningStatement,
-      ...rest
+      ...profile
     } = input;
+    // The settings are metaData keys, not columns: out of the column copy and the changed-field list.
+    const rest = omitBusinessSettingsKeys(profile);
 
     // R0-SEC2c review SEC2c-ST-1: Business.metaData is one jsonb column that
     // many writers read, change and write back whole. Reading the stored row
@@ -585,10 +615,12 @@ export class IdentityService {
         data.lastHealthCheck = new Date(lastHealthCheck);
       }
 
-      if (metaData) {
+      if (metaData || writesSettings) {
         const existingMeta = (oldBusiness.metaData as Record<string, any>) || {};
         const merged: Record<string, unknown> = { ...existingMeta, ...metaData };
-        applyPaymentSecretWrites(merged, existingMeta, metaData);
+        applyPaymentSecretWrites(merged, existingMeta, metaData ?? {});
+        // V1-63: over the copy read under the row lock (a concurrent writer's key is kept).
+        applyBusinessSettingsWrites(merged, existingMeta, settingsWrite);
         data.metaData = merged;
       }
 
@@ -683,8 +715,9 @@ export class IdentityService {
 
     // R0-09 review (R09-ST-1): the updated row carries every Business OAuth
     // token column; GET already redacts them, so the PATCH response and the
-    // KEY settings adapter's connector result must too.
-    return sanitizeBusiness(result);
+    // KEY settings adapter's connector result must too. V1-63: and it answers
+    // the v1 settings as GET does.
+    return { ...sanitizeBusiness(result), ...readBusinessSettings(result.metaData) };
   }
 
   async getBusinessCommunityProfile(businessId: string) {
@@ -867,11 +900,18 @@ export class IdentityService {
     }
   }
 
+  /**
+   * V1-63 (SWP-TEAM-INVITE-SERVER, BUG-016): each member carries `invitePending`,
+   * true while its User is still the invite placeholder inviteTeamMember made for
+   * an address with no account (nobody has signed in as it yet; the first
+   * bootstrap adopts it and the marker is gone). The placeholder marker is read
+   * from `users.meta_data` and never returned: `user` keeps its public fields.
+   */
   async listTeamMembers(businessId: string) {
     const members = await this.prisma.client.membership.findMany({
       where: { businessId },
       include: {
-        user: { select: { id: true, email: true, name: true, firstName: true, lastName: true, avatarUrl: true } },
+        user: { select: { id: true, email: true, name: true, firstName: true, lastName: true, avatarUrl: true, metaData: true } },
         orgAssignments: {
           where: { endedAt: null, isPrimary: true },
           include: { orgUnit: true, jobRole: true },
@@ -880,8 +920,10 @@ export class IdentityService {
       },
       orderBy: { createdAt: 'asc' },
     });
-    return members.map((m) => ({
+    return members.map(({ user: { metaData, ...user }, ...m }) => ({
       ...m,
+      user,
+      invitePending: IdentityService.isMarkedInvitePlaceholder(metaData),
       permissionScopes: this.resolveScopes(m),
       maxApprovalTier: this.resolveApprovalTier(m),
       orgUnit: m.orgAssignments[0]?.orgUnit?.name ?? null,
@@ -911,10 +953,24 @@ export class IdentityService {
    * really lacks both — and an invite with explicit scopes within its own (the web
    * form's STAFF map) still succeeds. Converging the web form's DEFAULT_SCOPES on
    * core/authority/module-vocabulary is a follow-up outside this packet's write set.
+   *
+   * V1-63 (SWP-TEAM-INVITE-SERVER, sweep BUG-016): one person per address, whatever
+   * the letter case. The address is trimmed and lower-cased (normalizeInviteEmail; one
+   * without a usable shape is a 400 before anything is written), and its holders are
+   * found case-insensitively (findEmailHolders), so a repeat in another case is the
+   * same person: refused when a holder a person can still reach is already a member
+   * here, else the membership goes to that holder (an account before a placeholder;
+   * inviteReach). An address no reachable row holds gets a new placeholder, under the
+   * normalized address, so the lower-case address a sign-in carries finds it; a
+   * placeholder an older invite left that no sign-in can adopt neither blocks the
+   * invite nor receives it (V1-63 review COR-63-1, COR-63-2). Before, the lookup was
+   * exact and the address stored as typed: a capitalised repeat created a second
+   * member and a second User that no sign-in could claim.
    */
   async inviteTeamMember(businessId: string, email: string, role: string, inviterId: string, scopes?: Record<string, string>, maxApprovalTier?: number) {
     const { requester, bounded } = await this.assertTeamAdmin(businessId, inviterId);
     this.validateRole(role);
+    const address = IdentityService.normalizeInviteEmail(email);
     const permissionScopes = scopes ?? (IdentityService.DEFAULT_SCOPES[role] || IdentityService.DEFAULT_SCOPES.STAFF);
     const tier = maxApprovalTier ?? (IdentityService.DEFAULT_APPROVAL_TIERS[role] || 0);
     if (scopes || maxApprovalTier !== undefined) {
@@ -923,37 +979,130 @@ export class IdentityService {
     if (bounded && (await this.authorityExcess({ role, permissionScopes, maxApprovalTier: tier }, requester))) {
       throw new ForbiddenException('You cannot grant more authority than your own');
     }
-    let user = await this.prisma.client.user.findUnique({ where: { email } });
-    if (!user) {
+    // Only a holder a person can still reach counts (inviteReach, V1-63 review COR-63-1/2):
+    // a membership on a placeholder no sign-in can adopt makes no repeat, and none is added to one.
+    const { target, reachable } = IdentityService.inviteReach(await this.findEmailHolders(address), address);
+    for (const holder of reachable) {
+      const existing = await this.prisma.client.membership.findUnique({
+        where: { userId_businessId: { userId: holder.id, businessId } },
+      });
+      if (existing) throw new BadRequestException(IdentityService.ALREADY_A_MEMBER);
+    }
+    let userId = target?.id;
+    if (!userId) {
       // The invitee has no account yet, so this row is a placeholder that holds
       // the address and the pending membership. The marker is what lets the
       // invitee's first bootstrap adopt it (adoptInvitePlaceholder); a row
       // without it is never moved to another sign-in (R0-SEC-01).
-      user = await this.prisma.client.user.create({
-        data: {
-          email,
-          name: email.split('@')[0],
-          role: 'USER',
-          metaData: { [IdentityService.INVITE_PLACEHOLDER_KEY]: true },
-        },
-      });
+      try {
+        userId = (
+          await this.prisma.client.user.create({
+            data: {
+              email: address,
+              name: address.split('@')[0],
+              role: 'USER',
+              metaData: { [IdentityService.INVITE_PLACEHOLDER_KEY]: true },
+            },
+          })
+        ).id;
+      } catch (err) {
+        // A concurrent invite (or first sign-in) created the row for this address
+        // between the read above and this create: use that row.
+        if ((err as { code?: string })?.code !== 'P2002') throw err;
+        const created = await this.prisma.client.user.findUnique({ where: { email: address }, select: { id: true } });
+        if (!created) throw err;
+        userId = created.id;
+      }
     }
-    const existing = await this.prisma.client.membership.findUnique({
-      where: { userId_businessId: { userId: user.id, businessId } },
-    });
-    if (existing) throw new BadRequestException('User is already a team member');
-    const membership = await this.prisma.client.membership.create({
-      data: {
-        userId: user.id,
-        businessId,
-        role,
-        permissionScopes,
-        maxApprovalTier: tier,
-      },
-      include: { user: { select: { id: true, email: true, name: true, firstName: true, lastName: true, avatarUrl: true } } },
-    });
-    await this.logTeamActivity(businessId, inviterId, 'team', 'member_invited', 'membership', membership.id, `Invited ${email} as ${role}`, undefined, { invitedEmail: email, role });
+    let membership;
+    try {
+      membership = await this.prisma.client.membership.create({
+        data: {
+          userId,
+          businessId,
+          role,
+          permissionScopes,
+          maxApprovalTier: tier,
+        },
+        include: { user: { select: { id: true, email: true, name: true, firstName: true, lastName: true, avatarUrl: true } } },
+      });
+    } catch (err) {
+      // A concurrent invite of the same person (in any letter case) won the
+      // (user, business) unique key: this one is the repeat.
+      if ((err as { code?: string })?.code === 'P2002') throw new BadRequestException(IdentityService.ALREADY_A_MEMBER);
+      throw err;
+    }
+    await this.logTeamActivity(businessId, inviterId, 'team', 'member_invited', 'membership', membership.id, `Invited ${address} as ${role}`, undefined, { invitedEmail: address, role });
     return membership;
+  }
+
+  private static readonly ALREADY_A_MEMBER = 'User is already a team member';
+
+  /**
+   * V1-63: the invite address, trimmed and lower-cased, or a 400 when it has no
+   * usable shape (not a string, blank, no single '@' between non-empty parts, or
+   * any whitespace inside). Addresses are compared case-insensitively everywhere a
+   * person is matched to one (bootstrap, the invite ownership proof), so the stored
+   * form is the lower-case one.
+   */
+  static normalizeInviteEmail(email: unknown): string {
+    const address = typeof email === 'string' ? email.trim().toLowerCase() : '';
+    if (!/^[^\s@]+@[^\s@]+$/.test(address)) {
+      throw new BadRequestException('A valid email address is required to invite a team member');
+    }
+    return address;
+  }
+
+  /**
+   * Every User whose address equals `email` ignoring letter case and surrounding
+   * whitespace (an invite stored the address as typed before V1-63), by an exact
+   * comparison of lower(btrim(email)). Raw SQL on purpose: Prisma's `mode: 'insensitive'`
+   * equality is compiled to a pattern match in which '_' and '%' are wildcards, so
+   * 'a_b@x.test' would also match the account 'aXb@x.test' and an invite would grant
+   * that account a membership. A read only: rows that collide by case are reported
+   * by the read-only census in the packet RETURN, never merged here.
+   */
+  private async findEmailHolders(email: string): Promise<Array<{ id: string; email: string; metaData: unknown }>> {
+    const rows = await this.prisma.client.$queryRaw<Array<{ id: string; email: string; meta_data: unknown }>>`
+      SELECT id, email, meta_data FROM users WHERE lower(btrim(email)) = lower(btrim(${email})) ORDER BY id`;
+    return rows.map((r) => ({ id: r.id, email: r.email, metaData: r.meta_data }));
+  }
+
+  /**
+   * Of the holders of an invite address (findEmailHolders), the ones a person can
+   * still reach, and the one an invite joins (`target`).
+   *
+   * An account is reached by its owner's own sign-in. An invite placeholder is
+   * reached only by the first sign-in bootstrapUser adopts it for, and this mirrors
+   * that choice for the address a sign-in carries (the lower-case one, as
+   * normalized here): the row stored under exactly that address, else the single
+   * holder in another letter case (invitePlaceholderInOtherCase); with several case
+   * variants and no exact row, bootstrap adopts none. Any other placeholder (beside
+   * an account, or one of several case variants: both left by invites stored as
+   * typed before V1-63) can never be claimed. Its membership is no repeat (V1-63
+   * review COR-63-1: refusing on it left the account with no way in), and an invite
+   * never hangs on it (COR-63-2: the invitation could not be accepted); with no
+   * reachable holder the caller makes a placeholder under the exact address, which
+   * bootstrap's exact lookup adopts. Nothing is merged: such rows stay, listed as
+   * pending, for the owner to remove.
+   *
+   * `target`: an account first (the row under exactly the address, then the lowest
+   * id), else the placeholder a sign-in adopts. `reachable`: the target and that
+   * placeholder, the holders whose membership makes an invite a repeat.
+   */
+  private static inviteReach<T extends { id: string; email: string; metaData: unknown }>(
+    holders: T[],
+    address: string,
+  ): { target: T | undefined; reachable: T[] } {
+    const isPlaceholder = (h: T) => IdentityService.isMarkedInvitePlaceholder(h.metaData);
+    const signIn = holders.find((h) => h.email === address) ?? (holders.length === 1 ? holders[0] : undefined);
+    const claimable = signIn && isPlaceholder(signIn) ? signIn : undefined;
+    const account = holders
+      .filter((h) => !isPlaceholder(h))
+      .sort((a, b) => Number(a.email !== address) - Number(b.email !== address) || a.id.localeCompare(b.id))[0];
+    const target = account ?? claimable;
+    const reachable = [target, claimable].filter((h, i, all): h is T => h !== undefined && all.indexOf(h) === i);
+    return { target, reachable };
   }
 
   async removeTeamMember(businessId: string, membershipId: string, requesterId: string) {
@@ -1168,6 +1317,8 @@ export class IdentityService {
       userId: m.userId,
       role: m.role,
       user: m.user,
+      // V1-63: what GET .../team carries; the Team page reads this route.
+      invitePending: m.invitePending,
       permissionScopes: m.permissionScopes,
       maxApprovalTier: m.maxApprovalTier,
       activeTasks: taskCountMap.get(m.userId) ?? 0,
@@ -1246,16 +1397,27 @@ export class IdentityService {
         // Logged once the guard has admitted the move, not for a refused one.
         this.logger.warn(`Reconciling User id ${oldId} -> ${newId} for email=${input.email}.`);
         const placeholderEmail = `__migrated_${oldId}_${Date.now()}@local.invalid`;
+        const priorEmail = (await tx.user.findUnique({ where: { id: oldId }, select: { email: true } }))?.email;
         const oldUser = await tx.user.update({
           where: { id: oldId },
           data: { email: placeholderEmail },
         });
+        // V1-63 review COR-63-3: a name inviteTeamMember derived from the row's own
+        // address (its local part) is derived again from the address the row now
+        // takes. A placeholder stored as typed before V1-63 ('Leo@Example.com',
+        // name 'Leo') is adopted under the lower-case token address; kept as 'Leo',
+        // the name no longer matched the address and co-members were offered the
+        // member by it (assigneeMemberLabel, D-87). The same address is unchanged.
+        const keptName =
+          oldUser.name !== null && priorEmail !== undefined && oldUser.name === priorEmail.split('@')[0]
+            ? input.email.split('@')[0]
+            : oldUser.name;
 
         const newUser = await tx.user.create({
           data: {
             id: newId,
             email: input.email,
-            name: oldUser.name ?? desiredName?.trim() ?? input.email,
+            name: keptName ?? desiredName?.trim() ?? input.email,
             role: oldUser.role ?? 'USER',
             firstName: oldUser.firstName ?? input.firstName?.trim() ?? null,
             lastName: oldUser.lastName ?? input.lastName?.trim() ?? null,
@@ -1433,11 +1595,15 @@ export class IdentityService {
       // an account is the marked placeholder inviteTeamMember creates for an
       // address with no account; the invitee's first bootstrap adopts it
       // under the conditions in adoptInvitePlaceholder (review repair
-      // SEC01-T1/CR-1).
-      const collidingByEmail = await this.prisma.client.user.findUnique({
-        where: { email: input.email },
-        select: { id: true, metaData: true },
-      });
+      // SEC01-T1/CR-1). V1-63 (BUG-016): with no row under exactly the token's
+      // address, a placeholder holding it in another letter case (an invite
+      // stored as typed before V1-63) is that invitation too
+      // (invitePlaceholderInOtherCase).
+      const collidingByEmail =
+        (await this.prisma.client.user.findUnique({
+          where: { email: input.email },
+          select: { id: true, metaData: true },
+        })) ?? (await this.invitePlaceholderInOtherCase(input.email, input.userId));
 
       if (collidingByEmail && collidingByEmail.id !== input.userId) {
         if (!IdentityService.isMarkedInvitePlaceholder(collidingByEmail.metaData)) {
@@ -1495,6 +1661,32 @@ export class IdentityService {
     // found, a Business read like GET /identity/businesses/:id: no OAuth token
     // column and metaData.whatsapp masked, for the owner too.
     return { user, business: sanitizeBusiness(business), isNewBusiness };
+  }
+
+  /**
+   * V1-63 (SWP-TEAM-INVITE-SERVER, BUG-016): for a first bootstrap whose token
+   * address no row holds exactly, the one invite placeholder holding it in another
+   * letter case. Before V1-63 inviteTeamMember stored the address as typed, so a
+   * 'Leo@Example.com' invitation never met the lower-case address a sign-in carries
+   * and could not be accepted. It is adopted exactly as an exact-case placeholder
+   * is (adoptInvitePlaceholder: re-checked under a lock, the pending memberships
+   * move only with proof of the address). Anything else answers null and bootstrap
+   * goes on as before: no holder, an account (a case variant of an account is not
+   * merged or refused here; the read-only census in the packet RETURN finds them),
+   * or more than one case variant, where which invitation is meant is not knowable.
+   */
+  private async invitePlaceholderInOtherCase(
+    email: string,
+    userId: string,
+  ): Promise<{ id: string; metaData: unknown } | null> {
+    const variants = (await this.findEmailHolders(email)).filter((h) => h.id !== userId);
+    if (variants.length !== 1 || !IdentityService.isMarkedInvitePlaceholder(variants[0].metaData)) {
+      if (variants.length > 1) {
+        this.logger.warn(`[bootstrap] ${variants.length} users hold the token address in other letter cases; none adopted (userId=${userId})`);
+      }
+      return null;
+    }
+    return { id: variants[0].id, metaData: variants[0].metaData };
   }
 
   /** 409 for an address another local account holds; bootstrap writes nothing. */
@@ -1595,10 +1787,11 @@ export class IdentityService {
     });
     // Never bound: nobody has signed in as it. Every bootstrap sets a referral
     // code, and only a sign-in creates a session, an identity link or an owned
-    // business.
+    // business. The address matches ignoring letter case (V1-63): a placeholder
+    // stored as typed before V1-63 holds the invited address in any case.
     const neverBound =
       row !== null &&
-      row.email === input.email &&
+      row.email.trim().toLowerCase() === input.email.trim().toLowerCase() &&
       IdentityService.isMarkedInvitePlaceholder(row.metaData) &&
       row.role === 'USER' &&
       !row.deletedAt &&

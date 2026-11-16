@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, Optional, forwardRef } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { channelRecipients } from '../communications/channel-audience';
 import { ActivityService } from './activity.service';
 import { CrmService } from '../crm/crm.service';
 import { canonicalContactStatus } from '../crm/crm.constants';
@@ -325,6 +326,13 @@ export class AutomationExecutorService {
               break;
             }
 
+            // SWEEP-P0-FOLLOWUP (WH3-1): the contact goes through the WhatsApp account only if its binder may open it.
+            const reachable = await channelRecipients(this.prisma, businessId, [waConnection], null, [context.contactId]);
+            if (!reachable.has(context.contactId)) {
+              this.logger.warn(`WhatsApp for playbook "${playbookName}" not queued: the sending account's binder may not open contact ${context.contactId}`);
+              break;
+            }
+
             const destination = waConnection.destinations[0];
             const messageBody = action.message || action.templateData?.message || `Hello from ${playbookName}`;
             const templateMeta: Record<string, unknown> = {};
@@ -402,11 +410,15 @@ export class AutomationExecutorService {
             contactWhere.tags = { hasSome: segmentTags };
           }
 
-          const recipients = await this.prisma.client.contact.findMany({
+          const audience = await this.prisma.client.contact.findMany({
             where: contactWhere,
             select: { id: true, email: true },
             take: 10000,
           });
+          // SWEEP-P0-FOLLOWUP (WH3-1): only the contacts the sending account's binder may open (no member sends a
+          // flow's campaign; channelRecipients, modules/communications/channel-audience.ts).
+          const reachable = await channelRecipients(this.prisma, businessId, [emailConnection], null, audience.map((r) => r.id));
+          const recipients = audience.filter((r) => reachable.has(r.id));
 
           if (recipients.length === 0) {
             this.logger.warn(`No eligible recipients for campaign in playbook "${playbookName}"`);

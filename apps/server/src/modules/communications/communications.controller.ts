@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { createHmac } from 'crypto';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -8,6 +8,13 @@ import { OutboundContentService } from './outbound-content.service';
 import { DeliveryQueueService } from './delivery-queue.service';
 import { ContentAiService } from './content-ai.service';
 import { WhatsAppAdapter } from './adapters/whatsapp-adapter';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { assertMayBindExport } from '../../core/connectors/connector-exports';
+import { assertMemberModuleLevel } from '../../core/auth/member-module-level';
+import { CHANNEL_EXPORT_TYPE, isMessagingProvider } from './channel-audience';
+
+/** The member a route acts for (AuthMiddleware attaches it; AuthGuard requires it). */
+type MemberRequest = { user?: { id?: string; role?: string } };
 
 // SECURITY: TRACKING_HMAC_SECRET must not silently fall back to an empty string —
 // an empty HMAC key would let any caller forge tracking tokens (ported from
@@ -32,6 +39,7 @@ export class CommunicationsController {
     @Inject(OutboundContentService) private readonly content: OutboundContentService,
     @Inject(DeliveryQueueService) private readonly delivery: DeliveryQueueService,
     @Inject(ContentAiService) private readonly contentAi: ContentAiService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   @Get('health')
@@ -64,6 +72,11 @@ export class CommunicationsController {
    * admin. It copies every social connection's token over the business's channel connection of that
    * provider (ChannelConnectionService.syncFromSocial), replacing the channel credential the other
    * connection writes need settings admin for (SV-2).
+   *
+   * SWEEP-P0-FOLLOWUP repair (review SEC-FU-1): the sync writes no messaging connection (EMAIL, GOOGLE, WHATSAPP): a
+   * social connection is never a sending account, and copying one over the owner-bound mailbox swapped its token for
+   * another member's while the recorded binder stayed. Those accounts are bound only by the routes below, which check
+   * the binder reads what it receives (CEN-11c reads the doors from the call graph).
    */
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('settings', 'admin')
@@ -82,18 +95,35 @@ export class CommunicationsController {
    * two businesses moved the connection into their own (ChannelConnectionService now writes only a
    * connection's own fields). The reads stay open to members and answer no token (stripSecrets).
    */
+  /**
+   * SWEEP-P0-FOLLOWUP (round 3 recheck WH3-1, CLASS A): an EMAIL / Gmail or WhatsApp connection's account receives
+   * every message sent through it, with the recipient's address or phone, so binding one is binding an export
+   * account: beside settings admin, the binder reads what it receives (crm: assertMayBindExport,
+   * CONNECTOR_EXPORT_READS.channel_messaging) and is recorded as its binder (providerMeta.boundBy, set by the
+   * server; a boundBy in the body is dropped). Sends through it reach only the contacts every receiver may open
+   * (channelRecipients). A settings admin whose map says crm none bound their own mailbox and the owner's PRIVATE
+   * contacts were queued through it.
+   */
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/connections')
-  createConnection(@Param('businessId') businessId: string, @Body() body: any) {
-    return this.connections.create(businessId, body);
+  async createConnection(@Param('businessId') businessId: string, @Body() body: any, @Req() req: MemberRequest) {
+    if (isMessagingProvider(body?.provider)) await assertMayBindExport(this.prisma, businessId, req.user, CHANNEL_EXPORT_TYPE);
+    return this.connections.create(businessId, body, req.user);
   }
 
+  // SWEEP-P0-FOLLOWUP (WH3-1): changing a messaging connection's account (token, mailbox, provider meta) rebinds it
+  // (see createConnection); a change that keeps the account (its label, its health) binds nothing. Repair COR-2: a
+  // change of the stored account, not an account field sent back unchanged (the web's sender form always sends its
+  // mailbox with a new label).
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('settings', 'admin')
   @Patch('businesses/:businessId/connections/:id')
-  updateConnection(@Param('businessId') businessId: string, @Param('id') id: string, @Body() body: any) {
-    return this.connections.update(businessId, id, body);
+  async updateConnection(@Param('businessId') businessId: string, @Param('id') id: string, @Body() body: any, @Req() req: MemberRequest) {
+    if (await this.connections.rebindsAccount(businessId, id, body)) {
+      await assertMayBindExport(this.prisma, businessId, req.user, CHANNEL_EXPORT_TYPE);
+    }
+    return this.connections.update(businessId, id, body, req.user);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -164,10 +194,21 @@ export class CommunicationsController {
     return this.connections.validateEmailSend(businessId, body);
   }
 
+  /**
+   * SWEEP-P0-FOLLOWUP repair (review SEC-FU-3): a preview of the audience is a read of the business's contacts (their
+   * names, emails and phones): crm read, checked in the handler as publishNow checks content write, and only the
+   * contacts the member may open (ChannelConnectionService.expandAudience). It was membership-only and answered the
+   * owner's PRIVATE contacts to a member with every module none.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/audience/expand')
-  expandAudience(@Param('businessId') businessId: string, @Body() body: { segmentTags?: string[]; ageGroups?: string[]; limit?: number; channel?: string }) {
-    return this.connections.expandAudience(businessId, body);
+  async expandAudience(
+    @Param('businessId') businessId: string,
+    @Body() body: { segmentTags?: string[]; ageGroups?: string[]; limit?: number; channel?: string },
+    @Req() req: MemberRequest,
+  ) {
+    await assertMemberModuleLevel(this.prisma, businessId, req.user, 'crm', 'read');
+    return this.connections.expandAudience(businessId, body, req.user);
   }
 
   // --- WhatsApp Connect & Verify ---
@@ -190,8 +231,14 @@ export class CommunicationsController {
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/whatsapp/connect')
-  async connectWhatsApp(@Param('businessId') businessId: string, @Body() body: { accessToken: string; waBusinessAccountId: string; label?: string }) {
-    return this.connections.connectWhatsApp(businessId, body);
+  async connectWhatsApp(
+    @Param('businessId') businessId: string,
+    @Body() body: { accessToken: string; waBusinessAccountId: string; label?: string },
+    @Req() req: MemberRequest,
+  ) {
+    // SWEEP-P0-FOLLOWUP (WH3-1): a WhatsApp business account is an export account (see createConnection).
+    await assertMayBindExport(this.prisma, businessId, req.user, CHANNEL_EXPORT_TYPE);
+    return this.connections.connectWhatsApp(businessId, body, req.user);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -280,24 +327,41 @@ export class CommunicationsController {
 
   // --- Delivery Operations ---
 
+  /**
+   * SWEEP-P0-FOLLOWUP (WH3-1): publishing or scheduling content sends it, to an audience of the business's contacts
+   * for an email or WhatsApp send: content write (it was membership only), and the audience is held to what the
+   * sending member and each sending account's binder may open (DeliveryQueueService, channelRecipients: the member
+   * needs crm read for an audience send).
+   *
+   * Content write is checked in the handler (assertMemberModuleLevel, ModuleScopeGuard's reading), not declared on the
+   * route: a declared scope makes DeliveryQueueService.publishNow governed work that KEY's comms_send_broadcast (a
+   * legacy-family tool) reaches one call deeper, which job-role-tool-families.spec.ts's drift guard (a required
+   * Release 0 case) refuses until that tool's grant is reviewed (an R0 amendment). The broadcast still meets the
+   * receiver rule (channelRecipients) with the command's member as the sender.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/content/:id/publish')
-  publishNow(
+  async publishNow(
     @Param('businessId') businessId: string,
     @Param('id') contentId: string,
     @Body() body: { destinationIds: string[] },
+    @Req() req: MemberRequest,
   ) {
-    return this.delivery.publishNow(businessId, contentId, body.destinationIds);
+    await assertMemberModuleLevel(this.prisma, businessId, req.user, 'content', 'write');
+    return this.delivery.publishNow(businessId, contentId, body.destinationIds, req.user ?? null);
   }
 
+  // SWEEP-P0-FOLLOWUP (WH3-1): content write (in the handler) and the audience rule; see publishNow.
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/content/:id/schedule')
-  schedule(
+  async schedule(
     @Param('businessId') businessId: string,
     @Param('id') contentId: string,
     @Body() body: { destinationIds: string[]; scheduledAt: string; timezone?: string },
+    @Req() req: MemberRequest,
   ) {
-    return this.delivery.schedule(businessId, contentId, body.destinationIds, body.scheduledAt, body.timezone);
+    await assertMemberModuleLevel(this.prisma, businessId, req.user, 'content', 'write');
+    return this.delivery.schedule(businessId, contentId, body.destinationIds, body.scheduledAt, body.timezone, req.user ?? null);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -316,9 +380,16 @@ export class CommunicationsController {
     return this.delivery.cancel(businessId, deliveryId);
   }
 
+  /**
+   * SWEEP-P0-FOLLOWUP repair (review SEC-FU-2): a retry sends the delivery again, so it needs content write, as
+   * publish does (checked in the handler; see publishNow). It was membership-only. The delivery is held to the
+   * receiver rule again when it is sent (DeliveryQueueService.executeDelivery, channelSendRefusal): a contact the
+   * sending account's binder may not open now fails RECEIVER_MAY_NOT_OPEN instead of going out.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/deliveries/:deliveryId/retry')
-  retry(@Param('businessId') businessId: string, @Param('deliveryId') deliveryId: string) {
+  async retry(@Param('businessId') businessId: string, @Param('deliveryId') deliveryId: string, @Req() req: MemberRequest) {
+    await assertMemberModuleLevel(this.prisma, businessId, req.user, 'content', 'write');
     return this.delivery.retry(businessId, deliveryId);
   }
 
@@ -356,9 +427,11 @@ export class CommunicationsController {
     return this.delivery.getDeliveryEvents(businessId, deliveryId);
   }
 
+  // SWEEP-P0-FOLLOWUP repair (review SEC-FU-2): content write, as retry (see retry).
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/content/:id/retry-all')
-  retryAllFailed(@Param('businessId') businessId: string, @Param('id') contentId: string) {
+  async retryAllFailed(@Param('businessId') businessId: string, @Param('id') contentId: string, @Req() req: MemberRequest) {
+    await assertMemberModuleLevel(this.prisma, businessId, req.user, 'content', 'write');
     return this.delivery.retryAllFailed(businessId, contentId);
   }
 

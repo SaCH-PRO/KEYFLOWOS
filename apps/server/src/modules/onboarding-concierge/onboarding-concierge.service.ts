@@ -1,6 +1,7 @@
 import { Injectable, Inject, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { isBusinessOwnerMember } from '../../core/auth/business-owner';
 import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { CatalogService } from '../catalog/catalog.service';
@@ -456,31 +457,18 @@ export class OnboardingConciergeService {
 
   /**
    * Whether the actor is the business owner for owner ruling D-11
-   * (R0-09b-D11-SIBLING-WRITES): the OWNER membership or the distinguished
-   * owner (Business.ownerId), the two arms IdentityService.assertBusinessOwner
-   * and BusinessGuard admit an owner by; a SUPER_ADMIN keeps the platform
-   * bypass BusinessGuard already grants. The actor is the authenticated user
-   * AuthMiddleware attached (req.user); none is not the owner (fails closed).
-   * The rule is restated rather than imported, as R0-08c did: injecting
-   * IdentityService would need OnboardingConciergeModule to import
-   * IdentityModule.
+   * (R0-09b-D11-SIBLING-WRITES): an OWNER membership of the route's business,
+   * the one owner rule core/auth/business-owner.ts isBusinessOwnerMember states
+   * (owner rulings D-104, D-116, D-125: Business.ownerId grants nothing on its
+   * own; W11-OWNER-HELPER-D11); a SUPER_ADMIN keeps the platform bypass
+   * BusinessGuard already grants. The actor is the authenticated user
+   * AuthMiddleware attached (req.user), or for completion the tenant-bound
+   * actor resolveCompletionActor passes; none is not the owner (fails closed).
    */
   async isProfileOwner(businessId: string, actor: { id?: string; role?: string } | undefined): Promise<boolean> {
     if (!actor?.id) return false;
     if (actor.role === 'SUPER_ADMIN') return true;
-    const membership = await this.prisma.client.membership.findUnique({
-      where: { userId_businessId: { userId: actor.id, businessId } },
-      select: { role: true },
-    });
-    if (membership?.role === 'OWNER') return true;
-    const owned = await this.prisma.client.business.findFirst({
-      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
-      // owner rulings D-116 / D-125 (W11-D116-PROFILE-OWNER): only an OWNER-role one (a recorded owner
-      // holding only ADMIN or STAFF is that role).
-      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id, role: 'OWNER' } } },
-      select: { id: true },
-    });
-    return !!owned;
+    return isBusinessOwnerMember(this.prisma.client, businessId, actor.id);
   }
 
   async autoConfigureFromTemplate(

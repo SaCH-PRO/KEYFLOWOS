@@ -234,13 +234,22 @@ describe('CW-1: the business\'s BYOK provider keys (ai_memories settings / ai_pr
     expect(await rowsOf('ai_memories')).toEqual(before);
   });
 
-  it('[CW2-AI-02] settings admin writes them: an ADMIN on role defaults and a STAFF member given settings admin each get 200 and the stored row changes', async () => {
+  // SWEEP-P0-FOLLOWUP, byokkeys ruling (recommended option): only the owner enters, changes or clears a BYOK key;
+  // settings admins keep the other AI preferences (sweep-followup-bindings-scope SFB-BYOK-01/02 prove both halves).
+  it('[CW2-AI-02] settings admin writes the other AI preferences (an ADMIN on role defaults and a STAFF member given settings admin each get 200 and the stored row changes); a BYOK key is the owner\'s (byokkeys: 403 BYOK_OWNER_ONLY), and the owner writes it', async () => {
     for (const actor of [ID.admin, ID.settingsAdmin]) {
       const before = await rowsOf('ai_memories');
-      const res = await send('put', prefs, actor, { byokOpenai: `${P}sk-${actor.slice(P.length)}` });
+      const res = await send('put', prefs, actor, { mode: actor === ID.admin ? 'fast' : 'premium' });
       expect(res.status, actor).toBe(200);
       expect(await rowsOf('ai_memories'), actor).not.toEqual(before);
+      const key = await send('put', prefs, actor, { byokOpenai: `${P}sk-${actor.slice(P.length)}` });
+      expect(key.status, `${actor} key`).toBe(403);
+      expect(JSON.stringify(key.body), actor).toMatch(/BYOK_OWNER_ONLY/);
     }
+    const before = await rowsOf('ai_memories');
+    const owner = await send('put', prefs, ID.owner, { byokOpenai: `${P}sk-owner-2` });
+    expect(owner.status).toBe(200);
+    expect(await rowsOf('ai_memories')).not.toEqual(before);
   });
 });
 
@@ -309,7 +318,9 @@ describe('CW-3: the Google Business Profile account and location the owner\'s to
 describe('CW-4: Connect (POST authenticate/:type) and a passed WhatsApp smoke test lift an explicit disconnect', () => {
   const conn = `/connectors/businesses/${ID.bizA}`;
 
-  it('[CW2-CON-01] RED-BEFORE: after the owner\'s explicit WhatsApp disconnect, a member below settings admin is refused Connect (authenticate) and the smoke test with 403, and the disconnect stands', async () => {
+  // SWEEP-P0-FOLLOWUP, whatsappsmoke ruling (recommended option): the WhatsApp test only reports its result and never
+  // switches WhatsApp back on, so it is open to members again; the disconnect stands whoever runs it.
+  it('[CW2-CON-01] RED-BEFORE: after the owner\'s explicit WhatsApp disconnect, a member below settings admin is refused Connect (authenticate) with 403; the smoke test answers them (whatsappsmoke) and switches nothing on; the disconnect stands', async () => {
     expect((await send('post', `${conn}/disconnect/whatsapp`, ID.owner)).status).toBe(201);
     const after = await whatsappRow();
     expect(after).toMatchObject({ status: 'disconnected', record: { state: 'disconnected' } });
@@ -318,7 +329,8 @@ describe('CW-4: Connect (POST authenticate/:type) and a passed WhatsApp smoke te
       expect(auth.status, `${actor} authenticate`).toBe(403);
       expect(String(auth.body?.message ?? ''), actor).toMatch(/settings requires admin access/);
       const smoke = await send('post', `${conn}/smoke/whatsapp`, actor);
-      expect(smoke.status, `${actor} smoke`).toBe(403);
+      expect(smoke.status, `${actor} smoke`).toBe(201);
+      expect(smoke.body?.success, `${actor} smoke`).toBe(false);
     }
     expect(await whatsappRow()).toEqual(after);
     expect((await send('get', `${conn}/health/whatsapp`, ID.owner)).body?.status).toBe('disconnected');

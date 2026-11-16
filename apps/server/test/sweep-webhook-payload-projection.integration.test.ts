@@ -56,7 +56,7 @@ const PERSON_KEYS = ['contact', 'contacts', 'customer', 'client', 'lead', 'owner
 /** Named by the class finding: never in a delivery, at any depth. */
 const NAMED_PRIVATE = ['visibility', 'ownerId', 'notesInternal', 'lifetimeValue', 'averageSpend', 'paymentReliability', 'riskFlags'];
 /** Values seeded on the PRIVATE contact that must never leave. */
-const SECRET_VALUES = ['Owner-only note: negotiating 40% discount', '98765.43', '4321.09', 'PRIVATE', 'poor_payment_history', '+18685550199', 'v99p_secret_token'];
+const SECRET_VALUES = ['Owner-only note: negotiating 40% discount', '98765.43', '4321.09', 'PRIVATE', 'poor_payment_history', '+18685550199', 'v99p_secret_token', 'v99p_SECRETADDR', 'v99p_SECRETCO', 'v99p_SECRETCUSTOM'];
 
 let db: any;
 let app: any;
@@ -267,6 +267,34 @@ afterAll(async () => {
   if (db) await cleanup();
 });
 
+/** SWEEP-P0-FOLLOWUP (WH3-2): a class instance carrying a row (not a plain object). */
+class CarriedRow {
+  constructor(src: Record<string, unknown>) {
+    Object.assign(this, src);
+  }
+}
+
+/**
+ * SWEEP-P0-FOLLOWUP (WH3-2): the shapes the round 3 recheck passed through the projector whole (no emitter produces
+ * them today; an include of contact with a narrow select under a renamed key would): a contact selected without
+ * any marker column under a key outside the person keys, a class instance carrying the whole contact, an object
+ * whose toJSON answers the contact, a snake_case copy of a contact inside a JSON column, and money rows under keys
+ * outside RELATION_MODULES.
+ */
+function wh32Shapes(contact: Record<string, any>) {
+  return {
+    customerContact: {
+      id: contact.id, firstName: contact.firstName, lastName: contact.lastName, email: contact.email, phone: contact.phone,
+      addressLine1: 'v99p_SECRETADDR', companyName: 'v99p_SECRETCO', jobTitle: 'Director', custom: { k: 'v99p_SECRETCUSTOM' },
+    },
+    attendeeRow: new CarriedRow(contact),
+    summary: { toJSON: () => contact },
+    depositPayment: { id: `${P}pay_dep`, amount: 500, method: 'card' },
+    settlementInvoice: { id: `${P}inv_settle`, total: 999, status: 'PAID' },
+    snapshot: { customer_snapshot: { first_name: contact.firstName, phone: contact.phone, address1: 'v99p_SECRETADDR', total_spent: '98765.43', lifetime_value: '98765.43' } },
+  };
+}
+
 /** A payload that embeds the PRIVATE contact (read whole, as the services read it) wherever a listener might look. */
 async function poisoned(eventName: string) {
   const contact = await db.contact.findUnique({ where: { id: ID.contact } });
@@ -285,8 +313,8 @@ async function poisoned(eventName: string) {
     status: 'SENT',
     previousStatus: 'PAID',
     invoice: { ...invoice, customer: contact },
-    booking: { ...booking, staff: { id: `${P}staff`, name: 'Staff One', email: `${P}staff@test.local`, accessToken: 'v99p_secret_token' } },
-    order: { ...order, contact, customer: contact, metadata: { checkoutToken: 'v99p_secret_token' } },
+    booking: { ...booking, staff: { id: `${P}staff`, name: 'Staff One', email: `${P}staff@test.local`, accessToken: 'v99p_secret_token' }, ...wh32Shapes(contact!) },
+    order: { ...order, contact, customer: contact, metadata: { checkoutToken: 'v99p_secret_token', ...wh32Shapes(contact!).snapshot } },
     post: { id: `${P}post`, content: 'Hello', status: 'PUBLISHED', author: contact, owner },
     quote: { id: `${P}quote`, total: 10, contact },
     lead: contact,
@@ -416,6 +444,33 @@ describe('CLASS A: one choke point projects every delivery (RC-1 and its sibling
       // a person key inside the record is still the person view
       expect(d.body.data.order.metadata.recipient, d.event).toEqual({ firstName: 'Private', lastName: 'Client' });
     }
+    await db.webhook.delete({ where: { id: wh.id } });
+  });
+
+  it('[WPP-09] RED-BEFORE (SWEEP-P0-FOLLOWUP, WH3-2): the projector is generic: a contact selected without marker columns under any key that names a person, a class instance or a toJSON object carrying a contact, a snake_case copy of a contact, and a money row under a key outside the relation table are each projected, at any depth', async () => {
+    const wh = await db.webhook.create({ data: { id: `${P}wh_wh32`, businessId: ID.bizA, name: `${P}wh32`, url: 'https://203.0.113.96/v99p-wh32', events: ['booking.created', 'store_order.delivered'], secret: `${P}whsecret_${'g'.repeat(40)}`, isActive: true } });
+    const contact = await db.contact.findUnique({ where: { id: ID.contact } });
+    const booking = { ...(await db.booking.findUnique({ where: { id: ID.booking } })), ...wh32Shapes(contact), nested: { deeper: { attendeeRow: new CarriedRow(contact), payout: { settlementInvoice: { id: `${P}inv_deep`, total: 1 } } } } };
+    const order = { ...(await db.marketplaceOrder.findUnique({ where: { id: ID.order } })), metadata: wh32Shapes(contact).snapshot };
+    const sent = await capture(async () => {
+      await events.emitAsync('booking.created', { booking, businessId: ID.bizA });
+      await events.emitAsync('store_order.delivered', { order, businessId: ID.bizA });
+    });
+    const mine = sent.filter((s) => s.webhookId === wh.id);
+    expect(mine.map((s) => s.event).sort()).toEqual(['booking.created', 'store_order.delivered']);
+    const view = { id: ID.contact, firstName: 'Private', lastName: 'Client', email: `${P}private@client.example` };
+    const b = mine.find((s) => s.event === 'booking.created')!.body.data.booking;
+    expect(b.customerContact, 'a narrow contact under a person-named key').toEqual(view);
+    expect(b.attendeeRow, 'a class instance carrying the contact').toEqual(view);
+    expect(b.summary, 'a toJSON object answering the contact').toEqual(view);
+    expect(b.nested.deeper.attendeeRow, 'at depth').toEqual(view);
+    // a bookings-read subscriber was not checked for revenue: the money rows are their id only, wherever they sit
+    expect(b.depositPayment).toEqual({ id: `${P}pay_dep` });
+    expect(b.settlementInvoice).toEqual({ id: `${P}inv_settle` });
+    expect(b.nested.deeper.payout.settlementInvoice).toEqual({ id: `${P}inv_deep` });
+    const snap = mine.find((s) => s.event === 'store_order.delivered')!.body.data.order.metadata.customer_snapshot;
+    expect(Object.keys(snap ?? {}).filter((k) => !PERSON_VIEW.has(k)), 'a snake_case contact copy').toEqual([]);
+    for (const s of mine) expect(leaksIn(s.body, contactOnlyKeys()), s.event).toEqual([]);
     await db.webhook.delete({ where: { id: wh.id } });
   });
 

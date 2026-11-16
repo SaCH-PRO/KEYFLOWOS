@@ -58,6 +58,9 @@ const ID = {
   admin: `${P}admin`, // ADMIN, explicit scope map with bookings 'none' (ADMIN keeps every module: D-71)
   staff: `${P}staff`, // STAFF, role defaults: read on every module but settings/team/ai, revenue read
   staffBook: `${P}staff_book`, // STAFF, role defaults + bookings write
+  // SWEEP-P0-FOLLOWUP (staffbookings): the STAFF role default is bookings write now, so the member held to bookings
+  // read is an explicit map.
+  staffBookRead: `${P}staff_bookread`, // STAFF, role defaults with bookings 'read'
   staffNoBook: `${P}staff_nobook`, // STAFF, role defaults with bookings 'none'
   staffCrmW: `${P}staff_crmw`, // STAFF, role defaults + crm write (crm_view all)
   staffOwned: `${P}staff_owned`, // STAFF, role defaults + crm write, crm_view owned
@@ -312,7 +315,7 @@ beforeAll(async () => {
 
   const staffDefaults = defaultScopesForRole('STAFF');
   const adminDefaults = defaultScopesForRole('ADMIN');
-  for (const [id, role] of [[ID.owner, 'USER'], [ID.admin, 'USER'], [ID.staff, 'USER'], [ID.staffBook, 'USER'], [ID.staffNoBook, 'USER'], [ID.staffCrmW, 'USER'], [ID.staffOwned, 'USER'], [ID.outsider, 'USER']] as const) {
+  for (const [id, role] of [[ID.owner, 'USER'], [ID.admin, 'USER'], [ID.staff, 'USER'], [ID.staffBook, 'USER'], [ID.staffBookRead, 'USER'], [ID.staffNoBook, 'USER'], [ID.staffCrmW, 'USER'], [ID.staffOwned, 'USER'], [ID.outsider, 'USER']] as const) {
     await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role } });
   }
   await db.business.create({ data: { id: ID.biz, name: 'V87B Biz', ownerId: ID.owner } });
@@ -323,6 +326,7 @@ beforeAll(async () => {
   await member(ID.admin, 'ADMIN', { ...adminDefaults, bookings: 'none' });
   await member(ID.staff, 'STAFF');
   await member(ID.staffBook, 'STAFF', { ...staffDefaults, bookings: 'write' });
+  await member(ID.staffBookRead, 'STAFF', { ...staffDefaults, bookings: 'read' });
   await member(ID.staffNoBook, 'STAFF', { ...staffDefaults, bookings: 'none' });
   await member(ID.staffCrmW, 'STAFF', { ...staffDefaults, crm: 'write' });
   await member(ID.staffOwned, 'STAFF', { ...staffDefaults, crm: 'write', crm_view: 'owned' });
@@ -349,8 +353,9 @@ afterAll(async () => {
 describe('fixture sanity (real rows)', () => {
   it('biz has its OWNER, an ADMIN without bookings, STAFF members with role defaults or explicit scope maps, three contacts (one PRIVATE to the OWNER) and a full-autonomy policy', async () => {
     const rows = await db.membership.findMany({ where: { businessId: ID.biz }, select: { userId: true, role: true }, orderBy: { userId: 'asc' } });
-    expect(rows.map((r: any) => r.role).sort()).toEqual(['ADMIN', 'OWNER', 'STAFF', 'STAFF', 'STAFF', 'STAFF', 'STAFF']);
-    expect(defaultScopesForRole('STAFF')).toMatchObject({ bookings: 'read', revenue: 'read', crm: 'read', settings: 'none' });
+    expect(rows.map((r: any) => r.role).sort()).toEqual(['ADMIN', 'OWNER', 'STAFF', 'STAFF', 'STAFF', 'STAFF', 'STAFF', 'STAFF']);
+    // SWEEP-P0-FOLLOWUP (staffbookings): the STAFF role default gives bookings write.
+    expect(defaultScopesForRole('STAFF')).toMatchObject({ bookings: 'write', revenue: 'read', crm: 'read', settings: 'none' });
     expect(await db.contact.count({ where: { businessId: ID.biz } })).toBe(3);
     const asCommand = (module: string, action: string) => ({ module, action, parameters: {}, businessId: ID.biz, userId: ID.owner, source: 'key_cortex', timestamp: new Date() });
     for (const [module, action] of [['bookings', 'create_booking'], ['bookings', 'get_services'], ['crm', 'update_contact'], ['crm', 'list_contacts'], ['commerce', 'create_invoice'], ['autopilot', 'create_task']]) {
@@ -364,11 +369,11 @@ describe('fixture sanity (real rows)', () => {
  * revenue write, and only for commerce steps; every other step ran for any creator.
  */
 describe('D-71: every KEY plan step needs the running member\'s scope for its module (write for a write, read for a read)', () => {
-  it('PM-01 RED-BEFORE: a STAFF creator holding bookings read only (role defaults) is refused its own plan that creates a booking: 403, nothing routed, the plan still pending', async () => {
+  it('PM-01 RED-BEFORE: a STAFF creator holding bookings read only (an explicit map: role defaults give bookings write since SWEEP-P0-FOLLOWUP staffbookings) is refused its own plan that creates a booking: 403, nothing routed, the plan still pending', async () => {
     const planId = `${P}pm01`;
-    await seedCortexPlan(planId, [{ module: 'bookings', action: 'create_booking' }], ID.staff);
+    await seedCortexPlan(planId, [{ module: 'bookings', action: 'create_booking' }], ID.staffBookRead);
     const from = routed.length;
-    const err = await planner.executePlan(planId, {}, asMember(ID.staff)).catch((e: unknown) => e);
+    const err = await planner.executePlan(planId, {}, asMember(ID.staffBookRead)).catch((e: unknown) => e);
     expect(err, String(err)).toBeInstanceOf(ForbiddenException);
     expect(String((err as Error).message)).toMatch(/bookings requires write/);
     expect(routedFor(planId, from)).toEqual([]);
@@ -377,7 +382,7 @@ describe('D-71: every KEY plan step needs the running member\'s scope for its mo
 
   it('PM-02 RED-BEFORE: the same plan run with no member (the query pipeline, a trigger) is held to its creator\'s scopes: 403 and nothing routed', async () => {
     const planId = `${P}pm02`;
-    await seedCortexPlan(planId, [{ module: 'bookings', action: 'create_booking' }], ID.staff);
+    await seedCortexPlan(planId, [{ module: 'bookings', action: 'create_booking' }], ID.staffBookRead);
     const from = routed.length;
     const err = await planner.executePlan(planId, { traceId: `${P}pm02` }).catch((e: unknown) => e);
     expect(err, String(err)).toBeInstanceOf(ForbiddenException);

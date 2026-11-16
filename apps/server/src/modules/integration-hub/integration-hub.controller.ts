@@ -8,17 +8,12 @@ import {
   Query,
   UseGuards,
   Inject,
-  Req,
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { IntegrationHubService } from './integration-hub.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { assertMemberModuleLevel } from '../../core/auth/member-module-level';
-
-/** The member a route acts for (AuthMiddleware attaches it; AuthGuard requires it). */
-type HubActorRequest = { user?: { id?: string; role?: string } };
 
 @Controller('integration-hub/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -49,31 +44,31 @@ export class IntegrationHubController {
   /**
    * SWEEP-P0-SCOPES round 1 class repair (CLASS B; found by the census call graph, CEN-10b): binding
    * and unbinding an integration (IntegrationConnection.authDataRef, the reference to its stored
-   * credential) also needs settings admin, as every other credential binding does. Connect write
-   * (ModuleScopeGuard) stays: `connect` is none for every role by deliberate decision
-   * (module-vocabulary.ts) and reachable only through an explicit grant, so the binding now needs
-   * both; a STAFF member granted connect write alone no longer binds the business's integration.
+   * credential) needs settings admin, as every other credential binding does.
+   *
+   * SWEEP-P0-FOLLOWUP (census owner question 11, answered by default): settings admin alone. The binding had
+   * needed connect write as well, and `connect` is none for every role by deliberate decision
+   * (module-vocabulary.ts), so on role defaults nobody could bind an integration. OWNER and ADMIN bind on role
+   * defaults now; connect write is kept for the hub's sync runs (POST sync-runs/:providerKey) and the provider
+   * seed, and a member granted connect write alone still binds nothing.
    */
   @Post('connections/:providerKey')
-  @RequireModuleScope('connect', 'write')
+  @RequireModuleScope('settings', 'admin')
   async connect(
     @Param('businessId') businessId: string,
     @Param('providerKey') providerKey: string,
     @Body() body: { authDataRef?: string; scopes?: string[]; settings?: Record<string, unknown> },
-    @Req() req?: HubActorRequest,
   ) {
-    await assertMemberModuleLevel(this.prisma, businessId, req?.user, 'settings', 'admin');
     return this.hub.createConnection(businessId, providerKey, body);
   }
 
+  // SWEEP-P0-FOLLOWUP (owner question 11): settings admin alone; see connect.
   @Delete('connections/:providerKey')
-  @RequireModuleScope('connect', 'write')
+  @RequireModuleScope('settings', 'admin')
   async disconnect(
     @Param('businessId') businessId: string,
     @Param('providerKey') providerKey: string,
-    @Req() req?: HubActorRequest,
   ) {
-    await assertMemberModuleLevel(this.prisma, businessId, req?.user, 'settings', 'admin');
     return this.hub.disconnect(businessId, providerKey);
   }
 

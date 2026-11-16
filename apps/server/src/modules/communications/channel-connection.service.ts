@@ -1,5 +1,11 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
+import { channelBinderOf, isMessagingProvider, providerMetaBoundBy, rebindsChannelAccount } from './channel-audience';
+
+/** Why sync-from-social copies no messaging account (SWEEP-P0-FOLLOWUP repair, SEC-FU-1). */
+const SOCIAL_SYNC_SKIPS_MESSAGING =
+  'Not copied: email and WhatsApp sending accounts are connected in Settings > Connections, never from a social connection.';
 
 type ConnectionRecord = Awaited<ReturnType<PrismaService['client']['channelConnection']['findFirst']>>;
 
@@ -80,6 +86,24 @@ export class ChannelConnectionService {
     return conn ? stripSecrets(conn) : null;
   }
 
+  /**
+   * SWEEP-P0-FOLLOWUP (WH3-1; repair COR-2): whether `data` rebinds this business's connection `id`: it is a messaging
+   * connection (EMAIL, GOOGLE, WHATSAPP) and the body changes its stored account (a token, refresh token, mailbox or
+   * provider meta that differs from what is stored; a field sent back unchanged, a label or a health change does not).
+   */
+  async rebindsAccount(businessId: string, id: string, data: unknown): Promise<boolean> {
+    const conn = await this.prisma.client.channelConnection.findFirst({
+      where: { id, businessId },
+      select: { provider: true, token: true, refreshToken: true, accountEmail: true, providerMeta: true },
+    });
+    return !!conn && isMessagingProvider(conn.provider) && rebindsChannelAccount(conn, data);
+  }
+
+  /**
+   * SWEEP-P0-FOLLOWUP (WH3-1): `binder` is the member who binds the account (the route's caller); for a messaging
+   * provider it is recorded as providerMeta.boundBy, the receiver every send through the account is held to
+   * (channelRecipients). A boundBy in the body is never stored.
+   */
   async create(businessId: string, data: {
     provider: string;
     label?: string;
@@ -89,8 +113,12 @@ export class ChannelConnectionService {
     expiresAt?: Date;
     scopes?: string;
     providerMeta?: Record<string, unknown>;
-  }) {
+  }, binder?: { id?: string } | null) {
     const fields = pickFields(data, CONNECTION_CREATE_FIELDS) as typeof data;
+    const boundBy = binder?.id;
+    const providerMeta = providerMetaBoundBy(data.provider, data.providerMeta, boundBy);
+    if (providerMeta !== undefined) fields.providerMeta = providerMeta;
+    else delete fields.providerMeta;
     const conn = await this.prisma.client.channelConnection.create({
       data: { ...fields, businessId },
       include: { destinations: true },
@@ -123,12 +151,23 @@ export class ChannelConnectionService {
     healthMessage?: string;
     lastCheckedAt?: Date;
     providerMeta?: Record<string, unknown>;
-  }) {
+  }, binder?: { id?: string } | null) {
     const existing = await this.prisma.client.channelConnection.findFirst({ where: { id, businessId } });
     if (!existing) return null;
+    const fields = pickFields(data, CONNECTION_UPDATE_FIELDS) as typeof data;
+    // SWEEP-P0-FOLLOWUP (WH3-1): a change of a messaging connection's account (its token, mailbox or provider meta)
+    // rebinds it to the member making the change; otherwise the binder recorded stays. A boundBy in the body is
+    // never stored. Repair COR-2: a change of what is stored, not a field sent back unchanged.
+    const rebinds = rebindsChannelAccount(existing, data);
+    if (rebinds || data.providerMeta !== undefined) {
+      const kept = channelBinderOf(existing.providerMeta);
+      const binderId = rebinds && isMessagingProvider(existing.provider) ? binder?.id : kept ?? undefined;
+      const meta = providerMetaBoundBy(existing.provider, data.providerMeta ?? existing.providerMeta, binderId ?? undefined);
+      if (meta !== undefined) fields.providerMeta = meta;
+    }
     const updated = await this.prisma.client.channelConnection.update({
       where: { id },
-      data: pickFields(data, CONNECTION_UPDATE_FIELDS) as typeof data,
+      data: fields,
     });
 
     if (existing.provider?.toUpperCase() === 'EMAIL' && data.accountEmail) {
@@ -317,16 +356,34 @@ export class ChannelConnectionService {
     };
   }
 
+  /**
+   * Copies every social connection (a page or profile: Facebook, Instagram, LinkedIn, X, TikTok) onto the business's
+   * channel connection of that platform, and its pages onto destinations.
+   *
+   * SWEEP-P0-FOLLOWUP repair (review SEC-FU-1): a social connection is never a sending mailbox or WhatsApp account, so
+   * the sync never writes a messaging connection (EMAIL, GOOGLE, WHATSAPP). It did: a settings admin whose map says
+   * crm none stored their own mailbox's token as a social EMAIL connection (the manual connect accepts any platform
+   * name) and the sync copied it over the owner-bound EMAIL connection, while the recorded binder still named the
+   * owner, so the owner's PRIVATE contacts went out through the other member's account; in a business with no EMAIL
+   * connection it made one with no recorded binder. Only the binding routes (POST connections, PATCH connections/:id,
+   * whatsapp/connect) write a messaging account: they check the binder reads what it receives and record them.
+   * Skipped platforms are answered (`skipped`) so the caller can say why.
+   */
   async syncFromSocial(businessId: string) {
     const socialConnections = await this.prisma.client.socialConnection.findMany({
       where: { businessId },
     });
 
     const results: { provider: string; connectionId: string; destinations: number }[] = [];
+    const skipped: string[] = [];
 
     for (const sc of socialConnections) {
       const provider = (sc.platform || '').toUpperCase();
       if (!provider) continue;
+      if (isMessagingProvider(provider)) {
+        skipped.push(provider);
+        continue;
+      }
 
       const existing = await this.prisma.client.channelConnection.findFirst({
         where: { businessId, provider },
@@ -403,7 +460,11 @@ export class ChannelConnectionService {
       this.logger.log(`Synced social connection ${provider} for business ${businessId}: ${destCount} destinations`);
     }
 
-    return { synced: results.length, results };
+    return {
+      synced: results.length,
+      results,
+      skipped: skipped.map((provider) => ({ provider, reason: SOCIAL_SYNC_SKIPS_MESSAGING })),
+    };
   }
 
   async validateEmailSend(businessId: string, input: {
@@ -497,17 +558,30 @@ export class ChannelConnectionService {
     };
   }
 
+  /**
+   * The audience a send would reach, previewed: each matching contact's name, email, phone and tags.
+   *
+   * SWEEP-P0-FOLLOWUP repair (review SEC-FU-3): this is a read of the business's contacts, the read twin of the
+   * audience the sends guard (channelRecipients), and it answered every matching contact, the owner's PRIVATE ones
+   * with their email and phone included, to any member. The route now needs crm read, and the preview holds only the
+   * contacts `viewer` may open (visibilityClause, the rule GET contacts applies: a PRIVATE contact only to its owner,
+   * an explicit share and the business owner; a member kept to their own book sees only it). The suppressed count is
+   * held to the same contacts.
+   */
   async expandAudience(businessId: string, input: {
     segmentTags?: string[];
     ageGroups?: string[];
     limit?: number;
     channel?: string;
-  }) {
+  }, viewer: { id?: string } | null | undefined) {
+    if (!viewer?.id) throw new ForbiddenException('Authentication required');
+    const visible = visibilityClause(await resolveCrmAccess(this.prisma, businessId, viewer.id), viewer.id) as Record<string, unknown> | null;
     const contactWhere: Record<string, unknown> = {
       businessId,
       deletedAt: null,
       doNotContact: { not: true },
       marketingOptIn: { not: false },
+      ...(visible ? { AND: [visible] } : {}),
     };
 
     if (input.channel === 'whatsapp') {
@@ -539,6 +613,7 @@ export class ChannelConnectionService {
         OR: [{ doNotContact: true }, { marketingOptIn: false }],
         ...(input.segmentTags && input.segmentTags.length > 0 ? { tags: { hasSome: input.segmentTags } } : {}),
         ...(input.ageGroups && input.ageGroups.length > 0 ? { ageGroup: { in: input.ageGroups } } : {}),
+        ...(visible ? { AND: [visible] } : {}),
       },
     });
 
@@ -624,7 +699,7 @@ export class ChannelConnectionService {
     accessToken: string;
     waBusinessAccountId: string;
     label?: string;
-  }) {
+  }, binder?: { id?: string } | null) {
     const { WhatsAppAdapter } = await import('./adapters/whatsapp-adapter');
     const adapter = new WhatsAppAdapter();
 
@@ -643,7 +718,7 @@ export class ChannelConnectionService {
       label: input.label || `WhatsApp (${phones[0].verifiedName})`,
       token: input.accessToken,
       providerMeta: { wabaId: input.waBusinessAccountId },
-    });
+    }, binder);
 
     return {
       connection: conn,

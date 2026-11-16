@@ -278,11 +278,14 @@ describe('the supplier connection credentials (SupplierConnection.credentials)',
 describe('the integration hub binding (IntegrationConnection.authDataRef)', () => {
   // Connect write stays (connect is none for every role by deliberate decision, module-vocabulary.ts):
   // binding an integration now needs it and settings admin.
-  it('[CRW-HUB-01] RED-BEFORE: connecting or disconnecting an integration needs settings admin as well as connect write: a STAFF member with connect write and settings write, an ADMIN with connect admin whose map says settings none, and a settings admin without connect write are refused with 403 and nothing is written', async () => {
+  // SWEEP-P0-FOLLOWUP (REST scope census owner question 11, answered by default): the binding needs settings admin
+  // alone; connect write is kept for the hub's sync runs. So a settings admin without connect write now binds
+  // (CRW-HUB-02), and every member below settings admin is still refused, connect write or not.
+  it('[CRW-HUB-01] RED-BEFORE: connecting or disconnecting an integration needs settings admin: a STAFF member with connect write and settings write, and an ADMIN with connect admin whose map says settings none, are refused with 403 and nothing is written', async () => {
     const first = await send('post', `/integration-hub/businesses/${ID.bizA}/connections/${ID.provider}`, ID.connectAdmin, { authDataRef: `${P}admin_vault_ref` });
     expect(first.status).toBe(201);
     const before = await rowsOf('integration_connections');
-    for (const actor of [...BELOW_SETTINGS_ADMIN, ID.settingsAdmin]) {
+    for (const actor of BELOW_SETTINGS_ADMIN) {
       const c = await send('post', `/integration-hub/businesses/${ID.bizA}/connections/${ID.provider}`, actor, { authDataRef: `${P}attacker_ref` });
       expect(c.status, `${actor} connect`).toBe(403);
       const d = await send('delete', `/integration-hub/businesses/${ID.bizA}/connections/${ID.provider}`, actor);
@@ -291,9 +294,11 @@ describe('the integration hub binding (IntegrationConnection.authDataRef)', () =
     expect(await rowsOf('integration_connections')).toEqual(before);
   });
 
-  it('[CRW-HUB-02] a member with settings admin and connect write (a STAFF member given both) connects and disconnects', async () => {
-    expect((await send('post', `/integration-hub/businesses/${ID.bizA}/connections/${ID.provider}`, ID.connectAdmin, { authDataRef: `${P}admin_ref` })).status).toBe(201);
-    expect((await send('delete', `/integration-hub/businesses/${ID.bizA}/connections/${ID.provider}`, ID.connectAdmin)).status).toBe(200);
+  it('[CRW-HUB-02] a member with settings admin connects and disconnects: one with connect write as well (a STAFF member given both), and one without it (owner question 11)', async () => {
+    for (const actor of [ID.connectAdmin, ID.settingsAdmin]) {
+      expect((await send('post', `/integration-hub/businesses/${ID.bizA}/connections/${ID.provider}`, actor, { authDataRef: `${P}admin_ref` })).status, actor).toBe(201);
+      expect((await send('delete', `/integration-hub/businesses/${ID.bizA}/connections/${ID.provider}`, actor)).status, actor).toBe(200);
+    }
   });
 });
 

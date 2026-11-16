@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { isBusinessOwnerMember } from '../../core/auth/business-owner';
 
 /**
  * R0-09f (owner ruling D-11): the refusal a non-owner gets on
@@ -115,36 +116,19 @@ export class FinanceSettingsService {
   /**
    * Whether the actor is the business owner for owner ruling D-11
    * (R0-09f-D11-FINANCE-TAX-AND-WEB): an OWNER membership of the route's
-   * business, as IdentityService.assertBusinessOwner admits an owner (owner
-   * rulings D-116 / D-125: Business.ownerId counts only holding an OWNER
-   * membership; a recorded owner holding only ADMIN or STAFF is that role); a
+   * business, the one owner rule core/auth/business-owner.ts
+   * isBusinessOwnerMember states (owner rulings D-104, D-116, D-125:
+   * Business.ownerId grants nothing on its own; W11-OWNER-HELPER-D11); a
    * SUPER_ADMIN keeps the platform bypass BusinessGuard grants. Consumers: the
    * tax rate on PATCH /finance/businesses/:id/settings and PATCH
    * /commerce/businesses/:id/document-templates (R0-09g; review CR-D116P-1).
    * The actor is the authenticated user AuthMiddleware attached (req.user);
-   * none is not the owner (fails closed). The rule is restated rather than
-   * imported, as R0-08c, R0-09b and R0-09d did (PresenceService.isSlugOwner,
-   * OnboardingConciergeService, BusinessGenesisService and
-   * TemplatesService.isProfileOwner): injecting IdentityService would need
-   * FinanceModule to import IdentityModule, and finance.module.ts is outside
-   * the R0-09f write set.
+   * none is not the owner (fails closed).
    */
   async isProfileOwner(businessId: string, actor: { id?: string; role?: string } | undefined): Promise<boolean> {
     if (!actor?.id) return false;
     if (actor.role === 'SUPER_ADMIN') return true;
-    const membership = await this.prisma.client.membership.findUnique({
-      where: { userId_businessId: { userId: actor.id, businessId } },
-      select: { role: true },
-    });
-    if (membership?.role === 'OWNER') return true;
-    const owned = await this.prisma.client.business.findFirst({
-      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
-      // owner rulings D-116 / D-125 (W11-D116-PROFILE-OWNER): only an OWNER-role one (a recorded owner
-      // holding only ADMIN or STAFF is that role).
-      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id, role: 'OWNER' } } },
-      select: { id: true },
-    });
-    return !!owned;
+    return isBusinessOwnerMember(this.prisma.client, businessId, actor.id);
   }
 
   /** Owner-only (D-11) for defaultTaxRate: the controller runs assertTaxRateOwner first. */

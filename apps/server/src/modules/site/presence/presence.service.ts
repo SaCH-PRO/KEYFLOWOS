@@ -5,6 +5,7 @@ import { skipTenantIsolation } from '@keyflow/db';
 import { z } from 'zod';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../../../core/prisma/prisma.service';
+import { isBusinessOwnerMember } from '../../../core/auth/business-owner';
 
 // ---------------------------------------------------------------------------
 // Schema — discriminated by section type so each section has typed, runtime-
@@ -610,12 +611,12 @@ export class PresenceService {
    * slug (assertSlugOwner); publish asks isSlugOwner and, for a non-owner,
    * publishes at the current address instead of refusing.
    *
-   * The owner is the OWNER membership or the distinguished owner
-   * (Business.ownerId), the two arms IdentityService.assertBusinessOwner and
-   * BusinessGuard admit an owner by; a SUPER_ADMIN keeps the platform bypass
-   * BusinessGuard already grants. The rule is restated rather than imported, as
-   * R0-08c did: IdentityModule imports AiModule, which reaches SiteModule
-   * through KeyCortexModule. No actor is not the owner (fails closed).
+   * The owner is a member holding an OWNER membership of this business, the
+   * one owner rule core/auth/business-owner.ts isBusinessOwnerMember states
+   * (owner rulings D-104, D-116, D-125: Business.ownerId grants nothing on its
+   * own; W11-OWNER-HELPER-D11), read with the caller's client (the publish and
+   * draft transactions pass theirs); a SUPER_ADMIN keeps the platform bypass
+   * BusinessGuard already grants. No actor is not the owner (fails closed).
    */
   private async isSlugOwner(
     businessId: string,
@@ -624,19 +625,7 @@ export class PresenceService {
   ): Promise<boolean> {
     if (!actor?.id) return false;
     if (actor.role === 'SUPER_ADMIN') return true;
-    const membership = await client.membership.findUnique({
-      where: { userId_businessId: { userId: actor.id, businessId } },
-      select: { role: true },
-    });
-    if (membership?.role === 'OWNER') return true;
-    const owned = await client.business.findFirst({
-      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
-      // owner rulings D-116 / D-125 (W11-D116-PROFILE-OWNER): only an OWNER-role one (a recorded owner
-      // holding only ADMIN or STAFF is that role).
-      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id, role: 'OWNER' } } },
-      select: { id: true },
-    });
-    return !!owned;
+    return isBusinessOwnerMember(client, businessId, actor.id);
   }
 
   /** 403 PRESENCE_SLUG_OWNER_ONLY unless the actor is the owner (see isSlugOwner). */

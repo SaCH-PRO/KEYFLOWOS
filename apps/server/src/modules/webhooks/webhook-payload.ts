@@ -70,6 +70,69 @@ const RELATION_MODULES: Readonly<Record<string, CanonicalModule>> = {
   expense: 'expenses', expenses: 'expenses',
 };
 
+/**
+ * SWEEP-P0-FOLLOWUP (round 3 recheck WH3-2): the projector is generic over the shapes a payload can take.
+ *   - A key that names a person (its last word: contact, customer, client, lead, owner, member, user, staff, attendee,
+ *     guest, recipient, sender, author, assignee, person, buyer, payer, ...; customerContact, customer_snapshot,
+ *     primaryAttendee) holds a person row whatever columns were selected: a contact read with a narrow select under a
+ *     renamed key carried its phone, address, company and custom fields whole.
+ *   - A key whose last word names a row of another module (invoice, payment, quote, receipt, booking, order,
+ *     shipment, deal, project, task, expense, campaign, post: depositPayment, settlementInvoice) is that module's
+ *     row, as RELATION_MODULES' exact keys are.
+ *   - snake_case keys are read as their camelCase twins (lifetime_value, email_normalized, first_name).
+ *   - The payload is read as it serialises (JSON) before it is projected: a class instance, a Buffer-like value or an
+ *     object whose toJSON answers a row is that row, and the rules apply to it (they were returned whole, and
+ *     NEVER_DELIVERED did not apply inside them).
+ */
+const PERSON_WORDS = new Set([
+  'contact', 'customer', 'client', 'lead', 'owner', 'member', 'user', 'staff', 'attendee', 'guest', 'recipient', 'sender',
+  'author', 'assignee', 'person', 'people', 'buyer', 'payer', 'referrer', 'requester', 'approver', 'subscriber', 'employee',
+]);
+const RELATION_WORDS: Readonly<Record<string, CanonicalModule>> = {
+  invoice: 'revenue', payment: 'revenue', quote: 'revenue', receipt: 'revenue', refund: 'revenue', creditnote: 'revenue', paymentlink: 'revenue',
+  booking: 'bookings', appointment: 'bookings',
+  order: 'storefront', shipment: 'storefront',
+  deal: 'crm', opportunity: 'crm',
+  project: 'projects', task: 'projects', timeentry: 'projects',
+  post: 'content', campaign: 'content',
+  expense: 'expenses', bill: 'expenses',
+};
+/** A key's words, lower case: camelCase and snake_case split (customerContact -> customer, contact). */
+const wordsOf = (key: string): string[] => key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+const singular = (word: string) => (word.endsWith('ies') ? `${word.slice(0, -3)}y` : word.endsWith('s') && !word.endsWith('ss') ? word.slice(0, -1) : word);
+/** The camelCase twin of a key (first_name -> firstName), so snake_case copies are read by the same rules. */
+const camelOf = (key: string) => key.replace(/_([a-z0-9])/g, (_m, c: string) => c.toUpperCase());
+/** Last words that say the key holds a copy of the row its other words name (customer_snapshot, contactRecord). */
+const ROW_WORDS = new Set(['snapshot', 'row', 'record', 'data', 'info', 'details', 'detail', 'profile', 'copy', 'json']);
+/**
+ * A key that names a person: an exact person key, one whose last word names one (customerContact, primaryAttendee),
+ * or one that names a person and says it holds its row (customer_snapshot). A key that only starts with a person word
+ * (leadForm, contactPreferences) is not one.
+ */
+const isPersonKey = (key: string) => {
+  if (WEBHOOK_PERSON_KEYS.has(key) || WEBHOOK_PERSON_KEYS.has(camelOf(key))) return true;
+  const words = wordsOf(key).map(singular);
+  const last = words[words.length - 1] ?? '';
+  return PERSON_WORDS.has(last) || (ROW_WORDS.has(last) && words.slice(0, -1).some((w) => PERSON_WORDS.has(w)));
+};
+/** The module a key's row belongs to: an exact relation key, or the module its last word names (depositPayment). */
+const relationModuleOf = (key: string): CanonicalModule | undefined => {
+  if (Object.prototype.hasOwnProperty.call(RELATION_MODULES, key)) return RELATION_MODULES[key];
+  const words = wordsOf(key);
+  const last = words.length ? singular(words[words.length - 1]) : '';
+  const lastTwo = words.length > 1 ? singular(`${words[words.length - 2]}${words[words.length - 1]}`) : '';
+  return RELATION_WORDS[lastTwo] ?? RELATION_WORDS[last];
+};
+
+/** The payload as it is delivered: its JSON form (class instances and toJSON values read as what they serialise to). */
+function asDelivered(data: unknown): unknown {
+  try {
+    return JSON.parse(JSON.stringify(data, (_key, value) => (typeof value === 'bigint' ? value.toString() : value)));
+  } catch {
+    return {};
+  }
+}
+
 const MAX_DEPTH = 12;
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> => {
@@ -78,7 +141,8 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> => {
   return proto === Object.prototype || proto === null;
 };
 
-const isPersonRow = (row: Record<string, unknown>) => PERSON_ROW_MARKERS.some((key) => Object.prototype.hasOwnProperty.call(row, key));
+const isPersonRow = (row: Record<string, unknown>) =>
+  Object.keys(row).some((key) => PERSON_ROW_MARKERS.includes(key) || PERSON_ROW_MARKERS.includes(camelOf(key)));
 
 /** A person row as every subscriber may read it: the view's fields it has, as plain values. */
 export function webhookPersonView(row: unknown): Record<string, unknown> | null {
@@ -88,6 +152,12 @@ export function webhookPersonView(row: unknown): Record<string, unknown> | null 
     if (!Object.prototype.hasOwnProperty.call(row, key)) continue;
     const value = row[key];
     if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) out[key] = value;
+  }
+  // SWEEP-P0-FOLLOWUP (WH3-2): a snake_case person row (first_name, last_name) is viewed by its camelCase fields.
+  for (const [key, value] of Object.entries(row)) {
+    const twin = camelOf(key);
+    if (twin === key || !(WEBHOOK_PERSON_VIEW as readonly string[]).includes(twin) || twin in out) continue;
+    if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) out[twin] = value;
   }
   return out;
 }
@@ -103,13 +173,14 @@ function project(value: unknown, reads: ReadonlySet<string>, depth: number): unk
   if (isPersonRow(value)) return webhookPersonView(value);
   const out: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value)) {
-    if (NEVER_DELIVERED.test(key)) continue;
+    if (NEVER_DELIVERED.test(key) || NEVER_DELIVERED.test(camelOf(key))) continue;
     let shown: unknown;
-    if (WEBHOOK_PERSON_KEYS.has(key)) {
+    const related = relationModuleOf(key);
+    if (isPersonKey(key) && child !== null && typeof child === 'object') {
       // a person row as the view; an id or name the row refers to a person by is delivered as it is
       const person = (v: unknown) => (isPlainObject(v) ? webhookPersonView(v) : v !== null && typeof v === 'object' ? undefined : v);
       shown = Array.isArray(child) ? child.map(person).filter((v) => v !== undefined) : person(child);
-    } else if (Object.prototype.hasOwnProperty.call(RELATION_MODULES, key) && !reads.has(RELATION_MODULES[key]) && child && typeof child === 'object') {
+    } else if (related && !reads.has(related) && child && typeof child === 'object') {
       shown = Array.isArray(child) ? child.map(reference).filter((v) => v !== undefined) : reference(child);
     } else {
       shown = project(child, reads, depth + 1);
@@ -125,5 +196,5 @@ function project(value: unknown, reads: ReadonlySet<string>, depth: number): unk
  */
 export function projectWebhookPayload(event: string, data: Record<string, unknown>): Record<string, unknown> {
   const reads = new Set<string>(webhookEventReads(event) ?? []);
-  return (project(data, reads, 0) as Record<string, unknown> | undefined) ?? {};
+  return (project(asDelivered(data), reads, 0) as Record<string, unknown> | undefined) ?? {};
 }

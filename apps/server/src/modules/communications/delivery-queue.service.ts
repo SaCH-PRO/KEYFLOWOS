@@ -2,6 +2,8 @@ import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy, NotFoundExce
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import type { ModuleLevelActor } from '../../core/auth/member-module-level';
+import { channelRecipients, channelSendRefusal, RECEIVER_MAY_NOT_OPEN } from './channel-audience';
 import { AdapterRegistryService } from './adapters/adapter-registry.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
 import { ChannelAdapter, PublishPayload, PublishResponse } from './adapters/channel-adapter.interface';
@@ -77,6 +79,8 @@ type ResendDeliveryRuntime = {
       token?: string | null;
       healthState?: string | null;
       accountEmail?: string | null;
+      /** SWEEP-P0-FOLLOWUP repair (SEC-FU-2): its recorded binder (providerMeta.boundBy), held again at send. */
+      providerMeta?: unknown;
     } | null;
   };
   content?: DeliveryContentRuntime | null;
@@ -252,6 +256,15 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
         return;
       }
       await this.failDelivery(delivery.id, delivery.contentId, delivery.businessId, 'NO_ADAPTER', `No adapter for platform: ${destination.platform}`, 'Sending');
+      return;
+    }
+
+    // SWEEP-P0-FOLLOWUP repair (review SEC-FU-2): the receiver rule holds when the delivery is sent, not only when it
+    // was queued: the account sends as it is bound now (a PATCH rebind after a send was scheduled, or before a failed
+    // delivery is retried, used to send the contact to the new binder's account although that binder may not open it).
+    const receiverRefusal = await channelSendRefusal(this.prisma, delivery.businessId, destination.connection, delivery.contactId);
+    if (receiverRefusal) {
+      await this.failDelivery(delivery.id, delivery.contentId, delivery.businessId, RECEIVER_MAY_NOT_OPEN, receiverRefusal, 'Sending');
       return;
     }
 
@@ -1138,7 +1151,12 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async publishNow(businessId: string, contentId: string, destinationIds: string[]) {
+  /**
+   * SWEEP-P0-FOLLOWUP (WH3-1): `sender` is the member who sends (the route's caller, KEY's member), or null for a send
+   * no member started (the cron digest). An audience send queues only the contacts every receiver may open: the
+   * sender and each messaging connection's binder (channelRecipients, modules/communications/channel-audience.ts).
+   */
+  async publishNow(businessId: string, contentId: string, destinationIds: string[], sender: ModuleLevelActor | null = null) {
     const content = await this.prisma.client.outboundContent.findFirst({
       where: { id: contentId, businessId, deletedAt: null },
       include: { variants: true },
@@ -1149,7 +1167,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
 
     const destinations = await this.prisma.client.channelDestination.findMany({
       where: { id: { in: destinationIds }, businessId, isActive: true },
-      include: { connection: { select: { provider: true, healthState: true, accountEmail: true } } },
+      include: { connection: { select: { provider: true, healthState: true, accountEmail: true, providerMeta: true } } },
     });
 
     if (destinations.length === 0) throw new BadRequestException('No valid active destinations found');
@@ -1171,13 +1189,14 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
       contactId: string | null; recipientEmail: string | null; recipientPhone: string | null;
     }> = [];
 
+    const recipients = isAudienceSend ? await this.expandRecipientsForDelivery(businessId, segmentTags) : [];
+    if (isAudienceSend && recipients.length === 0) {
+      throw new BadRequestException('No eligible recipients found. Check your audience segments and ensure contacts are not suppressed.');
+    }
+    // SWEEP-P0-FOLLOWUP (WH3-1): only the contacts every receiver may open (the sender and each sending account's binder).
+    const reachable = await channelRecipients(this.prisma, businessId, destinations.map((d) => d.connection), sender, recipients.map((r) => r.id));
+
     if (isAudienceSend) {
-      const recipients = await this.expandRecipientsForDelivery(businessId, segmentTags);
-
-      if (recipients.length === 0) {
-        throw new BadRequestException('No eligible recipients found. Check your audience segments and ensure contacts are not suppressed.');
-      }
-
       for (const dest of destinations) {
         const variant = content.variants.find(v => v.platform === dest.platform) || content.variants.find(v => v.platform === 'DEFAULT');
         const isWhatsApp = dest.connection.provider === 'WHATSAPP';
@@ -1185,6 +1204,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
 
         if (isEmail || isWhatsApp) {
           for (const r of recipients) {
+            if (!reachable.has(r.id)) continue;
             if (isEmail && !r.email) continue;
             if (isWhatsApp && !r.phone) continue;
             deliveryData.push({
@@ -1386,7 +1406,8 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async schedule(businessId: string, contentId: string, destinationIds: string[], scheduledAt: string, timezone?: string) {
+  // SWEEP-P0-FOLLOWUP (WH3-1): as publishNow, for a send at a later time.
+  async schedule(businessId: string, contentId: string, destinationIds: string[], scheduledAt: string, timezone?: string, sender: ModuleLevelActor | null = null) {
     const content = await this.prisma.client.outboundContent.findFirst({
       where: { id: contentId, businessId, deletedAt: null },
       include: { variants: true },
@@ -1399,7 +1420,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
 
     const destinations = await this.prisma.client.channelDestination.findMany({
       where: { id: { in: destinationIds }, businessId, isActive: true },
-      include: { connection: { select: { provider: true, healthState: true, accountEmail: true } } },
+      include: { connection: { select: { provider: true, healthState: true, accountEmail: true, providerMeta: true } } },
     });
     if (destinations.length === 0) throw new BadRequestException('No valid active destinations found');
 
@@ -1420,13 +1441,14 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
       contactId: string | null; recipientEmail: string | null; recipientPhone: string | null;
     }> = [];
 
+    const recipients = isAudienceSend ? await this.expandRecipientsForDelivery(businessId, segmentTags) : [];
+    if (isAudienceSend && recipients.length === 0) {
+      throw new BadRequestException('No eligible recipients found. Check your audience segments and ensure contacts are not suppressed.');
+    }
+    // SWEEP-P0-FOLLOWUP (WH3-1): only the contacts every receiver may open (the sender and each sending account's binder).
+    const reachable = await channelRecipients(this.prisma, businessId, destinations.map((d) => d.connection), sender, recipients.map((r) => r.id));
+
     if (isAudienceSend) {
-      const recipients = await this.expandRecipientsForDelivery(businessId, segmentTags);
-
-      if (recipients.length === 0) {
-        throw new BadRequestException('No eligible recipients found. Check your audience segments and ensure contacts are not suppressed.');
-      }
-
       for (const dest of destinations) {
         const variant = content.variants.find(v => v.platform === dest.platform) || content.variants.find(v => v.platform === 'DEFAULT');
         const isWhatsApp = dest.connection.provider === 'WHATSAPP';
@@ -1434,6 +1456,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
 
         if (isEmail || isWhatsApp) {
           for (const r of recipients) {
+            if (!reachable.has(r.id)) continue;
             if (isEmail && !r.email) continue;
             if (isWhatsApp && !r.phone) continue;
             deliveryData.push({
