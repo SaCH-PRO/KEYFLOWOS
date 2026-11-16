@@ -102,10 +102,13 @@ function ownPaypalSettings(meta: unknown): { clientId: string | null; clientSecr
 const PAYPAL_REFUND_EVENTS = new Set(['PAYMENT.CAPTURE.REFUNDED', 'PAYMENT.CAPTURE.REVERSED']);
 
 /** The capture a PayPal refund resource returns: supplementary_data.related_ids.capture_id, else its 'up' link's last segment. */
-function paypalRefundedCaptureId(resource: any): string | undefined {
-  const captureId: unknown =
-    resource?.supplementary_data?.related_ids?.capture_id ||
-    resource?.links?.find?.((l: any) => l?.rel === 'up')?.href?.split('/').pop();
+function paypalRefundedCaptureId(resource: unknown): string | undefined {
+  const refund = resource as
+    | { supplementary_data?: { related_ids?: { capture_id?: unknown } }; links?: Array<{ rel?: unknown; href?: unknown } | null> }
+    | null
+    | undefined;
+  const up = Array.isArray(refund?.links) ? refund.links.find((l) => l?.rel === 'up') : undefined;
+  const captureId = refund?.supplementary_data?.related_ids?.capture_id || (typeof up?.href === 'string' ? up.href.split('/').pop() : undefined);
   return typeof captureId === 'string' && captureId ? captureId : undefined;
 }
 
