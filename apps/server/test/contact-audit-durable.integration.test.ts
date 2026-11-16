@@ -44,6 +44,13 @@
  * evidence and task assignment, AI usage (the OCR route makes no provider call), the stats/flow
  * caches and the plan limit (allows), as in contacts-audit-actor.
  *
+ * Review repair SEC-TCAC-1 (TOF-CONTACT-AUDIT-CREATE): a reassign decides who owned each contact,
+ * and whether the member may still see it, on the row it locks inside its own transaction. The two
+ * race cases hold a contact row (SELECT ... FOR UPDATE in a transaction of the test's own), send
+ * the reassign, wait until it is parked behind that lock (pg_blocking_pids), then commit an owner
+ * change through the holder, standing in for a concurrent PATCH ownerId, before letting it go.
+ * Their RED-BEFORE cases fail at 34ee89f2 too, the packet head the repair starts from.
+ *
  * Requires DATABASE_URL. Every seeded row carries the `v63j_` prefix and is hard-deleted by raw
  * SQL (sqlLikePrefix) in beforeAll and afterAll. Cases tagged RED-BEFORE fail on the packet's
  * source base (45d648c8). The CONTROL cases assert what a normal write must keep doing (one audit
@@ -77,7 +84,17 @@ const ID = {
   // cases above keep their exact per-business trails.
   bizOkMany: `${P}bizOkMany`,     // audit rows are written normally
   bizFailMany: `${P}bizFailMany`, // the database refuses every audit row for this business too
+  // The reassign races (review repair SEC-TCAC-1): audit rows are written normally.
+  bizRace: `${P}bizRace`,
+  booker: `${P}booker`, // STAFF in bizRace whose book is the contacts they own, with the reassign right
 };
+/**
+ * bizRace's contacts, seeded directly (no audit row): rc1 owned by staff (the owner's reassign
+ * race), rv1 and rv2 owned by booker (the my-book member's reassign race, and its CONTROL).
+ */
+const RACE = ['rc1', 'rv1', 'rv2'] as const;
+type RaceKey = (typeof RACE)[number];
+const race = (key: RaceKey) => `${ID.bizRace}_${key}`;
 /**
  * The contacts each many-row write starts from, seeded directly (no audit row) in both businesses
  * under the same keys: bulk status update (bs1, bs2), bulk tag add (bt1), bulk delete (bd1, bd2),
@@ -205,10 +222,10 @@ function bulkDelete(businessId: string, contactIds: string[]) {
     .send({ contactIds });
 }
 
-function reassign(businessId: string, contactIds: string[], newOwnerId: string) {
+function reassign(businessId: string, contactIds: string[], newOwnerId: string, actor: string = ID.owner) {
   return request(app.getHttpServer())
     .post(`/crm/businesses/${businessId}/contacts/bulk/reassign`)
-    .set('x-test-user', ID.owner)
+    .set('x-test-user', actor)
     .send({ contactIds, newOwnerId });
 }
 
@@ -286,6 +303,58 @@ async function manyTraces(businessId: string) {
 
 function auditsOf(businessId: string, contactId: string) {
   return db.contactAuditEntry.findMany({ where: { businessId, contactId }, orderBy: { createdAt: 'asc' } });
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Review repair SEC-TCAC-1: holds the contact row (SELECT ... FOR UPDATE) in a transaction of the
+ * test's own, sends `call`, waits until a backend of this database is blocked behind the holder
+ * (the call has read whatever it reads before its own lock and is parked at the row), runs
+ * `change` through the holder (standing in for a concurrent PATCH that commits first), commits,
+ * and returns the call's response. Nothing but `change` is written through the holder.
+ */
+async function racedBehindRowLock(
+  contactId: string,
+  call: () => PromiseLike<any>,
+  change: string,
+  ...params: unknown[]
+): Promise<{ status: number; body: any }> {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let locked!: (pid: number) => void;
+  const isLocked = new Promise<number>((resolve) => { locked = resolve; });
+  const holder: Promise<void> = db.$transaction(async (tx: any) => {
+    const [me] = await tx.$queryRawUnsafe(`SELECT pg_backend_pid()::int AS pid`);
+    await tx.$queryRawUnsafe(`SELECT id FROM contacts WHERE id = $1 FOR UPDATE`, contactId);
+    locked(me.pid);
+    await gate;
+    await tx.$executeRawUnsafe(change, ...params);
+  }, { maxWait: 10_000, timeout: 30_000 });
+  const holderPid = await Promise.race([
+    isLocked,
+    holder.then(() => { throw new Error('the holder ended before it locked the row'); }),
+  ]);
+  let pending: Promise<{ status: number; body: any }> | undefined;
+  try {
+    pending = Promise.resolve(call()).then((res) => res, (err: unknown) => ({ status: -1, body: String(err) }));
+    let parked = 0;
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      const [row] = await db.$queryRawUnsafe(
+        `SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))`,
+        holderPid,
+      );
+      parked = row.n;
+      if (parked >= 1) break;
+      await sleep(25);
+    }
+    expect(parked, 'the reassign is parked behind the held row').toBeGreaterThanOrEqual(1);
+  } finally {
+    release();
+    await holder;
+  }
+  return pending!;
 }
 
 beforeAll(async () => {
@@ -457,6 +526,21 @@ beforeAll(async () => {
       data: { id: many(biz, 'im'), businessId: biz, firstName: 'Ivo', email: importEmail(biz), emailNormalized: importEmail(biz) },
     });
   }
+
+  // ---- the reassign races (SEC-TCAC-1): the owner, staff and a my-book member with the reassign right ----
+  await db.user.create({ data: { id: ID.booker, email: `${P}booker@test.local`, role: 'USER' } });
+  await db.business.create({ data: { id: ID.bizRace, name: 'V63J Biz Race', ownerId: ID.owner } });
+  await db.membership.create({ data: { id: `${ID.bizRace}_m_owner`, userId: ID.owner, businessId: ID.bizRace, role: 'OWNER' } });
+  await db.membership.create({ data: { id: `${ID.bizRace}_m_staff`, userId: ID.staff, businessId: ID.bizRace, role: 'STAFF' } });
+  await db.membership.create({
+    data: {
+      id: `${ID.bizRace}_m_booker`, userId: ID.booker, businessId: ID.bizRace, role: 'STAFF',
+      permissionScopes: { crm: 'write', crm_view: 'owned', crm_reassign: 'true' },
+    },
+  });
+  await db.contact.create({ data: { id: race('rc1'), businessId: ID.bizRace, firstName: 'Cass', lastName: `${P}seed`, ownerId: ID.staff } });
+  await db.contact.create({ data: { id: race('rv1'), businessId: ID.bizRace, firstName: 'Vera', lastName: `${P}seed`, ownerId: ID.booker } });
+  await db.contact.create({ data: { id: race('rv2'), businessId: ID.bizRace, firstName: 'Vic', lastName: `${P}seed`, ownerId: ID.booker } });
 
   // ---- the injected failure: the database refuses bizFail's and bizFailMany's audit rows ----
   await installRefusal();
@@ -859,5 +943,90 @@ describe('the many-row, reassign, merge and import-merge writes retried once the
     const okTrail = await manyTraces(ID.bizOkMany);
     expect({ ...failTrail, feedCopies: 0, announced: 0 }).toEqual({ ...okTrail, feedCopies: 0, announced: 0 });
     expect(failTrail).toMatchObject({ contacts: MANY.length, live: MANY.length - 3, audits: 10, mergeOps: 1, media: 1 });
+  });
+});
+
+describe('a reassign decides the owner it moves a contact from, and whether the member may still see it, on the row it locks (review repair SEC-TCAC-1)', () => {
+  const OWNER = { type: 'USER', id: ID.owner };
+  const brief = (r: any) => ({ action: r.action, actor: r.actor, before: r.before, after: r.after, changedFields: r.changedFields, reason: r.reason });
+  const eventsOf = (contactId: string) =>
+    db.contactEvent.findMany({ where: { businessId: ID.bizRace, contactId }, select: { type: true, data: true }, orderBy: { createdAt: 'asc' } });
+  const moveTo = `UPDATE contacts SET owner_id = $1 WHERE id = $2`;
+
+  it('fixture sanity: bizRace has the owner, staff and the my-book member with the reassign right, its three seeded contacts, and no trace of any write yet', async () => {
+    const members = await db.membership.findMany({
+      where: { businessId: ID.bizRace }, select: { userId: true, role: true, permissionScopes: true }, orderBy: { userId: 'asc' },
+    });
+    expect(members).toEqual([
+      { userId: ID.booker, role: 'STAFF', permissionScopes: { crm: 'write', crm_view: 'owned', crm_reassign: 'true' } },
+      { userId: ID.owner, role: 'OWNER', permissionScopes: null },
+      { userId: ID.staff, role: 'STAFF', permissionScopes: null },
+    ]);
+    expect(await storedContact(race('rc1'))).toMatchObject({ owner_id: ID.staff, deleted_at: null });
+    expect(await storedContact(race('rv1'))).toMatchObject({ owner_id: ID.booker, deleted_at: null });
+    expect(await storedContact(race('rv2'))).toMatchObject({ owner_id: ID.booker, deleted_at: null });
+    expect(await traces(ID.bizRace)).toEqual({ contacts: RACE.length, live: RACE.length, contactEvents: 0, audits: 0, teamLogs: 0, feedCopies: 0, announced: 0 });
+  });
+
+  it("RED-BEFORE: an owner change committed while the owner's reassign waits on the row — the 'reassigned' row and the contact.reassigned event record the transition the reassign made, from the owner it found under its lock", async () => {
+    // rc1 is staff's when the reassign is sent; the owner takes it back while the reassign is
+    // parked, so the reassign really moves it from the owner to staff.
+    const res = await racedBehindRowLock(race('rc1'), () => reassign(ID.bizRace, [race('rc1')], ID.staff), moveTo, ID.owner, race('rc1'));
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+    expect(res.body).toEqual({ reassigned: 1, newOwnerId: ID.staff });
+    expect(await storedContact(race('rc1'))).toMatchObject({ owner_id: ID.staff });
+    // At 34ee89f2: [{ before: {}, after: {}, changedFields: [], reason: 'owner v63j_staff → v63j_staff' }]
+    // — the owner was read before the transaction, so the trail lost the ownership change.
+    expect((await auditsOf(ID.bizRace, race('rc1'))).map(brief)).toEqual([{
+      action: 'reassigned',
+      actor: OWNER,
+      before: { ownerId: ID.owner },
+      after: { ownerId: ID.staff },
+      changedFields: ['ownerId'],
+      reason: `owner ${ID.owner} → ${ID.staff}`,
+    }]);
+    // At 34ee89f2: fromOwnerId v63j_staff.
+    expect(await eventsOf(race('rc1'))).toEqual([
+      { type: 'contact.reassigned', data: { fromOwnerId: ID.owner, toOwnerId: ID.staff, actorUserId: ID.owner } },
+    ]);
+  });
+
+  it("RED-BEFORE: a contact taken out of a my-book member's book while their reassign waits on the row is not moved — 403, the owner's contact keeps its owner and nothing is written", async () => {
+    // rv1 is booker's when booker sends the reassign; the owner takes it while it is parked, so it
+    // is no longer in booker's book (crm_view 'owned') when the reassign gets the row.
+    const res = await racedBehindRowLock(race('rv1'), () => reassign(ID.bizRace, [race('rv1')], ID.staff, ID.booker), moveTo, ID.owner, race('rv1'));
+    // At 34ee89f2: 201 {"reassigned":1}, rv1 moved from the owner to staff by a member who can no
+    // longer open it: the visibility check was decided before the transaction.
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(403);
+    expect(res.body).toMatchObject({ statusCode: 403, message: 'No eligible contacts to reassign' });
+    expect(await storedContact(race('rv1'))).toMatchObject({ owner_id: ID.owner });
+    expect(await auditsOf(ID.bizRace, race('rv1'))).toEqual([]);
+    expect(await eventsOf(race('rv1'))).toEqual([]);
+  });
+
+  it("CONTROL: with no race, the my-book member reassigns a contact of their book — 201, one 'reassigned' row naming them, from them to staff", async () => {
+    const res = await reassign(ID.bizRace, [race('rv2')], ID.staff, ID.booker);
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+    expect(res.body).toEqual({ reassigned: 1, newOwnerId: ID.staff });
+    expect(await storedContact(race('rv2'))).toMatchObject({ owner_id: ID.staff });
+    expect((await auditsOf(ID.bizRace, race('rv2'))).map(brief)).toEqual([{
+      action: 'reassigned',
+      actor: { type: 'USER', id: ID.booker },
+      before: { ownerId: ID.booker },
+      after: { ownerId: ID.staff },
+      changedFields: ['ownerId'],
+      reason: `owner ${ID.booker} → ${ID.staff}`,
+    }]);
+    expect(await eventsOf(race('rv2'))).toEqual([
+      { type: 'contact.reassigned', data: { fromOwnerId: ID.booker, toOwnerId: ID.staff, actorUserId: ID.booker } },
+    ]);
+  });
+
+  it("RED-BEFORE: bizRace's whole trail: one 'reassigned' row and one event for each contact a reassign moved, nothing for the refused one", async () => {
+    await settle();
+    // At 34ee89f2: { contactEvents: 3, audits: 3 } — the refused race had moved rv1 and audited it.
+    const t = await traces(ID.bizRace);
+    expect({ contacts: t.contacts, live: t.live, contactEvents: t.contactEvents, audits: t.audits })
+      .toEqual({ contacts: RACE.length, live: RACE.length, contactEvents: 2, audits: 2 });
   });
 });
