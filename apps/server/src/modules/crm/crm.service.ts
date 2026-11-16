@@ -1418,22 +1418,29 @@ export class CrmService {
       }
       if (typedPhone !== undefined) {
         const phone = contactPhoneForStorage(typedPhone, phoneCountry);
-        // Review COR-E164-3: the number the contact already has, in any
-        // spelling (its stored key read under the business's country), is not
-        // a change: the phone and its key stay as stored. The full edit form
-        // re-sends the phone with every edit, and re-keying a number stored
-        // before E.164 would collide with a contact holding it in E.164 (two
-        // keys the base allowed), refusing every edit of the contact.
-        const unchanged = phone.e164 !== null && phoneKeyReadsAs(existingContact.phoneNormalized, phone.e164, phoneCountry);
-        if (!unchanged) {
-          phoneNormalized = phoneIdentityKey(phone.value);
-          data.phone = phone.value;
-          data.phoneNormalized = phoneNormalized;
-          phonesTouched.push('phone');
-          if (phone.e164) {
+        const nextKey = phoneIdentityKey(phone.value);
+        let writesPhone = true;
+        if (phone.e164 && nextKey !== existingContact.phoneNormalized) {
+          if (phoneKeyReadsAs(existingContact.phoneNormalized, phone.e164, phoneCountry)) {
+            // Review COR-E164-3: the contact's own number (its stored key,
+            // read under the business's country), re-sent as the full edit
+            // form does with every edit, would be re-keyed to E.164. When
+            // another live contact holds that number too (two keys the base
+            // allowed), re-keying would collide and refuse every edit of the
+            // contact: the number did not change, so the phone and its key
+            // stay as stored. With no other holder it is stored in E.164.
+            const others = await livePhoneHolderIds(tx, input.businessId, phone.e164, phoneCountry, { exceptId: input.contactId });
+            if (others.length > 0) writesPhone = false;
+          } else {
             const holders = await this.phoneHoldersUnderAnotherKey(tx, input.businessId, phone.e164, phoneCountry, input.contactId);
             if (holders.length > 0) throw new ContactPhoneHeldError(holders);
           }
+        }
+        if (writesPhone) {
+          phoneNormalized = nextKey;
+          data.phone = phone.value;
+          data.phoneNormalized = nextKey;
+          phonesTouched.push('phone');
         }
       }
       if (typedWhatsapp !== undefined) {
