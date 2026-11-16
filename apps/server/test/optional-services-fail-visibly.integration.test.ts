@@ -49,12 +49,15 @@
  * failed first send does not take away what an accepted second send mailed.
  *
  * W11-PROVIDER-OUTAGE-503 (R-5 part 1): a Gmail that does not answer (a 5xx,
- * a 429, a rate-limited 403) is an outage, not a refusal. The block at the end
- * of this file drives the same send paths with Gmail answering an outage:
- * 503 { code: 'provider_unavailable', details: { service: 'gmail' } } with the
- * existing message 'Failed to send email', and nothing changes (as for a
- * refusal). The R0-CMF4 'reject' transport answers a genuine refusal (400
- * INVALID_ARGUMENT), so the R0-CMF4 cases assert what they always asserted.
+ * a 429, a rate-limited 403) is an outage, not a refusal: 503 { code:
+ * 'provider_unavailable', details: { service: 'gmail' } } with the existing
+ * message 'Failed to send email', and nothing changes. The R0-CMF4 'reject'
+ * transport still answers the Gmail 500 it always sent, so the required
+ * R0-CMF4 failed-send cases prove exactly that for a quote, an invoice with no
+ * link and an invoice with a live link (COR-503-1). The block at the end of
+ * this file drives the same send paths with the other outages (503, 429, a
+ * rate-limited 403) and with Gmail refusing the message (a 4xx keeps the
+ * existing 400 and changes nothing).
  *
  * RED-BEFORE (recorded in the tests-first commit): on the unmodified code the
  * Gmail paths answer 400 BAD_REQUEST ('Gmail not connected' / 'Google OAuth not
@@ -194,16 +197,15 @@ const outbound: string[] = [];
  * refused and recorded like any other fetch.
  *
  *   throw   the transport fails (a network failure)
- *   reject  Gmail refuses the message: a 400 INVALID_ARGUMENT, the refusal the
- *           R0-CMF4 cases pin as the existing 400 'Failed to send email'
+ *   reject  Gmail answers an error: a 500 (unchanged since R0-CMF4)
  *   accept  Gmail accepts it
  *
- * W11-PROVIDER-OUTAGE-503: 'reject' answered a 500 until that packet. A Gmail
- * 5xx is an outage, not a refusal, and GmailService now answers it 503
- * provider_unavailable; the outage cases are the W11-PROVIDER-OUTAGE-503 block
- * at the end of this file. 'reject' answers a genuine refusal, so the R0-CMF4
- * cases keep asserting exactly what they asserted (a refused send is 400
- * 'Failed to send email' and changes nothing).
+ * W11-PROVIDER-OUTAGE-503 (COR-503-1): 'reject' keeps the 500 the required
+ * R0-CMF4 cases have always sent, so they still prove that a send Gmail did
+ * not answer changes nothing. A Gmail 5xx is an outage, not a refusal:
+ * GmailService answers it 503 provider_unavailable. Gmail refusing the message
+ * (a 4xx, still 400 'Failed to send email') is the W11-PROVIDER-OUTAGE-503
+ * block at the end of this file.
  */
 type GmailOutcome = 'throw' | 'reject' | 'accept';
 let gmailTransport: GmailOutcome | null = null;
@@ -235,10 +237,7 @@ async function stubGmailSend(init: any): Promise<Response> {
   if (hook) await hook();
   if (outcome === 'throw') throw new Error('k07a: stubbed Gmail transport failure');
   if (outcome === 'reject') {
-    return new Response(
-      JSON.stringify({ error: { code: 400, message: 'k07a: Gmail refused the message', status: 'INVALID_ARGUMENT', errors: [{ reason: 'invalidArgument' }] } }),
-      { status: 400 },
-    );
+    return new Response(JSON.stringify({ error: { code: 500, message: 'k07a: Gmail backend error' } }), { status: 500 });
   }
   return new Response(JSON.stringify({ id: `${P}gmail_msg_${gmailSends.length}` }), {
     status: 200,
@@ -1237,9 +1236,17 @@ describe('R0-CMF4 review: a change made while the send is with Gmail is kept, an
 // layered over the suite's fetch recorder for the block and removed after it.
 // RED-BEFORE (int/v1-base at 15ca8599): each outage answered 400 BAD_REQUEST
 // 'Failed to send email' (Gmail 5xx was read as a refusal).
+// COR-503-1: the required R0-CMF4 failed-send cases keep their Gmail 500 (an
+// outage), so a Gmail refusal (a 4xx) of each send path is proven here: the
+// quote (K07A-503-04), an invoice with no link (K07A-503-06) and an invoice
+// that already has a live link (K07A-503-07, with the other outages too).
 describe('W11-PROVIDER-OUTAGE-503: with Gmail connected, a Gmail outage answers 503 provider_unavailable and changes nothing', () => {
   const QUOTE = `${P}quoteOutage`;
   const INVOICE = `${P}invOutage`;
+  /** A SENT invoice of bizSend that already has a live pay link (not the pre-V1-48 cuid shape, so never rotated). */
+  const INVOICE_LINKED = `${P}invOutageLinked`;
+  const LINK_LINKED = `${P}linkOutageLinked`;
+  const OUTAGE_LINK_TOKEN = `${P}outage-link-token-0123456789abcdef`;
   /** What Gmail's messages/send answers in this block (null: the suite's recorder decides). */
   let gmailAnswer: { status: number; body: string } | null = null;
   /** The messages this block's Gmail answer received, decoded, with the status it answered. */
@@ -1254,6 +1261,11 @@ describe('W11-PROVIDER-OUTAGE-503: with Gmail connected, a Gmail outage answers 
     [503, '<html>k07a: Service Unavailable</html>'],
     [429, gmailBody(429, 'RESOURCE_EXHAUSTED', ['rateLimitExceeded'])],
     [403, gmailBody(403, 'PERMISSION_DENIED', ['userRateLimitExceeded'])],
+  ];
+  /** Gmail refusing the message: a refusal keeps the existing 400. */
+  const REFUSALS: Array<[number, string]> = [
+    [400, gmailBody(400, 'INVALID_ARGUMENT', ['invalidArgument'])],
+    [403, gmailBody(403, 'PERMISSION_DENIED', ['insufficientPermissions'])],
   ];
 
   beforeAll(async () => {
@@ -1284,6 +1296,22 @@ describe('W11-PROVIDER-OUTAGE-503: with Gmail connected, a Gmail outage answers 
         items: { create: [{ id: `${INVOICE}_item1`, description: 'K07A outage item', quantity: 1, unitPrice: 100, total: 100 }] },
       },
     });
+    await db.invoice.create({
+      data: {
+        id: INVOICE_LINKED,
+        invoiceNumber: 'K07A-OUT-LINKED',
+        status: 'SENT',
+        subtotal: 100,
+        total: 100,
+        currency: 'TTD',
+        businessId: ID.bizSend,
+        contactId: ID.contactSend,
+        items: { create: [{ id: `${INVOICE_LINKED}_item1`, description: 'K07A outage linked item', quantity: 1, unitPrice: 100, total: 100 }] },
+      },
+    });
+    await db.paymentLink.create({
+      data: { id: LINK_LINKED, invoiceId: INVOICE_LINKED, businessId: ID.bizSend, token: OUTAGE_LINK_TOKEN },
+    });
     const spy = vi.mocked(globalThis.fetch);
     previous = spy.getMockImplementation() as typeof previous;
     spy.mockImplementation(async (input: any, init?: any) => {
@@ -1301,6 +1329,13 @@ describe('W11-PROVIDER-OUTAGE-503: with Gmail connected, a Gmail outage answers 
     gmailAnswer = null;
     if (previous) vi.mocked(globalThis.fetch).mockImplementation(previous);
   });
+
+  /** The existing 400 of a Gmail refusal, through the production filter. */
+  function expectGmailRefused(res: { status: number; body: any }) {
+    expect(res.status, JSON.stringify(res.body)).toBe(400);
+    expect(res.body.message).toBe('Failed to send email');
+    expect(res.body.code).toBe('BAD_REQUEST');
+  }
 
   /** The structured 503 of a Gmail outage, through the production filter. */
   function expectGmailUnavailable(res: { status: number; body: any }, upstreamStatus: number) {
@@ -1391,5 +1426,58 @@ describe('W11-PROVIDER-OUTAGE-503: with Gmail connected, a Gmail outage answers 
     expect(res.status).toBe(503);
     expect(JSON.stringify(res.body)).not.toContain(CANARY);
     expect(outbound.slice(outboundBefore)).toEqual([]);
+  });
+
+  it('[K07A-503-06] control: an invoice send-email Gmail refuses (400 INVALID_ARGUMENT, 403 insufficientPermissions) keeps the existing 400 "Failed to send email", leaves no new PaymentLink row, the DRAFT invoice DRAFT and the ledger as it was', async () => {
+    const ledgerBefore = await ledgerCounts(ID.bizSend);
+    const sendsBefore = sends.length;
+    const outboundAt = outbound.length;
+    expect(await linksOf(INVOICE)).toEqual([]);
+    for (const [status, body] of REFUSALS) {
+      gmailAnswer = { status, body };
+      const res = await as(agent().post(`/commerce/businesses/${ID.bizSend}/invoices/${INVOICE}/send-email`))
+        .send({ recipientEmail: `${P}to@test.local` });
+      expectGmailRefused(res);
+      expect(await linksOf(INVOICE), String(status)).toEqual([]);
+      expect(await db.invoice.findUnique({ where: { id: INVOICE }, select: { status: true, sentAt: true } }), String(status))
+        .toEqual({ status: 'DRAFT', sentAt: null });
+    }
+    // Each refused attempt reached Gmail carrying a pay link (D-07), and its token was never stored.
+    const attempts = sends.slice(sendsBefore);
+    expect(attempts.map((m) => m.status)).toEqual(REFUSALS.map(([status]) => status));
+    for (const m of attempts) {
+      const token = linkTokenIn(m.html);
+      expect(token).toMatch(RANDOM_TOKEN);
+      expect(await db.paymentLink.count({ where: { token } })).toBe(0);
+    }
+    expect(await ledgerCounts(ID.bizSend)).toEqual(ledgerBefore);
+    expect(outbound.slice(outboundAt)).toEqual([]);
+  });
+
+  it('[K07A-503-07] a send of an invoice that already has a live link reuses that link and leaves it as it was, whether Gmail does not answer (500, 503, 429, a rate-limited 403: 503 provider_unavailable) or refuses the message (400, a 403 insufficientPermissions: the existing 400)', async () => {
+    const before = await linksOf(INVOICE_LINKED);
+    expect(before.map((l) => [l.id, l.token, l.active])).toEqual([[LINK_LINKED, OUTAGE_LINK_TOKEN, true]]);
+    const sendsBefore = sends.length;
+    const outboundAt = outbound.length;
+    for (const [status, body] of OUTAGES) {
+      gmailAnswer = { status, body };
+      const res = await as(agent().post(`/commerce/businesses/${ID.bizSend}/invoices/${INVOICE_LINKED}/send-email`))
+        .send({ recipientEmail: `${P}to@test.local` });
+      expectGmailUnavailable(res, status);
+      expect(linkTokenIn(sends.at(-1)?.html), String(status)).toBe(OUTAGE_LINK_TOKEN);
+      expect(await linksOf(INVOICE_LINKED), String(status)).toEqual(before);
+    }
+    for (const [status, body] of REFUSALS) {
+      gmailAnswer = { status, body };
+      const res = await as(agent().post(`/commerce/businesses/${ID.bizSend}/invoices/${INVOICE_LINKED}/send-email`))
+        .send({ recipientEmail: `${P}to@test.local` });
+      expectGmailRefused(res);
+      expect(linkTokenIn(sends.at(-1)?.html), String(status)).toBe(OUTAGE_LINK_TOKEN);
+      expect(await linksOf(INVOICE_LINKED), String(status)).toEqual(before);
+    }
+    expect(sends.slice(sendsBefore).map((m) => m.status)).toEqual([...OUTAGES, ...REFUSALS].map(([status]) => status));
+    expect(await linksOf(INVOICE_LINKED)).toEqual(before);
+    expect((await db.invoice.findUnique({ where: { id: INVOICE_LINKED } })).status).toBe('SENT');
+    expect(outbound.slice(outboundAt)).toEqual([]);
   });
 });
