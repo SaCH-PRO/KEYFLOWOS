@@ -78,6 +78,13 @@ import { CortexSession, CortexMessage } from './key-cortex.types';
 
 import { BusinessEventType } from '@prisma/client';
 import {
+  CANONICAL_MODULES,
+  LEVEL_RANK,
+  defaultScopesForRole,
+  memberModuleLevel,
+  rankOf,
+} from '../../core/authority/module-vocabulary';
+import {
   KeyCortexInteroceptionService,
   type BodyState,
 } from './key-cortex-interoception.service';
@@ -141,6 +148,57 @@ function failureReason(error: unknown): string {
   const lines = message.split('\n').map((line) => line.trim()).filter(Boolean);
   return (lines[lines.length - 1] ?? 'unknown error').slice(0, 300);
 }
+
+/**
+ * W1F-KEY-EVIDENCE-WRITE review repair (SEC-W1FKEW-1, COR-W1FKEW-1): may
+ * `userId` receive KEY's deliberative answer in `businessId`?
+ *
+ * processConsciously reasons over the full KEY context
+ * (KeyCortexContextV2Service.getFullContext: revenue, outstanding and overdue
+ * invoices by customer, hot leads, inbox previews, every module's figures) and
+ * copies the temporal context's revenue figures into the answer word for word.
+ * So the answer goes to whoever may read that context:
+ *   - the business owner, an OWNER membership (D-125); D-129 serves the full
+ *     KEY context (GET cortex/context) to the owner and to no other member, so
+ *     an ADMIN or STAFF member is not given it here either;
+ *   - bound by its explicit scope map (D-140): an OWNER membership with an
+ *     explicit map must read every module the OWNER role reads by default,
+ *     read as ModuleScopeGuard reads a membership (memberModuleLevel: a key
+ *     the map lacks is none), so a co-owner whose map has no revenue gets no
+ *     revenue figure (D-145, D-182);
+ *   - no person (a turn naming no member) and no membership (a platform
+ *     SUPER_ADMIN who is not a member included): no, as KEY chat's own
+ *     standing context shows them no figure (keyContextSight, SEC-P195KG-2).
+ * Everyone else is answered by KEY chat's member-scoped fast path, which shows
+ * each member the figures their access covers.
+ */
+export async function mayReadFullKeyContext(
+  prisma: PrismaService,
+  businessId: string,
+  userId: string | null | undefined,
+): Promise<boolean> {
+  if (!userId || !businessId) return false;
+  const membership = await prisma.client.membership.findUnique({
+    where: { userId_businessId: { userId, businessId } },
+    select: { role: true, permissionScopes: true },
+  });
+  if (membership?.role !== 'OWNER') return false;
+  const ownerDefaults = defaultScopesForRole('OWNER');
+  return CANONICAL_MODULES.every(
+    (module) =>
+      rankOf(ownerDefaults[module]) < LEVEL_RANK.read ||
+      rankOf(memberModuleLevel(membership, module)) >= LEVEL_RANK.read,
+  );
+}
+
+/**
+ * What a person who may not read the full KEY context is told instead of the
+ * deliberative answer: why, and what to do next. It names no business figure.
+ */
+export const DELIBERATION_WITHHELD_TEXT =
+  'Deep think works from the whole business, including its money, customers and messages, ' +
+  'so only the business owner can use it. I have not answered this here. ' +
+  'Send it as a normal message and I will answer from what your access covers.';
 
 /**
  * UnifiedConsciousnessOrchestrator — The Mind of KEY.
@@ -284,6 +342,20 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
     const timing: Record<string, number> = {};
 
     try {
+      // ═══════════════════════════════════════════════════════════
+      // STEP 0: Who may receive this answer (review SEC-W1FKEW-1,
+      // COR-W1FKEW-1). Decided before any step reads the business: a person
+      // who may not read the full KEY context gets no step, no model call and
+      // no figure, only DELIBERATION_WITHHELD_TEXT (mayReadFullKeyContext).
+      // ═══════════════════════════════════════════════════════════
+      if (!(await mayReadFullKeyContext(this.prisma, session.businessId, session.userId))) {
+        this.logger.log(
+          `[Consciousness] Pipeline WITHHELD for business=${session.businessId}: ` +
+            'the person asking may not read the full KEY context (D-129, D-140)',
+        );
+        return this.createWithheldResponse(query, session);
+      }
+
       // ═══════════════════════════════════════════════════════════
       // STEP 1: Detect Emotion (LAYER 1)
       // ═══════════════════════════════════════════════════════════
@@ -1475,6 +1547,65 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
         tokensUsed: 0,
         cost: 0,
       },
+    };
+  }
+
+  /**
+   * The answer for a person who may not read the full KEY context
+   * (mayReadFullKeyContext): no step ran, so it carries no reasoning, no
+   * figure and no proposed action, and `withheld` tells the caller so.
+   */
+  private createWithheldResponse(query: string, session: CortexSession): ConsciousResponse {
+    const text = DELIBERATION_WITHHELD_TEXT;
+    return {
+      text,
+      withheld: true,
+      emotion: {
+        adaptPersona: false,
+        suggestedPersona: session.persona,
+        toneAdjustment: { speed: 'normal', detail: 'normal', empathy: 0.5, urgency: 0 },
+        shouldProactivelyHelp: false,
+      },
+      reasoning: {
+        chains: [],
+        bestChain: {
+          mode: 'analytical',
+          steps: [],
+          confidence: 0,
+          conclusion: text,
+          supportingEvidence: [],
+          counterArguments: [],
+          timeMs: 0,
+        },
+        consensus: 'Not reasoned: the full KEY context is the business owner\'s',
+        disagreements: [],
+        overallConfidence: 0,
+        reasoningTimeMs: 0,
+      },
+      confidence: {
+        statement: query,
+        confidence: 0,
+        reasoning: 'No answer was reasoned',
+        supportingEvidence: [],
+        caveats: [],
+        historicalAccuracy: 0.5,
+      },
+      ethical: {
+        action: 'withhold_full_context',
+        permitted: true,
+        confidence: 1,
+        principles: [
+          {
+            principle: 'data_privacy',
+            score: 1,
+            explanation: 'The full KEY context is served to the business owner only (D-129)',
+          },
+        ],
+        stakeholders: [],
+        explanation: 'The answer is withheld from a person who may not read the full KEY context.',
+      },
+      actions: [],
+      meta: { reasoningTimeMs: 0, modelsUsed: [], tokensUsed: 0, cost: 0 },
     };
   }
 

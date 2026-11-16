@@ -259,9 +259,16 @@ export class KeyCortexEthicsService {
       evaluation.explanation += `\n\n⚠️ FAIRNESS ALERT: This recommendation may constitute unfair pricing (${priceGougingFlags.join(', ')}).`;
     }
 
-    // Check for data misuse
-    const dataTypes = this.extractDataTypes(context);
-    const privacyCheck = await this.checkDataPrivacy(businessId, recommendation, context);
+    // Check for data misuse: the data the recommendation itself uses.
+    //
+    // W1F-KEY-EVIDENCE-WRITE review COR-W1FKEW-2: this read its data types from
+    // `context`, which processConsciously step 7 passes as the whole
+    // FullBusinessContext the answer was reasoned from. That always holds
+    // revenue and healthScore keys, so every deliberative answer, whatever was
+    // asked, came back refused with a DATA PRIVACY ALERT about "health,
+    // financial": the alarm that fires on everything checkDataPrivacy's own
+    // comment calls noise. The recommendation's words are what it would use.
+    const privacyCheck = await this.checkDataPrivacy(businessId, recommendation, { text: recommendation });
     if (!privacyCheck.compliant) {
       evaluation.permitted = false;
       evaluation.principles = evaluation.principles.map((p) =>
@@ -284,6 +291,16 @@ export class KeyCortexEthicsService {
 
     // Update confidence after additional checks
     evaluation.confidence = this.computeEvaluationConfidence(evaluation.principles);
+
+    // A check above that overturned the base verdict overturns its verdict
+    // line too: the explanation must not read PERMITTED above the alert that
+    // denied it (review COR-W1FKEW-2).
+    if (!evaluation.permitted) {
+      evaluation.explanation = evaluation.explanation.replace(
+        'Overall Verdict: ✅ PERMITTED',
+        'Overall Verdict: ❌ DENIED',
+      );
+    }
 
     // Regenerate explanation if status changed
     if (!evaluation.permitted && !evaluation.alternativeActions) {
