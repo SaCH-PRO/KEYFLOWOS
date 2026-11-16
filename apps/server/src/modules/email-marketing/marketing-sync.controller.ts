@@ -3,7 +3,7 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { assertMayExport, contactIdsEveryReceiverMayOpen } from '../../core/auth/receiver-reads';
-import type { ModuleLevelActor } from '../../core/auth/member-module-level';
+import { assertMemberModuleLevel, type ModuleLevelActor } from '../../core/auth/member-module-level';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CONNECTOR_EXPORT_READS, exportAudience } from '../../core/connectors/connector-exports';
 import { MailchimpConnector } from '../../core/connectors/implementations/mailchimp.connector';
@@ -24,6 +24,11 @@ type MarketingRequest = { user?: ModuleLevelActor };
  * Now the provider lists and campaigns are content read, triggering a campaign is content write, and a
  * push is content write, crm read (assertMayExport, CONNECTOR_EXPORT_READS) and sends only the contacts
  * every receiver may open: the member pushing and the member who bound the account (exportAudience).
+ *
+ * SWP-CENSUS-HIDDEN review repair (SEC-HID-1; owner ruling D-181, connectorauth: only a member with settings admin
+ * connects, syncs or tests a connector): the contact push and the campaign trigger act through the bound Mailchimp or
+ * Klaviyo account, so they also need settings admin, checked first in the handler (the routes keep their content
+ * write; the export and receiver checks follow).
  */
 @HiddenModuleWrites('marketing', 'content')
 @Controller('marketing')
@@ -79,6 +84,7 @@ export class MarketingSyncController {
     },
     @Req() req?: MarketingRequest,
   ) {
+    await assertMemberModuleLevel(this.prisma, businessId, req?.user, 'settings', 'admin');
     if (!body?.provider || !body?.listId) throw new BadRequestException('provider and listId are required');
     const target =
       body.provider === 'mailchimp'
@@ -142,7 +148,9 @@ export class MarketingSyncController {
     @Param('businessId') businessId: string,
     @Param('provider') provider: string,
     @Param('campaignId') campaignId: string,
+    @Req() req?: MarketingRequest,
   ) {
+    await assertMemberModuleLevel(this.prisma, businessId, req?.user, 'settings', 'admin');
     if (provider !== 'mailchimp' && provider !== 'klaviyo') throw new BadRequestException('Unknown provider');
     const connector = provider === 'mailchimp' ? this.mailchimp : this.klaviyo;
     if (!(await connector.isConnected(businessId))) throw new ForbiddenException(`${provider} is not connected`);

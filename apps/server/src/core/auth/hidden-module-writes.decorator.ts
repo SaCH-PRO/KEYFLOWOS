@@ -1,4 +1,4 @@
-import { RequestMethod } from '@nestjs/common';
+import { RequestMethod, SetMetadata } from '@nestjs/common';
 import { GUARDS_METADATA, METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import type { V1HiddenModuleKey } from '@keyflow/shared';
 import { isCanonicalModule, type CanonicalModule } from '../authority/module-vocabulary';
@@ -35,6 +35,20 @@ import { MODULE_SCOPE_KEY, ModuleScopeGuard, type ModuleScopeRequirement } from 
  * runs no member guard (a provider webhook, a public form, an OptionalAuthGuard route an anonymous
  * visitor may call) is left as it is, because there is no member whose module level could be read.
  *
+ * Review repair (SWP-CENSUS-HIDDEN review COR-HID-1..3, SEC-HID-3). Two more kinds of handler are left:
+ *   - one whose chain runs AuthGuard but not BusinessGuard and whose path (the class's and the
+ *     handler's) names no `:businessId`. ModuleScopeGuard reads the tenant from the path, the body or
+ *     the query; with none in the path and no BusinessGuard binding it, the only business it could
+ *     read is one the caller names, not the one the handler acts on (POST /community/posts/:postId/like
+ *     acts on a bare post id: the web sends no business, so the gate refused every caller, the owner
+ *     included, and a caller who named their own business passed it for another tenant's post). Such a
+ *     route keeps its census row and needs a rule bound to its record, not this gate;
+ *   - one that carries @HiddenModuleWritesExempt(<why>): a decision on that handler, named and
+ *     reasoned in place. A KEY flow signal's status is checked in the handler by the signal's own
+ *     module (revenue for a money signal: the AR Clerk Queue on Money > Overview, a v1 page, clears an
+ *     overdue-invoice item after the reminder); KEY chat's voice writes no row and speaks for KEY chat,
+ *     every member's surface. The census row of an exempted handler names the marker.
+ *
  * THE TWO ARGUMENTS. `hiddenModule` names the module by its key in the one list of what v1 hides,
  * packages/shared/src/v1-modules.ts (rest-scope-census.spec.ts CEN-12 checks every key against that
  * list). `scope` is the permission scope its writes need, a canonical module key
@@ -54,6 +68,23 @@ import { MODULE_SCOPE_KEY, ModuleScopeGuard, type ModuleScopeRequirement } from 
  * KEY-TOOL-DOMAIN-HIDE (recorded in the census doc).
  */
 export const HIDDEN_MODULE_WRITES_KEY = 'hidden_module_writes';
+
+/** Review repair: the metadata of @HiddenModuleWritesExempt, the reason the gate leaves a handler to its own rule. */
+export const HIDDEN_MODULE_WRITES_EXEMPT_KEY = 'hidden_module_writes_exempt';
+
+/**
+ * Leave one handler of a @HiddenModuleWrites class to its own rule, saying why (the census row names the marker and,
+ * for a handler that checks a module itself, its check). Not a way to open a write: every exempted handler is pinned
+ * by rest-scope-census.spec.ts CEN-12d and census-hidden.integration.test.ts.
+ */
+export function HiddenModuleWritesExempt(why: string): MethodDecorator {
+  if (typeof why !== 'string' || why.trim().length === 0) throw new Error('@HiddenModuleWritesExempt(<why>): say why the gate leaves this handler');
+  return SetMetadata(HIDDEN_MODULE_WRITES_EXEMPT_KEY, why);
+}
+
+/** A path segment that names the tenant ModuleScopeGuard reads (core/auth/request-business-id.ts: params first). */
+const TENANT_PARAM = /(^|\/):businessId(\/|$)/;
+const pathsOf = (value: unknown): string[] => (Array.isArray(value) ? value : [value]).filter((p): p is string => typeof p === 'string');
 
 export interface HiddenModuleWritesMetadata {
   hiddenModule: V1HiddenModuleKey;
@@ -78,6 +109,7 @@ export function HiddenModuleWrites(hiddenModule: V1HiddenModuleKey, scope: Canon
     }
     Reflect.defineMetadata(HIDDEN_MODULE_WRITES_KEY, { hiddenModule, scope } satisfies HiddenModuleWritesMetadata, target);
     const classGuards: unknown[] = Reflect.getMetadata(GUARDS_METADATA, target) ?? [];
+    const classPaths = pathsOf(Reflect.getMetadata(PATH_METADATA, target));
     const requirement: ModuleScopeRequirement = { module: scope, minLevel: 'write' };
     for (const name of Object.getOwnPropertyNames(target.prototype)) {
       if (name === 'constructor') continue;
@@ -87,6 +119,11 @@ export function HiddenModuleWrites(hiddenModule: V1HiddenModuleKey, scope: Canon
       const methodGuards: unknown[] = Reflect.getMetadata(GUARDS_METADATA, handler) ?? [];
       const chain = [...classGuards, ...methodGuards];
       if (!chain.some((guard) => MEMBER_GUARDS.has(guard))) continue;
+      // review repair: a handler exempted by name keeps its own rule
+      if (Reflect.hasMetadata(HIDDEN_MODULE_WRITES_EXEMPT_KEY, handler)) continue;
+      // review repair (COR-HID-2): no tenant ModuleScopeGuard could bind to the record the handler acts on
+      const namesTenant = [...classPaths, ...pathsOf(Reflect.getMetadata(PATH_METADATA, handler))].some((p) => TENANT_PARAM.test(p));
+      if (!chain.includes(BusinessGuard) && !namesTenant) continue;
       if (!Reflect.hasOwnMetadata(MODULE_SCOPE_KEY, handler)) Reflect.defineMetadata(MODULE_SCOPE_KEY, requirement, handler);
       if (!chain.includes(ModuleScopeGuard)) Reflect.defineMetadata(GUARDS_METADATA, [...methodGuards, ModuleScopeGuard], handler);
     }

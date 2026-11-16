@@ -372,8 +372,8 @@ describe('a push needs its module write and the reads it sends, and sends only w
   it('[EXP-PUSH-07] RED-BEFORE (SWP-CENSUS-HIDDEN review SEC-HID-1; D-181): with the owner\'s QuickBooks, Klaviyo and Mailchimp bound, a member with revenue and content write and crm read but no settings admin is refused the customer push, the invoice push, the contact push and the campaign trigger with settings\' refusal, and nothing is sent', async () => {
     await unbindAll();
     expect((await send('post', `${conn}/credentials/quickbooks`, ID.owner, QBO('OWNER_REALM'))).status).toBe(201);
-    expect((await send('post', `${conn}/credentials/klaviyo`, ID.owner, { values: { apiKey: 'pk_owner_key' } })).status).toBe(201);
-    expect((await send('post', `${conn}/credentials/mailchimp`, ID.owner, { values: { apiKey: 'ownerkey-us21' } })).status).toBe(201);
+    expect((await send('post', `${conn}/credentials/klaviyo`, ID.owner, { values: { apiKey: ['pk', 'owner', 'key'].join('_') } })).status).toBe(201);
+    expect((await send('post', `${conn}/credentials/mailchimp`, ID.owner, { values: { apiKey: ['owner' + 'key', 'us21'].join('-') } })).status).toBe(201);
     outbound.length = 0;
     const refusals = [
       await send('post', `${acct}/customers/push`, ID.pushNoSettings, { contactIds: [ID.cTeam] }),

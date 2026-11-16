@@ -45,9 +45,10 @@ access to a module wrote it because the route ran `AuthGuard` and `BusinessGuard
 
 ## Summary
 
-- Member routes without an enforced scope at this head: **435** (SWP-CENSUS-HIDDEN applied 309, every member write
-  route of the 42 controllers of modules v1 hides: 296 open and 13 exempt-check rows; see "SWP-CENSUS-HIDDEN" below;
-  744 before). At 744: (SWEEP-P0-FOLLOWUP applied 9: the KEY plan
+- Member routes without an enforced scope at this head: **440** (SWP-CENSUS-HIDDEN applied 304, the member write routes
+  of the 42 controllers of modules v1 hides: 291 open and 13 exempt-check rows; its review repair left five to their own
+  rule: the three KEY flow-signal status changes moved from open to exempt-check, and TTS and the community like stay
+  open; see "SWP-CENSUS-HIDDEN" below; 744 before). At 744: (SWEEP-P0-FOLLOWUP applied 9: the KEY plan
   controls, the connector form mapping routes, the bank connections; and moved publish and schedule to exempt-check,
   and, in its repair round, retry, retry-all and the audience preview; 753 before): 741 write routes and 3
   credential-binding GETs (the Google Calendar, Gmail and Drive consent starts, each with its
@@ -62,13 +63,13 @@ access to a module wrote it because the route ran `AuthGuard` and `BusinessGuard
   Profile location, CW-3; connector Connect, CW-4); the round 3 class repair applied the channel
   connection health check (-1, CB-1) and moved the Drive share to exempt-check (WPH2-2).
   Now:
-  - exempt-check: 53 (66 before SWP-CENSUS-HIDDEN)
+  - exempt-check: 56 (66 before SWP-CENSUS-HIDDEN)
   - exempt-guard: 23
   - exempt-own: 13
   - exempt-ruled: 17
   - deferred: 60 (none `held:`: the bank connections are settings admin since the PR195 merge, SWEEP-P0-FOLLOWUP)
-  - open: 269 (565 before SWP-CENSUS-HIDDEN)
-- Routes gated (applied): **411**: 309 by SWP-CENSUS-HIDDEN; **102** before it (93 by SWEEP-P0-SCOPES, 9 by SWEEP-P0-FOLLOWUP): 101 write routes and one credential-binding GET (the
+  - open: 271 (565 before SWP-CENSUS-HIDDEN)
+- Routes gated (applied): **406**: 304 by SWP-CENSUS-HIDDEN; **102** before it (93 by SWEEP-P0-SCOPES, 9 by SWEEP-P0-FOLLOWUP): 101 write routes and one credential-binding GET (the
   Outlook contacts consent start, SV-3; round 3: and crm read, WPH2-1); and 25 reads of the same controllers (round 2: the
   accounting summary, unsynced invoices and chart of accounts need revenue read). Beside these, the
   round 1 class repair added a settings admin check to routes that already enforced another scope
@@ -264,8 +265,8 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `AccountingController.pushCustomers` | POST | `/accounting/businesses/:businessId/customers/push` | applied | `revenue:write` (round 2 class repair, CLASS A, finding WHP-1): and read on what it sends, revenue and crm (check:assertMayExport, CONNECTOR_EXPORT_READS), for the member pushing and the member who bound the account (exportAudience); it sends only the contacts both may open (contactIdsEveryReceiverMayOpen) |
-| `AccountingController.pushInvoice` | POST | `/accounting/businesses/:businessId/invoices/push` | applied | `revenue:write` (round 2 class repair, CLASS A, finding WHP-1): and read on what it sends, revenue and crm (check:assertMayExport), for the member pushing and the account's binder; an invoice whose contact either may not open is not sent |
+| `AccountingController.pushCustomers` | POST | `/accounting/businesses/:businessId/customers/push` | applied | `revenue:write` (round 2 class repair, CLASS A, finding WHP-1): and read on what it sends, revenue and crm (check:assertMayExport, CONNECTOR_EXPORT_READS), for the member pushing and the member who bound the account (exportAudience); it sends only the contacts both may open (contactIdsEveryReceiverMayOpen); and settings admin, checked first in the handler (check:assertMemberModuleLevel; SWP-CENSUS-HIDDEN review SEC-HID-1, D-181 (connectorauth): only a settings admin connects, syncs or tests a connector, and a push through the bound account is a sync) |
+| `AccountingController.pushInvoice` | POST | `/accounting/businesses/:businessId/invoices/push` | applied | `revenue:write` (round 2 class repair, CLASS A, finding WHP-1): and read on what it sends, revenue and crm (check:assertMayExport), for the member pushing and the account's binder; an invoice whose contact either may not open is not sent; and settings admin, checked first in the handler (check:assertMemberModuleLevel; SWP-CENSUS-HIDDEN review SEC-HID-1, D-181 (connectorauth): only a settings admin connects, syncs or tests a connector, and a push through the bound account is a sync) |
 | `AiController.updateAiPreferences` | PUT | `/ai/businesses/:businessId/ai/preferences` | applied | `settings:admin` (round 2 class repair, CLASS B, finding CW-1, found by the schema-led call graph: it writes, replaces and clears the business's BYOK provider keys, ai_memories settings / ai_preferences; every AI call then runs on the stored key); SWEEP-P0-FOLLOWUP, byokkeys ruling (recommended option; owner question 14): a body that writes, replaces or clears a BYOK key is the owner's (check:assertBusinessOwnerMember, 403 BYOK_OWNER_ONLY); settings admins keep the mode, writing style, provider and budget caps |
 | `AnalyticsController.assessMaturity` | POST | `/api/businesses/:businessId/analytics/maturity/assess` | applied | `analytics:write` |
 | `AnalyticsController.dismissInsight` | POST | `/api/businesses/:businessId/analytics/insights/:id/dismiss` | applied | `analytics:write` |
@@ -297,8 +298,8 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
 | `GoogleDriveController.linkInventorySheet` | POST | `/drive/businesses/:businessId/inventory-sheet/link` | applied | `storefront:write`; SWEEP-P0-FOLLOWUP (round 3 recheck CW3-1, D-99): and the Google owner rule (check:assertGoogleConnectOwner, 403 GOOGLE_CONNECT_OWNER_ONLY): which spreadsheet the owner's Drive token reads and clears (Business.inventoryLinkedSheetId) is a binding of the owner's Google credential, as calendarId and the Business Profile location are |
 | `GoogleDriveController.pushInventoryToSheet` | POST | `/drive/businesses/:businessId/inventory-sheet/push` | applied | `storefront:write` |
 | `GoogleDriveController.unlinkInventorySheet` | DELETE | `/drive/businesses/:businessId/inventory-sheet/unlink` | applied | `storefront:write`; SWEEP-P0-FOLLOWUP (round 3 recheck CW3-1, D-99): and the Google owner rule (check:assertGoogleConnectOwner, 403 GOOGLE_CONNECT_OWNER_ONLY): which spreadsheet the owner's Drive token reads and clears (Business.inventoryLinkedSheetId) is a binding of the owner's Google credential, as calendarId and the Business Profile location are |
-| `MarketingSyncController.pushContacts` | POST | `/marketing/businesses/:businessId/lists/push-contacts` | applied | `content:write` (round 2 class repair, CLASS A, finding WHP-2): and crm read (check:assertMayExport), for the member pushing and the account's binder; only the contacts both may open are sent; Mailchimp's host is pinned to a data center (mailchimpDataCenter) |
-| `MarketingSyncController.triggerCampaign` | POST | `/marketing/businesses/:businessId/lists/campaigns/:provider/:campaignId/trigger` | applied | `content:write` (round 2 class repair: the marketing routes now enforce their module; the lists and campaigns reads are content read) |
+| `MarketingSyncController.pushContacts` | POST | `/marketing/businesses/:businessId/lists/push-contacts` | applied | `content:write` (round 2 class repair, CLASS A, finding WHP-2): and crm read (check:assertMayExport), for the member pushing and the account's binder; only the contacts both may open are sent; Mailchimp's host is pinned to a data center (mailchimpDataCenter); and settings admin, checked first in the handler (check:assertMemberModuleLevel; SWP-CENSUS-HIDDEN review SEC-HID-1, D-181 (connectorauth): only a settings admin connects, syncs or tests a connector, and a push through the bound account is a sync) |
+| `MarketingSyncController.triggerCampaign` | POST | `/marketing/businesses/:businessId/lists/campaigns/:provider/:campaignId/trigger` | applied | `content:write` (round 2 class repair: the marketing routes now enforce their module; the lists and campaigns reads are content read); and settings admin, checked first in the handler (check:assertMemberModuleLevel; SWP-CENSUS-HIDDEN review SEC-HID-1, D-181 (connectorauth): only a settings admin connects, syncs or tests a connector, and a push through the bound account is a sync) |
 | `MarketplaceController.adjustInventory` | POST | `/marketplace/businesses/:businessId/inventory/adjust` | applied | `storefront:write` |
 | `MarketplaceController.createListing` | POST | `/marketplace/businesses/:businessId/listings` | applied | `storefront:write` |
 | `MarketplaceController.createProjectForBundleOrder` | POST | `/marketplace/businesses/:businessId/orders/:orderId/create-project` | applied | `projects:write` (review repair SEC-4: it creates a Project, the BUG-014 rule) |
@@ -821,11 +822,14 @@ alone. Each controller now carries one class decorator, `@HiddenModuleWrites(<mo
 DELETE handler whose guard chain runs AuthGuard or BusinessGuard requires `<scope>` at write, unless it declares its own
 scope, and runs ModuleScopeGuard after those guards. GETs are untouched (SWP-READ-SCOPE-CENSUS), and so is a handler
 that runs no member guard (the Meta and Twilio webhooks, the anonymous community profile view): no member's level can
-be read there. Real-DB proof through the HTTP routes: census-hidden.integration.test.ts (prefix v62a_): a member holding
+be read there. Since the review repair, two more kinds of member write handler are left (below): one that carries
+`@HiddenModuleWritesExempt(<why>)`, and one that runs AuthGuard without BusinessGuard and names no `:businessId` in
+its path. Real-DB proof through the HTTP routes: census-hidden.integration.test.ts (prefix v62a_): a member holding
 every module at read is refused one representative write of every controller (six through their real services, with
 no row written), the owner is admitted, a member holding every module at write is admitted, and the runtime metadata of
-all 346 member write handlers matches this doc. CEN-12 pins the decorator on the 42 classes, the rule in the reader and
-the reader against the real decorator.
+all 346 member write handlers matches this doc (341 gated, 5 left to their own rule). CEN-12 pins the decorator on the
+42 classes, the rule in the reader, the reader against the real decorator, the handlers the gate leaves (CEN-12d) and
+the review's handler rules (CEN-12e).
 
 `<module>` is the module's key in packages/shared/src/v1-modules.ts (CEN-12a checks it there). `<scope>` is a canonical
 permission scope, beside it, because the list's keys are not permission scopes: `RequireModuleScope('helpdesk', 'write')`
@@ -835,19 +839,19 @@ follow-up module, except where noted:
 
 | controller | module | scope | note |
 | --- | --- | --- | --- |
-| AccountingController | accounting_sync | revenue | every write already declared revenue write (round 2); the gate adds nothing (D-171: Books writes are Money write) |
+| AccountingController | accounting_sync | revenue | every write already declared revenue write (round 2), so the gate adds nothing; the invoice and customer pushes also need settings admin, checked first in the handler (D-181: a push through the bound QuickBooks or Xero account is a connector sync; review SEC-HID-1) |
 | AutomationController, AutopilotController, FlowController | automations | automations | Autopilot's and Flow's existing automations write handlers keep their declarations |
-| FlowSignalController | key_flows | automations | |
+| FlowSignalController | key_flows | automations | no write of it is held by the gate: resolve, action-required and snooze are @HiddenModuleWritesExempt and check write on the signal's own module in the handler, revenue for a money signal, automations for any other (review COR-HID-1: the AR Clerk Queue on Money > Overview) |
 | BusinessAssetsController | assets | content | |
 | ChangeOrderController | projects | projects | |
 | TaskAssignmentController | projects | team | the row's module (people_ maps to team in the KEY member map) |
-| CommunicationsController, EmailMarketingController, MarketingAiController, MarketingController, MarketingSyncController | marketing | content | the channel connection writes keep settings admin; publish, schedule, retry and retry-all keep their content write check and audience/expand its crm read check (both now also behind the gate); deliveries reschedule and cancel need content write (the SWEEP-P0-FOLLOWUP wave-2 note) |
-| CommunityController, EducationController | community | content | the course enrolment and progress rows are the business's, not the member's own |
+| CommunicationsController, EmailMarketingController, MarketingAiController, MarketingController, MarketingSyncController | marketing | content | the channel connection writes keep settings admin; publish, schedule, retry and retry-all keep their content write check and audience/expand its crm read check (both now also behind the gate); deliveries reschedule and cancel need content write (the SWEEP-P0-FOLLOWUP wave-2 note); the WhatsApp connection test and phone list declare settings admin, and the Mailchimp/Klaviyo contact push and campaign trigger check it first in the handler (D-181; review SEC-HID-1) |
+| CommunityController, EducationController | community | content | the course enrolment and progress rows are the business's, not the member's own; the like (AuthGuard alone, a bare post id) names no tenant, so the gate leaves it open (review COR-HID-2, SEC-HID-3) |
 | KeystoreAdminController, KeystoreController | community | storefront | |
 | ConnectController | connectors | settings | the row said connect write; `connect` is none for every role by deliberate decision (module-vocabulary.ts), so it would refuse the owner; D-181 names settings admin for the other connectors. Its syncs (Google contacts, Outlook contacts, all sources, a resync, the Google Forms backfill and process-new) and the contact source disconnect declare settings admin (D-181); the Google owner checks (D-99) stay |
 | ShopifyController | connectors | settings | the four syncs declare settings admin (D-181), as connect already did |
 | GoogleDriveController | connectors | operations | the inventory-sheet routes keep storefront write; disconnect and share keep the Google owner check; the auth-url GET keeps its row |
-| ContentOpsController | content | content | |
+| ContentOpsController | content | content | generate-invoice writes an Invoice: it declares revenue write and checks content write in the handler (review SEC-HID-2) |
 | ConversionController | referrals | crm | |
 | CrmSequenceController | sequences | crm | |
 | DeviceController | capture | crm | approving and rejecting a visual intake declare operations write (the row's module for intakes) |
@@ -862,7 +866,7 @@ follow-up module, except where noted:
 | MessageIntakeController | inbox | crm | |
 | OmnichannelController | key_inbox | crm | v1-modules.ts has no omnichannel module; the drafts and threads are the KEY inbox's |
 | PhoneVoiceController | key_voice | crm | the outbound call; the Twilio inbound webhook runs no member guard and is left as it is |
-| VoiceController | key_voice | ai | |
+| VoiceController | key_voice | ai | its one write, TTS, is KEY chat's voice and writes no row: @HiddenModuleWritesExempt, membership only as KEY chat (review COR-HID-3); the gate holds any write added later |
 | PortalController | portal | crm | |
 | ReceiptController | continental_ops | revenue | the row named no module; these are payment receipts (PaymentReceiptService) |
 | RetainerController | retainers | revenue | |
@@ -872,6 +876,49 @@ follow-up module, except where noted:
 
 Rows left as they were: `GoogleDriveController.getAuthUrl` (a GET; exempt-check, the Google owner rule) and
 `CommunityController.recordProfileView` (exempt-own; OptionalAuthGuard, an anonymous visitor's view).
+
+### SWP-CENSUS-HIDDEN review repair (SEC-HID-1..3, COR-HID-1..3)
+
+The review of the first gate found it wrong in three places and short in three. Real-DB proof through the HTTP routes:
+census-hidden.integration.test.ts CH-W01c, CH-FS-01..05, CH-COMMUNITY-01, CH-INV-01, CH-VOICE-01 (prefix v62a_) and
+sweep-export-receivers-scope EXP-PUSH-07 (prefix v99x_, the real connectors behind a fetch tap); census CEN-12b..e;
+web: financial-flow ar-queue-refusal.test.tsx.
+
+- **SEC-HID-1 (D-181).** Six connector doors kept module write: a member with revenue and content write and no
+  settings access pushed invoices and customers to QuickBooks or Xero, contacts to Mailchimp or Klaviyo, triggered a
+  campaign, and tested a WhatsApp token against Meta. The WhatsApp test and phone list declare settings admin (as
+  connect); the pushes and the trigger check it first in the handler, before any connector is asked, and keep their
+  module write on the route and their export and receiver checks (a handler-level check, so the route scopes that
+  job-role-tool-families.spec and d46-write-routes.spec read are unchanged). The census row had cited D-171 for the
+  Accounting rows; D-171 is the chart-of-accounts ruling and does not apply there.
+- **COR-HID-1.** The KEY flow-signal status changes needed automations write. The AR Clerk Queue on Money > Overview
+  (/app/financial-flow, v1) sends the overdue-invoice reminder (revenue write) and then clears the item, so a member
+  who may send the reminder was refused the clear and the queue offered the same reminder again, with nothing said.
+  The three handlers are `@HiddenModuleWritesExempt` and check write on the signal's own module in the handler:
+  revenue for a money signal (the FINANCIAL flow, or a type, module or entity the flow router files there), automations
+  for any other; another business's signal is 404 (it was a 500). The page now says a refused reminder (and clears
+  nothing) or a refused clear (and says the reminder went out).
+- **COR-HID-2, SEC-HID-3.** The community like runs AuthGuard alone on a bare post id. ModuleScopeGuard reads the tenant
+  from the request, so it refused every caller the web sends (none names a business) and passed a caller who named
+  their own business for another tenant's post. The gate now leaves a member write route that runs no BusinessGuard and
+  names no `:businessId` in its path; the like's row is open again (a rule bound to the post is a follow-up). The
+  census-hidden harness registers neither the Prisma tenant extension nor the TenantInterceptor; its cases claim nothing
+  the extension would add.
+- **SEC-HID-2.** generate-invoice writes an Invoice behind content write only; every other invoice door needs revenue
+  write. It declares revenue write and checks content write in the handler. (The review found its service call failing
+  on this base with Prisma's "Argument business is missing" for any caller, a separate defect of the content module's
+  invoice call, recorded for a follow-up; no invoice row is written today.)
+- **COR-HID-3.** TTS is KEY chat's voice and writes no row; ai write silenced every STAFF member's auto-speak. It is
+  `@HiddenModuleWritesExempt`, membership only, as KEY chat.
+
+| route | was | now |
+| --- | --- | --- |
+| AccountingController push invoices / customers; MarketingSyncController push contacts / trigger campaign | module write | and settings admin, first in the handler (D-181) |
+| CommunicationsController whatsapp/verify-connection, whatsapp/list-phones | content write (the gate) | settings admin (D-181) |
+| FlowSignalController resolve / action-required / snooze | automations write (the gate) | write on the signal's own module (revenue for money), in the handler; 404 elsewhere |
+| CommunityController.likePost | content write in a business the caller names (the gate) | open, as before the gate (a rule bound to the post is a follow-up) |
+| ContentOpsController.generateInvoice | content write (the gate) | revenue write, and content write in the handler |
+| VoiceController.synthesize | ai write (the gate) | membership only, as KEY chat |
 
 KEY seam (not changed here): job-role-tool-families.spec.ts, a required Release 0 drift guard, derives which KEY tools
 each module grants from handler-level `@RequireModuleScope` text and does not read the class decorator, so the KEY
@@ -1256,7 +1303,7 @@ ModuleScopeGuard at class level).
 | `CommunicationsController.createContent` | POST | `/communications/businesses/:businessId/content` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('marketing', 'content') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: content write (connections: connect write)) |
 | `CommunicationsController.deleteContent` | DELETE | `/communications/businesses/:businessId/content/:id` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('marketing', 'content') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: content write (connections: connect write)) |
 | `CommunicationsController.expandAudience` | POST | `/communications/businesses/:businessId/audience/expand` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('marketing', 'content') on the class gates every member write of this hidden module); the handler keeps its check: check:assertMemberModuleLevel crm read in the handler (SWEEP-P0-FOLLOWUP repair, review SEC-FU-3: a preview of the audience answers each contact's name, email and phone; it was membership-only and answered the owner's PRIVATE contacts to a member with every module none); only the contacts the member may open (visibilityClause in ChannelConnectionService.expandAudience) |
-| `CommunicationsController.listWhatsAppPhones` | POST | `/communications/businesses/:businessId/whatsapp/list-phones` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('marketing', 'content') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: content write (connections: connect write)) |
+| `CommunicationsController.listWhatsAppPhones` | POST | `/communications/businesses/:businessId/whatsapp/list-phones` | applied | `settings:admin` (SWP-CENSUS-HIDDEN review SEC-HID-1, D-181 (connectorauth): only a settings admin connects, syncs or tests a connector; this tests a WhatsApp token against Meta before connect, which is settings admin; declared on the handler, which the class gate's content write leaves; was open: follow-up SWEEP-CENSUS: content write (connections: connect write)) |
 | `CommunicationsController.publishNow` | POST | `/communications/businesses/:businessId/content/:id/publish` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('marketing', 'content') on the class gates every member write of this hidden module); the handler keeps its check: check:assertMemberModuleLevel content write in the handler (SWEEP-P0-FOLLOWUP, round 3 recheck WH3-1, CLASS A; not a declared scope: a declared one makes DeliveryQueueService.publishNow governed work that KEY's comms_send_broadcast reaches, which the required Release 0 drift guard in job-role-tool-families.spec.ts refuses until that tool's grant is reviewed); an audience send through an EMAIL or WhatsApp connection also needs the sending member's crm read and reaches only the contacts the member and the sending account's binder may both open (channelRecipients in DeliveryQueueService; an account with no recorded binder is read as a non-owner's) |
 | `CommunicationsController.reschedule` | PATCH | `/communications/businesses/:businessId/deliveries/:deliveryId/reschedule` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('marketing', 'content') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: content write (connections: connect write)) |
 | `CommunicationsController.retry` | POST | `/communications/businesses/:businessId/deliveries/:deliveryId/retry` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('marketing', 'content') on the class gates every member write of this hidden module); the handler keeps its check: check:assertMemberModuleLevel content write in the handler, as publish (SWEEP-P0-FOLLOWUP repair, review SEC-FU-2: a retry sends the delivery again; it was membership-only); the delivery meets the receiver rule again when it is sent (channelSendRefusal in DeliveryQueueService.executeDelivery: a contact the sending account's binder may not open now fails RECEIVER_MAY_NOT_OPEN) |
@@ -1265,7 +1312,7 @@ ModuleScopeGuard at class level).
 | `CommunicationsController.updateContent` | PATCH | `/communications/businesses/:businessId/content/:id` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('marketing', 'content') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: content write (connections: connect write)) |
 | `CommunicationsController.upsertVariant` | POST | `/communications/businesses/:businessId/content/:id/variants` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('marketing', 'content') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: content write (connections: connect write)) |
 | `CommunicationsController.validateEmailSend` | POST | `/communications/businesses/:businessId/email/validate-send` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('marketing', 'content') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: content write (connections: connect write)) |
-| `CommunicationsController.verifyWhatsAppConnection` | POST | `/communications/businesses/:businessId/whatsapp/verify-connection` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('marketing', 'content') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: content write (connections: connect write)) |
+| `CommunicationsController.verifyWhatsAppConnection` | POST | `/communications/businesses/:businessId/whatsapp/verify-connection` | applied | `settings:admin` (SWP-CENSUS-HIDDEN review SEC-HID-1, D-181 (connectorauth): only a settings admin connects, syncs or tests a connector; this tests a WhatsApp token against Meta before connect, which is settings admin; declared on the handler, which the class gate's content write leaves; was open: follow-up SWEEP-CENSUS: content write (connections: connect write)) |
 
 ### MessageIntakeController (`communications/message-intake.controller.ts`)
 
@@ -1314,7 +1361,7 @@ ModuleScopeGuard at class level).
 | `CommunityController.draftIntroMessage` | POST | `/businesses/:businessId/community/intro-draft` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('community', 'content') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: content write; cross-business community actions (posts, connections, referrals, reviews); community posts are marketing under D-95's trash rule) |
 | `CommunityController.joinCohort` | POST | `/businesses/:businessId/community/cohorts/:cohortId/join` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('community', 'content') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: content write; cross-business community actions (posts, connections, referrals, reviews); community posts are marketing under D-95's trash rule) |
 | `CommunityController.leaveCohort` | DELETE | `/businesses/:businessId/community/cohorts/:cohortId/leave` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('community', 'content') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: content write; cross-business community actions (posts, connections, referrals, reviews); community posts are marketing under D-95's trash rule) |
-| `CommunityController.likePost` | POST | `/community/posts/:postId/like` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('community', 'content') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: content write; bare post id: a like by the caller) |
+| `CommunityController.likePost` | POST | `/community/posts/:postId/like` | open | membership only (AuthGuard alone): a like by the caller on any business's network post, by its bare id; no tenant in the path, so @HiddenModuleWrites leaves it (SWP-CENSUS-HIDDEN review COR-HID-2, SEC-HID-3): ModuleScopeGuard could only read a business the caller names, not the post's, and refused every caller the web sends (none names one); follow-up SWEEP-CENSUS: a rule bound to the post, not a module scope read from the request |
 | `CommunityController.markAllNotificationsRead` | POST | `/businesses/:businessId/community/notifications/read-all` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('community', 'content') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: content write; cross-business community actions (posts, connections, referrals, reviews); community posts are marketing under D-95's trash rule) |
 | `CommunityController.markNotificationRead` | PATCH | `/businesses/:businessId/community/notifications/:notificationId/read` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('community', 'content') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: content write; cross-business community actions (posts, connections, referrals, reviews); community posts are marketing under D-95's trash rule) |
 | `CommunityController.markReferralOutcome` | PATCH | `/businesses/:businessId/community/referrals/:referralId/outcome` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('community', 'content') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: content write; cross-business community actions (posts, connections, referrals, reviews); community posts are marketing under D-95's trash rule) |
@@ -1413,7 +1460,7 @@ Every other route is applied (above).
 | `ContentOpsController.createDriveDoc` | POST | `/businesses/:businessId/content-requests/:requestId/drive-doc` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('content', 'content') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: content write) |
 | `ContentOpsController.createDriveFolder` | POST | `/businesses/:businessId/content-requests/:requestId/drive-folder` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('content', 'content') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: content write) |
 | `ContentOpsController.deliver` | POST | `/businesses/:businessId/content-requests/:requestId/deliver` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('content', 'content') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: content write) |
-| `ContentOpsController.generateInvoice` | POST | `/businesses/:businessId/content-requests/:requestId/generate-invoice` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('content', 'content') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: content write) |
+| `ContentOpsController.generateInvoice` | POST | `/businesses/:businessId/content-requests/:requestId/generate-invoice` | applied | `revenue:write` (SWP-CENSUS-HIDDEN review SEC-HID-2: it writes an Invoice through CommerceService.createInvoice, and every invoice door needs revenue write (D-146; revenue-auth, invoice-create contract); declared on the handler, so the class gate's content write is not its scope); and content write, checked first in the handler (check:assertMemberModuleLevel); was open: follow-up SWEEP-CENSUS: content write |
 | `ContentOpsController.review` | POST | `/businesses/:businessId/content-requests/:requestId/review` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('content', 'content') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: content write) |
 | `ContentOpsController.startProduction` | POST | `/businesses/:businessId/content-requests/:requestId/start-production` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('content', 'content') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: content write) |
 | `ContentOpsController.submit` | POST | `/businesses/:businessId/content-requests/:requestId/submit` | applied | `content:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('content', 'content') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: content write) |
@@ -1626,9 +1673,9 @@ Every other route is applied (above).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `FlowSignalController.actionRequired` | POST | `/flow-signals/businesses/:businessId/:id/action-required` | applied | `automations:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('key_flows', 'automations') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: automations write) |
-| `FlowSignalController.resolve` | POST | `/flow-signals/businesses/:businessId/:id/resolve` | applied | `automations:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('key_flows', 'automations') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: automations write) |
-| `FlowSignalController.snooze` | POST | `/flow-signals/businesses/:businessId/:id/snooze` | applied | `automations:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('key_flows', 'automations') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: automations write) |
+| `FlowSignalController.actionRequired` | POST | `/flow-signals/businesses/:businessId/:id/action-required` | exempt-check | check:assertMemberModuleLevel: write on the signal's own module, revenue for a money signal (the FINANCIAL flow, or a type, module or entity the flow router files there), automations for any other; another business's signal is 404. @HiddenModuleWritesExempt (SWP-CENSUS-HIDDEN review COR-HID-1): the class gate's automations write broke the AR Clerk Queue on Money > Overview (/app/financial-flow, v1), whose Remind sends the reminder (revenue write) and then clears the item; was open: follow-up SWEEP-CENSUS: automations write |
+| `FlowSignalController.resolve` | POST | `/flow-signals/businesses/:businessId/:id/resolve` | exempt-check | check:assertMemberModuleLevel: write on the signal's own module, revenue for a money signal (the FINANCIAL flow, or a type, module or entity the flow router files there), automations for any other; another business's signal is 404. @HiddenModuleWritesExempt (SWP-CENSUS-HIDDEN review COR-HID-1): the class gate's automations write broke the AR Clerk Queue on Money > Overview (/app/financial-flow, v1), whose Remind sends the reminder (revenue write) and then clears the item; was open: follow-up SWEEP-CENSUS: automations write |
+| `FlowSignalController.snooze` | POST | `/flow-signals/businesses/:businessId/:id/snooze` | exempt-check | check:assertMemberModuleLevel: write on the signal's own module, revenue for a money signal (the FINANCIAL flow, or a type, module or entity the flow router files there), automations for any other; another business's signal is 404. @HiddenModuleWritesExempt (SWP-CENSUS-HIDDEN review COR-HID-1): the class gate's automations write broke the AR Clerk Queue on Money > Overview (/app/financial-flow, v1), whose Remind sends the reminder (revenue write) and then clears the item; was open: follow-up SWEEP-CENSUS: automations write |
 
 ### FlowController (`flow/flow.controller.ts`)
 
@@ -2105,7 +2152,7 @@ Every other route is applied (above).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
-| `VoiceController.synthesize` | POST | `/voice/businesses/:businessId/tts` | applied | `ai:write` (SWP-CENSUS-HIDDEN, D-152: @HiddenModuleWrites('key_voice', 'ai') on the class gates every member write of this hidden module; was open: follow-up SWEEP-CENSUS: ai write) |
+| `VoiceController.synthesize` | POST | `/voice/businesses/:businessId/tts` | open | membership only (AuthGuard, BusinessGuard); KEY chat's voice: use-key-chat-tts speaks KEY's reply through it, and KEY chat is every member's surface (AiFlowController.flowChatStream, exempt-ruled); it writes no row. @HiddenModuleWritesExempt (SWP-CENSUS-HIDDEN review COR-HID-3): the class gate's ai write silenced every STAFF member's auto-speak; follow-up: the rule KEY chat has, not ai write |
 
 ### WhatsAppController (`whatsapp/whatsapp.controller.ts`)
 

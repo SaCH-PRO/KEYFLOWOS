@@ -215,14 +215,21 @@ export class CommunicationsController {
 
   // --- WhatsApp Connect & Verify ---
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * SWP-CENSUS-HIDDEN review repair (SEC-HID-1; owner ruling D-181, connectorauth: only a member with settings admin
+   * connects, syncs or tests a connector): the connection test and the phone list call Meta with the token typed in,
+   * before connect (settings admin): settings admin, as connect. Both were left at content write by the class gate.
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/whatsapp/verify-connection')
   async verifyWhatsAppConnection(@Param('businessId') businessId: string, @Body() body: { accessToken: string }) {
     const adapter = new WhatsAppAdapter();
     return adapter.validateConnection({ token: body.accessToken });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/whatsapp/list-phones')
   async listWhatsAppPhones(@Param('businessId') businessId: string, @Body() body: { accessToken: string; waBusinessAccountId: string }) {
     const adapter = new WhatsAppAdapter();
