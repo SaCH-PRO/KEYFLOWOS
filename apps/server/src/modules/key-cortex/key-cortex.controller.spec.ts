@@ -69,6 +69,8 @@ describe('KeyCortexController new endpoints', () => {
       {} as any, // learning
       safety as KeyAutonomySafetyService,
       {} as any, // approvalOrchestrator
+      {} as any, // consciousness
+      { findSession: vi.fn(async (id: string) => conversation.getSession(id)) } as any, // session service
     );
   });
 
@@ -209,7 +211,10 @@ describe('R0-09c-KEY-ACTOR-BINDING — every handler acts for the authenticated 
       listSessions: vi.fn().mockResolvedValue([]),
       getSession: vi.fn().mockResolvedValue(null),
     };
-    sessionService = { getOrCreateSession: vi.fn().mockResolvedValue({ id: 'sess_new', businessId: 'biz_1' }) };
+    sessionService = {
+      getOrCreateSession: vi.fn().mockResolvedValue({ id: 'sess_new', businessId: 'biz_1' }),
+      findSession: vi.fn(async (id: string) => conversation.getSession(id)),
+    };
     reasoning = {
       processQuery: vi.fn().mockResolvedValue({ text: 'ok' }),
       streamQuery: vi.fn().mockImplementation(async function* () { yield { type: 'done' }; }),
@@ -395,7 +400,10 @@ describe('R0-09c-KEY-ACTOR-BINDING — a session id names one of the caller\'s o
       updateSession: vi.fn(async (id: string, dto: any) => ({ ...(SESSIONS[id] as object), ...dto })),
       deleteSession: vi.fn().mockResolvedValue(undefined),
     };
-    sessionService = { getOrCreateSession: vi.fn(async (q: any) => ({ id: q.sessionId ?? 'sess_new', businessId: q.businessId, userId: q.userId })) };
+    sessionService = {
+      getOrCreateSession: vi.fn(async (q: any) => ({ id: q.sessionId ?? 'sess_new', businessId: q.businessId, userId: q.userId })),
+      findSession: vi.fn(async (id: string) => SESSIONS[id] ?? null),
+    };
     reasoning = {
       processQuery: vi.fn().mockResolvedValue({ text: 'ok' }),
       streamQuery: vi.fn().mockImplementation(async function* () { yield { type: 'done' }; }),
