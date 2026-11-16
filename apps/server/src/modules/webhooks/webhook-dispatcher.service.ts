@@ -2,6 +2,9 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { createHmac } from 'crypto';
+import { CheckedAddress, PinnedDispatcher } from '../../core/security/outbound-address';
+import { checkWebhookUrl, WebhookUrlRefusedError } from './webhook-url';
+import { projectWebhookPayload } from './webhook-payload';
 import type {
   ContactCreatedPayload,
   ContactUpdatedPayload,
@@ -109,17 +112,24 @@ export class WebhookDispatcherService {
     return logEntry;
   }
 
+  /**
+   * Every family's records are delivered through dispatch(), which projects the whole payload
+   * (webhook-payload.ts; round 1 class repair, CLASS A): a contact, wherever it sits (the contact.*
+   * subject, a booking's or an invoice's contact), is delivered as the fixed person view, a row of a
+   * module the subscriber was not checked for as its id, and no credential or private CRM field at
+   * any depth. The handlers below hand the payload's records over as the emitters read them.
+   */
   @OnEvent('contact.created')
   async onContactCreated(payload: ContactCreatedPayload) {
     await this.dispatch('contact.created', payload.businessId, {
-      contact: this.sanitizeContact(payload.contact),
+      contact: payload.contact ?? null,
     });
   }
 
   @OnEvent('contact.updated')
   async onContactUpdated(payload: ContactUpdatedPayload) {
     await this.dispatch('contact.updated', payload.businessId, {
-      contact: this.sanitizeContact(payload.contact),
+      contact: payload.contact ?? null,
       fromStatus: payload.fromStatus ?? null,
       toStatus: payload.toStatus ?? null,
     });
@@ -128,16 +138,22 @@ export class WebhookDispatcherService {
   @OnEvent('contact.merged')
   async onContactMerged(payload: ContactMergedPayload) {
     await this.dispatch('contact.merged', payload.businessId, {
-      contact: this.sanitizeContact(payload.contact),
+      contact: payload.contact ?? null,
       mergedContactId: payload.duplicateId,
     });
   }
 
+  /**
+   * SWEEP-P0-SCOPES second review repair (finding SV-1): BookingsService emits the booking read with
+   * include { contact: true }, and the whole Contact row went out (a PRIVATE contact's visibility,
+   * owner, internal note and money signals; D-100) to a bookings-read member. dispatch() delivers it
+   * as the fixed person view, at data.contact and at data.booking.contact.
+   */
   @OnEvent('booking.created')
   async onBookingCreated(payload: BookingCreatedPayload) {
     await this.dispatch('booking.created', payload.businessId, {
       booking: payload.booking,
-      contact: payload.contact ? this.sanitizeContact(payload.contact) : null,
+      contact: payload.contact ?? null,
     });
   }
 
@@ -145,7 +161,7 @@ export class WebhookDispatcherService {
   async onBookingConfirmed(payload: BookingConfirmedPayload) {
     await this.dispatch('booking.confirmed', payload.businessId, {
       booking: payload.booking,
-      contact: payload.contact ? this.sanitizeContact(payload.contact) : null,
+      contact: payload.contact ?? null,
     });
   }
 
@@ -259,6 +275,13 @@ export class WebhookDispatcherService {
   /**
    * `subscribedVia` lists the subscriptions that receive `event` (default: the
    * event itself); a webhook subscribed to several of them gets one delivery.
+   *
+   * Round 1 class repair (CLASS A; RC-1): the one door every delivery goes through. The data is
+   * projected here, whatever the family (projectWebhookPayload, webhook-payload.ts): person rows as
+   * the fixed person view, rows of a module the subscriber was not checked for as their id, no
+   * credential or contact-private key at any depth. invoice.* delivered the invoice's whole Contact
+   * row (InvoiceWorkflowService reads it with include { contact: true, booking: true }) after the
+   * SV-1 repair had projected booking.* only.
    */
   private async dispatch(
     event: string,
@@ -281,7 +304,7 @@ export class WebhookDispatcherService {
         event,
         timestamp: new Date().toISOString(),
         businessId,
-        data,
+        data: projectWebhookPayload(event, data),
       };
 
       const body = JSON.stringify(payload);
@@ -304,12 +327,44 @@ export class WebhookDispatcherService {
     }
   }
 
+  /**
+   * SWEEP-P0-SCOPES (browser sweep BUG-001): every delivery goes through the outbound-address guard
+   * first (checkWebhookUrl, the rule the create route applies): a URL whose host is not public (a
+   * row stored before the create check, or a name that now resolves to a private address) is
+   * logged failed and never connected to, and is not retried. A delivery connects only to the
+   * addresses that check answered (PinnedDispatcher: no second DNS answer is used) and does not
+   * follow a redirect (redirect 'manual': a 3xx is a failed delivery), so it cannot be bounced onto
+   * an address the check never saw.
+   */
   private async sendWithLogging(webhook: WebhookRecord, event: string, timestamp: string, body: string, businessId: string): Promise<WebhookDeliveryLog> {
     const startTime = Date.now();
+    let target: CheckedAddress;
+    try {
+      target = (await checkWebhookUrl(webhook.url)).target;
+    } catch (err) {
+      const reason = err instanceof WebhookUrlRefusedError ? err.message : `Webhook URL check failed: ${(err as Error).message}`;
+      this.logger.warn(`Webhook ${webhook.id} not delivered for ${event}: ${reason}`);
+      const refused: WebhookDeliveryLog = {
+        id: `del-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        webhookId: webhook.id,
+        businessId,
+        event,
+        url: webhook.url,
+        status: 'failed',
+        statusCode: null,
+        attempts: 0,
+        duration: Date.now() - startTime,
+        error: reason,
+        timestamp: new Date().toISOString(),
+      };
+      this.addLog(refused);
+      return refused;
+    }
     const signature = createHmac('sha256', webhook.secret).update(body).digest('hex');
     let lastStatusCode: number | null = null;
     let lastError: string | null = null;
     for (let attempt = 1; attempt <= WebhookDispatcherService.MAX_RETRIES; attempt++) {
+      const pinned = new PinnedDispatcher(target);
       try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 10000);
@@ -325,10 +380,13 @@ export class WebhookDispatcherService {
           },
           body,
           signal: controller.signal,
-        });
+          redirect: 'manual',
+          dispatcher: pinned,
+        } as RequestInit);
 
         clearTimeout(timeout);
         lastStatusCode = response.status;
+        await response.body?.cancel().catch(() => undefined);
 
         if (response.ok) {
           if (attempt > 1) {
@@ -360,6 +418,9 @@ export class WebhookDispatcherService {
         this.logger.warn(
           `Webhook ${webhook.id} failed (attempt ${attempt}/${WebhookDispatcherService.MAX_RETRIES}): ${lastError}`,
         );
+      } finally {
+        // close() lets the request in flight finish, then ends the pinned connection.
+        pinned.close().catch(() => undefined);
       }
 
       if (attempt < WebhookDispatcherService.MAX_RETRIES) {
@@ -409,10 +470,4 @@ export class WebhookDispatcherService {
     }
   }
 
-  private sanitizeContact(contact: any) {
-    if (!contact) return null;
-    const { businessId: _businessId, ...rest } = contact;
-    void _businessId;
-    return rest;
-  }
 }

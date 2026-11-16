@@ -4,6 +4,7 @@ import type { Request } from 'express';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { SocialService } from './social.service';
 import { SocialConnectionsService } from './social-connections.service';
 import { SocialAnalyticsService } from './social-analytics.service';
@@ -310,10 +311,16 @@ export class SocialController {
     return this.social.publishPost(businessId, postId, body?.channelIds);
   }
 
+  /**
+   * SWEEP-P0-SCOPES (REST scope census, secret-bearing read): the rows carry the platform's OAuth
+   * access token and refresh token, which this list answered to every member. They are never
+   * answered now; the server reads them itself to publish and to test a connection.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/connections')
-  listConnections(@Param('businessId') businessId: string) {
-    return this.connections.listConnections(businessId);
+  async listConnections(@Param('businessId') businessId: string) {
+    const rows = await this.connections.listConnections(businessId);
+    return rows.map(({ token: _token, refreshToken: _refreshToken, ...visible }) => visible);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -328,7 +335,18 @@ export class SocialController {
     return result;
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * SWEEP-P0-SCOPES second review repair (finding SV-2, the SEC-1 credential class): a social
+   * connection is the business's account credential (the page or profile token every post goes out
+   * with). Deleting one, connecting one by token (manual), and starting or completing an OAuth
+   * connection (whoever completes the consent binds their account to the business) need settings
+   * admin, as the connector credentials do (SEC-1): OWNER and ADMIN by role default, STAFF none; an
+   * explicit map binds every role (D-114). They ran AuthGuard and BusinessGuard only: the sweep's STAFF
+   * member replaced the business's FACEBOOK connection with a token of their own. The reads (the
+   * connection list, without tokens, and the OAuth availability) and the connection test stay open.
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Delete('businesses/:businessId/connections/:platform')
   deleteConnection(
     @Param('businessId') businessId: string,
@@ -338,7 +356,8 @@ export class SocialController {
     return this.connections.deleteConnection(businessId, platform, platformId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/connections/:platform/oauth/start')
   async oauthStart(@Param('businessId') businessId: string, @Param('platform') platform: string) {
     const creds = await this.connections.getPlatformCredentials(businessId, platform);
@@ -383,7 +402,8 @@ export class SocialController {
     return { authUrl, redirectUri, state: stateToken };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/connections/:platform/oauth/callback')
   async oauthCallback(
     @Param('businessId') businessId: string,
@@ -704,7 +724,8 @@ export class SocialController {
     }
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/connections/:platform/manual')
   async manualConnect(
     @Param('businessId') businessId: string,

@@ -7,6 +7,20 @@ import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, Connec
 
 const CONNECTOR_TYPE = 'mailchimp' as const;
 
+/**
+ * SWEEP-P0-SCOPES round 2 class repair (CLASS A; finding WHP-2): the data center a Mailchimp API key
+ * names (the suffix after its last '-', e.g. us21), or null for a key that names none. Every request
+ * goes to https://<dc>.api.mailchimp.com, so the host was the binder's text: the key
+ * 'x-203.0.113.77/mc-collector?' sent the marketing push (contacts' emails and names) to
+ * https://203.0.113.77/..., a webhook to any host past the outbound-address guard. A data center is
+ * letters then digits, nothing else.
+ */
+export function mailchimpDataCenter(apiKey: string): string | null {
+  const dc = /^[^\s-][^\s]*-([a-z]{2,10}[0-9]{1,4})$/.exec(apiKey.trim())?.[1];
+  return dc ?? null;
+}
+const MAILCHIMP_DC_ERROR = 'Mailchimp API key does not end with a data-center suffix (e.g. "-us21")';
+
 @Injectable()
 export class MailchimpConnector implements IConnector {
   private readonly logger = new Logger(MailchimpConnector.name);
@@ -103,8 +117,8 @@ export class MailchimpConnector implements IConnector {
   async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
     const apiKey = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'apiKey', 'mailchimpApiKey');
     if (!apiKey) return { success: false, error: 'No Mailchimp API key configured' };
-    const dc = apiKey.split('-')[1];
-    if (!dc) return { success: false, error: 'Mailchimp API key is missing the data-center suffix (e.g. "-us21")' };
+    const dc = mailchimpDataCenter(apiKey);
+    if (!dc) return { success: false, error: MAILCHIMP_DC_ERROR };
     try {
       const auth = Buffer.from(`anystring:${apiKey}`).toString('base64');
       const rootRes = await fetch(`https://${dc}.api.mailchimp.com/3.0/`, {
@@ -175,8 +189,8 @@ export class MailchimpConnector implements IConnector {
   private async mailchimpAuth(businessId: string): Promise<{ apiKey: string; dc: string } | { error: string }> {
     const apiKey = await this.credentials.readCredential(businessId, CONNECTOR_TYPE, 'apiKey', 'mailchimpApiKey');
     if (!apiKey) return { error: 'No Mailchimp API key configured' };
-    const dc = apiKey.split('-')[1];
-    if (!dc) return { error: 'Mailchimp API key is missing the data-center suffix (e.g. "-us21")' };
+    const dc = mailchimpDataCenter(apiKey);
+    if (!dc) return { error: MAILCHIMP_DC_ERROR };
     return { apiKey, dc };
   }
 

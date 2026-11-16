@@ -96,6 +96,13 @@ function MarketplacePageInner() {
   const [editingItem, setEditingItem] = useState<{ id?: string } & FormState | null>(null);
   const [formData, setFormData] = useState<FormState>({});
   const [saving, setSaving] = useState(false);
+  /**
+   * SWEEP-P0-SCOPES second review repair (CRV-3): the server's refusal of a modal save (shown in the
+   * open form) or of a delete (shown above the tabs). Shown inline, so this file adds no import beside
+   * pkt/PR195-JOURNAL-SCOPE's.
+   */
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const [showProductEditor, setShowProductEditor] = useState(false);
   const [editingProduct, setEditingProduct] = useState<({ id?: string } & FormState) | null>(null);
@@ -206,6 +213,7 @@ function MarketplacePageInner() {
   }, [activeTab, loadTab]);
 
   const openCreate = (type: string, defaults: FormState = {}) => {
+    setSaveError(null);
     setModalType(type);
     setEditingItem(null);
     setFormData(defaults);
@@ -213,6 +221,7 @@ function MarketplacePageInner() {
   };
 
   const openEdit = (type: string, item: { id?: string } & FormState) => {
+    setSaveError(null);
     setModalType(type);
     setEditingItem(item);
     setFormData({ ...item });
@@ -295,6 +304,14 @@ function MarketplacePageInner() {
           if (res.data) await loadTab("inventory");
           break;
       }
+      // SWEEP-P0-SCOPES second review repair (CRV-3): the api client answers a refusal (storefront
+      // write) as { error } and does not throw; a refused save keeps the form open with the server's
+      // words. The modal closed whatever the answer, so a refused save looked saved.
+      if (res?.error) {
+        setSaveError(res.error);
+        setSaving(false);
+        return;
+      }
       setShowModal(false);
     } catch {}
     setSaving(false);
@@ -302,16 +319,22 @@ function MarketplacePageInner() {
 
   const handleDelete = async (type: string, id: string) => {
     if (!businessId) return;
+    setActionError(null);
     try {
+      // SWEEP-P0-SCOPES second review repair (CRV-3): a refused delete says why (it reloaded with no word).
       switch (type) {
-        case "listing":
-          await apiDelete(`${basePath}/listings/${id}`);
+        case "listing": {
+          const res = await apiDelete(`${basePath}/listings/${id}`);
+          if (res.error) setActionError(res.error);
           await loadTab("listings");
           break;
-        case "warehouse":
-          await apiDelete(`${basePath}/warehouses/${id}`);
+        }
+        case "warehouse": {
+          const res = await apiDelete(`${basePath}/warehouses/${id}`);
+          if (res.error) setActionError(res.error);
           await loadTab("inventory");
           break;
+        }
       }
     } catch {}
   };
@@ -417,6 +440,11 @@ function MarketplacePageInner() {
         </div>
       }
     >
+      {actionError && (
+        <div role="alert" className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+          {actionError}
+        </div>
+      )}
       {/* Metrics */}
       {!loading && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
@@ -585,6 +613,11 @@ function MarketplacePageInner() {
         onClose={() => setShowModal(false)}
         title={editingItem ? `Edit ${modalType.replace("-", " ")}` : `Create ${modalType.replace("-", " ")}`}
       >
+        {saveError && (
+          <p role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+            {saveError}
+          </p>
+        )}
         {modalType === "listing" && (
           <>
             <FormField label="Product">

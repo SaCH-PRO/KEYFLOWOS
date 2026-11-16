@@ -1,12 +1,14 @@
 import { Controller, Get, Post, Delete, Patch, Param, Query, Body, Req, Res, UseGuards, Inject } from '@nestjs/common';
 import { Response } from 'express';
 import { GoogleDriveService } from './google-drive.service';
-import { GeneratedDocumentService } from './generated-document.service';
+import { GENERATED_DOCUMENT_MODULES, GeneratedDocumentService, generatedDocumentModule } from './generated-document.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { assertGoogleConnectOwner, type GoogleConnectActor } from '../../core/connectors/google-suite.controller';
+import { assertMayExport, receiverReadRefusal } from '../../core/auth/receiver-reads';
 
 @Controller('drive')
 export class GoogleDriveController {
@@ -152,11 +154,20 @@ export class GoogleDriveController {
     return this.driveService.deleteFile(businessId, fileId);
   }
 
+  /**
+   * SWEEP-P0-SCOPES round 3 class repair (CLASS A; finding WPH2-2): a share hands a stored business file
+   * (an invoice PDF naming the client and the amounts, a journal, a report) to an account the caller
+   * names, or to anyone, with the owner's Drive token. It ran membership only, so a STAFF member with
+   * every module none granted the business's invoice documents to an account of their own. A grant made
+   * with the owner's Google account is the owner's (D-99, assertGoogleConnectOwner, 403
+   * GOOGLE_CONNECT_OWNER_ONLY first): the owner reads every record a file holds.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/files/:fileId/share')
-  share(
+  async share(
     @Param('businessId') businessId: string,
     @Param('fileId') fileId: string,
+    @Req() req: { user?: GoogleConnectActor },
     @Body()
     body: {
       type: 'user' | 'group' | 'domain' | 'anyone';
@@ -166,6 +177,7 @@ export class GoogleDriveController {
       sendNotification?: boolean;
     },
   ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req.user);
     return this.driveService.shareFile(businessId, fileId, body);
   }
 
@@ -266,7 +278,9 @@ export class GoogleDriveController {
     return this.driveService.getInventorySheetSyncStatus(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  // SWEEP-P0-SCOPES (REST scope census, BUG-015 family): the inventory sheet sync moves stock; storefront write.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/inventory-sheet/create')
   createInventorySheet(
     @Param('businessId') businessId: string,
@@ -275,7 +289,9 @@ export class GoogleDriveController {
     return this.driveService.createInventorySheet(businessId, body.title || 'Inventory Sync');
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  // SWEEP-P0-SCOPES (REST scope census, BUG-015 family): the inventory sheet sync moves stock; storefront write.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/inventory-sheet/link')
   linkInventorySheet(
     @Param('businessId') businessId: string,
@@ -284,13 +300,17 @@ export class GoogleDriveController {
     return this.driveService.linkInventorySheet(businessId, body.sheetId, body.sheetName);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  // SWEEP-P0-SCOPES (REST scope census, BUG-015 family): the inventory sheet sync moves stock; storefront write.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
   @Delete('businesses/:businessId/inventory-sheet/unlink')
   unlinkInventorySheet(@Param('businessId') businessId: string) {
     return this.driveService.unlinkInventorySheet(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  // SWEEP-P0-SCOPES (REST scope census, BUG-015 family): the inventory sheet sync moves stock; storefront write.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/inventory-sheet/push')
   pushInventoryToSheet(@Param('businessId') businessId: string) {
     return this.driveService.pushInventoryToSheet(businessId);
@@ -302,7 +322,9 @@ export class GoogleDriveController {
     return this.driveService.pullInventoryFromSheet(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  // SWEEP-P0-SCOPES (REST scope census, BUG-015 family): the inventory sheet sync moves stock; storefront write.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/inventory-sheet/apply')
   applyPulledInventory(
     @Param('businessId') businessId: string,
@@ -346,20 +368,36 @@ export class GoogleDriveController {
     });
   }
 
+  /**
+   * SWEEP-P0-SCOPES round 3 class repair (CLASS A; finding WPH2-2): the business's tracked documents (their
+   * Drive file ids and names) only of the modules the member reads: revenue for invoice, quote, payment,
+   * journal and report; expenses for expense (GENERATED_DOCUMENT_MODULES). Asking for one type needs read on
+   * its module (403, the receiver rule's words); the full list leaves out the rest. It listed every
+   * document to every member.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/generated-documents')
   async listGeneratedDocuments(
     @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: string; role?: string } },
     @Query('entityType') entityType?: string,
     @Query('entityId') entityId?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
+    if (entityType) {
+      await assertMayExport(this.prisma, businessId, req.user, [generatedDocumentModule(entityType)], `the generated ${entityType} documents`);
+    }
+    const readableModules = new Set<string>();
+    for (const module of new Set(Object.values(GENERATED_DOCUMENT_MODULES))) {
+      if (!(await receiverReadRefusal(this.prisma, businessId, req.user, [module], 'the generated documents'))) readableModules.add(module);
+    }
     return this.generatedDocService.list(businessId, {
       entityType,
       entityId,
       limit: limit ? parseInt(limit, 10) : undefined,
       offset: offset ? parseInt(offset, 10) : undefined,
+      readableModules,
     });
   }
 

@@ -708,11 +708,15 @@ export class CommerceController {
     @Param('businessId') businessId: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
+    // SWEEP-P0-SCOPES (browser sweep BUG-030): a contact's Money and Quotes & Invoices tabs ask for
+    // that contact's invoices (?contactId=); the query was dropped and every invoice was answered.
+    @Query('contactId') contactId?: string,
   ) {
     return this.commerce.listInvoices(
       businessId,
       page ? parseInt(page, 10) : 1,
       pageSize ? parseInt(pageSize, 10) : 50,
+      { contactId: typeof contactId === 'string' && contactId ? contactId : undefined },
     );
   }
 
@@ -1004,11 +1008,14 @@ export class CommerceController {
     @Param('businessId') businessId: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
+    // SWEEP-P0-SCOPES (BUG-030): the contact's tabs ask for that contact's quotes (?contactId=).
+    @Query('contactId') contactId?: string,
   ) {
     return this.commerce.listQuotes(
       businessId,
       page ? parseInt(page, 10) : 1,
       pageSize ? parseInt(pageSize, 10) : 50,
+      { contactId: typeof contactId === 'string' && contactId ? contactId : undefined },
     );
   }
 

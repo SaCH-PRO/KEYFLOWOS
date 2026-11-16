@@ -1,6 +1,26 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import type { CanonicalModule } from '../../core/authority/module-vocabulary';
 import { GoogleDriveService } from './google-drive.service';
+
+/**
+ * SWEEP-P0-SCOPES round 3 class repair (CLASS A; finding WPH2-2): the module whose records a tracked
+ * generated document holds (an invoice PDF names the client and the amounts). GET generated-documents
+ * lists a document, and so its Drive file id, only to a member who reads that module. A type this map
+ * does not name is read as revenue.
+ */
+export const GENERATED_DOCUMENT_MODULES: Readonly<Record<string, CanonicalModule>> = {
+  invoice: 'revenue',
+  quote: 'revenue',
+  payment: 'revenue',
+  journal: 'revenue',
+  report: 'revenue',
+  expense: 'expenses',
+};
+
+export function generatedDocumentModule(entityType: string): CanonicalModule {
+  return Object.prototype.hasOwnProperty.call(GENERATED_DOCUMENT_MODULES, entityType) ? GENERATED_DOCUMENT_MODULES[entityType] : 'revenue';
+}
 
 export interface UploadGeneratedDocInput {
   businessId: string;
@@ -96,11 +116,23 @@ export class GeneratedDocumentService {
    */
   async list(
     businessId: string,
-    filters?: { entityType?: string; entityId?: string; limit?: number; offset?: number },
+    filters?: { entityType?: string; entityId?: string; limit?: number; offset?: number; readableModules?: ReadonlySet<string> },
   ) {
+    // Round 3 (WPH2-2): only the documents of the modules the reader reads (undefined: every module).
+    const readable = filters?.readableModules;
+    const known = Object.keys(GENERATED_DOCUMENT_MODULES);
+    const typesOf = readable
+      ? {
+          OR: [
+            { entityType: { in: known.filter((t) => readable.has(GENERATED_DOCUMENT_MODULES[t])) } },
+            ...(readable.has('revenue') ? [{ entityType: { notIn: known } }] : []),
+          ],
+        }
+      : {};
     return (this.prisma.client as any).generatedDocument.findMany({
       where: {
         businessId,
+        ...typesOf,
         ...(filters?.entityType ? { entityType: filters.entityType } : {}),
         ...(filters?.entityId ? { entityId: filters.entityId } : {}),
       },

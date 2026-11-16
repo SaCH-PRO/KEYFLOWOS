@@ -69,6 +69,9 @@ export default function StockCountsPage() {
         setItemsJson('[{"description":"","systemQty":0,"countedQty":0}]');
         setNotesInput("");
         toast.success("Stock count created");
+      } else if (res.error) {
+        // SWEEP-P0-SCOPES second review repair (CRV-2): a refused create (storefront write) says why.
+        toast.error(res.error);
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to create");
@@ -85,6 +88,8 @@ export default function StockCountsPage() {
       if (res.data) {
         setCounts((prev) => prev.map((c) => (c.id === id ? res.data! : c)));
         toast.success("Stock adjusted");
+      } else if (res.error) {
+        toast.error(res.error);
       }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to adjust");
@@ -95,7 +100,14 @@ export default function StockCountsPage() {
     if (!businessId) return;
     if (!window.confirm("Are you sure? This cannot be undone.")) return;
     try {
-      await deleteStockCount(businessId, id);
+      // SWEEP-P0-SCOPES second review repair (CRV-1): the api client answers a refusal (storefront
+      // write) as { error } and does not throw; a refused delete keeps the row and says why. It was
+      // removed and reported deleted whatever the server answered.
+      const res = await deleteStockCount(businessId, id);
+      if (res.error) {
+        toast.error(res.error);
+        return;
+      }
       setCounts((prev) => prev.filter((c) => c.id !== id));
       toast.success("Deleted");
     } catch (e) {

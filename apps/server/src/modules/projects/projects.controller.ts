@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { ProjectsService } from './projects.service';
 import { ProjectPlannerService } from './project-planner.service';
 import { ProjectPlanExecutorService } from './project-plan-executor.service';
@@ -9,8 +10,26 @@ import { GeneratePlanDto, UpdatePlanEventDto, ReorderEventsDto, AnalyzeImpactDto
 /** The authenticated member a write acts for (AuthMiddleware attaches it; AuthGuard requires it). */
 type ActorRequest = { user?: { id?: string } };
 
+/**
+ * SWEEP-P0-SCOPES (browser sweep BUG-014): projects honour the projects module scope. This
+ * controller ran AuthGuard and BusinessGuard only, so a STAFF member with projects 'read' created
+ * projects and deleted the owner's (only plan approve and delete checked projects:write, in the
+ * service, D-85). Now ModuleScopeGuard runs after BusinessGuard and every handler names the
+ * projects module (the guard reads handler metadata only): read for a GET, write for every other
+ * route. analyze-impact writes no project row but makes a metered model call on the business's AI
+ * credits (ProjectPlannerService.analyzeRearrangement -> AiUsageService.callAi), so it is write too
+ * (review repair SEC-5): a member who may rearrange the plan may ask what the move does.
+ * OWNER and ADMIN hold projects admin by role default, STAFF read; an explicit map binds every
+ * role (D-114).
+ *
+ * Except the two plan doors owner ruling D-85 governs (approve, delete a draft): "OWNER/ADMIN or
+ * projects:write", which ProjectsService.assertMayGovernPlans applies (the role first, then the
+ * projects level). They name no module on the handler, so the guard cannot refuse what D-85
+ * admits: an OWNER or ADMIN whose explicit map holds projects below write (review repair CR-2;
+ * D-114 narrows the ADMIN bypass only for KEY plan money steps).
+ */
 @Controller('projects')
-@UseGuards(AuthGuard, BusinessGuard)
+@UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
 export class ProjectsController {
   constructor(
     @Inject(ProjectsService) private readonly projects: ProjectsService,
@@ -20,11 +39,13 @@ export class ProjectsController {
 
   // --- Existing Project Endpoints ---
 
+  @RequireModuleScope('projects', 'read')
   @Get('businesses/:businessId')
   listProjects(@Param('businessId') businessId: string) {
     return this.projects.listProjects(businessId);
   }
 
+  @RequireModuleScope('projects', 'read')
   @Get('businesses/:businessId/projects/:projectId')
   getProject(
     @Param('businessId') businessId: string,
@@ -33,6 +54,7 @@ export class ProjectsController {
     return this.projects.getProject(businessId, projectId);
   }
 
+  @RequireModuleScope('projects', 'write')
   @Post('businesses/:businessId')
   createProject(
     @Param('businessId') businessId: string,
@@ -53,6 +75,7 @@ export class ProjectsController {
     return this.projects.createProject(businessId, body);
   }
 
+  @RequireModuleScope('projects', 'write')
   @Patch('businesses/:businessId/projects/:projectId')
   updateProject(
     @Param('businessId') businessId: string,
@@ -74,6 +97,7 @@ export class ProjectsController {
     return this.projects.updateProject(businessId, projectId, body);
   }
 
+  @RequireModuleScope('projects', 'write')
   @Delete('businesses/:businessId/projects/:projectId')
   deleteProject(
     @Param('businessId') businessId: string,
@@ -82,6 +106,7 @@ export class ProjectsController {
     return this.projects.deleteProject(businessId, projectId);
   }
 
+  @RequireModuleScope('projects', 'write')
   @Post('businesses/:businessId/projects/:projectId/tasks')
   addTask(
     @Param('businessId') businessId: string,
@@ -101,6 +126,7 @@ export class ProjectsController {
     return this.projects.addTask(businessId, projectId, body, req?.user?.id ?? null);
   }
 
+  @RequireModuleScope('projects', 'write')
   @Patch('businesses/:businessId/tasks/:taskId')
   updateTask(
     @Param('businessId') businessId: string,
@@ -124,6 +150,7 @@ export class ProjectsController {
     return this.projects.updateTask(businessId, taskId, body, req?.user?.id ?? null);
   }
 
+  @RequireModuleScope('projects', 'write')
   @Delete('businesses/:businessId/tasks/:taskId')
   deleteTask(
     @Param('businessId') businessId: string,
@@ -132,6 +159,7 @@ export class ProjectsController {
     return this.projects.deleteTask(businessId, taskId);
   }
 
+  @RequireModuleScope('projects', 'write')
   @Patch('businesses/:businessId/tasks/:taskId/status')
   updateTaskStatus(
     @Param('businessId') businessId: string,
@@ -143,6 +171,7 @@ export class ProjectsController {
     return this.projects.updateTaskStatus(businessId, taskId, body?.status, body?.position, req?.user?.id ?? null);
   }
 
+  @RequireModuleScope('projects', 'write')
   @Post('businesses/:businessId/projects/:projectId/tasks/reorder')
   reorderTasks(
     @Param('businessId') businessId: string,
@@ -153,6 +182,7 @@ export class ProjectsController {
     return this.projects.reorderTasks(businessId, projectId, body?.updates, req?.user?.id ?? null);
   }
 
+  @RequireModuleScope('projects', 'read')
   @Get('businesses/:businessId/projects/:projectId/budget')
   getProjectBudget(
     @Param('businessId') businessId: string,
@@ -164,6 +194,7 @@ export class ProjectsController {
     return this.projects.getProjectBudget(projectId, businessId, { viewerUserId: req?.user?.id ?? null });
   }
 
+  @RequireModuleScope('projects', 'read')
   @Get('businesses/:businessId/projects/:projectId/timeline')
   getProjectTimeline(
     @Param('businessId') businessId: string,
@@ -176,6 +207,7 @@ export class ProjectsController {
   // state, so typing one in and switching tabs lost it. Guarded by the same
   // controller-level AuthGuard/BusinessGuard as everything else here, and the
   // service re-proves the project belongs to the business on every call.
+  @RequireModuleScope('projects', 'read')
   @Get('businesses/:businessId/projects/:projectId/deliverables')
   listDeliverables(
     @Param('businessId') businessId: string,
@@ -184,6 +216,7 @@ export class ProjectsController {
     return this.projects.listDeliverables(projectId, businessId);
   }
 
+  @RequireModuleScope('projects', 'write')
   @Post('businesses/:businessId/projects/:projectId/deliverables')
   createDeliverable(
     @Param('businessId') businessId: string,
@@ -193,6 +226,7 @@ export class ProjectsController {
     return this.projects.createDeliverable(projectId, businessId, body);
   }
 
+  @RequireModuleScope('projects', 'write')
   @Patch('businesses/:businessId/projects/:projectId/deliverables/:deliverableId')
   updateDeliverable(
     @Param('businessId') businessId: string,
@@ -203,6 +237,7 @@ export class ProjectsController {
     return this.projects.updateDeliverable(deliverableId, projectId, businessId, body);
   }
 
+  @RequireModuleScope('projects', 'write')
   @Delete('businesses/:businessId/projects/:projectId/deliverables/:deliverableId')
   deleteDeliverable(
     @Param('businessId') businessId: string,
@@ -212,6 +247,7 @@ export class ProjectsController {
     return this.projects.deleteDeliverable(deliverableId, projectId, businessId);
   }
 
+  @RequireModuleScope('projects', 'write')
   @Post('businesses/:businessId/projects/:projectId/milestones')
   createMilestone(
     @Param('businessId') businessId: string,
@@ -221,6 +257,7 @@ export class ProjectsController {
     return this.projects.createMilestone(projectId, businessId, body);
   }
 
+  @RequireModuleScope('projects', 'write')
   @Patch('businesses/:businessId/projects/:projectId/milestones/:milestoneId')
   updateMilestone(
     @Param('businessId') businessId: string,
@@ -231,6 +268,7 @@ export class ProjectsController {
     return this.projects.updateMilestone(milestoneId, projectId, businessId, body);
   }
 
+  @RequireModuleScope('projects', 'write')
   @Delete('businesses/:businessId/projects/:projectId/milestones/:milestoneId')
   deleteMilestone(
     @Param('businessId') businessId: string,
@@ -240,11 +278,13 @@ export class ProjectsController {
     return this.projects.deleteMilestone(milestoneId, projectId, businessId);
   }
 
+  @RequireModuleScope('projects', 'read')
   @Get('businesses/:businessId/templates')
   listTemplates(@Param('businessId') businessId: string) {
     return this.projects.listTemplates(businessId);
   }
 
+  @RequireModuleScope('projects', 'write')
   @Post('businesses/:businessId/templates')
   createTemplate(
     @Param('businessId') businessId: string,
@@ -253,6 +293,7 @@ export class ProjectsController {
     return this.projects.createTemplate(businessId, body);
   }
 
+  @RequireModuleScope('projects', 'write')
   @Delete('businesses/:businessId/templates/:templateId')
   deleteTemplate(
     @Param('businessId') businessId: string,
@@ -261,6 +302,7 @@ export class ProjectsController {
     return this.projects.deleteTemplate(businessId, templateId);
   }
 
+  @RequireModuleScope('projects', 'write')
   @Post('businesses/:businessId/from-template/:templateId')
   createFromTemplate(
     @Param('businessId') businessId: string,
@@ -272,6 +314,7 @@ export class ProjectsController {
 
   // --- Smart Project Planner Endpoints ---
 
+  @RequireModuleScope('projects', 'write')
   @Post('businesses/:businessId/plans')
   async generatePlan(
     @Param('businessId') businessId: string,
@@ -280,11 +323,13 @@ export class ProjectsController {
     return this.planner.generatePlan(businessId, body.userIdea, body.goalId, body.options);
   }
 
+  @RequireModuleScope('projects', 'read')
   @Get('businesses/:businessId/plans')
   listPlans(@Param('businessId') businessId: string) {
     return this.planner.listPlans(businessId);
   }
 
+  @RequireModuleScope('projects', 'read')
   @Get('businesses/:businessId/plans/:planId')
   getPlan(
     @Param('businessId') businessId: string,
@@ -293,6 +338,7 @@ export class ProjectsController {
     return this.planner.getPlan(businessId, planId);
   }
 
+  @RequireModuleScope('projects', 'write')
   @Patch('businesses/:businessId/plans/:planId')
   async updatePlan(
     @Param('businessId') businessId: string,
@@ -319,6 +365,7 @@ export class ProjectsController {
 
   // PR196-PROJECTS-SERVER (WPD-12, D-85, D-46): OWNER/ADMIN or projects:write, a compare-and-set
   // so a plan is approved and materialized once (409 after), and the approver on the feed.
+  // SWEEP-P0-SCOPES review repair CR-2: no module on the handler; D-85 is assertMayGovernPlans'.
   @Post('businesses/:businessId/plans/:planId/approve')
   approvePlan(
     @Param('businessId') businessId: string,
@@ -330,6 +377,7 @@ export class ProjectsController {
     );
   }
 
+  @RequireModuleScope('projects', 'write')
   @Post('businesses/:businessId/plans/:planId/reject')
   rejectPlan(
     @Param('businessId') businessId: string,
@@ -341,6 +389,7 @@ export class ProjectsController {
 
   // PR196-PROJECTS-SERVER (WPD-14, D-85, D-46): only a draft plan, by OWNER/ADMIN or
   // projects:write, with the actor on the feed.
+  // SWEEP-P0-SCOPES review repair CR-2: no module on the handler; D-85 is assertMayGovernPlans'.
   @Delete('businesses/:businessId/plans/:planId')
   deletePlan(
     @Param('businessId') businessId: string,
@@ -350,6 +399,7 @@ export class ProjectsController {
     return this.projects.deleteDraftPlan(businessId, planId, req?.user?.id ?? null);
   }
 
+  @RequireModuleScope('projects', 'write')
   @Patch('businesses/:businessId/plans/:planId/events/:eventId')
   updatePlanEvent(
     @Param('businessId') businessId: string,
@@ -361,6 +411,7 @@ export class ProjectsController {
     return this.projects.updatePlanEvent(businessId, planId, eventId, body);
   }
 
+  @RequireModuleScope('projects', 'write')
   @Post('businesses/:businessId/plans/:planId/events/reorder')
   reorderEvents(
     @Param('businessId') businessId: string,
@@ -370,6 +421,8 @@ export class ProjectsController {
     return this.planner.reorderEvents(businessId, planId, body.updates);
   }
 
+  // SWEEP-P0-SCOPES review repair SEC-5: write (a metered model call on the business's AI credits).
+  @RequireModuleScope('projects', 'write')
   @Post('businesses/:businessId/plans/:planId/events/:eventId/analyze-impact')
   analyzeImpact(
     @Param('businessId') businessId: string,
@@ -380,6 +433,7 @@ export class ProjectsController {
     return this.planner.analyzeRearrangement(businessId, planId, eventId, body.newSortOrder);
   }
 
+  @RequireModuleScope('projects', 'write')
   @Post('businesses/:businessId/plans/:planId/events/:eventId/execute')
   executeInAppEvent(
     @Param('businessId') businessId: string,
@@ -388,6 +442,7 @@ export class ProjectsController {
     return this.executor.executeInAppEvent(businessId, eventId);
   }
 
+  @RequireModuleScope('projects', 'write')
   @Post('businesses/:businessId/plans/:planId/events/:eventId/complete')
   completeOutAppEvent(
     @Param('businessId') businessId: string,

@@ -51,6 +51,10 @@ describe('SocialAdapterService', () => {
         socialConnection: { findFirst: vi.fn() },
         socialPost: { findMany: vi.fn() },
         socialEngagement: { create: vi.fn() },
+        // SWEEP-P0-SCOPES round 1 class repair (CLASS B): linking and unlinking an account need settings
+        // admin on the command's actor; user_456 is the business's OWNER (settings admin by role default).
+        user: { findUnique: vi.fn().mockResolvedValue({ role: 'USER' }) },
+        membership: { findUnique: vi.fn().mockResolvedValue({ role: 'OWNER', permissionScopes: null }) },
       },
     };
 
@@ -72,6 +76,23 @@ describe('SocialAdapterService', () => {
     const result = await service.execute(mkCmd('disconnect_account', { accountId: 'conn1' }));
     expect(result.success).toBe(true);
     expect(result.data).toEqual({ disconnected: true, accountId: 'conn1' });
+  });
+
+  it('RED-BEFORE (SWEEP-P0-SCOPES round 1 class repair, CLASS B): connect_account and disconnect_account need settings admin on the command actor: a STAFF actor (settings none by role default), an ADMIN whose explicit map says settings none, and a command with no human actor are refused, and no connection is written or removed', async () => {
+    for (const [userId, membership] of [
+      ['staff_1', { role: 'STAFF', permissionScopes: null }],
+      ['admin_1', { role: 'ADMIN', permissionScopes: { settings: 'none', content: 'admin' } }],
+      ['', null],
+    ] as const) {
+      (prisma.client.membership.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(membership);
+      (prisma.client.socialConnection.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'conn1', platform: 'FACEBOOK', platformId: 'pid' });
+      const connect = { ...mkCmd('connect_account', { platform: 'facebook', handle: '@x', accessToken: 'attacker' }), userId };
+      await expect(service.execute(connect), `${userId} connect`).rejects.toThrow(/settings requires admin access|Authentication required/);
+      const disconnect = { ...mkCmd('disconnect_account', { accountId: 'conn1' }), userId };
+      await expect(service.execute(disconnect), `${userId} disconnect`).rejects.toThrow(/settings requires admin access|Authentication required/);
+    }
+    expect(connections.upsertConnection).not.toHaveBeenCalled();
+    expect(connections.deleteConnection).not.toHaveBeenCalled();
   });
 
   it('schedule_social_post creates scheduled draft', async () => {

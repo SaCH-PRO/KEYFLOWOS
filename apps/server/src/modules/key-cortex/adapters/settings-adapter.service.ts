@@ -4,7 +4,7 @@ import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { IdentityService } from '../../identity/identity.service';
 import { IntegrationHubService } from '../../integration-hub/integration-hub.service';
 import { PrismaService } from '../../../core/prisma/prisma.service';
-import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../../core/authority/module-vocabulary';
+import { assertCommandActorModuleLevel } from '../../../core/auth/member-module-level';
 
 /**
  * R0-09c review CR-1: the member a remove_team_member or update_role command
@@ -86,7 +86,7 @@ export class SettingsAdapterService {
           return connectorOk(command, start, updated);
         }
         case 'configure_integration': {
-          await this.assertConnectWrite(command);
+          await this.assertIntegrationAdmin(command);
           const configured = await this.configureIntegration({
             businessId: command.businessId,
             providerKey: command.parameters.integration as string,
@@ -135,39 +135,23 @@ export class SettingsAdapterService {
   }
 
   /**
-   * R0-09c review ST-6: settings.configure_integration connects or disconnects
-   * an integration, which the HTTP routes (POST and DELETE
-   * integration-hub/businesses/:businessId/connections/:providerKey) admit only
-   * with connect:write through ModuleScopeGuard. The action checked no
-   * authority, so a STAFF command (connect is 'none' for every role by
-   * default) connected and disconnected the business's integrations.
+   * R0-09c review ST-6: settings.configure_integration connects or disconnects an integration, which
+   * the HTTP routes (POST and DELETE integration-hub/businesses/:businessId/connections/:providerKey)
+   * admit only with connect:write through ModuleScopeGuard. The action checked no authority, so a
+   * STAFF command (connect is 'none' for every role by default) connected and disconnected the
+   * business's integrations. The rule is ModuleScopeGuard's, on the command's actor.
    *
-   * The rule here is ModuleScopeGuard's, read from the same vocabulary, on the
-   * command's actor: SUPER_ADMIN (its User role, as AuthMiddleware attaches it)
-   * passes; otherwise the actor's membership of the business, its explicit
-   * scope map or else its role defaults, must hold connect at write or above.
-   * A command with no human actor, a non-member and a member below write are
-   * refused, and execute() answers the connector failure shape.
+   * SWEEP-P0-SCOPES round 1 class repair (CLASS B; found by the census call graph, CEN-10c): binding or
+   * unbinding an integration (IntegrationConnection.authDataRef, the reference to its stored
+   * credential) also needs settings admin, as the HTTP routes now do and as every other credential
+   * binding does. Both are read as ModuleScopeGuard reads them (assertCommandActorModuleLevel: an
+   * explicit map binds an ADMIN too, D-114; a JSON array names no module; SUPER_ADMIN passes); a
+   * command with no human actor, a non-member and a member below either level are refused, and
+   * execute() answers the connector failure shape.
    */
-  private async assertConnectWrite(command: ConnectorCommand): Promise<void> {
-    const actorId = command.userId;
-    if (typeof actorId !== 'string' || actorId.length === 0) {
-      throw new ForbiddenException('Authentication required');
-    }
-    const actor = await this.prisma.client.user.findUnique({ where: { id: actorId }, select: { role: true } });
-    if (actor?.role === 'SUPER_ADMIN') return;
-    const membership = await this.prisma.client.membership.findUnique({
-      where: { userId_businessId: { userId: actorId, businessId: command.businessId } },
-      select: { role: true, permissionScopes: true },
-    });
-    if (!membership) throw new ForbiddenException('Not a member of this business');
-    const scopes = membership.permissionScopes && typeof membership.permissionScopes === 'object'
-      ? (membership.permissionScopes as Record<string, string>)
-      : defaultScopesForRole(membership.role);
-    const level = scopes.connect || 'none';
-    if (rankOf(level) < LEVEL_RANK.write) {
-      throw new ForbiddenException(`Insufficient permissions: connect requires write access (you have ${level})`);
-    }
+  private async assertIntegrationAdmin(command: ConnectorCommand): Promise<void> {
+    await assertCommandActorModuleLevel(this.prisma, command.businessId, command.userId, 'connect', 'write');
+    await assertCommandActorModuleLevel(this.prisma, command.businessId, command.userId, 'settings', 'admin');
   }
 
   private async updateBusinessProfile(input: {

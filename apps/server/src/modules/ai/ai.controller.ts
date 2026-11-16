@@ -1469,7 +1469,17 @@ export class AiController {
     };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * SWEEP-P0-SCOPES round 2 class repair (CLASS B; finding CW-1): settings admin. The body writes,
+   * replaces and clears the business's BYOK provider keys (byokOpenai, byokAnthropic, byokXai, stored by
+   * ModelGatewayService.updatePreferences in ai_memories settings / ai_preferences), and every AI call
+   * of the business then runs on the stored key: a provider credential binding, the SEC-1 class. It ran
+   * AuthGuard and BusinessGuard only, so a STAFF member with every module none swapped the owner's key
+   * for one of their own (the owner's read answers only '••••••••') and cleared it. The routing mode,
+   * writing style and budget caps it also writes are the same business-wide AI settings.
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Put('businesses/:businessId/ai/preferences')
   async updateAiPreferences(
     @Param('businessId') businessId: string,

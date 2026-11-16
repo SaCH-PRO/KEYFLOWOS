@@ -1,14 +1,31 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, Inject, Param, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Inject, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { assertMayExport, contactIdsEveryReceiverMayOpen } from '../../core/auth/receiver-reads';
+import type { ModuleLevelActor } from '../../core/auth/member-module-level';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { CONNECTOR_EXPORT_READS, exportAudience } from '../../core/connectors/connector-exports';
 import { MailchimpConnector } from '../../core/connectors/implementations/mailchimp.connector';
 import { KlaviyoConnector } from '../../core/connectors/implementations/klaviyo.connector';
 
 type MarketingProvider = 'mailchimp' | 'klaviyo';
+type MarketingRequest = { user?: ModuleLevelActor };
 
+/**
+ * SWEEP-P0-SCOPES round 2 class repair (CLASS A; finding WHP-2): the marketing push sends contacts
+ * (email, name, and to Klaviyo the phone) to the Mailchimp or Klaviyo account in the stored
+ * credentials, which a settings admin binds. Every route here ran AuthGuard and BusinessGuard only: a
+ * STAFF member with every module none pushed any contact, or the default segment of every contact
+ * with an email, PRIVATE ones included, to an account an ADMIN with crm none had bound; and Mailchimp's
+ * host was the binder's text (MailchimpConnector now pins it to <dc>.api.mailchimp.com).
+ *
+ * Now the provider lists and campaigns are content read, triggering a campaign is content write, and a
+ * push is content write, crm read (assertMayExport, CONNECTOR_EXPORT_READS) and sends only the contacts
+ * every receiver may open: the member pushing and the member who bound the account (exportAudience).
+ */
 @Controller('marketing')
-@UseGuards(AuthGuard, BusinessGuard)
+@UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
 export class MarketingSyncController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -25,6 +42,7 @@ export class MarketingSyncController {
     return out;
   }
 
+  @RequireModuleScope('content', 'read')
   @Get('businesses/:businessId/lists')
   async lists(@Param('businessId') businessId: string) {
     const connected = await this.getConnected(businessId);
@@ -46,6 +64,7 @@ export class MarketingSyncController {
     };
   }
 
+  @RequireModuleScope('content', 'write')
   @Post('businesses/:businessId/lists/push-contacts')
   async pushContacts(
     @Param('businessId') businessId: string,
@@ -56,6 +75,7 @@ export class MarketingSyncController {
       contactIds?: string[];
       segment?: { tag?: string; status?: string; marketingOptIn?: boolean };
     },
+    @Req() req?: MarketingRequest,
   ) {
     if (!body?.provider || !body?.listId) throw new BadRequestException('provider and listId are required');
     const target =
@@ -68,9 +88,11 @@ export class MarketingSyncController {
     if (!(await target.connector.isConnected(businessId))) {
       throw new ForbiddenException(`${body.provider} is not connected`);
     }
+    await assertMayExport(this.prisma, businessId, req?.user, CONNECTOR_EXPORT_READS[body.provider], `pushing contacts to ${body.provider}`);
+    const audience = await exportAudience(this.prisma, businessId, body.provider, req?.user);
 
-    let contactIds = body.contactIds;
-    if (!contactIds || contactIds.length === 0) {
+    let contactIds = Array.isArray(body.contactIds) ? body.contactIds.filter((id): id is string => typeof id === 'string' && id.length > 0) : [];
+    if (contactIds.length === 0) {
       const where: Record<string, unknown> = { businessId, deletedAt: null, email: { not: null }, doNotContact: { not: true } };
       if (body.segment?.status) where.status = body.segment.status;
       if (typeof body.segment?.marketingOptIn === 'boolean') where.marketingOptIn = body.segment.marketingOptIn;
@@ -78,13 +100,28 @@ export class MarketingSyncController {
       const found = await this.prisma.client.contact.findMany({ where, select: { id: true }, take: 500 });
       contactIds = found.map((c) => c.id);
     }
-    if (contactIds.length === 0) {
-      return { provider: body.provider, listId: body.listId, total: 0, created: 0, updated: 0, failed: 0, errors: ['No contacts matched the segment'] };
+    // Only the contacts every receiver may open are sent; the rest are counted as not sent, with why.
+    const inView = await contactIdsEveryReceiverMayOpen(this.prisma, businessId, audience, contactIds);
+    const outOfView = contactIds.filter((id) => !inView.has(id)).length;
+    const sendable = contactIds.filter((id) => inView.has(id));
+    if (sendable.length === 0) {
+      return {
+        provider: body.provider, listId: body.listId, total: contactIds.length, created: 0, updated: 0, failed: outOfView,
+        errors: [outOfView ? `${outOfView} contact(s) not sent: outside the view of the member pushing them or of the account they would go to` : 'No contacts matched the segment'],
+      };
     }
-    const result = await target.connector.subscribeContacts(businessId, body.listId, contactIds);
-    return { provider: body.provider, listId: body.listId, total: contactIds.length, ...result };
+    const result = await target.connector.subscribeContacts(businessId, body.listId, sendable);
+    return {
+      provider: body.provider,
+      listId: body.listId,
+      total: contactIds.length,
+      ...result,
+      failed: result.failed + outOfView,
+      errors: outOfView ? [...result.errors, `${outOfView} contact(s) not sent: outside the view of the member pushing them or of the account they would go to`] : result.errors,
+    };
   }
 
+  @RequireModuleScope('content', 'read')
   @Get('businesses/:businessId/lists/campaigns/:provider')
   async campaigns(@Param('businessId') businessId: string, @Param('provider') provider: string) {
     if (provider !== 'mailchimp' && provider !== 'klaviyo') throw new BadRequestException('Unknown provider');
@@ -95,6 +132,7 @@ export class MarketingSyncController {
     return { provider, campaigns: out.campaigns ?? [] };
   }
 
+  @RequireModuleScope('content', 'write')
   @Post('businesses/:businessId/lists/campaigns/:provider/:campaignId/trigger')
   async triggerCampaign(
     @Param('businessId') businessId: string,

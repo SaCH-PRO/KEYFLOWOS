@@ -118,11 +118,15 @@ export function SheetsManageDrawer({ businessId }: { businessId: string }) {
     } catch {}
   };
 
+  // SWEEP-P0-SCOPES round 1 class repair (RC-3): the inventory-sheet writes need storefront write.
+  // Each handler reads the server's answer: a refused write shows the server's refusal and changes
+  // nothing on screen (an unlink the server refused leaves the sheet shown as linked, as it still is).
   const handleCreateSheet = async () => {
     setSheetLoading(true);
     try {
       const res = await apiPost({ path: `/drive/businesses/${businessId}/inventory-sheet/create`, body: { title: "Inventory Sync" } });
-      const sheetData = res.data as { fileId?: string; name?: string } | undefined;
+      if (res.error) toast.error(res.error);
+      const sheetData = res.error ? undefined : (res.data as { fileId?: string; name?: string } | undefined);
       if (sheetData) {
         setSheetStatus((prev) => ({
           ...prev,
@@ -136,7 +140,11 @@ export function SheetsManageDrawer({ businessId }: { businessId: string }) {
 
   const handleLinkSheet = async (sheetId: string, sheetName: string) => {
     try {
-      await apiPost({ path: `/drive/businesses/${businessId}/inventory-sheet/link`, body: { sheetId, sheetName } });
+      const linked = await apiPost({ path: `/drive/businesses/${businessId}/inventory-sheet/link`, body: { sheetId, sheetName } });
+      if (linked.error) {
+        toast.error(linked.error);
+        return;
+      }
       const res = await apiGet<InventorySheetStatusDto>(`/drive/businesses/${businessId}/inventory-sheet/status`);
       if (res.data) setSheetStatus(res.data);
     } catch {}
@@ -145,13 +153,17 @@ export function SheetsManageDrawer({ businessId }: { businessId: string }) {
   const handleUnlinkSheet = async () => {
     setSheetLoading(true);
     try {
-      await apiDelete(`/drive/businesses/${businessId}/inventory-sheet/unlink`);
-      setSheetStatus((prev) => ({
-        ...prev,
-        linkedSheetId: null,
-        linkedSheetName: null,
-        lastSyncAt: null,
-      }));
+      const res = await apiDelete(`/drive/businesses/${businessId}/inventory-sheet/unlink`);
+      if (res.error) {
+        toast.error(res.error);
+      } else {
+        setSheetStatus((prev) => ({
+          ...prev,
+          linkedSheetId: null,
+          linkedSheetName: null,
+          lastSyncAt: null,
+        }));
+      }
     } catch {}
     setSheetLoading(false);
   };
@@ -160,9 +172,13 @@ export function SheetsManageDrawer({ businessId }: { businessId: string }) {
     setSheetLoading(true);
     setSheetAction("push");
     try {
-      await apiPost({ path: `/drive/businesses/${businessId}/inventory-sheet/push`, body: {} });
-      const res = await apiGet<InventorySheetStatusDto>(`/drive/businesses/${businessId}/inventory-sheet/status`);
-      if (res.data) setSheetStatus(res.data);
+      const pushed = await apiPost({ path: `/drive/businesses/${businessId}/inventory-sheet/push`, body: {} });
+      if (pushed.error) {
+        toast.error(pushed.error);
+      } else {
+        const res = await apiGet<InventorySheetStatusDto>(`/drive/businesses/${businessId}/inventory-sheet/status`);
+        if (res.data) setSheetStatus(res.data);
+      }
     } catch {}
     setSheetLoading(false);
     setSheetAction(null);
@@ -184,10 +200,15 @@ export function SheetsManageDrawer({ businessId }: { businessId: string }) {
     setSheetAction("apply");
     try {
       const res = await apiPost({ path: `/drive/businesses/${businessId}/inventory-sheet/apply`, body: { rows } });
-      if (res.data) setImportResult(res.data as InventoryImportResultDto);
-      setPullPreview(null);
-      setSheetDiff(null);
-      setConflictResolutions({});
+      if (res.error) {
+        // A refused apply keeps the preview and the chosen resolutions, so nothing looks applied.
+        toast.error(res.error);
+      } else {
+        if (res.data) setImportResult(res.data as InventoryImportResultDto);
+        setPullPreview(null);
+        setSheetDiff(null);
+        setConflictResolutions({});
+      }
     } catch {}
     setSheetLoading(false);
     setSheetAction(null);

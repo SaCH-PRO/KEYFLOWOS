@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { motion } from "framer-motion";
+import { toast } from "sonner";
 import {
   TrendingUp,
   Target,
@@ -136,9 +137,16 @@ export function GrowthTrajectoryPanel({ businessId }: GrowthTrajectoryPanelProps
     if (!businessId) return;
     setGenerating(true);
     try {
-      await assessMaturity(businessId);
-      await generateInsights(businessId);
-      await generateRevenueProjection(businessId);
+      // SWEEP-P0-SCOPES review repair (CR-4): each step is analytics write on the server; the api
+      // client answers a refusal as { error } and does not throw, so each answer is read and the
+      // first refusal is said (the next steps would be refused the same way).
+      for (const step of [assessMaturity, generateInsights, generateRevenueProjection]) {
+        const res = await step(businessId);
+        if (res.error) {
+          toast.error(res.error);
+          return;
+        }
+      }
       await loadData();
     } catch (e) {
       console.error("Failed to generate analytics", e);

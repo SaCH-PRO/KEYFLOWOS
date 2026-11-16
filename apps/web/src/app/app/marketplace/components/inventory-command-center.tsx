@@ -307,7 +307,14 @@ export function InventoryCommandCenter({
     if (!adjustTarget) return;
     setAdjustSaving(true);
     try {
-      await apiPost({ path: `${basePath}/inventory/adjust`, body: { stockId: adjustTarget.id, ...adjustData } });
+      // SWEEP-P0-SCOPES (BUG-015): adjusting stock needs storefront write; a refused adjustment
+      // says why and keeps the modal open (it closed as if applied).
+      const { error } = await apiPost({ path: `${basePath}/inventory/adjust`, body: { stockId: adjustTarget.id, ...adjustData } });
+      if (error) {
+        toast.error(error);
+        setAdjustSaving(false);
+        return;
+      }
       setShowAdjustModal(false);
       setAdjustTarget(null);
       const res = await apiGet<InventoryStockDto[]>(`${basePath}/inventory`);
@@ -321,7 +328,13 @@ export function InventoryCommandCenter({
   const handleTransfer = async () => {
     setTransferSaving(true);
     try {
-      await apiPost({ path: `${basePath}/inventory/transfer`, body: transferData });
+      // SWEEP-P0-SCOPES (BUG-015): as an adjustment, a refused transfer says why and stays open.
+      const { error } = await apiPost({ path: `${basePath}/inventory/transfer`, body: transferData });
+      if (error) {
+        toast.error(error);
+        setTransferSaving(false);
+        return;
+      }
       setShowTransferModal(false);
       const res = await apiGet<InventoryStockDto[]>(`${basePath}/inventory`);
       if (res.data) setInventory(res.data);
@@ -400,7 +413,15 @@ export function InventoryCommandCenter({
       const form = new FormData();
       form.append("file", blob, "inventory.xlsx");
       const res = await fetch(`${API_BASE}${basePath}/inventory/import-excel`, { method: "POST", body: form, headers: getAuthHeaders() });
-      const data = await res.json() as InventoryImportResultDto;
+      const data = await res.json() as InventoryImportResultDto & { message?: string | string[] };
+      if (!res.ok) {
+        // SWEEP-P0-SCOPES review repair (CR-4): a refused import (storefront write) is the server's
+        // reason, not an import result rendered from the refusal body.
+        const reason = Array.isArray(data?.message) ? data.message.join(", ") : data?.message || `Import failed (${res.status})`;
+        toast.error(reason);
+        setXlsxImporting(false);
+        return;
+      }
       setImportResult(data);
       setXlsxWizard(null);
       const invRes = await apiGet<InventoryStockDto[]>(`${basePath}/inventory`);
@@ -416,7 +437,9 @@ export function InventoryCommandCenter({
     setSheetLoading(true);
     setSheetAction("push");
     try {
-      await apiPost({ path: `/drive/businesses/${businessId}/inventory-sheet/push`, body: {} });
+      // SWEEP-P0-SCOPES review repair (CR-4): a refused push (storefront write) says why.
+      const pushed = await apiPost({ path: `/drive/businesses/${businessId}/inventory-sheet/push`, body: {} });
+      if (pushed.error) toast.error(pushed.error);
       const res = await apiGet<InventorySheetStatusDto>(`/drive/businesses/${businessId}/inventory-sheet/status`);
       if (res.data) setSheetStatus(res.data);
     } catch {}
@@ -441,6 +464,7 @@ export function InventoryCommandCenter({
     try {
       const res = await apiPost({ path: `/drive/businesses/${businessId}/inventory-sheet/apply`, body: { rows } });
       if (res.data) setImportResult(res.data as InventoryImportResultDto);
+      else if (res.error) toast.error(res.error);
       const invRes = await apiGet<InventoryStockDto[]>(`${basePath}/inventory`);
       if (invRes.data) setInventory(invRes.data);
       setPullPreview(null);
@@ -485,6 +509,7 @@ export function InventoryCommandCenter({
     setSheetLoading(true);
     try {
       const res = await apiPost({ path: `/drive/businesses/${businessId}/inventory-sheet/create`, body: { title: "Inventory Sync" } });
+      if (res.error) toast.error(res.error);
       const sheetData = res.data as { fileId?: string; name?: string } | undefined;
       if (sheetData) setSheetStatus({ ...sheetStatus, linkedSheetId: sheetData.fileId ?? null, linkedSheetName: sheetData.name ?? null });
     } catch {}
@@ -494,8 +519,14 @@ export function InventoryCommandCenter({
   const handleUnlinkSheet = async () => {
     setSheetLoading(true);
     try {
-      await apiDelete(`/drive/businesses/${businessId}/inventory-sheet/unlink`);
-      setSheetStatus({ ...sheetStatus, linkedSheetId: null, linkedSheetName: null, lastSyncAt: null });
+      // SWEEP-P0-SCOPES review repair (CR-4): a refused unlink (storefront write) keeps the sheet
+      // shown as linked, as it still is on the server, and says why.
+      const res = await apiDelete(`/drive/businesses/${businessId}/inventory-sheet/unlink`);
+      if (res.error) {
+        toast.error(res.error);
+      } else {
+        setSheetStatus({ ...sheetStatus, linkedSheetId: null, linkedSheetName: null, lastSyncAt: null });
+      }
     } catch {}
     setSheetLoading(false);
   };
@@ -675,11 +706,17 @@ export function InventoryCommandCenter({
                   else toast.error(res.error || "Could not start Google Drive sign-in");
                 } catch {}
               }}
-              onLinkSheet={(sheetId: string, sheetName: string) =>
-                apiPost({ path: `/drive/businesses/${businessId}/inventory-sheet/link`, body: { sheetId, sheetName } })
-                  .then(() => apiGet<InventorySheetStatusDto>(`/drive/businesses/${businessId}/inventory-sheet/status`))
-                  .then(r => { if (r.data) setSheetStatus(r.data); })
-              }
+              onLinkSheet={async (sheetId: string, sheetName: string) => {
+                // SWEEP-P0-SCOPES second review repair (CRV-2): a refused link (storefront write) says
+                // why; the chain dropped the POST's answer and reloaded the status with no word.
+                const linked = await apiPost({ path: `/drive/businesses/${businessId}/inventory-sheet/link`, body: { sheetId, sheetName } });
+                if (linked.error) {
+                  toast.error(linked.error);
+                  return;
+                }
+                const r = await apiGet<InventorySheetStatusDto>(`/drive/businesses/${businessId}/inventory-sheet/status`);
+                if (r.data) setSheetStatus(r.data);
+              }}
             />
           )}
         </motion.div>

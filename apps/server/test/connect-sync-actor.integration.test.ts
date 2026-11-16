@@ -166,6 +166,12 @@ async function reseed(businessId: string) {
   }
   // A sync token or delta link an earlier case's sync stored, and its provider answer.
   await db.$executeRawUnsafe(`UPDATE businesses SET contacts_sync_token = NULL, ms_contacts_delta_link = NULL WHERE id = $1`, businessId);
+  // SWEEP-P0-SCOPES round 3 (WPH2-1): the Outlook account a sync links contacts to is its binder's, and the
+  // sync links only contacts the binder may open. These cases are about the run's principals, so the
+  // account is the owner's, as if the owner completed the consent (the callback records the binder).
+  if (businessId === ID.bizO) {
+    await db.connectorStatus.create({ data: { businessId, connectorType: 'outlook_contacts', status: 'connected', metadata: { boundBy: ID.owner } } });
+  }
   peopleNextSyncToken = undefined;
   graphDeltaLink = undefined;
   const priv = await db.contact.create({

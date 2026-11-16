@@ -2,6 +2,7 @@ import { BadRequestException, Body, Controller, Delete, Get, Inject, Param, Patc
 import { createHmac } from 'crypto';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { ChannelConnectionService } from './channel-connection.service';
 import { OutboundContentService } from './outbound-content.service';
 import { DeliveryQueueService } from './delivery-queue.service';
@@ -58,37 +59,75 @@ export class CommunicationsController {
     return this.connections.get(businessId, id);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * SWEEP-P0-SCOPES round 1 class repair (CLASS B; found by the census call graph, CEN-10b): settings
+   * admin. It copies every social connection's token over the business's channel connection of that
+   * provider (ChannelConnectionService.syncFromSocial), replacing the channel credential the other
+   * connection writes need settings admin for (SV-2).
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/connections/sync-from-social')
   async syncFromSocial(@Param('businessId') businessId: string) {
     return this.connections.syncFromSocial(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * SWEEP-P0-SCOPES second review repair (finding SV-2, the SEC-1 credential class): a channel
+   * connection is the business's account credential (its token and refresh token, the mailbox or page
+   * every send goes from). Creating, changing and deleting one, and connecting WhatsApp, need settings
+   * admin, as the connector credentials do (SEC-1): OWNER and ADMIN by role default, STAFF none; an
+   * explicit map binds every role (D-114). They ran AuthGuard and BusinessGuard only: the sweep's STAFF
+   * member (settings none) replaced the owner's email connection's token and account, and a member of
+   * two businesses moved the connection into their own (ChannelConnectionService now writes only a
+   * connection's own fields). The reads stay open to members and answer no token (stripSecrets).
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/connections')
   createConnection(@Param('businessId') businessId: string, @Body() body: any) {
     return this.connections.create(businessId, body);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Patch('businesses/:businessId/connections/:id')
   updateConnection(@Param('businessId') businessId: string, @Param('id') id: string, @Body() body: any) {
     return this.connections.update(businessId, id, body);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Delete('businesses/:businessId/connections/:id')
   deleteConnection(@Param('businessId') businessId: string, @Param('id') id: string) {
     return this.connections.delete(businessId, id);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * SWEEP-P0-SCOPES round 3 class repair (CLASS B; finding CB-1): settings admin, as the connection writes are
+   * (SV-2). A health check writes the connection's healthState, the sending state a settings admin sets (PATCH
+   * connections/:id 'Disabled' pauses the sender; DeliveryQueueService refuses a campaign whose sender is not
+   * 'Connected'). It ran membership only and recomputed the state from the token facts, so any member lifted
+   * the admin's 'Disabled' back to 'Connected'. A health check also keeps an admin's 'Disabled'
+   * (ChannelConnectionService.runHealthCheck): only PATCH connections/:id lifts it.
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/connections/:id/health-check')
   async healthCheck(@Param('businessId') businessId: string, @Param('id') id: string) {
     return this.connections.runHealthCheck(businessId, id);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * SWEEP-P0-SCOPES round 2 class repair (CLASS B; finding CW-2): settings admin, as the connection
+   * writes are (SV-2). A destination is where every send goes (a page and its own access token,
+   * ChannelDestination.destinationMeta): adding one, replacing its token, or turning the owner's off is a
+   * binding write. Both ran AuthGuard and BusinessGuard only: any member replaced the token on the
+   * owner's page, added a page of their own under the owner's credentialed connection, and turned the
+   * owner's page off. A destination read answers no token (ChannelConnectionService).
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Patch('businesses/:businessId/destinations/:destId/toggle')
   toggleDestination(@Param('businessId') businessId: string, @Param('destId') destId: string, @Body() body: { isActive: boolean }) {
     return this.connections.toggleDestination(businessId, destId, body.isActive);
@@ -106,7 +145,8 @@ export class CommunicationsController {
     return this.connections.listDestinations(businessId, { platform, activeOnly: activeOnly === 'true' });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/connections/:connectionId/destinations')
   createDestination(
     @Param('businessId') businessId: string,
@@ -146,7 +186,9 @@ export class CommunicationsController {
     return adapter.listPhoneNumbers(body.accessToken, body.waBusinessAccountId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /** SWEEP-P0-SCOPES second review repair (SV-2): stores the business's WhatsApp token: settings admin, as createConnection. */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/whatsapp/connect')
   async connectWhatsApp(@Param('businessId') businessId: string, @Body() body: { accessToken: string; waBusinessAccountId: string; label?: string }) {
     return this.connections.connectWhatsApp(businessId, body);

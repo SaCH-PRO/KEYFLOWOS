@@ -54,11 +54,13 @@ class WebhooksPrismaMock {
     const self = this;
     self.client = {
       webhook: {
-        findMany: vi.fn(({ where, orderBy }: any) => {
+        findMany: vi.fn(({ where, orderBy, select }: any) => {
           let rows = self.webhooks.filter((w) => w.businessId === where.businessId);
           if (orderBy?.createdAt === 'desc') {
             rows = [...rows].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
           }
+          // SWEEP-P0-SCOPES (BUG-001): the list selects its fields (no signing secret).
+          if (select) rows = rows.map((r) => Object.fromEntries(Object.keys(select).filter((k) => select[k]).map((k) => [k, r[k]])));
           return Promise.resolve(rows);
         }),
         create: vi.fn(({ data }: any) => {
@@ -105,6 +107,15 @@ class WebhooksPrismaMock {
         create: vi.fn(({ data }: any) => {
           self.webhookEvents.push(data);
           return Promise.resolve({ id: `we_${self.webhookEvents.length}`, ...data });
+        }),
+      },
+      // SWEEP-P0-SCOPES (BUG-001): ModuleScopeGuard reads the caller's membership (settings scope);
+      // every member here is an OWNER with no explicit map (settings admin by role default).
+      membership: {
+        findUnique: vi.fn(({ where }: any) => {
+          const { userId, businessId } = where?.userId_businessId ?? {};
+          const access = self.businessAccess.find((b) => b.businessId === businessId);
+          return Promise.resolve(access?.memberIds?.includes(userId) ? { userId, businessId, role: 'OWNER', permissionScopes: null } : null);
         }),
       },
       business: {
@@ -280,12 +291,17 @@ describe('WebhooksController', () => {
       .expect(200);
     expect(res.body).toHaveLength(1);
     expect(res.body[0].url).toBe('https://example.com/hook');
+    // SWEEP-P0-SCOPES (BUG-001, review repair CR-5): a read answers the signing secret to settings admin
+    // only; every member here is an OWNER with no explicit map (settings admin by role default).
+    // The settings read and write views are pinned by sweep-webhooks-api-keys-settings (WHK-02b).
+    expect(res.body[0].secret).toBe('secret');
   });
 
   it('creates a webhook with a generated secret and selected events', async () => {
     const res = await request(app.getHttpServer())
       .post('/webhooks/businesses/biz_1/webhooks')
-      .send({ url: 'https://example.com/hook', events: ['invoice.paid'], name: 'My Hook' })
+      // SWEEP-P0-SCOPES (BUG-001): the URL host is checked public (an IP literal: no DNS here; TEST-NET-3).
+      .send({ url: 'https://203.0.113.10/hook', events: ['invoice.paid'], name: 'My Hook' })
       .expect(201);
     expect(res.body.id).toBeDefined();
     expect(res.body.secret).toMatch(/^[a-f0-9]{64}$/);
@@ -297,16 +313,20 @@ describe('WebhooksController', () => {
     const res = await request(app.getHttpServer())
       .post('/webhooks/businesses/biz_1/webhooks')
       .send({ url: 'not-a-url', events: ['invoice.paid'] })
-      .expect(201);
-    expect(res.body.error).toMatch(/valid URL/);
+      // SWEEP-P0-SCOPES (BUG-001): a refused URL is a 400 (it was a 201 carrying an `error`).
+      .expect(400);
+    expect(res.body.message).toMatch(/valid URL/);
+    expect(prismaMock.webhooks).toHaveLength(0);
   });
 
   it('rejects creation when no events are selected', async () => {
     const res = await request(app.getHttpServer())
       .post('/webhooks/businesses/biz_1/webhooks')
-      .send({ url: 'https://example.com/hook', events: [] })
-      .expect(201);
-    expect(res.body.error).toMatch(/At least one event/);
+      .send({ url: 'https://203.0.113.10/hook', events: [] })
+      // SWEEP-P0-SCOPES (BUG-001): 400, nothing written.
+      .expect(400);
+    expect(res.body.message).toMatch(/At least one event/);
+    expect(prismaMock.webhooks).toHaveLength(0);
   });
 
   it('toggles webhook active state', async () => {

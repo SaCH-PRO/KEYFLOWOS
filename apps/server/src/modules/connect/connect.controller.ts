@@ -17,6 +17,7 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { assertMemberModuleLevel } from '../../core/auth/member-module-level';
 import { assertGoogleConnectOwner } from '../../core/connectors/google-suite.controller';
 import { contactVisibilityFilter, resolveCrmAccess } from '../crm/crm-permissions.helper';
 import { GoogleFormsService } from './google-forms.service';
@@ -441,7 +442,12 @@ export class ConnectController {
       await assertGoogleConnectOwner(this.prisma, businessId, req?.user);
       return this.contacts.disconnect(businessId);
     }
-    if (source === 'outlook_contacts') return this.outlook.disconnect(businessId);
+    if (source === 'outlook_contacts') {
+      // SWEEP-P0-SCOPES round 1 class repair (CLASS B; found by the census call graph, CEN-10b): it
+      // clears the business's Outlook contacts tokens, whose consent start is settings admin (SV-3).
+      await assertMemberModuleLevel(this.prisma, businessId, req?.user, 'settings', 'admin');
+      return this.outlook.disconnect(businessId);
+    }
     throw new BadRequestException(`Unknown source "${source}"`);
   }
 
@@ -468,11 +474,20 @@ export class ConnectController {
     return this.bp.listLocations(businessId, accountId);
   }
 
+  /**
+   * SWEEP-P0-SCOPES round 2 class repair (CLASS B; finding CW-3; owner ruling D-99): the account and
+   * location the owner's Google Business Profile tokens act on (Business.bpAccountId, bpLocationId) are
+   * the owner's to move, as calendarId is on the calendar settings doors: assertGoogleConnectOwner, 403
+   * GOOGLE_CONNECT_OWNER_ONLY, before anything is written. Any member (an ADMIN on role defaults
+   * included) moved the binding of the owner's Google connection.
+   */
   @Post('businesses/:businessId/business-profile/active-location')
-  setBpActiveLocation(
+  async setBpActiveLocation(
     @Param('businessId') businessId: string,
     @Body() body: { accountId: string; locationId: string },
+    @Req() req?: { user?: { id: string; role?: string } },
   ) {
+    await assertGoogleConnectOwner(this.prisma, businessId, req?.user);
     return this.bp.setActiveLocation(businessId, body.accountId, body.locationId);
   }
 

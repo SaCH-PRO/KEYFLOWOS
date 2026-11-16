@@ -173,6 +173,10 @@ const SERVICE_REFUSED: Record<string, string> = {
 
 type OtherKind = 'GUARDED' | 'SERVICE_REFUSED' | 'EXEMPT' | 'OPEN';
 
+const ACCOUNTING_PUSH =
+  'accounting push (SWEEP-P0-SCOPES round 2, WHP-1): copies invoices and customers to the QuickBooks or Xero account a member who reads them bound, ' +
+  'and stamps the external id it answers; no invoice, quote or payment write (no amount, line or status changes), so not the D-46 invoice-write door';
+
 const LEVERAGE_ATTRIBUTION = 'revenue attribution override (which source, campaign or staff member earned a booking or invoice): reporting metadata, not an invoice, quote or payment write';
 const LEVERAGE_TIME = 'time-cost entries (minutes and cost rate logged against a reference): margin reporting, not an invoice, quote or payment write';
 const RECURRING_GUARDED =
@@ -204,6 +208,11 @@ const DRIVE_INTAKE_REJECT_GUARDED =
  * GUARDED entries call their controller's D-46 helper first (D46-S07).
  */
 const OTHER_CONTROLLERS: Record<string, Record<string, { kind: OtherKind; why: string }>> = {
+  // SWEEP-P0-SCOPES round 2 class repair (CLASS A, WHP-1): the accounting push became a revenue:write handler.
+  AccountingController: {
+    pushInvoice: { kind: 'EXEMPT', why: ACCOUNTING_PUSH },
+    pushCustomers: { kind: 'EXEMPT', why: ACCOUNTING_PUSH },
+  },
   CommerceAiController: {
     aiExecute: {
       kind: 'SERVICE_REFUSED',

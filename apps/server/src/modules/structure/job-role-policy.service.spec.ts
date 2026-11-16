@@ -150,7 +150,9 @@ const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: s
     deny: ['commerce_create_invoice', 'crm_create_contact', 'projects_create_task'],
   },
   projects: {
-    // No `projects` scope is declared on any route; the legacy key's grant is kept.
+    // The legacy key's grant is kept (projects is both a canonical key and a legacy family, so the
+    // grants are the union); since SWEEP-P0-SCOPES every ProjectsController route also requires
+    // projects, so the canonical table governs the projects_* tools those routes back.
     read: ['projects_list', 'projects_list_tasks'],
     write: ['projects_create_task', 'time_log_entry'],
     admin: ['projects_delete_task'],
@@ -188,7 +190,8 @@ const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: s
   },
   storefront: {
     read: [],
-    write: [],
+    // SWEEP-P0-SCOPES (browser sweep BUG-015): POST marketplace inventory/adjust and inventory/transfer need storefront write
+    write: ['inventory_adjust_stock', 'inventory_transfer_stock'],
     admin: [],
     deny: ['commerce_create_product', 'apply_storefront_recommendation', 'store_list_products', 'crm_create_contact'],
   },
@@ -971,6 +974,8 @@ describe('V1-21b review 2 — KEY never exceeds HTTP on the same scope map (K2)'
           'operations:payroll_approve_run',
           'operations:payroll_mark_paid',
           'operations:procurement_issue_po',
+          // SWEEP-P0-SCOPES (BUG-014): DELETE .../tasks/:taskId needs projects write, the tool is tier 3
+          'projects:projects_delete_task',
           'revenue:commerce_delete_invoice',
           // PR195-JOURNAL-SCOPE (CR-P195-4): POST finance journal-entries needs revenue write; the tool is tier 3
           'revenue:finance_post_journal_entry',

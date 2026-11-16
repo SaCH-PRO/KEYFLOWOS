@@ -498,6 +498,8 @@ export class HealthCheckService {
       const apiKey = authData['apiKey'] as string | undefined;
       const serverPrefix = authData['serverPrefix'] as string | undefined;
       if (!apiKey || !serverPrefix) throw new Error('Missing Mailchimp credentials');
+      // SWEEP-P0-SCOPES round 2 (WHP-2's host class): the prefix is a data center (us21), never a host the binder chose.
+      if (!/^[a-z]{2,10}[0-9]{1,4}$/.test(serverPrefix)) throw new Error('Mailchimp server prefix is not a data center (e.g. "us21")');
 
       const response = await firstValueFrom(
         this.httpService.get(`https://${serverPrefix}.api.mailchimp.com/3.0/`, {

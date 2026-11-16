@@ -8,12 +8,53 @@ function stripSecrets(conn: NonNullable<ConnectionRecord>) {
   return safe;
 }
 
+/**
+ * SWEEP-P0-SCOPES round 2 class repair (CW-2): a destination's own credential (a page's access token in
+ * destinationMeta, written by syncFromSocial and by the destination writes) is never answered. GET
+ * destinations answered it to every member.
+ */
+const DESTINATION_SECRET_KEY = /token|secret|password|api_?key|credential/i;
+function stripDestinationMeta(meta: unknown): unknown {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return meta;
+  return Object.fromEntries(Object.entries(meta as Record<string, unknown>).filter(([key]) => !DESTINATION_SECRET_KEY.test(key)));
+}
+
 function stripSecretsFromDestination(dest: Record<string, unknown>) {
-  if (dest.connection && typeof dest.connection === 'object' && dest.connection !== null) {
-    const { token, refreshToken, ...safeConn } = dest.connection as Record<string, unknown>;
-    return { ...dest, connection: safeConn };
+  const out: Record<string, unknown> = { ...dest };
+  if ('destinationMeta' in out) out.destinationMeta = stripDestinationMeta(out.destinationMeta);
+  if (out.connection && typeof out.connection === 'object' && out.connection !== null) {
+    const { token, refreshToken, ...safeConn } = out.connection as Record<string, unknown>;
+    out.connection = safeConn;
   }
-  return dest;
+  return out;
+}
+
+/** The fields a destination write may set (the body is handed over whole: an id or a connection in it is not written). */
+const DESTINATION_CREATE_FIELDS = ['platform', 'platformId', 'displayName', 'avatarUrl', 'capabilities', 'destinationMeta'] as const;
+
+/**
+ * SWEEP-P0-SCOPES second review repair (finding SV-2): the fields a create or an update of a channel
+ * connection may write. The controller hands the request body over whole (`@Body() body: any`, which
+ * the global ValidationPipe does not strip), and update ran prisma.channelConnection.update({ where:
+ * { id }, data }) with it: a body naming businessId moved the business's credentialed connection (its
+ * encrypted token and refresh token) into another business, and one naming id renamed its key. A key
+ * outside these lists is not written; the business is always the route's.
+ */
+const CONNECTION_CREATE_FIELDS = ['provider', 'label', 'accountEmail', 'token', 'refreshToken', 'expiresAt', 'scopes', 'providerMeta'] as const;
+const CONNECTION_UPDATE_FIELDS = ['label', 'accountEmail', 'token', 'refreshToken', 'expiresAt', 'scopes', 'healthState', 'healthMessage', 'lastCheckedAt', 'providerMeta'] as const;
+
+/** The sending state only a settings admin sets and lifts (PATCH connections/:id); a health check keeps it (round 3, CB-1). */
+const ADMIN_DISABLED = 'Disabled';
+
+function pickFields<K extends string>(data: unknown, fields: readonly K[]): Partial<Record<K, unknown>> {
+  const out: Partial<Record<K, unknown>> = {};
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return out;
+  for (const key of fields) {
+    if (Object.prototype.hasOwnProperty.call(data, key) && (data as Record<string, unknown>)[key] !== undefined) {
+      out[key] = (data as Record<string, unknown>)[key];
+    }
+  }
+  return out;
 }
 
 @Injectable()
@@ -49,8 +90,9 @@ export class ChannelConnectionService {
     scopes?: string;
     providerMeta?: Record<string, unknown>;
   }) {
+    const fields = pickFields(data, CONNECTION_CREATE_FIELDS) as typeof data;
     const conn = await this.prisma.client.channelConnection.create({
-      data: { ...data, businessId },
+      data: { ...fields, businessId },
       include: { destinations: true },
     });
 
@@ -86,7 +128,7 @@ export class ChannelConnectionService {
     if (!existing) return null;
     const updated = await this.prisma.client.channelConnection.update({
       where: { id },
-      data,
+      data: pickFields(data, CONNECTION_UPDATE_FIELDS) as typeof data,
     });
 
     if (existing.provider?.toUpperCase() === 'EMAIL' && data.accountEmail) {
@@ -126,7 +168,7 @@ export class ChannelConnectionService {
     });
 
     if (existing) {
-      return this.prisma.client.channelDestination.update({
+      const updated = await this.prisma.client.channelDestination.update({
         where: { id: existing.id },
         data: {
           displayName: data.displayName ?? existing.displayName,
@@ -135,11 +177,13 @@ export class ChannelConnectionService {
           destinationMeta: (data.destinationMeta ?? existing.destinationMeta) ?? undefined,
         },
       });
+      return stripSecretsFromDestination(updated as unknown as Record<string, unknown>);
     }
 
-    return this.prisma.client.channelDestination.create({
-      data: { ...data, connectionId, businessId },
+    const created = await this.prisma.client.channelDestination.create({
+      data: { ...(pickFields(data, DESTINATION_CREATE_FIELDS) as typeof data), connectionId, businessId },
     });
+    return stripSecretsFromDestination(created as unknown as Record<string, unknown>);
   }
 
   async listDestinations(businessId: string, opts?: { platform?: string; activeOnly?: boolean }) {
@@ -203,12 +247,31 @@ export class ChannelConnectionService {
     };
   }
 
+  /**
+   * Recomputes a connection's health from its token facts. SWEEP-P0-SCOPES round 3 class repair (CB-1): an
+   * admin's 'Disabled' is a decision, not a token fact, so a health check keeps it (it stamps the check and
+   * answers the stored state); only PATCH connections/:id, settings admin, lifts it.
+   */
   async runHealthCheck(businessId: string, id: string) {
     const conn = await this.prisma.client.channelConnection.findFirst({
       where: { id, businessId },
       include: { destinations: true },
     });
     if (!conn) throw new NotFoundException('Connection not found');
+    if (conn.healthState === ADMIN_DISABLED) {
+      const kept = await this.prisma.client.channelConnection.update({
+        where: { id },
+        data: { lastCheckedAt: new Date() },
+        include: { destinations: true },
+      });
+      return {
+        id: kept.id,
+        healthState: kept.healthState,
+        healthMessage: kept.healthMessage,
+        lastCheckedAt: kept.lastCheckedAt,
+        destinations: kept.destinations,
+      };
+    }
 
     let healthState = 'Connected';
     let healthMessage: string | null = null;
@@ -550,10 +613,11 @@ export class ChannelConnectionService {
     });
     if (!dest) throw new NotFoundException('Destination not found');
 
-    return this.prisma.client.channelDestination.update({
+    const updated = await this.prisma.client.channelDestination.update({
       where: { id: destId },
       data: { isActive },
     });
+    return stripSecretsFromDestination(updated as unknown as Record<string, unknown>);
   }
 
   async connectWhatsApp(businessId: string, input: {
