@@ -1,7 +1,7 @@
 {
  "_about": {
   "what": "The re-cut v1 completion plan: every packet between the Release 0 product and the v1 launch gate (steps 0-8, journeys A-L). Plan of record for packet scope, definition of done, dependencies, the Release 0 register and fixture prefixes; BUILD-MAP-001.md holds the owner rulings it applies.",
-  "snapshot": "2026-11-16, main afc1711a; 181 packets (166 at the re-cut on 2026-11-13 plus review follow-ups).",
+  "snapshot": "2026-11-16 17:30Z; 193 packets (166 at the re-cut on 2026-11-13 plus review follow-ups, including the D-204..D-221 additions).",
   "status": "See V1-PROGRESS-2026-11-16.md for what is merged.",
   "paths": "scratchpad/... paths inside packet scopes refer to the orchestrating session's working files (executor run outputs, sweep evidence); they are not in the repository."
  },
@@ -1335,7 +1335,7 @@
    "definition_of_done": "Tests first with a recorded RED on the step-0 base; real-DB integration proof on Postgres for every server change; web unit tests for every screen change; typecheck and lint ratchet clean; `pnpm --filter server proof:release0` still MET. Done when these tests-first cases go RED then green: apps/server/test/contact-audit-durable.integration.test.ts (new, real DB): with the audit write failing, create/update/delete of a contact fails and writes nothing (RED: contact written, no audit); normal writes leave exactly one audit row. Proof: RED->green: test/contact-audit-durable.integration.test.ts; real Postgres; tsc + fixture-prefix-registry + release0-proof-coverage | keep green: V1-38 GDPR purge, R0-CT-03 audit actor, contact suites.",
    "journeys": [],
    "absorbs": [],
-   "r0_impact": "none: touches no required Release 0 case or closedBy evidence"
+   "r0_impact": "AMEND (D-204): contacts-persistence [CP-FH-01]; the create half lands in TOF-CONTACT-AUDIT-CREATE."
   },
   {
    "id": "WA-E164-SERVER",
@@ -6131,9 +6131,345 @@
     "D-146",
     "WH3-1 export-binding rule (SWEEP-P0-FOLLOWUP)"
    ],
-   "r0_impact": "KEEP: no required Release 0 case changes (check the r0_register; a required case that pins the old any-member PATCH is a CONTRADICTION to report, not to edit).",
+   "r0_impact": "KEEP here; the D11F amendment (D-205) lands in FU-FINANCE-SETTINGS-PATCH.",
    "scope": "Source: GATE-JOURNEYS-G-L repair (workflow wf_ba7b70e8-5be, scratchpad/tasks/wv93a6xng.output), probed on an isolated stack: a STAFF member with {bookings: read, crm: read} and no revenue scope PATCHed /finance/businesses/:id/settings accountantEmail to their own address (200, stored, the owner read it back), and GET .../finance/settings answered them the settings. POST .../finance/accountant-export/email uses Business.accountantEmail when no `to` is sent (the Reports page prefills it), and its saveRecipient:true also writes Business.accountantEmail under revenue read alone. So a member can redirect the business's books export to themselves. Tests first, real database. Rule to apply (the census rule SWEEP-P0-FOLLOWUP set for export destinations, WH3-1: binding a destination that receives the business's data needs read of that data beside settings admin): (1) writing accountantEmail, by PATCH settings or by saveRecipient, needs revenue read AND settings admin (reuse assertMayBindExport / CONNECTOR_EXPORT_READS if it fits, else the same check inline with the same refusal shape); the owner and SUPER_ADMIN pass as they do there; a refused saveRecipient refuses the whole request before anything is sent or written (403, plain message). (2) the other PATCH settings fields (accountingBasis, fiscalYearStartMonth, the four default account ids) need revenue write; the D-11 owner-only defaultTaxRate rule (assertTaxRateOwner) stays exactly as it is. (3) GET settings needs revenue read. Add each route to rest-scope-census (no allow-list growth). The web finance settings page and the Reports accountant box must show the refusal in plain words and never claim the address saved (web vitest). Characterise current callers first (grep the web and KEY adapters for the settings routes and saveRecipient) and keep every legitimate owner/admin/revenue-scoped flow working. Fixture prefix v71d_.",
    "definition_of_done": "RED on Postgres: the STAFF {bookings: read, crm: read} member's PATCH accountantEmail answers 200 and stores their address; a revenue:read-only member's saveRecipient stores it; GET settings answers them. GREEN: both writes are 403 and write nothing (Business.accountantEmail byte-identical; no email sent for the refused saveRecipient); GET settings is 403 without revenue read; the owner, an ADMIN with settings admin + revenue read, and a revenue-write STAFF member keep every legitimate write their scopes allow; defaultTaxRate owner-only unchanged (R0-09f suites green); rest-scope-census passes and fails when the scope is removed (mutation-checked); web shows the refusal in plain words."
+  },
+  {
+   "id": "TOF-CONTACT-AUDIT-CREATE",
+   "title": "A contact create writes its audit row in its own transaction (D-25), with the CP-FH-01 amendment ruled in D-204",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "C"
+   ],
+   "step": 3,
+   "lane": "server",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [
+    "TOF-CONTACT-AUDIT-AWAIT"
+   ],
+   "files": [
+    "apps/server/src/modules/crm/crm.service.ts (createContact)",
+    "apps/server/test/contacts-persistence.integration.test.ts [CP-FH-01]",
+    "scripts/proof-admission/manifests/contacts-persistence.json",
+    "apps/server/test/contact-audit-durable.integration.test.ts"
+   ],
+   "decisions": [
+    "D-25",
+    "D-204",
+    "D-176"
+   ],
+   "r0_impact": "AMEND (D-204): contacts-persistence [CP-FH-01] per the ruling; every other required case unchanged.",
+   "scope": "Land the create half of TOF-CONTACT-AUDIT-AWAIT. Start from the held commit 19cd7563 on local branch pkt/V1-TOF-CONTACT-AUDIT-AWAIT-held-create (it sits on the packet tip 2f774824; bring both into your branch by merge, not rebase). Then amend the required Release 0 case contacts-persistence [CP-FH-01] exactly as ruled in D-204: hold only team_activity_logs (the remaining fire-and-forget writer); the owner's create answers 201 with its audit row already committed (audits +1 at answer) while its team log is still in flight; settle() waits for the team log; the following STAFF (crm_edit none) POST answers 403 with every trace count unchanged. If the case title changes, change its text in scripts/proof-admission/manifests/contacts-persistence.json requiredCases and in any release0 index or coverage list that names it, in the same commit, and record the amendment where the repo records approved Release 0 updates (find the D-176 precedent: r0updates rows, manifest notes or release0-index). Do not touch any other required case.",
+   "definition_of_done": "contact-audit-durable passes 34/34 (the 4 create cases green); contacts-persistence passes in full with the amended CP-FH-01; node scripts/proof-admission/run-manifests.mjs --only contacts-persistence.json is SATISFIED at the exact head; release0-proof-coverage spec passes; proof:release0 MET (re-run load-only timeouts alone and say so); diff of every changed assertion listed in the RETURN."
+  },
+  {
+   "id": "FU-FINANCE-SETTINGS-PATCH",
+   "title": "Finance settings PATCH applies the D-205 rule; the accountant box learns in advance whether 'Remember' will be allowed",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "H",
+    "J"
+   ],
+   "step": 3,
+   "lane": "both",
+   "size": "M",
+   "priority": "P0",
+   "depends_on": [
+    "FU-FINANCE-SETTINGS-SCOPE"
+   ],
+   "files": [
+    "apps/server/src/modules/finance/finance.controller.ts and finance-settings.service.ts (PATCH settings, GET settings)",
+    "apps/server/src/core/connectors/connector-exports.ts (assertMaySetExportDestination)",
+    "apps/server/test/d11-finance-settings.integration.test.ts [D11F-F05, F06, F11]",
+    "scripts/proof-admission/manifests/d11-sibling-writes.json",
+    "apps/web/src/app/app/finance (settings page) and apps/web/src/components/finance/send-accountant-export-modal.tsx",
+    "docs/reconstruction/REST-SCOPE-CENSUS-2026-11-13.md (question 19)"
+   ],
+   "decisions": [
+    "D-11",
+    "D-205",
+    "D-176",
+    "WH3-1"
+   ],
+   "r0_impact": "AMEND (D-205): D11F-F05, D11F-F06, D11F-F11 actors become members holding the scopes the rule needs; add a refusal case for a STAFF member on role defaults. No other required case changes.",
+   "scope": "Close the books-export redirect FU-FINANCE-SETTINGS-SCOPE could not close. Per D-205: PATCH /finance/businesses/:id/settings needs settings admin plus revenue read to change accountantEmail (the same assertMaySetExportDestination check saveRecipient uses), and revenue write to change accountingBasis, fiscalYearStartMonth and the four default account ids; the D-11 owner-only defaultTaxRate rule (assertTaxRateOwner) is unchanged. A submission that carries an unchanged value is not a change (the settings page saves the whole form), as assertTaxRateOwner already handles for the rate. Amend the required cases D11F-F05, F06, F11 as ruled: their actors become members holding the needed scopes, and add a case where a STAFF member on role defaults is refused (403, nothing written). Also (C9): give GET settings a capability hint (for example mayChangeAccountantEmail: boolean for the caller) so the accountant box starts with 'Remember' unticked and hidden when the server would refuse it; the web settings page shows the refusal in plain words for the fields the member cannot change. Update the census row (question 19). Tests first, real database. Fixture prefix v71e_.",
+   "definition_of_done": "RED then GREEN on Postgres: STAFF on role defaults and a revenue-read-only member are refused 403 on PATCH accountantEmail with Business.accountantEmail byte-identical; a revenue:write member may change the basis/fiscal year/accounts; the owner and an ADMIN with settings admin + revenue read may change accountantEmail; defaultTaxRate rule unchanged; amended D11F cases green and d11-sibling-writes.json SATISFIED at exact head; web vitest for both screens; rest-scope-census passes; proof:release0 MET."
+  },
+  {
+   "id": "FU-IDENTITY-FINANCE-COLUMNS",
+   "title": "Business reads stop handing finance settings to members who may not read them",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "H",
+    "J"
+   ],
+   "step": 3,
+   "lane": "server",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [
+    "FU-FINANCE-SETTINGS-SCOPE"
+   ],
+   "files": [
+    "apps/server/src/modules/identity/identity.service.ts (sanitizeBusiness, getBusiness, listBusinesses)",
+    "web consumers of those fields"
+   ],
+   "decisions": [
+    "D-205",
+    "D-221"
+   ],
+   "r0_impact": "KEEP unless a required case pins these fields in the identity projections; then report a CONTRADICTION.",
+   "scope": "GET /identity/businesses and GET /identity/businesses/:businessId return accountantEmail, accountingBasis, fiscalYearStartMonth, defaultTaxRate and the four default account ids to every member, so the revenue-read gate on GET finance settings confines nothing. Drop accountantEmail and the default account ids from those projections for a member without revenue read (keep the fields a non-revenue screen needs, for example currency and the tax rate the invoice form reads; grep the web first and keep every legitimate reader working). Tests first. Fixture prefix v71f_.",
+   "definition_of_done": "RED: a STAFF member without revenue read reads accountantEmail from GET /identity/businesses/:id. GREEN: it is absent for them and present for the owner and a revenue reader; every web screen that read it still works (web vitest); no required case changes."
+  },
+  {
+   "id": "FU-CONTACT-AUDIT-RESIDUAL",
+   "title": "Every remaining contact write records its audit row durably (D-25), notes and tasks included (D-207)",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "C"
+   ],
+   "step": 3,
+   "lane": "server",
+   "size": "M",
+   "priority": "P1",
+   "depends_on": [
+    "TOF-CONTACT-AUDIT-CREATE"
+   ],
+   "files": [
+    "apps/server/src/modules/crm/crm.service.ts and the timeline/notes/tasks services",
+    "apps/server/src/modules/structure job-role-tool-families ESC-1 cases (amend per D-207)",
+    "contact sync services (Google, Outlook)"
+   ],
+   "decisions": [
+    "D-25",
+    "D-207"
+   ],
+   "r0_impact": "AMEND (D-207): job-role-tool-families ESC-1 wrapper pin for addNote/addTask to allow the audit row inside the note/task transaction. No other required case changes.",
+   "scope": "The D-25 writers TOF-CONTACT-AUDIT-AWAIT left: notes and tasks (addNote, addTask, note and task update/delete/complete) write their audit row in the same transaction (amend the ESC-1 wrapper pin exactly as D-207 rules and no further); undoContact, revertMerge, completeNextAction, snoozeNextAction gain a ContactAuditEntry; advanceToClientOnInvoicePaid and the Google/Outlook contact syncs write theirs durably (SYSTEM actor). Reuse ContactAuditService.write(opts, tx). Tests first, real database, failure injection as contact-audit-durable does. Fixture prefix v71g_.",
+   "definition_of_done": "For each writer: RED (no row, or a row lost on failure) then GREEN (one row, committed with the write; the write fails and writes nothing when the audit insert fails); amended ESC-1 case green; contacts suites green; proof:release0 MET."
+  },
+  {
+   "id": "FU-MERGE-CONTACTS-UNIQUE",
+   "title": "Merging two contacts no longer fails when the primary lacks the duplicate's email or phone",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "C"
+   ],
+   "step": 3,
+   "lane": "server",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [
+    "TOF-CONTACT-AUDIT-AWAIT"
+   ],
+   "files": [
+    "apps/server/src/modules/crm/crm.service.ts (mergeContacts)"
+   ],
+   "decisions": [
+    "D-221"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "Found by TOF-CONTACT-AUDIT-AWAIT: mergeContacts copies the duplicate's email (or phone) into the primary before it soft-deletes the duplicate, so contacts_business_id_email_normalized_live_key (and the phone key) refuses the update and the merge answers 500. Soft-delete (or clear the key on) the duplicate first, inside the same transaction, then copy. Tests first on the real route. Fixture prefix v71h_.",
+   "definition_of_done": "RED: merging a duplicate whose email the primary lacks answers 500 on Postgres. GREEN: 200, the primary carries the email, the duplicate is soft-deleted, both audit rows and the merge event written once; an existing-email conflict still refuses cleanly (409, nothing written)."
+  },
+  {
+   "id": "FU-MEMORY-COPIES-REWRITE",
+   "title": "An AI memory rewritten in place drops the semantic copies of its old value",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 3,
+   "lane": "server",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [
+    "W1F-MEMORY-COPIES"
+   ],
+   "files": [
+    "apps/server/src/modules/ai (AiMemoryService.upsert and the copy door W1F-MEMORY-COPIES added)"
+   ],
+   "decisions": [
+    "D-221"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "After W1F-MEMORY-COPIES a row's copies are hidden from readers when the value changes but stay at rest in ai_memory_embeddings. An upsert that changes the value deletes that row's copies (same door pattern) and re-embeds when the embedding path is on; a backfill command removes stale copies left before this change (dry-run by default; not run against production here). Fixture prefix v71i_.",
+   "definition_of_done": "RED: after an owner PUTs a new value, ai_memory_embeddings still holds the old text. GREEN: no copy of the old value remains; search and the memory block serve only the new value; the backfill dry-run lists stale copies and the apply removes them on a test database."
+  },
+  {
+   "id": "FU-KEY-EVENT-COLUMNS",
+   "title": "KEY's event writer uses the real business_events columns, and KEY's own observations are kept there (D-220)",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 3,
+   "lane": "server",
+   "size": "M",
+   "priority": "P2",
+   "depends_on": [
+    "W1F-KEY-EVIDENCE-WRITE"
+   ],
+   "files": [
+    "apps/server/src/modules/key-cortex (KeyCortexEventService and the claim writer)"
+   ],
+   "decisions": [
+    "D-220"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "KeyCortexEventService writes type/module/payload, which business_events does not have (event_type, subject_*, actor_*, metadata), so calibration, decision logs and conscious-process logs are never stored. Map its writes onto the real columns, business-scoped, with no PII or secrets in metadata; store KEY's cortex claims (capability tracking, pattern detection, action outcomes) there too, per D-220. Tests first. Fixture prefix v71j_.",
+   "definition_of_done": "RED: a calibration/decision write leaves no business_events row (or throws). GREEN: one row per event with the right columns and business id; another tenant never reads it; log redaction census passes."
+  },
+  {
+   "id": "FU-UNIT-GUARD-CI",
+   "title": "CI unit runs refuse non-loopback network calls; the remaining shared-process mock misses are fixed",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [],
+   "step": 3,
+   "lane": "server",
+   "size": "M",
+   "priority": "P2",
+   "depends_on": [
+    "FU-UNIT-MOCK-ISOLATION"
+   ],
+   "files": [
+    "apps/server/vitest.config.ts and the unit network guard FU-UNIT-MOCK-ISOLATION added",
+    "the specs it listed: keystore, key-connector, contact-enrichment, key-inbox-reply-sender, livekit, invoice-receipt.listener, token-crypto kdf-cache"
+   ],
+   "decisions": [
+    "D-221"
+   ],
+   "r0_impact": "KEEP: no required case changes; run test:ci and proof:release0 with the guard before and after.",
+   "scope": "Put the unit network guard on the CI unit config (test:ci and the proof runners) after a measured run shows which test/** suites reach unreachable provider hosts; make those suites use loopback stubs. Fix the remaining isolate:false mock misses with the reset-before-import pattern. Tests first: a meta-test that a real fetch to a public host fails under the guard. Fixture prefix v71k_.",
+   "definition_of_done": "Guard active in test:ci; meta-test RED without it, GREEN with it; test:ci and proof:release0 green with the guard; the listed specs pass under isolate:false and in isolation."
+  },
+  {
+   "id": "FU-OVERLAY-LAYER-TABLE",
+   "title": "Page-level overlays join the shell's layer table",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "A",
+    "F"
+   ],
+   "step": 3,
+   "lane": "web",
+   "size": "M",
+   "priority": "P2",
+   "depends_on": [
+    "SWP-LAYERS"
+   ],
+   "files": [
+    "apps/web/src/app/globals.css (layer table)",
+    "page components with z-40 backdrops and floating buttons, z-[100]/z-[101] modals (genome-chat-float, jarvis-voice, page-help-button, KeyFlowProperties, contact modals)"
+   ],
+   "decisions": [
+    "D-212",
+    "D-213",
+    "D-221"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "Move the page-level z-index literals SWP-LAYERS left onto its layer table so the header's menus sit above page floating buttons and page dialogs still cover the header. Measure live at 320, 375, 768, 1024 and 1440.",
+   "definition_of_done": "Web vitest/e2e sweep-overlays: no header menu is covered by a page floating button; page dialogs cover the header; no z-index literal outside the table in apps/web/src (a static guard spec)."
+  },
+  {
+   "id": "FU-PROVIDER-ERROR-HYGIENE",
+   "title": "Provider error bodies never reach responses; Business Profile insights answer an outage as 503",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "G"
+   ],
+   "step": 3,
+   "lane": "server",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [
+    "W11-PROVIDER-OUTAGE-CONNECT"
+   ],
+   "files": [
+    "token-refresh, Google Forms create and Microsoft Graph error paths",
+    "apps/server/src/modules/connect/google-business-profile.service.ts (getInsights)"
+   ],
+   "decisions": [
+    "D-221"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "Remove the provider response body from token-refresh, Forms-create and Graph error messages (they now reach 503 messages too); getInsights answers a Performance API outage as 503 provider_unavailable through providerFailure, a refusal stays 400. Tests first.",
+   "definition_of_done": "RED: an outage message carries the provider body; insights 503 answers 400. GREEN: messages carry no provider body; insights outage 503, refusal 400; provider-outage-mapping spec green."
+  },
+  {
+   "id": "FU-PHONE-COUNTRY-DUPLICATES",
+   "title": "Phone duplicates match only within the business's own country code (D-211), everywhere a contact is created",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "C"
+   ],
+   "step": 3,
+   "lane": "server",
+   "size": "M",
+   "priority": "P1",
+   "depends_on": [
+    "WA-E164-SERVER"
+   ],
+   "files": [
+    "the phone duplicate rule (SWP-CRM-SEARCH), EntityResolutionService, the connector contact syncs",
+    "a phone_normalized backfill script"
+   ],
+   "decisions": [
+    "D-211"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "After WA-E164-SERVER stores E.164 numbers: a number without a country code is read in the business's country only, so '+44 868 555 0101' no longer equals '868-555-0101' for a Trinidad and Tobago business and a 7-digit local number no longer matches behind another country's code. Move EntityResolutionService and the connector syncs onto the same E.164 key so a variant spelling is refused on create everywhere; add a backfill for phone_normalized on existing rows (dry-run by default; not run against production here). Fixture prefix v71l_.",
+   "definition_of_done": "RED cases for the two false matches and for a sync creating a variant duplicate; GREEN on Postgres; backfill dry-run lists rows, apply fixes them on a test database."
+  },
+  {
+   "id": "FU-COMMUNITY-LIKE-OWN-ACTION",
+   "title": "Liking a community post is the member's own action (D-216)",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [],
+   "step": 3,
+   "lane": "server",
+   "size": "S",
+   "priority": "P3",
+   "depends_on": [
+    "SWP-CENSUS-HIDDEN"
+   ],
+   "files": [
+    "apps/server community controller (POST /community/posts/:postId/like)",
+    "rest-scope-census"
+   ],
+   "decisions": [
+    "D-216"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "SWP-CENSUS-HIDDEN put the like behind content write in a named business, which refuses the web's call that names none. Per D-216 a like is the member's own action: exempt it from the module scope (still signed in, still only posts the member may see), and record the exemption in the census.",
+   "definition_of_done": "RED: the web's like call is refused. GREEN: a signed-in member likes a visible post once (idempotent), cannot like a post they cannot see, and the census records the exemption."
   }
  ],
  "moot": [
@@ -6450,6 +6786,23 @@
       "FU-FINANCE-SETTINGS-SCOPE"
      ],
      "note": "wave-2 follow-ups from wf_3679ac84-da1"
+    },
+    {
+     "packets": [
+      "TOF-CONTACT-AUDIT-CREATE",
+      "FU-FINANCE-SETTINGS-PATCH",
+      "FU-IDENTITY-FINANCE-COLUMNS",
+      "FU-CONTACT-AUDIT-RESIDUAL",
+      "FU-MERGE-CONTACTS-UNIQUE",
+      "FU-MEMORY-COPIES-REWRITE",
+      "FU-KEY-EVENT-COLUMNS",
+      "FU-UNIT-GUARD-CI",
+      "FU-OVERLAY-LAYER-TABLE",
+      "FU-PROVIDER-ERROR-HYGIENE",
+      "FU-PHONE-COUNTRY-DUPLICATES",
+      "FU-COMMUNITY-LIKE-OWN-ACTION"
+     ],
+     "note": "D-204..D-221 follow-ups (owner ruling 2026-11-16, 'all recommended and best')"
     }
    ],
    "notes": "Server chains run in parallel with the web shell. W11-OWNER-HELPER-REST waits for W11-OWNER-HELPER-D11 and W11-PROVIDER-OUTAGE-503 (gmail.service.ts). NAV-A1 is the only writer of nav-config.ts, disclosure-mode.ts, semantic-routes.ts and the redirect table until NAV-B-HIDE. web-key starts after NAV-A1."
@@ -7058,12 +7411,32 @@
   {
    "packet": "W1F-KEYCHAT-OWNSESSION",
    "r0_case": "key-cortex.controller.spec.ts (7 required cases, key-cortex-actor-binding.json)",
-   "change": "AMEND (owner ruling keychatsetup, pending): setup-only; no assertion, title or manifest change."
+   "change": "AMEND (owner ruling keychatsetup, approved D-195): setup-only; no assertion, title or manifest change."
   },
   {
    "packet": "W1F-STORE-STRIPE-R0",
    "r0_case": "MP-06d, MP-06g, MP-06h (mark-paid-convergence.json)",
-   "change": "AMEND (owner ruling storestripe, pending): the platform signature never settles a store order (D-138)."
+   "change": "AMEND (owner ruling storestripe, approved D-196): the platform signature never settles a store order (D-138)."
+  },
+  {
+   "packet": "TOF-CONTACT-AUDIT-CREATE",
+   "r0_case": "contacts-persistence [CP-FH-01] (contacts-persistence.json)",
+   "change": "AMEND (owner ruling D-204, approved): hold only team_activity_logs; the create answers 201 with its audit row committed; settle waits for the team log; the refused STAFF POST writes nothing."
+  },
+  {
+   "packet": "FU-FINANCE-SETTINGS-PATCH",
+   "r0_case": "D11F-F05, D11F-F06, D11F-F11 (d11-sibling-writes.json)",
+   "change": "AMEND (owner ruling D-205, approved): actors become members holding the scopes D-205 requires; add a STAFF-defaults refusal case."
+  },
+  {
+   "packet": "W11-PROVIDER-OUTAGE-503",
+   "r0_case": "R0-CMF4 x3 (optional-services-fail-visibly.json)",
+   "change": "AMEND (owner ruling D-206, approved retroactively; merged in #211 at c72069ac): the 'reject' arm expects 503 provider_unavailable for a Gmail 500; titles, manifest and every other assertion unchanged."
+  },
+  {
+   "packet": "FU-CONTACT-AUDIT-RESIDUAL",
+   "r0_case": "job-role-tool-families ESC-1 (addNote/addTask wrapper pin)",
+   "change": "AMEND (owner ruling D-207, approved): allow the audit row inside the note/task transaction; nothing else."
   }
  ],
  "ruling_sensitive": [
@@ -7570,6 +7943,51 @@
    "prefix": "v71d_",
    "owner": "(new suite chosen by the packet; register it)",
    "packet": "V1-71 (FU-FINANCE-SETTINGS-SCOPE)"
+  },
+  {
+   "prefix": "v71e_",
+   "owner": "(new suite chosen by the packet; register it)",
+   "packet": "V1-71 (FU-FINANCE-SETTINGS-PATCH)"
+  },
+  {
+   "prefix": "v71f_",
+   "owner": "(new suite chosen by the packet; register it)",
+   "packet": "V1-71 (FU-IDENTITY-FINANCE-COLUMNS)"
+  },
+  {
+   "prefix": "v71g_",
+   "owner": "(new suite chosen by the packet; register it)",
+   "packet": "V1-71 (FU-CONTACT-AUDIT-RESIDUAL)"
+  },
+  {
+   "prefix": "v71h_",
+   "owner": "(new suite chosen by the packet; register it)",
+   "packet": "V1-71 (FU-MERGE-CONTACTS-UNIQUE)"
+  },
+  {
+   "prefix": "v71i_",
+   "owner": "(new suite chosen by the packet; register it)",
+   "packet": "V1-71 (FU-MEMORY-COPIES-REWRITE)"
+  },
+  {
+   "prefix": "v71j_",
+   "owner": "(new suite chosen by the packet; register it)",
+   "packet": "V1-71 (FU-KEY-EVENT-COLUMNS)"
+  },
+  {
+   "prefix": "v71k_",
+   "owner": "(new suite chosen by the packet; register it)",
+   "packet": "V1-71 (FU-UNIT-GUARD-CI)"
+  },
+  {
+   "prefix": "v71l_",
+   "owner": "(new suite chosen by the packet; register it)",
+   "packet": "V1-71 (FU-PHONE-COUNTRY-DUPLICATES)"
+  },
+  {
+   "prefix": "v63y_",
+   "owner": "apps/server/test/provider-outage-connect.integration.test.ts",
+   "packet": "V1-63 (W11-PROVIDER-OUTAGE-CONNECT)"
   }
  ],
  "validation": {

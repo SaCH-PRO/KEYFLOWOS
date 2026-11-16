@@ -1208,8 +1208,28 @@ Ruled by the owner on 2026-11-13: "All 41 recommended please", and every decisio
 | D-201 | Cleaning up KEY memories that were shared too widely: Run the one-time command for each business right after the deploy. (`memorycleanup`) | S0-SEC-LANE-DEPLOY |
 | D-202 | A team member using KEY by WhatsApp or SMS: Give them their own history too (only their own). (`bridgememory`) | W1F-PERCEPTION-MODULE-SCOPE |
 | D-203 | What the customer support assistant (Chatwoot) can see: Only the conversation in front of it. (`supportdesk`) | W1F-PERCEPTION-MODULE-SCOPE |
+| D-204 | A new contact's audit record (Release 0 case CP-FH-01): Approve the amendment. The create writes its audit row in its own transaction and answers with it already there; a refused request still writes nothing. (`contactauditcreate`) | TOF-CONTACT-AUDIT-AWAIT, TOF-CONTACT-AUDIT-CREATE |
+| D-205 | Who may change the finance settings (Release 0 cases D11F-F05, F06, F11): Approve the amendment. The accountant export address needs settings admin plus money read; the accounting basis, fiscal year and default accounts need money write; the tax rate stays owner-only. (`financesettings`) | FU-FINANCE-SETTINGS-SCOPE, FU-FINANCE-SETTINGS-PATCH |
+| D-206 | A Gmail outage on a send (Release 0 case R0-CMF4, three cases): Approve, retroactively, the change merged in #211: a send Gmail answers with a server error is refused as 503 provider_unavailable, and the send still changes nothing. (`gmailoutage`) | W11-PROVIDER-OUTAGE-503 |
+| D-207 | Note and task audit records (Release 0 case job-role-tool-families ESC-1): Approve the amendment, in a follow-up: notes and tasks write their audit row in the same transaction. (`noteaudit`) | FU-CONTACT-AUDIT-RESIDUAL |
+| D-208 | Who gets KEY's Deep think: The owner only (an OWNER membership). Admins, and a platform admin who is not an owner, get the normal chat with the figures their access covers. (`deepthink`) | W1F-KEY-EVIDENCE-WRITE |
+| D-209 | Deep think for an owner with an explicit permission map: The map must cover every module the owner role reads by default. (`deepthinkmap`) | W1F-KEY-EVIDENCE-WRITE |
+| D-210 | The duplicate check on a contact the member cannot open: Treat it as new, as the list and detail screens do. (`dupvisibility`) | SWP-CRM-SEARCH |
+| D-211 | Phone duplicates: Match only within the business's own country code. (`phonecountry`) | FU-PHONE-COUNTRY-DUPLICATES |
+| D-212 | The header's Ask KEY button: Opens the KEY chat drawer. (`askkeydrawer`) | SWP-LAYERS |
+| D-213 | Toast messages: Show above the KEY drawer and dialogs. (`toastlayer`) | SWP-LAYERS |
+| D-214 | The header on the narrowest phones: Below 360px it hides the logo so every control fits. (`narrowheader`) | SWP-LAYERS |
+| D-215 | Access for the hidden modules: Connect and Shopify need settings; Gamification needs analytics; Receipts need revenue; Documents need operations (staff lose document edits in Settings › Business profile); Task assignment needs team. (`hiddenscopes`) | SWP-CENSUS-HIDDEN |
+| D-216 | Liking a community post: The member's own action, not a content write. (`communitylike`) | FU-COMMUNITY-LIKE-OWN-ACTION |
+| D-217 | Contact syncs and form backfills: The connector rule (D-181) covers the Google and Outlook contact syncs, the Google Forms backfill and process-new, and disconnecting a contact source: settings admin. (`syncauth`) | SWP-CENSUS-HIDDEN |
+| D-218 | Who sets "what you sell": The owner only; Advanced CRM and hub depth can also be changed by an admin with settings admin (the reading of D-150). (`sellsowner`) | BIZ-SETTINGS-SERVER, BIZ-SETTINGS-ADMIN-DOOR |
+| D-219 | KEY tools for the hidden modules: Leave them to KEY-TOOL-ALLOWLIST and KEY-TOOL-DOMAIN-HIDE; no Release 0 amendment for the census. (`hiddenkeytools`) | SWP-CENSUS-HIDDEN, KEY-TOOL-ALLOWLIST, KEY-TOOL-DOMAIN-HIDE |
+| D-220 | Where KEY's own observations are kept: In business_events, through the corrected KEY event writer. (`cortexclaims`) | FU-KEY-EVENT-COLUMNS |
+| D-221 | The follow-ups the reviews found: Add all of them to the plan. (`followups`) | FU-IDENTITY-FINANCE-COLUMNS, FU-CONTACT-AUDIT-RESIDUAL, FU-MERGE-CONTACTS-UNIQUE, FU-MEMORY-COPIES-REWRITE, FU-KEY-EVENT-COLUMNS, FU-UNIT-GUARD-CI, FU-OVERLAY-LAYER-TABLE, FU-PROVIDER-ERROR-HYGIENE and 4 more |
 
 D-191 to D-203 were ruled on 2026-11-16 ("All recommended"): the four Team-permission questions from the SWEEP-P0 round-3 rechecks and the nine questions from v1 wave 1. D-195 and D-196 approve the Release 0 amendments recorded for W1F-KEYCHAT-OWNSESSION and W1F-STORE-STRIPE-R0 in the plan's r0_register.
+
+D-204 to D-221 were ruled on 2026-11-16 ("all recommended and best"): the questions from v1 wave 2 (#211) and wave 2b. D-204, D-205, D-206 and D-207 approve Release 0 amendments recorded in the plan's r0_register; D-206 is retroactive, because its change merged in #211 before it was ruled. D-221 adds the reviews' follow-up packets to the plan (V1-PLAN-RECUT.json).
 
 ---
 
