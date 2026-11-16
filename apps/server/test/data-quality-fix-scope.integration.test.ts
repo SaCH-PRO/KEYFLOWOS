@@ -102,6 +102,9 @@ const C = {
   sEmail: `${P}c_sEmail`,
   // the other actions, applied as recommended
   rEmail: `${P}c_rEmail`,
+  rTaken: `${P}c_rTaken`,     // invalid_email whose recommended correction another contact holds
+  rHolder: `${P}c_rHolder`,
+  rBad: `${P}c_rBad`,         // invalid_email with no suggestion (edit_email)
   rPhone: `${P}c_rPhone`,
   vStale: `${P}c_vStale`,
   // visibility and edit scope
@@ -115,6 +118,7 @@ const C = {
 const issueOf = (contactId: string) => `${contactId}_i`;
 
 const OTHER_EMAIL = 'mina.holder@v71n.test';
+const CORRECTED_HELD = 'tomas@gmail.com';
 const HELD_PHONE_E164 = '+18687123601';
 
 let db: any;
@@ -373,6 +377,17 @@ beforeAll(async () => {
     kind: 'invalid_email', severity: 'high', field: 'email', message: 'Email address is not in a valid format.',
     recommendedFix: { action: 'replace_email', value: 'rita@gmail.com' },
   });
+  await contact(C.rHolder, { firstName: 'Tomas', email: CORRECTED_HELD, emailNormalized: CORRECTED_HELD });
+  await contact(C.rTaken, { firstName: 'Tom', email: 'tomas@gmial.com', emailNormalized: 'tomas@gmial.com' });
+  await issue(C.rTaken, {
+    kind: 'invalid_email', severity: 'high', field: 'email', message: 'Email address is not in a valid format.',
+    recommendedFix: { action: 'replace_email', value: CORRECTED_HELD },
+  });
+  await contact(C.rBad, { firstName: 'Ron', email: 'ron@nowhere', emailNormalized: 'ron@nowhere' });
+  await issue(C.rBad, {
+    kind: 'invalid_email', severity: 'high', field: 'email', message: 'Email address is not in a valid format.',
+    recommendedFix: { action: 'edit_email' },
+  });
   await contact(C.rPhone, { firstName: 'Ravi', phone: '868-712-3610', phoneNormalized: '8687123610' });
   await issue(C.rPhone, {
     kind: 'invalid_phone', severity: 'low', field: 'phone', message: 'Phone number can be reformatted to E.164.',
@@ -435,7 +450,7 @@ describe('fill_fields writes only the fields the issue fixes (mass assignment)',
 
   it('RED-BEFORE: an email another live contact holds answers 409 contact_email_taken (the PATCH identity rule), not a database error; nothing is written', async () => {
     const before = await snapshot(C.eTaken);
-    const res = await apply(ID.staffAll, issueOf(C.eTaken), { action: 'fill_fields', values: { email: ` ${OTHER_EMAIL.toUpperCase()} ` } });
+    const res = await apply(ID.staffAll, issueOf(C.eTaken), { action: 'fill_fields', values: { email: OTHER_EMAIL.toUpperCase() } });
     expect(res.status, JSON.stringify(res.body).slice(0, 400)).toBe(409);
     expect(res.body.code).toBe('contact_email_taken');
     expect(res.body.details).toEqual({ existingContactId: C.eHolder });
@@ -449,6 +464,22 @@ describe('fill_fields writes only the fields the issue fixes (mass assignment)',
     expect(res.body.code).toBe('contact_phone_taken');
     expect(res.body.details).toEqual({ existingContactId: C.pHolder });
     expect(await snapshot(C.pTaken)).toEqual(before);
+  });
+
+  it('RED-BEFORE: the recommended email correction, when another live contact holds it, answers 409 contact_email_taken (not a database error); nothing is written and the issue stays open', async () => {
+    const before = await snapshot(C.rTaken);
+    const res = await apply(ID.owner, issueOf(C.rTaken));
+    expect(res.status, JSON.stringify(res.body).slice(0, 400)).toBe(409);
+    expect(res.body.code).toBe('contact_email_taken');
+    expect(res.body.details).toEqual({ existingContactId: C.rHolder });
+    expect(await snapshot(C.rTaken)).toEqual(before);
+  });
+
+  it("RED-BEFORE: an email correction typed by the member that is not an email ('nope') is refused 400 as the contact PATCH DTO refuses it; nothing is written", async () => {
+    const before = await snapshot(C.rBad);
+    const res = await apply(ID.staffAll, issueOf(C.rBad), { action: 'replace_email', value: 'nope' });
+    expectBadRequest(res);
+    expect(await snapshot(C.rBad)).toEqual(before);
   });
 
   it("RED-BEFORE: a fill on a stale-data issue (whose fix writes no field) is refused 400; the contact keeps its company", async () => {
