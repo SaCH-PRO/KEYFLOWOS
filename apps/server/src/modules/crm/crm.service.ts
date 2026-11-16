@@ -297,19 +297,18 @@ export class CrmService {
    * transaction, the contact write's own, and the caller awaits it: when the
    * entry cannot be written the error propagates, the transaction rolls back
    * with the contact rows and their ContactEvents, and the request fails. The
-   * contact writes that pass it: updateContact, softDeleteContact,
-   * bulkUpdateContacts, bulkDeleteContacts, reassignContacts, mergeContacts
-   * and the import merge (mergeContactDetails). Each writes its entries right
+   * contact writes that pass it: createContact, updateContact,
+   * softDeleteContact, bulkUpdateContacts, bulkDeleteContacts,
+   * reassignContacts, mergeContacts and the import merge
+   * (mergeContactDetails). Each writes its entries right
    * after the contact rows and before any ContactEvent, so a refused entry
    * also leaves no Activity feed copy or crm.contact_event.logged
    * announcement behind (CrmTimelineService.logEvent makes both as it writes
    * the event, inside the transaction or not).
    *
    * Without `tx` it stays fire-and-forget, never blocking or failing the write
-   * it reports (the returned promise is already settled): createContact (HELD:
-   * the required Release 0 case contacts-persistence [CP-FH-01] pins a create
-   * that answers before its entry lands; see createContact) and the note and
-   * task writes (the R0 job-role-tool-families ESC-1 wrapper pin keeps
+   * it reports (the returned promise is already settled): the note and task
+   * writes (the R0 job-role-tool-families ESC-1 wrapper pin keeps
    * addNote/addTask to `this.timeline.addNote(input)` plus this helper, so
    * their entry cannot join the note's transaction there).
    */
@@ -823,6 +822,15 @@ export class CrmService {
           archivedAt: this.parseDateOrNull(input.archivedAt),
         },
       });
+      // D-25 (TOF-CONTACT-AUDIT-AWAIT): the 'created' entry commits with the
+      // contact or neither does, before its ContactEvent.
+      await this.auditContact({
+        businessId: input.businessId,
+        contactId: created.id,
+        action: 'created',
+        after: created,
+        ctx: _audit,
+      }, tx);
 
       // W3-V1-55c (CR-V155b-1, D-08): the feed's one row for this contact is
       // ActivityEventListener's 'New contact', from the contact.created emit
@@ -849,20 +857,6 @@ export class CrmService {
         ...this.eventActor(_audit),
       };
       this.events.emit('contact.created', payload);
-      // Still fire-and-forget, the one contact write left so (HELD,
-      // TOF-CONTACT-AUDIT-AWAIT): the required Release 0 case
-      // contacts-persistence [CP-FH-01] pins a create that answers while its
-      // audit entry still waits on a held contact_audit_entries. Writing this
-      // entry in the transaction above (D-25) needs the owner's r0updates
-      // ruling amending that case; until then a refused 'created' entry is
-      // logged by ContactAuditService and the contact stands.
-      void this.auditContact({
-        businessId: input.businessId,
-        contactId: contact.id,
-        action: 'created',
-        after: contact,
-        ctx: _audit,
-      });
     }
     if (contact && input.customFieldValues && Object.keys(input.customFieldValues).length > 0) {
       await this.customFieldValues.setValuesForContact(contact.id, input.customFieldValues).catch((err) => {
