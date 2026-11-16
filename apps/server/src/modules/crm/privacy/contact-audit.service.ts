@@ -18,15 +18,13 @@ import { PrismaService } from '../../../core/prisma/prisma.service';
  *   - write(opts, tx): the entry is part of the caller's transaction and a
  *     failure throws, so the contact write it audits rolls back with it. A
  *     failed INSERT aborts a Postgres transaction anyway: it cannot be
- *     swallowed there. CrmService's contact writes pass it: updateContact,
- *     softDeleteContact, bulkUpdateContacts, bulkDeleteContacts,
+ *     swallowed there. CrmService's contact writes pass it: createContact,
+ *     updateContact, softDeleteContact, bulkUpdateContacts, bulkDeleteContacts,
  *     reassignContacts, mergeContacts and the import merge.
  *   - write(opts) with no transaction: best-effort. A failure is logged and
  *     swallowed, never breaking the operation it reports (the GDPR purge's
  *     steps, the contact syncs' own entries, the paid-invoice lifecycle move,
- *     and CrmService's createContact, held until the owner rules on the
- *     Release 0 case contacts-persistence [CP-FH-01], and its note and task
- *     writes).
+ *     and CrmService's note and task writes).
  * writeOrThrow(opts, tx?) is the throwing write itself, for a caller that has
  * no transaction and must fail with its audit row.
  */
