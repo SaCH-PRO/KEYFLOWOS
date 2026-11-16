@@ -274,7 +274,7 @@ for (const [project, viewport] of Object.entries(JOURNEY_VIEWPORTS)) {
       await expect(page.getByRole("heading", { name: /^KEY$/ }).filter({ visible: true }), "KEY's chat drawer").toBeVisible();
     });
 
-    test("the header fits the screen: every header control is on screen and topmost, and a tap on the Notifications bell opens it", async ({ page }) => {
+    test("the header fits the screen: every header control is on screen and topmost, and a tap on the Notifications bell opens it", async ({ page }, testInfo) => {
       test.setTimeout(3 * 60_000);
       await page.goto("/app/command-center");
       await settle(page);
@@ -284,6 +284,8 @@ for (const [project, viewport] of Object.entries(JOURNEY_VIEWPORTS)) {
         await page.setViewportSize({ width, height: viewport.height });
         await page.waitForTimeout(500);
         const label = `${width}x${viewport.height}`;
+        // KEY's drawer can open by itself after the first check (SWP-KEY-SHELL-SMOKE's defect, recorded, not this file's).
+        if (await closeKeyDrawerIfOpen(page)) testInfo.annotations.push({ type: "key-drawer", description: `opened by itself before the ${label} measure` });
         findings.push(...(await headerFitFindings(page, label)));
 
         // A tap where the bell is (page.mouse, no scrolling) opens the notifications panel; a second tap there closes it.
@@ -315,6 +317,7 @@ for (const [project, viewport] of Object.entries(JOURNEY_VIEWPORTS)) {
       await page.getByRole("button", { name: "Settings", exact: true }).filter({ visible: true }).first().click();
       const dialogTitle = page.getByRole("heading", { name: "Data quality settings" });
       await expect(dialogTitle, "the data-quality settings dialog").toBeVisible();
+      await closeKeyDrawerIfOpen(page); // one that opened by itself would cover both (SWP-KEY-SHELL-SMOKE's defect)
 
       const newButton = page.locator("main header").getByRole("button", { name: /^new\b/i }).filter({ visible: true }).first();
       const box = await newButton.boundingBox();
