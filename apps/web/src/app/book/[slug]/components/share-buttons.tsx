@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Share2, Copy, Check, MessageCircle, X } from "lucide-react";
+import { buildWhatsAppLink } from "@/lib/whatsapp";
 
 type ShareButtonsProps = {
   url: string;
@@ -18,7 +19,7 @@ export function ShareButtons({ url, title, description, primaryColor = "#F97316"
   const _encodedTitle = encodeURIComponent(title);
   const encodedDesc = encodeURIComponent(description || title);
 
-  const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(`${title} - ${description || ""}\n${url}`)}`;
+  const whatsappUrl = buildWhatsAppLink({ text: `${title} - ${description || ""}\n`, link: url });
   const facebookUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`;
   const twitterUrl = `https://twitter.com/intent/tweet?text=${encodedDesc}&url=${encodedUrl}`;
 

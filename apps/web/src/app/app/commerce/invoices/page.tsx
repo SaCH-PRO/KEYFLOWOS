@@ -44,6 +44,7 @@ import { apiDelete } from "@/lib/api";
 import { invoiceBalanceOfStoredRows, invoicePaidPercent } from "@keyflow/shared";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { useCompose } from "@/components/email/compose-context";
+import { buildWhatsAppLink, getContactPhone, ownBusinessCountry } from "@/lib/whatsapp";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { formatAmount, getDaysUntilDue } from "../utils/commerce-utils";
 import { INVOICE_STATUS_FILTERS, BILLING_SORT_OPTIONS, BillingSortKey } from "../components/commerce-types";
@@ -59,7 +60,7 @@ export default function InvoicesHubPage() {
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [businessCurrency, _setBusinessCurrency] = useState<string>("TTD");
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [_contacts, setContacts] = useState<Contact[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [_products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [gmailStatus, setGmailStatus] = useState<{ connected: boolean; email: string | null } | null>(null);
@@ -232,6 +233,12 @@ export default function InvoicesHubPage() {
     return null;
   };
 
+  // The customer's own number (the operator read serves no phone): from the business's contacts.
+  const shareWhatsApp = (inv: Invoice, url: string) => {
+    const customer = contacts.find((c) => c.id === inv.contactId);
+    window.open(buildWhatsAppLink({ to: customer ? getContactPhone(customer) : null, text: "Your invoice:", link: url, country: ownBusinessCountry() }), "_blank");
+  };
+
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="max-w-6xl mx-auto pb-12">
       {/* Header */}
@@ -366,7 +373,7 @@ export default function InvoicesHubPage() {
                                 <DropdownItem icon={CheckCircle2} label="Mark paid" onClick={() => handleMarkPaid(inv.id)} show={inv.status === "DRAFT" || inv.status === "SENT"} loading={actionLoading[inv.id] === "paid"} />
                                 <DropdownItem icon={Receipt} label="Resend receipt" onClick={() => resendInvoiceReceipt(businessId!, inv.id, {}).then(r => r.data?.success ? toast.success("Resent") : toast.error(r.error ?? "Failed"))} show={!!(inv.status === "PAID" && gmailStatus?.connected)} />
                                 <DropdownItem icon={Files} label="Duplicate" onClick={() => handleDuplicate(inv)} show />
-                                <DropdownItem icon={MessageCircle} label="Share WhatsApp" onClick={() => buildPublicUrl(inv).then(url => { if (url) window.open(`https://wa.me/?text=${encodeURIComponent(`Your invoice: ${url}`)}`, "_blank"); })} show />
+                                <DropdownItem icon={MessageCircle} label="Share WhatsApp" onClick={() => buildPublicUrl(inv).then(url => { if (url) shareWhatsApp(inv, url); })} show />
                                 <DropdownItem icon={Ban} label="Void" onClick={() => handleVoid(inv.id)} show={inv.status !== "VOID" && inv.status !== "PAID"} loading={actionLoading[inv.id] === "void"} />
                                 <div className="border-t border-border my-1" />
                                 <DropdownItem icon={Trash2} label="Delete" destructive onClick={() => handleDelete(inv.id)} show={inv.status === "DRAFT" || inv.status === "VOID"} />

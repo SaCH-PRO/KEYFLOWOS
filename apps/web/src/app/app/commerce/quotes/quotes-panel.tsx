@@ -80,6 +80,7 @@ import { useCompose } from "@/components/email/compose-context";
 import { quoteConvertDefaults, quoteConvertRequest, type QuoteConvertForm } from "../../finance/components/quote-convert-modal";
 import { newPaymentAttemptKey } from "../../finance/components/payment-record-modal";
 import { ArrowRightLeft, Eye } from "lucide-react";
+import { buildWhatsAppLink, getContactPhone, ownBusinessCountry } from "@/lib/whatsapp";
 
 type QuoteBulkAction = "send" | "reject" | "delete";
 /** One row the bulk route left as it is (V1-50 / V1-QUOTE-CHAIN-finish bulk contract). */
@@ -716,7 +717,13 @@ export default function QuotesPanel({
         description: "Sharing the customer link needs revenue write access.",
       });
     }
-    window.open(`https://wa.me/?text=${encodeURIComponent(shareMessage(quote, url))}`, "_blank", "noopener,noreferrer");
+    // The customer's own number (the operator read serves no phone): from the business's contacts.
+    const customer = contacts.find((c) => c.id === quote.contactId);
+    window.open(
+      buildWhatsAppLink({ to: customer ? getContactPhone(customer) : null, text: shareMessage(quote, url), country: ownBusinessCountry() }),
+      "_blank",
+      "noopener,noreferrer",
+    );
   }
 
   async function handleConvert() {

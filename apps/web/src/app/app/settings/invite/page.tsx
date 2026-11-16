@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Gift, Copy, CheckCircle2, Users, Link2, Share2, Loader2 } from "lucide-react";
 import { API_BASE, getAuthHeaders } from "@/lib/api";
+import { buildWhatsAppLink } from "@/lib/whatsapp";
 
 interface ReferralData {
   code: string | null;
@@ -46,8 +47,7 @@ export default function InvitePage() {
 
   const handleShare = useCallback(() => {
     if (!data?.link) return;
-    const text = `I'm using KeyFlowOS to run my business on autopilot. Join me! ${data.link}`;
-    const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    const waUrl = buildWhatsAppLink({ text: "I'm using KeyFlowOS to run my business on autopilot. Join me!", link: data.link });
     window.open(waUrl, "_blank");
   }, [data?.link]);
 

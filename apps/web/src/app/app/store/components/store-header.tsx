@@ -15,6 +15,7 @@ import { useState, useRef, useEffect } from "react";
 import { Surface } from "@/components/ui-v2/surface";
 import { Button } from "@/components/ui-v2/button";
 import { Badge } from "@/components/ui-v2/badge";
+import { buildWhatsAppLink } from "@/lib/whatsapp";
 
 type Props = {
   storeEnabled: boolean;
@@ -47,8 +48,7 @@ export function StoreHeader({ storeEnabled, publicUrl, onToggleEnabled }: Props)
 
   function handleWhatsAppShare() {
     if (!publicUrl) return;
-    const text = encodeURIComponent(`Check out our store: ${publicUrl}`);
-    window.open(`https://wa.me/?text=${text}`, "_blank");
+    window.open(buildWhatsAppLink({ text: "Check out our store:", link: publicUrl }), "_blank");
     setShareOpen(false);
   }
 

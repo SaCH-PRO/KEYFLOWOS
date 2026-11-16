@@ -20,6 +20,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { StoreAnalytics } from "@/lib/client";
+import { buildWhatsAppLink } from "@/lib/whatsapp";
 
 interface StoreCommandHeroProps {
   storeEnabled: boolean;
@@ -221,10 +222,7 @@ export function StoreCommandHero({
 
   function handleWhatsApp() {
     if (!publicUrl) return;
-    const text = encodeURIComponent(
-      `Check out ${businessName ? businessName + "'s" : "our"} store! Browse & book: ${publicUrl}`
-    );
-    window.open(`https://wa.me/?text=${text}`, "_blank");
+    window.open(buildWhatsAppLink({ text: `Check out ${businessName ? businessName + "'s" : "our"} store! Browse & book:`, link: publicUrl }), "_blank");
   }
 
   const funnelData = useMemo(() => {

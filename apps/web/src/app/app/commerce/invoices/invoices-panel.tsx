@@ -88,6 +88,7 @@ import { DunningRulesPanel } from "../components/dunning-rules";
 
 import { formatAmount, getDaysUntilDue } from "../utils/commerce-utils";
 import { useCommerceSearch } from "../hooks/use-commerce-search";
+import { buildWhatsAppLink, getContactPhone, ownBusinessCountry } from "@/lib/whatsapp";
 import type { ReactNode } from "react";
 
 /**
@@ -429,8 +430,10 @@ export default function InvoicesPanel({
     const contactName = inv.contact
       ? `${inv.contact.firstName ?? ""} ${inv.contact.lastName ?? ""}`.trim()
       : "there";
-    const msg = `Hi ${contactName}, here is your invoice ${inv.invoiceNumber ?? ""} for ${formatAmount(inv.total, inv.currency)}. You can view and pay it here: ${link}`;
-    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
+    const msg = `Hi ${contactName}, here is your invoice ${inv.invoiceNumber ?? ""} for ${formatAmount(inv.total, inv.currency)}. You can view and pay it here:`;
+    // The customer's own number (the operator read serves no phone): from the business's contacts.
+    const customer = contacts.find((c) => c.id === inv.contactId);
+    window.open(buildWhatsAppLink({ to: customer ? getContactPhone(customer) : null, text: msg, link, country: ownBusinessCountry() }), "_blank");
   }
 
   async function handleResendReceipt(inv: Invoice) {

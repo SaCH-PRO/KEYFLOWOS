@@ -40,6 +40,7 @@ import { DetailAIActions } from "./detail-parts/detail-ai-actions";
 import { DetailLineItems } from "./detail-parts/detail-line-items";
 import { DetailNotes } from "./detail-parts/detail-notes";
 import { DetailViewPrint } from "./detail-parts/detail-view-print";
+import { buildWhatsAppLink, ownBusinessCountry } from "@/lib/whatsapp";
 
 export interface BusinessDataForPreview {
   name: string;
@@ -483,7 +484,7 @@ export function BillingDetailModal({
                     <>
                       <div className="w-px h-5 bg-border/30" />
                       <a
-                        href={`https://wa.me/${contact.phone.replace(/\D/g, "")}`}
+                        href={buildWhatsAppLink({ to: contact.phone, country: ownBusinessCountry() })}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex-1 flex items-center justify-center gap-1.5 py-2.5 hover:bg-emerald-500/10 transition-colors text-xs text-emerald-400"

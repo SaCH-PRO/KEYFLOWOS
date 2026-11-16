@@ -6,6 +6,7 @@ import type { CatalogItem } from "./types";
 import { ReviewSection } from "./review-display";
 import { ShareButtons } from "./share-buttons";
 import Image from "next/image";
+import { buildWhatsAppLink } from "@/lib/whatsapp";
 
 type Props = {
   item: CatalogItem;
@@ -67,10 +68,8 @@ export function ItemDetailModal({
   const badgeKey = badges?.[item.id];
   const badge = badgeKey ? badgeConfig[badgeKey] : null;
 
-  const cleanPhone = businessPhone?.replace(/[^0-9+]/g, "").replace(/^\+/, "") || "";
-  const waPhone = cleanPhone.startsWith("1") || cleanPhone.length > 10 ? cleanPhone : `1868${cleanPhone}`;
   const waLink = businessPhone
-    ? `https://wa.me/${waPhone}?text=${encodeURIComponent(`Hi, I'm interested in ${item.name}`)}`
+    ? buildWhatsAppLink({ to: businessPhone, text: `Hi, I'm interested in ${item.name}` })
     : null;
 
   return (
