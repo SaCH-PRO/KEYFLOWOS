@@ -986,6 +986,11 @@
       "prefix": "v63i_",
       "owner": "apps/server/test/crm-search-tags-phone.integration.test.ts",
       "packet": "V1-63 (SWP-CRM-SEARCH)"
+    },
+    {
+      "prefix": "v63j_",
+      "owner": "apps/server/test/contact-audit-durable.integration.test.ts",
+      "packet": "V1-63 (TOF-CONTACT-AUDIT-AWAIT)"
     }
   ],
   "pendingRenames": [],
