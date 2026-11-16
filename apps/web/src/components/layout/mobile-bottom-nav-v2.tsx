@@ -99,7 +99,7 @@ export function MobileBottomNavV2({
     <>
       <nav
         aria-label="Mobile navigation"
-        className="md:hidden fixed bottom-4 left-1/2 -translate-x-1/2 z-50"
+        className="md:hidden fixed bottom-4 left-1/2 -translate-x-1/2 z-[var(--kf-z-chrome)]"
         style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
       >
         <motion.div

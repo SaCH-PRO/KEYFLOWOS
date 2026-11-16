@@ -57,7 +57,7 @@ export function SideSheet({
     <AnimatePresence>
       {open && (
         <div
-          className={isMobile ? "fixed inset-0 z-50 flex items-end" : "fixed inset-0 z-50 flex justify-end"}
+          className={isMobile ? "fixed inset-0 z-[var(--kf-z-drawer)] flex items-end" : "fixed inset-0 z-[var(--kf-z-drawer)] flex justify-end"}
           role="dialog"
           aria-modal="true"
           aria-labelledby="side-sheet-title"

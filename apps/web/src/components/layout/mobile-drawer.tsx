@@ -169,7 +169,7 @@ export function MobileDrawer({
   const closeDrawer = () => setMobileDrawerOpen(false);
 
   return (
-    <div className="md:hidden fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="Navigation menu">
+    <div className="md:hidden fixed inset-0 z-[var(--kf-z-modal)]" role="dialog" aria-modal="true" aria-label="Navigation menu">
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}

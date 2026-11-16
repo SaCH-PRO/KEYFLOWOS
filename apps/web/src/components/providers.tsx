@@ -23,6 +23,9 @@ export function Providers({ children }: { children: ReactNode }) {
         <Toaster
           theme="dark"
           position="top-right"
+          // The toast layer of app/globals.css's table (SWP-LAYERS): over every
+          // sheet, drawer, dialog and KEY's drawer, so feedback is always seen.
+          style={{ zIndex: "var(--kf-z-toast)" }}
           toastOptions={{
             style: {
               background: "rgba(15, 23, 42, 0.95)",
