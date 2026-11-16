@@ -1188,7 +1188,7 @@ for (const pipeline of PIPELINES) {
     };
 
     beforeAll(async () => {
-      await db.user.create({ data: { id: staff, email: `${staff}@test.local`, role: 'USER' } });
+      await db.user.create({ data: { id: staff, email: `${P}kcsb_staff_${pipeline}@test.local`, role: 'USER' } });
       await db.membership.create({ data: { id: `${P}m_kcsb_staff_${pipeline}`, userId: staff, businessId: ID.bizA, role: 'STAFF' } });
     });
 
