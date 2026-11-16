@@ -144,8 +144,9 @@ function requestTargets(args) {
   }
   const targets = [];
   // A unix socket stays local; a custom lookup decides the address at the socket (judged there).
+  // `||`, as node reads them: an empty hostname is absent and the request goes to `host`.
   if (!options.socketPath && typeof options.lookup !== 'function') {
-    targets.push(options.hostname ?? options.host ?? url?.hostname);
+    targets.push(options.hostname || options.host || url?.hostname);
   }
   const path = typeof options.path === 'string' ? options.path : undefined;
   if (path && /^[a-z][a-z0-9+.-]*:\/\//i.test(path)) {
@@ -208,8 +209,9 @@ function guardLookup(lookup, hostname) {
 function guardSocketConnect(original) {
   return function guardedConnect(...args) {
     const options = connectOptions(args);
-    if (!options || options.path !== undefined) return original.apply(this, args); // IPC: a local path
-    const host = options.host ?? 'localhost';
+    // IPC (a unix socket or pipe) only when `path` is set: net tests it for truth, and an http agent passes `path: null`.
+    if (!options || options.path) return original.apply(this, args);
+    const host = options.host || 'localhost';
     if (isLoopbackHost(host)) return original.apply(this, args);
     if (typeof options.lookup === 'function' && net.isIP(String(host)) === 0) {
       // The lookup, not the name, decides where this connection goes (an SSRF pin): judge its answers.
