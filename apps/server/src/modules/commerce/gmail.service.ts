@@ -16,6 +16,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { GmailConnector } from '../../core/connectors/implementations/gmail.connector';
 import { decryptToken, encryptToken } from '../../core/crypto/token-crypto';
 import { getCurrentBusinessId } from '../../core/tenant/tenant-context';
+import { providerFailure, readProviderFailureBody } from '../../core/connectors/provider-failure';
 import type { Prisma } from '@prisma/client';
 
 /**
@@ -144,8 +145,14 @@ function gmailPendingNotFound(): NotFoundException {
  * ("Gmail not connected", "Google OAuth not configured") for log readers and
  * message matchers.
  *
- * A send that reaches Google and fails is not "not configured"; it keeps its
- * existing error.
+ * A send that reaches Google and fails is not "not configured". W11-PROVIDER-
+ * OUTAGE-503: a Gmail API or token-endpoint failure goes through
+ * providerFailure('gmail', ...) (core/connectors/provider-failure.ts): an
+ * outage (5xx, 408, 429, a rate-limited 403, an ABORTED 409) is 503
+ * { code: 'provider_unavailable', service: 'gmail' } with the site's existing
+ * message, a refusal keeps its existing 400. The OAuth consent and connect
+ * sites (exchangeCodeForTokens, getUserInfo, the pending-connection steps)
+ * keep their 400.
  */
 function gmailNotConfigured(message: string): ServiceUnavailableException {
   return new ServiceUnavailableException({
@@ -564,7 +571,9 @@ export class GmailService {
     });
 
     if (!response.ok) {
-      throw new BadRequestException('Failed to refresh access token');
+      // W11-PROVIDER-OUTAGE-503: a 400/401 (invalid_grant: a revoked or expired
+      // grant, which needs a reconnect) stays 400; a 5xx or 429 is 503.
+      throw providerFailure('gmail', response.status, await readProviderFailureBody(response), 'Failed to refresh access token');
     }
 
     return response.json();
@@ -1024,7 +1033,7 @@ export class GmailService {
     if (!response.ok) {
       const error = await response.text();
       this.logger.error(`Failed to send email: ${error}`);
-      throw new BadRequestException('Failed to send email');
+      throw providerFailure('gmail', response.status, error, 'Failed to send email');
     }
 
     const result = await response.json();
@@ -1056,7 +1065,7 @@ export class GmailService {
       `https://gmail.googleapis.com/gmail/v1/users/me/threads?${params.toString()}`,
       { headers: { Authorization: `Bearer ${accessToken}` } },
     );
-    if (!res.ok) throw new BadRequestException(`Gmail API error ${res.status}`);
+    if (!res.ok) throw providerFailure('gmail', res.status, await readProviderFailureBody(res), `Gmail API error ${res.status}`);
     return res.json();
   }
 
@@ -1066,7 +1075,7 @@ export class GmailService {
       `https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(threadId)}?format=full`,
       { headers: { Authorization: `Bearer ${accessToken}` } },
     );
-    if (!res.ok) throw new BadRequestException(`Gmail API error ${res.status}`);
+    if (!res.ok) throw providerFailure('gmail', res.status, await readProviderFailureBody(res), `Gmail API error ${res.status}`);
     return res.json();
   }
 
@@ -1085,7 +1094,7 @@ export class GmailService {
         body: JSON.stringify({ addLabelIds: add, removeLabelIds: remove }),
       },
     );
-    if (!res.ok) throw new BadRequestException(`Gmail API error ${res.status}`);
+    if (!res.ok) throw providerFailure('gmail', res.status, await readProviderFailureBody(res), `Gmail API error ${res.status}`);
     return res.json();
   }
 
@@ -1115,7 +1124,7 @@ export class GmailService {
       `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}/trash`,
       { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` } },
     );
-    if (!res.ok) throw new BadRequestException(`Gmail API error ${res.status}`);
+    if (!res.ok) throw providerFailure('gmail', res.status, await readProviderFailureBody(res), `Gmail API error ${res.status}`);
     return res.json();
   }
 
@@ -1125,7 +1134,7 @@ export class GmailService {
       `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}/untrash`,
       { method: 'POST', headers: { Authorization: `Bearer ${accessToken}` } },
     );
-    if (!res.ok) throw new BadRequestException(`Gmail API error ${res.status}`);
+    if (!res.ok) throw providerFailure('gmail', res.status, await readProviderFailureBody(res), `Gmail API error ${res.status}`);
     return res.json();
   }
 
@@ -1179,7 +1188,7 @@ export class GmailService {
     if (!res.ok) {
       const error = await res.text();
       this.logger.error(`Reply failed: ${error}`);
-      throw new BadRequestException('Failed to send reply');
+      throw providerFailure('gmail', res.status, error, 'Failed to send reply');
     }
     const result = (await res.json()) as { id: string; threadId: string };
     return { messageId: result.id, threadId: result.threadId };
@@ -1190,7 +1199,7 @@ export class GmailService {
     const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/labels', {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-    if (!res.ok) throw new BadRequestException(`Gmail API error ${res.status}`);
+    if (!res.ok) throw providerFailure('gmail', res.status, await readProviderFailureBody(res), `Gmail API error ${res.status}`);
     return res.json();
   }
 
@@ -1220,7 +1229,7 @@ export class GmailService {
     url.searchParams.set('maxResults', String(Math.min(maxResults, 100)));
 
     const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-    if (!res.ok) throw new BadRequestException(`Gmail search failed (${res.status})`);
+    if (!res.ok) throw providerFailure('gmail', res.status, await readProviderFailureBody(res), `Gmail search failed (${res.status})`);
     const body = (await res.json()) as { messages?: Array<{ id: string; threadId: string }> };
     return body.messages ?? [];
   }
@@ -1247,7 +1256,7 @@ export class GmailService {
       `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}?format=full`,
       { headers: { Authorization: `Bearer ${accessToken}` } },
     );
-    if (!res.ok) throw new BadRequestException(`Gmail message fetch failed (${res.status})`);
+    if (!res.ok) throw providerFailure('gmail', res.status, await readProviderFailureBody(res), `Gmail message fetch failed (${res.status})`);
 
     const msg = (await res.json()) as {
       id: string;
@@ -1294,7 +1303,7 @@ export class GmailService {
       `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
       { headers: { Authorization: `Bearer ${accessToken}` } },
     );
-    if (!res.ok) throw new BadRequestException(`Gmail attachment fetch failed (${res.status})`);
+    if (!res.ok) throw providerFailure('gmail', res.status, await readProviderFailureBody(res), `Gmail attachment fetch failed (${res.status})`);
     const body = (await res.json()) as { data?: string };
     // base64url: '-' and '_' replace '+' and '/'. Decoding as plain base64
     // silently corrupts any attachment whose bytes happen to produce them.
