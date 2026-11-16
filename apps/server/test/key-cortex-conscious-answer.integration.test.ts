@@ -657,7 +657,7 @@ describe('V70H-01 POST conscious/chat answers a deliberative question with the r
     // data, so it is permitted, and the answer carries no DATA PRIVACY ALERT about the context it was reasoned from.
     expect(res.body.permitted).toBe(true);
     expect(res.body.text).not.toContain('DATA PRIVACY ALERT');
-    expect(res.body.text).not.toMatch(/Overall Verdict: ✅ PERMITTED[\s\S]*⚠️/);
+    expect(res.body.text).not.toMatch(/Overall Verdict: ✅ PERMITTED[\s\S]*ALERT:/);
     expect(res.body.confidence).toBeGreaterThan(0);
     expect(res.body.confidence).toBeLessThanOrEqual(1);
 
@@ -892,10 +892,16 @@ describe('V70H-06 /app/key/chat (POST flow/chat/stream): the deliberate branch r
       expect(JSON.stringify(chunks)).not.toContain(PAYER);
       expect(contentOf(chunks).at(-1)).toBe(FAST_ANSWER);
       expect(chunks.at(-1)).toMatchObject({ type: 'done' });
-      // The fast path's prompt is the member's viewer projection of the business graph (SEC-P195KG-2).
+      // The fast path's prompt is the member's own viewer projection of the business graph (SEC-P195KG-2):
+      // the invoice's figure is in it exactly when the member has revenue read (the ADMIN on role defaults),
+      // never for the others. D-129 keeps the full KEY context from the ADMIN, not the figures its access covers.
       const prompted = promptedSince(from.prompts);
       expect(prompted).toContain('V70H Team Biz');
-      expect(prompted).not.toMatch(FIGURE);
+      const { keyContextSight } = await import('../src/modules/ai/business-graph.service');
+      const readsRevenue = (await keyContextSight({ client: db } as any, ID.bizTeam, user)).revenue;
+      expect(readsRevenue).toBe(user === ID.admin);
+      if (readsRevenue) expect(prompted).toMatch(FIGURE);
+      else expect(prompted).not.toMatch(FIGURE);
       expect(pipelineSessions.slice(from.sessions).filter((s) => s.userId !== user)).toEqual([]);
     },
   );
