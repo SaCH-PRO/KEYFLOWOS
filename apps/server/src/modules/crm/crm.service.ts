@@ -2652,7 +2652,17 @@ export class CrmService {
     return this.lists.removeContactFromList(input);
   }
 
-  async checkDuplicates(businessId: string, contacts: Array<{ email?: string | null; phone?: string | null; firstName?: string | null; lastName?: string | null }>) {
+  /**
+   * POST .../contacts/check-duplicates: which rows of an import already have a contact, and which
+   * one. Only contacts `actorUserId` may open are matched (findExistingBulk applies the M7
+   * visibility clause; SWP-CRM-SEARCH review SEC-CRMS-1): the answer names the holder, and a
+   * holder the member is denied on GET detail reads as a new row here.
+   */
+  async checkDuplicates(
+    businessId: string,
+    contacts: Array<{ email?: string | null; phone?: string | null; firstName?: string | null; lastName?: string | null }>,
+    actorUserId: string,
+  ) {
     const limited = contacts.slice(0, 100);
     const emails = limited
       .map((c) => normalizeEmail(c.email))
@@ -2661,7 +2671,7 @@ export class CrmService {
       .map((c) => normalizePhone(c.phone))
       .filter((p): p is string => !!p);
 
-    const { existingByEmail, existingByPhone } = await findExistingBulk(this.prisma, businessId, emails, phones);
+    const { existingByEmail, existingByPhone } = await findExistingBulk(this.prisma, businessId, emails, phones, actorUserId);
 
     const duplicates: Array<{
       importIndex: number;

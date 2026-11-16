@@ -1527,14 +1527,17 @@ export class CrmController {
   checkImportDuplicates(
     @Param('businessId') businessId: string,
     @Body() body: { contacts: Array<{ email?: string; phone?: string; firstName?: string; lastName?: string }> },
+    @Req() req: { user?: { id?: string } },
   ) {
+    // The answer names each matched contact, so it is bound to what this member may open (M7).
+    const actorUserId = this.requireActorUserId(req);
     if (!Array.isArray(body.contacts) || body.contacts.length === 0) {
       throw new BadRequestException('contacts array is required');
     }
     if (body.contacts.length > 100) {
       throw new BadRequestException('Maximum 100 contacts per check');
     }
-    return this.crm.checkDuplicates(businessId, body.contacts);
+    return this.crm.checkDuplicates(businessId, body.contacts, actorUserId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

@@ -1,6 +1,8 @@
+import type { Prisma } from '@prisma/client';
 import type { PrismaService } from '../../core/prisma/prisma.service';
 import { samePhoneNumber } from '../structure/position-holders';
 import { contactWhereBase } from './crm.helpers';
+import { resolveCrmAccess, visibilityClause } from './crm-permissions.helper';
 
 export function normalizeEmail(email?: string | null): string | null {
   return email ? email.trim().toLowerCase() : null;
@@ -81,16 +83,33 @@ const DUPLICATE_SELECT = {
  * (phone keys). A phone matches a contact holding the same number in any spelling
  * (samePhoneKey): candidates are the exact keys plus the keys ending with the same last seven
  * digits, then each is kept only when it is one number with a phone asked for.
+ *
+ * With `actorUserId`, only contacts that member may open are read: both reads carry the M7
+ * visibility clause GET contacts/:contactId applies (resolveCrmAccess + visibilityClause), as
+ * CrmService.rejectContactIdentityTaken does. The answer names each holder (id, name, email,
+ * phone, keys) and the id is a working key, so a holder the member is denied detail on (a
+ * 'my book' STAFF, or a view-all STAFF against another member's PRIVATE row) is not matched here
+ * either (SWP-CRM-SEARCH review SEC-CRMS-1). Callers with no actor (internal jobs) read the
+ * whole tenant.
  */
 export async function findExistingBulk(
   prisma: PrismaService,
   businessId: string,
   emails: string[],
   phones: string[],
+  actorUserId?: string | null,
 ) {
+  // The member's visibility, AND'd onto both reads (none for OWNER, SUPER_ADMIN or no actor).
+  let visible: { AND?: Prisma.ContactWhereInput[] } = {};
+  if (actorUserId && (emails.length > 0 || phones.length > 0)) {
+    const access = await resolveCrmAccess(prisma, businessId, actorUserId);
+    const visClause = visibilityClause(access, actorUserId);
+    if (visClause) visible = { AND: [visClause as Prisma.ContactWhereInput] };
+  }
+
   const existingByEmail = emails.length > 0
     ? await prisma.client.contact.findMany({
-        where: { ...contactWhereBase(businessId), emailNormalized: { in: emails } },
+        where: { ...contactWhereBase(businessId), emailNormalized: { in: emails }, ...visible },
         select: DUPLICATE_SELECT,
       })
     : [];
@@ -109,6 +128,7 @@ export async function findExistingBulk(
           { phoneNormalized: { in: phones } },
           ...[...tails].map((tail) => ({ phoneNormalized: { endsWith: tail } })),
         ],
+        ...visible,
       },
       select: DUPLICATE_SELECT,
     });
