@@ -256,8 +256,9 @@ for (const [project, viewport] of Object.entries(JOURNEY_VIEWPORTS)) {
       const contact = page.getByRole("menuitem", { name: /^contact/i }).filter({ visible: true }).first();
       await expect(contact).toBeVisible();
       expect(await coveredButtonFindings([{ what: "the header New menu's 'Contact'", locator: contact }]), "New > Contact (BUG-041)").toEqual([]);
-      await contact.click();
-      await page.waitForURL(/\/app\/crm\/contacts\?action=new/);
+      // Armed before the click: the contacts page replaces ?action=new away as soon as it reads it,
+      // so on a warm server a wait begun after the click can miss the URL it was sent to.
+      await Promise.all([page.waitForURL(/\/app\/crm\/contacts\?action=new/), contact.click()]);
     });
 
     test("no floating KEY bubble; the header's Ask KEY shows and opens KEY's drawer", async ({ page }) => {
