@@ -935,9 +935,12 @@ function aiMemoryRewrites(): Array<{ site: string; file: string; fn: string | un
     };
     const site = (node: ts.Node, what: string) => `${rel}:${sf.getLineAndCharacterOfPosition(node.getStart()).line + 1} ${what}`;
     const visit = (node: ts.Node) => {
+      // `this.aiMemory` is an injected AiMemoryService (UnifiedMemoryWriterService's), whose upsert writes through the
+      // door; a Prisma delegate is reached through a client (`this.prisma.client.aiMemory`, `tx.aiMemory`).
       const isModel =
-        (ts.isPropertyAccessExpression(node) && node.name.text === 'aiMemory') ||
-        (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression) && node.argumentExpression.text === 'aiMemory');
+        ((ts.isPropertyAccessExpression(node) && node.name.text === 'aiMemory') ||
+          (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression) && node.argumentExpression.text === 'aiMemory')) &&
+        node.expression.kind !== ts.SyntaxKind.ThisKeyword;
       if (isModel) {
         const member = node.parent;
         const method =

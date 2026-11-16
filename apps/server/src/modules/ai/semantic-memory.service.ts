@@ -35,10 +35,34 @@ export const AI_MEMORY_COPY_SOURCE_TYPE = 'memory';
  * (backfillFromAiMemory). A row is rewritten in place and keeps its id (PUT /ai/businesses/:id/ai/memory with the same
  * category and key, a document extracted again, a promotion into the same key: every writer upserts on business,
  * category and key, and none changes a row's category or key), so that the row exists does not say a copy of it is
- * current; a copy of a value the row no longer holds is neither written (insert) nor served (search).
+ * current; a copy of a value the row no longer holds is neither written (insert) nor served (search), and
+ * (FU-MEMORY-COPIES-REWRITE) the rewrite deletes it (upsertAiMemoryDroppingStaleCopies in ai-memory.service.ts).
+ * apps/server/scripts/cleanup-stale-memory-copies.ts states the same test in its own SQL (the script imports only
+ * @keyflow/db); apps/server/test/ai-memory-copies-rewrite.integration.test.ts V71I-07 holds the two to the same set.
  */
-function copyHoldsRowValue(content: Prisma.Sql): Prisma.Sql {
+export function copyHoldsRowValue(content: Prisma.Sql): Prisma.Sql {
   return Prisma.sql`(${content} = m.value OR ${content} = (m.category || ': ' || m.key || ' = ' || m.value))`;
+}
+
+/** The AiMemory row fields a semantic copy is made from. */
+export interface AiMemoryCopySource {
+  id: string;
+  businessId: string;
+  category: string;
+  key: string;
+  value: string;
+  confidence: number;
+}
+
+/** A copy a rewrite deleted (upsertAiMemoryDroppingStaleCopies): its content and metadata as they were. */
+export interface DroppedAiMemoryCopy {
+  content: string;
+  metadata: unknown;
+}
+
+/** The backfill's copy of a row: `<category>: <key> = <value>` (the entry form; the other form is the value alone). */
+export function aiMemoryEntryCopy(row: Pick<AiMemoryCopySource, 'category' | 'key' | 'value'>): string {
+  return `${row.category}: ${row.key} = ${row.value}`;
 }
 
 export interface SemanticMemory {
@@ -73,16 +97,78 @@ export class SemanticMemoryService {
   /**
    * Embeds `content` and stores it. A copy of an AiMemory row (sourceType 'memory') is written only while that row is
    * still in the business and holds what the copy holds (see insert), so a row deleted or rewritten while its embedding
-   * was being made gets no copy of the value it no longer holds.
+   * was being made gets no copy of the value it no longer holds. FU-MEMORY-COPIES-REWRITE: a copy of an AiMemory row
+   * that the row already has (the same content; AiMemoryService.upsert re-copies a rewritten row in the forms it had
+   * before UnifiedMemoryWriterService.store indexes it) is not embedded or written again.
    */
   async store(input: StoreMemoryInput): Promise<string> {
     try {
+      if (input.sourceType === AI_MEMORY_COPY_SOURCE_TYPE && (await this.hasCopy(input))) return input.sourceId;
       await this.storeCopy(input);
       return input.sourceId;
     } catch (err: any) {
       this.logger.error(`Failed to store semantic memory: ${(err as Error).message}`);
       throw err;
     }
+  }
+
+  /** Whether the AiMemory row `input` copies already has a copy with this content in its business. */
+  private async hasCopy(input: StoreMemoryInput): Promise<boolean> {
+    const found = await this.prisma.client.$queryRaw<Array<{ id: string }>>(
+      Prisma.sql`SELECT id FROM "ai_memory_embeddings"
+        WHERE business_id = ${input.businessId} AND source_type = ${AI_MEMORY_COPY_SOURCE_TYPE}
+          AND source_id = ${input.sourceId} AND content = ${input.content}
+        LIMIT 1`,
+    );
+    return found.length > 0;
+  }
+
+  /**
+   * FU-MEMORY-COPIES-REWRITE: copies a rewritten AiMemory row again, of the value it holds now, in each form its
+   * rewrite deleted (`dropped`, from upsertAiMemoryDroppingStaleCopies): the entry form (the backfill's
+   * `<category>: <key> = <value>`, with the backfill's metadata) and the value form (UnifiedMemoryWriterService's, with
+   * the deleted copy's metadata). A copy is written only while the row still holds this value (insert), so a row
+   * rewritten again meanwhile gets no copy of this one. When the embedding path is off (no OpenAI key, KEY_DISABLED, or
+   * the gateway's provider_unavailable: the same 503 for every form) nothing more is tried; any other failure skips
+   * that form. Never throws: the rewrite it follows has committed, and its old copies are gone either way. Answers how
+   * many copies were written.
+   */
+  async recopyRewrittenRow(row: AiMemoryCopySource, dropped: DroppedAiMemoryCopy[]): Promise<number> {
+    const entryPrefix = `${row.category}: ${row.key} = `;
+    const forms: Array<{ content: string; metadata: Record<string, unknown> }> = [];
+    const entry = dropped.find((d) => d.content.startsWith(entryPrefix));
+    if (entry) {
+      forms.push({ content: aiMemoryEntryCopy(row), metadata: { category: row.category, key: row.key, confidence: row.confidence } });
+    }
+    const valueCopy = dropped.find((d) => !d.content.startsWith(entryPrefix));
+    if (valueCopy) {
+      const metadata =
+        valueCopy.metadata && typeof valueCopy.metadata === 'object' && !Array.isArray(valueCopy.metadata)
+          ? (valueCopy.metadata as Record<string, unknown>)
+          : {};
+      forms.push({ content: row.value, metadata });
+    }
+
+    let written = 0;
+    for (const form of forms) {
+      try {
+        const stored = await this.storeCopy({
+          businessId: row.businessId,
+          content: form.content,
+          sourceType: AI_MEMORY_COPY_SOURCE_TYPE,
+          sourceId: row.id,
+          metadata: form.metadata,
+        });
+        if (stored) written++;
+      } catch (err: unknown) {
+        if (isAiProviderUnavailable(err)) {
+          this.logger.debug(`Memory ${row.id} was rewritten and its old copies deleted; the embedding path is off, so it was not copied again`);
+          break;
+        }
+        this.logger.warn(`Could not copy rewritten memory ${row.id} again: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    return written;
   }
 
   /** store(), answering whether a row was written. */
@@ -227,7 +313,7 @@ export class SemanticMemoryService {
       try {
         const written = await this.storeCopy({
           businessId,
-          content: `${memory.category}: ${memory.key} = ${memory.value}`,
+          content: aiMemoryEntryCopy(memory),
           sourceType: AI_MEMORY_COPY_SOURCE_TYPE,
           sourceId: memory.id,
           metadata: { category: memory.category, key: memory.key, confidence: memory.confidence },

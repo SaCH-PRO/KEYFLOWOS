@@ -1,8 +1,13 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
-import type { Prisma } from '@prisma/client';
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
+import { Prisma, type AiMemory } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
-import { AI_MEMORY_COPY_SOURCE_TYPE } from './semantic-memory.service';
+import {
+  AI_MEMORY_COPY_SOURCE_TYPE,
+  SemanticMemoryService,
+  copyHoldsRowValue,
+  type DroppedAiMemoryCopy,
+} from './semantic-memory.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 
 export type MemoryCategory =
@@ -140,6 +145,56 @@ export async function deleteAiMemoriesWithCopies(
   }
 }
 
+/** What an AiMemory write sets, besides the business, category and key that name the row. */
+export interface AiMemoryWrite {
+  create: Omit<Prisma.AiMemoryUncheckedCreateInput, 'id' | 'businessId' | 'category' | 'key'>;
+  update: Omit<Prisma.AiMemoryUncheckedUpdateInput, 'id' | 'businessId' | 'category' | 'key'>;
+}
+
+/**
+ * FU-MEMORY-COPIES-REWRITE (owner ruling D-221): the one way an AiMemory row is written in place. Every writer upserts a
+ * row on its business, category and key, so a rewrite keeps the row's id, and the row's semantic copies in
+ * ai_memory_embeddings (source_type AI_MEMORY_COPY_SOURCE_TYPE, source_id the row's id) were left holding the value it
+ * held before. W1F-MEMORY-COPIES stopped serving them (search and KEY's memory block serve a copy only while it holds
+ * what its row holds) but they stayed at rest: the owner's PUT of a new value left the old text in the table.
+ * Upserts the row, then deletes the row's copies that do not hold what it now holds (copyHoldsRowValue), in one
+ * transaction:
+ *   - the row first, then its copies, each its own statement: the upsert locks the row until the commit, so a backfill
+ *     that writes a copy of the old value (which takes a share lock on the row and re-reads it, see
+ *     SemanticMemoryService.insert) either wrote before the rewrite (its copy is committed, and the deletion, a later
+ *     statement, sees it) or waits for the commit and then finds the row holding the new value and writes nothing;
+ *   - a write that does not change the value (a new confidence, an expiry) deletes nothing: every copy still holds it.
+ * The scope is the business: only the named row's copies in this business go. Answers the row and the copies it
+ * deleted (their content and metadata), so AiMemoryService.upsert can copy the row again with its new value
+ * (SemanticMemoryService.recopyRewrittenRow). A failure rolls both back. apps/server/test/
+ * ai-memory-copies-rewrite.integration.test.ts (V71I-09) holds every AiMemory upsert and update in apps/server/src to
+ * this function, but for the named settings writers.
+ */
+export async function upsertAiMemoryDroppingStaleCopies(
+  prisma: PrismaService,
+  businessId: string,
+  row: { category: string; key: string },
+  write: AiMemoryWrite,
+): Promise<{ row: AiMemory; dropped: DroppedAiMemoryCopy[] }> {
+  const { category, key } = row;
+  return prisma.client.$transaction(async (tx) => {
+    const written = await tx.aiMemory.upsert({
+      where: { businessId_category_key: { businessId, category, key } },
+      create: { ...write.create, businessId, category, key },
+      update: write.update,
+    });
+    const dropped = await tx.$queryRaw<DroppedAiMemoryCopy[]>(
+      Prisma.sql`DELETE FROM "ai_memory_embeddings" e
+        USING "ai_memories" m
+        WHERE m.id = ${written.id} AND m.business_id = ${businessId}
+          AND e.business_id = m.business_id AND e.source_type = ${AI_MEMORY_COPY_SOURCE_TYPE} AND e.source_id = m.id
+          AND NOT ${copyHoldsRowValue(Prisma.sql`e.content`)}
+        RETURNING e.content, e.metadata`,
+    );
+    return { row: written, dropped };
+  });
+}
+
 @Injectable()
 export class AiMemoryService {
   private readonly logger = new Logger(AiMemoryService.name);
@@ -148,6 +203,8 @@ export class AiMemoryService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,
+    // FU-MEMORY-COPIES-REWRITE: copies a rewritten row again (upsert). AiModule provides it beside this service.
+    @Optional() @Inject(SemanticMemoryService) private readonly semantic?: SemanticMemoryService,
   ) {}
 
   async getAll(businessId: string): Promise<MemoryEntry[]> {
@@ -186,29 +243,27 @@ export class AiMemoryService {
     });
   }
 
+  /**
+   * Writes the row (FU-MEMORY-COPIES-REWRITE: through upsertAiMemoryDroppingStaleCopies, so a rewrite deletes the
+   * copies of the value the row held). A rewrite that deleted copies copies the row again with its new value, one copy
+   * per form it had, when the embedding path is on (SemanticMemoryService.recopyRewrittenRow; with no OpenAI key or
+   * KEY_DISABLED nothing is embedded and the row keeps no copy until the next backfill). A row that had no copy gets
+   * none: only POST .../agent/memory/backfill and KEY's writer (indexSemantic) start copying a row.
+   */
   async upsert(businessId: string, input: MemoryUpsertInput): Promise<MemoryEntry> {
     const { category, key, value, confidence = 1.0, source = 'user', expiresAt = null } = input;
 
-    return this.prisma.client.aiMemory.upsert({
-      where: {
-        businessId_category_key: { businessId, category, key },
+    const { row, dropped } = await upsertAiMemoryDroppingStaleCopies(
+      this.prisma,
+      businessId,
+      { category, key },
+      {
+        create: { value, confidence, source, expiresAt },
+        update: { value, confidence, source, expiresAt },
       },
-      create: {
-        businessId,
-        category,
-        key,
-        value,
-        confidence,
-        source,
-        expiresAt,
-      },
-      update: {
-        value,
-        confidence,
-        source,
-        expiresAt,
-      },
-    });
+    );
+    if (dropped.length > 0 && this.semantic) await this.semantic.recopyRewrittenRow(row, dropped);
+    return row;
   }
 
   async upsertMany(businessId: string, inputs: MemoryUpsertInput[]): Promise<MemoryEntry[]> {
