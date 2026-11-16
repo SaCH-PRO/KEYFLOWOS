@@ -4738,9 +4738,19 @@ export class KeyCortexController {
    * tenant's or member's is refused as `ownSession` refuses it), decided on
    * KeyCortexSessionService.findSession, which writes nothing (review
    * SEC-W11KCSB-1).
+   *
+   * Review COR-W1FKCO-1: as in `ownSession`, only the actor's own session is
+   * then read through KeyCortexConversationService.getSession, as before
+   * SEC-W11KCSB-1, so continuing one's own conversation on these routes still
+   * marks it accessed (GET sessions orders by lastAccessedAt, and GET messages
+   * with no sessionId reads the newest) and caches the session as GET
+   * sessions/:id caches it. The consciousness pipeline writes no session row,
+   * so on the conscious routes this read is the only one that marks it.
    */
   private async ownSessionId(businessId: string, actorId: string, sessionId: string | undefined): Promise<string | undefined> {
-    return resolveOwnSessionId((id) => this.sessionService.findSession(id), businessId, actorId, sessionId);
+    const own = await resolveOwnSessionId((id) => this.sessionService.findSession(id), businessId, actorId, sessionId);
+    if (!own) return undefined;
+    return ownedSession(await this.conversation.getSession(own), businessId, actorId) ? own : undefined;
   }
 
   /** PATCH and DELETE sessions/:id: the session must exist and be the actor's own (`ownSession`). */
