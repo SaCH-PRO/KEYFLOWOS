@@ -158,11 +158,15 @@ function observed(prompt: string): string[] {
   return at < 0 ? [] : prompt.slice(at).split('\n').filter((l) => l.startsWith('- ['));
 }
 
-/** The lines of a perception block, or of a numbered memory block, that render an event of one of `types`. */
+/**
+ * The lines of a prompt's memory that render an event of one of `types`: the perception block's ('- [business_event]
+ * type: ...'), buildMemoryContext's numbered block ('1. [business_event] type: ...') and the pipeline's own block
+ * ('[business_event] type: ...', no list mark).
+ */
 function eventLines(prompt: string, types: readonly string[]): string[] {
   return prompt
     .split('\n')
-    .filter((l) => types.some((t) => new RegExp(`^(- |\\d+\\. )\\[(business_event|cognitive_event)\\] ${t.replace(/\./g, '\\.')}: `).test(l)));
+    .filter((l) => types.some((t) => new RegExp(`^(- |\\d+\\. )?\\[(business_event|cognitive_event)\\] ${t.replace(/\./g, '\\.')}: `).test(l)));
 }
 
 /** Waits until the stores hold the rows a writer's events land in (the bus persists without being awaited). */
