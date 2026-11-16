@@ -2341,7 +2341,7 @@ export class MarketplaceService {
     order: { total: number; currency: string },
     data: { refundAmount?: unknown; currency?: unknown; reason?: unknown } | undefined,
     door: { paymentId: string | null; leftCents: number } | null,
-  ): Promise<{ cents: number; paymentId: string; once: { providerPaymentId: string; refusal: string } } | null> {
+  ): Promise<{ cents: number; paymentId: string; once: { providerPaymentId: string; refusal: string; reported?: string } } | null> {
     const requested = data?.refundAmount;
     if (requested === undefined || requested === null || requested === '') return null;
     const text = typeof requested === 'string' ? requested.trim() : null;
@@ -2368,6 +2368,14 @@ export class MarketplaceService {
       select: { id: true },
     });
     if (recorded) throw new ConflictException(once.refusal);
+    // PR210 review (COR-PR210-2, D-121): a refund of a PayPal payment that PayPal already reported (recorded from its
+    // notice) is not recorded again by hand, also when it is all that is left (it is not taken as the full refund). The
+    // door checks it again under its invoice lock, where PayPal's notice pairs with a hand refund in the other order.
+    const reported = await this.paypalReportedRefundOf(businessId, door.paymentId, cents, order.currency);
+    if (reported) {
+      if (reported.refundId) throw new ConflictException(reported.refusal);
+      once.reported = reported.refusal;
+    }
     const left = Math.max(door.leftCents, 0);
     if (cents > left) {
       throw new BadRequestException(
@@ -2376,6 +2384,39 @@ export class MarketplaceService {
       );
     }
     return cents === left ? null : { cents, paymentId: door.paymentId, once };
+  }
+
+  /**
+   * PR210-PAYPAL-STORE-REFUND review (COR-PR210-2, owner ruling D-121): for an order whose door payment PayPal took,
+   * the refusal a hand refund of `cents` gets when PayPal has already reported a refund of that amount of it (its
+   * notice recorded the refund: PaymentsService.processPaypalRefund), and that refund's id (null while none is
+   * recorded: the refusal is then handed to the door, which checks it again under its invoice lock). Null for a
+   * payment PayPal did not take. KeyFlow's refund calls no provider, so a refund of a PayPal payment is made in
+   * PayPal, whose notice records it; recording it by hand as well took it twice.
+   */
+  private async paypalReportedRefundOf(
+    businessId: string,
+    paymentId: string,
+    cents: number,
+    currency: string,
+  ): Promise<{ refundId: string | null; refusal: string } | null> {
+    const payment = await this.prisma.client.payment.findFirst({
+      where: { id: paymentId, businessId },
+      select: { provider: true, providerPaymentId: true, invoiceId: true },
+    });
+    if (payment?.provider !== 'paypal') return null;
+    const rows = await this.prisma.client.payment.findMany({
+      where: { businessId, invoiceId: payment.invoiceId },
+      select: { amount: true, status: true, provider: true, providerPaymentId: true, reference: true },
+    });
+    const refundId = CommerceService.providerReportedRefundOf(payment, rows, cents);
+    return {
+      refundId,
+      refusal:
+        `PayPal has already reported a refund of ${fromCents(cents).toFixed(2)} ${currency} of this order` +
+        `${refundId ? ` (PayPal refund ${refundId})` : ''}, and it is recorded on the order, so this refund is not recorded ` +
+        "again (nothing was written). A further refund of a PayPal payment is made in PayPal, and PayPal's notice records it here",
+    };
   }
 
   /**
@@ -2392,7 +2433,7 @@ export class MarketplaceService {
     cents: number,
     reason: unknown,
     currency: string,
-  ): { providerPaymentId: string; refusal: string } {
+  ): { providerPaymentId: string; refusal: string; reported?: string } {
     const said = typeof reason === 'string' ? reason.trim().replace(/\s+/g, ' ').toLowerCase() : '';
     const digest = createHash('sha256').update(`${cents}\n${said}`, 'utf8').digest('hex').slice(0, 32);
     return {
@@ -2427,7 +2468,7 @@ export class MarketplaceService {
     order: { id: string; orderNumber: string; total: number; currency: string },
     paymentId: string,
     amount: number,
-    once: { providerPaymentId: string; refusal: string },
+    once: { providerPaymentId: string; refusal: string; reported?: string },
     data: { reason?: unknown; note?: unknown } | undefined,
     actorId: string | null,
   ) {

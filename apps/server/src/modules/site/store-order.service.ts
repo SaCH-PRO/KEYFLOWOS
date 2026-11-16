@@ -9,7 +9,8 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { PromoCodeService } from './promo-code.service';
 import { CrmService } from '../crm/crm.service';
 import { PublicEventsService } from '../public-events/public-events.service';
-import { InvoiceWorkflowService } from '../commerce/invoice-workflow.service';
+import { InvoiceWorkflowService, balanceOfStoredRows } from '../commerce/invoice-workflow.service';
+import { fromCents, toCents } from '../commerce/money';
 import { InventoryRiskService } from '../commerce/inventory-risk.service';
 import { RevenueAttributionService } from '../commerce/revenue-attribution.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
@@ -32,7 +33,7 @@ import {
   releaseOrderFulfilmentForCancel,
   statusEditMayCancel,
 } from '../marketplace/fulfillment-routing.service';
-import { appendOrderTimeline } from '../marketplace/order-metadata';
+import { appendOrderTimeline, recordOrderRefundedTotal } from '../marketplace/order-metadata';
 import {
   normalizeStorefrontMethod,
   storePaypalCredentials,
@@ -1827,6 +1828,80 @@ export class StoreOrderService {
     }
 
     return updated;
+  }
+
+  /**
+   * PR210-PAYPAL-STORE-REFUND review (COR-PR210-1, SEC-PR210-4; owner rulings
+   * D-121, D-138): the order side of a refund the order's payment provider
+   * reported (PayPal's PAYMENT.CAPTURE.REFUNDED / .REVERSED of the capture
+   * that settled it), which the provider refund door has just recorded on the
+   * order's checkout invoice. It runs inside that door's transaction
+   * (PaymentsService.createRefundWithPosting, under the invoice lock), so the
+   * refund row, its posting and what the order shows commit together or not
+   * at all, and a delivery that fails is redelivered whole (V1-15c). The
+   * provider's refund was recorded with only the invoice before: the order
+   * stayed CONFIRMED/PAID with no refunded total, Sales > Orders and the
+   * orders summary counted it as paid, and no store_order.refunded was sent.
+   *
+   * What the order shows is read from the invoice's rows (the balance read
+   * contract, balanceOfStoredRows), as the D-121 refund door reads it
+   * (MarketplaceService.refundPartThroughDoor): while something received is
+   * left the order keeps its status and paymentStatus PAID (the order
+   * vocabulary has no partly refunded value; D-121 makes no schema change),
+   * metadata.refundedTotal is what is refunded and a 'partially_refunded' step
+   * names the provider's refund. Once nothing is left the order is REFUNDED,
+   * with a compare-and-set on PAID as refundOrder flips it, and a 'refunded'
+   * step. No member is named: the provider refunded. Returns whether this call
+   * flipped the order, so the caller announces it once the transaction has
+   * committed (announceProviderRefund).
+   */
+  async recordProviderRefundOnOrder(
+    tx: Prisma.TransactionClient,
+    input: { orderId: string; businessId: string; invoiceId: string; provider: string; providerRefundId: string; amount: number },
+  ): Promise<{ flipped: boolean }> {
+    const invoice = await tx.invoice.findFirst({
+      where: { id: input.invoiceId, businessId: input.businessId },
+      select: { total: true, currency: true },
+    });
+    if (!invoice) throw new NotFoundException('The order\'s checkout invoice was not found');
+    const rows = await tx.payment.findMany({
+      where: { businessId: input.businessId, invoiceId: input.invoiceId },
+      select: { amount: true, status: true },
+    });
+    const balance = balanceOfStoredRows(Number(invoice.total), rows, invoice.currency);
+    const refundedTotal = fromCents(toCents(balance.refunded));
+    const inFull = !(toCents(balance.net) > 0);
+    const flipped = inFull
+      ? (
+          await tx.marketplaceOrder.updateMany({
+            where: { id: input.orderId, businessId: input.businessId, paymentStatus: 'PAID' },
+            data: { status: 'REFUNDED', paymentStatus: 'REFUNDED' },
+          })
+        ).count === 1
+      : false;
+    await recordOrderRefundedTotal(tx, input.businessId, input.orderId, refundedTotal, [
+      {
+        status: inFull ? 'refunded' : 'partially_refunded',
+        timestamp: new Date().toISOString(),
+        refundAmount: input.amount,
+        refundedTotal,
+        provider: input.provider,
+        providerRefundId: input.providerRefundId,
+      },
+    ]);
+    return { flipped };
+  }
+
+  /**
+   * PR210-PAYPAL-STORE-REFUND review (COR-PR210-1): the one store_order.refunded
+   * of an order a provider's refund flipped REFUNDED (recordProviderRefundOnOrder),
+   * sent after the refund has committed, as refundOrder sends its own: it names
+   * the checkout invoice the refund is on, so its listener books no Expense
+   * beside the refund (CommerceIntegrationService.handleOrderRefunded).
+   */
+  async announceProviderRefund(orderId: string, businessId: string, invoiceId: string): Promise<void> {
+    const order = await this.getOrder(orderId, businessId);
+    this.events.emit('store_order.refunded', { order, businessId, refundAmount: order.total, invoiceId });
   }
 
   /**

@@ -259,6 +259,21 @@ const WIPAY_PLATFORM_ACCOUNT_REFUSAL = 'refused:platform-account';
  */
 const VOID_INVOICE_NOTHING_TO_REFUND = 'void_invoice_nothing_to_refund' as const;
 
+/**
+ * PR210-PAYPAL-STORE-REFUND review (COR-PR210-2; owner ruling D-121): the
+ * webhook_events provider under which a PayPal refund of a store order's door
+ * payment is kept when it is the refund the owner already recorded by hand
+ * (the D-121 fulfil refund door, which calls no provider: the owner then makes
+ * the refund in PayPal, and PayPal's notice of it arrives). One row per PayPal
+ * refund id (the unique (provider, providerEventId) key), its business the
+ * store's, and its event type `paired:<the hand-recorded refund row's id>`
+ * (paypalPairedWith), so each hand-recorded refund stands for one PayPal refund
+ * and the notice's redelivery or resend is the same refund. It is not a
+ * delivery's dedupe claim (provider 'paypal').
+ */
+const PAYPAL_REFUND_PAIRED_PROVIDER = 'paypal-refund-paired';
+const paypalPairedWith = (handRefundId: string) => `paired:${handRefundId}`;
+
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
@@ -486,6 +501,11 @@ export class PaymentsService {
     amountToRecord: (tx: Prisma.TransactionClient) => Promise<number>,
     alsoLinkedBy: string[] = [],
     refunder?: { actorId: string | null; initiatedBy?: string | null },
+    /**
+     * PR210-PAYPAL-STORE-REFUND review (COR-PR210-1): what else the recorded refund changes, in this transaction (the
+     * refunded store order: StoreOrderService.recordProviderRefundOnOrder), so it commits with the refund or not at all.
+     */
+    onRecorded?: (tx: Prisma.TransactionClient, amount: number) => Promise<void>,
   ) {
     return this.prisma.client.$transaction(async (tx) => {
       const txClient = tx as unknown as Prisma.TransactionClient;
@@ -525,6 +545,7 @@ export class PaymentsService {
         // W11-KEY-REFUND-INITIATED-BY (D-90, SEC-W7KMP-1): the member KEY's refund ran for, audit data only.
         ...(refunder?.initiatedBy ? { initiatedBy: refunder.initiatedBy } : {}),
       });
+      if (onRecorded) await onRecorded(txClient, amount);
       return created;
     });
   }
@@ -2161,15 +2182,24 @@ export class PaymentsService {
    * settlement recorded for it (paypalStorefrontSettlementOf): a store's
    * capture is verified with that store's own complete set only, whatever
    * else the resource names, never the platform's and never mixed (a store
-   * missing a value refuses, as for a capture). Any other capture (an
-   * invoice's) keeps the path below, unchanged. A failed read throws: the
+   * missing a value refuses, as for a capture). Review SEC-PR210-2 /
+   * COR-PR210-3: a store holding no PayPal setting of its own at all took no
+   * capture into a PayPal account of its own (before D-138 the platform's app
+   * settled its orders; since, it is offered no PayPal), so its capture's
+   * refund is verified with the platform's app, as at the base. Any other
+   * capture (an invoice's) keeps the path below, unchanged. A failed read throws: the
    * delivery is answered 500 and PayPal redelivers it, rather than it being
    * checked with an app the read did not choose.
    */
   private async resolvePaypalBusinessCreds(resource: any, eventType?: string): Promise<PaypalWebhookCredentials | null> {
     if (eventType && PAYPAL_REFUND_EVENTS.has(eventType)) {
       const store = await this.paypalStorefrontSettlementOf(paypalRefundedCaptureId(resource));
-      if (store) return storefrontPaypalCredentials(store.businessId, store.metaData);
+      // PR210 review (SEC-PR210-2, COR-PR210-3): a store that holds no PayPal setting of its own has no PayPal account
+      // KeyFlow could have taken its order's capture into but the platform's (the platform's app settled storefront
+      // orders before D-138; since D-138 such a store is offered no PayPal), so its capture's refund is the platform's
+      // event, verified with the platform's app as at the base. A store holding any PayPal setting is checked with its
+      // own complete set only.
+      if (store) return ownPaypalSettings(store.metaData) ? storefrontPaypalCredentials(store.businessId, store.metaData) : null;
     }
     const link = await this.resolvePaypalInvoiceId(resource).catch(() => null);
     if (!link) return this.resolvePaypalStorefrontCreds(resource);
@@ -2433,6 +2463,22 @@ export class PaymentsService {
    * because it names that store's order) records refunds of that store's captures only, never an invoice's or another
    * store's. Anything else keeps its path, unchanged. A refusal is logged and acked with nothing recorded, as a
    * capture verified with the wrong app is.
+   *
+   * PR210 review repairs (D-121, D-138):
+   *   - COR-PR210-1 / SEC-PR210-4: the refund also refunds the store order, in the same transaction
+   *     (StoreOrderService.recordProviderRefundOnOrder: refundedTotal and a 'partially_refunded' step, or, once
+   *     nothing received is left, the order REFUNDED and one store_order.refunded after commit). The order stayed
+   *     CONFIRMED/PAID while its invoice was reopened.
+   *   - COR-PR210-2: PayPal's notice of a refund the owner already recorded by hand (the D-121 door, which calls no
+   *     provider) is paired with it and recorded once (paypalStoreRefundToRecord); it was recorded beside it.
+   *   - SEC-PR210-1: the reads here throw (the delivery is answered 500 and PayPal redelivers it): a failed read of
+   *     the capture's payment was taken as no capture and the genuine refund acked with nothing recorded.
+   *   - SEC-PR210-3 / COR-PR210-4: a refund verified with a store's own app whose capture KeyFlow has not recorded yet
+   *     is answered 409 with its claim given back, so PayPal redelivers it until the capture is recorded; it was
+   *     acked with nothing recorded and its redeliveries acked as duplicates.
+   *   - SEC-PR210-2 / COR-PR210-3: a store holding no PayPal setting of its own (its capture the platform's, settled
+   *     before D-138) has its capture's refund verified with the platform's app (resolvePaypalBusinessCreds), and it
+   *     is recorded for that verifier, as at the base.
    */
   private async processPaypalRefund(resource: any, eventId?: string, verifier: PaypalVerifier = PLATFORM_PAYPAL_VERIFIER): Promise<void> {
     const refundId: string | undefined = resource?.id;
@@ -2440,9 +2486,11 @@ export class PaymentsService {
       this.logger.warn('PayPal refund event missing refund id');
       return;
     }
+    // SEC-PR210-1 (V1-15c): a failed read throws, so the claim is given back and PayPal redelivers the refund.
     const existing = await this.prisma.client.payment.findUnique({
       where: { providerPaymentId: refundId },
-    }).catch(() => null);
+      select: { id: true },
+    });
     if (existing) return;
 
     // The original capture id is in supplementary_data.related_ids.capture_id, else the refund's 'up' link.
@@ -2453,19 +2501,36 @@ export class PaymentsService {
       ? await this.prisma.client.payment.findUnique({
         where: { providerPaymentId: captureId },
         select: { id: true, providerPaymentId: true, invoiceId: true, businessId: true, currency: true, amount: true },
-      }).catch(() => null)
+      })
       : null;
-    // PR210 (D-138): a store's capture is refunded only by its own store's app, and a store's app refunds nothing else.
+    // PR210 (D-138): a store's capture is refunded only by the app it was taken with (its store's own; the platform's
+    // for a store holding no PayPal setting of its own, SEC-PR210-2), and a store's app refunds nothing else.
     const store = captured ? await this.paypalStorefrontSettlementOf(captureId) : null;
-    if ((store || verifier.store) && !(store && verifier.store && verifier.businessId === store.businessId)) {
+    const storeApp: PaypalVerifier | null = store
+      ? ownPaypalSettings(store.metaData)
+        ? { businessId: store.businessId, store: true }
+        : PLATFORM_PAYPAL_VERIFIER
+      : null;
+    if (!store && verifier.store && captureId && !captured) {
+      // SEC-PR210-3 / COR-PR210-4: the store's own app verified it (it names the store's order), and its capture is not
+      // recorded yet (its PAYMENT.CAPTURE.COMPLETED is still to come): 409, the claim given back, PayPal redelivers.
+      throw new ConflictException(
+        `PayPal refund ${refundId} returns capture ${captureId}, which is not recorded yet; it is recorded when PayPal redelivers it after the capture`,
+      );
+    }
+    if ((store || verifier.store) && !(storeApp && storeApp.store === verifier.store && storeApp.businessId === verifier.businessId)) {
       this.logger.error(
         `PayPal refund ${refundId} of capture ${captureId ?? '<none>'} not recorded: ` +
           (store
-            ? `it returns storefront order ${store.orderId}'s capture and the webhook was not verified with that store's own PayPal app`
+            ? `it returns storefront order ${store.orderId}'s capture and the webhook was not verified with the PayPal app it was taken with`
             : `the webhook was verified with store ${verifier.businessId}'s own PayPal app and the capture is not that store's`) +
           ` (verified for ${verifier.businessId ?? 'the platform'}; D-138)`,
       );
       return;
+    }
+    if (store && !this.storeOrderService) {
+      // COR-PR210-1: the refund of a store order is recorded with its order, or not at all (PayPal redelivers it).
+      throw new Error(`PayPal refund ${refundId} of storefront order ${store.orderId} not recorded: the store orders are unavailable`);
     }
     let invoice: { invoiceId: string; businessId: string; currency: string } | null = captured;
     if (!invoice) {
@@ -2493,8 +2558,29 @@ export class PaymentsService {
       currency: (resource?.amount?.currency_code || target.currency || 'USD').toUpperCase(),
       notes: resource?.note_to_payer ?? null,
     };
+    // COR-PR210-1 / COR-PR210-2: a store capture's refund is paired with a refund recorded by hand, and refunds its
+    // order with it, in the door's transaction.
+    let flipped = false;
     const persisted = await (captured
-      ? this.createRefundWithPosting(captured, refund, async () => amount)
+      ? this.createRefundWithPosting(
+          captured,
+          refund,
+          store ? (tx) => this.paypalStoreRefundToRecord(tx, captured, refundId, amount) : async () => amount,
+          [],
+          undefined,
+          store && this.storeOrderService
+            ? async (tx, recorded) => {
+                ({ flipped } = await this.storeOrderService!.recordProviderRefundOnOrder(tx, {
+                  orderId: store.orderId,
+                  businessId: store.businessId,
+                  invoiceId: captured.invoiceId,
+                  provider: 'paypal',
+                  providerRefundId: refundId,
+                  amount: recorded,
+                }));
+              }
+            : undefined,
+        )
       : this.createRefundWithPostingByInvoice(target, refund, amount)
     ).catch(this.refundAlreadyRecorded('PayPal', refundId));
     if (persisted === VOID_INVOICE_NOTHING_TO_REFUND) {
@@ -2520,6 +2606,83 @@ export class PaymentsService {
         this.logger.warn(`PayPal refund reconcile failed for invoice ${target.invoiceId}: ${e instanceof Error ? e.message : e}`);
       });
     }
+    if (flipped && store) {
+      // COR-PR210-1: the order this refund flipped REFUNDED is announced once, after commit (as refundOrder announces).
+      await this.storeOrderService?.announceProviderRefund(store.orderId, store.businessId, target.invoiceId).catch((e) => {
+        this.logger.warn(`store_order.refunded for order ${store.orderId} not sent: ${e instanceof Error ? e.message : e}`);
+      });
+    }
+  }
+
+  /**
+   * PR210-PAYPAL-STORE-REFUND review (COR-PR210-2; owner ruling D-121): how much of a PayPal refund of a store
+   * order's door payment (`original`) is not recorded yet, read under the invoice lock (createRefundWithPosting).
+   *
+   * The D-121 refund door (the owner's fulfil refund, CommerceService.markPaymentRefunded) calls no provider: it
+   * records a refund the owner then makes in PayPal, and PayPal's notice of that refund arrives here. The V1-29c cap
+   * (never more than is left of the payment) catches a duplicate full refund, not a partial one, so a refund of 30
+   * recorded by hand and PayPal's notice of it were two refunds of 30. A notice whose amount is that of a refund
+   * recorded by hand against this payment that no PayPal refund is paired with yet (the oldest first) is that refund:
+   * the pairing is kept (one PAYPAL_REFUND_PAIRED_PROVIDER row under PayPal's refund id, committed with this
+   * transaction) and nothing more is recorded. A notice already paired (its redelivery or resend) records nothing.
+   * Any other notice is recorded in full (the door still caps it at what is left). A hand refund of the amount of a
+   * PayPal refund already recorded is refused by the D-121 door in the other order (MarketplaceService
+   * .partialRefundOf, and under this lock CommerceService.markPaymentRefunded).
+   */
+  private async paypalStoreRefundToRecord(
+    tx: Prisma.TransactionClient,
+    original: RefundOriginal,
+    refundId: string,
+    amount: number,
+  ): Promise<number> {
+    const paired = await tx.webhookEvent.findUnique({
+      where: { provider_providerEventId: { provider: PAYPAL_REFUND_PAIRED_PROVIDER, providerEventId: refundId } },
+      select: { id: true },
+    });
+    if (paired) return 0;
+    const cents = toCents(amount);
+    const byHand = (
+      await tx.payment.findMany({
+        where: {
+          businessId: original.businessId,
+          invoiceId: original.invoiceId,
+          status: 'REFUNDED',
+          amount: { lt: 0 },
+          reference: original.providerPaymentId,
+          providerPaymentId: { startsWith: `${MANUAL_REFUND_ID_PREFIX}${original.id}_` },
+        },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: { id: true, amount: true },
+      })
+    ).filter((r) => Math.abs(toCents(Number(r.amount))) === cents);
+    if (byHand.length === 0) return amount;
+    const taken = new Set(
+      (
+        await tx.webhookEvent.findMany({
+          where: {
+            provider: PAYPAL_REFUND_PAIRED_PROVIDER,
+            businessId: original.businessId,
+            eventType: { in: byHand.map((r) => paypalPairedWith(r.id)) },
+          },
+          select: { eventType: true },
+        })
+      ).map((w) => w.eventType),
+    );
+    const hand = byHand.find((r) => !taken.has(paypalPairedWith(r.id)));
+    if (!hand) return amount;
+    await tx.webhookEvent.create({
+      data: {
+        provider: PAYPAL_REFUND_PAIRED_PROVIDER,
+        providerEventId: refundId,
+        eventType: paypalPairedWith(hand.id),
+        businessId: original.businessId,
+      },
+    });
+    this.logger.log(
+      `PayPal refund ${refundId} of ${fromCents(cents).toFixed(2)} ${original.currency} is the refund recorded by hand as ${hand.id}; ` +
+        'not recorded again (D-121)',
+    );
+    return 0;
   }
 
   /**

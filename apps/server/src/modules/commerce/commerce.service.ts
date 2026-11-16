@@ -4452,6 +4452,16 @@ export class CommerceService {
    * lock, so of identical refunds racing one is recorded; nothing else is
    * written. The unique index on providerPaymentId backs it (P2002 is the
    * same 409). A full refund needs none: a second one finds nothing left.
+   *
+   * PR210-PAYPAL-STORE-REFUND review (COR-PR210-2, D-121): `once.reported`
+   * refuses the partial refund (409 with that text, nothing written) when the
+   * payment's provider already reported a refund of the same amount of it
+   * (its own refund row, linked to the payment, not a hand-recorded one):
+   * that is the refund the owner made in the provider, already recorded from
+   * its notice (PaymentsService.processPaypalRefund), and recording it by hand
+   * as well took it twice. Checked under the invoice lock, where the
+   * provider's notice pairs with a hand-recorded refund in the other order, so
+   * the two racing record one refund.
    */
   async markPaymentRefunded(
     paymentId: string,
@@ -4459,7 +4469,7 @@ export class CommerceService {
     reason?: string,
     actorId?: string | null,
     amount?: number,
-    once?: { providerPaymentId: string; refusal: string },
+    once?: { providerPaymentId: string; refusal: string; reported?: string },
   ) {
     if (amount !== undefined && !(Number.isFinite(amount) && toCents(amount) > 0 && fromCents(toCents(amount)) === amount)) {
       throw new BadRequestException('A refund amount is a number above 0 in whole cents');
@@ -4507,6 +4517,10 @@ export class CommerceService {
         where: { businessId, invoiceId: current.invoiceId },
         select: { amount: true, status: true, provider: true, providerPaymentId: true, reference: true },
       });
+      // PR210 review (COR-PR210-2, D-121): the provider's own refund of this amount is recorded already (read under the lock).
+      if (once?.reported && amount !== undefined && CommerceService.providerReportedRefundOf(current, invoiceRows, toCents(amount))) {
+        throw new ConflictException(once.reported);
+      }
       const left = CommerceService.refundableOf(current, invoiceRows);
       if (left.refusal) throw new ConflictException(left.refusal);
       // W11-PARTIAL-REFUND-DOOR (D-121): a partial refund, never more than is left (read under the lock).
@@ -4572,6 +4586,30 @@ export class CommerceService {
       invoiceStatus: reconciled.status,
       balance: reconciled.balance,
     };
+  }
+
+  /**
+   * PR210-PAYPAL-STORE-REFUND review (COR-PR210-2, D-121): the refund the
+   * payment's provider reported of `cents` of it, recorded from its notice:
+   * among `rows` (the invoice's), a negative REFUNDED row of the payment's own
+   * provider linked to it (reference = its providerPaymentId) that is not a
+   * hand-recorded one (manual_ prefix). Null when there is none.
+   */
+  static providerReportedRefundOf(
+    payment: { provider: string; providerPaymentId: string },
+    rows: ReadonlyArray<{ amount: number; status: string; provider: string; providerPaymentId: string; reference: string | null }>,
+    cents: number,
+  ): string | null {
+    const reported = rows.find(
+      (r) =>
+        r.status === 'REFUNDED' &&
+        Number(r.amount) < 0 &&
+        r.provider === payment.provider &&
+        r.reference === payment.providerPaymentId &&
+        !r.providerPaymentId.startsWith('manual_') &&
+        Math.abs(toCents(Number(r.amount))) === cents,
+    );
+    return reported?.providerPaymentId ?? null;
   }
 
   /** Retry a failed payment by flipping it to PENDING and emitting an event. */
