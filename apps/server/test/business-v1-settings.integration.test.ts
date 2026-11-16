@@ -50,6 +50,14 @@
  * decorator pass through untouched. The pipe over UpdateBusinessDto is also
  * run directly ([V63E-D01], [V63E-D02]), as R0-09-O03 does.
  *
+ * REVIEW REPAIR SEC-V63-1 ([V63E-S01..S04]): a depth names each hub at most
+ * once, so the refusal of a depth that is not one is bounded whatever the
+ * body holds: more entries than there are hubs is one problem naming the
+ * count, and a refused entry's name comes back cut short. Before the repair
+ * every entry was a problem repeating its name, and the body pipe answers
+ * before the controller's D-11 check, so any member could ask for a refusal
+ * many times the size of its body.
+ *
  * NO PROVIDER IS CALLED: nothing on these paths reaches one.
  *
  * FIXTURES: every user, business and membership id has the `v63e_` prefix
@@ -526,6 +534,129 @@ describe('V1-63 an unknown value is refused with 400 and nothing is written', ()
     }
     const result = await identityService.updateBusiness(ID.bizA, { sells: 'services', advancedCrm: false, depth: { page: 'advanced' } });
     expect(settingsOf(result)).toEqual({ sells: 'services', advancedCrm: false, depth: { ...ALL_STANDARD, page: 'advanced' } });
+  });
+});
+
+/**
+ * Review SEC-V63-1: a depth names each hub at most once, so the refusal of a
+ * depth that is not one is bounded whatever the body holds. Before the repair
+ * the pipe (and the service, for the metaData bag) built one problem per entry,
+ * each repeating the entry's name, so a 50 KB body of junk entries was answered
+ * with a refusal many times its size, and the body pipe answers it before the
+ * controller's D-11 check (assertBusinessOwner), so any member could ask for
+ * it. After: a depth with more entries than there are hubs is refused with one
+ * problem that names the count, and a refused entry's name is cut short.
+ */
+describe('V1-63 the refusal of a depth that is not one is bounded (review SEC-V63-1)', () => {
+  /** A depth of `n` entries, none a hub: k0 .. k(n-1), each 1 (about 50 KB for 5,000). */
+  const junkDepth = (n: number) => Object.fromEntries(Array.from({ length: n }, (_, i) => [`k${i}`, 1]));
+  const JUNK = 5_000;
+  /** Seven entries (no more than there are hubs), none a hub, each name 9,000 characters long (about 63 KB). */
+  const LONG = 'x'.repeat(9_000);
+  const longKeyDepth = () => Object.fromEntries(Array.from({ length: 7 }, (_, i) => [`${LONG}${i}`, 'advanced']));
+  /** The most a refusal of a depth may weigh, whatever the body held. */
+  const MAX_REFUSAL_BYTES = 4_096;
+  /** A stretch no refusal may repeat: no entry's name comes back whole. */
+  const ECHO = 'x'.repeat(64);
+
+  async function pipeRefusal(body: unknown): Promise<{ status: number | undefined; response: any; bytes: number }> {
+    let error: any;
+    try { await runPipe(body); } catch (e) { error = e; }
+    expect(error, 'the pipe refuses').toBeDefined();
+    const response = error.getResponse?.();
+    return { status: error.getStatus?.(), response, bytes: Buffer.byteLength(JSON.stringify(response)) };
+  }
+
+  it('[V63E-S01] RED-BEFORE: the body pipe refuses a depth of more entries than there are hubs with one problem naming the count, none of the entries; seven long names come back cut short', async () => {
+    const many = await pipeRefusal({ depth: junkDepth(JUNK) });
+    expect(many.status).toBe(400);
+    expect(many.bytes, `the refusal of ${JUNK} entries weighs ${many.bytes} bytes`).toBeLessThanOrEqual(MAX_REFUSAL_BYTES);
+    const messages: string[] = many.response.message;
+    expect(messages, 'one message').toHaveLength(1);
+    expect(messages[0]).toContain('depth');
+    expect(messages[0], 'it names the count').toContain(String(JUNK));
+    expect(JSON.stringify(many.response), 'no entry is named').not.toMatch(/\bk\d+\b/);
+
+    // Eight entries (the seven hubs and one more) are one more than a depth can name.
+    const everyHub = Object.fromEntries(HUBS.map((h) => [h, 'advanced']));
+    const eight = await pipeRefusal({ depth: { ...everyHub, v63eExtra: 'advanced' } });
+    expect(eight.status).toBe(400);
+    expect(eight.response.message).toHaveLength(1);
+    expect(eight.response.message[0]).toContain('depth');
+
+    const long = await pipeRefusal({ depth: longKeyDepth() });
+    expect(long.status).toBe(400);
+    expect(long.bytes, `the refusal of seven long names weighs ${long.bytes} bytes`).toBeLessThanOrEqual(MAX_REFUSAL_BYTES);
+    expect(JSON.stringify(long.response), 'no name comes back whole').not.toContain(ECHO);
+    expect(JSON.stringify(long.response)).toContain('depth');
+
+    // The seven hubs, every one named, are still a depth (the bound is the hub count).
+    expect({ ...(await runPipe({ depth: everyHub })) }).toEqual({ depth: everyHub });
+  });
+
+  it(`[V63E-S02] RED-BEFORE: over HTTP the owner's depth of ${JUNK} junk entries, as the field and in the metaData bag, and seven long names are refused 400 with a bounded body and nothing written`, async () => {
+    await resetBizA();
+    for (const [label, body] of [
+      ['field, many entries', { depth: junkDepth(JUNK) }],
+      ['metaData bag, many entries', { metaData: { depth: junkDepth(JUNK) } }],
+      ['field, long names', { depth: longKeyDepth() }],
+      ['metaData bag, long names', { metaData: { depth: longKeyDepth() } }],
+    ] as const) {
+      const before = await businessRowText(ID.bizA);
+      const res = await patch(ID.owner, ID.bizA, body);
+      const bytes = Buffer.byteLength(res.text ?? '');
+      expect(res.status, `${label}: ${res.text?.slice(0, 300)}`).toBe(400);
+      expect(bytes, `${label}: the refusal weighs ${bytes} bytes`).toBeLessThanOrEqual(MAX_REFUSAL_BYTES);
+      expect(res.text, `${label}: no entry is named`).not.toMatch(/\bk\d+\b/);
+      expect(res.text, `${label}: no name comes back whole`).not.toContain(ECHO);
+      if ('metaData' in body) {
+        expect(res.body.code, label).toBe(SETTING_INVALID);
+        expect(res.body.problems, `${label}: one problem`).toHaveLength(label.endsWith('many entries') ? 1 : 7);
+      }
+      expect(await businessRowText(ID.bizA), `${label}: the row is byte-identical`).toBe(before);
+    }
+  });
+
+  it('[V63E-S03] RED-BEFORE: the service itself (no pipe) answers one problem for a depth of more entries than there are hubs, field and metaData bag alike', async () => {
+    await resetBizA();
+    for (const input of [{ depth: junkDepth(JUNK) }, { metaData: { depth: junkDepth(JUNK) } }]) {
+      const before = await businessRowText(ID.bizA);
+      let error: any;
+      try { await identityService.updateBusiness(ID.bizA, input); } catch (e) { error = e; }
+      expect(error, 'refused').toBeDefined();
+      expect(error.getStatus?.()).toBe(400);
+      const response = error.getResponse?.();
+      expect(response.code).toBe(SETTING_INVALID);
+      expect(response.problems, 'one problem').toHaveLength(1);
+      expect(Buffer.byteLength(JSON.stringify(response))).toBeLessThanOrEqual(MAX_REFUSAL_BYTES);
+      expect(await businessRowText(ID.bizA), 'the row is byte-identical').toBe(before);
+    }
+  });
+
+  it('[V63E-S04] RED-BEFORE: a member who is not the owner (STAFF with settings none, ADMIN with settings admin) sending the same depth is refused with a bounded body that names no entry, and nothing is written', async () => {
+    // The body pipe runs before the controller's D-11 check for every profile
+    // field (an order this packet does not change), so the field's refusal may
+    // be the pipe's 400 rather than the owner check's 403; either way it is
+    // bounded. The metaData bag reaches the owner check first: 403.
+    await resetBizA();
+    for (const actor of [ID.staff, ID.admin]) {
+      for (const [label, body] of [
+        ['field, many entries', { depth: junkDepth(JUNK) }],
+        ['field, long names', { depth: longKeyDepth() }],
+        ['metaData bag, many entries', { metaData: { depth: junkDepth(JUNK) } }],
+      ] as const) {
+        const before = await businessRowText(ID.bizA);
+        const res = await patch(actor, ID.bizA, body);
+        const bytes = Buffer.byteLength(res.text ?? '');
+        if ('metaData' in body) expect(res.status, `${actor} ${label}: ${res.text?.slice(0, 300)}`).toBe(403);
+        else expect([400, 403], `${actor} ${label}: ${res.text?.slice(0, 300)}`).toContain(res.status);
+        expect(bytes, `${actor} ${label}: the refusal weighs ${bytes} bytes`).toBeLessThanOrEqual(MAX_REFUSAL_BYTES);
+        expect(res.text, `${actor} ${label}: no entry is named`).not.toMatch(/\bk\d+\b/);
+        expect(res.text, `${actor} ${label}: no name comes back whole`).not.toContain(ECHO);
+        expect(res.body, label).not.toHaveProperty('sells');
+        expect(await businessRowText(ID.bizA), `${actor} ${label}: the row is byte-identical`).toBe(before);
+      }
+    }
   });
 });
 
