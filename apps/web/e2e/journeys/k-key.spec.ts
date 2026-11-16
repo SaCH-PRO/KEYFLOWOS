@@ -4,11 +4,14 @@ import {
   API_URL,
   VARIANT,
   coveredButtonFindings,
+  freshTenant,
   keyUiFindings,
   memberOf,
   settle,
   signedInContext,
+  type Tenant,
 } from "./journey-helpers";
+import { answerLeaks, chatBodyText, isRefusal, replyLines } from "./journey-text";
 import type { APIRequestContext, Page, Request } from "@playwright/test";
 
 /**
@@ -37,7 +40,14 @@ import type { APIRequestContext, Page, Request } from "@playwright/test";
  *
  * KEY-on with a model (@ai-on: the ai-on variant, a capped key, staging only)
  *   K5  KEY answers 'who owes me', 'what's on today' and 'how was this month'
- *       from the business's own data, within the member's scopes.
+ *       from the business's own data, within the member's scopes: the owner's
+ *       answer names the debtor and the 600 owed and nothing of another
+ *       business (a second tenant's debtor and 777); a member without revenue
+ *       read is told no ('no access', 'ask the owner'), and neither the drawer
+ *       nor the chat answer names the debtor, the invoice number or any
+ *       seeded amount (1,000, 400, 600). Each answer is read once KEY's chat
+ *       answer is complete and its reply shows in the drawer (replyLines), not
+ *       after a fixed wait.
  *   K6  The paste-message box on New quote, New invoice and New booking drafts
  *       from the real catalog.
  *   K7  A write asked for in chat shows a draft card with Confirm and Edit in
@@ -332,39 +342,80 @@ test.describe("journey K: ask KEY (optional)", () => {
   });
 
   test("K5 KEY answers who owes me, what's on today and how this month went, from the business's own data and within scopes", { tag: "@ai-on" }, async ({ page, request, owner, browser }) => {
-    test.setTimeout(10 * 60_000);
+    test.setTimeout(12 * 60_000);
     const last = `Owes${stamp()}`;
     const customer = await api<{ id: string }>(request, owner, "POST", `/crm/businesses/${owner.businessId}/contacts`, { firstName: "Maria", lastName: last });
-    const invoice = await api<{ id: string }>(request, owner, "POST", `/commerce/businesses/${owner.businessId}/invoices`, {
+    const invoice = await api<{ id: string; invoiceNumber: string }>(request, owner, "POST", `/commerce/businesses/${owner.businessId}/invoices`, {
       contactId: customer.id,
       currency: owner.currency,
       items: [{ description: "Catering", quantity: 1, unitPrice: 1000 }],
     });
     await api(request, owner, "PATCH", `/commerce/invoices/${invoice.id}/status/sent`, { businessId: owner.businessId, status: "SENT" });
     await api(request, owner, "POST", `/commerce/businesses/${owner.businessId}/invoices/${invoice.id}/payments`, { amount: 400, method: "Cash", idempotencyKey: `${invoice.id}-k5` });
-    const ask = async (p: Page, question: string): Promise<string> => {
+    // Another business, with a debtor of its own: the owner's answer must name neither (SEC-GL-3).
+    const other: Tenant = await freshTenant(request, "k5 other business");
+    const otherLast = `Elsewhere${stamp()}`;
+    const otherCustomer = await api<{ id: string }>(request, other, "POST", `/crm/businesses/${other.businessId}/contacts`, { firstName: "Rosa", lastName: otherLast });
+    const otherInvoice = await api<{ id: string }>(request, other, "POST", `/commerce/businesses/${other.businessId}/invoices`, {
+      contactId: otherCustomer.id,
+      currency: other.currency,
+      items: [{ description: "Wholesale", quantity: 1, unitPrice: 777 }],
+    });
+    await api(request, other, "PATCH", `/commerce/invoices/${otherInvoice.id}/status/sent`, { businessId: other.businessId, status: "SENT" });
+
+    /**
+     * Asks KEY in the drawer and reads its answer: the chat answer (the POST to KEY's chat route, read to its
+     * end, as text: chatBodyText) and the reply the drawer then shows (replyLines: what was not there before
+     * the question, once it stops changing). "" for the reply means KEY never replied.
+     */
+    const ask = async (p: Page, question: string): Promise<{ reply: string; body: string; status: number }> => {
       await todayDrawerClosed(p);
       await openDrawer(p);
       const drawer = drawerOf(p);
+      // The drawer as it settles (a restored conversation may load after it opens): what is there before the
+      // question is never the reply.
+      let before = await drawer.innerText();
+      for (let round = 0; round < 10; round += 1) {
+        await p.waitForTimeout(1_000);
+        const now = await drawer.innerText();
+        if (now === before) break;
+        before = now;
+      }
       await drawer.getByPlaceholder(/message KEY/i).or(drawer.getByRole("textbox")).first().fill(question);
+      const answered = p.waitForResponse((r) => isChatPost(r.request()) && (r.request().postData() ?? "").includes(question), { timeout: 180_000 });
       await drawer.getByRole("button", { name: /^send$/i }).first().click();
-      await p.waitForTimeout(30_000);
-      return (await drawer.innerText()).replace(/\s+/g, " ");
+      const res = await answered.catch(() => null);
+      expect.soft(res, `KEY's chat route answers '${question}'`).not.toBeNull();
+      const body = res ? chatBodyText(await res.text().catch(() => "")) : "";
+      let reply = "";
+      for (const until = Date.now() + 60_000; Date.now() < until; ) {
+        const now = replyLines(before, await drawer.innerText(), question);
+        if (now !== "" && now === reply) break;
+        reply = now;
+        await p.waitForTimeout(2_000);
+      }
+      test.info().annotations.push({ type: "key-answer", description: `${question} -> ${res?.status() ?? "no answer"}: ${reply.slice(0, 300)} | body: ${body.slice(0, 300)}` });
+      expect.soft(reply, `KEY's reply to '${question}' in the drawer`).not.toBe("");
+      return { reply, body, status: res?.status() ?? 0 };
     };
-    await test.step("'who owes me' names Maria and the 600 owed", async () => {
+    await test.step("'who owes me' names Maria and the 600 owed, and nothing of another business", async () => {
       const answer = await ask(page, "Who owes me?");
-      expect.soft(answer).toContain(last);
-      expect.soft(answer).toMatch(/600(\.00)?/);
+      expect.soft(answer.reply).toContain(last);
+      expect.soft(answer.reply).toMatch(/600(\.00)?/);
+      expect.soft(answerLeaks(`${answer.reply} ${answer.body}`, { names: [otherLast], amounts: [777] }), "another business's debtor or amount in the owner's answer").toEqual([]);
     });
     await test.step("'what's on today' and 'how was this month' answer from the books", async () => {
-      expect.soft(await ask(page, "What's on today?")).toMatch(/today|nothing|no bookings/i);
-      expect.soft(await ask(page, "How was this month?")).toMatch(/400(\.00)?/);
+      expect.soft((await ask(page, "What's on today?")).reply).toMatch(/today|nothing|no bookings/i);
+      expect.soft((await ask(page, "How was this month?")).reply).toMatch(/400(\.00)?/);
     });
-    await test.step("a member without revenue read is told no, with no amount", async () => {
+    await test.step("a member without revenue read is told no, and no answer names the debt", async () => {
       const staff = await memberOf(request, owner, "front desk", { role: "STAFF", scopes: { bookings: "read", crm: "read" } });
       const desk = await signedInContext(browser, staff);
-      const answer = await ask(await desk.newPage(), "Who owes me?");
-      expect.soft(answer).not.toMatch(/600(\.00)?/);
+      const member = await ask(await desk.newPage(), "Who owes me?");
+      expect.soft(isRefusal(member.reply), `KEY tells the member no ('no access' / 'ask the owner'): '${member.reply.slice(0, 300)}'`).toBe(true);
+      expect
+        .soft(answerLeaks(`${member.reply} ${member.body}`, { names: [last], invoiceNumbers: [invoice.invoiceNumber], amounts: [1000, 400, 600] }), "the debtor, the invoice or an amount in what the member was shown or sent")
+        .toEqual([]);
     });
   });
 

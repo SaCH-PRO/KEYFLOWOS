@@ -8,8 +8,10 @@ import {
   settle,
   type Tenant,
 } from "./journey-helpers";
-import { offeredPaymentMethods } from "./journey-text";
-import type { APIRequestContext, BrowserContext, Locator, Page } from "@playwright/test";
+import { framingRefused, offeredPaymentMethods } from "./journey-text";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import type { APIRequestContext, BrowserContext, Locator, Page, Request } from "@playwright/test";
 
 /**
  * GATE-JOURNEYS-G-L, journey G: sell online (product audit core_journeys_v1 G;
@@ -24,7 +26,10 @@ import type { APIRequestContext, BrowserContext, Locator, Page } from "@playwrig
  *       payload (GET /site/storefront/public/<slug>), and calls no route the API
  *       does not have.
  *   G3  Quantity is capped at stock, and checkout refuses an oversell in plain
- *       words (the product named, no id), writing no order.
+ *       words (the product named, no id), writing no order: through the
+ *       checkout route, and on the checkout screen itself when the stock drops
+ *       under a customer's cart before Place Order (the screen says so in
+ *       plain words, confirms nothing, and no order is written).
  *   G4  Only configured methods are offered: Settings > Getting paid, saved as
  *       its tab saves it (payments-tab.tsx: PATCH /identity/businesses/:id
  *       metaData), twice (bank transfer on and cash off, then the reverse); the
@@ -44,7 +49,10 @@ import type { APIRequestContext, BrowserContext, Locator, Page } from "@playwrig
  *   G9  The in-app preview and the /widgets/* embeds render: Your page's
  *       preview shows the store; another site frames /widgets/cart/<slug> and
  *       /widgets/booking/<slug>; the full booking page frames only inside the
- *       app (framing ruling D-186).
+ *       app (framing ruling D-186): its answer forbids another site to frame
+ *       it (X-Frame-Options / CSP frame-ancestors, journey-text.ts
+ *       framingRefused) and the browser refuses the frame (Chrome's error
+ *       page), never judged by text that has not loaded yet.
  *   G10 There are no unearned badges ('Verified Business', 'Instant Booking',
  *       'Guaranteed by KeyFlowOS'; 'Open Now' with no hours set).
  *   G11 /site/<slug> redirects to /book/<slug>, also for a business that
@@ -129,6 +137,8 @@ interface StockedProduct {
   id: string;
   name: string;
   price: number;
+  /** Its stock rows, one per warehouse, in the order given. */
+  stockIds: string[];
 }
 
 const warehouses = new Map<string, string[]>();
@@ -167,16 +177,18 @@ async function seedStockedProduct(
     outOfStockBehavior: "show_oos",
   });
   const ws = await warehousesOf(request, owner, stock.length);
+  const stockIds: string[] = [];
   for (let i = 0; i < stock.length; i++) {
-    await api(request, owner, "POST", `/marketplace/businesses/${owner.businessId}/inventory`, {
+    const row = await api<{ id: string }>(request, owner, "POST", `/marketplace/businesses/${owner.businessId}/inventory`, {
       productId: product.id,
       warehouseId: ws[i],
       quantity: stock[i],
       costPerUnit: cost,
       currency: owner.currency,
     });
+    stockIds.push(row.id);
   }
-  return { id: product.id, name: product.name, price };
+  return { id: product.id, name: product.name, price, stockIds };
 }
 
 /** Units on hand for a product, over every warehouse (the inventory read). */
@@ -507,6 +519,57 @@ test.describe("journey G: sell online", () => {
       expect.soft((await storeOrders(request, owner)).length, "no order is written for the oversell").toBe(before);
       expect.soft(await onHand(request, owner, product.id), "the stock is untouched").toBe(10);
     });
+
+    await test.step("the checkout screen refuses an oversell in plain words when the stock drops under the cart", async () => {
+      // A customer has 5 in the cart and reaches the Payment step; meanwhile the owner counts the stock down to 3
+      // (Inventory's adjustment: 6 -> 0 and 4 -> 3). Place Order must then be refused on the screen.
+      const visitor = await anonymousContext(browser, { who: "customer, stock dropped" });
+      const shop = await visitor.newPage();
+      await shop.goto(`/book/${slug}`);
+      await settle(shop, 1_000);
+      await putInCart(shop, product.name);
+      const cart = await openCart(shop);
+      for (let i = 1; i < 5; i++) await increaseOf(cart).click();
+      await expect.poll(() => cartQuantity(cart), { message: "5 in the cart" }).toBe(5);
+      await toPaymentStep(shop, { first: "Anil", last: `Persad${stamp()}` });
+      for (const [stockId, change] of [
+        [product.stockIds[0], -6],
+        [product.stockIds[1], -1],
+      ] as const) {
+        await api(request, owner, "POST", `/marketplace/businesses/${owner.businessId}/inventory/adjust`, { stockId, quantityChange: change, reasonCode: "COUNT_CORRECTION" });
+      }
+      expect(await onHand(request, owner, product.id), "3 on hand now").toBe(3);
+      const before = (await storeOrders(request, owner)).length;
+
+      // The customer chooses cash, agrees to the terms when asked, and presses the screen's own Place Order. A
+      // checkout that refuses before the order is sent (Place Order disabled, the shortfall shown) is a refusal too.
+      const cash = shop.getByRole("button", { name: /cash/i }).or(shop.getByRole("radio", { name: /cash/i })).or(shop.getByText(/cash/i)).filter({ visible: true });
+      if (await cash.count()) await cash.first().click();
+      const terms = shop.getByText(/i agree to the terms/i).filter({ visible: true });
+      if (await terms.count()) await terms.first().click();
+      const place = shop.getByRole("button", { name: /place order/i }).first();
+      const pressable = await expect(place).toBeEnabled({ timeout: 3_000 }).then(() => true).catch(() => false);
+      let answered = "not sent: Place Order is not pressable";
+      if (pressable) {
+        const placed = shop.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname === `/site/storefront/public/${slug}/checkout`, { timeout: 30_000 }).catch(() => null);
+        await place.click();
+        const res = await placed;
+        if (res) {
+          answered = `${res.status()} ${(await res.text().catch(() => "")).slice(0, 300)}`;
+          expect.soft(res.status(), `the checkout of 5 against 3 (BUG-017): ${answered}`).toBeGreaterThanOrEqual(400);
+          expect.soft(res.status(), "the refusal is not a server error").toBeLessThan(500);
+        }
+      }
+      test.info().annotations.push({ type: "oversell-screen", description: answered });
+      const OVERSELL_REFUSAL = /only \d+ (?:left|in stock|available)|not enough|out of stock|sold out|no longer available|(?:is|are)n['’]?t available|not available|insufficient|exceeds? (?:the )?(?:available )?stock|more than (?:we have|(?:is|are) (?:in stock|available))/i;
+      // Anywhere on the screen: the step's own text, a dialog, or a toast (the root sonner toaster).
+      const notice = shop.getByText(OVERSELL_REFUSAL).filter({ visible: true }).first();
+      await expect.soft(notice, "the checkout screen says, in plain words, that there is not enough stock").toBeVisible({ timeout: 10_000 });
+      if (await notice.count()) expect.soft(await notice.innerText(), "the screen's refusal carries no internal id").not.toMatch(ROW_ID);
+      await expect.soft(shop.getByText(/order (placed|confirmed)|thank you for your order|order received/i), "no order confirmation on the screen").toHaveCount(0);
+      expect.soft((await storeOrders(request, owner)).length, "no order is written for the oversell").toBe(before);
+      expect.soft(await onHand(request, owner, product.id), "the stock is untouched by the refused order").toBe(3);
+    });
   });
 
   test("G4 only the payment methods Settings > Getting paid enables are offered at checkout", async ({ page, request, owner, browser }) => {
@@ -690,8 +753,6 @@ test.describe("journey G: sell online", () => {
     const product = await seedStockedProduct(request, owner, `Guava cheese ${stamp()}`, 22, [10]);
     await addToStore(page, [product.name]);
     const web = new URL(baseURL ?? "http://127.0.0.1:5000");
-    // Another website: the same server under the other local name (127.0.0.1 <-> localhost), a different origin.
-    const otherSite = `${web.protocol}//${web.hostname === "localhost" ? "127.0.0.1" : "localhost"}:${web.port}`;
 
     await test.step("Your page's preview shows the store", async () => {
       await page.goto("/app/store");
@@ -709,34 +770,85 @@ test.describe("journey G: sell online", () => {
       await expect.soft(page.frameLocator(`iframe[src*="/book/${slug}"]`).first().getByText(product.name).first(), "the preview shows the store (BUG-056: blank, X-Frame-Options DENY)").toBeVisible({ timeout: 30_000 });
     });
 
-    const visitor: BrowserContext = await anonymousContext(browser, { who: "another website" });
-    const embed = (path: string) =>
-      `<!doctype html><html><body><h1>Another site</h1><iframe id="kf" src="${web.origin}${path}" width="420" height="700"></iframe></body></html>`;
-    await visitor.route(`${otherSite}/embed/**`, (route) => {
-      const path = new URL(route.request().url()).searchParams.get("path") ?? "/";
-      return route.fulfill({ status: 200, contentType: "text/html", body: embed(path) });
+    // Another website: a real site on this machine, another origin (a loopback server of the test's own, named
+    // localhost; the app is 127.0.0.1, or the reverse). Not a page Playwright fulfils: such a page has no
+    // address, so Chromium's local-network checks block every frame on it that points at the app
+    // (net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS), the embeds included, whatever the app's headers say.
+    const attr = (v: string) => v.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const server: Server = createServer((req, res) => {
+      const path = new URL(req.url ?? "/", "http://another.site").searchParams.get("path") ?? "/";
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(`<!doctype html><html><body><h1>Another site</h1><iframe id="kf" src="${attr(`${web.origin}${path}`)}" width="420" height="700"></iframe></body></html>`);
     });
-    const site = await visitor.newPage();
-    /** What the framed page shows another website: its text, or "" when the browser refused to frame it. */
-    const framed = async (path: string): Promise<string> => {
-      await site.goto(`${otherSite}/embed/page?path=${encodeURIComponent(path)}`);
-      await site.waitForTimeout(3_000);
-      const frame = site.frames().find((f) => f !== site.mainFrame());
-      if (!frame || frame.url().startsWith("chrome-error:")) return "";
-      return (await frame.locator("body").innerText({ timeout: 5_000 }).catch(() => "")).replace(/\s+/g, " ");
-    };
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    const otherSite = `http://${web.hostname === "localhost" ? "127.0.0.1" : "localhost"}:${(server.address() as AddressInfo).port}`;
+    try {
+      const visitor: BrowserContext = await anonymousContext(browser, { who: "another website" });
+      const site = await visitor.newPage();
+      /**
+       * What another website's frame of `path` comes to, and the app's answer (its headers): "refused" when the
+       * browser refused to frame it (the frame's load blocked by its response, or Chrome's error page),
+       * "rendered" once the frame shows `shows`, "still loading" when neither happens in 30 s; any other failed
+       * load is named. Never judged by text that has not loaded yet.
+       */
+      const framed = async (path: string, shows: RegExp): Promise<{ verdict: string; text: string; headers: Record<string, string> | null }> => {
+        const target = `${web.origin}${path}`;
+        let failure = "";
+        const onFailed = (r: Request) => {
+          if (r.url() === target && r.resourceType() === "document") failure = r.failure()?.errorText ?? "failed";
+        };
+        site.on("requestfailed", onFailed);
+        const answer = site.waitForResponse((r) => r.url() === target && r.request().resourceType() === "document", { timeout: 30_000 }).catch(() => null);
+        await site.goto(`${otherSite}/embed?path=${encodeURIComponent(path)}`);
+        const res = await answer;
+        let verdict = "still loading";
+        let text = "";
+        for (const until = Date.now() + 30_000; Date.now() < until; ) {
+          if (failure) {
+            verdict = /ERR_BLOCKED_BY_RESPONSE/.test(failure) ? "refused" : `failed (${failure})`;
+            break;
+          }
+          const frame = site.frames().find((f) => f !== site.mainFrame());
+          if (frame?.url().startsWith("chrome-error:")) {
+            verdict = "refused";
+            break;
+          }
+          if (frame && frame.url().startsWith(web.origin)) {
+            text = (await frame.locator("body").innerText({ timeout: 2_000 }).catch(() => "")).replace(/\s+/g, " ");
+            if (shows.test(text)) {
+              verdict = "rendered";
+              break;
+            }
+          }
+          await site.waitForTimeout(500);
+        }
+        site.off("requestfailed", onFailed);
+        test.info().annotations.push({ type: "framed", description: `${path}: ${verdict}; X-Frame-Options ${res?.headers()["x-frame-options"] ?? "none"}; CSP ${res?.headers()["content-security-policy"] ?? "none"}` });
+        return { verdict, text, headers: res ? res.headers() : null };
+      };
 
-    await test.step("another website frames /widgets/cart/<slug> and /widgets/booking/<slug>", async () => {
-      const cart = await framed(`/widgets/cart/${slug}`);
-      expect.soft(cart, "the cart widget renders inside another site (BUG-056: X-Frame-Options DENY)").toMatch(/order now|checkout|add/i);
-      const booking = await framed(`/widgets/booking/${slug}`);
-      expect.soft(booking, "the booking widget renders inside another site").toMatch(/book/i);
-    });
+      await test.step("another website frames /widgets/cart/<slug> and /widgets/booking/<slug>", async () => {
+        const cart = await framed(`/widgets/cart/${slug}`, /order now|checkout|add/i);
+        expect.soft(cart.verdict, `the cart widget renders inside another site (BUG-056: X-Frame-Options DENY; it shows '${cart.text.slice(0, 120)}')`).toBe("rendered");
+        const booking = await framed(`/widgets/booking/${slug}`, /book/i);
+        expect.soft(booking.verdict, `the booking widget renders inside another site (it shows '${booking.text.slice(0, 120)}')`).toBe("rendered");
+      });
 
-    await test.step("the full booking page does not render inside another website (framing ruling D-186)", async () => {
-      const full = await framed(`/book/${slug}`);
-      expect.soft(full.includes(product.name), "the full /book/<slug> page framed by another site").toBe(false);
-    });
+      await test.step("the full booking page does not render inside another website (framing ruling D-186)", async () => {
+        // Judged by the page's own answer and by the browser, never by absent text: /book is a client page that
+        // renders the catalog only after hydration and a storefront read.
+        const docPath = `/book/${slug}`;
+        const full = await framed(docPath, new RegExp(escapeRe(product.name)));
+        expect.soft(full.headers, `the framed ${docPath} answers`).not.toBeNull();
+        const headers = full.headers ?? {};
+        expect
+          .soft(framingRefused(headers, otherSite, web.origin), `${docPath}'s answer forbids another site to frame it (X-Frame-Options ${headers["x-frame-options"] ?? "none"}; CSP ${headers["content-security-policy"] ?? "none"})`)
+          .toBe(true);
+        expect.soft(full.verdict, "the browser refuses to frame the full booking page for another site").toBe("refused");
+      });
+    } finally {
+      server.close();
+    }
   });
 
   test("G10 no unearned badge on the store page", async ({ request, owner, browser }) => {

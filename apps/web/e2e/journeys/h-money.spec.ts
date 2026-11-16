@@ -9,7 +9,7 @@ import {
   signedInContext,
   type Tenant,
 } from "./journey-helpers";
-import { amountAfter } from "./journey-text";
+import { accountantExportAnswer, amountAfter } from "./journey-text";
 import type { APIRequestContext, Locator, Page } from "@playwright/test";
 
 /**
@@ -34,14 +34,22 @@ import type { APIRequestContext, Locator, Page } from "@playwright/test";
  *       storage is a provider the CI stack does not have).
  *   H5  Record a bill (pay later), then pay it, choosing the account and method
  *       (billpay ruling D-168: the app always asks).
- *   H6  Void a posted expense, with a confirm step (voidexpense ruling D-170).
+ *   H6  Void a posted expense, with a confirm step (voidexpense ruling D-170):
+ *       the void answers the expense VOID and its posting nets to 0. (A voided
+ *       expense is soft-deleted, so GET .../expenses/:id no longer answers it:
+ *       the void's own answer and the ledger are the reads.)
  *   H7a Marking an expense recurring creates its schedule.
  *   H7b Scheduler run: the recurring expense generates on schedule (@scheduler).
  * Reports
  *   H8  Report tabs switch without crashing (P&L, cash flow, balance sheet, ...).
  *   H9  'Send to my accountant' produces the export ZIP and sends it: the button
- *       asks for the accountant's email once and the ZIP is produced (CI); the
- *       email arrives (H9b, @staging).
+ *       asks for the accountant's email and the ZIP for the period is produced
+ *       (CI: GET .../accountant-export.zip?start&end). On the CI stack there is
+ *       no mail sender, so the email route answers its documented 400 'Email
+ *       sender is not configured' and the screen must say the email was not
+ *       sent; where the email is sent, the address is kept (saveRecipient), so
+ *       it is asked once. The email arriving, and the address kept, are H9b
+ *       (@staging).
  * H10 No invented figures anywhere on the Money screens.
  *
  * Doors (the packets that turn these green build to them): Money is /app/money,
@@ -497,9 +505,13 @@ test.describe("journey H: know my money", () => {
     await expect(confirm.first(), "a confirm step").toBeVisible();
     const voided = page.waitForResponse((r) => r.request().method() === "POST" && /\/void$/.test(new URL(r.url()).pathname));
     await confirm.first().click();
-    expect((await voided).status()).toBeLessThan(300);
-    const read = await api<{ status: string }>(request, owner, "GET", `/expenses/businesses/${owner.businessId}/expenses/${expense.id}`);
-    expect(read.status, "the expense is void").toBe("VOID");
+    const voidRes = await voided;
+    expect(voidRes.status(), `the void: ${new URL(voidRes.url()).pathname}`).toBeLessThan(300);
+    // A voided expense is soft-deleted (voidExpense sets deletedAt; getExpense reads deletedAt null), so the
+    // void's own answer says it is VOID, and the ledger says the posting is reversed.
+    const voidBody = (await voidRes.json().catch(() => ({}))) as { id?: string; status?: string };
+    expect.soft(voidBody.id, "the void answers this expense").toBe(expense.id);
+    expect(voidBody.status, "the void answers the expense as VOID").toBe("VOID");
     const gl = await api<{ rows: Array<{ accountType: string; debit: string | number; credit: string | number; sourceId: string | null }> }>(request, owner, "GET", `/finance/businesses/${owner.businessId}/general-ledger?pageSize=500`);
     const net = gl.rows.filter((r) => r.sourceId === expense.id && r.accountType === "EXPENSE").reduce((s, r) => s + Number(r.debit) - Number(r.credit), 0);
     expect(net, "the posting is reversed: the expense nets to 0").toBe(0);
@@ -528,6 +540,7 @@ test.describe("journey H: know my money", () => {
     test.setTimeout(15 * 60_000);
     const description = `Rent ${stamp()}`;
     await api(request, owner, "POST", `/expenses/businesses/${owner.businessId}/recurring`, {
+      name: description,
       description,
       amount: 4500,
       currency: owner.currency,
@@ -575,7 +588,7 @@ test.describe("journey H: know my money", () => {
     expect.soft(errors.filter((e) => /TypeError|Cannot read/i.test(e)), "page errors while switching report tabs").toEqual([]);
   });
 
-  test("H9 'Send to my accountant' asks for the accountant's email once and produces the export ZIP", async ({ page, request, owner }) => {
+  test("H9 'Send to my accountant' asks for the accountant's email and produces the export ZIP", async ({ page, request, owner }) => {
     test.setTimeout(5 * 60_000);
     await seedMonth(request, owner);
     const accountant = `accountant.${stamp()}@v62j.test.local`;
@@ -590,22 +603,67 @@ test.describe("journey H: know my money", () => {
     const exported = page.waitForResponse((r) => /accountant-export/.test(new URL(r.url()).pathname) && r.request().method() !== "OPTIONS", { timeout: 60_000 });
     await dialog.getByRole("button", { name: /^(send|export|email)/i }).last().click();
     const res = await exported;
-    test.info().annotations.push({ type: "export", description: `${res.status()} ${res.request().method()} ${new URL(res.url()).pathname}` });
-    // The email leg needs a mail provider (H9b, @staging); here the export itself must be made and the address kept.
-    expect(res.status() < 300 || res.status() === 503, `the export answers (${res.status()})`).toBe(true);
-    const zip = await request.get(`${API_URL}/finance/businesses/${owner.businessId}/accountant-export.zip`, { headers: auth(owner) });
-    expect(zip.status(), "the export ZIP is produced").toBe(200);
-    expect((await zip.body()).subarray(0, 2).toString("latin1"), "a ZIP").toBe("PK");
-    const read = await api<{ accountantEmail?: string | null }>(request, owner, "GET", `/identity/businesses/${owner.businessId}`);
-    expect(read.accountantEmail, "the accountant's email is kept, so it is asked once").toBe(accountant);
+    const path = new URL(res.url()).pathname;
+    const text = await res.text().catch(() => "");
+    const answer = accountantExportAnswer(path, res.status(), text);
+    test.info().annotations.push({ type: "export", description: `${res.status()} ${res.request().method()} ${path}: ${answer} ${text.slice(0, 200)}` });
+    // The CI stack has no mail sender: the email route answers its documented 400 'Email sender is not
+    // configured' (no-mail-sender). A sent email, or a produced ZIP, is the other right answer; a missing period
+    // or a server error is not.
+    expect(answer, `the export's answer: ${res.status()} ${path} ${text.slice(0, 200)}`).not.toBe("wrong");
+
+    // The period the button asked for (the request's periodStart/periodEnd, or start/end), else this month to date.
+    const asked = (() => {
+      const url = new URL(res.url());
+      let body: Record<string, unknown> = {};
+      try {
+        body = JSON.parse(res.request().postData() ?? "{}") as Record<string, unknown>;
+      } catch {
+        body = {};
+      }
+      const pick = (...vals: unknown[]) => vals.find((v): v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v))?.slice(0, 10);
+      return {
+        start: pick(body.periodStart, body.start, url.searchParams.get("start")) ?? firstOfMonth(),
+        end: pick(body.periodEnd, body.end, url.searchParams.get("end")) ?? localDay(new Date()),
+      };
+    })();
+
+    if (answer === "no-mail-sender") {
+      await test.step("the screen says the email could not be sent, and never that it was", async () => {
+        const reason = /(?:not|n['’]t) (?:been |be )?(?:set up|configured|available|sent)\b|(?:can['’]?t|cannot|could ?not|couldn['’]t|unable to) send|no (?:email|mail) (?:sender|service)/i;
+        await expect
+          .soft(dialog.getByText(reason).or(page.locator("[data-sonner-toast], [role=alert]").filter({ hasText: reason })).filter({ visible: true }).first(), "the screen says, in plain words, that the email was not sent")
+          .toBeVisible({ timeout: 10_000 });
+        await expect.soft(page.locator("[data-sonner-toast], [role=alert], [role=status]").filter({ hasText: /\b(sent|emailed)\b(?! ?(failed|error))/i }).filter({ hasNotText: reason }), "no notice that the export was sent").toHaveCount(0);
+      });
+    }
+
+    await test.step(`the export ZIP for ${asked.start} to ${asked.end} is produced`, async () => {
+      const zip = await request.get(`${API_URL}/finance/businesses/${owner.businessId}/accountant-export.zip?start=${asked.start}&end=${asked.end}`, { headers: auth(owner) });
+      expect(zip.status(), "the export ZIP is produced").toBe(200);
+      expect((await zip.body()).subarray(0, 2).toString("latin1"), "a ZIP").toBe("PK");
+    });
+
+    if (answer === "sent") {
+      await test.step("the address is kept, so it is asked once", async () => {
+        const settings = await api<{ accountantEmail?: string | null }>(request, owner, "GET", `/finance/businesses/${owner.businessId}/settings`);
+        expect(settings.accountantEmail, "the accountant's email is kept (saveRecipient)").toBe(accountant);
+      });
+    } else {
+      test.info().annotations.push({ type: "export", description: "no email was sent on this stack, so no address is saved: H9b (@staging) holds 'asked once'" });
+    }
   });
 
   test("H9b the accountant receives the export by email", { tag: "@staging" }, async ({ request, owner }) => {
     // GATE-STAGING-RUN: the platform mail provider and a sandbox mailbox.
     test.setTimeout(5 * 60_000);
+    await seedMonth(request, owner);
     const accountant = `accountant.${stamp()}@v62j.test.local`;
-    await api(request, owner, "PATCH", `/identity/businesses/${owner.businessId}`, { accountantEmail: accountant });
-    await api(request, owner, "POST", `/finance/businesses/${owner.businessId}/accountant-export/email`, {});
+    // The route the Send to my accountant button uses (sendAccountantExportEmail): the period is required, and
+    // saveRecipient keeps the address (identity's PATCH does not take accountantEmail).
+    await api(request, owner, "POST", `/finance/businesses/${owner.businessId}/accountant-export/email`, { to: accountant, saveRecipient: true, periodStart: firstOfMonth(), periodEnd: localDay(new Date()) });
+    const settings = await api<{ accountantEmail?: string | null }>(request, owner, "GET", `/finance/businesses/${owner.businessId}/settings`);
+    expect(settings.accountantEmail, "the accountant's address is kept, so it is asked once").toBe(accountant);
     const mailbox = process.env.E2E_STAGING_MAILBOX_URL ?? "";
     expect(mailbox, "E2E_STAGING_MAILBOX_URL (GATE-STAGING-RUN) reads the accountant's mail").not.toBe("");
     await expect

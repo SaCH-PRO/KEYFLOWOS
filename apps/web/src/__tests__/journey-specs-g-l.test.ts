@@ -360,6 +360,17 @@ describe("framingRefused: whether a page's answer forbids another site to frame 
     expect(g9).toMatch(/startsWith\("chrome-error:"\)[\s\S]*?"refused"/);
     expect(g9).toMatch(/toBe\("refused"\)/);
   });
+
+  it("G9's other website is a real loopback server, not a page Playwright fulfils (Chromium's local-network checks block every frame on one)", () => {
+    // Found in the repair's live run: on a fulfilled page the frame of the app fails with
+    // net::ERR_BLOCKED_BY_LOCAL_NETWORK_ACCESS_CHECKS before any header is read, so the widget legs could
+    // never pass and the full page's refusal proved nothing.
+    const g9 = testBlock("g-sell-online.spec.ts", "G9");
+    expect(g9).toMatch(/createServer\(/);
+    expect(g9).not.toMatch(/visitor\.route\(/);
+    expect(g9).toMatch(/ERR_BLOCKED_BY_RESPONSE/);
+    expect(g9, "the server is closed whatever the outcome").toMatch(/finally \{\s*server\.close\(\);/);
+  });
 });
 
 // ── J1, G3: the refusal on the screen the person sees (COR-GL-7) ────────

@@ -9,6 +9,7 @@ import {
   type Member,
   type Tenant,
 } from "./journey-helpers";
+import { ROLE_PRESETS, amountMentioned, presetFindings } from "./journey-text";
 import type { APIRequestContext, Locator, Page } from "@playwright/test";
 
 /**
@@ -19,9 +20,15 @@ import type { APIRequestContext, Locator, Page } from "@playwright/test";
  * folder).
  *
  *   J1  The owner invites by email, case-insensitive: the same address in other
- *       letters is refused, and the team holds one invite for it.
+ *       letters is refused, the Team screen says so in plain words (and never
+ *       that the invite was sent), and the team holds one invite for it.
  *   J2  ... with a role preset: Admin, Front desk or Bookkeeper; module scopes
- *       are optional (an invite with a preset and no scope edits is accepted).
+ *       are optional (an invite with a preset and no scope edits is accepted),
+ *       and each preset grants its own scope set (journey-text.ts
+ *       ROLE_PRESETS: Front desk is STAFF with bookings and customers and no
+ *       money, settings or team; Bookkeeper is STAFF with money and no
+ *       settings or team; Admin is ADMIN with settings admin), read back from
+ *       the team read.
  *   J3  The role control resets after each invite.
  *   J4  Pending invites look pending (marked so, and not counted as members).
  *   J5  A staff member's menu shows only the hubs they may open.
@@ -59,6 +66,13 @@ import type { APIRequestContext, Locator, Page } from "@playwright/test";
  * (at 375px its Staff tab is an unnamed icon and the list is not reached). J7
  * passes: the API refuses staff the webhook, API-key, stock and project
  * routes.
+ *
+ * Review repair (SEC-GL-1, SEC-GL-6, SEC-GL-7, COR-GL-7): J2 judges what each
+ * preset granted (presetFindings), not only that it is not the owner (the API
+ * never stores an OWNER invite); J6 looks for the owner's own expense on the
+ * refused screens; J7 seeds an owner webhook and API key, creates a key as
+ * staff (BUG-013's exposure) and looks for the secrets in every answer; J1
+ * reads the refusal on the Team screen.
  */
 
 const auth = (t: { token: string }) => ({ Authorization: `Bearer ${t.token}` });
@@ -233,25 +247,52 @@ test.describe("journey J: work with my team safely", () => {
       const rows = (await team(request, owner)).filter((r) => emailOf(r) === address);
       expect.soft(rows.length, `members or invites for ${address}, in any letters`).toBe(1);
     });
+
+    await test.step("the Team screen says so in plain words, and never that the invite was sent", async () => {
+      // What the screen tells the owner over the next 6 s: its toasts and alerts (the root sonner toaster),
+      // and the screen's own text (an inline reason under the form).
+      const notices = new Set<string>();
+      let screen = "";
+      for (let i = 0; i < 12; i += 1) {
+        for (const t of await page.locator("[data-sonner-toast], [role=alert]").filter({ visible: true }).allInnerTexts()) notices.add(t.replace(/\s+/g, " ").trim());
+        screen = (await page.locator("main").first().innerText().catch(() => "")).replace(/\s+/g, " ");
+        await page.waitForTimeout(500);
+      }
+      const told = [...notices];
+      test.info().annotations.push({ type: "invite-case-screen", description: `notices ${JSON.stringify(told)}` });
+      expect.soft(told.some((n) => /already/i.test(n)) || /already (a (team )?member|invited|on (the|your) team)/i.test(screen), `the screen says ${address.toUpperCase()} is already on the team (notices: ${JSON.stringify(told)})`).toBe(true);
+      expect.soft(told.filter((n) => /\b(invite|invitation) sent\b|\bsent (an |the )?invit|invited successfully|has been invited/i.test(n)), "a notice claiming the refused invite was sent").toEqual([]);
+    });
   });
 
-  test("J2 the invite offers the role presets Admin, Front desk and Bookkeeper; scopes are optional", async ({ page, request, owner }) => {
-    test.setTimeout(4 * 60_000);
+  test("J2 the invite offers the role presets Admin, Front desk and Bookkeeper; each grants its own scope set; scopes are optional", async ({ page, request, owner }) => {
+    test.setTimeout(6 * 60_000);
     const form = await inviteForm(page, true);
     const choices = await roleChoices(form);
     test.info().annotations.push({ type: "roles", description: JSON.stringify(choices) });
     for (const preset of [/^admin/i, /^front desk/i, /^bookkeeper/i]) {
       expect.soft(choices.some((c) => preset.test(c)), `the role control offers ${preset.source} (offers ${JSON.stringify(choices)})`).toBe(true);
     }
-    await test.step("an invite with the Front desk preset and no scope edits is accepted", async () => {
-      const address = `kai.${stamp()}@v62j.test.local`;
-      await pickRole(form, /^front desk/i);
-      const sent = await sendInvite(page, owner, address);
-      expect(sent.status, sent.body.slice(0, 200)).toBe(201);
-      const row = (await team(request, owner)).find((r) => emailOf(r) === address);
-      expect(row, "the invite is on the team").toBeTruthy();
-      expect(row!.role, "a preset is not the owner").not.toBe("OWNER");
-    });
+    // Each preset is picked and sent with no scope edits; the team read then says what it granted. An invite
+    // that grants more than its preset (an ADMIN for a front desk, or STAFF with no map, which stores the STAFF
+    // defaults with revenue and expenses read) fails here; the API never stores an OWNER invite, so 'not the
+    // owner' could never fail.
+    for (const [preset, pick] of [
+      ["Front desk", /^front desk/i],
+      ["Bookkeeper", /^bookkeeper/i],
+      ["Admin", /^admin/i],
+    ] as const) {
+      await test.step(`an invite with the ${preset} preset and no scope edits is accepted, and grants the ${preset} set`, async () => {
+        const address = `${preset.replace(/\s+/g, "").toLowerCase()}.${stamp()}@v62j.test.local`;
+        await pickRole(await inviteForm(page), pick);
+        const sent = await sendInvite(page, owner, address);
+        expect(sent.status, sent.body.slice(0, 200)).toBe(201);
+        const row = (await team(request, owner)).find((r) => emailOf(r) === address);
+        expect(row, "the invite is on the team").toBeTruthy();
+        test.info().annotations.push({ type: "preset", description: `${preset}: ${row!.role} ${JSON.stringify(row!.permissionScopes)}` });
+        expect.soft(presetFindings(row!, ROLE_PRESETS[preset]), `what the ${preset} preset granted (role ${row!.role}, scopes ${JSON.stringify(row!.permissionScopes)})`).toEqual([]);
+      });
+    }
   });
 
   test("J3 the role control resets after each invite", async ({ page, request, owner }) => {
@@ -307,8 +348,10 @@ test.describe("journey J: work with my team safely", () => {
 
   test("J6 a refused screen says 'No access, ask the owner', never zeros", async ({ request, owner, browser }) => {
     test.setTimeout(5 * 60_000);
+    // The owner's own expense: a refused screen must not show it (its description or its 1,250).
+    const rent = `Rent ${stamp()}`;
     await api(request, owner, "POST", `/expenses/businesses/${owner.businessId}/expenses`, {
-      description: `Rent ${stamp()}`,
+      description: rent,
       amount: 1250,
       currency: owner.currency,
       paymentMethod: "CASH",
@@ -328,6 +371,8 @@ test.describe("journey J: work with my team safely", () => {
         expect.soft(text, `${screen} says 'No access'`).toMatch(/no access/i);
         expect.soft(text, `${screen} says to ask the owner`).toMatch(/ask (the|your) owner/i);
         expect.soft(text, `${screen} shows zeros for a refusal (BUG-063, BUG-064)`).not.toMatch(/\b(TTD|TT\$|\$)\s?\$?0\.00\b|no team members yet|\b0 owner\b/i);
+        expect.soft(text.includes(rent), `${screen} shows the owner's expense '${rent}' to a member refused it`).toBe(false);
+        expect.soft(amountMentioned(text, 1250), `${screen} shows the owner's 1,250 to a member refused it`).toBe(false);
       });
     }
   });
@@ -337,6 +382,17 @@ test.describe("journey J: work with my team safely", () => {
     const product = await api<{ id: string }>(request, owner, "POST", `/commerce/businesses/${owner.businessId}/products`, { name: `Hair oil ${stamp()}`, price: 45, currency: owner.currency, category: "PRODUCT" });
     const warehouse = await api<{ id: string }>(request, owner, "POST", `/marketplace/businesses/${owner.businessId}/warehouses`, { name: `Back room ${stamp()}` });
     const stock = await api<{ id: string }>(request, owner, "POST", `/marketplace/businesses/${owner.businessId}/inventory`, { productId: product.id, warehouseId: warehouse.id, quantity: 12 });
+    // The owner's own secrets, so an answer that carries one is seen: a webhook (its signing secret) and an API
+    // key (its raw kf_ key, answered once, on create). The webhook points at a documentation address
+    // (TEST-NET-3, never routed) and listens for an event this test never makes, so nothing is delivered.
+    const hook = await api<{ id: string; secret: string }>(request, owner, "POST", `/webhooks/businesses/${owner.businessId}/webhooks`, {
+      url: "https://203.0.113.10/v62j-journey-j7",
+      events: ["invoice.paid"],
+      name: `Accounting sync ${stamp()}`,
+    });
+    const ownerKey = await api<{ key: string }>(request, owner, "POST", `/api/businesses/${owner.businessId}/api-keys`, { name: `Owner key ${stamp()}`, scopes: [] });
+    expect(hook.secret, "the owner's webhook has its signing secret").toBeTruthy();
+    expect(ownerKey.key, "the owner's API key").toMatch(/^kf_/);
     // Read on the store and on projects; no settings (a module the map leaves out is none).
     const staff: Member = await memberOf(request, owner, "stock clerk", { role: "STAFF", scopes: { storefront: "read", projects: "read", crm: "read" } });
     const asStaff = async (method: "GET" | "POST", path: string, data?: unknown) => {
@@ -346,6 +402,8 @@ test.describe("journey J: work with my team safely", () => {
     const checks = [
       { what: "the webhooks list (signing secrets)", call: () => asStaff("GET", `/webhooks/businesses/${owner.businessId}/webhooks`) },
       { what: "the API keys list", call: () => asStaff("GET", `/api/businesses/${owner.businessId}/api-keys`) },
+      // BUG-013's exposure: POST create answers the raw kf_ key, an API credential beyond the member's scopes.
+      { what: "a new API key", call: () => asStaff("POST", `/api/businesses/${owner.businessId}/api-keys`, { name: `Staff key ${stamp()}`, scopes: [] }) },
       { what: "a stock adjustment (store read only)", call: () => asStaff("POST", `/marketplace/businesses/${owner.businessId}/inventory/adjust`, { stockId: stock.id, quantityChange: -2, reasonCode: "COUNT_CORRECTION" }) },
       { what: "a new project (projects read only)", call: () => asStaff("POST", `/projects/businesses/${owner.businessId}`, { name: `Staff project ${stamp()}` }) },
     ];
@@ -355,6 +413,9 @@ test.describe("journey J: work with my team safely", () => {
         expect.soft(res.status, `${check.what} as a staff member: ${res.body.slice(0, 200)}`).toBe(403);
         expect.soft(res.body, `${check.what}: refused by module scope, not tenancy`).not.toMatch(/no access to this business/i);
         expect.soft(res.body, `${check.what}: no secret in the answer`).not.toMatch(/"secret"\s*:\s*"[^"]+"|kf_[A-Za-z0-9]{8,}/);
+        expect.soft(res.body.includes(hook.secret), `${check.what}: the owner's webhook signing secret`).toBe(false);
+        expect.soft(res.body.includes(ownerKey.key), `${check.what}: the owner's API key`).toBe(false);
+        expect.soft(res.body, `${check.what}: no 64-hex key material (a signing secret, a kf_ key)`).not.toMatch(/[0-9a-f]{64}/);
       });
     }
     const after = await api<Array<{ id: string; quantity: number }>>(request, owner, "GET", `/marketplace/businesses/${owner.businessId}/inventory`);

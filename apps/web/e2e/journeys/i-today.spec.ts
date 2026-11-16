@@ -10,7 +10,7 @@ import {
   signedInContext,
   type Tenant,
 } from "./journey-helpers";
-import { amountAfter } from "./journey-text";
+import { amountAfter, oneTapIn, revenueLeaks } from "./journey-text";
 import type { APIRequestContext, Locator, Page } from "@playwright/test";
 
 /**
@@ -28,14 +28,22 @@ import type { APIRequestContext, Locator, Page } from "@playwright/test";
  *       Reject (@ai-on @scheduler: a model, and a KEY job switched on for the
  *       run; the crons ruling D-163 keeps KEY's jobs off in production).
  *   I3  The Today block lists today's bookings, due invoices, tasks and orders,
- *       each one tap from its action.
+ *       each one tap from its action. Each item is found by what only its own
+ *       row shows (the booking's service, the invoice number, the task's
+ *       title, the order number): every row may name the customer.
  *   I3b ... and overdue invoices and 'ready to send' reminders, each one tap from
  *       WhatsApp (@scheduler: the overdue job and the run's server clock).
- *   I4  Pulse equals Money > Overview (each figure Pulse shows).
+ *   I4  Pulse equals Money > Overview: the five Pulse figures TODAY-AGGREGATE
+ *       names (cash, owed to you, you owe, this month's profit, safe to
+ *       spend), each shown and each equal to the Overview's; a bill is seeded
+ *       so 'you owe' is not 0 on both sides.
  *   I5  No metaphor labels or invented statistics (a fresh business: no Genome,
  *       Hull, Cortex, Command Center; no percentage, no risk count).
  *   I6  A STAFF member sees only tiles for their modules; a member without
- *       revenue:read sees no Pulse.
+ *       revenue:read sees no Pulse. Read on the screen and in the member's own
+ *       GET .../today answer (journey-text.ts revenueLeaks: no Pulse, no money
+ *       field, no invoice number, no 720), so money hidden only by the client
+ *       still fails.
  *   I7  Load time at 375px on throttled 3G is tracked against a 3-second budget
  *       (recorded, never pass/fail).
  *
@@ -216,26 +224,6 @@ async function blockHeadings(main: Locator): Promise<{ blocks: string[]; all: st
   return { blocks: h2.some((h) => BLOCKS.some((re) => re.test(h))) ? h2 : all, all };
 }
 
-/**
- * Whether the row of `text` in `block` carries its own action: from the element
- * showing the text, up to (not past) the first ancestor that also shows another
- * listed item, a link or button is found (or the row is one).
- */
-async function oneTap(block: Locator, text: string, others: string[]): Promise<boolean> {
-  return block.evaluate(
-    (root, { text, others }) => {
-      const leaf = Array.from(root.querySelectorAll("*")).find((e) => e.children.length === 0 && (e.textContent ?? "").includes(text));
-      for (let node: Element | null = leaf ?? null; node && node !== root; node = node.parentElement) {
-        if (node.matches("a[href], button")) return true;
-        if (others.some((o) => (node!.textContent ?? "").includes(o))) return false;
-        if (node.querySelector("a[href], button")) return true;
-      }
-      return false;
-    },
-    { text, others },
-  );
-}
-
 test.describe("journey I: know what to do today", () => {
   test.use({ timezoneId: ZONE });
 
@@ -336,8 +324,10 @@ test.describe("journey I: know what to do today", () => {
     const today = block(main, BLOCKS[1]);
     await expect(today, "Today's 'Today' block").toBeVisible();
 
+    // Each item by what only its own row shows: the customer's name may be on every row (the booking's, the
+    // invoice's, the task's and the order's), so it identifies none of them.
     const items = [
-      ["today's booking", customer.name],
+      ["today's booking", booking.service],
       ["the invoice due today", invoice.invoiceNumber],
       ["the task due today", task],
       ["the order to fulfil", order.orderNumber],
@@ -346,7 +336,8 @@ test.describe("journey I: know what to do today", () => {
       await test.step(`${what}, with its action on its own row`, async () => {
         await expect(today.getByText(text).first(), `the Today block lists ${what} ('${text}')`).toBeVisible();
         const others = items.map(([, t]) => t).filter((t) => t !== text);
-        expect.soft(await oneTap(today, text, [...others]), `${what} is one tap from its action (a button or link on its own row)`).toBe(true);
+        // journey-text.ts oneTapIn, run in the page: from the item's text up to its row, an action of its own.
+        expect.soft(await today.evaluate(oneTapIn, { text, others: [...others] }), `${what} is one tap from its action (a button or link on its own row)`).toBe(true);
       });
     }
 
@@ -361,7 +352,6 @@ test.describe("journey I: know what to do today", () => {
       await expect(page.getByText(invoice.invoiceNumber).first(), "the invoice opens").toBeVisible();
       expect(page.url(), "the invoice's page or sheet").toMatch(new RegExp(`${escapeRe(invoice.id)}|invoice`, "i"));
     });
-    void booking;
   });
 
   test("I3b overdue invoices and 'ready to send' reminders show in Today, each one tap from WhatsApp", { tag: "@scheduler" }, async ({ page, request, owner }) => {
@@ -399,13 +389,29 @@ test.describe("journey I: know what to do today", () => {
       date: localDay(new Date()),
       paymentMethod: "CASH",
     });
-    const LABELS = {
+    // A bill to pay later, so 'you owe' is 250 on both screens, not 0 = 0.
+    await api(request, owner, "POST", `/finance/businesses/${owner.businessId}/bills`, {
+      description: `Electricity ${stamp()}`,
+      amount: 250,
+      currency: owner.currency,
+      date: localDay(new Date()),
+      dueDate: localDay(new Date(Date.now() + 14 * 86_400_000)),
+      vendor: "T&TEC",
+    });
+    // The five Pulse figures TODAY-AGGREGATE names (journey H's Overview set); each must be shown.
+    const PULSE = {
       cash: /\bcash(?: balance| on hand)?\b/i,
       owedToYou: /owed to you|money owed|receivable/i,
+      youOwe: /you owe|bills (?:due|to pay)|payable/i,
+      profit: /(?:this month'?s )?(?:net )?profit/i,
+      safeToSpend: /safe.to.spend/i,
+    };
+    // Figures Pulse may also show; compared when it does.
+    const ALSO = {
       moneyIn: /money in\b/i,
       moneyOut: /money out\b/i,
-      profit: /(?:this month'?s )?(?:net )?profit/i,
     };
+    const LABELS = { ...PULSE, ...ALSO };
 
     const main = await openToday(page);
     const pulse = block(main, BLOCKS[2]);
@@ -419,9 +425,12 @@ test.describe("journey I: know what to do today", () => {
     const shownOnOverview = Object.fromEntries(Object.entries(LABELS).map(([k, re]) => [k, amountAfter(overviewText, re)]));
     test.info().annotations.push({ type: "pulse-vs-overview", description: `Pulse ${JSON.stringify(shownOnPulse)}; Overview ${JSON.stringify(shownOnOverview)}` });
 
-    expect.soft(shownOnPulse.cash, "Pulse shows cash").not.toBeNull();
-    expect.soft(shownOnPulse.owedToYou, "Pulse shows what is owed to you").not.toBeNull();
-    for (const key of Object.keys(LABELS)) {
+    for (const key of Object.keys(PULSE)) {
+      expect.soft(shownOnPulse[key], `Pulse shows ${key}`).not.toBeNull();
+      expect.soft(shownOnPulse[key], `Pulse's ${key} equals Money > Overview's`).toBe(shownOnOverview[key]);
+    }
+    expect.soft(shownOnPulse.youOwe, "Pulse's 'you owe' holds the 250 bill").toBe(250);
+    for (const key of Object.keys(ALSO)) {
       if (shownOnPulse[key] === null) continue;
       expect.soft(shownOnPulse[key], `Pulse's ${key} equals Money > Overview's`).toBe(shownOnOverview[key]);
     }
@@ -444,17 +453,32 @@ test.describe("journey I: know what to do today", () => {
   test("I6 a staff member sees only tiles for their modules, and no Pulse without revenue read", async ({ request, owner, browser }) => {
     test.setTimeout(6 * 60_000);
     const customer = await seedCustomer(request, owner, "Tamika");
-    await seedBookingToday(request, owner, customer);
+    const booking = await seedBookingToday(request, owner, customer);
     const invoice = await seedInvoiceDueToday(request, owner, customer.id, 720);
     // Front desk: bookings and customers, no money (revenue none).
     const staff = await memberOf(request, owner, "front desk", { role: "STAFF", scopes: { bookings: "write", crm: "read" } });
     const desk = await signedInContext(browser, staff);
     const page = await desk.newPage();
+    // The member's own GET .../today (TODAY-AGGREGATE's one read): what the server sent, not only what the screen shows.
+    const todayRead = page
+      .waitForResponse((r) => r.request().method() === "GET" && r.url().startsWith(`${API_URL}/`) && /\/today$/.test(new URL(r.url()).pathname), { timeout: 30_000 })
+      .catch(() => null);
     const main = await openToday(page);
     const text = (await main.innerText()).replace(/\s+/g, " ");
 
+    await test.step("the member's GET .../today carries no Pulse, no money field and no invoice", async () => {
+      const read = await todayRead;
+      expect.soft(read, "the member's Today is served by GET .../today (TODAY-AGGREGATE)").not.toBeNull();
+      if (read) {
+        expect.soft(read.status(), "the member's GET .../today").toBe(200);
+        const body: unknown = await read.json().catch(() => null);
+        const leaks = revenueLeaks(body, { invoiceNumbers: [invoice.invoiceNumber], amounts: [720] });
+        test.info().annotations.push({ type: "member-today", description: leaks.join("; ") || "no money in the member's Today answer" });
+        expect.soft(leaks, "money in the Today answer of a member without revenue read").toEqual([]);
+      }
+    });
     await test.step("the booking (bookings scope) is on their Today", async () => {
-      await expect(block(main, BLOCKS[1]).getByText(customer.name).first(), "today's booking, in the Today block").toBeVisible();
+      await expect(block(main, BLOCKS[1]).getByText(booking.service).first(), "today's booking, in the Today block").toBeVisible();
     });
     await test.step("no invoice and no money for a member without revenue read", async () => {
       expect.soft(text.includes(invoice.invoiceNumber), `the invoice ${invoice.invoiceNumber} on a front-desk Today`).toBe(false);
