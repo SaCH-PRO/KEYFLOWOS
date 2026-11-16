@@ -150,15 +150,32 @@ export function readBusinessSettings(metaData: unknown): BusinessSettings {
   };
 }
 
+/** The most characters of a refused depth entry's name a refusal repeats (review SEC-V63-1). */
+const REFUSED_DEPTH_KEY_SHOWN = 32;
+
+/** A refused depth entry's name as a refusal shows it: cut to REFUSED_DEPTH_KEY_SHOWN characters. */
+const shownDepthKey = (key: string) =>
+  key.length > REFUSED_DEPTH_KEY_SHOWN ? `${key.slice(0, REFUSED_DEPTH_KEY_SHOWN)}...` : key;
+
 /**
  * Why a depth value is not a settings write (empty when it is one): a map
  * whose every key is a hub and every value a depth. `{}` changes no hub.
+ *
+ * Review SEC-V63-1: the problems are bounded whatever the value holds. A depth
+ * names each hub at most once, so a map with more entries than there are hubs
+ * is refused with one problem naming the count (never one per entry), and a
+ * refused entry's name is cut short. The body pipe runs this before the
+ * controller's D-11 check, so any member can send it.
  */
 export function hubDepthProblems(value: unknown, field = 'depth'): string[] {
   if (!isPlainObject(value)) return [`${field} must be an object of hub to depth (hubs: ${BUSINESS_HUBS.join(', ')}; depths: ${HUB_DEPTHS.join(', ')})`];
+  const entries = Object.keys(value).length;
+  if (entries > BUSINESS_HUBS.length) {
+    return [`${field} names ${entries} entries; a depth names at most ${BUSINESS_HUBS.length}, one per hub (hubs: ${BUSINESS_HUBS.join(', ')})`];
+  }
   const problems: string[] = [];
   for (const [hub, depth] of Object.entries(value)) {
-    if (!isOneOf(BUSINESS_HUBS, hub)) problems.push(`${field}.${hub} is not a hub (hubs: ${BUSINESS_HUBS.join(', ')})`);
+    if (!isOneOf(BUSINESS_HUBS, hub)) problems.push(`${field}.${shownDepthKey(hub)} is not a hub (hubs: ${BUSINESS_HUBS.join(', ')})`);
     else if (!isOneOf(HUB_DEPTHS, depth)) problems.push(`${field}.${hub} must be one of: ${HUB_DEPTHS.join(', ')}`);
   }
   return problems;

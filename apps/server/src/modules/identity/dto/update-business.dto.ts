@@ -52,7 +52,8 @@ export enum TeamSize {
  * V1-63 BIZ-SETTINGS-SERVER: a depth write is a map whose every key is a hub
  * and every value a depth (hubDepthProblems, core/prisma/business-meta.ts,
  * the check the service applies again to the metaData bag and to in-process
- * callers).
+ * callers). Its message is bounded whatever the value holds (review
+ * SEC-V63-1): this pipe runs before the controller's D-11 check.
  */
 @ValidatorConstraint({ name: 'hubDepthMap', async: false })
 export class HubDepthMapConstraint implements ValidatorConstraintInterface {
