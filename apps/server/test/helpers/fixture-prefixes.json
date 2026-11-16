@@ -1036,6 +1036,16 @@
       "prefix": "v62a_",
       "owner": "apps/server/test/census-hidden.integration.test.ts",
       "packet": "V1-62 (SWP-CENSUS-HIDDEN)"
+    },
+    {
+      "prefix": "v63j_",
+      "owner": "apps/server/test/contact-audit-durable.integration.test.ts",
+      "packet": "V1-63 (TOF-CONTACT-AUDIT-AWAIT)"
+    },
+    {
+      "prefix": "v63k_",
+      "owner": "apps/server/test/contact-phone-e164.integration.test.ts",
+      "packet": "V1-63 (WA-E164-SERVER)"
     }
   ],
   "pendingRenames": [],
