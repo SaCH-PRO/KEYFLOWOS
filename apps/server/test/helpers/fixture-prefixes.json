@@ -1011,6 +1011,11 @@
       "prefix": "v62a_",
       "owner": "apps/server/test/census-hidden.integration.test.ts",
       "packet": "V1-62 (SWP-CENSUS-HIDDEN)"
+    },
+    {
+      "prefix": "v71b_",
+      "owner": "apps/server/test/delivery-token-decrypt.integration.test.ts",
+      "packet": "V1-71 (FU-DELIVERY-TOKEN-DECRYPT)"
     }
   ],
   "pendingRenames": [],
