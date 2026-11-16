@@ -1046,6 +1046,11 @@
       "prefix": "v63k_",
       "owner": "apps/server/test/contact-phone-e164.integration.test.ts",
       "packet": "V1-63 (WA-E164-SERVER)"
+    },
+    {
+      "prefix": "v71n_",
+      "owner": "apps/server/test/data-quality-fix-scope.integration.test.ts",
+      "packet": "V1-71 (FU-DATAQUALITY-MASS-ASSIGN)"
     }
   ],
   "pendingRenames": [],
