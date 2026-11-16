@@ -925,12 +925,14 @@ export class IdentityService {
    * the letter case. The address is trimmed and lower-cased (normalizeInviteEmail; one
    * without a usable shape is a 400 before anything is written), and its holders are
    * found case-insensitively (findEmailHolders), so a repeat in another case is the
-   * same person: refused when any holder is already a member here, else the
-   * membership goes to that holder (an account before a placeholder). Only an address
-   * nobody holds gets a new placeholder, under the normalized address, so the lower-case
-   * address a sign-in carries finds it. Before, the lookup was exact and the address
-   * stored as typed: a capitalised repeat created a second member and a second User
-   * that no sign-in could claim.
+   * same person: refused when a holder a person can still reach is already a member
+   * here, else the membership goes to that holder (an account before a placeholder;
+   * inviteReach). An address no reachable row holds gets a new placeholder, under the
+   * normalized address, so the lower-case address a sign-in carries finds it; a
+   * placeholder an older invite left that no sign-in can adopt neither blocks the
+   * invite nor receives it (V1-63 review COR-63-1, COR-63-2). Before, the lookup was
+   * exact and the address stored as typed: a capitalised repeat created a second
+   * member and a second User that no sign-in could claim.
    */
   async inviteTeamMember(businessId: string, email: string, role: string, inviterId: string, scopes?: Record<string, string>, maxApprovalTier?: number) {
     const { requester, bounded } = await this.assertTeamAdmin(businessId, inviterId);
@@ -944,14 +946,16 @@ export class IdentityService {
     if (bounded && (await this.authorityExcess({ role, permissionScopes, maxApprovalTier: tier }, requester))) {
       throw new ForbiddenException('You cannot grant more authority than your own');
     }
-    const holders = await this.findEmailHolders(address);
-    for (const holder of holders) {
+    // Only a holder a person can still reach counts (inviteReach, V1-63 review COR-63-1/2):
+    // a membership on a placeholder no sign-in can adopt makes no repeat, and none is added to one.
+    const { target, reachable } = IdentityService.inviteReach(await this.findEmailHolders(address), address);
+    for (const holder of reachable) {
       const existing = await this.prisma.client.membership.findUnique({
         where: { userId_businessId: { userId: holder.id, businessId } },
       });
       if (existing) throw new BadRequestException(IdentityService.ALREADY_A_MEMBER);
     }
-    let userId = IdentityService.preferredInviteHolder(holders, address)?.id;
+    let userId = target?.id;
     if (!userId) {
       // The invitee has no account yet, so this row is a placeholder that holds
       // the address and the pending membership. The marker is what lets the
@@ -1032,18 +1036,40 @@ export class IdentityService {
   }
 
   /**
-   * Which holder of an address an invite joins: an account before an invite
-   * placeholder (an account's owner signs in as that account and never adopts a
-   * placeholder, so a membership on a placeholder beside it would be unreachable),
-   * then the row stored under exactly the normalized address, then the lowest id.
+   * Of the holders of an invite address (findEmailHolders), the ones a person can
+   * still reach, and the one an invite joins (`target`).
+   *
+   * An account is reached by its owner's own sign-in. An invite placeholder is
+   * reached only by the first sign-in bootstrapUser adopts it for, and this mirrors
+   * that choice for the address a sign-in carries (the lower-case one, as
+   * normalized here): the row stored under exactly that address, else the single
+   * holder in another letter case (invitePlaceholderInOtherCase); with several case
+   * variants and no exact row, bootstrap adopts none. Any other placeholder (beside
+   * an account, or one of several case variants: both left by invites stored as
+   * typed before V1-63) can never be claimed. Its membership is no repeat (V1-63
+   * review COR-63-1: refusing on it left the account with no way in), and an invite
+   * never hangs on it (COR-63-2: the invitation could not be accepted); with no
+   * reachable holder the caller makes a placeholder under the exact address, which
+   * bootstrap's exact lookup adopts. Nothing is merged: such rows stay, listed as
+   * pending, for the owner to remove.
+   *
+   * `target`: an account first (the row under exactly the address, then the lowest
+   * id), else the placeholder a sign-in adopts. `reachable`: the target and that
+   * placeholder, the holders whose membership makes an invite a repeat.
    */
-  private static preferredInviteHolder<T extends { id: string; email: string; metaData: unknown }>(
+  private static inviteReach<T extends { id: string; email: string; metaData: unknown }>(
     holders: T[],
     address: string,
-  ): T | undefined {
-    const rank = (h: T) =>
-      (IdentityService.isMarkedInvitePlaceholder(h.metaData) ? 2 : 0) + (h.email === address ? 0 : 1);
-    return [...holders].sort((a, b) => rank(a) - rank(b) || a.id.localeCompare(b.id))[0];
+  ): { target: T | undefined; reachable: T[] } {
+    const isPlaceholder = (h: T) => IdentityService.isMarkedInvitePlaceholder(h.metaData);
+    const signIn = holders.find((h) => h.email === address) ?? (holders.length === 1 ? holders[0] : undefined);
+    const claimable = signIn && isPlaceholder(signIn) ? signIn : undefined;
+    const account = holders
+      .filter((h) => !isPlaceholder(h))
+      .sort((a, b) => Number(a.email !== address) - Number(b.email !== address) || a.id.localeCompare(b.id))[0];
+    const target = account ?? claimable;
+    const reachable = [target, claimable].filter((h, i, all): h is T => h !== undefined && all.indexOf(h) === i);
+    return { target, reachable };
   }
 
   async removeTeamMember(businessId: string, membershipId: string, requesterId: string) {
@@ -1338,16 +1364,27 @@ export class IdentityService {
         // Logged once the guard has admitted the move, not for a refused one.
         this.logger.warn(`Reconciling User id ${oldId} -> ${newId} for email=${input.email}.`);
         const placeholderEmail = `__migrated_${oldId}_${Date.now()}@local.invalid`;
+        const priorEmail = (await tx.user.findUnique({ where: { id: oldId }, select: { email: true } }))?.email;
         const oldUser = await tx.user.update({
           where: { id: oldId },
           data: { email: placeholderEmail },
         });
+        // V1-63 review COR-63-3: a name inviteTeamMember derived from the row's own
+        // address (its local part) is derived again from the address the row now
+        // takes. A placeholder stored as typed before V1-63 ('Leo@Example.com',
+        // name 'Leo') is adopted under the lower-case token address; kept as 'Leo',
+        // the name no longer matched the address and co-members were offered the
+        // member by it (assigneeMemberLabel, D-87). The same address is unchanged.
+        const keptName =
+          oldUser.name !== null && priorEmail !== undefined && oldUser.name === priorEmail.split('@')[0]
+            ? input.email.split('@')[0]
+            : oldUser.name;
 
         const newUser = await tx.user.create({
           data: {
             id: newId,
             email: input.email,
-            name: oldUser.name ?? desiredName?.trim() ?? input.email,
+            name: keptName ?? desiredName?.trim() ?? input.email,
             role: oldUser.role ?? 'USER',
             firstName: oldUser.firstName ?? input.firstName?.trim() ?? null,
             lastName: oldUser.lastName ?? input.lastName?.trim() ?? null,
