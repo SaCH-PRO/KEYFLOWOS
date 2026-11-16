@@ -23,9 +23,21 @@
  *     including a placeholder stored in mixed case before this fix, under the
  *     same ownership proof R0-SEC-01 requires (unproven: 409, nothing written).
  *
+ * Review repairs (V1-63 review): an invite joins a holder of the address a person
+ * can still reach, and only such a holder's membership makes it a repeat. A
+ * placeholder an older invite left that no sign-in can adopt (beside an account,
+ * or one of several case variants) neither blocks the invite (COR-63-1: the
+ * account is added) nor receives it (COR-63-2: a placeholder under the lower-case
+ * address is made, which the sign-in adopts). A placeholder named after its own
+ * address keeps that rule on adoption: its name is derived again from the new
+ * address, so GET .../task-assignments/options does not offer the member by the
+ * address before the '@' (COR-63-3). Nothing is merged; the stale rows stay.
+ *
  * Harness (as test/identity-local-auth.integration.test.ts, R0-SEC-01): the real
  * AuthMiddleware and AuthGuard, the real IdentityController and IdentityService on
- * the real PrismaService, the real BusinessGuard and ModuleScopeGuard. Tokens are
+ * the real PrismaService, the real BusinessGuard and ModuleScopeGuard, and for
+ * GET .../task-assignments/options the real TaskAssignmentController and
+ * TaskAssignmentService behind the real RateLimitGuard. Tokens are
  * HS256 on the test-only verifyLocal path (NODE_ENV=test, no Supabase URL), signed
  * with a secret built at run time. The only Supabase call bootstrap can make (the
  * service-role user lookup that proves an invitee owns its address) is a recording
@@ -79,6 +91,15 @@ const ID = {
   /** Subs that sign in (bootstrap). */
   ivySub: `${P}ivy_sub`,
   leoSub: `${P}leo_sub`,
+  zedSub: `${P}zed_sub`,
+  /** V1-63 review COR-63-1: a placeholder an older invite left beside the account, in another letter case. */
+  stalePlaceholder: `${P}stale_placeholder`,
+  /** V1-63 review COR-63-2: two placeholders older invites left for one address, in two letter cases. */
+  zedPlaceholderA: `${P}zed_ph_a`,
+  zedPlaceholderB: `${P}zed_ph_b`,
+  /** V1-63 review COR-63-2: two more businesses of the owner, where those older invites hang. */
+  biz2: `${P}biz2`,
+  biz3: `${P}biz3`,
 };
 
 const EMAIL = {
@@ -87,6 +108,7 @@ const EMAIL = {
   account: `${P}account@test.local`,
   legacy: `${P}leo@test.local`,
   wildAccount: `${P}wildXcard@test.local`,
+  zed: `${P}zed@test.local`,
 };
 
 /** 'v63d_Ivy@Test.Local': the same address as a person might type it. */
@@ -166,6 +188,14 @@ function teamList() {
 function teamDashboard() {
   return request(app.getHttpServer())
     .get(`/identity/businesses/${ID.biz}/team/dashboard`)
+    .set('Authorization', `Bearer ${ownerToken()}`)
+    .set('x-business-id', ID.biz);
+}
+
+/** GET .../task-assignments/options: how co-members are offered a member (assigneeMemberLabel). */
+function assigneeOptions() {
+  return request(app.getHttpServer())
+    .get(`/businesses/${ID.biz}/task-assignments/options`)
     .set('Authorization', `Bearer ${ownerToken()}`)
     .set('x-business-id', ID.biz);
 }
@@ -253,6 +283,31 @@ async function seedLegacyPlaceholder(withMembership: boolean) {
   }
 }
 
+/**
+ * A placeholder exactly as inviteTeamMember wrote it before V1-63 for an address typed `typed`:
+ * the address as typed, the name derived from it (typed.split('@')[0]), the invite marker, and
+ * a STAFF membership in each of `businessIds`.
+ */
+async function seedPreFixPlaceholder(id: string, typed: string, businessIds: string[]) {
+  await db.user.create({
+    data: { id, email: typed, name: typed.split('@')[0], role: 'USER', metaData: { invitePlaceholder: true } },
+  });
+  for (const businessId of businessIds) {
+    await db.membership.create(skipTenantIsolation({ data: { userId: id, businessId, role: 'STAFF' } }));
+  }
+}
+
+/** Another business of the owner (the owner's OWNER membership included). */
+async function seedOwnerBusiness(id: string) {
+  await db.business.create({ data: { id, name: `${P}${id.slice(P.length)} business`, ownerId: ID.owner } });
+  await db.membership.create(skipTenantIsolation({ data: { userId: ID.owner, businessId: id, role: 'OWNER' } }));
+}
+
+/** The members of the inviting business as {user_id: role}, independent of collation order. */
+async function memberRoles(): Promise<Record<string, string>> {
+  return Object.fromEntries((await members()).map((m) => [m.user_id, m.role]));
+}
+
 beforeAll(async () => {
   for (const k of PINNED_KEYS) saved[k] = process.env[k];
   for (const k of PINNED_KEYS) delete process.env[k];
@@ -286,6 +341,12 @@ beforeAll(async () => {
   const { SupabaseAdminService } = await import('../src/core/auth/supabase-admin.service');
   const { BlueprintService } = await import('../src/modules/blueprint/blueprint.service');
   const { DefaultTriggersService } = await import('../src/modules/ai/default-triggers.service');
+  const { RateLimitGuard } = await import('../src/core/guards/rate-limit.guard');
+  const { EventEmitter2 } = await import('@nestjs/event-emitter');
+  const { TaskAssignmentController } = await import('../src/modules/task-assignments/task-assignment.controller');
+  const { TaskAssignmentService } = await import('../src/modules/task-assignments/task-assignment.service');
+  const { TaskAssignmentRecommenderService } = await import('../src/modules/task-assignments/task-assignment-recommender.service');
+  const { BusinessEventService } = await import('../src/modules/business-events/business-event.service');
 
   const client = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
   redis = client;
@@ -294,13 +355,20 @@ beforeAll(async () => {
   const notOnThesePaths = {};
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [IdentityController],
+    // TaskAssignmentController: only GET .../task-assignments/options (review COR-63-3), which
+    // shows how co-members see a member adopted at sign-in.
+    controllers: [IdentityController, TaskAssignmentController],
     providers: [
       PrismaService,
       SupabaseAuthService,
       AuthMiddleware,
       AuthGuard,
+      RateLimitGuard,
       { provide: REDIS_CLIENT, useValue: client },
+      TaskAssignmentService,
+      { provide: EventEmitter2, useValue: notOnThesePaths },
+      { provide: BusinessEventService, useValue: notOnThesePaths },
+      { provide: TaskAssignmentRecommenderService, useValue: notOnThesePaths },
       IdentityService,
       { provide: BlueprintService, useValue: notOnThesePaths },
       { provide: DefaultTriggersService, useValue: notOnThesePaths },
@@ -312,6 +380,14 @@ beforeAll(async () => {
       { provide: SupabaseAdminService, useValue: supabaseAdmin },
     ],
   }).compile();
+
+  // TaskAssignmentController's constructor names its services by type only (no @Inject), which
+  // vitest's esbuild transform gives Nest no metadata for (as in
+  // projects-budget-assignee-scope.integration.test.ts): hand it the real service. Its guards
+  // (AuthGuard, BusinessGuard, RateLimitGuard) are resolved by Nest as usual.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- private constructor fields
+  const taskAssignments = moduleRef.get(TaskAssignmentController) as any;
+  taskAssignments.service ??= moduleRef.get(TaskAssignmentService);
 
   app = moduleRef.createNestApplication();
   configureNestApp(app);
@@ -483,6 +559,123 @@ describe('BUG-016 — the team list marks pending invites (invitePending)', () =
     );
     expect(byUser).toEqual({ [ID.owner]: false, [placeholder.body.userId]: true });
     expect(JSON.stringify(res.body)).not.toContain('invitePlaceholder');
+  });
+});
+
+describe('V1-63 review repairs — an invite lands on a holder a person can still reach', () => {
+  it('COR-63-1: an account beside a placeholder an older invite left in another letter case is invited (201), whatever that placeholder holds here; a repeat is then refused (RED: 400 "already a team member", the account never gets access)', async () => {
+    await db.user.create({
+      data: { id: ID.account, email: EMAIL.account, name: 'Ada', role: 'USER', referralCode: `${P}ACCOUNT`.toUpperCase() },
+    });
+    // Left by a capitalised invite of the account before V1-63. Bootstrap never adopts it: the
+    // account's owner signs in as the account, and a new sign-in with the address meets the
+    // account (409 account_email_in_use).
+    await seedPreFixPlaceholder(ID.stalePlaceholder, mixedCase(EMAIL.account), [ID.biz]);
+
+    const res = await invite(EMAIL.account);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.userId).toBe(ID.account);
+    expect(await footprint(ID.account)).toEqual({ users: 1, memberships: 1, businesses: 0 });
+    expect(await memberRoles()).toEqual({ [ID.owner]: 'OWNER', [ID.account]: 'STAFF', [ID.stalePlaceholder]: 'STAFF' });
+    // Nothing is merged: the stale row stays, listed as the pending invitation it is, for the owner to remove.
+    expect((await holdersOf(EMAIL.account)).map((h) => h.id).sort()).toEqual([ID.account, ID.stalePlaceholder].sort());
+
+    const list = await teamList();
+    expect(list.status, JSON.stringify(list.body)).toBe(200);
+    const pending = Object.fromEntries(list.body.map((m: { userId: string; invitePending: unknown }) => [m.userId, m.invitePending]));
+    expect(pending).toEqual({ [ID.owner]: false, [ID.account]: false, [ID.stalePlaceholder]: true });
+
+    for (const variant of [EMAIL.account, mixedCase(EMAIL.account), EMAIL.account.toUpperCase()]) {
+      const repeat = await invite(variant);
+      expect(repeat.status, `${variant}: ${JSON.stringify(repeat.body)}`).toBe(400);
+      expect(repeat.body.message).toBe('User is already a team member');
+    }
+    expect(await footprint(ID.account)).toEqual({ users: 1, memberships: 1, businesses: 0 });
+  });
+
+  it('COR-63-2: with two placeholders older invites left in two letter cases and no row under the lower-case address, the invite makes one under it; the confirmed sign-in claims it, then a repeat is refused (RED: the invite hangs on a case variant no sign-in can adopt)', async () => {
+    await seedOwnerBusiness(ID.biz2);
+    await seedOwnerBusiness(ID.biz3);
+    const variantA = mixedCase(EMAIL.zed);
+    const variantB = EMAIL.zed.toUpperCase();
+    await seedPreFixPlaceholder(ID.zedPlaceholderA, variantA, [ID.biz2]);
+    await seedPreFixPlaceholder(ID.zedPlaceholderB, variantB, [ID.biz3]);
+
+    const inv = await invite(EMAIL.zed);
+    expect(inv.status, JSON.stringify(inv.body)).toBe(201);
+    expect([ID.zedPlaceholderA, ID.zedPlaceholderB]).not.toContain(inv.body.userId);
+    expect(inv.body.user.email).toBe(EMAIL.zed);
+    const stored = await db.$queryRawUnsafe('SELECT email, meta_data FROM users WHERE id = $1', inv.body.userId);
+    expect(stored).toEqual([{ email: EMAIL.zed, meta_data: { invitePlaceholder: true } }]);
+
+    supabaseAdmin.records.set(ID.zedSub, confirmed(ID.zedSub, EMAIL.zed));
+    const res = await bootstrap(ID.zedSub, EMAIL.zed, { company: `${P}zed co` });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.user).toMatchObject({ id: ID.zedSub, email: EMAIL.zed });
+    expect(supabaseAdmin.lookups).toEqual([ID.zedSub]);
+
+    expect(await memberRoles()).toEqual({ [ID.owner]: 'OWNER', [ID.zedSub]: 'STAFF' });
+    expect(await footprint(ID.zedSub)).toEqual({ users: 1, memberships: 2, businesses: 1 });
+    // The two older rows are left as they were (no merge).
+    expect(await footprint(ID.zedPlaceholderA)).toEqual({ users: 1, memberships: 1, businesses: 0 });
+    expect(await footprint(ID.zedPlaceholderB)).toEqual({ users: 1, memberships: 1, businesses: 0 });
+
+    const list = await teamList();
+    expect(list.body.find((m: { userId: string }) => m.userId === ID.zedSub)).toMatchObject({ invitePending: false });
+
+    const repeat = await invite(variantA);
+    expect(repeat.status, JSON.stringify(repeat.body)).toBe(400);
+    expect(repeat.body.message).toBe('User is already a team member');
+  });
+
+  it('guard for COR-63-2: a single placeholder an older invite left in another letter case still receives the invite, and the lower-case sign-in claims its memberships here and elsewhere', async () => {
+    await seedOwnerBusiness(ID.biz2);
+    await seedPreFixPlaceholder(ID.zedPlaceholderA, mixedCase(EMAIL.zed), [ID.biz2]);
+
+    const inv = await invite(EMAIL.zed);
+    expect(inv.status, JSON.stringify(inv.body)).toBe(201);
+    expect(inv.body.userId).toBe(ID.zedPlaceholderA);
+    expect((await holdersOf(EMAIL.zed)).map((h) => h.id)).toEqual([ID.zedPlaceholderA]);
+
+    supabaseAdmin.records.set(ID.zedSub, confirmed(ID.zedSub, EMAIL.zed));
+    const res = await bootstrap(ID.zedSub, EMAIL.zed, { company: `${P}zed co` });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(await memberRoles()).toEqual({ [ID.owner]: 'OWNER', [ID.zedSub]: 'STAFF' });
+    // STAFF here and in biz2, and its own new business.
+    expect(await footprint(ID.zedSub)).toEqual({ users: 1, memberships: 3, businesses: 1 });
+    expect(await footprint(ID.zedPlaceholderA)).toEqual({ users: 0, memberships: 0, businesses: 0 });
+  });
+
+  it('COR-63-3: a pre-fix placeholder named after its own address (the old letter case) is adopted under the name derived from the new address, so co-members are not shown the email local part (RED: kept "V63d_Leo", offered by it)', async () => {
+    await seedPreFixPlaceholder(ID.legacyPlaceholder, mixedCase(EMAIL.legacy), [ID.biz]);
+    supabaseAdmin.records.set(ID.leoSub, confirmed(ID.leoSub, EMAIL.legacy));
+
+    const res = await bootstrap(ID.leoSub, EMAIL.legacy, { company: `${P}leo co` });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const rows = await db.$queryRawUnsafe('SELECT id, name, email FROM users WHERE id = $1', ID.leoSub);
+    expect(rows).toEqual([{ id: ID.leoSub, name: EMAIL.legacy.split('@')[0], email: EMAIL.legacy }]);
+
+    const options = await assigneeOptions();
+    expect(options.status, JSON.stringify(options.body)).toBe(200);
+    expect(options.body.find((o: { id: string }) => o.id === ID.leoSub)).toEqual({
+      type: 'User',
+      id: ID.leoSub,
+      name: `Unnamed member (…${ID.leoSub.slice(-4)})`,
+    });
+    // No option is named by the address before the '@', in either letter case.
+    const names = options.body.map((o: { name: string }) => o.name.toLowerCase());
+    expect(names).not.toContain(EMAIL.legacy.split('@')[0]);
+  });
+
+  it('COR-63-3 guard: a name the placeholder did not derive from its own address is kept on adoption', async () => {
+    // seedLegacyPlaceholder names the row 'leo', which is not its address's local part.
+    await seedLegacyPlaceholder(true);
+    supabaseAdmin.records.set(ID.leoSub, confirmed(ID.leoSub, EMAIL.legacy));
+
+    const res = await bootstrap(ID.leoSub, EMAIL.legacy, { company: `${P}leo co` });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const rows = await db.$queryRawUnsafe('SELECT name FROM users WHERE id = $1', ID.leoSub);
+    expect(rows).toEqual([{ name: 'leo' }]);
   });
 });
 
