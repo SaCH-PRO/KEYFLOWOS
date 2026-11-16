@@ -84,11 +84,21 @@
  *          'connected', ChannelConnection.healthState) and a payment or sending account id are binding
  *          writes. CEN-10d holds every shape the round 2 and round 3 hunts passed; CEN-10h holds the
  *          status doors (a status recorded after a provider call lifts no disconnect).
+ *          SWEEP-P0-FOLLOWUP (round 3 rechecks CW3-1..CW3-3): a check counts only when its refusal reaches the request
+ *          (awaited or returned, never under .catch, void, a short circuit, a ternary branch or Promise.allSettled) and
+ *          only for the request's principal (not the business owner's id, not an actor the body, query or path names);
+ *          data handed to a write whole reaches every credential column; a BullMQ queue.add reaches its Worker's
+ *          handler; concatenated SQL and a delegate named by a constant are read; Business.inventoryLinkedSheetId is a
+ *          binding; and a credential-holding JSON column written back from an earlier read of itself is a binding
+ *          write. CEN-10d holds each shape; CEN-10i: no census row is held for another branch.
  *   CEN-11 (round 2, CLASS A; round 3: WPH2-1, WPH2-2) every route and KEY action that reaches a send
  *          of the business's people or money rows, or a grant on a stored business file, to an account
  *          outside the server reaches it through the receiver check (assertMayExport,
  *          assertReceiversMayOpenContacts) or the owner rule; CEN-11b: the account such a send goes to
  *          is bound only by a member who reads what it receives, and the binder is recorded.
+ *          SWEEP-P0-FOLLOWUP (WH3-1): a queued outbound delivery (an outbound delivery row) is a send through the channel
+ *          connection's account, held to channelRecipients; the channel senders are EXPORT_ACCOUNTS of type
+ *          channel_messaging.
  */
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -312,7 +322,8 @@ const NOT_PROVIDER_CREDENTIALS: Record<string, string> = {
  */
 const BINDING_RULES: Record<string, string[]> = {
   // the account, location and calendar the owner's Google tokens act on (round 2 CW-3; D-99)
-  business: ['bpAccountId', 'bpLocationId', 'calendarId'],
+  // SWEEP-P0-FOLLOWUP (CW3-1): and the spreadsheet the owner's Drive token reads and clears (the inventory sync)
+  business: ['bpAccountId', 'bpLocationId', 'calendarId', 'inventoryLinkedSheetId'],
   bankConnection: ['providerItemId', '*delete', '*deactivate'],
   // providerMeta: the WhatsApp business account id a connection sends from.
   // healthState (round 3, CB-1, CM-3 g14): the sending state a settings admin sets (PATCH connections/:id
@@ -367,6 +378,10 @@ const DEACTIVATES_SQL = /\bis_active"?\s*=\s*false\b|\bstatus"?\s*=\s*'(DISCONNE
 const LIFTS = /\bstatus\s*:\s*(?:[^,{}]*\?\s*)?['"]connected['"]/;
 const LIFTS_SQL = /\bstatus"?\s*=\s*'connected'/;
 const OAUTH_SESSION_STORE = /^(store|save|put|create|issue|mint)\w*O[Aa]uth\w*(Session|State)s?$/;
+/** SWEEP-P0-FOLLOWUP (CW3-2): a metadata value that is not a literal of its own (a local, a shorthand, a spread copy). */
+const METADATA_FROM_READ = /\bmetadata\s*(:\s*(?:[A-Za-z_$][\w$]*\b(?!\s*\()|\{\s*\.\.\.)|[,}])/;
+/** SWEEP-P0-FOLLOWUP (CW3-2): the method (or a helper it calls) reads the connector row's metadata first. */
+const STATUS_METADATA_READ = /connectorStatus\s*\.\s*find(Unique|First)(OrThrow)?\s*\([\s\S]*?\bmetadata\b/;
 
 /**
  * Writers that bind by what they record rather than by a column (round 2 CW-4), pinned by name with
@@ -491,21 +506,27 @@ interface CheckRule {
   decl: string[];
   args?: RegExp;
   biz?: number;
+  /**
+   * SWEEP-P0-FOLLOWUP (CW3-3 mF, mK): the argument that names the member the check decides for. It must be the
+   * request's principal (req.user, a KEY command's userId, a parameter handed on), never a member the handler picked:
+   * the business owner (an ownerId the owner and admin rules always admit) or one the request body, query or path names.
+   */
+  actor?: number;
   gate?: boolean;
   why: string;
 }
 const SETTINGS_ADMIN_ARGS = /['"]settings['"]\s*,\s*['"]admin['"]/;
 const CREDENTIAL_CHECKS: Record<string, CheckRule> = {
-  assertMemberModuleLevel: { decl: ['fn:assertMemberModuleLevel@core/auth/member-module-level.ts'], args: SETTINGS_ADMIN_ARGS, biz: 1, why: 'settings admin, read as ModuleScopeGuard reads it' },
-  assertConnectorSettingsAdmin: { decl: ['ConnectorController.assertConnectorSettingsAdmin'], biz: 0, why: 'settings admin; gmail and the Google Suite connections answer their owner rules (D-11, D-99)' },
-  assertConnectorBindingAuthority: { decl: ['ConnectorController.assertConnectorBindingAuthority'], biz: 0, why: 'settings admin, or the Gmail (D-11, D-42) and Google Suite (D-99) owner rules for those connections, for a route that starts or resumes a binding' },
-  assertGoogleConnectOwner: { decl: ['fn:assertGoogleConnectOwner@core/connectors/google-suite.controller.ts'], biz: 1, why: 'D-99: every Google connection is the owner\'s' },
-  assertConnectAuthority: { decl: ['GmailService.assertConnectAuthority'], biz: 0, why: 'D-11, D-42: the business mailbox is the owner\'s (GMAIL_OWNER_ONLY)' },
-  connectStanding: { decl: ['GmailService.connectStanding'], biz: 0, why: 'D-11, D-42: the Gmail owner rule assertConnectAuthority runs, answering the standing for the audit row' },
-  assertBusinessOwner: { decl: ['IdentityService.assertBusinessOwner'], biz: 0, why: 'D-11: the business profile and its stored secrets are the owner\'s' },
-  assertConfigOwner: { decl: ['WhatsAppService.assertConfigOwner'], biz: 0, why: 'D-11: the WhatsApp sending identity is the owner\'s' },
-  assertConnectorOwner: { decl: ['SeoController.assertConnectorOwner'], biz: 0, why: 'D-94: GA4 and Search Console are the owner\'s' },
-  assertCommandActorModuleLevel: { decl: ['fn:assertCommandActorModuleLevel@core/auth/member-module-level.ts'], args: SETTINGS_ADMIN_ARGS, biz: 1, why: 'settings admin for a KEY command\'s human actor, read as ModuleScopeGuard reads it' },
+  assertMemberModuleLevel: { decl: ['fn:assertMemberModuleLevel@core/auth/member-module-level.ts'], args: SETTINGS_ADMIN_ARGS, biz: 1, actor: 2, why: 'settings admin, read as ModuleScopeGuard reads it' },
+  assertConnectorSettingsAdmin: { decl: ['ConnectorController.assertConnectorSettingsAdmin'], biz: 0, actor: 2, why: 'settings admin; gmail and the Google Suite connections answer their owner rules (D-11, D-99)' },
+  assertConnectorBindingAuthority: { decl: ['ConnectorController.assertConnectorBindingAuthority'], biz: 0, actor: 2, why: 'settings admin, or the Gmail (D-11, D-42) and Google Suite (D-99) owner rules for those connections, for a route that starts or resumes a binding' },
+  assertGoogleConnectOwner: { decl: ['fn:assertGoogleConnectOwner@core/connectors/google-suite.controller.ts'], biz: 1, actor: 2, why: 'D-99: every Google connection is the owner\'s' },
+  assertConnectAuthority: { decl: ['GmailService.assertConnectAuthority'], biz: 0, actor: 1, why: 'D-11, D-42: the business mailbox is the owner\'s (GMAIL_OWNER_ONLY)' },
+  connectStanding: { decl: ['GmailService.connectStanding'], biz: 0, actor: 1, why: 'D-11, D-42: the Gmail owner rule assertConnectAuthority runs, answering the standing for the audit row' },
+  assertBusinessOwner: { decl: ['IdentityService.assertBusinessOwner'], biz: 0, actor: 1, why: 'D-11: the business profile and its stored secrets are the owner\'s' },
+  assertConfigOwner: { decl: ['WhatsAppService.assertConfigOwner'], biz: 0, actor: 1, why: 'D-11: the WhatsApp sending identity is the owner\'s' },
+  assertConnectorOwner: { decl: ['SeoController.assertConnectorOwner'], biz: 0, actor: 1, why: 'D-94: GA4 and Search Console are the owner\'s' },
+  assertCommandActorModuleLevel: { decl: ['fn:assertCommandActorModuleLevel@core/auth/member-module-level.ts'], args: SETTINGS_ADMIN_ARGS, biz: 1, actor: 2, why: 'settings admin for a KEY command\'s human actor, read as ModuleScopeGuard reads it' },
   verifyState: {
     decl: [
       'CrmGoogleService.verifyState', 'GoogleDriveService.verifyState', 'MicrosoftOAuthService.verifyState', 'GmailService.verifyState',
@@ -568,15 +589,22 @@ const OUTBOUND_DESTINATIONS: Record<string, string> = {
 
 /** Checks that guard an export when they dominate it: the receiver's reads, or the owner (who reads everything). */
 const EXPORT_CHECKS: Record<string, CheckRule> = {
-  assertMayExport: { decl: ['fn:assertMayExport@core/auth/receiver-reads.ts'], biz: 1, why: "the reads the export's records need (core/auth/receiver-reads.ts: the module levels, and for contacts every one in view), for the member who sends them to the account bound" },
+  assertMayExport: { decl: ['fn:assertMayExport@core/auth/receiver-reads.ts'], biz: 1, actor: 2, why: "the reads the export's records need (core/auth/receiver-reads.ts: the module levels, and for contacts every one in view), for the member who sends them to the account bound" },
   assertReceiversMayOpenContacts: {
     decl: ['fn:assertReceiversMayOpenContacts@core/auth/receiver-reads.ts'],
     biz: 1,
     why: "round 3 (WPH2-1): every contact sent is one every receiver of the account may open (the account's recorded binder; an account with no recorded binder is read as a non-owner's)",
   },
-  assertGoogleConnectOwner: { decl: ['fn:assertGoogleConnectOwner@core/connectors/google-suite.controller.ts'], biz: 1, why: 'D-99: the owner, who reads every record, owns every Google connection' },
-  assertConnectAuthority: { decl: ['GmailService.assertConnectAuthority'], biz: 0, why: 'D-11, D-42: the owner\'s mailbox' },
-  assertBusinessOwner: { decl: ['IdentityService.assertBusinessOwner'], biz: 0, why: 'D-11: the owner' },
+  assertGoogleConnectOwner: { decl: ['fn:assertGoogleConnectOwner@core/connectors/google-suite.controller.ts'], biz: 1, actor: 2, why: 'D-99: the owner, who reads every record, owns every Google connection' },
+  assertConnectAuthority: { decl: ['GmailService.assertConnectAuthority'], biz: 0, actor: 1, why: 'D-11, D-42: the owner\'s mailbox' },
+  assertBusinessOwner: { decl: ['IdentityService.assertBusinessOwner'], biz: 0, actor: 1, why: 'D-11: the owner' },
+  channelRecipients: {
+    decl: ['fn:channelRecipients@modules/communications/channel-audience.ts'],
+    // no `biz`: the rows a send queues name their business through a list the method builds (deliveryData.push),
+    // which the one-local rule of sameBusiness cannot follow; channelRecipients reads the connections it is handed.
+    actor: 3,
+    why: "SWEEP-P0-FOLLOWUP (WH3-1): a send through a messaging channel connection reaches only the contacts every receiver may open (the member sending, when one sends, and each sending account's recorded binder; an account with no recorded binder is read as a non-owner's)",
+  },
 };
 
 /**
@@ -587,7 +615,139 @@ const EXPORT_CHECKS: Record<string, CheckRule> = {
 const EXPORT_ACCOUNTS: Record<string, { type: string; binds: string[]; recordsBinder?: string }> = {
   OutlookContactsSyncService: { type: 'outlook_contacts', binds: ['MicrosoftOAuthController.buildAuthUrl'], recordsBinder: 'MicrosoftOAuthService.handleCallback' },
   GoogleDriveService: { type: 'google_drive', binds: ['GoogleDriveController.getAuthUrl'] },
+  // SWEEP-P0-FOLLOWUP (WH3-1): the senders that queue messages through a messaging channel connection's account
+  // (an outbound delivery row is a send to that account; the adapters send what is queued). The account is bound by
+  // the channel connection writes, which check the binder reads crm and record them (providerMeta.boundBy).
+  DeliveryQueueService: {
+    type: 'channel_messaging',
+    binds: ['CommunicationsController.createConnection', 'CommunicationsController.updateConnection', 'CommunicationsController.connectWhatsApp'],
+    recordsBinder: 'ChannelConnectionService.create',
+  },
+  AutomationExecutorService: {
+    type: 'channel_messaging',
+    binds: ['CommunicationsController.createConnection', 'CommunicationsController.updateConnection', 'CommunicationsController.connectWhatsApp'],
+    recordsBinder: 'ChannelConnectionService.create',
+  },
+  CrmSequenceSchedulerService: {
+    type: 'channel_messaging',
+    binds: ['CommunicationsController.createConnection', 'CommunicationsController.updateConnection', 'CommunicationsController.connectWhatsApp'],
+    recordsBinder: 'ChannelConnectionService.create',
+  },
 };
+
+/**
+ * SWEEP-P0-FOLLOWUP repair (review SEC-FU-1): the binds of the channel_messaging accounts above were a hand-written
+ * list, and POST connections/sync-from-social (ChannelConnectionService.syncFromSocial: every social connection's
+ * token copied over the channel connection of that provider, EMAIL, GOOGLE and WHATSAPP included) was a door it left
+ * out: a settings admin whose map says crm none swapped the owner-bound mailbox's token for their own while the
+ * recorded binder still named the owner. CEN-11c now reads the doors from the call graph: every route and KEY module
+ * action that reaches a write of a channel connection's sending account (channelAccountLeaf) must be one of those
+ * binds (assertMayBindExport, the binder recorded) or reach the write only through a writer pinned here, which skips
+ * every messaging provider (isMessagingProvider ... continue) before it writes.
+ */
+const CHANNEL_NON_MESSAGING_WRITERS: Record<string, string> = {
+  'ChannelConnectionService.syncFromSocial':
+    'a social connection is a page or profile (Facebook, Instagram, LinkedIn, X, TikTok), never a sending mailbox or WhatsApp account: the sync skips EMAIL, GOOGLE and WHATSAPP, which only the binding routes above write',
+};
+/** The writer skips a messaging provider before it writes (CHANNEL_NON_MESSAGING_WRITERS). */
+const SKIPS_MESSAGING = /if\s*\(\s*isMessagingProvider\([^)]*\)\s*\)\s*(?:\{[^{}]*?\bcontinue\b|continue\b)/;
+
+/**
+ * A write of a channel connection's sending account: a new connection, or a write of its token, refresh token or
+ * provider meta (or data handed whole), by Prisma, raw SQL or a nested relation write. A health, lift, deactivation
+ * or delete write is not one (CEN-10 holds those).
+ */
+function channelAccountLeaf(leaf: string | null): string | null {
+  if (!leaf) return null;
+  const own = /^channelConnection\.(\w+)(?:\((.*)\))?$/.exec(leaf);
+  if (own) {
+    const [, op, cols = ''] = own;
+    if (/^(create|createMany|createManyAndReturn|upsert)$/.test(op) && !/^(deactivate|status lift)$/.test(cols)) return leaf;
+    return /^update/.test(op) && /\b(token|refreshToken|providerMeta)\b|data handed whole/.test(cols) ? leaf : null;
+  }
+  if (/^raw SQL INSERT INTO channel_connections\b/.test(leaf)) return leaf;
+  if (/^raw SQL UPDATE channel_connections SET\b/.test(leaf) && /\b(token|refresh_token|provider_meta|a JSON credential key)\b/.test(leaf)) return leaf;
+  if (/\(nested channelConnection\.(create|createMany|connectOrCreate|upsert|update|updateMany)\b/.test(leaf)) return leaf;
+  return null;
+}
+
+/**
+ * SWEEP-P0-FOLLOWUP repair (review COR-1): the methods that hand an audience send to the queue with no sending member,
+ * each with why. Every other call of CommunicationsService.sendBroadcast or DeliveryQueueService.publishNow / schedule
+ * names the member who sends (a `sender`, held to channelRecipients beside the account's binder), or hands its own
+ * caller's input through from a method of the same name (whose callers CEN-11d reads in turn). KEY's
+ * comms_send_broadcast (FlowOrchestratorService.executeToolAction) sent no member, so only the binder was checked and
+ * KEY reached contacts the same member's HTTP publish leaves out (D-88).
+ */
+const MEMBERLESS_AUDIENCE_SENDS: Record<string, string> = {
+  'KeyCortexDigestService.sendDigest':
+    "the scheduled digest: no member starts it; the send still reaches only the contacts the sending account's binder may open (channelRecipients)",
+};
+
+interface AudienceSendCall {
+  /** The method that makes the call (`Class.method`). */
+  at: string;
+  call: string;
+  /** The call names the member who sends. */
+  namesSender: boolean;
+  /** The call hands its method's own parameter through whole (sendBroadcast(input)). */
+  passThrough: boolean;
+}
+
+/** Every call that hands an audience send to the queue: sendBroadcast, and publishNow / schedule on the delivery queue. */
+function audienceSendCalls(files: Parsed[] = parsed()): AudienceSendCall[] {
+  const out: AudienceSendCall[] = [];
+  const enclosing = (n: ts.Node): { cls: string; method: string; params: string[] } => {
+    let method = '';
+    let params: string[] = [];
+    for (let p: ts.Node | undefined = n.parent; p; p = p.parent) {
+      if (!method && (ts.isMethodDeclaration(p) || ts.isFunctionDeclaration(p)) && p.name) {
+        method = p.name.getText();
+        params = p.parameters.map((x) => (ts.isIdentifier(x.name) ? x.name.text : ''));
+      }
+      if (ts.isClassDeclaration(p) && p.name) return { cls: p.name.text, method, params };
+    }
+    return { cls: '', method, params };
+  };
+  const nullish = (e: ts.Expression) => {
+    const v = strip(e);
+    return v.kind === ts.SyntaxKind.NullKeyword || (ts.isIdentifier(v) && v.text === 'undefined');
+  };
+  for (const { sf } of files) {
+    const visit = (n: ts.Node) => {
+      if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression)) {
+        const name = n.expression.name.text;
+        const receiver = n.expression.expression.getText(sf);
+        const broadcast = name === 'sendBroadcast';
+        const queue = (name === 'publishNow' || name === 'schedule') && /deliver/i.test(receiver);
+        if (broadcast || queue) {
+          const { cls, method, params } = enclosing(n);
+          let namesSender = false;
+          let passThrough = false;
+          if (broadcast) {
+            const arg = n.arguments[0] ? strip(n.arguments[0]) : undefined;
+            if (arg && ts.isObjectLiteralExpression(arg)) {
+              namesSender = arg.properties.some(
+                (p) =>
+                  (ts.isPropertyAssignment(p) && p.name.getText(sf) === 'sender' && !nullish(p.initializer)) ||
+                  (ts.isShorthandPropertyAssignment(p) && p.name.text === 'sender'),
+              );
+            } else if (arg && ts.isIdentifier(arg)) {
+              passThrough = method === 'sendBroadcast' && params.includes(arg.text);
+            }
+          } else {
+            const at = name === 'publishNow' ? 3 : 5;
+            namesSender = n.arguments.length > at && !nullish(n.arguments[at]);
+          }
+          out.push({ at: `${cls}.${method}`, call: `${receiver}.${name}`, namesSender, passThrough });
+        }
+      }
+      n.forEachChild(visit);
+    };
+    visit(sf);
+  }
+  return out;
+}
 
 interface GraphClass {
   file: string;
@@ -628,6 +788,11 @@ interface LeafContext {
   aliases: ReadonlyMap<string, string>;
   /** The text an expression stands for: a string constant it names (file-level or imported), or its own text (round 3, CM-2 g07). */
   constText(e: ts.Expression): string;
+  /**
+   * SWEEP-P0-FOLLOWUP (CW3-3 mG): whether an identifier names data the method was handed (a parameter, or a local
+   * that copies or spreads one), not data it built itself.
+   */
+  handed(name: string): boolean;
 }
 
 interface GraphRules {
@@ -731,10 +896,15 @@ function credentialLeafOfCall(call: ts.CallExpression | ts.TaggedTemplateExpress
   if (/^\$(executeRaw|queryRaw)(Unsafe)?$/.test(callee.name.text)) return rawSqlLeaf(call.arguments.map((a) => ctx.constText(a)).join(', '));
   if (!CREDENTIAL_WRITE_OPS.has(callee.name.text)) return null;
   const op = callee.name.text;
-  const anyModel = modelOf(callee.expression, aliases, true);
+  // SWEEP-P0-FOLLOWUP (CW3-3 mJ): a delegate named through a constant, `client[MODEL].deleteMany(...)`.
+  const receiver = strip(callee.expression);
+  const named = ts.isElementAccessExpression(receiver) && !ts.isStringLiteralLike(receiver.argumentExpression)
+    ? ctx.constText(receiver.argumentExpression).split('\n').map((v) => v.trim()).find((v) => Object.hasOwn(credentialModels(), v)) ?? null
+    : null;
+  const anyModel = named ?? modelOf(callee.expression, aliases, true);
   const nested = anyModel ? nestedRelationLeaf(anyModel, op, call.arguments[0]) : null;
   if (nested) return nested;
-  const model = modelOf(callee.expression, aliases);
+  const model = named ?? modelOf(callee.expression, aliases);
   if (!model) return null;
   const cols = credentialModels()[model];
   // the data is built elsewhere: a data / create / update / metadata value that is not an object literal, a shorthand, or a spread
@@ -744,6 +914,17 @@ function credentialLeafOfCall(call: ts.CallExpression | ts.TaggedTemplateExpress
   const scope = indirect ? mention : argsText;
   const hit = cols.filter((c) => !c.startsWith('*') && new RegExp(`\\b${c}\\b`).test(scope));
   if (hit.length) return `${model}.${op}(${hit.join(', ')})`;
+  // SWEEP-P0-FOLLOWUP (CW3-3 mG): data the method was handed whole (a DTO whose type is declared elsewhere, so no
+  // column is named here) reaches every credential column of the model; a pick list it builds names its columns.
+  const dataArg = call.arguments[0];
+  if (dataArg && ts.isObjectLiteralExpression(dataArg) && cols.some((c) => !c.startsWith('*'))) {
+    for (const part of dataArg.properties) {
+      const key = part.name?.getText(part.getSourceFile());
+      if (!key || !/^(data|create|update)$/.test(key)) continue;
+      const value = ts.isPropertyAssignment(part) ? strip(part.initializer) : ts.isShorthandPropertyAssignment(part) ? part.name : null;
+      if (value && ts.isIdentifier(value) && ctx.handed(value.text)) return `${model}.${op}(data handed whole: ${value.text})`;
+    }
+  }
   if (op.startsWith('delete') && cols.includes('*delete')) return `${model}.${op}`;
   if ((op.startsWith('create') || op === 'upsert') && cols.includes('*create')) return `${model}.${op}`;
   // an upsert deactivates (or lifts) through its update part only (a create of a disconnected row binds nothing)
@@ -757,6 +938,9 @@ function credentialLeafOfCall(call: ts.CallExpression | ts.TaggedTemplateExpress
   if (writes && cols.includes('*lift') && LIFTS.test(indirect && !/\bstatus\b/.test(updatePart) ? mention : updatePart)) return `${model}.${op}(status lift)`;
   // a JSON column that holds the credentials, replaced by a literal that keeps nothing of the stored one
   if (writes && cols.includes('*metadata') && /\bmetadata\s*:\s*\{(?![^{}]*\.\.\.)/.test(updatePart)) return `${model}.${op}(metadata replaced)`;
+  // SWEEP-P0-FOLLOWUP (CW3-2): the JSON column that holds the credentials written back whole from an earlier read of
+  // it (`{ ...meta, ...next }`): the credentials and binder read before are written over a revoke committed meanwhile.
+  if (writes && cols.includes('*metadata') && METADATA_FROM_READ.test(updatePart) && STATUS_METADATA_READ.test(mention)) return `${model}.${op}(metadata written back from an earlier read)`;
   if (model === 'business' && /\bmetaData\b/.test(indirect ? mention : argsText) && META_CREDENTIAL_KEYS.test(mention)) return 'business.metaData(credential keys)';
   return null;
 }
@@ -775,8 +959,19 @@ const CREDENTIAL_RULES: GraphRules = {
   doors: { ...REFRESH_DOORS, ...Object.fromEntries(Object.entries(STATUS_DOORS).map(([id, d]) => [id, d.why])) },
 };
 
+/**
+ * SWEEP-P0-FOLLOWUP (WH3-1): a queued outbound delivery is a send through the channel connection's account (the
+ * adapters send what is queued, from that account: the binder's mailbox or WhatsApp business account), to the
+ * recipient the row names. Writing one is the export, so the receiver check must dominate the write.
+ */
+const QUEUED_SEND_OPS = /^(create|createMany|createManyAndReturn|upsert)$/;
+
 const EXPORT_RULES: GraphRules = {
   leafOfCall: (call, ctx) => {
+    if (ts.isCallExpression(call) && ts.isPropertyAccessExpression(call.expression) && QUEUED_SEND_OPS.test(call.expression.name.text)
+      && modelOf(call.expression.expression, ctx.aliases, true) === 'outboundDelivery') {
+      return 'export (queues a send through a channel connection\'s account)';
+    }
     if (!ts.isCallExpression(call) || !isOutboundSend(call, ctx.own)) return null;
     if (FILE_GRANT.test(call.arguments[0] ? textOf(call.arguments[0]) : '')) return 'export (hands out a stored business file)';
     return RECORD_READ.test(ctx.mention) ? 'export (sends records out)' : null;
@@ -794,6 +989,10 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
   const functionReturns = new Map<string, string>();
   const listeners = new Map<string, string[]>();
   const declarations = new Set<string>();
+  /** SWEEP-P0-FOLLOWUP (CW3-3 mD): the declarations that answer a promise (async, or a declared Promise), whose refusal propagates only when awaited. */
+  const asyncDecls = new Set<string>();
+  const isAsyncNode = (n: ts.FunctionLikeDeclaration) =>
+    !!ts.getModifiers?.(n)?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) || /^Promise</.test(n.type?.getText() ?? '');
   const keyEntries: string[] = [];
   /** Round 3 (CM-2 g01): an injection token -> the provider classes bound to it (`{ provide: TOKEN, useClass: X }`). */
   const providers = new Map<string, string[]>();
@@ -863,6 +1062,26 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
     const e = strip(expr);
     if (ts.isStringLiteralLike(e)) return [e.text];
     if (ts.isConditionalExpression(e)) return [...stringValues(e.whenTrue, sf, scope, depth + 1), ...stringValues(e.whenFalse, sf, scope, depth + 1)];
+    // SWEEP-P0-FOLLOWUP (CW3-3 mI): SQL concatenated or templated from constants ('UPDATE ' + TABLE + ' SET ...');
+    // a part the reader cannot resolve stands as `?`, so the rest still reads.
+    const partValues = (part: ts.Expression) => {
+      const v = stringValues(part, sf, scope, depth + 1);
+      return v.length ? v.slice(0, 4) : ['?'];
+    };
+    if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      const out: string[] = [];
+      for (const l of partValues(e.left)) for (const r of partValues(e.right)) out.push(l + r);
+      return out.every((v) => v === '??') ? [] : out.slice(0, 16);
+    }
+    if (ts.isTemplateExpression(e)) {
+      let out = [e.head.text];
+      for (const span of e.templateSpans) {
+        const next: string[] = [];
+        for (const prefix of out) for (const v of partValues(span.expression)) next.push(prefix + v + span.literal.text);
+        out = next.slice(0, 16);
+      }
+      return out;
+    }
     const objectValues = (o: ts.Expression | undefined): string[] => {
       const v = o ? strip(o) : undefined;
       if (!v || !ts.isObjectLiteralExpression(v)) return [];
@@ -919,6 +1138,7 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
       if (ts.isFunctionDeclaration(node) && node.name && node.body) {
         functions.set(node.name.text, [...(functions.get(node.name.text) ?? []), { body: node.body, sf, params: node.parameters }]);
         declarations.add(`fn:${node.name.text}@${relFile(sf)}`);
+        if (isAsyncNode(node)) { asyncDecls.add(`fn:${node.name.text}@${relFile(sf)}`); asyncDecls.add(`fn:${node.name.text}`); }
         if (node.type) functionReturns.set(node.name.text, cleanType(node.type.getText(sf)));
       }
       if (ts.isVariableStatement(node)) {
@@ -926,6 +1146,7 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
           if (ts.isIdentifier(d.name) && d.initializer && (ts.isArrowFunction(d.initializer) || ts.isFunctionExpression(d.initializer))) {
             functions.set(d.name.text, [...(functions.get(d.name.text) ?? []), { body: d.initializer.body, sf, params: d.initializer.parameters }]);
             declarations.add(`fn:${d.name.text}@${relFile(sf)}`);
+            if (isAsyncNode(d.initializer)) { asyncDecls.add(`fn:${d.name.text}@${relFile(sf)}`); asyncDecls.add(`fn:${d.name.text}`); }
           }
         }
       }
@@ -963,6 +1184,7 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
           const name = m.name.getText(sf);
           cls.methods.set(name, m.body);
           methodParams.set(`${key}.${name}`, m.parameters);
+          if (ts.isMethodDeclaration(m) && isAsyncNode(m)) asyncDecls.add(`${key}.${name}`);
           if (m.type) methodReturns.set(`${key}.${name}`, cleanType(m.type.getText(sf)));
           declarations.add(`${key}.${name}`);
           if (ts.isGetAccessorDeclaration(m)) {
@@ -1144,6 +1366,8 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
     locals: Locals;
     /** The parameter bound to the route's :businessId, if the method has one. */
     routeBusiness?: string;
+    /** SWEEP-P0-FOLLOWUP (CW3-3 mK): the method's parameters (a check's actor must not come from @Body, @Query, @Param). */
+    params?: readonly ts.ParameterDeclaration[];
   }
   /** Round 3 (CM-1): the business a check names is the business the guarded call acts on. */
   const sameBusiness = (arg: ts.Expression | undefined, guarded: ts.Node | undefined, site: Site): boolean => {
@@ -1174,6 +1398,72 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
     return false;
   };
 
+  /**
+   * SWEEP-P0-FOLLOWUP (CW3-3 mF, mK): the member a check decides for is the request's principal (req.user, a KEY
+   * command's userId, a parameter handed on), never the business owner (an ownerId the owner and admin rules always
+   * admit) nor a member the request's body, query or path names.
+   */
+  const REQUEST_DATA = /^(Body|Query|Param|Headers)\(/;
+  const actorOk = (arg: ts.Expression | undefined, site: Site, depth = 0): boolean => {
+    if (!arg || depth > 4) return true;
+    const e = strip(arg);
+    if (e.kind === ts.SyntaxKind.NullKeyword || ts.isStringLiteralLike(e) || ts.isNumericLiteral(e) || (ts.isIdentifier(e) && e.text === 'undefined')) return true;
+    if (/\bownerId\b/.test(textOf(e))) return false;
+    if (ts.isObjectLiteralExpression(e)) {
+      return e.properties.every((p) =>
+        ts.isPropertyAssignment(p) ? actorOk(p.initializer, site, depth + 1)
+          : ts.isShorthandPropertyAssignment(p) ? actorOk(p.name, site, depth + 1)
+            : ts.isSpreadAssignment(p) ? actorOk(p.expression, site, depth + 1) : true);
+    }
+    if (ts.isConditionalExpression(e)) return actorOk(e.whenTrue, site, depth + 1) && actorOk(e.whenFalse, site, depth + 1);
+    if (ts.isBinaryExpression(e)) return actorOk(e.left, site, depth + 1) && actorOk(e.right, site, depth + 1);
+    let root: ts.Expression = e;
+    while (ts.isPropertyAccessExpression(root) || ts.isElementAccessExpression(root) || ts.isNonNullExpression(root) || ts.isParenthesizedExpression(root)) root = root.expression;
+    if (!ts.isIdentifier(root)) return true;
+    const name = root.text;
+    const param = site.params?.find((p) => ts.isIdentifier(p.name) && p.name.text === name);
+    if (param) return !decorators(param).some((d) => REQUEST_DATA.test(textOf(d.expression)));
+    let init: ts.Expression | undefined;
+    const visit = (n: ts.Node) => {
+      if (!init && ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === name && n.initializer) init = n.initializer;
+      if (!init) n.forEachChild(visit);
+    };
+    visit(site.body);
+    return init ? actorOk(init, site, depth + 1) : true;
+  };
+  /**
+   * SWEEP-P0-FOLLOWUP (CW3-3 mC, mD, mE, mL): a check guards only when its refusal reaches the request: awaited (or
+   * returned) when it answers a promise, and not swallowed on the way (`.catch`, `void`, the right side of `&&` /
+   * `||` / `??`, a ternary branch, an argument of any call but `Promise.all`).
+   */
+  const propagates = (call: ts.CallExpression, root: ts.Node, site: Site): boolean => {
+    let node: ts.Node = call;
+    let awaited = false;
+    let returned = false;
+    while (node !== root && node.parent) {
+      const p: ts.Node = node.parent;
+      if (ts.isAwaitExpression(p)) awaited = true;
+      else if (ts.isVoidExpression(p)) return false;
+      else if (ts.isConditionalExpression(p)) { if (node !== p.condition) return false; }
+      else if (ts.isBinaryExpression(p)) {
+        const k = p.operatorToken.kind;
+        if ((k === ts.SyntaxKind.AmpersandAmpersandToken || k === ts.SyntaxKind.BarBarToken || k === ts.SyntaxKind.QuestionQuestionToken) && node === p.right) return false;
+      } else if (ts.isPropertyAccessExpression(p) && node === p.expression) {
+        const use = p.parent;
+        if (p.name.text === 'catch' || (p.name.text === 'then' && use && ts.isCallExpression(use) && use.arguments.length > 1)) return false;
+      } else if (ts.isArrayLiteralExpression(p)) {
+        const use = p.parent;
+        if (!(use && ts.isCallExpression(use) && textOf(use.expression).replace(/\s+/g, '') === 'Promise.all')) return false;
+      } else if (ts.isCallExpression(p) && node !== p.expression) {
+        if (textOf(p.expression).replace(/\s+/g, '') !== 'Promise.all') return false;
+      } else if (ts.isReturnStatement(p)) returned = true;
+      node = p;
+    }
+    if (awaited || returned) return true;
+    const answersPromise = [...declsOf(call, site.cls, site.locals), ...targets(call, site.cls, site.locals, true)].some((d) => asyncDecls.has(d));
+    return !answersPromise;
+  };
+
   /** Methods and helpers that always run a pinned check before they return (a wrapper such as assertProfileOwner), with the parameter that names the business it checks (null: none). */
   const wrappers = new Map<string, number | null>();
   /** A call that is a pinned check (resolved to its declaration, carrying its arguments, for the guarded call's business), or a wrapper of one. */
@@ -1186,6 +1476,7 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
       const decls = declsOf(call, site.cls, site.locals);
       if (!decls.length || !decls.every((d) => rule.decl.includes(d))) return false;
       if (rule.args && !rule.args.test(call.arguments.map(textOf).join(', '))) return false;
+      if (rule.actor !== undefined && !actorOk(call.arguments[rule.actor], site)) return false;
       return rule.biz === undefined || sameBusiness(call.arguments[rule.biz], guarded, site);
     }
     const to = targets(call, site.cls, site.locals, true);
@@ -1257,9 +1548,9 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
     if (gateChecks(st, earlier, site, guarded)) return true;
     // an `if` counts when its condition runs a (throwing) check, or when each of its branches does (`if (gmail) ownerRuleA else ownerRuleB`)
     if (ts.isIfStatement(st)) {
-      return callsIn(st.expression, [], false).some((c) => isCheck(c, site, guarded, false)) || (!!st.elseStatement && branchChecks(st.thenStatement, site, guarded) && branchChecks(st.elseStatement, site, guarded));
+      return callsIn(st.expression, [], false).some((c) => propagates(c, st.expression, site) && isCheck(c, site, guarded, false)) || (!!st.elseStatement && branchChecks(st.thenStatement, site, guarded) && branchChecks(st.elseStatement, site, guarded));
     }
-    if (ts.isExpressionStatement(st) || ts.isVariableStatement(st) || ts.isReturnStatement(st)) return callsIn(st, [], false).some((c) => isCheck(c, site, guarded, false));
+    if (ts.isExpressionStatement(st) || ts.isVariableStatement(st) || ts.isReturnStatement(st)) return callsIn(st, [], false).some((c) => propagates(c, st, site) && isCheck(c, site, guarded, false));
     return false;
   };
   /** A pinned check (or a wrapper of one) is called in an earlier statement of a block enclosing the call, within the method. */
@@ -1272,7 +1563,7 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
         const before = parent.statements.slice(0, Math.max(i, 0));
         if (before.some((st, j) => statementChecks(st, before.slice(0, j), site, call))) return true;
       }
-      if (ts.isIfStatement(parent) && node !== parent.expression && callsIn(parent.expression, [], false).some((c) => isCheck(c, site, call, false))) return true;
+      if (ts.isIfStatement(parent) && node !== parent.expression && callsIn(parent.expression, [], false).some((c) => propagates(c, parent.expression, site) && isCheck(c, site, call, false))) return true;
       node = parent;
     }
     return false;
@@ -1284,6 +1575,7 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
     body,
     locals: localTypes(body, cls, params),
     routeBusiness: routeBusinessOf(params),
+    params,
   });
   /** The body runs a check in a top-level statement and returns nowhere before it; the answer is the parameter that names the business checked (null: none), or undefined (no wrapper). */
   const alwaysChecks = (site: Site, params: readonly ts.ParameterDeclaration[] = []): number | null | undefined => {
@@ -1320,6 +1612,44 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
     }
   }
 
+  /**
+   * SWEEP-P0-FOLLOWUP (CW3-3 mH): a job a method adds to a BullMQ queue runs in that queue's Worker. The queues a
+   * class holds (`this.q = new Queue(NAME, ...)`) and the Workers' handlers (`new Worker(NAME, async (job) => ...)`),
+   * by queue name; an add on a queue property is an edge to every handler of its queue.
+   */
+  const queueProps = new Map<string, string[]>();
+  const workers = new Map<string, Array<{ id: string; body: ts.Node; cls: string; params: readonly ts.ParameterDeclaration[] }>>();
+  for (const [name, c] of classes) {
+    for (const body of c.methods.values()) {
+      const sf = body.getSourceFile();
+      const visit = (n: ts.Node) => {
+        if (ts.isNewExpression(n) && ts.isIdentifier(n.expression) && /^(Queue|Worker)$/.test(n.expression.text)) {
+          const queues = stringValues(n.arguments?.[0], sf, body);
+          const parent = n.parent;
+          if (n.expression.text === 'Queue' && ts.isBinaryExpression(parent) && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken
+            && ts.isPropertyAccessExpression(parent.left) && parent.left.expression.kind === ts.SyntaxKind.ThisKeyword) {
+            const prop = `${name}.${parent.left.name.text}`;
+            queueProps.set(prop, [...new Set([...(queueProps.get(prop) ?? []), ...queues])]);
+          }
+          const handler = n.expression.text === 'Worker' && n.arguments?.[1] ? strip(n.arguments[1]) : undefined;
+          if (handler && (ts.isArrowFunction(handler) || ts.isFunctionExpression(handler))) {
+            for (const q of queues) workers.set(q, [...(workers.get(q) ?? []), { id: `worker:${q}@${relFile(sf)}:${n.pos}`, body: handler.body, cls: name, params: handler.parameters }]);
+          }
+        }
+        n.forEachChild(visit);
+      };
+      visit(body);
+    }
+  }
+  const queuedTo = (call: ts.CallExpression, cls: string | null): string[] => {
+    const callee = call.expression;
+    if (!cls || !ts.isPropertyAccessExpression(callee) || !/^(add|addBulk)$/.test(callee.name.text)) return [];
+    const recv = strip(callee.expression);
+    if (!ts.isPropertyAccessExpression(recv) || recv.expression.kind !== ts.SyntaxKind.ThisKeyword) return [];
+    const queues = [cls, ...supers(cls)].flatMap((k) => queueProps.get(`${k}.${recv.name.text}`) ?? []);
+    return queues.flatMap((q) => (workers.get(q) ?? []).map((w) => w.id));
+  };
+
   interface GraphNode {
     leaves: Array<{ write: string; guarded: boolean }>;
     edges: Array<{ to: string; guarded: boolean }>;
@@ -1353,6 +1683,28 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
         const values = stringValues(e, sf, body);
         return values.length ? values.join('\n') : textOf(e);
       },
+      handed: (name) => {
+        const paramNames = new Set((params ?? []).map((p) => (ts.isIdentifier(p.name) ? p.name.text : '')).filter(Boolean));
+        const seen = new Set<string>();
+        const from = (n: string): boolean => {
+          if (paramNames.has(n)) return true;
+          if (seen.has(n)) return false;
+          seen.add(n);
+          let init: ts.Expression | undefined;
+          const visit = (x: ts.Node) => {
+            if (!init && ts.isVariableDeclaration(x) && ts.isIdentifier(x.name) && x.name.text === n && x.initializer) init = x.initializer;
+            if (!init) x.forEachChild(visit);
+          };
+          visit(body);
+          if (!init) return false;
+          const v = strip(init);
+          if (ts.isIdentifier(v)) return from(v.text);
+          // `{ ...dto }`, `{ ...dto, updatedAt }`: a copy of the handed data
+          if (ts.isObjectLiteralExpression(v)) return v.properties.some((p) => ts.isSpreadAssignment(p) && ts.isIdentifier(strip(p.expression)) && from((strip(p.expression) as ts.Identifier).text));
+          return false;
+        };
+        return from(name);
+      },
     };
     const node: GraphNode = { leaves: [], edges: [] };
     const whole = rules.leafOfMethod(id, textOf(body), mention);
@@ -1364,7 +1716,7 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
     for (const call of callsIn(body)) {
       const leaf = rules.leafOfCall(call, ctx);
       if (leaf) node.leaves.push({ write: leaf, guarded: dominated(call, site) });
-      for (const to of [...targets(call, cls, site.locals), ...emitted(call, body)]) if (to !== id) node.edges.push({ to, guarded: dominated(call, site) });
+      for (const to of [...targets(call, cls, site.locals), ...emitted(call, body), ...queuedTo(call, cls)]) if (to !== id) node.edges.push({ to, guarded: dominated(call, site) });
     }
     ownLeaves.set(id, node.leaves.map((l) => l.write));
     if (Object.hasOwn(rules.doors, id)) {
@@ -1375,6 +1727,7 @@ function buildGraph(rules: GraphRules, files: Parsed[] = parsed()): CredentialGr
   };
   for (const [name, c] of classes) for (const [m, body] of c.methods) add(`${name}.${m}`, body, name, methodParams.get(`${name}.${m}`));
   for (const [name, list] of functions) for (const f of list) add(`fn:${name}`, f.body, null, f.params);
+  for (const list of workers.values()) for (const w of list) add(w.id, w.body, w.cls, w.params);
 
   // Least fixed points: a method reaches a leaf (any path), and reaches one by a path with no check.
   const solve = (guardedCounts: boolean) => {
@@ -1404,6 +1757,117 @@ let graphCache: CredentialGraph | null = null;
 const credentialGraph = () => (graphCache ??= buildCredentialGraph());
 let exportGraphCache: CredentialGraph | null = null;
 const exportGraph = () => (exportGraphCache ??= buildGraph(EXPORT_RULES));
+
+/**
+ * SWEEP-P0-FOLLOWUP repair (SEC-FU-1): the channel account graph. Same reader; its leaves are the writes of a channel
+ * connection's sending account (channelAccountLeaf), and the writers pinned in CHANNEL_NON_MESSAGING_WRITERS excuse
+ * theirs. CEN-11c reads `reaches`: a door is any route or KEY action with a path to such a write.
+ */
+const CHANNEL_ACCOUNT_RULES: GraphRules = {
+  leafOfCall: (call, ctx) => channelAccountLeaf(credentialLeafOfCall(call, ctx)),
+  leafOfMethod: () => null,
+  checks: {},
+  doors: CHANNEL_NON_MESSAGING_WRITERS,
+};
+let channelAccountGraphCache: CredentialGraph | null = null;
+const channelAccountGraph = () => (channelAccountGraphCache ??= buildGraph(CHANNEL_ACCOUNT_RULES));
+/** The routes of `list` that write a channel connection's sending account and are no channel_messaging bind of EXPORT_ACCOUNTS, with the path. */
+function unboundChannelAccountWriters(g: CredentialGraph, list: Route[]): Array<{ key: string; why: string }> {
+  const binds = new Set(Object.values(EXPORT_ACCOUNTS).filter((a) => a.type === 'channel_messaging').flatMap((a) => a.binds));
+  const out: Array<{ key: string; why: string }> = [];
+  for (const r of list) {
+    const path = g.reaches.get(r.key);
+    if (path && !binds.has(r.key)) out.push({ key: r.key, why: `${r.key} (${r.verb} ${r.path}) writes a channel connection's sending account and is no channel_messaging bind of EXPORT_ACCOUNTS (assertMayBindExport, the binder recorded): ${path.join(' -> ')}` });
+  }
+  return out;
+}
+/**
+ * SWEEP-P0-FOLLOWUP repair (SEC-FU-1): the mutation check of CEN-11c. A scratch controller of settings-admin routes,
+ * parsed beside the real source: each `h*` handler writes a channel connection's sending account a way the binding
+ * routes do not check (through the service, on the delegate, a new connection, raw SQL), and must be reported; each
+ * `t*` twin (the pinned sync, a health write) must not.
+ */
+const CEN11C_EXPECTED_UNBOUND = [
+  'Cen11cHuntController.h1ServiceToken',
+  'Cen11cHuntController.h2DelegateToken',
+  'Cen11cHuntController.h3DelegateCreate',
+  'Cen11cHuntController.h4RawProviderMeta',
+  'Cen11cHuntController.h5CopyLikeTheSync',
+];
+const CEN11C_EXPECTED_TWINS = ['Cen11cHuntController.t1PinnedSync', 'Cen11cHuntController.t2HealthWrite'];
+function CEN11C_HUNT(): Parsed {
+  const text = `
+import { Body, Controller, Inject, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { AuthGuard } from '../../core/auth/auth.guard';
+import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard } from '../../core/auth/module-scope.guard';
+import { RequireModuleScope } from '../../core/auth/require-module-scope.decorator';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { ChannelConnectionService } from '../communications/channel-connection.service';
+
+@Controller('cen11c-hunt')
+export class Cen11cHuntController {
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(ChannelConnectionService) private readonly channels: ChannelConnectionService,
+  ) {}
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
+  @Patch('businesses/:businessId/h1/:id')
+  h1ServiceToken(@Param('businessId') businessId: string, @Param('id') id: string, @Body() body: any) {
+    return this.channels.update(businessId, id, { token: body.token });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
+  @Post('businesses/:businessId/h2/:id')
+  h2DelegateToken(@Param('businessId') businessId: string, @Param('id') id: string, @Body() body: any) {
+    return this.prisma.client.channelConnection.update({ where: { id }, data: { token: body.token } });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
+  @Post('businesses/:businessId/h3')
+  h3DelegateCreate(@Param('businessId') businessId: string, @Body() body: any) {
+    return this.prisma.client.channelConnection.create({ data: { businessId, provider: 'EMAIL', token: body.token } });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
+  @Post('businesses/:businessId/h4/:id')
+  h4RawProviderMeta(@Param('businessId') businessId: string, @Param('id') id: string, @Body() body: any) {
+    return this.prisma.client.$executeRawUnsafe('UPDATE channel_connections SET provider_meta = $1 WHERE id = $2', body.meta, id);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
+  @Post('businesses/:businessId/h5')
+  async h5CopyLikeTheSync(@Param('businessId') businessId: string) {
+    for (const sc of await this.prisma.client.socialConnection.findMany({ where: { businessId } })) {
+      const existing = await this.prisma.client.channelConnection.findFirst({ where: { businessId, provider: sc.platform } });
+      if (existing) await this.prisma.client.channelConnection.update({ where: { id: existing.id }, data: { token: sc.token, refreshToken: sc.refreshToken } });
+    }
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
+  @Post('businesses/:businessId/t1')
+  t1PinnedSync(@Param('businessId') businessId: string) {
+    return this.channels.syncFromSocial(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
+  @Post('businesses/:businessId/t2/:id')
+  t2HealthWrite(@Param('businessId') businessId: string, @Param('id') id: string) {
+    return this.prisma.client.channelConnection.updateMany({ where: { id, businessId }, data: { healthState: 'Disabled' } });
+  }
+}
+`;
+  const file = join(SRC, 'modules/cen11c-hunt/cen11c-hunt.controller.ts');
+  return { file, text, sf: ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true) };
+}
 /**
  * Round 2 (CW-5): the shapes the round 2 hunt added to a scratch controller, one membership-only
  * handler each, all of which passed CEN-* at e740575c. CEN-10d parses them beside the real source
@@ -1440,19 +1904,118 @@ const HUNT_EXPECTED_UNGUARDED = [
   'Cen10dHuntController.r3g12CheckOtherBusiness', // CM-1 settings admin checked on another business than the one written
   'Cen10dHuntController.r3g13ConnectedLift', // CM-3 g13 connectorStatus.update({ status: 'connected' })
   'Cen10dHuntController.r3g14ChannelHealthState', // CM-3 g14 channelConnection.updateMany({ healthState: 'Disabled' })
+  // SWEEP-P0-FOLLOWUP (round 3 rechecks CW3-1, CW3-2, CW3-3): the shapes the round 3 mutation check passed through the
+  // reader (11 of 12 scratch handlers left all 19 CEN cases green), and the read-modify-write of a credential-holding
+  // JSON column that let a backfill undo a revoke.
+  'Cen10dHuntController.r4bResourceIdBinding', // CW3-1 / mB business.update({ inventoryLinkedSheetId }): the sheet the owner's Drive token reads and clears
+  'Cen10dHuntController.r4cCheckCaught', // CW3-3 mC await assertMemberModuleLevel(...).catch(() => undefined)
+  'Cen10dHuntController.r4dCheckVoid', // CW3-3 mD void assertMemberModuleLevel(...)
+  'Cen10dHuntController.r4eCheckShortCircuit', // CW3-3 mE body.strict && (await assertMemberModuleLevel(...))
+  'Cen10dHuntController.r4eCheckTernary', // CW3-3 mE twin: body.strict ? await assertMemberModuleLevel(...) : undefined
+  'Cen10dHuntController.r4fCheckForOwner', // CW3-3 mF the check made for the business owner ({ id: biz.ownerId })
+  'Cen10dHuntController.r4gDtoData', // CW3-3 mG socialConnection.updateMany({ data: dto }), the DTO typed in another file
+  'Cen10dHuntController.r4hQueueWorker', // CW3-3 mH the route enqueues; a BullMQ Worker writes the credential
+  'Cen10dHuntController.r4iConcatSql', // CW3-3 mI $executeRawUnsafe('UPDATE ' + TABLE + ' SET token = $1 ...')
+  'Cen10dHuntController.r4jConstDelegate', // CW3-3 mJ (this.prisma.client as any)[MODEL_CONST].deleteMany(...)
+  'Cen10dHuntController.r4kCheckForBodyActor', // CW3-3 mK the check made for an actor the request body names
+  'Cen10dHuntController.r4lCheckAllSettled', // CW3-3 mL await Promise.allSettled([assertMemberModuleLevel(...)])
+  'Cen10dHuntController.r4mMetadataFromRead', // CW3-2 connectorStatus metadata written back from an earlier read of itself ({ ...meta, ...next })
 ];
 const HUNT_EXPECTED_GUARDED = [
   'Cen10dHuntController.g1SettingsAdminCheck', // the M1 write after assertMemberModuleLevel(settings, admin)
   'Cen10dHuntController.g2SettingsAdminRoute', // the M5 write under an enforced settings admin scope
   'Cen10dHuntController.r3t11VerifyStateGated', // the g11 write after `if (!state) throw` on the pinned verifyState's result
   'Cen10dHuntController.r3t12CheckSameBusiness', // the g12 write after settings admin on the route's own :businessId
+  // SWEEP-P0-FOLLOWUP twins: the same writes behind a check that guards (awaited, its refusal propagating, for the request's principal).
+  'Cen10dHuntController.r4tCheckAwaitedLocal', // const level = await assertMemberModuleLevel(..., req.user, 'settings', 'admin'); then the write
+  'Cen10dHuntController.r4tQueueWorkerChecked', // settings admin checked before the route enqueues for the worker that writes
+  'Cen10dHuntController.r4tCheckInPromiseAll', // await Promise.all([assertMemberModuleLevel(..., req.user, 'settings', 'admin')]): a refusal rejects the await
 ];
+/**
+ * SWEEP-P0-FOLLOWUP (CW3-3 mG, mH): the shapes that need a second file: a DTO type declared elsewhere (so no column is
+ * named where the write is), and a service whose BullMQ Worker writes what the route only enqueues for.
+ */
+function HUNT_SHAPES_R4(): Parsed[] {
+  const types = `
+/** A DTO declared in another file: the writer names none of its fields. */
+export interface Cen10dConnectionPatch {
+  token?: string;
+  refreshToken?: string;
+  accountName?: string;
+}
+`;
+  const service = `
+import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
+import { Queue, Worker } from 'bullmq';
+import type { Cen10dConnectionPatch } from './cen10d-hunt.types';
+
+const CEN10D_MODEL = 'socialConnection';
+const CEN10D_TABLE = 'social_connections';
+const CEN10D_QUEUE = 'cen10d-r4-bind';
+
+@Injectable()
+export class Cen10dR4Service implements OnModuleInit {
+  private queue!: Queue;
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(ConnectorCredentialsService) private readonly creds: ConnectorCredentialsService,
+  ) {}
+
+  onModuleInit() {
+    this.queue = new Queue(CEN10D_QUEUE, { connection: {} });
+    new Worker(CEN10D_QUEUE, async (job) => {
+      await this.creds.setCredentials(job.data.businessId, 'quickbooks', job.data.values);
+    });
+  }
+
+  patchConnection(businessId: string, id: string, dto: Cen10dConnectionPatch) {
+    return this.prisma.client.socialConnection.updateMany({ where: { id, businessId }, data: dto });
+  }
+
+  enqueueBind(businessId: string, values: Record<string, string>) {
+    return this.queue.add('bind', { businessId, values });
+  }
+
+  rawConcat(businessId: string, token: string) {
+    return this.prisma.client.$executeRawUnsafe('UPDATE ' + CEN10D_TABLE + ' SET token = $1 WHERE business_id = $2', token, businessId);
+  }
+
+  dynamicDelegate(businessId: string) {
+    return (this.prisma.client as any)[CEN10D_MODEL].deleteMany({ where: { businessId } });
+  }
+
+  pointOwnerDriveAt(businessId: string, sheetId: string) {
+    return this.prisma.client.business.update({ where: { id: businessId }, data: { inventoryLinkedSheetId: sheetId } });
+  }
+
+  async writeMappings(businessId: string, next: Record<string, unknown>) {
+    const existing = await this.prisma.client.connectorStatus.findUnique({
+      where: { businessId_connectorType: { businessId, connectorType: 'typeform' } },
+      select: { metadata: true },
+    });
+    const meta = (existing?.metadata ?? {}) as Record<string, unknown>;
+    const merged = { ...meta, ...next };
+    await this.prisma.client.connectorStatus.upsert({
+      where: { businessId_connectorType: { businessId, connectorType: 'typeform' } },
+      create: { businessId, connectorType: 'typeform', status: 'disconnected', metadata: merged },
+      update: { metadata: merged },
+    });
+  }
+}
+`;
+  const at = (name: string, text: string): Parsed => {
+    const file = join(SRC, `modules/cen10d-hunt/${name}`);
+    return { file, text, sf: ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true) };
+  };
+  return [at('cen10d-hunt.types.ts', types), at('cen10d-r4.service.ts', service)];
+}
 function HUNT_SHAPES(): Parsed {
   const text = `
 import { Body, Controller, Get, Inject, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { assertMemberModuleLevel } from '../../core/auth/member-module-level';
+import type { Cen10dConnectionPatch } from './cen10d-hunt.types';
 
 export const CEN10D_CRED_STORE = 'CEN10D_CRED_STORE';
 export const CEN10D_BOUND_STORE = 'CEN10D_BOUND_STORE';
@@ -1491,7 +2054,103 @@ export class Cen10dHuntController {
     @Inject(ChannelConnectionService) private readonly channelConnections: ChannelConnectionService,
     @Inject(CalendarService) private readonly calendar: CalendarService,
     @Inject(ModuleRef) private readonly moduleRef: ModuleRef,
+    @Inject(Cen10dR4Service) private readonly r4: Cen10dR4Service,
   ) {}
+
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
+  @Post('businesses/:businessId/r4b')
+  async r4bResourceIdBinding(@Param('businessId') businessId: string, @Body() body: any) {
+    return this.r4.pointOwnerDriveAt(businessId, body.sheetId);
+  }
+
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('storefront', 'write')
+  @Post('businesses/:businessId/r4c')
+  async r4cCheckCaught(@Param('businessId') businessId: string, @Body() body: any, @Req() req: any) {
+    await assertMemberModuleLevel(this.prisma, businessId, req.user, 'settings', 'admin').catch(() => undefined);
+    return this.credentials.setCredentials(businessId, 'quickbooks', body.values);
+  }
+
+  @Post('businesses/:businessId/r4d')
+  async r4dCheckVoid(@Param('businessId') businessId: string, @Body() body: any, @Req() req: any) {
+    void assertMemberModuleLevel(this.prisma, businessId, req.user, 'settings', 'admin');
+    return this.credentials.setCredentials(businessId, 'quickbooks', body.values);
+  }
+
+  @Post('businesses/:businessId/r4e')
+  async r4eCheckShortCircuit(@Param('businessId') businessId: string, @Body() body: any, @Req() req: any) {
+    body.strict && (await assertMemberModuleLevel(this.prisma, businessId, req.user, 'settings', 'admin'));
+    return this.credentials.setCredentials(businessId, 'quickbooks', body.values);
+  }
+
+  @Post('businesses/:businessId/r4e2')
+  async r4eCheckTernary(@Param('businessId') businessId: string, @Body() body: any, @Req() req: any) {
+    body.strict ? await assertMemberModuleLevel(this.prisma, businessId, req.user, 'settings', 'admin') : undefined;
+    return this.credentials.setCredentials(businessId, 'quickbooks', body.values);
+  }
+
+  @Post('businesses/:businessId/r4f')
+  async r4fCheckForOwner(@Param('businessId') businessId: string, @Body() body: any) {
+    const biz = await this.prisma.client.business.findUnique({ where: { id: businessId }, select: { ownerId: true } });
+    await assertMemberModuleLevel(this.prisma, businessId, { id: biz?.ownerId ?? undefined, role: 'USER' }, 'settings', 'admin');
+    return this.credentials.setCredentials(businessId, 'quickbooks', body.values);
+  }
+
+  @Post('businesses/:businessId/r4g/:id')
+  async r4gDtoData(@Param('businessId') businessId: string, @Param('id') id: string, @Body() body: Cen10dConnectionPatch) {
+    return this.r4.patchConnection(businessId, id, body);
+  }
+
+  @Post('businesses/:businessId/r4h')
+  async r4hQueueWorker(@Param('businessId') businessId: string, @Body() body: any) {
+    return this.r4.enqueueBind(businessId, body.values);
+  }
+
+  @Post('businesses/:businessId/r4i')
+  async r4iConcatSql(@Param('businessId') businessId: string, @Body() body: any) {
+    return this.r4.rawConcat(businessId, body.token);
+  }
+
+  @Post('businesses/:businessId/r4j')
+  async r4jConstDelegate(@Param('businessId') businessId: string) {
+    return this.r4.dynamicDelegate(businessId);
+  }
+
+  @Post('businesses/:businessId/r4k')
+  async r4kCheckForBodyActor(@Param('businessId') businessId: string, @Body() body: any) {
+    await assertMemberModuleLevel(this.prisma, businessId, { id: body.actingFor }, 'settings', 'admin');
+    return this.credentials.setCredentials(businessId, 'quickbooks', body.values);
+  }
+
+  @Get('businesses/:businessId/r4l')
+  async r4lCheckAllSettled(@Param('businessId') businessId: string, @Query('v') v: string, @Req() req: any) {
+    await Promise.allSettled([assertMemberModuleLevel(this.prisma, businessId, req.user, 'settings', 'admin')]);
+    return this.credentials.setCredentials(businessId, 'quickbooks', { accessToken: v, realmId: v });
+  }
+
+  @Post('businesses/:businessId/r4m')
+  async r4mMetadataFromRead(@Param('businessId') businessId: string, @Body() body: any) {
+    return this.r4.writeMappings(businessId, { formMappings: body.formMappings });
+  }
+
+  @Post('businesses/:businessId/r4t1')
+  async r4tCheckAwaitedLocal(@Param('businessId') businessId: string, @Body() body: any, @Req() req: any) {
+    const level = await assertMemberModuleLevel(this.prisma, businessId, req.user, 'settings', 'admin');
+    return { level, done: await this.credentials.setCredentials(businessId, 'quickbooks', body.values) };
+  }
+
+  @Post('businesses/:businessId/r4t2')
+  async r4tQueueWorkerChecked(@Param('businessId') businessId: string, @Body() body: any, @Req() req: any) {
+    await assertMemberModuleLevel(this.prisma, businessId, req.user, 'settings', 'admin');
+    return this.r4.enqueueBind(businessId, body.values);
+  }
+
+  @Post('businesses/:businessId/r4t3')
+  async r4tCheckInPromiseAll(@Param('businessId') businessId: string, @Body() body: any, @Req() req: any) {
+    await Promise.all([assertMemberModuleLevel(this.prisma, businessId, req.user, 'settings', 'admin')]);
+    return this.credentials.setCredentials(businessId, 'quickbooks', body.values);
+  }
 
   @Get('businesses/:businessId/r3g01')
   async r3g01InterfaceToken(@Param('businessId') businessId: string, @Query('t') t: string) {
@@ -1720,7 +2379,7 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
     expect(byKey.get('ApiKeysController.revoke')?.guards).toContain('ModuleScopeGuard');
     // a class-level guard reaches every handler
     expect(byKey.get('ProjectsController.createProject')?.guards).toEqual(['AuthGuard', 'BusinessGuard', 'ModuleScopeGuard']);
-    // a declaration without the guard is inert: still membership-only
+    // an own-device route stays membership-only (SWEEP-P0-FOLLOWUP, owner question 3: its inert settings decorator is dropped)
     expect(population.map((r) => r.key)).toContain('PushNotificationController.subscribe');
     // review SEC-1: controllers outside modules/ are read too (core/connectors)
     expect(byKey.get('ConnectorController.saveCredentials')?.file).toBe('core/connectors/connector.controller.ts');
@@ -1866,7 +2525,19 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
       'SupplierController.createConnection', // RC-2 sibling: SupplierConnection.credentials
       'FinanceController.createBankConnection', // BankConnection.accessToken
       'MicrosoftOAuthController.callback', // a public callback storing the Outlook tokens
+      // SWEEP-P0-FOLLOWUP CW3-1: the spreadsheet the owner's Drive token reads and clears is a binding (Business.inventoryLinkedSheetId)
+      'GoogleDriveController.linkInventorySheet',
+      'GoogleDriveController.unlinkInventorySheet',
+      'GoogleDriveController.createInventorySheet',
     ]));
+    // SWEEP-P0-FOLLOWUP CW3-2: the connector form mappings wrote connector_statuses.metadata back from an earlier read of it
+    // (the stored encryptedCredentials and boundBy with it), over a revoke that committed in between. The reader sees that
+    // shape (CEN-10d r4mMetadataFromRead); the writer now changes formMappings alone (jsonb_set under the row lock), and the
+    // other writers of a connector row's own keys merge only those keys (mergeConnectorMetadata), so none is a leaf.
+    for (const id of ['ConnectorFormMappingService.updateFormMappings', 'GoogleContactsSyncService.saveMappingRules', 'OutlookContactsSyncService.saveMappingRules', 'GoogleBusinessProfileService.writeScheduledPosts', 'fn:mergeConnectorMetadata']) {
+      expect(g.leaves.has(id), `${id} is read`).toBe(true);
+      expect(g.leaves.get(id), `${id} writes no credential`).toEqual([]);
+    }
     // a read that writes nothing is not a writer
     for (const key of ['WebhooksController.list', 'CommunicationsController.listConnections', 'ShopifyController.test']) expect(g.reaches.has(key), key).toBe(false);
     const problems: string[] = [];
@@ -1904,7 +2575,7 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
   });
   it('[CEN-10d] (round 2, CW-5; round 3, CM-1..CM-3) guards the guard: the reader reports, as unguarded, a membership-only handler for every credential-writer shape the round 2 and round 3 hunts passed through it, and not its guarded twin', () => {
     const synthetic = HUNT_SHAPES();
-    const g = buildCredentialGraph([...parsed(), synthetic]);
+    const g = buildCredentialGraph([...parsed(), synthetic, ...HUNT_SHAPES_R4()]);
     const hunt = routes([synthetic]);
     expect(hunt.map((r) => r.key).sort()).toEqual([...HUNT_EXPECTED_UNGUARDED, ...HUNT_EXPECTED_GUARDED].sort());
     // a route is unguarded as CEN-10b reads it: an unguarded path, and no settings admin enforced on the route
@@ -1930,6 +2601,8 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
     expect(problems).toEqual([]);
     // guards the guard: the schema reader sees the credential columns the reviews found by hand
     expect(models.business).toEqual(expect.arrayContaining(['gmailRefreshToken', 'msContactsAccessToken', 'bpRefreshToken', 'bpAccountId', 'bpLocationId', 'calendarId']));
+    // SWEEP-P0-FOLLOWUP CW3-1: the inventory spreadsheet the owner's Drive token reads and clears
+    expect(models.business).toEqual(expect.arrayContaining(['inventoryLinkedSheetId']));
     expect(models.channelConnection).toEqual(expect.arrayContaining(['token', 'refreshToken']));
     expect(models.supplierConnection).toEqual(expect.arrayContaining(['credentials']));
     expect(models.integrationConnection).toEqual(expect.arrayContaining(['authData', 'authDataRef']));
@@ -1946,8 +2619,9 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
       'CommunicationsController.toggleDestination',
       'ConnectController.setBpActiveLocation',
       'ConnectorController.authenticate',
-      'ConnectorController.smoke',
     ]));
+    // whatsappsmoke (SWEEP-P0-FOLLOWUP): the WhatsApp test records nothing, so POST smoke/:type reaches no binding write.
+    expect(g.reaches.has('ConnectorController.smoke'), 'POST smoke binds nothing').toBe(false);
   });
 
   it('[CEN-10f] (round 2, CW-4) a connector whose provider check records a binding is named in CONNECTORS_BINDING_ON_CHECK, so POST smoke/:type holds it to the Connect rule: every connector class whose smokeTest reaches a credential or binding write on the call graph', () => {
@@ -1955,7 +2629,10 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
     const file = join(SRC, 'core/connectors/connector-binding.ts');
     const named = existsSync(file) ? new Set([...readFileSync(file, 'utf8').matchAll(/new Set\(\[([^\]]*)\]\)/g)].flatMap((m) => [...m[1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]))) : new Set<string>();
     const binding = [...g.reaches.keys()].filter((id) => id.endsWith('.smokeTest')).map((id) => id.slice(0, -'.smokeTest'.length));
-    expect(binding, 'guards the guard: the WhatsApp check records a binding').toContain('WhatsAppConnector');
+    // whatsappsmoke ruling (SWEEP-P0-FOLLOWUP, recommended option): the WhatsApp test only reports its result and never
+    // switches WhatsApp back on, so its smoke test reaches no binding write and it is no longer a binding-on-check connector.
+    expect(binding, 'the WhatsApp check records nothing (whatsappsmoke)').not.toContain('WhatsAppConnector');
+    expect([...named], 'no connector binds on its check today').toEqual([]);
     const problems: string[] = [];
     for (const cls of binding) {
       const text = readFileSync(join(SRC, g.classes.get(cls)!.file), 'utf8');
@@ -1963,6 +2640,16 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
       if (!type || !named.has(type)) problems.push(`${cls} (${type ?? 'no type'}): its smoke test reaches ${g.reaches.get(`${cls}.smokeTest`)!.join(' -> ')}`);
     }
     expect(problems).toEqual([]);
+  });
+
+  it('[CEN-10i] (SWEEP-P0-FOLLOWUP, census owner question 12) the PR195 merge has landed: no census row is held for another branch, and the bank connection writes (BankConnection.accessToken) need settings admin', () => {
+    const held = censusRows().filter((r) => /\bheld:/.test(r.reason)).map((r) => `line ${r.line}: ${r.key} (${r.disposition})`);
+    expect(held).toEqual([]);
+    const byKey = new Map(routes().map((r) => [r.key, r]));
+    for (const key of ['FinanceController.createBankConnection', 'FinanceController.updateBankConnection', 'FinanceController.deleteBankConnection']) {
+      const r = byKey.get(key);
+      expect(r && settingsAdminEnforced(r), `${key} enforces settings admin`).toBe(true);
+    }
   });
 
   it('[CEN-10h] (round 3, CM-3 g13) a status door lifts no disconnect: it still writes a status lift, and its connector\'s disconnect removes the credentials (a credential write that is no deactivation, or clearCredentials) or its connectedness is read from the credentials, never from the stored status', () => {
@@ -2003,6 +2690,10 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
     for (const key of ['AccountingController.pushInvoice', 'AccountingController.pushCustomers', 'MarketingSyncController.pushContacts']) expect(g.reaches.has(key), key).toBe(true);
     // round 3: every edit of a contact reaches the Outlook push (contact.updated -> ContactSyncService.onContactUpdated), and the Drive share route reaches its grant
     for (const key of ['CrmController.updateContact', 'GoogleDriveController.share']) expect(g.reaches.has(key), key).toBe(true);
+    // SWEEP-P0-FOLLOWUP WH3-1: an audience send through a channel connection (an EMAIL or WhatsApp account a settings
+    // admin binds) is an export of the business's contacts to that account; publish, schedule and KEY's broadcast reach it.
+    for (const key of ['CommunicationsController.publishNow', 'CommunicationsController.schedule']) expect(g.reaches.has(key), `${key} reaches the audience export`).toBe(true);
+    expect(g.keyEntries.filter((k) => g.reaches.has(k)), 'KEY comms_send_broadcast reaches the audience export').toContain('CommunicationsAdapterService.execute');
     const problems: string[] = [];
     for (const [door, why] of Object.entries(OUTBOUND_DESTINATIONS)) {
       if (!why.trim()) problems.push(`${door} names no reason`);
@@ -2062,6 +2753,84 @@ describe('REST scope census (SWEEP-P0-SCOPES)', () => {
     }
     const save = all.find((r) => r.key === 'ConnectorController.saveCredentials');
     if (!/\bassertMayBindExport\b/.test(save?.body ?? '')) problems.push('ConnectorController.saveCredentials does not check the export reads of the connector it binds (assertMayBindExport)');
+    expect(problems).toEqual([]);
+  });
+
+  it('[CEN-11c] (SWEEP-P0-FOLLOWUP repair, SEC-FU-1) a messaging channel connection\'s sending account is bound only through the export binding check: every route (member or public, any verb) and KEY module action that reaches a write of a channel connection\'s sending account (the call graph) is a channel_messaging bind of EXPORT_ACCOUNTS, or reaches it only through a pinned writer that skips every messaging provider before it writes', () => {
+    const g = channelAccountGraph();
+    // guards the guard: the binding doors the call graph finds, and the sync it now passes through a pinned writer
+    expect(all.filter((r) => g.reaches.has(r.key)).map((r) => r.key)).toEqual(
+      expect.arrayContaining(['CommunicationsController.createConnection', 'CommunicationsController.updateConnection', 'CommunicationsController.connectWhatsApp']),
+    );
+    expect(g.doorWrites.get('ChannelConnectionService.syncFromSocial')?.length ?? 0, 'the sync still writes channel connections (through its pinned door)').toBeGreaterThan(0);
+    const problems = unboundChannelAccountWriters(g, all).map((u) => u.why);
+    for (const k of g.keyEntries) if (g.reaches.has(k)) problems.push(`KEY ${k} writes a channel connection's sending account: ${g.reaches.get(k)!.join(' -> ')}`);
+    for (const [door, why] of Object.entries(CHANNEL_NON_MESSAGING_WRITERS)) {
+      if (!why.trim()) problems.push(`${door} names no reason`);
+      if (!(g.doorWrites.get(door) ?? []).length) problems.push(`${door} writes no channel connection's sending account (any more): drop it from CHANNEL_NON_MESSAGING_WRITERS`);
+      const [cls, method] = door.split('.');
+      const body = g.classes.get(cls)?.methods.get(method);
+      if (!body || !SKIPS_MESSAGING.test(textOf(body))) problems.push(`${door} does not skip a messaging provider (EMAIL, GOOGLE, WHATSAPP: if (isMessagingProvider(...)) continue) before it writes a channel connection's sending account`);
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('[CEN-11c-guard] (SWEEP-P0-FOLLOWUP repair, SEC-FU-1) guards the guard (mutation check): parsed beside the real source, every scratch settings-admin handler that writes a channel connection\'s sending account outside the binding routes is reported, and its twins (the pinned sync, a health write) are not', () => {
+    const hunt = CEN11C_HUNT();
+    const g = buildGraph(CHANNEL_ACCOUNT_RULES, [...parsed(), hunt]);
+    const huntRoutes = routes([hunt]);
+    expect(huntRoutes.map((r) => r.key).sort()).toEqual([...CEN11C_EXPECTED_UNBOUND, ...CEN11C_EXPECTED_TWINS].sort());
+    expect(unboundChannelAccountWriters(g, huntRoutes).map((u) => u.key).sort()).toEqual([...CEN11C_EXPECTED_UNBOUND].sort());
+    // the mutation the review made: the sync with its messaging skip taken out is a door again
+    const unskipped = parsed().map((p) => {
+      if (!p.file.endsWith('modules/communications/channel-connection.service.ts')) return p;
+      const text = p.text.replace(/if\s*\(\s*isMessagingProvider\([^)]*\)\s*\)\s*(?:\{[^{}]*?\bcontinue\b[^{}]*?\}|continue\s*;?)/g, '');
+      return { ...p, text, sf: ts.createSourceFile(p.file, text, ts.ScriptTarget.Latest, true) };
+    });
+    const gm = buildGraph(CHANNEL_ACCOUNT_RULES, unskipped);
+    const body = gm.classes.get('ChannelConnectionService')?.methods.get('syncFromSocial');
+    expect(!!body, 'the reader still sees the sync').toBe(true);
+    expect(SKIPS_MESSAGING.test(textOf(body!)), 'with the skip taken out, CEN-11c reports the sync').toBe(false);
+    expect((gm.doorWrites.get('ChannelConnectionService.syncFromSocial') ?? []).length).toBeGreaterThan(0);
+  });
+
+  it('[CEN-11d] (SWEEP-P0-FOLLOWUP repair, COR-1) every call that hands an audience send to the queue (CommunicationsService.sendBroadcast, DeliveryQueueService.publishNow and schedule) names the member who sends, hands its caller\'s input through from a method of the same name, or is a pinned memberless send (the scheduled digest)', () => {
+    const calls = audienceSendCalls();
+    // guards the guard: the reader sees the senders the review traced
+    expect(calls.map((c) => c.at)).toEqual(
+      expect.arrayContaining([
+        'FlowOrchestratorService.executeToolAction',
+        'CommunicationsAdapterService.execute',
+        'CommunicationsAdapterService.sendBroadcast',
+        'KeyCortexDigestService.sendDigest',
+        'CommunicationsService.sendBroadcast',
+        'CommunicationsController.publishNow',
+        'CommunicationsController.schedule',
+      ]),
+    );
+    const problems: string[] = [];
+    for (const c of calls) {
+      if (c.namesSender || c.passThrough) continue;
+      if (Object.hasOwn(MEMBERLESS_AUDIENCE_SENDS, c.at)) continue;
+      problems.push(`${c.at}: ${c.call}(...) hands an audience send to the queue without the member who sends (sender), so only the sending account's binder is checked`);
+    }
+    for (const [at, why] of Object.entries(MEMBERLESS_AUDIENCE_SENDS)) {
+      if (!why.trim()) problems.push(`${at} names no reason`);
+      if (!calls.some((c) => c.at === at && !c.namesSender)) problems.push(`${at} hands no memberless audience send to the queue (any more): drop it from MEMBERLESS_AUDIENCE_SENDS`);
+    }
+    // guards the guard (mutation check): a sendBroadcast with no sender, or with sender: null, and a publishNow with three arguments are reported
+    const scratch = `
+export class Cen11dHunt {
+  constructor(private readonly comms: any, private readonly deliveryQueue: any) {}
+  async noSender(businessId: string) { return this.comms.sendBroadcast({ businessId, segment: 'vip', channel: 'email', body: 'x' }); }
+  async nullSender(businessId: string) { return this.comms.sendBroadcast({ businessId, segment: 'vip', channel: 'email', body: 'x', sender: null }); }
+  async threeArgs(businessId: string, id: string) { return this.deliveryQueue.publishNow(businessId, id, []); }
+  async named(businessId: string, userId: string) { return this.comms.sendBroadcast({ businessId, segment: 'vip', channel: 'email', body: 'x', sender: { id: userId } }); }
+}
+`;
+    const file = join(SRC, 'modules/cen11d-hunt/cen11d-hunt.ts');
+    const hunt = audienceSendCalls([{ file, text: scratch, sf: ts.createSourceFile(file, scratch, ts.ScriptTarget.Latest, true) }]);
+    expect(hunt.filter((c) => !c.namesSender && !c.passThrough).map((c) => c.at).sort()).toEqual(['Cen11dHunt.noSender', 'Cen11dHunt.nullSender', 'Cen11dHunt.threeArgs']);
     expect(problems).toEqual([]);
   });
 });

@@ -81,7 +81,9 @@ describe('canonical module vocabulary', () => {
     for (const m of legacy13) {
       expect(owner[m]).toBe('admin');
       expect(admin[m]).toBe(m === 'team' ? 'write' : 'admin');
-      expect(staff[m]).toBe(['settings', 'team', 'ai'].includes(m) ? 'none' : 'read');
+      // SWEEP-P0-FOLLOWUP, staffbookings ruling (recommended option, census owner question 4): staff get booking
+      // handling by default, so STAFF's bookings default is write; every other STAFF default is as the guard shipped it.
+      expect(staff[m]).toBe(['settings', 'team', 'ai'].includes(m) ? 'none' : m === 'bookings' ? 'write' : 'read');
     }
   });
 

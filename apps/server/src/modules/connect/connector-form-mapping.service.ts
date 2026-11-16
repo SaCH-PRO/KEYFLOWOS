@@ -1,5 +1,4 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { canonicalContactStatus } from '../crm/crm.constants';
@@ -192,17 +191,18 @@ export class ConnectorFormMappingService {
       // to the request), never a value from the body.
       configuredBy: configuringMember(businessId, actorUserId) ?? prev.configuredBy ?? null,
     };
-    const formMappings = { ...(meta.formMappings ?? {}), [externalFormId]: next };
-    await this.writeMetadata(businessId, source, { ...meta, formMappings });
+    // SWEEP-P0-FOLLOWUP (CW3-2): only this form's mapping is written, over the mappings as they stand now.
+    await this.updateFormMappings(businessId, source, (current) => ({ ...current, [externalFormId]: next }));
     return next;
   }
 
   async deleteMapping(businessId: string, source: ConnectorFormSource, externalFormId: string) {
     const meta = await this.readMetadata(businessId, source);
     if (!meta.formMappings?.[externalFormId]) return { success: true };
-    const formMappings = { ...meta.formMappings };
-    delete formMappings[externalFormId];
-    await this.writeMetadata(businessId, source, { ...meta, formMappings });
+    await this.updateFormMappings(businessId, source, (current) => {
+      const { [externalFormId]: _removed, ...rest } = current;
+      return rest;
+    });
     return { success: true };
   }
 
@@ -264,17 +264,16 @@ export class ConnectorFormMappingService {
       }
     }
 
-    const merged = [...(mapping.processedSubmissionIds ?? []), ...newlyProcessed];
-    const trimmed = merged.length > PROCESSED_ID_CAP ? merged.slice(merged.length - PROCESSED_ID_CAP) : merged;
-    const formMappings = {
-      ...(meta.formMappings ?? {}),
-      [externalFormId]: {
-        ...mapping,
-        processedSubmissionIds: trimmed,
-        lastBackfillAt: new Date().toISOString(),
-      },
-    };
-    await this.writeMetadata(businessId, source, { ...meta, formMappings });
+    // SWEEP-P0-FOLLOWUP (CW3-2): the run records its processed submissions on this form's mapping as it stands
+    // when the run ends (a mapping deleted meanwhile stays deleted); nothing else of the row read at the start is
+    // written back.
+    await this.updateFormMappings(businessId, source, (current) => {
+      const now = current[externalFormId];
+      if (!now) return current;
+      const merged = [...new Set([...(now.processedSubmissionIds ?? []), ...newlyProcessed])];
+      const trimmed = merged.length > PROCESSED_ID_CAP ? merged.slice(merged.length - PROCESSED_ID_CAP) : merged;
+      return { ...current, [externalFormId]: { ...now, processedSubmissionIds: trimmed, lastBackfillAt: new Date().toISOString() } };
+    });
     return result;
   }
 
@@ -455,30 +454,39 @@ export class ConnectorFormMappingService {
     return ((row?.metadata as MappingMetadata | null | undefined) ?? {}) as MappingMetadata;
   }
 
-  private async writeMetadata(
+  /**
+   * SWEEP-P0-FOLLOWUP (round 3 recheck CW3-2): the one writer of a connector's form mappings. The row's metadata
+   * also holds the connector's credentials (encryptedCredentials, ConnectorCredentialsService) and its binder
+   * (boundBy), which only settings admin writes. The old writer read the whole metadata at the start of an
+   * operation and wrote `{ ...fresh, ...{ ...meta, formMappings } }` at its end, so a backfill (seconds over the
+   * submissions) wrote the credentials and binder it had read back over a revoke that committed in between, and
+   * the revoked webhook secret signed deliveries again. Now, in one transaction: the row is made to exist (a bare
+   * row; a stored one is not touched), locked (FOR UPDATE), its formMappings read as they stand, and only the
+   * formMappings key is written (jsonb_set). No other key of the row is ever written here.
+   */
+  private async updateFormMappings(
     businessId: string,
     source: ConnectorFormSource,
-    next: MappingMetadata,
-  ) {
-    const existing = await this.prisma.client.connectorStatus.findUnique({
-      where: {
-        businessId_connectorType: { businessId, connectorType: CONNECTOR_KEY[source] },
-      },
-      select: { metadata: true },
-    });
-    const meta = (existing?.metadata ?? {}) as Record<string, unknown>;
-    const merged = { ...meta, ...next };
-    await this.prisma.client.connectorStatus.upsert({
-      where: {
-        businessId_connectorType: { businessId, connectorType: CONNECTOR_KEY[source] },
-      },
-      create: {
-        businessId,
-        connectorType: CONNECTOR_KEY[source],
-        status: 'disconnected',
-        metadata: merged as unknown as Prisma.InputJsonValue,
-      },
-      update: { metadata: merged as unknown as Prisma.InputJsonValue },
+    update: (current: Record<string, PerFormMapping>) => Record<string, PerFormMapping>,
+  ): Promise<void> {
+    const connectorType = CONNECTOR_KEY[source];
+    await this.prisma.client.$transaction(async (tx) => {
+      await tx.connectorStatus.upsert({
+        where: { businessId_connectorType: { businessId, connectorType } },
+        create: { businessId, connectorType, status: 'disconnected' },
+        update: {},
+      });
+      const rows = await tx.$queryRaw<Array<{ form_mappings: unknown }>>`
+        SELECT metadata -> 'formMappings' AS form_mappings FROM connector_statuses
+        WHERE business_id = ${businessId} AND connector_type = ${connectorType}
+        FOR UPDATE`;
+      const stored = rows[0]?.form_mappings;
+      const current = stored && typeof stored === 'object' && !Array.isArray(stored) ? (stored as Record<string, PerFormMapping>) : {};
+      const next = update(current);
+      await tx.$executeRaw`
+        UPDATE connector_statuses
+        SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{formMappings}', ${JSON.stringify(next)}::jsonb, true), updated_at = NOW()
+        WHERE business_id = ${businessId} AND connector_type = ${connectorType}`;
     });
   }
 }

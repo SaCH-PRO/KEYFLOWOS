@@ -8,6 +8,7 @@ import { CrmService } from './crm.service';
 import { oauthRedirect } from '../../core/config/runtime-urls';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { assertGoogleConnectOwner } from '../../core/connectors/google-suite.controller';
+import { providerFailure, readProviderFailureBody } from '../../core/connectors/provider-failure';
 
 interface GoogleToken {
   access_token: string;
@@ -252,8 +253,11 @@ export class CrmGoogleService {
       }),
     });
 
+    // W11-PROVIDER-OUTAGE-CONNECT (R-5 part 3; D-73): a token endpoint that does
+    // not answer (5xx, 408, 429) is 503 provider_unavailable (google_contacts);
+    // invalid_grant / invalid_client (reconnect) keeps its 400. Same message.
     if (!response.ok) {
-      throw new BadRequestException('Failed to refresh access token');
+      throw providerFailure('google_contacts', response.status, await readProviderFailureBody(response), 'Failed to refresh access token');
     }
 
     return response.json();
@@ -277,10 +281,13 @@ export class CrmGoogleService {
       },
     );
 
+    // W11-PROVIDER-OUTAGE-CONNECT (R-5 part 3; D-73): People not answering
+    // (5xx, 408, 429, a rate-limited 403) is 503 provider_unavailable
+    // (google_contacts); a refusal keeps its 400. Same message.
     if (!response.ok) {
       const error = await response.text();
       this.logger.error(`Failed to fetch contacts: ${error}`);
-      throw new BadRequestException('Failed to fetch Google contacts');
+      throw providerFailure('google_contacts', response.status, error, 'Failed to fetch Google contacts');
     }
 
     return response.json();

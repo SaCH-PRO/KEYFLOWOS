@@ -29,6 +29,55 @@ const userCache = {
   role: "OWNER",
 };
 
+/** The web origin the specs drive (playwright.config.ts BASE_URL). */
+export function e2eBaseURL(): string {
+  return process.env.E2E_BASE_URL ?? `http://localhost:${process.env.E2E_PORT ?? 5000}`;
+}
+
+/**
+ * GATE-HARNESS: the live counterpart of seedWorkspace, for specs that drive a
+ * real API (e2e/journeys/). A signed-in session stored the way the web app
+ * stores one (lib/workspace.ts setStoredToken / setStoredBusinessId:
+ * localStorage kf_token and kf_business_id, plus the cookies of the same names
+ * the edge proxy gates /app/* on), as a Playwright storageState. A context
+ * starts from it once, so the app is free to change or clear the session
+ * afterwards: sign-out really signs out, which an init script would undo.
+ */
+export function liveSessionState(
+  token: string,
+  businessId: string,
+  baseURL: string = e2eBaseURL(),
+): {
+  cookies: Array<{ name: string; value: string; domain: string; path: string; expires: number; httpOnly: boolean; secure: boolean; sameSite: "Lax" }>;
+  origins: Array<{ origin: string; localStorage: Array<{ name: string; value: string }> }>;
+} {
+  const url = new URL(baseURL);
+  const expires = Math.floor(Date.now() / 1000) + 7 * 24 * 3600;
+  // The app writes these cookies with encodeURIComponent (release0-live.spec.ts storeSession).
+  const cookie = (name: string, value: string) => ({
+    name,
+    value: encodeURIComponent(value),
+    domain: url.hostname,
+    path: "/",
+    expires,
+    httpOnly: false,
+    secure: false,
+    sameSite: "Lax" as const,
+  });
+  return {
+    cookies: [cookie("kf_token", token), cookie("kf_business_id", businessId)],
+    origins: [
+      {
+        origin: url.origin,
+        localStorage: [
+          { name: "kf_token", value: token },
+          { name: "kf_business_id", value: businessId },
+        ],
+      },
+    ],
+  };
+}
+
 /**
  * Seed localStorage AND the `kf_token` cookie so both the Next.js edge
  * proxy (`apps/web/src/proxy.ts`, which gates `/app/*` on cookie presence)
@@ -45,8 +94,7 @@ export async function seedWorkspace(context: BrowserContext): Promise<void> {
   // preview domain; addCookies needs an explicit URL list rather than a
   // bare domain so the cookie is scoped correctly for whatever host the
   // tests are running against.
-  const baseURL =
-    process.env.E2E_BASE_URL ?? `http://localhost:${process.env.E2E_PORT ?? 5000}`;
+  const baseURL = e2eBaseURL();
   await context.addCookies([
     {
       name: "kf_token",

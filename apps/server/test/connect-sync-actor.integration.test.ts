@@ -89,7 +89,7 @@ const ID = {
   noDelete: `${P}nodelete`, // STAFF in bizO only, crm write with crm_delete none (the Outlook tombstone cases)
   bizG: `${P}bizG`, // Google Contacts
   bizO: `${P}bizO`, // Outlook Contacts
-  bizF: `${P}bizF`, // connector form (Typeform)
+  bizF: `${P}bizF`, // connector form (Typeform); there staff and reader also hold settings admin (CW3-2)
 };
 
 const EMAIL = {
@@ -331,8 +331,12 @@ beforeAll(async () => {
   for (const biz of [ID.bizG, ID.bizO, ID.bizF]) {
     await db.business.create({ data: { id: biz, name: `V92F ${biz}`, ownerId: ID.owner } });
     await db.membership.create({ data: { id: `${P}m_owner_${biz}`, userId: ID.owner, businessId: biz, role: 'OWNER' } });
-    await db.membership.create({ data: { id: `${P}m_staff_${biz}`, userId: ID.staff, businessId: biz, role: 'STAFF', permissionScopes: { crm: 'write' } } });
-    await db.membership.create({ data: { id: `${P}m_reader_${biz}`, userId: ID.reader, businessId: biz, role: 'STAFF', permissionScopes: { crm: 'read' } } });
+    // SWEEP-P0-FOLLOWUP (CW3-2, D-181): saving a connector form mapping and running its backfill need settings admin
+    // now, so in the connector form business the two STAFF members also hold settings admin. Their crm level (what
+    // these cases are about: it caps what a backfill writes) is unchanged; settings admin opens no contact.
+    const formAdmin = biz === ID.bizF ? { settings: 'admin' } : {};
+    await db.membership.create({ data: { id: `${P}m_staff_${biz}`, userId: ID.staff, businessId: biz, role: 'STAFF', permissionScopes: { crm: 'write', ...formAdmin } } });
+    await db.membership.create({ data: { id: `${P}m_reader_${biz}`, userId: ID.reader, businessId: biz, role: 'STAFF', permissionScopes: { crm: 'read', ...formAdmin } } });
   }
 }, 120_000);
 

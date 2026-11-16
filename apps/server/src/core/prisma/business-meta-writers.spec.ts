@@ -1350,3 +1350,239 @@ describe('FOLLOW3-D12 Business.metaData writers take the business row lock (cens
     expect(stale).toEqual([`${converted} no longer writes Business.metaData unlocked: remove it from D13_ALLOWLIST and lower ALLOWLIST_CEILING`]);
   });
 });
+
+// --------------------------------------------------------------------------
+// V1-63 BIZ-SETTINGS-SERVER: the v1 business settings keys and their one writer
+// --------------------------------------------------------------------------
+
+/**
+ * V1-63 BIZ-SETTINGS-SERVER (owner ruling D-150 'hubs'; D-11): what the
+ * business sells, the Advanced CRM switch and the depth of each hub are three
+ * Business.metaData keys, BUSINESS_SETTINGS_META_KEYS in
+ * core/prisma/business-meta.ts (sells, advancedCrm, depth). Their one writer
+ * is the owner-only profile PATCH, IdentityService.updateBusiness: it applies
+ * them with applyBusinessSettingsWrites (business-meta.ts) inside its
+ * transaction, after its inline row lock (the statement lockBusinessMeta
+ * runs) and before its write, so a concurrent metaData writer cannot lose one
+ * and one cannot undo a concurrent write. A second writer of one of these
+ * keys would be a door around the owner check and the value checks; this is
+ * the census of them.
+ *
+ * WHAT IS READ: every metaData writer the census reader finds (scanMetaWrites)
+ * outside HELPER_FILE. In the method or function that makes the write it
+ * looks for a settings key named where something is written: an object
+ * literal property, the target of an assignment or a `delete` (`x.k`,
+ * `x['k']`), a quoted key in raw SQL (`'sells'`), or a call to
+ * applyBusinessSettingsWrites. Reads (`settings.sells`, a destructuring) are
+ * not writes. WHAT THIS CANNOT DO: see a key the source computes or reaches
+ * through another function, or a writer the census reader cannot see (its
+ * header). Behaviour is proven on a real database by
+ * test/business-v1-settings.integration.test.ts.
+ */
+const SETTINGS_WRITER = 'modules/identity/identity.service.ts#IdentityService.updateBusiness';
+const SETTINGS_KEYS_CONST = 'BUSINESS_SETTINGS_META_KEYS';
+const SETTINGS_APPLY_FN = 'applyBusinessSettingsWrites';
+
+/** The string elements of a top-level `const <name> = [...]` (optionally `as const`) in `source`, or undefined. */
+function stringArrayConst(rel: string, source: string, name: string): string[] | undefined {
+  const sf = ts.createSourceFile(rel, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  let out: string[] | undefined;
+  const visit = (n: ts.Node) => {
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === name && n.initializer) {
+      const init = unwrap(n.initializer);
+      if (ts.isArrayLiteralExpression(init)) out = init.elements.filter((e): e is ts.StringLiteral => ts.isStringLiteral(e)).map((e) => e.text);
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return out;
+}
+
+/** The method or function declaration a node sits in (else its outermost function-like). */
+function writerFunction(node: ts.Node): ts.FunctionLikeDeclaration | undefined {
+  const fns = functionsOf(node);
+  return fns.find((f) => ts.isMethodDeclaration(f) || ts.isFunctionDeclaration(f) || ts.isConstructorDeclaration(f)) ?? fns[fns.length - 1];
+}
+
+/**
+ * Every writer of a v1 settings key: `<writer key> (<file>:<line>) <how>`,
+ * one row per place a key (or `applyFn`) is named where it is written, in
+ * the function of each metaData writer the census reader finds outside
+ * HELPER_FILE.
+ */
+export function settingsKeyWriters(sources: { rel: string; source: string }[], keys: readonly string[], applyFn = SETTINGS_APPLY_FN): string[] {
+  const out = new Set<string>();
+  for (const { rel, source } of sources) {
+    if (rel === HELPER_FILE || ![...keys, applyFn].some((k) => source.includes(k))) continue;
+    const rows = scanMetaWrites(rel, source).filter((w) => !w.opaque);
+    if (rows.length === 0) continue;
+    const sf = ts.createSourceFile(rel, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const lineOf = (n: ts.Node) => sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
+    const fns = new Map<ts.FunctionLikeDeclaration, string>();
+    const visit = (n: ts.Node) => {
+      for (const w of rows) {
+        if (lineOf(n) !== w.line) continue;
+        if (w.raw && (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateExpression(n))) {
+          for (const k of keys) if (n.getText(sf).includes(`'${k}'`)) out.add(`${w.key} (${rel}:${w.line}) names '${k}' in raw SQL`);
+        } else if (!w.raw && ts.isCallExpression(n)) {
+          const callee = unwrap(n.expression);
+          if (ts.isPropertyAccessExpression(callee) && WRITE_OPS.has(callee.name.text)) {
+            const fn = writerFunction(n);
+            if (fn) fns.set(fn, w.key);
+          }
+        }
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+    for (const [fn, key] of fns) {
+      const target = (e: ts.Expression): string | null => {
+        const x = unwrap(e);
+        if (ts.isPropertyAccessExpression(x)) return x.name.text;
+        if (ts.isElementAccessExpression(x) && ts.isStringLiteralLike(x.argumentExpression)) return x.argumentExpression.text;
+        return null;
+      };
+      const scan = (n: ts.Node) => {
+        let named: string | null = null;
+        let how = '';
+        if ((ts.isPropertyAssignment(n) || ts.isShorthandPropertyAssignment(n)) && ts.isObjectLiteralExpression(n.parent)) {
+          named = propName(n.name);
+          how = 'as an object literal key';
+        } else if (ts.isBinaryExpression(n) && n.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && n.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
+          named = target(n.left);
+          how = 'as an assignment target';
+        } else if (ts.isDeleteExpression(n)) {
+          named = target(n.expression);
+          how = 'in a delete';
+        } else if (ts.isCallExpression(n)) {
+          const callee = unwrap(n.expression);
+          const name = ts.isIdentifier(callee) ? callee.text : ts.isPropertyAccessExpression(callee) ? callee.name.text : null;
+          if (name === applyFn) out.add(`${key} (${rel}:${lineOf(n)}) calls ${applyFn}`);
+        }
+        if (named && keys.includes(named)) out.add(`${key} (${rel}:${lineOf(n)}) names '${named}' ${how}`);
+        ts.forEachChild(n, scan);
+      };
+      if (fn.body) scan(fn.body);
+    }
+  }
+  return [...out].sort();
+}
+
+describe('V1-63 BIZ-SETTINGS-SERVER: the v1 business settings keys have one writer, the owner-only profile PATCH under its row lock (census)', () => {
+  it('[MW-V63a] RED-BEFORE: business-meta.ts declares BUSINESS_SETTINGS_META_KEYS (sells, advancedCrm, depth) and applyBusinessSettingsWrites, and the one metaData writer that names a settings key is IdentityService.updateBusiness, through applyBusinessSettingsWrites', () => {
+    const helper = SOURCES.find((s) => s.rel === HELPER_FILE);
+    expect(helper, `${HELPER_FILE} is read`).toBeDefined();
+    const keys = stringArrayConst(HELPER_FILE, helper!.source, SETTINGS_KEYS_CONST);
+    expect(keys, `${HELPER_FILE} declares ${SETTINGS_KEYS_CONST} as a string array literal`).toEqual(['sells', 'advancedCrm', 'depth']);
+    expect(helper!.source, `${HELPER_FILE} exports ${SETTINGS_APPLY_FN}`).toMatch(new RegExp(`export function ${SETTINGS_APPLY_FN}\\(`));
+
+    const writers = settingsKeyWriters(SOURCES, keys ?? ['sells', 'advancedCrm', 'depth']);
+    expect(writers.map((w) => w.replace(/ \(.*?:\d+\)/, '')), 'every writer of a v1 settings key').toEqual([`${SETTINGS_WRITER} calls ${SETTINGS_APPLY_FN}`]);
+    expect(WRITES.filter((w) => w.key === SETTINGS_WRITER).every((w) => w.locked), 'IdentityService.updateBusiness writes metaData under the row lock').toBe(true);
+  });
+
+  it('[MW-V63b] RED-BEFORE: IdentityService.updateBusiness applies the settings inside its transaction, after the inline row lock and before its write, on the same client', () => {
+    const rel = 'modules/identity/identity.service.ts';
+    const file = SOURCES.find((s) => s.rel === rel)!;
+    const sf = ts.createSourceFile(rel, file.source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    let method: ts.MethodDeclaration | undefined;
+    const find = (n: ts.Node) => {
+      if (ts.isMethodDeclaration(n) && propName(n.name) === 'updateBusiness' && ts.isClassDeclaration(n.parent) && n.parent.name?.text === 'IdentityService') method = n;
+      ts.forEachChild(n, find);
+    };
+    find(sf);
+    expect(method, 'IdentityService.updateBusiness').toBeDefined();
+    const applies: ts.CallExpression[] = [];
+    const visit = (n: ts.Node) => {
+      if (ts.isCallExpression(n) && ts.isIdentifier(unwrap(n.expression)) && (unwrap(n.expression) as ts.Identifier).text === SETTINGS_APPLY_FN) applies.push(n);
+      ts.forEachChild(n, visit);
+    };
+    visit(method!);
+    expect(applies.length, `updateBusiness calls ${SETTINGS_APPLY_FN} once`).toBe(1);
+    const apply = applies[0];
+    const tx = functionsOf(apply)[0];
+    expect(tx && tx !== method, `${SETTINGS_APPLY_FN} is called inside the transaction callback`).toBe(true);
+    const rx = tx!.parameters[0] && ts.isIdentifier(tx!.parameters[0].name) ? tx!.parameters[0].name.text : '';
+    expect(rx, 'the transaction client').not.toBe('');
+    let lockAt = -1;
+    let writeAt = -1;
+    const scan = (n: ts.Node) => {
+      if (ts.isTaggedTemplateExpression(n) && INLINE_LOCK.test(n.template.getText(sf)) && ts.isPropertyAccessExpression(n.tag) && unwrap(n.tag.expression).getText(sf) === rx && lockAt < 0) lockAt = n.getStart(sf);
+      if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(unwrap(n.expression))) {
+        const callee = unwrap(n.expression) as ts.PropertyAccessExpression;
+        if (callee.name.text === 'update' && isBusinessDelegate(callee.expression) && receiverText(callee.expression, sf) === rx && writeAt < 0) writeAt = n.getStart(sf);
+      }
+      ts.forEachChild(n, scan);
+    };
+    scan(tx!);
+    expect(lockAt, `the transaction locks the business row on ${rx} (FOR NO KEY UPDATE)`).toBeGreaterThan(-1);
+    expect(writeAt, `the transaction writes the business on ${rx}`).toBeGreaterThan(-1);
+    expect(apply.getStart(sf), `${SETTINGS_APPLY_FN} runs after the row lock`).toBeGreaterThan(lockAt);
+    expect(apply.getStart(sf), `${SETTINGS_APPLY_FN} runs before the write`).toBeLessThan(writeAt);
+  });
+
+  it('[MW-V63c] the settings-key reader finds a settings key written in every form, and passes a writer of other keys and a non-metaData write (self-test)', () => {
+    const rel = 'modules/rogue/rogue-settings.service.ts';
+    const injected = [
+      "import { lockBusinessMeta, applyBusinessSettingsWrites } from '../../core/prisma/business-meta';",
+      'export class RogueSettings {',
+      '  async literal(db: any, id: string) {',
+      '    await db.$transaction(async (tx: any) => {',
+      '      const business = await lockBusinessMeta(tx, id);',
+      '      const meta = (business?.metaData as Record<string, unknown> | null) ?? {};',
+      "      await tx.business.update({ where: { id }, data: { metaData: { ...meta, sells: 'products' } } });",
+      '    });',
+      '  }',
+      '  async assigned(db: any, id: string) {',
+      '    await db.$transaction(async (tx: any) => {',
+      '      const business = await lockBusinessMeta(tx, id);',
+      '      const meta = (business?.metaData as Record<string, any> | null) ?? {};',
+      "      meta.depth = { money: 'advanced' };",
+      "      delete meta['advancedCrm'];",
+      '      await tx.business.update({ where: { id }, data: { metaData: meta } });',
+      '    });',
+      '  }',
+      '  async viaApply(db: any, id: string) {',
+      '    await db.$transaction(async (tx: any) => {',
+      '      const business = await lockBusinessMeta(tx, id);',
+      '      const meta = (business?.metaData as Record<string, unknown> | null) ?? {};',
+      '      const merged = { ...meta };',
+      "      applyBusinessSettingsWrites(merged, meta, { sells: 'services' });",
+      '      await tx.business.update({ where: { id }, data: { metaData: merged } });',
+      '    });',
+      '  }',
+      '  async raw(tx: any, id: string) {',
+      "    await tx.$executeRaw`UPDATE businesses SET meta_data = meta_data || jsonb_build_object('sells', 'products') WHERE id = ${id}`;",
+      '  }',
+      '  async otherKey(db: any, id: string) {',
+      '    await db.$transaction(async (tx: any) => {',
+      '      const business = await lockBusinessMeta(tx, id);',
+      '      const meta = (business?.metaData as Record<string, unknown> | null) ?? {};',
+      "      const { depth } = meta as any;",
+      "      await tx.business.update({ where: { id }, data: { metaData: { ...meta, bankName: String(meta.sells ?? depth) } } });",
+      '    });',
+      '  }',
+      '  async notMeta(tx: any, id: string) {',
+      "    const query = { depth: 2, sells: 'x' };",
+      "    await tx.business.update({ where: { id }, data: { name: JSON.stringify(query) } });",
+      '  }',
+      '  async readOnly(tx: any, id: string) {',
+      '    const b = await tx.business.findUnique({ where: { id }, select: { metaData: true } });',
+      '    return (b.metaData as any).sells;',
+      '  }',
+      '}',
+    ].join('\n');
+    const keys = ['sells', 'advancedCrm', 'depth'];
+    expect(settingsKeyWriters([{ rel, source: injected }], keys)).toEqual([
+      `${rel}#RogueSettings.assigned (${rel}:14) names 'depth' as an assignment target`,
+      `${rel}#RogueSettings.assigned (${rel}:15) names 'advancedCrm' in a delete`,
+      `${rel}#RogueSettings.literal (${rel}:7) names 'sells' as an object literal key`,
+      `${rel}#RogueSettings.raw (${rel}:29) names 'sells' in raw SQL`,
+      `${rel}#RogueSettings.viaApply (${rel}:24) calls ${SETTINGS_APPLY_FN}`,
+      `${rel}#RogueSettings.viaApply (${rel}:24) names 'sells' as an object literal key`,
+    ]);
+    // The helper file itself is the vocabulary, not a writer; a file naming no key is not read.
+    expect(settingsKeyWriters([{ rel: HELPER_FILE, source: injected }], keys)).toEqual([]);
+    expect(settingsKeyWriters([{ rel, source: injected.replace(/sells|advancedCrm|depth|applyBusinessSettingsWrites/g, 'other') }], keys)).toEqual([]);
+  });
+});

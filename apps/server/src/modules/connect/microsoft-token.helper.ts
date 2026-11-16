@@ -1,11 +1,18 @@
 import { BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { providerFailure } from '../../core/connectors/provider-failure';
 
 /**
  * Helper for refreshing & retrieving valid access tokens for the Microsoft Graph
  * (Outlook) integration. Mirrors GoogleTokenHelper but talks to the Microsoft
  * identity platform v2 endpoints. Uses the "common" tenant so personal &
  * work/school accounts are both supported.
+ *
+ * W11-PROVIDER-OUTAGE-CONNECT (R-5 part 3; D-73): a refresh the identity
+ * platform does not answer (5xx, 408, 429) is 503 provider_unavailable
+ * (service microsoft); every other failure (invalid_grant, invalid_client:
+ * reconnect) keeps its 400. The message is the existing one; no token is
+ * written.
  */
 export class MicrosoftTokenHelper {
   constructor(private readonly prisma: PrismaService) {}
@@ -53,7 +60,7 @@ export class MicrosoftTokenHelper {
     );
     if (!res.ok) {
       const err = await res.text();
-      throw new BadRequestException(`Failed to refresh Outlook Contacts token: ${err}`);
+      throw providerFailure('microsoft', res.status, err, `Failed to refresh Outlook Contacts token: ${err}`);
     }
     const tokens = (await res.json()) as {
       access_token: string;

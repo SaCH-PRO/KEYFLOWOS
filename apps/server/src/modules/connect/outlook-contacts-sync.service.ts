@@ -1,6 +1,7 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { mergeConnectorMetadata } from '../../core/connectors/connector-metadata';
 import { canonicalContactStatus } from '../crm/crm.constants';
 import { contactWhereWithId } from '../crm/crm.helpers';
 import { CrmService } from '../crm/crm.service';
@@ -20,6 +21,7 @@ import {
   type SyncPrincipals,
 } from './google-contacts-sync.service';
 import { MicrosoftTokenHelper } from './microsoft-token.helper';
+import { providerFailure, providerUnavailable } from '../../core/connectors/provider-failure';
 import { exportAudience } from '../../core/connectors/connector-exports';
 import { assertReceiversMayOpenContacts, contactIdsEveryReceiverMayOpen, type ExportAudience } from '../../core/auth/receiver-reads';
 
@@ -141,24 +143,14 @@ export class OutlookContactsSyncService {
       ...(defaultStatus !== undefined ? { defaultStatus } : {}),
       ...(defaultOwnerId !== undefined ? { defaultOwnerId } : {}),
     });
-    const existing = await this.prisma.client.connectorStatus.findUnique({
-      where: { businessId_connectorType: { businessId, connectorType: 'outlook_contacts' } },
-      select: { metadata: true },
-    });
-    const meta = (existing?.metadata ?? {}) as Record<string, unknown>;
     // W6-CONNECT-TAG-MERGE (SEC-D92R-2): the member saving the rules is the
     // member a sync writes existing contacts as, whoever runs it (as on Google).
     const configuredBy = configuringMember(businessId, actorUserId);
-    const merged = { ...meta, mappingRules: next, ...(configuredBy ? { [RULES_CONFIGURED_BY]: configuredBy } : {}) };
-    await this.prisma.client.connectorStatus.upsert({
-      where: { businessId_connectorType: { businessId, connectorType: 'outlook_contacts' } },
-      create: {
-        businessId,
-        connectorType: 'outlook_contacts',
-        status: 'disconnected',
-        metadata: merged as unknown as Prisma.InputJsonValue,
-      },
-      update: { metadata: merged as unknown as Prisma.InputJsonValue },
+    // SWEEP-P0-FOLLOWUP (CW3-2 class): only the rules (and who configured them) are written, merged over the row as
+    // it stands; the metadata read before is never written back (it holds the binder, boundBy).
+    await mergeConnectorMetadata(this.prisma.client, businessId, 'outlook_contacts', {
+      mappingRules: next,
+      ...(configuredBy ? { [RULES_CONFIGURED_BY]: configuredBy } : {}),
     });
     return next;
   }
@@ -287,6 +279,10 @@ export class OutlookContactsSyncService {
 
     do {
       const res = await fetch(nextUrl, { headers: { Authorization: `Bearer ${token}` } });
+      // W11-PROVIDER-OUTAGE-CONNECT (R-5 part 3; D-73): Graph not answering
+      // (5xx, 408, 429) is 503 provider_unavailable (outlook_contacts); every
+      // other 4xx keeps its 400 (Graph has no Google reason to read). The
+      // message is unchanged.
       if (!res.ok) {
         if (res.status === 410) {
           // Delta token expired — clear it and force a full re-sync next call
@@ -294,10 +290,11 @@ export class OutlookContactsSyncService {
             where: { id: businessId },
             data: { msContactsDeltaLink: null },
           });
-          throw new BadRequestException('Outlook delta token expired; please retry');
+          // Asking again does that full re-sync: a 503, as the message says.
+          throw providerUnavailable('outlook_contacts', res.status, 'Outlook delta token expired; please retry');
         }
         const body = await res.text().catch(() => '');
-        throw new BadRequestException(`Graph API error ${res.status}: ${body.slice(0, 200)}`);
+        throw providerFailure('outlook_contacts', res.status, body, `Graph API error ${res.status}: ${body.slice(0, 200)}`);
       }
       const data = (await res.json()) as {
         value?: MsContact[];

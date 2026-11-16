@@ -139,9 +139,22 @@ describe('CommunicationsService', () => {
           contentMeta: expect.objectContaining({ segmentTags: ['customers'] }),
         }),
       );
-      expect(mocks.deliveryQueue.publishNow).toHaveBeenCalledWith('biz_1', 'content_123', ['dest_1']);
+      // SWEEP-P0-FOLLOWUP (WH3-1): the sender goes to the queue, which sends only to contacts every receiver may open.
+      expect(mocks.deliveryQueue.publishNow).toHaveBeenCalledWith('biz_1', 'content_123', ['dest_1'], null);
       expect(result.success).toBe(true);
       expect(result.queued).toBe(5);
+    });
+
+    it('passes the sending member to the queue (SWEEP-P0-FOLLOWUP WH3-1)', async () => {
+      mocks.prisma.client.channelDestination.findFirst.mockResolvedValue({
+        id: 'dest_1',
+        connection: { provider: 'EMAIL' },
+      });
+      const sender = { id: 'user_1', role: 'USER' };
+
+      await service.sendBroadcast({ businessId: 'biz_1', segment: 'customers', channel: 'email', body: 'Broadcast body', sender });
+
+      expect(mocks.deliveryQueue.publishNow).toHaveBeenCalledWith('biz_1', 'content_123', ['dest_1'], sender);
     });
 
     it('returns error when no active destination exists', async () => {

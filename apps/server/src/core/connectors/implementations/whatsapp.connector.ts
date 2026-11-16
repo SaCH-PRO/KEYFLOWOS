@@ -155,6 +155,9 @@ interface WhatsAppWebhookBody {
 export class WhatsAppConnector implements IConnector {
   private readonly logger = new Logger(WhatsAppConnector.name);
 
+  /** SWEEP-P0-FOLLOWUP (whatsappsmoke): POST smoke/whatsapp reports its check and records nothing (see smokeTest). */
+  readonly smokeReportsOnly = true;
+
   readonly meta: ConnectorMeta = {
     type: 'whatsapp',
     name: 'WhatsApp Business',
@@ -188,7 +191,7 @@ export class WhatsAppConnector implements IConnector {
   async authenticate(businessId: string): Promise<{ connected: boolean; authUrl?: string }> {
     if (await this.isConnected(businessId)) return { connected: true };
     const { current, rev } = await this.readState(businessId);
-    if (current) return { connected: (await this.smokeTest(businessId)).success };
+    if (current) return { connected: (await this.verifyAndRecord(businessId)).success };
     if (!process.env.WHATSAPP_ACCESS_TOKEN) return { connected: false };
     const recorded = await this.recordConnected(businessId, { rev, fingerprint: null });
     return { connected: recorded === null && (await this.isConnected(businessId)) };
@@ -218,8 +221,8 @@ export class WhatsAppConnector implements IConnector {
    *
    * A business with no config of its own keeps the platform path
    * (WHATSAPP_ACCESS_TOKEN), except that an explicit disconnect (this
-   * connector's disconnect record) wins until Connect, Reconnect or a passed
-   * smoke test, and the platform WHATSAPP_PHONE_NUMBER_ID is never shown as
+   * connector's disconnect record) wins until Connect or Reconnect (SWEEP-P0-FOLLOWUP,
+   * whatsappsmoke: a smoke test no longer lifts it), and the platform WHATSAPP_PHONE_NUMBER_ID is never shown as
    * the account.
    */
   async healthCheck(businessId: string): Promise<ConnectorHealth> {
@@ -381,6 +384,23 @@ export class WhatsAppConnector implements IConnector {
    * rules.
    */
   async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
+    const { current, record } = await this.readState(businessId);
+    const result = await this.checkWithProvider(current?.config ?? null);
+    if (!result.success || record?.state !== 'disconnected') return result;
+    return {
+      ...result,
+      detail: `${result.detail ?? 'Check passed'} • WhatsApp stays disconnected: a test does not switch it back on (a settings admin reconnects it)`,
+    };
+  }
+
+  /**
+   * SWEEP-P0-FOLLOWUP, whatsappsmoke ruling (recommended option): the WhatsApp test (POST smoke/whatsapp, smokeTest
+   * above) only reports its result. It records nothing (smokeReportsOnly: the registry writes no status for it
+   * either), so it never switches WhatsApp back on after someone turned it off, and any member may run it again.
+   * A passed check is recorded only by Connect and Reconnect (authenticate, settings admin or the owner rules),
+   * through this method: the check, then recordConnected while what it checked still stands.
+   */
+  private async verifyAndRecord(businessId: string): Promise<ConnectorSmokeResult> {
     const { current, rev } = await this.readState(businessId);
     const result = await this.checkWithProvider(current?.config ?? null);
     if (!result.success) return result;

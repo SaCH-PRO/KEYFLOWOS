@@ -149,6 +149,9 @@ export class SettingsAdapterService {
    * command with no human actor, a non-member and a member below either level are refused, and
    * execute() answers the connector failure shape.
    */
+  // SWEEP-P0-FOLLOWUP (census owner question 11): the HTTP binding is settings admin alone now, but this action keeps
+  // connect write as well: required Release 0 cases pin it (key-cortex-actor-binding.json: the OWNER on role defaults
+  // is refused). KEY stays stricter than HTTP here (it never exceeds it) until those cases are amended.
   private async assertIntegrationAdmin(command: ConnectorCommand): Promise<void> {
     await assertCommandActorModuleLevel(this.prisma, command.businessId, command.userId, 'connect', 'write');
     await assertCommandActorModuleLevel(this.prisma, command.businessId, command.userId, 'settings', 'admin');

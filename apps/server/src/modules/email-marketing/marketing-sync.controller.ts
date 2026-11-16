@@ -93,7 +93,9 @@ export class MarketingSyncController {
 
     let contactIds = Array.isArray(body.contactIds) ? body.contactIds.filter((id): id is string => typeof id === 'string' && id.length > 0) : [];
     if (contactIds.length === 0) {
-      const where: Record<string, unknown> = { businessId, deletedAt: null, email: { not: null }, doNotContact: { not: true } };
+      // SWEEP-P0-FOLLOWUP (census owner question 16, answered by default): a contact whose doNotContact was never set
+      // (NULL) may be contacted; `{ not: true }` alone also excluded every NULL in SQL, so a default push skipped most.
+      const where: Record<string, unknown> = { businessId, deletedAt: null, email: { not: null }, OR: [{ doNotContact: false }, { doNotContact: null }] };
       if (body.segment?.status) where.status = body.segment.status;
       if (typeof body.segment?.marketingOptIn === 'boolean') where.marketingOptIn = body.segment.marketingOptIn;
       if (body.segment?.tag) where.tags = { has: body.segment.tag };

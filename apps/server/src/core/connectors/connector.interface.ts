@@ -218,6 +218,12 @@ export interface IConnector {
    */
   smokeTest?(businessId: string): Promise<ConnectorSmokeResult>;
 
+  /**
+   * SWEEP-P0-FOLLOWUP (whatsappsmoke): true when this connector's smoke test only reports its check: the registry
+   * then records no status for a passed test (WhatsApp, whose stored status decides it is connected).
+   */
+  readonly smokeReportsOnly?: boolean;
+
   getAuthUrl?(businessId: string): Promise<string>;
 
   /**

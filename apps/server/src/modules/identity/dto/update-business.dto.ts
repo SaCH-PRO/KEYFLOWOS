@@ -3,6 +3,7 @@ import {
   IsBoolean,
   IsEmail,
   IsEnum,
+  IsIn,
   IsNumber,
   IsObject,
   IsOptional,
@@ -11,8 +12,20 @@ import {
   Max,
   MaxLength,
   Min,
+  Validate,
+  ValidateIf,
+  ValidatorConstraint,
+  type ValidationArguments,
+  type ValidatorConstraintInterface,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import {
+  BUSINESS_SELLS,
+  hubDepthProblems,
+  type BusinessHub,
+  type BusinessSells,
+  type HubDepth,
+} from '../../../core/prisma/business-meta';
 
 export enum BusinessStage {
   IDEA = 'idea',
@@ -33,6 +46,24 @@ export enum TeamSize {
   SIX_TO_TEN = '6-10',
   ELEVEN_TO_FIFTY = '11-50',
   FIFTY_PLUS = '50+',
+}
+
+/**
+ * V1-63 BIZ-SETTINGS-SERVER: a depth write is a map whose every key is a hub
+ * and every value a depth (hubDepthProblems, core/prisma/business-meta.ts,
+ * the check the service applies again to the metaData bag and to in-process
+ * callers). Its message is bounded whatever the value holds (review
+ * SEC-V63-1): this pipe runs before the controller's D-11 check.
+ */
+@ValidatorConstraint({ name: 'hubDepthMap', async: false })
+export class HubDepthMapConstraint implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    return hubDepthProblems(value).length === 0;
+  }
+
+  defaultMessage(args: ValidationArguments): string {
+    return hubDepthProblems(args.value, args.property).join('; ');
+  }
 }
 
 export class UpdateBusinessDto {
@@ -263,4 +294,24 @@ export class UpdateBusinessDto {
   @IsOptional()
   @MaxLength(50)
   quoteTemplate?: string;
+
+  // V1-63 BIZ-SETTINGS-SERVER (owner ruling D-150 'hubs'): the per-business v1
+  // settings, stored in Business.metaData (core/prisma/business-meta.ts) and
+  // owner-only like every field here (D-11). A value that is not a setting is
+  // refused 400, null included (ValidateIf, not IsOptional, which would let
+  // null through): a setting is set, never cleared. An absent field changes
+  // nothing.
+
+  @ValidateIf((o: UpdateBusinessDto) => o.sells !== undefined)
+  @IsIn(BUSINESS_SELLS, { message: `sells must be one of: ${BUSINESS_SELLS.join(', ')}` })
+  sells?: BusinessSells;
+
+  @ValidateIf((o: UpdateBusinessDto) => o.advancedCrm !== undefined)
+  @IsBoolean({ message: 'advancedCrm must be true or false' })
+  advancedCrm?: boolean;
+
+  /** Per hub, 'standard' or 'advanced'; a hub not named keeps its depth. */
+  @ValidateIf((o: UpdateBusinessDto) => o.depth !== undefined)
+  @Validate(HubDepthMapConstraint)
+  depth?: Partial<Record<BusinessHub, HubDepth>>;
 }

@@ -1583,6 +1583,13 @@ export class FinanceController {
     return { items };
   }
 
+  /**
+   * SWEEP-P0-FOLLOWUP (census owner question 12, unblocked by the PR195 merge): creating, replacing or deleting a
+   * bank connection writes its provider access token (BankConnection.accessToken, a provider credential the census
+   * call graph names, CEN-10b): settings admin, as every other credential binding. It checked membership only.
+   */
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Post('bank-connections')
   async createBankConnection(@Param('businessId') businessId: string, @Body() body: CreateBankConnectionInput, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
@@ -1595,6 +1602,9 @@ export class FinanceController {
     return this.bankConnections.get(businessId, id);
   }
 
+  // SWEEP-P0-FOLLOWUP (owner question 12): settings admin; see createBankConnection.
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Patch('bank-connections/:id')
   async updateBankConnection(@Param('businessId') businessId: string, @Param('id') id: string, @Body() body: UpdateBankConnectionInput, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
@@ -1607,6 +1617,9 @@ export class FinanceController {
     return this.bankConnections.recordSync(businessId, id, body.cursor);
   }
 
+  // SWEEP-P0-FOLLOWUP (owner question 12): settings admin; see createBankConnection.
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Delete('bank-connections/:id')
   async deleteBankConnection(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);

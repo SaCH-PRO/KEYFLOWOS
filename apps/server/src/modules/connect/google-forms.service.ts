@@ -1,7 +1,14 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { GoogleTokenHelper } from './google-token.helper';
+import { providerFailure, readProviderFailureBody } from '../../core/connectors/provider-failure';
 
+/**
+ * W11-PROVIDER-OUTAGE-CONNECT (R-5 part 3; D-73): a Forms or Drive answer that
+ * is an outage (5xx, 408, 429, a rate-limited 403, an ABORTED 409) is 503
+ * provider_unavailable (service google_forms); a refusal keeps its 400. Every
+ * message is the existing one.
+ */
 @Injectable()
 export class GoogleFormsService {
   private readonly logger = new Logger(GoogleFormsService.name);
@@ -26,7 +33,10 @@ export class GoogleFormsService {
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ info: { title, documentTitle: title, description } }),
     });
-    if (!res.ok) throw new BadRequestException(`Forms API error ${res.status}: ${await res.text()}`);
+    if (!res.ok) {
+      const body = await res.text();
+      throw providerFailure('google_forms', res.status, body, `Forms API error ${res.status}: ${body}`);
+    }
     return res.json();
   }
 
@@ -35,7 +45,7 @@ export class GoogleFormsService {
     const res = await fetch(`https://forms.googleapis.com/v1/forms/${encodeURIComponent(formId)}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!res.ok) throw new BadRequestException(`Forms API error ${res.status}`);
+    if (!res.ok) throw providerFailure('google_forms', res.status, await readProviderFailureBody(res), `Forms API error ${res.status}`);
     return res.json();
   }
 
@@ -47,7 +57,7 @@ export class GoogleFormsService {
       `https://forms.googleapis.com/v1/forms/${encodeURIComponent(formId)}/responses?${params.toString()}`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
-    if (!res.ok) throw new BadRequestException(`Forms API error ${res.status}`);
+    if (!res.ok) throw providerFailure('google_forms', res.status, await readProviderFailureBody(res), `Forms API error ${res.status}`);
     return res.json();
   }
 
@@ -72,7 +82,7 @@ export class GoogleFormsService {
     const res = await fetch(`https://www.googleapis.com/drive/v3/files?${params.toString()}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!res.ok) throw new BadRequestException(`Drive API error ${res.status}`);
+    if (!res.ok) throw providerFailure('google_forms', res.status, await readProviderFailureBody(res), `Drive API error ${res.status}`);
     return res.json();
   }
 
@@ -87,7 +97,7 @@ export class GoogleFormsService {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok && res.status !== 204) {
-      throw new BadRequestException(`Drive delete failed: ${res.status}`);
+      throw providerFailure('google_forms', res.status, await readProviderFailureBody(res), `Drive delete failed: ${res.status}`);
     }
   }
 }

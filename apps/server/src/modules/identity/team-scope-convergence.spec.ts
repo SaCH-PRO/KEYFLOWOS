@@ -67,6 +67,13 @@ class TeamPrismaFake {
       }),
     },
     teamActivityLog: { create: vi.fn(async () => ({})) },
+    // V1-63 (SWP-TEAM-INVITE-SERVER, BUG-016): inviteTeamMember finds the holders of
+    // an address case-insensitively with one raw read (`... WHERE lower(btrim(email))
+    // = lower(btrim(${address}))`); its one interpolated value is the address.
+    $queryRaw: vi.fn(async (_sql: TemplateStringsArray, address: unknown) =>
+      this.users
+        .filter((u) => String(u.email).trim().toLowerCase() === String(address).trim().toLowerCase())
+        .map((u) => ({ id: u.id, email: u.email, meta_data: u.metaData ?? null }))),
   };
 }
 

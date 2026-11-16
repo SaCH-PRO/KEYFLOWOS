@@ -7002,12 +7002,20 @@ ${triage.standingContext}`;
         return { id: args.ticketId, deleted: deletion.success };
       }
       case 'comms_send_broadcast': {
+        // SWEEP-P0-FOLLOWUP repair (review COR-1; D-88: KEY acts as the member the command runs for). The broadcast
+        // names that member as its sender (contactBindMember: a chat turn's principal, the member a proposal,
+        // cortex or custom-logic run is for, a queued plan's member), so it reaches only the contacts both the member
+        // and the sending account's binder may open, as the member's own POST content/:id/publish does
+        // (channelRecipients). It named none, and KEY sent the owner's PRIVATE contacts for an ADMIN who may not
+        // open them. A run with no member is held to the binder alone, as the scheduled digest is.
+        const sender = await this.contactBindMember(businessId, action);
         const result = await this.getCommunications().sendBroadcast({
           businessId,
           segment: args.segment,
           channel: args.channel,
           body: args.body,
           templateId: args.templateId,
+          sender: sender ? { id: sender } : null,
         });
         return result;
       }

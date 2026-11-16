@@ -27,6 +27,11 @@ export interface SendBroadcastInput {
   channel: 'email' | 'whatsapp' | 'sms';
   body: string;
   templateId?: string;
+  /**
+   * SWEEP-P0-FOLLOWUP (WH3-1): the member who sends (KEY's command actor); absent for a send no member started (the
+   * cron digest). The audience is held to what this member and the sending account's binder may both open.
+   */
+  sender?: { id: string; role?: string } | null;
 }
 
 export interface SendReplyInput {
@@ -164,7 +169,7 @@ export class CommunicationsService {
       ],
     });
 
-    const result = await this.deliveryQueue.publishNow(input.businessId, content.id, [destination.id]);
+    const result = await this.deliveryQueue.publishNow(input.businessId, content.id, [destination.id], input.sender ?? null);
 
     return {
       success: true,

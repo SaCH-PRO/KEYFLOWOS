@@ -122,10 +122,9 @@ const REVIEWED_UNSCOPED: Readonly<Record<string, string>> = {
   'POST reserves': 'cash reserve buckets: a safe-to-spend figure, not the ledger (owner question)',
   'PATCH reserves/:id': 'cash reserve buckets: a safe-to-spend figure, not the ledger (owner question)',
   'DELETE reserves/:id': 'cash reserve buckets: a safe-to-spend figure, not the ledger (owner question)',
-  'POST bank-connections': 'a bank connection: the provider link, no statement line or posting (owner question)',
-  'PATCH bank-connections/:id': 'a bank connection: the provider link, no statement line or posting (owner question)',
+  // SWEEP-P0-FOLLOWUP (REST scope census owner question 12): POST, PATCH and DELETE bank-connections write the
+  // provider credential (BankConnection.accessToken), so they carry settings admin now and are no longer exempt.
   'POST bank-connections/:id/sync': 'records the provider sync cursor only (BankConnectionService.recordSync)',
-  'DELETE bank-connections/:id': 'a bank connection: the provider link, no statement line or posting (owner question)',
   'POST exchange-rates': 'exchange rates: no posting reads them (D-13: one currency per business)',
   'POST exchange-rates/bulk': 'exchange rates: no posting reads them (D-13: one currency per business)',
   'DELETE exchange-rates/:id': 'exchange rates: no posting reads them (D-13: one currency per business)',

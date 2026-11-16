@@ -67,9 +67,14 @@
  *       function, and in the same `case` clause when the call sits in one). A
  *       root (a route handler, a listener, a dispatcher entry point) reached
  *       without one is an unguarded path.
- *   W04 every named owner check implements the owner rule — the OWNER
- *       membership, Business.ownerId and the SUPER_ADMIN bypass appear in its
- *       body — or calls an owner check that does.
+ *   W04 every named owner check implements the owner rule (W11-OWNER-HELPER-D11;
+ *       owner rulings D-104, D-116, D-125: an OWNER membership of the route's
+ *       business; Business.ownerId grants nothing on its own): it calls
+ *       core/auth/business-owner.ts isBusinessOwnerMember and names the
+ *       'SUPER_ADMIN' bypass, or calls an owner check that does, and no check on
+ *       that chain names Business.ownerId (a restated recorded-owner arm). The
+ *       helper's body is pinned (the membership row's role by the compound key,
+ *       no Business read), and synthetic checks prove a restated arm is refused.
  *   W05 an entry of kind 'open' (a writer known to be unguarded and tracked by
  *       an it.todo, outside this packet's write set) is still unguarded: when it
  *       is fixed this fails, and the fix moves it to kind 'owner'.
@@ -203,7 +208,7 @@ const OWNER_WRITES: Record<string, Entry> = {
     kind: 'owner',
     writes: ['metaData.whatsapp'],
     guards: ['assertConfigOwner'],
-    why: 'R0-SEC2 (D-11 sending identity), listed by R0-SEC2b: PATCH /whatsapp/businesses/:businessId/config runs WhatsAppService.assertConfigOwner (isConfigOwner: OWNER membership, Business.ownerId, SUPER_ADMIN) before saveConfig, which re-encrypts the credentials and refuses foreign ciphertext and a phoneNumberId another business holds. PATCH /identity/businesses/:id refuses the key (PROFILE_PATCH_RESERVED_META_KEYS, D11W-09).',
+    why: 'R0-SEC2 (D-11 sending identity), listed by R0-SEC2b: PATCH /whatsapp/businesses/:businessId/config runs WhatsAppService.assertConfigOwner (isConfigOwner: the SUPER_ADMIN bypass, then isBusinessOwnerMember, an OWNER membership of the route business) before saveConfig, which re-encrypts the credentials and refuses foreign ciphertext and a phoneNumberId another business holds. PATCH /identity/businesses/:id refuses the key (PROFILE_PATCH_RESERVED_META_KEYS, D11W-09).',
   },
   'core/connectors/google-suite.service.ts#GoogleSuiteService.handleCallback': {
     kind: 'not-profile',
@@ -708,15 +713,92 @@ function unguardedPaths(writer: string, guards: string[]): { paths: string[]; ch
   return { paths, chain };
 }
 
-/** Whether every function named `name` implements the owner rule, directly or through another owner check. */
-function implementsOwnerRule(name: string, depth = 0): boolean {
-  const decls = [...A.fns.values()].filter((f) => f.name === name);
+/**
+ * W11-OWNER-HELPER-D11 (owner rulings D-104, D-116, D-125): the one owner rule,
+ * core/auth/business-owner.ts isBusinessOwnerMember: an OWNER membership of the
+ * route's business, read from the membership row alone.
+ */
+const OWNER_HELPER = 'isBusinessOwnerMember';
+const OWNER_HELPER_KEY = 'core/auth/business-owner.ts#isBusinessOwnerMember';
+/** The names an owner check goes by; a check implements the rule through another one so named. */
+const OWNER_CHECK_NAME = /^(assert|is|resolve)\w*(Owner|Actor)$/;
+
+/** The names a function calls (`f(...)`, `x.f(...)`), its own name excluded. */
+function calledNames(f: Fn): Set<string> {
+  const called = new Set<string>();
+  forEachDeep(f.node, (n) => { if (ts.isCallExpression(n)) { const c = calleeName(n); if (c && c !== f.name) called.add(c); } });
+  return called;
+}
+
+/** Whether a function's code (not its comments) holds the string literal `value`. */
+function namesLiteral(f: Fn, value: string): boolean {
+  let found = false;
+  forEachDeep(f.node, (n) => { if ((ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) && n.text === value) found = true; });
+  return found;
+}
+
+/**
+ * Whether a function's code names Business.ownerId (not its comments): a where
+ * or select key, a property read off a row (`.ownerId`, `['ownerId']`), a
+ * destructured name. A restated recorded-owner arm, in whatever shape, names it.
+ */
+function namesOwnerId(f: Fn): boolean {
+  let found = false;
+  forEachDeep(f.node, (n) => {
+    if ((ts.isIdentifier(n) || ts.isPrivateIdentifier(n)) && n.text === 'ownerId') found = true;
+    else if ((ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) && n.text === 'ownerId') found = true;
+  });
+  return found;
+}
+
+/** The registered functions of in-memory source (the owner-rule predicate on code outside the tree). */
+function probeFns(source: string): Map<string, Fn> {
+  const sf = ts.createSourceFile('zz-owner-probe.service.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const fns = new Map<string, Fn>();
+  const register = (key: string, name: string, node: ts.Node, className?: string) => {
+    fns.set(key, { key, file: 'zz-owner-probe.service.ts', className, name, node, text: node.getText(sf) });
+  };
+  const visit = (node: ts.Node) => {
+    if (ts.isClassDeclaration(node) && node.name) {
+      for (const m of node.members) {
+        if ((ts.isMethodDeclaration(m) || ts.isGetAccessorDeclaration(m)) && m.body && m.name) {
+          const n = propName(m.name);
+          if (n) register(`probe#${node.name.text}.${n}`, n, m, node.name.text);
+        }
+      }
+    } else if (ts.isFunctionDeclaration(node) && node.name && node.body) {
+      register(`probe#${node.name.text}`, node.name.text, node);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return fns;
+}
+
+/**
+ * Whether a function named `name`, or an owner check it calls (at any depth),
+ * names Business.ownerId: a restated recorded-owner arm somewhere on its chain.
+ */
+function restatesOwnerArm(name: string, fns: Map<string, Fn>, depth = 0): boolean {
+  if (depth > 4) return false;
+  return [...fns.values()].filter((f) => f.name === name).some((f) => namesOwnerId(f)
+    || [...calledNames(f)].some((c) => OWNER_CHECK_NAME.test(c) && restatesOwnerArm(c, fns, depth + 1)));
+}
+
+/**
+ * Whether every function named `name` implements the owner rule (W11-OWNER-HELPER-D11, owner rulings D-104,
+ * D-116, D-125): it, or an owner check it calls, calls isBusinessOwnerMember and names 'SUPER_ADMIN' (the platform
+ * bypass stays at the call site), and no function on that chain names Business.ownerId (a restated recorded-owner
+ * arm, which the helper makes redundant at best and which admitted Business.ownerId alone before D-104).
+ */
+function implementsOwnerRule(name: string, fns: Map<string, Fn> = A.fns, depth = 0): boolean {
+  const decls = [...fns.values()].filter((f) => f.name === name);
   if (decls.length === 0 || depth > 4) return false;
   return decls.every((f) => {
-    if (/['"]OWNER['"]/.test(f.text) && /\bownerId\b/.test(f.text) && /['"]SUPER_ADMIN['"]/.test(f.text)) return true;
-    const called = new Set<string>();
-    forEachDeep(f.node, (n) => { if (ts.isCallExpression(n)) { const c = calleeName(n); if (c && c !== name) called.add(c); } });
-    return [...called].some((c) => /^(assert|is|resolve)\w*(Owner|Actor)$/.test(c) && implementsOwnerRule(c, depth + 1));
+    if (restatesOwnerArm(f.name, fns)) return false;
+    const called = calledNames(f);
+    if (called.has(OWNER_HELPER) && namesLiteral(f, 'SUPER_ADMIN')) return true;
+    return [...called].some((c) => OWNER_CHECK_NAME.test(c) && implementsOwnerRule(c, fns, depth + 1));
   });
 }
 
@@ -756,10 +838,105 @@ describe('R0-09f D-11 static guard: every write of an owner-only Business field 
     expect(unguarded, 'a path to an owner-only write with no owner check on it').toEqual([]);
   });
 
-  it('[D11W-04] RED-BEFORE: every named owner check exists and implements the owner rule (OWNER membership, Business.ownerId, SUPER_ADMIN bypass), directly or through another owner check', () => {
+  // W11-OWNER-HELPER-D11 re-pinned this case (owner rulings D-104, D-116, D-125; Release 0 update approved by
+  // ruling D-176). It used to accept any check whose text held 'OWNER', ownerId and 'SUPER_ADMIN', so a restated
+  // recorded-owner arm, even the retired D-104 shape that admitted Business.ownerId with any membership, passed
+  // (wave 11a seam review W11SEAM-OWN-3). Now a check implements the rule only through the one helper, with no
+  // Business.ownerId on its chain, and the helper's body is pinned; synthetic checks prove the predicate refuses a
+  // restated arm (it is not vacuous).
+  it('[D11W-04] RED-BEFORE: every named owner check exists and implements the owner rule (an OWNER membership of the route\'s business through isBusinessOwnerMember, with the SUPER_ADMIN bypass; Business.ownerId alone admits no one, owner rulings D-104 and D-116), directly or through another owner check', () => {
+    // The helper: one declaration, in core/auth/business-owner.ts, reading the membership row's role by the
+    // (userId, businessId) compound key and nothing else: no Business read, no ownerId, no platform bypass.
+    const helpers = [...A.fns.values()].filter((f) => f.name === OWNER_HELPER);
+    expect(helpers.map((f) => f.key), 'one isBusinessOwnerMember, the core/auth one').toEqual([OWNER_HELPER_KEY]);
+    const helper = helpers[0];
+    expect(helper.text).toMatch(/\.membership\.findUnique\(/);
+    expect(helper.text).toMatch(/\buserId_businessId\b/);
+    expect(namesLiteral(helper, 'OWNER'), "the helper answers role === 'OWNER'").toBe(true);
+    expect(helper.text, 'the helper never reads the Business row').not.toMatch(/\.business\b/);
+    expect(namesOwnerId(helper), 'the helper never names Business.ownerId').toBe(false);
+    expect(namesLiteral(helper, 'SUPER_ADMIN'), 'the SUPER_ADMIN bypass stays at each call site, not in the helper').toBe(false);
+
+    // The predicate is not vacuous: on synthetic checks it accepts the helper with the bypass, directly or through
+    // another owner check, and refuses every restated recorded-owner arm and every check missing a part of the rule.
+    const probe = probeFns(`
+      async function isBusinessOwnerMember(db: any, businessId: string, userId: string) { return false; }
+      class ZzOwnerProbeService {
+        constructor(private readonly prisma: any) {}
+        async isHelperOwner(businessId: string, actor: { id?: string; role?: string }) {
+          if (!actor?.id) return false;
+          if (actor.role === 'SUPER_ADMIN') return true;
+          return isBusinessOwnerMember(this.prisma.client, businessId, actor.id);
+        }
+        async assertHelperOwner(businessId: string, actor: { id?: string; role?: string }) {
+          if (await this.isHelperOwner(businessId, actor)) return;
+          throw new Error('no');
+        }
+        async isRestatedArmOwner(businessId: string, actor: { id?: string; role?: string }) {
+          if (!actor?.id) return false;
+          if (actor.role === 'SUPER_ADMIN') return true;
+          if (await isBusinessOwnerMember(this.prisma.client, businessId, actor.id)) return true;
+          const owned = await this.prisma.client.business.findFirst({
+            where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id, role: 'OWNER' } } },
+            select: { id: true },
+          });
+          return !!owned;
+        }
+        async assertRestatedArmOwner(businessId: string, actor: { id?: string; role?: string }) {
+          if (await this.isRestatedArmOwner(businessId, actor)) return;
+          throw new Error('no');
+        }
+        async isLegacyOwner(businessId: string, actor: { id?: string; role?: string }) {
+          if (!actor?.id) return false;
+          if (actor.role === 'SUPER_ADMIN') return true;
+          const membership = await this.prisma.client.membership.findUnique({
+            where: { userId_businessId: { userId: actor.id, businessId } }, select: { role: true },
+          });
+          if (membership?.role === 'OWNER') return true;
+          const owned = await this.prisma.client.business.findFirst({
+            where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id } } }, select: { id: true },
+          });
+          return !!owned;
+        }
+        async isRowCompareOwner(businessId: string, actor: { id?: string; role?: string }) {
+          if (!actor?.id) return false;
+          if (actor.role === 'SUPER_ADMIN') return true;
+          const business = await this.prisma.client.business.findUnique({ where: { id: businessId } });
+          if (business?.ownerId === actor.id) return true;
+          return isBusinessOwnerMember(this.prisma.client, businessId, actor.id);
+        }
+        async isNoBypassOwner(businessId: string, actor: { id?: string; role?: string }) {
+          if (!actor?.id) return false;
+          return isBusinessOwnerMember(this.prisma.client, businessId, actor.id);
+        }
+        async isCommentBypassOwner(businessId: string, actor: { id?: string; role?: string }) {
+          // A platform 'SUPER_ADMIN' passes (a comment is not code).
+          return isBusinessOwnerMember(this.prisma.client, businessId, actor.id ?? '');
+        }
+        async assertMixedOwner(businessId: string, actor: { id?: string; role?: string }) {
+          if (await this.isHelperOwner(businessId, actor)) return;
+          if (await this.isRestatedArmOwner(businessId, actor)) return;
+          throw new Error('no');
+        }
+      }
+    `);
+    const verdicts = Object.fromEntries([...probe.values()].filter((f) => f.className).map((f) => [f.name, implementsOwnerRule(f.name, probe)]));
+    expect(verdicts).toEqual({
+      isHelperOwner: true,
+      assertHelperOwner: true,
+      isRestatedArmOwner: false,
+      assertRestatedArmOwner: false,
+      isLegacyOwner: false,
+      isRowCompareOwner: false,
+      isNoBypassOwner: false,
+      isCommentBypassOwner: false,
+      assertMixedOwner: false,
+    });
+
+    // The tree: every owner check an OWNER_WRITES entry names implements the rule through the helper.
     const guards = [...new Set(Object.values(OWNER_WRITES).flatMap((e) => (e.kind === 'owner' ? e.guards : [])))].sort();
     expect(guards).toContain('assertBusinessOwner');
-    expect(guards.filter((g) => !implementsOwnerRule(g)), 'an owner check that is missing or does not apply the owner rule').toEqual([]);
+    expect(guards.filter((g) => !implementsOwnerRule(g)), 'an owner check that is missing, restates Business.ownerId or does not apply the owner rule through isBusinessOwnerMember').toEqual([]);
   });
 
   it('[D11W-05] no writer is left open (R0-09g closed the last one, setDocumentTemplate), and an entry of kind open is still unguarded (pinned: when one is fixed this fails, and the fix moves its entry to kind owner and removes its it.todo)', () => {
