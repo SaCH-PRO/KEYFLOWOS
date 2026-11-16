@@ -558,16 +558,26 @@ describe('W11-PROVIDER-OUTAGE-CONNECT: unchanged', () => {
   it('[POC-U5] a scheduled post whose publish meets an outage is marked failed with the same message text as before', async () => {
     const { prisma, writes } = recordingPrisma();
     const due = { id: 'sched_1', location: LOCATION, summary: 'due post', scheduledFor: new Date(Date.now() - 60_000).toISOString(), status: 'scheduled', createdAt: new Date().toISOString() };
+    // The scheduled-post list is written through mergeConnectorMetadata (SWEEP-P0-FOLLOWUP CW3-2): an upsert that
+    // only makes sure the row exists, then one `metadata || patch` UPDATE whose JSON patch is the first bound value.
+    const merges: Array<Record<string, any>> = [];
     const bp = new GoogleBusinessProfileService({
       client: new Proxy(prisma.client, {
-        get: (t, key: string) => key === 'connectorStatus'
-          ? { findUnique: async () => ({ metadata: { scheduledPosts: [due] } }), upsert: async (args: any) => { writes.push({ model: 'connectorStatus', method: 'upsert', args }); return {}; } }
-          : t[key],
+        get: (t, key: string) => {
+          if (key === 'connectorStatus') {
+            return { findUnique: async () => ({ metadata: { scheduledPosts: [due] } }), upsert: async (args: any) => { writes.push({ model: 'connectorStatus', method: 'upsert', args }); return {}; } };
+          }
+          if (key === '$executeRaw') {
+            return async (_sql: TemplateStringsArray, ...values: unknown[]) => { merges.push(JSON.parse(String(values[0]))); return 1; };
+          }
+          return t[key];
+        },
       }),
     } as any);
     stubFetch((u, m) => m === 'POST' && u.endsWith('/localPosts'), 503, googleError(503, 'UNAVAILABLE'));
     expect(await bp.publishDueScheduledPosts(BIZ)).toEqual({ published: 0, failed: 1 });
-    const upsert = writes.find((w) => w.model === 'connectorStatus' && w.method === 'upsert');
-    expect(upsert?.args.update.metadata.scheduledPosts[0]).toMatchObject({ id: 'sched_1', status: 'failed', error: 'Business Profile API error 503' });
+    expect(writes.find((w) => w.model === 'connectorStatus' && w.method === 'upsert')?.args.update).toEqual({});
+    expect(merges).toHaveLength(1);
+    expect(merges[0].scheduledPosts[0]).toMatchObject({ id: 'sched_1', status: 'failed', error: 'Business Profile API error 503' });
   });
 });
