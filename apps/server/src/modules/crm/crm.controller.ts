@@ -947,9 +947,11 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @Param('issueId') issueId: string,
     @Body() body: { override?: Record<string, unknown> } | undefined,
-    @Req() req: any,
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.dataQuality.applyFix({ businessId, issueId, override: body?.override, actorId: req?.user?.id });
+    // FU-DATAQUALITY-MASS-ASSIGN: the fix is applied as the member, on a
+    // contact they may open and edit, writing only the fields its issue fixes.
+    return this.dataQuality.applyFix({ businessId, issueId, override: body?.override, actorId: this.requireActorUserId(req) });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -959,9 +961,9 @@ export class CrmController {
   dqDismiss(
     @Param('businessId') businessId: string,
     @Param('issueId') issueId: string,
-    @Req() req: any,
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.dataQuality.dismissIssue({ businessId, issueId, actorId: req?.user?.id });
+    return this.dataQuality.dismissIssue({ businessId, issueId, actorId: this.requireActorUserId(req) });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -971,12 +973,12 @@ export class CrmController {
   dqBulkApply(
     @Param('businessId') businessId: string,
     @Body() body: { issueIds: string[] },
-    @Req() req: any,
+    @Req() req: { user?: { id?: string } },
   ) {
     if (!body?.issueIds || !Array.isArray(body.issueIds)) {
       throw new BadRequestException('issueIds is required');
     }
-    return this.dataQuality.bulkApplyFix({ businessId, issueIds: body.issueIds, actorId: req?.user?.id });
+    return this.dataQuality.bulkApplyFix({ businessId, issueIds: body.issueIds, actorId: this.requireActorUserId(req) });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
