@@ -4,6 +4,20 @@ import { Evidence, EvidenceClaimType } from '@prisma/client';
 import { createHash } from 'crypto';
 
 /**
+ * A cortex claim cannot be stored in `evidence` (see createEvidence). Thrown
+ * before any query, so no PrismaClientValidationError is ever raised for it.
+ */
+export class CortexClaimNotStoredError extends Error {
+  constructor(claimType: string, source: string) {
+    super(
+      `A cortex claim (${claimType}, from ${source}) is not stored: the evidence table holds proof files ` +
+        'attached to a task, approval, contact, work order or call, and a cortex claim has neither.',
+    );
+    this.name = 'CortexClaimNotStoredError';
+  }
+}
+
+/**
  * KeyCortexEvidenceService — Proof of Work Completion
  *
  * Evidence provides tamper-proof proof that work was completed. Each piece
@@ -17,6 +31,13 @@ import { createHash } from 'crypto';
  *   3. DNA-contributing evidence drives genome score evolution
  *   4. Confidence scores indicate evidence quality
  *   5. Cross-references link evidence to related modules and entities
+ *
+ * The `evidence` table never had the columns this service was written for
+ * (claim, claim_type, proof, proof_hash, confidence, source, related_module,
+ * contributes_to_dna, dna_section, verified, verification_method). Its two
+ * methods with callers now name real columns only: createEvidence refuses a
+ * cortex claim and findEvidence reads the business's evidence (review
+ * UCS-COR-3). The others still name missing columns and have no caller.
  */
 @Injectable()
 export class KeyCortexEvidenceService {
@@ -25,12 +46,25 @@ export class KeyCortexEvidenceService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * Create evidence for a claim. The proof payload is hashed with SHA-256
-   * for tamper detection. If the proof changes later, the integrity check
-   * will fail.
+   * Refuses a cortex claim, by name, before any query: the `evidence` table
+   * cannot hold one.
    *
-   * When contributesToDna=true, this evidence will be used by the genome
-   * engine to update DNA section scores.
+   * `evidence` is the proof people attach to a task, approval, contact, work
+   * order or call: a file (url, storage key, checksum) and the object it proves
+   * (linkedType, linkedId). EvidenceService.submit writes it; /app/evidence, the
+   * evidence_* KEY tools and the module usage count read it. A cortex claim
+   * ("capability X ran with result Y") has no file and no object. This method
+   * used to write claim, claimType, proof, proofHash, confidence, source,
+   * relatedModule and others, none of which the table has, so the real client
+   * refused every call with a PrismaClientValidationError (review UCS-COR-3).
+   * Writing the claim into the real columns instead would put KEY's own
+   * bookkeeping into the business's proof list and usage count, which
+   * test/v1-module-usage-count V61-07 pins as holding only rows
+   * EvidenceService.submit wrote.
+   *
+   * KeyCortexMetacognitionService.trackCapability (processConsciously step 11)
+   * records the capability in business_events first; processConsciously
+   * survives this refusal (key-cortex-conscious-answer V70H-02).
    */
   async createEvidence(params: {
     businessId: string;
@@ -45,30 +79,7 @@ export class KeyCortexEvidenceService {
     contributesToDna?: boolean;
     dnaSection?: string;
   }): Promise<Evidence> {
-    const proofHash = this.hashProof(params.proof);
-
-    const evidence = await (this.prisma.client as any).evidence.create({
-      data: {
-        businessId: params.businessId,
-        claim: params.claim,
-        claimType: params.claimType,
-        proof: params.proof as never,
-        proofHash,
-        confidence: params.confidence,
-        source: params.source,
-        sourceEventId: params.sourceEventId,
-        relatedModule: params.relatedModule,
-        relatedEntityId: params.relatedEntityId,
-        contributesToDna: params.contributesToDna ?? false,
-        dnaSection: params.dnaSection,
-        verified: false,
-      },
-    });
-
-    this.logger.debug(
-      `[Evidence] ${params.claimType}: ${params.claim} (${params.confidence} confidence)`,
-    );
-    return evidence;
+    throw new CortexClaimNotStoredError(params.claimType, params.source);
   }
 
   /**
@@ -126,21 +137,18 @@ export class KeyCortexEvidenceService {
   }
 
   /**
-   * Find evidence with flexible filtering.
+   * The business's evidence, newest first, at most `limit` rows (50 by
+   * default). Only real columns are named: the WHERE once carried `limit`, and
+   * claimType, relatedModule, relatedEntityId and verified filters, and the
+   * order a createdAt, none of which the table has (review UCS-COR-3).
    */
   async findEvidence(
     businessId: string,
-    filters: {
-      claimType?: EvidenceClaimType;
-      relatedModule?: string;
-      relatedEntityId?: string;
-      verified?: boolean;
-      limit?: number;
-    } = {},
+    filters: { limit?: number } = {},
   ): Promise<Evidence[]> {
-    return (this.prisma.client as any).evidence.findMany({
-      where: { businessId, ...filters },
-      orderBy: { createdAt: 'desc' },
+    return this.prisma.client.evidence.findMany({
+      where: { businessId },
+      orderBy: { submittedAt: 'desc' },
       take: filters.limit ?? 50,
     });
   }
