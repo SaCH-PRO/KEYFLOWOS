@@ -216,3 +216,53 @@ describe('memberToolRunAuthority (KEY chat\'s tool calls, the plan queue, approv
     expect(await memberToolRunAuthority(prismaStandIn(), BIZ, 'ownerAiMap', REVENUE_READ)).toEqual({ refusal: REVENUE_READ_NONE, principal: false });
   });
 });
+
+/**
+ * TOF-GRAPH-SCOPE-ARRAY review repair (SEC-TGSA-3; owner rulings D-140, D-125): graphPlanReadScope returned every
+ * plan, every step and every step output to any OWNER membership before it read the map, so an OWNER membership
+ * with an explicit map (stored as [], or an object map a JobRole position copy can write onto it) read the steps
+ * and stored outputs that assertMayRunGraphAction refuses it to run. D-140 binds such an OWNER on KEY as on REST:
+ * it now reads the steps of the modules its map reads. It still sees every member's plans (PLAN_APPROVER_ROLES, a
+ * role rule) and every contact (the OWNER's visibility, D-37 and D-74); an OWNER with no map reads everything.
+ */
+describe('graphPlanReadScope: an OWNER membership with an explicit map reads only the steps its map reads (review SEC-TGSA-3, D-140)', () => {
+  const scopeOf = (userId: string) => graphPlanReadScope(prismaStandIn(), BIZ, { id: userId, role: 'USER' });
+
+  it('RED-BEFORE: the OWNER stored as [] still sees every member\'s plans but no revenue, operations or ai step, registry or KEY-cortex (was shown every step: the OWNER arm returned before the map was read)', async () => {
+    const scope = await scopeOf('ownerEmpty');
+    expect(scope.seesEveryPlan).toBe(true);
+    expect(scope.step(REVENUE_READ)).toBe(false);
+    expect(scope.step(OPERATIONS_WRITE)).toBe(false);
+    expect(scope.step(ORGAN_AI_WRITE)).toBe(false);
+    expect(scope.cortexStep('commerce')).toBe(false);
+    expect(scope.cortexStep('inbox')).toBe(false);
+    expect(scope.cortexStep('revenue')).toBe(false);
+  });
+
+  it('RED-BEFORE: an OWNER whose object map grants ai write alone reads the ai step and not the revenue or operations step', async () => {
+    const scope = await scopeOf('ownerAiMap');
+    expect(scope.seesEveryPlan).toBe(true);
+    expect(scope.step(ORGAN_AI_WRITE)).toBe(true);
+    expect(scope.cortexStep('temporal')).toBe(true);
+    expect(scope.step(REVENUE_READ)).toBe(false);
+    expect(scope.step(OPERATIONS_WRITE)).toBe(false);
+    expect(scope.cortexStep('commerce')).toBe(false);
+  });
+
+  it('control (the OWNER\'s contact sight is a role rule, unchanged): an OWNER with a map still sees every contact and every output of a step it reads', async () => {
+    const scope = await scopeOf('ownerAiMap');
+    expect(scope.seesEveryContact).toBe(true);
+    expect(scope.hiddenContacts).toBeNull();
+    expect(scope.stepOutput(ORGAN_AI_WRITE)).toBe(true);
+  });
+
+  it('control (unchanged): an OWNER with no map reads every step and every output, contacts included', async () => {
+    const scope = await scopeOf('ownerDefaults');
+    expect(scope.seesEveryPlan).toBe(true);
+    for (const tool of [REVENUE_READ, OPERATIONS_WRITE, ORGAN_AI_WRITE]) expect(scope.step(tool), tool).toBe(true);
+    for (const module of ['commerce', 'inbox', 'temporal', 'revenue']) expect(scope.cortexStep(module), module).toBe(true);
+    expect(scope.stepOutput('crm_list_contacts')).toBe(true);
+    expect(scope.seesEveryContact).toBe(true);
+    expect(scope.hiddenContacts).toBeNull();
+  });
+});
