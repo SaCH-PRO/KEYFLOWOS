@@ -2,6 +2,14 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import { skipTenantIsolation } from '@keyflow/db';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import {
+  BUSINESS_SETTING_INVALID,
+  applyBusinessSettingsWrites,
+  businessSettingsWriteOf,
+  mergeBusinessSettingsWrites,
+  omitBusinessSettingsKeys,
+  readBusinessSettings,
+} from '../../core/prisma/business-meta';
 import { isBusinessOwnerMember } from '../../core/auth/business-owner';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { DefaultTriggersService } from '../ai/default-triggers.service';
@@ -240,12 +248,19 @@ export class IdentityService {
     return items.map((b) => sanitizeBusiness(b));
   }
 
+  /**
+   * V1-63 BIZ-SETTINGS-SERVER: the read also answers the per-business v1
+   * settings as top-level sells, advancedCrm and depth (every hub), each
+   * absent or invalid stored key at its default (readBusinessSettings,
+   * core/prisma/business-meta.ts). Every member reads them; only the owner
+   * writes them (updateBusiness).
+   */
   async getBusiness(businessId: string) {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
     });
     if (!business) throw new NotFoundException('Business not found');
-    return sanitizeBusiness(business);
+    return { ...sanitizeBusiness(business), ...readBusinessSettings(business.metaData) };
   }
 
   private static readonly PUBLIC_BUSINESS_FIELDS = {
@@ -464,6 +479,11 @@ export class IdentityService {
     preferredProjectTypes?: string[];
     budgetFit?: string;
     positioningStatement?: string;
+    // V1-63 BIZ-SETTINGS-SERVER: checked here (businessSettingsWriteOf), not trusted
+    // from the type: an in-process caller (the KEY settings adapter) passes no pipe.
+    sells?: unknown;
+    advancedCrm?: unknown;
+    depth?: unknown;
   }) {
     // R0-SEC2b: a reserved metaData key (present at all, null included) refuses
     // the whole PATCH before anything is read or written (W3-D12b review
@@ -492,6 +512,22 @@ export class IdentityService {
       }
     }
 
+    // V1-63 BIZ-SETTINGS-SERVER (owner ruling D-150 'hubs'): what the business
+    // sells, the Advanced CRM switch and the depth of each hub are metaData keys
+    // (core/prisma/business-meta.ts). Each is checked wherever the caller names
+    // it, the field (the body pipe checked it already on the HTTP path) and the
+    // metaData bag alike, and an unknown value (null included) refuses the whole
+    // PATCH before anything is read or written. The field wins over the bag; a
+    // depth merges per hub. They are written below, under the row lock.
+    const fromFields = businessSettingsWriteOf(input);
+    const fromBag = businessSettingsWriteOf(input.metaData, 'metaData.');
+    const settingsProblems = [...fromFields.problems, ...fromBag.problems];
+    if (settingsProblems.length > 0) {
+      throw new BadRequestException({ code: BUSINESS_SETTING_INVALID, message: settingsProblems.join('; '), problems: settingsProblems });
+    }
+    const settingsWrite = mergeBusinessSettingsWrites(fromBag.write, fromFields.write);
+    const writesSettings = Object.keys(settingsWrite).length > 0;
+
     if (input.slug) {
       const existing = await this.prisma.client.business.findFirst({
         where: { slug: input.slug.trim(), NOT: { id: businessId } },
@@ -503,8 +539,10 @@ export class IdentityService {
       lastHealthCheck, metaData,
       skills, interests, preferredProjectTypes,
       acceptingWork, currentCapacity, leadTime, budgetFit, positioningStatement,
-      ...rest
+      ...profile
     } = input;
+    // The settings are metaData keys, not columns: out of the column copy and the changed-field list.
+    const rest = omitBusinessSettingsKeys(profile);
 
     // R0-SEC2c review SEC2c-ST-1: Business.metaData is one jsonb column that
     // many writers read, change and write back whole. Reading the stored row
@@ -577,10 +615,12 @@ export class IdentityService {
         data.lastHealthCheck = new Date(lastHealthCheck);
       }
 
-      if (metaData) {
+      if (metaData || writesSettings) {
         const existingMeta = (oldBusiness.metaData as Record<string, any>) || {};
         const merged: Record<string, unknown> = { ...existingMeta, ...metaData };
-        applyPaymentSecretWrites(merged, existingMeta, metaData);
+        applyPaymentSecretWrites(merged, existingMeta, metaData ?? {});
+        // V1-63: over the copy read under the row lock (a concurrent writer's key is kept).
+        applyBusinessSettingsWrites(merged, existingMeta, settingsWrite);
         data.metaData = merged;
       }
 
@@ -675,8 +715,9 @@ export class IdentityService {
 
     // R0-09 review (R09-ST-1): the updated row carries every Business OAuth
     // token column; GET already redacts them, so the PATCH response and the
-    // KEY settings adapter's connector result must too.
-    return sanitizeBusiness(result);
+    // KEY settings adapter's connector result must too. V1-63: and it answers
+    // the v1 settings as GET does.
+    return { ...sanitizeBusiness(result), ...readBusinessSettings(result.metaData) };
   }
 
   async getBusinessCommunityProfile(businessId: string) {
