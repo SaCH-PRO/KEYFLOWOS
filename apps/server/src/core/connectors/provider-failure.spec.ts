@@ -21,10 +21,23 @@
  *
  * RED-BEFORE (int/v1-base at 15ca8599): provider-failure.ts does not exist, so
  * the import fails and every case below fails.
+ *
+ * W11-PROVIDER-OUTAGE-CONNECT (R-5 part 3) adds the remaining Google clients'
+ * service ids (google_contacts, google_forms, google_business_profile,
+ * google_calendar), which keep the Google table, and the Microsoft ones
+ * (outlook_contacts for Graph, microsoft for the identity platform's token
+ * endpoint), which have no Google error body: 5xx, 408 and 429 are outages and
+ * every other 4xx (a 409, a 403, whatever the body says) stays 400. And
+ * providerUnavailable(), the 503 a client answers when it has decided the
+ * failure is an outage itself (the People / Graph 410 "please retry", whose
+ * cursor was just cleared). RED-BEFORE (pkt base c72069ac): POF-16 to POF-19
+ * fail (the Graph rows answer the Google table's 503 for a rate-limit 403 and
+ * an ABORTED 409, isTransientProviderFailure ignores the service, and
+ * providerUnavailable is not exported); POF-20 passes (the open union).
  */
 import { describe, it, expect } from 'vitest';
 import { BadRequestException, HttpException, ServiceUnavailableException } from '@nestjs/common';
-import { providerFailure, isTransientProviderFailure, readProviderFailureBody } from './provider-failure';
+import { providerFailure, providerUnavailable, isTransientProviderFailure, readProviderFailureBody } from './provider-failure';
 
 /** A Google API error body, as googleapis.com answers it. */
 function googleError(code: number, status: string, reasons: string[] = []): string {
@@ -182,5 +195,64 @@ describe('providerFailure: an upstream outage is 503 provider_unavailable, a ref
     expect(await readProviderFailureBody({ status: 500 } as any)).toBeNull();
     expect(await readProviderFailureBody({ status: 500, text: async () => { throw new Error('socket hang up'); } } as any)).toBeNull();
     expect(await readProviderFailureBody(null as any)).toBeNull();
+  });
+  // ---- W11-PROVIDER-OUTAGE-CONNECT: the Graph rows and the new service ids ----
+
+  it.each(['outlook_contacts', 'microsoft'])('[POF-16] Graph (%s): 5xx, 408 and 429 give 503 provider_unavailable; the body plays no part', (service) => {
+    for (const status of [500, 502, 503, 504, 599, 408, 429]) {
+      expectUnavailable(providerFailure(service, status, JSON.stringify({ error: { code: 'serviceNotAvailable', message: 'graph' } }), `Graph API error ${status}`), service, status, `Graph API error ${status}`);
+      expectUnavailable(providerFailure(service, status, null, `Graph API error ${status}`), service, status, `Graph API error ${status}`);
+    }
+  });
+
+  it.each(['outlook_contacts', 'microsoft'])('[POF-17] Graph (%s) has no Google reason or status field: every other 4xx stays 400, a Google-shaped rate-limit 403 or ABORTED 409 body included', (service) => {
+    const graph = (code: string) => JSON.stringify({ error: { code, message: `graph says ${code}` } });
+    for (const [status, body] of [
+      [400, graph('BadRequest')],
+      [401, JSON.stringify({ error: 'invalid_grant', error_description: 'AADSTS70008: expired' })],
+      [403, graph('ErrorAccessDenied')],
+      [404, graph('ErrorItemNotFound')],
+      [409, graph('ErrorIrresolvableConflict')],
+      [410, graph('SyncStateNotFound')],
+      [403, googleError(403, 'PERMISSION_DENIED', ['rateLimitExceeded'])],
+      [403, JSON.stringify({ error: { code: 403, message: 'Quota exceeded', status: 'RESOURCE_EXHAUSTED' } })],
+      [409, googleError(409, 'ABORTED')],
+    ] as Array<[number, string]>) {
+      expectRefused(providerFailure(service, status, body, `Graph API error ${status}`), `Graph API error ${status}`);
+    }
+  });
+
+  it('[POF-18] isTransientProviderFailure takes the service: a Graph service ignores the Google markers, a Google one (or none) reads them', () => {
+    const rateLimited403 = googleError(403, 'PERMISSION_DENIED', ['userRateLimitExceeded']);
+    const aborted409 = googleError(409, 'ABORTED');
+    for (const service of ['outlook_contacts', 'microsoft']) {
+      expect(isTransientProviderFailure(403, rateLimited403, service)).toBe(false);
+      expect(isTransientProviderFailure(409, aborted409, service)).toBe(false);
+      expect(isTransientProviderFailure(503, null, service)).toBe(true);
+      expect(isTransientProviderFailure(408, null, service)).toBe(true);
+      expect(isTransientProviderFailure(429, null, service)).toBe(true);
+      expect(isTransientProviderFailure(400, null, service)).toBe(false);
+    }
+    for (const service of ['gmail', 'drive', 'google_contacts', 'google_forms', 'google_business_profile', 'google_calendar', undefined]) {
+      expect(isTransientProviderFailure(403, rateLimited403, service)).toBe(true);
+      expect(isTransientProviderFailure(409, aborted409, service)).toBe(true);
+    }
+  });
+
+  it('[POF-19] providerUnavailable builds the same 503 an outage gets, for a status the table would call a refusal (the 410 "please retry")', () => {
+    expectUnavailable(providerUnavailable('google_contacts', 410, 'Sync token expired; please retry'), 'google_contacts', 410, 'Sync token expired; please retry');
+    expectUnavailable(providerUnavailable('outlook_contacts', 410, 'Outlook delta token expired; please retry'), 'outlook_contacts', 410, 'Outlook delta token expired; please retry');
+    expect(providerUnavailable('drive', 503, 'Failed to list Google Drive files').getResponse())
+      .toEqual(providerFailure('drive', 503, null, 'Failed to list Google Drive files').getResponse());
+  });
+
+  it.each(['google_contacts', 'google_forms', 'google_business_profile', 'google_calendar'])('[POF-20] the Google service id %s keeps the Google table', (service) => {
+    expectUnavailable(providerFailure(service, 503, null, 'm'), service, 503, 'm');
+    expectUnavailable(providerFailure(service, 429, null, 'm'), service, 429, 'm');
+    expectUnavailable(providerFailure(service, 403, googleError(403, 'PERMISSION_DENIED', ['rateLimitExceeded']), 'm'), service, 403, 'm');
+    expectUnavailable(providerFailure(service, 409, googleError(409, 'ABORTED'), 'm'), service, 409, 'm');
+    expectRefused(providerFailure(service, 403, googleError(403, 'PERMISSION_DENIED', ['insufficientPermissions']), 'm'), 'm');
+    expectRefused(providerFailure(service, 404, googleError(404, 'NOT_FOUND'), 'm'), 'm');
+    expectRefused(providerFailure(service, 400, JSON.stringify({ error: 'invalid_grant' }), 'm'), 'm');
   });
 });
