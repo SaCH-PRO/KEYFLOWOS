@@ -1026,6 +1026,11 @@
       "prefix": "v71d_",
       "owner": "apps/server/test/finance-settings-scope.integration.test.ts",
       "packet": "V1-71 (FU-FINANCE-SETTINGS-SCOPE)"
+    },
+    {
+      "prefix": "v71i_",
+      "owner": "apps/server/test/ai-memory-copies-rewrite.integration.test.ts",
+      "packet": "V1-71 (FU-MEMORY-COPIES-REWRITE)"
     }
   ],
   "pendingRenames": [],
