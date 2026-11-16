@@ -1,9 +1,10 @@
-import { Injectable, Logger, NotFoundException, Inject } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Inject, Optional } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { CrmService } from '../crm.service';
 import { ApolloEnrichmentProvider } from './apollo-enrichment.provider';
-import type { EnrichmentProvider } from './enrichment-provider';
+import { PublicDataEnrichmentProvider } from './public-data-enrichment.provider';
+import type { EnrichmentProvider, EnrichmentQuery } from './enrichment-provider';
 
 /** Fields an enrichment result may fill. Each maps to a Contact column and is
  *  only ever written when the contact's own value is blank. */
@@ -45,6 +46,16 @@ export interface EnrichmentOutcome {
  * disabled and every call returns `not_configured` without touching the row.
  * A `custom.enrichment` stamp records the last attempt (even a miss) so the
  * recent-guard can spare a paid lookup on the next call.
+ *
+ * TOF-WEBSITE-ENRICHMENT (V1-63; #63; owner ruling D-188): when Apollo is not
+ * configured, the website source (PublicDataEnrichmentProvider) reads the
+ * business website of the contact's work email, through the outbound address
+ * guard. It runs only here, on a member's explicit enrich (never in the
+ * background), after the same edit check, and counts as configured only when
+ * its flag (CONTACT_WEBSITE_ENRICHMENT) is on and the contact has a business
+ * website: otherwise the answer is `not_configured` with nothing asked and
+ * nothing stamped. Its match is written through CrmService.updateContact like
+ * Apollo's, with its audit row (D-25).
  */
 @Injectable()
 export class ContactEnrichmentService {
@@ -52,12 +63,22 @@ export class ContactEnrichmentService {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    private readonly crm: CrmService,
-    private readonly apollo: ApolloEnrichmentProvider,
+    @Inject(CrmService) private readonly crm: CrmService,
+    @Inject(ApolloEnrichmentProvider) private readonly apollo: ApolloEnrichmentProvider,
+    // TOF-WEBSITE-ENRICHMENT: provided by CrmModule; a module that does not
+    // provide it (a narrower test harness) gets Apollo alone, as before.
+    @Optional() @Inject(PublicDataEnrichmentProvider) private readonly website?: PublicDataEnrichmentProvider | null,
   ) {}
 
-  /** The active provider. A single adapter today; swap-point for a registry. */
+  /**
+   * The active provider: Apollo when it is configured (a business that set
+   * APOLLO_API_KEY keeps its paid person-level lookup), else the website source
+   * when its flag is on, else Apollo, whose `enabled` false makes the call the
+   * `not_configured` no-op it always was.
+   */
   private get provider(): EnrichmentProvider {
+    if (this.apollo.enabled) return this.apollo;
+    if (this.website?.enabled) return this.website;
     return this.apollo;
   }
 
@@ -85,6 +106,22 @@ export class ContactEnrichmentService {
       throw new NotFoundException('Contact not found');
     }
 
+    const query: EnrichmentQuery = {
+      email: contact.email,
+      firstName: contact.firstName,
+      lastName: contact.lastName,
+      companyName: contact.companyName,
+      domain: domainFromEmail(contact.email),
+    };
+
+    // TOF-WEBSITE-ENRICHMENT: the website source counts as configured for this
+    // contact only when the contact has a business website (a work email's
+    // domain). Without one there is nothing to ask: no lookup, no stamp, so a
+    // website added later is read on the next tap.
+    if (this.website && provider === this.website && !this.website.appliesTo(query)) {
+      return { status: 'not_configured', provider: provider.key, filled: [] };
+    }
+
     const custom = (contact.custom as Record<string, unknown> | null) ?? {};
     const meta = custom.enrichment as { lastRunAt?: string } | undefined;
     if (!input.force && meta?.lastRunAt) {
@@ -94,13 +131,7 @@ export class ContactEnrichmentService {
       }
     }
 
-    const outcome = await provider.enrich({
-      email: contact.email,
-      firstName: contact.firstName,
-      lastName: contact.lastName,
-      companyName: contact.companyName,
-      domain: domainFromEmail(contact.email),
-    });
+    const outcome = await provider.enrich(query);
 
     // A transient failure must NOT be cooled down — no stamp, so the next call
     // retries. Only a genuine miss earns the 7-day guard.

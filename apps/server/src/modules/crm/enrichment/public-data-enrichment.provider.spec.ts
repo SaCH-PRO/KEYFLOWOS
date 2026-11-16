@@ -369,7 +369,7 @@ describe('TOF-WEBSITE-ENRICHMENT: the fetch is bounded (http(s) default ports, r
   });
 
   it.each([
-    ['application/json', '{"name":"Acme"}'],
+    ['application/json', `{"note":"<meta property='og:site_name' content='Acme'>"}`],
     ['image/png', '<meta property="og:site_name" content="Acme">'],
     ['text/plain', '<meta property="og:site_name" content="Acme">'],
     [null, '<meta property="og:site_name" content="Acme">'],
