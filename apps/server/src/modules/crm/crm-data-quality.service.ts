@@ -1,12 +1,24 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  HttpException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
 import { CrmDuplicateDetectionService } from './crm-duplicate-detection.service';
+import { livePhoneHolderIds, normalizePhone } from './crm-duplicate.util';
+import { resolveCrmAccess, visibilityClause } from './crm-permissions.helper';
 import {
   DATA_QUALITY_KINDS,
   type DataQualityKind,
   computeQualityScore,
+  contactPhoneForStorage,
   isStale,
   missingRequiredFields,
   normalizeToE164,
@@ -14,6 +26,12 @@ import {
   severityFor,
   validateEmail,
 } from './crm-data-quality.util';
+
+/** The answer a contact write gets when a live contact already holds the number (CrmService's 409). */
+const PHONE_TAKEN_MESSAGE = 'A contact with this phone number already exists in this business';
+
+/** What bulk-apply reports for a fix that failed for a reason that is not the caller's to read. */
+const FIX_FAILED_MESSAGE = 'The fix could not be applied.';
 
 type IssueDraft = {
   contactId: string;
@@ -147,6 +165,17 @@ export class CrmDataQualityService {
         }
 
         const phoneRes = normalizeToE164(contact.phone, business.country ?? undefined);
+        // WA-E164-SERVER: the write paths flag a WhatsApp number that does not
+        // read under the business's country (CrmService.syncPhoneFlag); the
+        // scan reads it the same way, so it keeps that flag open. A contact has
+        // one invalid_phone issue (ContactDataIssue is unique per contact and
+        // kind): a phone that does not read comes first, then a WhatsApp number
+        // that does not read, and only then a phone that reads but can be
+        // reformatted (review COR-E164-6: a phone kept as typed with '+' and
+        // spaces must not take the slot from the WhatsApp flag).
+        const whatsappFlag = contact.phone && !phoneRes.ok
+          ? null
+          : phoneFlagFor({ whatsappNumber: contact.whatsappNumber }, business.country);
         if (contact.phone && !phoneRes.ok) {
           drafts.push({
             contactId: contact.id,
@@ -158,6 +187,15 @@ export class CrmDataQualityService {
               ? { action: 'replace_phone', value: phoneRes.suggestedFix }
               : { action: 'edit_phone' },
           });
+        } else if (whatsappFlag) {
+          drafts.push({
+            contactId: contact.id,
+            kind: 'invalid_phone',
+            severity: severityFor('invalid_phone'),
+            field: whatsappFlag.field,
+            message: whatsappFlag.message,
+            recommendedFix: whatsappFlag.recommendedFix,
+          });
         } else if (contact.phone && phoneRes.ok && phoneRes.suggestedFix && phoneRes.suggestedFix !== contact.phone) {
           drafts.push({
             contactId: contact.id,
@@ -167,21 +205,6 @@ export class CrmDataQualityService {
             message: 'Phone number can be reformatted to E.164.',
             recommendedFix: { action: 'replace_phone', value: phoneRes.suggestedFix },
           });
-        } else {
-          // WA-E164-SERVER: the write paths flag a WhatsApp number that does not
-          // read under the business's country (CrmService.syncPhoneFlag); the
-          // scan reads it the same way, so it keeps that flag open.
-          const whatsappFlag = phoneFlagFor({ whatsappNumber: contact.whatsappNumber }, business.country);
-          if (whatsappFlag) {
-            drafts.push({
-              contactId: contact.id,
-              kind: 'invalid_phone',
-              severity: severityFor('invalid_phone'),
-              field: whatsappFlag.field,
-              message: whatsappFlag.message,
-              recommendedFix: whatsappFlag.recommendedFix,
-            });
-          }
         }
 
         const missing = missingRequiredFields(contact);
@@ -486,11 +509,7 @@ export class CrmDataQualityService {
       case 'replace_phone': {
         const value = String(input.override?.value ?? fix?.value ?? '').trim();
         if (!value) throw new BadRequestException('Replacement phone is required');
-        const normalized = value.replace(/[^0-9+]/g, '');
-        await this.prisma.client.contact.update({
-          where: { id: contactId },
-          data: { phone: value, phoneNormalized: normalized, lastVerifiedAt: new Date() },
-        });
+        await this.replacePhone(input.businessId, contactId, value, input.actorId);
         break;
       }
       case 'mark_verified': {
@@ -533,11 +552,71 @@ export class CrmDataQualityService {
       try {
         await this.applyFix({ businessId: input.businessId, issueId: id, actorId: input.actorId });
         results.push({ issueId: id, ok: true });
-      } catch (err: any) {
-        results.push({ issueId: id, ok: false, error: (err as Error).message });
+      } catch (err: unknown) {
+        // The refusals applyFix raises itself (not found, unsupported, the
+        // phone another contact holds) are written for the caller; anything
+        // else (a database error, with its query and server path) is logged
+        // here and reported plainly (WA-E164-SERVER review COR-E164-4).
+        if (err instanceof HttpException) {
+          results.push({ issueId: id, ok: false, error: err.message });
+        } else {
+          this.logger.warn(`Bulk fix of issue ${id} failed: ${(err as Error)?.message ?? String(err)}`);
+          results.push({ issueId: id, ok: false, error: FIX_FAILED_MESSAGE });
+        }
       }
     }
     return { results, applied: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length };
+  }
+
+  /**
+   * The 'replace_phone' fix (WA-E164-SERVER review COR-E164-4): the phone is
+   * stored as a contact write stores it (read under the business's country:
+   * E.164, or as written with its country code), and it keeps the identity
+   * rule the writes keep: a number another live contact of the business holds
+   * (under its E.164 key, or under a key stored before E.164 that reads as it)
+   * is refused with the same 409 contact_phone_taken, naming the holder only
+   * when the actor may open it (the M7 clause CrmService applies). The scan
+   * offers a reformat for a number stored before E.164 that may be held so.
+   */
+  private async replacePhone(businessId: string, contactId: string, value: string, actorId?: string): Promise<void> {
+    const business = await this.prisma.client.business.findUnique({ where: { id: businessId }, select: { country: true } });
+    const country = business?.country ?? null;
+    const phone = contactPhoneForStorage(value, country);
+    if (!phone.e164 || !phone.value) {
+      throw new BadRequestException('Replacement phone is not a recognisable phone number');
+    }
+    const holders = await livePhoneHolderIds(this.prisma.client, businessId, phone.e164, country, { exceptId: contactId });
+    if (holders.length > 0) await this.rejectPhoneTaken(businessId, holders, actorId);
+    try {
+      await this.prisma.client.contact.update({
+        where: { id: contactId },
+        data: { phone: phone.value, phoneNormalized: normalizePhone(phone.value), lastVerifiedAt: new Date() },
+      });
+    } catch (err: unknown) {
+      // A holder that committed after the read: the identity unique refuses it (D-16).
+      if ((err as { code?: unknown } | null)?.code !== 'P2002') throw err;
+      const raced = await livePhoneHolderIds(this.prisma.client, businessId, phone.e164, country, { exceptId: contactId });
+      await this.rejectPhoneTaken(businessId, raced, actorId);
+    }
+  }
+
+  /** CrmService's bounded 409 contact_phone_taken: the holder's id only when the actor may open it. */
+  private async rejectPhoneTaken(businessId: string, holderIds: string[], actorId?: string): Promise<never> {
+    let existing: { id: string } | null = null;
+    if (holderIds.length > 0) {
+      const where: Prisma.ContactWhereInput = { ...contactWhereBase(businessId), id: { in: holderIds } };
+      if (actorId) {
+        const access = await resolveCrmAccess(this.prisma, businessId, actorId);
+        const visClause = visibilityClause(access, actorId);
+        if (visClause) where.AND = [visClause as Prisma.ContactWhereInput];
+      }
+      existing = await this.prisma.client.contact.findFirst({ where, select: { id: true }, orderBy: { createdAt: 'asc' } });
+    }
+    throw new ConflictException({
+      code: 'contact_phone_taken',
+      message: PHONE_TAKEN_MESSAGE,
+      existingContactId: existing?.id ?? null,
+    });
   }
 
   async dismissIssue(input: { businessId: string; issueId: string; actorId?: string }) {

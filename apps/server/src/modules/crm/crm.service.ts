@@ -21,8 +21,8 @@ import { contactWhereBase, contactWhereWithId } from './crm.helpers';
 import { buildContactWhere, findSearchTags } from './contact-filters.helper';
 import { resolveCrmAccess, visibilityClause, type CrmAccess } from './crm-permissions.helper';
 import { resolveTimelineViewer } from '../timeline/timeline-visibility';
-import { normalizeEmail, normalizePhone, findExistingBulk, findPhoneKeyMatch, samePhoneKey } from './crm-duplicate.util';
-import { contactPhoneForStorage, phoneFlagFor, severityFor, type PhoneFlagField } from './crm-data-quality.util';
+import { normalizeEmail, normalizePhone, findExistingBulk, findPhoneKeyMatch, livePhoneHolderIds } from './crm-duplicate.util';
+import { contactPhoneForStorage, phoneFlagFor, phoneKeyReadsAs, severityFor, type PhoneFlagField } from './crm-data-quality.util';
 import { CONTACT_EVENT } from '@keyflow/shared';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
 
@@ -179,9 +179,6 @@ class ContactPhoneHeldError extends Error {
     this.name = 'ContactPhoneHeldError';
   }
 }
-
-/** The fewest trailing digits two spellings of one phone number share (a national number, as samePhoneKey reads it). */
-const PHONE_TAIL_DIGITS = 7;
 
 /**
  * The identity key a contact write stores for its phone (Contact.phoneNormalized,
@@ -733,30 +730,22 @@ export class CrmService {
    * The live contacts of the tenant, other than `exceptId`, that hold the
    * number `e164` under ANOTHER key (WA-E164-SERVER): a contact stored before
    * phones were kept in E.164 keeps the key of its spelling (no backfill in
-   * v1), and SWP-CRM-SEARCH's reading (samePhoneKey) says whether that key is
-   * this number: '8685550160' and '18685550160' are +18685550160, a bare
-   * seven-digit '5550160' is not. A holder under the E.164 key itself is left
-   * to the identity unique (the database decides; rejectContactIdentityTaken
-   * maps its P2002). Tenant-wide: the caller bounds what it discloses.
+   * v1), and that key is this number when it reads as it under the business's
+   * country (review SEC-E164-1/2; livePhoneHolderIds): in Trinidad and Tobago
+   * '7123401', '8687123401' and '18687123401' are +18687123401, and '7123401'
+   * is not '+5927123401' or any other country's number ending in those
+   * digits. A holder under the E.164 key itself is left to the identity unique
+   * (the database decides; rejectContactIdentityTaken maps its P2002).
+   * Tenant-wide: the caller bounds what it discloses.
    */
-  private async phoneHoldersUnderAnotherKey(
+  private phoneHoldersUnderAnotherKey(
     client: Pick<PrismaService['client'], 'contact'>,
     businessId: string,
     e164: string,
+    country: string | null,
     exceptId?: string,
   ): Promise<string[]> {
-    const tail = e164.replace(/\D/g, '').slice(-PHONE_TAIL_DIGITS);
-    const rows = await client.contact.findMany({
-      where: {
-        ...contactWhereBase(businessId),
-        phoneNormalized: { endsWith: tail, not: e164 },
-        ...(exceptId ? { id: { not: exceptId } } : {}),
-      },
-      select: { id: true, phoneNormalized: true },
-      orderBy: { createdAt: 'asc' },
-      take: 200,
-    });
-    return rows.filter((row) => samePhoneKey(row.phoneNormalized, e164)).map((row) => row.id);
+    return livePhoneHolderIds(client, businessId, e164, country, { exceptId, otherKeysOnly: true });
   }
 
   /**
@@ -907,7 +896,7 @@ export class CrmService {
       if (phone.e164) {
         // A live contact holding this number under another key (stored before
         // E.164) is the same identity: refused before anything is written.
-        const holders = await this.phoneHoldersUnderAnotherKey(tx, input.businessId, phone.e164);
+        const holders = await this.phoneHoldersUnderAnotherKey(tx, input.businessId, phone.e164, country);
         if (holders.length > 0) throw new ContactPhoneHeldError(holders);
       }
       const created = await tx.contact.create({
@@ -1091,7 +1080,7 @@ export class CrmService {
       // check reads it: merged into, not duplicated. EntityResolutionService
       // matches on the exact key; its default match order reads the phone
       // (configureMergeRules has no caller).
-      const [holderId] = await this.phoneHoldersUnderAnotherKey(this.prisma.client, businessId, phoneRead.e164);
+      const [holderId] = await this.phoneHoldersUnderAnotherKey(this.prisma.client, businessId, phoneRead.e164, phoneCountry);
       if (holderId) matched = { contactId: holderId, matchedOn: 'phone' };
     }
 
@@ -1429,13 +1418,22 @@ export class CrmService {
       }
       if (typedPhone !== undefined) {
         const phone = contactPhoneForStorage(typedPhone, phoneCountry);
-        phoneNormalized = phoneIdentityKey(phone.value);
-        data.phone = phone.value;
-        data.phoneNormalized = phoneNormalized;
-        phonesTouched.push('phone');
-        if (phone.e164 && phone.e164 !== existingContact.phoneNormalized) {
-          const holders = await this.phoneHoldersUnderAnotherKey(tx, input.businessId, phone.e164, input.contactId);
-          if (holders.length > 0) throw new ContactPhoneHeldError(holders);
+        // Review COR-E164-3: the number the contact already has, in any
+        // spelling (its stored key read under the business's country), is not
+        // a change: the phone and its key stay as stored. The full edit form
+        // re-sends the phone with every edit, and re-keying a number stored
+        // before E.164 would collide with a contact holding it in E.164 (two
+        // keys the base allowed), refusing every edit of the contact.
+        const unchanged = phone.e164 !== null && phoneKeyReadsAs(existingContact.phoneNormalized, phone.e164, phoneCountry);
+        if (!unchanged) {
+          phoneNormalized = phoneIdentityKey(phone.value);
+          data.phone = phone.value;
+          data.phoneNormalized = phoneNormalized;
+          phonesTouched.push('phone');
+          if (phone.e164) {
+            const holders = await this.phoneHoldersUnderAnotherKey(tx, input.businessId, phone.e164, phoneCountry, input.contactId);
+            if (holders.length > 0) throw new ContactPhoneHeldError(holders);
+          }
         }
       }
       if (typedWhatsapp !== undefined) {
@@ -2945,6 +2943,13 @@ export class CrmService {
    * one. Only contacts `actorUserId` may open are matched (findExistingBulk applies the M7
    * visibility clause; SWP-CRM-SEARCH review SEC-CRMS-1): the answer names the holder, and a
    * holder the member is denied on GET detail reads as a new row here.
+   *
+   * A phone is read the way POST .../contacts and the import read it
+   * (WA-E164-SERVER review COR-E164-5): under the business's country, to the
+   * E.164 key a create would store ('712-3401' in Trinidad and Tobago is
+   * '+18687123401'), and a contact holds it when its stored key reads as that
+   * number under the same country (a key stored before E.164 included). A
+   * phone that does not read is matched by its exact key only.
    */
   async checkDuplicates(
     businessId: string,
@@ -2955,11 +2960,21 @@ export class CrmService {
     const emails = limited
       .map((c) => normalizeEmail(c.email))
       .filter((e): e is string => !!e);
+    const country = limited.some((c) => c.phone?.trim())
+      ? await this.businessPhoneCountry(this.prisma.client, businessId)
+      : null;
+    // The identity key a create would store for the phone (E.164 when it reads).
+    const phoneKeyOf = (phone?: string | null): string | null => {
+      const read = contactPhoneForStorage(phone, country);
+      return read.e164 ?? phoneIdentityKey(read.value);
+    };
+    const samePhone = (storedKey: string | null, asked: string) =>
+      asked.startsWith('+') ? phoneKeyReadsAs(storedKey, asked, country) : storedKey === asked;
     const phones = limited
-      .map((c) => normalizePhone(c.phone))
+      .map((c) => phoneKeyOf(c.phone))
       .filter((p): p is string => !!p);
 
-    const { existingByEmail, existingByPhone } = await findExistingBulk(this.prisma, businessId, emails, phones, actorUserId);
+    const { existingByEmail, existingByPhone } = await findExistingBulk(this.prisma, businessId, emails, phones, actorUserId, samePhone);
 
     const duplicates: Array<{
       importIndex: number;
@@ -2973,7 +2988,7 @@ export class CrmService {
     for (let i = 0; i < limited.length; i++) {
       const c = limited[i];
       const normalizedEmailVal = normalizeEmail(c.email);
-      const normalizedPhoneVal = normalizePhone(c.phone);
+      const normalizedPhoneVal = phoneKeyOf(c.phone);
       let matched = false;
 
       if (normalizedEmailVal) {
@@ -2984,8 +2999,9 @@ export class CrmService {
         }
       }
       if (!matched && normalizedPhoneVal) {
-        // The same number in any spelling (SWP-CRM-SEARCH, BUG-083), the exact key first.
-        const match = findPhoneKeyMatch(existingByPhone, normalizedPhoneVal);
+        // The same number in any spelling (SWP-CRM-SEARCH, BUG-083), read under the
+        // business's country (WA-E164-SERVER review COR-E164-5), the exact key first.
+        const match = findPhoneKeyMatch(existingByPhone, normalizedPhoneVal, samePhone);
         if (match) {
           duplicates.push({ importIndex: i, importContact: c, existingContact: match, matchField: 'phone' });
           matched = true;

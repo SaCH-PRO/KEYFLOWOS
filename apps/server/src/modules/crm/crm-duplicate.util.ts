@@ -3,6 +3,7 @@ import type { PrismaService } from '../../core/prisma/prisma.service';
 import { samePhoneNumber } from '../structure/position-holders';
 import { contactWhereBase } from './crm.helpers';
 import { resolveCrmAccess, visibilityClause } from './crm-permissions.helper';
+import { phoneKeyReadsAs } from './crm-data-quality.util';
 
 export function normalizeEmail(email?: string | null): string | null {
   return email ? email.trim().toLowerCase() : null;
@@ -38,9 +39,54 @@ export function samePhoneKey(a?: string | null, b?: string | null): boolean {
   return a === b || samePhoneNumber(a, b);
 }
 
-/** The row holding `key`: the one stored with exactly this key first, else one holding the same number. */
-export function findPhoneKeyMatch<T extends { phoneNormalized: string | null }>(rows: readonly T[], key: string): T | undefined {
-  return rows.find((row) => row.phoneNormalized === key) ?? rows.find((row) => samePhoneKey(row.phoneNormalized, key));
+/** Whether a stored phone key holds the phone asked for (a key or spelling); samePhoneKey by default. */
+export type SamePhone = (storedKey: string | null, asked: string) => boolean;
+
+/**
+ * The row holding `key`: the one stored with exactly this key first, else one holding the same
+ * number (`samePhone`: samePhoneKey by default; the import preview passes the reading under the
+ * business's country, WA-E164-SERVER review COR-E164-5).
+ */
+export function findPhoneKeyMatch<T extends { phoneNormalized: string | null }>(
+  rows: readonly T[],
+  key: string,
+  samePhone: SamePhone = samePhoneKey,
+): T | undefined {
+  return rows.find((row) => row.phoneNormalized === key) ?? rows.find((row) => samePhone(row.phoneNormalized, key));
+}
+
+/**
+ * The live contacts of a business, other than `exceptId`, that hold the number `e164`
+ * (WA-E164-SERVER; review SEC-E164-1/2): stored under exactly that key, or under another
+ * spelling's key that reads as that number under the business's country (phoneKeyReadsAs) — a
+ * contact stored before phones were kept in E.164 keeps the key of its spelling (no backfill in
+ * v1): in Trinidad and Tobago '7123401', '8687123401' and '18687123401' hold +18687123401, and
+ * '7123401' does not hold '+5927123401'. With `otherKeysOnly`, a holder under exactly the E.164
+ * key is left out (the write's identity unique decides it; its P2002 is mapped to the same 409).
+ * Candidates are the keys ending with the number's last seven digits (reading a key under a
+ * country only ever changes its front), oldest first. Tenant-wide: the caller bounds what it
+ * discloses.
+ */
+export async function livePhoneHolderIds(
+  client: Pick<PrismaService['client'], 'contact'>,
+  businessId: string,
+  e164: string,
+  country: string | null | undefined,
+  opts: { exceptId?: string; otherKeysOnly?: boolean } = {},
+): Promise<string[]> {
+  const tail = e164.replace(/\D/g, '').slice(-MIN_PHONE_DIGITS);
+  if (tail.length < MIN_PHONE_DIGITS) return [];
+  const rows = await client.contact.findMany({
+    where: {
+      ...contactWhereBase(businessId),
+      phoneNormalized: opts.otherKeysOnly ? { endsWith: tail, not: e164 } : { endsWith: tail },
+      ...(opts.exceptId ? { id: { not: opts.exceptId } } : {}),
+    },
+    select: { id: true, phoneNormalized: true },
+    orderBy: { createdAt: 'asc' },
+    take: 200,
+  });
+  return rows.filter((row) => phoneKeyReadsAs(row.phoneNormalized, e164, country)).map((row) => row.id);
 }
 
 /**
@@ -81,8 +127,10 @@ const DUPLICATE_SELECT = {
 /**
  * The live contacts of a business holding one of `emails` (normalised, exact) or one of `phones`
  * (phone keys). A phone matches a contact holding the same number in any spelling
- * (samePhoneKey): candidates are the exact keys plus the keys ending with the same last seven
- * digits, then each is kept only when it is one number with a phone asked for.
+ * (`samePhone`: samePhoneKey by default; CrmService.checkDuplicates passes the reading under the
+ * business's country, WA-E164-SERVER review COR-E164-5): candidates are the exact keys plus the
+ * keys ending with the same last seven digits, then each is kept only when it is one number with
+ * a phone asked for.
  *
  * With `actorUserId`, only contacts that member may open are read: both reads carry the M7
  * visibility clause GET contacts/:contactId applies (resolveCrmAccess + visibilityClause), as
@@ -98,6 +146,7 @@ export async function findExistingBulk(
   emails: string[],
   phones: string[],
   actorUserId?: string | null,
+  samePhone: SamePhone = samePhoneKey,
 ) {
   // The member's visibility, AND'd onto both reads (none for OWNER, SUPER_ADMIN or no actor).
   let visible: { AND?: Prisma.ContactWhereInput[] } = {};
@@ -132,7 +181,7 @@ export async function findExistingBulk(
       },
       select: DUPLICATE_SELECT,
     });
-    existingByPhone = candidates.filter((row) => phones.some((phone) => samePhoneKey(row.phoneNormalized, phone)));
+    existingByPhone = candidates.filter((row) => phones.some((phone) => row.phoneNormalized === phone || samePhone(row.phoneNormalized, phone)));
   }
 
   return { existingByEmail, existingByPhone };

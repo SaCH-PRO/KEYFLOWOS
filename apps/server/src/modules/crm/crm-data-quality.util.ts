@@ -286,6 +286,24 @@ export function contactPhoneForStorage(
   return { value: value.startsWith('+') ? value : read.e164, e164: read.e164, unreadable: false };
 }
 
+/**
+ * Whether a stored phone key (Contact.phoneNormalized: the digits and any '+' of the number as it
+ * was typed) is the number `e164`, read under the business's country (WA-E164-SERVER review
+ * SEC-E164-1/2): equal, or the key read the way a number typed today is read (normalizeToE164
+ * under Business.country). A contact stored before phones were kept in E.164 keeps the key of
+ * its spelling (no backfill in v1), so in Trinidad and Tobago '7123401', '8687123401' and
+ * '18687123401' are all +18687123401, while '7123401' is never '+5927123401' (Guyana) nor any
+ * other country's number that happens to end with the same digits. This is an identity decision
+ * (who already holds the number), so it does not use the country-agnostic search reading
+ * (samePhoneKey), which lets a national number sit behind ANY country calling code.
+ */
+export function phoneKeyReadsAs(key: string | null | undefined, e164: string, country?: string | null): boolean {
+  if (!key) return false;
+  if (key === e164) return true;
+  const read = normalizeToE164(key, country);
+  return read.ok && read.e164 === e164;
+}
+
 /** The contact fields a phone flag (an 'invalid_phone' data-quality issue) is written for. */
 export const PHONE_FLAG_FIELDS = ['phone', 'whatsappNumber'] as const;
 export type PhoneFlagField = typeof PHONE_FLAG_FIELDS[number];
