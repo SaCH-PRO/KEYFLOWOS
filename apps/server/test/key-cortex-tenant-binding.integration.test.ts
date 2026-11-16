@@ -1230,6 +1230,35 @@ for (const pipeline of PIPELINES) {
       expect(cache().has(sessionKey(ID.sessionB)), "B's session is not cached").toBe(false);
     });
 
+    // The chat, stream and conscious routes decide on ownSessionId, not ownSession: B's session named on every
+    // route, so both deciders are held to writing nothing for another tenant's session.
+    it("A's owner naming B's session cached by B's own traffic is refused on every route that takes a session id, and B's cached entry is not rewritten (no TTL extension) nor B's row written", async () => {
+      await stale(ID.sessionB);
+      const warm = await send(pipeline, { method: 'get', path: 'messages' }, { user: ID.ownerB, query: { businessId: ID.bizB, sessionId: ID.sessionB } });
+      expect(warm.status, JSON.stringify(warm.body)).toBe(200);
+      expect(cache().has(sessionKey(ID.sessionB))).toBe(true);
+      const cached = cache().get(sessionKey(ID.sessionB));
+      const before = await row(ID.sessionB);
+      const writes = await cacheWritesDuring(() => everyRoute(ID.ownerA, ID.sessionB));
+      expect(writes.filter((k) => k === sessionKey(ID.sessionB))).toEqual([]);
+      expect(cache().get(sessionKey(ID.sessionB))).toBe(cached);
+      expect(await row(ID.sessionB)).toEqual(before);
+    });
+
+    // Under the production pipeline the tenant extension scopes the database read to A, so B's cold session is not
+    // found there (no write, and the chat routes start a new session for an id found nowhere); only the handler
+    // alone reads B's row from the database, so only there is every route a refusal.
+    if (pipeline === 'bare') {
+      it("A's owner naming B's session (not cached) is refused on every route that takes a session id, and B's row is not written nor cached", async () => {
+        await stale(ID.sessionB);
+        const before = await row(ID.sessionB);
+        const writes = await cacheWritesDuring(() => everyRoute(ID.ownerA, ID.sessionB));
+        expect(await row(ID.sessionB)).toEqual(before);
+        expect(cache().has(sessionKey(ID.sessionB)), "B's session is not cached").toBe(false);
+        expect(writes.filter((k) => k === sessionKey(ID.sessionB))).toEqual([]);
+      });
+    }
+
     it("the OWNER reading its own session is answered with it and still marks it accessed, as before (positive control)", async () => {
       await stale(ID.sessionA);
       const res = await send(pipeline, { method: 'get', path: `sessions/${ID.sessionA}` }, { user: ID.ownerA, query: { businessId: ID.bizA } });
