@@ -117,8 +117,10 @@ const C = {
 /** The open issue seeded for contact `c` is `${c}_i`. */
 const issueOf = (contactId: string) => `${contactId}_i`;
 
-const OTHER_EMAIL = 'mina.holder@v71n.test';
-const CORRECTED_HELD = 'tomas@gmail.com';
+// Every address carries the fixture prefix (fixture-prefix-registry: a literal written to an `email` key
+// embeds it).
+const OTHER_EMAIL = `${P}mina.holder@test.local`;
+const CORRECTED_HELD = `${P}tomas@gmail.com`;
 const HELD_PHONE_E164 = '+18687123601';
 
 let db: any;
@@ -317,8 +319,8 @@ beforeAll(async () => {
   await cleanup(); // in case a prior run aborted
 
   // ---- identities, tenants, memberships ----------------------------------
-  for (const id of [ID.owner, ID.ownerB, ID.staffAll, ID.staffBook, ID.staffEdOwn, ID.staffNoEd]) {
-    await db.user.create({ data: { id, email: `${id}@test.local`, role: 'USER' } });
+  for (const suffix of ['owner', 'ownerB', 'stAll', 'stBook', 'stEdOwn', 'stNoEd']) {
+    await db.user.create({ data: { id: `${P}${suffix}`, email: `${P}${suffix}@test.local`, role: 'USER' } });
   }
   await db.business.create({ data: { id: ID.bizA, name: 'V71N Roti Shop', ownerId: ID.owner } });
   await db.business.create({ data: { id: ID.bizB, name: 'V71N Elsewhere', ownerId: ID.ownerB } });
@@ -348,7 +350,7 @@ beforeAll(async () => {
     [C.mBiz, 'Bea'], [C.mOwner, 'Omar'], [C.mVis, 'Vic'], [C.mDel, 'Dee'], [C.mKey, 'Kay'],
     [C.mMixed, 'Max'], [C.mOther, 'Otto'], [C.mOp, 'Opal'], [C.mLegit, 'Lia'], [C.mBulk, 'Bo'],
   ] as const) {
-    const email = `${firstName.toLowerCase()}@v71n.test`;
+    const email = `${P}${firstName.toLowerCase()}@test.local`;
     await contact(id, { firstName, relationshipType: 'VENDOR', email, emailNormalized: email });
     await issue(id, missingCompany);
   }
@@ -360,30 +362,30 @@ beforeAll(async () => {
   await contact(C.eHolder, { firstName: 'Mina', email: OTHER_EMAIL, emailNormalized: OTHER_EMAIL });
   // CLIENT with an email and no phone: missing_required ['phone'].
   for (const [id, firstName] of [[C.pTaken, 'Pat'], [C.pLegit, 'Pia']] as const) {
-    const email = `${firstName.toLowerCase()}@v71n.test`;
+    const email = `${P}${firstName.toLowerCase()}@test.local`;
     await contact(id, { firstName, relationshipType: 'CLIENT', email, emailNormalized: email });
     await issue(id, missingPhone);
   }
   await contact(C.pHolder, { firstName: 'Hal', phone: HELD_PHONE_E164, phoneNormalized: HELD_PHONE_E164 });
   // Stale contacts, for the actions another kind offers.
   for (const [id, firstName] of [[C.sFill, 'Sal'], [C.sEmail, 'Sue']] as const) {
-    const email = `${firstName.toLowerCase()}@v71n.test`;
+    const email = `${P}${firstName.toLowerCase()}@test.local`;
     await contact(id, { firstName, email, emailNormalized: email, companyName: `${firstName} Co` });
     await issue(id, stale);
   }
   // The other actions, as recommended.
-  await contact(C.rEmail, { firstName: 'Rita', email: 'rita@gmial.com', emailNormalized: 'rita@gmial.com' });
+  await contact(C.rEmail, { firstName: 'Rita', email: `${P}rita@gmial.com`, emailNormalized: `${P}rita@gmial.com` });
   await issue(C.rEmail, {
     kind: 'invalid_email', severity: 'high', field: 'email', message: 'Email address is not in a valid format.',
-    recommendedFix: { action: 'replace_email', value: 'rita@gmail.com' },
+    recommendedFix: { action: 'replace_email', value: `${P}rita@gmail.com` },
   });
   await contact(C.rHolder, { firstName: 'Tomas', email: CORRECTED_HELD, emailNormalized: CORRECTED_HELD });
-  await contact(C.rTaken, { firstName: 'Tom', email: 'tomas@gmial.com', emailNormalized: 'tomas@gmial.com' });
+  await contact(C.rTaken, { firstName: 'Tom', email: `${P}tomas@gmial.com`, emailNormalized: `${P}tomas@gmial.com` });
   await issue(C.rTaken, {
     kind: 'invalid_email', severity: 'high', field: 'email', message: 'Email address is not in a valid format.',
     recommendedFix: { action: 'replace_email', value: CORRECTED_HELD },
   });
-  await contact(C.rBad, { firstName: 'Ron', email: 'ron@nowhere', emailNormalized: 'ron@nowhere' });
+  await contact(C.rBad, { firstName: 'Ron', email: `${P}ron@nowhere`, emailNormalized: `${P}ron@nowhere` });
   await issue(C.rBad, {
     kind: 'invalid_email', severity: 'high', field: 'email', message: 'Email address is not in a valid format.',
     recommendedFix: { action: 'edit_email' },
@@ -400,7 +402,7 @@ beforeAll(async () => {
   await issue(C.hBook, stale);
   await contact(C.own, { firstName: 'Ola', ownerId: ID.staffBook });
   await issue(C.own, stale);
-  await contact(C.hPriv, { firstName: 'Priya', visibility: 'PRIVATE', relationshipType: 'VENDOR', email: 'priya@v71n.test', emailNormalized: 'priya@v71n.test' });
+  await contact(C.hPriv, { firstName: 'Priya', visibility: 'PRIVATE', relationshipType: 'VENDOR', email: `${P}priya@test.local`, emailNormalized: `${P}priya@test.local` });
   await issue(C.hPriv, missingCompany);
   await contact(C.edTeam, { firstName: 'Ted' });
   await issue(C.edTeam, stale);
@@ -443,7 +445,7 @@ describe('fill_fields writes only the fields the issue fixes (mass assignment)',
 
   it("RED-BEFORE: an email that is not an email is refused 400 as the contact PATCH DTO refuses it; nothing is written", async () => {
     const before = await snapshot(C.eBad);
-    const res = await apply(ID.staffAll, issueOf(C.eBad), { action: 'fill_fields', values: { email: 'not-an-email' } });
+    const res = await apply(ID.staffAll, issueOf(C.eBad), { action: 'fill_fields', values: { email: `${P}not-an-email` } });
     expectBadRequest(res);
     expect(await snapshot(C.eBad)).toEqual(before);
   });
@@ -491,7 +493,7 @@ describe('fill_fields writes only the fields the issue fixes (mass assignment)',
 
   it("RED-BEFORE: an email replacement named on a stale-data issue (another kind's action) is refused 400; the email is unchanged", async () => {
     const before = await snapshot(C.sEmail);
-    const res = await apply(ID.staffAll, issueOf(C.sEmail), { action: 'replace_email', value: 'someone.else@v71n.test' });
+    const res = await apply(ID.staffAll, issueOf(C.sEmail), { action: 'replace_email', value: `${P}someone.else@test.local` });
     expectBadRequest(res);
     expect(await snapshot(C.sEmail)).toEqual(before);
   });
@@ -535,7 +537,7 @@ describe('legitimate fixes still apply, through the contact write, and are audit
     expect(res.status, JSON.stringify(res.body).slice(0, 400)).toBe(201);
     expect(res.body).toMatchObject({ status: 'resolved', applied: true });
     const stored = await row(C.rEmail);
-    expect(stored).toMatchObject({ email: 'rita@gmail.com', email_normalized: 'rita@gmail.com' });
+    expect(stored).toMatchObject({ email: `${P}rita@gmail.com`, email_normalized: `${P}rita@gmail.com` });
     expect(stored?.last_verified_at).toBeTruthy();
     const entries = await audits(C.rEmail);
     expect(entries).toHaveLength(1);
