@@ -300,10 +300,17 @@ describe('fixture sanity (real rows)', () => {
       select: { id: true, phone: true, phoneNormalized: true },
     });
     const byId = new Map(keys.map((k: any) => [k.id, k]));
-    // The two spellings of one number are two different keys: this is the premise of BUG-083.
-    expect(byId.get(viaApi.ravi)).toMatchObject({ phone: '868-555-0101', phoneNormalized: '8685550101' });
+    // WA-E164-SERVER: the write path stores a number typed without its country code in E.164,
+    // read under the business's country (none set: Trinidad and Tobago), so Ravi's
+    // '868-555-0101' is '+18685550101'; a number typed with its country code keeps its spelling
+    // and its key is already E.164 (Asha).
+    expect(byId.get(viaApi.ravi)).toMatchObject({ phone: '+18685550101', phoneNormalized: '+18685550101' });
     expect(byId.get(viaApi.asha)).toMatchObject({ phone: '+1 868 555 0102', phoneNormalized: '+18685550102' });
-    expect(byId.get(viaApi.raviB)).toMatchObject({ phoneNormalized: '8685550101' });
+    expect(byId.get(viaApi.raviB)).toMatchObject({ phoneNormalized: '+18685550101' });
+    // A contact stored before that change keeps its national key (no backfill in v1): the two
+    // spellings of one number are two different keys, the premise of BUG-083 (Mina, '868-555-0144').
+    expect(await db.contact.findUnique({ where: { id: ID.mine }, select: { phoneNormalized: true } }))
+      .toEqual({ phoneNormalized: '8685550144' });
     expect((await db.contact.findUnique({ where: { id: ID.noel } })).tags).toEqual(['Christmas 2026']);
     const { normalizePhone, normalizeEmail } = await import('../src/modules/crm/crm-duplicate.util');
     expect(normalizePhone('+1 868 555 0177')).toBe('+18685550177');
