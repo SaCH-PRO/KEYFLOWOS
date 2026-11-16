@@ -431,7 +431,7 @@ export function BusinessHero({ business, primaryColor, secondaryColor, accentCol
               )}
               {business.whatsapp && showWhatsApp && (
                 <a
-                  href={buildWhatsAppLink({ to: business.whatsapp })}
+                  href={buildWhatsAppLink({ to: business.whatsapp, country: business.country })}
                   target="_blank" rel="noopener noreferrer"
                   className="w-10 h-10 rounded-xl flex items-center justify-center border transition-all hover:scale-110 hover:shadow-md min-h-[44px]"
                   style={{ backgroundColor: "rgba(16,185,129,0.06)", borderColor: "rgba(16,185,129,0.18)" }}

@@ -22,6 +22,8 @@ export type Business = {
   instagram?: string | null;
   twitter?: string | null;
   whatsapp?: string | null;
+  /** Business.country (served by the public slug read): reads the business's local WhatsApp number. */
+  country?: string | null;
   refundPolicy?: string | null;
 };
 

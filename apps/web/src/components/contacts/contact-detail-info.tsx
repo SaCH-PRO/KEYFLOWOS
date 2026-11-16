@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { updateContact } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
-import { buildWhatsAppLink } from "@/lib/whatsapp";
+import { buildWhatsAppLink, ownBusinessCountry } from "@/lib/whatsapp";
 import { useCompose } from "@/components/email/compose-context";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type { ContactDetailData } from "./contact-detail";
@@ -293,7 +293,7 @@ export function ContactDetailInfo({
   }
   if (contact.whatsappNumber && whatsappPhone) {
     otherChannels.push(
-      <a key="wa" href={buildWhatsAppLink(whatsappPhone)} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 transition-colors text-emerald-400" title={contact.whatsappNumber}>
+      <a key="wa" href={buildWhatsAppLink({ to: whatsappPhone, country: ownBusinessCountry() })} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 transition-colors text-emerald-400" title={contact.whatsappNumber}>
         <MessageCircle className="w-3 h-3" /> WhatsApp
       </a>
     );

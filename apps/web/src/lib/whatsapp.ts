@@ -1,4 +1,5 @@
 import { getCachedBusiness } from "./workspace";
+import { fetchContactDetail } from "./client";
 
 /**
  * One WhatsApp helper (WA-HELPER, whatsapp ruling D-153: outbound WhatsApp is a
@@ -10,8 +11,14 @@ import { getCachedBusiness } from "./workspace";
  *
  * Numbers are read as E.164 with the business's country for a local number
  * (Business.country, a free-text name or ISO code; default Trinidad and
- * Tobago, +1 868). Stored numbers are not rewritten here: contacts saved
- * before WA-E164-SERVER are read on the fly.
+ * Tobago, +1 868, when no country is set). A country the helper does not
+ * know ('Other Caribbean', 'Other') is not read as TT: there only a number
+ * written internationally is readable. Stored numbers are not rewritten here:
+ * contacts saved before WA-E164-SERVER are read on the fly.
+ *
+ * A quote or invoice share carries the document's bearer link, so it opens
+ * only the WhatsApp number the business saved on the contact
+ * (savedWhatsAppNumber), read by id at share time (readSavedWhatsAppNumber).
  */
 
 type CountryRule = {
@@ -100,10 +107,17 @@ function foldCountry(country: string): string {
     .trim();
 }
 
-function ruleFor(country: string | null | undefined): CountryRule {
+/**
+ * The dialling rule for a business's country: the default market when none is
+ * set, null for a country the helper does not know. A non-empty country says
+ * where the business is, so an unknown one ('Other Caribbean', 'Other' from the
+ * onboarding profile, a misspelling) is never read as TT: a local or national
+ * number there could be anyone's in Trinidad or North America (SEC-WAH-2).
+ */
+function ruleFor(country: string | null | undefined): CountryRule | null {
   if (!country || !country.trim()) return DEFAULT_RULE;
   const folded = foldCountry(country);
-  return RULE_BY_NAME.get(folded) ?? RULE_BY_NAME.get(folded.replace(/ /g, "")) ?? DEFAULT_RULE;
+  return RULE_BY_NAME.get(folded) ?? RULE_BY_NAME.get(folded.replace(/ /g, "")) ?? null;
 }
 
 /** E.164 allows 15 digits; the shortest real international numbers have 8. */
@@ -118,12 +132,15 @@ const MIN_NATIONAL = 6;
  * A phone number as E.164 ('+18687550123'), or null when it cannot be read.
  *
  * A number written internationally ('+', or the '00' / NANP '011' prefix) is
- * kept as written. Otherwise `businessCountry` (Business.country; default TT)
- * decides: in a NANP country 11 digits starting with 1 and 10 digits are
- * already complete, and 7 digits take the territory's area code (TT 868; the
- * US and Canada have none, so 7 digits there are unreadable); elsewhere the
- * trunk 0 is dropped and the calling code added to a national number, and a
- * number longer than any national one already carries its country code.
+ * kept as written. Otherwise `businessCountry` (Business.country; default TT
+ * when none is set) decides: in a NANP country 11 digits starting with 1 and
+ * 10 digits are already complete, 7 digits take the territory's area code (TT
+ * 868; the US and Canada have none, so 7 digits there are unreadable), and 11
+ * or more digits otherwise are an international number typed without its '+'
+ * (NANP has no such number); elsewhere the trunk 0 is dropped and the calling
+ * code added to a national number, and a number longer than any national one
+ * already carries its country code. In a country the helper does not know,
+ * only a number written internationally is readable.
  */
 export function toE164(phone: string | null | undefined, businessCountry?: string | null): string | null {
   if (!phone) return null;
@@ -136,14 +153,17 @@ export function toE164(phone: string | null | undefined, businessCountry?: strin
 
   const rule = ruleFor(businessCountry);
   if (digits.startsWith("00")) return e164(digits.slice(2));
+  // An unknown country: no national or local reading is safe.
+  if (!rule) return null;
   if (rule.cc === "1" && digits.startsWith("011")) return e164(digits.slice(3));
 
   if (rule.cc === "1") {
     if (digits.length === 11 && digits.startsWith("1")) return e164(digits);
     if (digits.length === 10 && /^[2-9]/.test(digits)) return e164(`1${digits}`);
     if (digits.length === 7 && rule.area) return e164(`1${rule.area}${digits}`);
-    // A longer number typed without its '+' (a customer abroad).
-    if (digits.length > 11) return e164(digits);
+    // 11 or more digits that are not a NANP number: a customer abroad typed
+    // without the '+' ('33612345678', '50761234567'). e164 refuses a leading 0.
+    if (digits.length >= 11) return e164(digits);
     return null;
   }
 
@@ -208,4 +228,47 @@ export function ownBusinessCountry(): string | null {
 
 export function getContactPhone(contact: { phone?: string | null; whatsappNumber?: string | null }): string | null {
   return contact.whatsappNumber || contact.phone || null;
+}
+
+/**
+ * The number a quote or invoice may be shared to: the WhatsApp number the
+ * business saved on the contact (Contact.whatsappNumber), or null for
+ * WhatsApp's chooser.
+ *
+ * The share carries the document's bearer link (the holder sees the customer's
+ * name, the items and the total, can pay the invoice and accept or reject the
+ * quote), so it must not go to a number nobody at the business entered.
+ * Contact.phone is not used: the public storefront intake, booking and order
+ * routes fill a blank phone on the existing contact they match by e-mail
+ * (CrmService.findOrCreateContact / mergeContactDetails), so an anonymous
+ * visitor can write it (SEC-WAH-1). No public route writes whatsappNumber;
+ * the contact form fills it from the phone the owner types. Until the server
+ * marks phones that came from public input (a follow-up), a phone alone gets
+ * WhatsApp's chooser here.
+ */
+export function savedWhatsAppNumber(
+  contact: { whatsappNumber?: string | null; phone?: string | null } | null | undefined,
+): string | null {
+  const saved = contact?.whatsappNumber?.trim();
+  return saved ? saved : null;
+}
+
+/**
+ * The customer's saved WhatsApp number, read by id when the share is made
+ * (GET /crm/businesses/:id/contacts/:contactId, the member's own read, so
+ * their visibility applies): not looked up in the list a screen loaded, which
+ * is only the 50 newest contacts (WAH-CR-1). A refused or failed read, or no
+ * ids, answers null (WhatsApp's chooser).
+ */
+export async function readSavedWhatsAppNumber(
+  businessId: string | null | undefined,
+  contactId: string | null | undefined,
+): Promise<string | null> {
+  if (!businessId || !contactId) return null;
+  try {
+    const { data, error } = await fetchContactDetail(contactId, businessId);
+    return error ? null : savedWhatsAppNumber(data?.contact);
+  } catch {
+    return null;
+  }
 }

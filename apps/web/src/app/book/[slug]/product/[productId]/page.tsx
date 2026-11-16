@@ -249,7 +249,7 @@ export default function ProductDetailPage() {
   const itemColor = item.itemType === "service" ? primaryColor : item.itemType === "product" ? secondaryColor : accentColor;
   const badge = typeBadge(item.itemType, primaryColor, secondaryColor, accentColor);
   const waLink = business.whatsapp
-    ? buildWhatsAppLink({ to: business.whatsapp, text: `Hi, I'm interested in ${item.name}` })
+    ? buildWhatsAppLink({ to: business.whatsapp, text: `Hi, I'm interested in ${item.name}`, country: business.country })
     : null;
 
   const deliveryInfo = item.itemType === "service"

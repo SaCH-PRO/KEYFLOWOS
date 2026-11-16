@@ -1083,7 +1083,7 @@ export function CheckoutFlow({
                 <div className="flex items-center justify-center">
                   <a
                     href={business.whatsapp
-                      ? buildWhatsAppLink({ to: business.whatsapp, text: "Hi, I have a question about my order" })
+                      ? buildWhatsAppLink({ to: business.whatsapp, text: "Hi, I have a question about my order", country: business.country })
                       : `mailto:${business.email}?subject=Question about my order`}
                     target="_blank"
                     rel="noopener noreferrer"

@@ -18,6 +18,8 @@ type Props = {
   removeFromCart: (itemId: string, itemType: string) => void;
   relatedItems: CatalogItem[];
   businessPhone?: string | null;
+  /** The business's country (Business.country), for its local number. */
+  businessCountry?: string | null;
   onClose: () => void;
   onSelectItem: (item: CatalogItem) => void;
   badges?: Record<string, string>;
@@ -57,6 +59,7 @@ export function ItemDetailModal({
   removeFromCart,
   relatedItems,
   businessPhone,
+  businessCountry,
   onClose,
   onSelectItem,
   badges,
@@ -69,7 +72,7 @@ export function ItemDetailModal({
   const badge = badgeKey ? badgeConfig[badgeKey] : null;
 
   const waLink = businessPhone
-    ? buildWhatsAppLink({ to: businessPhone, text: `Hi, I'm interested in ${item.name}` })
+    ? buildWhatsAppLink({ to: businessPhone, text: `Hi, I'm interested in ${item.name}`, country: businessCountry })
     : null;
 
   return (

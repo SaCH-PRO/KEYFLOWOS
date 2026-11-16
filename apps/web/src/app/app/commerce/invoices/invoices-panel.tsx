@@ -88,7 +88,7 @@ import { DunningRulesPanel } from "../components/dunning-rules";
 
 import { formatAmount, getDaysUntilDue } from "../utils/commerce-utils";
 import { useCommerceSearch } from "../hooks/use-commerce-search";
-import { buildWhatsAppLink, getContactPhone, ownBusinessCountry } from "@/lib/whatsapp";
+import { buildWhatsAppLink, ownBusinessCountry, readSavedWhatsAppNumber } from "@/lib/whatsapp";
 import type { ReactNode } from "react";
 
 /**
@@ -422,6 +422,8 @@ export default function InvoicesPanel({
   }
 
   async function shareViaWhatsApp(inv: Invoice) {
+    // The customer's number, read by id alongside the link (not from the loaded list).
+    const savedNumber = readSavedWhatsAppNumber(businessId, inv.contactId);
     const link = await buildPublicInvoiceUrl(inv.id);
     if (!link) {
       setInvoiceError("Could not create a payment link for this invoice");
@@ -431,9 +433,8 @@ export default function InvoicesPanel({
       ? `${inv.contact.firstName ?? ""} ${inv.contact.lastName ?? ""}`.trim()
       : "there";
     const msg = `Hi ${contactName}, here is your invoice ${inv.invoiceNumber ?? ""} for ${formatAmount(inv.total, inv.currency)}. You can view and pay it here:`;
-    // The customer's own number (the operator read serves no phone): from the business's contacts.
-    const customer = contacts.find((c) => c.id === inv.contactId);
-    window.open(buildWhatsAppLink({ to: customer ? getContactPhone(customer) : null, text: msg, link, country: ownBusinessCountry() }), "_blank");
+    // The share carries the invoice's bearer link: only the WhatsApp number the business saved, else the chooser.
+    window.open(buildWhatsAppLink({ to: await savedNumber, text: msg, link, country: ownBusinessCountry() }), "_blank");
   }
 
   async function handleResendReceipt(inv: Invoice) {
@@ -1236,6 +1237,7 @@ export default function InvoicesPanel({
             status={selectedInvoice.status}
             contact={selectedInvoice.contact ?? null}
             contactId={selectedInvoice.contactId ?? null}
+            businessId={businessId}
             total={Number(selectedInvoice.total)}
             currency={selectedInvoice.currency}
             items={selectedInvoice.items ?? []}

@@ -45,7 +45,7 @@ export function ContactSection({
   if (!hasContact) return null;
 
   const waLink = business.whatsapp
-    ? buildWhatsAppLink({ to: business.whatsapp, text: `Hi ${business.name}, I'd like to get in touch.` })
+    ? buildWhatsAppLink({ to: business.whatsapp, text: `Hi ${business.name}, I'd like to get in touch.`, country: business.country })
     : null;
 
   return (
