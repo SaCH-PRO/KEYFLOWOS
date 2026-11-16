@@ -95,6 +95,37 @@ function ownPaypalSettings(meta: unknown): { clientId: string | null; clientSecr
 }
 
 /**
+ * PR210-PAYPAL-STORE-REFUND: the PayPal events whose resource is a refund (a capture refunded, or reversed by a
+ * dispute). It names the capture it returns only through supplementary_data.related_ids.capture_id or its 'up' link
+ * (paypalRefundedCaptureId), not through custom_id / invoice_id as a capture does.
+ */
+const PAYPAL_REFUND_EVENTS = new Set(['PAYMENT.CAPTURE.REFUNDED', 'PAYMENT.CAPTURE.REVERSED']);
+
+/** The capture a PayPal refund resource returns: supplementary_data.related_ids.capture_id, else its 'up' link's last segment. */
+function paypalRefundedCaptureId(resource: any): string | undefined {
+  const captureId: unknown =
+    resource?.supplementary_data?.related_ids?.capture_id ||
+    resource?.links?.find?.((l: any) => l?.rel === 'up')?.href?.split('/').pop();
+  return typeof captureId === 'string' && captureId ? captureId : undefined;
+}
+
+/**
+ * W11-STORE-OWN-PAYMENT-KEYS (D-138): the credentials a PayPal webhook of a store's storefront order is verified with:
+ * the store's own complete pair and its own webhook id, each null when the store has not saved it (verifyPaypalSignature
+ * then refuses before any request), never one of the platform's (storefrontBusinessId makes the check store-only).
+ */
+function storefrontPaypalCredentials(businessId: string, meta: unknown): PaypalWebhookCredentials {
+  const own = storePaypalCredentials(meta);
+  return {
+    clientId: own?.clientId ?? null,
+    clientSecret: own?.clientSecret ?? null,
+    webhookId: storePaypalWebhookId(meta),
+    businessId,
+    storefrontBusinessId: businessId,
+  };
+}
+
+/**
  * V1-15c review (SEC-V15C-2, CR-V15C-1): the aborts of a payment transaction
  * that a second attempt can get past (P2028: the transaction expired or was
  * closed, typically behind a lock; P2034: a write conflict or deadlock), and
@@ -2063,7 +2094,9 @@ export class PaymentsService {
     // Review repair (SEC-W11OPK-1): the app is chosen from the first purchase
     // unit, but every captured unit is settled, so each one is settled only for
     // what that app may settle (an invoice: paypalAppOfInvoice).
-    const businessCreds = await this.resolvePaypalBusinessCreds(event.resource || {});
+    // PR210-PAYPAL-STORE-REFUND: a refund or reversal names only the capture it returns; a store's capture resolves
+    // to that store's own app (resolvePaypalBusinessCreds), so its refund is never checked with the platform's.
+    const businessCreds = await this.resolvePaypalBusinessCreds(event.resource || {}, event.event_type);
     const verified = await this.verifyPaypalSignature(headers, rawPayload, sandbox, businessCreds ?? undefined);
     if (!verified) {
       throw new BadRequestException('Invalid PayPal webhook signature');
@@ -2102,7 +2135,7 @@ export class PaymentsService {
           return { ok: true, received: true, processed: eventType };
         case 'PAYMENT.CAPTURE.REFUNDED':
         case 'PAYMENT.CAPTURE.REVERSED':
-          await this.processPaypalRefund(resource, event.id);
+          await this.processPaypalRefund(resource, event.id, verifier);
           return { ok: true, received: true, processed: eventType };
         default:
           return { ok: true, received: true };
@@ -2115,8 +2148,26 @@ export class PaymentsService {
    * invoice) and return its PayPal app credentials, falling back to env.
    * Returns null when no business can be resolved — the caller will then use
    * env-level credentials only.
+   *
+   * PR210-PAYPAL-STORE-REFUND (Codex review P1 on PR #210; D-138): a refund or
+   * reversal (PAYMENT.CAPTURE.REFUNDED / .REVERSED) names the capture it
+   * returns only through related_ids.capture_id or its 'up' link, which none
+   * of the readings below follow, so a store's own refund was checked with the
+   * platform's app and webhook id: refused 400 (PayPal kept redelivering it)
+   * and never recorded. The capture is followed first, to what the storefront
+   * settlement recorded for it (paypalStorefrontSettlementOf): a store's
+   * capture is verified with that store's own complete set only, whatever
+   * else the resource names, never the platform's and never mixed (a store
+   * missing a value refuses, as for a capture). Any other capture (an
+   * invoice's) keeps the path below, unchanged. A failed read throws: the
+   * delivery is answered 500 and PayPal redelivers it, rather than it being
+   * checked with an app the read did not choose.
    */
-  private async resolvePaypalBusinessCreds(resource: any): Promise<PaypalWebhookCredentials | null> {
+  private async resolvePaypalBusinessCreds(resource: any, eventType?: string): Promise<PaypalWebhookCredentials | null> {
+    if (eventType && PAYPAL_REFUND_EVENTS.has(eventType)) {
+      const store = await this.paypalStorefrontSettlementOf(paypalRefundedCaptureId(resource));
+      if (store) return storefrontPaypalCredentials(store.businessId, store.metaData);
+    }
     const link = await this.resolvePaypalInvoiceId(resource).catch(() => null);
     if (!link) return this.resolvePaypalStorefrontCreds(resource);
     const business = await this.prisma.client.business.findUnique({
@@ -2172,14 +2223,34 @@ export class PaymentsService {
       )
       .catch(() => null);
     if (!order) return null;
-    const own = storePaypalCredentials(order.business?.metaData);
-    return {
-      clientId: own?.clientId ?? null,
-      clientSecret: own?.clientSecret ?? null,
-      webhookId: storePaypalWebhookId(order.business?.metaData),
-      businessId: order.businessId,
-      storefrontBusinessId: order.businessId,
-    };
+    return storefrontPaypalCredentials(order.businessId, order.business?.metaData);
+  }
+
+  /**
+   * PR210-PAYPAL-STORE-REFUND: the storefront order a PayPal capture settled, as the storefront settlement recorded it
+   * (maybeCompleteStorefrontOrder -> StoreOrderService.updatePaymentStatus -> completeCheckout): the capture id is the
+   * providerPaymentId of a PayPal payment on the order's checkout invoice (INV-<orderNumber>, written only by that paid
+   * door) and the order's paymentRef, all under one business. Null for any other capture (an invoice's, one KeyFlow
+   * never recorded). Its store's settings come with it, for the store-only check (storefrontPaypalCredentials).
+   */
+  private async paypalStorefrontSettlementOf(
+    captureId: string | undefined,
+  ): Promise<{ orderId: string; businessId: string; metaData: unknown } | null> {
+    if (!captureId) return null;
+    const payment = await this.prisma.client.payment.findUnique({
+      where: { providerPaymentId: captureId },
+      select: { provider: true, businessId: true, invoice: { select: { businessId: true, invoiceNumber: true } } },
+    });
+    const invoiceNumber = payment?.invoice?.invoiceNumber;
+    if (payment?.provider !== 'paypal' || payment.invoice?.businessId !== payment.businessId || !invoiceNumber?.startsWith('INV-')) {
+      return null;
+    }
+    const order = await this.prisma.client.marketplaceOrder.findUnique({
+      where: { orderNumber: invoiceNumber.slice('INV-'.length) },
+      select: { id: true, businessId: true, paymentRef: true, business: { select: { metaData: true } } },
+    });
+    if (!order || order.businessId !== payment.businessId || order.paymentRef !== captureId) return null;
+    return { orderId: order.id, businessId: order.businessId, metaData: order.business?.metaData };
   }
 
   /**
@@ -2347,8 +2418,20 @@ export class PaymentsService {
     }).catch((e) => this.logger.warn(`PayPal connector event emission failed: ${e.message}`));
   }
 
-  /** `eventId`: the webhook_events id this delivery claimed (absent when PayPal sent none). */
-  private async processPaypalRefund(resource: any, eventId?: string): Promise<void> {
+  /**
+   * `eventId`: the webhook_events id this delivery claimed (absent when PayPal sent none). `verifier`: the PayPal app
+   * the delivery was verified with (handlePaypalWebhook); a direct call stands for the platform's, as before.
+   *
+   * PR210-PAYPAL-STORE-REFUND (D-138): a refund or reversal of a capture that settled a storefront order is recorded
+   * through the provider refund door (createRefundWithPosting: the refund row on the order's checkout invoice, linked
+   * to the capture's payment, deduped on the refund id, the settlement's payment posting reversed, never more than
+   * what is left of it; then the invoice reconciled), and only when the delivery was verified with that order's own
+   * store's app, as its capture was (maybeCompleteStorefrontOrder). An event verified with a store's own app (chosen
+   * because it names that store's order) records refunds of that store's captures only, never an invoice's or another
+   * store's. Anything else keeps its path, unchanged. A refusal is logged and acked with nothing recorded, as a
+   * capture verified with the wrong app is.
+   */
+  private async processPaypalRefund(resource: any, eventId?: string, verifier: PaypalVerifier = PLATFORM_PAYPAL_VERIFIER): Promise<void> {
     const refundId: string | undefined = resource?.id;
     if (!refundId) {
       this.logger.warn('PayPal refund event missing refund id');
@@ -2359,10 +2442,8 @@ export class PaymentsService {
     }).catch(() => null);
     if (existing) return;
 
-    // The original capture id is in supplementary_data.related_ids.capture_id
-    const captureId: string | undefined =
-      resource?.supplementary_data?.related_ids?.capture_id ||
-      resource?.links?.find?.((l: any) => l.rel === 'up')?.href?.split('/').pop();
+    // The original capture id is in supplementary_data.related_ids.capture_id, else the refund's 'up' link.
+    const captureId = paypalRefundedCaptureId(resource);
 
     // The capture's payment, when the refund names one we recorded.
     const captured: RefundOriginal | null = captureId
@@ -2371,6 +2452,18 @@ export class PaymentsService {
         select: { id: true, providerPaymentId: true, invoiceId: true, businessId: true, currency: true, amount: true },
       }).catch(() => null)
       : null;
+    // PR210 (D-138): a store's capture is refunded only by its own store's app, and a store's app refunds nothing else.
+    const store = captured ? await this.paypalStorefrontSettlementOf(captureId) : null;
+    if ((store || verifier.store) && !(store && verifier.store && verifier.businessId === store.businessId)) {
+      this.logger.error(
+        `PayPal refund ${refundId} of capture ${captureId ?? '<none>'} not recorded: ` +
+          (store
+            ? `it returns storefront order ${store.orderId}'s capture and the webhook was not verified with that store's own PayPal app`
+            : `the webhook was verified with store ${verifier.businessId}'s own PayPal app and the capture is not that store's`) +
+          ` (verified for ${verifier.businessId ?? 'the platform'}; D-138)`,
+      );
+      return;
+    }
     let invoice: { invoiceId: string; businessId: string; currency: string } | null = captured;
     if (!invoice) {
       const link = await this.resolvePaypalInvoiceId(resource);
