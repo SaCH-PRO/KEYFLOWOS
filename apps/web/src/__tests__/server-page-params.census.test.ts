@@ -33,7 +33,12 @@
  * The census checks itself first: synthetic modules it must flag and must
  * pass, so a parser change cannot make it pass by seeing nothing; and on the
  * real tree it must find the dynamic pages, the contact page among them, and
- * the server modules that do read their params.
+ * the server modules that do read their params. It also fails closed on what
+ * it cannot read: every page, layout, default and template must export a
+ * default function it checks, or re-export the default of another route
+ * module it checks (`export { default } from "@/app/app/commerce/page"`); a
+ * wrapped component (`export default wrap(...)`) or a re-export from outside
+ * src/app is named, not skipped.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -49,8 +54,14 @@ const PROPS_EXPORTS = new Set(["generateMetadata", "generateViewport"]);
 const HANDLERS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 
 type Finding = { file: string; line: number; entry: string; read: string };
-type Entry = { name: string; fn: ts.SignatureDeclaration & { body?: ts.ConciseBody }; propsIndex: number };
-type CensusResult = { findings: Finding[]; entries: string[]; checkedReads: number };
+type Entry = { name: string; fn: ts.SignatureDeclaration & { body?: ts.ConciseBody }; propsIndex: number; isDefault?: boolean };
+/**
+ * How the module's default export reached the census: a function it checked
+ * ("entry"), a re-export of another module's default ("reexport", with the
+ * specifier), or neither ("none": a wrapped component, a call, a class).
+ */
+type DefaultExport = { kind: "entry" } | { kind: "reexport"; from: string } | { kind: "none" };
+type CensusResult = { findings: Finding[]; entries: string[]; checkedReads: number; defaultExport: DefaultExport };
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -108,7 +119,7 @@ function entriesOf(sf: ts.SourceFile, fileName: string): Entry[] {
   for (const stmt of sf.statements) {
     if (ts.isFunctionDeclaration(stmt) && hasModifier(stmt, ts.SyntaxKind.ExportKeyword)) {
       if (hasModifier(stmt, ts.SyntaxKind.DefaultKeyword)) {
-        if (!isRoute) entries.push({ name: stmt.name?.text ?? "default", fn: stmt, propsIndex: 0 });
+        if (!isRoute) entries.push({ name: stmt.name?.text ?? "default", fn: stmt, propsIndex: 0, isDefault: true });
       } else if (stmt.name) {
         named(stmt.name.text, stmt);
       }
@@ -119,10 +130,10 @@ function entriesOf(sf: ts.SourceFile, fileName: string): Entry[] {
       }
     } else if (ts.isExportAssignment(stmt) && !stmt.isExportEquals && !isRoute) {
       const direct = asFunction(stmt.expression);
-      if (direct) entries.push({ name: "default", fn: direct, propsIndex: 0 });
+      if (direct) entries.push({ name: "default", fn: direct, propsIndex: 0, isDefault: true });
       else if (ts.isIdentifier(stmt.expression)) {
         const fn = topFunctions.get(stmt.expression.text);
-        if (fn) entries.push({ name: stmt.expression.text, fn, propsIndex: 0 });
+        if (fn) entries.push({ name: stmt.expression.text, fn, propsIndex: 0, isDefault: true });
       }
     } else if (ts.isExportDeclaration(stmt) && !stmt.moduleSpecifier && stmt.exportClause && ts.isNamedExports(stmt.exportClause)) {
       for (const spec of stmt.exportClause.elements) {
@@ -130,7 +141,7 @@ function entriesOf(sf: ts.SourceFile, fileName: string): Entry[] {
         const fn = topFunctions.get(local);
         if (!fn) continue;
         if (spec.name.text === "default") {
-          if (!isRoute) entries.push({ name: local, fn, propsIndex: 0 });
+          if (!isRoute) entries.push({ name: local, fn, propsIndex: 0, isDefault: true });
         } else named(spec.name.text, fn);
       }
     }
@@ -222,6 +233,16 @@ function referencesTo(name: string, body: ts.Node): ts.Identifier[] {
   return refs;
 }
 
+/** `export { default } from "x"` / `export { X as default } from "x"`: the module it re-exports from. */
+function reexportedDefault(sf: ts.SourceFile): string | undefined {
+  for (const stmt of sf.statements) {
+    if (!ts.isExportDeclaration(stmt) || !stmt.moduleSpecifier || !ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+    if (!stmt.exportClause || !ts.isNamedExports(stmt.exportClause)) continue;
+    if (stmt.exportClause.elements.some((spec) => spec.name.text === "default")) return stmt.moduleSpecifier.text;
+  }
+  return undefined;
+}
+
 /** The census of one module's source. */
 function censusSource(text: string, fileName: string): CensusResult {
   const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, scriptKind(fileName));
@@ -229,8 +250,15 @@ function censusSource(text: string, fileName: string): CensusResult {
   const entries: string[] = [];
   let checkedReads = 0;
   const lineOf = (node: ts.Node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+  const found = entriesOf(sf, fileName);
+  const from = reexportedDefault(sf);
+  const defaultExport: DefaultExport = found.some((e) => e.isDefault)
+    ? { kind: "entry" }
+    : from
+      ? { kind: "reexport", from }
+      : { kind: "none" };
 
-  for (const entry of entriesOf(sf, fileName)) {
+  for (const entry of found) {
     entries.push(entry.name);
     const param = entry.fn.parameters[entry.propsIndex];
     const body = entry.fn.body;
@@ -305,23 +333,42 @@ function censusSource(text: string, fileName: string): CensusResult {
       }
     }
   }
-  return { findings, entries, checkedReads };
+  return { findings, entries, checkedReads, defaultExport };
+}
+
+/** A re-export's specifier ("@/..." or relative) as the route module file it names, if it is one. */
+function resolveRouteModule(from: string, importer: string, routeFiles: Set<string>): string | undefined {
+  const base = from.startsWith("@/") ? path.join(WEB, "src", from.slice(2)) : from.startsWith(".") ? path.resolve(path.dirname(importer), from) : undefined;
+  if (!base) return undefined;
+  for (const candidate of [base, ...[".tsx", ".ts", ".jsx", ".js"].map((ext) => base + ext)]) {
+    if (routeFiles.has(candidate)) return candidate;
+  }
+  return undefined;
 }
 
 function censusTree() {
   const files = walk(APP).sort();
+  const routeFiles = new Set(files);
   const findings: Finding[] = [];
   const reading: string[] = [];
   const modulesWithEntries: string[] = [];
+  /** Page / layout / default / template modules whose default export the census could not check. */
+  const unseen: string[] = [];
   for (const file of files) {
     const result = censusSource(fs.readFileSync(file, "utf8"), file);
     for (const f of result.findings) findings.push({ ...f, file: rel(file) });
     if (result.entries.length) modulesWithEntries.push(rel(file));
     if (result.checkedReads > 0) reading.push(rel(file));
+    if (/^route\./.test(path.basename(file))) continue;
+    const d = result.defaultExport;
+    if (d.kind === "none") unseen.push(`${rel(file)}: a default export the census cannot read (not a function it can see)`);
+    else if (d.kind === "reexport" && !resolveRouteModule(d.from, file, routeFiles)) {
+      unseen.push(`${rel(file)}: re-exports its default from "${d.from}", which is not a route module the census checks`);
+    }
   }
   const pages = files.map(rel).filter((f) => /(^|\/)page\.(tsx|ts|jsx|js)$/.test(f));
   const dynamicPages = pages.filter((f) => /(^|\/)\[[^/]+\]\//.test(f));
-  return { files: files.map(rel), pages, dynamicPages, findings, reading, modulesWithEntries };
+  return { files: files.map(rel), pages, dynamicPages, findings, reading, modulesWithEntries, unseen };
 }
 
 const describeFinding = (f: Finding) => `${f.file}:${f.line} ${f.entry} reads ${f.read} without awaiting it`;
@@ -394,6 +441,19 @@ describe("the census flags a route module that reads params or searchParams with
     const { findings } = censusSource(src, `/virtual/app/x/[id]/${file}`);
     expect(findings.map(describeFinding)).toEqual([]);
   });
+
+  it("names a default export it cannot read instead of skipping it, and follows a re-exported default", () => {
+    const wrapped = censusSource(
+      `const P = wrap(function P({ params }: any) { return params.id; }); export default P;`,
+      "/virtual/app/x/[id]/page.tsx",
+    );
+    expect(wrapped.defaultExport).toEqual({ kind: "none" });
+    expect(censusSource(`export { default } from "@/app/app/commerce/page";`, "/virtual/app/money/page.tsx").defaultExport).toEqual({
+      kind: "reexport",
+      from: "@/app/app/commerce/page",
+    });
+    expect(censusSource(`export default async function P({ params }: any) { return (await params).id; }`, "/virtual/app/x/[id]/page.tsx").defaultExport).toEqual({ kind: "entry" });
+  });
 });
 
 // ── the real tree ───────────────────────────────────────────────────────
@@ -415,6 +475,10 @@ describe("census: every App Router module awaits params and searchParams before 
     ]) {
       expect(tree.reading, `the census checks the params / searchParams reads of ${reads}`).toContain(reads);
     }
+  });
+
+  it("reads every page, layout, default and template: a default export it checks, or one re-exported from a route module it checks", () => {
+    expect(tree.unseen).toEqual([]);
   });
 
   it("every app/**/[param]/page.tsx awaits params before reading it", () => {
