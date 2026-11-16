@@ -81,16 +81,23 @@
                     cover the header and the bottom bar, so no sheet's
                     footer button is ever under either
          modal      dialogs and the phone's navigation drawer
-         key-panel  KEY's chat drawer, opened on request only
-         toast      toasts, over every layer (and over the page-level
-                    z-index literals of 90 to 101 still in the app), so
-                    feedback is always seen */
+         key-panel  KEY's chat drawer, opened on request only, so it shows
+                    over whatever is open when it is asked for
+         toast      toasts, over every layer, so feedback is always seen
+       Pages still set z-index literals of their own, not on this table yet,
+       and the table keeps the order the shell had against them (review
+       LAY-CR-2): the header is 40, the z-40 of page dialogs' backdrops and
+       dropdown click-catchers, which come later in the document and so still
+       cover it (a click there closes what is open, never opens a header menu
+       over it); the bottom bar is under them; KEY's drawer is over page
+       modals at z-[70] and z-[90]; toasts are over every literal (up to
+       z-[101]). */
     --kf-z-fab: 30;
-    --kf-z-chrome: 40;
-    --kf-z-header: 45;
+    --kf-z-chrome: 35;
+    --kf-z-header: 40;
     --kf-z-drawer: 50;
     --kf-z-modal: 60;
-    --kf-z-key-panel: 70;
+    --kf-z-key-panel: 95;
     --kf-z-toast: 200;
 
     /* ─── NEW v2: Playful Luminous accent + surface tokens ─── */

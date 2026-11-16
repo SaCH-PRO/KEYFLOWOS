@@ -140,7 +140,10 @@ export function AppHeader({
     <header
       // The header layer (app/globals.css): the header is the stacking context
       // of every menu it opens, so this layer is theirs: over the page and the
-      // phone's bottom bar, under sheets, drawers and dialogs (BUG-041).
+      // phone's bottom bar, under sheets, drawers and dialogs (BUG-041). A
+      // page's own full-screen overlay at the z-40 literal (a dialog's
+      // backdrop, a dropdown's click-catcher) comes later in the document and
+      // so still covers it (LAY-CR-2).
       className="h-12 border-b border-border px-3 md:px-5 flex items-center justify-between flex-shrink-0 z-[var(--kf-z-header)] relative"
       style={{
         background: "hsl(var(--kf-header-bg))",
@@ -149,7 +152,12 @@ export function AppHeader({
       {/* Subtle top glow line */}
       <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-[hsl(var(--kf-accent1)/0.15)] to-transparent" />
 
-      <div className="flex items-center gap-2 md:gap-3 flex-1">
+      {/* The left group may shrink below its content (min-w-0): the header sits
+          in the shell's overflow-hidden root, so a left group as wide as its
+          content (the whole wordmark, Ask KEY, the KEY bar's typing text)
+          would push Search, New and Notifications off a phone's screen, where
+          nobody can reach them (LAY-CR-1). The logo gives way first. */}
+      <div className="flex items-center gap-2 md:gap-3 flex-1 min-w-0">
         {/* Mobile hamburger */}
         <button
           onClick={() => setMobileDrawerOpen(true)}
@@ -159,8 +167,9 @@ export function AppHeader({
           <Menu className="w-5 h-5" />
         </button>
 
-        {/* Mobile logo */}
-        <div className="md:hidden flex items-center gap-2 flex-1 min-w-0">
+        {/* Mobile logo: the mark alone on a phone (the wordmark from sm), and
+            nothing below 360px, where the header's controls take the width */}
+        <div className="md:hidden flex max-[359px]:hidden items-center gap-2 flex-1 min-w-0 overflow-hidden">
           <div
             className="h-6 w-6 rounded-md flex items-center justify-center flex-shrink-0"
             style={{
@@ -169,7 +178,7 @@ export function AppHeader({
           >
             <Sparkles className="w-3.5 h-3.5 text-white" />
           </div>
-          <span className="text-sm font-bold tracking-tight truncate">KEYFLOWOS</span>
+          <span className="hidden sm:block text-sm font-bold tracking-tight truncate">KEYFLOWOS</span>
         </div>
 
         {/* Ask KEY: KEY's one door in the shell (and Cmd/Ctrl+J). It opens
