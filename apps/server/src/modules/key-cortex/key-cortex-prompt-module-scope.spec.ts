@@ -160,6 +160,21 @@ describe('W1F-PERCEPTION-MODULE-SCOPE: readersOwnPromptMemory projects the busin
     expect(kept.map((f) => f.id)).toEqual(['mem', 'genome', 'temporal', 'exec', 'action']);
   });
 
+  it('a GOVERNANCE_DECISION record stays business-wide even when its subject or source names a module (the packet keeps proposals business-wide)', async () => {
+    const fragments = [be('gov_subject', 'GOVERNANCE_DECISION', 'invoice'), ce('gov_source', 'GOVERNANCE_DECISION', 'commerce')];
+    for (const reader of [null, 'blind', 'arrayMap']) {
+      const kept = await readersOwnPromptMemory(prisma as any, 'biz_1', reader, fragments as any, 1000);
+      expect(kept.map((f) => f.id), String(reader)).toEqual(['gov_subject', 'gov_source']);
+    }
+  });
+
+  it('no membership is read when no event names a module', async () => {
+    const fragments = [be('gov', 'GOVERNANCE_DECISION', 'key_action_proposal'), be('insight', 'insight.generated', 'KEY_CORTEX_EVENT'), { id: 'mem', sourceType: 'ai_memory', title: 'fact' }];
+    const kept = await readersOwnPromptMemory(prisma as any, 'biz_1', 'blind', fragments as any, 1000);
+    expect(kept.map((f) => f.id)).toEqual(['gov', 'insight', 'mem']);
+    expect(prisma.client.membership.findUnique).not.toHaveBeenCalled();
+  });
+
   it('the window is cut after the projection, so a refused event does not take a line of it', async () => {
     const fragments = [be('a', 'expense.created', 'Expense'), be('b', 'payment.received'), { id: 'mem', sourceType: 'ai_memory', title: 'fact' }];
     const kept = await readersOwnPromptMemory(prisma as any, 'biz_1', 'blind', fragments as any, 1);
