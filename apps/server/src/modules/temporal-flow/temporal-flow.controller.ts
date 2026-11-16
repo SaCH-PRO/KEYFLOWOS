@@ -18,7 +18,9 @@ import { TemporalFlowService } from './temporal-flow.service';
 import { TemporalFlowMemoryService } from './temporal-flow-memory.service';
 import { TemporalFlowMemoryQueueService } from './temporal-flow-memory.queue.service';
 import { TemporalFlowGenomeBridgeService } from './temporal-flow-genome-bridge.service';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('flow_hubs', 'bookings')
 @Controller('temporal-flow/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
 export class TemporalFlowController {

@@ -10,7 +10,9 @@ import { ReferralRewardService } from './referral-reward.service';
 import { SalesTeamService } from './sales-team.service';
 import { LeadMagnetService } from './lead-magnet.service';
 import { MerchantSubscriptionService } from './merchant-subscription.service';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('referrals', 'crm')
 @Controller('conversion')
 @UseGuards(AuthGuard, BusinessGuard)
 export class ConversionController {

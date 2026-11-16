@@ -469,6 +469,12 @@ describe('the outbound route names only the tenant BusinessGuard verified', () =
           // BusinessGuard's predicate: the caller owns or is a member of exactly BIZ_A.
           findFirst: vi.fn(async ({ where }: { where: { id: string } }) => (where.id === BIZ_A ? { id: BIZ_A } : null)),
         },
+        membership: {
+          // ModuleScopeGuard (SWP-CENSUS-HIDDEN: an outbound call is a crm write, @HiddenModuleWrites): the same
+          // caller is an ADMIN of BIZ_A (role defaults: crm admin) and of nothing else.
+          findUnique: vi.fn(async ({ where }: { where: { userId_businessId: { userId: string; businessId: string } } }) =>
+            where.userId_businessId.userId === MEMBER && where.userId_businessId.businessId === BIZ_A ? { role: 'ADMIN', permissionScopes: null } : null),
+        },
       },
     };
     const moduleRef = await Test.createTestingModule({

@@ -1026,6 +1026,11 @@
       "prefix": "v71d_",
       "owner": "apps/server/test/finance-settings-scope.integration.test.ts",
       "packet": "V1-71 (FU-FINANCE-SETTINGS-SCOPE)"
+    },
+    {
+      "prefix": "v62a_",
+      "owner": "apps/server/test/census-hidden.integration.test.ts",
+      "packet": "V1-62 (SWP-CENSUS-HIDDEN)"
     }
   ],
   "pendingRenames": [],

@@ -24,6 +24,9 @@
  *     marketing push) and read on what it sends, and it sends only the records every receiver may
  *     read: the pushing member and the member who bound the account (a PRIVATE contact goes only to
  *     an account its viewers bound; an account with no recorded binder is read as a non-owner's);
+ *     since SWP-CENSUS-HIDDEN's review repair (SEC-HID-1, owner ruling D-181: only a settings admin
+ *     connects, syncs or tests a connector) a push and a campaign trigger also need settings admin,
+ *     checked first (EXP-PUSH-07), so the members who push here hold it;
  *   - the accounting reads (summary, unsynced invoices, chart of accounts) need revenue read;
  *   - Mailchimp's host is <dc>.api.mailchimp.com with a real data-center suffix only.
  *
@@ -57,7 +60,9 @@ const ID = {
   setAdminNone: `${P}setAdminNone`, // ADMIN, explicit { settings: admin, every other module none } (D-114)
   staffNone: `${P}staffNone`, // STAFF, every module none
   crmBinder: `${P}crmBinder`, // STAFF, explicit { settings: admin, crm: admin, crm_view: all, content: write, revenue: none }
-  ownView: `${P}ownView`, // STAFF, explicit { revenue: write, crm: read, crm_view: owned, content: write } (their own book)
+  ownView: `${P}ownView`, // STAFF, explicit { settings: admin, revenue: write, crm: read, crm_view: owned, content: write } (their own book)
+  // SWP-CENSUS-HIDDEN review SEC-HID-1 (D-181: only a settings admin syncs a connector): the push's module write and reads, no settings admin
+  pushNoSettings: `${P}pushNoSettings`, // STAFF, explicit { settings: none, revenue: write, crm: read, crm_view: all, content: write }
   bizA: `${P}bizA`,
   cPrivate: `${P}c_private`, // PRIVATE, owned by the owner
   cTeam: `${P}c_team`, // TEAM, owned by the owner
@@ -195,7 +200,7 @@ beforeAll(async () => {
   await app.init();
 
   await cleanup();
-  for (const id of [ID.owner, ID.admin, ID.setAdminNone, ID.staffNone, ID.crmBinder, ID.ownView]) {
+  for (const id of [ID.owner, ID.admin, ID.setAdminNone, ID.staffNone, ID.crmBinder, ID.ownView, ID.pushNoSettings]) {
     await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role: 'USER' } });
   }
   await db.business.create({ data: { id: ID.bizA, name: 'V99X Biz A', ownerId: ID.owner } });
@@ -206,7 +211,9 @@ beforeAll(async () => {
   await m(ID.setAdminNone, 'ADMIN', { ...EVERY_MODULE_NONE, settings: 'admin' });
   await m(ID.staffNone, 'STAFF', { ...EVERY_MODULE_NONE, settings: 'none' });
   await m(ID.crmBinder, 'STAFF', { ...EVERY_MODULE_NONE, settings: 'admin', crm: 'admin', crm_view: 'all', content: 'write' });
-  await m(ID.ownView, 'STAFF', { ...EVERY_MODULE_NONE, settings: 'none', revenue: 'write', crm: 'read', crm_view: 'owned', content: 'write' });
+  // D-181 (SWP-CENSUS-HIDDEN review SEC-HID-1): a push is a connector sync, so the member pushing holds settings admin.
+  await m(ID.ownView, 'STAFF', { ...EVERY_MODULE_NONE, settings: 'admin', revenue: 'write', crm: 'read', crm_view: 'owned', content: 'write' });
+  await m(ID.pushNoSettings, 'STAFF', { ...EVERY_MODULE_NONE, settings: 'none', revenue: 'write', crm: 'read', crm_view: 'all', content: 'write' });
 
   const contact = (id: string, first: string, visibility: string, ownerId: string, extra: Record<string, unknown> = {}) =>
     db.contact.create({ data: { id, businessId: ID.bizA, firstName: first, lastName: 'Client', email: `${P}${id.slice(P.length)}@client.example`, doNotContact: false, visibility, ownerId, ...extra } });
@@ -360,6 +367,25 @@ describe('a push needs its module write and the reads it sends, and sends only w
     expect(res.status).toBe(201);
     expect(sentWith(PRIVATE_COMPANY)).toEqual([]);
     expect(sentWith('Team Co').length).toBe(1);
+  });
+
+  it('[EXP-PUSH-07] RED-BEFORE (SWP-CENSUS-HIDDEN review SEC-HID-1; D-181): with the owner\'s QuickBooks, Klaviyo and Mailchimp bound, a member with revenue and content write and crm read but no settings admin is refused the customer push, the invoice push, the contact push and the campaign trigger with settings\' refusal, and nothing is sent', async () => {
+    await unbindAll();
+    expect((await send('post', `${conn}/credentials/quickbooks`, ID.owner, QBO('OWNER_REALM'))).status).toBe(201);
+    expect((await send('post', `${conn}/credentials/klaviyo`, ID.owner, { values: { apiKey: ['pk', 'owner', 'key'].join('_') } })).status).toBe(201);
+    expect((await send('post', `${conn}/credentials/mailchimp`, ID.owner, { values: { apiKey: ['owner' + 'key', 'us21'].join('-') } })).status).toBe(201);
+    outbound.length = 0;
+    const refusals = [
+      await send('post', `${acct}/customers/push`, ID.pushNoSettings, { contactIds: [ID.cTeam] }),
+      await send('post', `${acct}/invoices/push`, ID.pushNoSettings, { invoiceIds: [ID.invTeam] }),
+      await send('post', `${mkt}/lists/push-contacts`, ID.pushNoSettings, { provider: 'klaviyo', listId: 'L1', contactIds: [ID.cTeam] }),
+      await send('post', `${mkt}/lists/campaigns/mailchimp/C1/trigger`, ID.pushNoSettings, {}),
+    ];
+    for (const res of refusals) {
+      expect(res.status, JSON.stringify(res.body)).toBe(403);
+      expect(JSON.stringify(res.body)).toMatch(/settings requires admin access \(you have none\)/);
+    }
+    expect(outbound).toEqual([]);
   });
 
   it('[EXP-PUSH-06] the owner\'s own account receives everything the owner pushes (no regression): both contacts and both invoices are sent to the owner\'s realm', async () => {

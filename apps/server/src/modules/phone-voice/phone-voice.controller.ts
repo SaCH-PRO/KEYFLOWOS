@@ -17,6 +17,7 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { GuardedBusinessId } from '../../core/auth/request-business-id';
 import { mintPhoneStreamToken, PHONE_STREAM_TOKEN_PARAM } from './phone-voice.service';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
 const STREAM_PATH = '/api/v1/cortex/phone/stream';
 const INBOUND_PATH = '/api/v1/cortex/phone/inbound';
@@ -27,6 +28,7 @@ function baseUrl(): string {
   return (process.env.PUBLIC_BASE_URL ?? process.env.API_URL ?? 'http://localhost:3001').replace(/\/$/, '');
 }
 
+@HiddenModuleWrites('key_voice', 'crm')
 @Controller('api/v1/cortex/phone')
 export class PhoneVoiceController {
   private readonly logger = new Logger(PhoneVoiceController.name);

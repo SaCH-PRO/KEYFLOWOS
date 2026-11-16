@@ -9,10 +9,14 @@ import {
   Query,
   UseGuards,
   Request,
+  Inject,
 } from '@nestjs/common';
 import { Request as ExpressRequest } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { assertMemberModuleLevel, type ModuleLevelActor } from '../../core/auth/member-module-level';
+import { PrismaService } from '../../core/prisma/prisma.service';
 import { RateLimit } from '../../core/decorators/rate-limit.decorator';
 import { RateLimitGuard } from '../../core/guards/rate-limit.guard';
 import { ContentRequestService } from './content-request.service';
@@ -22,14 +26,17 @@ import { CreateContentRequestDto } from './dto/create-content-request.dto';
 import { UpdateContentRequestDto } from './dto/update-content-request.dto';
 import { ContentReviewDto } from './dto/content-review.dto';
 import { UploadDeliverablesDto } from './dto/upload-deliverables.dto';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('content', 'content')
 @Controller()
 @UseGuards(AuthGuard, BusinessGuard, RateLimitGuard)
 export class ContentOpsController {
   constructor(
-    private readonly contentRequests: ContentRequestService,
-    private readonly delivery: ContentDeliveryService,
-    private readonly contentInvoice: ContentInvoiceService,
+    @Inject(ContentRequestService) private readonly contentRequests: ContentRequestService,
+    @Inject(ContentDeliveryService) private readonly delivery: ContentDeliveryService,
+    @Inject(ContentInvoiceService) private readonly contentInvoice: ContentInvoiceService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   @Post('businesses/:businessId/content-requests')
@@ -166,12 +173,21 @@ export class ContentOpsController {
     return this.contentRequests.deliverRequest(requestId, req.user?.id ?? 'system');
   }
 
+  /**
+   * SWP-CENSUS-HIDDEN review repair (SEC-HID-2): this writes an Invoice (ContentInvoiceService ->
+   * CommerceService.createInvoice), and every other door that creates one needs revenue write (D-146; revenue-auth,
+   * invoice-create contract). The handler declares it, so the class gate's content write is not its scope, and the
+   * content write it also needs (it bills a content request) is checked here first.
+   */
+  @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/content-requests/:requestId/generate-invoice')
   @RateLimit(20, 60_000)
   async generateInvoice(
     @Param('businessId') businessId: string,
     @Param('requestId') requestId: string,
+    @Request() req?: { user?: ModuleLevelActor },
   ) {
+    await assertMemberModuleLevel(this.prisma, businessId, req?.user, 'content', 'write');
     return this.contentInvoice.generateInvoiceFromDelivery(requestId, businessId);
   }
 

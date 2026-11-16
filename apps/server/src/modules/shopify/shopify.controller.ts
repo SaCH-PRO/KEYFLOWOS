@@ -5,7 +5,9 @@ import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-sco
 import { ShopifyService } from './shopify.service';
 import { ConnectorCredentialsService } from '../../core/connectors/connector-credentials.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('connectors', 'settings')
 @Controller('shopify')
 export class ShopifyController {
   constructor(
@@ -64,6 +66,8 @@ export class ShopifyController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  // D-181 (connectorauth): only a settings admin connects, syncs or tests the other connectors (SWP-CENSUS-HIDDEN).
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/sync/products')
   async syncProducts(
     @Param('businessId') businessId: string,
@@ -73,6 +77,8 @@ export class ShopifyController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  // D-181 (connectorauth): only a settings admin connects, syncs or tests the other connectors (SWP-CENSUS-HIDDEN).
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/sync/orders')
   async syncOrders(
     @Param('businessId') businessId: string,
@@ -82,6 +88,8 @@ export class ShopifyController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  // D-181 (connectorauth): only a settings admin connects, syncs or tests the other connectors (SWP-CENSUS-HIDDEN).
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/sync/customers')
   async syncCustomers(
     @Param('businessId') businessId: string,
@@ -91,6 +99,8 @@ export class ShopifyController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  // D-181 (connectorauth): only a settings admin connects, syncs or tests the other connectors (SWP-CENSUS-HIDDEN).
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/sync/all')
   async syncAll(@Param('businessId') businessId: string) {
     const [products, orders, customers] = await Promise.all([

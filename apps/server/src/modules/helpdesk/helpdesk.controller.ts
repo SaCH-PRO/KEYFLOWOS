@@ -2,7 +2,9 @@ import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, UseGu
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { HelpdeskService } from './helpdesk.service';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('helpdesk', 'operations')
 @Controller('helpdesk')
 @UseGuards(AuthGuard, BusinessGuard)
 export class HelpdeskController {

@@ -3,7 +3,9 @@ import { Controller, Get, Inject, Param, Post, UseGuards } from '@nestjs/common'
 import { GamificationService, GamificationStats } from './gamification.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('settings_insights', 'analytics')
 @Controller('gamification')
 export class GamificationController {
   constructor(@Inject(GamificationService) private readonly gamificationService: GamificationService) {}

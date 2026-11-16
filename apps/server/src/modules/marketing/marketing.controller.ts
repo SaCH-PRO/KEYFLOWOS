@@ -2,7 +2,9 @@ import { Controller, Get, Post, Patch, Delete, Inject, Param, Body, UseGuards } 
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { MarketingCampaignService } from './marketing-campaign.service';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('marketing', 'content')
 @Controller('marketing/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
 export class MarketingController {

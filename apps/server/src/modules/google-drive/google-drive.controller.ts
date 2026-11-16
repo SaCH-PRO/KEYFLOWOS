@@ -9,7 +9,9 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { assertGoogleConnectOwner, type GoogleConnectActor } from '../../core/connectors/google-suite.controller';
 import { assertMayExport, receiverReadRefusal } from '../../core/auth/receiver-reads';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('connectors', 'operations')
 @Controller('drive')
 export class GoogleDriveController {
   constructor(
