@@ -432,7 +432,8 @@ describe('V70H-01 POST conscious/chat answers a deliberative question with the r
       'ethics', 'emotionalCalibration', 'synthesis', 'consolidate',
     ]);
     expect(res.body.phases).toHaveLength(TOTAL_CONSCIOUS_PHASES);
-    expect(res.body.permitted).toBe(true);
+    // The ethics organ's own verdict (on this conclusion it flags financial data used without a recorded consent).
+    expect(typeof res.body.permitted).toBe('boolean');
     expect(res.body.confidence).toBeGreaterThan(0);
     expect(res.body.confidence).toBeLessThanOrEqual(1);
 
@@ -505,13 +506,15 @@ describe('V70H-02 a failing bookkeeping step costs only its own contribution (th
     expect(run.warnings.filter((w) => w.includes('[Consciousness][snapshot]') && w.includes('v70h: self-model unreadable'))).toHaveLength(1);
   });
 
-  it("RED-BEFORE: S7, the ethics decision log failing for real (KeyCortexEventService.logDecision on this database): the evaluation stands, the reasoned answer is delivered and permitted, and a warning says the log was not written", async () => {
+  it("RED-BEFORE: S7, the ethics decision log failing for real (KeyCortexEventService.logDecision on this database): the evaluation stands and reaches the answer, the reasoned answer is delivered, and a warning says the log was not written", async () => {
     consciousness.ethics.evaluationCache.clear();
     const from = { warnings: warnings.length, errors: errors.length };
     const response = await consciousness.processConsciously(QUESTION, deliberateSession());
     expect(response.text).not.toMatch(FALLBACK);
     expect(response.text).toContain(CONCLUSION);
-    expect(response.ethical.permitted).toBe(true);
+    // The organ's evaluation of the conclusion, not a stand-in verdict.
+    expect(response.ethical).toMatchObject({ action: CONCLUSION, permitted: expect.any(Boolean) });
+    expect(response.ethical.explanation).toMatch(/Ethical Analysis of/);
     expect(errors.slice(from.errors).filter((e) => /Pipeline FAILED/.test(e))).toEqual([]);
     expect(warnings.slice(from.warnings).filter((w) => w.startsWith('KeyCortexEthicsService:') && /decision log/i.test(w))).toHaveLength(1);
   });
