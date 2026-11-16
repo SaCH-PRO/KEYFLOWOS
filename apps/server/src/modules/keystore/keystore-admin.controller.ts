@@ -24,7 +24,9 @@ import {
   UpdateListingDto,
   UpdateOrderStatusDto,
 } from './dto';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('community', 'storefront')
 @UseGuards(AuthGuard, BusinessGuard)
 @Controller('keystore/admin')
 export class KeystoreAdminController {

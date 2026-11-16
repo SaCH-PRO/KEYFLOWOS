@@ -8,6 +8,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { CONNECTOR_EXPORT_READS, exportAudience } from '../../core/connectors/connector-exports';
 import { MailchimpConnector } from '../../core/connectors/implementations/mailchimp.connector';
 import { KlaviyoConnector } from '../../core/connectors/implementations/klaviyo.connector';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
 type MarketingProvider = 'mailchimp' | 'klaviyo';
 type MarketingRequest = { user?: ModuleLevelActor };
@@ -24,6 +25,7 @@ type MarketingRequest = { user?: ModuleLevelActor };
  * push is content write, crm read (assertMayExport, CONNECTOR_EXPORT_READS) and sends only the contacts
  * every receiver may open: the member pushing and the member who bound the account (exportAudience).
  */
+@HiddenModuleWrites('marketing', 'content')
 @Controller('marketing')
 @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
 export class MarketingSyncController {

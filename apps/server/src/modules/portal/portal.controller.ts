@@ -7,7 +7,9 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { RateLimit } from '../../core/decorators/rate-limit.decorator';
 import { RateLimitGuard } from '../../core/guards/rate-limit.guard';
 import { PortalService } from './portal.service';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('portal', 'crm')
 @Controller('portal')
 export class PortalController {
   constructor(

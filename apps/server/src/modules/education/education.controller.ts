@@ -2,7 +2,9 @@ import { Body, Controller, Get, Inject, Param, Patch, Post, Query, UseGuards } f
 import { EducationService } from './education.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('community', 'content')
 @Controller()
 export class EducationController {
   constructor(

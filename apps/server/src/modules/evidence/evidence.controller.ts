@@ -18,7 +18,9 @@ import { EvidenceService } from './evidence.service';
 import { EvidencePredictionService } from './evidence-prediction.service';
 import { SubmitEvidenceDto } from './dto/submit-evidence.dto';
 import { ListEvidenceQueryDto } from './dto/list-evidence-query.dto';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('evidence', 'operations')
 @Controller()
 @UseGuards(AuthGuard, BusinessGuard, RateLimitGuard)
 export class EvidenceController {

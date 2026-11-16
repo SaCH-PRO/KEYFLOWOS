@@ -18,7 +18,9 @@ import { ProfitTrajectoryService } from './profit-trajectory.service';
 import { ResponseDraftService } from './response-draft.service';
 import { ConsentService } from './consent.service';
 import { TriggerDefinitionService } from './trigger-definition.service';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('key_inbox', 'crm')
 @Controller('api/communications/businesses/:businessId')
 @UseGuards(BusinessGuard, ModuleScopeGuard)
 export class OmnichannelController {

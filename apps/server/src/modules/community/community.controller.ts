@@ -14,7 +14,9 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { OptionalAuthGuard } from '../../core/auth/optional-auth.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('community', 'content')
 @Controller()
 @UseGuards(CrmRateLimitGuard)
 export class CommunityController {

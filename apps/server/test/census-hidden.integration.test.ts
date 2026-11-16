@@ -133,6 +133,7 @@ const THIS_PACKET_DECLARES: Record<string, string> = {
   'ConnectController.syncOutlookContacts': 'settings:admin',
   'ConnectController.syncAllSources': 'settings:admin',
   'ConnectController.resyncSource': 'settings:admin',
+  'ConnectController.disconnectSource': 'settings:admin',
   'ShopifyController.syncProducts': 'settings:admin',
   'ShopifyController.syncOrders': 'settings:admin',
   'ShopifyController.syncCustomers': 'settings:admin',

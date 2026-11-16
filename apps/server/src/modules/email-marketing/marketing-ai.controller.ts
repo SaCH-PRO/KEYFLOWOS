@@ -6,7 +6,9 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { CrmRateLimitGuard, CrmRateLimit } from '../crm/guards/rate-limit.guard';
 import { FeatureFlagGuard, RequireFeature } from '../crm/guards/feature-flag.guard';
 import { checkAiRateLimit } from '../crm/ai-rate-limit.util';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('marketing', 'content')
 @Controller('marketing')
 @UseGuards(CrmRateLimitGuard)
 export class MarketingAiController {

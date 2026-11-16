@@ -8,6 +8,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { CONNECTOR_EXPORT_READS, exportAudience } from '../../core/connectors/connector-exports';
 import { QuickbooksConnector } from '../../core/connectors/implementations/quickbooks.connector';
 import { XeroConnector } from '../../core/connectors/implementations/xero.connector';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
 type AccountingProvider = 'quickbooks' | 'xero';
 type AccountingRequest = { user?: ModuleLevelActor };
@@ -31,6 +32,7 @@ const NOT_IN_VIEW = 'Not sent: the contact is outside the view of the member pus
  *     account (exportAudience; contactIdsEveryReceiverMayOpen). A record outside that view is answered
  *     as not sent, with why.
  */
+@HiddenModuleWrites('accounting_sync', 'revenue')
 @Controller('accounting')
 @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
 export class AccountingController {

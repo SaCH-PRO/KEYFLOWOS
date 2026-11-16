@@ -3,7 +3,9 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { GovernanceService } from './governance.service';
 import { CreateRiskDto } from './dto/create-risk.dto';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('governance', 'operations')
 @Controller('governance/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
 export class GovernanceController {

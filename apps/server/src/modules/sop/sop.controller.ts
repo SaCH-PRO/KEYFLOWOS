@@ -2,7 +2,9 @@ import { Controller, Get, Post, Patch, Delete, Inject, Param, Body, UseGuards } 
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { SopService } from './sop.service';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('operations', 'operations')
 @Controller('sop/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
 export class SopController {

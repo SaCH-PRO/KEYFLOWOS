@@ -357,7 +357,9 @@ beforeAll(async () => {
     // Owner ruling D-104: a Membership is the one access rule; D-99: a Google Contacts sync is the owner's.
     await db.membership.create({ data: { id: `${P}m_owner_${businessId}`, userId: ID.owner, businessId, role: 'OWNER' } });
   }
-  await db.membership.create({ data: { id: `${P}m_staff`, userId: ID.staff, businessId: ID.bizLive, role: 'STAFF', permissionScopes: { crm: 'write' } } });
+  // SWP-CENSUS-HIDDEN (D-181): starting a contact sync needs settings admin, so the STAFF member holds it; V63Y-04 is
+  // about the owner rule (D-99), which still refuses them.
+  await db.membership.create({ data: { id: `${P}m_staff`, userId: ID.staff, businessId: ID.bizLive, role: 'STAFF', permissionScopes: { crm: 'write', settings: 'admin' } } });
 
   // The providers, in process: each case sets `providers`; anything no rule
   // answers is recorded and refused, so a case that reached anything else

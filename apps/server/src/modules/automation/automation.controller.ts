@@ -7,7 +7,9 @@ import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.gu
 import { ActivityService } from '../flow/activity.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { AutomationExecutorService } from '../flow/automation-executor.service';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('automations', 'automations')
 @Controller('automation')
 export class AutomationController {
   private readonly logger = new Logger(AutomationController.name);

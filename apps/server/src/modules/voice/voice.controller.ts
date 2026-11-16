@@ -13,6 +13,7 @@ import { Response } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { VoiceService } from './voice.service';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
 interface TtsBody {
   text: string;
@@ -20,6 +21,7 @@ interface TtsBody {
   provider?: string;
 }
 
+@HiddenModuleWrites('key_voice', 'ai')
 @Controller('voice')
 @UseGuards(AuthGuard)
 export class VoiceController {

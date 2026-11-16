@@ -27,7 +27,9 @@ import { FlowTemplateService } from './flow-template.service';
 import { CreateFlowDto, UpdateFlowDto, TestFlowDto } from './dto';
 import { parseTimelineLimit } from '../timeline/dto/query-timeline.dto';
 import { resolveTimelineViewer } from '../timeline/timeline-visibility';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('automations', 'automations')
 @Controller('api/flows')
 export class FlowController {
   constructor(

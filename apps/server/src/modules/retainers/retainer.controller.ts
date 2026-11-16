@@ -14,6 +14,7 @@ import {
   IsOptional,
   IsString,
 } from 'class-validator';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
 /*
  * Required for these bodies to survive the global ValidationPipe, which runs
@@ -120,6 +121,7 @@ class UpdatePeriodDto {
   invoiceId?: string;
 }
 
+@HiddenModuleWrites('retainers', 'revenue')
 @Controller('retainers')
 @UseGuards(AuthGuard, BusinessGuard, RateLimitGuard)
 export class RetainerController {

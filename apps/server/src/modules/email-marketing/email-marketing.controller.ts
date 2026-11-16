@@ -4,7 +4,9 @@ import { EmailMarketingService } from './email-marketing.service';
 import { CampaignIntelligenceService } from './campaign-intelligence.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('marketing', 'content')
 @Controller()
 export class EmailMarketingController {
   constructor(

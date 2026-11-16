@@ -7,6 +7,7 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
 /** The authenticated member resolving an approval (V1-31b); 401 without one. */
 function resolvingUserId(req: { user?: { id?: string } } | undefined): string {
@@ -34,6 +35,7 @@ function resolvingUserId(req: { user?: { id?: string } } | undefined): string {
  */
 const SYSTEM_ONLY_TASK_STATUSES: ReadonlySet<string> = new Set(['AUTO_EXECUTED']);
 
+@HiddenModuleWrites('automations', 'automations')
 @Controller('autopilot/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
 export class AutopilotController {

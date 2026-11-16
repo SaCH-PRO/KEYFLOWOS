@@ -12,6 +12,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { assertMayBindExport } from '../../core/connectors/connector-exports';
 import { assertMemberModuleLevel } from '../../core/auth/member-module-level';
 import { CHANNEL_EXPORT_TYPE, isMessagingProvider } from './channel-audience';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
 /** The member a route acts for (AuthMiddleware attaches it; AuthGuard requires it). */
 type MemberRequest = { user?: { id?: string; role?: string } };
@@ -32,6 +33,7 @@ function verifyTrackingToken(deliveryId: string, token: string, extra?: string):
   return signTrackingToken(deliveryId, extra) === token;
 }
 
+@HiddenModuleWrites('marketing', 'content')
 @Controller('communications')
 export class CommunicationsController {
   constructor(

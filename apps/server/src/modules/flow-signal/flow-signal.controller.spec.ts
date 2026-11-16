@@ -5,6 +5,7 @@ import { FlowSignalService } from './flow-signal.service';
 import { RoleFlowService } from './role-flow.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard } from '../../core/auth/module-scope.guard';
 import { FlowType } from '@prisma/client';
 
 describe('FlowSignalController', () => {
@@ -41,6 +42,9 @@ describe('FlowSignalController', () => {
     })
       .overrideGuard(AuthGuard).useValue({ canActivate: () => true })
       .overrideGuard(BusinessGuard).useValue({ canActivate: () => true })
+      // The write handlers run ModuleScopeGuard since SWP-CENSUS-HIDDEN (@HiddenModuleWrites); these cases call the
+      // controller's methods directly, so no guard runs, as for the two above.
+      .overrideGuard(ModuleScopeGuard).useValue({ canActivate: () => true })
       .compile();
 
     controller = module.get(FlowSignalController);

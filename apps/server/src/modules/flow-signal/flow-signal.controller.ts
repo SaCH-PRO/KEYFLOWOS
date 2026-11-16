@@ -5,7 +5,9 @@ import { FlowSignalService } from './flow-signal.service';
 import { RoleFlowService } from './role-flow.service';
 import { FlowSignalQuery } from './flow-signal.types';
 import { FlowType } from '@prisma/client';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('key_flows', 'automations')
 @Controller('flow-signals/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
 export class FlowSignalController {

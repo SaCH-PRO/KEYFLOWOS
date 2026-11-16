@@ -3,7 +3,9 @@ import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, In
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { DocumentsService } from './documents.service';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('legal', 'operations')
 @Controller('documents')
 export class DocumentsController {
   constructor(@Inject(DocumentsService) private documentsService: DocumentsService) {}

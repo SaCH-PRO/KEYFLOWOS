@@ -22,7 +22,9 @@ import { CreateContentRequestDto } from './dto/create-content-request.dto';
 import { UpdateContentRequestDto } from './dto/update-content-request.dto';
 import { ContentReviewDto } from './dto/content-review.dto';
 import { UploadDeliverablesDto } from './dto/upload-deliverables.dto';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('content', 'content')
 @Controller()
 @UseGuards(AuthGuard, BusinessGuard, RateLimitGuard)
 export class ContentOpsController {

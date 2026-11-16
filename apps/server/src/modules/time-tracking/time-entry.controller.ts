@@ -26,6 +26,7 @@ import {
   IsOptional,
   IsString,
 } from 'class-validator';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
 /*
  * Decorators are required for these bodies to survive at all: the global
@@ -133,6 +134,7 @@ class BillTimeEntriesDto {
   invoiceId!: string;
 }
 
+@HiddenModuleWrites('time_tracking', 'projects')
 @Controller('time-entries')
 @UseGuards(AuthGuard)
 export class TimeEntryController {

@@ -449,12 +449,16 @@ describe('CLASS A (WPH2-2): a Drive share and the tracked documents list', () =>
 
   const share = (actor: string, body: unknown) => send('post', `/drive/businesses/${ID.bizA}/files/${P}drive-file-INV-0001/share`, actor, body);
 
-  it('[R3D-01] RED-BEFORE: a member who is not the owner may not share a file with the owner\'s Drive token, to the public or to an account of their own: 403 GOOGLE_CONNECT_OWNER_ONLY and nothing is sent to Drive (STAFF none, a settings admin ADMIN, a revenue reader)', async () => {
+  it('[R3D-01] RED-BEFORE: a member who is not the owner may not share a file with the owner\'s Drive token, to the public or to an account of their own: 403 and nothing is sent to Drive (STAFF none, a settings admin ADMIN, a revenue reader): GOOGLE_CONNECT_OWNER_ONLY for the ADMIN, operations write first for the members below it (SWP-CENSUS-HIDDEN)', async () => {
     for (const actor of [ID.staffNone, ID.admin, ID.revReader, ID.msAdmin]) {
       for (const body of [{ type: 'anyone', role: 'reader' }, { type: 'user', role: 'writer', emailAddress: 'staffnone.personal@attacker.example', sendNotification: false }]) {
         const res = await share(actor, body);
         expect(res.status, `${actor} ${JSON.stringify(body)}: ${JSON.stringify(res.body)}`).toBe(403);
-        expect(JSON.stringify(res.body)).toMatch(/GOOGLE_CONNECT_OWNER_ONLY|owner/i);
+        // SWP-CENSUS-HIDDEN (D-152): a Drive write needs operations write (@HiddenModuleWrites('connectors',
+        // 'operations')), which ModuleScopeGuard checks before the owner rule; only the ADMIN (operations admin by
+        // role default) reaches the owner rule. msAdmin's map holds settings admin and every module none.
+        if (actor === ID.admin) expect(JSON.stringify(res.body)).toMatch(/GOOGLE_CONNECT_OWNER_ONLY/);
+        else expect(JSON.stringify(res.body), actor).toMatch(/operations requires write access/);
       }
     }
     expect(driveGrants()).toEqual([]);

@@ -21,7 +21,9 @@ import {
   AcceptQuoteDto,
   RateOrderDto,
 } from './dto';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('community', 'storefront')
 @UseGuards(AuthGuard, BusinessGuard)
 @Controller('keystore')
 export class KeystoreController {
