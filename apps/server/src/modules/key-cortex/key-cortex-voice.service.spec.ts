@@ -13,10 +13,28 @@
  * and a client holding the sentinel key answers as OpenAI does (401), so no
  * request can leave the process.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import { HttpException, ServiceUnavailableException } from '@nestjs/common';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+
+/**
+ * FU-UNIT-MOCK-ISOLATION: vitest.unit.config.ts runs spec files with
+ * isolate:false, so they share one module registry. When an earlier file in
+ * the worker had imported key-cortex-voice.service.ts (the app graph does,
+ * through KeyCortexModule), the import below returned that copy, bound to the
+ * real `openai`, and the mock below never applied: the "SDK stubbed" cases
+ * sent their calls to api.openai.com. Resetting the registry before the
+ * imports (hoisted with the mock) makes them evaluate against this file's mock
+ * whatever ran before; resetting it again after the last test keeps the next
+ * file from inheriting a service bound to it.
+ */
+vi.hoisted(() => {
+  vi.resetModules();
+});
+afterAll(() => {
+  vi.resetModules();
+});
 
 const sdk = vi.hoisted(() => ({
   /** Every `new OpenAI(options)` attempted, before the real constructor runs. */
