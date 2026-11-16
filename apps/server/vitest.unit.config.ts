@@ -75,8 +75,12 @@ import { defineConfig } from 'vitest/config';
  * before every spec: a request to a host that is not loopback (fetch, http(s),
  * any socket) is refused before anything is resolved or sent, and the test
  * that made it fails even if the code under test swallowed the error. A mock
- * that misses now fails loudly instead of calling a provider.
- * unit-network-guard.spec.ts proves it.
+ * that misses now fails loudly instead of calling a provider. A loopback
+ * proxy is no way round it: the guard takes the proxy variables out of the
+ * worker's environment, refuses the ports they named, and refuses a CONNECT
+ * or proxy-form request line naming a host outside loopback on any loopback
+ * socket. unit-network-guard.spec.ts proves it. Only this config has the
+ * guard: test:ci (vitest.config.ts) and the proof runners do not.
  */
 export default defineConfig({
   test: {
