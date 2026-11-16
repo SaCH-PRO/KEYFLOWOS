@@ -1006,6 +1006,11 @@
       "prefix": "v63y_",
       "owner": "apps/server/test/provider-outage-connect.integration.test.ts",
       "packet": "V1-63 (W11-PROVIDER-OUTAGE-CONNECT)"
+    },
+    {
+      "prefix": "v71d_",
+      "owner": "apps/server/test/finance-settings-scope.integration.test.ts",
+      "packet": "V1-71 (FU-FINANCE-SETTINGS-SCOPE)"
     }
   ],
   "pendingRenames": [],
