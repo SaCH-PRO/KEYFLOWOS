@@ -1,9 +1,10 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ProAutoMonitorService, ProAutoInsight } from './pro-auto-monitor.service';
 import { AiOversightService } from './ai-oversight.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { deleteAiMemoriesWithCopies, upsertAiMemoryDroppingStaleCopies } from './ai-memory.service';
+import { SemanticMemoryService } from './semantic-memory.service';
 
 export interface ChatSuggestion {
   id: string;
@@ -32,6 +33,8 @@ export class ProactiveSuggestionService {
     @Inject(ProAutoMonitorService) private readonly monitor: ProAutoMonitorService,
     @Inject(AiOversightService) private readonly governance: AiOversightService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    // FU-MEMORY-COPIES-REWRITE review COR-V71I-3: copies a suggestion row the door rewrote again. AiModule provides it.
+    @Optional() @Inject(SemanticMemoryService) private readonly semantic?: SemanticMemoryService,
   ) {}
 
   /**
@@ -81,7 +84,7 @@ export class ProactiveSuggestionService {
             source: 'key_ai',
             expiresAt,
           },
-        });
+        }, this.semantic);
       }
     }
 
@@ -134,7 +137,7 @@ export class ProactiveSuggestionService {
     await upsertAiMemoryDroppingStaleCopies(this.prisma, businessId, { category: 'suggestion_block', key: category }, {
       update: { expiresAt },
       create: { value: 'blocked', source: 'user', expiresAt },
-    });
+    }, this.semantic);
   }
 
   private insightToSuggestion(insight: ProAutoInsight): ChatSuggestion | null {

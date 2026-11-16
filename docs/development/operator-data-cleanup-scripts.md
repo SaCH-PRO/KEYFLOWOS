@@ -403,31 +403,41 @@ before FU-MEMORY-COPIES-REWRITE a row rewritten in place (the owner's
 `PUT .../ai/memory` of a new value, a document extracted again, a promotion into
 the same key) left the copies of its old value. Since those packets no such copy
 is served, every deletion and rewrite removes them, and a rewrite copies the row
-again with its new value when the embedding path is on. The copies stored
+again with its new value when the embedding path is on (after the write has
+answered). The copies stored
 before are still in the table, holding text the owner removed or replaced.
 
-**What it deletes.** Every `memory` copy that no row of its business with its
-`source_id` holds, in either form (the same test as `copyHoldsRowValue` in
-`semantic-memory.service.ts`):
+**What it deletes.** Every `memory` copy that no memory row of its business
+with its `source_id` holds, in either form (the same test as
+`copyHoldsRowValue` in `semantic-memory.service.ts`). A settings row
+(category `settings`: the owner's AI preferences, which hold the BYOK
+provider keys as ciphertext, the routing table, the autonomy settings) is
+configuration, not memory, and has no copy since the FU-MEMORY-COPIES-REWRITE
+review repair (`AI_MEMORY_SETTINGS_CATEGORIES`), so every copy of one is
+deleted whatever it holds:
 
 ```sql
 DELETE FROM ai_memory_embeddings e
  WHERE e.source_type = 'memory'
    AND NOT EXISTS (SELECT 1 FROM ai_memories m
                     WHERE m.id = e.source_id AND m.business_id = e.business_id
+                      AND m.category NOT IN ('settings')
                       AND (e.content = m.value
                            OR e.content = m.category || ': ' || m.key || ' = ' || m.value));
 ```
 
 The reasons it reports: `row_gone` (no row with that id in the copy's business:
-deleted, or another business's row) and `value_rewritten` (the row holds
+deleted, or another business's row), `settings_row` (the row is a settings
+row: the backfill copied those before the review repair, and their writers
+rewrite them outside the write door, so after the owner rotated a BYOK key the
+copy still held the old key's ciphertext) and `value_rewritten` (the row holds
 another value). A copy of an expired row still holds what its row holds and is
 kept (search hides it while the row is expired). Other source types (document
 chunks, events, conversations) are never read or deleted. `--apply` deletes in
 batches of 1000, each one statement that re-checks the copy is still stale;
 a re-run deletes nothing new.
 
-**Output.** `stale_row_gone` and `stale_value_rewritten`, then `would_delete`
+**Output.** `stale_row_gone`, `stale_settings_row` and `stale_value_rewritten`, then `would_delete`
 and one `stale copy <id> <reason>` line per copy (dry run), or `deleted`
 (`--apply`). Exit status as above.
 
@@ -480,6 +490,11 @@ does not serve, less an expired row's; `--apply` deletes exactly those and is
 idempotent; `--business` leaves another business's copies; bad arguments exit
 2), and V71I-08 runs `pnpm cleanup:memory-copies` as pnpm runs it, with only
 `DATABASE_URL` (dry run, then `--apply`; the database URL is never printed).
+V71I-14 covers the settings rows: after the owner rotates a BYOK key (the real
+gateway writer), the dry run lists the copies of the preferences row made
+before the review repair as `settings_row` without their content, its stale set
+is exactly what search does not serve, and `--apply` leaves no copy of either
+key's ciphertext.
 
 `apps/server/test/v1-module-usage-count.integration.test.ts` (prefix `v61a_`)
 proves section 3 against Postgres:

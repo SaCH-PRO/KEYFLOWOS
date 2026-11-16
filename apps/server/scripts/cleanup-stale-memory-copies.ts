@@ -18,8 +18,13 @@
  *
  * A copy (source_type 'memory') is stale when no row of its business with its source_id holds what it holds, in either
  * form: the same test as copyHoldsRowValue in apps/server/src/modules/ai/semantic-memory.service.ts, stated here in
- * SQL so the script needs only @keyflow/db. Two reasons are reported:
+ * SQL so the script needs only @keyflow/db. A copy of a settings row (category 'settings': the owner's AI preferences,
+ * holding the BYOK provider keys as ciphertext, the routing table, the autonomy settings) is stale whatever it holds:
+ * a settings row is configuration, not memory, and has no copy (AI_MEMORY_SETTINGS_CATEGORIES in the same file;
+ * review SEC-FUMCR-1, SEC-FUMCR-2). Three reasons are reported:
  *   - row_gone: no AiMemory row with that id in the copy's business (deleted, or another business's row);
+ *   - settings_row: the row is a settings row (the backfill copied those before the review repair, and their writers
+ *     rewrite them outside the write door, so a rotated key's old ciphertext stayed in the copy);
  *   - value_rewritten: the row is there and holds another value.
  * A copy of a row that has expired still holds what its row holds: it is not stale (search hides it while the row is
  * expired). Other source types (document chunks, events, conversations) are never read or deleted.
@@ -48,6 +53,8 @@ type Db = Pick<typeof db, '$queryRawUnsafe' | '$executeRawUnsafe'>;
 
 /** The source_type of an AiMemory row's copies (AI_MEMORY_COPY_SOURCE_TYPE in semantic-memory.service.ts). */
 const COPY_SOURCE_TYPE = 'memory';
+/** The AiMemory categories that hold configuration, not memory (AI_MEMORY_SETTINGS_CATEGORIES in semantic-memory.service.ts). */
+const SETTINGS_CATEGORIES = "('settings')";
 /** How many copies one --apply statement deletes at most. */
 export const DELETE_BATCH = 1000;
 
@@ -55,12 +62,17 @@ export const DELETE_BATCH = 1000;
 const ROW_OF_COPY = 'm.id = e.source_id AND m.business_id = e.business_id';
 /** The copy `e` holds what the row `m` holds, in either form (copyHoldsRowValue). */
 const COPY_HOLDS_ROW_VALUE = "(e.content = m.value OR e.content = (m.category || ': ' || m.key || ' = ' || m.value))";
-/** The copy `e` is an AiMemory copy that no row of its business holds. */
-const STALE = `e.source_type = '${COPY_SOURCE_TYPE}' AND NOT EXISTS (SELECT 1 FROM ai_memories m WHERE ${ROW_OF_COPY} AND ${COPY_HOLDS_ROW_VALUE})`;
+/** The row `m` is memory, not a settings row. */
+const ROW_IS_MEMORY = `m.category NOT IN ${SETTINGS_CATEGORIES}`;
+/** The copy `e` is an AiMemory copy that no memory row of its business holds. */
+const STALE = `e.source_type = '${COPY_SOURCE_TYPE}' AND NOT EXISTS (SELECT 1 FROM ai_memories m WHERE ${ROW_OF_COPY} AND ${ROW_IS_MEMORY} AND ${COPY_HOLDS_ROW_VALUE})`;
 /** Why a stale copy is stale. */
-const REASON = `CASE WHEN EXISTS (SELECT 1 FROM ai_memories m WHERE ${ROW_OF_COPY}) THEN 'value_rewritten' ELSE 'row_gone' END`;
+const REASON = `CASE
+  WHEN EXISTS (SELECT 1 FROM ai_memories m WHERE ${ROW_OF_COPY} AND NOT (${ROW_IS_MEMORY})) THEN 'settings_row'
+  WHEN EXISTS (SELECT 1 FROM ai_memories m WHERE ${ROW_OF_COPY}) THEN 'value_rewritten'
+  ELSE 'row_gone' END`;
 
-export type StaleReason = 'row_gone' | 'value_rewritten';
+export type StaleReason = 'row_gone' | 'settings_row' | 'value_rewritten';
 
 export interface StaleCopy {
   id: string;
@@ -158,6 +170,7 @@ export async function main(argv: string[], deps: { db?: Db; log?: Log; error?: L
     return 1;
   }
   log(row('stale_row_gone', stale.filter((c) => c.reason === 'row_gone').length));
+  log(row('stale_settings_row', stale.filter((c) => c.reason === 'settings_row').length));
   log(row('stale_value_rewritten', stale.filter((c) => c.reason === 'value_rewritten').length));
   if (!args.apply) {
     log(row('would_delete', stale.length));
