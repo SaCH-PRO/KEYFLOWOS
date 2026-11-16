@@ -93,8 +93,10 @@ jobs:
         image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: keyflow
-          POSTGRES_PASSWORD: keyflow
           POSTGRES_DB: keyflowos
+          # Trust auth, so the repository carries no connection-string
+          # password literal (as native-dast.yml). CI-only, localhost-only.
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
         options: >-
@@ -113,8 +115,8 @@ jobs:
           --health-retries 10
 
     env:
-      DATABASE_URL: postgresql://keyflow:keyflow@localhost:5432/keyflowos
-      DIRECT_URL: postgresql://keyflow:keyflow@localhost:5432/keyflowos
+      DATABASE_URL: postgresql://keyflow@localhost:5432/keyflowos
+      DIRECT_URL: postgresql://keyflow@localhost:5432/keyflowos
       REDIS_URL: redis://localhost:6379
       API_PORT: '3001'
       E2E_API_URL: http://localhost:3001
@@ -298,8 +300,10 @@ jobs:
         image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: keyflow
-          POSTGRES_PASSWORD: keyflow
           POSTGRES_DB: keyflowos
+          # Trust auth, so the repository carries no connection-string
+          # password literal (as native-dast.yml). CI-only, localhost-only.
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
         options: >-
@@ -318,8 +322,8 @@ jobs:
           --health-retries 10
 
     env:
-      DATABASE_URL: postgresql://keyflow:keyflow@localhost:5432/keyflowos
-      DIRECT_URL: postgresql://keyflow:keyflow@localhost:5432/keyflowos
+      DATABASE_URL: postgresql://keyflow@localhost:5432/keyflowos
+      DIRECT_URL: postgresql://keyflow@localhost:5432/keyflowos
       REDIS_URL: redis://localhost:6379
       API_PORT: '3001'
       E2E_API_URL: http://localhost:3001
