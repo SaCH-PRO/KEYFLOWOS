@@ -80,6 +80,15 @@ const MEMBERS: Record<string, string[]> = { biz_1: ['user_1', 'user_2'] };
 const COGNITION_OWNERS: Record<string, string | null> = { cog_own: 'user_1', cog_other: 'user_2', cog_nobody: null };
 const prismaStub = {
   client: {
+    // W1F-PERCEPTION-MODULE-SCOPE (SEC-W11FPS-3): the reader's membership, whose module levels project the business-wide
+    // event stores. Both members of biz_1 are STAFF on role defaults (read on revenue, expenses, crm, ...).
+    membership: {
+      findUnique: vi.fn(async ({ where }: { where: { userId_businessId: { userId: string; businessId: string } } }) =>
+        (MEMBERS[where.userId_businessId.businessId] ?? []).includes(where.userId_businessId.userId)
+          ? { role: 'STAFF', permissionScopes: null }
+          : null,
+      ),
+    },
     business: {
       findFirst: vi.fn(async ({ where }: { where: { id: string; members: { some: { userId: string } } } }) =>
         (MEMBERS[where.id] ?? []).includes(where.members.some.userId) ? { id: where.id } : null,
@@ -103,11 +112,22 @@ const prismaStub = {
  * the implementation off the prototype exercises the shipped code without that
  * ceremony — and it still fails if the method is deleted or renamed.
  */
+/**
+ * W1F-PERCEPTION-MODULE-SCOPE (D-202): the envelopes JobRolePolicyService issued (isIssued), as the staff bridge hands
+ * chat() one with the position's verified holder (FlowServerContext). A copy is not issued.
+ */
+const ISSUED_ENVELOPE = { jobRoleName: 'Staff', approvedTools: [], blockedTools: [], maxRiskTier: 1 };
+type ServerContext = { jobRoleEnvelope: unknown; positionHolderUserId?: string | null };
+const holderTurn = (holder: string | null, envelope: unknown = ISSUED_ENVELOPE): ServerContext => ({
+  jobRoleEnvelope: envelope,
+  positionHolderUserId: holder,
+});
+
 function makeOrchestrator(memory: MemoryStub) {
   const impl = (
     FlowOrchestratorService.prototype as unknown as Record<
       string,
-      (b: string, q: string, t?: string, u?: string) => Promise<string>
+      (b: string, q: string, t?: string, u?: string, s?: ServerContext) => Promise<string>
     >
   ).buildPerceptionSection;
 
@@ -117,11 +137,13 @@ function makeOrchestrator(memory: MemoryStub) {
     getUnifiedMemory: () => memory,
     // W11-FLOW-PERCEPTION-SCOPE: the reader's membership and their own cognition rows are read with it.
     prisma: prismaStub,
+    // W1F-PERCEPTION-MODULE-SCOPE (D-202): whether the staff bridge's envelope is one the policy issued.
+    getJobRolePolicy: () => ({ isIssued: (envelope: unknown) => envelope === ISSUED_ENVELOPE }),
   };
 
   return {
-    buildPerceptionSection: (b: string, q: string, t?: string, u?: string) =>
-      impl.call(instance, b, q, t, u),
+    buildPerceptionSection: (b: string, q: string, t?: string, u?: string, s?: ServerContext) =>
+      impl.call(instance, b, q, t, u, s),
   };
 }
 
@@ -145,6 +167,8 @@ function expectNoReaderRead(memory: MemoryStub, label: string) {
 }
 
 describe('perception reaches the prompt', () => {
+  // W1F-PERCEPTION-MODULE-SCOPE (D-203): these turns are a member's (user_1, STAFF on role defaults). A turn that names
+  // no member and no staff position is the customer support desk's, which perceives nothing (pinned below).
   let memory: MemoryStub;
 
   beforeEach(() => {
@@ -159,32 +183,33 @@ describe('perception reaches the prompt', () => {
   });
 
   it('includes what KEY observed', async () => {
-    const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'how are we doing', 'standard');
+    const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'how are we doing', 'standard', 'user_1');
 
     expect(out).toContain('WHAT YOU HAVE OBSERVED');
     expect(out).toContain('INV-014');
   });
 
   it('labels the source, so KEY can say how it knows', async () => {
-    const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard');
+    const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', 'user_1');
     expect(out).toContain('[cognitive_event]');
   });
 
   it('says nothing when nothing was observed', async () => {
     memory.fragments = [];
-    const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard');
+    const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', 'user_1');
     expect(out).toBe('');
   });
 
   it('cannot fail the request', async () => {
     // Missing context must degrade the answer, never break the chat.
     memory.retrieveContext.mockRejectedValue(new Error('table locked'));
-    const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard');
+    const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', 'user_1');
     expect(out).toBe('');
   });
 });
 
 describe('cost is graded by the thalamus', () => {
+  // W1F-PERCEPTION-MODULE-SCOPE (D-203): a member's turns (user_1); the support desk's perceives nothing at all.
   let memory: MemoryStub;
 
   beforeEach(() => {
@@ -194,7 +219,7 @@ describe('cost is graded by the thalamus', () => {
 
   it('reflex pays NOTHING — no query at all', async () => {
     // A greeting does not need to know what the watchers saw last week.
-    const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'hi', 'reflex');
+    const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'hi', 'reflex', 'user_1');
 
     expect(memory.retrieveContext).not.toHaveBeenCalled();
     expect(out).toBe('');
@@ -202,8 +227,8 @@ describe('cost is graded by the thalamus', () => {
 
   it('deliberate gets a wider window than standard', async () => {
     const svc = makeOrchestrator(memory);
-    await svc.buildPerceptionSection('biz_1', 'q', 'standard');
-    await svc.buildPerceptionSection('biz_1', 'q', 'deliberate');
+    await svc.buildPerceptionSection('biz_1', 'q', 'standard', 'user_1');
+    await svc.buildPerceptionSection('biz_1', 'q', 'deliberate', 'user_1');
 
     const [std] = memory.retrieveContext.mock.calls[0] as unknown as [string, { limit: number }];
     void std;
@@ -214,7 +239,7 @@ describe('cost is graded by the thalamus', () => {
   });
 
   it('is bounded and filtered — never an unbounded scan', async () => {
-    await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'deliberate');
+    await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'deliberate', 'user_1');
 
     const opts = (memory.retrieveContext.mock.calls[0] as unknown as [string, Record<string, number>])[1];
     expect(opts.limit).toBeGreaterThan(0);
@@ -231,8 +256,8 @@ describe('cost is graded by the thalamus', () => {
   it('the block renders at most its window: 6 fragments for standard, 12 for deliberate, however many the store answers', async () => {
     memory.fragments = Array.from({ length: 200 }, (_, i) => ({ sourceType: 'genome_memory_event', title: `g${i}`, content: `c${i}` }));
     const lines = (out: string) => out.split('\n').filter((l) => l.startsWith('- ['));
-    expect(lines(await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard'))).toHaveLength(6);
-    expect(lines(await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'deliberate'))).toHaveLength(12);
+    expect(lines(await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', 'user_1'))).toHaveLength(6);
+    expect(lines(await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'deliberate', 'user_1'))).toHaveLength(12);
   });
 
   it('gives up rather than stalling time-to-first-token', async () => {
@@ -242,7 +267,7 @@ describe('cost is graded by the thalamus', () => {
     memory.retrieveContext = vi.fn(() => new Promise(() => {})) as never;
 
     const started = Date.now();
-    const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard');
+    const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', 'user_1');
 
     expect(out).toBe('');
     expect(Date.now() - started, 'no deadline — a hung query blocks the answer').toBeLessThan(3000);
@@ -252,7 +277,7 @@ describe('cost is graded by the thalamus', () => {
     // 0.3 was decorative: rankScore floors at 0.5*0.45 + 0*0.35 + 0.75*0.2 =
     // 0.375, so nothing was ever below the "floor". The value must sit inside
     // the real 0.375–1.0 range or the filter is a comment.
-    await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard');
+    await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', 'user_1');
 
     const opts = (memory.retrieveContext.mock.calls[0] as unknown as [
       string,
@@ -273,7 +298,7 @@ describe('cost is graded by the thalamus', () => {
     // cost of every chat message for a result already in the prompt.
     //
     // The structured stores are what this call is for.
-    await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'how are we doing', 'standard');
+    await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'how are we doing', 'standard', 'user_1');
 
     const opts = (memory.retrieveContext.mock.calls[0] as unknown as [
       string,
@@ -316,16 +341,25 @@ describe('personal memory stays personal', () => {
   // every member's rows (an absent userId used to leave AiExecutionLog and CortexActionLog unnarrowed).
   // Review CR-W11FPS-1: but the business-wide stores, business events included (an overdue invoice), are still read:
   // the read names the business-wide stores (sourceTypes) instead of turning off every episodic store.
-  it('a turn with no member, or a caller who is no member, reads no member\'s personal memory: no userId, and only the business-wide stores, business events included', async () => {
-    for (const userId of [undefined, 'user_9']) {
+  // W1F-PERCEPTION-MODULE-SCOPE: the turn with no member is now told apart. A staff position's turn with no holder (a
+  // contact-only position on the staff bridge) is the no-reader read below; the support desk's turn (no member, no
+  // staff position: D-203) reads nothing at all, and a position's verified holder is its reader (D-202), both pinned in
+  // the describe blocks that follow.
+  it('a caller who is no member, or a staff position with no holder, reads no member\'s personal memory: no userId, and only the business-wide stores, business events included', async () => {
+    for (const [label, userId, server] of [
+      ['user_9', 'user_9', undefined],
+      ['contact-only position', undefined, holderTurn(null)],
+    ] as const) {
       memory.retrieveContext.mockClear();
-      await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', userId);
-      expectNoReaderRead(memory, String(userId));
+      await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', userId, server);
+      expectNoReaderRead(memory, label);
     }
   });
 
+  // W1F-PERCEPTION-MODULE-SCOPE (D-202): the staff bridge's turn names no member but passes the position, and with it
+  // the position's holder; both chat paths hand it on.
   it('is passed on BOTH chat paths', () => {
-    const wired = src.match(/buildPerceptionSection\(businessId, message, triage\?\.tier, userId\)/g) ?? [];
+    const wired = src.match(/buildPerceptionSection\(businessId, message, triage\?\.tier, userId, server\)/g) ?? [];
     expect(wired.length, 'a chat path leaks other members’ history').toBe(2);
   });
 
@@ -398,6 +432,8 @@ describe("only the reader's own cognition memory, and no KEY tool-call record (W
       { id: 'ce_tool', sourceType: 'cognitive_event', title: 'tool.executed', content: 'tool.executed: TOOL-INPUT' },
       { id: 'cog_own', sourceType: 'cognition_memory', title: 'Memory fragment', content: 'Query: OWN typed' },
       { id: 'be_invoice', sourceType: 'business_event', title: 'invoice.overdue', entityType: 'invoice', content: 'INV-014 overdue' },
+      // W1F-PERCEPTION-MODULE-SCOPE: a business-wide record that names no module (kept for every reader).
+      { id: 'be_proposal', sourceType: 'business_event', title: 'GOVERNANCE_DECISION', entityType: 'key_action_proposal', content: 'ai propose key_action_proposal: PROPOSAL-PENDING' },
     ];
   });
 
@@ -415,11 +451,18 @@ describe("only the reader's own cognition memory, and no KEY tool-call record (W
     expect(out).toContain('INV-014 overdue');
   });
 
-  it('a turn with no member, or a caller who is no member, gets no cognition fragment at all', async () => {
-    for (const userId of [undefined, 'user_9']) {
-      const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', userId);
-      expect(out, String(userId)).not.toContain('[cognition_memory]');
-      expect(out, String(userId)).toContain('INV-014 overdue');
+  // W1F-PERCEPTION-MODULE-SCOPE (SEC-W11FPS-3, D-57): a reader with no membership has no module scope, so the overdue
+  // invoice (money, at revenue read) no longer reaches them; the business-wide proposal still does. The support desk's
+  // turn (no member, no position) perceives nothing at all (D-203).
+  it('a caller who is no member, or a staff position with no holder, gets no cognition fragment at all, and no money event; a business-wide record still reaches them', async () => {
+    for (const [label, userId, server] of [
+      ['user_9', 'user_9', undefined],
+      ['contact-only position', undefined, holderTurn(null)],
+    ] as const) {
+      const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', userId, server);
+      expect(out, label).not.toContain('[cognition_memory]');
+      expect(out, label).not.toContain('INV-014 overdue');
+      expect(out, label).toContain('PROPOSAL-PENDING');
     }
   });
 
@@ -428,7 +471,96 @@ describe("only the reader's own cognition memory, and no KEY tool-call record (W
     const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', 'user_1');
     expect(out).not.toContain('[cognition_memory]');
     expectNoReaderRead(memory, 'check failed');
-    expect(out).toContain('INV-014 overdue');
+    // W1F-PERCEPTION-MODULE-SCOPE: no reader, so no module scope: the money event is left out too.
+    expect(out).not.toContain('INV-014 overdue');
+    expect(out).toContain('PROPOSAL-PENDING');
+  });
+});
+
+describe("module scopes (W1F-PERCEPTION-MODULE-SCOPE, review SEC-W11FPS-3; D-71/D-146, D-57)", () => {
+  // The business-wide event stores carry every domain event the bridge forwards, figures included. A reader sees an
+  // event only with read on the module it names, by their membership (ModuleScopeGuard's reading). The full rule is
+  // pinned in key-cortex-prompt-module-scope.spec.ts; this pins it on the block itself.
+  let memory: MemoryStub;
+
+  beforeEach(() => {
+    memory = new MemoryStub();
+    memory.fragments = [
+      { id: 'be_expense', sourceType: 'business_event', title: 'expense.created', entityType: 'Expense', content: 'expenses PUBLISHED Expense: EXPENSE-7777' },
+      { id: 'ce_payment', sourceType: 'cognitive_event', title: 'payment.received', content: 'payment.received: PAYMENT-4321' },
+      { id: 'be_contact', sourceType: 'business_event', title: 'contact.created', entityType: 'Contact', content: 'crm PUBLISHED Contact: CONTACT-ADA' },
+      { id: 'be_proposal', sourceType: 'business_event', title: 'GOVERNANCE_DECISION', entityType: 'key_action_proposal', content: 'PROPOSAL-PENDING' },
+    ];
+  });
+
+  it("a member whose expenses and revenue scopes are none perceives no money event, and the events of the modules they read; another member on role defaults perceives them", async () => {
+    prismaStub.client.membership.findUnique.mockResolvedValueOnce({ role: 'STAFF', permissionScopes: { crm: 'read', expenses: 'none', revenue: 'none' } } as any);
+    const blind = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', 'user_1');
+    expect(blind).not.toContain('EXPENSE-7777');
+    expect(blind).not.toContain('PAYMENT-4321');
+    expect(blind).toContain('CONTACT-ADA');
+    expect(blind).toContain('PROPOSAL-PENDING');
+
+    const staff = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', 'user_2');
+    for (const marker of ['EXPENSE-7777', 'PAYMENT-4321', 'CONTACT-ADA', 'PROPOSAL-PENDING']) expect(staff, marker).toContain(marker);
+  });
+});
+
+describe("the customer support desk perceives only the conversation in front of it (W1F-PERCEPTION-MODULE-SCOPE, owner ruling D-203 `supportdesk`)", () => {
+  it('a turn that names no member and no staff position (chatwoot.service.ts calls chat() so) reads no memory store and renders no block', async () => {
+    const memory = new MemoryStub();
+    memory.fragments = [
+      { id: 'mem', sourceType: 'ai_memory', title: 'fact', content: 'FACT-NINE' },
+      { id: 'be_proposal', sourceType: 'business_event', title: 'GOVERNANCE_DECISION', entityType: 'key_action_proposal', content: 'PROPOSAL-PENDING' },
+      { id: 'be_invoice', sourceType: 'business_event', title: 'invoice.overdue', entityType: 'invoice', content: 'INV-014 overdue' },
+    ];
+    for (const tier of ['standard', 'deliberate']) {
+      memory.retrieveContext.mockClear();
+      const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', tier, undefined, undefined);
+      expect(out, tier).toBe('');
+      expect(memory.retrieveContext, tier).not.toHaveBeenCalled();
+    }
+  });
+});
+
+describe("a staff member on the WhatsApp/SMS bridge perceives their own history (W1F-PERCEPTION-MODULE-SCOPE, owner ruling D-202 `bridgememory`)", () => {
+  let memory: MemoryStub;
+
+  beforeEach(() => {
+    memory = new MemoryStub();
+    memory.fragments = [
+      { id: 'cog_own', sourceType: 'cognition_memory', title: 'Memory fragment', content: 'Query: OWN typed' },
+      { id: 'cog_other', sourceType: 'cognition_memory', title: 'Memory fragment', content: 'Query: OTHER-MEMBER typed' },
+      { id: 'exec_own', sourceType: 'ai_execution_log', title: 'own.exec', content: 'OWN-EXEC' },
+    ];
+  });
+
+  it("the position's verified holder (FlowServerContext.positionHolderUserId, on an envelope JobRolePolicyService issued) is the reader: their own personal rows and cognition, no one else's", async () => {
+    const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', undefined, holderTurn('user_1'));
+    const opts = (memory.retrieveContext.mock.calls[0] as unknown as [string, { userId?: string; sourceTypes?: string[] }])[1];
+    expect(opts.userId).toBe('user_1');
+    expect(opts.sourceTypes).toBeUndefined();
+    expect(out).toContain('OWN typed');
+    expect(out).toContain('OWN-EXEC');
+    expect(out).not.toContain('OTHER-MEMBER');
+  });
+
+  it('a holder on an envelope the policy did not issue, or a holder who is no member of the business, is nobody\'s reader (fail closed)', async () => {
+    for (const [label, server] of [
+      ['copied envelope', holderTurn('user_1', { ...ISSUED_ENVELOPE })],
+      ['holder no member', holderTurn('user_9')],
+    ] as const) {
+      memory.retrieveContext.mockClear();
+      const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', undefined, server);
+      expectNoReaderRead(memory, label);
+      expect(out, label).not.toContain('OWN typed');
+    }
+  });
+
+  it('a member in the app stays the reader even when a position is named beside them (the member, never the holder)', async () => {
+    await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', 'user_2', holderTurn('user_1'));
+    const opts = (memory.retrieveContext.mock.calls[0] as unknown as [string, { userId?: string }])[1];
+    expect(opts.userId).toBe('user_2');
   });
 });
 
@@ -462,11 +594,19 @@ describe("no business-wide record of one person's KEY turn or KEY action, for an
     ];
   });
 
+  // W1F-PERCEPTION-MODULE-SCOPE: the overdue invoice is money (revenue read), so it stays for the members (STAFF on role
+  // defaults) and not for a caller who is no member (no module scope, SEC-W11FPS-3); the support desk's turn (no member,
+  // no position) perceives nothing at all (D-203).
   it('leaves them out for a member, the owner, a caller who is no member and a turn with no member; the business events that are not one stay', async () => {
     for (const userId of ['user_1', 'user_2', 'user_9', undefined]) {
       const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'deliberate', userId);
       for (const marker of MARKERS) expect(out, `${String(userId)}: ${marker}`).not.toContain(marker);
-      expect(out, String(userId)).toContain('INV-014 overdue');
+      if (userId === undefined) {
+        expect(out, 'the support desk').toBe('');
+        continue;
+      }
+      if (userId === 'user_9') expect(out, String(userId)).not.toContain('INV-014 overdue');
+      else expect(out, String(userId)).toContain('INV-014 overdue');
       expect(out, String(userId)).toContain('CASHFLOW-DIP');
     }
   });

@@ -3000,7 +3000,9 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
       }
     }, 60_000);
 
-    it('W11-FLOW-PERCEPTION-SCOPE (review SEC-W11MC-3, D-130, W9-KEY-CORTEX-AUDIT fail closed): a turn whose requester is no member of the business reads no per-member memory into its perception block: a platform SUPER_ADMIN who is no member (BusinessGuard admits them) over POST .../flow/chat and its stream, and a turn that names no member (the Chatwoot support desk\'s chat() and streamChat()), get no cognition row and no CortexActionLog or AiExecutionLog row of anyone, the SUPER_ADMIN not even rows of their own left in the business (as a non-member in buildMemoryContext); the business-wide fact still reaches them', async () => {
+    // W1F-PERCEPTION-MODULE-SCOPE (owner ruling D-203 `supportdesk`): the support desk now perceives only the conversation
+    // in front of it, so its turn carries no perception block at all; the business-wide fact reaches the SUPER_ADMIN only.
+    it('W11-FLOW-PERCEPTION-SCOPE (review SEC-W11MC-3, D-130, W9-KEY-CORTEX-AUDIT fail closed): a turn whose requester is no member of the business reads no per-member memory into its perception block: a platform SUPER_ADMIN who is no member (BusinessGuard admits them) over POST .../flow/chat and its stream, and a turn that names no member (the Chatwoot support desk\'s chat() and streamChat()), get no cognition row and no CortexActionLog or AiExecutionLog row of anyone, the SUPER_ADMIN not even rows of their own left in the business (as a non-member in buildMemoryContext); the business-wide fact still reaches the SUPER_ADMIN, and the desk perceives nothing (D-203)', async () => {
       const ADMIN_SAID = 'V19C-FPS-ADMIN';
       await db.cognitionMemory.createMany({
         data: [
@@ -3039,7 +3041,12 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
             expect(prompt, label).not.toContain(ADMIN_SAID);
             expect(prompt, label).not.toContain('v19c.fps.admin_');
             expect(observed(prompt).filter((l) => /^- \[(cognition_memory|cortex_action_log|ai_execution_log)\]/.test(l)), label).toEqual([]);
-            expect(prompt, label).toContain(FPS.fact);
+            if (who === 'support desk') {
+              expect(prompt, label).not.toContain('WHAT YOU HAVE OBSERVED');
+              expect(prompt, label).not.toContain(FPS.fact);
+            } else {
+              expect(prompt, label).toContain(FPS.fact);
+            }
           }
         }
         expect(flow!.warnings.filter((w) => w.includes('perception'))).toEqual([]);
@@ -3289,7 +3296,11 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
       }
     }, 60_000);
 
-    it("W11-FLOW-PERCEPTION-SCOPE review CR-W11FPS-1: a turn with no reader still perceives the business: a non-member SUPER_ADMIN over POST .../flow/chat and its stream, and a turn that names no member (the Chatwoot support desk's chat() and streamChat(), as the staff bridge calls chat()), get the business-wide business event (an overdue invoice, written by the real BusinessEventService) as the STAFF member does, and still no member's cognition, CortexActionLog or AiExecutionLog row", async () => {
+    // W1F-PERCEPTION-MODULE-SCOPE: an overdue invoice is money (revenue read, D-57), so since SEC-W11FPS-3 it reaches only a
+    // reader whose membership reads revenue (the STAFF member on role defaults), not a SUPER_ADMIN who is no member (no
+    // module scope); the support desk perceives nothing at all (owner ruling D-203). The staff bridge's turn names its
+    // position, and its holder is its reader (D-202): test/perception-module-scope.integration.test.ts.
+    it("W11-FLOW-PERCEPTION-SCOPE review CR-W11FPS-1, as W1F-PERCEPTION-MODULE-SCOPE rules it: the overdue invoice (written by the real BusinessEventService) reaches the STAFF member who may read revenue over POST .../flow/chat and its stream, not a non-member SUPER_ADMIN (no module scope, SEC-W11FPS-3) who still perceives the business-wide fact, and nothing reaches the Chatwoot support desk's chat() and streamChat() (D-203); no member's cognition, CortexActionLog or AiExecutionLog row reaches either", async () => {
       const INVOICE = 'V19C-FPS-INV-OVERDUE-0042';
       const { BusinessEventService } = await import('../src/modules/business-events/business-event.service');
       await new BusinessEventService(prisma).emit({
@@ -3313,9 +3324,16 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
             ['support desk', await flow!.deskTurn(path)],
           ] as const) {
             const label = `${who} (${path})`;
-            expect(observed(prompt).filter((l) => l.startsWith('- [business_event] invoice.overdue: ') && l.includes(INVOICE)), label).toHaveLength(1);
-            expect(prompt, label).toContain(FPS.fact);
-            if (who === 'STAFF member') continue;
+            const overdue = observed(prompt).filter((l) => l.startsWith('- [business_event] invoice.overdue: ') && l.includes(INVOICE));
+            if (who === 'STAFF member') {
+              expect(overdue, label).toHaveLength(1);
+              expect(prompt, label).toContain(FPS.fact);
+              continue;
+            }
+            expect(overdue, label).toEqual([]);
+            expect(prompt, label).not.toContain(INVOICE);
+            if (who === 'support desk') expect(prompt, label).not.toContain('WHAT YOU HAVE OBSERVED');
+            else expect(prompt, label).toContain(FPS.fact);
             expect(observed(prompt).filter((l) => /^- \[(cognition_memory|cortex_action_log|ai_execution_log)\]/.test(l)), label).toEqual([]);
             expect(prompt, label).not.toContain('v19c.fps.owner_');
             expect(prompt, label).not.toContain('v19c.fps.member_');
