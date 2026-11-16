@@ -64,5 +64,8 @@ export default defineConfig({
     // Catches the class of bug fixed above: a test that passes only because of
     // what ran before it. See the note on reproducing a failure by seed.
     sequence: { shuffle: true },
+    // Tells a spec it runs under this config (unit-network-guard.spec.ts checks
+    // that the guard is already in place when a spec module loads).
+    env: { VITEST_KEYFLOW_UNIT: '1' },
   },
 });
