@@ -730,17 +730,30 @@ describe('V70H-02 a failing bookkeeping step costs only its own contribution (th
     expect(run.warnings.filter((w) => w.includes('[Consciousness][snapshot]') && w.includes('v70h: self-model unreadable'))).toHaveLength(1);
   });
 
-  it("RED-BEFORE: S7, the ethics decision log failing for real (KeyCortexEventService.logDecision on this database): the evaluation stands and reaches the answer, the reasoned answer is delivered, and a warning says the log was not written", async () => {
+  // FU-KEY-EVENT-COLUMNS (V1-71, D-220): logDecision no longer fails on this database (the writer names
+  // business_events' real columns, key-event-columns V71J-01), so the failure is now injected, once, into the
+  // real event service the ethics organ holds; the property pinned is unchanged.
+  it("RED-BEFORE: S7, the ethics decision log failing (KeyCortexEventService.logDecision, the real service made to fail once): the evaluation stands and reaches the answer, the reasoned answer is delivered, and a warning says the log was not written", async () => {
     consciousness.ethics.evaluationCache.clear();
     const from = { warnings: warnings.length, errors: errors.length };
-    const response = await consciousness.processConsciously(QUESTION, deliberateSession());
+    const decisionLog = vi.spyOn(consciousness.ethics.eventService, 'logDecision')
+      .mockRejectedValueOnce(new Error('Invalid invocation\n\nv70h: decision log refused the write'));
+    let response: any;
+    let calls = 0;
+    try {
+      response = await consciousness.processConsciously(QUESTION, deliberateSession());
+    } finally {
+      calls = decisionLog.mock.calls.length;
+      decisionLog.mockRestore();
+    }
+    expect(calls).toBe(1);
     expect(response.text).not.toMatch(FALLBACK);
     expect(response.text).toContain(CONCLUSION);
     // The organ's evaluation of the conclusion, not a stand-in verdict (permitted: it uses no sensitive data).
     expect(response.ethical).toMatchObject({ action: CONCLUSION, permitted: true });
     expect(response.ethical.explanation).toMatch(/Ethical Analysis of/);
     expect(errors.slice(from.errors).filter((e) => /Pipeline FAILED/.test(e))).toEqual([]);
-    expect(warnings.slice(from.warnings).filter((w) => w.startsWith('KeyCortexEthicsService:') && /decision log/i.test(w))).toHaveLength(1);
+    expect(warnings.slice(from.warnings).filter((w) => w.startsWith('KeyCortexEthicsService:') && /decision log/i.test(w) && w.includes('v70h: decision log refused the write'))).toHaveLength(1);
   });
 
   it('a failure in the reasoning itself still answers with the fallback, as before (positive control: only bookkeeping was made survivable)', async () => {
