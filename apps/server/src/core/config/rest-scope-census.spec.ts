@@ -108,6 +108,15 @@
  *          row of those controllers is `applied` (a GET, which the gate does not touch, and a route no member guard
  *          runs, keep their rows), and a row the gate applied says so; CEN-12c: on controllers built for the check,
  *          the reader and the real decorator agree handler by handler.
+ *          Review repair (SEC-HID-1..3, COR-HID-1..3): the gate leaves two more kinds of member write handler, and
+ *          the reader applies both: one that carries @HiddenModuleWritesExempt(<why>) (its own rule: a flow signal's
+ *          status is checked in the handler by the signal's own module; KEY chat's voice follows KEY chat), and one
+ *          whose chain runs AuthGuard without BusinessGuard and whose path names no :businessId (ModuleScopeGuard
+ *          could only read a business the caller names: the community like). CEN-12b holds their rows (the
+ *          exemption named, the missing tenant said); CEN-12d pins exactly which handlers the gate leaves; CEN-12e
+ *          pins the review's handler rules: D-181's settings admin on every connector sync, push and test of
+ *          these controllers (enforced on the route, or the handler's first statement), and revenue write on
+ *          the content request's generate-invoice (with its content write check).
  */
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -134,10 +143,14 @@ interface Route {
   /** CEN-12: the class's @HiddenModuleWrites(<module>, <scope>), and whether this handler's scope came from it. */
   hidden?: { module: string; scope: string; outermost: boolean };
   scopedByHidden?: boolean;
+  /** CEN-12 review repair: a member write handler of a gated class the gate leaves, and why. */
+  hiddenLeft?: 'exempt' | 'no-tenant';
 }
 
 /** CEN-12: the guards that make a handler a member route for @HiddenModuleWrites (an OptionalAuthGuard route admits anonymous callers). */
 const HIDDEN_MEMBER_GUARDS = ['AuthGuard', 'BusinessGuard'];
+/** CEN-12 review repair (COR-HID-2): a path segment that names the tenant ModuleScopeGuard reads. */
+const TENANT_PARAM = /(^|\/):businessId(\/|$)/;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -194,24 +207,31 @@ function routes(files: Parsed[] = parsed()): Route[] {
         let guards = [...classGuards, ...ds.filter((d) => name(d) === 'UseGuards').flatMap(args)];
         let scope = scopeDecorator ? { module: scopeArgs[0], minLevel: scopeArgs[1] ?? 'read' } : undefined;
         let scopedByHidden = false;
+        let hiddenLeft: Route['hiddenLeft'];
+        const path = '/' + [prefix, unquote(args(http)[0] ?? '')].filter(Boolean).join('/');
         // CEN-12: @HiddenModuleWrites' rule (core/auth/hidden-module-writes.decorator.ts), checked against the real decorator in CEN-12c.
         if (hidden && WRITE_VERBS.has(verb) && guards.some((g) => HIDDEN_MEMBER_GUARDS.includes(g))) {
-          if (!scope) {
-            scope = { module: hidden.scope, minLevel: 'write' };
-            scopedByHidden = true;
+          if (ds.some((d) => name(d) === 'HiddenModuleWritesExempt')) hiddenLeft = 'exempt';
+          else if (!guards.includes('BusinessGuard') && !TENANT_PARAM.test(path)) hiddenLeft = 'no-tenant';
+          else {
+            if (!scope) {
+              scope = { module: hidden.scope, minLevel: 'write' };
+              scopedByHidden = true;
+            }
+            if (!guards.includes('ModuleScopeGuard')) guards = [...guards, 'ModuleScopeGuard'];
           }
-          if (!guards.includes('ModuleScopeGuard')) guards = [...guards, 'ModuleScopeGuard'];
         }
         out.push({
           key: `${node.name.getText(sf)}.${member.name.getText(sf)}`,
           file: relative(SRC, file),
           verb,
-          path: '/' + [prefix, unquote(args(http)[0] ?? '')].filter(Boolean).join('/'),
+          path,
           guards,
           scope,
           body: member.body?.getText(sf) ?? '',
           hidden,
           scopedByHidden,
+          hiddenLeft,
         });
       }
     }
@@ -2982,6 +3002,35 @@ export class Cen12ClassScopeController {
   @Patch('businesses/:businessId/r')
   r() {}
 }
+
+@HiddenModuleWrites('community', 'content')
+@Controller('cen12t')
+export class Cen12TenantController {
+  @UseGuards(AuthGuard)
+  @Post('posts/:postId/like')
+  like() {}
+
+  @UseGuards(AuthGuard)
+  @Post('businesses/:businessId/posts')
+  post() {}
+
+  @UseGuards(BusinessGuard)
+  @Post('posts/:postId/pin')
+  pin() {}
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @HiddenModuleWritesExempt('checked in the handler by the record its own module names, for this check')
+  @Post('businesses/:businessId/signals/:id/resolve')
+  resolve() {}
+}
+
+@HiddenModuleWrites('key_flows', 'automations')
+@Controller('cen12c/businesses/:businessId')
+@UseGuards(AuthGuard)
+export class Cen12ClassTenantController {
+  @Post('x')
+  x() {}
+}
 `;
 
 describe('CEN-12 (SWP-CENSUS-HIDDEN): the hidden-module controllers carry one write gate', () => {
@@ -3025,6 +3074,15 @@ describe('CEN-12 (SWP-CENSUS-HIDDEN): the hidden-module controllers carry one wr
       }
       const memberRoute = r.guards.some((g) => HIDDEN_MEMBER_GUARDS.includes(g));
       if (r.verb === 'GET' || !memberRoute) continue;
+      // review repair: a handler the gate leaves keeps a row that says why
+      if (r.hiddenLeft === 'exempt') {
+        if (!/HiddenModuleWritesExempt/.test(row.reason)) problems.push(`line ${row.line}: ${row.key} carries @HiddenModuleWritesExempt and its reason does not say so`);
+        continue;
+      }
+      if (r.hiddenLeft === 'no-tenant') {
+        if (!/no tenant/.test(row.reason)) problems.push(`line ${row.line}: ${row.key} names no tenant (the gate leaves it) and its reason does not say so`);
+        continue;
+      }
       problems.push(`line ${row.line}: ${row.key} (${r.verb} ${r.path}) is ${row.disposition}: a member write of a hidden-module controller is applied`);
     }
     expect(problems).toEqual([]);
@@ -3040,6 +3098,7 @@ describe('CEN-12 (SWP-CENSUS-HIDDEN): the hidden-module controllers carry one wr
     const { OptionalAuthGuard } = await import('../auth/optional-auth.guard');
     const { BusinessGuard } = await import('../auth/business.guard');
     const { ModuleScopeGuard, RequireModuleScope, MODULE_SCOPE_KEY } = await import('../auth/module-scope.guard');
+    const { HiddenModuleWritesExempt } = (await import('../auth/hidden-module-writes.decorator')) as Record<string, any>;
 
     type Dec = ClassDecorator | MethodDecorator;
     const build = (name: string, classDecs: Dec[], methods: Array<[string, Dec[]]>) => {
@@ -3069,6 +3128,15 @@ describe('CEN-12 (SWP-CENSUS-HIDDEN): the hidden-module controllers carry one wr
       build('Cen12ClassScopeController', [HiddenModuleWrites('events', 'bookings'), UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard), Controller('cen12g')], [
         ['q', [Post('businesses/:businessId/q')]],
         ['r', [RequireModuleScope('bookings', 'admin'), Patch('businesses/:businessId/r')]],
+      ]),
+      build('Cen12TenantController', [HiddenModuleWrites('community', 'content'), Controller('cen12t')], [
+        ['like', [UseGuards(AuthGuard), Post('posts/:postId/like')]],
+        ['post', [UseGuards(AuthGuard), Post('businesses/:businessId/posts')]],
+        ['pin', [UseGuards(BusinessGuard), Post('posts/:postId/pin')]],
+        ['resolve', [UseGuards(AuthGuard, BusinessGuard), HiddenModuleWritesExempt('checked in the handler by the record its own module names, for this check'), Post('businesses/:businessId/signals/:id/resolve')]],
+      ]),
+      build('Cen12ClassTenantController', [HiddenModuleWrites('key_flows', 'automations'), Controller('cen12c/businesses/:businessId'), UseGuards(AuthGuard)], [
+        ['x', [Post('x')]],
       ]),
     ];
     const runtime = built.flatMap((cls) => {
@@ -3110,9 +3178,77 @@ describe('CEN-12 (SWP-CENSUS-HIDDEN): the hidden-module controllers carry one wr
       'Cen12MixedController.get': 'none AuthGuard',
       'Cen12ClassScopeController.q': 'bookings:write AuthGuard>BusinessGuard>ModuleScopeGuard',
       'Cen12ClassScopeController.r': 'bookings:admin AuthGuard>BusinessGuard>ModuleScopeGuard',
+      // review repair: AuthGuard alone with no tenant in the path is left (COR-HID-2); with one, or behind BusinessGuard, it is gated
+      'Cen12TenantController.like': 'none AuthGuard',
+      'Cen12TenantController.post': 'content:write AuthGuard>ModuleScopeGuard',
+      'Cen12TenantController.pin': 'content:write BusinessGuard>ModuleScopeGuard',
+      // review repair: an exemption by name is left as it is (COR-HID-1, COR-HID-3)
+      'Cen12TenantController.resolve': 'none AuthGuard>BusinessGuard',
+      'Cen12ClassTenantController.x': 'automations:write AuthGuard>ModuleScopeGuard',
     });
     // it refuses to read a class before @Controller has recorded it, and a scope that is not canonical
     expect(() => build('Cen12Inner', [Controller('x'), HiddenModuleWrites('helpdesk', 'operations')], [['w', [Post('businesses/:businessId/w')]]])).toThrow(/outermost/);
     expect(() => HiddenModuleWrites('helpdesk', 'helpdesk' as any)).toThrow(/not a permission scope/);
+    // an exemption says why
+    expect(() => HiddenModuleWritesExempt('')).toThrow(/why/);
+  });
+
+  /**
+   * Review repair: the member write handlers of the gated controllers the gate leaves, and why. An exemption is a
+   * decision on one handler (its row says what holds it instead); a route with no tenant in its path is one
+   * ModuleScopeGuard could only read for a business the caller names. A new one fails here until it is pinned.
+   */
+  const HIDDEN_LEFT: Record<string, 'exempt' | 'no-tenant'> = {
+    'FlowSignalController.actionRequired': 'exempt', // COR-HID-1: write on the signal's own module, in the handler
+    'FlowSignalController.resolve': 'exempt',
+    'FlowSignalController.snooze': 'exempt',
+    'VoiceController.synthesize': 'exempt', // COR-HID-3: KEY chat's voice follows KEY chat (writes no row)
+    'CommunityController.likePost': 'no-tenant', // COR-HID-2, SEC-HID-3: a bare post id behind AuthGuard alone
+  };
+
+  it('[CEN-12d] the gate leaves exactly the pinned member write handlers of these controllers: the ones exempted by name and the ones whose path names no tenant', () => {
+    const left = Object.fromEntries(all.filter((r) => r.hiddenLeft).map((r) => [r.key, r.hiddenLeft]));
+    expect(left).toEqual(HIDDEN_LEFT);
+  });
+
+  /** Review repair SEC-HID-1 (D-181, connectorauth): every connector sync, push or test of the gated controllers. */
+  const D181_CONNECTOR_DOORS = [
+    'AccountingController.pushCustomers',
+    'AccountingController.pushInvoice',
+    'CommunicationsController.listWhatsAppPhones',
+    'CommunicationsController.verifyWhatsAppConnection',
+    'ConnectController.backfillFormResponses',
+    'ConnectController.processNewFormResponses',
+    'ConnectController.resyncSource',
+    'ConnectController.syncAllSources',
+    'ConnectController.syncContacts',
+    'ConnectController.syncOutlookContacts',
+    'MarketingSyncController.pushContacts',
+    'MarketingSyncController.triggerCampaign',
+    'ShopifyController.syncAll',
+    'ShopifyController.syncCustomers',
+    'ShopifyController.syncOrders',
+    'ShopifyController.syncProducts',
+    'SocialController.testConnection',
+  ];
+  /** The handler's first statement is the settings admin check (a handler whose route scope is its own module's write). */
+  const FIRST_SETTINGS_ADMIN = /^\{\s*(?:\/\/[^\n]*\n\s*)*await assertMemberModuleLevel\(this\.prisma, businessId, req\??\.user, 'settings', 'admin'\);/;
+
+  it('[CEN-12e] review repair pins: D-181 settings admin holds on every connector sync, push and test of these controllers (enforced on the route, or the handler\'s first statement); generate-invoice needs revenue write and checks content write', () => {
+    const byKey = new Map(all.map((r) => [r.key, r]));
+    const problems: string[] = [];
+    for (const key of D181_CONNECTOR_DOORS) {
+      const r = byKey.get(key);
+      if (!r) { problems.push(`${key} is not a route`); continue; }
+      if (!settingsAdminEnforced(r) && !FIRST_SETTINGS_ADMIN.test(r.body)) {
+        problems.push(`${key} (${r.verb} ${r.path}) holds ${r.scope ? `${r.scope.module}:${r.scope.minLevel}` : 'no scope'} and does not check settings admin first`);
+      }
+    }
+    const invoice = byKey.get('ContentOpsController.generateInvoice');
+    if (!invoice || !enforced(invoice) || invoice.scope?.module !== 'revenue' || invoice.scope?.minLevel !== 'write') {
+      problems.push(`ContentOpsController.generateInvoice holds ${invoice?.scope ? `${invoice.scope.module}:${invoice.scope.minLevel}` : 'no scope'}, not revenue:write`);
+    }
+    if (!/assertMemberModuleLevel\(this\.prisma, businessId, req\??\.user, 'content', 'write'\)/.test(invoice?.body ?? '')) problems.push('ContentOpsController.generateInvoice does not check content write');
+    expect(problems).toEqual([]);
   });
 });

@@ -33,13 +33,40 @@
  *           (RED: 201 and an EMAIL row); FACEBOOK is still stored.
  *   CH-OUT  no outbound HTTP request was made (fetch tap).
  *
+ * Review repair (SEC-HID-1..3, COR-HID-1..3):
+ *   CH-W01c (SEC-HID-1; D-181) the six connector pushes and tests the gate had left at module write (the
+ *           QuickBooks/Xero invoice and customer push, the Mailchimp/Klaviyo contact push and campaign
+ *           trigger, the WhatsApp connection test and phone list) need settings admin: a member with
+ *           revenue, content and crm but no settings admin, and one with settings write, are refused
+ *           before any connector is asked (RED: 2xx, the connectors asked); the owner gets past the rule.
+ *   CH-FS-* (COR-HID-1) a KEY flow signal's status changes need write on the signal's own module:
+ *           revenue for a money signal (the AR Clerk Queue on Money > Overview), automations for any
+ *           other. The Bookkeeper shape (revenue write, no automations) clears an AR item (RED: 403); a
+ *           member with automations write and revenue read is refused it (RED: 201); another business's
+ *           signal is 404 (RED: 500).
+ *   CH-COMMUNITY-01 (COR-HID-2, SEC-HID-3) the community like (AuthGuard only, a bare post id, no tenant in
+ *           the path) is left by the gate: ModuleScopeGuard could only read a business the caller names.
+ *           The request the web sends reaches the handler and counts the like (RED: 403 'businessId is
+ *           required' for every caller, the owner included).
+ *   CH-INV-01 (SEC-HID-2) the content request's generate-invoice creates an invoice: revenue write, and
+ *           content write in the handler (RED: a member with content write and revenue read reaches it).
+ *   CH-VOICE-01 (COR-HID-3) KEY chat's voice (TTS) is left by the gate: a default STAFF member, who may
+ *           chat with KEY, hears the reply (RED: 403 'ai requires write access').
+ *
  * Nothing on the authorization path is mocked: PrismaService, AuthGuard, BusinessGuard and
- * ModuleScopeGuard are real against DATABASE_URL, and so are the six real-write services and
- * SocialConnectionsService. Stand-ins: identity attachment (`x-test-user`, as every suite here); the
- * other collaborators of the controllers (useMocker), which no case reaches: a global interceptor
- * answers every other request without calling its handler, so the claim there is exactly "the request
- * got past every guard to the handler" (an interceptor runs after the guards); and the rate-limit,
- * plan-limit and feature-flag guards, which answer allow (they decide no module level).
+ * ModuleScopeGuard are real against DATABASE_URL, and so are the six real-write services,
+ * SocialConnectionsService, FlowSignalService, FlowRouterService and CommunityService. Stand-ins:
+ * identity attachment (`x-test-user`, as every suite here); the other collaborators of the controllers
+ * (useMocker), which no case reaches: a global interceptor answers every other request without calling
+ * its handler, so the claim there is exactly "the request got past every guard to the handler" (an
+ * interceptor runs after the guards); the accounting and marketing connectors, the voice service and the
+ * content invoice service, recording stubs (no provider is asked: a stub answers "not connected", and
+ * the claim is "the handler's own rule ran first"); and the rate-limit, plan-limit and feature-flag
+ * guards, which answer allow (they decide no module level).
+ *
+ * This harness does not register the Prisma tenant extension (main.ts setTenantContextProvider) or the
+ * TenantInterceptor: a write here is bound to its business only by the where the code writes (review
+ * SEC-HID-3). The cases below claim nothing the extension would add.
  *
  * Requires DATABASE_URL. Every seeded row carries the `v62a_` prefix (registered for V1-62 in
  * test/helpers/fixture-prefixes.json) and is hard-deleted by raw SQL (sqlLikePrefix) in beforeAll
@@ -67,9 +94,22 @@ const ID = {
   allRead: `${P}allRead`, // STAFF of bizA, every canonical module at read: below write everywhere
   allWrite: `${P}allWrite`, // STAFF of bizA, every canonical module at write: below admin everywhere
   outsider: `${P}outsider`, // OWNER of bizB only
+  // review repair actors (STAFF of bizA, explicit maps: a missing key is none)
+  pusher: `${P}pusher`, // { content, revenue: write; crm: read; settings: none } (SEC-HID-1)
+  bookkeeper: `${P}bookkeeper`, // { revenue, expenses: write } (COR-HID-1: the Bookkeeper shape)
+  autoWrite: `${P}autoWrite`, // { automations: write; revenue: read } (COR-HID-1)
+  contentNoRevenue: `${P}contentNoRevenue`, // { content: write; revenue, crm: read } (SEC-HID-2)
+  revenueNoContent: `${P}revenueNoContent`, // { content: read; revenue: write } (SEC-HID-2)
+  staffDefault: `${P}staffDefault`, // STAFF, no explicit map: role defaults (ai none, revenue and automations read)
   bizA: `${P}bizA`,
   bizB: `${P}bizB`,
   contact: `${P}contact`,
+  // KEY flow signals (COR-HID-1)
+  sigAR: `${P}sig_ar`, // invoice.overdue, flows FINANCIAL + TEMPORAL + PEOPLE, AR clerk, ACTION_REQUIRED
+  sigARPeople: `${P}sig_ar_people`, // invoice.overdue filed under PEOPLE only (the AR queue lists it too): a money signal by its type
+  sigLead: `${P}sig_lead`, // lead.created, PEOPLE: not a money signal
+  sigB: `${P}sig_b`, // bizB's AR signal
+  post: `${P}post`, // a community post of bizA (COR-HID-2)
 };
 
 const CANONICAL = ['crm', 'revenue', 'bookings', 'projects', 'content', 'expenses', 'automations', 'storefront', 'settings', 'ai', 'team', 'analytics', 'operations', 'connect'];
@@ -141,7 +181,39 @@ const THIS_PACKET_DECLARES: Record<string, string> = {
   'SocialController.testConnection': 'settings:admin',
   'DeviceController.approveIntake': 'operations:write',
   'DeviceController.rejectIntake': 'operations:write',
+  // review repair SEC-HID-1 (D-181): the WhatsApp connection test and its phone list, before connect (settings admin, as connect)
+  'CommunicationsController.verifyWhatsAppConnection': 'settings:admin',
+  'CommunicationsController.listWhatsAppPhones': 'settings:admin',
+  // review repair SEC-HID-2: it creates an invoice (every invoice door needs revenue write); content write stays, in the handler
+  'ContentOpsController.generateInvoice': 'revenue:write',
 };
+
+/**
+ * Review repair: the member write handlers @HiddenModuleWritesExempt leaves to their own rule, with the census
+ * disposition their row carries. A flow signal's status changes are checked in the handler by the signal's own
+ * module (COR-HID-1); KEY chat's voice writes no row and speaks for KEY chat, every member's surface (COR-HID-3).
+ */
+const EXEMPT: Record<string, string> = {
+  'FlowSignalController.resolve': 'exempt-check',
+  'FlowSignalController.actionRequired': 'exempt-check',
+  'FlowSignalController.snooze': 'exempt-check',
+  'VoiceController.synthesize': 'open',
+};
+
+/**
+ * Review repair (COR-HID-2, SEC-HID-3): the member write routes that run AuthGuard alone and name no tenant in their
+ * path. ModuleScopeGuard could only read a business the caller names, not the one the handler acts on, so the gate
+ * leaves them (their census row stays open).
+ */
+const NO_TENANT = ['CommunityController.likePost'];
+
+/** Review repair SEC-HID-1: the handler-level rule the class gate cannot see (a check the handler runs first). */
+const CHECKED_FIRST_SETTINGS_ADMIN = [
+  'AccountingController.pushInvoice',
+  'AccountingController.pushCustomers',
+  'MarketingSyncController.pushContacts',
+  'MarketingSyncController.triggerCampaign',
+];
 
 /** Handler-level scopes on these controllers' write routes before this packet (kept: a handler's own declaration is its rule). */
 const DECLARED_BEFORE: Record<string, string> = {
@@ -198,6 +270,7 @@ const MEMBER_GUARDS = new Set(['AuthGuard', 'BusinessGuard']);
 let db: any;
 let app: any;
 let MODULE_SCOPE_KEY = '';
+let HIDDEN_MODULE_WRITES_EXEMPT_KEY = '';
 const classes: Record<string, any> = {};
 /** `Class.handler` of every request that got past every guard. */
 const reached: string[] = [];
@@ -210,12 +283,29 @@ const REAL = new Set([
   'EventsController.createEvent',
   'TimeEntryController.create',
   'SocialController.manualConnect',
+  // review repair: the handlers whose own rule is the claim
+  'FlowSignalController.resolve',
+  'FlowSignalController.actionRequired',
+  'FlowSignalController.snooze',
+  'FlowSignalController.getRoleQueue',
+  'CommunityController.likePost',
+  'ContentOpsController.generateInvoice',
+  'VoiceController.synthesize',
+  ...CHECKED_FIRST_SETTINGS_ADMIN,
 ]);
 const outbound: string[] = [];
 const realFetch = globalThis.fetch;
 
+/** Recording stubs (review repair): every call a handler makes on them, by `Stub.method`. */
+const stubCalls: string[] = [];
+const recording = (name: string, methods: Record<string, (...args: any[]) => unknown>) =>
+  Object.fromEntries(Object.entries(methods).map(([m, fn]) => [m, (...args: any[]) => { stubCalls.push(`${name}.${m}`); return fn(...args); }]));
+const notConnected = async () => false;
+
 async function cleanup() {
   for (const sql of [
+    `DELETE FROM flow_signals WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM community_posts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM support_tickets WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM business_risks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM sop_documents WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -283,6 +373,7 @@ beforeAll(async () => {
   const { BusinessGuard } = await import('../src/core/auth/business.guard');
   const scopeMod = await import('../src/core/auth/module-scope.guard');
   MODULE_SCOPE_KEY = scopeMod.MODULE_SCOPE_KEY;
+  HIDDEN_MODULE_WRITES_EXEMPT_KEY = ((await import('../src/core/auth/hidden-module-writes.decorator')) as Record<string, any>).HIDDEN_MODULE_WRITES_EXEMPT_KEY ?? 'hidden_module_writes_exempt';
   for (const [name, file] of CONTROLLERS) {
     const mod = await import(`../src/modules/${file}`);
     classes[name] = mod[name];
@@ -295,6 +386,16 @@ beforeAll(async () => {
   const { EventsService } = await import('../src/modules/events/events.service');
   const { TimeEntryService } = await import('../src/modules/time-tracking/time-entry.service');
   const { SocialConnectionsService } = await import('../src/modules/social/social-connections.service');
+  const { FlowSignalService } = await import('../src/modules/flow-signal/flow-signal.service');
+  const { FlowRouterService } = await import('../src/modules/flow-signal/flow-router.service');
+  const { RoleFlowService } = await import('../src/modules/flow-signal/role-flow.service');
+  const { CommunityService } = await import('../src/modules/community/community.service');
+  const { ContentInvoiceService } = await import('../src/modules/content-ops/content-invoice.service');
+  const { VoiceService } = await import('../src/modules/voice/voice.service');
+  const { QuickbooksConnector } = await import('../src/core/connectors/implementations/quickbooks.connector');
+  const { XeroConnector } = await import('../src/core/connectors/implementations/xero.connector');
+  const { MailchimpConnector } = await import('../src/core/connectors/implementations/mailchimp.connector');
+  const { KlaviyoConnector } = await import('../src/core/connectors/implementations/klaviyo.connector');
   const { RateLimitGuard } = await import('../src/core/guards/rate-limit.guard');
   const { PublicRateLimitGuard } = await import('../src/core/guards/public-rate-limit.guard');
   const { CrmRateLimitGuard } = await import('../src/modules/crm/guards/rate-limit.guard');
@@ -317,7 +418,26 @@ beforeAll(async () => {
       EventsService,
       TimeEntryService,
       SocialConnectionsService,
+      CommunityService,
       { provide: EventEmitter2, useValue: { emit: () => true, emitAsync: async () => [] } },
+      // review repair: real flow-signal services (their constructors name PrismaService by type only, which this
+      // runner does not emit, so they are built here exactly as Nest builds them)
+      { provide: FlowSignalService, useFactory: (prisma: any) => new FlowSignalService(prisma), inject: [PrismaService] },
+      { provide: RoleFlowService, useFactory: (prisma: any) => new RoleFlowService(prisma), inject: [PrismaService] },
+      { provide: FlowRouterService, useFactory: () => new FlowRouterService() },
+      // recording stubs: no provider is asked; "not connected" ends each handler right after its own rule
+      { provide: QuickbooksConnector, useValue: recording('QuickbooksConnector', { isConnected: notConnected }) },
+      { provide: XeroConnector, useValue: recording('XeroConnector', { isConnected: notConnected }) },
+      { provide: MailchimpConnector, useValue: recording('MailchimpConnector', { isConnected: notConnected }) },
+      { provide: KlaviyoConnector, useValue: recording('KlaviyoConnector', { isConnected: notConnected }) },
+      { provide: ContentInvoiceService, useValue: recording('ContentInvoiceService', { generateInvoiceFromDelivery: async () => ({ id: `${P}stub_invoice` }) }) },
+      {
+        provide: VoiceService,
+        useValue: recording('VoiceService', {
+          listProviders: () => [{ name: 'openai', available: true }],
+          synthesize: async () => ({ buffer: Buffer.from('v62a-audio'), contentType: 'audio/mpeg' }),
+        }),
+      },
     ],
   }).useMocker(() => ({}));
   for (const guard of [RateLimitGuard, PublicRateLimitGuard, CrmRateLimitGuard, FeatureFlagGuard, PlanLimitGuard]) {
@@ -368,6 +488,29 @@ beforeAll(async () => {
   await m(ID.allWrite, ID.bizA, 'STAFF', every('write'));
   await m(ID.outsider, ID.bizB, 'OWNER');
   await db.contact.create({ data: { id: ID.contact, businessId: ID.bizA, firstName: 'V62A', lastName: 'Customer', email: `${P}customer@test.local` } });
+
+  // review repair actors and rows
+  const staff: Array<[string, Record<string, string> | undefined]> = [
+    [ID.pusher, { content: 'write', revenue: 'write', crm: 'read', settings: 'none' }],
+    [ID.bookkeeper, { revenue: 'write', expenses: 'write' }],
+    [ID.autoWrite, { automations: 'write', revenue: 'read' }],
+    [ID.contentNoRevenue, { content: 'write', revenue: 'read', crm: 'read' }],
+    [ID.revenueNoContent, { content: 'read', revenue: 'write' }],
+    [ID.staffDefault, undefined],
+  ];
+  for (const [id, scopes] of staff) {
+    await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role: 'USER' } });
+    await m(id, ID.bizA, 'STAFF', scopes);
+  }
+  const signal = (id: string, businessId: string, type: string, flows: string[], ownerRoleHint: string, status: string) =>
+    db.flowSignal.create({
+      data: { id, businessId, source: 'SCHEDULER', type, flows, ownerRoleHint, status, title: `${P}${type}`, payload: { invoiceId: `${P}inv` } },
+    });
+  await signal(ID.sigAR, ID.bizA, 'invoice.overdue', ['FINANCIAL', 'TEMPORAL', 'PEOPLE'], 'ACCOUNTS_RECEIVABLE_CLERK', 'ACTION_REQUIRED');
+  await signal(ID.sigARPeople, ID.bizA, 'invoice.overdue', ['PEOPLE'], 'ACCOUNTS_RECEIVABLE_CLERK', 'ACTION_REQUIRED');
+  await signal(ID.sigLead, ID.bizA, 'lead.created', ['PEOPLE'], 'LEAD_QUALIFIER', 'RECORDED');
+  await signal(ID.sigB, ID.bizB, 'invoice.overdue', ['FINANCIAL'], 'ACCOUNTS_RECEIVABLE_CLERK', 'ACTION_REQUIRED');
+  await db.communityPost.create({ data: { id: ID.post, businessId: ID.bizA, content: `${P}post` } });
 }, 300_000);
 
 afterAll(async () => {
@@ -377,14 +520,21 @@ afterAll(async () => {
 });
 
 describe('CH-C: the write gate is on every member write handler of the hidden-module controllers', () => {
-  it('[CH-C01] RED-BEFORE: every member write handler runs AuthGuard or BusinessGuard, then ModuleScopeGuard, and requires its scope (the controller\'s at write, or its own declaration); only the handlers no member guard runs are left', () => {
+  it('[CH-C01] RED-BEFORE: every member write handler runs AuthGuard or BusinessGuard, then ModuleScopeGuard, and requires its scope (the controller\'s at write, or its own declaration); only the handlers no member guard runs, the ones exempted by name and the ones that name no tenant are left (review repair: RED at the packet head, which gated the flow signals, TTS and the community like)', () => {
     const problems: string[] = [];
     const ungated: string[] = [];
+    const left: string[] = [];
     let gated = 0;
     for (const [name, , , scope] of CONTROLLERS) {
       for (const h of handlersOf(classes[name]).filter((x) => WRITE_METHODS.has(x.method))) {
         const memberAt = h.guards.findIndex((g) => MEMBER_GUARDS.has(g));
         if (memberAt < 0) { ungated.push(h.key); continue; }
+        if (Object.hasOwn(EXEMPT, h.key) || NO_TENANT.includes(h.key)) {
+          // left to its own rule: no class scope and no ModuleScopeGuard the gate added
+          if (h.guards.includes('ModuleScopeGuard') || h.scope) problems.push(`${h.key} is left by the gate but requires ${scopeText(h.scope)} through ${h.guards.join('>')}`);
+          left.push(h.key);
+          continue;
+        }
         gated++;
         const scopeAt = h.guards.lastIndexOf('ModuleScopeGuard');
         if (scopeAt < 0) problems.push(`${h.key} does not run ModuleScopeGuard`);
@@ -395,10 +545,17 @@ describe('CH-C: the write gate is on every member write handler of the hidden-mo
     }
     expect(problems).toEqual([]);
     expect(ungated.sort()).toEqual(NO_MEMBER_GUARD);
-    expect(gated).toBe(346);
+    expect(left.sort()).toEqual([...Object.keys(EXEMPT), ...NO_TENANT].sort());
+    expect(gated).toBe(341);
+    // the exemption is a named, reasoned marker on the handler, not an omission
+    for (const key of Object.keys(EXEMPT)) {
+      const [cls, method] = key.split('.');
+      const why = Reflect.getMetadata(HIDDEN_MODULE_WRITES_EXEMPT_KEY, classes[cls].prototype[method]);
+      expect(typeof why === 'string' && why.length > 20, `${key} carries @HiddenModuleWritesExempt(<why>)`).toBe(true);
+    }
   });
 
-  it('[CH-C02] RED-BEFORE: every census row of these controllers whose verb writes is `applied` and names the scope its handler carries', () => {
+  it('[CH-C02] RED-BEFORE: every census row of these controllers whose verb writes is `applied` and names the scope its handler carries; an exempted handler\'s row names the marker (and its check), a route that names no tenant stays open', () => {
     const doc = readFileSync(path.resolve(__dirname, '../../../docs/reconstruction/REST-SCOPE-CENSUS-2026-11-13.md'), 'utf8');
     const rows = new Map<string, { verb: string; disposition: string; reason: string }>();
     for (const line of doc.split('\n')) {
@@ -414,6 +571,17 @@ describe('CH-C: the write gate is on every member write handler of the hidden-mo
           if (h.key === 'CommunityController.recordProfileView' && row?.disposition !== 'exempt-own') problems.push(`${h.key} should stay exempt-own`);
           continue;
         }
+        if (Object.hasOwn(EXEMPT, h.key)) {
+          if (row?.disposition !== EXEMPT[h.key]) problems.push(`${h.key} is ${row?.disposition ?? 'missing'}, not ${EXEMPT[h.key]}`);
+          else if (!/HiddenModuleWritesExempt/.test(row.reason)) problems.push(`${h.key}'s row does not name @HiddenModuleWritesExempt`);
+          else if (EXEMPT[h.key] === 'exempt-check' && !/check:assertMemberModuleLevel/.test(row.reason)) problems.push(`${h.key}'s row does not name its check`);
+          continue;
+        }
+        if (NO_TENANT.includes(h.key)) {
+          if (row?.disposition !== 'open') problems.push(`${h.key} is ${row?.disposition ?? 'missing'}, not open (the gate does not reach it)`);
+          else if (!/no tenant/.test(row.reason)) problems.push(`${h.key}'s row does not say its path names no tenant`);
+          continue;
+        }
         if (!row) {
           // a handler that carried its own enforced scope before the census never had a row
           if (!DECLARED_BEFORE[h.key]) problems.push(`${h.key} has no census row`);
@@ -426,7 +594,7 @@ describe('CH-C: the write gate is on every member write handler of the hidden-mo
       }
     }
     expect(problems).toEqual([]);
-    expect(applied).toBe(337);
+    expect(applied).toBe(332);
   });
 });
 
@@ -448,7 +616,6 @@ const REPRESENTATIVE: Array<[string, Verb, string, unknown?]> = [
   ['EmailMarketingController', 'post', `/businesses/${ID.bizA}/campaigns`, { name: 'x' }],
   ['EvidenceController', 'post', `/businesses/${ID.bizA}/evidence`, { title: 'x' }],
   ['FlowController', 'patch', `/api/flows/businesses/${ID.bizA}/cross-module-workflows/${P}wf`, { enabled: false }],
-  ['FlowSignalController', 'post', `/flow-signals/businesses/${ID.bizA}/${P}sig/resolve`],
   ['GamificationController', 'post', `/gamification/businesses/${ID.bizA}/streak`],
   ['GoogleDriveController', 'post', `/drive/businesses/${ID.bizA}/folders`, { name: 'x' }],
   ['KeystoreAdminController', 'post', `/keystore/admin/listings`, { businessId: ID.bizA, title: 'x' }],
@@ -465,8 +632,9 @@ const REPRESENTATIVE: Array<[string, Verb, string, unknown?]> = [
   ['SupplierController', 'post', `/supplier/businesses/${ID.bizA}/products/${P}product/variants`, { name: 'x' }],
   ['TaskAssignmentController', 'post', `/businesses/${ID.bizA}/task-assignments`, { taskId: `${P}task`, userId: ID.allRead }],
   ['TemporalFlowController', 'post', `/temporal-flow/businesses/${ID.bizA}`, { title: 'x' }],
-  ['VoiceController', 'post', `/voice/businesses/${ID.bizA}/tts`, { text: 'x' }],
 ];
+// Review repair: FlowSignalController's writes are checked by the signal's own module (CH-FS-*) and VoiceController's
+// one write, KEY chat's voice, is left to KEY chat's rule (CH-VOICE-01); neither has a write the class gate holds.
 
 describe('CH-01: a member below the scope is refused one representative write of every controller; the owner is admitted', () => {
   for (const [name, verb, url, body] of REPRESENTATIVE) {
@@ -578,6 +746,146 @@ describe('CH-SOC-01: the manual social connect stores social networks only', () 
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     const stored = await db.socialConnection.findMany({ where: { businessId: ID.bizA, platform: 'FACEBOOK' } });
     expect(stored).toHaveLength(1);
+  });
+});
+
+describe('CH-W01c (review SEC-HID-1; D-181): the connector pushes and tests need settings admin', () => {
+  const routes: Array<[string, string, unknown, RegExp]> = [
+    // [handler, url, body, what the OWNER meets right after the settings rule]
+    ['AccountingController.pushInvoice', `/accounting/businesses/${ID.bizA}/invoices/push`, { invoiceIds: [`${P}inv`] }, /No accounting provider is connected/],
+    ['AccountingController.pushCustomers', `/accounting/businesses/${ID.bizA}/customers/push`, { contactIds: [ID.contact] }, /No accounting provider is connected/],
+    ['MarketingSyncController.pushContacts', `/marketing/businesses/${ID.bizA}/lists/push-contacts`, { provider: 'klaviyo', listId: `${P}list` }, /klaviyo is not connected/],
+    ['MarketingSyncController.triggerCampaign', `/marketing/businesses/${ID.bizA}/lists/campaigns/mailchimp/${P}c1/trigger`, {}, /mailchimp is not connected/],
+    ['CommunicationsController.verifyWhatsAppConnection', `/communications/businesses/${ID.bizA}/whatsapp/verify-connection`, { accessToken: [P, 'wa', 'tok'].join('-') }, /./],
+    ['CommunicationsController.listWhatsAppPhones', `/communications/businesses/${ID.bizA}/whatsapp/list-phones`, { accessToken: [P, 'wa', 'tok'].join('-'), waBusinessAccountId: `${P}waba` }, /./],
+  ];
+
+  it('[CH-W01c] RED-BEFORE: a member with content and revenue write and crm read but no settings admin, and a member with settings write, are refused the six with settings\' refusal before any connector is asked or any request leaves; the owner gets past the rule', async () => {
+    for (const [key, url, body, ownerMeets] of routes) {
+      for (const actor of [ID.pusher, ID.allWrite]) {
+        stubCalls.length = 0;
+        reached.length = 0;
+        const res = await send('post', url, actor, body);
+        expect(res.status, `${key} as ${actor}: ${JSON.stringify(res.body)}`).toBe(403);
+        expect(JSON.stringify(res.body), `${key} as ${actor}`).toMatch(/settings requires admin access/);
+        expect(stubCalls, `${key} as ${actor}: a connector was asked`).toEqual([]);
+        // the WhatsApp test is refused before its handler; the pushes refuse first thing in theirs
+        if (!CHECKED_FIRST_SETTINGS_ADMIN.includes(key)) expect(reached, `${key} as ${actor}: the handler ran`).toEqual([]);
+      }
+      stubCalls.length = 0;
+      const owner = await send('post', url, ID.owner, body);
+      expect(JSON.stringify(owner.body), `${key} as owner`).not.toMatch(/settings requires admin access/);
+      expect(owner.status < 300 || ownerMeets.test(JSON.stringify(owner.body)), `${key} as owner: ${owner.status} ${JSON.stringify(owner.body)}`).toBe(true);
+    }
+  });
+});
+
+describe('CH-FS (review COR-HID-1): a KEY flow signal\'s status changes need write on the signal\'s own module', () => {
+  const statusOf = async (id: string) => (await db.flowSignal.findUnique({ where: { id }, select: { status: true } }))?.status;
+  const reset = (id: string, status = 'ACTION_REQUIRED') => db.flowSignal.update({ where: { id }, data: { status, completedAt: null, reminderAt: null } });
+  const url = (id: string, action: string, biz = ID.bizA) => `/flow-signals/businesses/${biz}/${id}/${action}`;
+  const tomorrow = () => new Date(Date.now() + 86_400_000).toISOString();
+
+  it('[CH-FS-01] RED-BEFORE: the Bookkeeper shape (revenue and expenses write, no automations) clears an AR Clerk Queue item after the reminder: resolve answers 201, the row is RESOLVED and the queue no longer lists it', async () => {
+    await reset(ID.sigAR);
+    const queue = await request(app.getHttpServer()).get(`/flow-signals/businesses/${ID.bizA}/role/ACCOUNTS_RECEIVABLE_CLERK`).set('x-test-user', ID.bookkeeper);
+    expect(queue.status).toBe(200);
+    expect(queue.body.items.map((i: any) => i.id)).toContain(ID.sigAR);
+    const res = await send('post', url(ID.sigAR, 'resolve'), ID.bookkeeper, {});
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(await statusOf(ID.sigAR)).toBe('RESOLVED');
+    const after = await request(app.getHttpServer()).get(`/flow-signals/businesses/${ID.bizA}/role/ACCOUNTS_RECEIVABLE_CLERK`).set('x-test-user', ID.bookkeeper);
+    expect(after.body.items.map((i: any) => i.id)).not.toContain(ID.sigAR);
+  });
+
+  it('[CH-FS-02] RED-BEFORE: a money signal by its type (invoice.overdue filed under PEOPLE only, which the AR queue lists) is the Bookkeeper\'s too: snooze and action-required answer 201 and are written', async () => {
+    await reset(ID.sigARPeople, 'RECORDED');
+    const snoozed = await send('post', url(ID.sigARPeople, 'snooze'), ID.bookkeeper, { until: tomorrow() });
+    expect(snoozed.status, JSON.stringify(snoozed.body)).toBe(201);
+    expect(await statusOf(ID.sigARPeople)).toBe('SNOOZED');
+    const marked = await send('post', url(ID.sigARPeople, 'action-required'), ID.bookkeeper, {});
+    expect(marked.status, JSON.stringify(marked.body)).toBe(201);
+    expect(await statusOf(ID.sigARPeople)).toBe('ACTION_REQUIRED');
+  });
+
+  it('[CH-FS-03] RED-BEFORE: a member with automations write and revenue read is refused a money signal with revenue\'s refusal and nothing is written; the same member resolves a lead signal (not money: automations write)', async () => {
+    await reset(ID.sigAR);
+    for (const [action, body] of [['resolve', {}], ['snooze', { until: tomorrow() }], ['action-required', {}]] as Array<[string, unknown]>) {
+      const res = await send('post', url(ID.sigAR, action), ID.autoWrite, body);
+      expect(res.status, `${action}: ${JSON.stringify(res.body)}`).toBe(403);
+      expect(JSON.stringify(res.body), action).toMatch(/revenue requires write access \(you have read\)/);
+      expect(await statusOf(ID.sigAR), action).toBe('ACTION_REQUIRED');
+    }
+    await reset(ID.sigLead, 'RECORDED');
+    const lead = await send('post', url(ID.sigLead, 'resolve'), ID.autoWrite, {});
+    expect(lead.status, JSON.stringify(lead.body)).toBe(201);
+    expect(await statusOf(ID.sigLead)).toBe('RESOLVED');
+  });
+
+  it('[CH-FS-04] RED-BEFORE: a default STAFF member (revenue and automations read) is refused the AR item with revenue\'s refusal, and the Bookkeeper is refused the lead signal with automations\' (nothing written); a member holding every module at read is refused both', async () => {
+    await reset(ID.sigAR);
+    await reset(ID.sigLead, 'RECORDED');
+    const staff = await send('post', url(ID.sigAR, 'resolve'), ID.staffDefault, {});
+    expect(staff.status).toBe(403);
+    expect(JSON.stringify(staff.body)).toMatch(/revenue requires write access \(you have read\)/);
+    const bk = await send('post', url(ID.sigLead, 'resolve'), ID.bookkeeper, {});
+    expect(bk.status).toBe(403);
+    expect(JSON.stringify(bk.body)).toMatch(/automations requires write access \(you have none\)/);
+    for (const id of [ID.sigAR, ID.sigLead]) expect((await send('post', url(id, 'resolve'), ID.allRead, {})).status, id).toBe(403);
+    expect(await statusOf(ID.sigAR)).toBe('ACTION_REQUIRED');
+    expect(await statusOf(ID.sigLead)).toBe('RECORDED');
+  });
+
+  it('[CH-FS-05] RED-BEFORE: another business\'s signal is 404 to bizA\'s owner and stays as it was; the owner resolves bizA\'s own', async () => {
+    const res = await send('post', url(ID.sigB, 'resolve'), ID.owner, {});
+    expect(res.status, JSON.stringify(res.body)).toBe(404);
+    expect(await statusOf(ID.sigB)).toBe('ACTION_REQUIRED');
+    await reset(ID.sigAR);
+    expect((await send('post', url(ID.sigAR, 'resolve'), ID.owner, {})).status).toBe(201);
+    expect(await statusOf(ID.sigAR)).toBe('RESOLVED');
+  });
+});
+
+describe('CH-COMMUNITY-01 (review COR-HID-2, SEC-HID-3): the community like names no tenant, so the gate leaves it', () => {
+  it('[CH-COMMUNITY-01] RED-BEFORE: POST /community/posts/:id/like with the body the web sends ({}) reaches the handler for bizA\'s owner and a bizA member, and counts each like', async () => {
+    const likes = async () => (await db.communityPost.findUnique({ where: { id: ID.post }, select: { likes: true } }))!.likes;
+    const before = await likes();
+    for (const actor of [ID.owner, ID.allRead]) {
+      const res = await send('post', `/community/posts/${ID.post}/like`, actor, {});
+      expect(res.status, `${actor}: ${JSON.stringify(res.body)}`).toBe(201);
+    }
+    expect(await likes()).toBe(before + 2);
+  });
+});
+
+describe('CH-INV-01 (review SEC-HID-2): generating an invoice from a content request needs revenue write, and content write', () => {
+  it('[CH-INV-01] RED-BEFORE: a member with content write and revenue read is refused before the handler; one with revenue write and content read is refused by the handler before any invoice is asked for; the owner\'s request is handed on once', async () => {
+    const path = `/businesses/${ID.bizA}/content-requests/${P}request/generate-invoice`;
+    stubCalls.length = 0;
+    reached.length = 0;
+    const noRevenue = await send('post', path, ID.contentNoRevenue, {});
+    expect(reached, 'the handler ran for a member with revenue read').toEqual([]);
+    expect(noRevenue.status, JSON.stringify(noRevenue.body)).toBe(403);
+    expect(JSON.stringify(noRevenue.body)).toMatch(/revenue requires write access \(you have read\)/);
+    const noContent = await send('post', path, ID.revenueNoContent, {});
+    expect(noContent.status, JSON.stringify(noContent.body)).toBe(403);
+    expect(JSON.stringify(noContent.body)).toMatch(/content requires write access \(you have read\)/);
+    expect(stubCalls).toEqual([]);
+    const owner = await send('post', path, ID.owner, {});
+    expect(owner.status, JSON.stringify(owner.body)).toBe(201);
+    expect(stubCalls).toEqual(['ContentInvoiceService.generateInvoiceFromDelivery']);
+  });
+});
+
+describe('CH-VOICE-01 (review COR-HID-3): KEY chat\'s voice follows KEY chat', () => {
+  it('[CH-VOICE-01] RED-BEFORE: a default STAFF member (ai none), who may chat with KEY, gets the spoken reply; so does the owner; a member of another business is refused', async () => {
+    for (const actor of [ID.staffDefault, ID.owner]) {
+      stubCalls.length = 0;
+      const res = await send('post', `/voice/businesses/${ID.bizA}/tts`, actor, { text: 'Hello.' });
+      expect(res.status, `${actor}: ${JSON.stringify(res.body)}`).toBe(200);
+      expect(stubCalls, actor).toEqual(['VoiceService.synthesize']);
+    }
+    expect((await send('post', `/voice/businesses/${ID.bizA}/tts`, ID.outsider, { text: 'Hello.' })).status).toBe(403);
   });
 });
 
