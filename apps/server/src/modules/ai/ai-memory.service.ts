@@ -1,6 +1,8 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
+import { AI_MEMORY_COPY_SOURCE_TYPE } from './semantic-memory.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 
 export type MemoryCategory =
@@ -72,6 +74,44 @@ export interface MemoryContextBlock {
    */
   learnedCorrections: string[];
   patterns: string[];
+}
+
+/**
+ * W1F-MEMORY-COPIES: the one way an AiMemory row is deleted. A row has semantic copies in ai_memory_embeddings
+ * (source_type AI_MEMORY_COPY_SOURCE_TYPE, source_id the row's id), and every member reads them back (GET
+ * .../agent/memory/search, and KEY's memory block as [ai_memory_embedding]), so a deletion that left them kept serving
+ * the deleted value; before this door only the consolidation's withdrawal removed them (W11-MEMORY-PROMOTE-SCOPE).
+ * Deletes the business's rows that match `where`, then the copies of every row that is gone, in one transaction:
+ *   - the rows first, then the copies, each its own statement: deleting a row locks it until the commit, so a
+ *     backfill that writes a copy of it (which takes a share lock on the row, see SemanticMemoryService.store) either
+ *     wrote before the row was deleted (its copy is committed, and the copy delete, a later statement, sees it) or
+ *     waits for the commit and then finds the row gone and writes nothing;
+ *   - a matched row that is still there once the delete has run (a concurrent write changed it so `where` no longer
+ *     matches) keeps its copies; one a concurrent deletion removed first is gone, and its copies go here too.
+ * The scope is the business: `where` cannot name another business's rows, and only this business's copies go.
+ * Returns how many rows and copies were deleted. apps/server/test/ai-memory-copies.integration.test.ts holds every
+ * AiMemory deletion in apps/server/src to this function.
+ */
+export async function deleteAiMemoriesWithCopies(
+  prisma: PrismaService,
+  businessId: string,
+  where: Prisma.AiMemoryWhereInput,
+): Promise<{ rows: number; copies: number }> {
+  return prisma.client.$transaction(async (tx) => {
+    const scoped: Prisma.AiMemoryWhereInput = { ...where, businessId };
+    const matched = (await tx.aiMemory.findMany({ where: scoped, select: { id: true } })).map((r) => r.id);
+    if (matched.length === 0) return { rows: 0, copies: 0 };
+    const deleted = await tx.aiMemory.deleteMany({ where: { ...scoped, id: { in: matched } } });
+    const kept = new Set(
+      (await tx.aiMemory.findMany({ where: { businessId, id: { in: matched } }, select: { id: true } })).map((r) => r.id),
+    );
+    const gone = matched.filter((id) => !kept.has(id));
+    if (gone.length === 0) return { rows: deleted.count, copies: 0 };
+    const copies = await tx.aiMemoryEmbedding.deleteMany({
+      where: { businessId, sourceType: AI_MEMORY_COPY_SOURCE_TYPE, sourceId: { in: gone } },
+    });
+    return { rows: deleted.count, copies: copies.count };
+  });
 }
 
 @Injectable()
@@ -153,24 +193,21 @@ export class AiMemoryService {
     return results;
   }
 
+  /** Deletes the row and its semantic copies (W1F-MEMORY-COPIES: deleteAiMemoriesWithCopies). False when there was none. */
   async remove(businessId: string, category: MemoryCategory, key: string): Promise<boolean> {
     try {
-      await this.prisma.client.aiMemory.delete({
-        where: {
-          businessId_category_key: { businessId, category, key },
-        },
-      });
-      return true;
-    } catch {
+      const { rows } = await deleteAiMemoriesWithCopies(this.prisma, businessId, { category, key });
+      return rows > 0;
+    } catch (err) {
+      this.logger.warn(`Failed to remove memory ${category}:${key}: ${(err as Error).message}`);
       return false;
     }
   }
 
+  /** Deletes the category's rows and their semantic copies (W1F-MEMORY-COPIES); answers how many rows. */
   async removeCategory(businessId: string, category: MemoryCategory): Promise<number> {
-    const result = await this.prisma.client.aiMemory.deleteMany({
-      where: { businessId, category },
-    });
-    return result.count;
+    const { rows } = await deleteAiMemoriesWithCopies(this.prisma, businessId, { category });
+    return rows;
   }
 
   async buildContextBlock(businessId: string): Promise<MemoryContextBlock> {
