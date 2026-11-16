@@ -1,7 +1,7 @@
 {
  "_about": {
   "what": "The re-cut v1 completion plan: every packet between the Release 0 product and the v1 launch gate (steps 0-8, journeys A-L). Plan of record for packet scope, definition of done, dependencies, the Release 0 register and fixture prefixes; BUILD-MAP-001.md holds the owner rulings it applies.",
-  "snapshot": "2026-11-16 17:30Z; 193 packets (166 at the re-cut on 2026-11-13 plus review follow-ups, including the D-204..D-221 additions).",
+  "snapshot": "2026-11-16 21:50Z; 196 packets (166 at the re-cut on 2026-11-13 plus review follow-ups).",
   "status": "See V1-PROGRESS-2026-11-16.md for what is merged.",
   "paths": "scratchpad/... paths inside packet scopes refer to the orchestrating session's working files (executor run outputs, sweep evidence); they are not in the repository."
  },
@@ -2175,7 +2175,7 @@
    "decisions": [
     "vat"
    ],
-   "scope": "Kept (payments list refreshes 084, Amount due is the balance 085, no Mark paid on drafts 086, 'Invoice sent' recorded 088, Print/PDF prints the invoice 051). 'Download PDF' builds a one-invoice A4 document with jspdf/jspdf-autotable (existing web deps; no new dependency) from the same projection the page shows; VAT-BASICS later adds the VAT number to it. Fixture prefix (pre-allocated in the plan's prefix table so parallel lanes add disjoint registry entries): v64b_ for invoice-sent-at.integration.test.ts. Register each as {prefix, owner, packet: 'V1-64 (SWP-INV-DETAIL)'} in fixture-prefixes.json.",
+   "scope": "Kept (payments list refreshes 084, Amount due is the balance 085, no Mark paid on drafts 086, 'Invoice sent' recorded 088, Print/PDF prints the invoice 051). 'Download PDF' builds a one-invoice A4 document with jspdf/jspdf-autotable (existing web deps; no new dependency) from the same projection the page shows; VAT-BASICS later adds the VAT number to it. Fixture prefix (pre-allocated in the plan's prefix table so parallel lanes add disjoint registry entries): v64b_ for invoice-sent-at.integration.test.ts. Register each as {prefix, owner, packet: 'V1-64 (SWP-INV-DETAIL)'} in fixture-prefixes.json. ORCHESTRATOR NOTE (FCP-COR-1): the customer on the invoice detail links to /app/crm/contacts/:id (journey C4).",
    "definition_of_done": "Tests first with a recorded RED on the step-0 base; real-DB integration proof on Postgres for every server change; web unit tests for every screen change; typecheck and lint ratchet clean; `pnpm --filter server proof:release0` still MET. Done when these tests-first cases go RED then green: apps/server/test/invoice-sent-at.integration.test.ts (new, real DB): DRAFT -> SENT without sentAt stamps it and one 'invoice.sent' activity (RED: null); + web invoice-detail-actions (two payment rows, remainder, no Mark paid/Copy link on DRAFT) + browser e2e/sweep-invoice-detail.spec.ts (print PDF). Proof: RED->green: test/invoice-sent-at.integration.test.ts + web invoice-detail-actions; real Postgres; tsc + fixture-prefix-registry + release0-proof-coverage | keep green: invoice-status-events, revenue-authorization and the sweep repro for BUG-051, BUG-084, BUG-085, BUG-086, BUG-088 no longer reproduces; journey spec step(s) for E that cover it turn green.",
    "journeys": [
     "E"
@@ -3579,7 +3579,7 @@
     "labels",
     "demo"
    ],
-   "scope": "Replaces SWP-COMMAND-CENTER-CONSISTENCY (069). /app/command-center (label 'Today') renders four blocks from TODAY-AGGREGATE: Needs you with inline Approve/Run/Reject and bank-transfer Confirm/Not yet; Today's list each one tap from its action (WhatsApp for reminders via WA-HELPER); Pulse equal to Money > Overview; Get set up with the sample preview (DEMO-PREVIEW) and the install step. Removed: mission-control hero, health strip, genome cards and readiness grid, the genome banner component. Day one shows no percentage, risk count, red badge or 'you owe 0'. Phone layout first; 3G load time tracked. BUG-010 web half: use-onboarding.ts (~155) router.replace ignores ?step and sends a finished owner to /app/command-center; with this packet every Get set up step opens its real page (from TODAY-AGGREGATE's hrefs) and ?step on a completed onboarding opens that step's settings page instead of bouncing.",
+   "scope": "Replaces SWP-COMMAND-CENTER-CONSISTENCY (069). /app/command-center (label 'Today') renders four blocks from TODAY-AGGREGATE: Needs you with inline Approve/Run/Reject and bank-transfer Confirm/Not yet; Today's list each one tap from its action (WhatsApp for reminders via WA-HELPER); Pulse equal to Money > Overview; Get set up with the sample preview (DEMO-PREVIEW) and the install step. Removed: mission-control hero, health strip, genome cards and readiness grid, the genome banner component. Day one shows no percentage, risk count, red badge or 'you owe 0'. Phone layout first; 3G load time tracked. BUG-010 web half: use-onboarding.ts (~155) router.replace ignores ?step and sends a finished owner to /app/command-center; with this packet every Get set up step opens its real page (from TODAY-AGGREGATE's hrefs) and ?step on a completed onboarding opens that step's settings page instead of bouncing. ORCHESTRATOR NOTE (FCP-COR-1): a customer named on Today links to /app/crm/contacts/:id (journey C4).",
    "definition_of_done": "RED: today-blocks test expects four blocks and no 'Hull integrity' text on a fresh business. GREEN: unit tests; command-actions-ops-scope.test.tsx (WOS-C01) and approved-actions-mount.test.tsx (D-72) pass unchanged; journey I spec green at both widths and under KEY_DISABLED. Under KEY_DISABLED (keyDisabled from /identity/me) no KEY UI renders on this surface (test). BUG-010: each Get set up step and each old ?step=products|hours|storefront link opens its page (web test with the real hook), and the sweep repro no longer bounces to Today. Journey D: an accepted quote shows in Needs you with Convert (journey D step 'the owner sees the acceptance on Today').",
    "journeys": [
     "A",
@@ -3657,7 +3657,7 @@
     "apps/web/e2e/sweep-contact-detail.spec.ts"
    ],
    "decisions": [],
-   "scope": "Shrunk: BUG-038 moved to FIX-CONTACT-PARAMS (step 3); BUG-062 is fixed by removal: this packet retires the list side-panel's tabs (the panel keeps the 'Contact details' region, a summary, 'Open' and Edit). Remaining: dropdown custom fields show labels (127), delete dialog mentions Undo/Trash (128), timeline shows plain events via status-labels.ts (129). BUG-062 fixed by removal: the list side panel's tabs are retired (one detail route); DoD check: /app/crm/contacts?view=list shows the 'Contact details' region with a summary, Open and Edit, and no tab strip.",
+   "scope": "Shrunk: BUG-038 moved to FIX-CONTACT-PARAMS (step 3); BUG-062 is fixed by removal: this packet retires the list side-panel's tabs (the panel keeps the 'Contact details' region, a summary, 'Open' and Edit). Remaining: dropdown custom fields show labels (127), delete dialog mentions Undo/Trash (128), timeline shows plain events via status-labels.ts (129). BUG-062 fixed by removal: the list side panel's tabs are retired (one detail route); DoD check: /app/crm/contacts?view=list shows the 'Contact details' region with a summary, Open and Edit, and no tab strip. ORCHESTRATOR NOTE (2026-11-16, FIX-CONTACT-PARAMS FCP-COR-1): also make the Cmd/Ctrl+K customer result open the customer's page (command-palette.tsx), so journey C step C4 passes; the journey locator stays as written.",
    "definition_of_done": "Tests first with a recorded RED on the step-0 base; real-DB integration proof on Postgres for every server change; web unit tests for every screen change; typecheck and lint ratchet clean; `pnpm --filter server proof:release0` still MET. Done when these tests-first cases go RED then green: apps/web/src/app/app/crm/contacts/__tests__/contact-detail-route.test.tsx (new): redirect to /<id>/overview for Promise params (RED: undefined); Tasks then Deals select those tabs (RED); + server-page-params census (RED names the page) + browser e2e/sweep-contact-detail.spec.ts. Proof: RED->green: src/app/app/crm/contacts src/__tests__/server-page-params.census.test.ts; web suite + typecheck + eslint and the sweep repro for BUG-127, BUG-128, BUG-129 no longer reproduces; journey spec step(s) for C that cover it turn green. /app/crm/contacts?view=list shows the 'Contact details' region with a summary, Open and Edit, and no tab strip.",
    "journeys": [
     "C"
@@ -5104,7 +5104,7 @@
     "payroll",
     "whatsapp"
    ],
-   "scope": "Starts only after the owner re-runs USAGE-COUNT-SCRIPT against production and posts the JSON to #80 (the count from step 1 is weeks old by then). The hide list is derived from the audit, not chosen here: every cut_or_hide entry with action defer-v1plus or hide-advanced and every '(hidden)' item in module_map. Mechanism: DormantFeatureGate keeps the build-time flag (feature-flags.ts) and adds the per-business answer from NAV-B-LEGACY-SERVER: flag off and the module not in the business's legacy list -> not rendered and not in any menu; flag off and the module in the list -> a read-only view with a 'Moved; coming back in V1.x' note and export; nothing is deleted. useModuleVisible() (lib/module-visibility.ts, flag-only until now) reads the same answer, so the inventory Purchase Orders tab (W11-WEB-INVENTORY-REFUSALS) and the bookings waitlist (SWP-CALENDAR-TRUTH) turn read-only for a legacy business. Part 1 routes (each gets a layout.tsx with the gate): /app/sales-team, /app/call-tasks, /app/retainers, /app/crm/intelligence, /app/crm/network, /app/crm/sequences, /app/helpdesk, /app/inbox, /app/events, /app/time-tracking, /app/budgeting, /app/accounting, /app/payroll, /app/continental-ops, /app/presence/pages, /app/seo, /app/settings/insights, /app/settings/conversion, /app/structure, /app/finance/fixed-assets, /app/finance/accounting-periods, /app/finance/recurring-journals, /app/finance/exchange-rates; /me/refer; Deals and Companies behind the per-business advancedCrm setting (crm/page.tsx); key-connect tiles except Gmail. /app/call-tasks gets a route-level gate (today only its nav entry is gated, nav-config.ts:253 dormantFlag salesPack), which is what makes W11-CALLS-WEB-LIST moot. The static census fails if any v1 hub, nav href or redirect target links into a flagged-off route; it runs against `next build` (flags default on outside production).",
+   "scope": "Starts only after the owner re-runs USAGE-COUNT-SCRIPT against production and posts the JSON to #80 (the count from step 1 is weeks old by then). The hide list is derived from the audit, not chosen here: every cut_or_hide entry with action defer-v1plus or hide-advanced and every '(hidden)' item in module_map. Mechanism: DormantFeatureGate keeps the build-time flag (feature-flags.ts) and adds the per-business answer from NAV-B-LEGACY-SERVER: flag off and the module not in the business's legacy list -> not rendered and not in any menu; flag off and the module in the list -> a read-only view with a 'Moved; coming back in V1.x' note and export; nothing is deleted. useModuleVisible() (lib/module-visibility.ts, flag-only until now) reads the same answer, so the inventory Purchase Orders tab (W11-WEB-INVENTORY-REFUSALS) and the bookings waitlist (SWP-CALENDAR-TRUTH) turn read-only for a legacy business. Part 1 routes (each gets a layout.tsx with the gate): /app/sales-team, /app/call-tasks, /app/retainers, /app/crm/intelligence, /app/crm/network, /app/crm/sequences, /app/helpdesk, /app/inbox, /app/events, /app/time-tracking, /app/budgeting, /app/accounting, /app/payroll, /app/continental-ops, /app/presence/pages, /app/seo, /app/settings/insights, /app/settings/conversion, /app/structure, /app/finance/fixed-assets, /app/finance/accounting-periods, /app/finance/recurring-journals, /app/finance/exchange-rates; /me/refer; Deals and Companies behind the per-business advancedCrm setting (crm/page.tsx); key-connect tiles except Gmail. /app/call-tasks gets a route-level gate (today only its nav entry is gated, nav-config.ts:253 dormantFlag salesPack), which is what makes W11-CALLS-WEB-LIST moot. The static census fails if any v1 hub, nav href or redirect target links into a flagged-off route; it runs against `next build` (flags default on outside production). ORCHESTRATOR NOTE (FIX-CONTACT-PARAMS): hide the contact menu's 'Refer / Link' item in v1 (no v1 journey uses it; ReferContactDialog is not mounted).",
    "definition_of_done": "RED: the census lists v1 hub links into hidden routes, visible hidden menu entries and /app/call-tasks reachable by URL. GREEN: census passes; a production-build crawl from every hub reaches no part-1 hidden route; a seeded business with payroll runs and waitlist entries sees both read-only (no Discard-free write, no Send Offer); a business with none sees neither; journeys A-L green with the hidden set off.",
    "journeys": [
     "A",
@@ -6470,6 +6470,99 @@
    "r0_impact": "KEEP",
    "scope": "SWP-CENSUS-HIDDEN put the like behind content write in a named business, which refuses the web's call that names none. Per D-216 a like is the member's own action: exempt it from the module scope (still signed in, still only posts the member may see), and record the exemption in the census.",
    "definition_of_done": "RED: the web's like call is refused. GREEN: a signed-in member likes a visible post once (idempotent), cannot like a post they cannot see, and the census records the exemption."
+  },
+  {
+   "id": "FU-WA-CONTACT-PHONE",
+   "title": "A contact with only a phone number can get a WhatsApp share after the owner confirms the number once",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "D",
+    "E",
+    "F"
+   ],
+   "step": 3,
+   "lane": "both",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [
+    "WA-HELPER",
+    "WA-E164-SERVER"
+   ],
+   "files": [
+    "apps/web/src/lib/whatsapp.ts (savedWhatsAppNumber)",
+    "the share controls WA-HELPER wired (quotes panel, invoices panel and hub, booking drawer)",
+    "the contact update route (saving the WhatsApp number)"
+   ],
+   "decisions": [
+    "D-153",
+    "D-221"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "WA-HELPER's security repair (SEC-WAH-1) opens wa.me only for the business-saved WhatsApp number, so a contact created with only a phone (owner POST, the composer quick-add, a CSV import) gets WhatsApp's chooser for quote and invoice shares, which leaves journeys D3 and E6 short of D-153. Keep the containment and close the gap: when a share finds no saved WhatsApp number but the contact has a phone, show the E.164 reading of that phone and one button, 'Use this as their WhatsApp number', which saves it to the contact through the existing contact update route (the member's own crm write is checked by the server; a refusal is shown in plain words), then opens wa.me with the tokenized link. Never fill the WhatsApp number from a public form or a sync without that confirmation. Fixture prefix v71m_.",
+   "definition_of_done": "Web vitest RED then GREEN: a phone-only contact's share offers the confirm step showing the E.164 number; after confirming, the contact's WhatsApp number is saved and wa.me opens with that number and the token link; a member without crm write sees the refusal and the chooser fallback. Server real-DB: the save is refused for a member without crm write and audited for one with it. Journey D3/E6 WhatsApp steps pass where their other prerequisites have landed (say which do).",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-DATAQUALITY-MASS-ASSIGN",
+   "title": "Contact data-quality fixes write only the fields they fix, and only on contacts the member may open",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "C",
+    "J"
+   ],
+   "step": 3,
+   "lane": "server",
+   "size": "S",
+   "priority": "P0",
+   "depends_on": [
+    "WA-E164-SERVER"
+   ],
+   "files": [
+    "apps/server/src/modules/crm data-quality service/controller (apply, bulk-apply, dismiss; the 'fill_fields' action)",
+    "rest-scope-census"
+   ],
+   "decisions": [
+    "D-11",
+    "D-221"
+   ],
+   "r0_impact": "KEEP; a required case that pins the old behaviour is a CONTRADICTION to report.",
+   "scope": "Found by WA-E164-SERVER's repair (pre-existing): the data-quality apply 'fill_fields' action passes override.values from the request body straight into contact.update, so any member with crm write can set any column, including businessId (moving the contact to another tenant), ownerId, visibility, deletedAt and phoneNormalized (bypassing the identity rules). And apply, bulk-apply and dismiss check only crm write, with no per-contact visibility, so a my-book STAFF member can act by issue id on contacts outside their book. Fix: an allow-list of the fields each issue type may fill (validated like the contact PATCH DTO, through the same normalisers and identity checks), every other key refused 400 with nothing written; per-contact visibility (the visibilityClause the contact routes use) on apply, bulk-apply and dismiss, a hidden contact answered like an unknown issue id. Tests first, real database, through the HTTP routes. Base note: merge the WA-E164-SERVER head (4b366f7e) into your branch first; it edits the same data-quality files. Fixture prefix v71n_.",
+   "definition_of_done": "RED on Postgres: a crm-write STAFF member's fill_fields with {businessId: other tenant} moves the contact (or with ownerId/visibility/deletedAt changes them); a my-book STAFF applies a fix to a contact outside their book. GREEN: both refused (400 / not-found shape), nothing written, the issue left as it was; legitimate fixes still apply and are audited; census passes.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-KEY-MEMORY-MONEY-SIGHT",
+   "title": "KEY's memory and proposals show money only to members who may read it",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 3,
+   "lane": "server",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [
+    "W1F-PERCEPTION-MODULE-SCOPE"
+   ],
+   "files": [
+    "apps/server/src/modules/ai unified-memory-retrieval.service.ts (fragment metadata)",
+    "key-cortex prompt context (readersOwnPromptMemory, GOVERNANCE_DECISION rendering)"
+   ],
+   "decisions": [
+    "D-73",
+    "D-93",
+    "D-129"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "Two minor findings W1F-PERCEPTION-MODULE-SCOPE left open: (SEC-W1FPMS-3) genome money memory events (FINANCE_GENOME, FINANCE_SNAPSHOT_COMPUTED, CROSS_DOMAIN) still reach KEY prompts of readers without revenue read: carry the genome row's sourceType, eventType, domain and section in the retrieved fragment's metadata so the money-memory filter can drop them for such readers; also carry the cognitive payload/actorType so task classification stops parsing rendered text (COR-W1FPMS-1 follow-up). (SEC-W1FPMS-4) GOVERNANCE_DECISION proposals stay business-wide, but for memberless turns (a contact-only bridge position, a non-member SUPER_ADMIN) render only the proposal's action, status and risk level, never its title or figures. Tests first. Fixture prefix v71o_.",
+   "definition_of_done": "RED: a STAFF reader without revenue read gets a FINANCE_SNAPSHOT_COMPUTED memory in the KEY prompt; a memberless bridge turn sees a proposal title with a money figure. GREEN: neither appears; revenue readers and the owner still see them; perception suites green.",
+   "fixture_prefix": null
   }
  ],
  "moot": [
@@ -6800,7 +6893,10 @@
       "FU-OVERLAY-LAYER-TABLE",
       "FU-PROVIDER-ERROR-HYGIENE",
       "FU-PHONE-COUNTRY-DUPLICATES",
-      "FU-COMMUNITY-LIKE-OWN-ACTION"
+      "FU-COMMUNITY-LIKE-OWN-ACTION",
+      "FU-WA-CONTACT-PHONE",
+      "FU-DATAQUALITY-MASS-ASSIGN",
+      "FU-KEY-MEMORY-MONEY-SIGHT"
      ],
      "note": "D-204..D-221 follow-ups (owner ruling 2026-11-16, 'all recommended and best')"
     }
@@ -7988,6 +8084,21 @@
    "prefix": "v63y_",
    "owner": "apps/server/test/provider-outage-connect.integration.test.ts",
    "packet": "V1-63 (W11-PROVIDER-OUTAGE-CONNECT)"
+  },
+  {
+   "prefix": "v71m_",
+   "owner": "(new suite chosen by the packet; register it)",
+   "packet": "V1-71 (FU-WA-CONTACT-PHONE)"
+  },
+  {
+   "prefix": "v71n_",
+   "owner": "(new suite chosen by the packet; register it)",
+   "packet": "V1-71 (FU-DATAQUALITY-MASS-ASSIGN)"
+  },
+  {
+   "prefix": "v71o_",
+   "owner": "(new suite chosen by the packet; register it)",
+   "packet": "V1-71 (FU-KEY-MEMORY-MONEY-SIGHT)"
   }
  ],
  "validation": {
