@@ -166,7 +166,8 @@ describe("Customers > Add contact (full form): the duplicate check reads phone s
     await submitFullForm("Ravi", "+1 868 555 0102");
 
     expect(await screen.findByText("Possible duplicate contact")).toBeInTheDocument();
-    expect(screen.getByText(/Ravi Persad/)).toBeInTheDocument();
+    // The dialog names the saved contact (the list behind it shows the name too).
+    expect(screen.getByText(/We found 1 similar contact\(s\): Ravi Persad\./)).toBeInTheDocument();
     expect(api.searches).toContain("+1 868 555 0102");
     expect(api.posts).toEqual([]);
   });
@@ -178,7 +179,8 @@ describe("Customers > Add contact (full form): the duplicate check reads phone s
     await submitFullForm("Asha", "868-555-0102");
 
     expect(await screen.findByText("Possible duplicate contact")).toBeInTheDocument();
-    expect(screen.getByText(/Asha Singh/)).toBeInTheDocument();
+    // The dialog names the saved contact (the list behind it shows the name too).
+    expect(screen.getByText(/We found 1 similar contact\(s\): Asha Singh\./)).toBeInTheDocument();
     expect(api.posts).toEqual([]);
   });
 

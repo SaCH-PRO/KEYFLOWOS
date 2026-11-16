@@ -47,6 +47,29 @@ interface PipelineTabContentProps {
 
 const PIPELINE_VIEW_KEY = "kf_pipeline_view";
 
+/** The fewest digits read as a phone number of its own (a national number). */
+const MIN_PHONE_DIGITS = 7;
+
+/**
+ * Whether two phone spellings are one number for the add-contact duplicate check (SWP-CRM-SEARCH,
+ * BUG-083): the same digits, or one written without '+' as a number of 7+ digits that the other's
+ * digits end with behind a 1 to 3 digit country code ('868-555-0102' and '+1 868 555 0102').
+ * The server's search returns the contact for either spelling; this keeps it as a duplicate.
+ */
+function samePhoneSpelling(a: string | null | undefined, b: string | null | undefined): boolean {
+  const da = (a ?? "").replace(/\D/g, "");
+  const db = (b ?? "").replace(/\D/g, "");
+  if (!da || !db) return false;
+  if (da === db) return true;
+  const nationalBehindCode = (written: string, national: string, other: string) =>
+    !written.includes("+")
+    && national.length >= MIN_PHONE_DIGITS
+    && other.length > national.length
+    && other.length - national.length <= 3
+    && other.endsWith(national);
+  return nationalBehindCode(a ?? "", da, db) || nationalBehindCode(b ?? "", db, da);
+}
+
 function getStoredViewMode(): ViewMode {
   if (typeof window === "undefined") return "focus";
   try {
@@ -208,13 +231,12 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
     });
     if (!data?.contacts) return [];
     const emailNorm = formData.email.trim().toLowerCase();
-    const phoneNorm = formData.phone.trim().replace(/\D/g, "");
+    const phone = formData.phone.trim();
     return data.contacts
       .filter((c) => {
         if (editingContact && (c.id === (editingContact as unknown as { id?: string }).id)) return false;
         const cEmail = c.email?.toLowerCase();
-        const cPhone = c.phone?.replace(/\D/g, "");
-        return (emailNorm && cEmail === emailNorm) || (phoneNorm && cPhone === phoneNorm);
+        return (emailNorm && cEmail === emailNorm) || (phone && samePhoneSpelling(phone, c.phone));
       })
       .map((c) => ({
         id: c.id,
