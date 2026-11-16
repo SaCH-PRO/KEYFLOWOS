@@ -169,10 +169,11 @@ describe('PR195-BOOKS-DOORS: every door that writes the Books needs a module wri
 
   // FU-FINANCE-SETTINGS-SCOPE (V1-71): PATCH settings writes the accountant export's saved recipient beside the basis, the
   // fiscal year and the default accounts, so it is no longer a reviewed exemption. It carries revenue read, the read every
-  // one of its fields needs; the packet's revenue write for the other fields and settings admin for accountantEmail are
-  // not applied: required Release 0 cases (d11-sibling-writes.json D11F-F05, F06, F11) pin revenue-read members' writes.
-  // The D-11 owner-only tax rate runs after the guard (assertTaxRateOwner). POST accountant-export/email keeps revenue
-  // read; its saveRecipient is held to settings admin and revenue read in AccountantExportEmailService (CEN-11e).
+  // one of its fields needs. The D-11 owner-only tax rate runs after the guard (assertTaxRateOwner), then the field rule
+  // owner ruling D-205 set (FU-FINANCE-SETTINGS-PATCH, FinanceSettingsService.assertMayChangeSettings: revenue write for
+  // the basis, fiscal year and default accounts, settings admin and revenue read for accountantEmail; proven on a real
+  // database by test/finance-settings-patch.integration.test.ts). POST accountant-export/email keeps revenue read; its
+  // saveRecipient is held to settings admin and revenue read in AccountantExportEmailService (CEN-11e).
   it.each([
     ['patchSettings', 'PATCH settings'],
     ['accountantExportEmailSend', 'POST accountant-export/email'],

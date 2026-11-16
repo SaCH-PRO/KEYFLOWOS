@@ -91,9 +91,10 @@ export async function assertMayBindExport(
  * refused with the same shape (403 "Insufficient permissions: <what> needs <module> <level> access (you have <level>)").
  * The owner (every module admin by role default) and a platform SUPER_ADMIN pass, as they do there. A type with no reads
  * named is a programming error and refuses (fails closed).
- * OPEN (review SEC-V71-1 / FSS-CR-1, owner question 19): PATCH finance/.../settings writes the same column under revenue
- * read alone, so until required Release 0 cases D11F-F05, F06 and F11 are amended and this rule applied there, every
- * member it refuses here can still change the saved recipient through that route.
+ * FU-FINANCE-SETTINGS-PATCH (owner ruling D-205, which amended required Release 0 cases D11F-F05, F06 and F11; review
+ * SEC-V71-1 / FSS-CR-1, owner question 19, closed): PATCH finance/.../settings, the other writer of the same column,
+ * runs this check for a change of accountantEmail (FinanceSettingsService.assertMayChangeSettings), and GET settings
+ * answers it in advance as mayChangeAccountantEmail; both doors to the saved recipient hold one rule.
  */
 export async function assertMaySetExportDestination(
   prisma: PrismaService,

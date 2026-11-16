@@ -81,9 +81,9 @@ function jsonResponse(status: number, body: unknown, statusText = "OK"): Respons
   } as unknown as Response;
 }
 
-/** The production filter's body for a 403 (http-exception.filter.ts), with the refused fields the server names. */
+/** The production filter's body for a 403 (http-exception.filter.ts), with the refused fields the server names (under `details`). */
 function refused(path: string, message: string, fields?: string[]) {
-  return jsonResponse(403, { statusCode: 403, code: "FORBIDDEN", message, ...(fields ? { fields } : {}), error: "Forbidden", timestamp: "2026-11-16T00:00:00.000Z", path }, "Forbidden");
+  return jsonResponse(403, { statusCode: 403, code: "FORBIDDEN", message, error: "Forbidden", timestamp: "2026-11-16T00:00:00.000Z", path, ...(fields ? { details: { fields } } : {}) }, "Forbidden");
 }
 
 type Call = { method: string; pathname: string; body: unknown };

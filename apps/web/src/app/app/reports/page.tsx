@@ -134,12 +134,17 @@ export default function ReportsPage() {
   const [exportingZip, setExportingZip] = useState(false);
   const [emailModal, setEmailModal] = useState<{ start: string; end: string } | null>(null);
   const [defaultAccountantEmail, setDefaultAccountantEmail] = useState<string | null>(null);
+  // FU-FINANCE-SETTINGS-PATCH (D-205): whether the member may save the address ("Remember"); undefined when not known.
+  const [mayRememberRecipient, setMayRememberRecipient] = useState<boolean | undefined>(undefined);
 
   useEffect(() => {
     if (!businessId) return;
     void (async () => {
       const r = await fetchFinanceSettings(businessId);
-      if (r.data) setDefaultAccountantEmail(r.data.accountantEmail ?? null);
+      if (r.data) {
+        setDefaultAccountantEmail(r.data.accountantEmail ?? null);
+        setMayRememberRecipient(r.data.mayChangeAccountantEmail);
+      }
     })();
   }, [businessId]);
 
@@ -431,6 +436,7 @@ export default function ReportsPage() {
           start={emailModal.start}
           end={emailModal.end}
           defaultEmail={defaultAccountantEmail}
+          mayRemember={mayRememberRecipient}
           onClose={() => setEmailModal(null)}
           onSavedDefault={(v) => setDefaultAccountantEmail(v)}
         />

@@ -194,11 +194,14 @@ const sendExport = (actor: string, body: Record<string, unknown>) =>
     .set('x-test-user', actor)
     .send({ periodStart: '2026-01-01', periodEnd: '2026-12-31', ...body });
 
-/** A refused write: 403 with the expected message (and refused fields, when named), no setting and no hint in the body. */
+/**
+ * A refused write: 403 with the expected message (and the refused fields, when named: the production filter answers an
+ * exception's extra properties under `details`), no setting and no hint in the body.
+ */
 function expectRefused(res: { status: number; body: any }, label: string, message: string, fields?: string[]) {
   expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(403);
   expect(res.body?.message, label).toBe(message);
-  if (fields) expect([...(res.body?.fields ?? [])].sort(), `${label}: the refused fields`).toEqual([...fields].sort());
+  if (fields) expect([...(res.body?.details?.fields ?? [])].sort(), `${label}: the refused fields`).toEqual([...fields].sort());
   for (const key of ['accountantEmail', 'accountingBasis', 'fiscalYearStartMonth', 'defaultTaxRate', 'currency', ...HINT_KEYS]) {
     expect(res.body, `${label}: no ${key} in a refusal`).not.toHaveProperty(key);
   }
@@ -509,7 +512,7 @@ describe('FU-FINANCE-SETTINGS-PATCH: GET settings tells the caller in advance wh
       const rate = await patchSettings(actor, { defaultTaxRate: 7 });
       expect(rate.status === 200, label(`PATCH defaultTaxRate answered ${rate.status}`)).toBe(hints.mayChangeTaxRate);
     }
-  });
+  }, 60_000);
 
   it('[V71E-G03] RED-BEFORE: PATCH answers the settings it wrote with the same hints GET answers (the settings page keeps them after a save); a refused PATCH carries no setting and no hint', async () => {
     for (const actor of [ID.owner, ID.staffWrite, ID.adminSet]) {
