@@ -44,6 +44,11 @@ const MEMBERSHIPS: Record<string, { role: string; permissionScopes: unknown }> =
     permissionScopes: { crm: 'read', bookings: 'read', projects: 'read', operations: 'read', storefront: 'read', content: 'read', automations: 'read', expenses: 'none', revenue: 'none' },
   },
   revenueOnly: { role: 'STAFF', permissionScopes: { crm: 'read', revenue: 'read', expenses: 'none' } },
+  /**
+   * Review SEC-W1FPMS-1 (mutation gap): reads expenses but not revenue, so a document's extraction (revenue and
+   * expenses) is told apart from an expense-only record.
+   */
+  expensesOnly: { role: 'STAFF', permissionScopes: { crm: 'read', expenses: 'read', revenue: 'none' } },
   staff: { role: 'STAFF', permissionScopes: null },
   owner: { role: 'OWNER', permissionScopes: null },
   /** ModuleScopeGuard reads a stored array as an explicit map in which every module is none (SEC-P195-2). */
@@ -184,6 +189,7 @@ const TABLE: Array<[Fragment, string[]]> = [
 const READS: Record<string, (module: string) => boolean> = {
   blind: (x) => ['crm', 'bookings', 'projects', 'operations', 'storefront', 'content', 'automations'].includes(x),
   revenueOnly: (x) => ['crm', 'revenue'].includes(x),
+  expensesOnly: (x) => ['crm', 'expenses'].includes(x),
   // STAFF role defaults: read on everything but settings, team, ai and connect.
   staff: (x) => !['settings', 'team', 'ai', 'connect'].includes(x),
   owner: () => true,
