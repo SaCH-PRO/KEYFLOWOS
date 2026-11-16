@@ -2703,6 +2703,15 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
       const at = prompt.indexOf('WHAT YOU HAVE OBSERVED');
       return at < 0 ? [] : prompt.slice(at).split('\n').filter((l) => l.startsWith('- ['));
     };
+    /**
+     * W1F-PERCEPTION-MODULE-SCOPE (owner ruling D-203 `supportdesk`): the business-wide fact reaches every member and a
+     * non-member SUPER_ADMIN; the support desk perceives only the conversation in front of it, so its prompt carries no
+     * perception block at all.
+     */
+    const expectFactUnlessDesk = (who: string, prompt: string, label: string) => {
+      if (who === 'support desk') expect(prompt, label).not.toContain('WHAT YOU HAVE OBSERVED');
+      else expect(prompt, label).toContain(FPS.fact);
+    };
     /** A line of a KEY tool call's record in a business-wide store (what isToolCallRecord names). */
     const toolCallRecordLines = (prompt: string) =>
       observed(prompt).filter(
@@ -3118,7 +3127,7 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
             expect(prompt, label).not.toContain('V19C-FPS-TURN-OWNER-TYPED');
             expect(prompt, label).not.toContain('V19C-FPS-TURN-KEY-ANSWERED');
             expect(keyTurnRecordLines(prompt), label).toEqual([]);
-            expect(prompt, label).toContain(FPS.fact);
+            expectFactUnlessDesk(who, prompt, label);
           }
         }
         const block = (await memoryContextFor(ID.member, undefined, FPS.biz)).aiMemory;
@@ -3193,7 +3202,7 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
             const label = `${who} (${path})`;
             expect(prompt, label).not.toContain('V19C-FPS-ACTION-OWNER-ANSWER');
             expect(keyActionRecordLines(prompt), label).toEqual([]);
-            expect(prompt, label).toContain(FPS.fact);
+            expectFactUnlessDesk(who, prompt, label);
           }
           // The owner reads their own action on their own rows only, never as a business-wide record.
           expect(keyActionRecordLines(await flow!.turn(ID.owner, path)), `owner (${path})`).toEqual([]);
@@ -3275,7 +3284,7 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
             expect(prompt, label).not.toContain(FPS.OWNER_NOTE);
             expect(keyActionRecordLines(prompt), label).toEqual([]);
             expect(toolCallRecordLines(prompt), label).toEqual([]);
-            expect(prompt, label).toContain(FPS.fact);
+            expectFactUnlessDesk(who, prompt, label);
           }
         }
         const block = (await memoryContextFor(ID.member, undefined, FPS.biz)).aiMemory;
