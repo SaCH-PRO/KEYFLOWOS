@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import { ForbiddenException, HttpException, Logger } from '@nestjs/common';
 import { AiUsageService } from './ai-usage.service';
 import { AI_CREDIT_COSTS } from '../subscriptions/plans';
@@ -8,6 +8,24 @@ import { KeyCortexDocumentService } from '../key-cortex/key-cortex-document.serv
 import { RealtimeBridgeService } from '../phone-voice/realtime-bridge.service';
 import { ElevenLabsVoiceProvider } from '../voice/elevenlabs-voice.provider';
 import { DiagnosticsService } from '../diagnostics/diagnostics.service';
+
+/**
+ * FU-UNIT-MOCK-ISOLATION: vitest.unit.config.ts runs spec files with
+ * isolate:false, so they share one module registry. When an earlier file in
+ * the worker had imported ai-usage.service.ts (or the KEY voice, document or
+ * realtime services), the imports above returned those copies, bound to the
+ * real `openai` and `ws`, and the mocks below never applied: six cases sent
+ * their calls to api.openai.com through the real SDK. Resetting the registry
+ * before the imports (hoisted with the mocks) makes them evaluate against this
+ * file's mocks whatever ran before; resetting it again after the last test
+ * keeps the next file from inheriting services bound to them.
+ */
+vi.hoisted(() => {
+  vi.resetModules();
+});
+afterAll(() => {
+  vi.resetModules();
+});
 
 /**
  * R0-07a: the OpenAI SDK the direct helpers (trackEmbedding, trackVision,

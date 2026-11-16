@@ -20,8 +20,26 @@
  * `@supabase/supabase-js` createClient is replaced; nothing leaves the process.
  */
 import { createHmac, randomUUID } from 'node:crypto';
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import { UnauthorizedException } from '@nestjs/common';
+
+/**
+ * FU-UNIT-MOCK-ISOLATION: vitest.unit.config.ts runs spec files with
+ * isolate:false, so they share one module registry. When an earlier file in
+ * the worker had imported supabase-auth.service.ts, the import below returned
+ * that copy, bound to the real createClient, and the mock never applied: five
+ * cases failed, and three passed only because the real getUser() round trip
+ * failed. Resetting the registry before the imports (hoisted with the mocks)
+ * makes them evaluate against this file's mocks whatever ran before; resetting
+ * it again after the last test keeps the next file from inheriting a service
+ * bound to them.
+ */
+vi.hoisted(() => {
+  vi.resetModules();
+});
+afterAll(() => {
+  vi.resetModules();
+});
 
 const { getUser, createClient } = vi.hoisted(() => {
   const getUser = vi.fn();
