@@ -867,11 +867,18 @@ export class IdentityService {
     }
   }
 
+  /**
+   * V1-63 (SWP-TEAM-INVITE-SERVER, BUG-016): each member carries `invitePending`,
+   * true while its User is still the invite placeholder inviteTeamMember made for
+   * an address with no account (nobody has signed in as it yet; the first
+   * bootstrap adopts it and the marker is gone). The placeholder marker is read
+   * from `users.meta_data` and never returned: `user` keeps its public fields.
+   */
   async listTeamMembers(businessId: string) {
     const members = await this.prisma.client.membership.findMany({
       where: { businessId },
       include: {
-        user: { select: { id: true, email: true, name: true, firstName: true, lastName: true, avatarUrl: true } },
+        user: { select: { id: true, email: true, name: true, firstName: true, lastName: true, avatarUrl: true, metaData: true } },
         orgAssignments: {
           where: { endedAt: null, isPrimary: true },
           include: { orgUnit: true, jobRole: true },
@@ -880,8 +887,10 @@ export class IdentityService {
       },
       orderBy: { createdAt: 'asc' },
     });
-    return members.map((m) => ({
+    return members.map(({ user: { metaData, ...user }, ...m }) => ({
       ...m,
+      user,
+      invitePending: IdentityService.isMarkedInvitePlaceholder(metaData),
       permissionScopes: this.resolveScopes(m),
       maxApprovalTier: this.resolveApprovalTier(m),
       orgUnit: m.orgAssignments[0]?.orgUnit?.name ?? null,
@@ -911,10 +920,22 @@ export class IdentityService {
    * really lacks both — and an invite with explicit scopes within its own (the web
    * form's STAFF map) still succeeds. Converging the web form's DEFAULT_SCOPES on
    * core/authority/module-vocabulary is a follow-up outside this packet's write set.
+   *
+   * V1-63 (SWP-TEAM-INVITE-SERVER, sweep BUG-016): one person per address, whatever
+   * the letter case. The address is trimmed and lower-cased (normalizeInviteEmail; one
+   * without a usable shape is a 400 before anything is written), and its holders are
+   * found case-insensitively (findEmailHolders), so a repeat in another case is the
+   * same person: refused when any holder is already a member here, else the
+   * membership goes to that holder (an account before a placeholder). Only an address
+   * nobody holds gets a new placeholder, under the normalized address, so the lower-case
+   * address a sign-in carries finds it. Before, the lookup was exact and the address
+   * stored as typed: a capitalised repeat created a second member and a second User
+   * that no sign-in could claim.
    */
   async inviteTeamMember(businessId: string, email: string, role: string, inviterId: string, scopes?: Record<string, string>, maxApprovalTier?: number) {
     const { requester, bounded } = await this.assertTeamAdmin(businessId, inviterId);
     this.validateRole(role);
+    const address = IdentityService.normalizeInviteEmail(email);
     const permissionScopes = scopes ?? (IdentityService.DEFAULT_SCOPES[role] || IdentityService.DEFAULT_SCOPES.STAFF);
     const tier = maxApprovalTier ?? (IdentityService.DEFAULT_APPROVAL_TIERS[role] || 0);
     if (scopes || maxApprovalTier !== undefined) {
@@ -923,37 +944,106 @@ export class IdentityService {
     if (bounded && (await this.authorityExcess({ role, permissionScopes, maxApprovalTier: tier }, requester))) {
       throw new ForbiddenException('You cannot grant more authority than your own');
     }
-    let user = await this.prisma.client.user.findUnique({ where: { email } });
-    if (!user) {
+    const holders = await this.findEmailHolders(address);
+    for (const holder of holders) {
+      const existing = await this.prisma.client.membership.findUnique({
+        where: { userId_businessId: { userId: holder.id, businessId } },
+      });
+      if (existing) throw new BadRequestException(IdentityService.ALREADY_A_MEMBER);
+    }
+    let userId = IdentityService.preferredInviteHolder(holders, address)?.id;
+    if (!userId) {
       // The invitee has no account yet, so this row is a placeholder that holds
       // the address and the pending membership. The marker is what lets the
       // invitee's first bootstrap adopt it (adoptInvitePlaceholder); a row
       // without it is never moved to another sign-in (R0-SEC-01).
-      user = await this.prisma.client.user.create({
-        data: {
-          email,
-          name: email.split('@')[0],
-          role: 'USER',
-          metaData: { [IdentityService.INVITE_PLACEHOLDER_KEY]: true },
-        },
-      });
+      try {
+        userId = (
+          await this.prisma.client.user.create({
+            data: {
+              email: address,
+              name: address.split('@')[0],
+              role: 'USER',
+              metaData: { [IdentityService.INVITE_PLACEHOLDER_KEY]: true },
+            },
+          })
+        ).id;
+      } catch (err) {
+        // A concurrent invite (or first sign-in) created the row for this address
+        // between the read above and this create: use that row.
+        if ((err as { code?: string })?.code !== 'P2002') throw err;
+        const created = await this.prisma.client.user.findUnique({ where: { email: address }, select: { id: true } });
+        if (!created) throw err;
+        userId = created.id;
+      }
     }
-    const existing = await this.prisma.client.membership.findUnique({
-      where: { userId_businessId: { userId: user.id, businessId } },
-    });
-    if (existing) throw new BadRequestException('User is already a team member');
-    const membership = await this.prisma.client.membership.create({
-      data: {
-        userId: user.id,
-        businessId,
-        role,
-        permissionScopes,
-        maxApprovalTier: tier,
-      },
-      include: { user: { select: { id: true, email: true, name: true, firstName: true, lastName: true, avatarUrl: true } } },
-    });
-    await this.logTeamActivity(businessId, inviterId, 'team', 'member_invited', 'membership', membership.id, `Invited ${email} as ${role}`, undefined, { invitedEmail: email, role });
+    let membership;
+    try {
+      membership = await this.prisma.client.membership.create({
+        data: {
+          userId,
+          businessId,
+          role,
+          permissionScopes,
+          maxApprovalTier: tier,
+        },
+        include: { user: { select: { id: true, email: true, name: true, firstName: true, lastName: true, avatarUrl: true } } },
+      });
+    } catch (err) {
+      // A concurrent invite of the same person (in any letter case) won the
+      // (user, business) unique key: this one is the repeat.
+      if ((err as { code?: string })?.code === 'P2002') throw new BadRequestException(IdentityService.ALREADY_A_MEMBER);
+      throw err;
+    }
+    await this.logTeamActivity(businessId, inviterId, 'team', 'member_invited', 'membership', membership.id, `Invited ${address} as ${role}`, undefined, { invitedEmail: address, role });
     return membership;
+  }
+
+  private static readonly ALREADY_A_MEMBER = 'User is already a team member';
+
+  /**
+   * V1-63: the invite address, trimmed and lower-cased, or a 400 when it has no
+   * usable shape (not a string, blank, no single '@' between non-empty parts, or
+   * any whitespace inside). Addresses are compared case-insensitively everywhere a
+   * person is matched to one (bootstrap, the invite ownership proof), so the stored
+   * form is the lower-case one.
+   */
+  static normalizeInviteEmail(email: unknown): string {
+    const address = typeof email === 'string' ? email.trim().toLowerCase() : '';
+    if (!/^[^\s@]+@[^\s@]+$/.test(address)) {
+      throw new BadRequestException('A valid email address is required to invite a team member');
+    }
+    return address;
+  }
+
+  /**
+   * Every User whose address equals `email` ignoring letter case and surrounding
+   * whitespace (an invite stored the address as typed before V1-63), by an exact
+   * comparison of lower(btrim(email)). Raw SQL on purpose: Prisma's `mode: 'insensitive'`
+   * equality is compiled to a pattern match in which '_' and '%' are wildcards, so
+   * 'a_b@x.test' would also match the account 'aXb@x.test' and an invite would grant
+   * that account a membership. A read only: rows that collide by case are reported
+   * by the read-only census in the packet RETURN, never merged here.
+   */
+  private async findEmailHolders(email: string): Promise<Array<{ id: string; email: string; metaData: unknown }>> {
+    const rows = await this.prisma.client.$queryRaw<Array<{ id: string; email: string; meta_data: unknown }>>`
+      SELECT id, email, meta_data FROM users WHERE lower(btrim(email)) = lower(btrim(${email})) ORDER BY id`;
+    return rows.map((r) => ({ id: r.id, email: r.email, metaData: r.meta_data }));
+  }
+
+  /**
+   * Which holder of an address an invite joins: an account before an invite
+   * placeholder (an account's owner signs in as that account and never adopts a
+   * placeholder, so a membership on a placeholder beside it would be unreachable),
+   * then the row stored under exactly the normalized address, then the lowest id.
+   */
+  private static preferredInviteHolder<T extends { id: string; email: string; metaData: unknown }>(
+    holders: T[],
+    address: string,
+  ): T | undefined {
+    const rank = (h: T) =>
+      (IdentityService.isMarkedInvitePlaceholder(h.metaData) ? 2 : 0) + (h.email === address ? 0 : 1);
+    return [...holders].sort((a, b) => rank(a) - rank(b) || a.id.localeCompare(b.id))[0];
   }
 
   async removeTeamMember(businessId: string, membershipId: string, requesterId: string) {
@@ -1168,6 +1258,8 @@ export class IdentityService {
       userId: m.userId,
       role: m.role,
       user: m.user,
+      // V1-63: what GET .../team carries; the Team page reads this route.
+      invitePending: m.invitePending,
       permissionScopes: m.permissionScopes,
       maxApprovalTier: m.maxApprovalTier,
       activeTasks: taskCountMap.get(m.userId) ?? 0,
@@ -1433,11 +1525,15 @@ export class IdentityService {
       // an account is the marked placeholder inviteTeamMember creates for an
       // address with no account; the invitee's first bootstrap adopts it
       // under the conditions in adoptInvitePlaceholder (review repair
-      // SEC01-T1/CR-1).
-      const collidingByEmail = await this.prisma.client.user.findUnique({
-        where: { email: input.email },
-        select: { id: true, metaData: true },
-      });
+      // SEC01-T1/CR-1). V1-63 (BUG-016): with no row under exactly the token's
+      // address, a placeholder holding it in another letter case (an invite
+      // stored as typed before V1-63) is that invitation too
+      // (invitePlaceholderInOtherCase).
+      const collidingByEmail =
+        (await this.prisma.client.user.findUnique({
+          where: { email: input.email },
+          select: { id: true, metaData: true },
+        })) ?? (await this.invitePlaceholderInOtherCase(input.email, input.userId));
 
       if (collidingByEmail && collidingByEmail.id !== input.userId) {
         if (!IdentityService.isMarkedInvitePlaceholder(collidingByEmail.metaData)) {
@@ -1495,6 +1591,32 @@ export class IdentityService {
     // found, a Business read like GET /identity/businesses/:id: no OAuth token
     // column and metaData.whatsapp masked, for the owner too.
     return { user, business: sanitizeBusiness(business), isNewBusiness };
+  }
+
+  /**
+   * V1-63 (SWP-TEAM-INVITE-SERVER, BUG-016): for a first bootstrap whose token
+   * address no row holds exactly, the one invite placeholder holding it in another
+   * letter case. Before V1-63 inviteTeamMember stored the address as typed, so a
+   * 'Leo@Example.com' invitation never met the lower-case address a sign-in carries
+   * and could not be accepted. It is adopted exactly as an exact-case placeholder
+   * is (adoptInvitePlaceholder: re-checked under a lock, the pending memberships
+   * move only with proof of the address). Anything else answers null and bootstrap
+   * goes on as before: no holder, an account (a case variant of an account is not
+   * merged or refused here; the read-only census in the packet RETURN finds them),
+   * or more than one case variant, where which invitation is meant is not knowable.
+   */
+  private async invitePlaceholderInOtherCase(
+    email: string,
+    userId: string,
+  ): Promise<{ id: string; metaData: unknown } | null> {
+    const variants = (await this.findEmailHolders(email)).filter((h) => h.id !== userId);
+    if (variants.length !== 1 || !IdentityService.isMarkedInvitePlaceholder(variants[0].metaData)) {
+      if (variants.length > 1) {
+        this.logger.warn(`[bootstrap] ${variants.length} users hold the token address in other letter cases; none adopted (userId=${userId})`);
+      }
+      return null;
+    }
+    return { id: variants[0].id, metaData: variants[0].metaData };
   }
 
   /** 409 for an address another local account holds; bootstrap writes nothing. */
@@ -1595,10 +1717,11 @@ export class IdentityService {
     });
     // Never bound: nobody has signed in as it. Every bootstrap sets a referral
     // code, and only a sign-in creates a session, an identity link or an owned
-    // business.
+    // business. The address matches ignoring letter case (V1-63): a placeholder
+    // stored as typed before V1-63 holds the invited address in any case.
     const neverBound =
       row !== null &&
-      row.email === input.email &&
+      row.email.trim().toLowerCase() === input.email.trim().toLowerCase() &&
       IdentityService.isMarkedInvitePlaceholder(row.metaData) &&
       row.role === 'USER' &&
       !row.deletedAt &&
