@@ -1028,6 +1028,11 @@
       "packet": "V1-71 (FU-FINANCE-SETTINGS-SCOPE)"
     },
     {
+      "prefix": "v71e_",
+      "owner": "apps/server/test/finance-settings-patch.integration.test.ts",
+      "packet": "V1-71 (FU-FINANCE-SETTINGS-PATCH)"
+    },
+    {
       "prefix": "v63j_",
       "owner": "apps/server/test/contact-audit-durable.integration.test.ts",
       "packet": "V1-63 (TOF-CONTACT-AUDIT-AWAIT)"

@@ -28,13 +28,27 @@
  * writes — accountingBasis, fiscalYearStartMonth, defaultCashAccountId,
  * defaultArAccountId, defaultApAccountId, defaultTaxAccountId and
  * accountantEmail — are not fields of the owner-only profile PATCH (they are
- * not in UpdateBusinessDto) and keep today's rule (any member; case F05). The
- * web finance settings page saves the whole form, defaultTaxRate included,
- * with the value GET returned (FinanceSettingsService.get answers a stored
- * NULL as 0): a non-owner who resubmits the current rate is not changing it,
- * so the save goes through (case F06) and the rate is not written: a
- * non-owner never writes Business.defaultTaxRate, a stored NULL included
- * (case F11).
+ * not in UpdateBusinessDto), so a non-owner may change them (case F05) when
+ * they hold the scopes owner ruling D-205 gives each (below). The web finance
+ * settings page saves the whole form, defaultTaxRate included, with the value
+ * GET returned (FinanceSettingsService.get answers a stored NULL as 0): a
+ * non-owner who resubmits the current rate is not changing it, so the save
+ * goes through (case F06) and the rate is not written: a non-owner never
+ * writes Business.defaultTaxRate, a stored NULL included (case F11).
+ * D-205 AMENDMENT (owner ruling D-205, 2026-11-16, an approved Release 0
+ * update; plan r0_register row FU-FINANCE-SETTINGS-PATCH): a change of
+ * accountantEmail needs settings admin and revenue read, and a change of the
+ * accounting basis, the fiscal year or a default account needs revenue write
+ * (FU-FINANCE-SETTINGS-PATCH). Cases F05, F06 and F11 keep what they prove
+ * with actors who hold those scopes and are not the owner: a STAFF member
+ * granted revenue write and settings admin (k09f_staffScoped, seeded by the
+ * D11F-F block's own beforeAll, after D11F-X01 has counted the shared
+ * fixtures, so that case is unchanged) and the ADMIN on role defaults (revenue
+ * admin, settings admin). Before D-205 their actors were the STAFF member on
+ * role defaults (revenue read, settings none) and the ADMIN granted
+ * settings:write, who may no longer change those fields; case F12 pins that
+ * the STAFF member on role defaults is now refused (403, nothing written).
+ * The rule's own proof is finance-settings-patch.integration.test.ts (v71e_).
  * THE OWNER CHECK IS BOUND TO THE ROUTE'S BUSINESS (the R0-09d review SEC-T1
  * fixture): a STAFF member of bizF who owns a business of their own (bizO: an
  * OWNER membership and Business.ownerId) is refused on bizF, also when the
@@ -93,6 +107,17 @@ const NON_OWNERS: Array<{ id: string; label: string }> = [
   { id: ID.staff, label: 'STAFF, role defaults (settings:none)' },
   { id: ID.adminW, label: 'ADMIN, settings:write' },
   { id: ID.admin, label: 'ADMIN, role defaults' },
+];
+/**
+ * D-205 (FU-FINANCE-SETTINGS-PATCH): non-owners holding the scopes the finance
+ * settings other than the tax rate need (revenue write; settings admin and
+ * revenue read for accountantEmail): the actors of cases F05, F06 and F11.
+ * k09f_staffScoped is seeded by the D11F-F block's beforeAll.
+ */
+const STAFF_SCOPED = `${P}staffScoped`;  // STAFF, role defaults with revenue: write and settings: admin
+const SCOPED_NON_OWNERS: Array<{ id: string; label: string }> = [
+  { id: STAFF_SCOPED, label: 'STAFF granted revenue:write and settings:admin' },
+  { id: ID.admin, label: 'ADMIN, role defaults (revenue:admin, settings:admin)' },
 ];
 const emailOf = (id: string) => `${id}@k09f.test.local`;
 
@@ -301,6 +326,19 @@ describe('R0-09f fixture sanity (real rows)', () => {
 });
 
 describe('R0-09f finance settings cannot change the business tax rate for a non-owner (D-11, R0-09d sweep)', () => {
+  // D-205 (FU-FINANCE-SETTINGS-PATCH): the scoped non-owner of cases F05, F06 and F11, seeded here so that
+  // D11F-X01 (which counts the shared fixtures before this block runs) is unchanged.
+  beforeAll(async () => {
+    const { ROLE_DEFAULT_SCOPES } = await import('../src/core/authority/module-vocabulary');
+    await db.user.create({ data: { id: STAFF_SCOPED, email: emailOf(STAFF_SCOPED), name: STAFF_SCOPED, role: 'USER' } });
+    await db.membership.create({
+      data: {
+        id: `${P}m_staffScoped_bizF`, userId: STAFF_SCOPED, businessId: ID.bizF, role: 'STAFF',
+        permissionScopes: { ...ROLE_DEFAULT_SCOPES.STAFF, revenue: 'write', settings: 'admin' },
+      },
+    });
+  });
+
   it('[D11F-F01] RED-BEFORE: a STAFF member (settings:none) changes defaultTaxRate: 403 BUSINESS_PROFILE_OWNER_ONLY, the Business row byte-identical, GET still answers the seeded rate', async () => {
     await reset(ID.bizF);
     const before = await businessRowText(ID.bizF);
@@ -358,8 +396,8 @@ describe('R0-09f finance settings cannot change the business tax rate for a non-
     await reset(ID.bizO);
   });
 
-  it("[D11F-F05] today's rule kept: a STAFF member (settings:none) and an ADMIN granted settings:write change accountingBasis, fiscalYearStartMonth, defaultCashAccountId and accountantEmail, which are not owner-only (200): those columns change and defaultTaxRate stays the owner's", async () => {
-    for (const { id, label } of NON_OWNERS.slice(0, 2)) {
+  it("[D11F-F05] D-205 (amended): a non-owner holding the scopes the rule needs, a STAFF member granted revenue:write and settings:admin or an ADMIN on role defaults, changes accountingBasis, fiscalYearStartMonth, defaultCashAccountId and accountantEmail, which are not owner-only (200): those columns change and defaultTaxRate stays the owner's", async () => {
+    for (const { id, label } of SCOPED_NON_OWNERS) {
       await reset(ID.bizF);
       const res = await patchSettings(id, ID.bizF, {
         accountingBasis: 'ACCRUAL', fiscalYearStartMonth: 4, defaultCashAccountId: null, accountantEmail: `${P}books@example.test`,
@@ -373,8 +411,8 @@ describe('R0-09f finance settings cannot change the business tax rate for a non-
     }
   });
 
-  it("[D11F-F06] today's rule kept: the web settings page's whole-form save — every field GET returned, defaultTaxRate unchanged — by a STAFF member or an ADMIN granted settings:write goes through (200): the open settings change and the effective rate is the one GET returned, also when the stored rate is NULL (GET answers 0)", async () => {
-    for (const { id, label } of NON_OWNERS.slice(0, 2)) {
+  it("[D11F-F06] D-205 (amended): the web settings page's whole-form save — every field GET returned, defaultTaxRate unchanged — by a STAFF member granted revenue:write and settings:admin or an ADMIN on role defaults goes through (200): the open settings change and the effective rate is the one GET returned, also when the stored rate is NULL (GET answers 0)", async () => {
+    for (const { id, label } of SCOPED_NON_OWNERS) {
       for (const stored of [SEEDED.defaultTaxRate, null] as const) {
         // No default account: the seeded id is not a FinancialAccount, and the
         // whole-form save resubmits every default account id GET returned.
@@ -390,8 +428,8 @@ describe('R0-09f finance settings cannot change the business tax rate for a non-
     }
   });
 
-  it('[D11F-F11] RED-BEFORE: a non-owner never writes Business.defaultTaxRate: the unchanged rate a STAFF member or an ADMIN granted settings:write resubmits is not written, so a stored NULL stays NULL (the unmodified code wrote 0 over it)', async () => {
-    for (const { id, label } of NON_OWNERS.slice(0, 2)) {
+  it('[D11F-F11] RED-BEFORE (D-205 amended): a non-owner never writes Business.defaultTaxRate: the unchanged rate a STAFF member granted revenue:write and settings:admin or an ADMIN on role defaults resubmits is not written, so a stored NULL stays NULL (the unmodified code wrote 0 over it)', async () => {
+    for (const { id, label } of SCOPED_NON_OWNERS) {
       for (const stored of [SEEDED.defaultTaxRate, null] as const) {
         await reset(ID.bizF, stored, null);
         const res = await patchSettings(id, ID.bizF, { defaultTaxRate: stored ?? 0, accountingBasis: 'ACCRUAL' });
@@ -401,6 +439,27 @@ describe('R0-09f finance settings cannot change the business tax rate for a non-
         expect(row?.defaultTaxRate, `${label}, stored ${stored}: the rate is not written`).toBe(stored);
       }
     }
+  });
+
+  it('[D11F-F12] RED-BEFORE (D-205): a STAFF member on role defaults (revenue:read, settings:none) is refused the finance settings D-205 holds to scopes they lack: accountingBasis, fiscalYearStartMonth, defaultCashAccountId and accountantEmail, together and each alone, are 403 with the Business row byte-identical (nothing written)', async () => {
+    for (const body of [
+      { accountingBasis: 'ACCRUAL', fiscalYearStartMonth: 4, defaultCashAccountId: null, accountantEmail: `${P}books@example.test` },
+      { accountingBasis: 'ACCRUAL' },
+      { fiscalYearStartMonth: 4 },
+      { defaultCashAccountId: null },
+      { accountantEmail: `${P}books@example.test` },
+    ]) {
+      await reset(ID.bizF);
+      const before = await businessRowText(ID.bizF);
+      const res = await patchSettings(ID.staff, ID.bizF, body);
+      expect(await businessRowText(ID.bizF), `${Object.keys(body).join(',')}: patch ${res.status}: the Business row is byte-identical`).toBe(before);
+      expect(res.status, `${Object.keys(body).join(',')}: ${JSON.stringify(res.body)}`).toBe(403);
+      expect(res.body?.message, Object.keys(body).join(',')).toMatch(/^Insufficient permissions: /);
+      for (const key of ['defaultTaxRate', 'accountingBasis', 'fiscalYearStartMonth', 'currency', 'accountantEmail', 'ownerId']) {
+        expect(res.body).not.toHaveProperty(key);
+      }
+    }
+    expect(await finance(ID.bizF)).toEqual(SEEDED);
   });
 
   it('[D11F-F07] positive control: the founding OWNER (OWNER membership and Business.ownerId) changes defaultTaxRate with the other settings (200): the row and GET reflect it', async () => {
