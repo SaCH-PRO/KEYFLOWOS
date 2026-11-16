@@ -100,6 +100,9 @@ const ID = {
   /** V1-63 review COR-63-2: two more businesses of the owner, where those older invites hang. */
   biz2: `${P}biz2`,
   biz3: `${P}biz3`,
+  /** PR 211 review (Codex P1): two accounts whose addresses differ only by letter case, neither under the lower-case address. */
+  twinA: `${P}twin_a`,
+  twinB: `${P}twin_b`,
 };
 
 const EMAIL = {
@@ -109,6 +112,7 @@ const EMAIL = {
   legacy: `${P}leo@test.local`,
   wildAccount: `${P}wildXcard@test.local`,
   zed: `${P}zed@test.local`,
+  twin: `${P}twin@test.local`,
 };
 
 /** 'v63d_Ivy@Test.Local': the same address as a person might type it. */
@@ -591,6 +595,36 @@ describe('V1-63 review repairs — an invite lands on a holder a person can stil
       expect(repeat.body.message).toBe('User is already a team member');
     }
     expect(await footprint(ID.account)).toEqual({ users: 1, memberships: 1, businesses: 0 });
+  });
+
+  it('PR 211 review (Codex P1): two accounts whose addresses differ only by letter case and none under the lower-case address are ambiguous: the invite is refused (400) in every case and writes nothing (RED: 201, the lowest id joins)', async () => {
+    // Legacy rows: both were stored as typed, neither is an invite placeholder, so each is reached by its own
+    // owner's sign-in. bootstrapUser adopts no case variant when there are several; an invite that picked one
+    // by id gave an arbitrary account a membership (and the business's data).
+    await db.user.create({ data: { id: ID.twinA, email: mixedCase(EMAIL.twin), name: 'Twin A', role: 'USER' } });
+    await db.user.create({ data: { id: ID.twinB, email: EMAIL.twin.toUpperCase(), name: 'Twin B', role: 'USER' } });
+
+    for (const variant of [EMAIL.twin, mixedCase(EMAIL.twin), EMAIL.twin.toUpperCase()]) {
+      const res = await invite(variant);
+      expect(res.status, `${variant}: ${JSON.stringify(res.body)}`).toBe(400);
+      expect(res.body.message).toBe(
+        'More than one account holds this address in different letter case, so the invite cannot tell which person to add',
+      );
+    }
+    expect(await memberRoles()).toEqual({ [ID.owner]: 'OWNER' });
+    expect((await holdersOf(EMAIL.twin)).map((h) => h.id).sort()).toEqual([ID.twinA, ID.twinB].sort());
+    expect(await footprint(ID.twinA)).toEqual({ users: 1, memberships: 0, businesses: 0 });
+    expect(await footprint(ID.twinB)).toEqual({ users: 1, memberships: 0, businesses: 0 });
+  });
+
+  it('guard for the Codex P1 repair: beside a case variant, the account stored under exactly the lower-case address is the one invited (201)', async () => {
+    await db.user.create({ data: { id: ID.twinA, email: mixedCase(EMAIL.twin), name: 'Twin A', role: 'USER' } });
+    await db.user.create({ data: { id: ID.twinB, email: EMAIL.twin, name: 'Twin B', role: 'USER' } });
+
+    const res = await invite(EMAIL.twin.toUpperCase());
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.userId).toBe(ID.twinB);
+    expect(await memberRoles()).toEqual({ [ID.owner]: 'OWNER', [ID.twinB]: 'STAFF' });
   });
 
   it('COR-63-2: with two placeholders older invites left in two letter cases and no row under the lower-case address, the invite makes one under it; the confirmed sign-in claims it, then a repeat is refused (RED: the invite hangs on a case variant no sign-in can adopt)', async () => {
