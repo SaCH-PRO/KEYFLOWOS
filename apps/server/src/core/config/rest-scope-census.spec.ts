@@ -2365,6 +2365,51 @@ export class Cen10dHuntListener {
 
 const settingsAdminEnforced = (r: Route) => enforced(r) && r.scope?.module === 'settings' && r.scope?.minLevel === 'admin';
 
+// ── FU-FINANCE-SETTINGS-SCOPE (CEN-11e): the accountant export's saved recipient. ─────────────────────────────────────
+
+/** The file that sends the accountant export and saves its recipient (POST finance .../accountant-export/email). */
+const ACCOUNTANT_EXPORT_SENDER = 'modules/finance/accountant-export-email.service.ts';
+/** The type the saved recipient binds (core/connectors/connector-exports.ts, CONNECTOR_EXPORT_READS). */
+const ACCOUNTANT_RECIPIENT_TYPES = new Set(['ACCOUNTANT_EMAIL_EXPORT_TYPE', "'accountant_email'"]);
+
+/**
+ * Why AccountantExportEmailService.send (in `text`) is not held to the export-binding rule, or [] when it is: an awaited
+ * statement `await assertMaySetExportDestination(..., <the accountant_email type>)` that comes before the export is
+ * built (`.build(`), the email sent (`.sendTransactional(`) and any Business write (`business.update`). The export
+ * builder and mailer are where the books leave; the write is the saved recipient every later send without a `to` uses.
+ */
+function recipientBindingProblems(text: string, file = join(SRC, ACCOUNTANT_EXPORT_SENDER)): string[] {
+  const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+  let send: ts.MethodDeclaration | undefined;
+  const findSend = (n: ts.Node): void => {
+    if (ts.isClassDeclaration(n) && n.name?.text === 'AccountantExportEmailService') {
+      send = n.members.find((m): m is ts.MethodDeclaration => ts.isMethodDeclaration(m) && m.name.getText(sf) === 'send');
+    }
+    ts.forEachChild(n, findSend);
+  };
+  findSend(sf);
+  if (!send?.body) return ['AccountantExportEmailService.send is not declared'];
+  let check = -1;
+  const effects: Array<{ at: number; what: string }> = [];
+  const visit = (n: ts.Node): void => {
+    if (ts.isCallExpression(n)) {
+      const callee = n.expression.getText(sf);
+      if (callee === 'assertMaySetExportDestination') {
+        const awaitedStatement = ts.isAwaitExpression(n.parent) && ts.isExpressionStatement(n.parent.parent);
+        const type = n.arguments[3]?.getText(sf) ?? '';
+        if (awaitedStatement && ACCOUNTANT_RECIPIENT_TYPES.has(type) && check < 0) check = n.getStart(sf);
+      } else if (/\.build$/.test(callee)) effects.push({ at: n.getStart(sf), what: 'builds the export' });
+      else if (/\.sendTransactional$/.test(callee)) effects.push({ at: n.getStart(sf), what: 'sends the email' });
+      else if (/\bbusiness\.(update|updateMany|upsert)$/.test(callee)) effects.push({ at: n.getStart(sf), what: 'writes the Business row' });
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(send.body);
+  if (check < 0) return ['AccountantExportEmailService.send never awaits assertMaySetExportDestination(..., ACCOUNTANT_EMAIL_EXPORT_TYPE) as a statement'];
+  if (!effects.some((e) => e.what === 'writes the Business row')) return ['AccountantExportEmailService.send writes no Business row (the reader no longer sees the saved recipient)'];
+  return effects.filter((e) => e.at < check).map((e) => `AccountantExportEmailService.send ${e.what} before the binding check`);
+}
+
 describe('REST scope census (SWEEP-P0-SCOPES)', () => {
   const all = routes();
   const byKey = new Map(all.map((r) => [r.key, r]));
@@ -2831,6 +2876,36 @@ export class Cen11dHunt {
     const file = join(SRC, 'modules/cen11d-hunt/cen11d-hunt.ts');
     const hunt = audienceSendCalls([{ file, text: scratch, sf: ts.createSourceFile(file, scratch, ts.ScriptTarget.Latest, true) }]);
     expect(hunt.filter((c) => !c.namesSender && !c.passThrough).map((c) => c.at).sort()).toEqual(['Cen11dHunt.noSender', 'Cen11dHunt.nullSender', 'Cen11dHunt.threeArgs']);
+    expect(problems).toEqual([]);
+  });
+
+  it("[CEN-11e] (FU-FINANCE-SETTINGS-SCOPE, the WH3-1 binding rule) the accountant export's saved recipient (Business.accountantEmail, where every send without a `to` goes) is bound only by a member who holds settings admin and reads the books: CONNECTOR_EXPORT_READS names its reads, AccountantExportEmailService.send awaits assertMaySetExportDestination before it builds, sends or writes anything, the finance settings and export routes carry revenue read, and the reader reports a send without the check (mutation check)", async () => {
+    const { CONNECTOR_EXPORT_READS, ACCOUNTANT_EMAIL_EXPORT_TYPE } = (await import('../connectors/connector-exports')) as {
+      CONNECTOR_EXPORT_READS: Record<string, readonly string[]>;
+      ACCOUNTANT_EMAIL_EXPORT_TYPE?: string;
+    };
+    expect(ACCOUNTANT_EMAIL_EXPORT_TYPE, 'connector-exports.ts names the type the saved recipient binds').toBe('accountant_email');
+    expect(CONNECTOR_EXPORT_READS.accountant_email, 'the saved recipient receives the books: revenue read').toEqual(['revenue']);
+    const source = readFileSync(join(SRC, ACCOUNTANT_EXPORT_SENDER), 'utf8');
+    const problems = recipientBindingProblems(source);
+    // the routes that read the saved recipient, change it or send to it carry revenue read (CEN-04 holds their rows too)
+    for (const key of ['FinanceController.getSettings', 'FinanceController.patchSettings', 'FinanceController.accountantExportEmailSend']) {
+      const r = byKey.get(key);
+      if (!r || !enforced(r) || r.scope?.module !== 'revenue' || r.scope?.minLevel !== 'read') {
+        problems.push(`${key} carries ${r?.scope ? `${r.scope.module}:${r.scope.minLevel}` : 'no scope'}${r && enforced(r) ? '' : ' (not enforced)'}, not revenue:read`);
+      }
+    }
+    // guards the guard (mutation check): the check removed, left unawaited, or moved after the send is reported
+    const call = /await assertMaySetExportDestination\(([^;]*)\);/.exec(source);
+    if (call) {
+      const removed = source.replace(call[0], '');
+      const unawaited = source.replace(call[0], `void assertMaySetExportDestination(${call[1]});`);
+      const late = source.replace(call[0], '').replace(/(\n(\s*)const result = await this\.emailSvc\.sendTransactional\()/, `\n$2${call[0]}$1`);
+      expect(late, 'the late mutant moves the check').not.toBe(removed);
+      for (const [label, mutant] of [['removed', removed], ['unawaited', unawaited], ['after the send', late]] as const) {
+        expect(recipientBindingProblems(mutant).length, `the reader reports the check ${label}`).toBeGreaterThan(0);
+      }
+    }
     expect(problems).toEqual([]);
   });
 });

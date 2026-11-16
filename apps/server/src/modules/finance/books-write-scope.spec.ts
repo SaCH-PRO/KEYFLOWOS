@@ -116,7 +116,6 @@ const REVIEWED_UNSCOPED: Readonly<Record<string, string>> = {
   'POST tax-rates': 'tax rates: invoice settings; the default rate is the owner-only profile (D-11)',
   'PATCH tax-rates/:id': 'tax rates: invoice settings; the default rate is the owner-only profile (D-11)',
   'DELETE tax-rates/:id': 'tax rates: invoice settings; the default rate is the owner-only profile (D-11)',
-  'PATCH settings': 'finance settings; the default tax rate is the owner-only profile (D-11)',
   'POST accounts/:accountId/statement-sources': "the business owner's (D-132): assertGoogleConnectOwner",
   'POST accounts/:accountId/statement-sources/:source/sweep': "the business owner's (D-132): assertGoogleConnectOwner",
   'POST reserves': 'cash reserve buckets: a safe-to-spend figure, not the ledger (owner question)',
@@ -166,6 +165,21 @@ describe('PR195-BOOKS-DOORS: every door that writes the Books needs a module wri
       unscoped.push(routeOf(handler));
     }
     expect(unscoped.sort()).toEqual(Object.keys(REVIEWED_UNSCOPED).sort());
+  });
+
+  // FU-FINANCE-SETTINGS-SCOPE (V1-71): PATCH settings writes the accountant export's saved recipient beside the basis, the
+  // fiscal year and the default accounts, so it is no longer a reviewed exemption. It carries revenue read, the read every
+  // one of its fields needs; the packet's revenue write for the other fields and settings admin for accountantEmail are
+  // not applied: required Release 0 cases (d11-sibling-writes.json D11F-F05, F06, F11) pin revenue-read members' writes.
+  // The D-11 owner-only tax rate runs after the guard (assertTaxRateOwner). POST accountant-export/email keeps revenue
+  // read; its saveRecipient is held to settings admin and revenue read in AccountantExportEmailService (CEN-11e).
+  it.each([
+    ['patchSettings', 'PATCH settings'],
+    ['accountantExportEmailSend', 'POST accountant-export/email'],
+  ])('BWS-U06 RED-BEFORE: %s (%s) runs ModuleScopeGuard with revenue read (FU-FINANCE-SETTINGS-SCOPE)', (method, route) => {
+    expect(routeOf(finance[method])).toBe(route);
+    expect(scopeOf(finance[method])).toEqual(REVENUE_READ);
+    expect(guardsOf(finance[method])).toEqual([ModuleScopeGuard]);
   });
 
   it.each([

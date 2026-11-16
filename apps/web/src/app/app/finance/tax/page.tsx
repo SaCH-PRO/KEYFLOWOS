@@ -1,18 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Calculator, RefreshCw, FileCheck2, Banknote, Loader2, ChevronRight, Download, X, Mail, Send } from "lucide-react";
+import { Calculator, RefreshCw, FileCheck2, Banknote, Loader2, ChevronRight, Download, X, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
 import {
   fetchTaxLiabilities, recomputeTaxLiabilities,
   fileTaxLiability, payTaxLiability,
   fetchTaxContributingInvoices, downloadAccountantExport,
-  fetchFinanceSettings, sendAccountantExportEmail,
+  fetchFinanceSettings,
   type TaxLiabilityRow, type TaxContributingInvoice,
 } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
 import { moduleReadRefusal } from "@/lib/module-access";
+import { SendAccountantExportModal } from "@/components/finance/send-accountant-export-modal";
 
 type Liab = TaxLiabilityRow;
 
@@ -252,7 +253,7 @@ export default function FinanceTaxPage() {
       )}
 
       {emailModal && businessId && (
-        <SendToAccountantModal
+        <SendAccountantExportModal
           businessId={businessId}
           start={emailModal.start}
           end={emailModal.end}
@@ -261,115 +262,6 @@ export default function FinanceTaxPage() {
           onSavedDefault={(v) => setDefaultAccountantEmail(v)}
         />
       )}
-    </div>
-  );
-}
-
-function SendToAccountantModal({
-  businessId, start, end, defaultEmail, onClose, onSavedDefault,
-}: {
-  businessId: string;
-  start: string;
-  end: string;
-  defaultEmail: string | null;
-  onClose: () => void;
-  onSavedDefault: (v: string | null) => void;
-}) {
-  const [to, setTo] = useState(defaultEmail ?? "");
-  const [message, setMessage] = useState("");
-  const [saveDefault, setSaveDefault] = useState(!defaultEmail);
-  const [sending, setSending] = useState(false);
-
-  const submit = async () => {
-    if (!to.trim()) {
-      toast.error("Recipient email is required");
-      return;
-    }
-    setSending(true);
-    const r = await sendAccountantExportEmail(businessId, {
-      start, end,
-      to: to.trim(),
-      message: message.trim() || null,
-      saveRecipient: saveDefault,
-    });
-    setSending(false);
-    if (r.error) {
-      toast.error(r.error);
-      return;
-    }
-    toast.success(`Sent to ${r.data?.to ?? to.trim()}`);
-    if (r.data?.savedAsDefault) onSavedDefault(r.data.to);
-    onClose();
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative w-full max-w-md bg-background border border-border rounded-xl shadow-xl">
-        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Mail className="w-4 h-4 text-primary" />
-            <h3 className="text-sm font-semibold">Send accountant export</h3>
-          </div>
-          <button type="button" onClick={onClose} className="p-1 rounded hover:bg-card">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-        <div className="p-4 space-y-3">
-          <p className="text-xs text-muted-foreground">
-            Sends the accountant export ZIP for <strong>{start}</strong> to <strong>{end}</strong> as an
-            email attachment via Keyflow&apos;s mailer.
-          </p>
-          <label className="block">
-            <span className="text-xs font-medium">Recipient email</span>
-            <input
-              type="email"
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-              placeholder="accountant@firm.com"
-              className="mt-1 w-full rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-sm"
-              autoFocus
-            />
-          </label>
-          <label className="block">
-            <span className="text-xs font-medium">Cover note (optional)</span>
-            <textarea
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              rows={4}
-              placeholder="Hi — attached is the latest export for your review."
-              className="mt-1 w-full rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-sm resize-none"
-            />
-          </label>
-          <label className="flex items-center gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={saveDefault}
-              onChange={(e) => setSaveDefault(e.target.checked)}
-              className="rounded border-border"
-            />
-            Remember this as the default recipient
-          </label>
-        </div>
-        <div className="px-4 py-3 border-t border-border flex items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-border hover:bg-card"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={sending || !to.trim()}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
-          >
-            {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-            Send email
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -567,7 +459,7 @@ function ContributingDrawer({
             </button>
           </div>
           {showSend && (
-            <SendToAccountantModal
+            <SendAccountantExportModal
               businessId={businessId}
               start={periodStart}
               end={periodEnd}

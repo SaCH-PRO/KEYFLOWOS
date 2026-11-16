@@ -224,6 +224,25 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
    Business.accountantEmail, the default receiver, under revenue read. The sender reads everything
    sent, so no read leaks, but the saved default is a receiver binding: settings admin or the owner
    for `saveRecipient`? finance.controller.ts is held for the PR195 merge.
+   **FU-FINANCE-SETTINGS-SCOPE (V1-71; found live by the GATE-JOURNEYS-G-L repair: a STAFF member with bookings and
+   crm read only set Business.accountantEmail to their own address through PATCH settings, and read the settings
+   through GET): the WH3-1 binding rule. Applied: a saveRecipient that changes the saved recipient needs settings admin
+   and revenue read (assertMaySetExportDestination, CONNECTOR_EXPORT_READS.accountant_email), checked before the
+   export is built, anything sent or anything written (CEN-11e; finance-settings-scope, v71d_); GET and PATCH settings
+   need revenue read. Not applied: settings admin for PATCH settings' accountantEmail and revenue write for its other
+   fields change three required Release 0 cases of d11-finance-settings.integration.test.ts (d11-sibling-writes.json:
+   D11F-F05, F06, F11: a STAFF member on role defaults, revenue read and settings none, and an ADMIN with settings write
+   change accountantEmail, accountingBasis, fiscalYearStartMonth and defaultCashAccountId, 200), which no r0_register
+   row of the packet approves. Applying it needs that amendment.**
+   **Review of 72d47256 (SEC-V71-1, FSS-CR-1, reproduced on Postgres): until that amendment the saveRecipient check
+   protects nothing: every member it refuses (STAFF on role defaults, a revenue:read or revenue:write STAFF member, an
+   ADMIN with settings write) writes the same column through PATCH settings (200), and the owner's next send without a
+   `to` goes to that address. Owner ruling needed: amend D11F-F05, F06 and F11 (an r0updates row) so PATCH settings'
+   accountantEmail needs settings admin and revenue read and its other fields revenue write. The accountant box says
+   only what it refused ("saving a new default recipient from here needs settings admin access") and offers "Send
+   without saving" (FSS-CR-2, FSS-CR-3). Open, outside the packet (SEC-V71-2): GET /identity/businesses and
+   /identity/businesses/:businessId answer accountantEmail and the finance settings columns to every member
+   (sanitizeBusiness keeps them), so the GET settings gate is not a confinement of the saved recipient.**
 
 ## KEY follow-ups and seams
 
@@ -603,7 +622,7 @@ HttpService or provider SDK call; the census's CLASS A inventory):
 | Google Calendar sync | bookings | the owner's calendar (D-99) | The owner reads everything. |
 | AI model gateway, Langfuse, code executor, document parsing, ElevenLabs | prompts and content | the platform's providers, or a BYOK key | BYOK keys are settings admin (round 2, CW-1; question 14). |
 | Apollo enrichment | a contact's email and name | the platform's Apollo key | The enrich route enforces crm; a platform processor. |
-| AccountantExportEmailService (FinanceController, revenue:read) | the accountant export ZIP | the email the sender names, or the saved default | The sender reads everything sent. The route is held by pkt/PR195-JOURNAL-SCOPE (question 19). |
+| AccountantExportEmailService (FinanceController, revenue:read) | the accountant export ZIP | the email the sender names, or the saved default | The sender reads everything sent. FU-FINANCE-SETTINGS-SCOPE (question 19): saving the default is a binding, settings admin and revenue read (assertMaySetExportDestination, CEN-11e); PATCH settings writes it under revenue read until the Release 0 amendment question 19 names. |
 | OAuth token exchanges and refreshes, provider health checks and syncs (GETs), Supabase auth, RISC, currency rates, HIBP, Chatwoot replies, diagnostics, SlackService (no caller), contract asset fetches | no people or money rows | provider and platform hosts | Not a send of records. |
 
 **CLASS B.** The round 3 hunt passed fifteen shapes through the reader with all 18 CEN cases green (CM-1,
@@ -1489,6 +1508,7 @@ Every other route is applied (above).
 
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
+| `FinanceController.accountantExportEmailSend` | POST | `/finance/businesses/:businessId/accountant-export/email` | applied | `revenue:read` (FOLLOW3-A6, SEC-A5A6-02: the sender reads everything sent); FU-FINANCE-SETTINGS-SCOPE (V1-71, owner question 19): a saveRecipient that changes Business.accountantEmail, the saved recipient every later send without a `to` goes to, binds an export destination, so it needs settings admin and revenue read (AccountantExportEmailService.send runs assertMaySetExportDestination, CONNECTOR_EXPORT_READS.accountant_email, before it builds, sends or writes anything; CEN-11e) |
 | `FinanceController.applyBankRules` | POST | `/finance/businesses/:businessId/bank-rules/apply` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.applyBankRulesToAccount` | POST | `/finance/businesses/:businessId/accounts/:accountId/bank-rules/apply` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.archiveAccount` | DELETE | `/finance/businesses/:businessId/accounts/:id` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
@@ -1522,10 +1542,11 @@ Every other route is applied (above).
 | `FinanceController.disposeFixedAsset` | POST | `/finance/businesses/:businessId/fixed-assets/:id/dispose` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.fileTaxLiability` | POST | `/finance/businesses/:businessId/tax-liabilities/:id/file` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.fileTaxLiabilityAlias` | POST | `/finance/businesses/:businessId/tax/liabilities/:id/file` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
+| `FinanceController.getSettings` | GET | `/finance/businesses/:businessId/settings` | applied | `revenue:read` (FU-FINANCE-SETTINGS-SCOPE, V1-71): the finance settings answer the accountant export's saved recipient (Business.accountantEmail), so the read needs the read of the books it receives; it was membership-only (books-read-scope.spec.ts BRS-U05). Not a confinement: GET /identity/businesses and /identity/businesses/:businessId still answer the same columns to every member (review SEC-V71-2, open) |
 | `FinanceController.ignoreBankRow` | POST | `/finance/businesses/:businessId/bank-transactions/:bankTransactionId/ignore` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.importBankCsv` | POST | `/finance/businesses/:businessId/accounts/:accountId/bank-transactions/import` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.manualMatch` | POST | `/finance/businesses/:businessId/bank-transactions/:bankTransactionId/match` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
-| `FinanceController.patchSettings` | PATCH | `/finance/businesses/:businessId/settings` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
+| `FinanceController.patchSettings` | PATCH | `/finance/businesses/:businessId/settings` | applied | `revenue:read` (FU-FINANCE-SETTINGS-SCOPE, V1-71; found live by the GATE-JOURNEYS-G-L repair: a STAFF member with bookings and crm read only set Business.accountantEmail, the accountant export's saved recipient, to their own address): the read every field of the route needs; the D-11 owner-only tax rate runs after it (assertTaxRateOwner). Settings admin for accountantEmail and revenue write for the other fields (the WH3-1 binding rule, the packet's rule) are NOT applied: required Release 0 cases D11F-F05, F06 and F11 (d11-sibling-writes.json) pin revenue-read members' writes; owner question 19 |
 | `FinanceController.payTaxLiability` | POST | `/finance/businesses/:businessId/tax-liabilities/:id/pay` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.payTaxLiabilityAlias` | POST | `/finance/businesses/:businessId/tax/liabilities/:id/pay` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.recomputeTaxLiabilities` | POST | `/finance/businesses/:businessId/tax-liabilities/recompute` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |

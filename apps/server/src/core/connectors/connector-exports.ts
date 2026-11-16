@@ -1,7 +1,7 @@
 import { ForbiddenException } from '@nestjs/common';
 import type { PrismaService } from '../prisma/prisma.service';
-import type { CanonicalModule } from '../authority/module-vocabulary';
-import type { ModuleLevelActor } from '../auth/member-module-level';
+import { LEVEL_RANK, type CanonicalModule } from '../authority/module-vocabulary';
+import { memberModuleLevel, type ModuleLevelActor } from '../auth/member-module-level';
 import { assertMayExport, receiverReadRefusal, type ExportAudience } from '../auth/receiver-reads';
 
 /**
@@ -33,7 +33,15 @@ export const CONNECTOR_EXPORT_READS: Readonly<Record<string, readonly CanonicalM
   // SWEEP-P0-FOLLOWUP (WH3-1): an EMAIL / Gmail or WhatsApp channel connection's sending account receives every
   // message sent through it, with the recipient's address or phone (modules/communications/channel-audience.ts).
   channel_messaging: ['crm'],
+  // FU-FINANCE-SETTINGS-SCOPE (V1-71): the accountant export's saved recipient (Business.accountantEmail) receives the
+  // books ZIP whenever a member sends it without naming a `to` (the Reports and Tax pages prefill it): the P&L, balance
+  // sheet, cash flow, aging, tax summary, trial balance, general ledger and audit log. POST
+  // .../accountant-export/email, the route that builds it, needs revenue read (FOLLOW3-A6), so binding the address does.
+  accountant_email: ['revenue'],
 };
+
+/** FU-FINANCE-SETTINGS-SCOPE: the export type the accountant export's saved recipient binds (assertMaySetExportDestination). */
+export const ACCOUNTANT_EMAIL_EXPORT_TYPE = 'accountant_email';
 
 /** The modules a connector's export carries, or null for a connector that exports nothing. */
 export function connectorExportReads(type: string): readonly CanonicalModule[] | null {
@@ -45,9 +53,19 @@ export function connectorExportReads(type: string): readonly CanonicalModule[] |
  * and what it receives, in plain words ("connecting channel_messaging, which receives the business's crm records" was
  * what a settings admin renaming the sender read).
  */
-const EXPORT_ACCOUNT_WORDS: Readonly<Record<string, { account: string; receives: string }>> = {
+const EXPORT_ACCOUNT_WORDS: Readonly<Record<string, { act?: string; account: string; receives: string }>> = {
   channel_messaging: { account: 'an email or WhatsApp sending account', receives: "the business's contacts" },
+  // FU-FINANCE-SETTINGS-SCOPE: an address is saved, not connected.
+  accountant_email: { act: 'saving', account: "the accountant's email address", receives: "the business's books (the accountant export)" },
 };
+
+/** What a binding refusal calls binding `type`'s account ("connecting ..., which receives ...,"). */
+function exportBindingWhat(type: string, reads: readonly CanonicalModule[]): string {
+  const words = Object.prototype.hasOwnProperty.call(EXPORT_ACCOUNT_WORDS, type) ? EXPORT_ACCOUNT_WORDS[type] : null;
+  return words
+    ? `${words.act ?? 'connecting'} ${words.account}, which receives ${words.receives},`
+    : `connecting ${type}, which receives the business's ${reads.join(' and ')} records,`;
+}
 
 /** 403 unless the member binding `type`'s account reads what it exports (a connector that exports nothing: no rule). */
 export async function assertMayBindExport(
@@ -58,10 +76,39 @@ export async function assertMayBindExport(
 ): Promise<void> {
   const reads = connectorExportReads(type);
   if (!reads) return;
-  const words = Object.prototype.hasOwnProperty.call(EXPORT_ACCOUNT_WORDS, type) ? EXPORT_ACCOUNT_WORDS[type] : null;
-  const what = words
-    ? `connecting ${words.account}, which receives ${words.receives},`
-    : `connecting ${type}, which receives the business's ${reads.join(' and ')} records,`;
+  await assertMayExport(prisma, businessId, actor, reads, exportBindingWhat(type, reads));
+}
+
+/**
+ * FU-FINANCE-SETTINGS-SCOPE (V1-71): the export-binding rule SWEEP-P0-FOLLOWUP set (WH3-1: binding a destination that
+ * receives the business's data needs read of that data beside settings admin), for a destination a route binds without a
+ * settings-admin guard in front of it. The connector and channel binding routes carry settings admin on the route
+ * (RequireModuleScope + ModuleScopeGuard) and call assertMayBindExport for the reads; POST
+ * finance/.../accountant-export/email is open to every revenue reader (each sends the export to an address they name and
+ * read everything sent) and its saveRecipient binds a destination, Business.accountantEmail, so the check is made
+ * here: settings admin, then the reads of what the destination receives (CONNECTOR_EXPORT_READS), both read as
+ * ModuleScopeGuard reads them (memberModuleLevel: the explicit map, else the role defaults; a SUPER_ADMIN is admin) and
+ * refused with the same shape (403 "Insufficient permissions: <what> needs <module> <level> access (you have <level>)").
+ * The owner (every module admin by role default) and a platform SUPER_ADMIN pass, as they do there. A type with no reads
+ * named is a programming error and refuses (fails closed).
+ * OPEN (review SEC-V71-1 / FSS-CR-1, owner question 19): PATCH finance/.../settings writes the same column under revenue
+ * read alone, so until required Release 0 cases D11F-F05, F06 and F11 are amended and this rule applied there, every
+ * member it refuses here can still change the saved recipient through that route.
+ */
+export async function assertMaySetExportDestination(
+  prisma: PrismaService,
+  businessId: string,
+  actor: ModuleLevelActor,
+  type: string,
+): Promise<void> {
+  const reads = connectorExportReads(type);
+  if (!reads) throw new ForbiddenException(`No export rule is named for ${type}`);
+  if (!actor?.id) throw new ForbiddenException('Authentication required');
+  const what = exportBindingWhat(type, reads);
+  const settings = await memberModuleLevel(prisma, businessId, actor, 'settings');
+  if (LEVEL_RANK[settings] < LEVEL_RANK.admin) {
+    throw new ForbiddenException(`Insufficient permissions: ${what} needs settings admin access (you have ${settings})`);
+  }
   await assertMayExport(prisma, businessId, actor, reads, what);
 }
 

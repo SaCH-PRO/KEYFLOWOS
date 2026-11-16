@@ -1021,6 +1021,11 @@
       "prefix": "v63i_",
       "owner": "apps/server/test/crm-search-tags-phone.integration.test.ts",
       "packet": "V1-63 (SWP-CRM-SEARCH)"
+    },
+    {
+      "prefix": "v71d_",
+      "owner": "apps/server/test/finance-settings-scope.integration.test.ts",
+      "packet": "V1-71 (FU-FINANCE-SETTINGS-SCOPE)"
     }
   ],
   "pendingRenames": [],

@@ -20,8 +20,10 @@ import { MODULE_SCOPE_KEY, ModuleScopeGuard } from '../../core/auth/module-scope
  * at revenue read (ModuleScopeGuard + RequireModuleScope, 403 before the handler); ensureAccess stays on each,
  * so a platform SUPER_ADMIN who is not a member is still refused (D-46). GET expense-breakdown sums the month's
  * Expense rows against their budgets, the data of GET expenses/summary, so it takes that route's scope,
- * expenses read. The reads that carry no figure of the business (its settings, tax rates, chart of
- * accounts, exchange rates and bank-connection status) stay membership-only, each listed with its reason.
+ * expenses read. The reads that carry no figure of the business (tax rates, chart of accounts, exchange rates and
+ * bank-connection status) stay membership-only, each listed with its reason. FU-FINANCE-SETTINGS-SCOPE (V1-71): the
+ * finance settings left that list: they answer the accountant export's saved recipient, so GET settings needs revenue
+ * read (BRS-U05).
  *
  * D-46 (SEC-P195BW-7): a platform SUPER_ADMIN who is not a member writes none of the business's books. The
  * FinanceController doors and the purchase-order doors already refused them; the expense-natured payment
@@ -82,7 +84,6 @@ const BOOKS_READS: ReadonlyArray<readonly [string, string]> = [
 
 /** The GETs on FinanceController that keep no module scope, each with why it carries no figure (a change here is reviewed). */
 const REVIEWED_UNSCOPED_READS: Readonly<Record<string, string>> = {
-  'GET settings': 'finance settings (currency, basis, default rate): what every money form needs to render, no figure',
   'GET tax-rates': 'tax rates: invoice and expense forms need them, no figure of the business',
   'GET chart-of-accounts': 'the chart: account names and codes postings may name, no balance',
   'GET exchange-rates': 'market exchange rates, no figure of the business (D-13: one currency per business)',
@@ -118,6 +119,22 @@ describe('PR195-KEY-GATES: Books reads need revenue read (D-146, SEC-P195BW-4)',
       unscoped.push(routeOf(handler));
     }
     expect(unscoped.sort()).toEqual(Object.keys(REVIEWED_UNSCOPED_READS).sort());
+  });
+});
+
+/**
+ * FU-FINANCE-SETTINGS-SCOPE (V1-71): GET settings answers the accountant export's saved recipient (Business.accountantEmail,
+ * where every send without a `to` goes) beside the basis, fiscal year and default accounts, so it is no longer a reviewed
+ * exemption: it needs revenue read, the read of the books that address receives. Its web readers are the finance pages
+ * (settings, tax, reports), which read the books already. Not a confinement (review SEC-V71-2, open follow-up): GET
+ * /identity/businesses and /identity/businesses/:businessId still answer accountantEmail and the finance settings
+ * columns to every member (sanitizeBusiness keeps them).
+ */
+describe('FU-FINANCE-SETTINGS-SCOPE: the finance settings read needs revenue read', () => {
+  it('BRS-U05 RED-BEFORE: getSettings (GET settings) runs ModuleScopeGuard with revenue read', () => {
+    expect(routeOf(finance.getSettings)).toBe('GET settings');
+    expect(scopeOf(finance.getSettings)).toEqual(REVENUE_READ);
+    expect(guardsOf(finance.getSettings)).toEqual([ModuleScopeGuard]);
   });
 });
 

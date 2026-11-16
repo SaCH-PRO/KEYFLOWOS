@@ -15,7 +15,7 @@ import {
   type FinanceSettings, type FinancialAccountRow, type ChartOfAccountRow, type TaxRateRow,
 } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
-import { moduleReadRefusal } from "@/lib/module-access";
+import { isModuleScopeRefusal, moduleReadRefusal } from "@/lib/module-access";
 
 const SECTIONS = [
   { key: "general", label: "General", icon: SettingsIcon },
@@ -64,8 +64,24 @@ export default function FinanceSettingsPage() {
 
 // ---------- General (basis, fiscal year, default tax, default accounts) ----------
 
+/**
+ * FU-FINANCE-SETTINGS-SCOPE (V1-71): what the General section says when a save is answered with an error, in plain
+ * words, or null when it went through. The PATCH refuses a submission as a whole (nothing of it is written), so the page
+ * says nothing was saved and never shows "Settings saved". GET and PATCH settings need revenue read; the default tax
+ * rate is the owner's (D-11, the server's own words). Repair (review FSS-CR-2): no accountant-address branch: PATCH
+ * settings answers no such refusal at this head (owner question 19 holds that rule); it comes back with the rule.
+ */
+function financeSettingsSaveRefusal(res: { error?: string | null; status?: number } | null | undefined): string | null {
+  if (!res || !res.error) return null;
+  if (isModuleScopeRefusal(res, "revenue")) return "Nothing was saved. You can't change the finance settings in this business: it needs access to its books.";
+  return `Nothing was saved. ${res.error}`;
+}
+
 function GeneralSection({ businessId }: { businessId: string }) {
   const [settings, setSettings] = useState<FinanceSettings | null>(null);
+  // FU-FINANCE-SETTINGS-SCOPE: GET settings needs revenue read; a refused read is said, not "Loading settings…" forever.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<FinancialAccountRow[]>([]);
   // PR195-KEY-GATES review repair (CRR-P195KG-1/2): GET accounts needs revenue read (D-146); the pickers say why they
   // list no account rather than offering an empty list.
@@ -77,7 +93,12 @@ function GeneralSection({ businessId }: { businessId: string }) {
       fetchFinanceSettings(businessId),
       fetchFinanceAccounts(businessId),
     ]);
-    if (s.data) setSettings(s.data);
+    if (s.data) {
+      setSettings(s.data);
+      setLoadError(null);
+    } else if (s.error) {
+      setLoadError(moduleReadRefusal(s, "revenue", "the finance settings") ?? `Couldn't load the finance settings: ${s.error}`);
+    }
     if (a.error) {
       setAccounts([]);
       setAccountsError(moduleReadRefusal(a, "revenue", "the financial accounts") ?? `Couldn't load the financial accounts: ${a.error}`);
@@ -89,13 +110,22 @@ function GeneralSection({ businessId }: { businessId: string }) {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, [load]);
 
-  if (!settings) return <p className="text-sm text-muted-foreground">Loading settings…</p>;
+  if (!settings) {
+    if (loadError) return <p className="text-sm text-amber-500" role="alert">{loadError}</p>;
+    return <p className="text-sm text-muted-foreground">Loading settings…</p>;
+  }
 
   const save = async () => {
     setSaving(true);
+    setSaveError(null);
     const r = await updateFinanceSettings(businessId, settings);
     setSaving(false);
-    if (r.error) { toast.error(r.error); return; }
+    const refused = financeSettingsSaveRefusal(r);
+    if (refused) {
+      setSaveError(refused);
+      toast.error(refused);
+      return;
+    }
     toast.success("Settings saved");
     if (r.data) setSettings(r.data);
   };
@@ -181,6 +211,8 @@ function GeneralSection({ businessId }: { businessId: string }) {
         <DefaultAccountSelect label="Accounts Payable" value={settings.defaultApAccountId} options={accountOptions} onChange={(v) => update({ defaultApAccountId: v })} />
         <DefaultAccountSelect label="Tax Payable" value={settings.defaultTaxAccountId} options={accountOptions} onChange={(v) => update({ defaultTaxAccountId: v })} />
       </div>
+
+      {saveError && <p className="text-sm text-amber-500" role="alert">{saveError}</p>}
 
       <div className="flex justify-end">
         <button
