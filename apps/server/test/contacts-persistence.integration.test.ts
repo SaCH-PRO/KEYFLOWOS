@@ -859,33 +859,41 @@ function holdTables(tables: string[], ms: number) {
   };
 }
 
-describe('W4-FLAKE-HARDEN review CR-FH-2: a refusal is not charged with an earlier write\'s late audit entry and team log', () => {
+describe('W4-FLAKE-HARDEN review CR-FH-2: a refusal is not charged with an earlier write\'s late team log', () => {
   // The load flake this packet fixed (a), reproduced inside the suite (it took
   // an outside load harness before): the owner's create is answered while its
-  // fire-and-forget audit entry (DEC-CONTACTS-002) and team log still wait on
-  // the held audit and team-log tables. The tables are released after
-  // LATE_MS, and at the latest just before the refused request is sent.
-  // settle() waits for those writes, so they land before the refusal's
-  // baseline. With the fixed 300 ms sleep settle() used to be, the baseline
-  // was read while they still waited: red, checked by putting the sleep back.
+  // team log, which the TeamAuditInterceptor writes after the response, still
+  // waits on the held team-log table. The table is released after LATE_MS,
+  // and at the latest just before the refused request is sent. settle() waits
+  // for that write, so it lands before the refusal's baseline. With the fixed
+  // 300 ms sleep settle() used to be, the baseline was read while it still
+  // waited: red, checked by putting the sleep back.
+  //
+  // Release 0 amendment, owner ruling D-204 (TOF-CONTACT-AUDIT-CREATE): the
+  // create writes its 'created' audit entry in its own transaction (D-25), so
+  // the entry is committed when the POST answers and cannot land late. The
+  // case holds only team_activity_logs and requires the audit count to be +1
+  // at the answer while the team log is still in flight. Before D-204 it held
+  // contact_audit_entries too and required the answer to come before the
+  // entry, which the create then wrote fire-and-forget (DEC-CONTACTS-002).
   const LATE_MS = 1_500;
 
-  it('[CP-FH-01] the owner creates a contact while the audit and team-log tables are held, so its audit entry and team log land late: settle() waits for them, and the POST by STAFF with crm_edit none that follows answers 403 with every trace count unchanged', async () => {
+  it('[CP-FH-01] the owner creates a contact while the team-log table is held: it answers 201 with its audit entry already committed (D-25, D-204) while its team log lands late; settle() waits for the team log, and the POST by STAFF with crm_edit none that follows answers 403 with every trace count unchanged', async () => {
     await settle();
-    const hold = holdTables(['contact_audit_entries', 'team_activity_logs'], LATE_MS);
+    const hold = holdTables(['team_activity_logs'], LATE_MS);
     try {
       await hold.locked;
       const atStart = await traceCounts();
       const created = await post(ID.owner, { firstName: `${P}LateAudit`, email: `${P}late-audit@test.local` });
       expect(created.status, JSON.stringify(created.body)).toBe(201);
       const answered = await traceCounts();
-      expect({ audits: answered.audits, teamLogs: answered.teamLogs }, 'the create answered before its audit entry and team log landed')
-        .toEqual({ audits: atStart.audits, teamLogs: atStart.teamLogs });
-      expect(asyncWrites!.inFlight(), 'its audit entry and team log are still in flight').toBeGreaterThan(0);
+      expect({ audits: answered.audits, teamLogs: answered.teamLogs }, 'the create answered with its audit entry committed, before its team log landed')
+        .toEqual({ audits: atStart.audits + 1, teamLogs: atStart.teamLogs });
+      expect(asyncWrites!.inFlight(), 'its team log is still in flight').toBeGreaterThan(0);
 
       await settle();
       const tracesBefore = await traceCounts();
-      expect({ audits: tracesBefore.audits, teamLogs: tracesBefore.teamLogs }, 'settle() waited for the late audit entry and team log')
+      expect({ audits: tracesBefore.audits, teamLogs: tracesBefore.teamLogs }, 'settle() waited for the late team log')
         .toEqual({ audits: atStart.audits + 1, teamLogs: atStart.teamLogs + 1 });
 
       hold.release(); // never later than the refused request

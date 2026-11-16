@@ -2,6 +2,9 @@
   "manifestVersion": 1,
   "packageId": "R0-13-CT-PERSISTENCE-PROOF",
   "proofScope": "contacts-write-contract-real-database",
+  "notes": [
+    "TOF-CONTACT-AUDIT-CREATE (owner ruling D-204, an approved Release 0 update; plan r0_register) amends [CP-FH-01] and no other case: a contact create now writes its 'created' audit entry in its own transaction (D-25), so the entry is committed when the POST answers and cannot be held late. The case holds only team_activity_logs (the TeamAuditInterceptor team log is still written after the response), requires the owner's create to answer 201 with the audit count already +1 and the team log still in flight, requires settle() to wait for the late team log, and keeps the following POST by STAFF with crm_edit none answering 403 with every trace count unchanged. Before D-204 it held contact_audit_entries too and required the create to answer before its fire-and-forget audit entry landed; its title was 'W4-FLAKE-HARDEN review CR-FH-2: a refusal is not charged with an earlier write's late audit entry and team log [CP-FH-01] the owner creates a contact while the audit and team-log tables are held, so its audit entry and team log land late: settle() waits for them, and the POST by STAFF with crm_edit none that follows answers 403 with every trace count unchanged'."
+  ],
   "requireReportSuccess": true,
   "allowAdditionalCases": false,
   "suites": [
@@ -33,6 +36,6 @@
     "REGRESSION CONTROL: an owner DELETE then a refresh the linked invoice is intact after the DELETE: the same row, still linked to the contact, not deleted (raw SQL)",
     "REGRESSION CONTROL: an owner DELETE then a refresh a PATCH of the deleted contact answers 404 and writes nothing",
     "REGRESSION CONTROL: an owner DELETE then a refresh V1-17 (D-16): re-creating the deleted contact's email answers 201 with a new live contact, and the deleted row keeps its deleted_at and its email",
-    "W4-FLAKE-HARDEN review CR-FH-2: a refusal is not charged with an earlier write's late audit entry and team log [CP-FH-01] the owner creates a contact while the audit and team-log tables are held, so its audit entry and team log land late: settle() waits for them, and the POST by STAFF with crm_edit none that follows answers 403 with every trace count unchanged"
+    "W4-FLAKE-HARDEN review CR-FH-2: a refusal is not charged with an earlier write's late team log [CP-FH-01] the owner creates a contact while the team-log table is held: it answers 201 with its audit entry already committed (D-25, D-204) while its team log lands late; settle() waits for the team log, and the POST by STAFF with crm_edit none that follows answers 403 with every trace count unchanged"
   ]
 }
