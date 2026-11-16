@@ -9,12 +9,15 @@
  * it (PrismaClientValidationError). processConsciously step 11 awaits
  * KeyCortexMetacognitionService.trackCapability, which awaits that write.
  *
- * What a real database shows (this suite's RED run): the pipeline does not get
- * as far as step 11. Four of its calls fail there, every time:
+ * What a real database shows (this suite's RED runs): the pipeline does not get
+ * as far as step 11. Five of its calls fail there, every time:
  *   S6   metacognition.calibrateConfidence: KeyCortexEventService.getEvents
  *        filters business_events on `type` (the column is event_type), then
  *        findEvidence puts `limit` in the WHERE and orders by a createdAt the
  *        evidence table does not have;
+ *   S7   ethics.evaluateRecommendation: the evaluation is made and cached, then
+ *        its decision log (KeyCortexEventService.logDecision -> logEvent)
+ *        fails and takes the evaluation with it;
  *   S10  logConsciousProcess: KeyCortexEventService.logEvent writes type,
  *        module and payload (the columns are event_type, subject_*, actor_*,
  *        metadata);
@@ -32,10 +35,12 @@
  *            capability is still recorded in business_events (the row
  *            upsertCapabilityRecord writes with real columns); nothing lands
  *            in `evidence`.
- *   V70H-02  each of those four calls failing costs the answer that call's
+ *   V70H-02  each of those calls failing costs the answer that call's
  *            contribution and nothing more: the answer is the reasoned one,
- *            a warning names the step, and an uncalibrated confidence says so
- *            in the answer.
+ *            a warning names the step, an uncalibrated confidence says so in
+ *            the answer, and an ethical evaluation whose decision log was not
+ *            written still stands (a failure in the reasoning itself still
+ *            answers with the fallback).
  *   V70H-03  the evidence writer never sends a column the table does not have:
  *            a cortex claim is refused by name before any query (writing it
  *            into the real columns would put KEY's bookkeeping in the
@@ -447,6 +452,8 @@ describe('V70H-01 POST conscious/chat answers a deliberative question with the r
 describe('V70H-02 a failing bookkeeping step costs only its own contribution (the real graph)', () => {
   /** processConsciously with one metacognition or logging call made to fail, on the real graph. */
   async function answerWith(target: any, method: string, failure: Error) {
+    // A fresh ethical review each time: a cached verdict would skip its decision log (step 7).
+    consciousness.ethics.evaluationCache.clear();
     const spy = vi.spyOn(target, method).mockRejectedValueOnce(failure);
     const from = { warnings: warnings.length, errors: errors.length };
     const phases: any[] = [];
@@ -496,6 +503,17 @@ describe('V70H-02 a failing bookkeeping step costs only its own contribution (th
     expect(run.calls).toBe(1);
     expectReasonedAnswer(run);
     expect(run.warnings.filter((w) => w.includes('[Consciousness][snapshot]') && w.includes('v70h: self-model unreadable'))).toHaveLength(1);
+  });
+
+  it("RED-BEFORE: S7, the ethics decision log failing for real (KeyCortexEventService.logDecision on this database): the evaluation stands, the reasoned answer is delivered and permitted, and a warning says the log was not written", async () => {
+    consciousness.ethics.evaluationCache.clear();
+    const from = { warnings: warnings.length, errors: errors.length };
+    const response = await consciousness.processConsciously(QUESTION, deliberateSession());
+    expect(response.text).not.toMatch(FALLBACK);
+    expect(response.text).toContain(CONCLUSION);
+    expect(response.ethical.permitted).toBe(true);
+    expect(errors.slice(from.errors).filter((e) => /Pipeline FAILED/.test(e))).toEqual([]);
+    expect(warnings.slice(from.warnings).filter((w) => w.startsWith('KeyCortexEthicsService:') && /decision log/i.test(w))).toHaveLength(1);
   });
 
   it('a failure in the reasoning itself still answers with the fallback, as before (positive control: only bookkeeping was made survivable)', async () => {

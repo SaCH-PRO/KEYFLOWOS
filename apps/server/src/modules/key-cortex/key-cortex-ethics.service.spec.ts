@@ -96,6 +96,25 @@ describe('KeyCortexEthicsService', () => {
         JSON.stringify(benign) !== JSON.stringify(destructive);
       expect(differs).toBe(true);
     });
+
+    // W1F-KEY-EVIDENCE-WRITE (UCS-COR-3): on a real database logDecision fails
+    // every time (KeyCortexEventService.logEvent names columns business_events
+    // does not have), and processConsciously step 7 lost every deliberative
+    // answer to it. The decision log records an evaluation already made.
+    it('a decision log that cannot be written does not discard the evaluation: it is returned, cached, and the failure is logged as a warning', async () => {
+      const { service: svc, eventService } = makeService();
+      eventService.logDecision.mockRejectedValue(new Error('Invalid invocation\n\nArgument `eventType` is missing.'));
+      const warn = vi.spyOn((svc as any).logger, 'warn').mockImplementation(() => undefined);
+
+      const result = await svc.evaluateAction('send_invoice_reminder', { contactId: 'c1' }, 'biz_1');
+      expect(result).toMatchObject({ action: 'send_invoice_reminder', permitted: expect.any(Boolean) });
+      expect(eventService.logDecision).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0][0])).toContain('Argument `eventType` is missing.');
+      // The evaluation was kept: the same question is answered from the cache, without a second log.
+      expect(await svc.evaluateAction('send_invoice_reminder', { contactId: 'c1' }, 'biz_1')).toEqual(result);
+      expect(eventService.logDecision).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('checkDataPrivacy', () => {
