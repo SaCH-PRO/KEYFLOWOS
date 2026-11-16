@@ -178,3 +178,46 @@ describe('the escalated turn is a complete turn', () => {
     expect(block).toMatch(/\.catch\(\(\) => undefined\)/);
   });
 });
+
+/**
+ * W1F-KEY-EVIDENCE-WRITE review repair (SEC-W1FKEW-1, COR-W1FKEW-1). Once the
+ * deliberative answer survived on a real database, it reached whoever asked,
+ * built from the full KEY context, which D-129 serves to the business owner
+ * only. deliberate() ran the pipeline as userId '' and could not tell. It now
+ * runs it as the member who asked, and a withheld answer (the member may not
+ * read the full KEY context) is no answer: the caller runs the member-scoped
+ * fast path. Real-DB proof through the route: key-cortex-conscious-answer
+ * V70H-06.
+ */
+describe('the member who asked (review SEC-W1FKEW-1)', () => {
+  const impl = (
+    FlowOrchestratorService.prototype as unknown as Record<
+      string,
+      (b: string, m: string, h: unknown[], onPhase?: unknown, userId?: string) => Promise<unknown>
+    >
+  ).deliberate;
+
+  it('RED-BEFORE: deliberate() hands the pipeline the member who asked, by id, never userId ""', async () => {
+    const processConsciously = vi.fn().mockResolvedValue({ text: 'reasoned', actions: [] });
+    const instance = { moduleRef: { get: () => ({ processConsciously }) }, logger: { warn: vi.fn() } };
+
+    await expect(impl.call(instance, 'biz_1', 'q', [], undefined, 'user_1')).resolves.toEqual({ text: 'reasoned', actions: [] });
+
+    expect(processConsciously).toHaveBeenCalledTimes(1);
+    expect(processConsciously.mock.calls[0][1]).toMatchObject({ businessId: 'biz_1', userId: 'user_1' });
+  });
+
+  it('RED-BEFORE: a withheld answer is no answer: null, so the caller runs the member-scoped fast path', async () => {
+    const processConsciously = vi.fn().mockResolvedValue({ text: 'Deep think is open to the business owner.', actions: [], withheld: true });
+    const instance = { moduleRef: { get: () => ({ processConsciously }) }, logger: { warn: vi.fn() } };
+
+    await expect(impl.call(instance, 'biz_1', 'q', [], undefined, 'user_1')).resolves.toBeNull();
+  });
+
+  it('RED-BEFORE: the escalation passes the member to deliberate()', () => {
+    const i = src.indexOf('if (this.shouldDeliberate(');
+    const block = src.slice(i, src.indexOf('\n    try {', i));
+    const call = block.slice(block.indexOf('this.deliberate('), block.indexOf(');', block.indexOf('this.deliberate(')));
+    expect(call).toMatch(/\buserId\b/);
+  });
+});

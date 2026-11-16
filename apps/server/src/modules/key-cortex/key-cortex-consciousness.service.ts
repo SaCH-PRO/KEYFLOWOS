@@ -78,6 +78,13 @@ import { CortexSession, CortexMessage } from './key-cortex.types';
 
 import { BusinessEventType } from '@prisma/client';
 import {
+  CANONICAL_MODULES,
+  LEVEL_RANK,
+  defaultScopesForRole,
+  memberModuleLevel,
+  rankOf,
+} from '../../core/authority/module-vocabulary';
+import {
   KeyCortexInteroceptionService,
   type BodyState,
 } from './key-cortex-interoception.service';
@@ -130,6 +137,68 @@ export const TOTAL_CONSCIOUS_PHASES = 12;
  * plausibly the thing that is wrong.
  */
 export const LATERAL_THINKING_THRESHOLD = 0.6;
+
+/**
+ * One line saying why a call failed, for a warning. A Prisma validation error
+ * spans dozens of lines (the call site, the query, the schema's options) and
+ * ends with the reason, so the last non-empty line is kept.
+ */
+function failureReason(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const lines = message.split('\n').map((line) => line.trim()).filter(Boolean);
+  return (lines[lines.length - 1] ?? 'unknown error').slice(0, 300);
+}
+
+/**
+ * W1F-KEY-EVIDENCE-WRITE review repair (SEC-W1FKEW-1, COR-W1FKEW-1): may
+ * `userId` receive KEY's deliberative answer in `businessId`?
+ *
+ * processConsciously reasons over the full KEY context
+ * (KeyCortexContextV2Service.getFullContext: revenue, outstanding and overdue
+ * invoices by customer, hot leads, inbox previews, every module's figures) and
+ * copies the temporal context's revenue figures into the answer word for word.
+ * So the answer goes to whoever may read that context:
+ *   - the business owner, an OWNER membership (D-125); D-129 serves the full
+ *     KEY context (GET cortex/context) to the owner and to no other member, so
+ *     an ADMIN or STAFF member is not given it here either;
+ *   - bound by its explicit scope map (D-140): an OWNER membership with an
+ *     explicit map must read every module the OWNER role reads by default,
+ *     read as ModuleScopeGuard reads a membership (memberModuleLevel: a key
+ *     the map lacks is none), so a co-owner whose map has no revenue gets no
+ *     revenue figure (D-145, D-182);
+ *   - no person (a turn naming no member) and no membership (a platform
+ *     SUPER_ADMIN who is not a member included): no, as KEY chat's own
+ *     standing context shows them no figure (keyContextSight, SEC-P195KG-2).
+ * Everyone else is answered by KEY chat's member-scoped fast path, which shows
+ * each member the figures their access covers.
+ */
+export async function mayReadFullKeyContext(
+  prisma: PrismaService,
+  businessId: string,
+  userId: string | null | undefined,
+): Promise<boolean> {
+  if (!userId || !businessId) return false;
+  const membership = await prisma.client.membership.findUnique({
+    where: { userId_businessId: { userId, businessId } },
+    select: { role: true, permissionScopes: true },
+  });
+  if (membership?.role !== 'OWNER') return false;
+  const ownerDefaults = defaultScopesForRole('OWNER');
+  return CANONICAL_MODULES.every(
+    (module) =>
+      rankOf(ownerDefaults[module]) < LEVEL_RANK.read ||
+      rankOf(memberModuleLevel(membership, module)) >= LEVEL_RANK.read,
+  );
+}
+
+/**
+ * What a person who may not read the full KEY context is told instead of the
+ * deliberative answer: why, and what to do next. It names no business figure.
+ */
+export const DELIBERATION_WITHHELD_TEXT =
+  'Deep think works from the whole business, including its money, customers and messages, ' +
+  'so only the business owner can use it. I have not answered this here. ' +
+  'Send it as a normal message and I will answer from what your access covers.';
 
 /**
  * UnifiedConsciousnessOrchestrator — The Mind of KEY.
@@ -274,6 +343,20 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
 
     try {
       // ═══════════════════════════════════════════════════════════
+      // STEP 0: Who may receive this answer (review SEC-W1FKEW-1,
+      // COR-W1FKEW-1). Decided before any step reads the business: a person
+      // who may not read the full KEY context gets no step, no model call and
+      // no figure, only DELIBERATION_WITHHELD_TEXT (mayReadFullKeyContext).
+      // ═══════════════════════════════════════════════════════════
+      if (!(await mayReadFullKeyContext(this.prisma, session.businessId, session.userId))) {
+        this.logger.log(
+          `[Consciousness] Pipeline WITHHELD for business=${session.businessId}: ` +
+            'the person asking may not read the full KEY context (D-129, D-140)',
+        );
+        return this.createWithheldResponse(query, session);
+      }
+
+      // ═══════════════════════════════════════════════════════════
       // STEP 1: Detect Emotion (LAYER 1)
       // ═══════════════════════════════════════════════════════════
       const step1Start = Date.now();
@@ -414,14 +497,28 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
 
       // ═══════════════════════════════════════════════════════════
       // STEP 6: Apply Metacognition — Calibrate Confidence (LAYER 5)
+      //
+      // Calibration checks the reasoning's confidence against KEY's track
+      // record. When the track record cannot be read, the answer keeps the
+      // reasoning's own confidence and says it is uncalibrated (see
+      // withoutFailing).
       // ═══════════════════════════════════════════════════════════
       const step6Start = Date.now();
-      const calibratedConfidence =
-        await this.metacognition.calibrateConfidence(
-          reasoningResult.bestChain.conclusion,
-          reasoningResult.bestChain.confidence,
-          session.businessId,
-        );
+      const calibratedConfidence = await this.withoutFailing(
+        'S6',
+        'Confidence calibration',
+        () =>
+          this.metacognition.calibrateConfidence(
+            reasoningResult.bestChain.conclusion,
+            reasoningResult.bestChain.confidence,
+            session.businessId,
+          ),
+        () =>
+          this.uncalibratedConfidence(
+            reasoningResult.bestChain.conclusion,
+            reasoningResult.bestChain.confidence,
+          ),
+      );
       timing.metacognitionMs = Date.now() - step6Start;
       emit('metacognition', 'Calibrating confidence', timing.metacognitionMs, {
         raw: reasoningResult.bestChain.confidence,
@@ -564,7 +661,12 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
       // STEP 10: Log Everything
       // ═══════════════════════════════════════════════════════════
       const step10Start = Date.now();
-      await this.logConsciousProcess(session.businessId, response);
+      await this.withoutFailing(
+        'S10',
+        'Process log',
+        () => this.logConsciousProcess(session.businessId, response),
+        () => undefined,
+      );
       timing.logMs = Date.now() - step10Start;
 
       // Store process log for introspection
@@ -601,10 +703,16 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
       // STEP 11: Update Self-Model
       // ═══════════════════════════════════════════════════════════
       const step11Start = Date.now();
-      await this.metacognition.trackCapability(
-        session.businessId,
-        'conscious_response',
-        ethicalEvaluation.permitted ? 'success' : 'partial',
+      await this.withoutFailing(
+        'S11',
+        'Self-model update',
+        () =>
+          this.metacognition.trackCapability(
+            session.businessId,
+            'conscious_response',
+            ethicalEvaluation.permitted ? 'success' : 'partial',
+          ),
+        () => undefined,
       );
       // ═══════════════════════════════════════════════════════════
       // STEP 11b: Close the feedback loop (ENDOCRINE)
@@ -640,25 +748,32 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
           `ethical=${ethicalEvaluation.permitted ? 'OK' : 'FLAGGED'}`,
       );
 
-      // Update the snapshot cache
-      await this.updateSnapshotCache(session.businessId, {
-        mindState,
-        emotionalState,
-        reasoningMode: reasoningResult.bestChain.mode,
-        metacognition: await this.metacognition.buildSelfModel(
-          session.businessId,
-        ),
-        recentInsights: [], // populated by reflection service
-        activeGoals: this.activeGoalsCache.get(session.businessId) ?? [],
-        awareness: {
-          businessHealth: 75, // placeholder — would come from genome
-          userMood: emotionalState.primary,
-          pendingTasks: 0,
-          unreadAlerts: 0,
-          genomeStage: 'evolving',
-        },
-        timestamp: new Date(),
-      });
+      // Update the snapshot cache. Without a self-model the snapshot is left
+      // as it was rather than refreshed without one.
+      const selfModel = await this.withoutFailing(
+        'snapshot',
+        'Self-model read',
+        () => this.metacognition.buildSelfModel(session.businessId),
+        () => null,
+      );
+      if (selfModel) {
+        await this.updateSnapshotCache(session.businessId, {
+          mindState,
+          emotionalState,
+          reasoningMode: reasoningResult.bestChain.mode,
+          metacognition: selfModel,
+          recentInsights: [], // populated by reflection service
+          activeGoals: this.activeGoalsCache.get(session.businessId) ?? [],
+          awareness: {
+            businessHealth: 75, // placeholder — would come from genome
+            userMood: emotionalState.primary,
+            pendingTasks: 0,
+            unreadAlerts: 0,
+            genomeStage: 'evolving',
+          },
+          timestamp: new Date(),
+        });
+      }
 
       return response;
     } catch (error: unknown) {
@@ -671,6 +786,60 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
       // Graceful degradation: return a basic response
       return this.createFallbackResponse(query, session, errMsg);
     }
+  }
+
+  /**
+   * Run one of the pipeline's bookkeeping calls so that its failure costs the
+   * answer that call's contribution and nothing more.
+   *
+   * Calibration (S6), the process log (S10), the self-model update (S11) and
+   * the self-model read for the snapshot surround an answer the reasoning has
+   * already produced. Each of them fails on a real database today: the cortex
+   * event and evidence services name columns business_events and evidence do
+   * not have (review UCS-COR-3). The catch-all below then answered every
+   * deliberative question with createFallbackResponse, discarding the reasoned
+   * answer, and FlowOrchestratorService.deliberate handed that fallback to the
+   * person as KEY's answer. Now the failure is logged as a warning naming the
+   * step, and the pipeline carries on with `fallback`. A failure in the
+   * reasoning itself, or in the ethical review (S7), still reaches the
+   * catch-all; the ethical review's own decision log is made survivable in
+   * KeyCortexEthicsService.evaluateAction, not here.
+   */
+  private async withoutFailing<T>(
+    step: string,
+    what: string,
+    work: () => Promise<T>,
+    fallback: () => T,
+  ): Promise<T> {
+    try {
+      return await work();
+    } catch (error: unknown) {
+      this.logger.warn(
+        `[Consciousness][${step}] ${what} failed; the answer stands without it: ${failureReason(error)}`,
+      );
+      return fallback();
+    }
+  }
+
+  /**
+   * The confidence report for an answer whose confidence could not be checked
+   * against KEY's track record: the reasoning's own estimate, bounded as
+   * calibrateConfidence bounds it, saying so in its reasoning and caveats.
+   */
+  private uncalibratedConfidence(
+    statement: string,
+    rawConfidence: number,
+  ): ConfidenceReport {
+    return {
+      statement,
+      confidence:
+        Math.round(Math.max(0.05, Math.min(0.99, rawConfidence)) * 100) / 100,
+      reasoning:
+        "the reasoning's own estimate; I could not check it against my track record this time",
+      supportingEvidence: [],
+      caveats: ['This confidence is not calibrated against my track record.'],
+      historicalAccuracy: 0.5,
+    };
   }
 
   /**
@@ -1378,6 +1547,65 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
         tokensUsed: 0,
         cost: 0,
       },
+    };
+  }
+
+  /**
+   * The answer for a person who may not read the full KEY context
+   * (mayReadFullKeyContext): no step ran, so it carries no reasoning, no
+   * figure and no proposed action, and `withheld` tells the caller so.
+   */
+  private createWithheldResponse(query: string, session: CortexSession): ConsciousResponse {
+    const text = DELIBERATION_WITHHELD_TEXT;
+    return {
+      text,
+      withheld: true,
+      emotion: {
+        adaptPersona: false,
+        suggestedPersona: session.persona,
+        toneAdjustment: { speed: 'normal', detail: 'normal', empathy: 0.5, urgency: 0 },
+        shouldProactivelyHelp: false,
+      },
+      reasoning: {
+        chains: [],
+        bestChain: {
+          mode: 'analytical',
+          steps: [],
+          confidence: 0,
+          conclusion: text,
+          supportingEvidence: [],
+          counterArguments: [],
+          timeMs: 0,
+        },
+        consensus: 'Not reasoned: the full KEY context is the business owner\'s',
+        disagreements: [],
+        overallConfidence: 0,
+        reasoningTimeMs: 0,
+      },
+      confidence: {
+        statement: query,
+        confidence: 0,
+        reasoning: 'No answer was reasoned',
+        supportingEvidence: [],
+        caveats: [],
+        historicalAccuracy: 0.5,
+      },
+      ethical: {
+        action: 'withhold_full_context',
+        permitted: true,
+        confidence: 1,
+        principles: [
+          {
+            principle: 'data_privacy',
+            score: 1,
+            explanation: 'The full KEY context is served to the business owner only (D-129)',
+          },
+        ],
+        stakeholders: [],
+        explanation: 'The answer is withheld from a person who may not read the full KEY context.',
+      },
+      actions: [],
+      meta: { reasoningTimeMs: 0, modelsUsed: [], tokensUsed: 0, cost: 0 },
     };
   }
 

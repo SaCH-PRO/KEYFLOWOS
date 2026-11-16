@@ -2504,7 +2504,9 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
   // row was withdrawn (a backfill that read the row before the withdrawal and wrote its copy after: held back here at
   // the embedding call), removed by the next run. A member-less row's copy, a user's learning memory's copy and the
   // business fact's copy are kept. Every embedding is the stand-in vector (no outbound request).
-  it("W11-MEMORY-PROMOTE-SCOPE review SEC-W11MPS-1: the semantic copies of a promoted member row (what POST .../agent/memory/backfill writes into ai_memory_embeddings) are withdrawn with it, so GET .../agent/memory/search and the STAFF member's memory block stop serving the owner's answer: a withdrawn row's copies, a copy of the member's answer whose row a member-less promotion rewrote in place, and a copy a racing backfill wrote after the withdrawal (on the next run); a member-less row's, a user's learning memory's and a fact's copies are kept", async () => {
+  // W1F-MEMORY-COPIES closed (3): the backfill now writes a copy only while its row still holds what it read, under a
+  // lock on the row, so the racing backfill writes no copy at all (ai-memory-copies.integration.test.ts V70B-07/08).
+  it("W11-MEMORY-PROMOTE-SCOPE review SEC-W11MPS-1: the semantic copies of a promoted member row (what POST .../agent/memory/backfill writes into ai_memory_embeddings) are withdrawn with it, so GET .../agent/memory/search and the STAFF member's memory block stop serving the owner's answer: a withdrawn row's copies and a copy of the member's answer whose row a member-less promotion rewrote in place, and a racing backfill that read the row before the withdrawal writes no copy after it (W1F-MEMORY-COPIES); a member-less row's, a user's learning memory's and a fact's copies are kept", async () => {
     const realFetch = globalThis.fetch;
     const outbound: string[] = [];
     globalThis.fetch = (async (input: unknown) => {
@@ -2627,10 +2629,11 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
       expect(await db.aiMemory.count({ where: { businessId: ID.memBiz, key: 'learned:v19c_mps_emb_race' } })).toBe(0);
       release();
       await racing;
-      // The late copy is served until the next run...
-      expect(await memoryCopies()).toContain(copyOf('learned:v19c_mps_emb_race', EMB.RACE));
-      expect(await http.search(ID.member, QUESTION), 'the late copy').toContain('V19C-MPS-EMB-RACE');
-      // ...which withdraws it.
+      // W1F-MEMORY-COPIES: the racing backfill writes no late copy (it writes a copy only while its row still holds
+      // what it read, under a lock on the row), so none is ever served...
+      expect(await memoryCopies()).not.toContain(copyOf('learned:v19c_mps_emb_race', EMB.RACE));
+      expect(await http.search(ID.member, QUESTION), 'no late copy').not.toContain('V19C-MPS-EMB-RACE');
+      // ...and the next run finds no copy of it to withdraw.
       await consolidation.run(ID.memBiz);
       expect(await memoryCopies()).toEqual(
         [

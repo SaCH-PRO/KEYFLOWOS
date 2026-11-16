@@ -809,6 +809,15 @@ export interface ConsciousResponse {
     reframeDescription: string;
   }>;
 
+  /**
+   * Set when the pipeline did not run because the person asking may not read
+   * the full KEY context it reasons over (processConsciously,
+   * mayReadFullKeyContext): `text` says so, and carries no business figure.
+   * FlowOrchestratorService.deliberate answers such a person on the
+   * member-scoped fast path instead.
+   */
+  withheld?: true;
+
   /** Observability and cost metadata. */
   meta: ConsciousResponseMeta;
 }

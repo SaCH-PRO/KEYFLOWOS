@@ -1242,12 +1242,21 @@ export class FlowOrchestratorService {
    *
    * processConsciously only reads six fields off the session, so the synthetic
    * one below is honest rather than a stub: everything it reads is real.
+   *
+   * W1F-KEY-EVIDENCE-WRITE review repair (SEC-W1FKEW-1, COR-W1FKEW-1): the
+   * session names the member who asked (`userId`), not ''. The pipeline
+   * reasons over the full KEY context, which only the business owner may read
+   * (D-129, D-140; KeyCortexConsciousnessService mayReadFullKeyContext); for
+   * anyone else it answers `withheld`, and that is no answer here: null, so the
+   * caller answers on the fast path, whose standing context is the member's
+   * own viewer projection (SEC-P195KG-2).
    */
   private async deliberate(
     businessId: string,
     message: string,
     conversationHistory: FlowMessage[],
     onPhase?: (label: string, step: number, of: number) => void,
+    userId?: string,
   ): Promise<{ text: string; actions: Array<{ command: string; requiresApproval: boolean }> } | null> {
     try {
       const consciousness = this.moduleRef.get(KeyCortexConsciousnessService, { strict: false });
@@ -1259,7 +1268,7 @@ export class FlowOrchestratorService {
         {
           id: `flow-deliberate-${businessId}-${now.getTime()}`,
           businessId,
-          userId: '',
+          userId: userId ?? '',
           status: 'active',
           persona: 'jarvis',
           voice: 'default',
@@ -1280,6 +1289,7 @@ export class FlowOrchestratorService {
           : undefined,
       );
 
+      if (response?.withheld) return null;
       if (!response?.text?.trim()) return null;
       return { text: response.text, actions: response.actions ?? [] };
     } catch (err: unknown) {
@@ -2656,6 +2666,7 @@ ${triage.standingContext}`;
         enrichedMessage,
         conversationHistory,
         (label, step, of) => phases.push({ label, step, of }),
+        userId,
       );
 
       if (deliberation) {

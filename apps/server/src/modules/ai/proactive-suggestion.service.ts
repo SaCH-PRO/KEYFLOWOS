@@ -3,6 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { ProAutoMonitorService, ProAutoInsight } from './pro-auto-monitor.service';
 import { AiOversightService } from './ai-oversight.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { deleteAiMemoriesWithCopies } from './ai-memory.service';
 
 export interface ChatSuggestion {
   id: string;
@@ -115,15 +116,13 @@ export class ProactiveSuggestionService {
   }
 
   /**
-   * Mark a suggestion as dismissed so it won't appear again.
+   * Mark a suggestion as dismissed so it won't appear again. W1F-MEMORY-COPIES: the row goes with its semantic copies
+   * (a backfill copies suggestion rows too), so search and KEY's memory block stop serving it.
    */
   async dismissSuggestion(businessId: string, suggestionId: string): Promise<void> {
-    await this.prisma.client.aiMemory.deleteMany({
-      where: {
-        businessId,
-        category: 'suggestion',
-        value: { contains: suggestionId },
-      },
+    await deleteAiMemoriesWithCopies(this.prisma, businessId, {
+      category: 'suggestion',
+      value: { contains: suggestionId },
     });
   }
 

@@ -96,6 +96,81 @@ describe('KeyCortexEthicsService', () => {
         JSON.stringify(benign) !== JSON.stringify(destructive);
       expect(differs).toBe(true);
     });
+
+    // W1F-KEY-EVIDENCE-WRITE (UCS-COR-3): on a real database logDecision fails
+    // every time (KeyCortexEventService.logEvent names columns business_events
+    // does not have), and processConsciously step 7 lost every deliberative
+    // answer to it. The decision log records an evaluation already made.
+    it('a decision log that cannot be written does not discard the evaluation: it is returned, cached, and the failure is logged as a warning', async () => {
+      const { service: svc, eventService } = makeService();
+      eventService.logDecision.mockRejectedValue(new Error('Invalid invocation\n\nArgument `eventType` is missing.'));
+      const warn = vi.spyOn((svc as any).logger, 'warn').mockImplementation(() => undefined);
+
+      const result = await svc.evaluateAction('send_invoice_reminder', { contactId: 'c1' }, 'biz_1');
+      expect(result).toMatchObject({ action: 'send_invoice_reminder', permitted: expect.any(Boolean) });
+      expect(eventService.logDecision).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0][0])).toContain('Argument `eventType` is missing.');
+      // The evaluation was kept: the same question is answered from the cache, without a second log.
+      expect(await svc.evaluateAction('send_invoice_reminder', { contactId: 'c1' }, 'biz_1')).toEqual(result);
+      expect(eventService.logDecision).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // W1F-KEY-EVIDENCE-WRITE review COR-W1FKEW-2. processConsciously step 7 hands
+  // evaluateRecommendation the whole FullBusinessContext the answer was reasoned
+  // from, which always holds revenue and healthScore keys. The data-privacy
+  // check read its data types from that dump, so every deliberative answer, for
+  // every business and question, came back permitted: false with a DATA PRIVACY
+  // ALERT about "health, financial", under an "Overall Verdict: ✅ PERMITTED"
+  // line. The check now reads what the recommendation itself uses.
+  describe('evaluateRecommendation (review COR-W1FKEW-2)', () => {
+    /** The keys every FullBusinessContext carries, whatever was asked. */
+    const fullContext = {
+      commerce: { revenueThisMonth: 98765.43, outstandingInvoices: { total: 98765.43, invoices: [{ contactName: 'Ada', amount: 98765.43 }] } },
+      crm: { hotLeads: [{ name: 'Ada', email: 'ada@example.test', phone: '555-0100' }] },
+      summary: { healthScore: 72, totalRevenueOutstanding: 98765.43 },
+      genome: { financialHealth: 0.4 },
+    };
+
+    it('RED-BEFORE: a recommendation that uses no sensitive data is permitted and carries no DATA PRIVACY ALERT, though the context it was reasoned from holds revenue, health and contact keys', async () => {
+      const { service: svc } = makeService({ consents: [] });
+
+      const result = await svc.evaluateRecommendation('Chase the three oldest overdue invoices before offering new terms', fullContext, 'biz_1');
+
+      expect(result.permitted).toBe(true);
+      expect(result.explanation).not.toContain('DATA PRIVACY ALERT');
+      expect(result.principles.find((p) => p.principle === 'data_privacy')?.explanation ?? '').not.toContain('DATA PRIVACY VIOLATION');
+    });
+
+    it("RED-BEFORE: the check reads the recommendation: one that itself uses critical data is flagged, though the context it was reasoned from holds none", async () => {
+      const { service: svc } = makeService({ consents: [] });
+
+      const result = await svc.evaluateRecommendation(
+        'Chase the three oldest overdue invoices and keep their social security numbers before offering new terms',
+        {},
+        'biz_1',
+      );
+
+      expect(result.permitted).toBe(false);
+      expect(result.explanation).toContain('DATA PRIVACY ALERT');
+      expect(result.explanation).toMatch(/critical-sensitivity data types: ssn/);
+      expect(result.explanation).not.toContain('✅ PERMITTED');
+    });
+
+    it('RED-BEFORE: when a recommendation check overturns the verdict, the explanation says DENIED, never PERMITTED above the alert', async () => {
+      const { service: svc } = makeService({ consents: [] });
+      const recommendation = 'Chase the three oldest overdue invoices with a hidden fee before offering new terms';
+      // The base evaluation of the same words permits them; the deceptive-practice check overturns it.
+      expect((await makeService().service.evaluateAction(recommendation, {}, 'biz_1')).permitted).toBe(true);
+
+      const result = await svc.evaluateRecommendation(recommendation, {}, 'biz_1');
+
+      expect(result.permitted).toBe(false);
+      expect(result.explanation).toContain('DECEPTIVE PRACTICE ALERT');
+      expect(result.explanation).not.toContain('✅ PERMITTED');
+      expect(result.explanation).toContain('Overall Verdict: ❌ DENIED');
+    });
   });
 
   describe('checkDataPrivacy', () => {
