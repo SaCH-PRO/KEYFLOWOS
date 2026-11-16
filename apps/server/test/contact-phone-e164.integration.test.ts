@@ -167,6 +167,14 @@ async function stored(contactId: string) {
   });
 }
 
+/** A row as the table holds it, soft-deleted or not (raw SQL bypasses the soft-delete extension). */
+async function rawRow(contactId: string): Promise<{ phone: string | null; phone_normalized: string | null; deleted_at: Date | null } | null> {
+  const rows: Array<{ phone: string | null; phone_normalized: string | null; deleted_at: Date | null }> = await db.$queryRawUnsafe(
+    'SELECT phone, phone_normalized, deleted_at FROM contacts WHERE id = $1', contactId,
+  );
+  return rows[0] ?? null;
+}
+
 /** Live contacts of the business holding exactly this phone key. */
 async function liveWithKey(businessId: string, key: string): Promise<number> {
   return db.contact.count({ where: { businessId, phoneNormalized: key, deletedAt: null } });
@@ -452,9 +460,9 @@ describe('the identity check compares the E.164 value (contact_phone_taken)', ()
     expect(del.status, JSON.stringify(del.body).slice(0, 300)).toBe(200);
     const againId = await created(ID.owner, ID.bizTT, { firstName: 'Again', phone: '868 712 3406' });
     expect(await stored(againId)).toMatchObject({ phone: '+18687123406', phoneNormalized: '+18687123406', deletedAt: null });
-    const gone = await stored(goneId);
-    expect(gone.deletedAt).not.toBeNull();
-    expect(gone.phoneNormalized).toBe('+18687123406');
+    const gone = await rawRow(goneId);
+    expect(gone?.deleted_at).not.toBeNull();
+    expect(gone?.phone_normalized).toBe('+18687123406');
     expect(await liveWithKey(ID.bizTT, '+18687123406')).toBe(1);
   });
 
@@ -492,6 +500,12 @@ describe('a number that cannot be read is kept as typed and flagged, never dropp
     const open = await issues(ID.bizTT, id);
     expect(open).toHaveLength(1);
     expect(open[0]).toMatchObject({ kind: 'invalid_phone', field: 'phone', status: 'open' });
+  });
+
+  it("RED-BEFORE: a second contact whose phone has no digits is kept too ('mobile unknown'): a phone with no digits holds no identity key (it held '' and answered 409)", async () => {
+    const id = await created(ID.owner, ID.bizTT, { firstName: 'Hal', phone: 'mobile unknown' });
+    expect(await stored(id)).toMatchObject({ phone: 'mobile unknown', phoneNormalized: null });
+    expect((await issues(ID.bizTT, id)).map((i) => `${i.kind}:${i.field}`)).toEqual(['invalid_phone:phone']);
   });
 
   it("RED-BEFORE: a WhatsApp number that cannot be read ('12345') is kept and flagged on 'whatsappNumber' while the phone reads", async () => {
@@ -634,6 +648,6 @@ describe('POST .../data-quality/scan reads phones under the business country and
   });
 
   it('CONTROL: the business still has every contact this file created live (nothing was dropped)', async () => {
-    expect(await liveCount(ID.bizTT)).toBeGreaterThanOrEqual(10);
+    expect(await liveCount(ID.bizTT)).toBeGreaterThanOrEqual(11);
   });
 });
