@@ -1267,6 +1267,88 @@ for (const pipeline of PIPELINES) {
       expect((await row(ID.sessionA)).lastAccessedAt.getTime()).toBeGreaterThan(STALE.getTime());
       expect(cache().has(sessionKey(ID.sessionA))).toBe(true);
     });
+
+    // Review COR-W1FKCO-1. The chat, stream and conscious routes decide on ownSessionId, not ownSession. Once the
+    // session is found to be the caller's own, it is read as GET sessions/:id reads it
+    // (KeyCortexConversationService.getSession), as before SEC-W11KCSB-1: continuing one's own conversation marks it
+    // accessed (GET sessions orders by lastAccessedAt, GET messages with no sessionId reads the newest) and caches
+    // the session as the routes answer with it. The reasoning engine and the consciousness pipeline here write no
+    // session row, and the real consciousness pipeline writes none either, so only the route's own read marks it.
+    it("the OWNER continuing its own session on chat, the streams and the conscious pipeline is answered on it, and each route still marks it accessed and caches it as GET sessions/:id does, so GET sessions lists it first and GET messages reads it (positive control, review COR-W1FKCO-1)", async () => {
+      const RECENT = new Date('2026-06-01T00:00:00.000Z');
+      const recent = `${P}kcsb_recent_${pipeline}`;
+      const q = { businessId: ID.bizA };
+      const text = 'Hello from k34b';
+      // Another of the OWNER's sessions in A, accessed after the stale one: the newest until a route marks A's.
+      await db.cortexSession.create({ data: {
+        id: recent, businessId: ID.bizA, userId: ID.ownerA, title: 'k34b A recent session', lastAccessedAt: RECENT,
+        messages: [{ id: `${P}msg_recent_${pipeline}`, role: 'user', content: 'k34b A recent message', timestamp: RECENT.toISOString() }],
+      } });
+      try {
+        // The session as GET sessions/:id caches it.
+        await stale(ID.sessionA);
+        const read = await send(pipeline, { method: 'get', path: `sessions/${ID.sessionA}` }, { user: ID.ownerA, query: q });
+        expect(read.status, JSON.stringify(read.body)).toBe(200);
+        const readCached = cache().get(sessionKey(ID.sessionA));
+        expect(readCached).toBeDefined();
+        const sessionShape = Object.keys(JSON.parse(readCached!)).sort();
+
+        const routes: Array<[string, () => Promise<any>]> = [
+          ['POST chat', () => send(pipeline, { method: 'post', path: 'chat' }, { user: ID.ownerA, query: q, body: { businessId: ID.bizA, text, sessionId: ID.sessionA } })],
+          ['POST conscious/chat', () => send(pipeline, { method: 'post', path: 'conscious/chat' }, { user: ID.ownerA, query: q, body: { businessId: ID.bizA, text, sessionId: ID.sessionA } })],
+          ['GET chat/stream', () => sse('chat/stream', ID.ownerA, { ...q, text, sessionId: ID.sessionA })],
+          ['GET conscious/stream', () => sse('conscious/stream', ID.ownerA, { ...q, text, sessionId: ID.sessionA })],
+          ['GET stream', () => sse('stream', ID.ownerA, { ...q, message: text, sessionId: ID.sessionA })],
+        ];
+        const seen: Record<string, unknown> = {};
+        for (const [route, run] of routes) {
+          await stale(ID.sessionA);
+          const reasoningFrom = reasoningCalls[pipeline].length;
+          const consciousFrom = consciousCalls[pipeline].length;
+          const res = await run();
+          const body = typeof res.body === 'string' ? res.body : JSON.stringify(res.body);
+          expect(res.status, `${route} ${body}`).toBe(200);
+          // chat/stream writes its chunks as bare events (no data field), so only the call record shows its answer.
+          if (route !== 'GET chat/stream') expect(body, route).toContain('k34b answer');
+          expect(body, route).not.toContain('Session not found');
+          const handed = [
+            ...reasoningCalls[pipeline].slice(reasoningFrom).map((c) => c.sessionId),
+            ...consciousCalls[pipeline].slice(consciousFrom).map((c) => c.sessionId),
+          ];
+          expect(handed, `${route}: the session the engine was handed`).toEqual([ID.sessionA]);
+
+          const after = await row(ID.sessionA);
+          const cached = cache().get(sessionKey(ID.sessionA));
+          const cachedShape = cached === undefined ? undefined : Object.keys(JSON.parse(cached)).sort();
+          const sessions = await send(pipeline, { method: 'get', path: 'sessions' }, { user: ID.ownerA, query: q });
+          expect(sessions.status, JSON.stringify(sessions.body)).toBe(200);
+          const messages = await send(pipeline, { method: 'get', path: 'messages' }, { user: ID.ownerA, query: q });
+          expect(messages.status, JSON.stringify(messages.body)).toBe(200);
+          const marked = (at: Date) => (at.getTime() > RECENT.getTime() ? 'marked now' : at.toISOString());
+          seen[route] = {
+            lastAccessedAt: marked(after.lastAccessedAt),
+            updatedAt: marked(after.updatedAt),
+            cache: cachedShape === undefined
+              ? 'not cached'
+              : JSON.stringify(cachedShape) === JSON.stringify(sessionShape)
+                ? 'the session as GET sessions/:id caches it'
+                : `another shape: ${cachedShape.join(',')}`,
+            firstListed: sessions.body.map((s: any) => s.id)[0],
+            messagesWithNoSessionId: messages.body.messages.map((m: any) => m.content),
+          };
+        }
+        // Every route's outcome at once, so a regression names each route it reaches.
+        expect(seen).toEqual(Object.fromEntries(routes.map(([route]) => [route, {
+          lastAccessedAt: 'marked now',
+          updatedAt: 'marked now',
+          cache: 'the session as GET sessions/:id caches it',
+          firstListed: ID.sessionA,
+          messagesWithNoSessionId: ['k34b A message'],
+        }])));
+      } finally {
+        await db.$executeRawUnsafe('DELETE FROM cortex_sessions WHERE id = $1', recent);
+      }
+    });
   });
 }
 
