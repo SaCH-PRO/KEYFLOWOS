@@ -12,6 +12,7 @@
  *   FS-01  RED-BEFORE  Finance settings: a refused read is a refusal in plain words, not "Loading settings…" forever
  *   FS-02  RED-BEFORE  Finance settings: a refused save says so in plain words on the page; no "Settings saved"
  *   FS-03  control     Finance settings: an accepted save still says "Settings saved"
+ *   FS-04              Finance settings: a save refused for the accountant address says who may change it
  *   RA-01  RED-BEFORE  Reports accountant box: a refused save of the recipient says, in plain words, that nothing was sent
  *                      and the saved address did not change, and how to send without saving; no "Sent to"; the address is
  *                      not remembered
@@ -137,6 +138,24 @@ describe("Finance settings (FU-FINANCE-SETTINGS-SCOPE)", () => {
     expect(alert.textContent).toMatch(/Nothing was saved/);
     expect(alert.textContent).toMatch(/You can't change the finance settings in this business/);
     expect(alert.textContent).not.toMatch(/Insufficient permissions/);
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it("FS-04: a save refused for the accountant address (the binding refusal) says who may change where the accountant export goes; no \"Settings saved\"", async () => {
+    stubServer((method, pathname) => {
+      if (method === "GET" && pathname.endsWith(`${FIN}/settings`)) return jsonResponse(200, SETTINGS);
+      if (method === "GET" && pathname.endsWith(`${FIN}/accounts`)) return jsonResponse(200, { items: [] });
+      if (method === "PATCH" && pathname.endsWith(`${FIN}/settings`)) return refused(`${FIN}/settings`, SAVE_REFUSAL);
+      return undefined;
+    });
+    render(<FinanceSettingsPage />);
+    const email = await screen.findByPlaceholderText("accountant@firm.com");
+    fireEvent.change(email, { target: { value: "me@elsewhere.test" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save settings/ }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe(
+      "Nothing was saved. Only a member who manages this business's settings and can see its books can change where the accountant export goes.",
+    );
     expect(toast.success).not.toHaveBeenCalled();
   });
 

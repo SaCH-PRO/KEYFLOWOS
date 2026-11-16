@@ -76,8 +76,10 @@ import { assertGoogleConnectOwner } from '../../core/connectors/google-suite.con
  * their reports, the tax liabilities (with the PAID invoices behind one, and the tax calendar), the fixed assets
  * and their depreciation, the accounting periods, the cash reserves and the finance action items. GET
  * expense-breakdown sums the month's expenses against their budgets, the rows GET expenses/summary serves, so it
- * takes that route's expenses read. The reads that carry no figure of the business (settings, tax rates, the
- * chart, exchange rates, bank-connection status) stay membership-only; books-read-scope.spec.ts pins both lists.
+ * takes that route's expenses read. The reads that carry no figure of the business (tax rates, the chart, exchange
+ * rates, bank-connection status) stay membership-only; books-read-scope.spec.ts pins both lists. FU-FINANCE-SETTINGS-SCOPE
+ * (V1-71): the finance settings left that list (they answer the accountant export's saved recipient): GET and PATCH
+ * settings need revenue read.
  */
 @Controller('finance/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -575,6 +577,18 @@ export class FinanceController {
   }
 
   // ---------- Settings ----------
+  /**
+   * FU-FINANCE-SETTINGS-SCOPE (V1-71; found live by the GATE-JOURNEYS-G-L
+   * repair): the settings answer Business.accountantEmail, the accountant
+   * export's saved recipient, beside the basis, fiscal year and default
+   * accounts, so the read needs revenue read, the read of the books that
+   * address receives (ModuleScopeGuard: 403 before the handler, nothing read).
+   * It was membership-only: a STAFF member with bookings and crm read only
+   * read every setting. Its readers are the finance pages (settings, tax,
+   * reports). ensureAccess stays (D-46).
+   */
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('settings')
   async getSettings(@Param('businessId') businessId: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
@@ -583,9 +597,24 @@ export class FinanceController {
   /**
    * R0-09f (owner ruling D-11, R0-09d sweep): Business.defaultTaxRate is a field
    * of the owner-only business profile, so a non-owner's change to it is
-   * refused (403 BUSINESS_PROFILE_OWNER_ONLY) before anything is written; the
-   * other finance settings keep ensureAccess (any member).
+   * refused (403 BUSINESS_PROFILE_OWNER_ONLY) before anything is written.
+   *
+   * FU-FINANCE-SETTINGS-SCOPE (V1-71): the route needs revenue read
+   * (ModuleScopeGuard, before the handler and so before the D-11 check, which
+   * runs after it exactly as before): a STAFF member with bookings and crm read
+   * only set accountantEmail, where the books ZIP goes whenever a send names
+   * no `to`, to their own address. Revenue read is the read every field here
+   * needs. The packet's full rule (settings admin and revenue read for
+   * accountantEmail, the WH3-1 binding rule POST accountant-export/email's
+   * saveRecipient applies; revenue write for the other fields) is NOT applied:
+   * required Release 0 cases D11F-F05, F06 and F11 (d11-sibling-writes.json)
+   * pin a STAFF member on role defaults (revenue read, settings none) and an
+   * ADMIN with settings write writing accountantEmail and the basis, fiscal year
+   * and default cash account (200); applying it needs that amendment (REST scope
+   * census owner question 19).
    */
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Patch('settings')
   async patchSettings(
     @Param('businessId') businessId: string,
@@ -1317,6 +1346,12 @@ export class FinanceController {
    * Email the Accountant Export ZIP directly to a recipient. Uses the
    * business's configured `accountantEmail` when `to` is omitted; pass
    * `saveRecipient: true` to persist a new address as the new default.
+   *
+   * FU-FINANCE-SETTINGS-SCOPE (V1-71): a send needs revenue read (the sender
+   * reads everything sent); a saveRecipient that changes the saved default
+   * binds the address the books go to, so it also needs settings admin
+   * (AccountantExportEmailService.send runs assertMaySetExportDestination for
+   * `actor` before it builds, sends or writes anything).
    */
   @UseGuards(ModuleScopeGuard)
   @RequireModuleScope('revenue', 'read')
@@ -1356,6 +1391,7 @@ export class FinanceController {
         message: body?.message ?? null,
         saveRecipient: Boolean(body?.saveRecipient),
         userId: req.user.id,
+        actor: req.user,
       });
     } catch (err) {
       // W5-SYSTEM-EMAIL-CALLERS (SEC-W4HK-1, 9B-D2): this error escapes to the

@@ -224,6 +224,16 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
    Business.accountantEmail, the default receiver, under revenue read. The sender reads everything
    sent, so no read leaks, but the saved default is a receiver binding: settings admin or the owner
    for `saveRecipient`? finance.controller.ts is held for the PR195 merge.
+   **FU-FINANCE-SETTINGS-SCOPE (V1-71; found live by the GATE-JOURNEYS-G-L repair: a STAFF member with bookings and
+   crm read only set Business.accountantEmail to their own address through PATCH settings, and read the settings
+   through GET): the WH3-1 binding rule. Applied: a saveRecipient that changes the saved recipient needs settings admin
+   and revenue read (assertMaySetExportDestination, CONNECTOR_EXPORT_READS.accountant_email), checked before the
+   export is built, anything sent or anything written (CEN-11e; finance-settings-scope, v71d_); GET and PATCH settings
+   need revenue read. Not applied: settings admin for PATCH settings' accountantEmail and revenue write for its other
+   fields change three required Release 0 cases of d11-finance-settings.integration.test.ts (d11-sibling-writes.json:
+   D11F-F05, F06, F11: a STAFF member on role defaults, revenue read and settings none, and an ADMIN with settings write
+   change accountantEmail, accountingBasis, fiscalYearStartMonth and defaultCashAccountId, 200), which no r0_register
+   row of the packet approves. Applying it needs that amendment.**
 
 ## KEY follow-ups and seams
 
@@ -603,7 +613,7 @@ HttpService or provider SDK call; the census's CLASS A inventory):
 | Google Calendar sync | bookings | the owner's calendar (D-99) | The owner reads everything. |
 | AI model gateway, Langfuse, code executor, document parsing, ElevenLabs | prompts and content | the platform's providers, or a BYOK key | BYOK keys are settings admin (round 2, CW-1; question 14). |
 | Apollo enrichment | a contact's email and name | the platform's Apollo key | The enrich route enforces crm; a platform processor. |
-| AccountantExportEmailService (FinanceController, revenue:read) | the accountant export ZIP | the email the sender names, or the saved default | The sender reads everything sent. The route is held by pkt/PR195-JOURNAL-SCOPE (question 19). |
+| AccountantExportEmailService (FinanceController, revenue:read) | the accountant export ZIP | the email the sender names, or the saved default | The sender reads everything sent. FU-FINANCE-SETTINGS-SCOPE (question 19): saving the default is a binding, settings admin and revenue read (assertMaySetExportDestination, CEN-11e); PATCH settings writes it under revenue read until the Release 0 amendment question 19 names. |
 | OAuth token exchanges and refreshes, provider health checks and syncs (GETs), Supabase auth, RISC, currency rates, HIBP, Chatwoot replies, diagnostics, SlackService (no caller), contract asset fetches | no people or money rows | provider and platform hosts | Not a send of records. |
 
 **CLASS B.** The round 3 hunt passed fifteen shapes through the reader with all 18 CEN cases green (CM-1,

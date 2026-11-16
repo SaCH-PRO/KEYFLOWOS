@@ -1,5 +1,7 @@
 import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import type { ModuleLevelActor } from '../../core/auth/member-module-level';
+import { ACCOUNTANT_EMAIL_EXPORT_TYPE, assertMaySetExportDestination } from '../../core/connectors/connector-exports';
 import { SystemEmailService } from '../notifications/system-email.service';
 import { AccountantExportService } from './accountant-export.service';
 
@@ -12,6 +14,8 @@ export interface SendAccountantExportInput {
   message?: string | null;
   saveRecipient?: boolean;
   userId?: string | null;
+  /** The member who sends (req.user, as AuthMiddleware attaches it): a saveRecipient that changes the saved recipient is checked for them. */
+  actor?: ModuleLevelActor;
 }
 
 export interface SendAccountantExportResult {
@@ -32,6 +36,17 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  * byte-for-byte identical to the downloadable ZIP. The recipient defaults
  * to `Business.accountantEmail`; when the caller passes a `to` and
  * `saveRecipient: true`, that address is persisted as the new default.
+ *
+ * FU-FINANCE-SETTINGS-SCOPE (V1-71; the WH3-1 export-binding rule): the saved
+ * default receives the books whenever a member sends without naming a `to`,
+ * so saving one binds an export destination. A saveRecipient that would change
+ * it needs settings admin and revenue read of the member who sends
+ * (assertMaySetExportDestination, CONNECTOR_EXPORT_READS.accountant_email),
+ * checked before the sender's configuration is read, the export built,
+ * anything sent or anything written: a refusal (403) undoes the whole request.
+ * A send that saves nothing (no saveRecipient, or the address already saved)
+ * keeps the route's rule (revenue read: the sender reads everything sent).
+ * The census pins the order (rest-scope-census.spec.ts CEN-11e).
  */
 @Injectable()
 export class AccountantExportEmailService {
@@ -44,12 +59,6 @@ export class AccountantExportEmailService {
   ) {}
 
   async send(input: SendAccountantExportInput): Promise<SendAccountantExportResult> {
-    if (!this.emailSvc.isConfigured()) {
-      throw new BadRequestException(
-        'Email sender is not configured. Set RESEND_API_KEY and EMAIL_FROM_ADDRESS to enable accountant emails.',
-      );
-    }
-
     const business = await this.prisma.client.business.findUnique({
       where: { id: input.businessId },
       select: { id: true, name: true, currency: true, accountantEmail: true },
@@ -59,6 +68,17 @@ export class AccountantExportEmailService {
     const requested = (input.to ?? '').trim();
     const fallback = (business.accountantEmail ?? '').trim();
     const to = requested.length > 0 ? requested : fallback;
+    // FU-FINANCE-SETTINGS-SCOPE: a change of the saved recipient binds an export destination; checked first.
+    const savesRecipient = Boolean(input.saveRecipient) && to.length > 0 && to !== fallback;
+    if (savesRecipient) {
+      await assertMaySetExportDestination(this.prisma, input.businessId, input.actor, ACCOUNTANT_EMAIL_EXPORT_TYPE);
+    }
+
+    if (!this.emailSvc.isConfigured()) {
+      throw new BadRequestException(
+        'Email sender is not configured. Set RESEND_API_KEY and EMAIL_FROM_ADDRESS to enable accountant emails.',
+      );
+    }
     if (!to) {
       throw new BadRequestException(
         'No recipient: pass `to` or set a default accountant email under Finance > Settings.',
@@ -91,7 +111,7 @@ export class AccountantExportEmailService {
     });
 
     let savedAsDefault = false;
-    if (input.saveRecipient && to !== fallback) {
+    if (savesRecipient) {
       await this.prisma.client.business.update({
         where: { id: input.businessId },
         data: { accountantEmail: to },
