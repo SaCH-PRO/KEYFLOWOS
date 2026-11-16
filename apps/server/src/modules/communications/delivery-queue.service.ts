@@ -98,11 +98,25 @@ type ResendDeliveryRuntime = {
  * decryptNestedRecord is the extension's own decrypt step (same columns, same key as a top-level read). The plaintext
  * stays on the in-memory delivery handed to the adapter or to the retry decision: it is never returned, logged or
  * written (the delivery rows and events record the provider's answer, not the connection).
+ *
+ * A stored value that does not decrypt (saved under another key, or damaged) is no usable credential: the account
+ * reads as having none, so its delivery fails visibly (EMAIL_ACCOUNT_NOT_CONNECTED for Gmail, MISSING_CREDENTIALS for
+ * WhatsApp) and the rest of the batch is still sent. Throwing here would leave the claimed delivery in Sending and
+ * abort the tick (DTD-07); sending the ciphertext is what this fixes.
  */
+const decryptLogger = new Logger('DeliveryQueueService');
 function withDecryptedConnection<T extends { destination?: { connection?: unknown } | null }>(delivery: T): T {
   const destination = delivery.destination;
   if (!destination?.connection) return delivery;
-  return { ...delivery, destination: { ...destination, connection: decryptNestedRecord('ChannelConnection', destination.connection) } };
+  let connection: unknown;
+  try {
+    connection = decryptNestedRecord('ChannelConnection', destination.connection);
+  } catch {
+    const id = (destination.connection as { id?: unknown }).id;
+    decryptLogger.warn(`Sending account ${String(id)}: its stored token cannot be decrypted; the account is treated as not connected`);
+    connection = { ...(destination.connection as Record<string, unknown>), token: null, refreshToken: null };
+  }
+  return { ...delivery, destination: { ...destination, connection } };
 }
 
 function resolveScheduledAtUtc(scheduledAt: string, timezone?: string): Date {
