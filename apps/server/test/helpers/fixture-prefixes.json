@@ -996,6 +996,16 @@
       "prefix": "zz_wl_",
       "owner": "apps/server/test/booking-waitlist.integration.test.ts",
       "legacy": true
+    },
+    {
+      "prefix": "v63z_",
+      "owner": "apps/server/test/provider-outage-503.integration.test.ts",
+      "packet": "V1-63 (W11-PROVIDER-OUTAGE-503)"
+    },
+    {
+      "prefix": "v63y_",
+      "owner": "apps/server/test/provider-outage-connect.integration.test.ts",
+      "packet": "V1-63 (W11-PROVIDER-OUTAGE-CONNECT)"
     }
   ],
   "pendingRenames": [],

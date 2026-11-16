@@ -23,6 +23,7 @@
  * Google ever sees and the only one a mock cannot invent.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { GoogleDriveService } from '../google-drive/google-drive.service';
 import { GmailService } from '../commerce/gmail.service';
 import { StatementSourceService } from './statement-source.service';
@@ -265,5 +266,129 @@ describe('the Gmail request that actually leaves the process', () => {
     const content = bankImport.ingest.mock.calls[0][2] as string;
     expect(content).toContain('<FITID>FIT-1');
     expect(content).toContain('OFXHEADER');
+  });
+});
+
+/**
+ * W11-PROVIDER-OUTAGE-503 (R-5 part 1; W10-DISPATCH-STATUS review CR-W10DS-1).
+ * The same fetch boundary, with Google answering an error. A Google outage is
+ * not a refusal: the real GmailService and GoogleDriveService answer it 503
+ * { code: 'provider_unavailable', service } (so KEY's plan queue keeps
+ * retrying reconcile_sweep_statements), while a genuine refusal keeps its
+ * existing 400 and message.
+ *
+ * RED-BEFORE (int/v1-base at 15ca8599): the outage cases reject with
+ * BadRequestException('Gmail search failed (503)') and
+ * BadRequestException('Failed to list Google Drive files'); the controls pass.
+ */
+describe('a Google outage during a sweep is 503 provider_unavailable; a refusal stays 400 (W11-PROVIDER-OUTAGE-503)', () => {
+  function googleError(code: number, status: string, reasons: string[] = []) {
+    return JSON.stringify({ error: { code, message: status, status, errors: reasons.map((reason) => ({ reason })) } });
+  }
+
+  /** fetch answers the Gmail search or the Drive list with `status`; anything else is a test failure. */
+  function stubFailing(match: string, status: number, body: string) {
+    globalThis.fetch = vi.fn(async (url: any, init?: any) => {
+      const u = String(url);
+      calls.push({ url: u, init });
+      if (u.includes(match)) {
+        return new Response(body, { status, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`unexpected fetch ${u}`);
+    }) as any;
+  }
+
+  function services() {
+    const account = {
+      id: 'acc_A', businessId: 'biz_1', name: 'Republic',
+      metadata: { statementSources: { driveFolderId: 'FOLDER_XYZ', gmailQuery: 'from:republicbank.com' } },
+    };
+    const prisma = prismaWithConnection();
+    prisma.client.financialAccount.findMany = vi.fn(async () => [account]);
+    prisma.client.financialAccount.findFirst = vi.fn(async () => account);
+    const bankImport = { ingest: vi.fn() } as any;
+    const service = new StatementSourceService(prisma, new GoogleDriveService(prisma), new GmailService(prisma) as any, bankImport);
+    return { service, prisma, bankImport };
+  }
+
+  it('[SSH-503-01] RED-BEFORE: Gmail search answered 503 makes sweepGmail reject with 503 {code: provider_unavailable, service: gmail, message: "Gmail search failed (503)"}; nothing is imported or stamped', async () => {
+    stubFailing('/gmail/v1/users/me/messages?', 503, googleError(503, 'UNAVAILABLE', ['backendError']));
+    const { service, prisma, bankImport } = services();
+
+    const err = await service.sweepGmail('biz_1', 'acc_A').then(() => null, (e) => e);
+
+    expect(err).toBeInstanceOf(ServiceUnavailableException);
+    expect(err.getStatus()).toBe(503);
+    expect(err.getResponse()).toMatchObject({ code: 'provider_unavailable', service: 'gmail', message: 'Gmail search failed (503)', upstreamStatus: 503 });
+    expect(bankImport.ingest).not.toHaveBeenCalled();
+    expect(prisma.client.financialAccount.update).not.toHaveBeenCalled();
+    expect(calls.map((c) => new URL(c.url).pathname)).toEqual(['/gmail/v1/users/me/messages']);
+  });
+
+  it('[SSH-503-02] RED-BEFORE: Drive list answered 429 makes sweepDrive reject with 503 {code: provider_unavailable, service: drive} and its existing message', async () => {
+    stubFailing('/drive/v3/files?', 429, googleError(429, 'RESOURCE_EXHAUSTED', ['rateLimitExceeded']));
+    const { service, prisma, bankImport } = services();
+
+    const err = await service.sweepDrive('biz_1', 'acc_A').then(() => null, (e) => e);
+
+    expect(err).toBeInstanceOf(ServiceUnavailableException);
+    expect(err.getResponse()).toMatchObject({ code: 'provider_unavailable', service: 'drive', message: 'Failed to list Google Drive files', upstreamStatus: 429 });
+    expect(bankImport.ingest).not.toHaveBeenCalled();
+    expect(prisma.client.financialAccount.update).not.toHaveBeenCalled();
+  });
+
+  it('[SSH-503-03] RED-BEFORE: a Drive list 403 rateLimitExceeded is an outage too (503), a 403 insufficientPermissions is a refusal (400)', async () => {
+    stubFailing('/drive/v3/files?', 403, googleError(403, 'PERMISSION_DENIED', ['userRateLimitExceeded']));
+    const limited = await services().service.sweepDrive('biz_1', 'acc_A').then(() => null, (e) => e);
+    expect(limited).toBeInstanceOf(ServiceUnavailableException);
+    expect(limited.getResponse()).toMatchObject({ code: 'provider_unavailable', service: 'drive', upstreamStatus: 403 });
+
+    stubFailing('/drive/v3/files?', 403, googleError(403, 'PERMISSION_DENIED', ['insufficientPermissions']));
+    const refused = await services().service.sweepDrive('biz_1', 'acc_A').then(() => null, (e) => e);
+    expect(refused).toBeInstanceOf(BadRequestException);
+    expect(refused).not.toBeInstanceOf(ServiceUnavailableException);
+    expect(refused.message).toBe('Failed to list Google Drive files');
+  });
+
+  it('[SSH-503-04] control: Gmail search answered 400 stays BadRequestException("Gmail search failed (400)")', async () => {
+    stubFailing('/gmail/v1/users/me/messages?', 400, googleError(400, 'INVALID_ARGUMENT', ['invalidArgument']));
+    const err = await services().service.sweepGmail('biz_1', 'acc_A').then(() => null, (e) => e);
+
+    expect(err).toBeInstanceOf(BadRequestException);
+    expect(err).not.toBeInstanceOf(ServiceUnavailableException);
+    expect(err.getStatus()).toBe(400);
+    expect(err.message).toBe('Gmail search failed (400)');
+  });
+
+  it('[SSH-503-05] control: Drive list answered 404 stays BadRequestException("Failed to list Google Drive files")', async () => {
+    stubFailing('/drive/v3/files?', 404, googleError(404, 'NOT_FOUND', ['notFound']));
+    const err = await services().service.sweepDrive('biz_1', 'acc_A').then(() => null, (e) => e);
+
+    expect(err).toBeInstanceOf(BadRequestException);
+    expect(err).not.toBeInstanceOf(ServiceUnavailableException);
+    expect(err.message).toBe('Failed to list Google Drive files');
+  });
+
+  it('[SSH-503-06] RED-BEFORE: an outage on one message of a sweep is reported on the result, as any per-file failure is (the sweep goes on); the message names the outage', async () => {
+    // Search answers, the message fetch is down: sweepGmail's per-message
+    // catch records it on the result rather than rejecting the whole sweep.
+    globalThis.fetch = vi.fn(async (url: any, init?: any) => {
+      const u = String(url);
+      calls.push({ url: u, init });
+      if (u.includes('/messages?')) return jsonResponse({ messages: [{ id: 'm1', threadId: 't1' }] });
+      if (u.includes('/messages/m1')) return new Response(googleError(502, 'UNAVAILABLE'), { status: 502 });
+      throw new Error(`unexpected fetch ${u}`);
+    }) as any;
+    const { service, bankImport } = services();
+
+    const result = await service.sweepGmail('biz_1', 'acc_A');
+
+    expect(result.errors).toEqual(['message m1: Gmail message fetch failed (502)']);
+    expect(bankImport.ingest).not.toHaveBeenCalled();
+    // What the per-message catch saw was the outage, not a refusal.
+    const gmail = new GmailService(prismaWithConnection()) as any;
+    const err = await gmail.getMessageWithAttachments('biz_1', 'm1').then(() => null, (e: unknown) => e);
+    expect(err).toBeInstanceOf(ServiceUnavailableException);
+    expect(err.getResponse()).toMatchObject({ code: 'provider_unavailable', service: 'gmail', message: 'Gmail message fetch failed (502)', upstreamStatus: 502 });
   });
 });

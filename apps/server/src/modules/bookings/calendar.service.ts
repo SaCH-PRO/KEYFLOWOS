@@ -3,6 +3,7 @@ import { timingSafeStringEqual } from '../../core/security/timing-safe-equal';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { createHmac, randomBytes } from 'crypto';
 import { GoogleCalendarConnector } from '../../core/connectors/implementations/google-calendar.connector';
+import { providerFailure, readProviderFailureBody } from '../../core/connectors/provider-failure';
 
 /**
  * W8-GOOGLE-CONSENT-OWNER review repair (owner ruling D-99; SEC-W8GCO-1): the
@@ -307,9 +308,12 @@ export class CalendarService {
       'https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=writer&maxResults=100',
       { headers: { Authorization: `Bearer ${accessToken}` } },
     );
+    // W11-PROVIDER-OUTAGE-CONNECT (R-5 part 3; D-73): Calendar not answering
+    // (5xx, 408, 429, a rate-limited 403) is 503 provider_unavailable
+    // (google_calendar); a refusal keeps its 400. Same message.
     if (!res.ok) {
       this.logger.error(`Failed to list calendars: ${res.status}`);
-      throw new BadRequestException('Could not load Google calendars');
+      throw providerFailure('google_calendar', res.status, await readProviderFailureBody(res), 'Could not load Google calendars');
     }
     const data = await res.json();
     const items: any[] = data.items ?? [];
@@ -577,9 +581,12 @@ export class CalendarService {
       }),
     });
 
+    // W11-PROVIDER-OUTAGE-CONNECT (R-5 part 3; D-73): a token endpoint that does
+    // not answer (5xx, 408, 429) is 503 provider_unavailable (google_calendar);
+    // invalid_grant / invalid_client (reconnect) keeps its 400. Same message.
     if (!res.ok) {
       this.logger.error('Failed to refresh calendar token');
-      throw new BadRequestException('Failed to refresh Google Calendar token');
+      throw providerFailure('google_calendar', res.status, await readProviderFailureBody(res), 'Failed to refresh Google Calendar token');
     }
 
     const tokens = await res.json();

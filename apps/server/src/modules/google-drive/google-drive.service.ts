@@ -5,6 +5,7 @@ import { createHmac, randomBytes } from 'crypto';
 import * as mammoth from 'mammoth';
 import sanitizeHtml from 'sanitize-html';
 import { GoogleDriveConnector } from '../../core/connectors/implementations/google-drive.connector';
+import { providerFailure, readProviderFailureBody } from '../../core/connectors/provider-failure';
 
 const DOCX_MIME =
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -71,6 +72,15 @@ export interface DriveListResult {
   nextPageToken?: string;
 }
 
+/**
+ * W11-PROVIDER-OUTAGE-503: every non-OK Drive, Docs export, upload, Sheets and
+ * token-refresh answer goes through providerFailure('drive', ...)
+ * (core/connectors/provider-failure.ts): an outage (5xx, 408, 429, a
+ * rate-limited 403, an ABORTED 409) is 503 { code: 'provider_unavailable',
+ * service: 'drive' } with the site's existing message; a refusal keeps its
+ * existing 400. 'Google Drive not connected', 'Google OAuth not configured'
+ * and the connect site (saveDriveCredentials) keep their 400.
+ */
 @Injectable()
 export class GoogleDriveService {
   private readonly logger = new Logger(GoogleDriveService.name);
@@ -319,7 +329,9 @@ export class GoogleDriveService {
 
     if (!res.ok) {
       this.logger.error('Failed to refresh Drive token');
-      throw new BadRequestException('Failed to refresh Google Drive connection. Please reconnect.');
+      // W11-PROVIDER-OUTAGE-503: a 400/401 (invalid_grant: reconnect) stays 400;
+      // a 5xx or 429 from the token endpoint is 503 provider_unavailable.
+      throw providerFailure('drive', res.status, await readProviderFailureBody(res), 'Failed to refresh Google Drive connection. Please reconnect.');
     }
 
     const tokens = await res.json();
@@ -435,7 +447,7 @@ export class GoogleDriveService {
     if (!res.ok) {
       const err = await res.text();
       this.logger.error('Failed to list Drive files', err);
-      throw new BadRequestException('Failed to list Google Drive files');
+      throw providerFailure('drive', res.status, err, 'Failed to list Google Drive files');
     }
 
     const data = await res.json();
@@ -454,7 +466,7 @@ export class GoogleDriveService {
     );
 
     if (!res.ok) {
-      throw new BadRequestException('Failed to get file details');
+      throw providerFailure('drive', res.status, await readProviderFailureBody(res), 'Failed to get file details');
     }
 
     return res.json();
@@ -474,7 +486,7 @@ export class GoogleDriveService {
         body: JSON.stringify({ name: newName }),
       },
     );
-    if (!res.ok) throw new BadRequestException(`Drive rename failed: ${res.status}`);
+    if (!res.ok) throw providerFailure('drive', res.status, await readProviderFailureBody(res), `Drive rename failed: ${res.status}`);
     return res.json();
   }
 
@@ -498,7 +510,7 @@ export class GoogleDriveService {
         body: JSON.stringify({}),
       },
     );
-    if (!res.ok) throw new BadRequestException(`Drive move failed: ${res.status}`);
+    if (!res.ok) throw providerFailure('drive', res.status, await readProviderFailureBody(res), `Drive move failed: ${res.status}`);
     return res.json();
   }
 
@@ -509,7 +521,7 @@ export class GoogleDriveService {
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ trashed: true }),
     });
-    if (!res.ok) throw new BadRequestException(`Drive trash failed: ${res.status}`);
+    if (!res.ok) throw providerFailure('drive', res.status, await readProviderFailureBody(res), `Drive trash failed: ${res.status}`);
   }
 
   async untrashFile(businessId: string, fileId: string): Promise<void> {
@@ -519,7 +531,7 @@ export class GoogleDriveService {
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ trashed: false }),
     });
-    if (!res.ok) throw new BadRequestException(`Drive untrash failed: ${res.status}`);
+    if (!res.ok) throw providerFailure('drive', res.status, await readProviderFailureBody(res), `Drive untrash failed: ${res.status}`);
   }
 
   async deleteFile(businessId: string, fileId: string): Promise<void> {
@@ -529,7 +541,7 @@ export class GoogleDriveService {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!res.ok && res.status !== 204) {
-      throw new BadRequestException(`Drive delete failed: ${res.status}`);
+      throw providerFailure('drive', res.status, await readProviderFailureBody(res), `Drive delete failed: ${res.status}`);
     }
   }
 
@@ -562,7 +574,7 @@ export class GoogleDriveService {
     );
     if (!res.ok) {
       const err = await res.text();
-      throw new BadRequestException(`Drive share failed: ${res.status} ${err}`);
+      throw providerFailure('drive', res.status, err, `Drive share failed: ${res.status} ${err}`);
     }
     return res.json();
   }
@@ -578,7 +590,7 @@ export class GoogleDriveService {
         ...(parentId ? { parents: [parentId] } : {}),
       }),
     });
-    if (!res.ok) throw new BadRequestException(`Drive createDoc failed: ${res.status}`);
+    if (!res.ok) throw providerFailure('drive', res.status, await readProviderFailureBody(res), `Drive createDoc failed: ${res.status}`);
     return res.json();
   }
 
@@ -593,7 +605,7 @@ export class GoogleDriveService {
         ...(parentId ? { parents: [parentId] } : {}),
       }),
     });
-    if (!res.ok) throw new BadRequestException(`Drive createSheet failed: ${res.status}`);
+    if (!res.ok) throw providerFailure('drive', res.status, await readProviderFailureBody(res), `Drive createSheet failed: ${res.status}`);
     return res.json();
   }
 
@@ -608,7 +620,7 @@ export class GoogleDriveService {
         ...(parentId ? { parents: [parentId] } : {}),
       }),
     });
-    if (!res.ok) throw new BadRequestException(`Drive createFolder failed: ${res.status}`);
+    if (!res.ok) throw providerFailure('drive', res.status, await readProviderFailureBody(res), `Drive createFolder failed: ${res.status}`);
     return res.json();
   }
 
@@ -632,7 +644,7 @@ export class GoogleDriveService {
       `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(queryParts.join(' and '))}&fields=files(id,name)`,
       { headers: { Authorization: `Bearer ${accessToken}` } },
     );
-    if (!searchRes.ok) throw new BadRequestException(`Drive folder search failed: ${searchRes.status}`);
+    if (!searchRes.ok) throw providerFailure('drive', searchRes.status, await readProviderFailureBody(searchRes), `Drive folder search failed: ${searchRes.status}`);
     const searchData = await searchRes.json();
     if (searchData.files?.length > 0) {
       return { id: searchData.files[0].id, name: searchData.files[0].name };
@@ -707,7 +719,7 @@ export class GoogleDriveService {
     if (!res.ok) {
       const err = await res.text();
       this.logger.error('Failed to upload file to Drive', err);
-      throw new BadRequestException('Failed to upload file to Google Drive');
+      throw providerFailure('drive', res.status, err, 'Failed to upload file to Google Drive');
     }
 
     const file = await res.json();
@@ -769,7 +781,7 @@ export class GoogleDriveService {
     if (!res.ok) {
       const err = await res.text();
       this.logger.error('Failed to save HTML document to Drive', err);
-      throw new BadRequestException('Failed to save document to Google Drive');
+      throw providerFailure('drive', res.status, err, 'Failed to save document to Google Drive');
     }
 
     const file = await res.json();
@@ -833,7 +845,7 @@ export class GoogleDriveService {
     if (!res.ok) {
       const err = await res.text();
       this.logger.error('Failed to save document to Drive', err);
-      throw new BadRequestException('Failed to save document to Google Drive');
+      throw providerFailure('drive', res.status, err, 'Failed to save document to Google Drive');
     }
 
     const file = await res.json();
@@ -918,7 +930,7 @@ export class GoogleDriveService {
     if (!res.ok) {
       const err = await res.text();
       this.logger.error('Failed to download Drive binary', err);
-      throw new BadRequestException('Failed to download file from Drive');
+      throw providerFailure('drive', res.status, err, 'Failed to download file from Drive');
     }
     const arrayBuf = await res.arrayBuffer();
     const buffer = Buffer.from(arrayBuf);
@@ -943,7 +955,7 @@ export class GoogleDriveService {
       if (!res.ok) {
         const err = await res.text();
         this.logger.error('Failed to export Google Doc', err);
-        throw new BadRequestException('Failed to load Google Doc contents');
+        throw providerFailure('drive', res.status, err, 'Failed to load Google Doc contents');
       }
       const html = await res.text();
       return { html, mimeType, name: meta.name };
@@ -955,7 +967,7 @@ export class GoogleDriveService {
         { headers: { Authorization: `Bearer ${accessToken}` } },
       );
       if (!res.ok) {
-        throw new BadRequestException('Failed to download Drive file');
+        throw providerFailure('drive', res.status, await readProviderFailureBody(res), 'Failed to download Drive file');
       }
       const body = await res.text();
       const html =
@@ -973,7 +985,7 @@ export class GoogleDriveService {
       if (!res.ok) {
         const err = await res.text();
         this.logger.error('Failed to download .docx file', err);
-        throw new BadRequestException('Failed to download Word document');
+        throw providerFailure('drive', res.status, err, 'Failed to download Word document');
       }
       const arrayBuf = await res.arrayBuffer();
       const buffer = Buffer.from(arrayBuf);
@@ -1050,7 +1062,7 @@ export class GoogleDriveService {
       if (!upgradeRes.ok) {
         const err = await upgradeRes.text();
         this.logger.error('Failed to upgrade .docx to Google Doc', err);
-        throw new BadRequestException('Failed to save Word document changes back to Google Drive');
+        throw providerFailure('drive', upgradeRes.status, err, 'Failed to save Word document changes back to Google Drive');
       }
 
       const data = await upgradeRes.json();
@@ -1090,7 +1102,7 @@ export class GoogleDriveService {
     if (!res.ok) {
       const err = await res.text();
       this.logger.error('Failed to update Drive file content', err);
-      throw new BadRequestException('Failed to save changes back to Google Drive');
+      throw providerFailure('drive', res.status, err, 'Failed to save changes back to Google Drive');
     }
 
     const data = await res.json();
@@ -1180,7 +1192,7 @@ export class GoogleDriveService {
     if (!res.ok) {
       const err = await res.text();
       this.logger.error('Failed to create inventory sheet', err);
-      throw new BadRequestException('Failed to create Google Sheet — check Drive permissions');
+      throw providerFailure('drive', res.status, err, 'Failed to create Google Sheet — check Drive permissions');
     }
 
     const file = await res.json();
@@ -1210,7 +1222,7 @@ export class GoogleDriveService {
     if (!res.ok) {
       const err = await res.text();
       this.logger.error('Failed to write sheet values', err);
-      throw new BadRequestException('Failed to write to Google Sheet — check permissions and sheet access');
+      throw providerFailure('drive', res.status, err, 'Failed to write to Google Sheet — check permissions and sheet access');
     }
     return res.json();
   }
@@ -1238,7 +1250,7 @@ export class GoogleDriveService {
     if (!res.ok) {
       const err = await res.text();
       this.logger.error('Failed to read sheet values', err);
-      throw new BadRequestException('Failed to read from Google Sheet — check sheet ID and permissions');
+      throw providerFailure('drive', res.status, err, 'Failed to read from Google Sheet — check sheet ID and permissions');
     }
     const data = await res.json();
     return data.values || [];
