@@ -50,6 +50,37 @@
  *   V70H-04  the evidence reader asks only for real columns: findEvidence
  *            returns the business's own evidence, newest first, limited.
  *
+ * Review repair (SEC-W1FKEW-1, COR-W1FKEW-1, COR-W1FKEW-2). Once the answer
+ * survives, it reaches whoever asked, and it is built from the full KEY context
+ * (KeyCortexContextV2Service.getFullContext: revenue, outstanding and overdue
+ * invoices by customer, hot leads, inbox previews) and carries the temporal
+ * context's revenue figures word for word. D-129 serves that context to the
+ * business owner only (an OWNER membership, D-125), D-140 binds an OWNER
+ * membership's explicit scope map on KEY, and D-145 / D-182 / SEC-P195KG-2 hold
+ * money figures to members with Money read. Pinned here, on the team business
+ * (one invoice of 98,765.43, 20 days overdue, owed by "v70h Private Payer"):
+ *   V70H-05  POST conscious/chat and GET conscious/stream for a member who may
+ *            not read the full KEY context (a STAFF member with an explicit map
+ *            that has no revenue, either the SEC review's {bookings: write} or
+ *            the COR review's {crm: read}; an ADMIN, D-129; an OWNER membership
+ *            whose explicit map has no revenue, D-140) still answer 200 on the
+ *            member's own session (the Release 0 actor-binding cases), but the
+ *            answer carries no figure and no customer name, the reasoning model
+ *            is never prompted with the business's context, and the answer says
+ *            Deep think is the owner's and what to do instead. The business's
+ *            OWNER still gets the reasoned answer (control).
+ *   V70H-06  /app/key/chat (POST /ai/businesses/:id/flow/chat/stream, the real
+ *            AiFlowController and FlowOrchestratorService.streamChat, graded
+ *            deliberate): the deliberate branch runs for the member who asked,
+ *            by id, never as userId ''; a member who may not read the full KEY
+ *            context gets the member-scoped fast path instead (the viewer
+ *            projection of the business graph, SEC-P195KG-2), so no chunk and no
+ *            model prompt carries a figure or the customer's name; the OWNER
+ *            gets the deliberated answer.
+ *   V70H-01 (tightened, COR-W1FKEW-2) the ethics organ judges what the
+ *            recommendation itself uses, not the whole context dump, so a plain
+ *            recommendation is permitted and carries no DATA PRIVACY ALERT.
+ *
  * WHAT IS REAL: PrismaService over DATABASE_URL, AuthGuard, BusinessGuard,
  * TenantInterceptor and the Prisma tenant extension, the production
  * GlobalHttpExceptionFilter and ValidationPipe, KeyCortexController,
@@ -69,7 +100,17 @@
  * was never called); and the collaborators the controller holds for its other
  * routes (an allow-listed mocker). Vitest's esbuild transform emits no
  * parameter types, so the suite writes the ones tsc emits for the controller's
- * constructor and consciousChat, as key-cortex-actor-binding does.
+ * constructor, consciousChat and consciousStream, as key-cortex-actor-binding
+ * does.
+ * For V70H-06: AiFlowController behind the real AuthGuard, BusinessGuard and
+ * CrmRateLimitGuard, and FlowOrchestratorService's own streamChat,
+ * shouldDeliberate, deliberate and finalizeStreamSession, with the real
+ * BusinessGraphService (the member's viewer projection) and the same
+ * consciousness graph; the stand-ins are the prompt-building reads that decide
+ * nothing on this path (crew, memories, semantic memory, blueprint, onboarding,
+ * perception, tool menu, session persistence), the thalamus (it grades the
+ * question deliberate) and the model (trackAndStream records the prompt and
+ * answers "v70h fast-path answer").
  *
  * Every seeded row carries the `v70h_` prefix and is hard-deleted by raw SQL
  * with sqlLikePrefix() in beforeAll and afterAll; no $transaction wrapping.
@@ -98,6 +139,18 @@ const ID = {
   evOld: `${P}ev_old`,
   evNew: `${P}ev_new`,
   evOther: `${P}ev_other`,
+  /** The team business (review repair): an OWNER, the members below and one large overdue invoice. */
+  bizTeam: `${P}bizTeam`,
+  /** STAFF, explicit map {bookings: write}: no revenue, expenses or ai (the SEC-W1FKEW-1 repro). */
+  staff: `${P}staff`,
+  /** STAFF, explicit map {crm: read}: keyContextSight shows no revenue (the COR-W1FKEW-1 repro). */
+  staffCrm: `${P}staffCrm`,
+  /** ADMIN on role defaults: the full KEY context is the owner's (D-129). */
+  admin: `${P}admin`,
+  /** A co-owner: an OWNER membership whose explicit map has no revenue (D-140 binds it). */
+  coOwner: `${P}coOwner`,
+  contact: `${P}contact`,
+  invoice: `${P}inv1`,
 };
 
 /** A question with no action verb: FlowOrchestratorService.shouldDeliberate routes it to processConsciously. */
@@ -106,6 +159,13 @@ const QUESTION = 'Why are my customers paying their invoices so late?';
 const CONCLUSION = 'v70h: chase the three oldest overdue invoices before offering new terms';
 const RAW_CONFIDENCE = 0.8;
 const FALLBACK = /I encountered an issue while processing your request/;
+/** The team business's one invoice, and who owes it. */
+const INVOICE_TOTAL = 98765.43;
+const PAYER = 'v70h Private Payer';
+/** The invoice's figure in any of the ways the pipeline prints it ($98,765, 98765.43, 98,765.43). */
+const FIGURE = /98,?765/;
+/** What the fast path's model stand-in answers. */
+const FAST_ANSWER = 'v70h fast-path answer';
 
 /** The controller's collaborators for its other routes; consciousChat reaches none of them. */
 const OFF_BOUNDARY = new Set([
@@ -123,6 +183,10 @@ let consciousness: any;
 let TOTAL_CONSCIOUS_PHASES = 0;
 /** Every model request the stand-ins answered, by feature (no model is called). */
 const modelCalls: string[] = [];
+/** The prompt of every model request (consciousness graph and fast path), by feature. */
+const prompts: Array<{ feature: string; prompt: string }> = [];
+/** Every session the consciousness pipeline was handed (spied, the real pipeline runs). */
+const pipelineSessions: Array<{ businessId: unknown; userId: unknown }> = [];
 /** Every globalThis.fetch the process attempted during the suite (refused). */
 const outbound: string[] = [];
 /** Logger.warn and Logger.error lines, with the logger's context. */
@@ -168,6 +232,8 @@ async function cleanup() {
     `DELETE FROM evidence WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM cortex_sessions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM key_cortex_memories WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -178,6 +244,54 @@ async function cleanup() {
 
 function consciousChat(user: string, body: Record<string, unknown>) {
   return request(app.getHttpServer()).post('/api/v1/cortex/conscious/chat').set(HEADER, user).send(body);
+}
+
+function collectText(res: any, cb: (err: Error | null, body: string) => void) {
+  let data = '';
+  res.setEncoding('utf8');
+  res.on('data', (chunk: string) => { data += chunk; });
+  res.on('end', () => cb(null, data));
+}
+
+/** GET conscious/stream, its SSE events parsed (`event: <type>`, `data: <json>`). */
+async function consciousStream(user: string, query: Record<string, string>) {
+  const res = await request(app.getHttpServer())
+    .get('/api/v1/cortex/conscious/stream')
+    .set(HEADER, user)
+    .query(query)
+    .buffer(true)
+    .parse(collectText);
+  const events: Array<{ type: string; data: any }> = [];
+  for (const block of String(res.body).split('\n\n')) {
+    const type = /^event: (.*)$/m.exec(block)?.[1];
+    const data = /^data: (.*)$/m.exec(block)?.[1];
+    if (type && data) events.push({ type, data: JSON.parse(data) });
+  }
+  return { status: res.status, events };
+}
+
+let ipSeq = 0;
+/** POST /ai/businesses/:id/flow/chat/stream (/app/key/chat), its chunks parsed. */
+async function flowChatStream(user: string, businessId: string, message: string) {
+  ipSeq += 1;
+  const res = await request(app.getHttpServer())
+    .post(`/ai/businesses/${businessId}/flow/chat/stream`)
+    .set(HEADER, user)
+    // A distinct client address per request, so CrmRateLimitGuard's per-address buckets never cap the suite.
+    .set('x-forwarded-for', `10.70.8.${ipSeq}`)
+    .send({ message })
+    .buffer(true)
+    .parse(collectText);
+  const chunks = String(res.body)
+    .split('\n')
+    .filter((l) => l.startsWith('data: ') && l !== 'data: [DONE]')
+    .map((l) => JSON.parse(l.slice('data: '.length)));
+  return { status: res.status, chunks };
+}
+
+/** What the model was prompted with since `from` (every feature), as one string. */
+function promptedSince(from: number): string {
+  return prompts.slice(from).map((p) => p.prompt).join('\n');
 }
 
 /** A session processConsciously accepts: the six fields it reads, as FlowOrchestratorService.deliberate builds it. */
@@ -266,6 +380,11 @@ beforeAll(async () => {
   const { KeyCortexGenomeBridgeService } = await import('../src/modules/key-cortex/key-cortex-genome-bridge.service');
   const { KeyCortexInteroceptionService } = await import('../src/modules/key-cortex/key-cortex-interoception.service');
   const { KeyCortexEndocrineService } = await import('../src/modules/key-cortex/key-cortex-endocrine.service');
+  // /app/key/chat (V70H-06).
+  const { AiFlowController } = await import('../src/modules/ai/flow.controller');
+  const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+  const { BusinessGraphService } = await import('../src/modules/ai/business-graph.service');
+  const { CrmRateLimitGuard } = await import('../src/modules/crm/guards/rate-limit.guard');
 
   // The production build (tsc, emitDecoratorMetadata) records the constructor
   // parameter types Nest injects by; vitest's esbuild transform does not. This
@@ -286,20 +405,72 @@ beforeAll(async () => {
   if (!Reflect.getMetadata('design:paramtypes', KeyCortexController.prototype, 'consciousChat')) {
     Reflect.defineMetadata('design:paramtypes', [controllerModule.ConsciousChatDto, Object], KeyCortexController.prototype, 'consciousChat');
   }
+  // consciousStream's: the query class, the guarded tenant (String), the principal.
+  if (!Reflect.getMetadata('design:paramtypes', KeyCortexController.prototype, 'consciousStream')) {
+    Reflect.defineMetadata('design:paramtypes', [controllerModule.ConsciousChatDto, String, Object], KeyCortexController.prototype, 'consciousStream');
+  }
 
   // Stand-ins (see the header). The model answers at once and records the feature.
+  // Every prompt is recorded whole (JSON of the request), so a figure anywhere in it is seen.
   const aiUsage = {
-    trackAndComplete: async (_businessId: string, _userId: unknown, feature: string) => {
+    trackAndComplete: async (_businessId: string, _userId: unknown, feature: string, req?: unknown) => {
       modelCalls.push(feature);
+      prompts.push({ feature, prompt: JSON.stringify(req ?? null) });
       return { content: modelAnswer(feature), usage, model: 'v70h-stand-in', provider: 'v70h-stand-in' };
     },
   };
   const modelGateway = {
-    complete: async () => {
+    complete: async (...args: unknown[]) => {
       modelCalls.push('model_gateway');
+      prompts.push({ feature: 'model_gateway', prompt: JSON.stringify(args) });
       return { content: '{}', usage, model: 'v70h-stand-in', provider: 'v70h-stand-in' };
     },
   };
+  // The fast path's model (/app/key/chat): records the prompt, answers FAST_ANSWER.
+  const flowAi = {
+    checkRateLimit() {},
+    async checkCredits() {
+      return { allowed: true };
+    },
+    async *trackAndStream(_businessId: string, _userId: unknown, feature: string, req?: unknown) {
+      modelCalls.push(feature);
+      prompts.push({ feature, prompt: JSON.stringify(req ?? null) });
+      yield { type: 'content_delta', content: FAST_ANSWER };
+      yield { type: 'usage', usage };
+    },
+  };
+  // FlowOrchestratorService's own streamChat, shouldDeliberate, deliberate and finalizeStreamSession; the
+  // prompt-building reads that decide nothing on this path are stubbed, the thalamus grades the question
+  // deliberate, and the business graph (the member's viewer projection) and the cortex are the real ones
+  // (set once the module is compiled).
+  const flowRegistry = new Map<unknown, unknown>();
+  const orchestrator: any = Object.assign(Object.create(FlowOrchestratorService.prototype), {
+    logger: new Logger('FlowOrchestratorService'),
+    moduleRef: {
+      get(token: any) {
+        if (!flowRegistry.has(token)) throw new Error(`v70h moduleRef has no provider for ${token?.name ?? String(token)}`);
+        return flowRegistry.get(token);
+      },
+    },
+    aiUsage: flowAi,
+    memory: { buildContextBlock: async () => ({}), buildPromptSection: () => '' },
+    semanticMemory: { search: async () => [] },
+    genomeFacts: { listTopFacts: async () => [] },
+    buildAttachmentContext: async () => '',
+    resolveTurnAuthority: async () => ({ primary: 'general', crew: ['general'], scores: {} }),
+    buildBlueprintSection: async () => '',
+    buildOnboardingDirective: async () => '',
+    buildPerceptionSection: async () => '',
+    selectToolsForRequest: async () => [],
+    getTriage: () => ({
+      triage: () => ({
+        tier: 'deliberate', score: 4, arousal: 1, reason: 'v70h: graded deliberate', maxTokens: 2000,
+        temperature: 0.5, standingContext: null, taskCategory: 'tool-calling',
+      }),
+    }),
+    saveConversationHistory: async () => undefined,
+    enforceDoNotSay: async () => undefined,
+  });
   const noOrgans = { listAdapters: () => [] };
   const noInsights = { generateInsights: async () => [] };
 
@@ -331,11 +502,13 @@ beforeAll(async () => {
   };
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [KeyCortexController],
+    controllers: [KeyCortexController, AiFlowController],
     providers: [
       PrismaService,
       AuthGuard,
       BusinessGuard,
+      CrmRateLimitGuard,
+      { provide: FlowOrchestratorService, useValue: orchestrator },
       {
         provide: KeyCortexConversationService,
         useFactory: (prisma: any) => new KeyCortexConversationService(prisma, inMemoryRedis(cache) as any),
@@ -358,8 +531,18 @@ beforeAll(async () => {
     .compile();
 
   consciousness = moduleRef.get(KeyCortexConsciousnessService);
+  // Every session the pipeline is handed, from any caller; the real pipeline then runs.
+  const realProcess = consciousness.processConsciously.bind(consciousness);
+  consciousness.processConsciously = (query: string, session: any, onPhase?: unknown) => {
+    pipelineSessions.push({ businessId: session?.businessId, userId: session?.userId });
+    return realProcess(query, session, onPhase);
+  };
+  flowRegistry.set(KeyCortexConsciousnessService, consciousness);
+  orchestrator.prisma = moduleRef.get(PrismaService);
+  orchestrator.businessGraph = new BusinessGraphService(moduleRef.get(PrismaService));
 
   app = moduleRef.createNestApplication();
+  app.getHttpAdapter().getInstance().set('trust proxy', true);
   // Identity attachment only, for seeded v70h_ users. No guard is overridden.
   app.use(async (req: any, _res: any, next: any) => {
     const header = req.headers[HEADER];
@@ -390,6 +573,26 @@ beforeAll(async () => {
   await db.evidence.create({ data: proof(ID.evNew, ID.biz, '2026-11-02T09:00:00.000Z') });
   await db.evidence.create({ data: proof(ID.evOther, ID.bizOther, '2026-11-03T09:00:00.000Z') });
 
+  // The team business (review repair): its OWNER, four members who may not read the full KEY context,
+  // and one large overdue invoice owed by a named customer.
+  await db.user.create({ data: { id: ID.staff, email: `${P}staff@test.local`, role: 'USER' } });
+  await db.user.create({ data: { id: ID.staffCrm, email: `${P}staffcrm@test.local`, role: 'USER' } });
+  await db.user.create({ data: { id: ID.admin, email: `${P}admin@test.local`, role: 'USER' } });
+  await db.user.create({ data: { id: ID.coOwner, email: `${P}coowner@test.local`, role: 'USER' } });
+  await db.business.create({ data: { id: ID.bizTeam, name: 'V70H Team Biz', ownerId: ID.owner } });
+  await db.membership.create({ data: { id: `${P}m_team_owner`, userId: ID.owner, businessId: ID.bizTeam, role: 'OWNER' } });
+  await db.membership.create({ data: { id: `${P}m_team_staff`, userId: ID.staff, businessId: ID.bizTeam, role: 'STAFF', permissionScopes: { bookings: 'write' } } });
+  await db.membership.create({ data: { id: `${P}m_team_staffcrm`, userId: ID.staffCrm, businessId: ID.bizTeam, role: 'STAFF', permissionScopes: { crm: 'read' } } });
+  await db.membership.create({ data: { id: `${P}m_team_admin`, userId: ID.admin, businessId: ID.bizTeam, role: 'ADMIN' } });
+  await db.membership.create({ data: { id: `${P}m_team_coowner`, userId: ID.coOwner, businessId: ID.bizTeam, role: 'OWNER', permissionScopes: { crm: 'admin', bookings: 'admin' } } });
+  await db.contact.create({ data: { id: ID.contact, businessId: ID.bizTeam, firstName: 'v70h', lastName: 'Private Payer', displayName: PAYER } as any });
+  await db.invoice.create({
+    data: {
+      id: ID.invoice, businessId: ID.bizTeam, contactId: ID.contact, invoiceNumber: `${P}INV-1`, total: INVOICE_TOTAL,
+      status: 'SENT', dueDate: new Date(Date.now() - 20 * 86_400_000),
+    } as any,
+  });
+
   // No case below may reach a real provider: every global fetch is recorded and refused.
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: any) => {
     outbound.push(typeof input === 'string' ? input : String(input?.url ?? input));
@@ -412,6 +615,24 @@ describe('fixture sanity (real rows)', () => {
     expect(await evidenceRows(ID.bizOther)).toEqual([ID.evOther]);
   });
 
+  it('the team business: its OWNER and four members, none of whom may read the full KEY context, and one large overdue invoice owed by a named customer', async () => {
+    const members = await db.membership.findMany({ where: { businessId: ID.bizTeam }, select: { userId: true, role: true, permissionScopes: true }, orderBy: { userId: 'asc' } });
+    expect(members).toEqual([
+      { userId: ID.admin, role: 'ADMIN', permissionScopes: null },
+      { userId: ID.coOwner, role: 'OWNER', permissionScopes: { crm: 'admin', bookings: 'admin' } },
+      { userId: ID.owner, role: 'OWNER', permissionScopes: null },
+      { userId: ID.staff, role: 'STAFF', permissionScopes: { bookings: 'write' } },
+      { userId: ID.staffCrm, role: 'STAFF', permissionScopes: { crm: 'read' } },
+    ]);
+    const { keyContextSight } = await import('../src/modules/ai/business-graph.service');
+    const prisma = { client: db } as any;
+    // KEY chat's own reading (SEC-P195KG-2): none of the STAFF members or the co-owner may see revenue.
+    for (const user of [ID.staff, ID.staffCrm, ID.coOwner]) expect((await keyContextSight(prisma, ID.bizTeam, user)).revenue, user).toBe(false);
+    expect((await keyContextSight(prisma, ID.bizTeam, ID.owner)).revenue).toBe(true);
+    const invoices: any[] = await db.$queryRawUnsafe('SELECT total::float AS total, status, contact_id FROM invoices WHERE business_id = $1', ID.bizTeam);
+    expect(invoices).toEqual([{ total: INVOICE_TOTAL, status: 'SENT', contact_id: ID.contact }]);
+  });
+
   it('the question is a deliberative one: no action verb, so /app/key/chat would route it to processConsciously', () => {
     expect(/\b(create|make|add|send|schedule|book|update|change|delete|remove|cancel|invoice|draft|generate|assign|move|set|mark|pay|refund|publish|post)\b/i.test(QUESTION)).toBe(false);
   });
@@ -432,8 +653,11 @@ describe('V70H-01 POST conscious/chat answers a deliberative question with the r
       'ethics', 'emotionalCalibration', 'synthesis', 'consolidate',
     ]);
     expect(res.body.phases).toHaveLength(TOTAL_CONSCIOUS_PHASES);
-    // The ethics organ's own verdict (on this conclusion it flags financial data used without a recorded consent).
-    expect(typeof res.body.permitted).toBe('boolean');
+    // COR-W1FKEW-2: the ethics organ judges what the recommendation itself uses. This one uses no sensitive
+    // data, so it is permitted, and the answer carries no DATA PRIVACY ALERT about the context it was reasoned from.
+    expect(res.body.permitted).toBe(true);
+    expect(res.body.text).not.toContain('DATA PRIVACY ALERT');
+    expect(res.body.text).not.toMatch(/Overall Verdict: ✅ PERMITTED[\s\S]*⚠️/);
     expect(res.body.confidence).toBeGreaterThan(0);
     expect(res.body.confidence).toBeLessThanOrEqual(1);
 
@@ -512,8 +736,8 @@ describe('V70H-02 a failing bookkeeping step costs only its own contribution (th
     const response = await consciousness.processConsciously(QUESTION, deliberateSession());
     expect(response.text).not.toMatch(FALLBACK);
     expect(response.text).toContain(CONCLUSION);
-    // The organ's evaluation of the conclusion, not a stand-in verdict.
-    expect(response.ethical).toMatchObject({ action: CONCLUSION, permitted: expect.any(Boolean) });
+    // The organ's evaluation of the conclusion, not a stand-in verdict (permitted: it uses no sensitive data).
+    expect(response.ethical).toMatchObject({ action: CONCLUSION, permitted: true });
     expect(response.ethical.explanation).toMatch(/Ethical Analysis of/);
     expect(errors.slice(from.errors).filter((e) => /Pipeline FAILED/.test(e))).toEqual([]);
     expect(warnings.slice(from.warnings).filter((w) => w.startsWith('KeyCortexEthicsService:') && /decision log/i.test(w))).toHaveLength(1);
@@ -569,5 +793,123 @@ describe('V70H-04 the evidence reader asks only for real columns', () => {
     expect((await cortex.findEvidence(ID.biz, { limit: 1 })).map((e: any) => e.id)).toEqual([ID.evNew]);
     expect((await cortex.findEvidence(ID.biz)).map((e: any) => e.id)).toEqual([ID.evNew, ID.evOld]);
     expect((await cortex.findEvidence(ID.bizOther, { limit: 50 })).map((e: any) => e.id)).toEqual([ID.evOther]);
+  });
+});
+
+/** Cortex sessions `user` holds in `businessId`. */
+async function sessionsOf(user: string, businessId: string): Promise<number> {
+  const rows: Array<{ n: number }> = await db.$queryRawUnsafe(
+    'SELECT count(*)::int AS n FROM cortex_sessions WHERE user_id = $1 AND business_id = $2',
+    user,
+    businessId,
+  );
+  return rows[0].n;
+}
+
+/** The members of the team business who may not read the full KEY context. */
+const NOT_THE_OWNER: Array<[string, string]> = [
+  ['a STAFF member whose explicit map has no revenue ({bookings: write}, SEC-W1FKEW-1)', ID.staff],
+  ['a STAFF member whose explicit map reads only crm ({crm: read}, COR-W1FKEW-1)', ID.staffCrm],
+  ["an ADMIN on role defaults (the full KEY context is the owner's, D-129)", ID.admin],
+  ['an OWNER membership whose explicit map has no revenue (D-140 binds it)', ID.coOwner],
+];
+
+describe('V70H-05 the deliberative answer reaches only who may read the full KEY context (SEC-W1FKEW-1, COR-W1FKEW-1)', () => {
+  it.each(NOT_THE_OWNER)(
+    "RED-BEFORE: POST conscious/chat for %s: 200 on the member's own session, but no figure, no customer name and no reasoned answer; the model is never prompted with the business's context; the answer says Deep think is the owner's and what to do instead",
+    async (_who, user) => {
+      const from = { prompts: prompts.length, sessions: pipelineSessions.length };
+      const sessionsBefore = await sessionsOf(user, ID.bizTeam);
+
+      const res = await consciousChat(user, { businessId: ID.bizTeam, text: QUESTION });
+
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      const text = String(res.body.text);
+      expect(text).not.toMatch(FIGURE);
+      expect(text).not.toContain(PAYER);
+      expect(text).not.toContain('Temporal context');
+      expect(text).not.toContain(CONCLUSION);
+      expect(text).not.toMatch(FALLBACK);
+      expect(text).toMatch(/Deep think/);
+      expect(text).toMatch(/owner/);
+      expect(JSON.stringify(res.body)).not.toMatch(FIGURE);
+      // The reasoning model never saw the business's context.
+      const prompted = promptedSince(from.prompts);
+      expect(prompted).not.toMatch(FIGURE);
+      expect(prompted).not.toContain(PAYER);
+      // The route still runs for the member, on the member's own session (Release 0 actor binding).
+      expect(pipelineSessions.slice(from.sessions)).toEqual([{ businessId: ID.bizTeam, userId: user }]);
+      expect(await sessionsOf(user, ID.bizTeam)).toBe(sessionsBefore + 1);
+      expect(outbound).toEqual([]);
+    },
+  );
+
+  it("RED-BEFORE: GET conscious/stream (the web KEY chat's Deep think) for the STAFF member ({bookings: write}): no event carries a figure or the customer's name, and the answer event says Deep think is the owner's", async () => {
+    const from = { prompts: prompts.length, sessions: pipelineSessions.length };
+
+    const { status, events } = await consciousStream(ID.staff, { businessId: ID.bizTeam, text: QUESTION });
+
+    expect(status).toBe(200);
+    const answer = events.find((e) => e.type === 'answer');
+    expect(answer, JSON.stringify(events).slice(0, 400)).toBeDefined();
+    expect(JSON.stringify(events)).not.toMatch(FIGURE);
+    expect(JSON.stringify(events)).not.toContain(PAYER);
+    expect(String(answer!.data.text)).toMatch(/Deep think/);
+    expect(String(answer!.data.text)).not.toContain(CONCLUSION);
+    expect(promptedSince(from.prompts)).not.toMatch(FIGURE);
+    expect(pipelineSessions.slice(from.sessions)).toEqual([{ businessId: ID.bizTeam, userId: ID.staff }]);
+  });
+
+  it("the team business's OWNER (an OWNER membership with no explicit map) still gets the reasoned answer, reasoned over the business's figures (control: the assertions above are not vacuous)", async () => {
+    const from = { prompts: prompts.length, sessions: pipelineSessions.length };
+
+    const res = await consciousChat(ID.owner, { businessId: ID.bizTeam, text: QUESTION });
+
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.text).toContain(CONCLUSION);
+    expect(res.body.text).not.toMatch(FALLBACK);
+    expect(res.body.phases).toHaveLength(TOTAL_CONSCIOUS_PHASES);
+    // The owner may read the full KEY context: the reasoning was prompted with the invoice and who owes it.
+    const prompted = promptedSince(from.prompts);
+    expect(prompted).toMatch(FIGURE);
+    expect(prompted).toContain(PAYER);
+    expect(pipelineSessions.slice(from.sessions)).toEqual([{ businessId: ID.bizTeam, userId: ID.owner }]);
+  });
+});
+
+describe('V70H-06 /app/key/chat (POST flow/chat/stream): the deliberate branch runs for the member who asked (SEC-W1FKEW-1, COR-W1FKEW-1)', () => {
+  const contentOf = (chunks: any[]) => chunks.filter((c) => c.type === 'content_delta').map((c) => String(c.content));
+
+  it.each(NOT_THE_OWNER)(
+    "RED-BEFORE: %s asking a deliberative question gets the member-scoped fast path: no chunk and no model prompt carries the invoice's figure, and the pipeline never runs as anyone but the member",
+    async (_who, user) => {
+      const from = { prompts: prompts.length, sessions: pipelineSessions.length };
+
+      const { status, chunks } = await flowChatStream(user, ID.bizTeam, QUESTION);
+
+      expect(status).toBeLessThan(300);
+      expect(JSON.stringify(chunks)).not.toMatch(FIGURE);
+      expect(JSON.stringify(chunks)).not.toContain(PAYER);
+      expect(contentOf(chunks).at(-1)).toBe(FAST_ANSWER);
+      expect(chunks.at(-1)).toMatchObject({ type: 'done' });
+      // The fast path's prompt is the member's viewer projection of the business graph (SEC-P195KG-2).
+      const prompted = promptedSince(from.prompts);
+      expect(prompted).toContain('V70H Team Biz');
+      expect(prompted).not.toMatch(FIGURE);
+      expect(pipelineSessions.slice(from.sessions).filter((s) => s.userId !== user)).toEqual([]);
+    },
+  );
+
+  it('RED-BEFORE: the OWNER asking the same question gets the deliberated answer, and the pipeline runs for the OWNER by id, never as userId ""', async () => {
+    const from = { sessions: pipelineSessions.length };
+
+    const { status, chunks } = await flowChatStream(ID.owner, ID.bizTeam, QUESTION);
+
+    expect(status).toBeLessThan(300);
+    expect(contentOf(chunks).join('\n')).toContain(CONCLUSION);
+    expect(contentOf(chunks)).not.toContain(FAST_ANSWER);
+    expect(chunks.at(-1)).toMatchObject({ type: 'done' });
+    expect(pipelineSessions.slice(from.sessions)).toEqual([{ businessId: ID.bizTeam, userId: ID.owner }]);
+    expect(outbound).toEqual([]);
   });
 });
