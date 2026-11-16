@@ -1119,6 +1119,126 @@ for (const pipeline of PIPELINES) {
       expectOnlyA(pipeline, from, 2);
     });
   });
+
+  /*
+   * W11-KEY-CHAT-SESSION-BIND review SEC-W11KCSB-1. KeyCortexController.ownSession and ownSessionId decided
+   * ownership on KeyCortexConversationService.getSession, a read that writes: it extends the cached entry's TTL
+   * (a cache hit) or, from the database, sets lastAccessedAt (and @updatedAt) on the row and caches it for 24h,
+   * and only then was the session refused. So a STAFF member naming the OWNER's session reordered the OWNER's
+   * sessions by recency (GET sessions orders by lastAccessedAt) and kept the OWNER's conversation in the shared
+   * session cache; on the bare handler, another tenant's session was written the same way. The decision now reads
+   * through KeyCortexSessionService.findSession (cache, then database, nothing written); only the caller's own
+   * session is then read as the routes answer with it.
+   */
+  describe(`a session id that is not the caller's own is refused on a read that writes nothing (review SEC-W11KCSB-1) - ${PIPELINE_LABEL[pipeline]}`, () => {
+    const staff = `${P}kcsb_staff_${pipeline}`;
+    const STALE = new Date('2026-01-01T00:00:00.000Z');
+    const cache = () => caches[pipeline];
+    const sse = (path: string, user: string, query: Record<string, string>) =>
+      request(apps[pipeline]!.getHttpServer()).get(`/api/v1/cortex/${path}`).set(HEADER, user).query(query).buffer(true).parse(collectText);
+    const row = (id: string) =>
+      db.cortexSession.findUnique({
+        where: { id },
+        select: { id: true, businessId: true, userId: true, title: true, status: true, persona: true, messages: true, lastAccessedAt: true, updatedAt: true },
+      });
+    /** As a session the caller has not touched since 2026-01-01, and no longer cached. */
+    const stale = async (id: string) => {
+      await db.$executeRawUnsafe('UPDATE cortex_sessions SET last_accessed_at = $1, updated_at = $1 WHERE id = $2', STALE, id);
+      cache().delete(sessionKey(id));
+    };
+    /** Every write to the session cache while `fn` runs, by key. */
+    const cacheWritesDuring = async (fn: () => Promise<void>) => {
+      const store = cache();
+      const writes: string[] = [];
+      const set = store.set.bind(store);
+      store.set = (key: string, value: string) => {
+        writes.push(key);
+        return set(key, value);
+      };
+      try {
+        await fn();
+      } finally {
+        delete (store as any).set;
+      }
+      return writes;
+    };
+    /** Each route that takes a client session id, as `user` naming `sessionId` under A; every one must refuse it. */
+    const everyRoute = async (user: string, sessionId: string) => {
+      const q = { businessId: ID.bizA };
+      const label = (r: string, res: { status: number; body: unknown }) => `${r} ${res.status} ${typeof res.body === 'string' ? res.body : JSON.stringify(res.body)}`;
+      const plain: Array<[string, () => Promise<any>]> = [
+        ['GET sessions/:id', () => send(pipeline, { method: 'get', path: `sessions/${sessionId}` }, { user, query: q })],
+        ['PATCH sessions/:id', () => send(pipeline, { method: 'patch', path: `sessions/${sessionId}` }, { user, query: q, body: { title: 'k34b hijacked' } })],
+        ['DELETE sessions/:id', () => send(pipeline, { method: 'delete', path: `sessions/${sessionId}` }, { user, query: q })],
+        ['GET messages', () => send(pipeline, { method: 'get', path: 'messages' }, { user, query: { ...q, sessionId } })],
+        ['POST chat', () => send(pipeline, { method: 'post', path: 'chat' }, { user, query: q, body: { businessId: ID.bizA, text: 'Hello from k34b', sessionId } })],
+        ['POST conscious/chat', () => send(pipeline, { method: 'post', path: 'conscious/chat' }, { user, query: q, body: { businessId: ID.bizA, text: 'Hello from k34b', sessionId } })],
+        ['POST feedback', () => send(pipeline, { method: 'post', path: 'feedback' }, { user, query: q, body: { businessId: ID.bizA, sessionId, userResponse: 'rejected' } })],
+        ['POST personalities/switch', () => send(pipeline, { method: 'post', path: 'personalities/switch' }, { user, query: q, body: { sessionId, persona: 'jarvis' } })],
+      ];
+      for (const [r, run] of plain) {
+        const res = await run();
+        expect(res.status, label(r, res)).toBe(404);
+      }
+      expectSessionRefusedSse(pipeline, await sse('chat/stream', user, { ...q, text: 'Hello from k34b', sessionId }));
+      expectSessionRefusedSse(pipeline, await sse('conscious/stream', user, { ...q, text: 'Hello from k34b', sessionId }));
+      const stream = await sse('stream', user, { ...q, message: 'Hello from k34b', sessionId });
+      expect(stream.status).toBe(200);
+      expect(String(stream.body)).toMatch(/"type":"error"[^\n]*"content":"Session not found"/);
+    };
+
+    beforeAll(async () => {
+      await db.user.create({ data: { id: staff, email: `${staff}@test.local`, role: 'USER' } });
+      await db.membership.create({ data: { id: `${P}m_kcsb_staff_${pipeline}`, userId: staff, businessId: ID.bizA, role: 'STAFF' } });
+    });
+
+    afterAll(async () => {
+      await db.$executeRawUnsafe('DELETE FROM cortex_sessions WHERE user_id = $1', staff);
+      await db.$executeRawUnsafe('DELETE FROM memberships WHERE user_id = $1', staff);
+      await db.$executeRawUnsafe('DELETE FROM users WHERE id = $1', staff);
+    });
+
+    it("a STAFF member of A naming the OWNER's session (not cached) on every route that takes a session id is refused, and the OWNER's row is not written (lastAccessedAt and updatedAt included) nor cached", async () => {
+      await stale(ID.sessionA);
+      const before = await row(ID.sessionA);
+      const writes = await cacheWritesDuring(() => everyRoute(staff, ID.sessionA));
+      expect(await row(ID.sessionA)).toEqual(before);
+      expect(cache().has(sessionKey(ID.sessionA)), "the OWNER's session is not cached").toBe(false);
+      expect(writes.filter((k) => k === sessionKey(ID.sessionA))).toEqual([]);
+    });
+
+    it("a STAFF member of A naming the OWNER's session cached by the OWNER's own traffic is refused on every route, and the cached entry is not rewritten (no TTL extension)", async () => {
+      await stale(ID.sessionA);
+      const warm = await send(pipeline, { method: 'get', path: 'messages' }, { user: ID.ownerA, query: { businessId: ID.bizA, sessionId: ID.sessionA } });
+      expect(warm.status, JSON.stringify(warm.body)).toBe(200);
+      expect(cache().has(sessionKey(ID.sessionA))).toBe(true);
+      const before = await row(ID.sessionA);
+      const writes = await cacheWritesDuring(() => everyRoute(staff, ID.sessionA));
+      expect(writes.filter((k) => k === sessionKey(ID.sessionA))).toEqual([]);
+      expect(await row(ID.sessionA)).toEqual(before);
+    });
+
+    it("A's owner naming B's session (not cached) is refused, and B's row is not written nor cached", async () => {
+      await stale(ID.sessionB);
+      const before = await row(ID.sessionB);
+      const res = await send(pipeline, { method: 'get', path: `sessions/${ID.sessionB}` }, { user: ID.ownerA, query: { businessId: ID.bizA } });
+      expect(res.status, JSON.stringify(res.body)).toBe(404);
+      expect(JSON.stringify(res.body)).not.toContain(B_MARKER);
+      const messages = await send(pipeline, { method: 'get', path: 'messages' }, { user: ID.ownerA, query: { businessId: ID.bizA, sessionId: ID.sessionB } });
+      expect(messages.status, JSON.stringify(messages.body)).toBe(404);
+      expect(await row(ID.sessionB)).toEqual(before);
+      expect(cache().has(sessionKey(ID.sessionB)), "B's session is not cached").toBe(false);
+    });
+
+    it("the OWNER reading its own session is answered with it and still marks it accessed, as before (positive control)", async () => {
+      await stale(ID.sessionA);
+      const res = await send(pipeline, { method: 'get', path: `sessions/${ID.sessionA}` }, { user: ID.ownerA, query: { businessId: ID.bizA } });
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body).toMatchObject({ id: ID.sessionA, businessId: ID.bizA, userId: ID.ownerA });
+      expect((await row(ID.sessionA)).lastAccessedAt.getTime()).toBeGreaterThan(STALE.getTime());
+      expect(cache().has(sessionKey(ID.sessionA))).toBe(true);
+    });
+  });
 }
 
 describe('nothing left the process (suite-wide)', () => {
