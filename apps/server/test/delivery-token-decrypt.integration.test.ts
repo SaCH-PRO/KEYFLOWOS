@@ -383,6 +383,50 @@ describe('every way a delivery is claimed again sends the saved token', () => {
     expect(sends.length).toBe(1);
     expect(sends[0].auth).toBe(`Bearer ${legacy}`);
   });
+
+  it('[DTD-07] RED-BEFORE (b83c6545c): a stored token that cannot be decrypted (saved under another key, or damaged) fails its own delivery visibly as an unconnected account, sends nothing, and the rest of the batch still goes out; no delivery is left in Sending', async () => {
+    const broken = await bindGmail('brokenbox');
+    const good = await bindGmail('goodbox');
+    // Damage the stored ciphertext (GCM refuses it, as it refuses a value saved under another key).
+    const stored = await storedToken(broken.id);
+    const raw = Buffer.from(stored.slice(CIPHER_PREFIX.length), 'base64');
+    raw[raw.length - 1] ^= 0xff;
+    await db.$executeRawUnsafe('UPDATE channel_connections SET token = $1 WHERE id = $2', CIPHER_PREFIX + raw.toString('base64'), broken.id);
+
+    try {
+      // Both scheduled (no publish-time tick), then due together: the broken one first in the batch.
+      const brokenContent = await newsletter('Broken account');
+      const goodContent = await newsletter('Good account');
+      for (const [contentId, dest] of [[brokenContent, broken.dest], [goodContent, good.dest]]) {
+        const res = await send('post', `${comms}/content/${contentId}/schedule`, ID.owner, { destinationIds: [dest], scheduledAt: '2031-01-01T10:00:00' });
+        expect(res.status, said(res)).toBe(201);
+      }
+      await db.outboundDelivery.updateMany({ where: { contentId: brokenContent }, data: { scheduledAt: new Date(Date.now() - 2000) } });
+      await db.outboundDelivery.updateMany({ where: { contentId: goodContent }, data: { scheduledAt: new Date(Date.now() - 1000) } });
+      const before = gmailSends().length;
+      await runTick();
+
+      const sends = gmailSends().slice(before);
+      expect(sends.map((s) => s.auth), 'only the good account sent, under its saved token').toEqual([`Bearer ${good.token}`]);
+      const [b] = await deliveriesOf(brokenContent);
+      expect(b.status, `${b.errorCode}: ${b.errorMessage}`).toBe('Failed');
+      expect(b.errorCode).toBe('EMAIL_ACCOUNT_NOT_CONNECTED');
+      const [g] = await deliveriesOf(goodContent);
+      expect(g.status, `${g.errorCode}: ${g.errorMessage}`).toBe('Published');
+      expect(await db.outboundDelivery.count({ where: { businessId: ID.biz, status: 'Sending' } }), 'no delivery is left claimed').toBe(0);
+
+      // A manual re-send of the broken delivery is accepted and fails the same way at send (no 500).
+      const retry = await send('post', `${comms}/deliveries/${b.id}/retry`, ID.owner, {});
+      expect(retry.status, said(retry)).toBe(201);
+      await runTick();
+      expect(gmailSends().length - before, 'still nothing sent through the broken account').toBe(1);
+      expect((await deliveriesOf(brokenContent))[0].errorCode).toBe('EMAIL_ACCOUNT_NOT_CONNECTED');
+    } finally {
+      // The account is readable again for DTD-06's reads: a TOP-LEVEL read of a damaged row throws in the
+      // extension (GET connections answers 500 for the whole business), which is outside this packet (open issue).
+      await db.$executeRawUnsafe('UPDATE channel_connections SET token = $1 WHERE id = $2', stored, broken.id);
+    }
+  });
 });
 
 describe('the decrypted token stays on the wire to the provider', () => {
