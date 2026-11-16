@@ -191,6 +191,8 @@ describe('a request to a host that is not loopback is refused, whichever client 
   it('http.request and http.get throw the guard refusal', async () => {
     await expectRefusedAndRecorded(thrownBy(() => http.request(`http://${NAME}/v1/models`)), NAME, /^http\.request/);
     await expectRefusedAndRecorded(thrownBy(() => http.get({ host: ADDR, port: 80, path: '/' })), ADDR, /^http\.get/);
+    // node reads an empty `hostname` as absent and connects to `host`: the request layer judges the same host.
+    await expectRefusedAndRecorded(thrownBy(() => http.request({ hostname: '', host: NAME, path: '/' })), NAME, /^http\.request/);
   });
 
   it('https.request, https.get and the ESM named import of node:https throw the guard refusal (the openai SDK node-fetch path)', async () => {
@@ -220,6 +222,16 @@ describe('a request to a host that is not loopback is refused, whichever client 
     await expectRefusedAndRecorded(thrownBy(() => net.connect({ host: NAME, port: 443 })), NAME, /^net\.Socket#connect/);
     await expectRefusedAndRecorded(thrownBy(() => tls.connect({ host: NAME, port: 443 })), NAME, /^net\.Socket#connect/);
     await expectRefusedAndRecorded(thrownBy(() => new net.Socket().connect(443, ADDR)), ADDR, /^net\.Socket#connect/);
+  });
+
+  it('a request that skips http.request (new ClientRequest through the agent) is refused at the socket', async () => {
+    // The agent hands net a request's options with `path: null`; that is not an IPC path, and the socket judges the host.
+    await expectRefusedAndRecorded(thrownBy(() => new http.ClientRequest({ host: NAME, port: 80, path: '/v1/models' })), NAME, /^net\.Socket#connect/);
+    await expectRefusedAndRecorded(
+      thrownBy(() => new http.ClientRequest({ host: NAME, port: 443, path: '/', protocol: 'https:', agent: https.globalAgent as unknown as http.Agent })),
+      NAME,
+      /^net\.Socket#connect/,
+    );
   });
 
   it('a connection whose lookup is pinned is refused when the lookup answers a non-loopback address', async () => {
