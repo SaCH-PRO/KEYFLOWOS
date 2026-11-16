@@ -452,10 +452,14 @@ export class AiController {
     return this.aiUsage.getBillingSummary(businessId);
   }
 
+  /**
+   * TOF-GRAPH-SCOPE-ARRAY review repair (review SEC-TGSA-2; D-57): GET graph/business/:businessId's twin, answered the
+   * same way: the snapshot projected for the requesting member (BusinessGraphService.getSharedSnapshotForMember).
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/graph')
-  async getBusinessGraph(@Param('businessId') businessId: string) {
-    return this.businessGraph.getSnapshot(businessId);
+  async getBusinessGraph(@Param('businessId') businessId: string, @Req() req: AuthenticatedRequest) {
+    return this.businessGraph.getSharedSnapshotForMember(businessId, req?.user);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

@@ -12,7 +12,7 @@ import {
 import { KeyCortexSagaService } from './key-cortex-saga.service';
 import { KeyCortexCompensationService } from './key-cortex-compensation.service';
 import { ConnectorCommand } from './key-cortex-connector.types';
-import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+import { LEVEL_RANK, explicitScopeMap, memberModuleLevel, memberScopeMap, rankOf } from '../../core/authority/module-vocabulary';
 import { contactVisibilityFilter, resolveCrmAccess, visibilityClause, type CrmAccess } from '../crm/crm-permissions.helper';
 import {
   CRM_DELETE_ACTIONS,
@@ -864,10 +864,12 @@ export class KeyCortexPlannerService {
     if (!membership) {
       throw new ForbiddenException('Not a member of this business: a KEY plan runs only as a member of its business (D-73)');
     }
-    const explicit = membership.permissionScopes;
-    const explicitScopes: Record<string, string> | null =
-      explicit && typeof explicit === 'object' && !Array.isArray(explicit) ? (explicit as Record<string, string>) : null;
-    const scopes: Record<string, string> = explicitScopes ?? defaultScopesForRole(membership.role);
+    // TOF-GRAPH-SCOPE-ARRAY review repair (SEC-TGSA-1; D-71, D-114): read as ModuleScopeGuard reads it. A stored JSON
+    // array is an explicit map that names no module (explicitScopeMap): it had been read as the role's defaults, so an
+    // ADMIN stored as [] ran money steps (D-114 binds an ADMIN's explicit map) and a STAFF member stored as [] ran the
+    // STAFF defaults' reads, while the guard refuses both every module route.
+    const scopes: Record<string, string> = memberScopeMap(membership);
+    const explicitScopes: Record<string, string> | null = explicitScopeMap(membership.permissionScopes) ? scopes : null;
     let crm: { access: CrmAccess; clause: unknown } | undefined;
     for (const step of plan.steps ?? []) {
       const refusal =
@@ -1010,19 +1012,16 @@ export class KeyCortexPlannerService {
   }
 
   /**
-   * Revenue write as ModuleScopeGuard computes it (the membership's explicit scope
-   * map, else its role's defaults); the business OWNER (either arm) holds it.
+   * Revenue write as ModuleScopeGuard computes it (memberModuleLevel: the membership's explicit
+   * scope map, a stored JSON array included, else its role's defaults); the business OWNER (either
+   * arm) holds it.
    */
   private async assertRevenueWrite(businessId: string, userId: string): Promise<void> {
     if (await this.isBusinessOwner(businessId, userId)) return;
     const membership = await this.membershipOf(businessId, userId);
     if (!membership) throw new ForbiddenException('Not a member of this business');
-    const explicit = membership.permissionScopes;
-    const scopes: Record<string, string> =
-      explicit && typeof explicit === 'object' && !Array.isArray(explicit)
-        ? (explicit as Record<string, string>)
-        : defaultScopesForRole(membership.role);
-    const level = scopes.revenue || 'none';
+    // TOF-GRAPH-SCOPE-ARRAY review repair (SEC-TGSA-1): ModuleScopeGuard's own reading, a stored JSON array included.
+    const level = memberModuleLevel(membership, 'revenue');
     if (rankOf(level) < LEVEL_RANK.write) {
       throw new ForbiddenException(
         `Insufficient permissions: revenue requires write access (you have ${level}); this plan writes the business's invoices or payments`,

@@ -183,8 +183,9 @@ export interface KeyContextSight {
 const NO_SIGHT: KeyContextSight = { treasury: false, pipeline: false, support: false, revenue: false, expenses: false };
 
 /**
- * The shared snapshot (no viewer option: the REST graph routes, the control tower, the other KEY services): its
- * revenue and expenses sections as they have always been served, and none of the PR195-PORT sections.
+ * The shared snapshot (no viewer option: the control tower, the other KEY services): its revenue and expenses
+ * sections as they have always been served, and none of the PR195-PORT sections. The REST graph routes answer it
+ * projected for their member (getSharedSnapshotForMember, review SEC-TGSA-2).
  */
 const SHARED_SIGHT: KeyContextSight = { treasury: false, pipeline: false, support: false, revenue: true, expenses: true };
 
@@ -304,6 +305,31 @@ export class BusinessGraphService {
     const full = await this.fullSnapshot(businessId, forceRefresh);
     if (!opts || !('viewerId' in opts)) return this.project(full, SHARED_SIGHT) as BusinessGraphSnapshot;
     return this.project(full, await keyContextSight(this.prisma, businessId, opts.viewerId));
+  }
+
+  /**
+   * TOF-GRAPH-SCOPE-ARRAY review repair (review SEC-TGSA-2; D-57, D-140, D-125): the shared snapshot as the REST graph
+   * routes (GET graph/business/:businessId, GET ai/businesses/:businessId/ai/graph) answer it to one member. Those
+   * routes are guarded by membership alone (AuthGuard, BusinessGuard), and they answered every member the shared
+   * snapshot, so a member whose map grants no revenue read got the business's revenue totals, its overdue invoices
+   * and its top clients (name, email, revenue). Now the revenue section (and the clients' revenue, the overdue
+   * invoices and the links between them) is answered only at revenue read and the expenses section only at expenses
+   * read, by keyContextSight (ModuleScopeGuard's reading: an explicit map, a stored JSON array included, binds an
+   * OWNER membership too, D-140), with the overdue, budget and profitability alerts withheld alike. A platform
+   * SUPER_ADMIN passes as ModuleScopeGuard passes them. Still no treasury, pipeline or support section here, for anyone
+   * (those are KEY's standing context's, getSnapshotForViewer).
+   */
+  async getSharedSnapshotForMember(
+    businessId: string,
+    viewer: { id?: string | null; role?: string | null } | null | undefined,
+    forceRefresh = false,
+  ): Promise<KeyContextSnapshot> {
+    let sight: KeyContextSight = SHARED_SIGHT;
+    if (viewer?.role !== 'SUPER_ADMIN') {
+      const member = await keyContextSight(this.prisma, businessId, viewer?.id ?? null);
+      sight = { ...SHARED_SIGHT, revenue: member.revenue, expenses: member.expenses };
+    }
+    return this.project(await this.fullSnapshot(businessId, forceRefresh), sight);
   }
 
   /** KEY's standing context for `viewerId` (no viewer: a turn that names no member, which sees no figure). */

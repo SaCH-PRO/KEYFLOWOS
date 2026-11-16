@@ -170,6 +170,38 @@ export function memberModuleLevel(
 }
 
 /**
+ * TOF-GRAPH-SCOPE-ARRAY review repair (SEC-TGSA-1, COR-TOFGSA-1; D-71, D-114, D-140): the explicit scope map a
+ * membership's stored permissionScopes is, by ModuleScopeGuard's rule (memberModuleLevel): any non-null object is
+ * one; a JSON ARRAY, empty or not, is the explicit map that names no module (`{}`: every module is
+ * EXPLICIT_MAP_MISSING_KEY); an object map is itself. Anything else (null, a string, a number) is no explicit map
+ * (null): the role's defaults apply. For a reader that must tell "an explicit map" from "the role's defaults"
+ * (D-114: an ADMIN with an explicit map is bound by its revenue level; D-140: an OWNER with one is bound by it).
+ */
+export function explicitScopeMap(permissionScopes: unknown): Record<string, unknown> | null {
+  if (!permissionScopes || typeof permissionScopes !== 'object') return null;
+  return Array.isArray(permissionScopes) ? {} : (permissionScopes as Record<string, unknown>);
+}
+
+/**
+ * TOF-GRAPH-SCOPE-ARRAY review repair (SEC-TGSA-1, COR-TOFGSA-1): a membership's whole scope map, read as
+ * ModuleScopeGuard reads it: its explicit map (explicitScopeMap: an array names no module) else its role's
+ * defaults, each module's level as memberModuleLevel answers it (a level that is no string is left out, so it reads
+ * EXPLICIT_MAP_MISSING_KEY). For the readers that hand a whole map on (the KEY cortex member authority, the KEY plan
+ * step rules): they had read a stored array as the role's defaults (`typeof === 'object' && !Array.isArray(...)`),
+ * so a member the guard refuses every module route ran KEY's direct commands, queries and plan steps on its role's
+ * defaults. permission-scopes-array-readers.spec.ts holds this in agreement with memberModuleLevel.
+ */
+export function memberScopeMap(membership: { role: string; permissionScopes: unknown }): Record<string, string> {
+  const explicit = explicitScopeMap(membership.permissionScopes);
+  if (!explicit) return { ...defaultScopesForRole(membership.role) };
+  const scopes: Record<string, string> = {};
+  for (const [module, level] of Object.entries(explicit)) {
+    if (typeof level === 'string' && level) scopes[module] = level;
+  }
+  return scopes;
+}
+
+/**
  * Approval tiers by role. Unchanged, and deliberately separate from module levels:
  * approval tier and execution permission are distinct outputs and must not be merged.
  */

@@ -562,9 +562,10 @@ export function planStepDispatchedTool(step: { toolName: string | null; action: 
  * AI-PLANS-READ), and, since KEY-R3a-PLAN-READS (D-74), for GET cortex/plans/:planId: one rule for
  * every plan read route (visiblePlans / visiblePlanSteps apply it).
  * `seesEveryPlan`: every member's plans (the OWNER, an ADMIN, a SUPER_ADMIN), else only the viewer's
- * own. `step`: whether a step of `toolName` is shown (every step for the OWNER and a SUPER_ADMIN;
- * otherwise a step whose tool graphActionRequirement maps, with each of its module scopes held at
- * read as ModuleScopeGuard computes them). `cortexStep`: the same for a KEY-cortex step stored as
+ * own. `step`: whether a step of `toolName` is shown (every step for a SUPER_ADMIN and an OWNER with
+ * no explicit scope map; otherwise, an OWNER with a map included (D-140, review SEC-TGSA-3), a step
+ * whose tool graphActionRequirement maps, with each of its module scopes held at read as
+ * ModuleScopeGuard computes them). `cortexStep`: the same for a KEY-cortex step stored as
  * module.action with no tool (KeyCortexPlannerService), by its module (KEY_PLAN_MODULE_SCOPES; the
  * settings adapter's module is 'settings'). A module the map does not hold is denied by default, as
  * the executor refuses it to a member held to module scopes (memberPlanStepScopeRefusal; KEY-R3a
@@ -619,12 +620,21 @@ export async function graphPlanReadScope(
       hiddenContacts: async (ids) => new Set(ids),
     };
   }
-  if (membership.role === 'OWNER') return everything;
+  // TOF-GRAPH-SCOPE-ARRAY review repair (SEC-TGSA-3, D-140): an OWNER membership reads everything only when it holds no
+  // explicit map. One that holds a map (stored as [], or an object map a JobRole position copy can write onto it) is
+  // bound by it on KEY as on REST: it reads the steps of the modules its map reads, as assertMayRunGraphAction lets it
+  // run them; it still sees every member's plans (PLAN_APPROVER_ROLES) and every contact, and so every output of a
+  // step it reads (the OWNER's visibility, D-37 and D-74: a role rule, not a module scope).
+  const owner = membership.role === 'OWNER';
+  if (owner && !isExplicitScopeMap(membership.permissionScopes)) return everything;
   // TOF-GRAPH-SCOPE-ARRAY (D-71): read as ModuleScopeGuard reads it (memberModuleLevel), a stored JSON array included.
   const reads = (module: string) => rankOf(memberModuleLevel(membership, module)) >= LEVEL_RANK.read;
   // D-74 / D-37: the contacts the viewer may open, by the rule GET contacts/:id applies
-  // (resolveCrmAccess + visibilityClause; an ADMIN does not open another member's PRIVATE contact).
-  const clause = visibilityClause(await resolveCrmAccess(prisma, businessId, viewer.id), viewer.id) as Prisma.ContactWhereInput | null;
+  // (resolveCrmAccess + visibilityClause; an ADMIN does not open another member's PRIVATE contact). The OWNER opens
+  // every contact.
+  const clause = owner
+    ? null
+    : (visibilityClause(await resolveCrmAccess(prisma, businessId, viewer.id), viewer.id) as Prisma.ContactWhereInput | null);
   return {
     seesEveryPlan: PLAN_APPROVER_ROLES.has(membership.role),
     step: (toolName) => {
@@ -642,7 +652,7 @@ export async function graphPlanReadScope(
     },
     // KEY-R3b review SEC-R3b-1: every contact read, known by what the tool does; and
     // (W3-KEY-CRM-VISIBILITY, D-37) every tool whose contacts only the principal's visibility bounds.
-    stepOutput: (toolName) => !graphActionBoundByContactVisibility(toolName),
+    stepOutput: (toolName) => owner || !graphActionBoundByContactVisibility(toolName),
     seesEveryContact: !clause,
     hiddenContacts: clause ? (ids) => hiddenBusinessContacts(prisma, businessId, clause, ids) : null,
   };
@@ -925,15 +935,21 @@ export class GraphActionsController {
     @Inject(EventEmitter2) private readonly eventEmitter: EventEmitter2,
   ) {}
 
+  /**
+   * TOF-GRAPH-SCOPE-ARRAY review repair (review SEC-TGSA-2; D-57): the snapshot projected for the requesting member
+   * (BusinessGraphService.getSharedSnapshotForMember): the revenue figures, the overdue invoices and the top clients
+   * only at revenue read, the expenses figures only at expenses read. It answered every member all of them.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(20, 60_000)
   @Get('graph/business/:businessId')
   async getGraph(
     @Param('businessId') businessId: string,
+    @Req() req: AuthenticatedRequest,
     @Query('refresh') refresh?: string,
   ) {
     const forceRefresh = refresh === 'true' || refresh === '1';
-    const snapshot = await this.businessGraph.getSnapshot(businessId, forceRefresh);
+    const snapshot = await this.businessGraph.getSharedSnapshotForMember(businessId, req?.user, forceRefresh);
     return {
       snapshot,
       generatedAt: new Date().toISOString(),

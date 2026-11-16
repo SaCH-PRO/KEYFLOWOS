@@ -3,7 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { isSystemActor } from '../../core/auth/system-actor';
-import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+import { LEVEL_RANK, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
 import { TimelineService } from '../timeline/timeline.service';
 import { resolveTimelineViewer } from '../timeline/timeline-visibility';
 import { EvidenceService } from '../evidence/evidence.service';
@@ -940,9 +940,10 @@ export class ProjectsService {
 
   /**
    * D-85 (PR196-PROJECTS-SERVER): approving or deleting a project plan needs the business OWNER,
-   * an ADMIN, or a member holding projects:write (the membership's explicit scope map, else its
-   * role defaults, as ModuleScopeGuard computes it). A membership is required, so a platform
-   * SUPER_ADMIN who is not a member is refused (D-46; BusinessGuard admits them to every tenant).
+   * an ADMIN, or a member holding projects:write (the membership's explicit scope map, a stored JSON
+   * array included, else its role defaults, as ModuleScopeGuard computes it: memberModuleLevel). A
+   * membership is required, so a platform SUPER_ADMIN who is not a member is refused (D-46;
+   * BusinessGuard admits them to every tenant).
    * 403 otherwise, before anything is read or written.
    */
   private async assertMayGovernPlans(businessId: string, actorId: string | null | undefined) {
@@ -953,11 +954,9 @@ export class ProjectsService {
     });
     if (!membership) throw new ForbiddenException('Not a member of this business');
     if (PLAN_GOVERNOR_ROLES.has(membership.role)) return;
-    const scopes: Record<string, string> =
-      membership.permissionScopes && typeof membership.permissionScopes === 'object' && !Array.isArray(membership.permissionScopes)
-        ? (membership.permissionScopes as Record<string, string>)
-        : defaultScopesForRole(membership.role);
-    const level = scopes.projects || 'none';
+    // TOF-GRAPH-SCOPE-ARRAY review repair (COR-TOFGSA-1): ModuleScopeGuard's own reading (memberModuleLevel), so a
+    // stored JSON array is an explicit map that names no module; it had been read as the role's defaults.
+    const level = memberModuleLevel(membership, 'projects');
     if (rankOf(level) < LEVEL_RANK.write) {
       throw new ForbiddenException(
         `Insufficient permissions: approving or deleting a project plan needs the owner, an admin or projects write access (you have ${level})`,
