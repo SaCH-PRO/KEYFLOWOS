@@ -1816,6 +1816,15 @@ export class CrmService {
    * names the member (actorUserId) as USER, as updateContact's 'reassigned'
    * entry does; a call with no actor is SYSTEM. A `contact.reassigned`
    * timeline event per contact follows the commit, as before.
+   *
+   * The owner each entry and event names as `from`, and whether the member may
+   * still see the contact, are decided on the rows the transaction locks
+   * (review repair SEC-TCAC-1), as updateContact decides on its locked row: the
+   * read before the transaction only refuses early when nothing is eligible. A
+   * concurrent ownership change that commits first is waited for and seen, so
+   * the trail records the transition this reassign really made, and a contact
+   * that has left a member's book in the meantime is not moved (when none is
+   * left, 403 and nothing is written).
    */
   async reassignContacts(input: {
     businessId: string;
@@ -1857,16 +1866,27 @@ export class CrmService {
     }
 
     const eligibleIds = eligible.map((c) => c.id);
-    const fromOwner = new Map(eligible.map((c) => [c.id, c.ownerId ?? null]));
     const audit = this.memberAuditContext(undefined, input.actorUserId);
-    const movedIds = await this.prisma.client.$transaction(async (tx) => {
-      const moved = await tx.contact.updateManyAndReturn({
-        where: { id: { in: eligibleIds }, ...contactWhereBase(input.businessId) },
-        data: { ownerId: input.newOwnerId },
-        select: { id: true },
+    const moved = await this.prisma.client.$transaction(async (tx) => {
+      // Lock the rows first (in id order, so overlapping reassigns queue rather
+      // than deadlock), then read them again under the lock with the same
+      // tenant, liveness and visibility predicate: the owner each one moves
+      // from, and whether the member may still see it, are those of the row
+      // this transaction writes (SEC-TCAC-1).
+      await tx.$queryRaw`SELECT id FROM contacts WHERE id = ANY(${eligibleIds}) AND business_id = ${input.businessId} AND deleted_at IS NULL ORDER BY id FOR UPDATE`;
+      const locked = await tx.contact.findMany({
+        where: { ...eligibleWhere, id: { in: eligibleIds } },
+        select: { id: true, ownerId: true },
       });
-      for (const { id: cid } of moved) {
-        const from = fromOwner.get(cid) ?? null;
+      if (locked.length === 0) {
+        throw new ForbiddenException('No eligible contacts to reassign');
+      }
+      await tx.contact.updateMany({
+        where: { id: { in: locked.map((c) => c.id) }, ...contactWhereBase(input.businessId) },
+        data: { ownerId: input.newOwnerId },
+      });
+      for (const { id: cid, ownerId } of locked) {
+        const from = ownerId ?? null;
         await this.auditContact({
           businessId: input.businessId,
           contactId: cid,
@@ -1877,11 +1897,11 @@ export class CrmService {
           extraReason: `owner ${from ?? 'none'} → ${input.newOwnerId}`,
         }, tx);
       }
-      return moved.map((row) => row.id);
+      return locked;
     });
 
     await Promise.allSettled(
-      eligible.map((c) =>
+      moved.map((c) =>
         this.timeline.logEvent(input.businessId, c.id, 'contact.reassigned', {
           fromOwnerId: c.ownerId ?? null,
           toOwnerId: input.newOwnerId,
@@ -1893,7 +1913,7 @@ export class CrmService {
     this.stats.invalidateCache(input.businessId);
     this.flow.invalidateCache(input.businessId);
 
-    return { reassigned: movedIds.length, newOwnerId: input.newOwnerId };
+    return { reassigned: moved.length, newOwnerId: input.newOwnerId };
   }
 
   async mergeContacts(input: { businessId: string; primaryId: string; duplicateId: string; fieldOverrides?: Record<string, unknown>; actorId?: string; actorType?: string }, _audit?: AuditContext) {
