@@ -38,6 +38,8 @@
  *         coOwner holds an OWNER membership and is not Business.ownerId (D-125: the owner).
  *   bizS  Business.ownerId = recStaff, who holds a STAFF membership (role defaults).
  *   bizO  Business.ownerId = ownerO, who holds an OWNER membership (the control).
+ *   bizM, bizG  per section (SEC-W11D116K-1: OWNER memberships with an object map;
+ *         TOF-GRAPH-SCOPE-ARRAY: memberships stored as a JSON array).
  * Cases tagged RED-BEFORE fail at the packet's base. The co-owner and the
  * OWNER-holding recorded owner are the owner on every surface (controls, except
  * where a case says the co-owner was refused at the base); the recorded owner
@@ -764,5 +766,260 @@ describe('W11-D116-KEY-OWNER (D-116): businessOwnerRecipient — mail addressed 
   it('control (D-116): the recorded owner holding OWNER is the recipient, for their own business only', async () => {
     expect(await businessOwnerRecipient(prismaSvc, ID.bizO, ID.ownerO)).toEqual({ email: `${P}ownerO@test.local`, name: ID.ownerO });
     expect(await businessOwnerRecipient(prismaSvc, ID.bizA, ID.ownerO)).toBeNull();
+  });
+});
+
+/**
+ * TOF-GRAPH-SCOPE-ARRAY (tie-off follow-up; owner rulings D-71, D-119, D-125). permissionScopes is a Json
+ * column, so an array can be stored in it, and ModuleScopeGuard (memberModuleLevel, since the PR195 port's
+ * review SEC-P195-2) reads any non-null object, an ARRAY INCLUDED, as an explicit scope map in which every
+ * module is absent (none): such a member, the OWNER included, is refused every module route. At the packet's
+ * base KEY's graph actions tested isJsonObject, false for an array, and read the role's defaults instead:
+ * assertMayRunGraphAction (POST actions/.../execute and the plan queue), graphPlanReadScope (GET
+ * actions/.../queue) and isExplicitScopeMap (memberToolRunAuthority's owner arm).
+ *
+ * FIXTURES: bizG, Business.ownerId = ownerArr, who holds an OWNER membership stored as []; staffArr holds a
+ * STAFF membership stored as []; staffMapG holds a STAFF membership whose object map grants revenue read and
+ * operations write (the control). Each holds a pending plan of its own with a revenue-read step
+ * (commerce_list_invoices) and an operations-write step (helpdesk_create_ticket). Created here, removed by the
+ * suite's prefix cleanup.
+ *
+ * HTTP COMPOSITION: one real Nest app with the real GraphActionsController, PrismaService, AuthGuard,
+ * BusinessGuard, CrmRateLimitGuard, PlannerService (its step status write), the production TenantInterceptor,
+ * GlobalHttpExceptionFilter and ValidationPipe, and this suite's identity middleware. Stand-ins: governance
+ * (allows every tool at tier 1, no pending approvals), the execution log (records; no history) and the FLOW
+ * dispatcher (records each executeToolDirect call, the route's external effect, and answers success: no
+ * tool runs, no provider is reached); the graph, intent and workspace services no case reaches.
+ */
+describe('TOF-GRAPH-SCOPE-ARRAY (D-71, D-119, D-125): a JSON-array permissionScopes binds KEY\'s graph actions as ModuleScopeGuard reads it', () => {
+  const G = {
+    bizG: `${P}bizG`,
+    ownerArr: `${P}ownerArr`,
+    staffArr: `${P}staffArr`,
+    staffMapG: `${P}staffMapG`,
+  };
+  const REVENUE_READ = 'commerce_list_invoices';
+  const OPERATIONS_WRITE = 'helpdesk_create_ticket';
+  const REVENUE_READ_NONE = 'Insufficient permissions: revenue requires read access (you have none)';
+  const OPERATIONS_WRITE_NONE = 'Insufficient permissions: operations requires write access (you have none)';
+  const SCOPES: Record<string, unknown> = {
+    [G.ownerArr]: [],
+    [G.staffArr]: [],
+    [G.staffMapG]: { revenue: 'read', operations: 'write' },
+  };
+  const planOf = (userId: string) => `${userId}_plan`;
+  const stepOf = (userId: string, kind: 'rev' | 'ops') => `${userId}_s_${kind}`;
+
+  let graphApp: any;
+  /** Every tool the route handed the FLOW dispatcher, with the principal it named. */
+  const dispatchedG: Array<{ toolName: string; planStepId: unknown; principal: unknown }> = [];
+
+  async function resetPlans() {
+    await db.$executeRawUnsafe('DELETE FROM ai_execution_logs WHERE business_id = $1', G.bizG);
+    await db.$executeRawUnsafe('DELETE FROM ai_plans WHERE business_id = $1', G.bizG);
+    dispatchedG.length = 0;
+    for (const userId of [G.ownerArr, G.staffArr, G.staffMapG]) {
+      await db.aiPlan.create({
+        data: {
+          id: planOf(userId), businessId: G.bizG, userId, objective: `v97x ${planOf(userId)}`, status: 'pending',
+          steps: {
+            create: [
+              { id: stepOf(userId, 'rev'), order: 1, toolName: REVENUE_READ, action: REVENUE_READ, description: 'v97x revenue read', inputPayload: {} },
+              { id: stepOf(userId, 'ops'), order: 2, toolName: OPERATIONS_WRITE, action: OPERATIONS_WRITE, description: 'v97x operations write', inputPayload: { subject: 'v97x ticket' } },
+            ],
+          },
+        },
+      });
+    }
+  }
+
+  const stepStatus = async (id: string) => (await db.aiPlanStep.findUnique({ where: { id }, select: { status: true } }))?.status;
+  const execute = (userId: string, kind: 'rev' | 'ops') =>
+    request(graphApp.getHttpServer())
+      .post(`/actions/businesses/${G.bizG}/execute`)
+      .set(HEADER, userId)
+      .send({ planId: planOf(userId), planStepId: stepOf(userId, kind) });
+  const queue = (userId: string) => request(graphApp.getHttpServer()).get(`/actions/businesses/${G.bizG}/queue?limit=50`).set(HEADER, userId);
+
+  beforeAll(async () => {
+    for (const id of [G.ownerArr, G.staffArr, G.staffMapG]) {
+      await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, name: id, role: 'USER' } });
+    }
+    await db.business.create({ data: { id: G.bizG, name: `${G.bizG}-name`, ownerId: G.ownerArr } });
+    for (const [userId, role] of [[G.ownerArr, 'OWNER'], [G.staffArr, 'STAFF'], [G.staffMapG, 'STAFF']] as const) {
+      await db.membership.create({ data: { id: `${P}m_${userId.slice(P.length)}`, userId, businessId: G.bizG, role, permissionScopes: SCOPES[userId] } });
+    }
+    await resetPlans();
+
+    const { Test } = await import('@nestjs/testing');
+    const { ValidationPipe } = await import('@nestjs/common');
+    const { APP_INTERCEPTOR } = await import('@nestjs/core');
+    const { EventEmitter2 } = await import('@nestjs/event-emitter');
+    const { TenantInterceptor } = await import('../src/core/tenant/tenant.interceptor');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+    const { AuthGuard } = await import('../src/core/auth/auth.guard');
+    const { BusinessGuard } = await import('../src/core/auth/business.guard');
+    const { CrmRateLimitGuard } = await import('../src/modules/crm/guards/rate-limit.guard');
+    const { GraphActionsController } = await import('../src/modules/ai/graph-actions.controller');
+    const { PlannerService } = await import('../src/modules/ai/planner.service');
+    const { BusinessGraphService } = await import('../src/modules/ai/business-graph.service');
+    const { IntentParserService } = await import('../src/modules/ai/intent-parser.service');
+    const { AiOversightService } = await import('../src/modules/ai/ai-oversight.service');
+    const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+    const { AiExecutionLogService } = await import('../src/modules/ai/ai-execution-log.service');
+    const { WorkspaceRecommendationsService } = await import('../src/modules/ai/workspace-recommendations.service');
+
+    const graphRef = await Test.createTestingModule({
+      controllers: [GraphActionsController],
+      providers: [
+        PrismaService,
+        AuthGuard,
+        BusinessGuard,
+        CrmRateLimitGuard,
+        { provide: EventEmitter2, useValue: new EventEmitter2() },
+        { provide: PlannerService, inject: [PrismaService], useFactory: (prisma: any) => new (PlannerService as any)(prisma, {}, {}, {}, {}, {}) },
+        { provide: BusinessGraphService, useValue: {} },
+        { provide: IntentParserService, useValue: {} },
+        {
+          provide: AiOversightService,
+          useValue: {
+            evaluate: async () => ({ allowed: true, tier: 1, requiresFormalApproval: false, requiresAdminApproval: false }),
+            getPendingApprovals: async () => [],
+          },
+        },
+        {
+          provide: FlowOrchestratorService,
+          useValue: {
+            executeToolDirect: async (_businessId: string, toolName: string, _args: unknown, _planId: unknown, planStepId: unknown, ctx: any) => {
+              dispatchedG.push({ toolName, planStepId, principal: ctx?.principalUserId });
+              return { success: true, result: { v97x: 'dispatched' }, changedEntities: [] };
+            },
+          },
+        },
+        { provide: AiExecutionLogService, useValue: { log: async () => undefined, getHistory: async () => ({ logs: [] }) } },
+        { provide: WorkspaceRecommendationsService, useValue: {} },
+        { provide: APP_INTERCEPTOR, useClass: TenantInterceptor },
+      ],
+    }).compile();
+    graphApp = graphRef.createNestApplication();
+    graphApp.use(async (req: any, _res: any, next: any) => {
+      const header = req.headers[HEADER];
+      const id = typeof header === 'string' ? header : undefined;
+      if (id && id.startsWith(P)) {
+        const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+        if (user) req.user = { id: user.id, email: user.email, role: user.role };
+      }
+      next();
+    });
+    graphApp.useGlobalFilters(new GlobalHttpExceptionFilter());
+    graphApp.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    await graphApp.init();
+  }, 120_000);
+
+  afterAll(async () => {
+    if (graphApp) await graphApp.close();
+  });
+
+  it('fixture sanity: bizG is recorded as ownerArr\'s; ownerArr (OWNER) and staffArr (STAFF) are stored as [], staffMapG as an object map; each holds its own pending plan with the two steps', async () => {
+    expect(await db.business.findUnique({ where: { id: G.bizG }, select: { ownerId: true } })).toEqual({ ownerId: G.ownerArr });
+    const rows = await db.membership.findMany({ where: { businessId: G.bizG }, select: { userId: true, role: true, permissionScopes: true }, orderBy: { userId: 'asc' } });
+    expect(rows).toEqual([
+      { userId: G.ownerArr, role: 'OWNER', permissionScopes: [] },
+      { userId: G.staffArr, role: 'STAFF', permissionScopes: [] },
+      { userId: G.staffMapG, role: 'STAFF', permissionScopes: { revenue: 'read', operations: 'write' } },
+    ]);
+    const { memberModuleLevel } = await import('../src/core/authority/module-vocabulary');
+    for (const row of rows.slice(0, 2)) {
+      for (const module of ['revenue', 'operations', 'ai', 'connect']) expect(memberModuleLevel(row, module), `${row.userId} ${module}`).toBe('none');
+    }
+    for (const userId of [G.ownerArr, G.staffArr, G.staffMapG]) {
+      expect(await stepStatus(stepOf(userId, 'rev'))).toBe('pending');
+      expect(await stepStatus(stepOf(userId, 'ops'))).toBe('pending');
+    }
+  });
+
+  it('RED-BEFORE: POST actions/.../execute refuses the STAFF member stored as [] its own revenue-read step, 403 before anything is claimed or dispatched (was run: the STAFF defaults read revenue)', async () => {
+    await resetPlans();
+    const res = await execute(G.staffArr, 'rev');
+    expect(res.status, describeBody(res)).toBe(403);
+    expect(JSON.stringify(res.body)).toContain(REVENUE_READ_NONE);
+    expect(dispatchedG).toEqual([]);
+    expect(await stepStatus(stepOf(G.staffArr, 'rev'))).toBe('pending');
+    expect(await db.aiExecutionLog.count({ where: { businessId: G.bizG } })).toBe(0);
+  });
+
+  it('RED-BEFORE: POST actions/.../execute refuses the STAFF member stored as [] its own operations-write step on its explicit map (none; was refused on the STAFF defaults: read)', async () => {
+    await resetPlans();
+    const res = await execute(G.staffArr, 'ops');
+    expect(res.status, describeBody(res)).toBe(403);
+    expect(JSON.stringify(res.body)).toContain(OPERATIONS_WRITE_NONE);
+    expect(dispatchedG).toEqual([]);
+    expect(await stepStatus(stepOf(G.staffArr, 'ops'))).toBe('pending');
+  });
+
+  it('RED-BEFORE (D-125, D-71): POST actions/.../execute refuses the OWNER stored as [] its own revenue-read and operations-write steps, as ModuleScopeGuard refuses it every module route (was run: the OWNER defaults)', async () => {
+    await resetPlans();
+    for (const [kind, refusal] of [['rev', REVENUE_READ_NONE], ['ops', OPERATIONS_WRITE_NONE]] as const) {
+      const res = await execute(G.ownerArr, kind);
+      expect(res.status, `${kind} ${describeBody(res)}`).toBe(403);
+      expect(JSON.stringify(res.body), kind).toContain(refusal);
+      expect(await stepStatus(stepOf(G.ownerArr, kind)), kind).toBe('pending');
+    }
+    expect(dispatchedG).toEqual([]);
+  });
+
+  it('control (object maps unchanged): the STAFF member whose object map grants revenue read and operations write runs both of its steps once, as their principal', async () => {
+    await resetPlans();
+    for (const kind of ['rev', 'ops'] as const) {
+      const res = await execute(G.staffMapG, kind);
+      expect(res.status, `${kind} ${describeBody(res)}`).toBe(201);
+      expect(res.body.success, kind).toBe(true);
+      expect(await stepStatus(stepOf(G.staffMapG, kind)), kind).toBe('completed');
+    }
+    expect(dispatchedG).toEqual([
+      { toolName: REVENUE_READ, planStepId: stepOf(G.staffMapG, 'rev'), principal: G.staffMapG },
+      { toolName: OPERATIONS_WRITE, planStepId: stepOf(G.staffMapG, 'ops'), principal: G.staffMapG },
+    ]);
+    await resetPlans();
+  });
+
+  it('RED-BEFORE: GET actions/.../queue shows the STAFF member stored as [] its own plan without the revenue and operations steps (was shown both: the STAFF defaults read them); the object-map control is shown both', async () => {
+    await resetPlans();
+    const arr = await queue(G.staffArr);
+    expect(arr.status, describeBody(arr)).toBe(200);
+    expect(arr.body.plans.map((p: any) => p.id)).toEqual([planOf(G.staffArr)]);
+    expect(arr.body.plans[0].steps).toEqual([]);
+    const map = await queue(G.staffMapG);
+    expect(map.status, describeBody(map)).toBe(200);
+    expect(map.body.plans.map((p: any) => p.id)).toEqual([planOf(G.staffMapG)]);
+    expect(map.body.plans[0].steps.map((s: any) => s.id)).toEqual([stepOf(G.staffMapG, 'rev'), stepOf(G.staffMapG, 'ops')]);
+  });
+
+  it('RED-BEFORE (D-125, D-71; the owner-role-key case for []): memberToolRunAuthority refuses the OWNER stored as [] every mapped tool, FLOW and KEY organ alike, with or without the principal (was admitted: null)', async () => {
+    const refusals: ReadonlyArray<readonly [string, string]> = [
+      ['commerce_mark_invoice_paid', 'Insufficient permissions: revenue requires write access (you have none)'],
+      [REVENUE_READ, REVENUE_READ_NONE],
+      [OPERATIONS_WRITE, OPERATIONS_WRITE_NONE],
+      ['cortex.create_task', 'Insufficient permissions: ai requires write access (you have none)'],
+      ...KEY_CONNECTOR_READS.map((tool) => [tool, CONNECT_READ_REFUSAL] as const),
+    ];
+    for (const [tool, refusal] of refusals) {
+      for (const asPrincipal of [false, true]) {
+        expect(await memberToolRunAuthority(prismaSvc, G.bizG, G.ownerArr, tool, { asPrincipal }), `${tool} asPrincipal ${asPrincipal}`).toEqual({ refusal, principal: false });
+      }
+    }
+  });
+
+  it('RED-BEFORE: the plan queue (planStepRunRefusal) refuses a revenue-read step of the plan the OWNER stored as [] created (was admitted)', async () => {
+    const { planStepRunRefusal } = await import('../src/modules/ai/plan-step-authority');
+    expect(await planStepRunRefusal(prismaSvc, G.bizG, planOf(G.ownerArr), REVENUE_READ)).toBe(REVENUE_READ_NONE);
+    expect(await planStepRunRefusal(prismaSvc, G.bizG, planOf(G.ownerArr), 'cortex.create_task')).toBe('Insufficient permissions: ai requires write access (you have none)');
+  });
+
+  it('control (D-119): the OWNER stored as [] still runs the unmapped dotted tool, the business owner\'s only, and a tool the map never runs stays refused', async () => {
+    expect(await memberToolRunAuthority(prismaSvc, G.bizG, G.ownerArr, UNMAPPED_TOOL)).toEqual({ refusal: null, principal: false });
+    expect(await memberToolRunAuthority(prismaSvc, G.bizG, G.ownerArr, UNMAPPED_TOOL, { asPrincipal: true })).toEqual({ refusal: null, principal: true });
+    expect(String((await memberToolRunAuthority(prismaSvc, G.bizG, G.ownerArr, REFUSED_TOOL)).refusal)).toMatch(/^Tool "execute_custom_logic" is not executed/);
   });
 });
