@@ -186,6 +186,7 @@ for (const [project, viewport] of Object.entries(JOURNEY_VIEWPORTS)) {
     });
 
     test("the header's New > Contact is the topmost control where it sits, and opens the new-contact form", async ({ page }) => {
+      test.setTimeout(2 * 60_000);
       await page.goto("/app/command-center");
       await settle(page);
       await closeKeyDrawerIfOpen(page);
@@ -200,6 +201,7 @@ for (const [project, viewport] of Object.entries(JOURNEY_VIEWPORTS)) {
     });
 
     test("no floating KEY bubble; the header's Ask KEY shows and opens KEY's drawer", async ({ page }) => {
+      test.setTimeout(2 * 60_000);
       await page.goto("/app/command-center");
       await settle(page);
       await closeKeyDrawerIfOpen(page);

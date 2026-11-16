@@ -261,7 +261,9 @@ describe("SWP-LAYERS: one z-index layer table in app/globals.css", () => {
 
 // ── the app shell ─────────────────────────────────────────────────────────
 
-describe("SWP-LAYERS: the app shell (app/app/layout.tsx)", () => {
+// The real shell mounts in about two seconds in jsdom, and a sheet's exit
+// animation runs before it unmounts.
+describe("SWP-LAYERS: the app shell (app/app/layout.tsx)", { timeout: 30_000 }, () => {
   it("mounts no floating KEY bubble and no Business Genome banner", async () => {
     await renderShell(<PageWithSheet kind="ui" />);
     await waitFor(() =>
@@ -289,7 +291,8 @@ describe("SWP-LAYERS: the app shell (app/app/layout.tsx)", () => {
 
       // Closing the sheet: no bubble comes back; the header's Ask KEY is KEY's door, and it opens KEY.
       fireEvent.keyDown(document, { key: "Escape" });
-      await waitFor(() => expect(screen.queryByRole("button", { name: "Create" })).toBeNull());
+      // The sheet slides out (framer-motion's exit) before it unmounts.
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Create" })).toBeNull(), { timeout: 8000 });
       expect(keyBubble(), "a floating KEY bubble after the sheet closed").toBeNull();
       const askKey = within(header).getByRole("button", { name: "Ask KEY" });
       fireEvent.click(askKey);
@@ -315,7 +318,8 @@ describe("SWP-LAYERS: the app shell (app/app/layout.tsx)", () => {
     expect(rootLayer(contact).z).toBe(TABLE.get("--kf-z-header"));
   });
 
-  it("the header's Ask KEY door shows at phone width and opens KEY's drawer, as Cmd/Ctrl+J does; KEY opens by nothing else in the shell", async () => {
+  // The bottom bar's own "AI" entry (nav-config.ts mobileBottomNav "#key") leaves with NAV-A1's bar.
+  it("the header's Ask KEY door shows at phone width and opens KEY's drawer, as Cmd/Ctrl+J does; no floating bubble is a second door", async () => {
     const { header } = await renderShell(<div>Today</div>);
     const askKey = within(header).getByRole("button", { name: "Ask KEY" });
     expect(hiddenOnAPhone(askKey, header), "Ask KEY is display:none below the md breakpoint").toBe(false);
