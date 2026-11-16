@@ -94,7 +94,31 @@ const NEVER_USED: Record<string, string> = {
 };
 
 /** Prisma calls whose args the reader cannot see into, each with the reason it reads no encrypted column. */
-const OPAQUE_REVIEWED: Record<string, string> = {};
+const OPAQUE_REVIEWED: Record<string, string> = {
+  'apps/server/src/modules/ai/flow-orchestrator.service.ts#FlowOrchestratorService.idWithinBusiness <dynamic>.findFirst <delegate>':
+    'the model is a DispatcherTenantModel (contentRequest, evidence, approvalRequest, bookingWaitlistEntry, service, staffMember, procurementRequest), none in the field map, and select is { id: true }.',
+  'apps/server/src/modules/key-cortex/key-cortex-actions.service.ts#KeyCortexActionsService.handleUpdateCrm <dynamic>.update <delegate>':
+    'args are { where, data } with no include or select, and only updated.id is answered (the receiver is PrismaService, which has no model delegates, so the call throws before any query).',
+  'apps/server/src/modules/key-cortex/key-cortex-actions.service.ts#KeyCortexActionsService.handleUpdateRecord <dynamic>.update <delegate>':
+    'the fallback when no safe database is wired: args are { where, data } with no include or select, and only updated.id is answered (PrismaService has no model delegates, so it throws before any query).',
+  'apps/server/src/modules/key-cortex/key-cortex-safe-database.service.ts#KeyCortexSafeDatabaseService.safeUpdate <dynamic>.findFirst <delegate>':
+    'select is { id: true }, on a model in UPDATABLE_MODELS (none in the field map).',
+  'apps/server/src/modules/key-cortex/key-cortex-safe-database.service.ts#KeyCortexSafeDatabaseService.safeUpdate <dynamic>.update <delegate>':
+    'args are { where, data } with no include or select, on a model in UPDATABLE_MODELS (none in the field map), and data keys are allow-listed per model (ALLOWED_UPDATE_FIELDS), so no relation is written or read.',
+};
+
+/**
+ * Prisma calls whose args the reader cannot see into and that DO reach an encrypted column, where the fix is not a
+ * decrypt step. Each value starts with `OPEN <issue id>:` and names the fix. Listing one here records a known open
+ * issue; it does not make the read acceptable.
+ */
+const OPAQUE_OPEN: Record<string, string> = {
+  'apps/server/src/modules/key-cortex/key-cortex-safe-database.service.ts#KeyCortexSafeDatabaseService.safeQuery <dynamic>.findMany <delegate>':
+    "OPEN SEC-DTD-2: KEY's cortex.query_business_data builds select from the model's field list with no field allow-list (buildSelect), so select ['business'] on a readable model returns the nested Business row to the model provider: its OAuth token columns as ciphertext, and Business.metaData's payment secrets as plaintext. The fix is to refuse relation names in select (server-key chain), not to decrypt.",
+};
+
+/** Every opaque call that is accounted for: reviewed (reads no encrypted column) or a recorded open issue. */
+const OPAQUE_LISTED: Record<string, string> = { ...OPAQUE_REVIEWED, ...OPAQUE_OPEN };
 
 // ---------------------------------------------------------------------------------------------------------------
 // The schema: each model's relation fields and their target model.
@@ -556,7 +580,7 @@ describe('nested reads of encrypted columns are decrypted or never used (FU-DELI
 
   it('NR-01: every nested encrypted read is decrypted with decryptNestedRecord or listed in NEVER_USED with its reason', () => {
     expect(
-      judge(CENSUS, NEVER_USED, OPAQUE_REVIEWED).undecided,
+      judge(CENSUS, NEVER_USED, OPAQUE_LISTED).undecided,
       'these read an encrypted column through a nested include/select, where the extension does not decrypt it: ' +
         "call decryptNestedRecord('<Model>', row) from @keyflow/db before the value is used, or add the read to " +
         'NEVER_USED with the reason it never reaches an outbound call or a decision',
@@ -564,7 +588,7 @@ describe('nested reads of encrypted columns are decrypted or never used (FU-DELI
   });
 
   it('NR-02: every NEVER_USED entry still names an undecrypted nested read, and its function names none of the encrypted fields', () => {
-    const verdict = judge(CENSUS, NEVER_USED, OPAQUE_REVIEWED);
+    const verdict = judge(CENSUS, NEVER_USED, OPAQUE_LISTED);
     expect(verdict.staleNeverUsed, 'no longer an undecrypted nested read: take it off NEVER_USED').toEqual([]);
     expect(verdict.neverUsedNamesField, 'a listed read whose function now names an encrypted field needs the decrypt step').toEqual([]);
   });
@@ -581,10 +605,14 @@ describe('nested reads of encrypted columns are decrypted or never used (FU-DELI
     }
   });
 
-  it('NR-04: every Prisma call whose args the reader cannot see into is reviewed', () => {
-    const verdict = judge(CENSUS, NEVER_USED, OPAQUE_REVIEWED);
+  it('NR-04: every Prisma call whose args the reader cannot see into is reviewed, or recorded as an open issue', () => {
+    const verdict = judge(CENSUS, NEVER_USED, OPAQUE_LISTED);
     expect(verdict.unreviewedOpaque, 'add each to OPAQUE_REVIEWED with the reason it reads no encrypted column, or make its args readable').toEqual([]);
-    expect(verdict.staleOpaque, 'no longer opaque: take it off OPAQUE_REVIEWED').toEqual([]);
+    expect(verdict.staleOpaque, 'no longer opaque: take it off OPAQUE_REVIEWED / OPAQUE_OPEN').toEqual([]);
+    expect(Object.keys(OPAQUE_REVIEWED).filter((k) => k in OPAQUE_OPEN), 'a call is reviewed or open, not both').toEqual([]);
+    expect(Object.entries(OPAQUE_OPEN).filter(([, why]) => !/^OPEN [A-Z][A-Z0-9]*(-[A-Z0-9]+)+: /.test(why)).map(([k]) => k), 'each open entry names its issue').toEqual([]);
+    // SEC-DTD-2: a delegate chosen at run time is seen (KEY's safeQuery: `(this.prisma.client as any)[model]`, aliased).
+    expect(CENSUS.opaque).toContain('apps/server/src/modules/key-cortex/key-cortex-safe-database.service.ts#KeyCortexSafeDatabaseService.safeQuery <dynamic>.findMany <delegate>');
   });
 
   it("NR-05: the field map is the extension's own, and decryptNestedRecord decrypts exactly its fields", () => {
@@ -614,16 +642,16 @@ describe('nested reads of encrypted columns are decrypted or never used (FU-DELI
     expect(() => decryptNestedRecord('Contact', {}), 'a model outside the map is refused').toThrow();
   });
 
-  it('NR-06: scanner self-test — injected reads are found and judged; a nested read added without the decrypt step fails the census', () => {
-    const fieldMap: FieldMap = {
-      ChannelConnection: ['token', 'refreshToken'],
-      Business: ['gmailAccessToken', 'driveAccessToken'],
-      Webhook: ['secret'],
-    };
-    const injected = (body: string): Source => ({
-      rel: 'apps/server/src/modules/zz-injected/zz.service.ts',
-      abs: join(REPO, 'apps/server/src/modules/zz-injected/zz.service.ts'),
-      text: `
+  // The scanner self-tests (NR-06, NR-06b) read one injected source file with this field map.
+  const selfTestFieldMap: FieldMap = {
+    ChannelConnection: ['token', 'refreshToken'],
+    Business: ['gmailAccessToken', 'driveAccessToken'],
+    Webhook: ['secret'],
+  };
+  const injected = (body: string): Source => ({
+    rel: 'apps/server/src/modules/zz-injected/zz.service.ts',
+    abs: join(REPO, 'apps/server/src/modules/zz-injected/zz.service.ts'),
+    text: `
         import { Prisma } from '@prisma/client';
         import { decryptNestedRecord } from '@keyflow/db';
         const CONN_INCLUDE = { destination: { include: { connection: true } } }; const CONN_ONLY = { connection: true };
@@ -633,9 +661,11 @@ describe('nested reads of encrypted columns are decrypted or never used (FU-DELI
           private readonly hookSelect = { webhooks: { select: { url: true, secret: true } } };
           ${body}
         }`,
-    });
-    const census = (body: string) => scan([injected(body)], fieldMap);
-    const keyOf = (c: Census) => c.reads.map((r) => `${r.key}|${r.model}|${r.fields.join(',')}|${r.decrypted ? 'D' : '-'}`);
+  });
+  const census = (body: string) => scan([injected(body)], selfTestFieldMap);
+  const keyOf = (c: Census) => c.reads.map((r) => `${r.key}|${r.model}|${r.fields.join(',')}|${r.decrypted ? 'D' : '-'}`);
+
+  it('NR-06: scanner self-test — injected reads are found and judged; a nested read added without the decrypt step fails the census', () => {
 
     // found: true, { include }, a const, a validator, a narrowed select naming a secret, a class property, `? :`, a spread
     expect(keyOf(census('async a() { return this.prisma.client.outboundDelivery.findUnique({ where: { id: 1 }, include: { destination: { include: { connection: true } } } }); }')))
@@ -671,11 +701,42 @@ describe('nested reads of encrypted columns are decrypted or never used (FU-DELI
 
     // The census over the real sources plus one new nested read: it fails, naming the read; with the step it passes.
     const added = census("async addedRead() { const d: any = await db.outboundDelivery.findUnique({ where: { id: 'x' }, include: { destination: { include: { connection: true } } } }); return d.destination.connection.token; }");
-    const failing = judge({ reads: [...CENSUS.reads, ...added.reads], opaque: CENSUS.opaque }, NEVER_USED, OPAQUE_REVIEWED);
+    const failing = judge({ reads: [...CENSUS.reads, ...added.reads], opaque: CENSUS.opaque }, NEVER_USED, OPAQUE_LISTED);
     expect(failing.undecided).toEqual([
       'apps/server/src/modules/zz-injected/zz.service.ts#ZzService.addedRead outboundDelivery.findUnique destination.connection (apps/server/src/modules/zz-injected/zz.service.ts:9; ChannelConnection: token, refreshToken)',
     ]);
     const fixed = census("async addedRead() { const d: any = await db.outboundDelivery.findUnique({ where: { id: 'x' }, include: { destination: { include: { connection: true } } } }); const c = decryptNestedRecord('ChannelConnection', d.destination.connection); return c.token; }");
-    expect(judge({ reads: [...CENSUS.reads, ...fixed.reads], opaque: CENSUS.opaque }, NEVER_USED, OPAQUE_REVIEWED).undecided).toEqual([]);
+    expect(judge({ reads: [...CENSUS.reads, ...fixed.reads], opaque: CENSUS.opaque }, NEVER_USED, OPAQUE_LISTED).undecided).toEqual([]);
+  });
+
+  it('NR-06b: scanner self-test (review repair V71-COR-1, SEC-DTD-2) — names resolve in their own scope, delegate aliases are read, run-time delegates are opaque', () => {
+    // V71-COR-1: a name is resolved in the scope it is used in, never to the first same-named declaration in the file.
+    const z = 'apps/server/src/modules/zz-injected/zz.service.ts#ZzService';
+    expect.soft(keyOf(census([
+      'async q1(businessId: string) { const inc = { destinations: true }; return db.channelConnection.findMany({ where: { businessId }, include: inc }); }',
+      'async q2(businessId: string) { const inc = { connection: true }; const rows = await db.channelDestination.findMany({ where: { businessId }, include: inc }); return rows.map((r: any) => r.connection.token); }',
+    ].join('\n')))).toEqual([`${z}.q2 channelDestination.findMany connection|ChannelConnection|token,refreshToken|-`]);
+    expect.soft(keyOf(census('async q3() { const inc = { connection: { select: { provider: true } } }; { const inc = { connection: true }; return db.channelDestination.findMany({ include: inc }); } }')))
+      .toEqual([`${z}.q3 channelDestination.findMany connection|ChannelConnection|token,refreshToken|-`]);
+    // a parameter (here shadowing the file's CONN_ONLY), a destructured or loop binding, or a binding written after
+    // its declaration is opaque, never its initializer or a same-named const
+    expect.soft(census('async q4(CONN_ONLY: any) { return db.channelDestination.findMany({ include: CONN_ONLY }); }').opaque).toEqual([`${z}.q4 channelDestination.findMany <include>`]);
+    expect.soft(census('async q5(o: any) { const { inc } = o; return db.channelDestination.findMany({ include: inc }); }').opaque).toEqual([`${z}.q5 channelDestination.findMany <include>`]);
+    expect.soft(census('async q6(f: boolean) { let inc: any = { connection: { select: { provider: true } } }; if (f) inc = { connection: true }; return db.channelDestination.findMany({ include: inc }); }').opaque)
+      .toEqual([`${z}.q6 channelDestination.findMany <include>`]);
+    expect.soft(census('async q7() { const inc: any = { connection: { select: { provider: true } } }; inc.connection = true; return db.channelDestination.findMany({ include: inc }); }').opaque)
+      .toEqual([`${z}.q7 channelDestination.findMany <include>`]);
+    expect.soft(census('async q8() { const inc: any = { connection: { select: { provider: true } } }; Object.assign(inc, CONN_ONLY); return db.channelDestination.findMany({ include: inc }); }').opaque)
+      .toEqual([`${z}.q8 channelDestination.findMany <include>`]);
+    // ...while a same-named binding written in another scope leaves this one readable
+    expect.soft(keyOf(census('async q9() { const inc = { connection: true }; const other = () => { const inc: any = {}; inc.x = 1; return inc; }; other(); return db.channelDestination.findMany({ include: inc }); }')))
+      .toEqual([`${z}.q9 channelDestination.findMany connection|ChannelConnection|token,refreshToken|-`]);
+    // SEC-DTD-2: a delegate reached through a const alias is read as that delegate; one chosen at run time is opaque
+    expect.soft(keyOf(census('async q10() { const d = db.channelDestination; return d.findMany({ include: { connection: true } }); }')))
+      .toEqual([`${z}.q10 channelDestination.findMany connection|ChannelConnection|token,refreshToken|-`]);
+    expect.soft(census("async q11(model: string, fields: string[]) { const delegate = (db as any)[model]; return delegate.findMany({ select: Object.fromEntries(fields.map((f) => [f, true])) }); }").opaque)
+      .toEqual([`${z}.q11 <dynamic>.findMany <delegate>`]);
+    expect.soft(census('async q12(model: string) { return (db as any)[model].update({ where: { id: 1 }, data: {} }); }').opaque).toEqual([`${z}.q12 <dynamic>.update <delegate>`]);
+    expect.soft(census('async q13(model: string) { return this[model].findMany({}); }').opaque, 'a receiver on `this` is not a delegate').toEqual([]);
   });
 });

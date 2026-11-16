@@ -17,9 +17,15 @@
  * request and answers it itself (a provider-shaped 200, or a 503 when a case asks for a transient failure), so no
  * request reaches a provider.
  *
+ * Review repair SEC-DTD-1 (DTD-08, DTD-09): the at-rest ciphertext is not tied to its row (one key, no associated
+ * data), and the extension stores a value that already has the ciphertext shape as it is. So a settings admin of one
+ * business who got hold of another's stored token ('enc:v1:...') could bind it as their own connection's token, and
+ * the queue, which now decrypts, sent under the other business's plaintext token. The credential writes refuse a
+ * value with the ciphertext shape (a provider credential never has it), as WhatsApp settings already do (SEC2-R1).
+ *
  * Requires DATABASE_URL. Every seeded row carries the `v71b_` prefix and is hard-deleted by raw SQL (sqlLikePrefix)
  * in beforeAll and afterAll. The plaintext tokens are built at run time from fragments. Cases tagged RED-BEFORE fail
- * on the unrepaired code (c80841dc2): the tapped bearer is 'enc:v1:...'.
+ * on the unrepaired code (c80841dc2): the tapped bearer is 'enc:v1:...'; DTD-08 and DTD-09 fail on a1bcb83d6.
  */
 import 'reflect-metadata';
 import path from 'path';
@@ -37,8 +43,13 @@ const ID = {
   owner: `${P}owner`,
   biz: `${P}biz`,
   cVip: `${P}c_vip`,
+  // A second business, whose owner tries to bind the first business's stored ciphertext (SEC-DTD-1).
+  owner2: `${P}owner2`,
+  biz2: `${P}biz2`,
+  cVip2: `${P}c_vip2`,
 };
 const VIP_EMAIL = `${P}vip@client.example`;
+const VIP2_EMAIL = `${P}vip2@client.example`;
 const VIP_PHONE = '+18685557101';
 const PHONE_NUMBER_ID = `${P}pnid`;
 /** A secret built from fragments at run time, so no secret-shaped literal sits in the source. */
@@ -70,6 +81,7 @@ async function cleanup() {
     `DELETE FROM outbound_content WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM channel_destinations WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM channel_connections WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM social_connections WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -90,6 +102,7 @@ async function send(verb: Verb, url: string, actor: string | undefined, body?: u
 const said = (res: any) => JSON.stringify(res.body ?? {});
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const comms = `/communications/businesses/${ID.biz}`;
+const comms2 = `/communications/businesses/${ID.biz2}`;
 
 /** One run of the delivery queue's own tick (after any tick a publish or retry started has finished). */
 async function runTick() {
@@ -150,6 +163,8 @@ beforeAll(async () => {
   const { DeliveryQueueService } = await import('../src/modules/communications/delivery-queue.service');
   const { AdapterRegistryService } = await import('../src/modules/communications/adapters/adapter-registry.service');
   const { CommunicationsService } = await import('../src/modules/communications/communications.service');
+  const { SocialController } = await import('../src/modules/social/social.controller');
+  const { SocialConnectionsService } = await import('../src/modules/social/social-connections.service');
 
   // Every log line, through the Nest logger (instance and static) and the console, is recorded (DTD-04).
   const record = (args: unknown[]) =>
@@ -170,9 +185,10 @@ beforeAll(async () => {
   }
 
   moduleRef = await Test.createTestingModule({
-    controllers: [CommunicationsController],
+    controllers: [CommunicationsController, SocialController],
     providers: [
       PrismaService,
+      SocialConnectionsService,
       AuthGuard,
       BusinessGuard,
       ModuleScopeGuard,
@@ -211,6 +227,15 @@ beforeAll(async () => {
       email: VIP_EMAIL, phone: VIP_PHONE, visibility: 'TEAM', marketingOptIn: true, doNotContact: false,
     },
   });
+  await db.user.create({ data: { id: ID.owner2, email: `${P}owner2@test.local`, role: 'USER' } });
+  await db.business.create({ data: { id: ID.biz2, name: 'V71B Biz Two', ownerId: ID.owner2 } });
+  await db.membership.create({ data: { id: `${P}m_owner2`, userId: ID.owner2, businessId: ID.biz2, role: 'OWNER' } });
+  await db.contact.create({
+    data: {
+      id: ID.cVip2, businessId: ID.biz2, firstName: 'Vip', lastName: 'Two', tags: ['vip'],
+      email: VIP2_EMAIL, visibility: 'TEAM', marketingOptIn: true, doNotContact: false,
+    },
+  });
 }, 180_000);
 
 afterAll(async () => {
@@ -221,10 +246,10 @@ afterAll(async () => {
 });
 
 /** A Gmail sending account the owner binds through POST connections; the token is stored encrypted. */
-async function bindGmail(mailbox: string) {
+async function bindGmail(mailbox: string, base = comms, actor = ID.owner) {
   const token = secret(P, mailbox, 'oauth', String(Date.now()));
   plaintexts.push(token);
-  const res = await send('post', `${comms}/connections`, ID.owner, {
+  const res = await send('post', `${base}/connections`, actor, {
     provider: 'EMAIL', label: mailbox, accountEmail: `${P}${mailbox}@biz.example`, token,
   });
   expect(res.status, said(res)).toBe(201);
@@ -249,8 +274,8 @@ async function bindWhatsApp() {
   return { id, dest, token };
 }
 
-async function newsletter(subject: string) {
-  const res = await send('post', `${comms}/content`, ID.owner, {
+async function newsletter(subject: string, base = comms, actor = ID.owner) {
+  const res = await send('post', `${base}/content`, actor, {
     contentType: 'email_newsletter', subject, body: `News: ${subject}`, contentMeta: { segmentTags: ['vip'] },
     variants: [{ platform: 'EMAIL', textBody: `News: ${subject}` }],
   });
@@ -267,8 +292,8 @@ async function whatsappMessage(text: string) {
   return res.body.id as string;
 }
 
-async function publish(contentId: string, dest: string) {
-  const res = await send('post', `${comms}/content/${contentId}/publish`, ID.owner, { destinationIds: [dest] });
+async function publish(contentId: string, dest: string, base = comms, actor = ID.owner) {
+  const res = await send('post', `${base}/content/${contentId}/publish`, actor, { destinationIds: [dest] });
   expect(res.status, said(res)).toBe(201);
   expect(res.body.queued, said(res)).toBe(1);
   return res;
@@ -426,6 +451,81 @@ describe('every way a delivery is claimed again sends the saved token', () => {
       // extension (GET connections answers 500 for the whole business), which is outside this packet (open issue).
       await db.$executeRawUnsafe('UPDATE channel_connections SET token = $1 WHERE id = $2', stored, broken.id);
     }
+  });
+});
+
+describe('a stored ciphertext is never accepted as a credential (review repair SEC-DTD-1)', () => {
+  it("[DTD-08] RED-BEFORE (a1bcb83d6): the owner of a second business who posts the first business's stored token ciphertext as a connection's token or refresh token (POST connections, PATCH connections/:id, POST whatsapp/connect; also with surrounding blanks) is refused 400 CHANNEL_CREDENTIAL_CIPHERTEXT, nothing is written and no provider is called; their queued send goes out under their own saved token, never the first business's", async () => {
+    const victim = await bindGmail('victimbox');
+    const ciphertext = await storedToken(victim.id);
+    expect(ciphertext.startsWith(CIPHER_PREFIX), 'characterisation: the first business stores ciphertext').toBe(true);
+    const body64 = ciphertext.slice(CIPHER_PREFIX.length);
+    // Built outside the body literals: the fixture-prefix registry reads a literal token value as a unique-column write.
+    const padded = [' ', ciphertext, '\n'].join('');
+    const refused = (res: any, what: string) => {
+      expect.soft(res.status, `${what}: ${said(res)}`).toBe(400);
+      expect.soft(res.body?.code, `${what}: refusal code`).toBe('CHANNEL_CREDENTIAL_CIPHERTEXT');
+      expect.soft(res.text, `${what}: the refusal does not echo the value`).not.toContain(body64);
+    };
+
+    // POST connections: as the token, as the refresh token, padded with blanks, and for WhatsApp.
+    const tapped = outbound.length;
+    for (const [what, body] of [
+      ['EMAIL token', { provider: 'EMAIL', label: 'Borrowed', accountEmail: `${P}borrowed1@biz2.example`, token: ciphertext }],
+      ['EMAIL refreshToken', { provider: 'EMAIL', label: 'Borrowed', accountEmail: `${P}borrowed2@biz2.example`, token: secret(P, 'own', 'access'), refreshToken: ciphertext }],
+      ['EMAIL token with blanks', { provider: 'EMAIL', label: 'Borrowed', accountEmail: `${P}borrowed3@biz2.example`, token: padded }],
+      ['WHATSAPP token', { provider: 'WHATSAPP', label: 'Borrowed', token: ciphertext, providerMeta: { phoneNumber: '+18685550072', phoneNumberId: `${P}pnid2` } }],
+    ] as const) {
+      refused(await send('post', `${comms2}/connections`, ID.owner2, body), `POST connections ${what}`);
+    }
+    expect.soft(await db.channelConnection.count({ where: { businessId: ID.biz2 } }), 'no connection was written for the second business').toBe(0);
+
+    // POST whatsapp/connect: refused before the token is checked with the provider.
+    refused(await send('post', `${comms2}/whatsapp/connect`, ID.owner2, { accessToken: ciphertext, waBusinessAccountId: `${P}waba2` }), 'POST whatsapp/connect');
+    expect.soft(outbound.slice(tapped).map((o) => `${o.method} ${o.url} ${o.auth.slice(0, 20)}`), 'no provider was called with the ciphertext').toEqual([]);
+    expect.soft(await db.channelConnection.count({ where: { businessId: ID.biz2 } })).toBe(0);
+
+    // PATCH connections/:id on the second business's own Gmail account: refused, the stored token unchanged.
+    const own = await bindGmail('ownbox', comms2, ID.owner2);
+    const before = await storedToken(own.id);
+    for (const [what, body] of [['token', { token: ciphertext }], ['refreshToken', { refreshToken: ciphertext }]] as const) {
+      refused(await send('patch', `${comms2}/connections/${own.id}`, ID.owner2, body), `PATCH connections/:id ${what}`);
+    }
+    expect.soft(await storedToken(own.id), 'the stored token is unchanged').toBe(before);
+
+    // The second business's queued send goes out under its own saved token, never the first business's.
+    const contentId = await newsletter('Own account', comms2, ID.owner2);
+    const sent = gmailSends().length;
+    await publish(contentId, own.dest, comms2, ID.owner2);
+    await runTick();
+    const sends = gmailSends().slice(sent);
+    expect.soft(sends.map((o) => mimeOf(o).includes(`To: ${VIP2_EMAIL}`)), 'one send, to the second business\'s contact').toEqual([true]);
+    expect.soft(sends.map((o) => o.auth === `Bearer ${victim.token}`), "the first business's plaintext token never goes out for the second business").toEqual([false]);
+    expect(sends.map((o) => o.auth), 'the bearer is the token the second business saved').toEqual([`Bearer ${own.token}`]);
+  });
+
+  it("[DTD-09] RED-BEFORE (a1bcb83d6): a social account's stored token ciphertext posted to another business's manual social connect (as the token or the refresh token) is refused 400 SOCIAL_CREDENTIAL_CIPHERTEXT and nothing is written, so neither social publishing nor a channel sync from social can decrypt it as that business's credential", async () => {
+    const res1 = await send('post', `/social/businesses/${ID.biz}/connections/FACEBOOK/manual`, ID.owner, {
+      token: secret(P, 'fb', 'page', String(Date.now())), platformId: `${P}page1`, accountName: 'V71B Page',
+    });
+    expect(res1.status, said(res1)).toBe(201);
+    const [{ token: ciphertext }] = (await db.$queryRawUnsafe(
+      'SELECT token FROM social_connections WHERE business_id = $1 AND platform_id = $2', ID.biz, `${P}page1`,
+    )) as Array<{ token: string }>;
+    expect(ciphertext.startsWith(CIPHER_PREFIX), 'characterisation: the social token is stored as ciphertext').toBe(true);
+    const padded = ['\t', ciphertext, ' '].join('');
+
+    for (const [what, body] of [
+      ['token', { token: ciphertext, platformId: `${P}page2`, accountName: 'Borrowed' }],
+      ['refreshToken', { token: secret(P, 'own', 'fb'), refreshToken: ciphertext, platformId: `${P}page3`, accountName: 'Borrowed' }],
+      ['token with blanks', { token: padded, platformId: `${P}page4`, accountName: 'Borrowed' }],
+    ] as const) {
+      const res = await send('post', `/social/businesses/${ID.biz2}/connections/FACEBOOK/manual`, ID.owner2, body);
+      expect.soft(res.status, `${what}: ${said(res)}`).toBe(400);
+      expect.soft(res.body?.code, `${what}: refusal code`).toBe('SOCIAL_CREDENTIAL_CIPHERTEXT');
+      expect.soft(res.text, `${what}: the refusal does not echo the value`).not.toContain(ciphertext.slice(CIPHER_PREFIX.length));
+    }
+    expect(await db.socialConnection.count({ where: { businessId: ID.biz2 } }), 'no social connection was written for the second business').toBe(0);
   });
 });
 
