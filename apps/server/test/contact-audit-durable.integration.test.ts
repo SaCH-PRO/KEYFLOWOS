@@ -1,36 +1,48 @@
 /**
  * TOF-CONTACT-AUDIT-AWAIT (V1-63; owner ruling D-25, DEC-CONTACTS-002 Option A) — every contact
- * create, update and delete records its ContactAuditEntry, or does not happen. Against a REAL
- * database, through the HTTP routes.
+ * write records its ContactAuditEntry, or does not happen. Against a REAL database, through the
+ * HTTP routes.
  *
  * D-25: "Every contact write records a ContactAuditEntry." Before this packet
  * CrmService.auditContact started the entry fire-and-forget (`void this.contactAudit.write(...)`)
  * after the contact's transaction had committed, and ContactAuditService.write caught and only
  * logged every failure ("Never throws"), so awaiting it would have changed nothing: when the audit
  * row could not be written the contact was created, changed or deleted all the same, the request
- * answered 2xx, and the write had no audit row.
+ * answered 2xx, and the write had no audit row. POST contacts/bulk/reassign wrote no audit row at
+ * all, even with the audit table healthy.
  *
- * The contract proven here, for POST, PATCH and DELETE /crm/businesses/:businessId/contacts:
+ * The contract proven here, for POST, PATCH and DELETE /crm/businesses/:businessId/contacts and
+ * (review repair SEC-CAA-2 / COR-2) the many-row and merge writes: PATCH and DELETE contacts/bulk,
+ * POST contacts/bulk/reassign, POST contacts/:contactId/merge/:duplicateId and the import merge
+ * (POST import/image/ocr of a card whose email matches an existing contact, which fills that
+ * contact's empty fields through CrmService.findOrCreateContact):
  *   - with the audit write failing (the database refuses the row), the request fails and writes
- *     nothing: no contact row created, changed or deleted, no ContactEvent, no audit row, no team
- *     log, no contact.* announcement and no Activity feed copy;
- *   - a normal write leaves exactly one audit row for itself, already there when the request
- *     answers, naming the member who made it (R0-CT-03);
+ *     nothing: no contact row created, changed, reassigned, merged or deleted, no ContactEvent, no
+ *     audit row, no team log, no merge operation, no media row, no contact.* announcement and no
+ *     Activity feed copy;
+ *   - a normal write leaves exactly one audit row per contact it wrote, already there when the
+ *     request answers, naming the member who made it (R0-CT-03);
  *   - the same write retried once the failure is gone writes once and is audited once (no
- *     duplicate row from the failed attempt).
+ *     duplicate row from the failed attempt, and the failed attempt left nothing behind).
  * The failure is injected in the database, not in the code under test: a trigger on
- * contact_audit_entries refuses every row for one business (bizFail) only, named with this
- * suite's prefix and dropped in cleanup (the ledger-write-door suite's v15a_slow_stamp pattern).
+ * contact_audit_entries refuses every row for two businesses (bizFail, bizFailMany) only, named
+ * with this suite's prefix (the ledger-write-door suite's v15a_slow_stamp pattern). The refusal is
+ * lifted by replacing the trigger function's body with a pass-through (CREATE OR REPLACE FUNCTION
+ * takes no lock on contact_audit_entries), and the trigger is created and dropped only in
+ * beforeAll and cleanup, each under a short lock_timeout and retried (review repair COR-3): a
+ * CREATE or DROP TRIGGER queued behind another suite's EXCLUSIVE hold on the table
+ * (contacts-persistence [CP-FH-01]) would otherwise block every read of the table behind it.
  *
  * Nothing on the HTTP or persistence path is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CrmRateLimitGuard, PlanLimitGuard, TeamAuditInterceptor, the global
  * ValidationPipe and GlobalHttpExceptionFilter, CrmController, CrmService, CrmTimelineService
- * (the ContactEvent row inside the contact transaction) and ContactAuditService are real against
+ * (the ContactEvent row inside the contact transaction), CrmImportService and
+ * EntityResolutionService (the import merge) and ContactAuditService are real against
  * DATABASE_URL. The stand-ins: identity attachment (a test middleware reads `x-test-user` and
  * loads that seeded user row as AuthMiddleware would after token verification), the unified
  * activity ledger (a recorder: its calls are the Activity feed copies CrmTimelineService makes),
- * evidence and task assignment, the stats/flow caches and the plan limit (allows), as in
- * contacts-audit-actor.
+ * evidence and task assignment, AI usage (the OCR route makes no provider call), the stats/flow
+ * caches and the plan limit (allows), as in contacts-audit-actor.
  *
  * Requires DATABASE_URL. Every seeded row carries the `v63j_` prefix and is hard-deleted by raw
  * SQL (sqlLikePrefix) in beforeAll and afterAll. Cases tagged RED-BEFORE fail on the packet's
@@ -54,14 +66,29 @@ loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
 const P = 'v63j_';
 const ID = {
-  owner: `${P}owner`,     // OWNER of both businesses
+  owner: `${P}owner`,     // OWNER of every business
+  staff: `${P}staff`,     // STAFF in bizFailMany and bizOkMany: the reassign target
   bizOk: `${P}bizOk`,     // audit rows are written normally
   bizFail: `${P}bizFail`, // the database refuses every audit row for this business
   // Seeded directly in bizFail (no audit row): the PATCH and DELETE targets.
   upd: `${P}c_upd`,
   del: `${P}c_del`,
+  // The many-row and merge writes (SEC-CAA-2 / COR-2), in two more businesses so the single-row
+  // cases above keep their exact per-business trails.
+  bizOkMany: `${P}bizOkMany`,     // audit rows are written normally
+  bizFailMany: `${P}bizFailMany`, // the database refuses every audit row for this business too
 };
-/** The trigger (and its function) that refuses bizFail's audit rows. */
+/**
+ * The contacts each many-row write starts from, seeded directly (no audit row) in both businesses
+ * under the same keys: bulk status update (bs1, bs2), bulk tag add (bt1), bulk delete (bd1, bd2),
+ * merge (mp the primary, md the duplicate, which fills mp's empty job title and company), reassign (ra1, ra2, owned by the owner) and the import
+ * merge target (im, whose email the OCR card carries).
+ */
+const MANY = ['bs1', 'bs2', 'bt1', 'bd1', 'bd2', 'mp', 'md', 'ra1', 'ra2', 'im'] as const;
+type ManyKey = (typeof MANY)[number];
+const many = (businessId: string, key: ManyKey) => `${businessId}_${key}`;
+const importEmail = (businessId: string) => `${businessId.toLowerCase()}-import@test.local`;
+/** The trigger (and its function) that refuses bizFail's and bizFailMany's audit rows. */
 const REFUSE = `${P}refuse_audit`;
 const REFUSAL = `${P}injected audit write failure`;
 
@@ -74,8 +101,54 @@ const feedCopies: Array<{ businessId: string; action: string; entityId?: string 
 /** The contact.* and crm.contact_event.logged announcements, by business. */
 const announced: Array<{ name: string; businessId: string }> = [];
 
+/**
+ * DDL on contact_audit_entries under a short lock_timeout, retried (review repair COR-3). CREATE
+ * TRIGGER and DROP TRIGGER lock the table; queued behind another session's EXCLUSIVE hold
+ * (contacts-persistence [CP-FH-01] holds it for 1.5 s in a parallel run) a DROP TRIGGER would
+ * block every read of the table behind it until that hold ends. Under lock_timeout it gives up
+ * its place in the queue within LOCK_TIMEOUT_MS and tries again.
+ */
+const LOCK_TIMEOUT_MS = 100;
+const DDL_ATTEMPTS = 150;
+async function auditTableDdl(sql: string) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await db.$transaction(async (tx: any) => {
+        await tx.$executeRawUnsafe(`SET LOCAL lock_timeout = '${LOCK_TIMEOUT_MS}ms'`);
+        await tx.$executeRawUnsafe(sql);
+      });
+      return;
+    } catch (err: any) {
+      const lockTimeout = err?.meta?.code === '55P03' || /lock timeout/i.test(String(err?.message));
+      if (!lockTimeout || attempt >= DDL_ATTEMPTS) throw err;
+      await new Promise((resolve) => setTimeout(resolve, LOCK_TIMEOUT_MS));
+    }
+  }
+}
+
+/** The trigger function's body: refuse the row, or (lifted) let it through. No table lock. */
+async function setRefusal(refuse: boolean) {
+  const body = refuse ? `RAISE EXCEPTION '${REFUSAL}';` : 'RETURN NEW;';
+  await db.$executeRawUnsafe(
+    `CREATE OR REPLACE FUNCTION ${REFUSE}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN ${body} END $$`,
+  );
+}
+
+async function installRefusal() {
+  await setRefusal(true);
+  await auditTableDdl(
+    `CREATE TRIGGER ${REFUSE} BEFORE INSERT ON contact_audit_entries FOR EACH ROW
+       WHEN (NEW.business_id IN ('${ID.bizFail}', '${ID.bizFailMany}')) EXECUTE FUNCTION ${REFUSE}()`,
+  );
+}
+
+/** Lift the refusal mid-suite without touching the table's locks. */
+async function liftRefusal() {
+  await setRefusal(false);
+}
+
 async function dropRefusal() {
-  await db.$executeRawUnsafe(`DROP TRIGGER IF EXISTS ${REFUSE} ON contact_audit_entries`);
+  await auditTableDdl(`DROP TRIGGER IF EXISTS ${REFUSE} ON contact_audit_entries`);
   await db.$executeRawUnsafe(`DROP FUNCTION IF EXISTS ${REFUSE}()`);
 }
 
@@ -86,6 +159,8 @@ async function cleanup() {
   for (const sql of [
     `DELETE FROM contact_audit_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contact_media WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM merge_operations WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
@@ -114,6 +189,42 @@ function del(businessId: string, contactId: string) {
   return request(app.getHttpServer())
     .delete(`/crm/businesses/${businessId}/contacts/${contactId}`)
     .set('x-test-user', ID.owner);
+}
+
+function bulkPatch(businessId: string, body: Record<string, unknown>) {
+  return request(app.getHttpServer())
+    .patch(`/crm/businesses/${businessId}/contacts/bulk`)
+    .set('x-test-user', ID.owner)
+    .send(body);
+}
+
+function bulkDelete(businessId: string, contactIds: string[]) {
+  return request(app.getHttpServer())
+    .delete(`/crm/businesses/${businessId}/contacts/bulk`)
+    .set('x-test-user', ID.owner)
+    .send({ contactIds });
+}
+
+function reassign(businessId: string, contactIds: string[], newOwnerId: string) {
+  return request(app.getHttpServer())
+    .post(`/crm/businesses/${businessId}/contacts/bulk/reassign`)
+    .set('x-test-user', ID.owner)
+    .send({ contactIds, newOwnerId });
+}
+
+function merge(businessId: string, primaryId: string, duplicateId: string) {
+  return request(app.getHttpServer())
+    .post(`/crm/businesses/${businessId}/contacts/${primaryId}/merge/${duplicateId}`)
+    .set('x-test-user', ID.owner)
+    .send({});
+}
+
+/** The import merge: a card whose email matches `im` fills im's empty last name and phone. */
+function ocrImport(businessId: string) {
+  return request(app.getHttpServer())
+    .post(`/crm/businesses/${businessId}/import/image/ocr`)
+    .set('x-test-user', ID.owner)
+    .send({ ocrText: `Ivo Imported\n${importEmail(businessId)}\n+1 868 555 0101` });
 }
 
 /** Let every write a request started after its answer land (the team log, any fire-and-forget audit). */
@@ -151,6 +262,28 @@ async function storedContact(id: string): Promise<Record<string, unknown> | null
   return rows[0]?.row ?? null;
 }
 
+/** The refusal's reason stays in the server log: the client gets the generic 500 body only. */
+function expectGeneric500(body: Record<string, unknown>) {
+  expect(body).toMatchObject({ statusCode: 500, message: 'Internal server error' });
+  expect(JSON.stringify(body)).not.toContain(REFUSAL);
+}
+
+/** Every seeded many-row contact of the business, as stored (every column). */
+async function storedMany(businessId: string): Promise<Record<string, unknown>> {
+  const out: Record<string, unknown> = {};
+  for (const key of MANY) out[key] = await storedContact(many(businessId, key));
+  return out;
+}
+
+/** The many-row traces beyond traces(): merge operations and media rows. */
+async function manyTraces(businessId: string) {
+  return {
+    ...(await traces(businessId)),
+    mergeOps: await count('merge_operations WHERE business_id = $1', businessId),
+    media: await count('contact_media WHERE business_id = $1', businessId),
+  };
+}
+
 function auditsOf(businessId: string, contactId: string) {
   return db.contactAuditEntry.findMany({ where: { businessId, contactId }, orderBy: { createdAt: 'asc' } });
 }
@@ -186,6 +319,7 @@ beforeAll(async () => {
   const { PlanLimitGuard } = await import('../src/modules/subscriptions/plan-limit.guard');
   const { SubscriptionsService } = await import('../src/modules/subscriptions/subscriptions.service');
   const { CrmImportService } = await import('../src/modules/crm/crm-import.service');
+  const { AiUsageService } = await import('../src/modules/ai/ai-usage.service');
   const { CrmPlaybookService } = await import('../src/modules/crm/crm-playbook.service');
   const { CrmActionsService } = await import('../src/modules/crm/crm-actions.service');
   const { CrmRevenueService } = await import('../src/modules/crm/crm-revenue.service');
@@ -211,7 +345,7 @@ beforeAll(async () => {
   ]);
 
   const events = new EventEmitter2();
-  for (const name of ['contact.created', 'contact.updated', 'contact.deleted', 'crm.contact_event.logged']) {
+  for (const name of ['contact.created', 'contact.updated', 'contact.deleted', 'contact.merged', 'crm.contact_event.logged']) {
     events.on(name, (payload: { businessId?: string }) => {
       if (payload?.businessId?.startsWith(P)) announced.push({ name, businessId: payload.businessId });
     });
@@ -233,6 +367,10 @@ beforeAll(async () => {
       CrmService,
       CrmTimelineService,
       ContactAuditService,
+      // The import merge: the importer and the matcher findOrCreateContact consults are real.
+      CrmImportService,
+      EntityResolutionService,
+      { provide: AiUsageService, useValue: {} },
       { provide: EventEmitter2, useValue: events },
       // The unified activity ledger: a recorder of the Activity feed copies CrmTimelineService
       // makes (its write is fire-and-forget and outside the contact transaction).
@@ -250,9 +388,7 @@ beforeAll(async () => {
       { provide: CrmFlowService, useValue: { invalidateCache: () => undefined } },
       { provide: SubscriptionsService, useValue: { checkLimit: async () => ({ allowed: true }) } },
       { provide: CrmListsService, useValue: {} },
-      { provide: EntityResolutionService, useValue: {} },
       { provide: ContactCustomFieldValueService, useValue: {} },
-      { provide: CrmImportService, useValue: {} },
       { provide: CrmPlaybookService, useValue: {} },
       { provide: CrmActionsService, useValue: {} },
       { provide: CrmRevenueService, useValue: {} },
@@ -297,14 +433,33 @@ beforeAll(async () => {
   await db.contact.create({ data: { id: ID.upd, businessId: ID.bizFail, firstName: 'Una', lastName: `${P}seed`, jobTitle: 'Clerk' } });
   await db.contact.create({ data: { id: ID.del, businessId: ID.bizFail, firstName: 'Dora', lastName: `${P}seed` } });
 
-  // ---- the injected failure: the database refuses bizFail's audit rows ----
-  await db.$executeRawUnsafe(
-    `CREATE OR REPLACE FUNCTION ${REFUSE}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION '${REFUSAL}'; END $$`,
-  );
-  await db.$executeRawUnsafe(
-    `CREATE TRIGGER ${REFUSE} BEFORE INSERT ON contact_audit_entries FOR EACH ROW
-       WHEN (NEW.business_id = '${ID.bizFail}') EXECUTE FUNCTION ${REFUSE}()`,
-  );
+  // ---- the many-row and merge writes (SEC-CAA-2 / COR-2) ------------------
+  await db.user.create({ data: { id: ID.staff, email: `${P}staff@test.local`, role: 'USER' } });
+  for (const biz of [ID.bizOkMany, ID.bizFailMany]) {
+    await db.business.create({ data: { id: biz, name: `V63J ${biz.slice(P.length)}`, ownerId: ID.owner } });
+    await db.membership.create({ data: { id: `${biz}_m_owner`, userId: ID.owner, businessId: biz, role: 'OWNER' } });
+    await db.membership.create({ data: { id: `${biz}_m_staff`, userId: ID.staff, businessId: biz, role: 'STAFF' } });
+    const seed = (key: ManyKey, data: Record<string, unknown>) =>
+      db.contact.create({ data: { id: many(biz, key), businessId: biz, lastName: `${P}seed`, ...data } });
+    await seed('bs1', { firstName: 'Bea', status: 'LEAD' });
+    await seed('bs2', { firstName: 'Ben', status: 'LEAD' });
+    await seed('bt1', { firstName: 'Tia', tags: [`${P}old`] });
+    await seed('bd1', { firstName: 'Dee' });
+    await seed('bd2', { firstName: 'Dan' });
+    await seed('mp', { firstName: 'Mia' });
+    // The duplicate fills two of the primary's empty fields. Neither has an email or phone: a merge
+    // that copies the duplicate's email or phone into the primary is refused by the live-row unique
+    // index before the duplicate is deleted (a merge defect outside this packet, recorded).
+    await seed('md', { firstName: 'Mia', jobTitle: 'Buyer', companyName: `${P}Dup Co` });
+    await seed('ra1', { firstName: 'Rae', ownerId: ID.owner });
+    await seed('ra2', { firstName: 'Rex', ownerId: ID.owner });
+    await db.contact.create({
+      data: { id: many(biz, 'im'), businessId: biz, firstName: 'Ivo', email: importEmail(biz), emailNormalized: importEmail(biz) },
+    });
+  }
+
+  // ---- the injected failure: the database refuses bizFail's and bizFailMany's audit rows ----
+  await installRefusal();
 }, 120_000);
 
 afterAll(async () => {
@@ -316,17 +471,29 @@ afterAll(async () => {
 
 describe('fixture sanity (real rows)', () => {
   it('two tenants of one owner, the two seeded bizFail contacts, and no trace of any write yet', async () => {
-    expect(await db.membership.count({ where: { userId: ID.owner } })).toBe(2);
+    expect(await db.membership.count({ where: { userId: ID.owner, businessId: { in: [ID.bizOk, ID.bizFail] } } })).toBe(2);
     expect(await traces(ID.bizOk)).toEqual({ contacts: 0, live: 0, contactEvents: 0, audits: 0, teamLogs: 0, feedCopies: 0, announced: 0 });
     expect(await traces(ID.bizFail)).toEqual({ contacts: 2, live: 2, contactEvents: 0, audits: 0, teamLogs: 0, feedCopies: 0, announced: 0 });
   });
 
-  it("the database refuses an audit row for bizFail, and only for bizFail (the injected failure is real and bounded)", async () => {
+  it('the many-row tenants: the owner and one STAFF member each, the ten seeded contacts, and no trace of any write yet', async () => {
+    for (const biz of [ID.bizOkMany, ID.bizFailMany]) {
+      const members = await db.membership.findMany({ where: { businessId: biz }, select: { userId: true, role: true }, orderBy: { userId: 'asc' } });
+      expect(members).toEqual([{ userId: ID.owner, role: 'OWNER' }, { userId: ID.staff, role: 'STAFF' }]);
+      expect(await manyTraces(biz)).toEqual({
+        contacts: MANY.length, live: MANY.length, contactEvents: 0, audits: 0, teamLogs: 0, feedCopies: 0, announced: 0, mergeOps: 0, media: 0,
+      });
+    }
+  });
+
+  it("the database refuses an audit row for bizFail and bizFailMany, and only for them (the injected failure is real and bounded)", async () => {
     const entry = (businessId: string, contactId: string) => ({
       data: { businessId, contactId, contactHash: `${P}probe`, action: 'updated', reason: `${P}probe` },
     });
     await expect(db.contactAuditEntry.create(entry(ID.bizFail, ID.upd))).rejects.toThrow(REFUSAL);
     expect(await db.contactAuditEntry.count({ where: { businessId: ID.bizFail } })).toBe(0);
+    await expect(db.contactAuditEntry.create(entry(ID.bizFailMany, many(ID.bizFailMany, 'bs1')))).rejects.toThrow(REFUSAL);
+    expect(await db.contactAuditEntry.count({ where: { businessId: ID.bizFailMany } })).toBe(0);
 
     const okContact = await db.contact.create({ data: { businessId: ID.bizOk, firstName: 'Probe', lastName: `${P}probe` } });
     const probe = await db.contactAuditEntry.create(entry(ID.bizOk, okContact.id));
@@ -343,6 +510,7 @@ describe('with the audit write failing, a contact write fails and writes nothing
     const res = await post(ID.bizFail, { firstName: 'Nadia', lastName: `${P}new`, email: `${P}nadia@test.local` });
     // At 45d648c8: 201, the contact is written and has no audit row.
     expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(500);
+    expectGeneric500(res.body);
     expect(await count('contacts WHERE business_id = $1 AND email = $2', ID.bizFail, `${P}nadia@test.local`)).toBe(0);
     expect(await traces(ID.bizFail)).toEqual(before);
   });
@@ -354,6 +522,7 @@ describe('with the audit write failing, a contact write fails and writes nothing
     const res = await patch(ID.bizFail, ID.upd, { firstName: 'Ursula', jobTitle: 'Manager' });
     // At 45d648c8: 200, the contact is changed and the change has no audit row.
     expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(500);
+    expectGeneric500(res.body);
     // The stored row, every column (updated_at included), is the one read before the request.
     expect(await storedContact(ID.upd)).toEqual(row);
     expect(await traces(ID.bizFail)).toEqual(before);
@@ -364,6 +533,7 @@ describe('with the audit write failing, a contact write fails and writes nothing
     const res = await del(ID.bizFail, ID.del);
     // At 45d648c8: 200, the contact is deleted and the deletion has no audit row.
     expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(500);
+    expectGeneric500(res.body);
     const row = await storedContact(ID.del);
     expect(row).not.toBeNull();
     expect(row?.deleted_at).toBeNull();
@@ -377,6 +547,55 @@ describe('with the audit write failing, a contact write fails and writes nothing
       crm.createContact({ businessId: ID.bizFail, firstName: 'Sys', lastName: `${P}system`, email: `${P}system@test.local` }),
     ).rejects.toThrow(REFUSAL);
     expect(await traces(ID.bizFail)).toEqual(before);
+  });
+});
+
+describe('with the audit write failing, a many-row, reassign, merge or import-merge write fails and writes nothing (review repair SEC-CAA-2 / COR-2)', () => {
+  const B = ID.bizFailMany;
+  const c = (key: ManyKey) => many(B, key);
+
+  /** A refused request: 500 with the generic body, and every seeded row and every trace exactly as before. */
+  async function refusedAndWroteNothing(send: () => Promise<any>) {
+    const rows = await storedMany(B);
+    const before = await manyTraces(B);
+    const res = await send();
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(500);
+    expectGeneric500(res.body);
+    // Every seeded contact, every column (updated_at included), is the one read before the request.
+    expect(await storedMany(B)).toEqual(rows);
+    expect(await manyTraces(B)).toEqual(before);
+  }
+
+  it('RED-BEFORE: PATCH contacts/bulk setting a field — 500; neither contact changes and nothing else is written', async () => {
+    // At 45d648c8: 200 {"updated":2}, both contacts' status changed, no audit row.
+    await refusedAndWroteNothing(() => bulkPatch(B, { contactIds: [c('bs1'), c('bs2')], status: 'CLIENT' }));
+  });
+
+  it('RED-BEFORE: PATCH contacts/bulk adding tags — 500; the contact keeps its tags and nothing else is written', async () => {
+    // At 45d648c8: 200 {"updated":1}, the tag added, no audit row.
+    await refusedAndWroteNothing(() => bulkPatch(B, { contactIds: [c('bt1')], addTags: [`${P}new`] }));
+  });
+
+  it('RED-BEFORE: DELETE contacts/bulk — 500; both contacts stay live and nothing else is written', async () => {
+    // At 45d648c8: 200 {"deleted":2}, both contacts soft-deleted, no audit row.
+    await refusedAndWroteNothing(() => bulkDelete(B, [c('bd1'), c('bd2')]));
+  });
+
+  it('RED-BEFORE: POST contacts/bulk/reassign — 500; both contacts keep their owner and nothing else is written', async () => {
+    // At 45d648c8: 201 {"reassigned":2}, owner_id moved on both, and a reassign writes no audit row
+    // at all (not even with the audit table healthy: see the CONTROL below).
+    await refusedAndWroteNothing(() => reassign(B, [c('ra1'), c('ra2')], ID.staff));
+  });
+
+  it('RED-BEFORE: POST contacts/:contactId/merge/:duplicateId — 500; the duplicate stays live, the primary unchanged, no merge operation, nothing else written', async () => {
+    // At 45d648c8: 201, the duplicate merged away into the primary, no audit row.
+    await refusedAndWroteNothing(() => merge(B, c('mp'), c('md')));
+  });
+
+  it('RED-BEFORE: POST import/image/ocr of a card matching an existing contact (the import merge) — 500; the contact keeps its empty fields, no media row, nothing else written', async () => {
+    // At 45d648c8: 201, the matched contact's last name, phone and source filled, a media row and
+    // an event written, no audit row.
+    await refusedAndWroteNothing(() => ocrImport(B));
   });
 });
 
@@ -426,13 +645,121 @@ describe('a normal write leaves exactly one audit row, there when the request an
   });
 });
 
-describe('the same writes retried once the failure is gone: written once, audited once', () => {
-  it('the refusal is lifted', async () => {
-    await dropRefusal();
-    const probe = await db.contactAuditEntry.create({
-      data: { businessId: ID.bizFail, contactId: ID.upd, contactHash: `${P}probe`, action: 'updated', reason: `${P}probe` },
+describe('a normal many-row, reassign, merge or import-merge write leaves one audit row per contact it wrote, there when the request answers (review repair SEC-CAA-2 / COR-2)', () => {
+  const B = ID.bizOkMany;
+  const c = (key: ManyKey) => many(B, key);
+  const OWNER = { type: 'USER', id: ID.owner };
+  const brief = (r: any) => ({ action: r.action, actor: r.actor, before: r.before, after: r.after, reason: r.reason });
+
+  it("CONTROL: PATCH contacts/bulk setting a field — one 'bulk_updated' row per contact, naming the owner", async () => {
+    const res = await bulkPatch(B, { contactIds: [c('bs1'), c('bs2')], status: 'CLIENT' });
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(200);
+    expect(res.body).toEqual({ updated: 2 });
+    for (const key of ['bs1', 'bs2'] as const) {
+      // Read before anything is drained: the rows committed with the change.
+      expect((await auditsOf(B, c(key))).map(brief), key)
+        .toEqual([{ action: 'bulk_updated', actor: OWNER, before: {}, after: { status: 'CLIENT' }, reason: null }]);
+      expect(await storedContact(c(key))).toMatchObject({ status: 'CLIENT' });
+    }
+    await settle();
+    for (const key of ['bs1', 'bs2'] as const) expect(await auditsOf(B, c(key)), key).toHaveLength(1);
+  });
+
+  it("CONTROL: PATCH contacts/bulk adding tags — one 'bulk_updated' row naming the owner", async () => {
+    const res = await bulkPatch(B, { contactIds: [c('bt1')], addTags: [`${P}new`] });
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(200);
+    expect(res.body).toEqual({ updated: 1 });
+    expect((await auditsOf(B, c('bt1'))).map(brief))
+      .toEqual([{ action: 'bulk_updated', actor: OWNER, before: {}, after: { addedTags: [`${P}new`] }, reason: null }]);
+    expect(await storedContact(c('bt1'))).toMatchObject({ tags: [`${P}old`, `${P}new`] });
+    await settle();
+    expect(await auditsOf(B, c('bt1'))).toHaveLength(1);
+  });
+
+  it("CONTROL: DELETE contacts/bulk — one 'bulk_deleted' row per contact, naming the owner", async () => {
+    const res = await bulkDelete(B, [c('bd1'), c('bd2')]);
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(200);
+    expect(res.body).toEqual({ deleted: 2 });
+    for (const key of ['bd1', 'bd2'] as const) {
+      expect((await auditsOf(B, c(key))).map((r: any) => ({ action: r.action, actor: r.actor })), key)
+        .toEqual([{ action: 'bulk_deleted', actor: OWNER }]);
+      expect((await storedContact(c(key)))?.deleted_at, key).not.toBeNull();
+    }
+    await settle();
+    for (const key of ['bd1', 'bd2'] as const) expect(await auditsOf(B, c(key)), key).toHaveLength(1);
+  });
+
+  it("RED-BEFORE: POST contacts/bulk/reassign — one 'reassigned' row per contact, naming the owner, from the old owner to the new", async () => {
+    const res = await reassign(B, [c('ra1'), c('ra2')], ID.staff);
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+    expect(res.body).toEqual({ reassigned: 2, newOwnerId: ID.staff });
+    for (const key of ['ra1', 'ra2'] as const) {
+      // At 45d648c8: [] — an ownership change, which widens what a 'my book' member can open, had no audit row.
+      expect((await auditsOf(B, c(key))).map(brief), key).toEqual([{
+        action: 'reassigned',
+        actor: OWNER,
+        before: { ownerId: ID.owner },
+        after: { ownerId: ID.staff },
+        reason: `owner ${ID.owner} → ${ID.staff}`,
+      }]);
+      expect(await storedContact(c(key)), key).toMatchObject({ owner_id: ID.staff });
+    }
+    await settle();
+    for (const key of ['ra1', 'ra2'] as const) expect(await auditsOf(B, c(key)), key).toHaveLength(1);
+  });
+
+  it("RED-BEFORE: POST contacts/:contactId/merge/:duplicateId — one 'merged' row for the primary and one for the duplicate, naming the owner who merged them", async () => {
+    const res = await merge(B, c('mp'), c('md'));
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+    const primary = await auditsOf(B, c('mp'));
+    const duplicate = await auditsOf(B, c('md'));
+    // At 45d648c8 the rows land after the answer, and when they do they name SYSTEM, not the owner.
+    expect(primary.map((r: any) => ({ action: r.action, actor: r.actor, reason: r.reason })))
+      .toEqual([{ action: 'merged', actor: OWNER, reason: `merged duplicate ${c('md')} into primary` }]);
+    expect(primary[0].after).toMatchObject({ jobTitle: 'Buyer', companyName: `${P}Dup Co` });
+    expect(duplicate.map((r: any) => ({ action: r.action, actor: r.actor, reason: r.reason })))
+      .toEqual([{ action: 'merged', actor: OWNER, reason: `duplicate merged into ${c('mp')}` }]);
+    expect(await storedContact(c('md'))).toMatchObject({ merged_into_id: c('mp') });
+    await settle();
+    expect(await auditsOf(B, c('mp'))).toHaveLength(1);
+    expect(await auditsOf(B, c('md'))).toHaveLength(1);
+  });
+
+  it("CONTROL: POST import/image/ocr of a card matching an existing contact — one 'updated' row naming the owner, its diff the fields the card filled", async () => {
+    const res = await ocrImport(B);
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+    expect(res.body.contact).toMatchObject({ id: c('im'), lastName: 'Imported' });
+    const rows = await auditsOf(B, c('im'));
+    expect(rows.map((r: any) => ({ action: r.action, actor: r.actor, reason: r.reason })))
+      .toEqual([{ action: 'updated', actor: OWNER, reason: 'merged ocr input into existing contact' }]);
+    expect(rows[0].changedFields).toEqual(expect.arrayContaining(['lastName', 'phone']));
+    expect(rows[0].before).toMatchObject({ lastName: null, phone: null });
+    expect(rows[0].after).toMatchObject({ lastName: 'Imported' });
+    await settle();
+    expect(await auditsOf(B, c('im'))).toHaveLength(1);
+  });
+
+  it("bizOkMany's whole trail: one audit row for each contact each write wrote", async () => {
+    await settle();
+    expect(await manyTraces(B)).toMatchObject({
+      contacts: MANY.length,
+      live: MANY.length - 3, // bd1, bd2 deleted; md merged away
+      audits: 10, // bs1, bs2, bt1, bd1, bd2, ra1, ra2, mp, md, im
+      mergeOps: 1,
+      media: 1,
     });
-    await db.$executeRawUnsafe(`DELETE FROM contact_audit_entries WHERE id = $1`, probe.id);
+  });
+});
+
+describe('the same writes retried once the failure is gone: written once, audited once', () => {
+  it('the refusal is lifted (the trigger function now lets every row through; no lock is taken on the table)', async () => {
+    await liftRefusal();
+    for (const [businessId, contactId] of [[ID.bizFail, ID.upd], [ID.bizFailMany, many(ID.bizFailMany, 'bs1')]]) {
+      const probe = await db.contactAuditEntry.create({
+        data: { businessId, contactId, contactHash: `${P}probe`, action: 'updated', reason: `${P}probe` },
+      });
+      await db.$executeRawUnsafe(`DELETE FROM contact_audit_entries WHERE id = $1`, probe.id);
+    }
   });
 
   it("RED-BEFORE: POST again — 201, one contact with that email and one 'created' row (the failed attempt left nothing to collide with)", async () => {
@@ -459,10 +786,78 @@ describe('the same writes retried once the failure is gone: written once, audite
     // At 45d648c8: 404, the failed attempt had deleted the contact.
     expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(200);
     expect((await auditsOf(ID.bizFail, ID.del)).map((r: any) => r.action)).toEqual(['deleted']);
+  });
+
+  it("RED-BEFORE: bizFail's whole trail: every row is a retried write's, each audited once", async () => {
     await settle();
-    // bizFail's whole trail: every row is a retried write's, each audited once.
     const t = await traces(ID.bizFail);
     expect({ contacts: t.contacts, live: t.live, contactEvents: t.contactEvents, audits: t.audits, teamLogs: t.teamLogs })
       .toEqual({ contacts: 3, live: 2, contactEvents: 3, audits: 3, teamLogs: 3 });
+  });
+});
+
+describe('the many-row, reassign, merge and import-merge writes retried once the failure is gone: written once, audited once (review repair SEC-CAA-2 / COR-2)', () => {
+  const B = ID.bizFailMany;
+  const c = (key: ManyKey) => many(B, key);
+  const OWNER = { type: 'USER', id: ID.owner };
+
+  it("CONTROL: PATCH contacts/bulk again (a field, then added tags) — each contact's one 'bulk_updated' row, there when the request answers", async () => {
+    const field = await bulkPatch(B, { contactIds: [c('bs1'), c('bs2')], status: 'CLIENT' });
+    expect(field.status, JSON.stringify(field.body).slice(0, 300)).toBe(200);
+    expect(field.body).toEqual({ updated: 2 });
+    const tags = await bulkPatch(B, { contactIds: [c('bt1')], addTags: [`${P}new`] });
+    expect(tags.status, JSON.stringify(tags.body).slice(0, 300)).toBe(200);
+    for (const key of ['bs1', 'bs2', 'bt1'] as const) {
+      expect((await auditsOf(B, c(key))).map((r: any) => r.action), key).toEqual(['bulk_updated']);
+    }
+    expect(await storedContact(c('bt1'))).toMatchObject({ tags: [`${P}old`, `${P}new`] });
+  });
+
+  it("RED-BEFORE: DELETE contacts/bulk again — 200 {\"deleted\":2} and one 'bulk_deleted' row each (the failed attempt did not already delete them)", async () => {
+    const res = await bulkDelete(B, [c('bd1'), c('bd2')]);
+    // At 45d648c8: 200 {"deleted":0}, the failed attempt had deleted both.
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(200);
+    expect(res.body).toEqual({ deleted: 2 });
+    for (const key of ['bd1', 'bd2'] as const) {
+      expect((await auditsOf(B, c(key))).map((r: any) => r.action), key).toEqual(['bulk_deleted']);
+    }
+  });
+
+  it("RED-BEFORE: POST contacts/bulk/reassign again — one 'reassigned' row each, from the owner the failed attempt left in place", async () => {
+    const res = await reassign(B, [c('ra1'), c('ra2')], ID.staff);
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+    expect(res.body).toEqual({ reassigned: 2, newOwnerId: ID.staff });
+    for (const key of ['ra1', 'ra2'] as const) {
+      // At 45d648c8: [] (a reassign writes no audit row).
+      expect((await auditsOf(B, c(key))).map((r: any) => ({ action: r.action, actor: r.actor, before: r.before, after: r.after })), key)
+        .toEqual([{ action: 'reassigned', actor: OWNER, before: { ownerId: ID.owner }, after: { ownerId: ID.staff } }]);
+    }
+  });
+
+  it("RED-BEFORE: POST contacts/:contactId/merge/:duplicateId again — 201 and one 'merged' row each (the failed attempt did not already merge them)", async () => {
+    const res = await merge(B, c('mp'), c('md'));
+    // At 45d648c8: 404, the failed attempt had merged the duplicate away.
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+    expect((await auditsOf(B, c('mp'))).map((r: any) => r.action)).toEqual(['merged']);
+    expect((await auditsOf(B, c('md'))).map((r: any) => r.action)).toEqual(['merged']);
+    expect(await count('merge_operations WHERE business_id = $1', B)).toBe(1);
+  });
+
+  it("RED-BEFORE: POST import/image/ocr again — 201 and one 'updated' row whose diff fills the empty fields (the failed attempt did not already fill them)", async () => {
+    const res = await ocrImport(B);
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+    const rows = await auditsOf(B, c('im'));
+    // At 45d648c8: [] — the failed attempt had already filled them, so the retry changed nothing.
+    expect(rows.map((r: any) => ({ action: r.action, actor: r.actor }))).toEqual([{ action: 'updated', actor: OWNER }]);
+    expect(rows[0].before).toMatchObject({ lastName: null, phone: null });
+    expect(rows[0].after).toMatchObject({ lastName: 'Imported' });
+  });
+
+  it("RED-BEFORE: bizFailMany's whole trail is bizOkMany's: every row is a retried write's, each audited once", async () => {
+    await settle();
+    const failTrail = await manyTraces(B);
+    const okTrail = await manyTraces(ID.bizOkMany);
+    expect({ ...failTrail, feedCopies: 0, announced: 0 }).toEqual({ ...okTrail, feedCopies: 0, announced: 0 });
+    expect(failTrail).toMatchObject({ contacts: MANY.length, live: MANY.length - 3, audits: 10, mergeOps: 1, media: 1 });
   });
 });
