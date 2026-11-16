@@ -1037,6 +1037,8 @@ export class IdentityService {
   }
 
   private static readonly ALREADY_A_MEMBER = 'User is already a team member';
+  private static readonly AMBIGUOUS_INVITE_ADDRESS =
+    'More than one account holds this address in different letter case, so the invite cannot tell which person to add';
 
   /**
    * V1-63: the invite address, trimmed and lower-cased, or a 400 when it has no
@@ -1086,9 +1088,16 @@ export class IdentityService {
    * bootstrap's exact lookup adopts. Nothing is merged: such rows stay, listed as
    * pending, for the owner to remove.
    *
-   * `target`: an account first (the row under exactly the address, then the lowest
-   * id), else the placeholder a sign-in adopts. `reachable`: the target and that
-   * placeholder, the holders whose membership makes an invite a repeat.
+   * `target`: an account first (the row under exactly the address, else the single
+   * account in another letter case), else the placeholder a sign-in adopts.
+   * `reachable`: the target and that placeholder, the holders whose membership makes
+   * an invite a repeat.
+   *
+   * PR 211 review (Codex P1): several accounts in other letter cases and none under
+   * exactly the address are ambiguous, as they are to bootstrapUser, so the invite is
+   * refused (400) before anything is written. It used to join the lowest id, which
+   * gave an arbitrary one of those accounts a membership. Nothing is merged; the
+   * owner can invite the address once one account is left.
    */
   private static inviteReach<T extends { id: string; email: string; metaData: unknown }>(
     holders: T[],
@@ -1097,9 +1106,12 @@ export class IdentityService {
     const isPlaceholder = (h: T) => IdentityService.isMarkedInvitePlaceholder(h.metaData);
     const signIn = holders.find((h) => h.email === address) ?? (holders.length === 1 ? holders[0] : undefined);
     const claimable = signIn && isPlaceholder(signIn) ? signIn : undefined;
-    const account = holders
-      .filter((h) => !isPlaceholder(h))
-      .sort((a, b) => Number(a.email !== address) - Number(b.email !== address) || a.id.localeCompare(b.id))[0];
+    const accounts = holders.filter((h) => !isPlaceholder(h));
+    const exactAccount = accounts.find((h) => h.email === address);
+    if (!exactAccount && accounts.length > 1) {
+      throw new BadRequestException(IdentityService.AMBIGUOUS_INVITE_ADDRESS);
+    }
+    const account = exactAccount ?? accounts[0];
     const target = account ?? claimable;
     const reachable = [target, claimable].filter((h, i, all): h is T => h !== undefined && all.indexOf(h) === i);
     return { target, reachable };
