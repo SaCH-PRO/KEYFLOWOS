@@ -401,6 +401,9 @@ describe('the decrypted token stays on the wire to the provider', () => {
     ];
     for (const r of reads) expect(r.status, said(r)).toBe(200);
 
+    // The recorders saw something, or the two checks below are vacuous (the adapter registry logs at start-up).
+    expect(responses.length).toBeGreaterThan(10);
+    expect(logLines.some((l) => l.includes('Registered adapter')), 'the log recorder sees the Nest logger').toBe(true);
     for (const token of plaintexts) {
       expect(responses.filter((r) => r.includes(token)), 'an HTTP response carried a plaintext token').toEqual([]);
       expect(logLines.filter((l) => l.includes(token)), 'a log line carried a plaintext token').toEqual([]);
