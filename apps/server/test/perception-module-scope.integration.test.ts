@@ -31,6 +31,19 @@
  * prompt it is handed), the other context reads of the prompt, and the semantic store (answers nothing; no query is
  * passed to the perception read, so it is never asked). Every case taps fetch and asserts no outbound request.
  *
+ * Review repair (SEC-W1FPMS-1, SEC-W1FPMS-2, COR-W1FPMS-1, COR-W1FPMS-2), pinned in the describe blocks at the end:
+ *  - SEC-W1FPMS-1: a record that named no module was business-wide, so a receipt the owner extracts (document.extracted,
+ *    the whole extraction with its totals), a Drive intake (file.uploaded and ingestion.item.received re-emit it), a
+ *    vendor and a medical claim reached a member whose expenses and revenue scopes are none. They are classified now,
+ *    and a type nobody classified needs read on every module (fails closed).
+ *  - SEC-W1FPMS-2: the position's holder was the reader of whoever texted from the position's phone, a phone the
+ *    position's editor sets and nobody verifies: another member, or no member at all, read the holder's own history.
+ *    The holder is the reader only when the phone is the holder's own account phone and no other member's.
+ *  - COR-W1FPMS-1: a task was filed under projects by the bare word, so a CRM contact task and an autopilot task left a
+ *    member with crm and automations but no projects scope, and reached one with projects alone.
+ *  - COR-W1FPMS-2: a contact-only position perceived no module-named event at all; it now sees what its JobRole map
+ *    grants, as its tools do, but contacts and money (a memberless turn, D-73/D-93).
+ *
  * Fixture prefix v70c_ (V1-70, W1F-PERCEPTION-MODULE-SCOPE), cleaned with sqlLikePrefix().
  */
 import 'reflect-metadata';
@@ -65,6 +78,15 @@ const ID = {
   posContact: `${P}pos_contact`,
   /** The customer of the invoice the overdue watcher finds. */
   customer: `${P}customer`,
+  /**
+   * Review SEC-W1FPMS-2: a STAFF member whose account phone is PHONE.phone, with crm read and revenue and expenses none.
+   * The owner files the role-default STAFF member's position on this member's phone.
+   */
+  phone: `${P}phone`,
+  /** Review COR-W1FPMS-1: STAFF with crm and automations write, and no projects scope (absent: none). */
+  sales: `${P}sales`,
+  /** Review COR-W1FPMS-1: STAFF with projects read, and crm and automations none. */
+  projector: `${P}projector`,
 };
 const m = (who: string) => `${P}m_${who.slice(P.length)}`;
 const BLIND_SCOPES = {
@@ -72,7 +94,14 @@ const BLIND_SCOPES = {
   analytics: 'read', operations: 'read', expenses: 'none', revenue: 'none',
 };
 const REVENUE_SCOPES = { crm: 'read', operations: 'read', revenue: 'read', expenses: 'none' };
-const PHONE = { blind: '+18685557001', contact: '+18685557002' };
+/**
+ * `blind`: the blind member's own account phone, which their position carries (review SEC-W1FPMS-2: the holder is the
+ * reader only on their own phone). `phone`: the account phone of ID.phone. `nobody`: no member's account phone.
+ */
+const PHONE = { blind: '+18685557001', contact: '+18685557002', phone: '+18685557009', nobody: '+18685557010' };
+const SALES_SCOPES = { crm: 'write', automations: 'write', bookings: 'read', operations: 'read', storefront: 'read', content: 'read', revenue: 'read', expenses: 'read' };
+const PROJECTOR_SCOPES = { projects: 'read', crm: 'none', automations: 'none', revenue: 'read', expenses: 'read' };
+const PHONE_SCOPES = { crm: 'read', bookings: 'read', revenue: 'none', expenses: 'none' };
 const PNID = '990000007001';
 const HOST = 'api.v70c.test';
 /** The Twilio auth token the webhook verifies under, built at run time (no literal secret in the suite). */
@@ -99,6 +128,8 @@ let flow: {
   retrievals: { count: number };
 };
 let stripe: any;
+let structure: any;
+let tasks: any;
 let audit: any;
 let businessEvents: any;
 let watcher: any;
@@ -127,6 +158,8 @@ async function cleanup() {
     byBiz('expenses'),
     byBiz('expense_categories'),
     byBiz('chart_of_accounts'),
+    `DELETE FROM task_assignments WHERE task_id LIKE ${sqlLikePrefix(P)}`,
+    byBiz('contact_tasks'),
     `DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     byBiz('invoices'),
     byBiz('contacts'),
@@ -305,6 +338,7 @@ beforeAll(async () => {
   const { CashPositionService } = await import('../src/modules/finance/cash-position.service');
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
   const { DocumentIntelligenceService } = await import('../src/modules/ai/document-intelligence.service');
+  const { TaskAssignmentService } = await import('../src/modules/task-assignments/task-assignment.service');
 
   prisma = new PrismaService();
 
@@ -397,6 +431,25 @@ beforeAll(async () => {
   };
   flow = { orchestrator, prompts, warnings, snapshotViewers, toolSelectionUsers, savedHistories, retrievals };
 
+  const extraction = {
+    documentType: 'receipt',
+    confidence: 0.93,
+    invoiceData: { vendorName: 'V70C-RCPT-VENDOR', total: 3141.59, currency: 'TTD', lineItems: [{ description: 'V70C receipt line', quantity: 1, unitPrice: 3141.59, total: 3141.59 }] },
+    rawText: 'V70C-RCPT-VENDOR receipt 3141.59',
+    suggestedActions: [],
+  };
+  const docIntel = new DocumentIntelligenceService(
+    prisma,
+    events,
+    {} as any,
+    { log: async () => undefined } as any,
+    {} as any,
+    { trackAndComplete: async () => ({ content: JSON.stringify(extraction), toolCalls: [], usage }) } as any,
+    { get: () => undefined } as any,
+  );
+  // Review COR-W1FPMS-1: the real TaskAssignmentService (its ledger row is written for no business, so it is stood in).
+  tasks = new TaskAssignmentService(prisma, { emit: async () => undefined } as any, events);
+
   // App 1: the flow chat routes and the expense and bill routes, behind their real guards.
   const testing = await Test.createTestingModule({
     controllers: [AiFlowController, ExpensesController, BillsController],
@@ -418,7 +471,9 @@ beforeAll(async () => {
       CashPositionService,
       { provide: EventEmitter2, useValue: events },
       { provide: TimelineService, useValue: { recordEvent: async () => null } },
-      { provide: DocumentIntelligenceService, useValue: {} },
+      // Review SEC-W1FPMS-1: the real DocumentIntelligenceService behind POST .../expenses/extract-receipt, its model
+      // call stood in (an extraction with figures), emitting document.extracted through the real EventEmitter2.
+      { provide: DocumentIntelligenceService, useValue: docIntel },
     ],
   }).compile();
   http = testing.createNestApplication();
@@ -438,7 +493,7 @@ beforeAll(async () => {
   const coa = testing.get(ChartOfAccountsSeederService);
 
   // App 2: the WhatsApp webhook, the staff bridge in front of the same orchestrator.
-  const structure = new StructureService(prisma);
+  structure = new StructureService(prisma);
   const oversight = new AiOversightService(prisma, { log: async () => undefined } as any, { recordApprovalSignal: async () => undefined } as any, {} as any, {} as any, jobRolePolicy);
   const bridgeRef = {
     get: (token: unknown) =>
@@ -544,8 +599,13 @@ beforeAll(async () => {
     [ID.revenue, 'USER'],
     [ID.staff, 'USER'],
     [ID.admin, 'SUPER_ADMIN'],
+    [ID.phone, 'USER'],
+    [ID.sales, 'USER'],
+    [ID.projector, 'USER'],
   ] as const) {
-    await db.user.create({ data: { id, email: `${id}@${P}test.local`, role } });
+    // Review SEC-W1FPMS-2: the blind member's position carries their own account phone; ID.phone's is PHONE.phone.
+    const phone = id === ID.blind ? PHONE.blind : id === ID.phone ? PHONE.phone : undefined;
+    await db.user.create({ data: { id, email: `${id}@${P}test.local`, role, ...(phone ? { phone } : {}) } });
   }
   await db.business.create({
     data: { id: ID.biz, name: 'V70C Biz', slug: `${P}biz`, ownerId: ID.owner, currency: 'TTD', metaData: { whatsapp: { provider: 'mock', phoneNumberId: PNID } } },
@@ -555,6 +615,9 @@ beforeAll(async () => {
     [ID.blind, 'STAFF', { permissionScopes: BLIND_SCOPES, maxApprovalTier: 0 }],
     [ID.revenue, 'STAFF', { permissionScopes: REVENUE_SCOPES, maxApprovalTier: 0 }],
     [ID.staff, 'STAFF', { maxApprovalTier: 0 }],
+    [ID.phone, 'STAFF', { permissionScopes: PHONE_SCOPES, maxApprovalTier: 0 }],
+    [ID.sales, 'STAFF', { permissionScopes: SALES_SCOPES, maxApprovalTier: 0 }],
+    [ID.projector, 'STAFF', { permissionScopes: PROJECTOR_SCOPES, maxApprovalTier: 0 }],
   ] as const) {
     await db.membership.create({ data: { id: m(userId), userId, businessId: ID.biz, role, ...extra } });
   }
@@ -591,7 +654,8 @@ const PATHS = ['chat', 'stream'] as const;
  */
 const MONEY: Array<{
   name: string;
-  module: 'expenses' | 'revenue';
+  /** 'money': revenue and expenses both (review SEC-W1FPMS-1: a document carries what was read off an invoice or a receipt). */
+  module: 'expenses' | 'revenue' | 'money';
   types: string[];
   markers: string[];
   business: number;
@@ -723,15 +787,68 @@ const MONEY: Array<{
       }
     },
   },
+  // Review SEC-W1FPMS-1: the families that named no module and carry money.
+  {
+    name: 'a receipt the owner extracts over POST /expenses/businesses/:id/expenses/extract-receipt (DocumentIntelligenceService.extractFromDocument: document.extracted, the whole extraction with its totals)',
+    module: 'money',
+    types: ['document.extracted'],
+    markers: ['3141.59', 'V70C-RCPT-VENDOR'],
+    business: 1,
+    cognitive: 1,
+    write: async () => {
+      const res = await agent().post(`/expenses/businesses/${ID.biz}/expenses/extract-receipt`).set(HEADER, ID.owner)
+        .send({ url: 'https://files.v70c.invalid/receipt.jpg', filename: 'v70c-receipt.jpg' });
+      expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+      expect(res.body.invoiceData.total).toBe(3141.59);
+    },
+  },
+  {
+    name: 'a Drive intake, as ConnectorIntelligenceService.processDriveIntakeFile re-emits the extraction (file.uploaded and ingestion.item.received)',
+    module: 'money',
+    types: ['file.uploaded', 'ingestion.item.received'],
+    markers: ['2718.28', 'V70C-DRIVE-INVOICE'],
+    business: 2,
+    cognitive: 2,
+    write: async () => {
+      const result = { documentType: 'invoice', confidence: 0.9, invoiceData: { invoiceNumber: 'V70C-DRIVE-INVOICE', total: 2718.28, currency: 'TTD' } };
+      events.emit('file.uploaded', { businessId: ID.biz, connectorType: 'google_drive', externalId: `${P}drive_1`, fileName: 'v70c.pdf', mimeType: 'application/pdf', intakeId: `${P}intake_1`, result });
+      events.emit('ingestion.item.received', {
+        businessId: ID.biz,
+        inputs: [{ sourceType: 'google_drive', sourceConnectorType: 'google_drive', externalId: `${P}drive_1`, receivedAt: new Date(), from: { name: 'Google Drive' }, subject: 'v70c.pdf', rawPayload: { driveFileId: `${P}drive_1`, name: 'v70c.pdf', mimeType: 'application/pdf', extractedData: result } }],
+      });
+    },
+  },
+  {
+    name: 'a vendor forwarded by the bridge (vendor.*; no domain emitter yet)',
+    module: 'expenses',
+    types: ['vendor.created'],
+    markers: ['1618.03', 'V70C-VENDOR-SUPPLY'],
+    business: 1,
+    cognitive: 1,
+    write: async () => {
+      events.emit('vendor.created', { businessId: ID.biz, vendor: { id: `${P}vendor_1`, name: 'V70C-VENDOR-SUPPLY', openBalance: 1618.03 } });
+    },
+  },
+  {
+    name: 'a medical claim forwarded by the bridge (claim.*; no domain emitter yet)',
+    module: 'revenue',
+    types: ['claim.submitted'],
+    markers: ['1414.21', 'V70C-CLAIM-77'],
+    business: 1,
+    cognitive: 1,
+    write: async () => {
+      events.emit('claim.submitted', { businessId: ID.biz, claim: { id: `${P}claim_1`, number: 'V70C-CLAIM-77', amountBilled: 1414.21 } });
+    },
+  },
 ];
 
 /** Who may read each module, by their membership (ModuleScopeGuard's reading); the SUPER_ADMIN has none here. */
-const READS: Record<Reader, Record<'expenses' | 'revenue' | 'crm', boolean>> = {
-  blind: { expenses: false, revenue: false, crm: true },
-  revenue: { expenses: false, revenue: true, crm: true },
-  staff: { expenses: true, revenue: true, crm: true },
-  owner: { expenses: true, revenue: true, crm: true },
-  admin: { expenses: false, revenue: false, crm: false },
+const READS: Record<Reader, Record<'expenses' | 'revenue' | 'money' | 'crm', boolean>> = {
+  blind: { expenses: false, revenue: false, money: false, crm: true },
+  revenue: { expenses: false, revenue: true, money: false, crm: true },
+  staff: { expenses: true, revenue: true, money: true, crm: true },
+  owner: { expenses: true, revenue: true, money: true, crm: true },
+  admin: { expenses: false, revenue: false, money: false, crm: false },
 };
 
 describe('W1F-PERCEPTION-MODULE-SCOPE (SEC-W11FPS-3, D-71/D-146, D-57): perception follows module scopes', () => {
@@ -915,7 +1032,7 @@ describe("W1F-PERCEPTION-MODULE-SCOPE, owner ruling D-202 (`bridgememory`): a st
     }
   }, 120_000);
 
-  it("a contact-only position's message (no holder) perceives nobody's history, no money event and no CRM event (no member, so no module scope), and still the business-wide proposal and fact", async () => {
+  it("a contact-only position's message (no holder) perceives nobody's history, no money event and no CRM event (a memberless turn: no contacts and no money, D-73/D-93), and still the business-wide proposal and fact", async () => {
     await clearPerceivedStores();
     await seedHistories();
     await MONEY[3].write();
@@ -931,6 +1048,146 @@ describe("W1F-PERCEPTION-MODULE-SCOPE, owner ruling D-202 (`bridgememory`): a st
       expect(texted).not.toContain('V70C-CONTACT-BRIDGE');
       expect(eventLines(texted, ['GOVERNANCE_DECISION']).length, observed(texted).join(' | ')).toBe(3);
       expect(texted).toContain(FACT);
+      expect(outbound, 'no outbound request').toEqual([]);
+    } finally {
+      await clearPerceivedStores();
+    }
+  }, 120_000);
+});
+
+
+describe('W1F-PERCEPTION-MODULE-SCOPE review (COR-W1FPMS-1): a task is perceived by the module of its own task type, not by the bare word', () => {
+  it("a CRM contact task assigned through the real TaskAssignmentService (task.assigned, ContactTask) and an autopilot task as DelegationLoopService emits it (stored as task.created) reach a member with crm and automations but no projects scope, and not a member with projects alone; the owner gets both (control)", async () => {
+    await clearPerceivedStores();
+    await db.contactTask.create({ data: { id: `${P}ctask_1`, businessId: ID.biz, contactId: ID.customer, title: 'V70C-CTASK call the payer' } });
+    await tasks.assign({ businessId: ID.biz, taskType: 'ContactTask', taskId: `${P}ctask_1`, assignableType: 'User', assignableId: ID.sales, assignedBy: ID.owner });
+    events.emit('autopilot.task.created', {
+      businessId: ID.biz,
+      taskId: `${P}atask_1`,
+      category: 'LEAD_REACTIVATION',
+      loopType: 'lead_reactivation',
+      relatedId: ID.customer,
+    });
+    await waitForRows(['task.assigned', 'task.created'], 2, 2);
+    try {
+      // Premise: the stores hold the shapes the bridge writes (autopilot.'s prefix stripped).
+      const rows = await db.businessEvent.findMany({ where: { businessId: ID.biz, eventType: { in: ['task.assigned', 'task.created'] } }, select: { eventType: true, subjectType: true } });
+      expect(rows.map((r: any) => `${r.eventType}/${r.subjectType}`).sort()).toEqual(['task.assigned/Task', 'task.created/Task']);
+      for (const path of PATHS) {
+        for (const [who, assigned, autopilot] of [
+          [ID.sales, true, true],
+          [ID.projector, false, false],
+          [ID.owner, true, true],
+        ] as const) {
+          const prompt = await turn(who, path);
+          const label = `${who} (${path}): ${observed(prompt).join(' | ')}`;
+          expect(eventLines(prompt, ['task.assigned']).length, `${label}: task.assigned`).toBe(assigned ? 2 : 0);
+          expect(eventLines(prompt, ['task.created']).length, `${label}: task.created`).toBe(autopilot ? 2 : 0);
+        }
+      }
+      expect(outbound, 'no outbound request').toEqual([]);
+    } finally {
+      await clearPerceivedStores();
+      await db.$executeRawUnsafe(`DELETE FROM task_assignments WHERE task_id LIKE ${sqlLikePrefix(P)}`);
+      await db.contactTask.deleteMany({ where: { businessId: ID.biz } });
+    }
+  }, 120_000);
+});
+
+describe('W1F-PERCEPTION-MODULE-SCOPE review (SEC-W1FPMS-2; D-202): the holder is the reader only of a message from their own phone', () => {
+  const PRIVATE = { staff: 'V70C-STAFF-PRIVATE typed: my salary review talk', revenue: 'V70C-REVENUE-PRIVATE typed: my own notes' };
+  const created: string[] = [];
+
+  async function seedPrivate() {
+    for (const who of ['staff', 'revenue'] as const) {
+      await db.cognitionMemory.create({
+        data: { businessId: ID.biz, userId: ID[who], sessionId: `${P}sess_priv_${who}`, query: PRIVATE[who], recommendation: 'v70c: KEY answered', userResponse: 'no_action', confidence: 0.9 },
+      });
+      await db.cortexActionLog.create({
+        data: { businessId: ID.biz, userId: ID[who], sessionId: `${P}sess_priv_${who}`, actionType: `v70c.${who}_private_action`, status: 'success', description: `v70c: the ${who}'s own episode` },
+      });
+    }
+  }
+
+  afterAll(async () => {
+    for (const id of created) await db.orgAssignment.delete({ where: { id } }).catch(() => undefined);
+  });
+
+  it("another member texting from their own phone, which the owner filed on the role-default STAFF member's position (the real StructureService.createAssignment), reads none of the holder's history and no event the holder's scopes allow but theirs refuse; the holder in the app still reads their own (control)", async () => {
+    await clearPerceivedStores();
+    const position = await structure.createAssignment(ID.biz, { orgUnitId: ID.unit, membershipId: m(ID.staff), userId: ID.staff, contactPhone: PHONE.phone }, ID.owner);
+    created.push(position.id);
+    await seedPrivate();
+    await MONEY[3].write();
+    await waitForRows(['payment.received'], 1, 1);
+    try {
+      // Control: the holder in the app reads their own history and the payment (role defaults: revenue read).
+      const inApp = await turn(ID.staff, 'chat');
+      expect(inApp).toContain(PRIVATE.staff);
+      expect(inApp).toContain('4321.09');
+
+      const texted = await bridgeTurn(PHONE.phone);
+      for (const marker of [PRIVATE.staff, PRIVATE.revenue, 'v70c.staff_private_action', 'v70c.revenue_private_action', '4321.09']) {
+        expect(texted, marker).not.toContain(marker);
+      }
+      expect(observed(texted).filter((l) => /^- \[(cognition_memory|cortex_action_log|ai_execution_log)\]/.test(l))).toEqual([]);
+      expect(eventLines(texted, ['payment.received'])).toEqual([]);
+      expect(texted).toContain(FACT);
+      expect(outbound, 'no outbound request').toEqual([]);
+    } finally {
+      await clearPerceivedStores();
+    }
+  }, 120_000);
+
+  it("a message from a phone that is no member's account phone, filed on the revenue member's position, reads none of the holder's history", async () => {
+    await clearPerceivedStores();
+    const position = await structure.createAssignment(ID.biz, { orgUnitId: ID.unit, membershipId: m(ID.revenue), userId: ID.revenue, contactPhone: PHONE.nobody }, ID.owner);
+    created.push(position.id);
+    await seedPrivate();
+    try {
+      // Control: the holder in the app reads their own history.
+      expect(await turn(ID.revenue, 'chat')).toContain(PRIVATE.revenue);
+      const texted = await bridgeTurn(PHONE.nobody);
+      for (const marker of [PRIVATE.revenue, PRIVATE.staff, 'v70c.revenue_private_action']) expect(texted, marker).not.toContain(marker);
+      expect(observed(texted).filter((l) => /^- \[(cognition_memory|cortex_action_log|ai_execution_log)\]/.test(l))).toEqual([]);
+      expect(texted).toContain(FACT);
+      expect(outbound, 'no outbound request').toEqual([]);
+    } finally {
+      await clearPerceivedStores();
+    }
+  }, 120_000);
+});
+
+describe("W1F-PERCEPTION-MODULE-SCOPE review (COR-W1FPMS-2): a contact-only position perceives the modules its JobRole map grants, as its tools do, but contacts and money", () => {
+  it("the contact-only position's message perceives a booking and a project (its JobRole reads bookings and projects), and still no contact and no money; the holder texting from their own phone perceives them too (control)", async () => {
+    await clearPerceivedStores();
+    events.emit('booking.created', { businessId: ID.biz, booking: { id: `${P}booking_1`, businessId: ID.biz, title: 'V70C-BOOKING-0900 site visit' } });
+    events.emit('project.created', { businessId: ID.biz, project: { id: `${P}project_1`, businessId: ID.biz, name: 'V70C-PROJECT-ROOF' } });
+    events.emit('contact.created', { contact: { id: `${P}contact_cor2`, businessId: ID.biz, firstName: 'V70C-CONTACT-COR2' }, businessId: ID.biz });
+    await MONEY[3].write();
+    await waitForRows(['booking.created', 'project.created', 'contact.created', 'payment.received'], 4, 4);
+    try {
+      // Premise: the position's tools reach bookings and projects (JobRolePolicyService.envelopeForJobRole of its map).
+      const { JobRolePolicyService } = await import('../src/modules/structure/job-role-policy.service');
+      const envelope = new JobRolePolicyService().envelopeForJobRole({ id: ID.role, name: 'V70C Staff', permissions: BLIND_SCOPES as any });
+      expect(envelope.approvedTools.some((t: string) => t.startsWith('bookings_'))).toBe(true);
+      expect(envelope.approvedTools.some((t: string) => t.startsWith('projects_'))).toBe(true);
+
+      for (const [label, phone] of [['contact-only', PHONE.contact], ['holder on their own phone', PHONE.blind]] as const) {
+        const texted = await bridgeTurn(phone);
+        const seen = `${label}: ${observed(texted).join(' | ')}`;
+        // Both stores' rows for the contact-only position (five lines with the fact); the holder also reads the contact, so
+        // their six-line window holds at least one row of each.
+        const each = label === 'contact-only' ? 2 : 1;
+        expect(eventLines(texted, ['booking.created']).length, seen).toBeGreaterThanOrEqual(each);
+        expect(eventLines(texted, ['project.created']).length, seen).toBeGreaterThanOrEqual(each);
+        expect(eventLines(texted, ['payment.received']), seen).toEqual([]);
+        expect(texted, seen).not.toContain('4321.09');
+        if (label === 'contact-only') {
+          expect(eventLines(texted, ['contact.created']), seen).toEqual([]);
+          expect(texted, seen).not.toContain('V70C-CONTACT-COR2');
+        }
+      }
       expect(outbound, 'no outbound request').toEqual([]);
     } finally {
       await clearPerceivedStores();

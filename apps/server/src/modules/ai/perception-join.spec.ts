@@ -115,11 +115,37 @@ const prismaStub = {
 /**
  * W1F-PERCEPTION-MODULE-SCOPE (D-202): the envelopes JobRolePolicyService issued (isIssued), as the staff bridge hands
  * chat() one with the position's verified holder (FlowServerContext). A copy is not issued.
+ *
+ * Review SEC-W1FPMS-2 / COR-W1FPMS-2: what a position's turn perceives is what the policy resolved for the position
+ * whose envelope governs the turn (JobRolePolicyService.perceptionOf(envelope)): the member whose own history it reads
+ * (the holder, only when the message came from the holder's own phone) and the modules whose events it sees. The holder
+ * named beside the envelope (positionHolderUserId, which call_create_task reads) is not, by itself, a reader.
  */
-const ISSUED_ENVELOPE = { jobRoleName: 'Staff', approvedTools: [], blockedTools: [], maxRiskTier: 1 };
+type Perception = { readerUserId: string | null; modules: readonly string[] };
+const ISSUED = new Set<unknown>();
+const PERCEPTIONS = new Map<unknown, Perception>();
+/** What a STAFF member on role defaults reads: every event module but team. */
+const STAFF_MODULES = ['revenue', 'expenses', 'crm', 'bookings', 'projects', 'operations', 'storefront', 'content', 'automations'];
+const issuedEnvelope = (perception: Perception | null) => {
+  const envelope = Object.freeze({ jobRoleName: 'Staff', approvedTools: [], blockedTools: [], maxRiskTier: 1 });
+  ISSUED.add(envelope);
+  if (perception) PERCEPTIONS.set(envelope, perception);
+  return envelope;
+};
+const ISSUED_ENVELOPE = issuedEnvelope({ readerUserId: 'user_1', modules: STAFF_MODULES });
 type ServerContext = { jobRoleEnvelope: unknown; positionHolderUserId?: string | null };
-const holderTurn = (holder: string | null, envelope: unknown = ISSUED_ENVELOPE): ServerContext => ({
-  jobRoleEnvelope: envelope,
+/**
+ * A position's turn whose holder is `holder` and whose policy perception names the same holder as its reader (the
+ * message came from the holder's own phone) with `modules`; a contact-only position (null) has no reader. `envelope`
+ * replaces the issued one (a copy is not issued).
+ */
+const holderTurn = (holder: string | null, envelope?: unknown, modules: readonly string[] = holder ? STAFF_MODULES : []): ServerContext => ({
+  jobRoleEnvelope: envelope ?? issuedEnvelope({ readerUserId: holder, modules }),
+  positionHolderUserId: holder,
+});
+/** A position's turn whose holder is `holder` but whose policy perception is `perception` (SEC-W1FPMS-2, COR-W1FPMS-2). */
+const positionTurn = (holder: string | null, perception: Perception | null): ServerContext => ({
+  jobRoleEnvelope: issuedEnvelope(perception),
   positionHolderUserId: holder,
 });
 
@@ -137,8 +163,12 @@ function makeOrchestrator(memory: MemoryStub) {
     getUnifiedMemory: () => memory,
     // W11-FLOW-PERCEPTION-SCOPE: the reader's membership and their own cognition rows are read with it.
     prisma: prismaStub,
-    // W1F-PERCEPTION-MODULE-SCOPE (D-202): whether the staff bridge's envelope is one the policy issued.
-    getJobRolePolicy: () => ({ isIssued: (envelope: unknown) => envelope === ISSUED_ENVELOPE }),
+    // W1F-PERCEPTION-MODULE-SCOPE (D-202): whether the staff bridge's envelope is one the policy issued, and (review
+    // SEC-W1FPMS-2 / COR-W1FPMS-2) what the policy resolved that position's turn perceives.
+    getJobRolePolicy: () => ({
+      isIssued: (envelope: unknown) => ISSUED.has(envelope),
+      perceptionOf: (envelope: unknown) => (ISSUED.has(envelope) ? PERCEPTIONS.get(envelope) ?? null : null),
+    }),
   };
 
   return {
@@ -562,6 +592,72 @@ describe("a staff member on the WhatsApp/SMS bridge perceives their own history 
     const opts = (memory.retrieveContext.mock.calls[0] as unknown as [string, { userId?: string }])[1];
     expect(opts.userId).toBe('user_2');
   });
+
+  // Review SEC-W1FPMS-2: the holder is the reader only when the policy's perception names them (the message came from the
+  // holder's own phone and no other member's). A position held by one member on another person's phone, or on a phone
+  // that is no member's account phone, reads nobody's history: whoever texts from that phone is not shown to be the
+  // holder.
+  it("the holder named beside the envelope is nobody's reader when the policy's perception names no reader (the phone is not the holder's own)", async () => {
+    for (const [label, server] of [
+      ['phone of another member', positionTurn('user_1', { readerUserId: null, modules: [] })],
+      ['no perception resolved for the envelope', positionTurn('user_1', null)],
+    ] as const) {
+      memory.retrieveContext.mockClear();
+      const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', undefined, server);
+      expectNoReaderRead(memory, label);
+      expect(out, label).not.toContain('OWN typed');
+      expect(out, label).not.toContain('OWN-EXEC');
+    }
+  });
+
+  it('the reader the policy names is the reader even when another member is named as the holder (the perception decides)', async () => {
+    await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', undefined, positionTurn('user_2', { readerUserId: 'user_1', modules: STAFF_MODULES }));
+    const opts = (memory.retrieveContext.mock.calls[0] as unknown as [string, { userId?: string }])[1];
+    expect(opts.userId).toBe('user_1');
+  });
+});
+
+describe("a staff position's turn sees the modules the policy resolved for the position (review SEC-W1FPMS-2, COR-W1FPMS-2; D-202, D-73/D-93)", () => {
+  let memory: MemoryStub;
+
+  beforeEach(() => {
+    memory = new MemoryStub();
+    memory.fragments = [
+      { id: 'be_booking', sourceType: 'business_event', title: 'booking.created', entityType: 'Booking', content: 'bookings PUBLISHED Booking: BOOKING-0900' },
+      { id: 'ce_project', sourceType: 'cognitive_event', title: 'project.created', content: 'project.created: PROJECT-ROOF' },
+      { id: 'be_expense', sourceType: 'business_event', title: 'expense.created', entityType: 'Expense', content: 'expenses PUBLISHED Expense: EXPENSE-7777' },
+      { id: 'be_contact', sourceType: 'business_event', title: 'contact.created', entityType: 'Contact', content: 'crm PUBLISHED Contact: CONTACT-ADA' },
+      { id: 'be_proposal', sourceType: 'business_event', title: 'GOVERNANCE_DECISION', entityType: 'key_action_proposal', content: 'PROPOSAL-PENDING' },
+    ];
+  });
+
+  it('a contact-only position (no reader) sees the modules its JobRole map grants, as its tools do: a booking and a project, not money and not contacts', async () => {
+    const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', undefined, positionTurn(null, { readerUserId: null, modules: ['bookings', 'projects', 'operations'] }));
+    expectNoReaderRead(memory, 'contact-only');
+    expect(out).toContain('BOOKING-0900');
+    expect(out).toContain('PROJECT-ROOF');
+    expect(out).toContain('PROPOSAL-PENDING');
+    expect(out).not.toContain('EXPENSE-7777');
+    expect(out).not.toContain('CONTACT-ADA');
+  });
+
+  it("the holder-reader's turn sees the position's modules (the JobRole map capped by the phone members' scopes), not their membership's whole sight", async () => {
+    // user_1 is STAFF on role defaults (reads expenses); the position grants bookings and crm only.
+    const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', undefined, positionTurn('user_1', { readerUserId: 'user_1', modules: ['bookings', 'crm'] }));
+    const opts = (memory.retrieveContext.mock.calls[0] as unknown as [string, { userId?: string }])[1];
+    expect(opts.userId).toBe('user_1');
+    expect(out).toContain('BOOKING-0900');
+    expect(out).toContain('CONTACT-ADA');
+    expect(out).not.toContain('EXPENSE-7777');
+    expect(out).not.toContain('PROJECT-ROOF');
+  });
+
+  it('a reader the policy names who is no member of the business (removed since) reads nothing personal and sees no module (fail closed)', async () => {
+    const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', undefined, positionTurn('user_9', { readerUserId: 'user_9', modules: STAFF_MODULES }));
+    expectNoReaderRead(memory, 'removed holder');
+    for (const marker of ['BOOKING-0900', 'PROJECT-ROOF', 'EXPENSE-7777', 'CONTACT-ADA']) expect(out, marker).not.toContain(marker);
+    expect(out).toContain('PROPOSAL-PENDING');
+  });
 });
 
 describe("no business-wide record of one person's KEY turn or KEY action, for any reader (W11-FLOW-PERCEPTION-SCOPE review SEC-W11FPS-1, SEC-W11FPS-2)", () => {
@@ -591,6 +687,7 @@ describe("no business-wide record of one person's KEY turn or KEY action, for an
       { id: 'be_proposal', sourceType: 'business_event', title: 'ACTION_EXECUTED', entityType: 'key_action_proposal', content: 'ai execute key_action_proposal: PROPOSAL-EXECUTION-RESULT' },
       { id: 'be_insight', sourceType: 'business_event', title: 'insight.generated', entityType: 'KEY_CORTEX_EVENT', content: 'key_cortex PUBLISHED KEY_CORTEX_EVENT: CASHFLOW-DIP' },
       { id: 'be_invoice', sourceType: 'business_event', title: 'invoice.overdue', entityType: 'invoice', content: 'INV-014 overdue' },
+      { id: 'be_governance', sourceType: 'business_event', title: 'GOVERNANCE_DECISION', entityType: 'key_action_proposal', content: 'ai propose key_action_proposal: PROPOSAL-PENDING' },
     ];
   });
 
@@ -607,7 +704,10 @@ describe("no business-wide record of one person's KEY turn or KEY action, for an
       }
       if (userId === 'user_9') expect(out, String(userId)).not.toContain('INV-014 overdue');
       else expect(out, String(userId)).toContain('INV-014 overdue');
-      expect(out, String(userId)).toContain('CASHFLOW-DIP');
+      // Review SEC-W1FPMS-1: a record that names no module (insight.generated) needs read on every module, which no
+      // STAFF member on role defaults (team none) and no caller who is no member holds; the business-wide proposal stays.
+      expect(out, String(userId)).not.toContain('CASHFLOW-DIP');
+      expect(out, String(userId)).toContain('PROPOSAL-PENDING');
     }
   });
 });
