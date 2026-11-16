@@ -186,12 +186,23 @@ export class KeyCortexEthicsService {
       expiresAt: Date.now() + this.CACHE_TTL_MS,
     });
 
-    await this.eventService.logDecision(businessId, {
+    // The decision log is the audit trail of an evaluation already made and
+    // cached: a log that cannot be written must not discard the evaluation. On
+    // a real database it cannot be written today (KeyCortexEventService.logEvent
+    // names columns business_events does not have), and processConsciously
+    // step 7 lost every deliberative answer to it (review UCS-COR-3).
+    try {
+      await this.eventService.logDecision(businessId, {
         decision: `ethical_evaluation:${action}`,
         rationale: explanation,
         confidence: evaluation.confidence,
         source: 'ethics',
       });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      const reason = message.split('\n').map((line) => line.trim()).filter(Boolean).pop() ?? 'unknown error';
+      this.logger.warn(`Decision log for an ethical evaluation not written; the evaluation stands: ${reason.slice(0, 300)}`);
+    }
 
     this.logger.debug(
       `Ethical evaluation of "${action}" for ${businessId}: ${permitted ? 'PERMITTED' : 'DENIED'} in ${Date.now() - startTime}ms`,
