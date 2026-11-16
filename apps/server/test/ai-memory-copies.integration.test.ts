@@ -768,6 +768,9 @@ describe('W1F-MEMORY-COPIES: memory consolidation promotes on a code point and w
       await db.cognitionMemory.createMany({
         data: [
           cognition(null, `${P}fn_across`, ACROSS),
+          // A member's whole answer of the same function that equals the member-less row's cut: the promoted value is
+          // still the member-less row's, so it is not withdrawn (the withdrawal reads a 499-unit value as a cut too).
+          cognition(ID.member, `${P}fn_across`, 'a'.repeat(499), 0.95),
           cognition(null, `${P}fn_inside`, INSIDE),
           cognition(ID.owner, `${P}fn_leak9`, LEAK, 0.95),
         ],
@@ -792,7 +795,8 @@ describe('W1F-MEMORY-COPIES: memory consolidation promotes on a code point and w
       expect(hasLoneSurrogate(across) || hasLoneSurrogate(inside)).toBe(false);
       expect(await app.api.memories(ID.member)).not.toContain('V70B-09-LEAK');
 
-      // The next run keeps the member-less promotions as they are (their cut values are not taken for a member's).
+      // The next run keeps the member-less promotions as they are (their cut values are not taken for a member's, also
+      // where a member's whole answer equals the cut).
       const again = await consolidation.run(ID.biz);
       expect(again).toMatchObject({ promoted: 2, withdrawn: 0 });
       expect(
