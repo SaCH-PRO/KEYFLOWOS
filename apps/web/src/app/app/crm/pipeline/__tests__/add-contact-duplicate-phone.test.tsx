@@ -17,6 +17,13 @@
  *
  * Cases tagged RED-BEFORE fail on the packet's source base: the dialog never opens and the form
  * POSTs the second contact.
+ *
+ * The screen reads two spellings as one number by the server's rule (samePhoneNumber in
+ * apps/server/src/modules/structure/position-holders.ts, which POST .../contacts/check-duplicates
+ * applies): the same digits, or a national number of 7+ digits behind exactly a country calling
+ * code. Digits in front that are no country calling code ('868', '999') do not make a local number
+ * the same as a longer one (SWP-CRM-SEARCH review F1): cases tagged RED-BEFORE-F1 failed at the
+ * packet's first fix, which took any 1 to 3 digits in front as a country code.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -191,6 +198,38 @@ describe("Customers > Add contact (full form): the duplicate check reads phone s
     await submitFullForm("Ravi", "(868) 555-0102");
 
     expect(await screen.findByText("Possible duplicate contact")).toBeInTheDocument();
+    expect(api.posts).toEqual([]);
+  });
+
+  it("RED-BEFORE-F1: a 7-digit local '555-0102' for a contact saved as '868-555-0102' is not a duplicate ('868' is no country calling code): no dialog, the contact is saved", async () => {
+    const api = stubContactsApi({ id: "c_ravi", firstName: "Ravi", lastName: "Persad", phone: "868-555-0102" });
+    render(<ContactsScreenHarness />);
+    await openFullForm();
+    await submitFullForm("Ravi", "555-0102");
+
+    await waitFor(() => expect(api.posts).toHaveLength(1));
+    expect(api.searches).toContain("555-0102");
+    expect(screen.queryByText("Possible duplicate contact")).not.toBeInTheDocument();
+  });
+
+  it("RED-BEFORE-F1: '+999 868 555 0102' for a contact saved as '868-555-0102' is not a duplicate ('999' is no country calling code): no dialog, the contact is saved", async () => {
+    const api = stubContactsApi({ id: "c_ravi", firstName: "Ravi", lastName: "Persad", phone: "868-555-0102" });
+    render(<ContactsScreenHarness />);
+    await openFullForm();
+    await submitFullForm("Ravi", "+999 868 555 0102");
+
+    await waitFor(() => expect(api.posts).toHaveLength(1));
+    expect(screen.queryByText("Possible duplicate contact")).not.toBeInTheDocument();
+  });
+
+  it("CONTROL: '20 7946 0958' for a contact saved as '+44 20 7946 0958' ('44' is a country calling code) opens the dialog", async () => {
+    const api = stubContactsApi({ id: "c_lon", firstName: "Lena", lastName: "Hart", phone: "+44 20 7946 0958" });
+    render(<ContactsScreenHarness />);
+    await openFullForm();
+    await submitFullForm("Lena", "20 7946 0958");
+
+    expect(await screen.findByText("Possible duplicate contact")).toBeInTheDocument();
+    expect(screen.getByText(/We found 1 similar contact\(s\): Lena Hart\./)).toBeInTheDocument();
     expect(api.posts).toEqual([]);
   });
 

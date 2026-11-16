@@ -19,6 +19,14 @@
  * with behind exactly a country calling code. Stored keys are left as they are (no backfill);
  * WA-E164-SERVER stores E.164 from the business's country.
  *
+ * The duplicate check answers only contacts the member may open (SWP-CRM-SEARCH review
+ * SEC-CRMS-1): POST .../contacts/check-duplicates names the holder it matched (id, name, email,
+ * phone and keys), and the id is a working key, so a holder the member is denied on
+ * GET contacts/:contactId (a 'my book' STAFF, or a view-all STAFF against another member's
+ * PRIVATE row) is not matched there either, by the M7 rule rejectContactIdentityTaken applies. The
+ * route read the whole tenant before (the exact key only); the reading of other spellings widened
+ * what it handed out.
+ *
  * Stale: GET ?staleDays=N (the Customers 'stale' filter sends 14) listed every contact with no
  * booking in the window, so a contact added a minute ago was "stale". A contact created inside
  * the window is not stale yet; one created before it, with no booking since, still is.
@@ -50,6 +58,7 @@ const P = 'v63i_';
 const ID = {
   owner: `${P}owner`,         // OWNER of bizA
   staffOwned: `${P}staffOwn`, // STAFF of bizA, 'my book' (crm_view=owned)
+  staffAll: `${P}staffAll`,   // STAFF of bizA, view-all (crm_view=all): every TEAM row, no other member's PRIVATE row
   ownerB: `${P}ownerB`,       // OWNER of bizB only
   bizA: `${P}bizA`,
   bizB: `${P}bizB`,
@@ -62,6 +71,8 @@ const ID = {
   abc: `${P}c_abc`,           // first name 'Tabcde' (a '_' reads as any one character)
   noelB: `${P}c_noelB`,       // bizB, tag 'Christmas 2026'
   old: `${P}c_old`,           // created 40 days ago, no booking: stale
+  priv: `${P}c_priv`,         // PRIVATE, owned by the OWNER, phone '+1 868 555 0177'
+  mine: `${P}c_mine`,         // owned by the my-book STAFF, phone '868-555-0144'
 };
 
 let db: any;
@@ -219,7 +230,7 @@ beforeAll(async () => {
   await cleanup(); // in case a prior run aborted
 
   // ---- identities, tenants, memberships ----------------------------------
-  for (const suffix of ['owner', 'staffOwn', 'ownerB']) {
+  for (const suffix of ['owner', 'staffOwn', 'staffAll', 'ownerB']) {
     await db.user.create({ data: { id: `${P}${suffix}`, email: `${P}${suffix}@test.local`, role: 'USER' } });
   }
   await db.business.create({ data: { id: ID.bizA, name: 'V63I Biz A', ownerId: ID.owner } });
@@ -229,6 +240,12 @@ beforeAll(async () => {
     data: {
       id: `${P}m_staff_bizA`, userId: ID.staffOwned, businessId: ID.bizA, role: 'STAFF',
       permissionScopes: { crm: 'write', crm_view: 'owned', crm_edit: 'owned' },
+    },
+  });
+  await db.membership.create({
+    data: {
+      id: `${P}m_staffAll_bizA`, userId: ID.staffAll, businessId: ID.bizA, role: 'STAFF',
+      permissionScopes: { crm: 'write', crm_view: 'all', crm_edit: 'owned' },
     },
   });
   await db.membership.create({ data: { id: `${P}m_ownerB_bizB`, userId: ID.ownerB, businessId: ID.bizB, role: 'OWNER' } });
@@ -245,6 +262,15 @@ beforeAll(async () => {
   await seed(ID.noelB, ID.bizB, { firstName: 'Noel', tags: ['Christmas 2026'] });
   await seed(ID.old, ID.bizA, { firstName: 'Olden', tags: [] });
   await db.$executeRawUnsafe(`UPDATE contacts SET created_at = now() - interval '40 days' WHERE id = '${ID.old}'`);
+  // The keys are the ones normalizePhone / normalizeEmail store for these spellings (asserted below).
+  await seed(ID.priv, ID.bizA, {
+    firstName: 'Priya', lastName: 'Private', visibility: 'PRIVATE', ownerId: ID.owner,
+    phone: '+1 868 555 0177', phoneNormalized: '+18685550177',
+    email: `${P}priya.private@example.test`, emailNormalized: `${P}priya.private@example.test`,
+  });
+  await seed(ID.mine, ID.bizA, {
+    firstName: 'Mina', ownerId: ID.staffOwned, phone: '868-555-0144', phoneNormalized: '8685550144',
+  });
 
   // ---- contacts created through the API (phone keys from the write path) --
   const created = async (key: string, actor: string, businessId: string, body: Record<string, unknown>) => {
@@ -279,6 +305,13 @@ describe('fixture sanity (real rows)', () => {
     expect(byId.get(viaApi.asha)).toMatchObject({ phone: '+1 868 555 0102', phoneNormalized: '+18685550102' });
     expect(byId.get(viaApi.raviB)).toMatchObject({ phoneNormalized: '8685550101' });
     expect((await db.contact.findUnique({ where: { id: ID.noel } })).tags).toEqual(['Christmas 2026']);
+    const { normalizePhone, normalizeEmail } = await import('../src/modules/crm/crm-duplicate.util');
+    expect(normalizePhone('+1 868 555 0177')).toBe('+18685550177');
+    expect(normalizePhone('868-555-0144')).toBe('8685550144');
+    expect(normalizeEmail(`${P}priya.private@example.test`)).toBe(`${P}priya.private@example.test`);
+    // Ravi came in through the OWNER's POST: a TEAM row no 'my book' STAFF owns.
+    expect(await db.contact.findUnique({ where: { id: viaApi.ravi }, select: { visibility: true, ownerId: true } }))
+      .toMatchObject({ visibility: 'TEAM' });
   });
 });
 
@@ -398,6 +431,16 @@ describe('BUG-083 — POST .../contacts/check-duplicates reads phone spellings a
     expect(res.body.newCount).toBe(1);
   });
 
+  it("CONTROL: digits in front that are no country calling code do not make another number the same: '555-0101' (a local number behind '868') and '+999 868 555 0101' match nothing (the add form's check reads the same rule, review F1)", async () => {
+    const res = await checkDuplicates(ID.owner, ID.bizA, [
+      { phone: '555-0101' },
+      { phone: '+999 868 555 0101' },
+    ]);
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+    expect(res.body.duplicates).toEqual([]);
+    expect(res.body.newCount).toBe(2);
+  });
+
   it("RED-BEFORE: in bizB, '+1 868 555 0101' matches bizB's own Ravi, never bizA's contacts", async () => {
     const res = await checkDuplicates(ID.ownerB, ID.bizB, [
       { firstName: 'Ravi', phone: '+1 868 555 0101' },
@@ -408,6 +451,78 @@ describe('BUG-083 — POST .../contacts/check-duplicates reads phone spellings a
     expect(res.body.duplicates[0]).toMatchObject({ importIndex: 0, matchField: 'phone', existingContact: { id: viaApi.raviB } });
     expect(JSON.stringify(res.body)).not.toContain(viaApi.ravi);
     expect(JSON.stringify(res.body)).not.toContain(viaApi.asha);
+  });
+});
+
+describe('SEC-CRMS-1 — check-duplicates answers only contacts the member may open (M7)', () => {
+  function detail(actor: string, contactId: string) {
+    return request(app.getHttpServer())
+      .get(`/crm/businesses/${ID.bizA}/contacts/${contactId}`)
+      .set('x-test-user', actor);
+  }
+
+  /** Nothing of a hidden holder in the answer: its id, its name, its stored keys. */
+  function expectNoTraceOf(body: unknown, ...needles: string[]) {
+    const text = JSON.stringify(body);
+    for (const needle of needles) expect(text, `the answer names ${needle}`).not.toContain(needle);
+  }
+
+  it("CONTROL: the premise: GET detail refuses the my-book STAFF Ravi and Priya (404) and opens their own Mina; the view-all STAFF opens Ravi, not Priya", async () => {
+    expect((await detail(ID.staffOwned, viaApi.ravi)).status).toBe(404);
+    expect((await detail(ID.staffOwned, ID.priv)).status).toBe(404);
+    expect((await detail(ID.staffOwned, ID.mine)).status).toBe(200);
+    expect((await detail(ID.staffAll, viaApi.ravi)).status).toBe(200);
+    expect((await detail(ID.staffAll, ID.priv)).status).toBe(404);
+  });
+
+  it("RED-BEFORE: a my-book STAFF gets no duplicate for Ravi (any spelling, the exact one too) or Priya (phone or email); their own Mina is still matched", async () => {
+    const res = await checkDuplicates(ID.staffOwned, ID.bizA, [
+      { phone: '+1 868 555 0101' },
+      { phone: '868-555-0101' },
+      { email: `${P}PRIYA.private@example.test` },
+      { phone: '868-555-0177' },
+      { phone: '+1 868 555 0144' },
+    ]);
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+    expect(res.body.total).toBe(5);
+    expect(res.body.duplicates).toHaveLength(1);
+    expect(res.body.duplicates[0]).toMatchObject({ importIndex: 4, matchField: 'phone', existingContact: { id: ID.mine, firstName: 'Mina' } });
+    expect(res.body.duplicateCount).toBe(1);
+    expect(res.body.newCount).toBe(4);
+    expectNoTraceOf(res.body, viaApi.ravi, ID.priv, 'Ravi', 'Priya', 'Private', '8685550101', '+18685550177');
+  });
+
+  it("RED-BEFORE: a view-all STAFF gets no duplicate for another member's PRIVATE Priya (phone in any spelling, or email); the TEAM row Ravi is still matched", async () => {
+    const res = await checkDuplicates(ID.staffAll, ID.bizA, [
+      { phone: '868-555-0177' },
+      { phone: '1 868 555 0177' },
+      { phone: '+1 868 555 0177' },
+      { email: `${P}priya.private@example.test` },
+      { phone: '+1 868 555 0101' },
+    ]);
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+    expect(res.body.duplicates).toHaveLength(1);
+    expect(res.body.duplicates[0]).toMatchObject({ importIndex: 4, matchField: 'phone', existingContact: { id: viaApi.ravi } });
+    expect(res.body.duplicateCount).toBe(1);
+    expect(res.body.newCount).toBe(4);
+    expectNoTraceOf(res.body, ID.priv, 'Priya', 'Private', 'priya.private', '+18685550177');
+  });
+
+  it('CONTROL: the OWNER, who opens every row, still gets Priya for her phone in another spelling and for her email', async () => {
+    const res = await checkDuplicates(ID.owner, ID.bizA, [
+      { phone: '868-555-0177' },
+      { email: `${P}priya.private@example.test` },
+    ]);
+    expect(res.status).toBe(201);
+    const byIndex = new Map<number, any>(res.body.duplicates.map((d: any) => [d.importIndex, d]));
+    expect(byIndex.get(0)).toMatchObject({ matchField: 'phone', existingContact: { id: ID.priv } });
+    expect(byIndex.get(1)).toMatchObject({ matchField: 'email', existingContact: { id: ID.priv } });
+  });
+
+  it('CONTROL: the list search stays bound by the same rule (the my-book STAFF finds Mina, not Ravi; the view-all STAFF does not find Priya)', async () => {
+    expect(await search(ID.staffOwned, ID.bizA, '+1 868 555 0101')).toEqual([]);
+    expect(await search(ID.staffOwned, ID.bizA, '+1 868 555 0144')).toEqual([ID.mine]);
+    expect(await search(ID.staffAll, ID.bizA, '868-555-0177')).toEqual([]);
   });
 });
 
