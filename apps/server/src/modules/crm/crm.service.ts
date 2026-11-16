@@ -18,10 +18,10 @@ import { CrmListsService } from './crm-lists.service';
 import { CrmFlowService } from './crm-flow.service';
 import { ContactAuditService, ContactAuditActor } from './privacy/contact-audit.service';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
-import { buildContactWhere } from './contact-filters.helper';
+import { buildContactWhere, findSearchTags } from './contact-filters.helper';
 import { resolveCrmAccess, visibilityClause, type CrmAccess } from './crm-permissions.helper';
 import { resolveTimelineViewer } from '../timeline/timeline-visibility';
-import { normalizeEmail, normalizePhone, findExistingBulk } from './crm-duplicate.util';
+import { normalizeEmail, normalizePhone, findExistingBulk, findPhoneKeyMatch } from './crm-duplicate.util';
 import { CONTACT_EVENT } from '@keyflow/shared';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
 
@@ -430,17 +430,22 @@ export class CrmService {
       }
     }
 
+    // SWP-CRM-SEARCH (BUG-081): the full-text hits (search_vector, filled only where the archived
+    // trigger still runs) are added to the field search, never put in its place, and the field
+    // search matches a tag by any part of it, in any case (findSearchTags).
     let searchContactIds: string[] | undefined;
+    let searchTags: string[] | undefined;
     if (input.search?.trim()) {
       const tsIds = await this.searchContactIdsByTsvector(input.businessId, input.search.trim());
       if (tsIds.length > 0) {
         searchContactIds = tsIds;
       }
+      searchTags = await findSearchTags(this.prisma, input.businessId, input.search);
     }
 
     const where: any = buildContactWhere(input.businessId, {
       status: input.status,
-      search: searchContactIds ? undefined : input.search,
+      search: input.search,
       hasUnpaidInvoices: input.hasUnpaidInvoices,
       hasUpcomingBookings: input.hasUpcomingBookings,
       hasOpenDeals: input.hasOpenDeals,
@@ -463,10 +468,10 @@ export class CrmService {
       pipelineStages: input.pipelineStages,
       favorite: input.favorite,
       includeArchived: input.includeArchived,
-    });
+    }, { searchTags });
 
     if (searchContactIds) {
-      where.id = { in: searchContactIds };
+      where.OR = [...(where.OR ?? []), { id: { in: searchContactIds } }];
     }
 
     if (revenueContactIds) {
@@ -2647,7 +2652,17 @@ export class CrmService {
     return this.lists.removeContactFromList(input);
   }
 
-  async checkDuplicates(businessId: string, contacts: Array<{ email?: string | null; phone?: string | null; firstName?: string | null; lastName?: string | null }>) {
+  /**
+   * POST .../contacts/check-duplicates: which rows of an import already have a contact, and which
+   * one. Only contacts `actorUserId` may open are matched (findExistingBulk applies the M7
+   * visibility clause; SWP-CRM-SEARCH review SEC-CRMS-1): the answer names the holder, and a
+   * holder the member is denied on GET detail reads as a new row here.
+   */
+  async checkDuplicates(
+    businessId: string,
+    contacts: Array<{ email?: string | null; phone?: string | null; firstName?: string | null; lastName?: string | null }>,
+    actorUserId: string,
+  ) {
     const limited = contacts.slice(0, 100);
     const emails = limited
       .map((c) => normalizeEmail(c.email))
@@ -2656,7 +2671,7 @@ export class CrmService {
       .map((c) => normalizePhone(c.phone))
       .filter((p): p is string => !!p);
 
-    const { existingByEmail, existingByPhone } = await findExistingBulk(this.prisma, businessId, emails, phones);
+    const { existingByEmail, existingByPhone } = await findExistingBulk(this.prisma, businessId, emails, phones, actorUserId);
 
     const duplicates: Array<{
       importIndex: number;
@@ -2681,7 +2696,8 @@ export class CrmService {
         }
       }
       if (!matched && normalizedPhoneVal) {
-        const match = existingByPhone.find((e) => e.phoneNormalized === normalizedPhoneVal);
+        // The same number in any spelling (SWP-CRM-SEARCH, BUG-083), the exact key first.
+        const match = findPhoneKeyMatch(existingByPhone, normalizedPhoneVal);
         if (match) {
           duplicates.push({ importIndex: i, importContact: c, existingContact: match, matchField: 'phone' });
           matched = true;
