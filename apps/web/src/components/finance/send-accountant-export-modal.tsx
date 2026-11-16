@@ -10,16 +10,28 @@ import { isModuleScopeRefusal } from "@/lib/module-scope-refusal";
  * FU-FINANCE-SETTINGS-SCOPE (V1-71): the server refuses a send that saves a new accountant address (saveRecipient)
  * unless the member holds settings admin and revenue read: "Insufficient permissions: saving the accountant's email
  * address, which receives the business's books (the accountant export), needs settings admin access (you have none)".
- * The whole request is undone (nothing sent, nothing written), so the box says that, says how to send without saving,
- * and claims nothing.
+ * The whole request is undone (nothing sent, nothing written), so the box says that and claims nothing.
+ *
+ * Repair (review FSS-CR-2): the words say what this box refused, saving a new default from here, and no wider rule:
+ * PATCH settings still writes the address for every revenue reader until owner question 19 is answered (required
+ * Release 0 cases D11F-F05, F06 and F11 pin it). Review FSS-CR-3: with no saved address "Remember" starts ticked, so a
+ * member without settings admin is refused on a first send; the box unticks it and offers "Send without saving", the
+ * same address in one click.
  */
 export const ACCOUNTANT_SAVE_REFUSED =
-  "Nothing was sent, and the saved accountant address was not changed: only a member who manages this business's settings and can see its books can change where the accountant export goes. Untick “Remember this as the default recipient” to send it without saving the address.";
+  "Nothing was sent, and the saved accountant address was not changed: saving a new default recipient from here needs settings admin access in this business. You can still send the export to this address without saving it.";
+
+type SendAnswer = { error?: string | null; status?: number } | null | undefined;
+
+/** Whether a send was refused for its saveRecipient (the server's binding refusal), not for the send itself. */
+export function isAccountantSaveRefusal(res: SendAnswer): boolean {
+  return Boolean(res && res.error && res.status === 403 && /\baccountant's email address\b/.test(res.error));
+}
 
 /** What the accountant box says when a send is answered with an error, in plain words, or null when it went through. */
-export function accountantSendRefusal(res: { error?: string | null; status?: number } | null | undefined): string | null {
+export function accountantSendRefusal(res: SendAnswer): string | null {
   if (!res || !res.error) return null;
-  if (res.status === 403 && /\baccountant's email address\b/.test(res.error)) return ACCOUNTANT_SAVE_REFUSED;
+  if (isAccountantSaveRefusal(res)) return ACCOUNTANT_SAVE_REFUSED;
   if (isModuleScopeRefusal(res, "revenue")) return "Nothing was sent: sending the accountant export needs access to this business's books.";
   return `Nothing was sent. ${res.error}`;
 }
@@ -44,25 +56,33 @@ export function SendAccountantExportModal({
   const [saveDefault, setSaveDefault] = useState(!defaultEmail);
   const [sending, setSending] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
+  // Review FSS-CR-3: the saveRecipient was refused, so the box offers the same send without saving.
+  const [offerUnsaved, setOfferUnsaved] = useState(false);
 
-  const submit = async () => {
+  const submit = async (saveRecipient: boolean) => {
     if (!to.trim()) {
       toast.error("Recipient email is required");
       return;
     }
     setSending(true);
     setRefusal(null);
+    setOfferUnsaved(false);
     const r = await sendAccountantExportEmail(businessId, {
       start, end,
       to: to.trim(),
       message: message.trim() || null,
-      saveRecipient: saveDefault,
+      saveRecipient,
     });
     setSending(false);
     const refused = accountantSendRefusal(r);
     if (refused) {
-      // The box stays open with what was typed: the member can untick "Remember" and send again.
+      // The box stays open with what was typed. A refused save of the recipient unticks "Remember" (so a plain Send
+      // does not ask again) and offers "Send without saving".
       setRefusal(refused);
+      if (isAccountantSaveRefusal(r)) {
+        setSaveDefault(false);
+        setOfferUnsaved(true);
+      }
       toast.error(refused);
       return;
     }
@@ -124,6 +144,17 @@ export function SendAccountantExportModal({
               {refusal}
             </p>
           )}
+          {offerUnsaved && (
+            <button
+              type="button"
+              onClick={() => submit(false)}
+              disabled={sending || !to.trim()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-border hover:bg-card disabled:opacity-50"
+            >
+              <Send className="w-3.5 h-3.5" />
+              Send without saving
+            </button>
+          )}
         </div>
         <div className="px-4 py-3 border-t border-border flex items-center justify-end gap-2">
           <button
@@ -135,7 +166,7 @@ export function SendAccountantExportModal({
           </button>
           <button
             type="button"
-            onClick={submit}
+            onClick={() => submit(saveDefault)}
             disabled={sending || !to.trim()}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
           >

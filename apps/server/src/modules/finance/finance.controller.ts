@@ -584,8 +584,14 @@ export class FinanceController {
    * accounts, so the read needs revenue read, the read of the books that
    * address receives (ModuleScopeGuard: 403 before the handler, nothing read).
    * It was membership-only: a STAFF member with bookings and crm read only
-   * read every setting. Its readers are the finance pages (settings, tax,
+   * read every setting. Its web readers are the finance pages (settings, tax,
    * reports). ensureAccess stays (D-46).
+   * NOT A CONFINEMENT (review SEC-V71-2, open follow-up): GET
+   * /identity/businesses and GET /identity/businesses/:businessId still answer
+   * accountantEmail and the finance settings columns (basis, fiscal year,
+   * default tax rate, default account ids) to every member (sanitizeBusiness
+   * keeps them), so this gate does not keep the saved recipient from a member
+   * without revenue read; the identity projections are outside this packet.
    */
   @UseGuards(ModuleScopeGuard)
   @RequireModuleScope('revenue', 'read')

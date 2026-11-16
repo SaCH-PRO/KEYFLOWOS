@@ -68,15 +68,12 @@ export default function FinanceSettingsPage() {
  * FU-FINANCE-SETTINGS-SCOPE (V1-71): what the General section says when a save is answered with an error, in plain
  * words, or null when it went through. The PATCH refuses a submission as a whole (nothing of it is written), so the page
  * says nothing was saved and never shows "Settings saved". GET and PATCH settings need revenue read; the default tax
- * rate is the owner's (D-11, the server's own words); a refusal of the accountant address (its saved recipient binds
- * where the books go) says who may change it.
+ * rate is the owner's (D-11, the server's own words). Repair (review FSS-CR-2): no accountant-address branch: PATCH
+ * settings answers no such refusal at this head (owner question 19 holds that rule); it comes back with the rule.
  */
 function financeSettingsSaveRefusal(res: { error?: string | null; status?: number } | null | undefined): string | null {
   if (!res || !res.error) return null;
   if (isModuleScopeRefusal(res, "revenue")) return "Nothing was saved. You can't change the finance settings in this business: it needs access to its books.";
-  if (res.status === 403 && /\baccountant's email address\b/.test(res.error)) {
-    return "Nothing was saved. Only a member who manages this business's settings and can see its books can change where the accountant export goes.";
-  }
   return `Nothing was saved. ${res.error}`;
 }
 

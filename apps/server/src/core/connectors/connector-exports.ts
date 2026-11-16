@@ -85,12 +85,15 @@ export async function assertMayBindExport(
  * settings-admin guard in front of it. The connector and channel binding routes carry settings admin on the route
  * (RequireModuleScope + ModuleScopeGuard) and call assertMayBindExport for the reads; POST
  * finance/.../accountant-export/email is open to every revenue reader (each sends the export to an address they name and
- * read everything sent) and only its saveRecipient binds a destination, Business.accountantEmail, so the check is made
+ * read everything sent) and its saveRecipient binds a destination, Business.accountantEmail, so the check is made
  * here: settings admin, then the reads of what the destination receives (CONNECTOR_EXPORT_READS), both read as
  * ModuleScopeGuard reads them (memberModuleLevel: the explicit map, else the role defaults; a SUPER_ADMIN is admin) and
  * refused with the same shape (403 "Insufficient permissions: <what> needs <module> <level> access (you have <level>)").
  * The owner (every module admin by role default) and a platform SUPER_ADMIN pass, as they do there. A type with no reads
  * named is a programming error and refuses (fails closed).
+ * OPEN (review SEC-V71-1 / FSS-CR-1, owner question 19): PATCH finance/.../settings writes the same column under revenue
+ * read alone, so until required Release 0 cases D11F-F05, F06 and F11 are amended and this rule applied there, every
+ * member it refuses here can still change the saved recipient through that route.
  */
 export async function assertMaySetExportDestination(
   prisma: PrismaService,

@@ -234,6 +234,15 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
    D11F-F05, F06, F11: a STAFF member on role defaults, revenue read and settings none, and an ADMIN with settings write
    change accountantEmail, accountingBasis, fiscalYearStartMonth and defaultCashAccountId, 200), which no r0_register
    row of the packet approves. Applying it needs that amendment.**
+   **Review of 72d47256 (SEC-V71-1, FSS-CR-1, reproduced on Postgres): until that amendment the saveRecipient check
+   protects nothing: every member it refuses (STAFF on role defaults, a revenue:read or revenue:write STAFF member, an
+   ADMIN with settings write) writes the same column through PATCH settings (200), and the owner's next send without a
+   `to` goes to that address. Owner ruling needed: amend D11F-F05, F06 and F11 (an r0updates row) so PATCH settings'
+   accountantEmail needs settings admin and revenue read and its other fields revenue write. The accountant box says
+   only what it refused ("saving a new default recipient from here needs settings admin access") and offers "Send
+   without saving" (FSS-CR-2, FSS-CR-3). Open, outside the packet (SEC-V71-2): GET /identity/businesses and
+   /identity/businesses/:businessId answer accountantEmail and the finance settings columns to every member
+   (sanitizeBusiness keeps them), so the GET settings gate is not a confinement of the saved recipient.**
 
 ## KEY follow-ups and seams
 
@@ -1533,7 +1542,7 @@ Every other route is applied (above).
 | `FinanceController.disposeFixedAsset` | POST | `/finance/businesses/:businessId/fixed-assets/:id/dispose` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.fileTaxLiability` | POST | `/finance/businesses/:businessId/tax-liabilities/:id/file` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.fileTaxLiabilityAlias` | POST | `/finance/businesses/:businessId/tax/liabilities/:id/file` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
-| `FinanceController.getSettings` | GET | `/finance/businesses/:businessId/settings` | applied | `revenue:read` (FU-FINANCE-SETTINGS-SCOPE, V1-71): the finance settings answer the accountant export's saved recipient (Business.accountantEmail), so the read needs the read of the books it receives; it was membership-only (books-read-scope.spec.ts BRS-U05) |
+| `FinanceController.getSettings` | GET | `/finance/businesses/:businessId/settings` | applied | `revenue:read` (FU-FINANCE-SETTINGS-SCOPE, V1-71): the finance settings answer the accountant export's saved recipient (Business.accountantEmail), so the read needs the read of the books it receives; it was membership-only (books-read-scope.spec.ts BRS-U05). Not a confinement: GET /identity/businesses and /identity/businesses/:businessId still answer the same columns to every member (review SEC-V71-2, open) |
 | `FinanceController.ignoreBankRow` | POST | `/finance/businesses/:businessId/bank-transactions/:bankTransactionId/ignore` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.importBankCsv` | POST | `/finance/businesses/:businessId/accounts/:accountId/bank-transactions/import` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.manualMatch` | POST | `/finance/businesses/:businessId/bank-transactions/:bankTransactionId/match` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
