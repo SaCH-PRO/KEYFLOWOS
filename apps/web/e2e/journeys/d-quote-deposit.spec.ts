@@ -8,6 +8,7 @@ import {
   settle,
   type Tenant,
 } from "./journey-helpers";
+import { amountAfter } from "./journey-text";
 import type { APIRequestContext, Locator, Page } from "@playwright/test";
 
 /**
@@ -282,12 +283,6 @@ async function copiedBy(page: Page, click: () => Promise<void>): Promise<string>
   return page.evaluate(() => (window as unknown as { __kfCopied: string[] }).__kfCopied.at(-1) ?? "");
 }
 
-/** The first amount shown after a label in a block of text ("Revenue TTD 400.00" -> 400). */
-function amountAfter(text: string, label: RegExp): number | null {
-  const m = text.match(new RegExp(`(?:${label.source})[^0-9-]{0,40}(-?[0-9][0-9,]*(?:\\.[0-9]{1,2})?)`, label.flags.includes("i") ? "i" : ""));
-  return m ? Number(m[1].replace(/,/g, "")) : null;
-}
-
 test.describe("journey D: quote, accept, invoice, deposit", () => {
   test("D1 KEY on: a pasted WhatsApp message drafts the quote lines from the real catalog", { tag: "@ai-on" }, async ({ page, request, owner }) => {
     test.setTimeout(5 * 60_000);
@@ -379,8 +374,11 @@ test.describe("journey D: quote, accept, invoice, deposit", () => {
       expect(target.hostname).toMatch(/(^|\.)wa\.me$|whatsapp\.com$/);
       expect(target.pathname.replace(/\D/g, "") || target.searchParams.get("phone"), "the customer's own number, E.164").toBe(customer.e164Digits);
       const text = target.searchParams.get("text") ?? "";
-      const read = await api<Quote>(request, owner, "GET", `/commerce/businesses/${owner.businessId}/quotes/${quote.id}`);
-      expect(text, "the message carries the tokenized quote link").toContain(`/quote/${read.viewToken}`);
+      // The customer's token is the one the send handed over (seedQuote keeps it); the operator's
+      // read of the quote never carries it (SEC-V52-1: a member with revenue:read must not hold the
+      // customer's accept link).
+      expect(quote.viewToken, "the sent quote's /quote/<token>").toBeTruthy();
+      expect(text, "the message carries the tokenized quote link").toContain(`/quote/${quote.viewToken}`);
     });
 
     await test.step("Copy link copies the /quote/<token> link", async () => {
@@ -418,8 +416,10 @@ test.describe("journey D: quote, accept, invoice, deposit", () => {
       for (const item of quote.items) expect.soft(text.includes(item.description), `line '${item.description}'`).toBe(true);
     });
     await test.step("subtotal, discount, tax and total, as the server computed them", async () => {
+      // Read as the invoice public page lays its totals out ('Tax (12.5%) TTD 130.00', 'Discount
+      // -TTD 104.00'): the discount is compared by its size, shown with a minus or without.
       expect.soft(amountAfter(text, /subtotal/i), "Subtotal").toBe(Number(quote.subtotal));
-      expect.soft(amountAfter(text, /discount/i), "Discount").toBe(Number(quote.discountAmount));
+      expect.soft(Math.abs(amountAfter(text, /discount/i) ?? Number.NaN), "Discount, by its size (NaN: no amount after 'Discount')").toBe(Number(quote.discountAmount));
       expect.soft(amountAfter(text, /\btax\b/i), "Tax").toBe(Number(quote.taxAmount));
       expect.soft(text.includes(money(Number(quote.total))), `Total ${money(Number(quote.total))}`).toBe(true);
     });

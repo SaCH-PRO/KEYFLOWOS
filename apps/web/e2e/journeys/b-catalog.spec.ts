@@ -22,13 +22,16 @@ import { crc32, deflateSync } from "node:zlib";
  *       currency, tax, optional SKU and stock; edit and archive work; a photo,
  *       if offered, uploads to the server and shows on another device.
  *   B2  Schedule > Services > New creates a service with name, price, duration,
- *       staff and an optional deposit.
+ *       staff and an optional deposit (read back: the price, duration and the
+ *       deposit's type and value as stored, and, after a reload, the staff
+ *       member and the deposit in the service's Edit).
  *   B3  Each item appears exactly once in the quote and the invoice line picker.
  *   B4  'Add to store' shows it exactly once on /book/<slug>; 'Remove from store'
  *       removes it (storelisting ruling D-185: only products added to the store show).
  *   B5  An edit shows everywhere after one reload.
- *   B6  Archiving hides the item from new documents only.
- *   B7  Applying a business template twice adds nothing.
+ *   B6  Archiving hides the item from new documents only (read once the line
+ *       picker lists an active product, so an unread picker never passes).
+ *   B7  Applying a business template twice adds nothing (products and services).
  *
  * Doors (the packets that turn these green build to them):
  *   - Sales > Products is /app/commerce/products (CATALOG-1), reached from a
@@ -39,7 +42,10 @@ import { crc32, deflateSync } from "node:zlib";
  *   - Schedule > Services is the services editor in Schedule; today it is
  *     Bookings > Setup (/app/bookings?tab=catalog), which SWP-SERVICE-DEPOSIT
  *     extends with the deposit fields; its create button is "New service" (or
- *     "Add service"), with fields Name, Price, Duration, Staff and Deposit.
+ *     "Add service"), with fields Name, Price, Duration, Staff and Deposit
+ *     (a deposit type, when asked, offers a percentage); each service row
+ *     offers Edit, which shows what is stored (B2 reads the staff member and
+ *     the deposit back there: the service list read carries no staff).
  *   - The line picker is the product choice on each line of New invoice
  *     (/app/commerce/invoices/new) and of the New Quote sheet (Sales > Quotes >
  *     New Quote).
@@ -330,6 +336,16 @@ test.describe("journey B: set up what I sell", () => {
       if ((await staffField.evaluate((el) => el.tagName)) === "SELECT") await staffField.selectOption({ label: staff.name });
       else await form.getByRole("checkbox", { name: staff.name }).check();
       await form.getByLabel(/deposit/i).first().check().catch(async () => form.getByLabel(/deposit/i).first().click());
+      // A percentage deposit: the type, when the form asks, is the percentage one.
+      const type = form.getByLabel(/deposit type/i);
+      const percent = form.getByRole("radio", { name: /percent|%/i });
+      if (await type.count()) {
+        const options = await type.first().evaluate((el) =>
+          el.tagName === "SELECT" ? Array.from((el as HTMLSelectElement).options).map((o) => ({ value: o.value, text: o.text })) : [],
+        );
+        const pick = options.find((o) => /percent|%/i.test(o.text) || /percent/i.test(o.value));
+        if (pick) await type.first().selectOption(pick.value);
+      } else if (await percent.count()) await percent.first().check();
       const amount = form.getByLabel(/deposit (amount|value|%)|percent/i).first();
       await amount.fill("25");
       const created = page.waitForResponse((r) => r.request().method() === "POST" && /\/services$/.test(new URL(r.url()).pathname));
@@ -338,13 +354,37 @@ test.describe("journey B: set up what I sell", () => {
       expect(res.status(), await res.text()).toBe(201);
     });
 
-    await test.step("the service is stored with its price, duration, staff and deposit", async () => {
+    await test.step("the service is stored with its price, duration and a 25% deposit", async () => {
       const services = rowsOf<Record<string, unknown>>(await api(request, owner, "GET", `/bookings/businesses/${owner.businessId}/services`), "services");
       const service = services.find((s) => s.name === name);
       expect(service, `the service ${name}`).toBeTruthy();
       expect(Number(service!.price)).toBe(120);
       expect(Number(service!.duration ?? service!.durationMins)).toBe(45);
-      expect({ depositRequired: service!.depositRequired, depositValue: Number(service!.depositValue) }).toEqual({ depositRequired: true, depositValue: 25 });
+      expect({ depositRequired: service!.depositRequired, depositType: service!.depositType, depositValue: Number(service!.depositValue) }).toEqual({
+        depositRequired: true,
+        depositType: "PERCENT",
+        depositValue: 25,
+      });
+    });
+
+    // The service list read carries no staff, so the stored staff link is read back where the owner
+    // reads it: the service's Edit, after a reload (nothing kept in the browser).
+    await test.step("after a reload, the service's Edit shows its staff member and its 25% deposit", async () => {
+      await page.reload();
+      await settle(page, 1_000);
+      const row = rowOf(page, name);
+      await expect(row, `the service ${name} in Schedule > Services`).toBeVisible();
+      await (await rowAction(page, row, /^edit/i)).click();
+      const form = page.getByRole("dialog").filter({ visible: true }).last();
+      await expect(form).toBeVisible();
+      const staffField = form.getByLabel(/staff/i).first();
+      if ((await staffField.count()) && (await staffField.evaluate((el) => el.tagName)) === "SELECT") {
+        const selectedStaff = await staffField.evaluate((el) => Array.from((el as HTMLSelectElement).selectedOptions).map((o) => o.text.trim()));
+        expect(selectedStaff, "the service's staff, as stored").toContain(staff.name);
+      } else {
+        await expect(form.getByRole("checkbox", { name: staff.name }), "the service's staff, as stored").toBeChecked();
+      }
+      await expect(form.getByLabel(/deposit (amount|value|%)|percent/i).first(), "the deposit, as stored").toHaveValue(/^25(\.0+)?$/);
     });
   });
 
@@ -443,8 +483,10 @@ test.describe("journey B: set up what I sell", () => {
 
     await test.step("after one reload the new name and price show in the line picker and on /book/<slug>", async () => {
       await page.goto("/app/commerce/invoices/new");
-      const p = await pickerCount(page.locator("main").first(), renamed);
-      expect.soft(p.count, `'${renamed}' in the invoice picker`).toBe(1);
+      const form = page.locator("main").first();
+      await expect.poll(async () => (await pickerCount(form, renamed)).choices.length, { message: "the invoice line picker loads" }).toBeGreaterThan(1);
+      const p = await pickerCount(form, renamed);
+      expect.soft(p.count, `'${renamed}' in the invoice picker ${JSON.stringify(p.choices)}`).toBe(1);
       const customer = await anonymousContext(browser, { who: "customer" });
       const shop = await customer.newPage();
       await shop.goto(`/book/${slug}`);
@@ -456,6 +498,8 @@ test.describe("journey B: set up what I sell", () => {
   test("B6 archiving hides the item from new documents only", async ({ page, request, owner }) => {
     test.setTimeout(5 * 60_000);
     const product = await seedProduct(request, owner, `Archived item ${stamp()}`, 12);
+    // An active product the picker must still list: proof it has loaded before an absence is read.
+    const kept = await seedProduct(request, owner, `Kept item ${stamp()}`, 9);
     const contact = await api<{ id: string }>(request, owner, "POST", `/crm/businesses/${owner.businessId}/contacts`, { firstName: "Archie", lastName: `Ves ${stamp()}` });
     const invoice = await api<{ id: string; invoiceNumber: string }>(request, owner, "POST", `/commerce/businesses/${owner.businessId}/invoices`, {
       contactId: contact.id,
@@ -470,11 +514,15 @@ test.describe("journey B: set up what I sell", () => {
       if (await confirm.count()) await confirm.first().click();
     });
 
-    await test.step("New invoice no longer offers it", async () => {
+    await test.step("New invoice no longer offers it (and still offers the active product)", async () => {
       await page.goto("/app/commerce/invoices/new");
       await expect(page.getByRole("heading", { name: "New Invoice" })).toBeVisible();
-      await page.waitForLoadState("networkidle").catch(() => {});
-      expect((await pickerCount(page.locator("main").first(), product.name)).count).toBe(0);
+      const form = page.locator("main").first();
+      await expect
+        .poll(async () => (await pickerCount(form, kept.name)).count, { message: `the line picker has loaded: it lists '${kept.name}'` })
+        .toBe(1);
+      const archived = await pickerCount(form, product.name);
+      expect(archived.count, `the archived '${product.name}' in New invoice's picker ${JSON.stringify(archived.choices)}`).toBe(0);
     });
 
     await test.step("the invoice that already used it still shows the line", async () => {
@@ -485,7 +533,11 @@ test.describe("journey B: set up what I sell", () => {
 
   test("B7 applying a business template twice adds nothing the second time", async ({ page, request, owner }) => {
     test.setTimeout(4 * 60_000);
-    const count = async () => rowsOf(await api(request, owner, "GET", `/commerce/businesses/${owner.businessId}/products?pageSize=200`), "products").length;
+    // A template adds products and services (templates.service.ts applyTemplate): both are counted.
+    const count = async () => ({
+      products: rowsOf(await api(request, owner, "GET", `/commerce/businesses/${owner.businessId}/products?pageSize=200`), "products").length,
+      services: rowsOf(await api(request, owner, "GET", `/bookings/businesses/${owner.businessId}/services`), "services").length,
+    });
     const apply = async () => {
       await page.goto("/app/templates");
       const card = page.locator("div").filter({ has: page.getByRole("heading", { level: 3 }) }).filter({ has: page.getByRole("button", { name: /apply template/i }) }).last();
@@ -497,18 +549,19 @@ test.describe("journey B: set up what I sell", () => {
       return res.status();
     };
 
-    let afterFirst = 0;
-    await test.step("apply a template once: it adds its products", async () => {
+    let afterFirst = { products: 0, services: 0 };
+    await test.step("apply a template once: it adds its products and services", async () => {
       const before = await count();
       const status = await apply();
       expect(status, "the first apply").toBeLessThan(400);
       afterFirst = await count();
-      expect(afterFirst, "products after the first apply").toBeGreaterThan(before);
+      test.info().annotations.push({ type: "template", description: `before ${JSON.stringify(before)}, after the first apply ${JSON.stringify(afterFirst)}` });
+      expect(afterFirst.products + afterFirst.services, "items after the first apply").toBeGreaterThan(before.products + before.services);
     });
 
     await test.step("apply the same template again: nothing is added", async () => {
       await apply();
-      expect(await count(), "products after the second apply").toBe(afterFirst);
+      expect(await count(), "products and services after the second apply").toEqual(afterFirst);
     });
   });
 });

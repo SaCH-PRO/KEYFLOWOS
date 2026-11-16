@@ -24,16 +24,22 @@ import type { APIRequestContext, Locator, Page } from "@playwright/test";
  *   C4  Every link to a customer opens /app/crm/contacts/<id>: from the list,
  *       Cmd/Ctrl+K, Today and documents.
  *   C5  The detail page shows only this customer's quotes, invoices, payments,
- *       bookings, notes and tasks.
+ *       bookings, notes and tasks (each customer's booking is of a service of
+ *       their own, so either's booking can be told apart).
  *   C6  Labels are plain (no event codes, raw ids or stored values).
- *   C7  CSV import, tags, trash and undo work.
+ *   C7  CSV import, tags, trash and undo work: a delete reaches the server
+ *       and the customer is gone; the trash lists them and Restore brings them
+ *       back; Undo inside the window keeps them.
  *   C8  At 375px the list is the first thing on screen (asserted on both
  *       projects: the first row is on screen, in the top half, unscrolled).
  *
  * Doors: Customers is /app/crm/contacts with an "Add contact" quick dialog
  * (fields First name "Jane", Last name "Doe", Email, Phone; "Open full form"
  * opens the full form "Add New Contact"); the header's "New" menu has
- * "Contact". A refusal is shown inside the still-open dialog. The detail page's
+ * "Contact". A refusal's reason shows in the still-open dialog or in a toast
+ * while the dialog stays open and filled (FAILURE-KIT: one toast that keeps
+ * the form open; the app's toaster is mounted at the root, outside the
+ * dialog). Trash is /app/trash, whose rows offer Restore. The detail page's
  * tabs are the links under /app/crm/contacts/<id>/ (the v1 tab set is
  * Overview, Money, Bookings, Notes and tasks, Details; the test reads every
  * tab the page links, whatever their names). The second customer, the
@@ -97,6 +103,19 @@ async function openQuickAdd(page: Page): Promise<Locator> {
   const dialog = quickDialog(page);
   await expect(dialog).toBeVisible();
   return dialog;
+}
+
+/**
+ * The refusal's reason, where it may show while the form stays open: inside
+ * the dialog, or in a toast (the app's sonner <Toaster>, mounted at the root
+ * outside the dialog; FAILURE-KIT's one toast that keeps the form open).
+ */
+function refusalShown(page: Page, dialog: Locator, reason: RegExp): Locator {
+  return dialog
+    .getByText(reason)
+    .or(page.locator("[data-sonner-toast], [role=alert]").filter({ hasText: reason }))
+    .filter({ visible: true })
+    .first();
 }
 
 const contactPath = (businessId: string) => (r: { request(): { method(): string }; url(): string }) =>
@@ -220,7 +239,7 @@ test.describe("journey C: one customer record", () => {
       expect((await refused).status(), "the server refuses the duplicate").toBe(409);
       await expect(dialog, "the dialog stays open").toBeVisible();
       await expect(dialog.getByPlaceholder("Doe", { exact: true }), "what was typed is kept").toHaveValue(last);
-      await expect(dialog.getByText(/already|duplicate|exists|in use/i).first(), "the dialog says why").toBeVisible();
+      await expect(refusalShown(page, dialog, /already|duplicate|exists|in use/i), "the dialog or its toast says why").toBeVisible();
     });
 
     await test.step("no access: a member with read-only Customers access is refused, and the dialog says so", async () => {
@@ -234,7 +253,7 @@ test.describe("journey C: one customer record", () => {
       await dialog.getByRole("button", { name: /^add contact$/i }).click();
       expect((await refused).status(), "the server refuses a read-only member").toBe(403);
       await expect(dialog, "the dialog stays open").toBeVisible();
-      await expect(dialog.getByText(/no access|permission|not allowed|ask the owner|read/i).first(), "the dialog says why").toBeVisible();
+      await expect(refusalShown(memberPage, dialog, /no access|permission|not allowed|ask the owner|read[- ]only/i), "the dialog or its toast says why").toBeVisible();
     });
   });
 
@@ -292,11 +311,14 @@ test.describe("journey C: one customer record", () => {
 
   test("C5 the detail page shows only this customer's quotes, invoices, payments, bookings, notes and tasks", async ({ page, request, owner }) => {
     test.setTimeout(6 * 60_000);
-    const serviceName = `Massage ${stamp()}`;
-    const service = await api<{ id: string }>(request, owner, "POST", `/bookings/businesses/${owner.businessId}/services`, { name: serviceName, duration: 60, price: 250, currency: owner.currency });
     const staff = await api<{ id: string }>(request, owner, "POST", `/bookings/businesses/${owner.businessId}/staff`, { name: `Therapist ${stamp()}` });
-    // Amounts no other record on the page carries (the service is 250, each invoice 200, each quote 90).
+    // Amounts no other record on the page carries (each service is 250, each invoice 200, each quote 90).
+    // Each customer's booking is of a service of their own, named for them, so the booking shown on
+    // a page says whose it is (the Bookings tab lists every booking of the business and filters them
+    // in the browser: a broken filter shows the other customer's).
     const seed = async (first: string, dayOffset: number, payment: number) => {
+      const booking = `${first === "Hana" ? "Massage" : "Facial"} for ${first} ${stamp()}`;
+      const service = await api<{ id: string }>(request, owner, "POST", `/bookings/businesses/${owner.businessId}/services`, { name: booking, duration: 60, price: 250, currency: owner.currency });
       const last = `${first}${stamp()}`;
       const contact = await seedContact(request, owner, first, last);
       const invoice = await seedSentInvoice(request, owner, contact.id, `Invoice line for ${first}`);
@@ -315,7 +337,7 @@ test.describe("journey C: one customer record", () => {
         startTime: start.toISOString(),
         endTime: new Date(start.getTime() + 3_600_000).toISOString(),
       });
-      return { contact, last, invoice: invoice.invoiceNumber, quote: quote.quoteNumber, note, task, payment: payment.toFixed(2), bookingDay: start };
+      return { contact, last, invoice: invoice.invoiceNumber, quote: quote.quoteNumber, note, task, payment: payment.toFixed(2), booking };
     };
     const a = await seed("Hana", 3, 37.25);
     const b = await seed("Ivan", 4, 61.75);
@@ -329,7 +351,7 @@ test.describe("journey C: one customer record", () => {
         .evaluateAll((els) => [...new Set(els.map((e) => e.getAttribute("href") ?? ""))]);
       expect(hrefs.length, "the customer page has tabs").toBeGreaterThan(1);
       // Tabs load their lists after the page: read them until this customer's records show, or 3 times.
-      const wanted = [a.quote, a.invoice, a.note, a.task, a.payment, serviceName];
+      const wanted = [a.quote, a.invoice, a.note, a.task, a.payment, a.booking];
       for (let round = 0; round < 3 && !wanted.every((w) => text.includes(w)); round++) {
         text = "";
         for (const href of hrefs) {
@@ -351,11 +373,11 @@ test.describe("journey C: one customer record", () => {
         expect.soft(text.includes(needle), `${what} ${needle} on ${a.last}'s page`).toBe(true);
       }
       expect.soft(text.includes(a.payment), `the payment of ${a.payment} on the customer's page`).toBe(true);
-      expect.soft(text.includes(serviceName), `the booking (${serviceName}) on the customer's page`).toBe(true);
+      expect.soft(text.includes(a.booking), `the booking (${a.booking}) on the customer's page`).toBe(true);
     });
 
-    await test.step("another customer's records are not shown", async () => {
-      const leaked = [b.quote, b.invoice, b.note, b.task, b.payment].filter((needle) => text.includes(needle));
+    await test.step("another customer's records are not shown, their booking included", async () => {
+      const leaked = [b.quote, b.invoice, b.note, b.task, b.payment, b.booking].filter((needle) => text.includes(needle));
       expect(leaked, `${b.last}'s records on ${a.last}'s page (BUG-030)`).toEqual([]);
     });
   });
@@ -441,30 +463,71 @@ test.describe("journey C: one customer record", () => {
         .toContain(tag);
     });
 
-    await test.step("delete a customer, then Undo brings them back", async () => {
-      const last = `Trash${stamp()}`;
-      const contact = await seedContact(request, owner, "Uma", last);
+    /** Deletes a customer from the Customers list: Delete on their row, or in the row's actions menu, then any confirm. */
+    const deleteFromList = async (name: string) => {
       await page.goto("/app/crm/contacts?view=list");
       const remove = /^(delete contact|delete|move to trash)$/i;
-      const row = page.locator("[role=option], tr, li, [role=row]").filter({ hasText: `Uma ${last}` }).last();
+      const row = page.locator("[role=option], tr, li, [role=row]").filter({ hasText: name }).last();
       await expect(row).toBeVisible();
       await row.hover();
-      // Delete is on the row, or in the row's actions menu.
       const direct = row.getByRole("button", { name: remove });
       if (await direct.count()) await direct.first().click();
       else {
         const menu = row.locator('button[aria-haspopup="menu"]').or(row.getByRole("button", { name: /more|actions/i })).first();
-        await expect(menu, `a Delete door on Uma ${last}'s row`).toBeVisible();
+        await expect(menu, `a Delete door on ${name}'s row`).toBeVisible();
         await menu.click();
         await page.getByRole("menuitem", { name: remove }).or(page.getByRole("button", { name: remove })).filter({ visible: true }).first().click();
       }
       const confirm = page.getByRole("dialog").getByRole("button", { name: /^(delete|move to trash|confirm)/i });
       if (await confirm.count()) await confirm.first().click();
+    };
+    const readContact = (id: string) => request.get(`${API_URL}/crm/businesses/${owner.businessId}/contacts/${id}`, { headers: auth(owner) });
+    const isDelete = (id: string) => (r: { request(): { method(): string }; url(): string }) =>
+      r.request().method() === "DELETE" && new URL(r.url()).pathname === `/crm/businesses/${owner.businessId}/contacts/${id}`;
+
+    // A delete with no Undo first: it must reach the server (the list may defer it a few seconds
+    // for Undo) and leave the customer gone, so Undo's leg below proves Undo kept them.
+    const trashedFirst = `Vic${stamp()}`;
+    let trashedId = "";
+    await test.step("delete a customer without Undo: the delete reaches the server and the customer is gone", async () => {
+      const last = `Trash${stamp()}`;
+      const contact = await seedContact(request, owner, trashedFirst, last);
+      trashedId = contact.id;
+      const deleted = page.waitForResponse(isDelete(contact.id), { timeout: 30_000 });
+      await deleteFromList(`${trashedFirst} ${last}`);
+      const res = await deleted;
+      expect(res.status(), `the delete answers: ${await res.text()}`).toBeLessThan(300);
+      expect((await readContact(contact.id)).status(), "the deleted customer is gone").toBe(404);
+    });
+
+    await test.step("the trash lists the deleted customer, and Restore brings them back", async () => {
+      await page.goto("/app/trash");
+      await settle(page, 1_000);
+      const contacts = page.getByRole("button", { name: /^contacts$/i }).filter({ visible: true });
+      if (await contacts.count()) await contacts.first().click();
+      const row = page
+        .locator("div")
+        .filter({ hasText: trashedFirst })
+        .filter({ has: page.getByRole("button", { name: /^restore$/i }) })
+        .last();
+      await expect(row, `${trashedFirst} in the trash`).toBeVisible();
+      const restored = page.waitForResponse(
+        (r) => r.request().method() === "POST" && new URL(r.url()).pathname === `/api/businesses/${owner.businessId}/trash/contact/${trashedId}/restore`,
+      );
+      await row.getByRole("button", { name: /^restore$/i }).click();
+      const res = await restored;
+      expect(res.status(), `the restore answers: ${await res.text()}`).toBeLessThan(300);
+      expect((await readContact(trashedId)).status(), "the restored customer is back").toBe(200);
+    });
+
+    await test.step("delete a customer, then Undo brings them back", async () => {
+      const last = `Trash${stamp()}`;
+      const contact = await seedContact(request, owner, "Uma", last);
+      await deleteFromList(`Uma ${last}`);
       await page.getByRole("button", { name: /^undo$/i }).filter({ visible: true }).first().click();
-      // Past any deferred delete, so Undo is what kept the customer.
+      // Past any deferred delete (the leg above shows one lands within it), so Undo is what kept the customer.
       await page.waitForTimeout(8_000);
-      const read = await request.get(`${API_URL}/crm/businesses/${owner.businessId}/contacts/${contact.id}`, { headers: auth(owner) });
-      expect(read.status(), "the customer is back after Undo").toBe(200);
+      expect((await readContact(contact.id)).status(), "the customer is back after Undo").toBe(200);
     });
   });
 

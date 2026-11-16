@@ -8,6 +8,7 @@ import {
   signedInContext,
   type Tenant,
 } from "./journey-helpers";
+import { keyCardsAboveForm, type KeyTextCandidate } from "./journey-text";
 import type { APIRequestContext, Locator, Page } from "@playwright/test";
 
 /**
@@ -22,7 +23,8 @@ import type { APIRequestContext, Locator, Page } from "@playwright/test";
  *       (@staging, GATE-STAGING-RUN).
  *   A3  Onboarding opens with the manual form at the top: business name,
  *       currency (TTD or USD), timezone and 'services, products or both'; no
- *       scrolling, no KEY card above it.
+ *       scrolling, no KEY card above it (the header's KEY door, a button or
+ *       link in the app header that journey K requires, is not a card).
  *   A4  The answer is saved on the business and sets the visible hubs and the
  *       bottom bar on every device (phone: the bar; desktop: the hubs in the
  *       menu; read again on a second device signed in as the owner).
@@ -258,14 +260,16 @@ test.describe("journey A: start the business", () => {
           .toBeInViewport({ ratio: 1 });
       });
 
-      await test.step("no KEY card sits above the manual form", async () => {
-        const above = await page.evaluate(() => {
+      await test.step("no KEY card sits above the manual form (the header's KEY door is not a card)", async () => {
+        // Every visible text naming KEY outside the form, with whether it is the header's KEY door
+        // (a button or link inside the app header): journey K requires that door ('KEY opens only
+        // from the header button'), so it is not the KEY card the bullet bans (keyCardsAboveForm).
+        const seen = await page.evaluate(() => {
           const region = Array.from(document.querySelectorAll("section")).find((s) =>
             /set up manually/i.test(s.querySelector("h1,h2,h3")?.textContent ?? ""),
           );
-          if (!region) return ["the manual form is not on the page"];
-          const top = region.getBoundingClientRect().top;
-          const out: string[] = [];
+          if (!region) return null;
+          const candidates: Array<{ text: string; top: number; headerDoor: boolean; where: string }> = [];
           const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
           for (let n = walker.nextNode(); n; n = walker.nextNode()) {
             const text = n.textContent ?? "";
@@ -275,11 +279,21 @@ test.describe("journey A: start the business", () => {
             const r = el.getBoundingClientRect();
             const style = getComputedStyle(el);
             if (r.width === 0 || r.height === 0 || style.visibility === "hidden" || style.display === "none") continue;
-            if (r.top < top) out.push(`"${text.replace(/\s+/g, " ").trim().slice(0, 60)}" at y=${Math.round(r.top)} (form at y=${Math.round(top)})`);
+            const control = el.closest("button, a, [role=button], [role=link]");
+            const holder = control ?? el;
+            const cls = (holder.getAttribute("class") ?? "").split(/\s+/).slice(0, 3).join(" ");
+            candidates.push({
+              text,
+              top: r.top,
+              headerDoor: !!control && !!control.closest("header, [role=banner]"),
+              where: `<${holder.tagName.toLowerCase()}${cls ? ` class="${cls}"` : ""}>`,
+            });
           }
-          return out;
+          return { formTop: region.getBoundingClientRect().top, candidates };
         });
-        expect.soft(above, "KEY text above the manual form").toEqual([]);
+        expect(seen, "the manual form is on the page").not.toBeNull();
+        const above = keyCardsAboveForm(seen!.candidates as KeyTextCandidate[], seen!.formTop);
+        expect.soft(above, "a KEY card above the manual form").toEqual([]);
       });
 
       await test.step("the form asks for the business name, a currency of TTD or USD only, and the timezone", async () => {

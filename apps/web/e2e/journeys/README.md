@@ -11,6 +11,7 @@ GATE-JOURNEY-RUN.
 |---|---|
 | `harness-settings.ts` | The rules, with no Playwright runtime: variants, projects, leg tags, the production-build check, the 3G profile and budget, the KEY UI markers, the fixture prefix. Pinned by `src/__tests__/journey-harness.test.ts`. |
 | `journey-helpers.ts` | The `test` journeys import (fixtures: a fresh tenant per test, signed in; the stack preflight; the watch on every browser the journey makes) and the shared helpers. |
+| `journey-text.ts` | Readers of what a journey's page shows, with no Playwright runtime: `amountAfter` (a total after its label, as the documents lay totals out), `keyCardsAboveForm` (journey A's KEY-card rule, the header's KEY door excepted), `offeredPaymentMethods` (the checkout's methods). Pinned by `src/__tests__/journey-specs-a-f.test.ts`, with the journey A to F steps the GATE-JOURNEYS-A-F review repaired. |
 | `smoke.spec.ts` | The harness end to end: Today for a fresh owner, no KEY UI under KEY_DISABLED, nothing covering a primary button, Today's 3G load timing. |
 | `harness-self-check.spec.ts` | The harness's own guarantees, live (tag `@harness`): a customer has no session, a bare `browser.newContext()` is refused, a member is refused by module scope and not tenancy, and negative controls showing the watch raises an off-host request, a 5xx and another business named, from any person's browser. Required in CI. |
 | `../release0-live.spec.ts` | The Release 0 live journey (closedBy evidence). It runs in the journey projects unedited and must pass in every variant. |

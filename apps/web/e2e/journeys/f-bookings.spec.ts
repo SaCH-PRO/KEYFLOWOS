@@ -8,6 +8,7 @@ import {
   settle,
   type Tenant,
 } from "./journey-helpers";
+import { offeredPaymentMethods } from "./journey-text";
 import type { APIRequestContext, BrowserContext, Locator, Page } from "@playwright/test";
 
 /**
@@ -20,7 +21,10 @@ import type { APIRequestContext, BrowserContext, Locator, Page } from "@playwrig
  *   F1  /book/<slug> (a slug, not a cuid) lists bookable services with staff and prices.
  *   F2  The time picker shows only slots from GET /bookings/public/businesses/:id/slots.
  *   F3  Only methods enabled in Settings > Getting paid are offered; PayPal is never
- *       offered for TTD unless the business has saved its own keys.
+ *       offered for TTD unless the business has saved its own keys. Getting
+ *       paid is saved as its tab saves it (payments-tab.tsx: PATCH
+ *       /identity/businesses/:id metaData), twice: bank transfer on and cash
+ *       off, then the reverse; each time the checkout offers exactly that one.
  *   F4  An optional deposit can be taken.
  * Owner side
  *   F5  The owner gets a push alert, or an email as fallback, within a minute
@@ -29,8 +33,13 @@ import type { APIRequestContext, BrowserContext, Locator, Page } from "@playwrig
  *   F7  The owner can confirm, complete (the invoice nets the deposit), cancel
  *       (the deposit is forfeit) or mark a no-show: F7a confirm then complete
  *       (no deposit: the invoice is the price), F7b complete after a paid 25%
- *       deposit (the invoice is the price less the deposit), F7c cancel after
- *       a paid deposit (kept, recorded as forfeit, D-26), F7d no-show.
+ *       deposit (the invoice is the price less the deposit), F7c the customer
+ *       cancelled after paying the deposit (kept, recorded as forfeit, D-26; a
+ *       cancel that names no one is the customer's, D-65), F7d no-show, F7e
+ *       the business cancelled (V1-84: only a customer cancel forfeits, so the
+ *       deposit stays paid). The Cancel says who cancelled: F7c picks the
+ *       option naming the customer when one is offered, F7e requires the one
+ *       naming the business, and both read who the status write names.
  * Reminders
  *   F8  Tomorrow's booking appears in Today's 'ready to send' reminders
  *       (@scheduler, GATE-SCHEDULER-RUN).
@@ -57,7 +66,17 @@ import type { APIRequestContext, BrowserContext, Locator, Page } from "@playwrig
  * the booking offers no Confirm and no No-show (BUG-120); F7b and F7c stop at
  * the dropped deposit (BUG-048); F9 the calendar's New event Create is under
  * the Mobile navigation bar (375x812) and the KEY bubble (1440x900, BUG-004).
- * F3 passes: the TTD store offers Cash only.
+ *
+ * Review repair (GATE-JOURNEYS-A-F review): F3 offers Cash where Getting paid
+ * turns cash off and bank transfer on (the store always offers 'Cash /
+ * Manual Payment'; nothing reads metaData.cashEnabled); F7e stops at the
+ * dropped deposit (BUG-048), then needs the Cancel to ask who cancelled.
+ * Behind BUG-048 on F7c's leg is a server defect in neither the sweep nor the
+ * plan (review SEC-GJ-2): a customer cancel of a paid-deposit booking commits
+ * CANCELLED and DEPOSIT_FORFEITED, then answers 400 'Unknown ContactEvent type
+ * "booking.deposit_forfeited"' (bookings.service.ts writes a contact event
+ * type crm-timeline.service.ts does not know), skipping the booking.cancelled
+ * event and timeline row; F7c reads that 400 once BUG-048 is fixed.
  */
 
 const auth = (t: Tenant) => ({ Authorization: `Bearer ${t.token}` });
@@ -312,22 +331,45 @@ test.describe("journey F: take bookings", () => {
     expect(offered, "the picker's times equal GET .../slots").toEqual(expected);
   });
 
-  test("F3 only the payment methods the business has enabled are offered; no PayPal for TTD without its own keys", async ({ request, owner, browser }) => {
-    test.setTimeout(5 * 60_000);
+  test("F3 only the payment methods enabled in Settings > Getting paid are offered; no PayPal for TTD without its own keys", async ({ request, owner, browser }) => {
+    test.setTimeout(6 * 60_000);
     const b = await seedBookable(request, owner, "f3");
-    const day = dayAhead(4);
-    const visitor = await anonymousContext(browser, { who: "customer" });
-    const customer = await visitor.newPage();
-    await toScheduleStep(customer, b);
-    const times = await offeredTimes(customer, b.staff.name, day);
-    expect(times.length, "a time to pick").toBeGreaterThan(0);
-    await pickTime(customer, times[0]);
-    await customer.getByRole("button", { name: /^continue$/i }).filter({ visible: true }).first().click();
-    await expect(customer.getByRole("button", { name: /place order/i }).first()).toBeVisible();
-    const methods = (await customer.locator("main, body").first().innerText()).match(/\b(PayPal|Stripe|WiPay|Card|Cash|Bank transfer|Bank Transfer)\b/g) ?? [];
-    test.info().annotations.push({ type: "methods", description: [...new Set(methods)].join(", ") });
-    expect.soft([...new Set(methods)].filter((m) => /paypal/i.test(m)), "PayPal on a TTD store with no PayPal keys (BUG-037)").toEqual([]);
-    expect.soft([...new Set(methods)].filter((m) => /stripe|wipay|card/i.test(m)), "online methods with no keys saved").toEqual([]);
+    /** Saves Settings > Getting paid as payments-tab.tsx's Save does (the metaData keys it writes), and reads it back. */
+    const gettingPaid = async (methods: { cashEnabled: boolean; bankTransferEnabled: boolean }) => {
+      const bank = methods.bankTransferEnabled ? { bankName: "Republic Bank", bankAccountNumber: String(Date.now()).slice(-10) } : {};
+      await api(request, owner, "PATCH", `/identity/businesses/${owner.businessId}`, { metaData: { ...methods, ...bank } });
+      const read = await api<{ metaData?: Record<string, unknown> }>(request, owner, "GET", `/identity/businesses/${owner.businessId}`);
+      expect({ cashEnabled: read.metaData?.cashEnabled, bankTransferEnabled: read.metaData?.bankTransferEnabled }, "Getting paid, as stored").toEqual(methods);
+    };
+    /** The methods the store's Payment step offers a new customer (its choices: buttons, radios, options, labels). */
+    const offered = async (day: string, who: string): Promise<string[]> => {
+      const visitor = await anonymousContext(browser, { who });
+      const customer = await visitor.newPage();
+      await toScheduleStep(customer, b);
+      const times = await offeredTimes(customer, b.staff.name, day);
+      expect(times.length, "a time to pick").toBeGreaterThan(0);
+      await pickTime(customer, times[0]);
+      await customer.getByRole("button", { name: /^continue$/i }).filter({ visible: true }).first().click();
+      await expect(customer.getByRole("button", { name: /place order/i }).first()).toBeVisible();
+      const choices = await customer.locator("button, [role=radio], [role=option], label").filter({ visible: true }).allInnerTexts();
+      return offeredPaymentMethods(choices.join("\n"));
+    };
+
+    await test.step("Getting paid: bank transfer on, cash off; the checkout offers bank transfer only", async () => {
+      await gettingPaid({ cashEnabled: false, bankTransferEnabled: true });
+      const methods = await offered(dayAhead(4), "customer, bank transfer on");
+      test.info().annotations.push({ type: "methods", description: `bank transfer on, cash off: ${methods.join(", ") || "none"}` });
+      expect.soft(methods.filter((m) => m === "paypal"), "PayPal on a TTD store with no PayPal keys (BUG-037)").toEqual([]);
+      expect.soft(methods, "the methods offered are exactly those Getting paid enables").toEqual(["bank transfer"]);
+    });
+
+    await test.step("Getting paid: cash on, bank transfer off; the checkout offers cash only", async () => {
+      await gettingPaid({ cashEnabled: true, bankTransferEnabled: false });
+      const methods = await offered(dayAhead(5), "customer, cash on");
+      test.info().annotations.push({ type: "methods", description: `cash on, bank transfer off: ${methods.join(", ") || "none"}` });
+      expect.soft(methods.filter((m) => m === "paypal"), "PayPal on a TTD store with no PayPal keys (BUG-037)").toEqual([]);
+      expect.soft(methods, "the methods offered are exactly those Getting paid enables").toEqual(["cash"]);
+    });
   });
 
   test("F4 an optional deposit can be taken", async ({ request, owner, browser }) => {
@@ -415,6 +457,49 @@ test.describe("journey F: take bookings", () => {
     expect((await done).status()).toBeLessThan(300);
   }
 
+  /** The Cancel's choice naming who cancelled (V1-84): the customer, or the business. */
+  const CANCELLED_BY = {
+    customer: /customer cancel|cancell?ed by (the )?(customer|client)|(the )?(customer|client) cancell?ed/i,
+    business: /we cancell?ed|business cancel|cancell?ed by (us|the business)|(the )?business cancell?ed|our side/i,
+  } as const;
+
+  /**
+   * Cancels the booking of `customer` from Schedule as `by`'s cancellation: the
+   * customer's (a paid deposit is forfeit, D-26; a cancel that names no one is
+   * the customer's, D-65) or the business's (not forfeit, V1-84). Picks the
+   * Cancel's option naming that side when it offers one; a business cancel
+   * needs it. Reads who the status write names, then that it answers.
+   */
+  async function cancelBooking(page: Page, customer: string, by: "customer" | "business"): Promise<void> {
+    const detail = await openBooking(page, customer);
+    const cancel = detail.getByRole("button", { name: /^cancel/i }).filter({ visible: true });
+    await expect(cancel.first(), `the booking of ${customer} offers Cancel`).toBeVisible();
+    expect(await coveredButtonFindings([{ what: "the booking's Cancel", locator: cancel.first() }]), "covered booking actions").toEqual([]);
+    const done = page.waitForResponse((r) => ["POST", "PATCH"].includes(r.request().method()) && /\/bookings\/[^/]+(\/status)?$/.test(new URL(r.url()).pathname));
+    await cancel.first().click();
+    const side = CANCELLED_BY[by];
+    const choice = page
+      .getByRole("radio", { name: side })
+      .or(page.getByRole("button", { name: side }))
+      .or(page.getByRole("menuitem", { name: side }))
+      .or(page.getByRole("option", { name: side }))
+      .filter({ visible: true });
+    if (await choice.count()) {
+      if ((await choice.first().getAttribute("role")) === "radio" || (await choice.first().evaluate((el) => (el as HTMLInputElement).type === "radio"))) await choice.first().check();
+      else await choice.first().click();
+    } else {
+      expect(by, "the Cancel asks who cancelled: 'we cancelled' keeps the customer's deposit (D-26, V1-84)").toBe("customer");
+    }
+    const confirm = page.getByRole("dialog").getByRole("button", { name: /^(confirm|yes|cancel booking)/i }).filter({ visible: true });
+    if (await confirm.count()) await confirm.first().click().catch(() => {});
+    const res = await done;
+    const sent = (res.request().postDataJSON() ?? {}) as { status?: string; cancelledBy?: string };
+    expect(sent.status, "the status write cancels the booking").toBe("CANCELLED");
+    // No initiator is the customer's cancel (D-65); the business's must say so.
+    expect(sent.cancelledBy ?? "CUSTOMER", "who cancelled, as the status write names it").toBe(by === "customer" ? "CUSTOMER" : "BUSINESS");
+    expect(res.status(), `the cancel answers: ${(await res.text()).slice(0, 300)}`).toBeLessThan(300);
+  }
+
   test("F7a the owner confirms a booking, then completes it: the invoice bills the price", async ({ page, request, owner }) => {
     test.setTimeout(5 * 60_000);
     const b = await seedBookable(request, owner, "f7a");
@@ -454,13 +539,14 @@ test.describe("journey F: take bookings", () => {
     });
   });
 
-  test("F7c the owner cancels a booking whose deposit was paid: the deposit is forfeit", async ({ page, request, owner }) => {
+  test("F7c the customer cancelled a booking whose deposit was paid: the owner records it and the deposit is forfeit", async ({ page, request, owner }) => {
     test.setTimeout(5 * 60_000);
     const b = await seedBookable(request, owner, "f7c");
     const booked = await depositBooking(request, owner, b, dayAhead(3), "13:00", "Vera");
 
-    await test.step("Cancel", async () => {
-      await act(page, booked.customer, /^cancel/i);
+    await test.step("Cancel, as the customer's cancellation (D-26, D-65)", async () => {
+      // Once BUG-048 is fixed this write answers 400 although the forfeit commits (review SEC-GJ-2; header).
+      await cancelBooking(page, booked.customer, "customer");
     });
 
     await test.step("the booking is cancelled, the deposit kept and recorded as forfeit (D-26)", async () => {
@@ -478,6 +564,24 @@ test.describe("journey F: take bookings", () => {
     const three = await ownerBooking(request, owner, b, dayAhead(2), "15:00", "Wes");
     await act(page, three.customer, /no.?show/i);
     expect((await bookingById(request, owner, three.id))?.status).toBe("NO_SHOW");
+  });
+
+  test("F7e the business cancels a booking whose deposit was paid: the deposit is not forfeit", async ({ page, request, owner }) => {
+    test.setTimeout(5 * 60_000);
+    const b = await seedBookable(request, owner, "f7e");
+    const booked = await depositBooking(request, owner, b, dayAhead(3), "15:00", "Wren");
+
+    await test.step("Cancel, as the business's cancellation (V1-84)", async () => {
+      await cancelBooking(page, booked.customer, "business");
+    });
+
+    await test.step("the booking is cancelled and the deposit stays paid, not forfeit (D-26: only a customer cancel forfeits)", async () => {
+      const read = await bookingById(request, owner, booked.id);
+      expect(read?.status).toBe("CANCELLED");
+      expect(read?.paymentStatus, "a business cancel keeps the deposit as paid").toBe("DEPOSIT_PAID");
+      const deposit = await api<{ status: string }>(request, owner, "GET", `/commerce/businesses/${owner.businessId}/invoices/${booked.depositInvoiceId}`);
+      expect(deposit.status, "the deposit invoice stays paid").toBe("PAID");
+    });
   });
 
   test("F8 tomorrow's booking appears in Today's 'ready to send' reminders", { tag: "@scheduler" }, async ({ page, request, owner }) => {

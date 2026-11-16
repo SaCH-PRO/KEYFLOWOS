@@ -225,7 +225,8 @@ describe("journey B reads what its bullets name", () => {
   it("B6 proves the line picker loaded (an active product is listed) before reading the archived one's absence", () => {
     const b6 = testBlock("b-catalog.spec.ts", "B6");
     expect(b6).toMatch(/const kept = await seedProduct\(/);
-    expect(b6).toMatch(/expect\s*\.poll\([^)]*pickerCount\([^)]*kept\.name/);
+    expect(b6).toMatch(/expect\s*\.poll\(async \(\) => \(await pickerCount\(\w+, kept\.name\)\)\.count/);
+    expect(b6.indexOf("kept.name"), "the picker is seen loaded before the archived product's count is read").toBeLessThan(b6.indexOf("pickerCount(form, product.name)"));
   });
 
   it("B7 counts the services a template adds, not only its products", () => {

@@ -45,7 +45,8 @@ import type { APIRequestContext, Locator, Page } from "@playwright/test";
  *   E13 A voided invoice's link says it is voided.
  * Overdue (@scheduler, GATE-SCHEDULER-RUN)
  *   E14 The overdue job fires and the invoice appears in Today's 'ready to send'
- *       list; email goes out only if Gmail is connected.
+ *       list; email goes out only if Gmail is connected (read on the invoice's
+ *       activity, GET .../invoices/:id/timeline).
  *
  * Doors: New invoice is /app/commerce/invoices/new; the invoice's page is
  * /app/commerce/invoices/<id>, whose actions (Record payment, WhatsApp, Copy
@@ -724,7 +725,18 @@ test.describe("journey E: invoice and get paid", () => {
     await expect(ready.getByText(invoice.invoiceNumber).first(), "the overdue invoice is ready to send").toBeVisible();
     await expect(ready.getByRole("link", { name: /whatsapp/i }).or(ready.getByRole("button", { name: /whatsapp/i })).first()).toBeVisible();
     const gmail = await api<{ connected: boolean }>(request, owner, "GET", `/commerce/businesses/${owner.businessId}/gmail/status`);
-    const activity = JSON.stringify(await api(request, owner, "GET", `/commerce/businesses/${owner.businessId}/invoices/${invoice.id}`));
-    if (!gmail.connected) expect(activity, "no reminder email without Gmail").not.toMatch(/reminder (email )?sent/i);
+    // A reminder's sending is recorded on the invoice's activity (its timeline: an
+    // invoice.payment_reminder_sent entry with its channel), not on the invoice row.
+    const timeline = await api<{ entries: Array<{ type: string; label: string; data?: { channel?: unknown } }> }>(
+      request,
+      owner,
+      "GET",
+      `/commerce/businesses/${owner.businessId}/invoices/${invoice.id}/timeline`,
+    );
+    expect(timeline.entries.map((e) => e.type), "the invoice's activity is read (it names the invoice's creation)").toContain("invoice.created");
+    const emailed = timeline.entries.filter(
+      (e) => e.type === "invoice.payment_reminder_sent" && (/email|gmail/i.test(String(e.data?.channel ?? "")) || /\((e-?mail|gmail)\)/i.test(e.label)),
+    );
+    if (!gmail.connected) expect(emailed, "no reminder email without Gmail").toEqual([]);
   });
 });
