@@ -19,12 +19,14 @@ type CountryRule = {
   cc: string;
   /** NANP territories with one area code: a 7-digit local number gets it. */
   area?: string;
-  /** The national trunk prefix dropped before the calling code (0 in most non-NANP countries). */
+  /** Outside NANP: the national trunk prefix dropped before the calling code (0 in most countries). */
   trunk?: string;
+  /** Outside NANP: the longest national number; a longer one already carries its country code. */
+  nsn?: number;
 };
 
 const NANP = (area?: string): CountryRule => ({ cc: "1", area });
-const TRUNK0 = (cc: string): CountryRule => ({ cc, trunk: "0" });
+const NATIONAL = (cc: string, nsn: number, trunk?: string): CountryRule => ({ cc, nsn, trunk });
 
 /** The default market (D-153; WA-E164-SERVER uses the same default). */
 const DEFAULT_RULE: CountryRule = NANP("868");
@@ -53,47 +55,46 @@ const COUNTRY_RULES: Array<[string[], CountryRule]> = [
   [["ca", "can", "canada"], NANP()],
   [["pr", "pri", "puerto rico"], NANP()],
   [["do", "dom", "dominican republic"], NANP()],
-  [["gy", "guy", "guyana"], { cc: "592" }],
-  [["sr", "sur", "suriname"], { cc: "597" }],
-  [["bz", "blz", "belize"], { cc: "501" }],
-  [["aw", "abw", "aruba"], { cc: "297" }],
-  [["cw", "cuw", "curacao"], { cc: "5999" }],
-  [["ht", "hti", "haiti"], { cc: "509" }],
-  [["pa", "pan", "panama"], { cc: "507" }],
-  [["cr", "cri", "costa rica"], { cc: "506" }],
-  [["gb", "gbr", "uk", "united kingdom", "great britain", "britain", "england", "scotland", "wales", "northern ireland"], TRUNK0("44")],
-  [["ie", "irl", "ireland"], TRUNK0("353")],
-  [["ve", "ven", "venezuela"], TRUNK0("58")],
-  [["co", "col", "colombia"], { cc: "57" }],
-  [["br", "bra", "brazil"], TRUNK0("55")],
-  [["mx", "mex", "mexico"], { cc: "52" }],
-  [["fr", "fra", "france"], TRUNK0("33")],
-  [["de", "deu", "germany"], TRUNK0("49")],
-  [["nl", "nld", "netherlands", "the netherlands"], TRUNK0("31")],
-  [["es", "esp", "spain"], { cc: "34" }],
-  [["in", "ind", "india"], TRUNK0("91")],
-  [["ng", "nga", "nigeria"], TRUNK0("234")],
-  [["gh", "gha", "ghana"], TRUNK0("233")],
-  [["ke", "ken", "kenya"], TRUNK0("254")],
-  [["za", "zaf", "south africa"], TRUNK0("27")],
-  [["au", "aus", "australia"], TRUNK0("61")],
-  [["nz", "nzl", "new zealand"], TRUNK0("64")],
-  [["ph", "phl", "philippines"], TRUNK0("63")],
-  [["cn", "chn", "china"], TRUNK0("86")],
+  [["gy", "guy", "guyana"], NATIONAL("592", 7)],
+  [["sr", "sur", "suriname"], NATIONAL("597", 7)],
+  [["bz", "blz", "belize"], NATIONAL("501", 7)],
+  [["aw", "abw", "aruba"], NATIONAL("297", 7)],
+  [["cw", "cuw", "curacao"], NATIONAL("5999", 7)],
+  [["ht", "hti", "haiti"], NATIONAL("509", 8)],
+  [["pa", "pan", "panama"], NATIONAL("507", 8)],
+  [["cr", "cri", "costa rica"], NATIONAL("506", 8)],
+  [["gb", "gbr", "uk", "united kingdom", "great britain", "britain", "england", "scotland", "wales", "northern ireland"], NATIONAL("44", 10, "0")],
+  [["ie", "irl", "ireland"], NATIONAL("353", 9, "0")],
+  [["ve", "ven", "venezuela"], NATIONAL("58", 10, "0")],
+  [["co", "col", "colombia"], NATIONAL("57", 10)],
+  [["br", "bra", "brazil"], NATIONAL("55", 11, "0")],
+  [["mx", "mex", "mexico"], NATIONAL("52", 10)],
+  [["fr", "fra", "france"], NATIONAL("33", 9, "0")],
+  [["de", "deu", "germany"], NATIONAL("49", 11, "0")],
+  [["nl", "nld", "netherlands", "the netherlands"], NATIONAL("31", 9, "0")],
+  [["es", "esp", "spain"], NATIONAL("34", 9)],
+  [["in", "ind", "india"], NATIONAL("91", 10, "0")],
+  [["ng", "nga", "nigeria"], NATIONAL("234", 10, "0")],
+  [["gh", "gha", "ghana"], NATIONAL("233", 9, "0")],
+  [["ke", "ken", "kenya"], NATIONAL("254", 9, "0")],
+  [["za", "zaf", "south africa"], NATIONAL("27", 9, "0")],
+  [["au", "aus", "australia"], NATIONAL("61", 9, "0")],
+  [["nz", "nzl", "new zealand"], NATIONAL("64", 10, "0")],
+  [["ph", "phl", "philippines"], NATIONAL("63", 10, "0")],
+  [["cn", "chn", "china"], NATIONAL("86", 11, "0")],
 ];
 
 const RULE_BY_NAME = new Map<string, CountryRule>(
   COUNTRY_RULES.flatMap(([names, rule]) => names.map((n) => [n, rule] as [string, CountryRule])),
 );
 
-/** "Trinidad & Tobago", "St. Lucia", "Curaçao", "U.S.A." -> the map's keys. */
+/** "Trinidad & Tobago", "St. Lucia", "U.S.A." and accented names -> the map's keys. */
 function foldCountry(country: string): string {
   return country
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/&/g, " and ")
-    .replace(/\bst\b\.?/g, "st")
     .replace(/[^a-z ]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -110,6 +111,9 @@ function e164(digits: string): string | null {
   return digits.length >= 8 && digits.length <= 15 && !digits.startsWith("0") ? `+${digits}` : null;
 }
 
+/** The shortest national number read as one (a few small territories use 6 digits). */
+const MIN_NATIONAL = 6;
+
 /**
  * A phone number as E.164 ('+18687550123'), or null when it cannot be read.
  *
@@ -118,7 +122,8 @@ function e164(digits: string): string | null {
  * decides: in a NANP country 11 digits starting with 1 and 10 digits are
  * already complete, and 7 digits take the territory's area code (TT 868; the
  * US and Canada have none, so 7 digits there are unreadable); elsewhere the
- * trunk 0 is dropped and the calling code added.
+ * trunk 0 is dropped and the calling code added to a national number, and a
+ * number longer than any national one already carries its country code.
  */
 export function toE164(phone: string | null | undefined, businessCountry?: string | null): string | null {
   if (!phone) return null;
@@ -142,12 +147,12 @@ export function toE164(phone: string | null | undefined, businessCountry?: strin
     return null;
   }
 
-  if (rule.trunk && digits.startsWith(rule.trunk)) {
-    const national = digits.replace(/^0+/, "");
-    return national.length >= 6 ? e164(`${rule.cc}${national}`) : null;
-  }
-  if (digits.startsWith(rule.cc) && digits.length >= rule.cc.length + 8) return e164(digits);
-  return digits.length >= 6 ? e164(`${rule.cc}${digits}`) : null;
+  const nsn = rule.nsn ?? 10;
+  const national = rule.trunk && digits.startsWith(rule.trunk) ? digits.replace(/^0+/, "") : digits;
+  if (national.length < MIN_NATIONAL) return null;
+  if (national.length <= nsn) return e164(`${rule.cc}${national}`);
+  // Longer than a national number: it already carries its country code (typed without its '+').
+  return national === digits ? e164(digits) : null;
 }
 
 export interface WhatsAppLinkInput {
