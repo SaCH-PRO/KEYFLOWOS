@@ -22,15 +22,25 @@
  *     screens use reads the number the same way;
  *   - ownBusinessCountry() is the signed-in business's country (the workspace
  *     cache), for owner screens;
+ *   - repair (review of 087b0365): a business whose country the helper does
+ *     not know ('Other Caribbean', 'Other' from the onboarding profile card)
+ *     is not read as Trinidad and Tobago: only a number written
+ *     internationally is readable there (SEC-WAH-2); an international number
+ *     typed without its '+' (11 digits not starting with 1) is kept in a NANP
+ *     country, as before the packet (WAH-CR-2); a quote or invoice share,
+ *     which carries the document's bearer link, opens only the WhatsApp number
+ *     the business saved on the contact, read by id at share time
+ *     (SEC-WAH-1, WAH-CR-1); and owner screens pass the business's country,
+ *     the positional form being left to the customer pages (WAH-CR-5);
  *   - census: no file under apps/web/src outside lib/whatsapp.ts builds a
  *     WhatsApp URL itself (wa.me/, api.whatsapp.com/send, web.whatsapp.com/send,
  *     whatsapp://send), except the two surfaces v1 does not edit, each listed
  *     with its reason.
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { buildWhatsAppLink, toE164, ownBusinessCountry, getContactPhone } from "../whatsapp";
+import { buildWhatsAppLink, toE164, ownBusinessCountry, getContactPhone, savedWhatsAppNumber, readSavedWhatsAppNumber } from "../whatsapp";
 import { setCachedBusiness } from "../workspace";
 
 /** The chat number of a wa.me link (its path digits), and its prefilled text. */
@@ -70,8 +80,36 @@ describe("toE164: one number, every spelling", () => {
     expect(toE164(typed, "")).toBe(TT);
   });
 
-  it("a country the helper does not know reads like the default market (TT, +1 868)", () => {
-    expect(toE164("755-0123", "Atlantis")).toBe(TT);
+  // SEC-WAH-2 (RED at 087b0365: an unknown country fell back to Trinidad and
+  // Tobago, so a St Lucian '456-1234' became +1 868 456 1234 and an Italian
+  // '312 345 6789' a Chicago number, each a stranger's chat that a quote or
+  // invoice share prefilled with its bearer link).
+  it.each(["Other Caribbean", "Other", "other", "Atlantis"])(
+    "a business in %j (a country the helper does not know) is not read as TT: a local or national number is unreadable",
+    (country) => {
+      expect(toE164("456-1234", country)).toBeNull();
+      expect(toE164("755-0123", country)).toBeNull();
+      expect(toE164("312 345 6789", country)).toBeNull();
+      expect(toE164("868-755-0123", country)).toBeNull();
+      expect(toE164("1 868 755 0123", country)).toBeNull();
+      expect(toE164("07700 900123", country)).toBeNull();
+    },
+  );
+
+  it.each(["Other Caribbean", "Other", "Atlantis"])(
+    "a business in %j still reads a number written internationally ('+' or 00)",
+    (country) => {
+      expect(toE164("+39 312 345 6789", country)).toBe("+393123456789");
+      expect(toE164("0039 312 345 6789", country)).toBe("+393123456789");
+      expect(toE164("+1 758 456 1234", country)).toBe("+17584561234");
+      expect(toE164("+44 (0)7700 900123", country)).toBe("+447700900123");
+    },
+  );
+
+  it("no country at all is still the default market (TT, +1 868)", () => {
+    expect(toE164("755-0123", null)).toBe(TT);
+    expect(toE164("755-0123", undefined)).toBe(TT);
+    expect(toE164("755-0123", "  ")).toBe(TT);
   });
 
   it.each(["(212) 555-0123", "212-555-0123", "212 555 0123", "1 212 555 0123", "+1 212-555-0123", "+12125550123"])(
@@ -83,6 +121,35 @@ describe("toE164: one number, every spelling", () => {
       expect(toE164(typed)).toBe("+12125550123");
     },
   );
+
+  // WAH-CR-2 (RED at 087b0365: in a NANP country only more than 11 digits
+  // were kept without a '+', so a French, Spanish or Dutch mobile (33/34/31 +
+  // 9 digits), a Panamanian, Costa Rican or Haitian number (507/506/509 + 8),
+  // a Curacao number (5999 + 7), an Australian or South African mobile, typed
+  // without its '+', opened the chooser; before the packet they opened their
+  // chat). NANP has no 11-digit number that does not start with 1.
+  it.each([
+    ["33612345678", "+33612345678"],
+    ["34612345678", "+34612345678"],
+    ["31612345678", "+31612345678"],
+    ["50761234567", "+50761234567"],
+    ["50683123456", "+50683123456"],
+    ["50934123456", "+50934123456"],
+    ["59997654321", "+59997654321"],
+    ["61412345678", "+61412345678"],
+    ["27821234567", "+27821234567"],
+    ["33 6 12 34 56 78", "+33612345678"],
+  ])("an international number typed without its '+' (%j, 11 digits not starting with 1) is kept: %s", (typed, e164) => {
+    expect(toE164(typed)).toBe(e164);
+    expect(toE164(typed, "TT")).toBe(e164);
+    expect(toE164(typed, "United States")).toBe(e164);
+    expect(toE164(typed, "Jamaica")).toBe(e164);
+  });
+
+  it("an 11-digit number starting with 0 is a national number of another country, not one this business can read", () => {
+    expect(toE164("07700900123")).toBeNull();
+    expect(toE164("07700900123", "US")).toBeNull();
+  });
 
   it("a US business cannot read a seven-digit number (no area code), where a TT one can", () => {
     expect(toE164("555-0123", "US")).toBeNull();
@@ -192,10 +259,78 @@ describe("buildWhatsAppLink: a chat with the customer's own number, the text and
     expect(buildWhatsAppLink("+44 7700 900123")).toBe("https://wa.me/447700900123");
   });
 
+  it("an international number stored without its '+' opens its chat from the positional and the object form (WAH-CR-2)", () => {
+    // The contact card's positional call and the booking drawer's object call, on numbers saved as typed.
+    expect(buildWhatsAppLink("33612345678", "Hi Ana, ")).toBe("https://wa.me/33612345678?text=Hi%20Ana%2C%20");
+    expect(buildWhatsAppLink({ to: "50761234567", country: null })).toBe("https://wa.me/50761234567");
+  });
+
+  it("a business in 'Other Caribbean' sharing an invoice with a local number gets WhatsApp's chooser, never a Trinidad chat (SEC-WAH-2)", () => {
+    const LINK_TOKEN = "https://app.keyflow.test/public/invoice/tok_wa_helper_0002";
+    expect(buildWhatsAppLink({ to: "456-1234", text: "Your invoice:", link: LINK_TOKEN, country: "Other Caribbean" })).toBe(
+      `https://wa.me/?text=${encodeURIComponent(`Your invoice: ${LINK_TOKEN}`)}`,
+    );
+    expect(buildWhatsAppLink({ to: "312 345 6789", text: "Your invoice:", link: LINK_TOKEN, country: "Other" })).toBe(
+      `https://wa.me/?text=${encodeURIComponent(`Your invoice: ${LINK_TOKEN}`)}`,
+    );
+  });
+
   it("getContactPhone still prefers the WhatsApp number over the phone", () => {
     expect(getContactPhone({ whatsappNumber: "755-0199", phone: "755-0123" })).toBe("755-0199");
     expect(getContactPhone({ whatsappNumber: null, phone: "755-0123" })).toBe("755-0123");
     expect(getContactPhone({})).toBeNull();
+  });
+});
+
+// SEC-WAH-1 / WAH-CR-1: the number a quote or invoice share may open.
+describe("savedWhatsAppNumber / readSavedWhatsAppNumber: a document share opens only the WhatsApp number the business saved", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("is the contact's WhatsApp number; a phone alone (a public form can fill it on an existing contact) is not", () => {
+    expect(savedWhatsAppNumber({ whatsappNumber: "868-755-0199", phone: "755-0123" })).toBe("868-755-0199");
+    expect(savedWhatsAppNumber({ whatsappNumber: null, phone: "+1 868 555 0199" })).toBeNull();
+    expect(savedWhatsAppNumber({ whatsappNumber: "   ", phone: "+1 868 555 0199" })).toBeNull();
+    expect(savedWhatsAppNumber({})).toBeNull();
+    expect(savedWhatsAppNumber(null)).toBeNull();
+  });
+
+  function serveContact(status: number, contact: Record<string, unknown> | null) {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(typeof input === "string" ? input : String(input), "http://localhost");
+        calls.push(url.pathname);
+        const body = status === 200 ? { contact, events: [], notes: [], tasks: [] } : { message: "Contact not found" };
+        const text = JSON.stringify(body);
+        return {
+          ok: status >= 200 && status < 300,
+          status,
+          statusText: status === 200 ? "OK" : "Not Found",
+          json: async () => JSON.parse(text) as unknown,
+          text: async () => text,
+          headers: new Headers({ "content-type": "application/json" }),
+        } as unknown as Response;
+      }),
+    );
+    return calls;
+  }
+
+  it("reads the customer by id through the member's own contact read, not the list a screen loaded", async () => {
+    const calls = serveContact(200, { id: "ct_old", firstName: "Oldest", phone: "755-0123", whatsappNumber: "868-755-0123" });
+    await expect(readSavedWhatsAppNumber("biz_wa", "ct_old")).resolves.toBe("868-755-0123");
+    expect(calls).toEqual(["/crm/businesses/biz_wa/contacts/ct_old"]);
+  });
+
+  it("a contact with a phone only, a refused read, or no ids: no number (WhatsApp's chooser)", async () => {
+    serveContact(200, { id: "ct_victim", firstName: "Vera", phone: "+1 868 555 0199", whatsappNumber: null });
+    await expect(readSavedWhatsAppNumber("biz_wa", "ct_victim")).resolves.toBeNull();
+    serveContact(404, null);
+    await expect(readSavedWhatsAppNumber("biz_wa", "ct_hidden")).resolves.toBeNull();
+    await expect(readSavedWhatsAppNumber(null, "ct_x")).resolves.toBeNull();
+    await expect(readSavedWhatsAppNumber("biz_wa", null)).resolves.toBeNull();
   });
 });
 
@@ -259,5 +394,29 @@ describe("census: every WhatsApp link goes through lib/whatsapp.ts", () => {
 
   it("each exemption names its reason", () => {
     for (const e of EXEMPT) expect(e.reason.length).toBeGreaterThan(20);
+  });
+});
+
+/**
+ * The customer pages that read a business's number with the default market:
+ * they must never read the visitor's own workspace (ownBusinessCountry), and
+ * their payloads are edited by CUSTOMER-PAGE-HONESTY, not here.
+ */
+const POSITIONAL_ALLOWED = ["app/order/[token]/page.tsx", "components/ui/public-page-state.tsx"];
+/** buildWhatsAppLink called with a phone first (the positional form), not an object. */
+const POSITIONAL_CALL = /buildWhatsAppLink\(\s*[^\s{)]/;
+
+// WAH-CR-5 (RED at 087b0365: the booking list, contact card, contact header,
+// notes, tasks and timeline tabs, broadcast, insight card and recommendations
+// read a customer's number as TT while the booking drawer of the same
+// booking read it with the business's own country).
+describe("census: owner screens read a customer's number with the business's own country", () => {
+  const files = sourceFiles().filter((f) => f !== HELPER);
+  const positional = files.filter((f) => POSITIONAL_CALL.test(fs.readFileSync(path.join(WEB_SRC, f), "utf8")));
+
+  it("the positional form (which takes no country) is left to the customer pages", () => {
+    expect(positional.sort(), "owner screens call buildWhatsAppLink({ to, text, country: ownBusinessCountry() })").toEqual(
+      [...POSITIONAL_ALLOWED].sort(),
+    );
   });
 });

@@ -15,6 +15,20 @@
  * mounted as the route renders it with its data doors stubbed
  * (invoices-hub-refund-balance.test.tsx's harness). lib/whatsapp.ts is real in
  * both.
+ *
+ * Repair (review of 087b0365):
+ * - SEC-WAH-1: the share carries the invoice's bearer link (its holder sees
+ *   the customer's name, the items and the total, and can pay). Public forms
+ *   (storefront intake, bookings, orders) fill a blank Contact.phone on the
+ *   contact they match by e-mail, so a phone may be a number nobody at the
+ *   business checked. The share opens only the WhatsApp number the business
+ *   saved on the contact (Contact.whatsappNumber, which no public route
+ *   writes); a phone alone gets WhatsApp's chooser, as before the packet.
+ * - WAH-CR-1: the screens' contacts are the 50 newest (fetchContacts sends no
+ *   take), so the customer is read by id at share time (GET
+ *   /crm/businesses/:id/contacts/:contactId, the member's own read).
+ * - SEC-WAH-2: a business whose country the helper does not know is not read
+ *   as Trinidad and Tobago.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
@@ -43,7 +57,14 @@ vi.mock("@/components/email/compose-context", () => ({ useCompose: () => ({ open
 vi.mock("../../components/invoice-drive-uploader", () => ({ InvoiceDriveUploader: () => null, buildTemplateData: () => null }));
 vi.mock("../../components/tax-summary-panel", () => ({ TaxSummaryPanel: () => null }));
 vi.mock("../../components/dunning-rules", () => ({ DunningRulesPanel: () => null }));
-vi.mock("../../components/billing-detail-modal", () => ({ BillingDetailModal: () => null }));
+// The detail panel is stubbed here (its own test mounts it); the stub records what the panel passes it.
+const detail = vi.hoisted(() => ({ props: null as Record<string, unknown> | null }));
+vi.mock("../../components/billing-detail-modal", () => ({
+  BillingDetailModal: (props: Record<string, unknown>) => {
+    detail.props = props;
+    return null;
+  },
+}));
 vi.mock("../../components/invoice-mobile-actions", () => ({ InvoiceMobileActions: () => null }));
 // The hub's data doors read the stored lists; createInvoicePaymentLink stays real (fetch below).
 vi.mock("@/lib/client", async (importOriginal) => {
@@ -106,7 +127,11 @@ function jsonResponse(status: number, body: unknown): Response {
   } as unknown as Response;
 }
 
-/** The network edge: the payment-link mint, and an empty answer for everything else. */
+/** The customer as the member's contact read serves it (GET .../contacts/:contactId), or that read's refusal. */
+let served: { status: number; contact: Contact | null } = { status: 200, contact: null };
+let contactReads: string[] = [];
+
+/** The network edge: the payment-link mint, the customer's read, and an empty answer for everything else. */
 function installServer() {
   vi.stubGlobal(
     "fetch",
@@ -115,6 +140,12 @@ function installServer() {
       const method = (init?.method ?? "GET").toUpperCase();
       if (method === "POST" && url.pathname === `/commerce/businesses/${BIZ}/invoices/inv_wa/payment-link`) {
         return jsonResponse(201, { id: "pl_1", token: TOKEN, url: `/pay/link/${TOKEN}`, expiresAt: null });
+      }
+      if (method === "GET" && url.pathname === `/crm/businesses/${BIZ}/contacts/ct_rena`) {
+        contactReads.push(url.pathname);
+        return served.status === 200
+          ? jsonResponse(200, { contact: served.contact, events: [], notes: [], tasks: [] })
+          : jsonResponse(served.status, { message: "Contact not found" });
       }
       if (method === "GET" && url.pathname.endsWith("/document-templates")) {
         return jsonResponse(200, { templates: [], branding: {} });
@@ -127,6 +158,8 @@ function installServer() {
 let windowOpen: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
+  contactReads = [];
+  served = { status: 200, contact: null };
   windowOpen = vi.fn(() => null);
   vi.stubGlobal("open", windowOpen);
   window.open = windowOpen as unknown as typeof window.open;
@@ -162,16 +195,27 @@ async function opened(): Promise<URL> {
   return new URL(String(windowOpen.mock.calls[0]![0]));
 }
 
-async function panelShare(contacts: Contact[]): Promise<URL> {
-  render(<Panel contacts={contacts} />);
+/** The contacts a screen loaded: the 50 newest, which need not include the invoice's customer. */
+function fiftyNewest(): Contact[] {
+  return Array.from({ length: 50 }, (_, i) =>
+    ({ id: `ct_new_${i}`, firstName: `New${i}`, lastName: "Customer", phone: `755-01${String(i).padStart(2, "0")}` }) as Contact,
+  );
+}
+
+/** Share from the panel; `customer` is what the contact read serves (null: none), `loaded` the panel's contact list (default: the customer). */
+async function panelShare(customer: Contact | null, loaded: Contact[] = customer ? [customer] : []): Promise<URL> {
+  served = { status: 200, contact: customer };
+  render(<Panel contacts={loaded} />);
   fireEvent.click(screen.getAllByLabelText("More actions")[0]!);
   fireEvent.click(screen.getByText("Share via WhatsApp"));
   return opened();
 }
 
-async function hubShare(contacts: Contact[]): Promise<URL> {
+/** Share from the hub; `customer` is what the contact read serves (null: none), `loaded` the hub's contact list (default: the customer). */
+async function hubShare(customer: Contact | null, loaded: Contact[] = customer ? [customer] : []): Promise<URL> {
+  served = { status: 200, contact: customer };
   hub.invoices = [invoice()];
-  hub.contacts = contacts;
+  hub.contacts = loaded;
   render(<InvoicesHubPage />);
   const number = await screen.findAllByText("INV-0042");
   const row = number[0]!.closest("tr")!;
@@ -182,8 +226,8 @@ async function hubShare(contacts: Contact[]): Promise<URL> {
 }
 
 describe("WA-HELPER Sales > Invoices panel: Share via WhatsApp opens the customer's own number", () => {
-  it.each(["755-0123", "868-755-0123", "+1 868 755 0123"])("phone saved as %j: wa.me/18687550123 with the invoice link", async (typed) => {
-    const target = await panelShare([contact({ phone: typed })]);
+  it.each(["755-0123", "868-755-0123", "+1 868 755 0123"])("WhatsApp number saved as %j: wa.me/18687550123 with the invoice link", async (typed) => {
+    const target = await panelShare(contact({ phone: typed, whatsappNumber: typed }));
     expect(target.origin + target.pathname).toBe("https://wa.me/18687550123");
     const text = target.searchParams.get("text") ?? "";
     expect(text.startsWith("Hi Rena Ali, here is your invoice INV-0042 for ")).toBe(true);
@@ -192,33 +236,98 @@ describe("WA-HELPER Sales > Invoices panel: Share via WhatsApp opens the custome
   });
 
   it("the customer's WhatsApp number wins over their phone", async () => {
-    const target = await panelShare([contact({ phone: "755-0123", whatsappNumber: "868-755-0199" })]);
+    const target = await panelShare(contact({ phone: "755-0123", whatsappNumber: "868-755-0199" }));
     expect(target.pathname).toBe("/18687550199");
   });
 
   it("no number on file: WhatsApp's chooser with the same link", async () => {
-    const target = await panelShare([]);
+    const target = await panelShare(null);
+    expect(target.origin + target.pathname).toBe("https://wa.me/");
+    expect(target.searchParams.get("text")).toContain(`/public/invoice/${TOKEN}`);
+  });
+
+  // SEC-WAH-1 (RED at 087b0365: wa.me/18685550199 with the bearer invoice link).
+  it("a phone with no WhatsApp number saved by the business (a public form can write it) never receives the invoice link: the chooser", async () => {
+    const target = await panelShare(contact({ phone: "+1 868 555 0199", whatsappNumber: null }));
+    expect(target.origin + target.pathname).toBe("https://wa.me/");
+    expect(target.searchParams.get("text")).toContain(`/public/invoice/${TOKEN}`);
+  });
+
+  // WAH-CR-1 (RED at 087b0365: the chooser, because the customer was not in the loaded list).
+  it("a customer outside the 50 contacts the panel loaded: read by id, the share still opens their number", async () => {
+    const target = await panelShare(contact({ phone: "755-0123", whatsappNumber: "755-0123" }), fiftyNewest());
+    expect(target.origin + target.pathname).toBe("https://wa.me/18687550123");
+    expect(contactReads).toEqual([`/crm/businesses/${BIZ}/contacts/ct_rena`]);
+  });
+
+  it("the member's contact read is refused: the chooser, with the same link", async () => {
+    served = { status: 404, contact: null };
+    render(<Panel contacts={[]} />);
+    fireEvent.click(screen.getAllByLabelText("More actions")[0]!);
+    fireEvent.click(screen.getByText("Share via WhatsApp"));
+    const target = await opened();
     expect(target.origin + target.pathname).toBe("https://wa.me/");
     expect(target.searchParams.get("text")).toContain(`/public/invoice/${TOKEN}`);
   });
 });
 
 describe("WA-HELPER Invoices hub: Share WhatsApp opens the customer's own number", () => {
-  it.each(["755-0123", "868-755-0123"])("phone saved as %j: wa.me/18687550123 with the invoice link", async (typed) => {
-    const target = await hubShare([contact({ phone: typed })]);
+  it.each(["755-0123", "868-755-0123"])("WhatsApp number saved as %j: wa.me/18687550123 with the invoice link", async (typed) => {
+    const target = await hubShare(contact({ phone: typed, whatsappNumber: typed }));
     expect(target.origin + target.pathname).toBe("https://wa.me/18687550123");
     expect(target.searchParams.get("text")).toMatch(new RegExp(`^Your invoice: \\S+/public/invoice/${TOKEN}$`));
   });
 
   it("a local number reads with the business's own country", async () => {
     hub.country = "United Kingdom";
-    const target = await hubShare([contact({ phone: "07700 900123" })]);
+    const target = await hubShare(contact({ phone: "07700 900123", whatsappNumber: "07700 900123" }));
     expect(target.pathname).toBe("/447700900123");
   });
 
   it("no number on file: WhatsApp's chooser with the same link", async () => {
-    const target = await hubShare([contact({ phone: null })]);
+    const target = await hubShare(contact({ phone: null, whatsappNumber: null }));
     expect(target.origin + target.pathname).toBe("https://wa.me/");
     expect(target.searchParams.get("text")).toContain(`/public/invoice/${TOKEN}`);
+  });
+
+  // SEC-WAH-1 (RED at 087b0365: wa.me/18685550199 with the bearer invoice link).
+  it("a phone planted through the public intake (no WhatsApp number saved by the business): the chooser, never the planted chat", async () => {
+    const target = await hubShare(contact({ phone: "+1 868 555 0199", whatsappNumber: null }));
+    expect(target.origin + target.pathname).toBe("https://wa.me/");
+    expect(target.searchParams.get("text")).toMatch(new RegExp(`^Your invoice: \\S+/public/invoice/${TOKEN}$`));
+  });
+
+  // WAH-CR-1 (RED at 087b0365: the chooser).
+  it("a customer outside the 50 contacts the hub loaded: read by id, the share still opens their number", async () => {
+    const target = await hubShare(contact({ phone: "755-0123", whatsappNumber: "755-0123" }), fiftyNewest());
+    expect(target.origin + target.pathname).toBe("https://wa.me/18687550123");
+    expect(contactReads).toEqual([`/crm/businesses/${BIZ}/contacts/ct_rena`]);
+  });
+
+  // SEC-WAH-2 (RED at 087b0365: wa.me/18684561234 and wa.me/13123456789, strangers in Trinidad and Chicago).
+  it.each([
+    ["Other Caribbean", "456-1234"],
+    ["Other", "312 345 6789"],
+  ])("a business in %j: the saved local number %j is not read as TT; the chooser opens", async (country, typed) => {
+    hub.country = country;
+    const target = await hubShare(contact({ phone: typed, whatsappNumber: typed }));
+    expect(target.origin + target.pathname).toBe("https://wa.me/");
+    expect(target.searchParams.get("text")).toContain(`/public/invoice/${TOKEN}`);
+  });
+});
+
+// WAH-CR-4 (RED at 087b0365: the panel passed no business id, and the
+// operator read's contact has no phone, so the detail panel's WhatsApp never
+// rendered). billing-detail-modal-whatsapp.test.tsx proves what the detail
+// panel does with these two ids.
+describe("WA-HELPER Sales > Invoices panel: the detail panel gets what it needs to read the customer's number", () => {
+  it("View details passes the business id and the invoice's contact id", async () => {
+    detail.props = null;
+    render(<Panel contacts={[]} />);
+    fireEvent.click(screen.getAllByLabelText("More actions")[0]!);
+    fireEvent.click(screen.getByText("View details"));
+    await waitFor(() => expect(detail.props).not.toBeNull());
+    expect(detail.props!.contactId).toBe("ct_rena");
+    expect(detail.props!.businessId).toBe(BIZ);
   });
 });
