@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { ownStockRows } from '../../core/inventory/inventory-mode';
 
 export type InventoryRiskType = 'out_of_stock' | 'low_stock' | 'unverified_supplier_inventory' | 'no_inventory_tracked';
 
@@ -56,11 +57,17 @@ export class InventoryRiskService {
     return 'none';
   }
 
+  /**
+   * W11-CHECKOUT-PAIR-SCOPE review (CPS-SEC-3, CPS-COR-1; D-137): the business's own stock rows only (ownStockRows). A
+   * planted row of another business on this business's product was read as its stock: that business's quantity in
+   * this business's report, and a product with no inventoryMode taken as tracked from it.
+   */
   async evaluateProduct(productId: string, businessId: string): Promise<ProductInventoryRisk | null> {
     const product = await this.db.product.findFirst({
       where: { id: productId, businessId, deletedAt: null },
       include: {
         inventoryStocks: {
+          where: ownStockRows(businessId),
           include: { warehouse: { select: { id: true, name: true } } },
         },
         sourceLinks: {

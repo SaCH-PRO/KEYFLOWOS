@@ -266,11 +266,15 @@ export class SiteController {
   /**
    * G6PUB-R3-STORE-ORDER-DOORS (recheck G6PUB-RC2-4, RC1-1; D-69): the
    * gateways a storefront takes for an amount in `currency` (the cart's;
-   * without one, the business currency), by the same rule as the invoice pay
-   * page (PaymentsService.getAvailableGateways): WiPay only for a business with
-   * a WiPay merchant pair and a TTD amount. The storefront checkout offers WiPay
+   * without one, the business currency): WiPay only for a business with a
+   * WiPay merchant pair and a TTD amount. The storefront checkout offers WiPay
    * from this answer only; it listed WiPay, as the default, for every TTD cart.
    * Ids, names and currencies only: no key, account number or other setting.
+   *
+   * W11-STORE-OWN-PAYMENT-KEYS (owner ruling D-138): the storefront's own list
+   * (PaymentsService.getStorefrontGateways), no longer the invoice pay page's:
+   * PayPal and Stripe only with the business's own complete credentials, never
+   * the platform's env, alone or mixed. The checkout gate reads the same.
    */
   @UseGuards(PublicRateLimitGuard)
   @PublicRateLimit(30, 60_000)
@@ -278,7 +282,7 @@ export class SiteController {
   async getPublicGateways(@Param('slug') slug: string, @Query('currency') currency?: string) {
     const storefront = await this.siteService.getPublicStorefront(slug);
     const payable = typeof currency === 'string' && currency.trim() ? sanitize(currency.trim(), 8) : null;
-    const gateways = await this.paymentsService.getAvailableGateways(storefront.business.id, payable);
+    const gateways = await this.paymentsService.getStorefrontGateways(storefront.business.id, payable);
     return gateways.map((g) => ({ id: g.id, name: g.name, currencies: g.currencies }));
   }
 

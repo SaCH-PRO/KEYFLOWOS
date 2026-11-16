@@ -31,8 +31,30 @@
  * that would breach either.
  *
  * If this rule ever changes it must change here, not in one caller.
+ *
+ * "Keeping stock for a product" means the business's OWN stock rows
+ * (ownStockRows). W11-CHECKOUT-PAIR-SCOPE review (CPS-SEC-2, CPS-SEC-3,
+ * CPS-COR-1; D-137): inventory_stocks is unique on (product, warehouse) across
+ * every business, and D-137 leaves a planted row of another business for an
+ * operator, so another business's row can sit on this business's product.
+ * Counted, it made a product with no inventoryMode tracked for one reader and
+ * not for another (the paid door sold the line as untracked, routing then
+ * failed it for stock), and its quantity was published, sold from and reported
+ * as this business's. Every reader above counts and reads stock through
+ * ownStockRows.
  */
 export type InventoryMode = 'tracked' | 'untracked' | 'virtual' | (string & {});
+
+/**
+ * The stock rows that are stock kept for a product of `businessId`: that
+ * business's own rows, never another business's (a planted row, D-137). A
+ * Prisma where-filter on inventory_stocks, for the `hasStock` count and the
+ * quantity reads of the rule's readers (store-order's paid door, the catalog's
+ * storefront projection, fulfilment routing, the inventory risk read).
+ */
+export function ownStockRows(businessId: string): { businessId: string } {
+  return { businessId };
+}
 
 export function resolveInventoryMode(
   inventoryMode: string | null | undefined,

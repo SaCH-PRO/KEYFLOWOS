@@ -1195,6 +1195,21 @@ Ruled by the owner on 2026-11-13: "All 41 recommended please", and every decisio
 | D-188 | Looking up a contact’s website for extra details: Only when a member who may edit the contact taps “Enrich”; never in the background. (`enrichment`) | S1-RULINGS-RECORD, TOF-WEBSITE-ENRICHMENT |
 | D-189 | KEY’s knowledge of its own setup (#162): Owner-only, inside KEY’s context; not in staff chats. (`keyself`) | S1-RULINGS-RECORD, TOF-KEY-SELF-MODEL |
 | D-190 | Three agent-tooling packets left from the tie-off: Run them in this wave. (`controlplane`) | S1-RULINGS-RECORD, TOF-STALE-GATES-PKT, TOF-LISTER-FORK-PRS, TOF-WORKER-CURSOR-PROOF |
+| D-191 | Can staff handle bookings and log their own time: Yes: staff get booking handling by default, and log their own time when Projects returns. (`staffbookings`) | SWEEP-P0-FOLLOWUP |
+| D-192 | Can staff pause, resume or stop KEY's plans: No, owners and admins only, unless you give a staff member KEY access. (`staffkeyplans`) | SWEEP-P0-FOLLOWUP |
+| D-193 | Who may enter the business's own AI keys (OpenAI, Anthropic): Only the owner enters or changes the AI keys; admins keep the other AI settings. (`byokkeys`) | SWEEP-P0-FOLLOWUP |
+| D-194 | The WhatsApp “test connection” button: The test only reports the result and never switches WhatsApp back on, so any member may run it. (`whatsappsmoke`) | SWEEP-P0-FOLLOWUP |
+| D-195 | A setup-only change to seven locked KEY chat tests: Approve the setup-only change. (`keychatsetup`) | W1F-KEYCHAT-OWNSESSION |
+| D-196 | Store orders settle only with the store’s own Stripe account: Update that locked test so the platform’s signature never settles a store order. (`storestripe`) | W1F-STORE-STRIPE-R0 |
+| D-197 | PayPal on your public store: Offer PayPal on the store only once a webhook ID is entered (adds that field to Settings › Payments). (`storepaypal`) | W1F-STORE-PAYPAL |
+| D-198 | Changing the status of a shipped order: Refuse moving a shipped or delivered order backwards (fix a mistake with a return or refund), and make ship and cancel check the current status before saving. (`orderstatus`) | W1F-ORDER-TRANSITIONS |
+| D-199 | A customer pays online but the item has run out: Record the payment, keep the order, and alert you to restock or refund. (`paidnostock`) | W1F-SETTLE-NO-STOCK |
+| D-200 | A stock check before the security deploy: Make the read-only check a required step before the deploy. (`stockcheck`) | S0-SEC-LANE-DEPLOY |
+| D-201 | Cleaning up KEY memories that were shared too widely: Run the one-time command for each business right after the deploy. (`memorycleanup`) | S0-SEC-LANE-DEPLOY |
+| D-202 | A team member using KEY by WhatsApp or SMS: Give them their own history too (only their own). (`bridgememory`) | W1F-PERCEPTION-MODULE-SCOPE |
+| D-203 | What the customer support assistant (Chatwoot) can see: Only the conversation in front of it. (`supportdesk`) | W1F-PERCEPTION-MODULE-SCOPE |
+
+D-191 to D-203 were ruled on 2026-11-16 ("All recommended"): the four Team-permission questions from the SWEEP-P0 round-3 rechecks and the nine questions from v1 wave 1. D-195 and D-196 approve the Release 0 amendments recorded for W1F-KEYCHAT-OWNSESSION and W1F-STORE-STRIPE-R0 in the plan's r0_register.
 
 ---
 

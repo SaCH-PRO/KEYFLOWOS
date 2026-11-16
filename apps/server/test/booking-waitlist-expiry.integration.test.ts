@@ -603,7 +603,9 @@ describe('a KEY offer names the member it was made for (review SEC-WX-1)', () =>
         },
       },
     });
-  });
+    // The first import of flow-orchestrator.service transforms a very large module; under a loaded
+    // full run it outlasts the 10s default hook timeout (as in key-dispatcher-tenant's 120s setup).
+  }, 120_000);
 
   const keyOffer = (entryId: string, day: number) => {
     const slot = slotAt(day);

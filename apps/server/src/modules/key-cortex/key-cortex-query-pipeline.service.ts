@@ -61,7 +61,7 @@ import { KeyCortexLearningService } from './key-cortex-learning.service';
 import { KeyCortexSessionService } from './key-cortex-session.service';
 import {
   KeyCortexPromptContextService,
-  isToolCallRecord,
+  isPersonalKeyRecord,
   readersOwnCognitionMemory,
 } from './key-cortex-prompt-context.service';
 import { userCanAccessBusiness } from '../../core/auth/business.guard';
@@ -2024,6 +2024,9 @@ export class KeyCortexQueryPipelineService {
    * the business reads none (fail closed); and no KEY tool call's record is taken from the
    * business-wide stores (isToolCallRecord: another member's tool answer and typed input). The
    * business-wide stores are otherwise not narrowed. Both calls read every member's episodes before.
+   * W11-FLOW-PERCEPTION-SCOPE review (SEC-W11FPS-1/2): nor KEY's own record of a member's turn (what they
+   * typed, KEY's answer to them), the legacy action route's action.<status>, or a ledger ACTION_* row under
+   * any subject: isPersonalKeyRecord, the rule buildMemoryContext and the /ai flow chat's perception keep.
    *
    * Review SEC-W10CCS-R2: cognition memory (CognitionMemory) is a per-member store, read business-wide
    * by the retrieval service: processQuery writes one row on every turn (recordObservation: what the
@@ -2045,7 +2048,7 @@ export class KeyCortexQueryPipelineService {
         limit: CHAT_MEMORY_FRAGMENTS + CHAT_MEMORY_HEADROOM,
         ...(reader ? { userId: reader } : { includeEpisodic: false }),
       })
-    ).filter((fragment) => !isToolCallRecord(fragment));
+    ).filter((fragment) => !isPersonalKeyRecord(fragment));
     // W11-CORTEX-MEMORY-COGNITION (D-130): the shared rule, which buildMemoryContext applies to the same prompt.
     const own = await readersOwnCognitionMemory(this.prisma, query.businessId, reader, fragments, this.logger, 'chatMemory');
     return fragments

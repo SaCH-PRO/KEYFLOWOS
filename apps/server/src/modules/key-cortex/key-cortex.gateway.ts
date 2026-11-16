@@ -3,7 +3,8 @@
  * Real-time bidirectional communication layer for KEY AI.
  *
  * Provides:
- *   - Live chat streaming (key:chat → key:stream)
+ *   - Live chat streaming (key:chat → key:stream), on the member's own KEY
+ *     session only (W11-KEY-CHAT-SESSION-BIND, see handleChat)
  *   - Approval workflows (key:approve / key:reject)
  *   - Typing indicators (key:typing)
  *   - Server-push alerts, insights, suggestions & health updates
@@ -32,6 +33,7 @@ import { KeyCortexApprovalService } from './key-cortex-approval.service';
 import { KeyCortexEventService } from './key-cortex-event.service';
 import { KeyCortexExecutorService } from './key-cortex-executor.service';
 import { KeyCortexWsAuthService, isAllowedWsOrigin } from './key-cortex-ws-auth.service';
+import { KeyCortexSessionService } from './key-cortex-session.service';
 
 // ------------------------------------------------------------------
 // Types
@@ -236,6 +238,9 @@ export class KeyCortexGateway
     private readonly eventService: KeyCortexEventService,
     private readonly executorService: KeyCortexExecutorService,
     private readonly wsAuth: KeyCortexWsAuthService,
+    // W11-KEY-CHAT-SESSION-BIND: resolves key:chat's client session id (see handleChat).
+    // Appended, never inserted: specs construct this gateway positionally.
+    private readonly sessionService: KeyCortexSessionService,
   ) {}
 
   // ================================================================
@@ -358,13 +363,27 @@ export class KeyCortexGateway
    * Chat message from the client.
    * Calls the reasoning engine and streams the response back
    * as a series of key:stream events.
+   *
+   * SESSION (W11-KEY-CHAT-SESSION-BIND, review SEC-W11MC-1). `data.sessionId`
+   * is the client's: the reasoning engine is handed it only when it names one
+   * of this socket's member's own sessions in the socket's business
+   * (KeyCortexSessionService.chatSessionId, the session ownership rule the HTTP
+   * routes apply), decided before anything reads a session; any other value
+   * starts a new session for the member, exactly as an id that names no
+   * session does, so the socket cannot tell a foreign id from an unknown one.
+   * Before, the id went to getOrCreateSession unchecked, which loads any
+   * session by id (the Redis cache first, then the database, which no tenant
+   * context scopes here): another member's or another business's session had
+   * its running summary and last 10 messages in this member's prompt, and the
+   * turn was appended to it.
    */
   @SubscribeMessage('key:chat')
   async handleChat(
     @MessageBody()
     data: {
       text: string;
-      sessionId?: string;
+      /** The client's: resolved by KeyCortexSessionService.chatSessionId, never used as given. */
+      sessionId?: unknown;
       persona?: string;
       context?: Record<string, unknown>;
     },
@@ -380,6 +399,9 @@ export class KeyCortexGateway
     const { userId, businessId } = clientInfo;
 
     try {
+      // W11-KEY-CHAT-SESSION-BIND: the member's own session in the socket's business, or undefined (a new session).
+      const sessionId = await this.sessionService.chatSessionId(businessId, userId, data?.sessionId);
+
       // Acknowledge receipt
       client.emit('key:status', { status: 'thinking', timestamp: new Date().toISOString() });
 
@@ -395,7 +417,7 @@ export class KeyCortexGateway
         userId,
         businessId,
         message: data.text,
-        sessionId: data.sessionId,
+        sessionId,
         persona: data.persona,
         context: data.context,
       });

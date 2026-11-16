@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException, Logger } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
-import { resolveInventoryMode } from '../../core/inventory/inventory-mode';
+import { ownStockRows, resolveInventoryMode } from '../../core/inventory/inventory-mode';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { db } from '@keyflow/db';
@@ -182,7 +182,7 @@ export class CatalogService {
       await this.assertPublicStore(businessId);
       return [];
     }
-    const stockByProduct = await this.aggregateStock(products.map((p) => p.id));
+    const stockByProduct = await this.aggregateStock(businessId, products.map((p) => p.id));
     const result: any[] = [];
     for (const { inventoryMode, outOfStockBehavior, ...publicFields } of products) {
       const projected = this.projectAvailability({ inventoryMode, outOfStockBehavior }, stockByProduct.get(publicFields.id));
@@ -211,17 +211,25 @@ export class CatalogService {
       where: { id: productId, businessId, deletedAt: null },
     });
     if (!product) return null;
-    const stockByProduct = await this.aggregateStock([product.id]);
+    const stockByProduct = await this.aggregateStock(businessId, [product.id]);
     const projected = this.projectAvailability(product, stockByProduct.get(product.id));
     return { ...product, ...projected.public };
   }
 
-  private async aggregateStock(productIds: string[]) {
+  /**
+   * W11-CHECKOUT-PAIR-SCOPE review (CPS-SEC-2; D-137): the business's own stock
+   * rows only (ownStockRows). A planted row of another business on this
+   * business's product was summed in, so the anonymous list published that
+   * business's quantity as this one's and, through resolveInventoryMode, made a
+   * product with no inventoryMode tracked and purchasable from it, while the
+   * paid door counts the business's own rows.
+   */
+  private async aggregateStock(businessId: string, productIds: string[]) {
     const map = new Map<string, { quantity: number; reserved: number }>();
     if (productIds.length === 0) return map;
     const rows = await this.prisma.client.inventoryStock.groupBy({
       by: ['productId'],
-      where: { productId: { in: productIds } },
+      where: { ...ownStockRows(businessId), productId: { in: productIds } },
       _sum: { quantity: true, reserved: true },
     });
     for (const r of rows) {
