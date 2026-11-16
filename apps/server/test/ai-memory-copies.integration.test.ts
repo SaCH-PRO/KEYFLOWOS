@@ -31,6 +31,16 @@
  *      Prisma refused the write, and run() stopped before withdrawMemberPromotions, so a member's leaked promotion
  *      stayed served. The cut is now on a code point, and the withdrawal runs first.
  *
+ * The packet's review repair (wave 1 review of W1F-MEMORY-COPIES):
+ *   4. SEC-W1FMC-1: a row rewritten in place keeps its id (PUT .../ai/memory with the same category and key, a document
+ *      extracted again, a promotion into the same key), so a copy of its old value still named a live row and search
+ *      served it to every member, as did KEY's memory block. And UnifiedMemoryWriterService.store's own copy (made
+ *      after its write, a provider call later) was inserted whatever the row held by then. A copy is now served, and
+ *      written, only while it holds what its row holds (V70B-13, V70B-14).
+ *   5. COR-W1FMC-1 / SEC-W1FMC-2: the door read the rows it deletes with findMany, which @keyflow/db caps at 1000
+ *      (defaultTakeExtension, inside a transaction too), and deleted only those: a deletion matching more left the rest,
+ *      served with their copies. The door now deletes every matching row (V70B-12).
+ *
  * WHAT IS REAL: the database (PrismaService, the Prisma client, pgvector), the HTTP routes on the real AiController
  * (GET/PUT/DELETE .../ai/memory, POST .../ai/suggestions/refresh and .../dismiss) behind its real AuthGuard,
  * BusinessGuard and CrmRateLimitGuard, and on the real AgentController (POST .../agent/memory/backfill, GET
@@ -579,6 +589,57 @@ describe('W1F-MEMORY-COPIES: every AiMemory deletion removes its semantic copies
       await app.close();
     }
   }, 60_000);
+
+  it("V70B-12 a deletion matching more rows than @keyflow/db's 1000-row findMany cap (AiMemoryService.removeCategory of 1005 rows) deletes every one with its copies and answers 1005: GET .../ai/memory and search serve none of them; another category's row and the other business's row of the category keep theirs (COR-W1FMC-1, SEC-W1FMC-2)", async () => {
+    const app = await memoryApp();
+    try {
+      const N = 1005;
+      const KEEP = 'V70B-12-KEEP: the business tone is warm';
+      const OTHER = 'V70B-12-OTHER-BIZ: a pattern of the other business';
+      await db.aiMemory.createMany({
+        data: Array.from({ length: N }, (_, i) => ({
+          businessId: ID.biz,
+          category: 'patterns',
+          key: `${P}pattern_${String(i).padStart(4, '0')}`,
+          value: `V70B-12-PATTERN ${i}: peak hour ${i % 24}`,
+          source: 'pattern_analysis',
+          confidence: 0.8,
+        })),
+      });
+      const keep = await app.api.put(ID.owner, { category: 'priorities', key: `${P}keep`, value: KEEP });
+      const other = await app.api.put(ID.owner, { category: 'patterns', key: `${P}pattern_other`, value: OTHER }, ID.other);
+      // What backfills wrote over time (one backfill copies at most 500 rows): one copy of every row, in the backfill's
+      // form, in both businesses.
+      await db.$executeRawUnsafe(
+        `INSERT INTO ai_memory_embeddings (id, business_id, content, source_type, source_id, embedding, metadata, created_at)
+         SELECT $1 || 'emb_' || id, business_id, category || ': ' || key || ' = ' || value, 'memory', id, $2::vector, '{}'::jsonb, NOW()
+         FROM ai_memories WHERE business_id IN ($3, $4)`,
+        P,
+        `[${UNIT_VECTOR.join(',')}]`,
+        ID.biz,
+        ID.other,
+      );
+      expect(await db.aiMemoryEmbedding.count({ where: { businessId: ID.biz, sourceType: 'memory' } })).toBe(N + 1);
+      expect(await app.api.search(ID.member), 'before the deletion').toContain('V70B-12-PATTERN');
+
+      expect(await app.memory.removeCategory(ID.biz, 'patterns'), 'every matching row').toBe(N);
+
+      expect(await db.aiMemory.count({ where: { businessId: ID.biz, category: 'patterns' } }), 'rows left').toBe(0);
+      expect(await memoryCopies(), "the business's copies left").toEqual([backfillCopy('priorities', `${P}keep`, KEEP)]);
+      expect(await copiesOf(keep.id)).toHaveLength(1);
+      expect(await copiesOf(other.id), "the other business's row of the category").toEqual([
+        backfillCopy('patterns', `${P}pattern_other`, OTHER),
+      ]);
+      expect(await app.api.memories(ID.member)).not.toContain('V70B-12-PATTERN');
+      const search = await app.api.search(ID.member);
+      expect(search).not.toContain('V70B-12-PATTERN');
+      expect(search).toContain(KEEP);
+      expect(await semanticBlockFor(ID.member, app.semantic)).not.toContain('V70B-12-PATTERN');
+      expect(await app.api.search(ID.owner, QUESTION, ID.other)).toContain(OTHER);
+    } finally {
+      await app.close();
+    }
+  }, 120_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -726,6 +787,83 @@ describe('W1F-MEMORY-COPIES: a backfill cannot write a copy of a row that is gon
       expect(await memoryCopies()).toEqual([]);
       expect(await app.api.search(ID.member)).not.toContain('V70B-08-LEAK');
       expect(await semanticBlockFor(ID.member, app.semantic)).not.toContain('V70B-08-LEAK');
+    } finally {
+      await app.close();
+    }
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// 2b. A row rewritten in place (review SEC-W1FMC-1)
+// ---------------------------------------------------------------------------
+
+describe('W1F-MEMORY-COPIES: a row rewritten in place serves only the value it holds now', () => {
+  it("V70B-13 a row rewritten in place (PUT .../ai/memory with the same category and key: the same row, a new value; a document extracted again) stops serving the copies of its old value: the STAFF member's search and memory block serve only what the rows hold now (the backfill's copy and the writer's own copy alike); the next backfill's copies of the new values are served (SEC-W1FMC-1)", async () => {
+    const app = await memoryApp();
+    try {
+      const OLD = 'V70B-13-OLD-SECRET: the owner is selling the second shop in March';
+      const NEW = 'V70B-13-NEW: (removed)';
+      const DOC = `${P}doc_rewritten`;
+      const OLD_EXTRACT = 'V70B-13-OLD-EXTRACT: payroll total 18400 for March';
+      const NEW_EXTRACT = 'V70B-13-NEW-EXTRACT: payroll total withheld';
+      const row = await app.api.put(ID.owner, { category: 'goals', key: `${P}goal`, value: OLD });
+      // The writer stores a document's extraction and indexes it (its own copy: content the value).
+      await app.writer.storeDocumentExtraction(ID.biz, DOC, OLD_EXTRACT, { indexSemantic: true });
+      const extraction = await db.aiMemory.findFirstOrThrow({ where: { businessId: ID.biz, category: 'document_extraction', key: DOC } });
+      expect(await app.api.backfill(ID.member)).toBe(2);
+      expect(await copiesOf(row.id)).toEqual([backfillCopy('goals', `${P}goal`, OLD)]);
+      expect(await copiesOf(extraction.id)).toEqual([backfillCopy('document_extraction', DOC, OLD_EXTRACT), OLD_EXTRACT].sort());
+      const before = await app.api.search(ID.member);
+      expect(before, 'before the rewrite').toContain('V70B-13-OLD-SECRET');
+      expect(before, 'before the rewrite').toContain('V70B-13-OLD-EXTRACT');
+
+      // The owner rewrites the goal; the document is extracted again (not indexed this time).
+      const rewritten = await app.api.put(ID.owner, { category: 'goals', key: `${P}goal`, value: NEW });
+      expect(rewritten.id, 'the same row, rewritten in place').toBe(row.id);
+      await app.writer.storeDocumentExtraction(ID.biz, DOC, NEW_EXTRACT);
+      expect((await db.aiMemory.findUniqueOrThrow({ where: { id: extraction.id } })).value).toBe(NEW_EXTRACT);
+
+      const memories = await app.api.memories(ID.member);
+      expect(memories).toContain(NEW);
+      expect(memories).not.toContain('V70B-13-OLD');
+      for (const userId of [ID.member, ID.owner]) {
+        expect(await app.api.search(userId), `${userId}: search after the rewrite`).not.toContain('V70B-13-OLD');
+        expect(await semanticBlockFor(userId, app.semantic), `${userId}: memory block after the rewrite`).not.toContain('V70B-13-OLD');
+      }
+
+      // The next backfill copies what the rows hold, and those copies are served.
+      expect(await app.api.backfill(ID.member)).toBe(2);
+      const after = await app.api.search(ID.member);
+      expect(after).toContain(backfillCopy('goals', `${P}goal`, NEW));
+      expect(after).toContain(backfillCopy('document_extraction', DOC, NEW_EXTRACT));
+      expect(after).not.toContain('V70B-13-OLD');
+      expect(await semanticBlockFor(ID.member, app.semantic)).toContain('V70B-13-NEW-EXTRACT');
+    } finally {
+      await app.close();
+    }
+  }, 60_000);
+
+  it("V70B-14 the writer's own copy (UnifiedMemoryWriterService.store with indexSemantic) of a value its row no longer holds is not written: an extraction whose embedding call is held while the document is extracted again writes no copy of its old value after; only the new value's copy is served (SEC-W1FMC-1)", async () => {
+    const app = await memoryApp();
+    try {
+      const DOC = `${P}doc_raced`;
+      const OLD = 'V70B-14-WRITER-OLD: payroll 18400';
+      const NEW = 'V70B-14-WRITER-NEW: payroll withheld';
+      const held = app.holdEmbedding('V70B-14-WRITER-OLD');
+      const first = app.writer.storeDocumentExtraction(ID.biz, DOC, OLD, { indexSemantic: true });
+      await held.reached; // the row holds OLD; the first extraction's copy is not written yet
+      // The document is extracted again, and indexed: the row now holds NEW, with its copy.
+      await app.writer.storeDocumentExtraction(ID.biz, DOC, NEW, { indexSemantic: true });
+      held.release();
+      expect((await first).value, 'the first extraction answers what it wrote').toBe(OLD);
+
+      const row = await db.aiMemory.findFirstOrThrow({ where: { businessId: ID.biz, category: 'document_extraction', key: DOC } });
+      expect(row.value).toBe(NEW);
+      expect(await copiesOf(row.id), 'only the value the row holds is copied').toEqual([NEW]);
+      const search = await app.api.search(ID.member);
+      expect(search).not.toContain('V70B-14-WRITER-OLD');
+      expect(search).toContain(NEW);
+      expect(await semanticBlockFor(ID.member, app.semantic)).not.toContain('V70B-14-WRITER-OLD');
     } finally {
       await app.close();
     }
