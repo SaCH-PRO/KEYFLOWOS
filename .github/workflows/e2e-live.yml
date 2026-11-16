@@ -1,9 +1,26 @@
 name: E2E Live (Release 0 journey)
 
-# R0-25-PLAYWRIGHT-R0. The Release 0 journey (issue #186) in a real browser
-# against a real API, Postgres and Redis on this runner: apps/web/e2e/
-# release0-live.spec.ts. Nothing is mocked, and the spec fails on any request
-# that leaves localhost and on any 5xx.
+# R0-25-PLAYWRIGHT-R0, extended by GATE-HARNESS (the v1 journey gate,
+# apps/web/e2e/journeys/README.md). The Release 0 journey (issue #186) and the
+# v1 journey specs in a real browser against a real API, Postgres and Redis on
+# this runner: apps/web/e2e/release0-live.spec.ts, unedited, and
+# apps/web/e2e/journeys/*.spec.ts. Nothing is mocked, and the specs fail on any
+# request that leaves localhost and on any 5xx.
+#
+# Every spec runs in two Playwright projects (playwright.config.ts): phone
+# (375x812, touch) and desktop (1440x900), against the production build
+# (`next build`, served standalone), so the web's feature flags take their
+# production values; the journey preflight refuses a dev server.
+#
+# Three variants of the API (E2E_VARIANT):
+#   ai-disabled   AI_DISABLED=1 and no provider key (the harness before GATE-HARNESS)
+#   key-disabled  the same plus KEY_DISABLED=1: no KEY UI may render
+#   ai-on         AI on with a capped test key. Staging only: it runs only when
+#                 dispatched with ai_on, in the e2e-ai-on environment (required
+#                 reviewers, the capped key as its secret E2E_AI_ON_OPENAI_API_KEY),
+#                 under the operator's recorded authority for provider traffic.
+# The first two always run; the journey preflight checks that the API runs the
+# variant the job names.
 #
 # MANUAL ONLY (workflow_dispatch). It builds and boots the whole stack, so it is
 # not a per-push gate; the mocked Playwright job in ci-cd.yml is.
@@ -11,16 +28,41 @@ name: E2E Live (Release 0 journey)
 # Sign-in (owner ruling D-02, option C, hosted Supabase): this runner has no
 # Supabase project and must not call one, so the sign-up submit is not driven
 # here; it belongs to the operator-authorized staging run (#186 step B). The
-# spec starts each owner from an HS256 token signed with a secret generated
+# specs start each owner from an HS256 token signed with a secret generated
 # for this run and handed to the API as SUPABASE_JWT_SECRET (verified locally
-# under NODE_ENV=test), and records that substitution in its output.
+# under NODE_ENV=test), and record that substitution in their output.
 #
-# The API runs with NODE_ENV=test, AI_DISABLED=1, HIBP_DISABLED=true, no
-# schedulers and no provider key of any kind: every optional service stays off.
-# The trace of the run is uploaded whether it passes or fails.
+# The API runs with NODE_ENV=test, HIBP_DISABLED=true, no schedulers and no
+# provider key of any kind outside the ai-on job (journey legs tagged
+# @scheduler run in GATE-SCHEDULER-RUN, @staging legs on the staging stack).
+#
+# Three Playwright steps, each writing its own --output folder (Playwright
+# empties its output folder when a run starts, so a shared one would lose the
+# earlier step's traces):
+#   release0-live.spec.ts        required; its traces are uploaded as their own
+#                                artifact, release0-live-trace-<variant> (R0-25
+#                                closedBy evidence)
+#   the journey harness self-check (e2e/journeys/harness-self-check.spec.ts)
+#                                required
+#   the v1 journeys (e2e/journeys/, less @harness)
+#                                a RED report until the packets that fix them
+#                                land: the step continues on error, so the job's
+#                                verdict stays Release 0's, unless dispatched with
+#                                journeys_required (GATE-JOURNEY-RUN)
+# The job summary names each step's verdict. The traces, the API log and the
+# journeys' 3G timing records are uploaded whether the run passes or fails.
 
 on:
   workflow_dispatch:
+    inputs:
+      ai_on:
+        description: 'Also run the ai-on variant (staging authority for provider traffic; e2e-ai-on environment, capped key)'
+        type: boolean
+        default: false
+      journeys_required:
+        description: 'Fail the job when a v1 journey fails (GATE-JOURNEY-RUN); otherwise the journeys are a RED report and Release 0 decides the job'
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -35,12 +77,16 @@ env:
   PNPM_VERSION: '9.15.0'
 
 jobs:
-  release0-live:
-    name: Release 0 live journey (Playwright)
+  journeys:
+    name: Journeys and Release 0 (${{ matrix.variant }}, phone + desktop)
     # Pinned: ubuntu-latest moved to 26.04, where Playwright 1.59.1 cannot install its browser
     # ("Playwright does not support chromium on ubuntu26.04-x64"). Unpin once Playwright supports it.
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [ai-disabled, key-disabled]
 
     services:
       postgres:
@@ -73,6 +119,7 @@ jobs:
       API_PORT: '3001'
       E2E_API_URL: http://localhost:3001
       E2E_PORT: '5000'
+      E2E_VARIANT: ${{ matrix.variant }}
 
     steps:
       - name: Checkout
@@ -109,7 +156,7 @@ jobs:
       - name: Build server
         run: cd apps/server && pnpm run build
 
-      # A per-run HS256 secret: the API verifies the spec's tokens with it, and
+      # A per-run HS256 secret: the API verifies the specs' tokens with it, and
       # it exists nowhere else.
       - name: Generate the run's token secret
         run: |
@@ -118,25 +165,35 @@ jobs:
           echo "E2E_JWT_SECRET=$secret" >> "$GITHUB_ENV"
 
       # An allow-listed environment, not a copy of the runner's: no provider key
-      # can reach the API.
-      - name: Start the API (no provider keys, optional services off)
+      # can reach the API. The key-disabled variant adds KEY_DISABLED=1.
+      - name: Start the API (no provider keys, optional services off; KEY_DISABLED in key-disabled)
         run: |
+          case "$E2E_VARIANT" in
+            ai-disabled) key_switch='KEY_DISABLED=' ;;
+            key-disabled) key_switch='KEY_DISABLED=1' ;;
+            *) echo "unknown variant $E2E_VARIANT"; exit 1 ;;
+          esac
           cd apps/server
           env -i PATH="$PATH" HOME="$HOME" \
             DATABASE_URL="$DATABASE_URL" DIRECT_URL="$DIRECT_URL" REDIS_URL="$REDIS_URL" \
             NODE_ENV=test PORT="$API_PORT" AI_DISABLED=1 DISABLE_SCHEDULERS=1 HIBP_DISABLED=true \
-            SUPABASE_JWT_SECRET="$E2E_JWT_SECRET" RATE_LIMIT_MAX_REQUESTS=100000 \
+            SUPABASE_JWT_SECRET="$E2E_JWT_SECRET" RATE_LIMIT_MAX_REQUESTS=100000 "$key_switch" \
             nohup node dist/main.js > "$RUNNER_TEMP/api.log" 2>&1 &
           for _ in $(seq 1 90); do
-            if curl -fsS "$E2E_API_URL/healthz" > /dev/null; then echo "API ready"; exit 0; fi
+            if curl -fsS "$E2E_API_URL/healthz" > /dev/null; then echo "API ready ($E2E_VARIANT)"; exit 0; fi
             sleep 2
           done
           echo "API did not become ready"; tail -80 "$RUNNER_TEMP/api.log"; exit 1
 
       # NEXT_PUBLIC_* are inlined at build time: the browser bundle calls the
-      # local API and has no Supabase URL or key to call.
-      - name: Build web against the local API
-        run: cd apps/web && pnpm run build
+      # local API and has no Supabase URL or key to call. No NEXT_PUBLIC_FF_*
+      # override may reach the build: the journeys run on production flags.
+      - name: Build web against the local API (production build, production flags)
+        run: |
+          if env | grep -q '^NEXT_PUBLIC_FF_'; then
+            echo "a NEXT_PUBLIC_FF_* override is set; the journeys run on production flags"; exit 1
+          fi
+          cd apps/web && pnpm run build
         env:
           NEXT_PUBLIC_API_BASE_URL: http://localhost:3001
           NEXT_PUBLIC_SUPABASE_URL: ''
@@ -146,8 +203,11 @@ jobs:
       - name: Install Playwright Chromium
         run: cd apps/web && pnpm exec playwright install --with-deps chromium
 
-      - name: Run the Release 0 live journey
-        run: cd apps/web && pnpm exec playwright test e2e/release0-live.spec.ts
+      # release0-live.spec.ts is closedBy evidence: it runs unedited, on both
+      # projects, in every variant, and must pass. Its own output folder.
+      - name: Run the Release 0 live journey (phone + desktop)
+        id: release0
+        run: cd apps/web && pnpm exec playwright test e2e/release0-live.spec.ts --project=phone --project=desktop --output=test-results/release0-live
         env:
           E2E_LIVE: '1'
           # The standalone server the build above produced (next.config.ts
@@ -156,13 +216,255 @@ jobs:
           E2E_WEB_COMMAND: standalone
           E2E_BASE_URL: http://127.0.0.1:5000
 
-      - name: Upload trace and API log
+      - name: Upload the Release 0 trace
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: release0-live-trace
+          name: release0-live-trace-${{ matrix.variant }}
           path: |
-            apps/web/test-results/
+            apps/web/test-results/release0-live/
+          retention-days: 14
+          if-no-files-found: warn
+
+      # The harness's own guarantees (every person's browser watched, no
+      # session for a customer, members refused by scope): required.
+      - name: Check the journey harness (phone + desktop)
+        id: harness
+        if: ${{ !cancelled() }}
+        run: cd apps/web && pnpm exec playwright test e2e/journeys/harness-self-check.spec.ts --project=phone --project=desktop --output=test-results/journey-harness
+        env:
+          E2E_LIVE: '1'
+          E2E_WEB_COMMAND: standalone
+          E2E_BASE_URL: http://127.0.0.1:5000
+
+      # The v1 journeys: red until the packets that fix them land, and their
+      # failing steps are the gate's RED report, so this step does not decide
+      # the job unless dispatched with journeys_required. Runs whether or not
+      # the steps above passed, so one run reports all three.
+      - name: Run the journey specs (phone + desktop; RED report unless journeys_required)
+        id: journeys
+        if: ${{ !cancelled() }}
+        continue-on-error: ${{ !inputs.journeys_required }}
+        run: cd apps/web && pnpm exec playwright test e2e/journeys/ --grep-invert @harness --project=phone --project=desktop --output=test-results/journeys
+        env:
+          E2E_LIVE: '1'
+          E2E_WEB_COMMAND: standalone
+          E2E_BASE_URL: http://127.0.0.1:5000
+
+      - name: Report the verdicts
+        if: always()
+        run: |
+          {
+            echo "### ${E2E_VARIANT}: Release 0 and the v1 journeys (phone + desktop)"
+            echo "- Release 0 live journey (release0-live.spec.ts, required): ${R0_OUTCOME:-not run}"
+            echo "- Journey harness self-check (required): ${HARNESS_OUTCOME:-not run}"
+            if [ "$JOURNEYS_REQUIRED" = "true" ]; then
+              echo "- v1 journeys (required in this run): ${JOURNEYS_OUTCOME:-not run}"
+            else
+              echo "- v1 journeys (RED report, not required: dispatch with journeys_required to require them): ${JOURNEYS_OUTCOME:-not run}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          R0_OUTCOME: ${{ steps.release0.outcome }}
+          HARNESS_OUTCOME: ${{ steps.harness.outcome }}
+          JOURNEYS_OUTCOME: ${{ steps.journeys.outcome }}
+          JOURNEYS_REQUIRED: ${{ inputs.journeys_required }}
+
+      - name: Upload traces, timings and API log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: journeys-${{ matrix.variant }}
+          path: |
+            apps/web/test-results/release0-live/
+            apps/web/test-results/journey-harness/
+            apps/web/test-results/journeys/
+            ${{ runner.temp }}/api.log
+          retention-days: 14
+          if-no-files-found: warn
+
+  # The ai-on variant: staging authority only (see the header). Same stack and
+  # steps, with AI on and the capped test key from the e2e-ai-on environment;
+  # journey legs tagged @ai-on run here and nowhere else.
+  journeys-ai-on:
+    name: Journeys and Release 0 (ai-on, phone + desktop; staging authority)
+    if: ${{ inputs.ai_on }}
+    environment: e2e-ai-on
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: keyflow
+          POSTGRES_PASSWORD: keyflow
+          POSTGRES_DB: keyflowos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U keyflow"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://keyflow:keyflow@localhost:5432/keyflowos
+      DIRECT_URL: postgresql://keyflow:keyflow@localhost:5432/keyflowos
+      REDIS_URL: redis://localhost:6379
+      API_PORT: '3001'
+      E2E_API_URL: http://localhost:3001
+      E2E_PORT: '5000'
+      E2E_VARIANT: ai-on
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Build workspace packages
+        run: pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build
+
+      - name: Admit test resources
+        run: node scripts/proof-admission/admit-resources.mjs --manifest scripts/proof-admission/manifests/ci-resources.json
+
+      - name: Apply migrations
+        run: pnpm db:deploy
+
+      - name: Build server
+        run: cd apps/server && pnpm run build
+
+      - name: Generate the run's token secret
+        run: |
+          secret=$(openssl rand -hex 32)
+          echo "::add-mask::$secret"
+          echo "E2E_JWT_SECRET=$secret" >> "$GITHUB_ENV"
+
+      # The same allow-list, with AI on: the capped test key is the only
+      # provider key the API gets, and only in this job.
+      - name: Start the API (AI on with the capped test key; every other provider off)
+        run: |
+          if [ -z "$AI_ON_KEY" ]; then echo "the e2e-ai-on environment has no E2E_AI_ON_OPENAI_API_KEY"; exit 1; fi
+          cd apps/server
+          env -i PATH="$PATH" HOME="$HOME" \
+            DATABASE_URL="$DATABASE_URL" DIRECT_URL="$DIRECT_URL" REDIS_URL="$REDIS_URL" \
+            NODE_ENV=test PORT="$API_PORT" DISABLE_SCHEDULERS=1 HIBP_DISABLED=true \
+            SUPABASE_JWT_SECRET="$E2E_JWT_SECRET" RATE_LIMIT_MAX_REQUESTS=100000 \
+            AI_INTEGRATIONS_OPENAI_API_KEY="$AI_ON_KEY" \
+            nohup node dist/main.js > "$RUNNER_TEMP/api.log" 2>&1 &
+          for _ in $(seq 1 90); do
+            if curl -fsS "$E2E_API_URL/healthz" > /dev/null; then echo "API ready (ai-on)"; exit 0; fi
+            sleep 2
+          done
+          echo "API did not become ready"; tail -80 "$RUNNER_TEMP/api.log"; exit 1
+        env:
+          AI_ON_KEY: ${{ secrets.E2E_AI_ON_OPENAI_API_KEY }}
+
+      - name: Build web against the local API (production build, production flags)
+        run: |
+          if env | grep -q '^NEXT_PUBLIC_FF_'; then
+            echo "a NEXT_PUBLIC_FF_* override is set; the journeys run on production flags"; exit 1
+          fi
+          cd apps/web && pnpm run build
+        env:
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:3001
+          NEXT_PUBLIC_SUPABASE_URL: ''
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ''
+          NEXT_PUBLIC_SITE_URL: ''
+
+      - name: Install Playwright Chromium
+        run: cd apps/web && pnpm exec playwright install --with-deps chromium
+
+      - name: Run the Release 0 live journey (phone + desktop)
+        id: release0
+        run: cd apps/web && pnpm exec playwright test e2e/release0-live.spec.ts --project=phone --project=desktop --output=test-results/release0-live
+        env:
+          E2E_LIVE: '1'
+          E2E_WEB_COMMAND: standalone
+          E2E_BASE_URL: http://127.0.0.1:5000
+
+      - name: Upload the Release 0 trace
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release0-live-trace-ai-on
+          path: |
+            apps/web/test-results/release0-live/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Check the journey harness (phone + desktop)
+        id: harness
+        if: ${{ !cancelled() }}
+        run: cd apps/web && pnpm exec playwright test e2e/journeys/harness-self-check.spec.ts --project=phone --project=desktop --output=test-results/journey-harness
+        env:
+          E2E_LIVE: '1'
+          E2E_WEB_COMMAND: standalone
+          E2E_BASE_URL: http://127.0.0.1:5000
+
+      - name: Run the journey specs (phone + desktop; RED report unless journeys_required)
+        id: journeys
+        if: ${{ !cancelled() }}
+        continue-on-error: ${{ !inputs.journeys_required }}
+        run: cd apps/web && pnpm exec playwright test e2e/journeys/ --grep-invert @harness --project=phone --project=desktop --output=test-results/journeys
+        env:
+          E2E_LIVE: '1'
+          E2E_WEB_COMMAND: standalone
+          E2E_BASE_URL: http://127.0.0.1:5000
+
+      - name: Report the verdicts
+        if: always()
+        run: |
+          {
+            echo "### ai-on: Release 0 and the v1 journeys (phone + desktop)"
+            echo "- Release 0 live journey (release0-live.spec.ts, required): ${R0_OUTCOME:-not run}"
+            echo "- Journey harness self-check (required): ${HARNESS_OUTCOME:-not run}"
+            if [ "$JOURNEYS_REQUIRED" = "true" ]; then
+              echo "- v1 journeys (required in this run): ${JOURNEYS_OUTCOME:-not run}"
+            else
+              echo "- v1 journeys (RED report, not required: dispatch with journeys_required to require them): ${JOURNEYS_OUTCOME:-not run}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          R0_OUTCOME: ${{ steps.release0.outcome }}
+          HARNESS_OUTCOME: ${{ steps.harness.outcome }}
+          JOURNEYS_OUTCOME: ${{ steps.journeys.outcome }}
+          JOURNEYS_REQUIRED: ${{ inputs.journeys_required }}
+
+      - name: Upload traces, timings and API log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: journeys-ai-on
+          path: |
+            apps/web/test-results/release0-live/
+            apps/web/test-results/journey-harness/
+            apps/web/test-results/journeys/
             ${{ runner.temp }}/api.log
           retention-days: 14
           if-no-files-found: warn
