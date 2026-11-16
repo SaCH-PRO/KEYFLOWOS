@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import { Prisma } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { GoogleTokenHelper } from './google-token.helper';
+import { providerFailure, readProviderFailureBody } from '../../core/connectors/provider-failure';
 
 export interface ScheduledGbpPost {
   id: string;
@@ -20,6 +21,14 @@ interface SchedulerMetadata {
   scheduledPosts?: ScheduledGbpPost[];
 }
 
+/**
+ * W11-PROVIDER-OUTAGE-CONNECT (R-5 part 3; D-73): a Business Profile answer
+ * that is an outage (5xx, 408, 429, a rate-limited 403, an ABORTED 409) is 503
+ * provider_unavailable (service google_business_profile); a refusal keeps its
+ * 400 and message. Unchanged: the business-validation 400s of the scheduled
+ * posts, and the insights read (getInsights), which is outside this packet's
+ * sites.
+ */
 @Injectable()
 export class GoogleBusinessProfileService {
   private readonly logger = new Logger(GoogleBusinessProfileService.name);
@@ -42,7 +51,7 @@ export class GoogleBusinessProfileService {
     const res = await fetch('https://mybusinessaccountmanagement.googleapis.com/v1/accounts', {
       headers: { Authorization: `Bearer ${token}` },
     });
-    if (!res.ok) throw new BadRequestException(`Business Profile API error ${res.status}`);
+    if (!res.ok) throw providerFailure('google_business_profile', res.status, await readProviderFailureBody(res), `Business Profile API error ${res.status}`);
     return res.json();
   }
 
@@ -68,7 +77,7 @@ export class GoogleBusinessProfileService {
       `https://mybusinessbusinessinformation.googleapis.com/v1/accounts/${encodeURIComponent(account)}/locations?readMask=name,title,storefrontAddress,websiteUri,phoneNumbers,categories`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
-    if (!res.ok) throw new BadRequestException(`Business Profile API error ${res.status}`);
+    if (!res.ok) throw providerFailure('google_business_profile', res.status, await readProviderFailureBody(res), `Business Profile API error ${res.status}`);
     return res.json();
   }
 
@@ -86,7 +95,7 @@ export class GoogleBusinessProfileService {
       `https://mybusinessbusinessinformation.googleapis.com/v1/${locationName}?readMask=name,title,storefrontAddress,websiteUri,phoneNumbers,categories,regularHours,profile`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
-    if (!res.ok) throw new BadRequestException(`Business Profile API error ${res.status}`);
+    if (!res.ok) throw providerFailure('google_business_profile', res.status, await readProviderFailureBody(res), `Business Profile API error ${res.status}`);
     return res.json();
   }
 
@@ -96,7 +105,7 @@ export class GoogleBusinessProfileService {
       `https://mybusiness.googleapis.com/v4/${locationName}/localPosts`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
-    if (!res.ok) throw new BadRequestException(`Business Profile API error ${res.status}`);
+    if (!res.ok) throw providerFailure('google_business_profile', res.status, await readProviderFailureBody(res), `Business Profile API error ${res.status}`);
     return res.json();
   }
 
@@ -119,7 +128,7 @@ export class GoogleBusinessProfileService {
         }),
       },
     );
-    if (!res.ok) throw new BadRequestException(`Business Profile API error ${res.status}`);
+    if (!res.ok) throw providerFailure('google_business_profile', res.status, await readProviderFailureBody(res), `Business Profile API error ${res.status}`);
     return res.json();
   }
 
@@ -129,7 +138,7 @@ export class GoogleBusinessProfileService {
       `https://mybusiness.googleapis.com/v4/${locationName}/reviews`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
-    if (!res.ok) throw new BadRequestException(`Business Profile API error ${res.status}`);
+    if (!res.ok) throw providerFailure('google_business_profile', res.status, await readProviderFailureBody(res), `Business Profile API error ${res.status}`);
     return res.json();
   }
 
@@ -147,7 +156,7 @@ export class GoogleBusinessProfileService {
         body: JSON.stringify({ comment }),
       },
     );
-    if (!res.ok) throw new BadRequestException(`Business Profile API error ${res.status}`);
+    if (!res.ok) throw providerFailure('google_business_profile', res.status, await readProviderFailureBody(res), `Business Profile API error ${res.status}`);
     return res.json();
   }
 

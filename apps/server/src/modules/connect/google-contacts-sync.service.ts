@@ -7,6 +7,7 @@ import { resolveCrmAccess } from '../crm/crm-permissions.helper';
 import { CrmService } from '../crm/crm.service';
 import { ContactAuditService, type ContactAuditActor } from '../crm/privacy/contact-audit.service';
 import { GoogleTokenHelper } from './google-token.helper';
+import { providerFailure, providerUnavailable, readProviderFailureBody } from '../../core/connectors/provider-failure';
 
 interface PeopleConnection {
   resourceName: string;
@@ -581,15 +582,19 @@ export class GoogleContactsSyncService {
         `https://people.googleapis.com/v1/people/me/connections?${params.toString()}`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
+      // W11-PROVIDER-OUTAGE-CONNECT (R-5 part 3; D-73): People not answering
+      // (5xx, 408, 429, a rate-limited 403) is 503 provider_unavailable
+      // (google_contacts), a refusal keeps its 400; the message is unchanged.
       if (!res.ok) {
         if (res.status === 410) {
           await this.prisma.client.business.update({
             where: { id: businessId },
             data: { contactsSyncToken: null },
           });
-          throw new BadRequestException('Sync token expired; please retry');
+          // The sync token is cleared, so asking again does a full sync: a 503, as the message says.
+          throw providerUnavailable('google_contacts', res.status, 'Sync token expired; please retry');
         }
-        throw new BadRequestException(`People API error ${res.status}`);
+        throw providerFailure('google_contacts', res.status, await readProviderFailureBody(res), `People API error ${res.status}`);
       }
       const data = (await res.json()) as {
         connections?: PeopleConnection[];

@@ -35,8 +35,32 @@ import { BadRequestException, HttpException, ServiceUnavailableException } from 
  * shaped bodies classify as a refusal), and never put in the message or the
  * response. A fetch() that throws never reaches here: its error propagates as
  * it always did.
+ *
+ * W11-PROVIDER-OUTAGE-CONNECT (R-5 part 3; D-73): the remaining Google
+ * clients use it too (google_contacts: the People sync and the CRM Google
+ * import; google_forms; google_business_profile; google_calendar), with the
+ * Google table above. So do the Microsoft ones (outlook_contacts: the Graph
+ * contacts sync; microsoft: the identity platform's token endpoint), which
+ * have no Google error body: for them the status alone decides (5xx, 408 and
+ * 429 are outages, every other 4xx a refusal, a 403 or a 409 whatever its
+ * body says). providerUnavailable() is the same 503 for a client that has
+ * decided the failure is an outage itself: the People and Graph 410 ("please
+ * retry"), whose cursor the client has just cleared so the retry does a full
+ * sync.
  */
-export type ProviderService = 'gmail' | 'drive' | (string & {});
+export type ProviderService =
+  | 'gmail'
+  | 'drive'
+  | 'google_contacts'
+  | 'google_forms'
+  | 'google_business_profile'
+  | 'google_calendar'
+  | 'outlook_contacts'
+  | 'microsoft'
+  | (string & {});
+
+/** The Microsoft services: Graph and the identity platform answer no Google error body, so only the status is read. */
+const STATUS_ONLY_SERVICES: ReadonlySet<string> = new Set(['outlook_contacts', 'microsoft']);
 
 /** Bodies longer than this are not parsed (a Google error body is a few hundred bytes). */
 const MAX_PARSED_BODY = 64 * 1024;
@@ -68,10 +92,15 @@ function isRateLimited(error: Record<string, unknown>): boolean {
   );
 }
 
-/** Whether an upstream answer of `status` (with `bodyText`) is an outage rather than a refusal. */
-export function isTransientProviderFailure(status: number, bodyText: string | null): boolean {
+/**
+ * Whether an upstream answer of `status` (with `bodyText`) from `service` is
+ * an outage rather than a refusal. Without a service, or for a Google one, a
+ * 403 and a 409 are read for Google's markers; a Microsoft service's are not.
+ */
+export function isTransientProviderFailure(status: number, bodyText: string | null, service?: ProviderService): boolean {
   if (status >= 500 || status === 408 || status === 429) return true;
   if (status !== 403 && status !== 409) return false;
+  if (service !== undefined && STATUS_ONLY_SERVICES.has(service)) return false;
   const error = googleErrorOf(bodyText);
   if (!error) return false;
   if (status === 403) return isRateLimited(error);
@@ -89,16 +118,24 @@ export function providerFailure(
   bodyText: string | null,
   message: string,
 ): HttpException {
-  if (isTransientProviderFailure(status, bodyText)) {
-    return new ServiceUnavailableException({
-      code: 'provider_unavailable',
-      service,
-      message,
-      upstreamStatus: status,
-      error: 'Service Unavailable',
-    });
-  }
+  if (isTransientProviderFailure(status, bodyText, service)) return providerUnavailable(service, status, message);
   return new BadRequestException(message);
+}
+
+/**
+ * The 503 provider_unavailable a client answers for an upstream answer of
+ * `status` it treats as an outage: what providerFailure answers for one, and
+ * what a client answers itself when it knows better than the table (a People
+ * or Graph 410 whose cursor it has just cleared: asking again succeeds).
+ */
+export function providerUnavailable(service: ProviderService, status: number, message: string): ServiceUnavailableException {
+  return new ServiceUnavailableException({
+    code: 'provider_unavailable',
+    service,
+    message,
+    upstreamStatus: status,
+    error: 'Service Unavailable',
+  });
 }
 
 /**

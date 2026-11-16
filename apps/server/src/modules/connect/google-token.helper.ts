@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { providerFailure, type ProviderService } from '../../core/connectors/provider-failure';
 
 type TokenFields = {
   access: 'gmailAccessToken' | 'calendarAccessToken' | 'driveAccessToken' | 'formsAccessToken' | 'contactsAccessToken' | 'bpAccessToken';
@@ -8,8 +9,27 @@ type TokenFields = {
 };
 
 /**
+ * W11-PROVIDER-OUTAGE-CONNECT (R-5 part 3; D-73): the service a failed refresh
+ * of each connection's columns names in its 503 provider_unavailable.
+ */
+const REFRESH_SERVICE: Record<TokenFields['refresh'], ProviderService> = {
+  gmailRefreshToken: 'gmail',
+  calendarRefreshToken: 'google_calendar',
+  driveRefreshToken: 'drive',
+  formsRefreshToken: 'google_forms',
+  contactsRefreshToken: 'google_contacts',
+  bpRefreshToken: 'google_business_profile',
+};
+
+/**
  * Helper for refreshing & retrieving valid access tokens for any per-service Google
  * connector that uses the standard {access,refresh,expiry} column triplet.
+ *
+ * W11-PROVIDER-OUTAGE-CONNECT (R-5 part 3; D-73): a refresh the token endpoint
+ * does not answer (5xx, 408, 429, a rate-limited 403) is 503
+ * provider_unavailable naming the connection's service; a refusal
+ * (invalid_grant, invalid_client: reconnect) keeps its 400. Either way the
+ * message is the existing one and no token is written.
  */
 export class GoogleTokenHelper {
   constructor(private readonly prisma: PrismaService) {}
@@ -77,7 +97,7 @@ export class GoogleTokenHelper {
       });
       if (!res.ok) {
         const err = await res.text();
-        throw new BadRequestException(`Failed to refresh ${label} token: ${err}`);
+        throw providerFailure(REFRESH_SERVICE[fields.refresh], res.status, err, `Failed to refresh ${label} token: ${err}`);
       }
       const tokens = (await res.json()) as { access_token: string; expires_in?: number };
       const newExpiry = new Date(Date.now() + (tokens.expires_in ?? 3600) * 1000);
