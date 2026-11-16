@@ -948,6 +948,11 @@
       "packet": "V1-63 (SWP-TEAM-INVITE-SERVER)"
     },
     {
+      "prefix": "v63e_",
+      "owner": "apps/server/test/business-v1-settings.integration.test.ts",
+      "packet": "V1-63 (BIZ-SETTINGS-SERVER)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
