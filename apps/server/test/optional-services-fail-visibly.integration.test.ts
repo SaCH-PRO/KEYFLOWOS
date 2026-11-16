@@ -35,8 +35,9 @@
  * quote.sent event; a refused or failed invoice send-email leaves no new
  * PaymentLink row. A business connected to Gmail with a live access token
  * (bizSend) drives the real GmailService into a stubbed Gmail transport that
- * throws (a network failure), answers an error (Gmail refused it: the old 400)
- * or accepts the message. Accepted, the quote is SENT with the viewToken the
+ * throws (a network failure), answers an error (a Gmail 500: since
+ * W11-PROVIDER-OUTAGE-503 an outage, 503 provider_unavailable) or accepts the
+ * message. Accepted, the quote is SENT with the viewToken the
  * email carried, and the invoice gets exactly one live link, whose token link
  * is in the email and the response (D-07); a resend reuses that link.
  * RED-BEFORE (recorded in the R0-CMF4 tests-first commit): the quote was moved
@@ -882,8 +883,9 @@ describe('Gmail OAuth state (R0-07 review)', () => {
 // R0-CMF4-SEND-EMAIL-ORDER (COST-LEDGER-001 section 7 items 2 and 3). bizSend
 // is connected to Gmail with a live access token, so the real GmailService
 // builds the message and hands it to fetch, where the stubbed Gmail transport
-// throws (a network failure), answers an error (Gmail refused the message), or
-// accepts it. Nothing leaves the process.
+// throws (a network failure), answers an error (a Gmail 500, an outage: 503
+// provider_unavailable since W11-PROVIDER-OUTAGE-503), or accepts it. Nothing
+// leaves the process.
 describe('R0-CMF4: with Gmail connected (stubbed transport), a failed send changes nothing; an accepted send marks the quote SENT and mints one pay link', () => {
   const FAILURES = ['throw', 'reject'] as const;
 
@@ -902,14 +904,21 @@ describe('R0-CMF4: with Gmail connected (stubbed transport), a failed send chang
   }
 
   /**
-   * A failed send keeps its existing error: Gmail's refusal is the old 400
-   * 'Failed to send email'; a transport that throws is a 5xx. Neither is the
-   * not-configured 503 (the business is connected).
+   * A failed send answers a visible error: Gmail answering a 500 is an outage,
+   * 503 provider_unavailable with the existing message 'Failed to send email'
+   * (W11-PROVIDER-OUTAGE-503; it was 400 before that packet); a transport that
+   * throws is a 5xx. Neither is the not-configured 503 (the business is
+   * connected).
    */
   function expectSendFailed(res: { status: number; body: any }, mode: (typeof FAILURES)[number]) {
     if (mode === 'reject') {
-      expect(res.status, JSON.stringify(res.body)).toBe(400);
-      expect(res.body.message).toBe('Failed to send email');
+      expect(res.status, JSON.stringify(res.body)).toBe(503);
+      expect(res.body).toMatchObject({
+        statusCode: 503,
+        code: 'provider_unavailable',
+        message: 'Failed to send email',
+        details: { service: 'gmail', upstreamStatus: 500 },
+      });
     } else {
       expect(res.status, JSON.stringify(res.body)).toBeGreaterThanOrEqual(500);
       expect(res.body.code).not.toBe('provider_not_configured');
