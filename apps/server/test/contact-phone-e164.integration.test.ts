@@ -100,6 +100,7 @@ const ID = {
   fixA: `${P}c_fixA`,       // '868-712-3508' (key '8687123508') ...
   fixB: `${P}c_fixB`,       // ... and '+18687123508' (key '+18687123508')
   fixC: `${P}c_fixC`,       // '868-712-3509' (key '8687123509'), no other holder
+  rex: `${P}c_rex`,         // '868-712-3512' (key '8687123512'), no other holder
 };
 
 let db: any;
@@ -459,6 +460,7 @@ beforeAll(async () => {
     [ID.fixA, 'FixA', '868-712-3508', '8687123508'],
     [ID.fixB, 'FixB', '+18687123508', '+18687123508'],
     [ID.fixC, 'FixC', '868-712-3509', '8687123509'],
+    [ID.rex, 'Rex', '868-712-3512', '8687123512'],
   ] as const) {
     await db.contact.create({
       data: { id, businessId: ID.bizTT, firstName, lastName: `${P}seed`, ownerId: ID.owner, phone, phoneNormalized },
@@ -792,6 +794,21 @@ describe("review repair (COR-E164-3): a PATCH that re-sends the contact's own nu
   it("RED-BEFORE (SEC-E164-2): a PATCH of PairA onto a different number another live contact holds is still 409 naming it (Lou's '712-3504', typed '868-712-3504'), and PairA keeps its number", async () => {
     expectPhoneTaken(await patch(ID.owner, ID.bizTT, ID.pairA, { phone: '868-712-3504' }), ID.lou);
     expect(await stored(ID.pairA)).toMatchObject({ phone: '868-712-3507', phoneNormalized: '8687123507' });
+  });
+
+  it("CONTROL (the packet head's behaviour, kept): a PATCH that re-spells the contact's own number under the same key writes the new spelling (Ira '+1 868 712 3513' to '+18687123513')", async () => {
+    const id = await created(ID.owner, ID.bizTT, { firstName: 'Ira', phone: '+1 868 712 3513' });
+    expect(await stored(id)).toMatchObject({ phone: '+1 868 712 3513', phoneNormalized: '+18687123513' });
+    const res = await patch(ID.owner, ID.bizTT, id, { phone: '+18687123513' });
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(200);
+    expect(await stored(id)).toMatchObject({ phone: '+18687123513', phoneNormalized: '+18687123513' });
+  });
+
+  it("CONTROL (the packet head's behaviour, kept): a contact stored before E.164 whose number no other live contact holds is stored in E.164 when its phone is re-sent with an edit (Rex '868-712-3512' to +18687123512)", async () => {
+    const res = await patch(ID.owner, ID.bizTT, ID.rex, { phone: '868-712-3512', jobTitle: 'Driver' });
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(200);
+    expect(await stored(ID.rex)).toMatchObject({ phone: '+18687123512', phoneNormalized: '+18687123512' });
+    expect(await db.contact.findUnique({ where: { id: ID.rex } })).toMatchObject({ jobTitle: 'Driver' });
   });
 });
 
