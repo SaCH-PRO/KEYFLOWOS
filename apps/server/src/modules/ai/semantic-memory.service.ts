@@ -29,6 +29,18 @@ function isAiProviderUnavailable(err: unknown): err is HttpException {
  */
 export const AI_MEMORY_COPY_SOURCE_TYPE = 'memory';
 
+/**
+ * W1F-MEMORY-COPIES (review SEC-W1FMC-1): whether the copy content `content` holds what the AiMemory row `m` holds now,
+ * in either writer's form: the value (UnifiedMemoryWriterService.store) or `<category>: <key> = <value>`
+ * (backfillFromAiMemory). A row is rewritten in place and keeps its id (PUT /ai/businesses/:id/ai/memory with the same
+ * category and key, a document extracted again, a promotion into the same key: every writer upserts on business,
+ * category and key, and none changes a row's category or key), so that the row exists does not say a copy of it is
+ * current; a copy of a value the row no longer holds is neither written (insert) nor served (search).
+ */
+function copyHoldsRowValue(content: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`(${content} = m.value OR ${content} = (m.category || ': ' || m.key || ' = ' || m.value))`;
+}
+
 export interface SemanticMemory {
   id: string;
   content: string;
@@ -60,7 +72,8 @@ export class SemanticMemoryService {
 
   /**
    * Embeds `content` and stores it. A copy of an AiMemory row (sourceType 'memory') is written only while that row is
-   * still in the business (see insert), so a row deleted while its embedding was being made gets no copy.
+   * still in the business and holds what the copy holds (see insert), so a row deleted or rewritten while its embedding
+   * was being made gets no copy of the value it no longer holds.
    */
   async store(input: StoreMemoryInput): Promise<string> {
     try {
@@ -72,10 +85,10 @@ export class SemanticMemoryService {
     }
   }
 
-  /** store(), answering whether a row was written; `holds` as in insert. */
-  private async storeCopy(input: StoreMemoryInput, holds?: { category: string; key: string; value: string }): Promise<boolean> {
+  /** store(), answering whether a row was written. */
+  private async storeCopy(input: StoreMemoryInput): Promise<boolean> {
     const embedding = await this.generateEmbedding(input.businessId, input.content);
-    const written = await this.insert(input, embedding, holds);
+    const written = await this.insert(input, embedding);
     if (written) {
       this.events.emit('memory.stored', {
         businessId: input.businessId,
@@ -88,21 +101,18 @@ export class SemanticMemoryService {
 
   /**
    * W1F-MEMORY-COPIES: the embedding is a provider call, made after the caller read what it copies, and the row may be
-   * deleted in between (a member's DELETE .../ai/memory/:category/:key, the consolidation's withdrawal of a member's
-   * promoted answer). Writing the copy anyway put a deleted value back in front of every member (search and KEY's
-   * memory block read it). So a copy of an AiMemory row (sourceType 'memory') is inserted only if the row is still in
-   * this business and, when `holds` is given (the backfill, which copies a value it read), still holds that category,
-   * key and value; otherwise nothing is written. The row is read FOR SHARE in the same statement: a deletion that has
-   * deleted it and not committed holds this insert until it commits, and the row then no longer qualifies (a plain
-   * read would see it still there and commit a copy the deletion's copy delete, its snapshot taken, never sees).
-   * deleteAiMemoriesWithCopies deletes the rows before their copies for the same reason. Other source types insert as
-   * before.
+   * deleted or rewritten in between (a member's DELETE .../ai/memory/:category/:key, the consolidation's withdrawal of a
+   * member's promoted answer, the owner's PUT .../ai/memory of a new value, the document extracted again). Writing the
+   * copy anyway put a value the row no longer holds back in front of every member (search and KEY's memory block read
+   * it). So a copy of an AiMemory row (sourceType 'memory') is inserted only if the row is still in this business and
+   * still holds what the copy holds (copyHoldsRowValue: the backfill's copy of the value it read, and, review
+   * SEC-W1FMC-1, UnifiedMemoryWriterService.store's copy of the value it wrote); otherwise nothing is written. The row
+   * is read FOR SHARE in the same statement: a deletion or rewrite that has not committed holds this insert until it
+   * commits, and the row is then read again as it is (a plain read would see the old row and commit a copy the
+   * deletion's copy delete, its snapshot taken, never sees). deleteAiMemoriesWithCopies deletes the rows before their
+   * copies for the same reason. Other source types insert as before.
    */
-  private async insert(
-    input: StoreMemoryInput,
-    embedding: number[],
-    holds?: { category: string; key: string; value: string },
-  ): Promise<boolean> {
+  private async insert(input: StoreMemoryInput, embedding: number[]): Promise<boolean> {
     const id = this.generateId();
     const vectorLiteral = `[${embedding.join(',')}]`;
     if (input.sourceType !== AI_MEMORY_COPY_SOURCE_TYPE) {
@@ -112,13 +122,11 @@ export class SemanticMemoryService {
       );
       return true;
     }
-    const holding = holds
-      ? Prisma.sql`AND "category" = ${holds.category} AND "key" = ${holds.key} AND "value" = ${holds.value}`
-      : Prisma.empty;
     const written = await this.prisma.client.$executeRaw(
       Prisma.sql`WITH source AS (
-          SELECT id FROM "ai_memories"
-          WHERE id = ${input.sourceId} AND business_id = ${input.businessId} ${holding}
+          SELECT m.id FROM "ai_memories" m
+          WHERE m.id = ${input.sourceId} AND m.business_id = ${input.businessId}
+            AND ${copyHoldsRowValue(Prisma.sql`${input.content}::text`)}
           FOR SHARE
         )
         INSERT INTO "ai_memory_embeddings" (id, business_id, content, source_type, source_id, embedding, metadata, created_at)
@@ -147,8 +155,10 @@ export class SemanticMemoryService {
       const vectorLiteral = `[${embedding.join(',')}]`;
 
       // W1F-MEMORY-COPIES: a copy of an AiMemory row is served only while its row is (it is still in the business and
-      // has not expired, as AiMemoryService.getAll reads it). Copies a deletion left behind before every deletion
-      // removed its copies (deleteAiMemoriesWithCopies) are not served.
+      // has not expired, as AiMemoryService.getAll reads it) and only while it holds what the row holds now (review
+      // SEC-W1FMC-1, copyHoldsRowValue: a row rewritten in place keeps its id). Copies a deletion left behind before
+      // every deletion removed its copies (deleteAiMemoriesWithCopies), and copies of a value a row was rewritten from,
+      // are not served.
       let query = Prisma.sql`
         SELECT id, content, source_type, source_id, metadata,
                1 - (embedding <=> ${vectorLiteral}::vector) as similarity
@@ -161,6 +171,7 @@ export class SemanticMemoryService {
               SELECT 1 FROM "ai_memories" m
               WHERE m.id = e.source_id AND m.business_id = e.business_id
                 AND (m.expires_at IS NULL OR m.expires_at > NOW())
+                AND ${copyHoldsRowValue(Prisma.sql`e.content`)}
             )
           )
       `;
@@ -202,8 +213,8 @@ export class SemanticMemoryService {
 
   /**
    * Copies the business's AiMemory rows into ai_memory_embeddings. W1F-MEMORY-COPIES: each copy is written only while
-   * its row still holds the category, key and value read here (insert), so a row deleted or rewritten while the copy's
-   * embedding was being made gets no copy; the answer counts the copies written.
+   * its row still holds the value read here (insert), so a row deleted or rewritten while the copy's embedding was
+   * being made gets no copy; the answer counts the copies written.
    */
   async backfillFromAiMemory(businessId: string): Promise<number> {
     const memories = await this.prisma.client.aiMemory.findMany({
@@ -214,16 +225,13 @@ export class SemanticMemoryService {
     let stored = 0;
     for (const memory of memories) {
       try {
-        const written = await this.storeCopy(
-          {
-            businessId,
-            content: `${memory.category}: ${memory.key} = ${memory.value}`,
-            sourceType: AI_MEMORY_COPY_SOURCE_TYPE,
-            sourceId: memory.id,
-            metadata: { category: memory.category, key: memory.key, confidence: memory.confidence },
-          },
-          { category: memory.category, key: memory.key, value: memory.value },
-        );
+        const written = await this.storeCopy({
+          businessId,
+          content: `${memory.category}: ${memory.key} = ${memory.value}`,
+          sourceType: AI_MEMORY_COPY_SOURCE_TYPE,
+          sourceId: memory.id,
+          metadata: { category: memory.category, key: memory.key, confidence: memory.confidence },
+        });
         if (written) stored++;
       } catch (err: any) {
           // W7-AI-SERVICES-503 (R0-07a rule): the provider refusal is the same for every

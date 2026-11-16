@@ -77,17 +77,27 @@ export interface MemoryContextBlock {
 }
 
 /**
+ * How many rows one batch of deleteAiMemoriesWithCopies reads and deletes. Under @keyflow/db's findMany cap (its
+ * defaultTakeExtension answers at most 1000 rows, inside a transaction too), so a batch reads all it asks for.
+ */
+const AI_MEMORY_DELETE_BATCH = 500;
+
+/**
  * W1F-MEMORY-COPIES: the one way an AiMemory row is deleted. A row has semantic copies in ai_memory_embeddings
  * (source_type AI_MEMORY_COPY_SOURCE_TYPE, source_id the row's id), and every member reads them back (GET
  * .../agent/memory/search, and KEY's memory block as [ai_memory_embedding]), so a deletion that left them kept serving
  * the deleted value; before this door only the consolidation's withdrawal removed them (W11-MEMORY-PROMOTE-SCOPE).
- * Deletes the business's rows that match `where`, then the copies of every row that is gone, in one transaction:
- *   - the rows first, then the copies, each its own statement: deleting a row locks it until the commit, so a
- *     backfill that writes a copy of it (which takes a share lock on the row, see SemanticMemoryService.store) either
- *     wrote before the row was deleted (its copy is committed, and the copy delete, a later statement, sees it) or
- *     waits for the commit and then finds the row gone and writes nothing;
+ * Deletes every row of the business that matches `where`, with the copies of every row that is gone. The rows are read
+ * in id order, AI_MEMORY_DELETE_BATCH at a time, each batch after the last id the one before read, until a batch reads
+ * fewer (review COR-W1FMC-1 / SEC-W1FMC-2: one read is capped at 1000 rows, and a deletion that deleted only the rows
+ * it read left the rest, served with their copies). Each batch is one transaction:
+ *   - the batch's rows first, then their copies, each its own statement: deleting a row locks it until the commit, so
+ *     a backfill that writes a copy of it (which takes a share lock on the row, see SemanticMemoryService.insert)
+ *     either wrote before the row was deleted (its copy is committed, and the copy delete, a later statement, sees it)
+ *     or waits for the commit and then finds the row gone and writes nothing;
  *   - a matched row that is still there once the delete has run (a concurrent write changed it so `where` no longer
  *     matches) keeps its copies; one a concurrent deletion removed first is gone, and its copies go here too.
+ * A failure stops the deletion: the batches before it are deleted (each row with its copies), the rest are not.
  * The scope is the business: `where` cannot name another business's rows, and only this business's copies go.
  * Returns how many rows and copies were deleted. apps/server/test/ai-memory-copies.integration.test.ts holds every
  * AiMemory deletion in apps/server/src to this function.
@@ -97,21 +107,37 @@ export async function deleteAiMemoriesWithCopies(
   businessId: string,
   where: Prisma.AiMemoryWhereInput,
 ): Promise<{ rows: number; copies: number }> {
-  return prisma.client.$transaction(async (tx) => {
-    const scoped: Prisma.AiMemoryWhereInput = { ...where, businessId };
-    const matched = (await tx.aiMemory.findMany({ where: scoped, select: { id: true } })).map((r) => r.id);
-    if (matched.length === 0) return { rows: 0, copies: 0 };
-    const deleted = await tx.aiMemory.deleteMany({ where: { ...scoped, id: { in: matched } } });
-    const kept = new Set(
-      (await tx.aiMemory.findMany({ where: { businessId, id: { in: matched } }, select: { id: true } })).map((r) => r.id),
-    );
-    const gone = matched.filter((id) => !kept.has(id));
-    if (gone.length === 0) return { rows: deleted.count, copies: 0 };
-    const copies = await tx.aiMemoryEmbedding.deleteMany({
-      where: { businessId, sourceType: AI_MEMORY_COPY_SOURCE_TYPE, sourceId: { in: gone } },
+  const scoped: Prisma.AiMemoryWhereInput = { ...where, businessId };
+  let rows = 0;
+  let copies = 0;
+  let after: string | undefined;
+  for (;;) {
+    const batch = await prisma.client.$transaction(async (tx) => {
+      const matched = (
+        await tx.aiMemory.findMany({
+          where: after === undefined ? scoped : { AND: [scoped, { id: { gt: after } }] },
+          select: { id: true },
+          orderBy: { id: 'asc' },
+          take: AI_MEMORY_DELETE_BATCH,
+        })
+      ).map((r) => r.id);
+      if (matched.length === 0) return { matched, rows: 0, copies: 0 };
+      const deleted = await tx.aiMemory.deleteMany({ where: { ...scoped, id: { in: matched } } });
+      const kept = new Set(
+        (await tx.aiMemory.findMany({ where: { businessId, id: { in: matched } }, select: { id: true } })).map((r) => r.id),
+      );
+      const gone = matched.filter((id) => !kept.has(id));
+      if (gone.length === 0) return { matched, rows: deleted.count, copies: 0 };
+      const removed = await tx.aiMemoryEmbedding.deleteMany({
+        where: { businessId, sourceType: AI_MEMORY_COPY_SOURCE_TYPE, sourceId: { in: gone } },
+      });
+      return { matched, rows: deleted.count, copies: removed.count };
     });
-    return { rows: deleted.count, copies: copies.count };
-  });
+    rows += batch.rows;
+    copies += batch.copies;
+    if (batch.matched.length < AI_MEMORY_DELETE_BATCH) return { rows, copies };
+    after = batch.matched[batch.matched.length - 1];
+  }
 }
 
 @Injectable()
@@ -204,7 +230,7 @@ export class AiMemoryService {
     }
   }
 
-  /** Deletes the category's rows and their semantic copies (W1F-MEMORY-COPIES); answers how many rows. */
+  /** Deletes every row of the category and their semantic copies (W1F-MEMORY-COPIES); answers how many rows. */
   async removeCategory(businessId: string, category: MemoryCategory): Promise<number> {
     const { rows } = await deleteAiMemoriesWithCopies(this.prisma, businessId, { category });
     return rows;
