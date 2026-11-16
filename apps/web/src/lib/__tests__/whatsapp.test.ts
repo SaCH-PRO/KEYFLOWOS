@@ -114,6 +114,19 @@ describe("toE164: one number, every spelling", () => {
     expect(toE164("+592 600 1234", "TT")).toBe("+5926001234");
   });
 
+  it("outside NANP a national number is told from one carrying its country code by its length, not its first digits", () => {
+    // An Indian mobile can start with 91, the calling code: ten digits are still national.
+    expect(toE164("91234 56789", "India")).toBe("+919123456789");
+    expect(toE164("091234 56789", "India")).toBe("+919123456789");
+    expect(toE164("91 91234 56789", "India")).toBe("+919123456789");
+    // A Guyanese number typed with its calling code and no '+'.
+    expect(toE164("592 600 1234", "Guyana")).toBe("+5926001234");
+    // A customer abroad typed in full without the '+': kept, not given a second calling code.
+    expect(toE164("1 868 755 0123", "United Kingdom")).toBe("+18687550123");
+    // A trunk 0 in front of a number too long to be national is not a number.
+    expect(toE164("0 1868 755 0123 45", "United Kingdom")).toBeNull();
+  });
+
   it.each([undefined, null, "", "   ", "abc", "ext.", "12345", "755-012", "+12", "+1 234 567 890 123 456"])(
     "%j is not a number it can read: null",
     (typed) => {
