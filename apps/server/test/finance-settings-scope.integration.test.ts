@@ -48,6 +48,8 @@
  *   V71D-S03  RED-BEFORE  the refusal comes first: refused even when the sender is not configured (403, not the 400)
  *   V71D-S04  control     a send without saveRecipient, and a saveRecipient naming the saved address, go through, saving nothing
  *   V71D-S05  control     the owner, a settings-admin ADMIN with revenue read and a SUPER_ADMIN member save the recipient
+ *   V71D-S06  control     the accountant box's way forward (review FSS-CR-3): a STAFF member on role defaults refused the
+ *                         save, then the same address with saveRecipient false: 201, sent once, nothing saved
  */
 import 'reflect-metadata';
 import path from 'path';
@@ -427,5 +429,21 @@ describe('FU-FINANCE-SETTINGS-SCOPE: saving the accountant export recipient need
       expect(builder.calls.map((c) => c.businessId), actor).toEqual([ID.biz]);
       expect((await stored())?.accountantEmail, actor).toBe(to);
     }
+  });
+
+  it("[V71D-S06] control (review FSS-CR-3, the accountant box's \"Send without saving\"): a STAFF member on role defaults refused a saveRecipient sends the same address with saveRecipient false: 201, sent once to it, nothing built for the refused send, nothing saved", async () => {
+    const before = await businessRowText();
+    const to = ownAddress(ID.staffDefault);
+    const refused = await sendExport(ID.staffDefault, { to, saveRecipient: true });
+    expectRefused(refused, 'staffDefault saveRecipient', `Insufficient permissions: ${RECIPIENT_WHAT} needs settings admin access (you have none)`);
+    expect(mailer.sent, 'the refused send sent nothing').toEqual([]);
+    expect(builder.calls, 'the refused send built nothing').toEqual([]);
+    const unsaved = await sendExport(ID.staffDefault, { to, saveRecipient: false });
+    expect(unsaved.status, JSON.stringify(unsaved.body)).toBe(201);
+    expect(unsaved.body).toMatchObject({ to, savedAsDefault: false });
+    expect(mailer.sent.map((m) => m.to), 'sent once, to the address the member named').toEqual([to]);
+    expect(builder.calls.map((c) => c.businessId)).toEqual([ID.biz]);
+    expect(await businessRowText(), 'nothing saved: the Business row is byte-identical').toBe(before);
+    expect((await stored())?.accountantEmail).toBe(SEEDED.accountantEmail);
   });
 });
