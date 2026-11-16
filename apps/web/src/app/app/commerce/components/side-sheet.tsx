@@ -63,7 +63,7 @@ export function SideSheet({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
-          className={isMobile ? "fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-end" : "fixed inset-0 bg-black/50 backdrop-blur-sm z-50"}
+          className={isMobile ? "fixed inset-0 bg-black/50 backdrop-blur-sm z-[var(--kf-z-drawer)] flex items-end" : "fixed inset-0 bg-black/50 backdrop-blur-sm z-[var(--kf-z-drawer)]"}
           onClick={(e) => e.target === e.currentTarget && onClose()}
         >
           {isMobile ? (
@@ -206,7 +206,7 @@ export function QuickSheet({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center"
+          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[var(--kf-z-drawer)] flex items-end sm:items-center justify-center"
           onClick={(e) => e.target === e.currentTarget && onClose()}
         >
           <motion.div

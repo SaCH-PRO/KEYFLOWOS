@@ -13,11 +13,9 @@ import { PlanLimitDialog } from "@/components/ui/upgrade-prompt";
 import { KeyflowOSStoreDrawer } from "@/components/keyflowos-store-drawer";
 
 import { CelebrationListener } from "@/components/ui/celebration-listener";
-import { GenomeIntegrityBanner } from "@/components/genome-integrity-banner";
 import { RequireAuth } from "@/components/require-auth";
 import { KeyAgent } from "@/components/key";
 import { KeyChatProvider } from "@/components/key/chat";
-import { KeyChatBubbleV2 } from "@/components/key/chat/key-chat-bubble-v2";
 import { DesktopSidebar } from "@/components/layout/desktop-sidebar";
 import { AppHeader } from "@/components/layout/app-header";
 import { MobileDrawer } from "@/components/layout/mobile-drawer";
@@ -35,9 +33,14 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const isOnboardingRoute = layout.pathname.startsWith("/app/onboarding");
   // GenomeProvider supplies genome data; useGenomeGate gates the app on
   // ONBOARDING completion only. A user who has NOT finished onboarding is
-  // redirected there; an incomplete Business Genome is a soft nudge via
-  // GenomeIntegrityBanner (below), never a redirect — do not re-add
-  // !threePillarMet to the gate, which trapped returning users on onboarding.
+  // redirected there; an incomplete Business Genome is never a redirect — do
+  // not re-add !threePillarMet to the gate, which trapped returning users on
+  // onboarding. Nor is it a banner over the app (SWP-LAYERS, BUG-041: the
+  // GenomeIntegrityBanner covered the header's New menu).
+  //
+  // No overlay of the shell covers a screen's primary button (the layer table
+  // in app/globals.css): KEY has no floating bubble (BUG-004, product audit
+  // v1 KEY ruling) and opens only from the header's Ask KEY or Cmd/Ctrl+J.
   const genomeGate = useGenomeGate();
   useKeyboardShortcuts();
   useRouteKeyboardShortcuts();
@@ -105,7 +108,6 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
             userMenuRef={layout.userMenuRef}
             handleLogout={layout.handleLogout}
           />
-          <GenomeIntegrityBanner />
           <div className="px-3 md:px-6 pt-1">
             <OriginAwareBreadcrumbs />
           </div>
@@ -149,7 +151,6 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       <PlanLimitDialog planLimit={layout.planLimitHit} onClose={layout.clearPlanLimit} />
       <KeyflowOSStoreDrawer open={layout.kfStoreOpen} onClose={() => layout.setKfStoreOpen(false)} />
       {!isOnboardingRoute && <KeyAgent currentModule={layout.copilotModule} />}
-      {!isOnboardingRoute && <KeyChatBubbleV2 />}
       <KeyboardShortcutsHelp />
       <CelebrationListener />
 

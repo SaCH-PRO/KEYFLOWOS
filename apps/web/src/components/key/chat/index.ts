@@ -2,7 +2,6 @@ export * from "./types";
 export * from "./constants";
 export { KeyChatProvider, useKeyChat } from "./key-chat-store";
 export { KeyChatPanel } from "./key-chat-panel";
-export { KeyChatBubble } from "./key-chat-bubble";
 export { KeyChatModeTabs } from "./key-chat-mode-tabs";
 export { KeyChatMessages } from "./key-chat-messages";
 export { KeyChatInput } from "./key-chat-input";

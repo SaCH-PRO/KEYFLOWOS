@@ -4,10 +4,11 @@ import { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Sparkles } from "lucide-react";
 import { NewEntityMenu } from "./new-entity-menu";
+import { openKey } from "@/components/key/key-agent";
 import { MODE_LABELS, type DisclosureMode } from "@/lib/disclosure-mode";
 import { getCachedUser } from "@/lib/workspace";
 import { getNotificationIcon, getNotificationLink, relativeTime } from "@/lib/notifications";
@@ -122,7 +123,11 @@ export function AppHeader({
   handleLogout,
 }: AppHeaderProps) {
   const [searchFocused, setSearchFocused] = useState(false);
-  const router = useRouter();
+  const pathname = usePathname();
+  // KEY's door (journey K: "KEY opens only from the header button, on phones
+  // too, or Cmd/Ctrl+J"). app/app/layout.tsx mounts KeyAgent, which answers
+  // it, everywhere but onboarding, so the door is not shown there.
+  const showKeyDoor = !pathname?.startsWith("/app/onboarding");
 
   const modeColors = {
     startup: { border: "border-emerald-500/30", bg: "bg-emerald-500/10", text: "text-emerald-400", glow: "shadow-[0_0_12px_hsl(142,71%,45%,0.2)]" },
@@ -133,7 +138,13 @@ export function AppHeader({
 
   return (
     <header
-      className="h-12 border-b border-border px-3 md:px-5 flex items-center justify-between flex-shrink-0 z-40 relative"
+      // The header layer (app/globals.css): the header is the stacking context
+      // of every menu it opens, so this layer is theirs: over the page and the
+      // phone's bottom bar, under sheets, drawers and dialogs (BUG-041). A
+      // page's own full-screen overlay at the z-40 literal (a dialog's
+      // backdrop, a dropdown's click-catcher) comes later in the document and
+      // so still covers it (LAY-CR-2).
+      className="h-12 border-b border-border px-3 md:px-5 flex items-center justify-between flex-shrink-0 z-[var(--kf-z-header)] relative"
       style={{
         background: "hsl(var(--kf-header-bg))",
       }}
@@ -141,7 +152,12 @@ export function AppHeader({
       {/* Subtle top glow line */}
       <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-[hsl(var(--kf-accent1)/0.15)] to-transparent" />
 
-      <div className="flex items-center gap-2 md:gap-3 flex-1">
+      {/* The left group may shrink below its content (min-w-0): the header sits
+          in the shell's overflow-hidden root, so a left group as wide as its
+          content (the whole wordmark, Ask KEY, the KEY bar's typing text)
+          would push Search, New and Notifications off a phone's screen, where
+          nobody can reach them (LAY-CR-1). The logo gives way first. */}
+      <div className="flex items-center gap-2 md:gap-3 flex-1 min-w-0">
         {/* Mobile hamburger */}
         <button
           onClick={() => setMobileDrawerOpen(true)}
@@ -151,8 +167,9 @@ export function AppHeader({
           <Menu className="w-5 h-5" />
         </button>
 
-        {/* Mobile logo */}
-        <div className="md:hidden flex items-center gap-2 flex-1 min-w-0">
+        {/* Mobile logo: the mark alone on a phone (the wordmark from sm), and
+            nothing below 360px, where the header's controls take the width */}
+        <div className="md:hidden flex max-[359px]:hidden items-center gap-2 flex-1 min-w-0 overflow-hidden">
           <div
             className="h-6 w-6 rounded-md flex items-center justify-center flex-shrink-0"
             style={{
@@ -161,33 +178,41 @@ export function AppHeader({
           >
             <Sparkles className="w-3.5 h-3.5 text-white" />
           </div>
-          <span className="text-sm font-bold tracking-tight truncate">KEYFLOWOS</span>
+          <span className="hidden sm:block text-sm font-bold tracking-tight truncate">KEYFLOWOS</span>
         </div>
 
-        {/* KEY Search Bar — Desktop */}
-        <motion.button
-          onClick={() => router.push("/app/key/chat")}
-          onFocus={() => setSearchFocused(true)}
-          onBlur={() => setSearchFocused(false)}
-          className={cn(
-            "hidden md:flex flex-1 min-w-0 max-w-xl items-center gap-2.5 rounded-xl border px-3.5 py-2 text-sm transition-all cursor-pointer relative overflow-hidden",
-            searchFocused
-              ? "border-[hsl(var(--kf-accent1)/0.4)] bg-muted/30 shadow-[0_0_20px_hsl(var(--kf-accent1)/0.08)]"
-              : "border-border/50 bg-muted/15 hover:border-[hsl(var(--kf-accent1)/0.25)] hover:bg-muted/25"
-          )}
-        >
-          {/* Subtle gradient border glow on focus */}
-          {searchFocused && (
-            <div className="absolute inset-0 rounded-xl opacity-20 bg-gradient-to-r from-[hsl(var(--kf-accent1))] via-transparent to-[hsl(var(--kf-accent2))]" />
-          )}
-          <Brain className="w-4 h-4 text-[hsl(var(--kf-accent2))] relative z-10 flex-shrink-0" />
-          <span className="text-muted-foreground relative z-10 truncate text-left flex-1">
-            <KEYSearchPlaceholder />
-          </span>
-          <kbd className="relative z-10 ml-auto px-1.5 py-0.5 rounded-md bg-muted border border-border/50 text-[10px] font-mono shrink-0 text-muted-foreground">
-            ⌘J
-          </kbd>
-        </motion.button>
+        {/* Ask KEY: KEY's one door in the shell (and Cmd/Ctrl+J). It opens
+            KEY's chat drawer, as Cmd/Ctrl+J does; on a phone it is a compact
+            "Ask KEY" button, on a desktop the wide bar with the ⌘J hint. */}
+        {showKeyDoor && (
+          <motion.button
+            type="button"
+            aria-label="Ask KEY"
+            title="Ask KEY (⌘J)"
+            onClick={() => openKey({ mode: "chat" })}
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
+            className={cn(
+              "flex shrink-0 md:shrink md:flex-1 min-w-0 md:max-w-xl min-h-[44px] md:min-h-0 items-center gap-1.5 md:gap-2.5 rounded-xl border px-2.5 md:px-3.5 py-2 text-sm transition-all cursor-pointer relative overflow-hidden",
+              searchFocused
+                ? "border-[hsl(var(--kf-accent1)/0.4)] bg-muted/30 shadow-[0_0_20px_hsl(var(--kf-accent1)/0.08)]"
+                : "border-border/50 bg-muted/15 hover:border-[hsl(var(--kf-accent1)/0.25)] hover:bg-muted/25"
+            )}
+          >
+            {/* Subtle gradient border glow on focus */}
+            {searchFocused && (
+              <div className="absolute inset-0 rounded-xl opacity-20 bg-gradient-to-r from-[hsl(var(--kf-accent1))] via-transparent to-[hsl(var(--kf-accent2))]" />
+            )}
+            <Brain className="w-4 h-4 text-[hsl(var(--kf-accent2))] relative z-10 flex-shrink-0" />
+            <span className="md:hidden relative z-10 text-xs font-medium text-foreground whitespace-nowrap">Ask KEY</span>
+            <span className="hidden md:block text-muted-foreground relative z-10 truncate text-left flex-1">
+              <KEYSearchPlaceholder />
+            </span>
+            <kbd className="hidden md:inline relative z-10 ml-auto px-1.5 py-0.5 rounded-md bg-muted border border-border/50 text-[10px] font-mono shrink-0 text-muted-foreground">
+              ⌘J
+            </kbd>
+          </motion.button>
+        )}
 
         {/* Command Palette Button */}
         <button
