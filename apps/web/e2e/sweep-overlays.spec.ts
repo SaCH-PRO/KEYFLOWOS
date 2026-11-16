@@ -29,6 +29,17 @@ import { JOURNEY_VIEWPORTS } from "./journeys/harness-settings";
  *   7. The header's "Ask KEY" is shown on a phone and on a desktop and opens
  *      KEY's chat drawer (not under KEY_DISABLED, where SWP-KEY-SHELL-SMOKE
  *      hides every KEY door).
+ *   8. The header fits the screen (review LAY-CR-1): every control it shows is
+ *      inside the viewport and is the topmost element where it sits, with no
+ *      scrolling (the shell's root is overflow-hidden, so a control clipped
+ *      off the right edge cannot be reached at all), and a tap where the
+ *      Notifications bell is opens the notifications panel. The phone is
+ *      measured at 375, 360 and 320 px wide; the desktop at 1440, 1024 and 768.
+ *   9. A page's own dialog still covers the header (review LAY-CR-2): with the
+ *      CRM data-quality settings dialog open (its backdrop is the page's z-40
+ *      literal, not on the layer table yet), the topmost element where the
+ *      header's New sits is that backdrop, and a tap there closes the dialog
+ *      and opens no New menu over it.
  *
  * Both viewports of the journey gate run: 1440x900 (the sweep's) and 375x812
  * (a phone, where the bottom bar covered the sheets' footers). It is live
@@ -111,6 +122,55 @@ async function coverOf(what: string, locator: Locator): Promise<string[]> {
   await expect(locator, what).toBeVisible();
   await locator.page().waitForTimeout(800);
   return coveredButtonFindings([{ what, locator }]);
+}
+
+/** The widths each project measures the header at (its own viewport first). */
+const HEADER_WIDTHS: Record<string, number[]> = { phone: [375, 360, 320], desktop: [1440, 1024, 768] };
+
+/**
+ * What of the app header does not fit the screen at the page's current width:
+ * the header's content wider than the header, and each control it shows that
+ * lies outside the viewport or is not the topmost element at its centre and 20%
+ * in from each side. Measured where everything is, with no scrolling: the
+ * shell's root is overflow-hidden, so what it clips no user can scroll to (the
+ * journey helpers' coveringElement scrolls a button into view first, which
+ * would move the clipped header instead).
+ */
+async function headerFitFindings(page: Page, label: string): Promise<string[]> {
+  return page.evaluate((label) => {
+    const header = document.querySelector("main header") as HTMLElement | null;
+    if (!header) return [`${label}: the app header is not on the page`];
+    const findings: string[] = [];
+    const vw = document.documentElement.clientWidth;
+    if (header.scrollWidth > header.clientWidth + 1) {
+      findings.push(`${label}: the header's content is ${header.scrollWidth}px wide in a ${header.clientWidth}px header`);
+    }
+    const nameOf = (el: Element) =>
+      el.getAttribute("aria-label") ?? el.getAttribute("title") ?? (el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 30);
+    const controls = Array.from(header.querySelectorAll<HTMLElement>("button, a[href]")).filter((el) => {
+      const box = el.getBoundingClientRect();
+      return box.width > 0 && box.height > 0 && getComputedStyle(el).visibility !== "hidden";
+    });
+    if (controls.length === 0) findings.push(`${label}: the header shows no control`);
+    for (const el of controls) {
+      const box = el.getBoundingClientRect();
+      const name = nameOf(el);
+      if (box.left < -0.5 || box.right > vw + 0.5) {
+        findings.push(`${label}: "${name}" is off screen (x ${Math.round(box.left)} to ${Math.round(box.right)} of ${vw})`);
+        continue;
+      }
+      for (const f of [0.5, 0.2, 0.8]) {
+        const x = box.left + box.width * f;
+        const y = box.top + box.height / 2;
+        const hit = document.elementFromPoint(x, y);
+        if (!hit || !(hit === el || el.contains(hit))) {
+          const by = hit ? `<${hit.tagName.toLowerCase()} "${nameOf(hit.closest("button, a, [aria-label]") ?? hit)}">` : "nothing (off screen)";
+          findings.push(`${label}: "${name}" is covered at (${Math.round(x)}, ${Math.round(y)}) by ${by}`);
+        }
+      }
+    }
+    return findings;
+  }, label);
 }
 
 for (const [project, viewport] of Object.entries(JOURNEY_VIEWPORTS)) {
@@ -212,6 +272,70 @@ for (const [project, viewport] of Object.entries(JOURNEY_VIEWPORTS)) {
       expect(await coveredButtonFindings([{ what: "the header's 'Ask KEY'", locator: askKey }]), "Ask KEY").toEqual([]);
       await askKey.click();
       await expect(page.getByRole("heading", { name: /^KEY$/ }).filter({ visible: true }), "KEY's chat drawer").toBeVisible();
+    });
+
+    test("the header fits the screen: every header control is on screen and topmost, and a tap on the Notifications bell opens it", async ({ page }) => {
+      test.setTimeout(3 * 60_000);
+      await page.goto("/app/command-center");
+      await settle(page);
+      await closeKeyDrawerIfOpen(page);
+      const findings: string[] = [];
+      for (const width of HEADER_WIDTHS[project]) {
+        await page.setViewportSize({ width, height: viewport.height });
+        await page.waitForTimeout(500);
+        const label = `${width}x${viewport.height}`;
+        findings.push(...(await headerFitFindings(page, label)));
+
+        // A tap where the bell is (page.mouse, no scrolling) opens the notifications panel; a second tap there closes it.
+        const bell = page.locator("main header").getByRole("button", { name: "Notifications" });
+        const box = await bell.boundingBox();
+        if (!box) {
+          findings.push(`${label}: the Notifications bell has no box`);
+          continue;
+        }
+        const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+        await page.mouse.click(at.x, at.y);
+        const panel = page.locator("main header").getByText("Notifications", { exact: true }).filter({ visible: true });
+        const opened = await panel.first().waitFor({ state: "visible", timeout: 3_000 }).then(() => true, () => false);
+        if (!opened) {
+          findings.push(`${label}: a tap at the Notifications bell (${Math.round(at.x)}, ${Math.round(at.y)}) does not open the notifications panel`);
+          continue;
+        }
+        await page.mouse.click(at.x, at.y);
+        await panel.first().waitFor({ state: "hidden", timeout: 3_000 }).catch(() => {});
+      }
+      expect(findings, "header controls a user cannot reach (LAY-CR-1)").toEqual([]);
+    });
+
+    test("a page's own dialog covers the header: with the data-quality settings open, a tap on New closes the dialog and opens no New menu", async ({ page }) => {
+      test.setTimeout(2 * 60_000);
+      await page.goto("/app/crm/data-quality");
+      await settle(page);
+      await closeKeyDrawerIfOpen(page);
+      await page.getByRole("button", { name: "Settings", exact: true }).filter({ visible: true }).first().click();
+      const dialogTitle = page.getByRole("heading", { name: "Data quality settings" });
+      await expect(dialogTitle, "the data-quality settings dialog").toBeVisible();
+
+      const newButton = page.locator("main header").getByRole("button", { name: /^new\b/i }).filter({ visible: true }).first();
+      const box = await newButton.boundingBox();
+      expect(box, "the header's New has a box").not.toBeNull();
+      const at = { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 };
+      // What is topmost where New sits: the dialog's backdrop (the dialog's own container), not New.
+      const topmost = await page.evaluate(({ x, y }) => {
+        const hit = document.elementFromPoint(x, y);
+        if (!hit) return "nothing";
+        if (hit.closest("main header")) return `the header's ${hit.closest("button")?.getAttribute("title") ?? hit.tagName.toLowerCase()}`;
+        const backdrop = Array.from(document.querySelectorAll("h2")).find((h) => h.textContent === "Data quality settings")?.closest(".fixed");
+        return backdrop && (hit === backdrop || backdrop.contains(hit)) ? "the dialog's backdrop" : `<${hit.tagName.toLowerCase()} class="${hit.getAttribute("class") ?? ""}">`;
+      }, at);
+      expect(topmost, "the topmost element where the header's New sits, with a page dialog open").toBe("the dialog's backdrop");
+
+      await page.mouse.click(at.x, at.y);
+      await expect(dialogTitle, "a tap outside the dialog (on its backdrop) closes it").toBeHidden();
+      await expect(
+        page.locator("main header").getByRole("menuitem", { name: /^contact/i }),
+        "no New menu opened over the dialog",
+      ).toHaveCount(0);
     });
   });
 }

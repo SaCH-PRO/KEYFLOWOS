@@ -43,11 +43,21 @@
  * sheet restores the bubble" was written for the earlier cut, where the bubble
  * hid while a sheet was open. The re-cut scope unmounts the bubble, so closing
  * a sheet restores KEY's door, the header's Ask KEY, and no bubble comes back.
+ *
+ * Review repair (LAY-CR-1, LAY-CR-2). The table sits among page-level z-index
+ * literals it does not own yet (page dialogs' backdrops and dropdown
+ * click-catchers at z-40, page modals at z-[70] and z-[90]); the shell's layers
+ * keep the order they had against them before the table: a page's own
+ * full-screen overlay still covers the header (and now the bottom bar), and
+ * KEY's drawer, opened on request, still paints over a page's modal. And the
+ * header's left group may shrink, so on a phone its content never pushes the
+ * right-hand controls (Search, New, Notifications) off the screen.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { render, screen, waitFor, within, fireEvent, cleanup, act } from "@testing-library/react";
 
 // Stable across renders, as Next's own are: a new URLSearchParams on every
@@ -353,5 +363,76 @@ describe("SWP-LAYERS: the app shell (app/app/layout.tsx)", { timeout: 30_000 }, 
       return t as HTMLElement;
     });
     expect(rootLayer(toaster).z, "toasts").toBe(TABLE.get("--kf-z-toast"));
+  });
+  // LAY-CR-1. The header is a flex row inside the shell's overflow-hidden root:
+  // a left group that cannot shrink below its content (hamburger, logo and the
+  // whole KEYFLOWOS wordmark, Ask KEY) made the header wider than a phone, and
+  // the root clipped Notifications (and at 320px New) off the screen, where
+  // nobody can tap or scroll to them. jsdom has no layout; the browser measure,
+  // every header control on screen and topmost at 375, 360 and 320, is
+  // e2e/sweep-overlays.spec.ts.
+  it("the header's left group may shrink, and a phone shows the logo mark without the wordmark, so Search, New and Notifications stay on screen", async () => {
+    const { header } = await renderShell(<div>Today</div>);
+    const hamburger = within(header).getByRole("button", { name: "Open navigation menu" });
+    let leftGroup: HTMLElement = hamburger;
+    while (leftGroup.parentElement && leftGroup.parentElement !== header) leftGroup = leftGroup.parentElement;
+    expect(leftGroup.parentElement, "the hamburger sits in a group of the header").toBe(header);
+    expect(within(leftGroup).getByRole("button", { name: "Ask KEY" }), "Ask KEY is in the left group").toBeTruthy();
+    expect(leftGroup.classList.contains("flex-1"), "the left group takes the header's free width").toBe(true);
+    expect(
+      leftGroup.classList.contains("min-w-0"),
+      "the left group (flex-1) may shrink below its content (min-w-0); without it its min-content width (the whole wordmark and Ask KEY) pushes the right-hand controls off a phone's screen",
+    ).toBe(true);
+    const wordmark = within(header).getByText("KEYFLOWOS");
+    expect(hiddenOnAPhone(wordmark, header), "the KEYFLOWOS wordmark is display:none on a phone (below sm)").toBe(true);
+    // The right-hand controls are all still there.
+    for (const name of ["Search", "Notifications"]) expect(within(header).getByRole("button", { name }), name).toBeTruthy();
+    expect(within(header).getByRole("button", { name: /^new\b/i }), "New").toBeTruthy();
+  });
+
+  // LAY-CR-2. Page dialogs' backdrops (crm/data-quality's settings dialog,
+  // the product import, the contacts export, the bulk-action menus) and page
+  // dropdowns' click-catchers still use the z-40 literal. They covered the
+  // header before the table and must still: a click on the header lands on the
+  // backdrop and closes what is open, never opens the header's New menu over an
+  // open dialog.
+  it("a page's own full-screen overlay at the z-40 literal covers the header and the phone's bottom bar; the header's menus still sit over the bottom bar", async () => {
+    const { header } = await renderShell(
+      <div>
+        <p>Data quality</p>
+        <div data-testid="page-overlay" className="fixed inset-0 z-40 bg-black/40" />
+      </div>,
+    );
+    const overlay = screen.getByTestId("page-overlay");
+    expect(paintsOver(overlay, header), `the page's overlay ${describeLayer(overlay)} over the header ${describeLayer(header)}`).toBe(true);
+    expect(paintsOver(overlay, bottomBar()), `the page's overlay ${describeLayer(overlay)} over the bottom bar ${describeLayer(bottomBar())}`).toBe(true);
+    expect(paintsOver(header, bottomBar()), `the header ${describeLayer(header)} (and so its menus) over the bottom bar ${describeLayer(bottomBar())}`).toBe(true);
+  });
+
+  // LAY-CR-2. KEY opens on request only (Ask KEY, Cmd/Ctrl+J), so when it is
+  // asked for it shows over whatever is open, as it did before the table: over
+  // a page modal at the z-[90] literal (KeyFlowStudio's) and over one at the
+  // z-[70] literal that a page portals to the end of the document (later than
+  // KEY's drawer, so a tie would go to the page).
+  function PageModals() {
+    return (
+      <div>
+        <div data-testid="page-modal-90" className="fixed inset-0 z-[90] bg-black/60" />
+        {createPortal(<div data-testid="page-modal-70" className="fixed inset-0 z-[70]" />, document.body)}
+      </div>
+    );
+  }
+
+  it("KEY's drawer, opened with Ctrl+J over a page's modal at the z-[90] or z-[70] literal, paints over it", async () => {
+    await renderShell(<PageModals />);
+    fireEvent.keyDown(window, { key: "j", ctrlKey: true });
+    await waitFor(() => expect(keyDrawerHeading(), "Ctrl+J opens KEY's drawer").not.toBeNull());
+    const key = keyDrawerHeading()!;
+    const under: string[] = [];
+    for (const id of ["page-modal-90", "page-modal-70"]) {
+      const modal = screen.getByTestId(id);
+      if (!paintsOver(key, modal)) under.push(`${id} ${describeLayer(modal)} paints over KEY's drawer ${describeLayer(key)}`);
+    }
+    expect(under, "page modals over KEY's drawer").toEqual([]);
   });
 });
