@@ -269,9 +269,12 @@ export class CrmTimelineService {
     }
     if (input.status) where.status = input.status;
     if (input.dueBefore) where.dueDate = { lte: input.dueBefore };
+    // By due date (undated last), then the newest first. Two sort fields are an
+    // array, one object each: an object with both answered 500, so a customer's
+    // Tasks tab said 'No tasks yet' right after 'Task added' (sweep BUG-036).
     return this.prisma.client.contactTask.findMany({
       where,
-      orderBy: { dueDate: 'asc', createdAt: 'desc' },
+      orderBy: [{ dueDate: 'asc' }, { createdAt: 'desc' }],
       include: { contact: true },
       take: 100,
     });
