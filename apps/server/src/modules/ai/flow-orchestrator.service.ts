@@ -1335,8 +1335,16 @@ export class FlowOrchestratorService {
     query: string,
     tier: string | undefined,
     userId?: string,
+    server?: FlowServerContext,
   ): Promise<string> {
     if (tier === 'reflex') return '';
+
+    // W1F-PERCEPTION-MODULE-SCOPE, owner ruling D-203 (`supportdesk`: "only the conversation in front of it"): a turn
+    // that names no member and no staff position is the customer-facing Chatwoot support desk's (chatwoot.service.ts
+    // calls chat() with neither). It perceives nothing: no store is read, so no business event, no figure and no fact
+    // reaches a customer who could ask KEY to repeat it. A member's turn names the member; the staff bridge's names the
+    // position (FlowServerContext); a future caller with neither fails closed here too.
+    if (!userId && !server) return '';
 
     const memory = this.getUnifiedMemory();
     if (!memory) return '';
@@ -1368,8 +1376,25 @@ export class FlowOrchestratorService {
       // for the window plus the shared headroom so that what is left out does not leave the reader's
       // own rows unread (CR-W10CCS-1).
       const window = tier === 'deliberate' ? 12 : 6;
+      // W1F-PERCEPTION-MODULE-SCOPE, owner ruling D-202 (`bridgememory`: "give them their own history too, only their
+      // own"): the staff WhatsApp/SMS bridge's turn names no member, but its position's verified holder
+      // (FlowServerContext.positionHolderUserId, which JobRolePolicyService.holderForPosition resolved for a
+      // membership-backed position) is its reader, on an envelope the policy issued (the bridge's own turn), and only
+      // while promptMemoryReader finds them a member. Their own episodic and cognition rows, and the business-wide events
+      // their own module scopes allow (readersOwnPromptMemory). It is the reader and nothing else (D-73/D-88): chat()
+      // still runs the turn with no principal, no standing-context viewer and no conversation owner, and chatToolAction
+      // still reads the holder for call_create_task alone. A member in the app is their own reader.
+      const candidate = userId ?? (() => {
+        const holder = server?.positionHolderUserId;
+        if (!server || !holder) return undefined;
+        try {
+          return this.getJobRolePolicy().isIssued(server.jobRoleEnvelope) ? holder : undefined;
+        } catch {
+          return undefined;
+        }
+      })();
       const perceive = async () => {
-        const reader = await promptMemoryReader(this.prisma, businessId, userId, this.logger, 'perception');
+        const reader = await promptMemoryReader(this.prisma, businessId, candidate, this.logger, 'perception');
         const read = await memory.retrieveContext(businessId, {
           // `query` is deliberately NOT passed.
           //
@@ -1396,8 +1421,12 @@ export class FlowOrchestratorService {
           // asked — renders into another member's prompt. No reader, no personal
           // store at all (fail closed): the read names the business-wide stores
           // instead. Review CR-W11FPS-1: not includeEpisodic false, which also
-          // dropped every business event (an overdue invoice) from the support
-          // desk, the staff bridge and a SUPER_ADMIN who is no member.
+          // dropped every business event (an overdue invoice) from a SUPER_ADMIN
+          // who is no member and a contact-only staff position.
+          // W1F-PERCEPTION-MODULE-SCOPE (SEC-W11FPS-3): of those business events,
+          // readersOwnPromptMemory keeps only what the reader's module scopes
+          // allow; no reader has no module, so it keeps only the business-wide
+          // records (a GOVERNANCE_DECISION proposal, a record naming no module).
           ...(reader ? { userId: reader } : { sourceTypes: [...BUSINESS_WIDE_MEMORY_SOURCES] }),
           limit: window + PROMPT_MEMORY_HEADROOM,
           // 0.3 was decorative — it could not reject a single row.
@@ -2135,7 +2164,7 @@ ${triage.standingContext}`;
 
     // Join the two halves of perception: what KEY sensed, not just what it was
     // told. Graded by the thalamus so a greeting pays nothing for it.
-    systemPrompt += await this.buildPerceptionSection(businessId, message, triage?.tier, userId);
+    systemPrompt += await this.buildPerceptionSection(businessId, message, triage?.tier, userId, server);
 
     const messages: GatewayMessage[] = [
       { role: 'system', content: withEvidenceDiscipline(systemPrompt) },
@@ -2585,7 +2614,7 @@ ${triage.standingContext}`;
 
     // Join the two halves of perception: what KEY sensed, not just what it was
     // told. Graded by the thalamus so a greeting pays nothing for it.
-    systemPrompt += await this.buildPerceptionSection(businessId, message, triage?.tier, userId);
+    systemPrompt += await this.buildPerceptionSection(businessId, message, triage?.tier, userId, server);
 
     const messages: GatewayMessage[] = [
       { role: 'system', content: withEvidenceDiscipline(systemPrompt) },

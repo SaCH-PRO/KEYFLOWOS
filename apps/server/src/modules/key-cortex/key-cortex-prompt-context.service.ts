@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { userCanAccessBusiness } from '../../core/auth/business.guard';
+import { LEVEL_RANK, memberModuleLevel, rankOf, type CanonicalModule } from '../../core/authority/module-vocabulary';
 import { KeyCortexContextService } from './key-cortex-context.service';
 import { UnifiedMemoryRetrievalService } from './unified-memory-retrieval.service';
 import { KeyCortexLearningService } from './key-cortex-learning.service';
@@ -20,6 +21,8 @@ const PROMPT_MEMORY_FRAGMENTS = 15;
  * cognitive_events), asked for on top so that leaving them out still fills the prompt's fragments.
  * W11-FLOW-PERCEPTION-SCOPE review (SEC-W11FPS-1/2): it bounds every record isPersonalKeyRecord leaves out (KEY's
  * turn records too), since all of them come from those two stores.
+ * W1F-PERCEPTION-MODULE-SCOPE (SEC-W11FPS-3): and every event the reader's module scopes leave out
+ * (withinModuleSight), which come from the same two stores, so the bound holds for all of them together.
  */
 const TOOL_CALL_RECORD_HEADROOM = 100;
 /**
@@ -74,7 +77,7 @@ const KEY_TURN_EVENT_TYPES = new Set([
 /** The business_events subjects of KEY's own turn records (any case). */
 const KEY_TURN_SUBJECTS = new Set(['keycommand', 'cortexsession']);
 
-type RecordFragment = Pick<MemoryFragment, 'sourceType' | 'entityType' | 'title'>;
+type RecordFragment = Pick<MemoryFragment, 'sourceType' | 'entityType' | 'title' | 'metadata'>;
 const isBusinessWideEventRecord = (fragment: RecordFragment) =>
   fragment.sourceType === 'business_event' || fragment.sourceType === 'cognitive_event';
 const subjectOf = (fragment: RecordFragment) =>
@@ -140,6 +143,119 @@ export const BUSINESS_WIDE_MEMORY_SOURCES: readonly MemorySourceType[] = [
   'conversation',
   'business_event',
 ];
+
+/**
+ * W1F-PERCEPTION-MODULE-SCOPE (review SEC-W11FPS-3; D-71/D-146, D-57): the words that name the module whose read scope
+ * a business-wide event needs, by the module REST guards for it. The bus writes every domain event
+ * EventEmitterFlowBridgeService forwards to business_events and cognitive_events, figures included: money at revenue
+ * read (D-57: invoices, payments, quotes, refunds, revenue actions, the Books and the bank; payroll's committed figure
+ * is a treasury figure, D-145) and at expenses read (D-146: expenses, bills, receipts, budgets), and the other modules'
+ * records (crm, bookings, projects, operations, storefront, content, automations, team).
+ */
+const MODULE_WORDS: ReadonlyArray<readonly [CanonicalModule, readonly string[]]> = [
+  [
+    'revenue',
+    [
+      'invoice', 'invoices', 'payment', 'payments', 'revenue', 'refund', 'refunds', 'deposit', 'deposits', 'transaction',
+      'transactions', 'bank', 'banking', 'reconciliation', 'quote', 'quotes', 'payout', 'payouts', 'ledger', 'journal',
+      'receivable', 'receivables', 'commerce', 'finance', 'financial', 'cash', 'cashflow', 'treasury', 'charge', 'charges',
+      'billing', 'payroll',
+    ],
+  ],
+  ['expenses', ['expense', 'expenses', 'budget', 'budgets', 'bill', 'bills', 'receipt', 'receipts']],
+  ['crm', ['crm', 'contact', 'contacts', 'lead', 'leads', 'deal', 'deals', 'opportunity', 'opportunities', 'outreach', 'sequence', 'sequences', 'call']],
+  ['bookings', ['booking', 'bookings', 'reservation', 'reservations', 'appointment', 'appointments', 'calendar', 'meeting', 'meetings']],
+  ['projects', ['project', 'projects', 'task', 'tasks', 'milestone', 'milestones']],
+  [
+    'operations',
+    ['ticket', 'tickets', 'helpdesk', 'support', 'inbox', 'message', 'messages', 'whatsapp', 'procurement', 'purchase', 'contract', 'contracts', 'payroll'],
+  ],
+  ['storefront', ['product', 'products', 'catalog', 'inventory', 'stock', 'order', 'orders', 'marketplace', 'storelink', 'checkout']],
+  ['content', ['campaign', 'campaigns', 'content', 'asset', 'assets', 'marketing']],
+  ['automations', ['autopilot', 'automation', 'automations']],
+  ['team', ['employee', 'employees', 'hr', 'candidate', 'candidates', 'recruiting']],
+];
+const WORD_MODULES: ReadonlyMap<string, readonly CanonicalModule[]> = (() => {
+  const map = new Map<string, CanonicalModule[]>();
+  for (const [module, words] of MODULE_WORDS) {
+    for (const word of words) map.set(word, [...(map.get(word) ?? []), module]);
+  }
+  return map;
+})();
+/**
+ * W1F-PERCEPTION-MODULE-SCOPE: a GOVERNANCE_DECISION record (the approval orchestrator's propose, approve and reject
+ * rows, and their bridged copies) is a business-wide approval item, kept for every reader whatever words it carries.
+ */
+const BUSINESS_WIDE_EVENT_TYPES = new Set(['GOVERNANCE_DECISION']);
+
+/** The lower-case words of an event type, subject or source: 'proactive.invoice_overdue', 'RecurringInvoice', 'key_inbox'. */
+function wordsOf(value: unknown): string[] {
+  if (typeof value !== 'string' || !value) return [];
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+/**
+ * W1F-PERCEPTION-MODULE-SCOPE (review SEC-W11FPS-3; D-71/D-146, D-57): the modules whose read scope a reader needs to
+ * see a business-wide event record (business_events, cognitive_events), named by its event type, its subject (a
+ * business_events row's subjectType) and its source (a cognitive_events row's sourceType): every module MODULE_WORDS
+ * names for any of their words. [] is business-wide: a record that names no module, a GOVERNANCE_DECISION proposal, or
+ * a fragment of another store (AiMemory facts, genome and temporal-flow memory, and the reader's own episodic rows).
+ */
+export function eventModulesOf(fragment: RecordFragment): CanonicalModule[] {
+  if (!isBusinessWideEventRecord(fragment)) return [];
+  if (BUSINESS_WIDE_EVENT_TYPES.has(fragment.title ?? '')) return [];
+  const source = fragment.sourceType === 'cognitive_event' ? fragment.metadata?.sourceType : undefined;
+  const subject = fragment.sourceType === 'business_event' ? fragment.entityType : undefined;
+  const modules = new Set<CanonicalModule>();
+  for (const word of [...wordsOf(fragment.title), ...wordsOf(subject), ...wordsOf(source)]) {
+    for (const module of WORD_MODULES.get(word) ?? []) modules.add(module);
+  }
+  return [...modules];
+}
+
+/** W1F-PERCEPTION-MODULE-SCOPE: whether a reader may read a module (at least 'read'). */
+export type ModuleSight = (module: CanonicalModule) => boolean;
+/** No member, no module (as KEY's standing context gives a turn with no member no figure, PR195-KEY-GATES). */
+const NO_MODULE_SIGHT: ModuleSight = () => false;
+
+/**
+ * W1F-PERCEPTION-MODULE-SCOPE (review SEC-W11FPS-3; D-71/D-146, D-57): the modules `reader` may read in `businessId`,
+ * read as ModuleScopeGuard reads a membership (memberModuleLevel: its explicit permissionScopes, an array included,
+ * else its role's defaults; an OWNER membership with an explicit map is bound by it, D-140). Membership is the rule
+ * (D-104), as for KEY's standing context (keyContextSight): no reader, no membership (a SUPER_ADMIN who is no member,
+ * a removed member), no client to read with, or a read that fails: no module (fail closed).
+ */
+export async function readersModuleSight(
+  prisma: PrismaService | undefined,
+  businessId: string,
+  reader: string | null,
+  logger: Pick<Logger, 'warn'> = cognitionMemoryLogger,
+  logTag = 'promptMemory',
+): Promise<ModuleSight> {
+  if (!reader || !prisma) return NO_MODULE_SIGHT;
+  try {
+    const membership = await prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: reader, businessId } },
+      select: { role: true, permissionScopes: true },
+    });
+    if (!membership) return NO_MODULE_SIGHT;
+    return (module) => rankOf(memberModuleLevel(membership, module)) >= LEVEL_RANK.read;
+  } catch (err: unknown) {
+    logger.warn(
+      `[${logTag}][${businessId}] module scope read failed, no module's events read: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return NO_MODULE_SIGHT;
+  }
+}
+
+/** W1F-PERCEPTION-MODULE-SCOPE: whether a reader with `sight` may see `fragment` (every module it names). */
+export function withinModuleSight(fragment: RecordFragment, sight: ModuleSight): boolean {
+  return eventModulesOf(fragment).every(sight);
+}
 
 const cognitionMemoryLogger = new Logger('ReadersOwnCognitionMemory');
 
@@ -213,10 +329,17 @@ export async function promptMemoryReader(
  * a cognition fragment only when its row is the reader's own (readersOwnCognitionMemory; a member-less row is nobody's
  * own, and no reader reads none). The read is expected to have asked for `limit` plus PROMPT_MEMORY_HEADROOM.
  *
- * The one rule of KeyCortexPromptContextService.buildMemoryContext (POST /cortex/chat) and of
- * FlowOrchestratorService.buildPerceptionSection (POST /ai/businesses/:id/flow/chat and its stream).
+ * W1F-PERCEPTION-MODULE-SCOPE (review SEC-W11FPS-3; D-71/D-146, D-57): and a business-wide event only when the reader
+ * may read every module it names (withinModuleSight, by readersModuleSight: their membership's module levels; no
+ * reader has none). An owner's expense, a Stripe payment or an invoice total no longer reaches a member whose expenses
+ * or revenue scope is none, nor a turn with no reader; a GOVERNANCE_DECISION proposal and a record that names no module
+ * stay business-wide. The membership is read only when an event names a module.
+ *
+ * The one rule of KeyCortexPromptContextService.buildMemoryContext and the pipeline's chatMemoryFragments (POST
+ * /cortex/chat and its stream) and of FlowOrchestratorService.buildPerceptionSection (POST
+ * /ai/businesses/:id/flow/chat and its stream, the staff bridge).
  */
-export async function readersOwnPromptMemory<F extends Pick<MemoryFragment, 'id' | 'sourceType' | 'entityType' | 'title'>>(
+export async function readersOwnPromptMemory<F extends Pick<MemoryFragment, 'id' | 'sourceType' | 'entityType' | 'title' | 'metadata'>>(
   prisma: PrismaService | undefined,
   businessId: string,
   reader: string | null,
@@ -226,8 +349,13 @@ export async function readersOwnPromptMemory<F extends Pick<MemoryFragment, 'id'
   logTag = 'promptMemory',
 ): Promise<F[]> {
   const withoutKeyRecords = fragments.filter((fragment) => !isPersonalKeyRecord(fragment));
-  const own = await readersOwnCognitionMemory(prisma, businessId, reader, withoutKeyRecords, logger, logTag);
+  const namesAModule = withoutKeyRecords.some((fragment) => eventModulesOf(fragment).length > 0);
+  const [sight, own] = await Promise.all([
+    namesAModule ? readersModuleSight(prisma, businessId, reader, logger, logTag) : Promise.resolve(NO_MODULE_SIGHT),
+    readersOwnCognitionMemory(prisma, businessId, reader, withoutKeyRecords, logger, logTag),
+  ]);
   return withoutKeyRecords
+    .filter((fragment) => withinModuleSight(fragment, sight))
     .filter((fragment) => fragment.sourceType !== 'cognition_memory' || own.has(fragment.id))
     .slice(0, limit);
 }
