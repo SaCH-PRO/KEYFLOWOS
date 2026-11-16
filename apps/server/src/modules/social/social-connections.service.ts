@@ -1,5 +1,6 @@
-import { Inject, Injectable, OnModuleDestroy , Logger} from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, OnModuleDestroy , Logger} from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { isTokenEncrypted } from '../../core/crypto/token-crypto';
 import { safeInterval } from '../../core/scheduling/safe-interval';
 
 const ENV_CREDENTIAL_MAP: Record<string, { idKey: string; secretKey: string }> = {
@@ -9,6 +10,19 @@ const ENV_CREDENTIAL_MAP: Record<string, { idKey: string; secretKey: string }> =
   TWITTER: { idKey: 'TWITTER_CLIENT_ID', secretKey: 'TWITTER_CLIENT_SECRET' },
   TIKTOK: { idKey: 'TIKTOK_CLIENT_KEY', secretKey: 'TIKTOK_CLIENT_SECRET' },
 };
+
+/**
+ * FU-DELIVERY-TOKEN-DECRYPT review repair (SEC-DTD-1): the refusal code of a social credential that is already an
+ * at-rest ciphertext.
+ *
+ * SocialConnection.token and refreshToken are encrypted at rest by the token-encryption extension, which stores a value
+ * that already has the ciphertext shape ('enc:v1:...') as it is and decrypts it on every read with the one platform
+ * key. A settings admin who posted another business's stored token to the manual connect route got it back decrypted
+ * in the answer, and social publishing (and a channel sync from social) then used it as this business's credential.
+ * A provider credential never has that shape (blanks around it do not change that), so upsertConnection, the writer
+ * behind the manual route, the OAuth callbacks and KEY's connect_account, refuses it with nothing written.
+ */
+export const SOCIAL_CREDENTIAL_CIPHERTEXT = 'SOCIAL_CREDENTIAL_CIPHERTEXT';
 
 @Injectable()
 export class SocialConnectionsService implements OnModuleDestroy {
@@ -73,6 +87,14 @@ export class SocialConnectionsService implements OnModuleDestroy {
       scopes?: string;
     },
   ) {
+    for (const [field, value] of [['token', data.token], ['refreshToken', data.refreshToken]] as const) {
+      if (typeof value === 'string' && isTokenEncrypted(value.trim())) {
+        throw new BadRequestException({
+          code: SOCIAL_CREDENTIAL_CIPHERTEXT,
+          message: `${field} must be the provider's credential itself; an encrypted value is not accepted.`,
+        });
+      }
+    }
     const platform = data.platform.toUpperCase();
     const existing = await this.prisma.client.socialConnection.findFirst({
       where: {

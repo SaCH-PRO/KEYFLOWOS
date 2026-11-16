@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { isTokenEncrypted } from '../../core/crypto/token-crypto';
 import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
 import { channelBinderOf, isMessagingProvider, providerMetaBoundBy, rebindsChannelAccount } from './channel-audience';
 
@@ -48,6 +49,33 @@ const DESTINATION_CREATE_FIELDS = ['platform', 'platformId', 'displayName', 'ava
  */
 const CONNECTION_CREATE_FIELDS = ['provider', 'label', 'accountEmail', 'token', 'refreshToken', 'expiresAt', 'scopes', 'providerMeta'] as const;
 const CONNECTION_UPDATE_FIELDS = ['label', 'accountEmail', 'token', 'refreshToken', 'expiresAt', 'scopes', 'healthState', 'healthMessage', 'lastCheckedAt', 'providerMeta'] as const;
+
+/**
+ * FU-DELIVERY-TOKEN-DECRYPT review repair (SEC-DTD-1): the refusal code of a connection credential that is already an
+ * at-rest ciphertext.
+ */
+export const CHANNEL_CREDENTIAL_CIPHERTEXT = 'CHANNEL_CREDENTIAL_CIPHERTEXT';
+
+/**
+ * A connection's credential (its token, its refresh token, a WhatsApp access token) is the provider's credential
+ * itself, never a value with the at-rest ciphertext shape ('enc:v1:...'). The token-encryption extension stores such a
+ * value as it is (encryptToken leaves an encrypted value alone), and one platform key decrypts every business's
+ * ciphertext. So a settings admin who had another business's stored token (an OAuth column, a social or a channel
+ * token) bound it here, and the delivery queue, which decrypts the account's token before it sends, sent under the
+ * other business's plaintext credential. A provider credential never has that shape; blanks around it do not change
+ * that (as WhatsApp settings, SEC2-R1). Refused before anything is written or any provider is called, without echoing
+ * the value.
+ */
+function refuseStoredCiphertext(credentials: Record<string, unknown>): void {
+  for (const [field, value] of Object.entries(credentials)) {
+    if (typeof value === 'string' && isTokenEncrypted(value.trim())) {
+      throw new BadRequestException({
+        code: CHANNEL_CREDENTIAL_CIPHERTEXT,
+        message: `${field} must be the provider's credential itself; an encrypted value is not accepted.`,
+      });
+    }
+  }
+}
 
 /** The sending state only a settings admin sets and lifts (PATCH connections/:id); a health check keeps it (round 3, CB-1). */
 const ADMIN_DISABLED = 'Disabled';
@@ -115,6 +143,7 @@ export class ChannelConnectionService {
     providerMeta?: Record<string, unknown>;
   }, binder?: { id?: string } | null) {
     const fields = pickFields(data, CONNECTION_CREATE_FIELDS) as typeof data;
+    refuseStoredCiphertext({ token: fields.token, refreshToken: fields.refreshToken });
     const boundBy = binder?.id;
     const providerMeta = providerMetaBoundBy(data.provider, data.providerMeta, boundBy);
     if (providerMeta !== undefined) fields.providerMeta = providerMeta;
@@ -152,9 +181,10 @@ export class ChannelConnectionService {
     lastCheckedAt?: Date;
     providerMeta?: Record<string, unknown>;
   }, binder?: { id?: string } | null) {
+    const fields = pickFields(data, CONNECTION_UPDATE_FIELDS) as typeof data;
+    refuseStoredCiphertext({ token: fields.token, refreshToken: fields.refreshToken });
     const existing = await this.prisma.client.channelConnection.findFirst({ where: { id, businessId } });
     if (!existing) return null;
-    const fields = pickFields(data, CONNECTION_UPDATE_FIELDS) as typeof data;
     // SWEEP-P0-FOLLOWUP (WH3-1): a change of a messaging connection's account (its token, mailbox or provider meta)
     // rebinds it to the member making the change; otherwise the binder recorded stays. A boundBy in the body is
     // never stored. Repair COR-2: a change of what is stored, not a field sent back unchanged.
@@ -700,6 +730,8 @@ export class ChannelConnectionService {
     waBusinessAccountId: string;
     label?: string;
   }, binder?: { id?: string } | null) {
+    // SEC-DTD-1: refused before the token is checked with the provider.
+    refuseStoredCiphertext({ accessToken: input?.accessToken });
     const { WhatsAppAdapter } = await import('./adapters/whatsapp-adapter');
     const adapter = new WhatsAppAdapter();
 
