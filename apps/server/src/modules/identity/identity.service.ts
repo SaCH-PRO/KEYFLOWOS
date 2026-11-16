@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import { skipTenantIsolation } from '@keyflow/db';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { isBusinessOwnerMember } from '../../core/auth/business-owner';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { DefaultTriggersService } from '../ai/default-triggers.service';
 import { BUSINESS_META_PAYMENT_SECRET_KEYS, sanitizeBusiness } from '../../core/security/sanitize-business';
@@ -398,26 +399,17 @@ export class IdentityService {
    * (PATCH /identity/businesses/:businessId) is OWNER only, regardless of granted
    * scopes — settings:write or settings:admin does not admit a STAFF or ADMIN.
    *
-   * The owner is the OWNER membership or the distinguished owner (Business.ownerId)
-   * holding an OWNER membership (owner rulings D-116 / D-125: a recorded owner
-   * holding only ADMIN or STAFF is that role). A SUPER_ADMIN keeps the platform
-   * bypass BusinessGuard already grants it on this route; nothing here widens that.
+   * The owner is a member holding an OWNER membership of this business, the one
+   * owner rule core/auth/business-owner.ts isBusinessOwnerMember states (owner
+   * rulings D-104, D-116, D-125: a co-owner holding OWNER is the owner;
+   * Business.ownerId grants nothing on its own, and a recorded owner holding
+   * only ADMIN or STAFF is that role; W11-OWNER-HELPER-D11). A SUPER_ADMIN keeps
+   * the platform bypass BusinessGuard already grants it on this route; nothing
+   * here widens that.
    */
   async assertBusinessOwner(businessId: string, actor: { id: string; role?: string }): Promise<void> {
     if (actor.role === 'SUPER_ADMIN') return;
-    const membership = await this.prisma.client.membership.findUnique({
-      where: { userId_businessId: { userId: actor.id, businessId } },
-      select: { role: true },
-    });
-    if (membership?.role === 'OWNER') return;
-    const owned = await this.prisma.client.business.findFirst({
-      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row.
-      // Owner rulings D-116 / D-125 (W11-D116-PROFILE-OWNER; review SEC-W10OM-4 answered): only an
-      // OWNER-role one. A recorded owner holding only ADMIN or STAFF is that role and is refused here.
-      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id, role: 'OWNER' } } },
-      select: { id: true },
-    });
-    if (owned) return;
+    if (await isBusinessOwnerMember(this.prisma.client, businessId, actor.id)) return;
     throw new ForbiddenException('Only the business owner can edit the business profile');
   }
 

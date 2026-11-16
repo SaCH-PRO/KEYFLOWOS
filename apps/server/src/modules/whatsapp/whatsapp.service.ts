@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { isBusinessOwnerMember } from '../../core/auth/business-owner';
 import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
@@ -329,35 +330,20 @@ export class WhatsAppService {
    * config is the identity the business sends from (its Meta phone number id
    * and access token, or its Twilio account), so replacing it is a D-11 write.
    *
-   * The owner is the OWNER membership or the distinguished owner
-   * (Business.ownerId), the two arms IdentityService.assertBusinessOwner and
-   * BusinessGuard admit an owner by; since owner rulings D-116 and D-125 the
-   * distinguished owner counts only while it holds an OWNER membership (holding
-   * ADMIN or STAFF it is that role, and WhatsAppOperationsScopeGuard leaves it
-   * to ModuleScopeGuard). A SUPER_ADMIN keeps the platform bypass
+   * The owner is a member holding an OWNER membership of this business, the
+   * one owner rule core/auth/business-owner.ts isBusinessOwnerMember states
+   * (owner rulings D-104, D-116, D-125: Business.ownerId grants nothing on its
+   * own, and a recorded owner holding ADMIN or STAFF is that role, which
+   * WhatsAppOperationsScopeGuard leaves to ModuleScopeGuard;
+   * W11-OWNER-HELPER-D11). A SUPER_ADMIN keeps the platform bypass
    * BusinessGuard already grants. The actor is the authenticated user
    * AuthMiddleware attached (req.user); none is not the owner (fails closed).
-   * Only the route's businessId is consulted. The rule is restated rather than
-   * imported, as TemplatesService.isProfileOwner and
-   * GmailService.assertConnectAuthority restate it: WhatsAppModule does not
-   * import IdentityModule.
+   * Only the route's businessId is consulted.
    */
   async isConfigOwner(businessId: string, actor: { id?: string; role?: string } | undefined): Promise<boolean> {
     if (!actor?.id) return false;
     if (actor.role === 'SUPER_ADMIN') return true;
-    const membership = await this.prisma.client.membership.findUnique({
-      where: { userId_businessId: { userId: actor.id, businessId } },
-      select: { role: true },
-    });
-    if (membership?.role === 'OWNER') return true;
-    const owned = await this.prisma.client.business.findFirst({
-      // Owner ruling D-104 (W10-OWNER-MEMBERSHIP): the ownerId arm counts only with a Membership row;
-      // owner rulings D-116, D-125 (W11-D116-CONNECTION-OWNER): only with an OWNER one (holding
-      // ADMIN or STAFF, the recorded owner is that role).
-      where: { id: businessId, ownerId: actor.id, members: { some: { userId: actor.id, role: 'OWNER' } } },
-      select: { id: true },
-    });
-    return !!owned;
+    return isBusinessOwnerMember(this.prisma.client, businessId, actor.id);
   }
 
   /** PATCH .../config runs this before anything is read or written: 403 BUSINESS_PROFILE_OWNER_ONLY. */
