@@ -85,8 +85,8 @@ describe("team invite form: STAFF handle bookings by default (SWEEP-P0-FOLLOWUP 
     const scopes = payload.scopes as Record<string, string>;
     expect(payload.role).toBe("STAFF");
     expect(scopes.bookings).toBe("write");
-    for (const module of CANONICAL_MODULES.filter((m) => m !== "bookings")) {
-      expect(scopes[module], module).toBe([...STAFF_DENIED, ...NONE_FOR_EVERY_ROLE].includes(module) ? "none" : "read");
+    for (const mod of CANONICAL_MODULES.filter((m) => m !== "bookings")) {
+      expect(scopes[mod], mod).toBe([...STAFF_DENIED, ...NONE_FOR_EVERY_ROLE].includes(mod) ? "none" : "read");
     }
   });
 
