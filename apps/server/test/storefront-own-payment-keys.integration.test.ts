@@ -87,6 +87,31 @@
  *           still settled by a platform-signed session, as built (Release 0
  *           case MP-06d requires it; a deviation recorded for an owner ruling)
  *
+ * PR210-PAYPAL-STORE-REFUND (Codex review P1 on PR #210; D-138): PayPal's
+ * PAYMENT.CAPTURE.REFUNDED / .REVERSED resource names the capture it returns
+ * only through supplementary_data.related_ids.capture_id or its 'up' link (no
+ * custom_id, no invoice_id), so a store's own refund was checked with the
+ * platform's app and webhook id: the genuine refund was refused 400 (PayPal
+ * kept redelivering) and the reversal never recorded. The tap's verify answers
+ * SUCCESS here only for the app that signed the delivery (paypalSigner).
+ *   RF-01  a store's own refund (related_ids) and reversal ('up' link) are
+ *          verified with its own app and webhook id and recorded once on the
+ *          order's checkout invoice (refund row, the settlement's posting
+ *          reversed, the invoice reopened); a redelivery and a resend under a
+ *          new event id record nothing new
+ *   RF-02  a platform-signed refund / reversal of a store's capture is checked
+ *          with the store's own app only and refused 400, nothing recorded, no
+ *          claim kept; the processor behind the route records nothing for a
+ *          store's capture with the platform's verifier
+ *   RF-03  a store missing a value of its own (webhook id; secret) is refused
+ *          400 before any request, nothing recorded
+ *   RF-04  a refund is verified by the store whose capture it returns: (a) A's
+ *          app with A's order in custom_id and B's capture is checked with B's
+ *          app and refused; (b) A's app with an invoice capture records nothing
+ *          on the invoice
+ *   RF-05  control: an invoice's refund naming only its capture keeps its path
+ *          (the platform's app for a business with no PayPal of its own)
+ *
  * Nothing on the money path or the authorization boundary is mocked:
  * PrismaService, PublicRateLimitGuard (real Redis, this suite's namespace),
  * SiteService, StoreOrderService (the paid door), PaymentsService,
@@ -211,6 +236,15 @@ let paypalBuilt: unknown[][] = [];
 let paypalOrdered: any[] = [];
 let paypalSpy: ReturnType<typeof vi.spyOn> | undefined;
 let stripeSessions = 0;
+/**
+ * PR210-PAYPAL-STORE-REFUND: the PayPal app that signed this case's deliveries. Null: PayPal's verify-webhook-signature
+ * answers SUCCESS for any app, as before. Set: SUCCESS only when the check is made with that app's own token and its own
+ * webhook id (PayPal verifies a delivery against the webhook it was sent for), FAILURE otherwise.
+ */
+type PaypalApp = { clientId: string; clientSecret: string; webhookId: string };
+let paypalSigner: PaypalApp | null = null;
+/** The app (its Basic authorization) each PayPal access token the tap minted in this case was asked for. */
+let paypalTokens = new Map<string, string>();
 
 async function settle() {
   while (inflight.length > 0) {
@@ -462,6 +496,138 @@ async function orderInvoice(orderId: string, businessId: string) {
   };
 }
 
+/**
+ * PR210-PAYPAL-STORE-REFUND's fixtures, under this suite's registered prefix. The plan allocated 'w1fi_', which the
+ * registry cannot take (fixture-prefix-registry.spec.ts NEW_PREFIX: k<NN><a-z>_ or v<NN><a-z>_ only), and a suite a
+ * packet extends keeps its own prefix: so every id below is v61b_w1fi_..., cleaned up with the suite's own patterns.
+ */
+const R = `${P}w1fi_`;
+
+/** The PayPal apps that sign deliveries in the PR210 cases (the tap's paypalSigner). */
+const PLATFORM_APP: PaypalApp = {
+  clientId: PLATFORM_PAYPAL.PAYPAL_CLIENT_ID,
+  clientSecret: PLATFORM_PAYPAL.PAYPAL_CLIENT_SECRET,
+  webhookId: PLATFORM_PAYPAL_WEBHOOK.PAYPAL_WEBHOOK_ID,
+};
+const OWN_APP: PaypalApp = {
+  clientId: OWN_PAYPAL.paypalClientId,
+  clientSecret: OWN_PAYPAL.paypalClientSecret,
+  webhookId: OWN_PAYPAL_WEBHOOK.paypalWebhookId,
+};
+/** Another store's own complete PayPal app (bizMixed's, saved per case). */
+const MIXED_APP: PaypalApp = {
+  clientId: fake('mixed', 'paypal', 'client'),
+  clientSecret: fake('mixed', 'paypal', 'secret'),
+  webhookId: fake('mixed', 'paypal', 'webhook'),
+};
+const settingsOf = (app: PaypalApp) => ({ paypalClientId: app.clientId, paypalClientSecret: app.clientSecret, paypalWebhookId: app.webhookId });
+
+/** The token and verify requests of one signature check, as the app and webhook id they were made with. */
+function paypalChecks(): Array<{ path: string; authorization: string | null; webhookId?: string }> {
+  return paypalRequests().map((r) =>
+    r.path === '/v1/notifications/verify-webhook-signature'
+      ? { path: r.path, authorization: paypalTokens.get((r.authorization ?? '').replace(/^Bearer /, '')) ?? null, webhookId: JSON.parse(r.body).webhook_id }
+      : { path: r.path, authorization: r.authorization },
+  );
+}
+
+/** One signature check made with `app`: its token request, then its verify request with its own webhook id. */
+const checkedWith = (app: PaypalApp) => [
+  { path: '/v1/oauth2/token', authorization: basic(app.clientId, app.clientSecret) },
+  { path: '/v1/notifications/verify-webhook-signature', authorization: basic(app.clientId, app.clientSecret), webhookId: app.webhookId },
+];
+
+/** A USD storefront order of the business, settled through the paid door by its store's own capture signed with `app`. */
+async function settledPaypalOrder(businessId: string, productId: string, app: PaypalApp, tag: string) {
+  const orderId = await seedOrder(businessId, productId, 'PAYPAL');
+  const captureId = `${R}cap_${tag}`;
+  paypalSigner = app;
+  const res = await paypalWebhook(captureCompleted(`${R}WH_cap_${tag}`, captureId, orderId));
+  expect(res.status, `settling ${tag}: ${JSON.stringify(res.body)}`).toBe(201);
+  expect(await orderState(orderId), `settling ${tag}`).toBe(`CONFIRMED/PAID/${captureId}`);
+  requests = [];
+  return { orderId, captureId };
+}
+
+/** A SENT USD invoice of a business with no PayPal of its own, paid by a capture the platform's app signed. */
+async function paidPlatformInvoice(tag: string) {
+  const invoiceId = `${R}inv_${tag}`;
+  await db.invoice.create({
+    data: {
+      id: invoiceId,
+      businessId: ID.bizPlatform,
+      contactId: ID.contactPlatform,
+      invoiceNumber: `${R}INV-${tag}`,
+      status: 'SENT',
+      currency: 'USD',
+      subtotal: ORDER_TOTAL,
+      total: ORDER_TOTAL,
+      items: { create: [{ id: `${invoiceId}_item1`, description: 'w1fi item', quantity: 1, unitPrice: ORDER_TOTAL, total: ORDER_TOTAL }] },
+    },
+  });
+  const captureId = `${R}cap_${tag}`;
+  paypalSigner = PLATFORM_APP;
+  const res = await paypalWebhook(captureCompleted(`${R}WH_cap_${tag}`, captureId, invoiceId));
+  expect(res.status, `paying ${tag}: ${JSON.stringify(res.body)}`).toBe(201);
+  requests = [];
+  return { invoiceId, captureId };
+}
+
+/**
+ * PayPal's PAYMENT.CAPTURE.REFUNDED / .REVERSED: a refund resource that names the capture it returns only through
+ * supplementary_data.related_ids.capture_id, or only through its 'up' link (no custom_id, no invoice_id). `extra` adds
+ * fields to the resource (a custom_id, for the cross-tenant cases).
+ */
+function captureRefund(
+  eventType: 'PAYMENT.CAPTURE.REFUNDED' | 'PAYMENT.CAPTURE.REVERSED',
+  eventId: string,
+  refundId: string,
+  captureId: string,
+  names: 'related_ids' | 'up_link',
+  extra: Record<string, unknown> = {},
+) {
+  const self = { href: `https://${PAYPAL_SANDBOX}/v2/payments/refunds/${refundId}`, rel: 'self', method: 'GET' };
+  const up = { href: `https://${PAYPAL_SANDBOX}/v2/payments/captures/${captureId}`, rel: 'up', method: 'GET' };
+  return {
+    id: eventId,
+    event_type: eventType,
+    resource_type: 'refund',
+    resource: {
+      id: refundId,
+      status: 'COMPLETED',
+      amount: { value: ORDER_TOTAL.toFixed(2), currency_code: 'USD' },
+      ...(names === 'related_ids' ? { supplementary_data: { related_ids: { capture_id: captureId } } } : {}),
+      links: names === 'related_ids' ? [self] : [self, up],
+      ...extra,
+    },
+  };
+}
+
+/** A storefront order's money: the order row, its checkout invoice (INV-<orderNumber>), that invoice's payments and their postings. */
+async function orderBooks(orderId: string) {
+  const stored = await db.marketplaceOrder.findUnique({ where: { id: orderId } });
+  const invoice = await db.invoice.findFirst({ where: { businessId: stored.businessId, invoiceNumber: `INV-${stored.orderNumber}` } });
+  return { order: `${stored.status}/${stored.paymentStatus}`, ...(await invoiceBooks(invoice?.id ?? null)) };
+}
+
+/** An invoice's status, its payments (`provider:providerPaymentId:status:amount@businessId`) and their postings (`type:status:amount`). */
+async function invoiceBooks(invoiceId: string | null) {
+  if (!invoiceId) return { invoice: null, payments: [], postings: [] };
+  const invoice = await db.invoice.findUnique({ where: { id: invoiceId } });
+  const rows = await db.payment.findMany({ where: { invoiceId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+  const txns = rows.length
+    ? await db.financialTransaction.findMany({
+        where: { sourceType: 'Payment', sourceId: { in: rows.map((r: any) => r.id) } },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      })
+    : [];
+  return {
+    invoice: invoice.status,
+    payments: rows.map((p: any) => `${p.provider}:${p.providerPaymentId}:${p.status}:${Number(p.amount)}@${p.businessId}`),
+    postings: txns.map((t: any) => `${t.type}:${t.status}:${Number(t.amount)}`),
+  };
+}
+
 beforeAll(async () => {
   process.env.RATE_LIMIT_KEY_NAMESPACE = RATE_LIMIT_NS;
   delete process.env.WIPAY_API_KEY;
@@ -690,6 +856,8 @@ beforeEach(async () => {
 
   requests = [];
   stripeSessions = 0;
+  paypalSigner = null;
+  paypalTokens = new Map();
   fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((async (input: any, init?: any) => {
     const url = new URL(String(input?.url ?? input));
     const headers = new Headers(init?.headers ?? {});
@@ -699,9 +867,17 @@ beforeEach(async () => {
       stripeSessions += 1;
       return json({ id: `${P}cs_${stripeSessions}`, url: STRIPE_REDIRECT });
     }
-    if (url.host === PAYPAL_SANDBOX && url.pathname === '/v1/oauth2/token') return json({ access_token: `${P}paypal_access` });
+    if (url.host === PAYPAL_SANDBOX && url.pathname === '/v1/oauth2/token') {
+      const token = `${P}paypal_access_${paypalTokens.size + 1}`;
+      paypalTokens.set(token, headers.get('authorization') ?? '');
+      return json({ access_token: token });
+    }
     if (url.host === PAYPAL_SANDBOX && url.pathname === '/v1/notifications/verify-webhook-signature') {
-      return json({ verification_status: 'SUCCESS' });
+      if (!paypalSigner) return json({ verification_status: 'SUCCESS' });
+      const app = paypalTokens.get((headers.get('authorization') ?? '').replace(/^Bearer /, ''));
+      const webhookId = JSON.parse(String(init?.body ?? '{}')).webhook_id;
+      const signedFor = app === basic(paypalSigner.clientId, paypalSigner.clientSecret) && webhookId === paypalSigner.webhookId;
+      return json({ verification_status: signedFor ? 'SUCCESS' : 'FAILURE' });
     }
     throw new Error(`v61b: unexpected network call to ${url.href}`);
   }) as typeof fetch);
@@ -1153,5 +1329,159 @@ describe('W11-STORE-OWN-PAYMENT-KEYS (D-138): a storefront offers PayPal and Str
     );
     expect(res2.status, `(b): ${JSON.stringify(res2.body)}`).toBe(201);
     expect(await orderState(orderPlatform), '(b): as built').toBe(`CONFIRMED/PAID/${P}cs_10b`);
+  });
+});
+
+describe("PR210-PAYPAL-STORE-REFUND (D-138; Codex P1 on PR #210): a store's own PayPal refund and reversal webhooks are verified with that store's app and reverse the store order's payment", () => {
+  it("RF-01: a store's own PAYMENT.CAPTURE.REFUNDED naming its capture only in supplementary_data.related_ids, and its PAYMENT.CAPTURE.REVERSED naming it only in the 'up' link, are verified with that store's own app and webhook id (never the platform's, which is in the env) and recorded once on the order's checkout invoice: the refund row, the settlement's posting reversed, the invoice reopened; a redelivery and PayPal's resend of the refund under a new event id record nothing new", async () => {
+    setEnv({ ...PLATFORM_PAYPAL, ...PLATFORM_PAYPAL_WEBHOOK });
+    for (const [label, eventType, names] of [
+      ['refund', 'PAYMENT.CAPTURE.REFUNDED', 'related_ids'],
+      ['reversal', 'PAYMENT.CAPTURE.REVERSED', 'up_link'],
+    ] as const) {
+      const { orderId, captureId } = await settledPaypalOrder(ID.bizOwn, ID.prodOwn, OWN_APP, `rf01_${label}`);
+      const capture = `paypal:${captureId}:SUCCESSFUL:${ORDER_TOTAL}@${ID.bizOwn}`;
+      expect(await orderBooks(orderId), `${label}: settled once through the paid door`).toEqual({
+        order: 'CONFIRMED/PAID',
+        invoice: 'PAID',
+        payments: [capture],
+        postings: [`INCOME:POSTED:${ORDER_TOTAL}`],
+      });
+
+      const refundId = `${R}rf_rf01_${label}`;
+      const event = captureRefund(eventType, `${R}WH_rf01_${label}`, refundId, captureId, names);
+      const res = await paypalWebhook(event);
+      // At the base: 400 'Invalid PayPal webhook signature': the refund names no invoice and no order, so it was checked
+      // with the platform's app and webhook id, which did not sign it (PayPal keeps redelivering; nothing is recorded).
+      expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(201);
+      expect(res.body, label).toEqual({ ok: true, received: true, processed: eventType });
+      expect(paypalChecks(), `${label}: checked with the store's own app and webhook id only`).toEqual(checkedWith(OWN_APP));
+      // The order row itself keeps CONFIRMED/PAID: only StoreOrderService.refundOrder moves it to REFUNDED, and it takes a
+      // member with revenue write (a provider's refund names none). Recorded as an open issue of this packet.
+      const refunded = {
+        order: 'CONFIRMED/PAID',
+        invoice: 'SENT',
+        payments: [capture, `paypal:${refundId}:REFUNDED:-${ORDER_TOTAL}@${ID.bizOwn}`],
+        postings: [`INCOME:REVERSED:${ORDER_TOTAL}`, `REVERSAL:POSTED:${ORDER_TOTAL}`],
+      };
+      expect(await orderBooks(orderId), `${label}: recorded once on the order's checkout invoice`).toEqual(refunded);
+
+      requests = [];
+      const again = await paypalWebhook(event);
+      expect(again.status, `${label} redelivery: ${JSON.stringify(again.body)}`).toBe(201);
+      expect(again.body, `${label}: the redelivery is acknowledged, not processed`).toEqual({ ok: true, received: true });
+      expect(await orderBooks(orderId), `${label}: the redelivery records nothing`).toEqual(refunded);
+
+      const resent = await paypalWebhook({ ...event, id: `${R}WH_rf01_${label}_resent` });
+      expect(resent.status, `${label} resent: ${JSON.stringify(resent.body)}`).toBe(201);
+      expect(await orderBooks(orderId), `${label}: the same refund under a new event id records nothing (deduped on the refund id)`).toEqual(refunded);
+    }
+  });
+
+  it("RF-02: the platform's signature never verifies a refund or reversal of a store's capture: a delivery the platform's app signed, naming only the store's capture, is checked with the store's own app (the platform's app, in the env, is never asked) and refused 400, nothing recorded and no claim kept; behind the route, the refund processor called with the platform's verifier records nothing for the store's order either", async () => {
+    setEnv({ ...PLATFORM_PAYPAL, ...PLATFORM_PAYPAL_WEBHOOK });
+    const { orderId, captureId } = await settledPaypalOrder(ID.bizOwn, ID.prodOwn, OWN_APP, 'rf02');
+    const paid = await orderBooks(orderId);
+    paypalSigner = PLATFORM_APP;
+    for (const [label, eventType, names] of [
+      ['refund', 'PAYMENT.CAPTURE.REFUNDED', 'related_ids'],
+      ['reversal', 'PAYMENT.CAPTURE.REVERSED', 'up_link'],
+    ] as const) {
+      requests = [];
+      const eventId = `${R}WH_rf02_${label}`;
+      const res = await paypalWebhook(captureRefund(eventType, eventId, `${R}rf_rf02_${label}`, captureId, names));
+      // At the base: 201 processed: checked with the platform's app and webhook id (which signed it), and the refund
+      // recorded on the store's order, whose money was taken into the store's own PayPal account.
+      expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(400);
+      expect(res.body, label).toMatchObject({ message: 'Invalid PayPal webhook signature' });
+      expect(paypalChecks(), `${label}: checked with the store's own app only, never the platform's`).toEqual(checkedWith(OWN_APP));
+      expect(await orderBooks(orderId), `${label}: nothing recorded`).toEqual(paid);
+      expect(await db.webhookEvent.count({ where: { providerEventId: eventId } }), `${label}: no claim kept`).toBe(0);
+    }
+
+    // The recording guard behind the route: a refund of a store's capture is recorded only for that store's own app.
+    const direct = captureRefund('PAYMENT.CAPTURE.REFUNDED', `${R}WH_rf02_direct`, `${R}rf_rf02_direct`, captureId, 'related_ids');
+    await (payments as any).processPaypalRefund(direct.resource, direct.id);
+    // At the base: the refund recorded on the store's order.
+    expect(await orderBooks(orderId), 'the processor called with the platform verifier records nothing').toEqual(paid);
+    await (payments as any).processPaypalRefund(direct.resource, direct.id, { businessId: ID.bizMixed, store: true });
+    expect(await orderBooks(orderId), "nor called with another store's verifier").toEqual(paid);
+  });
+
+  it("RF-03: a store missing any of its own PayPal values when its capture's refund arrives (no webhook id of its own; no secret of its own) is refused 400 before any request: nothing asked of PayPal (the platform's app and webhook id are not mixed in), nothing recorded", async () => {
+    setEnv({ ...PLATFORM_PAYPAL, ...PLATFORM_PAYPAL_WEBHOOK });
+    await setSettings(ID.bizMixed, settingsOf(MIXED_APP));
+    const { orderId, captureId } = await settledPaypalOrder(ID.bizMixed, ID.prodMixed, MIXED_APP, 'rf03');
+    const paid = await orderBooks(orderId);
+    for (const [n, label, settings] of [
+      [1, 'no webhook id of its own', { paypalClientId: MIXED_APP.clientId, paypalClientSecret: MIXED_APP.clientSecret }],
+      [2, 'no secret of its own', { paypalClientId: MIXED_APP.clientId, paypalWebhookId: MIXED_APP.webhookId }],
+    ] as const) {
+      await setSettings(ID.bizMixed, settings);
+      requests = [];
+      const res = await paypalWebhook(captureRefund('PAYMENT.CAPTURE.REFUNDED', `${R}WH_rf03_${n}`, `${R}rf_rf03_${n}`, captureId, 'related_ids'));
+      expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(400);
+      // At the base: the token and verify requests were made with the platform's app and webhook id.
+      expect(paypalRequests(), `${label}: nothing is asked of PayPal`).toEqual([]);
+      expect(await orderBooks(orderId), `${label}: nothing recorded`).toEqual(paid);
+    }
+  });
+
+  it("RF-04: a refund is verified by the store whose capture it returns, and a store's own app records refunds of that store's captures only: (a) a delivery store A's app signed whose custom_id names A's order and whose capture is store B's is checked with B's own app and refused 400, B's books untouched; (b) a delivery store A's app signed whose custom_id names A's order and whose capture is an invoice capture of a business with no PayPal of its own is acknowledged and records nothing on that invoice", async () => {
+    setEnv({ ...PLATFORM_PAYPAL, ...PLATFORM_PAYPAL_WEBHOOK });
+    await setSettings(ID.bizMixed, settingsOf(MIXED_APP));
+    const storeB = await settledPaypalOrder(ID.bizMixed, ID.prodMixed, MIXED_APP, 'rf04_b');
+    const paidB = await orderBooks(storeB.orderId);
+    const orderA = await seedOrder(ID.bizOwn, ID.prodOwn, 'PAYPAL');
+    const invoice = await paidPlatformInvoice('rf04');
+    const paidInvoice = await invoiceBooks(invoice.invoiceId);
+    expect(paidInvoice.payments, 'the invoice is paid by the platform-signed capture').toEqual([
+      `paypal:${invoice.captureId}:SUCCESSFUL:${ORDER_TOTAL}@${ID.bizPlatform}`,
+    ]);
+    paypalSigner = OWN_APP;
+
+    // (a) Store B's capture, named beside store A's order.
+    requests = [];
+    const res = await paypalWebhook(
+      captureRefund('PAYMENT.CAPTURE.REFUNDED', `${R}WH_rf04_a`, `${R}rf_rf04_a`, storeB.captureId, 'related_ids', { custom_id: orderA }),
+    );
+    // At the base: 201 processed: verified with A's own app (chosen by the custom_id) and the refund recorded on B's
+    // order, under B, for money A's app returned.
+    expect(res.status, `(a): ${JSON.stringify(res.body)}`).toBe(400);
+    expect(paypalChecks(), "(a): checked with B's own app, the store of the capture").toEqual(checkedWith(MIXED_APP));
+    expect(await orderBooks(storeB.orderId), "(a): nothing recorded for B").toEqual(paidB);
+
+    // (b) An invoice capture of a business with no PayPal of its own, named beside store A's order.
+    requests = [];
+    const res2 = await paypalWebhook(
+      captureRefund('PAYMENT.CAPTURE.REFUNDED', `${R}WH_rf04_b`, `${R}rf_rf04_b`, invoice.captureId, 'related_ids', { custom_id: orderA }),
+    );
+    expect(res2.status, `(b): ${JSON.stringify(res2.body)}`).toBe(201);
+    expect(paypalChecks(), "(b): verified with A's own app (the custom_id names A's order)").toEqual(checkedWith(OWN_APP));
+    // At the base: the refund recorded on the platform business's invoice (reopened SENT), money A's app returned.
+    expect(await invoiceBooks(invoice.invoiceId), '(b): nothing recorded on the invoice').toEqual(paidInvoice);
+    expect(await orderState(orderA), "(b): A's order untouched").toBe('PENDING/UNPAID/');
+  });
+
+  it("RF-05 (control: an invoice's refund keeps its path): a refund naming only the capture of an invoice of a business with no PayPal of its own is verified with the platform's app and webhook id and recorded once on that invoice, as before; a redelivery records nothing", async () => {
+    setEnv({ ...PLATFORM_PAYPAL, ...PLATFORM_PAYPAL_WEBHOOK });
+    const invoice = await paidPlatformInvoice('rf05');
+    const capture = `paypal:${invoice.captureId}:SUCCESSFUL:${ORDER_TOTAL}@${ID.bizPlatform}`;
+    expect(await invoiceBooks(invoice.invoiceId)).toEqual({ invoice: 'PAID', payments: [capture], postings: [`INCOME:POSTED:${ORDER_TOTAL}`] });
+    paypalSigner = PLATFORM_APP;
+    const event = captureRefund('PAYMENT.CAPTURE.REFUNDED', `${R}WH_rf05`, `${R}rf_rf05`, invoice.captureId, 'related_ids');
+    const res = await paypalWebhook(event);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toEqual({ ok: true, received: true, processed: 'PAYMENT.CAPTURE.REFUNDED' });
+    expect(paypalChecks(), "checked with the platform's app and webhook id, as before").toEqual(checkedWith(PLATFORM_APP));
+    const refunded = {
+      invoice: 'SENT',
+      payments: [capture, `paypal:${R}rf_rf05:REFUNDED:-${ORDER_TOTAL}@${ID.bizPlatform}`],
+      postings: [`INCOME:REVERSED:${ORDER_TOTAL}`, `REVERSAL:POSTED:${ORDER_TOTAL}`],
+    };
+    expect(await invoiceBooks(invoice.invoiceId), 'recorded once').toEqual(refunded);
+    const again = await paypalWebhook(event);
+    expect(again.body, 'the redelivery is acknowledged, not processed').toEqual({ ok: true, received: true });
+    expect(await invoiceBooks(invoice.invoiceId), 'the redelivery records nothing').toEqual(refunded);
   });
 });
