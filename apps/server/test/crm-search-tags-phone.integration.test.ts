@@ -73,11 +73,16 @@ const ID = {
   old: `${P}c_old`,           // created 40 days ago, no booking: stale
   priv: `${P}c_priv`,         // PRIVATE, owned by the OWNER, phone '+1 868 555 0177'
   mine: `${P}c_mine`,         // owned by the my-book STAFF, phone '868-555-0144'
+  // Stored before WA-E164-SERVER, the national way, as the write path stored them then (seeded:
+  // the write path now stores E.164, and these cases are about a key stored another way).
+  ravi: `${P}c_ravi`,         // bizA, TEAM, owned by the OWNER, phone '868-555-0101' (key '8685550101')
+  raviB: `${P}c_bizBRavi`,    // bizB, the same number in another tenant (no id here contains another)
 };
 
 let db: any;
 let app: any;
-// Contacts created through POST (their phone keys come from the real write path).
+// Contacts created through POST (their phone keys come from the real write path), and the Ravis
+// seeded as stored before WA-E164-SERVER (named the same way by the cases).
 const viaApi: Record<string, string> = {};
 
 async function cleanup() {
@@ -278,12 +283,19 @@ beforeAll(async () => {
     expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
     viaApi[key] = res.body.id;
   };
-  // Ravi came in through a CSV import, written the national way.
-  await created('ravi', ID.owner, ID.bizA, { firstName: 'Ravi', phone: '868-555-0101' });
+  // Ravi came in through a CSV import before WA-E164-SERVER, written the national way: the key
+  // that write stored ('8685550101'; the write path now stores E.164, so he is seeded as stored).
+  await seed(ID.ravi, ID.bizA, {
+    firstName: 'Ravi', ownerId: ID.owner, phone: '868-555-0101', phoneNormalized: '8685550101',
+  });
+  viaApi.ravi = ID.ravi;
   // Asha was added by hand with the country code.
   await created('asha', ID.owner, ID.bizA, { firstName: 'Asha', phone: '+1 868 555 0102' });
-  // Another tenant holds Ravi's number too.
-  await created('raviB', ID.ownerB, ID.bizB, { firstName: 'Ravi', phone: '868-555-0101' });
+  // Another tenant holds Ravi's number too, stored the same way.
+  await seed(ID.raviB, ID.bizB, {
+    firstName: 'Ravi', ownerId: ID.ownerB, phone: '868-555-0101', phoneNormalized: '8685550101',
+  });
+  viaApi.raviB = ID.raviB;
   // Added a minute ago, no bookings yet.
   await created('fresh', ID.owner, ID.bizA, { firstName: 'Fresh' });
 }, 120_000);
@@ -300,15 +312,13 @@ describe('fixture sanity (real rows)', () => {
       select: { id: true, phone: true, phoneNormalized: true },
     });
     const byId = new Map(keys.map((k: any) => [k.id, k]));
-    // WA-E164-SERVER: the write path stores a number typed without its country code in E.164,
-    // read under the business's country (none set: Trinidad and Tobago), so Ravi's
-    // '868-555-0101' is '+18685550101'; a number typed with its country code keeps its spelling
-    // and its key is already E.164 (Asha).
-    expect(byId.get(viaApi.ravi)).toMatchObject({ phone: '+18685550101', phoneNormalized: '+18685550101' });
+    // The two spellings of one number are two different keys: this is the premise of BUG-083.
+    // Ravi (and raviB) hold the national key a write stored before WA-E164-SERVER (no backfill in
+    // v1); a number typed with its country code keeps its spelling and its key is already E.164
+    // (Asha, through the write path).
+    expect(byId.get(viaApi.ravi)).toMatchObject({ phone: '868-555-0101', phoneNormalized: '8685550101' });
     expect(byId.get(viaApi.asha)).toMatchObject({ phone: '+1 868 555 0102', phoneNormalized: '+18685550102' });
-    expect(byId.get(viaApi.raviB)).toMatchObject({ phoneNormalized: '+18685550101' });
-    // A contact stored before that change keeps its national key (no backfill in v1): the two
-    // spellings of one number are two different keys, the premise of BUG-083 (Mina, '868-555-0144').
+    expect(byId.get(viaApi.raviB)).toMatchObject({ phoneNormalized: '8685550101' });
     expect(await db.contact.findUnique({ where: { id: ID.mine }, select: { phoneNormalized: true } }))
       .toEqual({ phoneNormalized: '8685550144' });
     expect((await db.contact.findUnique({ where: { id: ID.noel } })).tags).toEqual(['Christmas 2026']);
@@ -438,14 +448,17 @@ describe('BUG-083 — POST .../contacts/check-duplicates reads phone spellings a
     expect(res.body.newCount).toBe(1);
   });
 
-  it("CONTROL: digits in front that are no country calling code do not make another number the same: '555-0101' (a local number behind '868') and '+999 868 555 0101' match nothing (the add form's check reads the same rule, review F1)", async () => {
+  it("RED-BEFORE (WA-E164-SERVER review COR-E164-5): a phone is read under the business's country, as POST .../contacts and the import read it: in bizA (no country: Trinidad and Tobago) the local '555-0101' is Ravi's +1 868 555 0101; digits in front that are no country calling code ('+999 868 555 0101') or another country's code ('+44 868 555 0101', '+592 555 0101') do not make another number the same", async () => {
     const res = await checkDuplicates(ID.owner, ID.bizA, [
       { phone: '555-0101' },
       { phone: '+999 868 555 0101' },
+      { phone: '+44 868 555 0101' },
+      { phone: '+592 555 0101' },
     ]);
     expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
-    expect(res.body.duplicates).toEqual([]);
-    expect(res.body.newCount).toBe(2);
+    expect(res.body.duplicates).toHaveLength(1);
+    expect(res.body.duplicates[0]).toMatchObject({ importIndex: 0, matchField: 'phone', existingContact: { id: viaApi.ravi } });
+    expect(res.body.newCount).toBe(3);
   });
 
   it("RED-BEFORE: in bizB, '+1 868 555 0101' matches bizB's own Ravi, never bizA's contacts", async () => {

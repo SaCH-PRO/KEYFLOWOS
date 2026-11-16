@@ -25,20 +25,34 @@
  *  - the identity check compares the E.164 value: a punctuation or country-code variant of a
  *    live contact's phone answers 409 contact_phone_taken (the database decides between keys
  *    in E.164), and a live contact stored before this change under another spelling of the
- *    same number (no backfill in v1) is the same number by SWP-CRM-SEARCH's reading
- *    (samePhoneKey): POST and PATCH answer the same bounded 409, and an import row merges
- *    into it instead of adding a duplicate;
+ *    same number (no backfill in v1) holds that number when its stored key, read under the
+ *    business's country, is the same E.164 number: POST and PATCH answer the same bounded 409,
+ *    and an import row (or a public submission through findOrCreateContact) merges into it
+ *    instead of adding a duplicate;
  *  - a soft-deleted contact's phone stays free (D-16; contact-partial-unique stays green).
+ *
+ * Review repair (SEC-E164-1/2, COR-E164-1..7): the legacy key is read under Business.country,
+ * not by the country-agnostic samePhoneKey. In a Trinidad and Tobago business the seven-digit
+ * key '7123504' is +1 868 712 3504 (it was missed, so re-typing the number made a second live
+ * contact), and it is NOT '+592 712 3504' or any other country's number behind another calling
+ * code (it was matched, so a create answered 409 naming an unrelated contact and an anonymous
+ * storefront intake merged a stranger's email into that contact). A PATCH that re-sends the
+ * contact's own number leaves it as stored; the data-quality fix that reformats a phone to
+ * E.164 refuses a number another live contact holds (409, not a raw database error); the import
+ * preview (check-duplicates) reads phones the way the create and the import do; the scan keeps
+ * a WhatsApp flag over a mere reformat suggestion.
  *
  * Nothing on the HTTP or persistence path is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CrmRateLimitGuard, PlanLimitGuard, TeamAuditInterceptor, ValidationPipe,
  * GlobalHttpExceptionFilter, multer, CrmController, CrmService, CrmImportService,
  * EntityResolutionService, CrmStatsService, CrmDataQualityService and ContactAuditService are
- * real against DATABASE_URL. Identity attachment reads `x-test-user` and loads that seeded user
- * row as AuthMiddleware would after token verification; the timeline's side channels, caches
- * and flow are recorders, and the plan limit allows. The import's vision model is never called
- * (CSV only), and the data-quality scan's email MX lookup is off (KF_DISABLE_MX=1; no contact
- * here has an email), so no request leaves the process.
+ * real against DATABASE_URL; so are the anonymous storefront intake route (SiteController,
+ * IntakeService, PublicRateLimitGuard against REDIS_URL, HoneypotGuard). Identity attachment
+ * reads `x-test-user` and loads that seeded user row as AuthMiddleware would after token
+ * verification; the timeline's side channels, caches, flow, notifications and the storefront
+ * event log are recorders, and the plan limit allows. The import's vision model is never called
+ * (CSV only), and the data-quality scan's email MX lookup is off (KF_DISABLE_MX=1), so no
+ * request leaves the process.
  *
  * Requires DATABASE_URL. Every seeded row carries the `v63k_` prefix (rows created through the
  * API are deleted by business id) and is hard-deleted by raw SQL (sqlLikePrefix) in beforeAll
@@ -72,10 +86,27 @@ const ID = {
   bizXX: `${P}bizXX`,       // Business.country 'Atlantis' (no dialling rules)
   // Stored before WA-E164-SERVER, the national way (seeded: no backfill in v1).
   legacy: `${P}c_legacy`,   // bizTT, TEAM, owned by the OWNER, phone '868-555-0160' (key '8685550160')
+  // Review repair: more contacts stored before E.164, each as the pre-packet create path wrote it
+  // (the phone as typed, the key normalizePhone gave it), all in bizTT (no country: Trinidad and
+  // Tobago), owned by the OWNER.
+  tara: `${P}c_tara`,       // '712-3501' (key '7123501'): a seven-digit local number, the commonest spelling
+  neil: `${P}c_neil`,       // '868-555-0277' (key '8685550277')
+  tia: `${P}c_tia`,         // '712-3503' (key '7123503'), no email
+  lou: `${P}c_lou`,         // '712-3504' (key '7123504')
+  ivy: `${P}c_ivy`,         // '712-3505' (key '7123505')
+  gil: `${P}c_gil`,         // '712-3506' (key '7123506')
+  pairA: `${P}c_pairA`,     // '868-712-3507' (key '8687123507') ...
+  pairB: `${P}c_pairB`,     // ... and '+1 868 712 3507' (key '+18687123507'): one number, two keys, as the base allowed
+  fixA: `${P}c_fixA`,       // '868-712-3508' (key '8687123508') ...
+  fixB: `${P}c_fixB`,       // ... and '+18687123508' (key '+18687123508')
+  fixC: `${P}c_fixC`,       // '868-712-3509' (key '8687123509'), no other holder
 };
 
 let db: any;
 let app: any;
+let redis: any;
+/** What the storefront intake logged (PublicEventsService.logStorefrontEvent), in order. */
+const storefrontEvents: Array<Record<string, any>> = [];
 
 /** A fresh client address per request: each gets its own rate-limit bucket. */
 let ipN = 0;
@@ -91,6 +122,7 @@ async function cleanup() {
     `DELETE FROM contact_audit_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM intake_submissions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -156,6 +188,45 @@ function scan(businessId: string) {
     .post(`/crm/businesses/${businessId}/data-quality/scan`)
     .set('x-test-user', ID.owner)
     .set('x-forwarded-for', nextIp());
+}
+
+/** POST .../contacts/check-duplicates: the import preview. */
+function checkDuplicates(businessId: string, contacts: Array<Record<string, unknown>>) {
+  return request(app.getHttpServer())
+    .post(`/crm/businesses/${businessId}/contacts/check-duplicates`)
+    .set('x-test-user', ID.owner)
+    .set('x-forwarded-for', nextIp())
+    .send({ contacts });
+}
+
+/** POST .../data-quality/issues/:issueId/apply, the fix the issue recommends. */
+function applyFix(businessId: string, issueId: string) {
+  return request(app.getHttpServer())
+    .post(`/crm/businesses/${businessId}/data-quality/issues/${issueId}/apply`)
+    .set('x-test-user', ID.owner)
+    .set('x-forwarded-for', nextIp())
+    .send({});
+}
+
+function bulkApplyFix(businessId: string, issueIds: string[]) {
+  return request(app.getHttpServer())
+    .post(`/crm/businesses/${businessId}/data-quality/bulk-apply`)
+    .set('x-test-user', ID.owner)
+    .set('x-forwarded-for', nextIp())
+    .send({ issueIds });
+}
+
+/** The anonymous storefront intake form (no signed-in member): POST /site/storefront/public/:slug/intake. */
+function publicIntake(slug: string, body: Record<string, unknown>) {
+  return request(app.getHttpServer())
+    .post(`/site/storefront/public/${slug}/intake`)
+    .set('x-forwarded-for', nextIp())
+    .send({ category: 'Catering', description: 'A quote for a family lime', ...body });
+}
+
+/** The contact's open phone issue (kind invalid_phone), as the table holds it. */
+async function openPhoneIssue(contactId: string) {
+  return db.contactDataIssue.findFirst({ where: { contactId, kind: 'invalid_phone', status: 'open' } });
 }
 
 // ---- reads ------------------------------------------------------------------
@@ -244,10 +315,29 @@ beforeAll(async () => {
   const { ConversationAiService } = await import('../src/modules/crm/conversation-ai.service');
   const { CrmNetworkService } = await import('../src/modules/crm/crm-network.service');
   const { ContactInsightService } = await import('../src/modules/crm/contact-insight.service');
+  // The anonymous storefront intake (review repair SEC-E164-1): findOrCreateContact on the public surface.
+  const { SiteController } = await import('../src/modules/site/site.controller');
+  const { IntakeService } = await import('../src/modules/site/intake.service');
+  const { NotificationsService } = await import('../src/modules/notifications/notifications.service');
+  const { PublicEventsService } = await import('../src/modules/public-events/public-events.service');
+  const { SiteService } = await import('../src/modules/site/site.service');
+  const { StoreOrderService } = await import('../src/modules/site/store-order.service');
+  const { PromoCodeService } = await import('../src/modules/site/promo-code.service');
+  const { QualificationService } = await import('../src/modules/site/qualification.service');
+  const { CustomerReferralService } = await import('../src/modules/site/customer-referral.service');
+  const { CaseStudyService } = await import('../src/modules/site/case-study.service');
+  const { PaymentsService } = await import('../src/modules/payments/payments.service');
+  const { StorefrontConversionService } = await import('../src/modules/site/storefront-conversion.service');
+  const { PublicRateLimitGuard } = await import('../src/core/guards/public-rate-limit.guard');
+  const { HoneypotGuard } = await import('../src/core/guards/honeypot.guard');
+  const { REDIS_CLIENT } = await import('../src/core/redis/redis.constants');
+  const IORedis = (await import('ioredis')).default;
+  // The public route's rate limit counts in Redis (each request here comes from a fresh address).
+  redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2 });
 
   // ---- the real HTTP path (wired before any row is seeded) ---------------
   const moduleRef = await Test.createTestingModule({
-    controllers: [CrmController],
+    controllers: [CrmController, SiteController],
     providers: [
       PrismaService,
       AuthGuard,
@@ -287,6 +377,29 @@ beforeAll(async () => {
       { provide: ConversationAiService, useValue: {} },
       { provide: CrmNetworkService, useValue: {} },
       { provide: ContactInsightService, useValue: {} },
+      // The storefront intake is real (it calls the real CrmService.findOrCreateContact when the
+      // visitor has no cookie id); its notification and event log are recorders.
+      IntakeService,
+      PublicRateLimitGuard,
+      HoneypotGuard,
+      { provide: REDIS_CLIENT, useValue: redis },
+      { provide: NotificationsService, useValue: { create: async () => undefined } },
+      {
+        provide: PublicEventsService,
+        useValue: {
+          logStorefrontEvent: async (event: Record<string, any>) => { storefrontEvents.push(event); },
+          backstitchVisitor: async () => undefined,
+          upsertStorefrontContact: async () => { throw new Error('not reached: the intakes here carry no visitor id'); },
+        },
+      },
+      { provide: SiteService, useValue: {} },
+      { provide: StoreOrderService, useValue: {} },
+      { provide: PromoCodeService, useValue: {} },
+      { provide: QualificationService, useValue: {} },
+      { provide: CustomerReferralService, useValue: {} },
+      { provide: CaseStudyService, useValue: {} },
+      { provide: PaymentsService, useValue: {} },
+      { provide: StorefrontConversionService, useValue: {} },
     ],
   }).compile();
 
@@ -333,10 +446,29 @@ beforeAll(async () => {
       phone: '868-555-0160', phoneNormalized: '8685550160',
     },
   });
+  // Review repair: more customers stored before E.164 in bizTT (key = normalizePhone(as typed)).
+  for (const [id, firstName, phone, phoneNormalized] of [
+    [ID.tara, 'Tara', '712-3501', '7123501'],
+    [ID.neil, 'Neil', '868-555-0277', '8685550277'],
+    [ID.tia, 'Tia', '712-3503', '7123503'],
+    [ID.lou, 'Lou', '712-3504', '7123504'],
+    [ID.ivy, 'Ivy', '712-3505', '7123505'],
+    [ID.gil, 'Gil', '712-3506', '7123506'],
+    [ID.pairA, 'PairA', '868-712-3507', '8687123507'],
+    [ID.pairB, 'PairB', '+1 868 712 3507', '+18687123507'],
+    [ID.fixA, 'FixA', '868-712-3508', '8687123508'],
+    [ID.fixB, 'FixB', '+18687123508', '+18687123508'],
+    [ID.fixC, 'FixC', '868-712-3509', '8687123509'],
+  ] as const) {
+    await db.contact.create({
+      data: { id, businessId: ID.bizTT, firstName, lastName: `${P}seed`, ownerId: ID.owner, phone, phoneNormalized },
+    });
+  }
 }, 120_000);
 
 afterAll(async () => {
   if (app) await app.close();
+  if (redis) await redis.quit().catch(() => undefined);
   if (db) await cleanup();
   if (savedMx === undefined) delete process.env.KF_DISABLE_MX;
   else process.env.KF_DISABLE_MX = savedMx;
@@ -493,6 +625,73 @@ describe('the identity check compares the E.164 value (contact_phone_taken)', ()
   });
 });
 
+// -----------------------------------------------------------------------------
+// Review repair: a key stored before E.164 is read under the business country
+// -----------------------------------------------------------------------------
+
+describe("review repair: a contact stored before E.164 holds the number its key reads as under the business's country, and no other (SEC-E164-1/2, COR-E164-1/2)", () => {
+  it("RED-BEFORE (SEC-E164-2, COR-E164-1): re-typing a seven-digit legacy number ('712-3504', key '7123504') answers 409 naming that contact, in every spelling; the number stays with one live contact", async () => {
+    for (const variant of ['712-3504', '(868) 712-3504', '+1 868 712 3504', '1-868-712-3504']) {
+      const res = await post(ID.owner, ID.bizTT, { firstName: 'Lu', phone: variant });
+      expectPhoneTaken(res, ID.lou);
+    }
+    expect(await db.contact.count({ where: { businessId: ID.bizTT, firstName: 'Lu' } })).toBe(0);
+    expect(await liveWithKey(ID.bizTT, '+18687123504')).toBe(0);
+    expect(await stored(ID.lou)).toMatchObject({ phone: '712-3504', phoneNormalized: '7123504', deletedAt: null });
+  });
+
+  it("RED-BEFORE (SEC-E164-2): the refusal is bounded the same way: a 'my book' STAFF re-typing that number gets existingContactId null and the id nowhere in the body", async () => {
+    const res = await post(ID.staffBook, ID.bizTT, { firstName: 'Probe', phone: '712-3504', ownerId: ID.staffBook });
+    expectPhoneTaken(res, null);
+    expect(JSON.stringify(res.body)).not.toContain(ID.lou);
+    // Refused for Lou's number, not for a second holder an earlier write left under the E.164 key.
+    expect(await liveWithKey(ID.bizTT, '+18687123504')).toBe(0);
+  });
+
+  it("RED-BEFORE (SEC-E164-2): PATCH of another contact onto the seven-digit legacy number answers 409 naming its holder, and the row is unchanged", async () => {
+    const id = await created(ID.owner, ID.bizTT, { firstName: 'Penn' });
+    expectPhoneTaken(await patch(ID.owner, ID.bizTT, id, { phone: '712-3504' }), ID.lou);
+    expect(await stored(id)).toMatchObject({ phone: null, phoneNormalized: null });
+  });
+
+  it("RED-BEFORE (SEC-E164-1): another country's number with the same last digits is a different number: '+592 712 3501' (Guyana) is created beside Tara ('712-3501') and Tara is untouched", async () => {
+    const id = await created(ID.owner, ID.bizTT, { firstName: 'Gita', phone: '+592 712 3501' });
+    expect(await stored(id)).toMatchObject({ phone: '+592 712 3501', phoneNormalized: '+5927123501' });
+    expect(await stored(ID.tara)).toMatchObject({ phone: '712-3501', phoneNormalized: '7123501', firstName: 'Tara' });
+  });
+
+  it("RED-BEFORE (SEC-E164-1): '+44 868 555 0277' (UK) is not Neil's '868-555-0277' (Trinidad): created, not refused naming Neil", async () => {
+    const id = await created(ID.owner, ID.bizTT, { firstName: 'Uma', phone: '+44 868 555 0277' });
+    expect(await stored(id)).toMatchObject({ phone: '+44 868 555 0277', phoneNormalized: '+448685550277' });
+    expect(await stored(ID.neil)).toMatchObject({ phone: '868-555-0277', phoneNormalized: '8685550277' });
+  });
+
+  it("RED-BEFORE (SEC-E164-1): an anonymous storefront intake with '+592 712 3503' does not merge into Tia ('712-3503'): a new contact holds the submitter's name, email and number; Tia keeps no email and the submission is logged on the new contact", async () => {
+    const liveBefore = await liveCount(ID.bizTT);
+    const eventsBefore = storefrontEvents.length;
+    const res = await publicIntake(ID.bizTT, { name: 'Gita Guyana', email: `${P}gita@example.test`, phone: '+592 712 3503' });
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+    expect(await liveCount(ID.bizTT)).toBe(liveBefore + 1);
+    const tia = await db.contact.findUnique({ where: { id: ID.tia } });
+    expect(tia).toMatchObject({ firstName: 'Tia', email: null, emailNormalized: null, phone: '712-3503', phoneNormalized: '7123503' });
+    const gita = await db.contact.findFirst({ where: { businessId: ID.bizTT, emailNormalized: `${P}gita@example.test`, deletedAt: null } });
+    expect(gita).toMatchObject({ firstName: 'Gita', lastName: 'Guyana', phone: '+592 712 3503', phoneNormalized: '+5927123503' });
+    const logged = storefrontEvents.slice(eventsBefore);
+    expect(logged.map((e) => `${e.type}:${e.contactId}`)).toEqual([`lead_form.submitted:${gita.id}`]);
+  });
+
+  it("RED-BEFORE (COR-E164-2): an anonymous storefront intake with Tia's number as she was stored ('712-3503', which the base matched by exact key) or in another spelling ('868 712 3503') is Tia: merged into her, no new contact", async () => {
+    const liveBefore = await liveCount(ID.bizTT);
+    let res = await publicIntake(ID.bizTT, { name: 'Tia Again', email: `${P}tia@example.test`, phone: '712-3503' });
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+    res = await publicIntake(ID.bizTT, { name: 'Tia Third', email: `${P}tia3@example.test`, phone: '868 712 3503' });
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+    expect(await liveCount(ID.bizTT)).toBe(liveBefore);
+    expect(await liveWithKey(ID.bizTT, '+18687123503')).toBe(0);
+    expect(await db.contact.findUnique({ where: { id: ID.tia } })).toMatchObject({ emailNormalized: `${P}tia@example.test`, phone: '712-3503', phoneNormalized: '7123503' });
+  });
+});
+
 describe('a number that cannot be read is kept as typed and flagged, never dropped', () => {
   it("RED-BEFORE: 'ask at the front desk' is kept as typed and the contact carries an open invalid_phone issue on 'phone'", async () => {
     const id = await created(ID.owner, ID.bizTT, { firstName: 'Fay', phone: 'ask at the front desk' });
@@ -523,6 +722,12 @@ describe('a number that cannot be read is kept as typed and flagged, never dropp
     const intl = await created(ID.owner, ID.bizXX, { firstName: 'In', phone: '+44 20 7946 0958' });
     expect(await stored(intl)).toMatchObject({ phone: '+44 20 7946 0958', phoneNormalized: '+442079460958' });
     expect(await issues(ID.bizXX, intl)).toEqual([]);
+  });
+
+  it("CONTROL (COR-E164-6, written here, scanned below): a phone typed with '+' and spaces ('+1 868 712 3511', kept as typed) beside a WhatsApp number that cannot be read: the contact is flagged on 'whatsappNumber'", async () => {
+    const id = await created(ID.owner, ID.bizTT, { firstName: 'Wade', phone: '+1 868 712 3511', whatsappNumber: 'ask at the desk' });
+    expect(await stored(id)).toMatchObject({ phone: '+1 868 712 3511', whatsappNumber: 'ask at the desk' });
+    expect((await issues(ID.bizTT, id)).map((i) => `${i.kind}:${i.field}:${i.status}`)).toEqual(['invalid_phone:whatsappNumber:open']);
   });
 });
 
@@ -565,6 +770,28 @@ describe('PATCH .../contacts/:contactId stores the phone in E.164 too', () => {
     expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(200);
     expect(await stored(id)).toMatchObject({ phone: '+18687123410' });
     expect(await issues(ID.bizTT, id)).toEqual([]);
+  });
+});
+
+describe("review repair (COR-E164-3): a PATCH that re-sends the contact's own number leaves it as stored", () => {
+  it("RED-BEFORE: PairA ('868-712-3507', key '8687123507'), whose number PairB also holds as '+18687123507' (two keys the base allowed), is edited with its phone re-sent as the full form does: 200, the edit lands, the phone and key are as stored", async () => {
+    const res = await patch(ID.owner, ID.bizTT, ID.pairA, { phone: '868-712-3507', jobTitle: 'Chef' });
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(200);
+    expect(await db.contact.findUnique({ where: { id: ID.pairA } }))
+      .toMatchObject({ jobTitle: 'Chef', phone: '868-712-3507', phoneNormalized: '8687123507', deletedAt: null });
+  });
+
+  it("RED-BEFORE: the same number in another spelling ('(868) 712-3507') is the same number: 200, nothing about the phone changes", async () => {
+    const res = await patch(ID.owner, ID.bizTT, ID.pairA, { phone: '(868) 712-3507', jobTitle: 'Head chef' });
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(200);
+    expect(await db.contact.findUnique({ where: { id: ID.pairA } }))
+      .toMatchObject({ jobTitle: 'Head chef', phone: '868-712-3507', phoneNormalized: '8687123507' });
+    expect(await stored(ID.pairB)).toMatchObject({ phone: '+1 868 712 3507', phoneNormalized: '+18687123507' });
+  });
+
+  it("RED-BEFORE (SEC-E164-2): a PATCH of PairA onto a different number another live contact holds is still 409 naming it (Lou's '712-3504', typed '868-712-3504'), and PairA keeps its number", async () => {
+    expectPhoneTaken(await patch(ID.owner, ID.bizTT, ID.pairA, { phone: '868-712-3504' }), ID.lou);
+    expect(await stored(ID.pairA)).toMatchObject({ phone: '868-712-3507', phoneNormalized: '8687123507' });
   });
 });
 
@@ -612,6 +839,66 @@ describe('a CSV import stores E.164 and finds the customer it already has', () =
   });
 });
 
+describe("review repair (COR-E164-2, SEC-E164-1): a CSV import reads a legacy key under the business's country", () => {
+  let importRes: any;
+  let liveBefore: number;
+
+  beforeAll(async () => {
+    liveBefore = await liveCount(ID.bizTT);
+    importRes = await csvImport(ID.bizTT, [
+      'first_name,last_name,phone',
+      `Ivy,${P}imp2,712-3505`,
+      `Gwen,${P}imp2,+592 712 3506`,
+    ].join('\n'));
+  });
+
+  it('CONTROL: the import completes: two rows, both processed', () => {
+    expect(importRes.status, JSON.stringify(importRes.body).slice(0, 300)).toBe(201);
+    expect(importRes.body).toMatchObject({ status: 'COMPLETED', totalRows: 2, processedRows: 2 });
+  });
+
+  it("RED-BEFORE (COR-E164-2): the row with Ivy's number as she was stored ('712-3505', which the base matched by exact key) merges into Ivy: no second contact holds +1 868 712 3505", async () => {
+    expect(await liveWithKey(ID.bizTT, '+18687123505')).toBe(0);
+    expect(await db.contact.count({ where: { businessId: ID.bizTT, lastName: `${P}imp2`, firstName: 'Ivy', deletedAt: null } })).toBe(0);
+    expect(await stored(ID.ivy)).toMatchObject({ phone: '712-3505', phoneNormalized: '7123505', deletedAt: null });
+  });
+
+  it("RED-BEFORE (SEC-E164-1): the row with '+592 712 3506' (Guyana) is a new contact, not Gil ('712-3506', Trinidad): Gil is untouched", async () => {
+    const gwen = await db.contact.findFirst({ where: { businessId: ID.bizTT, lastName: `${P}imp2`, firstName: 'Gwen', deletedAt: null } });
+    expect(gwen).toMatchObject({ phone: '+592 712 3506', phoneNormalized: '+5927123506' });
+    expect(await stored(ID.gil)).toMatchObject({ firstName: 'Gil', phone: '712-3506', phoneNormalized: '7123506' });
+    expect(await liveCount(ID.bizTT)).toBe(liveBefore + 1);
+  });
+});
+
+describe('review repair (COR-E164-5): the import preview (check-duplicates) reads a phone the way the create and the import do', () => {
+  it("RED-BEFORE: '712-3510' previews as the contact saved from '(868) 712-3510' (+18687123510), and a POST of it answers 409 naming the same contact", async () => {
+    const holderId = await created(ID.owner, ID.bizTT, { firstName: 'Cleo', phone: '(868) 712-3510' });
+    expect(await stored(holderId)).toMatchObject({ phone: '+18687123510' });
+    const res = await checkDuplicates(ID.bizTT, [{ firstName: 'Cleo', phone: '712-3510' }]);
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+    expect(res.body).toMatchObject({ total: 1, newCount: 0, duplicateCount: 1 });
+    expect(res.body.duplicates[0]).toMatchObject({ importIndex: 0, matchField: 'phone', existingContact: { id: holderId } });
+    expectPhoneTaken(await post(ID.owner, ID.bizTT, { firstName: 'Cleo', phone: '712-3510' }), holderId);
+  });
+
+  it("RED-BEFORE: a legacy seven-digit key ('7123504', Lou) previews as Lou for '868 712 3504' and '+1 868 712 3504'; '+592 712 3504' (Guyana) and '+44 712 3504' are new", async () => {
+    const res = await checkDuplicates(ID.bizTT, [
+      { phone: '868 712 3504' },
+      { phone: '+1 868 712 3504' },
+      { phone: '+592 712 3504' },
+      { phone: '+44 712 3504' },
+    ]);
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+    const byIndex = new Map<number, any>(res.body.duplicates.map((d: any) => [d.importIndex, d]));
+    expect(byIndex.get(0)).toMatchObject({ matchField: 'phone', existingContact: { id: ID.lou } });
+    expect(byIndex.get(1)).toMatchObject({ matchField: 'phone', existingContact: { id: ID.lou } });
+    expect(byIndex.has(2)).toBe(false);
+    expect(byIndex.has(3)).toBe(false);
+    expect(res.body).toMatchObject({ total: 4, duplicateCount: 2, newCount: 2 });
+  });
+});
+
 // -----------------------------------------------------------------------------
 // The data-quality scan reads the same way and keeps the write's flags
 // -----------------------------------------------------------------------------
@@ -647,7 +934,60 @@ describe('POST .../data-quality/scan reads phones under the business country and
     expect(open.map((i) => `${i.kind}:${i.field}:${i.status}`)).toEqual(['invalid_phone:phone:open']);
   });
 
+  it("RED-BEFORE (COR-E164-6): the WhatsApp flag outranks a mere reformat suggestion: Wade's phone typed '+1 868 712 3511' (kept as typed) does not take the contact's one phone issue from his unreadable WhatsApp number", async () => {
+    const wade = await db.contact.findFirst({ where: { businessId: ID.bizTT, firstName: 'Wade' }, select: { id: true } });
+    const open = (await issues(ID.bizTT, wade.id)).filter((i) => i.kind === 'invalid_phone');
+    expect(open.map((i) => `${i.kind}:${i.field}:${i.status}`)).toEqual(['invalid_phone:whatsappNumber:open']);
+    expect(open[0]).toMatchObject({ recommendedFix: { action: 'edit_whatsapp' } });
+  });
+
   it('CONTROL: the business still has every contact this file created live (nothing was dropped)', async () => {
     expect(await liveCount(ID.bizTT)).toBeGreaterThanOrEqual(11);
+  });
+});
+
+describe('review repair (COR-E164-4): applying the data-quality phone fix keeps the identity rule', () => {
+  let fixAIssue: any;
+
+  beforeAll(async () => {
+    const res = await scan(ID.bizTT);
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+    fixAIssue = await openPhoneIssue(ID.fixA);
+  });
+
+  it("CONTROL: the scan offers FixA ('868-712-3508', key '8687123508') a low-severity reformat to +18687123508, the number FixB holds as '+18687123508'", () => {
+    expect(fixAIssue).toMatchObject({
+      severity: 'low', field: 'phone', status: 'open', recommendedFix: { action: 'replace_phone', value: '+18687123508' },
+    });
+  });
+
+  it('RED-BEFORE: applying it answers 409 contact_phone_taken naming FixB (not a 500); FixA keeps its phone and the issue stays open', async () => {
+    const res = await applyFix(ID.bizTT, fixAIssue.id);
+    expectPhoneTaken(res, ID.fixB);
+    expect(await stored(ID.fixA)).toMatchObject({ phone: '868-712-3508', phoneNormalized: '8687123508' });
+    expect(await stored(ID.fixB)).toMatchObject({ phone: '+18687123508', phoneNormalized: '+18687123508' });
+    expect(await openPhoneIssue(ID.fixA)).toMatchObject({ id: fixAIssue.id, status: 'open' });
+  });
+
+  it('RED-BEFORE: bulk-apply reports that issue failed with the same plain message, and no database or server text reaches the client', async () => {
+    const res = await bulkApplyFix(ID.bizTT, [fixAIssue.id]);
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+    expect(res.body).toMatchObject({ applied: 0, failed: 1 });
+    expect(res.body.results).toEqual([
+      { issueId: fixAIssue.id, ok: false, error: 'A contact with this phone number already exists in this business' },
+    ]);
+    const text = JSON.stringify(res.body);
+    for (const needle of ['prisma', 'Prisma', 'invocation', '.ts', 'Unique constraint', '/home/']) expect(text).not.toContain(needle);
+    expect(await stored(ID.fixA)).toMatchObject({ phone: '868-712-3508', phoneNormalized: '8687123508' });
+  });
+
+  it("CONTROL: applying the reformat for FixC ('868-712-3509'), whose number no other contact holds, stores +18687123509 and resolves the issue", async () => {
+    const issue = await openPhoneIssue(ID.fixC);
+    expect(issue).toMatchObject({ recommendedFix: { action: 'replace_phone', value: '+18687123509' } });
+    const res = await applyFix(ID.bizTT, issue.id);
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+    expect(res.body).toMatchObject({ issueId: issue.id, status: 'resolved', applied: true });
+    expect(await stored(ID.fixC)).toMatchObject({ phone: '+18687123509', phoneNormalized: '+18687123509' });
+    expect(await openPhoneIssue(ID.fixC)).toBeNull();
   });
 });
