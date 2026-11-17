@@ -60,6 +60,24 @@
  *                         mayChangeTaxRate what PATCH defaultTaxRate answers, for every member kind
  *   V71E-G03  RED-BEFORE  PATCH answers the same hints as GET (the settings page keeps them after a save); a refusal carries
  *                         no setting and no hint
+ *
+ * REVIEW REPAIR (SEC-FSP-1): the JSON body reached FinanceSettingsService.update untyped, and update handed its values to
+ * business.update as they came, so a member who may change a field could send a Prisma update operator for it ({set: v},
+ * {increment: n}) or a value of the wrong type: the default-account ownership check read string ids only (a revenue:write
+ * member stored another business's FinancialAccount id as {set: id}), the fiscal year and tax rate range checks compared an
+ * object (13, 101 and 1000 were stored), and a non-text accountant email was a 500 (TypeError on .trim). Each value must
+ * now be of its field's type before anything is written (400 in the field's own words, row byte-identical); the D-205 and
+ * D-11 refusals still come first for a member who may not change the field.
+ *   V71E-E01  RED-BEFORE  a revenue:write member (who owns another business) and the owner cannot point a default account at
+ *                         the other business's FinancialAccount: the plain id, the id wrapped in an update operator or sent as
+ *                         a non-text value are 400 "do not belong", row byte-identical
+ *   V71E-E02  RED-BEFORE  a revenue:write member's fiscal year must be a whole month 1-12 and the basis CASH or ACCRUAL: update
+ *                         operators, fractions, text, '' are 400 in the field's words, row byte-identical
+ *   V71E-E03  RED-BEFORE  a settings admin's accountant email must be text or null: an update operator, a number, a list are
+ *                         400 (not 500), row byte-identical, nothing sent
+ *   V71E-E04  RED-BEFORE  the owner's tax rate must be a number 0-100: update operators and text are 400, row byte-identical
+ *   V71E-E05  pinned      a member who may not change the field is still refused it first (403 naming it; the rate's
+ *                         BUSINESS_PROFILE_OWNER_ONLY), whatever the value's shape, row byte-identical
  */
 import 'reflect-metadata';
 import path from 'path';
@@ -527,5 +545,105 @@ describe('FU-FINANCE-SETTINGS-PATCH: GET settings tells the caller in advance wh
     await reset();
     const refused = await patchSettings(ID.staffDefault, { accountantEmail: ownAddress(ID.staffDefault) });
     expectRefused(refused, 'STAFF on defaults PATCH accountantEmail', recipientRefusal('none'), ['accountantEmail']);
+  });
+});
+
+/**
+ * REVIEW REPAIR SEC-FSP-1: a value must be of its field's type before it is written. Another business, owned by the
+ * revenue:write STAFF member of ID.biz, holds the FinancialAccount the redirect would point at (seeded here, after
+ * V71E-X01 has counted the shared fixtures; every id carries the prefix, so cleanup removes it).
+ */
+describe('FU-FINANCE-SETTINGS-PATCH review repair (SEC-FSP-1): a submitted value must be of its field\'s type, never a Prisma update operator', () => {
+  const X = { biz: `${P}bizX`, coa: `${P}coaX`, acct: `${P}xacct` };
+  const ACCOUNT_FIELDS = ['defaultCashAccountId', 'defaultArAccountId', 'defaultApAccountId', 'defaultTaxAccountId'] as const;
+  const NOT_THIS_BUSINESS = 'One or more default accounts do not belong to this business';
+  const MONTH_WORDS = 'Fiscal year start month must be 1-12';
+  const BASIS_WORDS = 'Accounting basis must be CASH or ACCRUAL';
+  const EMAIL_WORDS = 'Accountant email is not a valid email address';
+  const RATE_WORDS = 'Default tax rate must be between 0 and 100';
+
+  /** A refused value: 400 in the field's words, no setting and no hint in the body, the Business row byte-identical. */
+  async function expectBadValue(actor: string, body: Record<string, unknown>, message: string) {
+    const label = `${actor} PATCH ${JSON.stringify(body)}`;
+    const before = await businessRowText();
+    const res = await patchSettings(actor, body);
+    expect(await businessRowText(), `${label}: patch ${res.status}: the Business row is byte-identical`).toBe(before);
+    expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(400);
+    expect(res.body?.message, label).toBe(message);
+    for (const key of ['accountantEmail', 'accountingBasis', 'fiscalYearStartMonth', 'defaultTaxRate', 'currency', ...HINT_KEYS]) {
+      expect(res.body, `${label}: no ${key} in a refusal`).not.toHaveProperty(key);
+    }
+  }
+
+  beforeAll(async () => {
+    await db.business.create({ data: { id: X.biz, name: `${X.biz}-name`, ownerId: ID.staffWrite, currency: 'TTD' } });
+    await db.membership.create({ data: { id: `${P}m_staffWrite_bizX`, businessId: X.biz, userId: ID.staffWrite, role: 'OWNER' } });
+    await db.chartOfAccount.create({ data: { id: X.coa, businessId: X.biz, name: `${P}BankX`, type: 'ASSET', code: `${P}1011` } });
+    await db.financialAccount.create({ data: { id: X.acct, businessId: X.biz, chartOfAccountId: X.coa, name: X.acct, type: 'BANK', currency: 'TTD' } });
+  }, 60_000);
+
+  it("[V71E-E01] RED-BEFORE: a revenue:write STAFF member who owns another business, and the owner, cannot point any of the four default accounts at that business's FinancialAccount: the plain id, the id inside a Prisma update operator ({set}, {connect}) or as a list, and a number, are each 400 'do not belong' with the Business row byte-identical; the owner's GET still answers no default account", async () => {
+    expect(await db.financialAccount.count({ where: { id: X.acct, businessId: X.biz } }), 'the other business holds the account').toBe(1);
+    for (const actor of [ID.staffWrite, ID.owner]) {
+      for (const field of ACCOUNT_FIELDS) {
+        for (const value of [X.acct, { set: X.acct }, { connect: { id: X.acct } }, [X.acct], 7]) {
+          await expectBadValue(actor, { [field]: value }, NOT_THIS_BUSINESS);
+        }
+      }
+    }
+    const read = await getSettings(ID.owner);
+    expect(read.status, JSON.stringify(read.body)).toBe(200);
+    for (const field of ACCOUNT_FIELDS) expect(read.body[field], field).toBeNull();
+    expect(await stored()).toMatchObject({ defaultCashAccountId: null, defaultArAccountId: null, defaultApAccountId: null, defaultTaxAccountId: null });
+  });
+
+  it("[V71E-E02] RED-BEFORE: a revenue:write member's fiscal year start month must be a whole month from 1 to 12 ({set: 13}, {increment: 100}, {set: 7}, 7.5, '7', 0 and 13 are 400 'must be 1-12') and the accounting basis CASH or ACCRUAL ({set: 'ACCRUAL'}, '', ['ACCRUAL'] are 400), the Business row byte-identical; a NULL fiscal year stays NULL", async () => {
+    for (const actor of [ID.staffWrite, ID.adminW]) {
+      for (const value of [{ set: 13 }, { increment: 100 }, { set: 7 }, 7.5, '7', 0, 13]) {
+        await expectBadValue(actor, { fiscalYearStartMonth: value }, MONTH_WORDS);
+      }
+      for (const value of [{ set: 'ACCRUAL' }, '', ['ACCRUAL']]) {
+        await expectBadValue(actor, { accountingBasis: value }, BASIS_WORDS);
+      }
+    }
+    await reset(null);
+    await expectBadValue(ID.staffWrite, { fiscalYearStartMonth: { increment: 100 } }, MONTH_WORDS);
+    expect((await stored())?.fiscalYearStartMonth, 'a NULL fiscal year stays NULL').toBeNull();
+  });
+
+  it("[V71E-E03] RED-BEFORE: a settings admin's accountant email must be text or null: {set: <address>}, a number, a list and an object are 400 'not a valid email address' (not a 500), the Business row byte-identical and the saved address unchanged", async () => {
+    for (const actor of [ID.adminSet, ID.owner]) {
+      for (const value of [{ set: `evil@${P}firm.test.local` }, 7, [`evil@${P}firm.test.local`], {}]) {
+        await expectBadValue(actor, { accountantEmail: value }, EMAIL_WORDS);
+      }
+    }
+    expect((await stored())?.accountantEmail).toBe(SEEDED.accountantEmail);
+    expect(mailer.sent, 'nothing sent').toEqual([]);
+  });
+
+  it("[V71E-E04] RED-BEFORE: the owner's default tax rate must be a number from 0 to 100: {set: 1000}, {increment: 1000}, '15', -1 and 101 are 400 'between 0 and 100', the Business row byte-identical", async () => {
+    for (const value of [{ set: 1000 }, { increment: 1000 }, { set: 15 }, '15', -1, 101]) {
+      await expectBadValue(ID.owner, { defaultTaxRate: value }, RATE_WORDS);
+    }
+    expect((await stored())?.defaultTaxRate).toBe(SEEDED.defaultTaxRate);
+  });
+
+  it('[V71E-E05] pinned: a member who may not change a field is refused it first, whatever its shape: STAFF on role defaults sending update operators for the basis, the fiscal year, a default account and the address is 403 naming the field, a revenue:write member sending one for the rate is 403 BUSINESS_PROFILE_OWNER_ONLY; the Business row byte-identical', async () => {
+    for (const [body, message] of [
+      [{ accountingBasis: { set: 'ACCRUAL' } }, booksRefusal('read')],
+      [{ fiscalYearStartMonth: { set: 13 } }, booksRefusal('read')],
+      [{ defaultCashAccountId: { set: X.acct } }, booksRefusal('read')],
+      [{ accountantEmail: { set: ownAddress(ID.staffDefault) } }, recipientRefusal('none')],
+    ] as const) {
+      const before = await businessRowText();
+      const res = await patchSettings(ID.staffDefault, body);
+      expect(await businessRowText(), `${JSON.stringify(body)}: patch ${res.status}: the Business row is byte-identical`).toBe(before);
+      expectRefused(res, `STAFF on defaults PATCH ${JSON.stringify(body)}`, message, Object.keys(body));
+    }
+    const before = await businessRowText();
+    const rate = await patchSettings(ID.staffWrite, { defaultTaxRate: { set: 1000 } });
+    expect(await businessRowText(), `rate patch ${rate.status}: the Business row is byte-identical`).toBe(before);
+    expect(rate.status, JSON.stringify(rate.body)).toBe(403);
+    expect(rate.body?.code).toBe(PROFILE_CODE);
   });
 });
