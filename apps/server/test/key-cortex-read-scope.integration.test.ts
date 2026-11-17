@@ -35,6 +35,23 @@
  * the guarded tenant: a user who is OWNER of bizC and only STAFF of bizA is
  * refused bizA's full context (and still gets bizC's).
  *
+ * W11-CORTEX-INSIGHT-QUERIES (review SEC-W11CRR-2, second half). The 200
+ * cases above pass only through the insight stub. The real
+ * KeyCortexInsightService selected columns Contact does not have (name,
+ * score, stage, lastActivityAt, estimatedValue), a Product status and an
+ * AutopilotTask source that do not exist, and lower-case enum values Prisma
+ * refuses ('draft', 'paid', 'cancelled'), behind `as any` casts that stopped
+ * tsc from saying so. Each method caught the throw and answered its empty
+ * payload, so insights/revenue said 0 revenue and insights/profit said no
+ * opportunities on any real business. The last describe block runs the REAL
+ * service on seeded contacts, invoices, deals, products and tasks (no stub)
+ * and checks each insight method's figures and customer names through its
+ * route. Fixing the queries makes insights/churn (customer balances, owed and
+ * overdue amounts, recovery values) and insights/pipeline (open deal values)
+ * answer real figures, and both were membership-only; the report already
+ * serves both analyses behind revenue:read (D-57), so each now needs
+ * revenue:read too (the D-57 block for churn and pipeline below).
+ *
  * WHAT IS REAL: PrismaService, AuthGuard, BusinessGuard, ModuleScopeGuard, the
  * route guard the fix adds, the production GlobalHttpExceptionFilter and
  * ValidationPipe, Nest's routing, and KeyCortexController, against
@@ -46,6 +63,11 @@
  * its other routes (an allow-listed mocker). Vitest's esbuild transform emits
  * no constructor parameter types, so the suite writes the ones tsc emits for
  * the controller, as key-cortex-tenant-binding.integration.test.ts does.
+ * The real-data block builds a second app in which KeyCortexInsightService
+ * is the real class over the real PrismaService; its other collaborators are
+ * stand-ins: the model gateway refuses every call (no provider traffic, so
+ * the report takes its fallback narrative), AI usage records, and the full
+ * KEY context (read by the report only) answers a fixed shape.
  *
  * Every seeded row carries the `v97o_` prefix and is hard-deleted by raw SQL
  * with sqlLikePrefix() in beforeAll and afterAll; no $transaction wrapping.
@@ -86,6 +108,8 @@ const REVENUE_MARKER = 'v97o-revenue-marker';
 const PROFIT_MARKER = 'v97o-profit-marker';
 const REPORT_MARKER = 'v97o-report-marker';
 const RECOMMENDATION_MARKER = 'v97o-recommendation-marker';
+const CHURN_MARKER = 'v97o-churn-marker';
+const PIPELINE_MARKER = 'v97o-pipeline-marker';
 /** The overdue invoice total the report and recommendation stubs carry, as the real methods take it from the full context. */
 const OVERDUE_TOTAL = 98765;
 
@@ -108,6 +132,14 @@ let app: any;
 
 async function cleanup() {
   for (const sql of [
+    // The real-data block's rows, children first (invoices.contact_id is NO ACTION).
+    `DELETE FROM deals WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM deal_stages WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM autopilot_tasks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -190,6 +222,16 @@ beforeAll(async () => {
     findProfitOpportunities: async (businessId: unknown) => {
       calls.push({ method: 'insight.findProfitOpportunities', businessId });
       return [{ id: `${P}opp`, title: PROFIT_MARKER }];
+    },
+    // Shaped like the real methods: churn names customers with their owed balances; the
+    // pipeline sums open deal values by stage.
+    analyzeChurnRisk: async (businessId: unknown) => {
+      calls.push({ method: 'insight.analyzeChurnRisk', businessId });
+      return [{ contactId: `${P}churn`, contactName: CHURN_MARKER, outstandingBalance: OVERDUE_TOTAL }];
+    },
+    analyzePipeline: async (businessId: unknown) => {
+      calls.push({ method: 'insight.analyzePipeline', businessId });
+      return { marker: PIPELINE_MARKER, totalPipelineValue: OVERDUE_TOTAL, stages: [] };
     },
     // Shaped like the real methods (key-cortex-insight.service.ts generateBusinessReport and
     // generateRecommendations): the revenue analysis, the profit opportunities and the
@@ -473,4 +515,488 @@ describe('W11-CORTEX-READ-ROUTES-SCOPE review (SEC-W11CRR-1, SEC-W11CRR-2, CRR-1
       expect(callsSince(from)).toEqual([]);
     });
   }
+});
+
+describe('W11-CORTEX-INSIGHT-QUERIES D-57: GET cortex/insights/churn and insights/pipeline need revenue read, as GET report, which carries both analyses, does', () => {
+  let from = 0;
+  beforeEach(() => { from = calls.length; });
+
+  const ROUTES = [
+    { route: 'insights/churn', method: 'insight.analyzeChurnRisk', marker: CHURN_MARKER },
+    { route: 'insights/pipeline', method: 'insight.analyzePipeline', marker: PIPELINE_MARKER },
+  ] as const;
+
+  for (const { route, method, marker } of ROUTES) {
+    it.each([
+      ['a STAFF member holding revenue none', ID.staffNoRevenue],
+      ['the OWNER of another business who is STAFF holding revenue none here', ID.ownerElsewhere],
+    ])(`D-57: GET ${route} refuses %s 403, and the insight service is never called`, async (_label, user) => {
+      const res = await get(route, user, ID.bizA);
+      expect(res.status, JSON.stringify(res.body)).toBe(403);
+      const text = JSON.stringify(res.body);
+      expect(text).not.toContain(marker);
+      expect(text).not.toContain(String(OVERDUE_TOTAL));
+      expect(callsSince(from)).toEqual([]);
+    });
+
+    it.each([
+      ['a STAFF member holding revenue read (explicit map)', ID.staffRevenueRead],
+      ['a STAFF member with the role-default scopes (revenue read)', ID.staffDefault],
+      ['the OWNER', ID.owner],
+    ])(`D-57: GET ${route} answers %s 200 with the analysis of the business`, async (_label, user) => {
+      const res = await get(route, user, ID.bizA);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(JSON.stringify(res.body)).toContain(marker);
+      expect(callsSince(from)).toEqual([{ method, businessId: ID.bizA }]);
+    });
+
+    it(`D-57: GET ${route} refuses a user with no membership 403`, async () => {
+      const res = await get(route, ID.nonMember, ID.bizA);
+      expect(res.status, JSON.stringify(res.body)).toBe(403);
+      expect(callsSince(from)).toEqual([]);
+    });
+  }
+});
+
+describe('W11-CORTEX-INSIGHT-QUERIES (SEC-W11CRR-2): the REAL insight service answers each route with its figures and customer names from seeded contacts and invoices (no stub)', () => {
+  const R = {
+    biz: `${P}bizR`,
+    owner: `${P}r_owner`,
+    staffNoRevenue: `${P}r_staff_norev`,
+    staffRevenueRead: `${P}r_staff_revread`,
+    bizX: `${P}bizX`,
+    xOwner: `${P}x_owner`,
+  };
+  const C = {
+    alicia: `${P}r_c_alicia`, // firstName + lastName, CLIENT
+    maraval: `${P}r_c_maraval`, // companyName only, CUSTOMER (the legacy CLIENT spelling)
+    marcus: `${P}r_c_marcus`, // displayName wins over firstName/lastName, CLIENT
+    kerry: `${P}r_c_kerry`, // LEAD, score 85, quiet 20 days, one open deal
+    nadia: `${P}r_c_nadia`, // LEAD, score 40, no stage, no deal
+    ghost: `${P}r_c_ghost`, // soft-deleted LEAD with an open deal
+    zed: `${P}x_c_zed`, // bizX
+    yara: `${P}x_c_yara`, // bizX
+  };
+  const NAME = {
+    alicia: 'Alicia Baptiste',
+    maraval: 'Maraval Hardware Ltd',
+    marcus: 'Marcus Lee',
+    kerry: 'Kerry Mohammed',
+    nadia: 'Nadia',
+    ghost: 'Ghost Deleted',
+    zed: 'Zed Outsider',
+    yara: 'Yara Elsewhere',
+  };
+  const DAY = 86_400_000;
+  const now = new Date();
+  const daysAgo = (n: number) => new Date(now.getTime() - n * DAY);
+  const daysAhead = (n: number) => new Date(now.getTime() + n * DAY);
+
+  interface SeedInvoice { id: string; businessId: string; contactId: string; total: number; status: string; createdAt: Date; dueDate?: Date; deletedAt?: Date }
+  const INV = {
+    sent: `${P}r_inv_sent`,
+    upcoming: `${P}r_inv_upcoming`,
+    paidA: `${P}r_inv_paid_a`,
+    void: `${P}r_inv_void`,
+    deleted: `${P}r_inv_deleted`,
+    paidM: `${P}r_inv_paid_m`,
+    draft: `${P}r_inv_draft`,
+    prev: `${P}r_inv_prev`,
+    overdueM: `${P}r_inv_overdue_m`,
+    up1: `${P}r_inv_up1`,
+    up2: `${P}r_inv_up2`,
+    x: `${P}x_inv`,
+  };
+  // Computed once, as the service computes "this month" and "last month" (the process time zone).
+  let periodStart: Date;
+  let previousStart: Date;
+  let INVOICES: SeedInvoice[] = [];
+  const PRODUCT = { premium: `${P}r_prod_premium`, retired: `${P}r_prod_retired`, basic: `${P}r_prod_basic`, outsider: `${P}x_prod_outsider` };
+
+  /** The full KEY context the report reads (the V2 service is not under test): a fixed shape. */
+  const REPORT_CONTEXT = {
+    commerce: { outstandingInvoices: { total: 0, overdue: 0, overdueTotal: 0 }, collectionRate: 0 },
+    bookings: { completionRate: 0, noShows: { rate: 0 }, todayBookings: { count: 0, totalValue: 0 } },
+    inbox: { unreadMessages: 0 },
+    summary: { healthScore: 50 },
+    autopilot: { automationRate: 50, activeTasks: [] as unknown[] },
+  };
+  const gatewayCalls: unknown[] = [];
+  const usageCalls: unknown[] = [];
+  const legacyCalls: unknown[] = [];
+  let app2: any;
+
+  function get2(route: string, user: string, businessId: string) {
+    return request(app2.getHttpServer()).get(`/api/v1/cortex/${route}`).set(HEADER, user).query({ businessId });
+  }
+  const isRevenue = (i: SeedInvoice) => i.status !== 'DRAFT' && i.status !== 'VOID' && !i.deletedAt;
+
+  beforeAll(async () => {
+    const { startOfMonth, subMonths } = await import('date-fns');
+    periodStart = startOfMonth(now);
+    previousStart = subMonths(periodStart, 1);
+    INVOICES = [
+      { id: INV.sent, businessId: R.biz, contactId: C.alicia, total: 1000, status: 'SENT', createdAt: now, dueDate: daysAgo(10) },
+      { id: INV.upcoming, businessId: R.biz, contactId: C.alicia, total: 120, status: 'SENT', createdAt: now, dueDate: daysAhead(5) },
+      { id: INV.paidA, businessId: R.biz, contactId: C.alicia, total: 400, status: 'PAID', createdAt: now },
+      { id: INV.void, businessId: R.biz, contactId: C.alicia, total: 7777, status: 'VOID', createdAt: now, dueDate: daysAgo(10) },
+      { id: INV.deleted, businessId: R.biz, contactId: C.alicia, total: 5555, status: 'SENT', createdAt: now, dueDate: daysAgo(10), deletedAt: now },
+      { id: INV.paidM, businessId: R.biz, contactId: C.maraval, total: 600, status: 'PAID', createdAt: now },
+      { id: INV.draft, businessId: R.biz, contactId: C.maraval, total: 9999, status: 'DRAFT', createdAt: now, dueDate: daysAgo(10) },
+      { id: INV.prev, businessId: R.biz, contactId: C.maraval, total: 500, status: 'PAID', createdAt: new Date(previousStart.getTime() + 2 * DAY) },
+      { id: INV.overdueM, businessId: R.biz, contactId: C.maraval, total: 250, status: 'OVERDUE', createdAt: daysAgo(50), dueDate: daysAgo(40) },
+      { id: INV.up1, businessId: R.biz, contactId: C.marcus, total: 300, status: 'PAID', createdAt: daysAgo(60) },
+      { id: INV.up2, businessId: R.biz, contactId: C.marcus, total: 350, status: 'PAID', createdAt: daysAgo(45) },
+      { id: INV.x, businessId: R.bizX, contactId: C.zed, total: 777, status: 'SENT', createdAt: now, dueDate: daysAgo(5) },
+    ];
+
+    const { Test } = await import('@nestjs/testing');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+    const { ValidationPipe } = await import('@nestjs/common');
+    const { AuthGuard } = await import('../src/core/auth/auth.guard');
+    const { BusinessGuard } = await import('../src/core/auth/business.guard');
+    const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
+    const { KeyCortexController } = await import('../src/modules/key-cortex/key-cortex.controller');
+    const { KeyCortexReasoningService } = await import('../src/modules/key-cortex/key-cortex-reasoning.service');
+    const { KeyCortexContextV2Service } = await import('../src/modules/key-cortex/key-cortex-context-v2.service');
+    const { KeyCortexInsightService } = await import('../src/modules/key-cortex/key-cortex-insight.service');
+
+    const contextV2 = {
+      getFullContext: async (businessId: unknown) => ({ ...REPORT_CONTEXT, businessId }),
+      formatContextForPrompt: () => '',
+    };
+    // No provider traffic: the gateway refuses, so the report writes its fallback narrative.
+    const gateway = {
+      complete: async (...args: unknown[]) => {
+        gatewayCalls.push(args);
+        throw new Error('v97o: the model gateway is not reached in this suite');
+      },
+    };
+    const aiUsage = { track: async (...args: unknown[]) => { usageCalls.push(args); } };
+    // insights/profit falls back to the reasoning engine only when the insight service throws.
+    const reasoning = {
+      findProfitOpportunities: async (businessId: unknown) => {
+        legacyCalls.push(businessId);
+        return [];
+      },
+    };
+
+    const moduleRef = await Test.createTestingModule({
+      controllers: [KeyCortexController],
+      providers: [
+        PrismaService,
+        AuthGuard,
+        BusinessGuard,
+        ModuleScopeGuard,
+        { provide: KeyCortexContextV2Service, useValue: contextV2 },
+        {
+          provide: KeyCortexInsightService,
+          useFactory: (prisma: InstanceType<typeof PrismaService>) =>
+            new KeyCortexInsightService(prisma, gateway as any, aiUsage as any, contextV2 as any),
+          inject: [PrismaService],
+        },
+        { provide: KeyCortexReasoningService, useValue: reasoning },
+      ],
+    })
+      .useMocker((token: any) => {
+        const name = typeof token === 'function' ? token.name : String(token);
+        return OFF_BOUNDARY.has(name) ? {} : undefined;
+      })
+      .compile();
+
+    app2 = moduleRef.createNestApplication();
+    app2.use(async (req: any, _res: any, next: any) => {
+      const header = req.headers[HEADER];
+      const id = typeof header === 'string' ? header : undefined;
+      if (id && id.startsWith(P)) {
+        const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+        if (user) req.user = { id: user.id, email: user.email, role: user.role };
+      }
+      next();
+    });
+    app2.useGlobalFilters(new GlobalHttpExceptionFilter());
+    app2.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    await app2.init();
+
+    for (const id of [R.owner, R.staffNoRevenue, R.staffRevenueRead, R.xOwner]) {
+      await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role: 'USER' } });
+    }
+    await db.business.create({ data: { id: R.biz, name: 'V97O Biz R', ownerId: R.owner } });
+    await db.business.create({ data: { id: R.bizX, name: 'V97O Biz X', ownerId: R.xOwner } });
+    for (const m of [
+      { userId: R.owner, businessId: R.biz, role: 'OWNER' },
+      { userId: R.staffNoRevenue, businessId: R.biz, role: 'STAFF', permissionScopes: { revenue: 'none' } },
+      { userId: R.staffRevenueRead, businessId: R.biz, role: 'STAFF', permissionScopes: { revenue: 'read' } },
+      { userId: R.xOwner, businessId: R.bizX, role: 'OWNER' },
+    ]) {
+      await db.membership.create({ data: { id: `${P}m_${m.userId.slice(P.length)}`, ...m } });
+    }
+
+    const contacts = [
+      { id: C.alicia, businessId: R.biz, firstName: 'Alicia', lastName: 'Baptiste', email: `${P}alicia@test.local`, status: 'CLIENT' },
+      { id: C.maraval, businessId: R.biz, companyName: 'Maraval Hardware Ltd', email: `${P}maraval@test.local`, status: 'CUSTOMER' },
+      { id: C.marcus, businessId: R.biz, displayName: 'Marcus Lee', firstName: 'Marc', lastName: 'Leeroy', email: `${P}marcus@test.local`, status: 'CLIENT', lastInteractionAt: daysAgo(70) },
+      { id: C.kerry, businessId: R.biz, firstName: 'Kerry', lastName: 'Mohammed', status: 'LEAD', leadScore: 85, lastInteractionAt: daysAgo(20), pipelineStage: 'qualified' },
+      { id: C.nadia, businessId: R.biz, firstName: 'Nadia', status: 'LEAD', leadScore: 40 },
+      { id: C.ghost, businessId: R.biz, firstName: 'Ghost', lastName: 'Deleted', status: 'LEAD', leadScore: 95, lastInteractionAt: daysAgo(30), pipelineStage: 'qualified', deletedAt: now },
+      { id: C.zed, businessId: R.bizX, firstName: 'Zed', lastName: 'Outsider', status: 'CLIENT' },
+      { id: C.yara, businessId: R.bizX, firstName: 'Yara', lastName: 'Elsewhere', status: 'LEAD', leadScore: 95, lastInteractionAt: daysAgo(30), pipelineStage: 'proposal' },
+    ];
+    for (const c of contacts) await db.contact.create({ data: c });
+
+    await db.dealStage.create({ data: { id: `${P}r_stage`, businessId: R.biz, name: 'Qualified', slug: `${P}qualified` } });
+    await db.dealStage.create({ data: { id: `${P}x_stage`, businessId: R.bizX, name: 'Proposal', slug: `${P}proposal` } });
+    for (const d of [
+      { id: `${P}r_deal_kerry_open`, businessId: R.biz, contactId: C.kerry, stageId: `${P}r_stage`, title: 'Kerry fit-out', value: 2500, status: 'OPEN' },
+      { id: `${P}r_deal_kerry_won`, businessId: R.biz, contactId: C.kerry, stageId: `${P}r_stage`, title: 'Kerry earlier job', value: 9000, status: 'WON' },
+      { id: `${P}r_deal_ghost_open`, businessId: R.biz, contactId: C.ghost, stageId: `${P}r_stage`, title: 'Ghost deal', value: 4444, status: 'OPEN' },
+      { id: `${P}x_deal_yara_open`, businessId: R.bizX, contactId: C.yara, stageId: `${P}x_stage`, title: 'Yara deal', value: 3333, status: 'OPEN' },
+    ] as const) {
+      await db.deal.create({ data: d });
+    }
+
+    for (const p of [
+      { id: PRODUCT.premium, businessId: R.biz, name: 'Premium Detailing', price: 450, isActive: true },
+      { id: PRODUCT.retired, businessId: R.biz, name: 'Retired Package', price: 900, isActive: false },
+      { id: PRODUCT.basic, businessId: R.biz, name: 'Basic Wash', price: 50, isActive: true },
+      { id: PRODUCT.outsider, businessId: R.bizX, name: 'Outsider Product', price: 800, isActive: true },
+    ]) {
+      await db.product.create({ data: p });
+    }
+
+    const tasks: Array<{ id: string; businessId: string; title: string; category: string }> = [];
+    for (let i = 0; i < 21; i++) tasks.push({ id: `${P}r_task_manual_${i}`, businessId: R.biz, title: `Manual task ${i}`, category: 'SALES' });
+    for (let i = 0; i < 3; i++) tasks.push({ id: `${P}r_task_auto_${i}`, businessId: R.biz, title: `Workflow task ${i}`, category: 'workflow' });
+    for (let i = 0; i < 30; i++) tasks.push({ id: `${P}x_task_manual_${i}`, businessId: R.bizX, title: `Manual task ${i}`, category: 'SALES' });
+    await db.autopilotTask.createMany({ data: tasks });
+
+    for (const inv of INVOICES) {
+      await db.invoice.create({
+        data: {
+          id: inv.id,
+          businessId: inv.businessId,
+          contactId: inv.contactId,
+          invoiceNumber: inv.id.slice(P.length).toUpperCase(),
+          status: inv.status as any,
+          subtotal: inv.total,
+          total: inv.total,
+          createdAt: inv.createdAt,
+          dueDate: inv.dueDate ?? null,
+          deletedAt: inv.deletedAt ?? null,
+        },
+      });
+    }
+    // Money received in the last 30 days: one SUCCESSFUL payment (counted) and one FAILED (not).
+    for (const pay of [
+      { id: `${P}r_pay_ok`, status: 'SUCCESSFUL', amount: 400 },
+      { id: `${P}r_pay_failed`, status: 'FAILED', amount: 999 },
+    ]) {
+      await db.payment.create({
+        data: { ...pay, businessId: R.biz, invoiceId: INV.paidA, currency: 'TTD', provider: 'cash', method: 'cash', providerPaymentId: `${P}${pay.id.slice(P.length)}` },
+      });
+    }
+  }, 180_000);
+
+  afterAll(async () => {
+    if (app2) await app2.close();
+  });
+
+  it('fixture sanity (real rows): bizR holds 11 invoices (one soft-deleted) of 3 customers and 3 leads (one soft-deleted), bizX 1 invoice; no stub stands for the insight service', async () => {
+    // Raw SQL: the db client's soft-delete extension hides deleted rows from count/findMany
+    // (not from groupBy, aggregate or a relation include, which is why the service filters them itself).
+    const n = async (sql: string, ...params: unknown[]) =>
+      Number(((await db.$queryRawUnsafe(sql, ...params)) as Array<{ n: number | bigint }>)[0].n);
+    expect(await n('SELECT count(*) AS n FROM invoices WHERE business_id = $1', R.biz)).toBe(11);
+    expect(await n('SELECT count(*) AS n FROM invoices WHERE business_id = $1 AND deleted_at IS NOT NULL', R.biz)).toBe(1);
+    expect(await n('SELECT count(*) AS n FROM invoices WHERE business_id = $1', R.bizX)).toBe(1);
+    expect(await n(`SELECT count(*) AS n FROM contacts WHERE business_id = $1 AND status = 'LEAD'`, R.biz)).toBe(3);
+    expect(await n(`SELECT count(*) AS n FROM contacts WHERE business_id = $1 AND status = 'LEAD' AND deleted_at IS NULL`, R.biz)).toBe(2);
+    expect(await db.autopilotTask.count({ where: { businessId: R.biz } })).toBe(24);
+    const insight = app2.get((await import('../src/modules/key-cortex/key-cortex-insight.service')).KeyCortexInsightService);
+    expect(insight.constructor.name).toBe('KeyCortexInsightService');
+  });
+
+  it('GET insights/revenue: this month\'s total, count and average from the issued invoices (no draft, void or deleted one), last month\'s total, and the top customers by their real names', async () => {
+    const res = await get2('insights/revenue', R.owner, R.biz).query({ period: 'month' });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const a = res.body.analysis;
+    const previous = INVOICES.filter((i) => i.businessId === R.biz && isRevenue(i) && i.createdAt >= previousStart && i.createdAt < periodStart)
+      .reduce((s, i) => s + i.total, 0);
+    expect(previous).toBeGreaterThanOrEqual(500);
+    expect(a.period).toBe('This Month');
+    expect(a.totalRevenue).toBe(2120);
+    expect(a.invoiceCount).toBe(4);
+    expect(a.averageInvoiceValue).toBe(530);
+    expect(a.previousPeriodRevenue).toBe(previous);
+    expect(a.growthRate).toBe(Math.round(((2120 - previous) / previous) * 100));
+    expect(a.topCustomers).toEqual([
+      { id: C.alicia, name: NAME.alicia, revenue: 1520, invoices: 3, avgInvoice: 507 },
+      { id: C.maraval, name: NAME.maraval, revenue: 600, invoices: 1, avgInvoice: 600 },
+    ]);
+    expect(a.revenueByDay.reduce((s: number, d: { amount: number }) => s + d.amount, 0)).toBe(2120);
+    const text = JSON.stringify(res.body);
+    for (const absent of ['Unknown', NAME.zed, '7777', '9999', '5555', '777']) expect(text).not.toContain(absent);
+  });
+
+  it('GET insights/profit: overdue invoices to collect by customer name, the stale lead with its open deal value, the unsold active product, the manual-task count and the repeat buyer, from this business only', async () => {
+    const res = await get2('insights/profit', R.owner, R.biz);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(legacyCalls).toEqual([]);
+    const opps: any[] = res.body.opportunities;
+    const byId = new Map(opps.map((o) => [o.id, o]));
+    expect([...byId.keys()].sort()).toEqual([
+      `auto-${R.biz}`,
+      `inv-${INV.overdueM}`,
+      `inv-${INV.sent}`,
+      `lead-${C.kerry}`,
+      `prod-${PRODUCT.premium}`,
+      `upsell-${C.marcus}`,
+    ].sort());
+
+    expect(byId.get(`inv-${INV.sent}`)).toMatchObject({
+      type: 'overdue_invoice',
+      title: `Collect $1,000 from ${NAME.alicia}`,
+      estimatedValue: 1000,
+      sourceData: { invoiceId: INV.sent, daysOverdue: 10, amount: 1000 },
+      priority: 'medium',
+    });
+    expect(byId.get(`inv-${INV.overdueM}`)).toMatchObject({
+      type: 'overdue_invoice',
+      title: `Collect $250 from ${NAME.maraval}`,
+      estimatedValue: 250,
+      sourceData: { invoiceId: INV.overdueM, daysOverdue: 40, amount: 250 },
+      priority: 'high',
+    });
+    expect(byId.get(`lead-${C.kerry}`)).toMatchObject({
+      type: 'stale_lead',
+      title: `Re-engage ${NAME.kerry} (score: 85)`,
+      estimatedValue: 2500,
+      sourceData: { contactId: C.kerry, daysStale: 20, score: 85 },
+      priority: 'high',
+    });
+    expect(byId.get(`prod-${PRODUCT.premium}`)).toMatchObject({
+      type: 'underutilized_product',
+      title: 'Promote "Premium Detailing" — only sold 0 times',
+      estimatedValue: 4500,
+    });
+    expect(byId.get(`auto-${R.biz}`)).toMatchObject({
+      type: 'automation_gap',
+      title: 'Automate 21 recurring manual tasks',
+      estimatedValue: 525,
+      sourceData: { manualTaskCount: 21 },
+    });
+    expect(byId.get(`upsell-${C.marcus}`)).toMatchObject({
+      type: 'upsell',
+      title: `Upsell ${NAME.marcus} — repeat buyer, 45d since last purchase`,
+      estimatedValue: 420,
+      sourceData: { contactId: C.marcus, purchaseCount: 2, daysSincePurchase: 45 },
+    });
+    const text = JSON.stringify(res.body);
+    for (const absent of ['Unknown', NAME.zed, NAME.yara, NAME.ghost, NAME.nadia, 'Retired Package', 'Basic Wash', 'Outsider Product', '7777', '9999', '5555', '4444', '9000']) {
+      expect(text).not.toContain(absent);
+    }
+  });
+
+  it('GET insights/churn: each client (CLIENT and the legacy CUSTOMER spelling) with their real name, owed and overdue balance and recovery value; leads, deleted rows and other businesses are not in it', async () => {
+    const res = await get2('insights/churn', R.owner, R.biz);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const risks: any[] = res.body.risks;
+    expect(res.body.summary).toEqual({ totalAtRisk: 3 });
+    const byId = new Map(risks.map((r) => [r.contactId, r]));
+    expect([...byId.keys()].sort()).toEqual([C.alicia, C.maraval, C.marcus].sort());
+    expect(byId.get(C.alicia)).toMatchObject({
+      contactName: NAME.alicia, email: `${P}alicia@test.local`, riskScore: 95, riskLevel: 'critical',
+      outstandingBalance: 1120, daysSinceLastInteraction: 999, cancelledBookings: 0,
+    });
+    expect(byId.get(C.alicia).factors).toContain('$1,000 overdue balance');
+    expect(byId.get(C.alicia).estimatedRecoveryValue).toBeCloseTo(456, 6);
+    expect(byId.get(C.maraval)).toMatchObject({ contactName: NAME.maraval, riskScore: 95, riskLevel: 'critical', outstandingBalance: 250 });
+    expect(byId.get(C.maraval).estimatedRecoveryValue).toBeCloseTo(405, 6);
+    expect(byId.get(C.marcus)).toMatchObject({ contactName: NAME.marcus, riskScore: 55, riskLevel: 'high', outstandingBalance: 0, daysSinceLastInteraction: 70 });
+    expect(byId.get(C.marcus).estimatedRecoveryValue).toBeCloseTo(195, 6);
+    const text = JSON.stringify(res.body);
+    for (const absent of ['Unknown', NAME.zed, NAME.kerry, NAME.ghost, '5555', '7777']) expect(text).not.toContain(absent);
+  });
+
+  it('GET insights/pipeline: the live leads by pipeline stage with their open deal values (a won deal, a deleted lead and another business left out)', async () => {
+    const res = await get2('insights/pipeline', R.owner, R.biz);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const p = res.body.pipeline;
+    expect(p.totalLeads).toBe(2);
+    expect(p.totalPipelineValue).toBe(2500);
+    const stage = (name: string) => p.stages.find((s: any) => s.name === name);
+    expect(stage('new')).toMatchObject({ count: 1, value: 0 });
+    expect(stage('qualified')).toMatchObject({ count: 1, value: 2500, avgDaysInStage: 20 });
+    expect(p.funnel).toEqual([
+      { stage: 'new', count: 1, percentage: 50 },
+      { stage: 'qualified', count: 1, percentage: 50 },
+    ]);
+  });
+
+  it('GET report: the revenue, opportunities, churn, pipeline and cash flow (paid invoices, the upcoming payment by name, the forecast from successful payments) it carries are the real figures, and the narrative falls back without provider traffic', async () => {
+    const gatewayFrom = gatewayCalls.length;
+    const usageFrom = usageCalls.length;
+    const res = await get2('report', R.owner, R.biz).query({ scope: 'monthly' });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const r = res.body;
+    expect(r.revenue.totalRevenue).toBe(2120);
+    expect(r.revenue.topCustomers.map((c: any) => c.name)).toEqual([NAME.alicia, NAME.maraval]);
+    expect(r.opportunities.map((o: any) => o.title)).toContain(`Collect $1,000 from ${NAME.alicia}`);
+    expect(r.churnRisks.map((c: any) => c.contactName).sort()).toEqual([NAME.alicia, NAME.maraval, NAME.marcus].sort());
+    expect(r.pipeline.totalPipelineValue).toBe(2500);
+    // Paid invoices of this business (400 + 600 + 500 + 300 + 350; all rows were written this month).
+    expect(r.cashFlow.moneyIn).toBe(2150);
+    expect(r.cashFlow.upcomingPaymentsDue).toEqual([
+      expect.objectContaining({ id: INV.upcoming, contactName: NAME.alicia, amount: 120 }),
+    ]);
+    // The forecast projects the SUCCESSFUL payment of the last 30 days (Payment.status vocabulary), not the FAILED one.
+    expect(r.cashFlow.forecast.projectedInflow).toBe(400);
+    expect(r.narrative).toContain('2,120');
+    expect(gatewayCalls.length - gatewayFrom).toBe(1);
+    expect(usageCalls.length).toBe(usageFrom);
+    const text = JSON.stringify(res.body);
+    for (const absent of ['Unknown', NAME.zed, NAME.yara]) expect(text).not.toContain(absent);
+  });
+
+  it.each([
+    ['insights/revenue'],
+    ['insights/profit'],
+    ['insights/churn'],
+    ['insights/pipeline'],
+    ['report'],
+  ])('D-57: GET %s refuses a STAFF member of the business holding revenue none 403, with no customer name or figure', async (route) => {
+    const res = await get2(route, R.staffNoRevenue, R.biz);
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    const text = JSON.stringify(res.body);
+    for (const absent of [NAME.alicia, NAME.maraval, NAME.marcus, NAME.kerry, '1,000', '2120', '2500']) expect(text).not.toContain(absent);
+  });
+
+  it('D-57: a STAFF member holding revenue read gets the churn and pipeline figures of the business', async () => {
+    const churn = await get2('insights/churn', R.staffRevenueRead, R.biz);
+    expect(churn.status, JSON.stringify(churn.body)).toBe(200);
+    expect(churn.body.risks.map((r: any) => r.contactName).sort()).toEqual([NAME.alicia, NAME.maraval, NAME.marcus].sort());
+    const pipeline = await get2('insights/pipeline', R.staffRevenueRead, R.biz);
+    expect(pipeline.status, JSON.stringify(pipeline.body)).toBe(200);
+    expect(pipeline.body.pipeline.totalPipelineValue).toBe(2500);
+  });
+
+  it('the owner of bizX gets bizX\'s own figures and names, and nothing of bizR', async () => {
+    const revenue = await get2('insights/revenue', R.xOwner, R.bizX).query({ period: 'month' });
+    expect(revenue.status, JSON.stringify(revenue.body)).toBe(200);
+    expect(revenue.body.analysis.totalRevenue).toBe(777);
+    expect(revenue.body.analysis.topCustomers).toEqual([{ id: C.zed, name: NAME.zed, revenue: 777, invoices: 1, avgInvoice: 777 }]);
+    const profit = await get2('insights/profit', R.xOwner, R.bizX);
+    expect(profit.status, JSON.stringify(profit.body)).toBe(200);
+    const titles = profit.body.opportunities.map((o: any) => o.title);
+    expect(titles).toEqual(expect.arrayContaining([
+      `Collect $777 from ${NAME.zed}`,
+      `Re-engage ${NAME.yara} (score: 95)`,
+      'Automate 30 recurring manual tasks',
+      'Promote "Outsider Product" — only sold 0 times',
+    ]));
+    expect(profit.body.opportunities.find((o: any) => o.type === 'stale_lead').estimatedValue).toBe(3333);
+    const text = JSON.stringify([revenue.body, profit.body]);
+    for (const absent of [NAME.alicia, NAME.maraval, NAME.marcus, NAME.kerry, 'Premium Detailing', '2,500']) expect(text).not.toContain(absent);
+  });
 });
