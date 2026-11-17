@@ -126,9 +126,9 @@ export default function SecurityAuditPage() {
         <div role="alert" className="rounded-2xl border border-border/50 bg-card/40 p-6 flex items-start gap-3">
           <Lock className="w-5 h-5 text-muted-foreground shrink-0 mt-0.5" />
           <div className="space-y-1">
-            <div className="text-sm font-medium">No access</div>
+            <div className="text-sm font-medium">No access, ask the owner</div>
             <p className="text-xs text-muted-foreground">
-              The security audit needs access to this business&apos;s settings. Ask the business owner for access.
+              The security audit reads this business&apos;s settings. Ask the business owner for access.
             </p>
           </div>
         </div>
