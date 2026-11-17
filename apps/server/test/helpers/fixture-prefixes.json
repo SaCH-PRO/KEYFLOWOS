@@ -1036,6 +1036,11 @@
       "prefix": "v63j_",
       "owner": "apps/server/test/contact-audit-durable.integration.test.ts",
       "packet": "V1-63 (TOF-CONTACT-AUDIT-AWAIT)"
+    },
+    {
+      "prefix": "v71f_",
+      "owner": "apps/server/test/identity-finance-columns.integration.test.ts",
+      "packet": "V1-71 (FU-IDENTITY-FINANCE-COLUMNS)"
     }
   ],
   "pendingRenames": [],
