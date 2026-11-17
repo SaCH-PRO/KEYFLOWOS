@@ -21,6 +21,9 @@
  *   business checked. The share opens only the WhatsApp number the business
  *   saved on the contact (Contact.whatsappNumber, which no public route
  *   writes); a phone alone gets WhatsApp's chooser, as before the packet.
+ *   FU-WA-CONTACT-PHONE (D-221): a phone alone is now offered for the member
+ *   to confirm as the WhatsApp number first (quotes-panel-whatsapp-confirm
+ *   .test.tsx); unconfirmed it still never receives the link.
  * - WAH-CR-1: the panel's contacts are the 50 newest (fetchContacts sends no
  *   take), so the customer is read by id at share time (GET
  *   /crm/businesses/:id/contacts/:contactId, the member's own read), not
@@ -28,7 +31,7 @@
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import React from "react";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 
 const toastMock = vi.hoisted(() => {
   const fn = vi.fn() as unknown as ((...args: unknown[]) => unknown) & Record<string, ReturnType<typeof vi.fn>>;
@@ -196,9 +199,20 @@ describe("WA-HELPER quotes panel: Share via WhatsApp opens the customer's own nu
     expect(target.searchParams.get("text")).toContain(PUBLIC_URL);
   });
 
-  // SEC-WAH-1 (RED at 087b0365: wa.me/18685550199 with the bearer quote link).
-  it("a phone with no WhatsApp number saved by the business (a public form can write it) never receives the quote link: the chooser", async () => {
-    const target = await shareTarget(contact({ phone: "+1 868 555 0199", whatsappNumber: null }));
+  // SEC-WAH-1 (RED at 087b0365: wa.me/18685550199 with the bearer quote link). Since
+  // FU-WA-CONTACT-PHONE the phone is offered for the member to confirm first
+  // (quotes-panel-whatsapp-confirm.test.tsx); unconfirmed it never receives the link.
+  it("a phone with no WhatsApp number saved by the business (a public form can write it) never receives the quote link unconfirmed: the confirm step, and without confirming, the chooser", async () => {
+    served = { status: 200, contact: contact({ phone: "+1 868 555 0199", whatsappNumber: null }) };
+    installServer();
+    renderPanel([]);
+    fireEvent.click(screen.getAllByLabelText("More actions")[0]!);
+    fireEvent.click(screen.getByText("Share via WhatsApp"));
+    const step = await screen.findByRole("dialog", { name: /whatsapp number/i });
+    expect(windowOpen).not.toHaveBeenCalled();
+    fireEvent.click(within(step).getByRole("button", { name: "Share without a number" }));
+    await waitFor(() => expect(windowOpen).toHaveBeenCalledTimes(1));
+    const target = new URL(String(windowOpen.mock.calls[0]![0]));
     expect(target.origin + target.pathname).toBe("https://wa.me/");
     expect(target.searchParams.get("text")).toContain(PUBLIC_URL);
   });

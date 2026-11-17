@@ -1056,6 +1056,11 @@
       "prefix": "v63k_",
       "owner": "apps/server/test/contact-phone-e164.integration.test.ts",
       "packet": "V1-63 (WA-E164-SERVER)"
+    },
+    {
+      "prefix": "v71m_",
+      "owner": "apps/server/test/contact-whatsapp-confirm.integration.test.ts",
+      "packet": "V1-71 (FU-WA-CONTACT-PHONE)"
     }
   ],
   "pendingRenames": [],
