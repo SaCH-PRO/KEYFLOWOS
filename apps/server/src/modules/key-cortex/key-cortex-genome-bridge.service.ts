@@ -1,6 +1,6 @@
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { KeyCortexEventService, type KeyCortexClaim } from './key-cortex-event.service';
+import { KeyCortexEventService, actionResultOf, type KeyActionResult, type KeyCortexClaim } from './key-cortex-event.service';
 import { KeyCortexEvidenceService } from './key-cortex-evidence.service';
 
 // Key Genome domain services (optional — graceful degradation)
@@ -88,9 +88,12 @@ export interface OutcomeRecord {
   success: boolean;
   module: string;
   action: string;
-  result: 'success' | 'error' | 'partial';
+  /** What became of the action: it ran (success, error, partial) or never ran (pending_approval, blocked, skipped). */
+  result: KeyActionResult;
   approvalRequired: boolean;
   details?: Record<string, unknown>;
+  /** The turn or command the action ran in (business_events.correlation_id of its observation). */
+  correlationId?: string;
 }
 
 interface DnaScores {
@@ -394,14 +397,20 @@ export class KeyCortexGenomeBridgeService {
     }
 
     if (this.eventService) {
+      // FU-KEY-EVENT-COLUMNS review (KEC-COR-1): the row says what became of the action (a pending approval, a block
+      // or a skip is not a failure) and is on the action's correlation. The correlation id is its column, not a
+      // parameter; the writer keeps the rest of the details only where they are allowed (the description, the
+      // tool's data and the timestamp are withheld by name).
+      const parameters = Object.fromEntries(Object.entries(outcome.details ?? {}).filter(([key]) => key !== 'correlationId'));
       await this.eventService
         .logActionExecuted(businessId, {
           module: outcome.module,
           source: 'key_cortex',
           action: outcome.action,
-          parameters: outcome.details ?? {},
-          result: outcome.success ? 'success' : 'error',
+          parameters,
+          result: outcome.result,
           executionTimeMs: 0,
+          correlationId: outcome.correlationId,
         })
         .catch(() => undefined);
     }
@@ -492,6 +501,17 @@ export class KeyCortexGenomeBridgeService {
     return attached ?? claim ?? { id: `ev_${Date.now()}`, businessId, ...evidence };
   }
 
+  /**
+   * Report what became of an action KEY ran (or was asked to run): kept once as its ACTION_EXECUTED observation, and,
+   * when it succeeded, as KEY's cortex_action claim (D-220).
+   *
+   * FU-KEY-EVENT-COLUMNS review (KEC-COR-1): every caller (command execution, the query pipeline's processQuery and
+   * streamQuery, reasoning, interaction, evolution) sends `{ actionId, status, description, result: the tool's data,
+   * timestamp, correlationId }`. This read `outcome.result === 'success'` and `outcome.action`, which none of them
+   * sends, so a real success was kept as a failed action called 'unknown' and its claim was never written. The status
+   * is the outcome (actionResultOf; `result` is read as one only when it is a status word, as an older shape sent it),
+   * the action is named by `action` or else `actionId`, and the correlation id goes to both rows.
+   */
   async reportActionOutcome(
     businessId: string,
     outcome: Record<string, unknown>,
@@ -499,25 +519,32 @@ export class KeyCortexGenomeBridgeService {
   ): Promise<void> {
     this.logger.debug(`[reportActionOutcome] ${businessId}`);
 
+    const result = actionResultOf(outcome.status) ?? actionResultOf(outcome.result) ?? 'error';
+    const named = (value: unknown) => (typeof value === 'string' && value.trim() ? value : undefined);
+    const action = named(outcome.action) ?? named(outcome.actionId) ?? 'unknown';
+    const correlationId = named(metadata?.correlationId) ?? named(outcome.correlationId);
+
     // Record outcome for learning
     await this.recordOutcome(businessId, {
-      success: (outcome.result as string) === 'success',
+      success: result === 'success',
       module: String(outcome.module ?? 'key_cortex'),
-      action: String(outcome.action ?? 'unknown'),
-      result: (outcome.result as 'success' | 'error' | 'partial') ?? 'success',
-      approvalRequired: false,
+      action,
+      result,
+      approvalRequired: result === 'pending_approval',
       details: { ...outcome, ...metadata },
+      correlationId,
     });
 
     // Create evidence for successful actions
-    if ((outcome.result as string) === 'success') {
+    if (result === 'success') {
       await this.createEvidence(businessId, {
         sourceModule: String(outcome.module ?? 'key_cortex'),
         sourceEntityType: 'cortex_action',
-        sourceEntityId: String(outcome.actionId ?? ''),
-        description: `KEY executed ${outcome.action}: ${outcome.description ?? ''}`,
+        sourceEntityId: action,
+        description: `KEY executed ${action}: ${outcome.description ?? ''}`,
         evidenceStrength: 0.8,
         occurredAt: new Date().toISOString(),
+        ...(correlationId ? { correlationId } : {}),
         ...metadata,
       }).catch(() => undefined);
     }

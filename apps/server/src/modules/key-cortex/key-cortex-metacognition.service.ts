@@ -5,7 +5,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { KeyCortexEventService } from './key-cortex-event.service';
+import { EXECUTED_ACTION_RESULTS, KeyCortexEventService } from './key-cortex-event.service';
 import { KeyCortexEvidenceService } from './key-cortex-evidence.service';
 import { BusinessEventType } from '@prisma/client';
 import {
@@ -599,6 +599,11 @@ export class KeyCortexMetacognitionService {
 
   /**
    * Compute action success rate: % of executed actions that worked.
+   *
+   * FU-KEY-EVENT-COLUMNS review (KEC-COR-1): only the observations of an action that ran count
+   * (EXECUTED_ACTION_RESULTS). The ACTION_EXECUTED rows also hold KEY's cortex claims about an action (cortex_action,
+   * action_outcome: no result of their own) and the outcomes of actions that never ran (pending_approval, blocked,
+   * skipped); counting them as failures put a successful action at 1 in 3.
    */
   private async computeActionSuccessRate(
     businessId: string,
@@ -608,14 +613,15 @@ export class KeyCortexMetacognitionService {
       limit: 500,
     });
 
-    if (events.length === 0) return 0;
+    const ran = events.filter((e) => {
+      const payload = (e.metadata ?? {}) as Record<string, unknown>;
+      return typeof payload.result === 'string' && EXECUTED_ACTION_RESULTS.has(payload.result);
+    });
+    if (ran.length === 0) return 0;
 
-    const successes = events.filter((e) => {
-      const payload = e.metadata as Record<string, unknown>;
-      return payload.result === 'success';
-    }).length;
+    const successes = ran.filter((e) => (e.metadata as Record<string, unknown>).result === 'success').length;
 
-    return Math.round((successes / events.length) * 100) / 100;
+    return Math.round((successes / ran.length) * 100) / 100;
   }
 
   /**

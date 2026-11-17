@@ -35,7 +35,8 @@ import { AiUsageService } from '../ai/ai-usage.service';
 // it crashed `node dist/main.js` with ERR_REQUIRE_ESM before NestFactory ran.
 // randomUUID returns a v4 UUID string, and every call site here is a bare
 // uuidv4() with no arguments, so this is a true drop-in.
-import { randomUUID as uuidv4 } from 'node:crypto';
+import { createHash, randomUUID as uuidv4 } from 'node:crypto';
+import { BusinessEventType } from '@prisma/client';
 import { keyCronsDisabled } from '../../core/config/env';
 
 /* ─────────────────────────── Type Definitions ─────────────────────────── */
@@ -80,6 +81,24 @@ const SIGNAL_ALERT_THRESHOLD = 0.6;
  * about a marginal account is not worth interrupting anyone over.
  */
 const CHURN_ALERT_RISK_THRESHOLD = 0.7;
+
+/**
+ * FU-KEY-EVENT-COLUMNS review (KEC-COR-2): how long a signal may go unseen and still be the same persisting signal:
+ * two runs of the job that sees it (the hourly scan; the daily churn analysis). A signal whose memory row was
+ * refreshed within this before a run persists, and its alert, once raised, is not raised again; one unseen for longer
+ * lapsed, and is raised again when it comes back.
+ */
+const SIGNAL_LAPSE_MS = 2 * 60 * 60 * 1000;
+const CHURN_LAPSE_MS = 2 * 24 * 60 * 60 * 1000;
+
+/**
+ * The subject id of an alert about a signal or a churn risk (business_events.subject_id): a digest of what makes it
+ * that signal (signalIdentity) or that customer (the matched entity), so a later run can find the alert it already
+ * raised while the row names no free text and no customer.
+ */
+function alertSubjectId(prefix: 'sig' | 'churn', identity: string): string {
+  return `${prefix}_${createHash('sha256').update(identity).digest('hex').slice(0, 24)}`;
+}
 
 export interface WeakSignal {
   id: string;
@@ -590,6 +609,8 @@ export class KeyCortexIntuitionService {
    */
   private async recordSignals(businessId: string, signals: WeakSignal[]): Promise<void> {
     if (signals.length === 0) return;
+    // KEC-COR-2: when each signal was last seen, read before this scan refreshes it (alertStillRaised).
+    const lastSeen = await this.memoryLastSeen(businessId, signals.map((s) => `sig_${businessId}_${signalIdentity(s)}`));
 
     for (const signal of signals) {
       if (signal.confidence < SIGNAL_PERSIST_THRESHOLD) continue;
@@ -645,22 +666,30 @@ export class KeyCortexIntuitionService {
         s.confidence >= SIGNAL_ALERT_THRESHOLD,
     );
 
+    const raisedNow = new Set<string>();
     for (const signal of worthRaising) {
       try {
-        await this.eventService.logAlert(businessId, {
-          alert: signal.description,
-          severity: signal.potentialImpact === 'critical' ? 'critical' : 'high',
-          module: 'key_cortex',
-          source: 'intuition',
-          details: {
-            signalId: signal.id,
-            category: signal.category,
-            trend: signal.trend,
-            confidence: signal.confidence,
-            recommendedInvestigation: signal.recommendedInvestigation,
-            sources: signal.sources,
-          },
-        });
+        // KEC-COR-2: one ALERT_TRIGGERED row per persisting signal, not one per hourly scan.
+        const subject = { type: MEMORY_TYPE_WEAK_SIGNAL, id: alertSubjectId('sig', signalIdentity(signal)) };
+        const seen = lastSeen.get(`sig_${businessId}_${signalIdentity(signal)}`);
+        if (!raisedNow.has(subject.id) && !(await this.alertStillRaised(businessId, subject, seen, SIGNAL_LAPSE_MS))) {
+          raisedNow.add(subject.id);
+          await this.eventService.logAlert(businessId, {
+            alert: signal.description,
+            severity: signal.potentialImpact === 'critical' ? 'critical' : 'high',
+            module: 'key_cortex',
+            source: 'intuition',
+            subject,
+            details: {
+              signalId: signal.id,
+              category: signal.category,
+              trend: signal.trend,
+              confidence: signal.confidence,
+              recommendedInvestigation: signal.recommendedInvestigation,
+              sources: signal.sources,
+            },
+          });
+        }
       } catch (error: unknown) {
         this.logger.warn(
           `[Intuition] Could not raise alert for ${signal.id}: ` +
@@ -681,6 +710,50 @@ export class KeyCortexIntuitionService {
       `[Intuition] Recorded ${signals.length} signals for ${businessId}, ` +
         `raised ${worthRaising.length} alerts`,
     );
+  }
+
+  /**
+   * FU-KEY-EVENT-COLUMNS review (KEC-COR-2): when each of these memory rows was last refreshed, read before this run
+   * refreshes them. A read that fails reads as never seen, so the alert is raised as it was before.
+   */
+  private async memoryLastSeen(businessId: string, ids: string[]): Promise<Map<string, Date>> {
+    try {
+      const rows = await this.prisma.client.keyCortexMemory.findMany({
+        where: { businessId, id: { in: [...new Set(ids)] } },
+        select: { id: true, updatedAt: true },
+      });
+      return new Map(rows.map((row: { id: string; updatedAt: Date }) => [row.id, row.updatedAt]));
+    } catch {
+      return new Map();
+    }
+  }
+
+  /**
+   * FU-KEY-EVENT-COLUMNS review (KEC-COR-2): whether the alert about `subject` is still raised, so this run adds no
+   * row for it. It is when the signal persisted (its memory row was refreshed within `lapseMs` before this run, as
+   * the run before would) and an alert about it is already kept. Logging every run's alert kept a new
+   * ALERT_TRIGGERED row per persisting signal every hour (and every day for churn), which the memory upsert above is
+   * keyed to avoid. A signal seen for the first time, or one that lapsed and came back, is raised. A read that fails
+   * reads as not raised (the alert is kept, as before).
+   */
+  private async alertStillRaised(
+    businessId: string,
+    subject: { type: string; id: string },
+    lastSeen: Date | undefined,
+    lapseMs: number,
+  ): Promise<boolean> {
+    if (!lastSeen || Date.now() - lastSeen.getTime() > lapseMs) return false;
+    try {
+      const raised = await this.eventService.getEvents(businessId, {
+        type: BusinessEventType.ALERT_TRIGGERED,
+        source: 'intuition',
+        subject,
+        limit: 1,
+      });
+      return raised.length > 0;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -743,6 +816,9 @@ export class KeyCortexIntuitionService {
    */
   private async recordChurnRisk(businessId: string, matches: PatternMatch[]): Promise<void> {
     if (matches.length === 0) return;
+    // KEC-COR-2: when each customer's risk was last seen, read before this run refreshes it (alertStillRaised).
+    const lastSeen = await this.memoryLastSeen(businessId, matches.map((m) => `churn_${businessId}_${m.matchedEntity}`));
+    const raisedNow = new Set<string>();
 
     let alerted = 0;
     for (const match of matches) {
@@ -789,21 +865,29 @@ export class KeyCortexIntuitionService {
 
       if (match.riskScore >= CHURN_ALERT_RISK_THRESHOLD && match.confidence >= SIGNAL_ALERT_THRESHOLD) {
         try {
-          await this.eventService.logAlert(businessId, {
-            alert: match.prediction,
-            severity: match.riskScore >= 0.85 ? 'critical' : 'high',
-            module: 'key_cortex',
-            source: 'intuition',
-            details: {
-              matchedEntity: match.matchedEntity,
-              matchedEntityType: match.matchedEntityType,
-              pattern: match.pattern,
-              timeHorizon: match.timeHorizon,
-              riskScore: match.riskScore,
-              confidence: match.confidence,
-            },
-          });
-          alerted += 1;
+          // KEC-COR-2: one ALERT_TRIGGERED row per customer the daily analysis keeps predicting, not one per day. The
+          // subject is a digest of the customer, not the customer.
+          const subject = { type: MEMORY_TYPE_CHURN_RISK, id: alertSubjectId('churn', match.matchedEntity) };
+          const seen = lastSeen.get(`churn_${businessId}_${match.matchedEntity}`);
+          if (!raisedNow.has(subject.id) && !(await this.alertStillRaised(businessId, subject, seen, CHURN_LAPSE_MS))) {
+            raisedNow.add(subject.id);
+            await this.eventService.logAlert(businessId, {
+              alert: match.prediction,
+              severity: match.riskScore >= 0.85 ? 'critical' : 'high',
+              module: 'key_cortex',
+              source: 'intuition',
+              subject,
+              details: {
+                matchedEntity: match.matchedEntity,
+                matchedEntityType: match.matchedEntityType,
+                pattern: match.pattern,
+                timeHorizon: match.timeHorizon,
+                riskScore: match.riskScore,
+                confidence: match.confidence,
+              },
+            });
+            alerted += 1;
+          }
         } catch (error: unknown) {
           this.logger.warn(
             `[Intuition] Could not raise churn alert: ` +

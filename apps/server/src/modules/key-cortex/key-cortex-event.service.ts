@@ -48,6 +48,47 @@ const OBSERVATION_FIELDS: ReadonlySet<string> = new Set([
   'parameters', 'details', 'estimatedImpact',
 ]);
 
+/**
+ * FU-KEY-EVENT-COLUMNS review (KEC-COR-1): fields kept only as a single value (a token, number or flag). An action's
+ * `result` or `status` is an outcome ('success', 'pending_approval'); an object or list under either is the tool's
+ * data, withheld whole. Kept by the nested rules, it kept the parts whose keys KEY uses for its own figures (a tool
+ * answering `{ status, cost }` kept the business's cost).
+ */
+const SCALAR_FIELDS: ReadonlySet<string> = new Set(['result', 'status']);
+
+/**
+ * What became of an action KEY reports (FU-KEY-EVENT-COLUMNS review, KEC-COR-1): it ran and worked ('success'), failed
+ * ('error') or partly worked ('partial'); or it never ran because it waits for the owner's approval
+ * ('pending_approval'), was blocked ('blocked') or was skipped ('skipped').
+ */
+export type KeyActionResult = 'success' | 'error' | 'partial' | 'pending_approval' | 'blocked' | 'skipped';
+
+/** The callers' status words, by the result KEY keeps (CortexActionResult's, the interaction and evolution services'). */
+const ACTION_RESULTS: Readonly<Record<string, KeyActionResult>> = {
+  success: 'success',
+  error: 'error',
+  failure: 'error',
+  failed: 'error',
+  partial: 'partial',
+  pending_approval: 'pending_approval',
+  blocked: 'blocked',
+  skipped: 'skipped',
+};
+
+/** The result KEY keeps for a caller's status word, or undefined when it is not one. */
+export function actionResultOf(status: unknown): KeyActionResult | undefined {
+  return typeof status === 'string' && Object.prototype.hasOwnProperty.call(ACTION_RESULTS, status)
+    ? ACTION_RESULTS[status]
+    : undefined;
+}
+
+/**
+ * The results of an action that ran: the only rows an action success rate counts. An action waiting for approval,
+ * blocked or skipped never ran, and a cortex claim about an action is not another run of it. 'failure' is a
+ * capability claim's word for a failed run (KeyCortexMetacognitionService.trackCapability).
+ */
+export const EXECUTED_ACTION_RESULTS: ReadonlySet<string> = new Set(['success', 'error', 'failure', 'partial']);
+
 /** A short closed-vocabulary token or id: a letter first, then letters, digits, '_', '-', '.', ':'; at most 64. */
 const TOKEN = /^[A-Za-z][A-Za-z0-9_.:-]{0,63}$/;
 /** A column id (correlation, session): a letter or digit first; at most 128. */
@@ -121,7 +162,7 @@ function keepFields(payload: Record<string, unknown>, prefix: string, depth: num
   for (const [key, value] of Object.entries(payload)) {
     if (value === undefined) continue;
     const path = `${prefix}${TOKEN.test(key) ? key : '<key>'}`;
-    if (!OBSERVATION_FIELDS.has(key)) {
+    if (!OBSERVATION_FIELDS.has(key) || (SCALAR_FIELDS.has(key) && (Array.isArray(value) || isPlainObject(value)))) {
       withheld.push(path);
       continue;
     }
@@ -205,6 +246,8 @@ export interface KeyObservationFilters {
   module?: string;
   /** The organ that observed it (actor_id). */
   source?: string;
+  /** What the observation is about (subject_type / subject_id). */
+  subject?: { type: string; id: string };
   startDate?: Date;
   endDate?: Date;
   genomeSignal?: boolean;
@@ -326,7 +369,8 @@ export class KeyCortexEventService {
 
   /**
    * Log an action execution — the most common event type.
-   * Captures parameters, result, and execution time for performance tracking.
+   * Captures parameters, result, and execution time for performance tracking. `result` is what became of the action
+   * (KeyActionResult): an action that waits for approval, was blocked or was skipped is kept as that, not as a failure.
    */
   async logActionExecuted(
     businessId: string,
@@ -335,7 +379,7 @@ export class KeyCortexEventService {
       source: string;
       action: string;
       parameters: Record<string, unknown>;
-      result: 'success' | 'error';
+      result: KeyActionResult;
       executionTimeMs: number;
       correlationId?: string;
       userId?: string;
@@ -461,7 +505,8 @@ export class KeyCortexEventService {
   }
 
   /**
-   * Log an alert triggered by the system, autopilot monitor, or governance.
+   * Log an alert triggered by the system, autopilot monitor, or governance. `subject` names what it is about (a
+   * signal, a churn risk), so a caller can tell an alert already raised for it (getEvents' `subject` filter).
    */
   async logAlert(
     businessId: string,
@@ -472,6 +517,7 @@ export class KeyCortexEventService {
       source: string;
       details?: Record<string, unknown>;
       correlationId?: string;
+      subject?: { type: string; id: string };
     },
   ): Promise<BusinessEvent> {
     return this.logEvent({
@@ -480,6 +526,7 @@ export class KeyCortexEventService {
       module: params.module,
       source: params.source,
       action: 'alert',
+      subject: params.subject,
       payload: {
         alert: params.alert,
         severity: params.severity,
@@ -589,6 +636,10 @@ export class KeyCortexEventService {
     const where: Prisma.BusinessEventWhereInput = { businessId: requireBusiness(businessId), source: KEY_OBSERVATION_SOURCE };
     if (filters.type) where.eventType = filters.type;
     if (filters.source) where.actorId = filters.source;
+    if (filters.subject) {
+      where.subjectType = filters.subject.type;
+      where.subjectId = filters.subject.id;
+    }
     const json: Prisma.BusinessEventWhereInput[] = [];
     if (filters.module) json.push({ metadata: { path: ['module'], equals: filters.module } });
     if (filters.genomeSignal !== undefined) json.push({ metadata: { path: ['genomeSignal'], equals: filters.genomeSignal } });
