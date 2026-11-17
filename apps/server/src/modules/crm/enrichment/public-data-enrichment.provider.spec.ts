@@ -297,6 +297,20 @@ describe('TOF-WEBSITE-ENRICHMENT (DoD): 127.0.0.1, 10.x, 169.254.169.254, a publ
   });
 
   it('a public host redirecting to a name that resolves to the metadata address is refused before any request to it', async () => {
+    // Review SEC-WEB-1: the target is the site's own www. name, so the redirect is within the site
+    // and it is the address check on the hop (not the site rule) that refuses it.
+    answers['v63l-hop.invalid'] = [{ address: PUBLIC_V4, family: 4 }];
+    answers['www.v63l-hop.invalid'] = [{ address: '169.254.169.254', family: 4 }];
+    pages['https://v63l-hop.invalid/'] = redirectTo('http://www.v63l-hop.invalid/latest/meta-data/');
+    pages['http://www.v63l-hop.invalid/latest/meta-data/'] = site(ACME_HOME);
+
+    expect(await provider().enrich(query('jane@v63l-hop.invalid'))).toEqual({ status: 'no_match' });
+    expect(tapped.map((t) => t.url)).toEqual(['https://v63l-hop.invalid/']);
+    expect(asked).toEqual({ 'v63l-hop.invalid': 1, 'www.v63l-hop.invalid': 1 });
+    expect(connectSpy).not.toHaveBeenCalled();
+  });
+
+  it('review SEC-WEB-1: a public host redirecting to another domain that resolves to the metadata address is refused before that name is even resolved', async () => {
     answers['v63l-hop.invalid'] = [{ address: PUBLIC_V4, family: 4 }];
     answers['v63l-meta.invalid'] = [{ address: '169.254.169.254', family: 4 }];
     pages['https://v63l-hop.invalid/'] = redirectTo('http://v63l-meta.invalid/latest/meta-data/');
@@ -304,7 +318,7 @@ describe('TOF-WEBSITE-ENRICHMENT (DoD): 127.0.0.1, 10.x, 169.254.169.254, a publ
 
     expect(await provider().enrich(query('jane@v63l-hop.invalid'))).toEqual({ status: 'no_match' });
     expect(tapped.map((t) => t.url)).toEqual(['https://v63l-hop.invalid/']);
-    expect(asked).toEqual({ 'v63l-hop.invalid': 1, 'v63l-meta.invalid': 1 });
+    expect(asked).toEqual({ 'v63l-hop.invalid': 1 });
     expect(connectSpy).not.toHaveBeenCalled();
   });
 
@@ -579,5 +593,269 @@ describe('TOF-WEBSITE-ENRICHMENT (PRS-M14): the page is parsed linearly and only
       readWebsiteFacts(markup);
       expect(Date.now() - started, markup.slice(0, 40)).toBeLessThan(500);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TOF-WEBSITE-ENRICHMENT review repair (SEC-WEB-1, COR-WEB-1, COR-WEB-2, COR-WEB-3).
+// ---------------------------------------------------------------------------
+
+describe("TOF-WEBSITE-ENRICHMENT review SEC-WEB-1: a redirect is followed only within the site of the contact's email domain (that host, or its www. pair)", () => {
+  const OTHER_HOSTS = [
+    'v63l-elsewhere.invalid',
+    'www.v63l-elsewhere.invalid',
+    'evil-v63l-acme.invalid',
+    'v63l-acme.invalid.v63l-elsewhere.invalid',
+    'shop.v63l-acme.invalid',
+    'www.www.v63l-acme.invalid',
+  ];
+
+  beforeEach(() => {
+    answers['v63l-acme.invalid'] = [{ address: PUBLIC_V4, family: 4 }];
+    for (const host of OTHER_HOSTS) answers[host] = [{ address: PUBLIC_V4_B, family: 4 }];
+  });
+
+  it.each([
+    ['another public domain, with any path and query', 'http://v63l-elsewhere.invalid/any/path?q=1'],
+    ['another public domain over https', 'https://v63l-elsewhere.invalid/'],
+    ['the www. name of another domain', 'https://www.v63l-elsewhere.invalid/'],
+    ['a name that ends with the site name but is not under it', 'https://evil-v63l-acme.invalid/'],
+    ['a name that starts with the site name', 'https://v63l-acme.invalid.v63l-elsewhere.invalid/'],
+    ['another subdomain of the site', 'https://shop.v63l-acme.invalid/'],
+    ['a www. under the www. name', 'https://www.www.v63l-acme.invalid/'],
+  ])('a redirect to %s is a miss: the target is never resolved, asked for anything or read, and nothing it declares comes back', async (_label, location) => {
+    pages['https://v63l-acme.invalid/'] = redirectTo(location, 301);
+    pages[location] = site('<meta property="og:site_name" content="Second">');
+
+    const out = await provider().enrich(query('jane@v63l-acme.invalid'));
+
+    expect(out).toEqual({ status: 'no_match' });
+    expect(tapped.map((t) => t.url)).toEqual(['https://v63l-acme.invalid/']);
+    expect(asked).toEqual({ 'v63l-acme.invalid': 1 });
+    expect(connectSpy).not.toHaveBeenCalled();
+  });
+
+  it('within the site, the same host on another path or scheme, its www. name and the bare name again are followed, each hop re-checked and pinned on its own', async () => {
+    answers['www.v63l-acme.invalid'] = [{ address: PUBLIC_V4_B, family: 4 }];
+    pages['https://v63l-acme.invalid/'] = redirectTo('http://v63l-acme.invalid/en/', 301);
+    pages['http://v63l-acme.invalid/en/'] = redirectTo('https://WWW.v63l-acme.invalid/en/', 302);
+    pages['https://www.v63l-acme.invalid/en/'] = redirectTo('https://v63l-acme.invalid/en/home', 307);
+    pages['https://v63l-acme.invalid/en/home'] = site(ACME_HOME);
+
+    const out = await provider().enrich(query('jane@v63l-acme.invalid'));
+
+    expect(out).toEqual({
+      status: 'match',
+      result: { companyName: 'Acme Bakery & Co', raw: { source: 'website', website: 'https://v63l-acme.invalid/' } },
+    });
+    expect(tapped.map((t) => t.url)).toEqual([
+      'https://v63l-acme.invalid/',
+      'http://v63l-acme.invalid/en/',
+      'https://www.v63l-acme.invalid/en/',
+      'https://v63l-acme.invalid/en/home',
+    ]);
+    expect((tapped[2].dispatcher as PinnedDispatcher).target).toEqual({
+      hostname: 'www.v63l-acme.invalid',
+      addresses: [{ address: PUBLIC_V4_B, family: 4 }],
+    });
+    expect(asked).toEqual({ 'v63l-acme.invalid': 3, 'www.v63l-acme.invalid': 1 });
+  });
+
+  it('a contact whose email is at the www. name may be redirected to the bare name', async () => {
+    answers['www.v63l-acme.invalid'] = [{ address: PUBLIC_V4_B, family: 4 }];
+    pages['https://www.v63l-acme.invalid/'] = redirectTo('https://v63l-acme.invalid/', 301);
+    pages['https://v63l-acme.invalid/'] = site(ACME_HOME);
+
+    const out = await provider().enrich(query('jane@www.v63l-acme.invalid'));
+
+    expect(out).toMatchObject({ status: 'match', result: { companyName: 'Acme Bakery & Co', raw: { website: 'https://v63l-acme.invalid/' } } });
+    expect(tapped.map((t) => t.url)).toEqual(['https://www.v63l-acme.invalid/', 'https://v63l-acme.invalid/']);
+  });
+});
+
+describe('TOF-WEBSITE-ENRICHMENT review COR-WEB-1: a resolver that cannot answer now is a transient error (never stamped); only a name with no address is a miss', () => {
+  function lookupFails(code: string | undefined) {
+    lookupSpy.mockImplementation((async (hostname: string) => {
+      asked[hostname] = (asked[hostname] ?? 0) + 1;
+      throw code === undefined ? new Error('the resolver broke') : Object.assign(new Error(`getaddrinfo ${code} ${hostname}`), { code });
+    }) as any);
+  }
+
+  it.each(['EAI_AGAIN', 'ETIMEOUT', 'ESERVFAIL', 'EAI_FAIL', 'ECONNREFUSED', undefined])(
+    'a lookup failing with %s is an error with no request, so the next tap asks again',
+    async (code) => {
+      lookupFails(code);
+      expect(await provider().enrich(query('jane@v63l-acme.invalid'))).toEqual({ status: 'error' });
+      expect(asked).toEqual({ 'v63l-acme.invalid': 1 });
+      expect(tapped).toEqual([]);
+      expect(connectSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['ENOTFOUND', 'ENODATA'])('a lookup failing with %s (the name has no address) is a miss with no request', async (code) => {
+    lookupFails(code);
+    expect(await provider().enrich(query('jane@v63l-acme.invalid'))).toEqual({ status: 'no_match' });
+    expect(tapped).toEqual([]);
+  });
+
+  it('a name that resolves to no address at all is a miss', async () => {
+    answers['v63l-acme.invalid'] = [];
+    expect(await provider().enrich(query('jane@v63l-acme.invalid'))).toEqual({ status: 'no_match' });
+    expect(tapped).toEqual([]);
+  });
+
+  it('a redirect hop whose lookup the resolver cannot answer now is an error, not a miss', async () => {
+    answers['v63l-acme.invalid'] = [{ address: PUBLIC_V4, family: 4 }];
+    pages['https://v63l-acme.invalid/'] = redirectTo('https://www.v63l-acme.invalid/', 301);
+    const resolve = lookupSpy.getMockImplementation()!;
+    lookupSpy.mockImplementation((async (hostname: string, options?: { all?: boolean }) => {
+      if (hostname === 'www.v63l-acme.invalid') {
+        asked[hostname] = (asked[hostname] ?? 0) + 1;
+        throw Object.assign(new Error(`getaddrinfo EAI_AGAIN ${hostname}`), { code: 'EAI_AGAIN' });
+      }
+      return resolve(hostname, options);
+    }) as any);
+
+    expect(await provider().enrich(query('jane@v63l-acme.invalid'))).toEqual({ status: 'error' });
+    expect(tapped.map((t) => t.url)).toEqual(['https://v63l-acme.invalid/']);
+    expect(asked).toEqual({ 'v63l-acme.invalid': 1, 'www.v63l-acme.invalid': 1 });
+  });
+});
+
+describe("TOF-WEBSITE-ENRICHMENT review COR-WEB-2: the page is decoded in the charset it declares (its byte-order mark, its Content-Type, else a <meta> charset), and a value that cannot be spelled is never written", () => {
+  const latin1 = (text: string) => Uint8Array.from(Buffer.from(text, 'latin1'));
+  const utf8 = (text: string) => new TextEncoder().encode(text);
+  const bytesPage = (bytes: Uint8Array, contentType: string) => () =>
+    new Response(bytes, { status: 200, headers: { 'content-type': contentType } });
+
+  beforeEach(() => {
+    answers['v63l-latin.invalid'] = [{ address: PUBLIC_V4, family: 4 }];
+  });
+
+  async function nameOf(bytes: Uint8Array, contentType: string) {
+    pages['https://v63l-latin.invalid/'] = bytesPage(bytes, contentType);
+    return provider().enrich(query('jane@v63l-latin.invalid'));
+  }
+
+  it('a Latin-1 page labelled iso-8859-1 in its Content-Type keeps its accented letters', async () => {
+    const out = await nameOf(latin1('<meta property="og:site_name" content="Café René Pâtisserie">'), 'text/html; charset=iso-8859-1');
+    expect(out).toMatchObject({ status: 'match', result: { companyName: 'Café René Pâtisserie' } });
+  });
+
+  it('a quoted windows-1252 label is read, and its curly quote (0x92) is the letter it stands for', async () => {
+    const out = await nameOf(latin1("<meta property='og:site_name' content='Joe\x92s Café'>"), 'text/html; Charset="Windows-1252"');
+    expect(out).toMatchObject({ status: 'match', result: { companyName: 'Joe’s Café' } });
+  });
+
+  it('with no charset in the Content-Type, <meta charset> in the first 1024 bytes decides', async () => {
+    const out = await nameOf(latin1('<html><head><meta charset="ISO-8859-1"><meta property="og:site_name" content="Crème Brûlée Ltd">'), 'text/html');
+    expect(out).toMatchObject({ status: 'match', result: { companyName: 'Crème Brûlée Ltd' } });
+  });
+
+  it('with no charset in the Content-Type, <meta http-equiv="Content-Type"> in the first 1024 bytes decides', async () => {
+    const out = await nameOf(
+      latin1('<meta content="text/html; charset=windows-1252" http-equiv="content-type"><meta property="og:site_name" content="Señor Pâté">'),
+      'text/html',
+    );
+    expect(out).toMatchObject({ status: 'match', result: { companyName: 'Señor Pâté' } });
+  });
+
+  it('a <meta> charset past the first 1024 bytes is not read: the page is UTF-8, so its Latin-1 name is not written', async () => {
+    const filler = `<!-- ${'x'.repeat(1100)} -->`;
+    expect(
+      await nameOf(latin1(`<html><head>${filler}<meta charset="iso-8859-1"><meta property="og:site_name" content="Café Late">`), 'text/html'),
+    ).toEqual({ status: 'no_match' });
+  });
+
+  it('the Content-Type charset outranks a <meta> one, and a UTF-8 byte-order mark outranks both', async () => {
+    expect(
+      await nameOf(utf8('<meta charset="iso-8859-1"><meta property="og:site_name" content="Café Utf">'), 'text/html; charset=utf-8'),
+    ).toMatchObject({ status: 'match', result: { companyName: 'Café Utf' } });
+    expect(
+      await nameOf(
+        Uint8Array.from([0xef, 0xbb, 0xbf, ...utf8('<meta property="og:site_name" content="Café Bom">')]),
+        'text/html; charset=iso-8859-1',
+      ),
+    ).toMatchObject({ status: 'match', result: { companyName: 'Café Bom' } });
+  });
+
+  it('an unknown label, or none at all, is read as UTF-8', async () => {
+    expect(await nameOf(utf8('<meta property="og:site_name" content="Café Unknown">'), 'text/html; charset=x-v63l-made-up')).toMatchObject({
+      status: 'match',
+      result: { companyName: 'Café Unknown' },
+    });
+    expect(await nameOf(utf8('<meta property="og:site_name" content="Café None">'), 'text/html')).toMatchObject({
+      status: 'match',
+      result: { companyName: 'Café None' },
+    });
+  });
+
+  it('a name whose bytes are not in the charset the page declares is not written (no U+FFFD): a miss, or the next declared name', async () => {
+    expect(await nameOf(latin1('<meta property="og:site_name" content="Café">'), 'text/html; charset=utf-8')).toEqual({ status: 'no_match' });
+    expect(
+      await nameOf(latin1('<meta property="og:site_name" content="Café"><meta name="application-name" content="Cafe Ok">'), 'text/html; charset=utf-8'),
+    ).toMatchObject({ status: 'match', result: { companyName: 'Cafe Ok' } });
+  });
+
+  it('readWebsiteFacts drops a value carrying U+FFFD, whether in the text or as a character reference', () => {
+    expect(readWebsiteFacts('<meta property="og:site_name" content="Caf� Ren�">')).toEqual({});
+    expect(readWebsiteFacts('<meta property="og:site_name" content="Caf&#xFFFD;"><meta name="application-name" content="Cafe">')).toEqual({ companyName: 'Cafe' });
+    const ld = { '@type': 'Organization', name: 'Acme � Ltd', address: { addressLocality: 'Port of Spain', addressCountry: 'T�' } };
+    expect(readWebsiteFacts(`<script type="application/ld+json">${JSON.stringify(ld)}</script>`)).toEqual({ city: 'Port of Spain' });
+  });
+});
+
+describe('TOF-WEBSITE-ENRICHMENT review COR-WEB-3: a personal mailbox at a webmail or ISP host names no business website', () => {
+  it.each([
+    'live.ca',
+    'live.fr',
+    'live.com.au',
+    'live.co.za',
+    'msn.co.uk',
+    'msn.com',
+    'mail.ru',
+    'bk.ru',
+    'orange.fr',
+    'wanadoo.fr',
+    'free.fr',
+    'laposte.net',
+    'libero.it',
+    'virgilio.it',
+    'rediffmail.com',
+    'naver.com',
+    'hanmail.net',
+    'rogers.com',
+    'shaw.ca',
+    'sympatico.ca',
+    'sky.com',
+    'virginmedia.com',
+    'cox.net',
+    'charter.net',
+    'bellsouth.net',
+    'bigpond.com',
+    'optusnet.com.au',
+    'xtra.co.nz',
+    'duck.com',
+    'tuta.io',
+    'tutanota.de',
+    'protonmail.ch',
+    'posteo.de',
+    'seznam.cz',
+    'wp.pl',
+    'uol.com.br',
+  ])('jane.personal@%s gives no website: the source does not apply and nothing is resolved or fetched', async (host) => {
+    const email = `jane.personal@${host}`;
+    expect(websiteFor(query(email))).toBeNull();
+    const source = provider();
+    expect(source.appliesTo(query(email))).toBe(false);
+    expect(await source.enrich(query(email))).toEqual({ status: 'no_match' });
+    expect(lookupSpy).not.toHaveBeenCalled();
+    expect(tapped).toEqual([]);
+  });
+
+  it('a business domain is still a website (a brand name inside a longer label, or under a business domain, is not free mail)', () => {
+    expect(websiteFor(query('jane@livestock-v63l.invalid'))?.href).toBe('https://livestock-v63l.invalid/');
+    expect(websiteFor(query('jane@msn-v63l.invalid'))?.href).toBe('https://msn-v63l.invalid/');
+    expect(websiteFor(query('jane@live.v63l-acme.invalid'))?.href).toBe('https://live.v63l-acme.invalid/');
   });
 });

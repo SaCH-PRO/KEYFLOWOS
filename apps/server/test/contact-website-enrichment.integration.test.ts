@@ -24,6 +24,10 @@
  *   - Only on the tap of a member who may edit the contact: a contact the member cannot see answers
  *     404 like an unknown id, an edit-scope refusal stays 403, a read-only member and an outsider
  *     are refused, and creating or editing a contact asks the website nothing.
+ *   - Review repair: a redirect to another domain is a miss before that domain is resolved (its
+ *     own www. name is followed); a resolver that cannot answer now (EAI_AGAIN) is provider_error,
+ *     not a stamped miss; a Latin-1 page is decoded in the charset it declares; a personal mailbox
+ *     at a webmail or ISP host (live.fr, msn.co.uk, mail.ru, rogers.com) names no website.
  *
  * No real traffic: the resolver (node:dns promises lookup, the one the guard calls) is stubbed
  * from a table of .invalid names, and fetch is a tap that records every request and answers from
@@ -60,6 +64,7 @@ const UNKNOWN_CONTACT = `${P}c_unknown`;
 const FLAG = 'CONTACT_WEBSITE_ENRICHMENT';
 
 const PUBLIC_V4 = '93.184.215.14';
+const PUBLIC_V4_B = '93.184.215.15';
 const ACME = 'v63l-acme.invalid';
 const ACME_NAME = 'Acme Bakery & Co (v63l)';
 const ACME_PAGE = [
@@ -82,7 +87,20 @@ const ANSWERS: Record<string, Array<{ address: string; family: 4 | 6 }>> = {
   'v63l-down.invalid': [{ address: PUBLIC_V4, family: 4 }],
   'v63l-loopback.invalid': [{ address: '127.0.0.1', family: 4 }],
   'v63l-metadata.invalid': [{ address: '169.254.169.254', family: 4 }],
+  // Review SEC-WEB-1, COR-WEB-1, COR-WEB-2.
+  'v63l-away.invalid': [{ address: PUBLIC_V4, family: 4 }],
+  'v63l-elsewhere.invalid': [{ address: PUBLIC_V4_B, family: 4 }],
+  'v63l-www.invalid': [{ address: PUBLIC_V4, family: 4 }],
+  'www.v63l-www.invalid': [{ address: PUBLIC_V4_B, family: 4 }],
+  'v63l-flaky.invalid': [{ address: PUBLIC_V4, family: 4 }],
+  'v63l-latin.invalid': [{ address: PUBLIC_V4, family: 4 }],
 };
+
+/**
+ * Review COR-WEB-1: names whose next lookup fails with this resolver code (consumed once), as a
+ * resolver that cannot answer now does (EAI_AGAIN).
+ */
+const LOOKUP_FAILS_ONCE: Record<string, string> = {};
 
 /** The pages the fetch tap serves, per URL. Anything else fails as a network error would. */
 const PAGES: Record<string, () => Response> = {
@@ -92,6 +110,21 @@ const PAGES: Record<string, () => Response> = {
   'https://v63l-loopback.invalid/': () => new Response('<meta property="og:site_name" content="Loopback">', { status: 200, headers: { 'content-type': 'text/html' } }),
   'https://v63l-metadata.invalid/': () => new Response('<meta property="og:site_name" content="Metadata">', { status: 200, headers: { 'content-type': 'text/html' } }),
   'https://v63l-down.invalid/': () => new Response('down', { status: 503, headers: { 'content-type': 'text/html' } }),
+  // Review SEC-WEB-1: a site that sends its visitor to another domain, and one that sends it to its own www. name.
+  'https://v63l-away.invalid/': () => new Response(null, { status: 301, headers: { location: 'http://v63l-elsewhere.invalid/any/path?q=1' } }),
+  'http://v63l-elsewhere.invalid/any/path?q=1': () =>
+    new Response('<meta property="og:site_name" content="Second (v63l)">', { status: 200, headers: { 'content-type': 'text/html' } }),
+  'https://v63l-www.invalid/': () => new Response(null, { status: 301, headers: { location: 'https://www.v63l-www.invalid/' } }),
+  'https://www.v63l-www.invalid/': () =>
+    new Response('<meta property="og:site_name" content="Www Bakery (v63l)">', { status: 200, headers: { 'content-type': 'text/html' } }),
+  // Review COR-WEB-1: a site whose name the resolver cannot answer at the first tap.
+  'https://v63l-flaky.invalid/': () => new Response(ACME_PAGE, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8' } }),
+  // Review COR-WEB-2: a Latin-1 page that says so in its Content-Type.
+  'https://v63l-latin.invalid/': () =>
+    new Response(Uint8Array.from(Buffer.from('<html><head><meta property="og:site_name" content="Café René Pâtisserie"></head></html>', 'latin1')), {
+      status: 200,
+      headers: { 'content-type': 'text/html; charset=iso-8859-1' },
+    }),
 };
 
 /** Every name the resolver was asked for, and every request the fetch tap saw. */
@@ -346,6 +379,11 @@ beforeAll(async () => {
   // ---- the outbound taps (no real resolver, no real request) --------------
   lookupSpy = vi.spyOn(dnsPromises, 'lookup').mockImplementation((async (hostname: string, options?: { all?: boolean }) => {
     resolved.push(hostname);
+    const failure = LOOKUP_FAILS_ONCE[hostname];
+    if (failure) {
+      delete LOOKUP_FAILS_ONCE[hostname];
+      throw Object.assign(new Error(`getaddrinfo ${failure} ${hostname}`), { code: failure });
+    }
     const list = ANSWERS[hostname];
     if (!list) throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${hostname}`), { code: 'ENOTFOUND' });
     return options?.all ? list : list[0];
@@ -492,6 +530,11 @@ describe('NEGATIVE CONTROL: off unless the flag is on; configured only for a con
   it.each([
     ['a free-mail address (gmail.com)', `${P}jane@gmail.com`],
     ['a free-mail address (yahoo.co.uk)', `${P}jane@yahoo.co.uk`],
+    // Review COR-WEB-3: personal mailboxes at webmail and ISP hosts.
+    ['a free-mail address (live.fr)', `${P}jane.personal@live.fr`],
+    ['a free-mail address (msn.co.uk)', `${P}jane.personal@msn.co.uk`],
+    ['a free-mail address (mail.ru)', `${P}jane.personal@mail.ru`],
+    ['an ISP mailbox (rogers.com)', `${P}jane.personal@rogers.com`],
     ['no email', null],
     ['an IP-literal domain', `${P}jane@[127.0.0.1]`],
   ])('a contact with %s has no business website: not_configured, nothing resolved, fetched, stamped or written', async (_label, email) => {
@@ -590,5 +633,75 @@ describe('NEGATIVE CONTROL: only on the tap of a member who may edit the contact
     const tapped1 = await enrich(ID.owner, contactId);
     expect(tapped1.body).toEqual({ status: 'enriched', provider: 'website', filled: ['companyName', 'city', 'country'] });
     expect(tapped.map((t) => t.url)).toEqual([`https://${ACME}/`]);
+  });
+});
+
+describe('TOF-WEBSITE-ENRICHMENT review repair: redirects stay within the site, a resolver outage is not a miss, the page charset is read', () => {
+  it("SEC-WEB-1: a site redirecting to another domain is a miss: that domain is never resolved or asked for anything, and nothing it declares is written", async () => {
+    const contact = await seedContact({ email: workEmail('v63l-away.invalid') });
+
+    const res = await enrich(ID.staff, contact.id, { force: true });
+
+    expect(res.status, res.text).toBe(201);
+    expect(res.body).toEqual({ status: 'no_match', provider: 'website', filled: [] });
+    expect(resolved).toEqual(['v63l-away.invalid']);
+    expect(tapped.map((t) => t.url)).toEqual(['https://v63l-away.invalid/']);
+    const row = await rawRow(contact.id);
+    expect(row.company_name).toBeNull();
+    expect(row.custom.enrichment).toMatchObject({ provider: 'website', filled: [], raw: null });
+    await settle();
+    expect(await auditsOf(contact.id)).toEqual([]);
+  });
+
+  it("SEC-WEB-1 (control): a site redirecting to its own www. name is followed, re-checked and pinned there, and that page's declared name is written with the www. site as provenance", async () => {
+    const contact = await seedContact({ email: workEmail('v63l-www.invalid') });
+
+    const res = await enrich(ID.owner, contact.id);
+
+    expect(res.body).toEqual({ status: 'enriched', provider: 'website', filled: ['companyName'] });
+    expect(resolved).toEqual(['v63l-www.invalid', 'www.v63l-www.invalid']);
+    expect(tapped.map((t) => t.url)).toEqual(['https://v63l-www.invalid/', 'https://www.v63l-www.invalid/']);
+    expect(tapped[1].dispatcher.target).toEqual({ hostname: 'www.v63l-www.invalid', addresses: [{ address: PUBLIC_V4_B, family: 4 }] });
+    const row = await rawRow(contact.id);
+    expect(row.company_name).toBe('Www Bakery (v63l)');
+    expect(row.custom.enrichment).toMatchObject({ raw: { source: 'website', website: 'https://www.v63l-www.invalid/' } });
+  });
+
+  it('COR-WEB-1: a resolver that cannot answer now (EAI_AGAIN) is provider_error with no stamp, so the next tap (no force) asks again and fills the contact', async () => {
+    const contact = await seedContact({ email: workEmail('v63l-flaky.invalid'), visibility: 'TEAM' });
+    LOOKUP_FAILS_ONCE['v63l-flaky.invalid'] = 'EAI_AGAIN';
+
+    const first = await enrich(ID.owner, contact.id);
+
+    expect(first.status, first.text).toBe(201);
+    expect(first.body).toEqual({ status: 'provider_error', provider: 'website', filled: [] });
+    expect(resolved).toEqual(['v63l-flaky.invalid']);
+    expect(tapped).toEqual([]);
+    const afterFirst = await rawRow(contact.id);
+    expect(afterFirst.custom ?? {}).not.toHaveProperty('enrichment');
+    expect(afterFirst.company_name).toBeNull();
+
+    resolved.length = 0;
+    tapped.length = 0;
+    const second = await enrich(ID.owner, contact.id);
+
+    expect(second.body).toEqual({ status: 'enriched', provider: 'website', filled: ['companyName', 'city', 'country'] });
+    expect(resolved).toEqual(['v63l-flaky.invalid']);
+    expect(tapped.map((t) => t.url)).toEqual(['https://v63l-flaky.invalid/']);
+    expect(await rawRow(contact.id)).toMatchObject({ company_name: ACME_NAME, city: 'San Fernando', country: 'TT' });
+  });
+
+  it("COR-WEB-2: a Latin-1 page labelled iso-8859-1 fills the company name with its accented letters, and the audit row records the same value", async () => {
+    const contact = await seedContact({ email: workEmail('v63l-latin.invalid') });
+
+    const res = await enrich(ID.owner, contact.id);
+
+    expect(res.body).toEqual({ status: 'enriched', provider: 'website', filled: ['companyName'] });
+    const row = await rawRow(contact.id);
+    expect(row.company_name).toBe('Café René Pâtisserie');
+    expect(row.company_name).not.toContain('\ufffd');
+    const audits = await auditsOf(contact.id);
+    expect(audits.map((a: any) => a.action)).toEqual(['updated']);
+    expect(audits[0].after).toMatchObject({ companyName: 'Café René Pâtisserie' });
   });
 });

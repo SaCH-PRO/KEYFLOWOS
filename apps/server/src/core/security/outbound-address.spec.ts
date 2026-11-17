@@ -137,6 +137,41 @@ describe('ST-38c-2 (W4-IMPORT-SSRF-PIN): resolvePublicAddress resolves a name on
     expect((await refusal('v90d-empty.invalid')).reason).toBe('unresolvable');
   });
 
+  it.each(['EAI_AGAIN', 'ETIMEOUT', 'ESERVFAIL', 'EAI_FAIL', 'ECONNREFUSED'])(
+    'TOF-WEBSITE-ENRICHMENT review COR-WEB-1: a resolver that cannot answer now (%s) is refused as unresolvable with its code and marked transient',
+    async (code) => {
+      lookupSpy.mockImplementationOnce((async (hostname: string) => {
+        throw Object.assign(new Error(`getaddrinfo ${code} ${hostname}`), { code });
+      }) as any);
+      const err = await refusal('v90d-public.invalid');
+      expect(err.reason).toBe('unresolvable');
+      expect(err.lookupCode).toBe(code);
+      expect(err.transient).toBe(true);
+    },
+  );
+
+  it('TOF-WEBSITE-ENRICHMENT review COR-WEB-1: a lookup failure with no code is transient too (UNKNOWN)', async () => {
+    lookupSpy.mockImplementationOnce((async () => {
+      throw new Error('the resolver broke');
+    }) as any);
+    const err = await refusal('v90d-public.invalid');
+    expect(err).toMatchObject({ reason: 'unresolvable', lookupCode: 'UNKNOWN', transient: true });
+  });
+
+  it('TOF-WEBSITE-ENRICHMENT review COR-WEB-1: a name with no address (ENOTFOUND, ENODATA, an empty answer) and a non-public answer are not transient', async () => {
+    expect(await refusal('v90d-nxdomain.invalid')).toMatchObject({ reason: 'unresolvable', lookupCode: 'ENOTFOUND', transient: false });
+    lookupSpy.mockImplementationOnce((async (hostname: string) => {
+      throw Object.assign(new Error(`queryA ENODATA ${hostname}`), { code: 'ENODATA' });
+    }) as any);
+    expect(await refusal('v90d-public.invalid')).toMatchObject({ reason: 'unresolvable', lookupCode: 'ENODATA', transient: false });
+    const empty = await refusal('v90d-empty.invalid');
+    expect(empty).toMatchObject({ reason: 'unresolvable', transient: false });
+    expect(empty.lookupCode).toBeUndefined();
+    const refused = await refusal('v90d-loopback.invalid');
+    expect(refused).toMatchObject({ reason: 'non_public', transient: false });
+    expect(refused.lookupCode).toBeUndefined();
+  });
+
   it("ST-38c-2 (W4-IMPORT-SSRF-PIN, review CR-PIN-1): a name whose every address is public gives every address, in the resolver's order, all of them the fetch is pinned to", async () => {
     await expect(resolvePublicAddress('v90d-public.invalid')).resolves.toEqual({
       hostname: 'v90d-public.invalid',
