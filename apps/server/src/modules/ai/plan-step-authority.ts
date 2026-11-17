@@ -115,7 +115,8 @@ export function noMemberToolRefusal(toolName: string): string | null {
  *   - the business owner (an OWNER membership: owner rulings D-116, D-125) runs every tool the
  *     authority map does not map (D-119) and holds every module (the OWNER defaults) unless its
  *     membership carries an explicit scope map, which binds it as it binds any member (review
- *     SEC-W11D116K-1) and refuses it every unmapped tool (D-140, W11-OWNER-MAP-UNMAPPED-TOOLS); with
+ *     SEC-W11D116K-1) and refuses it every unmapped tool (D-140, W11-OWNER-MAP-UNMAPPED-TOOLS:
+ *     memberToolRunAuthority's owner arm, which this applies); with
  *     no such map it also runs every mapped KEY organ (dotted) tool, the connector reads whose connect
  *     read no role default holds included (W11A-SEAM-REPAIR, D-131 binds members), but a tool the
  *     authority map never runs (execute_custom_logic) is refused to the owner too (KEY-R3b review
@@ -240,7 +241,13 @@ async function systemPlanOwner(
  *     ruling D-140; seam review SEC-SR-3): the unmapped tools are the owner's only while its OWNER
  *     membership carries no explicit scope map; one that carries a map (an object map or a JSON array,
  *     as ModuleScopeGuard reads it) is refused every unmapped tool (ownerScopeMapUnmappedRefusal), as it
- *     is any mapped tool its map does not reach;
+ *     is any mapped tool its map does not reach. This holds where this rule judges a member: the KEY
+ *     chat's tool calls (processQuery, streamQuery), the plan queue (planStepRunRefusal), an approved
+ *     proposal (KeyCortexActionExecutorPlugin.runAuthority, both paths) and the Pro Auto monitor. The KEY
+ *     cortex plan door (POST api/v1/cortex/plans/:planId/execute) runs module.action steps, not tools,
+ *     and applies D-140 by its own rule (KeyCortexPlannerService.isUnscopedBusinessOwner: an OWNER
+ *     membership with an explicit map is held to it by assertMemberSteps and assertRevenueWrite, and its
+ *     skipApproval is ignored; W11-OWNER-MAP-UNMAPPED-TOOLS review repair SEC-W11OMU-1);
  *   - any other member: assertMayRunGraphAction with the member as the caller, either with no
  *     principal (`asPrincipal` false: the rule POST ai/plans/:planId/approve applies, so a contact read
  *     no visibility clause bounds is the OWNER's only) or as the principal (`asPrincipal`: the rule
