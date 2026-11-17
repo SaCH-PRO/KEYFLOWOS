@@ -26,10 +26,12 @@ import {
   CANONICAL_MODULES,
   CRM_SUBPERMISSION_VALUES,
   DEFAULT_APPROVAL_TIERS as CANONICAL_APPROVAL_TIERS,
+  LEVEL_RANK,
   ROLE_DEFAULT_SCOPES,
   memberModuleLevel,
   rankOf,
 } from '../../core/authority/module-vocabulary';
+import { memberModuleLevel as viewerModuleLevel, type ModuleLevelActor } from '../../core/auth/member-module-level';
 import { membershipApprovalTier } from '../../core/authority/approval-tier';
 import { draftPayloadFollowingBusinessSlug } from '../site/presence/presence.service';
 import { resolveCrmAccess, type CrmAccess } from '../crm/crm-permissions.helper';
@@ -43,6 +45,54 @@ import { resolveCrmAccess, type CrmAccess } from '../crm/crm-permissions.helper'
  * renamed key fails there.
  */
 const TRIGGER_CREATOR_KEY = '$createdBy';
+
+/**
+ * FU-IDENTITY-FINANCE-COLUMNS (V1-71; review SEC-V71-2 of FU-FINANCE-SETTINGS-SCOPE, added by owner ruling D-221; the
+ * rule is owner ruling D-205's): the Business columns a business read answers only to a reader holding revenue read on
+ * that business. Business.accountantEmail is where the books go (the accountant export, whenever a send names no `to`),
+ * and the four default ledger account ids point the postings; GET /finance/businesses/:id/settings answers them under
+ * revenue read (ModuleScopeGuard, FU-FINANCE-SETTINGS-SCOPE), and that gate confined nothing while GET
+ * /identity/businesses, GET /identity/businesses/:businessId and POST /identity/bootstrap answered the same columns to
+ * every member. Every other column stays for every member: currency and the default tax rate (the invoice form and the
+ * business settings page read them), the basis and fiscal year, the timezone, the profile, the masked metaData.
+ */
+export const BUSINESS_FINANCE_SETTINGS_FIELDS = [
+  'accountantEmail',
+  'defaultCashAccountId',
+  'defaultArAccountId',
+  'defaultApAccountId',
+  'defaultTaxAccountId',
+] as const;
+
+export type BusinessFinanceSettingsField = (typeof BUSINESS_FINANCE_SETTINGS_FIELDS)[number];
+
+/**
+ * A business read with the finance settings columns (BUSINESS_FINANCE_SETTINGS_FIELDS) kept only when `mayReadRevenue`.
+ * The input is not modified (a shallow copy is answered), so a caller that holds the row keeps what it read.
+ */
+export type WithFinanceSettingsOptional<T> = Omit<T, BusinessFinanceSettingsField> &
+  Partial<Pick<T, BusinessFinanceSettingsField & keyof T>>;
+
+export function withholdBusinessFinanceSettings<T extends Record<string, unknown>>(
+  business: T,
+  mayReadRevenue: boolean,
+): WithFinanceSettingsOptional<T> {
+  if (mayReadRevenue) return business;
+  const clone: Record<string, unknown> = { ...business };
+  for (const field of BUSINESS_FINANCE_SETTINGS_FIELDS) delete clone[field];
+  return clone as WithFinanceSettingsOptional<T>;
+}
+
+/**
+ * Whether a membership row holds revenue read, by ModuleScopeGuard's rule (core/authority/module-vocabulary
+ * memberModuleLevel: its explicit permissionScopes map when that is any non-null object, a JSON array included, where a
+ * missing key is none; else its role's defaults). No membership is no read. The platform SUPER_ADMIN bypass is the
+ * caller's, as the guard applies it before reading the membership.
+ */
+function membershipReadsRevenue(membership: { role: string; permissionScopes: unknown } | null | undefined): boolean {
+  if (!membership) return false;
+  return rankOf(memberModuleLevel(membership, 'revenue')) >= LEVEL_RANK.read;
+}
 
 /** The three inputs that make up a membership's authority. */
 type AuthorityEnvelope = { role: string; permissionScopes: unknown; maxApprovalTier: number | null };
@@ -258,12 +308,23 @@ export class IdentityService {
    * true together; if a future route ever lists workspaces from inside a tenant
    * context, this query needs an explicit `skipTenantIsolation`.
    */
-  async listBusinesses(userId: string) {
+  async listBusinesses(userId: string, userRole?: string) {
     if (!userId) throw new UnauthorizedException('User ID is required to list businesses');
     const items = await this.prisma.client.business.findMany({
       where: { deletedAt: null, members: { some: { userId } } },
+      // FU-IDENTITY-FINANCE-COLUMNS: the caller's own membership of each business, read with it (a relation include,
+      // not a Membership operation: no tenant context narrows it), so each entry is answered by that membership.
+      include: { members: { where: { userId }, select: { role: true, permissionScopes: true } } },
     });
-    return items.map((b) => sanitizeBusiness(b));
+    // FU-IDENTITY-FINANCE-COLUMNS (V1-71, D-205): each business answers the finance settings columns
+    // (BUSINESS_FINANCE_SETTINGS_FIELDS) only when the caller holds revenue read on it, as GET finance settings does
+    // (a SUPER_ADMIN passes, as ModuleScopeGuard passes them); the membership rows are not answered.
+    return items.map(({ members, ...business }) =>
+      withholdBusinessFinanceSettings(
+        sanitizeBusiness(business),
+        userRole === 'SUPER_ADMIN' || membershipReadsRevenue(members?.[0]),
+      ),
+    );
   }
 
   /**
@@ -272,13 +333,34 @@ export class IdentityService {
    * absent or invalid stored key at its default (readBusinessSettings,
    * core/prisma/business-meta.ts). Every member reads them; only the owner
    * writes them (updateBusiness).
+   *
+   * FU-IDENTITY-FINANCE-COLUMNS (V1-71; review SEC-V71-2; owner rulings D-205, D-221): with a `viewer` (GET
+   * /identity/businesses/:businessId passes the authenticated member), the answer carries the finance settings columns
+   * (BUSINESS_FINANCE_SETTINGS_FIELDS: the accountant export's address and the four default ledger account ids) only
+   * when the viewer holds revenue read on the business, read exactly as ModuleScopeGuard reads it for GET
+   * /finance/businesses/:id/settings (memberModuleLevel; a SUPER_ADMIN passes), so the two reads answer them to the
+   * same members. A null viewer (no authenticated member) is no read. Without a viewer the read is an in-process
+   * server read that is not answered to a member as it is (the KEY settings adapter's profile context, the document
+   * guidance route, which reads the profile fields only): the full projection, as before.
    */
-  async getBusiness(businessId: string) {
+  async getBusiness(businessId: string, viewer?: ModuleLevelActor) {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
     });
     if (!business) throw new NotFoundException('Business not found');
-    return { ...sanitizeBusiness(business), ...readBusinessSettings(business.metaData) };
+    const answer = { ...sanitizeBusiness(business), ...readBusinessSettings(business.metaData) };
+    if (viewer === undefined) return answer;
+    return withholdBusinessFinanceSettings(answer, await this.readsRevenue(businessId, viewer));
+  }
+
+  /**
+   * FU-IDENTITY-FINANCE-COLUMNS: whether `viewer` holds revenue read on the business, as ModuleScopeGuard reads it
+   * (core/auth/member-module-level, imported as viewerModuleLevel beside module-vocabulary's synchronous
+   * memberModuleLevel: the membership's explicit map else its role's defaults, a SUPER_ADMIN admin, no
+   * membership or no viewer none).
+   */
+  private async readsRevenue(businessId: string, viewer: ModuleLevelActor): Promise<boolean> {
+    return LEVEL_RANK[await viewerModuleLevel(this.prisma, businessId, viewer, 'revenue')] >= LEVEL_RANK.read;
   }
 
   private static readonly PUBLIC_BUSINESS_FIELDS = {
@@ -1789,7 +1871,13 @@ export class IdentityService {
     // R0-SEC2b review SEC2b-R1: POST /identity/bootstrap answers the business it
     // found, a Business read like GET /identity/businesses/:id: no OAuth token
     // column and metaData.whatsapp masked, for the owner too.
-    return { user, business: sanitizeBusiness(business), isNewBusiness };
+    // FU-IDENTITY-FINANCE-COLUMNS (V1-71, D-205): and, as that read, the finance
+    // settings columns only to a caller holding revenue read on it. The business
+    // found can be one the caller is only a member of (the oldest membership of a
+    // Business.ownerId holder with no membership on the business they are recorded
+    // as owning, ensureBootstrapWorkspace); one created here is the caller's own.
+    const mayReadRevenue = isNewBusiness || (await this.readsRevenue(business.id, { id: user.id, role: user.role }));
+    return { user, business: withholdBusinessFinanceSettings(sanitizeBusiness(business), mayReadRevenue), isNewBusiness };
   }
 
   /**
