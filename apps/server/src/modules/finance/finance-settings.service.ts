@@ -278,28 +278,42 @@ export class FinanceSettingsService {
   /**
    * Owner-only (D-11) for defaultTaxRate: the controller runs assertTaxRateOwner first; D-205 for the other fields: then
    * assertMayChangeSettings (FU-FINANCE-SETTINGS-PATCH). update writes what they return.
+   *
+   * Review repair SEC-FSP-1: the input is the PATCH body as JSON parsed it (no DTO), and every value written goes to
+   * business.update, which reads an object as a Prisma update operator ({set: v}, {increment: n}). So each value must be
+   * of its field's type (null or absent where the field allows it) before anything is checked further or written, a 400
+   * in the field's own words otherwise: the basis 'CASH' or 'ACCRUAL', the fiscal year a whole month 1-12, the tax rate a
+   * finite number 0-100, a default account id text, the accountant email text. The ownership check then sees every
+   * default account id that will be written, and nothing but plain values reaches the row.
    */
   async update(businessId: string, input: UpdateFinanceSettingsInput): Promise<FinanceSettings> {
-    if (input.accountingBasis && input.accountingBasis !== 'CASH' && input.accountingBasis !== 'ACCRUAL') {
+    // The body is untyped JSON: read each value as what it is, not as UpdateFinanceSettingsInput says it is.
+    const raw = input as Record<keyof UpdateFinanceSettingsInput, unknown>;
+    if (raw.accountingBasis != null && raw.accountingBasis !== 'CASH' && raw.accountingBasis !== 'ACCRUAL') {
       throw new BadRequestException('Accounting basis must be CASH or ACCRUAL');
     }
-    if (input.fiscalYearStartMonth != null) {
-      if (input.fiscalYearStartMonth < 1 || input.fiscalYearStartMonth > 12) {
+    if (raw.fiscalYearStartMonth != null) {
+      const month = raw.fiscalYearStartMonth;
+      if (typeof month !== 'number' || !Number.isInteger(month) || month < 1 || month > 12) {
         throw new BadRequestException('Fiscal year start month must be 1-12');
       }
     }
-    if (input.defaultTaxRate != null && (input.defaultTaxRate < 0 || input.defaultTaxRate > 100)) {
-      throw new BadRequestException('Default tax rate must be between 0 and 100');
+    if (raw.defaultTaxRate != null) {
+      const rate = raw.defaultTaxRate;
+      if (typeof rate !== 'number' || !Number.isFinite(rate) || rate < 0 || rate > 100) {
+        throw new BadRequestException('Default tax rate must be between 0 and 100');
+      }
     }
 
     // Validate any defaultXxxAccountId references belong to this business —
-    // mis-pointed defaults silently corrupt postings downstream.
-    const accountIds = [
-      input.defaultCashAccountId,
-      input.defaultArAccountId,
-      input.defaultApAccountId,
-      input.defaultTaxAccountId,
-    ].filter((x): x is string => typeof x === 'string' && x.length > 0);
+    // mis-pointed defaults silently corrupt postings downstream. A value that is
+    // not text (an update operator, a list, a number) is no account of this
+    // business either (SEC-FSP-1).
+    const accountValues = [raw.defaultCashAccountId, raw.defaultArAccountId, raw.defaultApAccountId, raw.defaultTaxAccountId];
+    if (accountValues.some((x) => x != null && typeof x !== 'string')) {
+      throw new BadRequestException('One or more default accounts do not belong to this business');
+    }
+    const accountIds = accountValues.filter((x): x is string => typeof x === 'string' && x.length > 0);
     if (accountIds.length > 0) {
       const found = await this.prisma.client.financialAccount.count({
         where: { businessId, id: { in: accountIds } },
@@ -309,8 +323,8 @@ export class FinanceSettingsService {
       }
     }
 
-    if (input.accountantEmail != null && input.accountantEmail !== '') {
-      if (!EMAIL_RE.test(input.accountantEmail.trim())) {
+    if (raw.accountantEmail != null && raw.accountantEmail !== '') {
+      if (typeof raw.accountantEmail !== 'string' || !EMAIL_RE.test(raw.accountantEmail.trim())) {
         throw new BadRequestException('Accountant email is not a valid email address');
       }
     }

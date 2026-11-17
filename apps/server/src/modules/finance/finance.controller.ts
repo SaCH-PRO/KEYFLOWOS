@@ -632,6 +632,10 @@ export class FinanceController {
    * value equal to the one GET answers is not a change and is not written by a
    * member who may not change it. A refusal is a 403 naming the fields, with
    * nothing written. The answer carries the caller's capability hints, as GET.
+   * Review repair SEC-FSP-1: the body has no DTO, so update then holds each
+   * value to its field's type (a 400 in the field's words for a Prisma update
+   * operator such as {set: v} or a value of the wrong type), before it checks
+   * the default accounts belong to this business and writes anything.
    */
   @UseGuards(ModuleScopeGuard)
   @RequireModuleScope('revenue', 'read')
