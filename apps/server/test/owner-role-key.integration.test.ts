@@ -40,6 +40,8 @@
  *   bizO  Business.ownerId = ownerO, who holds an OWNER membership (the control).
  *   bizM, bizG  per section (SEC-W11D116K-1: OWNER memberships with an object map;
  *         TOF-GRAPH-SCOPE-ARRAY: memberships stored as a JSON array).
+ *   bizR, bizK, bizP  per section (TOF-GRAPH-SCOPE-ARRAY review repair; W11-OWNER-MAP-UNMAPPED-TOOLS and its
+ *         review repair: OWNER memberships with an explicit map on the KEY surfaces and the KEY cortex plan door).
  * Cases tagged RED-BEFORE fail at the packet's base. The co-owner and the
  * OWNER-holding recorded owner are the owner on every surface (controls, except
  * where a case says the co-owner was refused at the base); the recorded owner
@@ -1872,5 +1874,304 @@ describe('W11-OWNER-MAP-UNMAPPED-TOOLS (D-140): an OWNER membership with an expl
         expect(cortexRan.slice(before), id).toEqual([]);
       }
     }
+  });
+});
+
+/**
+ * W11-OWNER-MAP-UNMAPPED-TOOLS review repair (review findings SEC-W11OMU-1, COR-W11OMU-1, SEC-W11OMU-2; owner ruling
+ * D-140, with D-71, D-114, D-46 and V1-10 review ST-3): the KEY cortex plan door, POST api/v1/cortex/plans/:planId/execute
+ * (KeyCortexPlannerService.executePlan), binds an OWNER membership's explicit scope map as the other KEY surfaces do.
+ *
+ * THE DEFECT (at 67b55e96, and at e4e3b35b before it): the planner's owner bypass in assertStepsWithinAuthority,
+ * assertRevenueWrite and mayOverrideApproval read only the membership's role (isBusinessOwner), never its
+ * permissionScopes map. So an OWNER membership with an explicit map (stored as [], or an object map) ran, on this door:
+ * plan steps of modules mapped to no module scope (genome, activity: memberPlanStepScopeRefusal refuses them to every
+ * other member), steps of mapped modules its map leaves out (expenses, revenue), invoice and payment writes its revenue
+ * level does not reach (another member's plan included), and skipApproval past the business's approval policy. The same
+ * owner is refused that work by memberToolRunAuthority (the KEY chat, the plan queue, an approved proposal), by POST
+ * api/v1/cortex/execute, and is not shown those steps by GET api/v1/cortex/plans/:planId (graphPlanReadScope, SEC-TGSA-3).
+ *
+ * Required, pinned here over HTTP on the real rows: only an OWNER membership with NO explicit map passes every step,
+ * holds revenue write and may skip the approval policy. An OWNER membership with an explicit map is held to it like any
+ * member (assertMemberSteps: memberPlanStepScopeRefusal on its map; memberModuleLevel's revenue write for an invoice or
+ * payment plan), and its skipApproval is ignored (the steps follow the business's approval policy). It stays the business
+ * owner for who may run a plan (another member's included) and for contact visibility (a role rule, not a module scope,
+ * as graphPlanReadScope keeps it every member's plans and every contact).
+ *
+ * FIXTURES (bizP, Business.ownerId = pOwner): pOwner holds an OWNER membership with no map (the control); pCoArr an
+ * OWNER membership stored as [] (D-125: an owner; the map naming no module); pCoMap an OWNER membership with the object
+ * map {operations: 'write'}; pStaff a STAFF membership on role defaults (the creator of another member's plan);
+ * pStaffArr a STAFF membership stored as [] (the D-71 control: the refusal the scoped owners now get). bizP's settings:
+ * full autonomy, and notifications.send_notification always needs approval (aiAlwaysRequireApproval), so a skipApproval
+ * that is honoured runs it and one that is ignored parks it.
+ *
+ * HTTP COMPOSITION: one real Nest app with the real KeyCortexGoalsController, PrismaService, AuthGuard, BusinessGuard,
+ * the production TenantInterceptor, GlobalHttpExceptionFilter and ValidationPipe, and the suite's identity middleware;
+ * the planner is the suite's (the real KeyCortexPlannerService, KeyCortexExecutorService and KeyCortexSagaService over
+ * the recording connector: `routed` is the external effect). The no-member path (the query pipeline and the cortex
+ * triggers call executePlan with no member) is driven on the same planner.
+ */
+describe('W11-OWNER-MAP-UNMAPPED-TOOLS review repair (SEC-W11OMU-1, COR-W11OMU-1; D-140): POST cortex/plans/:planId/execute holds an OWNER membership with an explicit scope map to it', () => {
+  const Q = {
+    bizP: `${P}bizP`,
+    owner: `${P}pOwner`, // Business.ownerId of bizP; OWNER membership with no map (control)
+    coArr: `${P}pCoArr`, // co-owner: OWNER membership stored as []
+    coMap: `${P}pCoMap`, // co-owner: OWNER membership with the object map {operations: 'write'}
+    staff: `${P}pStaff`, // STAFF on role defaults (creates another member's plan)
+    staffArr: `${P}pStaffArr`, // STAFF stored as [] (D-71 control)
+  };
+  const OPERATIONS_WRITE_MAP = { operations: 'write' };
+  const MEMBERS: ReadonlyArray<readonly [string, string, unknown]> = [
+    [Q.owner, 'OWNER', undefined],
+    [Q.coArr, 'OWNER', []],
+    [Q.coMap, 'OWNER', OPERATIONS_WRITE_MAP],
+    [Q.staff, 'STAFF', undefined],
+    [Q.staffArr, 'STAFF', []],
+  ];
+  /** The step the business's approval policy always parks (bizP's aiAlwaysRequireApproval). */
+  const NEEDS_APPROVAL: readonly [string, string] = ['notifications', 'send_notification'];
+
+  const PLAN_REVENUE_WRITE_NONE = 'Insufficient permissions: revenue requires write access (you have none); this plan writes the business\'s invoices or payments';
+  const UNMAPPED_STEP = (module: string, action: string) =>
+    `Plan step "${module}.${action}": module "${module}" is mapped to no module scope, so it is not run for this member (D-71)`;
+  const EXPENSES_READ_NONE = 'Insufficient permissions: expenses requires read access (you have none); plan step "finance.list_expenses" is not run (D-71)';
+
+  /** Every plan this section runs: its creator and its steps (module, action). */
+  const PLANS: Record<string, { userId: string; steps: ReadonlyArray<readonly [string, string]> }> = {
+    // Another member's plan of money steps, an invoice write among them (the reviewer's case (a)).
+    [`${Q.staff}_money`]: { userId: Q.staff, steps: [['commerce', 'list_invoices'], ['commerce', 'mark_invoice_paid'], ['finance', 'get_profit_loss']] },
+    // A plan of unmapped modules and a mapped module the map leaves out (COR-W11OMU-1's probe), by each actor.
+    [`${Q.coArr}_probe`]: { userId: Q.coArr, steps: [['genome', 'get_dna'], ['activity', 'list_recent'], ['finance', 'list_expenses']] },
+    [`${Q.coArr}_probe_nm`]: { userId: Q.coArr, steps: [['genome', 'get_dna'], ['activity', 'list_recent'], ['finance', 'list_expenses']] },
+    [`${Q.staffArr}_probe`]: { userId: Q.staffArr, steps: [['genome', 'get_dna'], ['activity', 'list_recent'], ['finance', 'list_expenses']] },
+    [`${Q.owner}_probe`]: { userId: Q.owner, steps: [['genome', 'get_dna'], ['activity', 'list_recent'], ['finance', 'list_expenses']] },
+    [`${Q.owner}_probe_nm`]: { userId: Q.owner, steps: [['genome', 'get_dna'], ['activity', 'list_recent'], ['finance', 'list_expenses']] },
+    // An unmapped write and two payment writes, run with skipApproval (the reviewer's case (b)).
+    [`${Q.coArr}_pay`]: { userId: Q.coArr, steps: [['genome', 'update_dna'], ['commerce', 'process_payment'], ['commerce', 'send_invoice']] },
+    [`${Q.owner}_pay`]: { userId: Q.owner, steps: [['genome', 'update_dna'], ['commerce', 'process_payment'], ['commerce', 'send_invoice']] },
+    // The object-map owner: a step its map reaches beside an unmapped one; a mapped module its map leaves out; a
+    // step its map reaches alone; the step the policy always parks (with skipApproval).
+    [`${Q.coMap}_genome`]: { userId: Q.coMap, steps: [['inbox', 'archive_thread'], ['genome', 'update_dna']] },
+    [`${Q.coMap}_expenses`]: { userId: Q.coMap, steps: [['finance', 'list_expenses']] },
+    [`${Q.coMap}_ok`]: { userId: Q.coMap, steps: [['inbox', 'archive_thread']] },
+    [`${Q.coMap}_skip`]: { userId: Q.coMap, steps: [NEEDS_APPROVAL] },
+    [`${Q.owner}_skip`]: { userId: Q.owner, steps: [NEEDS_APPROVAL] },
+  };
+
+  let planApp: any;
+
+  async function resetPlans() {
+    await db.$executeRawUnsafe('DELETE FROM ai_plans WHERE business_id = $1', Q.bizP);
+    await db.$executeRawUnsafe('DELETE FROM saga_executions WHERE business_id = $1', Q.bizP);
+    for (const [planId, { userId, steps }] of Object.entries(PLANS)) {
+      await db.aiPlan.create({
+        data: {
+          id: planId, businessId: Q.bizP, userId, objective: `v97x ${planId}`, status: 'pending',
+          steps: {
+            create: steps.map(([module, action], i) => ({
+              id: `${planId}_s${i + 1}`, order: i + 1, module, action, toolName: `${module}.${action}`,
+              inputPayload: { marker: `${planId}_s${i + 1}` },
+            })),
+          },
+        },
+      });
+    }
+  }
+
+  const executeAs = (userId: string, planId: string, body: Record<string, unknown> = {}) =>
+    request(planApp.getHttpServer()).post(`/api/v1/cortex/plans/${planId}/execute`).set(HEADER, userId).send({ businessId: Q.bizP, ...body });
+  const readAs = (userId: string, planId: string) =>
+    request(planApp.getHttpServer()).get(`/api/v1/cortex/plans/${planId}`).query({ businessId: Q.bizP }).set(HEADER, userId);
+  const planState = async (planId: string) => {
+    const row = await planRow(planId);
+    return { status: row?.status, steps: row?.steps.map((s: { status: string }) => s.status) };
+  };
+  /** What the connector was handed for `planId`'s steps since `from` (an index into the suite's `routed`). */
+  const routedSince = (from: number, planId: string) =>
+    routed.slice(from).filter((r) => typeof r.marker === 'string' && r.marker.startsWith(`${planId}_s`));
+  const ranAs = (from: number, planId: string) => routedSince(from, planId).map((r) => [r.module, r.action, r.userId]);
+
+  /**
+   * `userId` executes `planId` over HTTP and is refused: 403 with `refusal`, and the plan is left as it was (still
+   * pending, no step run) with nothing routed.
+   */
+  async function expectRefused(userId: string, planId: string, refusal: string, body: Record<string, unknown> = {}) {
+    const from = routed.length;
+    const res = await executeAs(userId, planId, body);
+    expect(res.status, `${planId}: ${describeBody(res)}`).toBe(403);
+    expect(res.body.message, planId).toBe(refusal);
+    expect(await planState(planId), planId).toEqual({ status: 'pending', steps: PLANS[planId].steps.map(() => 'pending') });
+    expect(routedSince(from, planId), planId).toEqual([]);
+  }
+
+  beforeAll(async () => {
+    for (const [id] of MEMBERS) {
+      await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, name: id, role: 'USER' } });
+    }
+    await db.business.create({ data: { id: Q.bizP, name: `${Q.bizP}-name`, ownerId: Q.owner } });
+    await db.businessSetting.create({
+      data: { id: `${Q.bizP}_setting`, businessId: Q.bizP, aiAutonomyLevel: 'full', aiAlwaysRequireApproval: [NEEDS_APPROVAL.join('.')] },
+    });
+    for (const [userId, role, permissionScopes] of MEMBERS) {
+      await db.membership.create({
+        data: { id: `${P}m_${userId.slice(P.length)}`, userId, businessId: Q.bizP, role, ...(permissionScopes === undefined ? {} : { permissionScopes }) },
+      });
+    }
+
+    const { Test } = await import('@nestjs/testing');
+    const { ValidationPipe } = await import('@nestjs/common');
+    const { APP_INTERCEPTOR } = await import('@nestjs/core');
+    const { TenantInterceptor } = await import('../src/core/tenant/tenant.interceptor');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+    const { AuthGuard } = await import('../src/core/auth/auth.guard');
+    const { BusinessGuard } = await import('../src/core/auth/business.guard');
+    const { KeyCortexGoalsController } = await import('../src/modules/key-cortex/key-cortex-goals.controller');
+    const { KeyCortexPlannerService } = await import('../src/modules/key-cortex/key-cortex-planner.service');
+    const { KeyCortexTriggerService } = await import('../src/modules/key-cortex/key-cortex-trigger.service');
+
+    // The constructor parameter types tsc emits for KeyCortexGoalsController (no @Inject; vitest's esbuild emits none).
+    if (!Reflect.getMetadata('design:paramtypes', KeyCortexGoalsController)) {
+      Reflect.defineMetadata('design:paramtypes', [KeyCortexPlannerService, KeyCortexTriggerService, PrismaService], KeyCortexGoalsController);
+    }
+    const planRef = await Test.createTestingModule({
+      controllers: [KeyCortexGoalsController],
+      providers: [
+        PrismaService,
+        AuthGuard,
+        BusinessGuard,
+        { provide: KeyCortexPlannerService, useValue: planner },
+        { provide: APP_INTERCEPTOR, useClass: TenantInterceptor },
+      ],
+    })
+      // The trigger service and every other collaborator no case reaches are inert.
+      .useMocker(() => ({}))
+      .compile();
+    planApp = planRef.createNestApplication();
+    planApp.use(async (req: any, _res: any, next: any) => {
+      const header = req.headers[HEADER];
+      const id = typeof header === 'string' ? header : undefined;
+      if (id && id.startsWith(P)) {
+        const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+        if (user) req.user = { id: user.id, email: user.email, role: user.role };
+      }
+      next();
+    });
+    planApp.useGlobalFilters(new GlobalHttpExceptionFilter());
+    planApp.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    await planApp.init();
+  }, 180_000);
+
+  // Every row this section writes goes with the suite's prefix cleanup.
+  afterAll(async () => {
+    if (planApp) await planApp.close();
+  });
+
+  it('fixture sanity: bizP is recorded as pOwner\'s; the memberships are stored as described (ModuleScopeGuard reads both scoped owners\' maps as explicit: no expenses, no revenue); bizP\'s policy always parks notifications.send_notification', async () => {
+    expect(await db.business.findUnique({ where: { id: Q.bizP }, select: { ownerId: true } })).toEqual({ ownerId: Q.owner });
+    const rows = await db.membership.findMany({ where: { businessId: Q.bizP }, select: { userId: true, role: true, permissionScopes: true }, orderBy: { userId: 'asc' } });
+    expect(rows).toEqual([
+      { userId: Q.coArr, role: 'OWNER', permissionScopes: [] },
+      { userId: Q.coMap, role: 'OWNER', permissionScopes: OPERATIONS_WRITE_MAP },
+      { userId: Q.owner, role: 'OWNER', permissionScopes: null },
+      { userId: Q.staff, role: 'STAFF', permissionScopes: null },
+      { userId: Q.staffArr, role: 'STAFF', permissionScopes: [] },
+    ]);
+    const { memberModuleLevel } = await import('../src/core/authority/module-vocabulary');
+    for (const userId of [Q.coArr, Q.coMap]) {
+      const m = rows.find((r: any) => r.userId === userId);
+      for (const module of ['revenue', 'expenses']) expect(memberModuleLevel(m as any, module), `${userId} ${module}`).toBe('none');
+    }
+    expect(memberModuleLevel(rows.find((r: any) => r.userId === Q.coMap) as any, 'operations')).toBe('write');
+    expect(await db.businessSetting.findUnique({ where: { businessId: Q.bizP }, select: { aiAutonomyLevel: true, aiAlwaysRequireApproval: true } }))
+      .toEqual({ aiAutonomyLevel: 'full', aiAlwaysRequireApproval: ['notifications.send_notification'] });
+  });
+
+  /* ------------------ the OWNER membership stored as [] ------------------ */
+
+  it('RED-BEFORE (SEC-W11OMU-1 (a); D-140, D-46): the co-owner stored as [] executing another member\'s plan of money steps (an invoice write among them) is refused 403 at its revenue level, before the claim: the plan stays pending and nothing reaches the connector (was run: completed, all three routed as the co-owner)', async () => {
+    await resetPlans();
+    const planId = `${Q.staff}_money`;
+    await expectRefused(Q.coArr, planId, PLAN_REVENUE_WRITE_NONE);
+  });
+
+  it('RED-BEFORE (COR-W11OMU-1; D-140, D-71): the co-owner stored as [] executing its own plan of genome, activity and expenses steps is refused 403 at its first step, as the STAFF member stored as [] is (was run: completed, all three routed); GET cortex/plans/:planId shows it none of those steps, so the run rule and the read rule agree', async () => {
+    await resetPlans();
+    for (const [userId, planId] of [[Q.coArr, `${Q.coArr}_probe`], [Q.staffArr, `${Q.staffArr}_probe`]] as const) {
+      await expectRefused(userId, planId, UNMAPPED_STEP('genome', 'get_dna'));
+      const read = await readAs(userId, planId);
+      expect(read.status, describeBody(read)).toBe(200);
+      expect(read.body.steps, planId).toEqual([]);
+    }
+  });
+
+  it('RED-BEFORE (SEC-W11OMU-1 (b); D-140, D-46, ST-3): the co-owner stored as [] executing its own plan of an unmapped genome write and two payment writes with skipApproval is refused 403 before the claim: nothing reaches the connector (was run: completed, all three routed)', async () => {
+    await resetPlans();
+    const planId = `${Q.coArr}_pay`;
+    await expectRefused(Q.coArr, planId, PLAN_REVENUE_WRITE_NONE, { skipApproval: true });
+  });
+
+  it('RED-BEFORE (COR-W11OMU-1; D-140, D-71, D-73): with no member (the query pipeline and the cortex triggers), the co-owner\'s plan runs as its creator and is held to the same map: refused 403 at its first step, nothing routed (was run: completed)', async () => {
+    await resetPlans();
+    const planId = `${Q.coArr}_probe_nm`;
+    const from = routed.length;
+    let caught: any;
+    await planner.executePlan(planId).catch((err: unknown) => { caught = err; });
+    expect(caught?.getStatus?.(), String(caught)).toBe(403);
+    expect(caught.message).toBe(UNMAPPED_STEP('genome', 'get_dna'));
+    expect(await planState(planId)).toEqual({ status: 'pending', steps: ['pending', 'pending', 'pending'] });
+    expect(routedSince(from, planId)).toEqual([]);
+  });
+
+  /* ------------------ the OWNER membership with an object map ------------------ */
+
+  it('RED-BEFORE (SEC-W11OMU-1; D-140, D-71): the co-owner whose map is {operations: write} is refused its plan pairing an inbox write its map reaches with an unmapped genome write (at the genome step), and its plan of an expenses read its map leaves out; both 403 before the claim, nothing routed (was run: completed)', async () => {
+    await resetPlans();
+    await expectRefused(Q.coMap, `${Q.coMap}_genome`, UNMAPPED_STEP('genome', 'update_dna'));
+    await expectRefused(Q.coMap, `${Q.coMap}_expenses`, EXPENSES_READ_NONE);
+  });
+
+  it('RED-BEFORE (SEC-W11OMU-1; D-140, V1-10 review ST-3): the same co-owner\'s skipApproval is ignored, as any member\'s is: the step the business\'s policy always parks waits for approval and nothing is routed (was honoured: the step ran)', async () => {
+    await resetPlans();
+    const planId = `${Q.coMap}_skip`;
+    const from = routed.length;
+    const res = await executeAs(Q.coMap, planId, { skipApproval: true });
+    expect(res.status, describeBody(res)).toBe(201);
+    expect(res.body).toMatchObject({ planId, status: 'waiting_approval', executed: 1 });
+    expect(await planState(planId)).toEqual({ status: 'waiting_approval', steps: ['waiting_approval'] });
+    expect(routedSince(from, planId)).toEqual([]);
+  });
+
+  it('control (D-140: bound by its map, not refused everything): the same co-owner runs its plan of the inbox write its map reaches, once, as itself', async () => {
+    await resetPlans();
+    const planId = `${Q.coMap}_ok`;
+    const from = routed.length;
+    const res = await executeAs(Q.coMap, planId);
+    expect(res.status, describeBody(res)).toBe(201);
+    expect(res.body).toMatchObject({ planId, status: 'completed', executed: 1 });
+    expect(ranAs(from, planId)).toEqual([['inbox', 'archive_thread', Q.coMap]]);
+  });
+
+  /* ------------------ the OWNER membership with no map (control) ------------------ */
+
+  it('control (D-140: an OWNER with no explicit map keeps every step; D-125): the recorded owner holding OWNER with no map runs another member\'s money plan, its own genome/activity/expenses plan (over HTTP and with no member) and its own genome and payment plan with skipApproval, every step once as itself; its skipApproval runs the step the policy parks', async () => {
+    await resetPlans();
+    const cases: ReadonlyArray<readonly [string, Record<string, unknown>, ReadonlyArray<readonly [string, string]>]> = [
+      [`${Q.staff}_money`, {}, PLANS[`${Q.staff}_money`].steps],
+      [`${Q.owner}_probe`, {}, PLANS[`${Q.owner}_probe`].steps],
+      [`${Q.owner}_pay`, { skipApproval: true }, PLANS[`${Q.owner}_pay`].steps],
+      [`${Q.owner}_skip`, { skipApproval: true }, PLANS[`${Q.owner}_skip`].steps],
+    ];
+    for (const [planId, body, steps] of cases) {
+      const from = routed.length;
+      const res = await executeAs(Q.owner, planId, body);
+      expect(res.status, `${planId}: ${describeBody(res)}`).toBe(201);
+      expect(res.body, planId).toMatchObject({ planId, status: 'completed', executed: steps.length });
+      expect(ranAs(from, planId), planId).toEqual(steps.map(([module, action]) => [module, action, Q.owner]));
+    }
+    const noMember = `${Q.owner}_probe_nm`;
+    const from = routed.length;
+    expect(await planner.executePlan(noMember)).toMatchObject({ planId: noMember, status: 'completed', executed: 3 });
+    expect(ranAs(from, noMember)).toEqual(PLANS[noMember].steps.map(([module, action]) => [module, action, Q.owner]));
   });
 });
