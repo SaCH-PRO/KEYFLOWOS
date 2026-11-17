@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
-import type { MemoryFragment, MemoryRetrievalOptions, MemorySourceType } from './unified-memory.types';
+import { GENOME_ROW_METADATA_KEY } from './unified-memory.types';
+import type { GenomeRowColumns, MemoryFragment, MemoryRetrievalOptions, MemorySourceType } from './unified-memory.types';
 
 interface RawMemoryRow {
   id: string;
@@ -177,6 +178,9 @@ export class UnifiedMemoryRetrievalService {
           sourceType: true,
           sourceEntityId: true,
           eventType: true,
+          // FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-3): the row's module columns, carried in the fragment (genomeRowOf).
+          domain: true,
+          section: true,
           title: true,
           summary: true,
           confidenceDelta: true,
@@ -333,7 +337,7 @@ export class UnifiedMemoryRetrievalService {
         content: e.summary ?? e.title,
         confidence: e.confidenceDelta ? 0.5 + e.confidenceDelta / 2 : 0.5,
         createdAt: e.createdAt,
-        metadata: e.metadata,
+        metadata: this.genomeMetadata(e),
       });
     }
 
@@ -372,7 +376,9 @@ export class UnifiedMemoryRetrievalService {
         content: `${e.eventType}: ${JSON.stringify(e.payload)}`,
         confidence: e.confidence,
         createdAt: e.createdAt,
-        metadata: { sourceType: e.sourceType },
+        // FU-KEY-MEMORY-MONEY-SIGHT (review COR-W1FPMS-1 follow-up): the payload itself, so a prompt's projection reads a
+        // task's own type (and a proposal's action and status, SEC-W1FPMS-4) without parsing the rendered content.
+        metadata: { sourceType: e.sourceType, payload: e.payload },
       });
     }
 
@@ -386,7 +392,9 @@ export class UnifiedMemoryRetrievalService {
         content: `${e.actorType} ${e.action} ${e.subjectType}${e.after ? ': ' + JSON.stringify(e.after) : ''}`,
         confidence: 0.8,
         createdAt: e.createdAt,
-        metadata: { before: e.before, after: e.after, source: e.source, metadata: e.metadata },
+        // FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4): its actor type and action too, which a memberless turn's proposal
+        // line is built from (the rendered content is never parsed back).
+        metadata: { before: e.before, after: e.after, source: e.source, metadata: e.metadata, actorType: e.actorType, action: e.action },
       });
     }
 
@@ -496,6 +504,31 @@ export class UnifiedMemoryRetrievalService {
 
   private extractContent(row: RawMemoryRow): string {
     return row.content ?? row.summary ?? row.value ?? row.recommendation ?? '';
+  }
+
+  /**
+   * FU-KEY-MEMORY-MONEY-SIGHT (review SEC-W1FPMS-3; D-128, D-100): a genome fragment's metadata, the row's own metadata
+   * with the row's sourceType, eventType, domain and section under GENOME_ROW_METADATA_KEY, written last so a writer's
+   * metadata cannot stand in for them. The genome's REST routes withhold its money memory events (isMoneyMemoryEvent:
+   * FINANCE_GENOME, a finance signal, CROSS_DOMAIN, the customer-sales snapshot) from a reader without revenue read;
+   * the fragment carried none of these columns, so a KEY prompt could not apply the same rule.
+   */
+  private genomeMetadata(e: {
+    sourceType?: string | null;
+    eventType?: string | null;
+    domain?: string | null;
+    section?: string | null;
+    metadata?: unknown;
+  }): Record<string, unknown> {
+    const own = this.safeMetadata(e.metadata);
+    const row: GenomeRowColumns = {
+      sourceType: e.sourceType ?? null,
+      eventType: e.eventType ?? null,
+      domain: e.domain ?? null,
+      section: e.section ?? null,
+    };
+    const base = own && !Array.isArray(own) ? own : own === undefined ? {} : { raw: own };
+    return { ...base, [GENOME_ROW_METADATA_KEY]: row };
   }
 
   private safeMetadata(metadata: any): Record<string, unknown> | undefined {
