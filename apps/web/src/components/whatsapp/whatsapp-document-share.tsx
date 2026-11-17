@@ -6,14 +6,31 @@
  *
  * The share carries the document's bearer link, so it opens the chat only for
  * the WhatsApp number the business saved on the customer (WA-HELPER, SEC-WAH-1:
- * a public form can fill a customer's phone). A customer with only a phone
- * (created by an owner, the composer's quick-add or a CSV import) is asked
- * about once: the step shows the E.164 reading of that phone and one button,
- * 'Use this as their WhatsApp number', which saves it on the customer through
- * the contact update route (the member's own crm write; the server checks and
- * audits it) and then opens the chat with that number and the link. A refusal
- * is said in plain words, with the chooser as the way on ('Share without a
- * number'). Nothing is saved and nothing opens until the member chooses.
+ * a public form can fill a customer's phone). A customer with a phone and no
+ * WhatsApp number (created by an owner, the composer's quick-add or a CSV
+ * import, or filled by the website) gets one step: it shows the E.164 reading
+ * of that phone and one button, 'Use this as their WhatsApp number', which
+ * saves it on the customer through the contact update route (the member's own
+ * crm write; the server checks and audits it) and then opens the chat with
+ * that number and the link. A refusal is said in plain words, with the chooser
+ * as the way on ('Share without a number'). Nothing is saved and nothing opens
+ * until the member chooses.
+ *
+ * The step does not vouch for the phone (review SEC-WACP-1). The storefront
+ * intake, bookings and orders fill a blank phone on the customer they match by
+ * e-mail, and that fill leaves nothing the web can read (no audit entry, the
+ * source unchanged), so a phone on file may be one an anonymous visitor typed.
+ * Once saved, the number is trusted for this share and every later one. So the
+ * step says the phone may not be the customer's and where it may have come
+ * from, asks the member to save it only if they know it is the customer's
+ * WhatsApp, says what the link gives whoever gets it and that later quotes and
+ * invoices go to the number without asking, and opens with the focus on the
+ * safe choice ('Share without a number'), so Enter never saves it.
+ *
+ * Escape closes the step alone (review COR-WACP-1): the step takes Escape on
+ * window in the capture phase, before the detail modal under it
+ * (BillingDetailModal listens on document) or any other screen listener sees
+ * it, and only while the step is open.
  *
  * Used by the quotes panel, the Sales > Invoices panel and the Invoices hub;
  * every chat URL is built by lib/whatsapp.ts.
@@ -132,27 +149,33 @@ interface WhatsAppNumberConfirmProps {
   onClose: () => void;
 }
 
-/** The confirm step: the phone's E.164 reading and one button that saves it as the WhatsApp number. */
+/**
+ * The confirm step: the phone's E.164 reading, why it may not be the customer's,
+ * and one button that saves it as the WhatsApp number.
+ */
 function WhatsAppNumberConfirm({ reading, what, saving, refusal, refused, onConfirm, onWithoutNumber, onClose }: WhatsAppNumberConfirmProps) {
   const titleId = useId();
   const descriptionId = useId();
-  const primaryRef = useRef<HTMLButtonElement>(null);
   const fallbackRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const returnTo = typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null;
-    primaryRef.current?.focus();
+    // The safe choice has the focus: Enter never saves a number the member has not read.
+    fallbackRef.current?.focus();
+    // The topmost layer takes its Escape first: window, capture phase, then no further.
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      onClose();
     };
-    document.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
     return () => {
-      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onKey, true);
       returnTo?.focus?.();
     };
   }, [onClose]);
 
-  // Refused: the way on is sharing without a number.
+  // Refused: the save button is gone, and the way on is sharing without a number.
   useEffect(() => {
     if (refused) fallbackRef.current?.focus();
   }, [refused]);
@@ -160,7 +183,9 @@ function WhatsAppNumberConfirm({ reading, what, saving, refusal, refused, onConf
   if (typeof document === "undefined") return null;
 
   const who = reading.name ?? "this customer";
+  const whose = reading.name ? `${reading.name}'s` : "the customer's";
   const sameAsStored = reading.phone.replace(/[^\d+]/g, "") === reading.e164;
+  const linkGives = what === "invoice" ? "see and pay this invoice" : "see, accept or reject this quote";
 
   return createPortal(
     <div className="fixed inset-0 z-[var(--kf-z-modal)] flex items-end justify-center sm:items-center">
@@ -181,22 +206,28 @@ function WhatsAppNumberConfirm({ reading, what, saving, refusal, refused, onConf
           <X className="h-4 w-4" />
         </button>
         <h2 id={titleId} className="pr-10 text-base font-semibold">
-          Is this their WhatsApp number?
+          Is this {whose} WhatsApp number?
         </h2>
         <div id={descriptionId} className="mt-2 space-y-2 text-sm text-muted-foreground">
           <p>
             No WhatsApp number is saved for {who}.{" "}
             {sameAsStored ? (
-              "Their phone number on file is:"
+              "The phone number on the customer's record is:"
             ) : (
               <>
-                Their phone on file, <span className="whitespace-nowrap text-foreground">{reading.phone}</span>, reads as:
+                The phone number on the customer&apos;s record,{" "}
+                <span className="whitespace-nowrap text-foreground">{reading.phone}</span>, reads as:
               </>
             )}
           </p>
           <p className="text-lg font-semibold tabular-nums tracking-wide text-foreground">{reading.e164}</p>
+          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-foreground">
+            This number may not be {whose}. Your website&apos;s forms, bookings and orders can add a phone number to a
+            customer&apos;s record, and anyone can type one there.
+          </p>
           <p>
-            Save it as their WhatsApp number to send this {what} to that chat. You only do this once for {who}.
+            Save it as their WhatsApp number only if you know it is {whose} WhatsApp: whoever gets the link can{" "}
+            {linkGives}. Once saved, later quotes and invoices for {who} go to this number without asking.
           </p>
         </div>
         {refusal && (
@@ -210,7 +241,6 @@ function WhatsAppNumberConfirm({ reading, what, saving, refusal, refused, onConf
           </Button>
           {!refused && (
             <Button
-              ref={primaryRef}
               size="lg"
               onClick={onConfirm}
               disabled={saving}
