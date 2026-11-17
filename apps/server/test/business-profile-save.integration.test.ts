@@ -28,6 +28,12 @@
  *   - [V63M-C04] the contract the form is held to, unchanged: "" and each
  *     old spelling are refused 400 naming every team size the server takes,
  *     with the row byte-identical;
+ *   - [V63M-C05] RED-BEFORE: clearing a stored team size clears it: the
+ *     value the form sends for a clear (its CLEARED_TEAM_SIZE, from its
+ *     source) is saved with the rest of the form's body as team_size NULL
+ *     and GET reads none (PTS-COR-1, review: the form left a clear out of
+ *     the body, which C02 shows keeps the stored size, and still said
+ *     "Business info updated"; RED at the base: the form has no clear);
  *   - [V63M-D11] owner ruling D-11 unchanged: a STAFF granted settings write
  *     and an ADMIN are refused 403 with the row byte-identical, a valid team
  *     size included, and an owner of another business is refused by
@@ -104,6 +110,18 @@ function formTeamSizes(): string[] {
 function formStoredSpellings(): Array<[string, string]> {
   const map = literalOf(fs.readFileSync(FORM_SOURCE, 'utf8'), 'STORED_TEAM_SIZE');
   return [...map.matchAll(/["']?([\w+-]+)["']?\s*:\s*["']([^"']*)["']/g)].map((m) => [m[1], m[2]]);
+}
+
+/**
+ * What the form sends as teamSize when the owner clears a stored team size: the value of its CLEARED_TEAM_SIZE (a
+ * null, string or number literal), read from its source.
+ */
+function formClearedTeamSize(): unknown {
+  const source = fs.readFileSync(FORM_SOURCE, 'utf8');
+  const decl = /const CLEARED_TEAM_SIZE\b[^=]*=\s*(null|"[^"\n]*"|'[^'\n]*'|-?\d+)\s*;/.exec(source);
+  if (!decl) throw new Error(`CLEARED_TEAM_SIZE is not in ${path.basename(FORM_SOURCE)}`);
+  const literal = decl[1].startsWith("'") ? `"${decl[1].slice(1, -1)}"` : decl[1];
+  return JSON.parse(literal);
 }
 
 /** The Business Profile form's body (handleSave), with or without a team size. */
@@ -327,6 +345,25 @@ describe('V1-63 SWP-PROFILE-TEAMSIZE: the form\'s save is the PATCH\'s contract 
       expect(res.status, `teamSize '${teamSize}'`).toBe(400);
       expect(JSON.stringify(res.body?.message)).toContain(named);
       expect(await businessRowText(ID.bizA), `teamSize '${teamSize}' writes nothing`).toBe(before);
+    }
+  });
+
+  it('[V63M-C05] RED-BEFORE: clearing a stored team size (the form\'s clear, read from its source) clears it, and saves the rest', async () => {
+    const cleared = formClearedTeamSize();
+    // A size the form offers, and one the old form stored (shown by the form as the option it means).
+    for (const [i, stored] of ['2-5', 'SMALL_TEAM'].entries()) {
+      await resetBizA(stored);
+      const body = { ...formBody({ name: `${P}Cleared ${i}`, tagline: `Fresh ${i}`, description: `Bakery ${i}` }), teamSize: cleared };
+      const res = await patch(ID.owner, ID.bizA, body);
+      expect(res.status, `clear of '${stored}' with teamSize ${JSON.stringify(cleared)}: ${JSON.stringify(res.body)}`).toBe(200);
+      const row = await db.business.findUnique({ where: { id: ID.bizA }, select: { name: true, tagline: true, description: true, teamSize: true, businessHours: true } });
+      expect(row, `'${stored}' is cleared`).toEqual({ name: body.name, tagline: body.tagline, description: body.description, teamSize: null, businessHours: HOURS });
+      const nulls = await db.$queryRawUnsafe('SELECT team_size IS NULL AS cleared FROM businesses WHERE id = $1', ID.bizA);
+      expect(nulls[0].cleared, 'team_size is NULL').toBe(true);
+      const read = await get(ID.owner, ID.bizA);
+      expect(read.status).toBe(200);
+      expect(read.body, 'GET reads no team size').toHaveProperty('teamSize', null);
+      expect(read.body.name).toBe(body.name);
     }
   });
 });
