@@ -103,6 +103,14 @@ const UNMAPPED_TOOL = 'cortex.execute_tool';
 const REFUSED_TOOL = 'execute_custom_logic';
 const OWNER_ONLY_REFUSAL = /^Tool "crm_update_contact" is executed from here only for the business owner: /;
 const UNMAPPED_REFUSAL = 'Tool "cortex.execute_tool" is mapped to no module scope, so it is not executed from this route';
+/**
+ * W11-OWNER-MAP-UNMAPPED-TOOLS (owner ruling D-140): what an OWNER membership that carries an explicit permissionScopes
+ * map (an object or a JSON array, as ModuleScopeGuard reads it) is told for a tool the authority map does not map.
+ */
+const OWNER_MAP_UNMAPPED_REFUSAL = (tool: string) =>
+  `Tool "${tool}" needs the business owner's unrestricted access (it is mapped to no module scope), and this OWNER membership is bound by its explicit scope map (D-140)`;
+/** The mapped-to-no-module-scope refusal every non-owner gets for an unmapped tool (D-119, unchanged by D-140). */
+const NOT_MAPPED_REFUSAL = (tool: string) => `Tool "${tool}" is mapped to no module scope, so it is not executed from this route`;
 /** W11A-SEAM-REPAIR: the KEY connector reads B1 maps to connect read (D-131), which no role default holds. */
 const KEY_CONNECTOR_READS = ['key_connector.list_providers', 'key_connector.list_connections', 'key_connector.check_health'] as const;
 const CONNECT_READ_REFUSAL = 'Insufficient permissions: connect requires read access (you have none)';
@@ -146,6 +154,7 @@ async function cleanup() {
     `DELETE FROM business_autonomy_profiles WHERE ${biz}`,
     `DELETE FROM agent_triggers WHERE ${biz}`,
     `DELETE FROM ai_execution_logs WHERE ${biz}`,
+    `DELETE FROM key_action_proposals WHERE ${biz}`,
     `DELETE FROM ai_plans WHERE ${biz}`,
     `DELETE FROM saga_executions WHERE ${biz}`,
     `DELETE FROM business_settings WHERE ${biz}`,
@@ -553,11 +562,20 @@ describe('W11-D116-KEY-OWNER review SEC-W11D116K-1 (D-125, D-116, D-71, D-119): 
     }
   });
 
-  it('control (D-119, D-125, D-71): the scoped co-owner still runs the unmapped dotted tool (the owner\'s only) and a mapped tool its map reaches, as the principal when asked; a tool the map never runs stays refused', async () => {
-    for (const tool of [UNMAPPED_TOOL, IN_MAP_TOOL]) {
-      expect(await memberToolRunAuthority(prismaSvc, M.bizM, M.coM, tool), tool).toEqual({ refusal: null, principal: false });
-      expect(await memberToolRunAuthority(prismaSvc, M.bizM, M.coM, tool, { asPrincipal: true }), tool).toEqual({ refusal: null, principal: true });
+  // W11-OWNER-MAP-UNMAPPED-TOOLS (owner ruling D-140): this was a D-119 control (the scoped co-owner ran the unmapped
+  // dotted tool, whatever its map said: review SEC-SR-3, awaiting a ruling). D-140 binds an OWNER membership's explicit
+  // map on the unmapped tools too. RED at e4e3b35b for the unmapped half (admitted: null); the rest is unchanged.
+  it('RED-BEFORE (D-140; was a D-119 control): the scoped co-owner and the scoped recorded owner are refused the unmapped dotted tool, with or without the principal; the scoped co-owner still runs a mapped tool its map reaches, as the principal when asked; a tool the map never runs stays refused', async () => {
+    for (const userId of [M.coM, M.recM]) {
+      for (const asPrincipal of [false, true]) {
+        expect(await memberToolRunAuthority(prismaSvc, M.bizM, userId, UNMAPPED_TOOL, { asPrincipal }), `${userId} asPrincipal ${asPrincipal}`).toEqual({
+          refusal: OWNER_MAP_UNMAPPED_REFUSAL(UNMAPPED_TOOL),
+          principal: false,
+        });
+      }
     }
+    expect(await memberToolRunAuthority(prismaSvc, M.bizM, M.coM, IN_MAP_TOOL)).toEqual({ refusal: null, principal: false });
+    expect(await memberToolRunAuthority(prismaSvc, M.bizM, M.coM, IN_MAP_TOOL, { asPrincipal: true })).toEqual({ refusal: null, principal: true });
     expect(String((await memberToolRunAuthority(prismaSvc, M.bizM, M.coM, REFUSED_TOOL)).refusal)).toMatch(/^Tool "execute_custom_logic" is not executed/);
   });
 
@@ -1017,9 +1035,16 @@ describe('TOF-GRAPH-SCOPE-ARRAY (D-71, D-119, D-125): a JSON-array permissionSco
     expect(await planStepRunRefusal(prismaSvc, G.bizG, planOf(G.ownerArr), 'cortex.create_task')).toBe('Insufficient permissions: ai requires write access (you have none)');
   });
 
-  it('control (D-119): the OWNER stored as [] still runs the unmapped dotted tool, the business owner\'s only, and a tool the map never runs stays refused', async () => {
-    expect(await memberToolRunAuthority(prismaSvc, G.bizG, G.ownerArr, UNMAPPED_TOOL)).toEqual({ refusal: null, principal: false });
-    expect(await memberToolRunAuthority(prismaSvc, G.bizG, G.ownerArr, UNMAPPED_TOOL, { asPrincipal: true })).toEqual({ refusal: null, principal: true });
+  // W11-OWNER-MAP-UNMAPPED-TOOLS (owner ruling D-140): this was a D-119 control. A JSON array is an explicit map (the one
+  // naming no module, as ModuleScopeGuard reads it), so D-140 refuses the OWNER stored as [] the unmapped dotted tool too.
+  // RED at e4e3b35b for the unmapped half (admitted: null).
+  it('RED-BEFORE (D-140; was a D-119 control): the OWNER stored as [] is refused the unmapped dotted tool, with or without the principal, and a tool the map never runs stays refused', async () => {
+    for (const asPrincipal of [false, true]) {
+      expect(await memberToolRunAuthority(prismaSvc, G.bizG, G.ownerArr, UNMAPPED_TOOL, { asPrincipal }), `asPrincipal ${asPrincipal}`).toEqual({
+        refusal: OWNER_MAP_UNMAPPED_REFUSAL(UNMAPPED_TOOL),
+        principal: false,
+      });
+    }
     expect(String((await memberToolRunAuthority(prismaSvc, G.bizG, G.ownerArr, REFUSED_TOOL)).refusal)).toMatch(/^Tool "execute_custom_logic" is not executed/);
   });
 });
@@ -1457,5 +1482,395 @@ describe('TOF-GRAPH-SCOPE-ARRAY review repair (D-71, D-114, D-140, D-57): a JSON
     const res = await planReadAs(R.owner, DONE_PLAN);
     expect(res.status, describeBody(res)).toBe(200);
     expect(res.body.steps.map((s: any) => [s.id, s.outputResult])).toEqual([[`${DONE_PLAN}_s1`, DONE_OUTPUT]]);
+  });
+});
+
+/**
+ * W11-OWNER-MAP-UNMAPPED-TOOLS (owner ruling D-140, 2026-11-12; closes seam review SEC-SR-3). D-140: an OWNER
+ * membership that carries an explicit permissionScopes map is bound by it on KEY as on REST: it is refused every
+ * unmapped KEY tool (fail closed), as it already is any mapped tool outside its map; an OWNER membership with no
+ * explicit map keeps every tool.
+ *
+ * THE DEFECT (at e4e3b35b): memberToolRunAuthority's owner arm (plan-step-authority.ts) held an OWNER membership's
+ * explicit map on every mapped tool (review SEC-W11D116K-1) but still ran every tool the authority map does not map
+ * (graphActionRequirement null: the dotted organ and legacy cortex tools of KEY_ORGAN_TOOLS_UNMAPPED, D-119 "the
+ * owner's only") for any OWNER membership, whatever its map said. So an owner whose own map grants
+ * {operations: write} alone ran cortex.execute_tool (any registry tool by name) and key_connector.execute_internal
+ * (any connector module.action by argument) on every KEY surface that judges a member by this rule: the KEY chat's
+ * tool calls, the plan queue and an approved proposal (KeyCortexActionExecutorPlugin.runAuthority, the SEC-SR-1 path).
+ * ModuleScopeGuard refuses that owner every module route its map leaves out.
+ *
+ * Required, and pinned here on the real rows: an OWNER membership with an explicit map (an object map, or a JSON array:
+ * the map naming no module, memberModuleLevel's reading) is refused each unmapped tool with a stable refusal naming
+ * that the tool needs the business owner's unrestricted access; an OWNER membership with no map (the recorded owner of
+ * bizO, the co-owner of bizK) keeps them; non-owners keep D-119's refusal word for word.
+ *
+ * FIXTURES (bizK, Business.ownerId = kRecMap): kRecMap holds an OWNER membership with the explicit map
+ * {operations: 'write'}; kCoArr an OWNER membership stored as []; kCoNull an OWNER membership with no map (D-125: a
+ * co-owner, the control); kAdmin an ADMIN on role defaults; kStaff a STAFF membership with the same map as kRecMap.
+ * The suite's bizO (ownerO: the recorded owner holding an OWNER membership with no map) is the second control.
+ *
+ * COMPOSITION:
+ *   - the approved proposal over HTTP: POST key-autonomy/businesses/:businessId/actions/proposals/:proposalId/execute
+ *     on one real Nest app with the real KeyActionProposalController, AuthGuard, BusinessGuard, ModuleScopeGuard,
+ *     KeyCortexApprovalOrchestratorService, KeyActionProposalService (the claim and the approver re-read included),
+ *     KeyActionPolicyService, KeyActionBoundaryService, CapabilityContractService, KeyActionExecutorService,
+ *     KeyActionExecutorRegistryService, SafetyShellService and KeyCortexActionExecutorPlugin, the production
+ *     TenantInterceptor, GlobalHttpExceptionFilter and ValidationPipe, and the suite's identity middleware. Stand-ins:
+ *     the KEY cortex tool registry (records every tool the plugin hands it: the external effect counted here), the
+ *     autonomy orchestrator and genome policy (allow), the temporal sink, the action audit and the cortex audit (no-op).
+ *   - the plan queue: QueueService.processPlanStep, the worker body, called as BullMQ calls it, on the real
+ *     PrismaService; its dispatcher records each step it is handed (the external effect), the oversight auto-approves.
+ *   - the KEY chat's tool-call rule (KeyCortexQueryPipelineService.memberToolCallRefusals, which processQuery and
+ *     streamQuery run on the model's tool calls) on the real rows through the service's own method: the chat route
+ *     needs a model (the unit spec key-cortex-query-pipeline.service.spec.ts drives both chat paths).
+ */
+describe('W11-OWNER-MAP-UNMAPPED-TOOLS (D-140): an OWNER membership with an explicit scope map is refused every unmapped KEY tool on the KEY chat, the plan queue and an approved proposal', () => {
+  const K = {
+    bizK: `${P}bizK`,
+    recMap: `${P}kRecMap`, // Business.ownerId of bizK; OWNER membership with the explicit map {operations: 'write'}
+    coArr: `${P}kCoArr`, // co-owner: OWNER membership stored as [] (an explicit map naming no module)
+    coNull: `${P}kCoNull`, // co-owner: OWNER membership with no explicit map (control)
+    admin: `${P}kAdmin`, // ADMIN on role defaults (control: non-owner)
+    staff: `${P}kStaff`, // STAFF with the same explicit map as kRecMap (control: non-owner)
+  };
+  const OPERATIONS_WRITE_MAP = { operations: 'write' };
+  const MEMBERS: ReadonlyArray<readonly [string, string, unknown]> = [
+    [K.recMap, 'OWNER', OPERATIONS_WRITE_MAP],
+    [K.coArr, 'OWNER', []],
+    [K.coNull, 'OWNER', undefined],
+    [K.admin, 'ADMIN', undefined],
+    [K.staff, 'STAFF', OPERATIONS_WRITE_MAP],
+  ];
+  /** The unmapped dotted tools D-140's definition of done names (KEY_ORGAN_TOOLS_UNMAPPED). */
+  const UNMAPPED = ['cortex.execute_tool', 'key_connector.execute_internal'] as const;
+  /** The OWNER memberships an explicit map binds (D-140). */
+  const SCOPED_OWNERS = [K.recMap, K.coArr] as const;
+  /** The OWNER memberships with no map: the co-owner of bizK and the recorded owner of bizO (the suite's control). */
+  const UNBOUND_OWNERS: ReadonlyArray<readonly [string, string]> = [[K.bizK, K.coNull], [ID.bizO, ID.ownerO]];
+  const slug = (tool: string) => tool.replace(/\./g, '_');
+
+  let propApp: any;
+  let worker: any;
+  /** Every tool KeyCortexActionExecutorPlugin handed the KEY cortex registry, and the member it ran for. */
+  const cortexRan: Array<{ tool: string; userId: unknown }> = [];
+  /** Every plan step the plan-queue worker handed its dispatcher. */
+  const dispatched: Array<{ toolName: string; planStepId: unknown }> = [];
+
+  /** A plan `userId` created in `businessId`, approved, with the one step `toolName` (as PlannerService stores a step). */
+  async function seedToolPlan(id: string, businessId: string, userId: string, toolName: string) {
+    await db.aiPlan.create({
+      data: {
+        id, businessId, userId, objective: `v97x ${id}`, status: 'approved',
+        steps: { create: [{ id: `${id}_s1`, order: 1, toolName, action: toolName, module: 'ai', status: 'pending', inputPayload: { marker: `${id}_s1` } }] },
+      },
+    });
+    return `${id}_s1`;
+  }
+
+  /** The plan-queue worker body on the plan's one step, as BullMQ hands it a job. */
+  function runQueueStep(planId: string, businessId: string, toolName: string) {
+    const stepId = `${planId}_s1`;
+    return worker.processPlanStep({
+      data: {
+        planId, stepId, businessId, toolName, args: {}, order: 1, dependsOn: [], retryCount: 0,
+        idempotencyKey: `${planId}_job`, planContext: { planId, planStepId: stepId },
+      },
+    });
+  }
+
+  /**
+   * An approved EXECUTE_TOOL proposal of `toolName`, as POST .../actions/proposals files it (MANUAL, the client's
+   * payload, no stored plan) and the member approved it, or (`planId`) as PlanExecutorService.createStepProposal
+   * files a plan step that needed approval (AI_PLAN, the stored plan and step).
+   */
+  async function seedProposal(id: string, businessId: string, userId: string, toolName: string, plan?: { planId: string; planStepId: string }) {
+    await db.keyActionProposal.create({
+      data: {
+        id, businessId, userId, sourceType: plan ? 'AI_PLAN' : 'MANUAL', title: `v97x ${id}`, actionType: 'EXECUTE_TOOL',
+        payload: { toolName, inputPayload: { marker: id } }, status: 'APPROVED', approvedBy: userId, approvedAt: new Date(),
+        requiresApproval: true, riskLevel: 'MEDIUM', ...(plan ? { planId: plan.planId, planStepId: plan.planStepId } : {}),
+      },
+    });
+  }
+
+  const executeProposal = (userId: string, businessId: string, proposalId: string) =>
+    request(propApp.getHttpServer()).post(`/key-autonomy/businesses/${businessId}/actions/proposals/${proposalId}/execute`).set(HEADER, userId).send({});
+  const proposalRow = (id: string) => db.keyActionProposal.findUnique({ where: { id }, select: { status: true, failureReason: true, executedBy: true } });
+
+  beforeAll(async () => {
+    for (const [id] of MEMBERS) {
+      await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, name: id, role: 'USER' } });
+    }
+    await db.business.create({ data: { id: K.bizK, name: `${K.bizK}-name`, ownerId: K.recMap } });
+    for (const [userId, role, permissionScopes] of MEMBERS) {
+      await db.membership.create({
+        data: { id: `${P}m_${userId.slice(P.length)}`, userId, businessId: K.bizK, role, ...(permissionScopes === undefined ? {} : { permissionScopes }) },
+      });
+    }
+
+    const { Test } = await import('@nestjs/testing');
+    const { Logger, ValidationPipe } = await import('@nestjs/common');
+    const { APP_INTERCEPTOR } = await import('@nestjs/core');
+    const { EventEmitter2 } = await import('@nestjs/event-emitter');
+    const { TenantInterceptor } = await import('../src/core/tenant/tenant.interceptor');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+    const { AuthGuard } = await import('../src/core/auth/auth.guard');
+    const { BusinessGuard } = await import('../src/core/auth/business.guard');
+    const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
+    const { TemporalFlowService } = await import('../src/modules/temporal-flow/temporal-flow.service');
+    const { CapabilityContractService } = await import('../src/modules/capabilities/capability-contract.service');
+    const { KeyActionProposalController } = await import('../src/modules/key-autonomy/key-action-proposal.controller');
+    const { KeyActionProposalService } = await import('../src/modules/key-autonomy/key-action-proposal.service');
+    const { KeyActionPolicyService } = await import('../src/modules/key-autonomy/key-action-policy.service');
+    const { KeyActionExecutorService } = await import('../src/modules/key-autonomy/key-action-executor.service');
+    const { KeyActionExecutorRegistryService } = await import('../src/modules/key-autonomy/key-action-executor-registry.service');
+    const { SafetyShellService } = await import('../src/modules/key-autonomy/safety-shell.service');
+    const { ActionAuditService } = await import('../src/modules/key-autonomy/action-audit.service');
+    const { KeyActionGenomePolicyService } = await import('../src/modules/key-autonomy/key-action-genome-policy.service');
+    const { AutonomyOrchestratorService } = await import('../src/modules/key-autonomy/autonomy-orchestrator.service');
+    const { KeyActionBoundaryService } = await import('../src/modules/key-autonomy/action-boundary/key-action-boundary.service');
+    const { KeyCortexApprovalOrchestratorService } = await import('../src/modules/key-cortex/key-cortex-approval-orchestrator.service');
+    const { KeyCortexActionExecutorPlugin } = await import('../src/modules/key-cortex/key-cortex-action-executor.plugin');
+    const { QueueService } = await import('../src/modules/ai/queue.service');
+
+    const cortexRegistry = {
+      execute: async (tool: string, ctx: { userId?: unknown }) => {
+        cortexRan.push({ tool, userId: ctx?.userId });
+        return { success: true, data: { v97x: tool } };
+      },
+    };
+    const allow = { allowed: true, requiresApproval: false, tier: 'full', confidence: 1, reason: 'v97x: allowed', ruleTrace: [], createdAt: new Date() };
+    const noop = async () => undefined;
+
+    const propRef = await Test.createTestingModule({
+      controllers: [KeyActionProposalController],
+      providers: [
+        PrismaService,
+        AuthGuard,
+        BusinessGuard,
+        ModuleScopeGuard,
+        KeyActionProposalService,
+        KeyActionPolicyService,
+        KeyActionBoundaryService,
+        CapabilityContractService,
+        KeyActionExecutorService,
+        KeyActionExecutorRegistryService,
+        SafetyShellService,
+        { provide: EventEmitter2, useValue: new EventEmitter2() },
+        { provide: TemporalFlowService, useValue: { emit: async () => ({}) } },
+        { provide: ActionAuditService, useValue: { recordBlocked: noop, recordFailed: noop, recordExecuted: noop } },
+        { provide: KeyActionGenomePolicyService, useValue: { evaluateExecution: async () => ({ allowed: true, requiresExtraConfirmation: false, message: 'v97x: allowed', blockedReasons: [], missingFacts: [] }) } },
+        { provide: AutonomyOrchestratorService, useValue: { evaluateAction: async () => allow } },
+        // Constructed by hand: its second parameter carries no @Inject (vitest's esbuild emits no design:paramtypes).
+        {
+          provide: KeyCortexApprovalOrchestratorService,
+          inject: [KeyActionProposalService],
+          useFactory: (proposals: any) => new KeyCortexApprovalOrchestratorService(proposals, { emit: noop } as any),
+        },
+        { provide: APP_INTERCEPTOR, useClass: TenantInterceptor },
+      ],
+    })
+      // Every collaborator no case reaches is inert (the executor's genome and constitution services).
+      .useMocker(() => ({}))
+      .compile();
+    // The real plugin, registered as its onModuleInit registers it, over the recording KEY cortex registry; it reads
+    // the PrismaService through the module, as in production.
+    const plugin = new KeyCortexActionExecutorPlugin(propRef.get(KeyActionExecutorRegistryService), cortexRegistry as any, propRef as any);
+    plugin.onModuleInit();
+    propApp = propRef.createNestApplication();
+    propApp.use(async (req: any, _res: any, next: any) => {
+      const header = req.headers[HEADER];
+      const id = typeof header === 'string' ? header : undefined;
+      if (id && id.startsWith(P)) {
+        const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+        if (user) req.user = { id: user.id, email: user.email, role: user.role };
+      }
+      next();
+    });
+    propApp.useGlobalFilters(new GlobalHttpExceptionFilter());
+    propApp.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    await propApp.init();
+
+    worker = Object.create(QueueService.prototype);
+    Object.assign(worker, {
+      prisma: prismaSvc,
+      events: { emit: () => true },
+      governance: { evaluateAutoApproval: async () => ({ autoApproved: true }) },
+      actionDispatcher: {
+        dispatch: async (req: { toolName: string; planStepId?: string }) => {
+          dispatched.push({ toolName: req.toolName, planStepId: req.planStepId });
+          return { success: true, result: { v97x: req.toolName } };
+        },
+      },
+      stateMachine: { transition: async () => undefined },
+      logger: new Logger('v97x-queue'),
+    });
+  }, 180_000);
+
+  // Every row this section writes (bizK's and bizO's plans and proposals included) goes with the suite's prefix
+  // cleanup (key_action_proposals before ai_plans).
+  afterAll(async () => {
+    if (propApp) await propApp.close();
+  });
+
+  it('fixture sanity: bizK is recorded as kRecMap\'s; the memberships are stored as described (the scoped owners\' maps explicit, as ModuleScopeGuard reads them); bizO\'s recorded owner holds an OWNER membership with no map', async () => {
+    expect(await db.business.findUnique({ where: { id: K.bizK }, select: { ownerId: true } })).toEqual({ ownerId: K.recMap });
+    const rows = await db.membership.findMany({ where: { businessId: K.bizK }, select: { userId: true, role: true, permissionScopes: true }, orderBy: { userId: 'asc' } });
+    expect(rows).toEqual([
+      { userId: K.admin, role: 'ADMIN', permissionScopes: null },
+      { userId: K.coArr, role: 'OWNER', permissionScopes: [] },
+      { userId: K.coNull, role: 'OWNER', permissionScopes: null },
+      { userId: K.recMap, role: 'OWNER', permissionScopes: OPERATIONS_WRITE_MAP },
+      { userId: K.staff, role: 'STAFF', permissionScopes: OPERATIONS_WRITE_MAP },
+    ]);
+    expect(await db.membership.findUnique({ where: { userId_businessId: { userId: ID.ownerO, businessId: ID.bizO } }, select: { role: true, permissionScopes: true } }))
+      .toEqual({ role: 'OWNER', permissionScopes: null });
+  });
+
+  /* ------------------------------ the rule (memberToolRunAuthority) ------------------------------ */
+
+  it('RED-BEFORE (D-140): memberToolRunAuthority refuses the scoped recorded owner ({operations: write}) and the co-owner stored as [] both unmapped dotted tools, with or without the principal, naming the business owner\'s unrestricted access (was admitted: null)', async () => {
+    for (const userId of SCOPED_OWNERS) {
+      for (const tool of UNMAPPED) {
+        for (const asPrincipal of [false, true]) {
+          expect(await memberToolRunAuthority(prismaSvc, K.bizK, userId, tool, { asPrincipal }), `${userId} ${tool} asPrincipal ${asPrincipal}`).toEqual({
+            refusal: OWNER_MAP_UNMAPPED_REFUSAL(tool),
+            principal: false,
+          });
+        }
+      }
+    }
+  });
+
+  it('control (D-140, D-125, D-119): the OWNER memberships with no map (the co-owner of bizK, the recorded owner of bizO) run both, as the principal when asked; the ADMIN and the STAFF member keep D-119\'s refusal word for word; the scoped recorded owner still runs a mapped organ tool its map reaches (key_inbox.list_threads: operations read)', async () => {
+    for (const [businessId, userId] of UNBOUND_OWNERS) {
+      for (const tool of UNMAPPED) {
+        expect(await memberToolRunAuthority(prismaSvc, businessId, userId, tool), `${userId} ${tool}`).toEqual({ refusal: null, principal: false });
+        expect(await memberToolRunAuthority(prismaSvc, businessId, userId, tool, { asPrincipal: true }), `${userId} ${tool}`).toEqual({ refusal: null, principal: true });
+      }
+    }
+    for (const userId of [K.admin, K.staff]) {
+      for (const tool of UNMAPPED) {
+        expect(await memberToolRunAuthority(prismaSvc, K.bizK, userId, tool), `${userId} ${tool}`).toEqual({ refusal: NOT_MAPPED_REFUSAL(tool), principal: false });
+      }
+    }
+    expect(await memberToolRunAuthority(prismaSvc, K.bizK, K.recMap, 'key_inbox.list_threads')).toEqual({ refusal: null, principal: false });
+  });
+
+  /* ------------------------------ the KEY chat's tool calls ------------------------------ */
+
+  it('RED-BEFORE (D-140): the KEY chat\'s tool-call rule (memberToolCallRefusals, on the real rows) refuses both scoped owners both unmapped dotted tools (was run); the owners with no map run them; the ADMIN and the STAFF member are refused them as before', async () => {
+    const { KeyCortexQueryPipelineService } = await import('../src/modules/key-cortex/key-cortex-query-pipeline.service');
+    const pipeline: any = Object.create(KeyCortexQueryPipelineService.prototype);
+    pipeline.prisma = prismaSvc;
+    const refusalsFor = async (businessId: string, userId: string) =>
+      Object.fromEntries((await pipeline.memberToolCallRefusals([...UNMAPPED], { businessId, userId })) as Map<string, string>);
+    for (const userId of SCOPED_OWNERS) {
+      expect(await refusalsFor(K.bizK, userId), userId).toEqual(Object.fromEntries(UNMAPPED.map((tool) => [tool, OWNER_MAP_UNMAPPED_REFUSAL(tool)])));
+    }
+    for (const [businessId, userId] of UNBOUND_OWNERS) expect(await refusalsFor(businessId, userId), userId).toEqual({});
+    for (const userId of [K.admin, K.staff]) {
+      expect(await refusalsFor(K.bizK, userId), userId).toEqual(Object.fromEntries(UNMAPPED.map((tool) => [tool, NOT_MAPPED_REFUSAL(tool)])));
+    }
+  });
+
+  /* ------------------------------ the plan queue ------------------------------ */
+
+  it('RED-BEFORE (D-140): the plan queue (QueueService.processPlanStep) refuses a step of either unmapped tool on a plan either scoped owner created: the step is recorded failed with the refusal and nothing is dispatched (was dispatched and completed)', async () => {
+    for (const userId of SCOPED_OWNERS) {
+      for (const tool of UNMAPPED) {
+        const planId = `${userId}_q_${slug(tool)}`;
+        const stepId = await seedToolPlan(planId, K.bizK, userId, tool);
+        const before = dispatched.length;
+        expect(await runQueueStep(planId, K.bizK, tool), planId).toEqual({ refused: OWNER_MAP_UNMAPPED_REFUSAL(tool) });
+        expect(dispatched.slice(before), planId).toEqual([]);
+        expect(await db.aiPlanStep.findUnique({ where: { id: stepId }, select: { status: true, errorMessage: true } }), planId).toEqual({
+          status: 'failed',
+          errorMessage: `Refused: ${OWNER_MAP_UNMAPPED_REFUSAL(tool)}`,
+        });
+      }
+    }
+  });
+
+  it('control (D-140, D-125; D-119 unchanged): the plan queue dispatches the same steps once on a plan an OWNER with no map created (the co-owner of bizK, the recorded owner of bizO), and they complete; the ADMIN\'s and the STAFF member\'s steps are refused as before', async () => {
+    for (const [businessId, userId] of UNBOUND_OWNERS) {
+      for (const tool of UNMAPPED) {
+        const planId = `${P}k_q_${userId.slice(P.length)}_${slug(tool)}`;
+        const stepId = await seedToolPlan(planId, businessId, userId, tool);
+        const before = dispatched.length;
+        expect(await runQueueStep(planId, businessId, tool), planId).toEqual({ v97x: tool });
+        expect(dispatched.slice(before), planId).toEqual([{ toolName: tool, planStepId: stepId }]);
+        expect((await db.aiPlanStep.findUnique({ where: { id: stepId }, select: { status: true } }))?.status, planId).toBe('completed');
+      }
+    }
+    for (const userId of [K.admin, K.staff]) {
+      for (const tool of UNMAPPED) {
+        const planId = `${userId}_q_${slug(tool)}`;
+        await seedToolPlan(planId, K.bizK, userId, tool);
+        const before = dispatched.length;
+        expect(await runQueueStep(planId, K.bizK, tool), planId).toEqual({ refused: NOT_MAPPED_REFUSAL(tool) });
+        expect(dispatched.slice(before), planId).toEqual([]);
+      }
+    }
+  });
+
+  /* ------------------------------ an approved proposal, over HTTP ------------------------------ */
+
+  it('RED-BEFORE (D-140): POST key-autonomy/.../proposals/:id/execute of an approved EXECUTE_TOOL proposal of either unmapped tool, filed (MANUAL) and executed by either scoped owner, is FAILED with the refusal and never reaches the KEY cortex registry (was EXECUTED: the registry ran it)', async () => {
+    for (const userId of SCOPED_OWNERS) {
+      for (const tool of UNMAPPED) {
+        const id = `${userId}_p_${slug(tool)}`;
+        await seedProposal(id, K.bizK, userId, tool);
+        const before = cortexRan.length;
+        const res = await executeProposal(userId, K.bizK, id);
+        expect(res.status, describeBody(res)).toBe(201);
+        expect(res.body, id).toMatchObject({ id, status: 'FAILED', failureReason: `Refused: ${OWNER_MAP_UNMAPPED_REFUSAL(tool)}` });
+        expect(await proposalRow(id), id).toEqual({ status: 'FAILED', failureReason: `Refused: ${OWNER_MAP_UNMAPPED_REFUSAL(tool)}`, executedBy: userId });
+        expect(cortexRan.slice(before), id).toEqual([]);
+      }
+    }
+  });
+
+  it('RED-BEFORE (D-140): an approved plan step\'s proposal (AI_PLAN, its stored plan created by either scoped owner) runs as the plan\'s member (planStepRunAuthority), so executing it over HTTP, whoever executes it (the co-owner with no map included), is FAILED with the refusal and never reaches the KEY cortex registry (was EXECUTED)', async () => {
+    for (const userId of SCOPED_OWNERS) {
+      for (const tool of UNMAPPED) {
+        const planId = `${userId}_pp_${slug(tool)}`;
+        const planStepId = await seedToolPlan(planId, K.bizK, userId, tool);
+        const id = `${planId}_proposal`;
+        await seedProposal(id, K.bizK, K.coNull, tool, { planId, planStepId });
+        const before = cortexRan.length;
+        const res = await executeProposal(K.coNull, K.bizK, id);
+        expect(res.status, describeBody(res)).toBe(201);
+        expect(res.body, id).toMatchObject({ id, status: 'FAILED', failureReason: `Refused: ${OWNER_MAP_UNMAPPED_REFUSAL(tool)}` });
+        expect(cortexRan.slice(before), id).toEqual([]);
+      }
+    }
+  });
+
+  it('control (D-140, D-125; D-119 unchanged): the same proposals filed and executed by an OWNER with no map (the co-owner of bizK, the recorded owner of bizO) are EXECUTED, each reaching the KEY cortex registry once, run for that owner; the ADMIN\'s and the STAFF member\'s are FAILED with D-119\'s refusal and reach nothing', async () => {
+    for (const [businessId, userId] of UNBOUND_OWNERS) {
+      for (const tool of UNMAPPED) {
+        const id = `${P}k_p_${userId.slice(P.length)}_${slug(tool)}`;
+        await seedProposal(id, businessId, userId, tool);
+        const before = cortexRan.length;
+        const res = await executeProposal(userId, businessId, id);
+        expect(res.status, describeBody(res)).toBe(201);
+        expect(res.body, id).toMatchObject({ id, status: 'EXECUTED', executionResult: { v97x: tool } });
+        expect(cortexRan.slice(before), id).toEqual([{ tool, userId }]);
+      }
+    }
+    for (const userId of [K.admin, K.staff]) {
+      for (const tool of UNMAPPED) {
+        const id = `${userId}_p_${slug(tool)}`;
+        await seedProposal(id, K.bizK, userId, tool);
+        const before = cortexRan.length;
+        const res = await executeProposal(userId, K.bizK, id);
+        expect(res.status, describeBody(res)).toBe(201);
+        expect(res.body, id).toMatchObject({ id, status: 'FAILED', failureReason: `Refused: ${NOT_MAPPED_REFUSAL(tool)}` });
+        expect(cortexRan.slice(before), id).toEqual([]);
+      }
+    }
   });
 });
