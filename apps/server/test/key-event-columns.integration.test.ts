@@ -35,16 +35,34 @@
  *            (UnifiedMemoryRetrievalService) does not take KEY's own bookkeeping as an observed business event,
  *            while another writer's row still reaches it.
  *
+ * Review repair (FU-KEY-EVENT-COLUMNS review, KEC-COR-1 and KEC-COR-2):
+ *   V71J-05  (KEC-COR-1) an action outcome is driven in the shape every production caller of
+ *            KeyCortexGenomeBridgeService.reportActionOutcome sends ({actionId, status, description, result: the
+ *            tool's data, timestamp, correlationId}; key-cortex-command-execution.service.ts:85, query-pipeline 890
+ *            and 1537, reasoning 998, 1017 and 1133, interaction 193 and 211, evolution 1056), not a shape no caller
+ *            sends: the row names the action and says what became of it, and a success makes its D-220 claim.
+ *   V71J-07  (KEC-COR-1) POST /api/v1/cortex/chat with actions, through the real KeyCortexReasoningService (its
+ *            genome layer on, as production wires it) and the real query pipeline's STEP 10: an action that
+ *            succeeded is kept as a success named for itself, with its claims, and the tool's data is not kept;
+ *            one that failed, waits for approval or was blocked is kept as what it was; KEY's action success rate
+ *            counts the actions that ran.
+ *   V71J-08  (KEC-COR-2) the hourly intuition scan and the daily churn analysis raise one ALERT_TRIGGERED row per
+ *            persisting signal, not one per scan; a signal that lapsed and comes back is raised again.
+ *
  * WHAT IS REAL: PrismaService over DATABASE_URL, AuthGuard, BusinessGuard, TenantInterceptor and the Prisma tenant
  * extension, the production GlobalHttpExceptionFilter and ValidationPipe, KeyCortexController,
  * KeyCortexSessionService and KeyCortexConversationService, and the whole consciousness graph (emotion, reasoning
  * engine, reflection, intuition, metacognition, creativity, ethics, temporal reasoning, context v2, genome bridge,
- * personality, event, evidence, interoception, endocrine), as key-cortex-conscious-answer builds it.
+ * personality, event, evidence, interoception, endocrine), as key-cortex-conscious-answer builds it; for
+ * POST /cortex/chat, KeyCortexReasoningService and KeyCortexQueryPipelineService with the real genome bridge and
+ * event writer.
  * Stand-ins: identity attachment (`x-v71j-user` attaches the seeded user row, as AuthMiddleware does after token
  * verification); the model (AiUsageService.trackAndComplete and ModelGatewayService.complete answer at once; no
  * model or provider is called); Redis (an in-memory get/set/setex/del map); the organ registrar (no organs);
- * KeyCortexInsightService (no insights); globalThis.fetch (recorded and refused; asserted never called); and the
- * controller's collaborators for its other routes (an allow-listed mocker).
+ * KeyCortexInsightService (no insights); globalThis.fetch (recorded and refused; asserted never called); the
+ * controller's collaborators for its other routes (an allow-listed mocker); and the chat pipeline's collaborators
+ * that are not under test (session, prompt, personality and context builders, and the tool execution itself:
+ * the actions service answers what the case sets, in the shape KeyCortexActionsService.executeActions returns).
  *
  * Every seeded row carries the `v71j_` prefix and is hard-deleted by raw SQL with sqlLikePrefix() in beforeAll and
  * afterAll; no $transaction wrapping. Values that must never be stored are built at runtime from fragments.
@@ -67,8 +85,10 @@ const HEADER = 'x-v71j-user';
 const ID = {
   ownerA: `${P}ownerA`,
   ownerB: `${P}ownerB`,
+  ownerC: `${P}ownerC`,
   bizA: `${P}bizA`,
   bizB: `${P}bizB`,
+  bizC: `${P}bizC`,
   contactA: `${P}contactA`,
   invoiceA: `${P}invA`,
 };
@@ -87,9 +107,23 @@ const FALLBACK = /I encountered an issue while processing your request/;
 /** The source every row KEY's event writer writes carries (KEY_OBSERVATION_SOURCE). */
 const KEY_SOURCE = 'key_observation';
 
-/** The controller's collaborators for its other routes; consciousChat reaches none of them. */
+/** A question for POST /cortex/chat with actions on, carrying a marker so it can be looked for. */
+const TURN_QUESTION = 'Please chase the late payer for me (v71j-question-marker)';
+/** What the model stand-in answers a chat turn: it names the customer and the figure. */
+const TURN_ANSWER = `v71j: done, I chased ${PAYER} for ${FIGURE}`;
+
+/**
+ * What KEY's tool execution answers the next chat turn (the actions service stand-in), in the shape
+ * KeyCortexActionsService.executeActions returns (CortexActionResult). Each V71J-07 case sets it.
+ */
+let nextExecuted: Array<Record<string, unknown>> = [];
+
+/**
+ * The controller's collaborators for its other routes; consciousChat reaches none of them. KeyCortexReasoningService
+ * (POST /cortex/chat) is real, built below with the real query pipeline, genome bridge and event writer.
+ */
 const OFF_BOUNDARY = new Set([
-  'KeyCortexReasoningService', 'KeyCortexVoiceService', 'KeyCortexPersonalityService', 'KeyCortexActionsService',
+  'KeyCortexVoiceService', 'KeyCortexPersonalityService', 'KeyCortexActionsService',
   'KeyCortexContextService', 'KeyCortexConnectorService', 'KeyCortexCommandService', 'KeyCortexExecutorService',
   'KeyCortexContextV2Service', 'KeyCortexInsightService', 'KeyCortexMonitorV2Service', 'KeyCortexSandboxService',
   'KeyCortexFlowStudioService', 'KeyCortexEvolutionService', 'KeyCortexPhoneService', 'KeyCortexDocumentService',
@@ -158,6 +192,11 @@ async function cleanup() {
 
 function consciousChat(user: string, body: Record<string, unknown>) {
   return request(app.getHttpServer()).post('/api/v1/cortex/conscious/chat').set(HEADER, user).send(body);
+}
+
+/** POST /api/v1/cortex/chat (KeyCortexController.chat -> KeyCortexReasoningService.processQuery). */
+function chat(user: string, body: Record<string, unknown>) {
+  return request(app.getHttpServer()).post('/api/v1/cortex/chat').set(HEADER, user).send(body);
 }
 
 type EventRow = {
@@ -232,6 +271,7 @@ beforeAll(async () => {
   const consciousnessModule: any = await import('../src/modules/key-cortex/key-cortex-consciousness.service');
   modules = {
     KeyCortexReasoningService: (await import('../src/modules/key-cortex/key-cortex-reasoning.service')).KeyCortexReasoningService,
+    KeyCortexQueryPipelineService: (await import('../src/modules/key-cortex/key-cortex-query-pipeline.service')).KeyCortexQueryPipelineService,
     KeyCortexConversationService: (await import('../src/modules/key-cortex/key-cortex-conversation.service')).KeyCortexConversationService,
     KeyCortexVoiceService: (await import('../src/modules/key-cortex/key-cortex-voice.service')).KeyCortexVoiceService,
     KeyCortexPersonalityService: (await import('../src/modules/key-cortex/key-cortex-personality.service')).KeyCortexPersonalityService,
@@ -286,6 +326,9 @@ beforeAll(async () => {
   if (!Reflect.getMetadata('design:paramtypes', KeyCortexController.prototype, 'consciousChat')) {
     Reflect.defineMetadata('design:paramtypes', [controllerModule.ConsciousChatDto, Object], KeyCortexController.prototype, 'consciousChat');
   }
+  if (!Reflect.getMetadata('design:paramtypes', KeyCortexController.prototype, 'chat')) {
+    Reflect.defineMetadata('design:paramtypes', [controllerModule.ChatQueryDto, Object], KeyCortexController.prototype, 'chat');
+  }
 
   const aiUsage = {
     trackAndComplete: async (_businessId: string, _userId: unknown, feature: string) => (
@@ -324,6 +367,75 @@ beforeAll(async () => {
     );
   };
 
+  /**
+   * POST /cortex/chat's reasoning service as production builds it for this question: the real
+   * KeyCortexReasoningService (its genome layer on because the genome bridge and the event writer are both wired,
+   * `genomeV3Enabled = !!(genomeBridgeService && eventService)`), delegating to the real
+   * KeyCortexQueryPipelineService, whose STEP 10 reports each action KEY ran to the real genome bridge over the real
+   * event writer. Its other collaborators answer at once (positional, in the constructors' order); the tool execution
+   * answers `nextExecuted`, in the shape KeyCortexActionsService.executeActions returns.
+   */
+  const buildReasoning = (prisma: any) => {
+    const redis = inMemoryRedis(cache) as any;
+    const events = new M.KeyCortexEventService(prisma);
+    const genomeBridge = new M.KeyCortexGenomeBridgeService(prisma, events, new M.KeyCortexEvidenceService(prisma));
+    const gateway = {
+      complete: async () => ({ content: TURN_ANSWER, provider: 'openai', model: 'v71j-stand-in', usage: { totalTokens: 2, estimatedCost: 0 }, fallbackUsed: false }),
+    };
+    const personality = {
+      classifyPersona: async () => undefined,
+      getPersonalityConfig: () => ({ persona: 'jarvis', temperature: 0.5 }),
+      selectTone: async () => ({ tone: '', temperatureAdjustment: 0 }),
+      buildSystemPrompt: () => 'You are KEY.',
+      buildValueBlock: async () => '',
+    };
+    const context = { buildContextSnapshot: async (businessId: string) => ({ businessId, genomeStage: 'startup', executiveReadiness: 50 }) };
+    const actions = {
+      buildToolDefinitions: async () => [],
+      executeActions: async () => nextExecuted.map((a) => ({ ...a })),
+    };
+    const sessions = {
+      getOrCreateSession: async (query: any) => ({
+        id: `${P}sess_turn`, businessId: query.businessId, userId: query.userId, status: 'active', persona: 'jarvis',
+        messages: [], detectedRole: null, detectedFunction: null,
+      }),
+      generateId: () => `${P}msg`,
+      saveMessage: async () => undefined,
+      updateSessionCognitionMetadata: async () => undefined,
+      updateRunningSummary: async () => undefined,
+    };
+    const promptContext = { buildMemoryContext: async () => ({}), buildMessages: () => [] };
+    const toolLoop = { handleToolCalls: async () => undefined };
+    const detection = { detectActions: () => nextExecuted.map((a) => ({ actionType: a.actionType, status: 'pending', description: '' })) };
+    const suggestions = { generateSuggestions: async () => [] };
+    const genomeContext = {
+      getGenomeEnrichedContext: async () => { throw new Error('v71j: no genome context in this suite'); },
+      getRankedRecommendations: async () => [],
+    };
+    const systemPrompt = { buildV2SystemPrompt: () => 'V2', buildV3SystemPrompt: () => 'V3', enrichSnapshotFromV2: () => undefined, enrichSnapshotFromGenome: () => undefined };
+    const structured = {
+      classifyTaskCategory: () => 'general',
+      buildStructuredOutputInstructions: () => '',
+      parseStructuredResponse: () => ({ role: 'assistant', recommendation: TURN_ANSWER, confidence: 80 }),
+    };
+    const mood = { detectMood: () => 'casual' };
+    const pipeline = new M.KeyCortexQueryPipelineService(
+      gateway, prisma, redis, personality, context, actions, sessions, promptContext, toolLoop, detection, suggestions,
+      genomeContext, systemPrompt, structured, mood,
+      undefined, undefined, // memory retrieval, adaptive router
+      undefined, undefined, undefined, undefined, // v2: connector, command, executor, context v2 (off, as in legacy mode)
+      genomeBridge, events,
+    );
+    return new M.KeyCortexReasoningService(
+      gateway, prisma, redis, personality, context, actions, sessions, promptContext, toolLoop, detection,
+      {} /* legacy insight */, {} /* provider selection */, structured, mood, suggestions, genomeContext, systemPrompt,
+      {} /* interaction */, {} /* command execution */, pipeline,
+      undefined, undefined, undefined, // adaptive router, AI memory, semantic memory
+      undefined, undefined, undefined, undefined, undefined, // v2: connector, command, executor, context v2, insight
+      genomeBridge, events,
+    );
+  };
+
   const moduleRef = await Test.createTestingModule({
     controllers: [KeyCortexController],
     providers: [
@@ -341,6 +453,7 @@ beforeAll(async () => {
         inject: [PrismaService],
       },
       { provide: M.KeyCortexConsciousnessService, useFactory: buildConsciousness, inject: [PrismaService] },
+      { provide: M.KeyCortexReasoningService, useFactory: buildReasoning, inject: [PrismaService] },
       { provide: APP_INTERCEPTOR, useClass: TenantInterceptor },
     ],
   })
@@ -375,6 +488,10 @@ beforeAll(async () => {
   await db.business.create({ data: { id: ID.bizB, name: 'V71J Biz B', ownerId: ID.ownerB } });
   await db.membership.create({ data: { id: `${P}m_a`, userId: ID.ownerA, businessId: ID.bizA, role: 'OWNER' } });
   await db.membership.create({ data: { id: `${P}m_b`, userId: ID.ownerB, businessId: ID.bizB, role: 'OWNER' } });
+  // Business C: KEY's actions through POST /cortex/chat (V71J-07), with no other KEY row in it.
+  await db.user.create({ data: { id: ID.ownerC, email: `${P}ownerc@test.local`, role: 'USER' } });
+  await db.business.create({ data: { id: ID.bizC, name: 'V71J Biz C', ownerId: ID.ownerC } });
+  await db.membership.create({ data: { id: `${P}m_c`, userId: ID.ownerC, businessId: ID.bizC, role: 'OWNER' } });
   const [firstName, ...rest] = PAYER.split(' ');
   await db.contact.create({ data: { id: ID.contactA, businessId: ID.bizA, firstName, lastName: rest.join(' '), displayName: PAYER } as any });
   await db.invoice.create({
@@ -663,7 +780,7 @@ describe('V71J-05 KEY\'s cortex claims are kept in business_events (D-220)', () 
     type: 'action_outcome',
     description: `KEY executed send_invoice_reminder: emailed ${OWNER_EMAIL}`,
     source: 'key_cortex',
-    metadata: { correlationId: `${P}corr_outcome`, actionType: 'send_invoice_reminder', result: { to: OWNER_EMAIL } },
+    metadata: { correlationId: `${P}corr_outcome`, actionType: 'send_invoice_reminder', result: { to: OWNER_EMAIL, status: 'sent', cost: 98765.43 } },
   });
 
   it('RED-BEFORE: trackCapability writes its claim once, in business_events, and nothing in evidence', async () => {
@@ -696,9 +813,11 @@ describe('V71J-05 KEY\'s cortex claims are kept in business_events (D-220)', () 
       withheld: ['description', 'recommendation'],
     });
     expect(rows[1].correlation_id).toBe(`${P}corr_outcome`);
+    // Review repair (KEC-COR-1): a `result` that is not an outcome token is the tool's data, withheld whole; its
+    // allowed-looking keys (a `status`, a `cost`) are not kept in part.
     expect(rows[1].metadata).toEqual({
       module: 'key_cortex', claimKind: 'action_outcome', actionType: 'send_invoice_reminder',
-      withheld: ['description', 'result.to'],
+      withheld: ['description', 'result'],
     });
     expectNothingPersonal(rows);
     expect(await evidenceCount(ID.bizA)).toBe(0);
@@ -721,20 +840,227 @@ describe('V71J-05 KEY\'s cortex claims are kept in business_events (D-220)', () 
     expectNothingPersonal(rows);
   });
 
-  it('RED-BEFORE: an action outcome the bridge reports is logged once (not twice), with its claim', async () => {
+  // FU-KEY-EVENT-COLUMNS review KEC-COR-1: this case used to call reportActionOutcome with
+  // {module, action, result: 'success'}, a shape no caller sends, so it passed while every real success was kept as a
+  // failed action named 'unknown', with no claim. It now sends exactly what key-cortex-command-execution.service.ts:85
+  // sends (and query-pipeline 890/1537, reasoning 998/1017/1133, interaction 193/211 send the same keys).
+  it('RED-BEFORE (KEC-COR-1): an action outcome in the shape every caller sends is logged once, named for its action, as a success, on its correlation, with its claim; the tool\'s data is not kept', async () => {
     const M = modules;
     const bridge = new M.KeyCortexGenomeBridgeService(prismaService, new M.KeyCortexEventService(prismaService), new M.KeyCortexEvidenceService(prismaService));
     const { rows } = await rowsWrittenBy(ID.bizA, () => bridge.reportActionOutcome(ID.bizA, {
-      actionId: 'send_invoice_reminder', module: 'crm', action: 'send_invoice_reminder', result: 'success', description: `emailed ${OWNER_EMAIL}`,
+      actionId: 'send_invoice_reminder',
+      status: 'success',
+      description: 'Successfully executed send_invoice_reminder on crm',
+      // The tool's data: a recipient, a business figure under a key KEY keeps for its own figures, a status.
+      result: { to: OWNER_EMAIL, cost: 98765.43, status: 'sent', id: `${P}msg_1` },
+      timestamp: new Date(),
+      correlationId: `${P}corr_report`,
     }));
     expect(rows.map((r) => `${r.event_type} ${r.subject_type}/${r.subject_id} ${r.action}`).sort()).toEqual([
       'ACTION_EXECUTED cortex_action/send_invoice_reminder claim_recorded',
-      'ACTION_EXECUTED key_cortex/crm send_invoice_reminder',
+      'ACTION_EXECUTED key_cortex/key_cortex send_invoice_reminder',
     ]);
+    for (const row of rows) {
+      expectKeyRow(row, ID.bizA);
+      expect(row.correlation_id, row.action).toBe(`${P}corr_report`);
+    }
     const outcome = rows.find((r) => r.action === 'send_invoice_reminder')!;
-    expect(outcome.metadata).toMatchObject({ module: 'crm', result: 'success', executionTimeMs: 0 });
+    expect(outcome.metadata).toEqual({
+      module: 'key_cortex',
+      result: 'success',
+      executionTimeMs: 0,
+      parameters: { actionId: 'send_invoice_reminder', status: 'success' },
+      withheld: ['parameters.description', 'parameters.result', 'parameters.timestamp'],
+    });
+    const claim = rows.find((r) => r.action === 'claim_recorded')!;
+    expect(claim.metadata).toMatchObject({ module: 'key_cortex', claimKind: 'cortex_action', evidenceStrength: 0.8 });
+    expectNothingPersonal(rows);
+    const text = JSON.stringify(rows);
+    for (const needle of [OWNER_EMAIL, `${P}msg_1`, '98765', 'unknown']) expect(text, needle).not.toContain(needle);
+  });
+
+  it('RED-BEFORE (KEC-COR-1): an outcome that failed, waits for approval, was blocked or was skipped is logged once, named for its action, as what it was, and makes no claim', async () => {
+    const M = modules;
+    const bridge = new M.KeyCortexGenomeBridgeService(prismaService, new M.KeyCortexEventService(prismaService), new M.KeyCortexEvidenceService(prismaService));
+    // The statuses the callers send: CortexActionResult's (query pipeline, reasoning, command execution), the
+    // interaction service's 'skipped' and the evolution service's 'failure'.
+    const outcomes = [
+      ['send_email', 'error'], ['schedule_meeting', 'pending_approval'], ['delete_contact', 'blocked'],
+      ['follow_up_lead', 'skipped'], ['pricing_advice', 'failure'],
+    ];
+    const { rows } = await rowsWrittenBy(ID.bizA, async () => {
+      for (const [actionId, status] of outcomes) {
+        await bridge.reportActionOutcome(ID.bizA, {
+          actionId, status, description: `Execution failed: ${OWNER_EMAIL} did not answer`, result: {}, timestamp: new Date(), correlationId: `${P}corr_${actionId}`,
+        });
+      }
+    });
+    expect(rows.map((r) => `${r.event_type} ${r.subject_type}/${r.subject_id} ${r.action} ${r.metadata.result}`)).toEqual([
+      'ACTION_EXECUTED key_cortex/key_cortex send_email error',
+      'ACTION_EXECUTED key_cortex/key_cortex schedule_meeting pending_approval',
+      'ACTION_EXECUTED key_cortex/key_cortex delete_contact blocked',
+      'ACTION_EXECUTED key_cortex/key_cortex follow_up_lead skipped',
+      'ACTION_EXECUTED key_cortex/key_cortex pricing_advice error',
+    ]);
+    for (const row of rows) {
+      expectKeyRow(row, ID.bizA);
+      expect(row.correlation_id).toBe(`${P}corr_${row.action}`);
+      expect(row.metadata.parameters).toEqual({ actionId: row.action, status: outcomes.find(([a]) => a === row.action)![1] });
+    }
+    expect(JSON.stringify(rows)).not.toContain(OWNER_EMAIL);
+  });
+});
+
+describe('V71J-07 POST /api/v1/cortex/chat: an action KEY runs is kept as what it was, named for itself, and its success rate counts it (KEC-COR-1)', () => {
+  it('RED-BEFORE: a turn whose action succeeds keeps one outcome row naming it as a success, its claim and the pipeline\'s action-outcome claim, on the turn\'s correlation; the tool\'s data is not kept; KEY\'s action success rate is 1', async () => {
+    nextExecuted = [{
+      actionType: 'CREATE_TASK',
+      status: 'success',
+      description: `Created a task to chase ${PAYER}`,
+      result: { id: `${P}task_1`, status: 'open', assignee: OWNER_EMAIL, cost: 98765.43 },
+      requiresApproval: false,
+    }];
+    const from = { warnings: warnings.length, errors: errors.length };
+    const { result: res, rows } = await rowsWrittenBy(ID.bizC, () => chat(ID.ownerC, { businessId: ID.bizC, text: TURN_QUESTION, enableActions: true }));
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.actions.map((a: any) => `${a.actionType} ${a.status}`)).toEqual(['CREATE_TASK success']);
+    const correlationId = res.body.message.metadata.correlationId;
+    expect(correlationId).toMatch(/^corr_/);
+
+    const summary = rows.map((r) => `${r.event_type} ${r.subject_type}/${r.subject_id} ${r.action} ${r.metadata.claimKind ?? r.metadata.result}`).sort();
+    expect(summary).toEqual([
+      'ACTION_EXECUTED cortex_action/CREATE_TASK claim_recorded action_outcome',
+      'ACTION_EXECUTED cortex_action/CREATE_TASK claim_recorded cortex_action',
+      'ACTION_EXECUTED key_cortex/key_cortex CREATE_TASK success',
+    ]);
+    for (const row of rows) {
+      expectKeyRow(row, ID.bizC);
+      expect(row.correlation_id, `${row.action} ${row.metadata.claimKind ?? ''}`).toBe(correlationId);
+    }
+    const outcome = rows.find((r) => r.action === 'CREATE_TASK')!;
+    expect(outcome.metadata).toEqual({
+      module: 'key_cortex',
+      result: 'success',
+      executionTimeMs: 0,
+      parameters: { actionId: 'CREATE_TASK', status: 'success' },
+      withheld: ['parameters.description', 'parameters.result', 'parameters.timestamp'],
+    });
+    // The pipeline's own claim names its action; the tool's data it was given is withheld, not kept in part.
+    const pipelineClaim = rows.find((r) => r.metadata.claimKind === 'action_outcome')!;
+    expect(pipelineClaim.metadata).toEqual({
+      module: 'key_cortex', claimKind: 'action_outcome', actionType: 'CREATE_TASK', withheld: ['description', 'result'],
+    });
+    expectNothingPersonal(rows);
+    const text = JSON.stringify(rows);
+    for (const needle of [OWNER_EMAIL, `${P}task_1`, '98765', 'unknown']) expect(text, needle).not.toContain(needle);
+
+    // KEY's self-model reads the success it had, not a failure of an action called 'unknown'.
+    const self = await consciousness.metacognition.buildSelfModel(ID.bizC);
+    expect(self.actionSuccessRate).toBe(1);
+    const fresh = warnings.slice(from.warnings).concat(errors.slice(from.errors));
+    expect(fresh.filter((w) => /Cortex claim not kept|outcome reporting failed|PrismaClient|Invalid invocation|Unknown argument/i.test(w)), fresh.join('\n')).toEqual([]);
+    expect(outbound).toEqual([]);
+  });
+
+  it('RED-BEFORE: a turn whose actions fail, wait for approval or are blocked keeps one row each, named, as what each was, and no claim; the success rate counts the actions that ran (1 of 2)', async () => {
+    nextExecuted = [
+      { actionType: 'SEND_EMAIL', status: 'error', description: `Execution failed: could not reach ${OWNER_EMAIL}`, error: `could not reach ${OWNER_EMAIL}`, requiresApproval: false },
+      { actionType: 'SCHEDULE_MEETING', status: 'pending_approval', description: 'Action "SCHEDULE_MEETING" awaiting user approval.', requiresApproval: true },
+      { actionType: 'DELETE_CONTACT', status: 'blocked', description: 'Action "DELETE_CONTACT" blocked by autonomy guard.', requiresApproval: false },
+    ];
+    const { result: res, rows } = await rowsWrittenBy(ID.bizC, () => chat(ID.ownerC, { businessId: ID.bizC, text: TURN_QUESTION, enableActions: true }));
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const correlationId = res.body.message.metadata.correlationId;
+    expect(rows.map((r) => `${r.event_type} ${r.subject_type}/${r.subject_id} ${r.action} ${r.metadata.result}`).sort()).toEqual([
+      'ACTION_EXECUTED key_cortex/key_cortex DELETE_CONTACT blocked',
+      'ACTION_EXECUTED key_cortex/key_cortex SCHEDULE_MEETING pending_approval',
+      'ACTION_EXECUTED key_cortex/key_cortex SEND_EMAIL error',
+    ]);
+    for (const row of rows) {
+      expectKeyRow(row, ID.bizC);
+      expect(row.correlation_id).toBe(correlationId);
+    }
     expectNothingPersonal(rows);
     expect(JSON.stringify(rows)).not.toContain(OWNER_EMAIL);
+
+    // One action ran and worked (the first turn), one ran and failed; the approval and the block never ran.
+    const self = await consciousness.metacognition.buildSelfModel(ID.bizC);
+    expect(self.actionSuccessRate).toBe(0.5);
+  });
+});
+
+describe('V71J-08 a signal that persists is raised once, not once per scan (KEC-COR-2)', () => {
+  /** A high-impact weak signal as detectWeakSignals builds it; its wording names the customer and the figure. */
+  const signal = (overrides: Record<string, unknown> = {}) => ({
+    id: 'sig_revenue_drop',
+    description: `Revenue from ${PAYER} fell 40% against its baseline`,
+    sources: ['invoices'],
+    confidence: 0.8,
+    trend: 'emerging',
+    potentialImpact: 'high',
+    recommendedInvestigation: `Call ${PAYER} about ${FIGURE}`,
+    detectedAt: new Date(),
+    category: 'behavioral',
+    score: 0.7,
+    evidence: [],
+    businessId: ID.bizB,
+    ...overrides,
+  });
+  /** One run of the hourly scan's recording step (scheduledIntuitionScan -> recordSignals) for business B. */
+  const scan = (signals: unknown[]) => consciousness.intuition.recordSignals(ID.bizB, signals);
+  const alerts = (rows: EventRow[]) => rows.filter((r) => r.event_type === 'ALERT_TRIGGERED');
+
+  it('RED-BEFORE: two hourly scans that both see the same high-impact signal keep one ALERT_TRIGGERED row, about the signal, with no free text', async () => {
+    const { rows } = await rowsWrittenBy(ID.bizB, async () => {
+      await scan([signal()]);
+      await scan([signal({ id: 'sig_revenue_drop_next_scan', confidence: 0.85, description: `Revenue from ${PAYER} fell 42% against its baseline` })]);
+    });
+    const raised = alerts(rows);
+    expect(raised, JSON.stringify(rows.map((r) => `${r.event_type} ${r.subject_type}/${r.subject_id}`))).toHaveLength(1);
+    expectKeyRow(raised[0], ID.bizB);
+    expect(raised[0]).toMatchObject({ actor_id: 'intuition', action: 'alert', subject_type: 'weak_signal' });
+    expect(raised[0].subject_id).toMatch(/^sig_[0-9a-f]{24}$/);
+    expect(raised[0].metadata).toMatchObject({ module: 'key_cortex', severity: 'high', genomeSignal: true, details: { category: 'behavioral', confidence: 0.8 } });
+    expectNothingPersonal(raised);
+    // The signal's memory is still one row, refreshed (the upsert this follows).
+    const memory: Array<{ n: number }> = await db.$queryRawUnsafe(`SELECT count(*)::int AS n FROM key_cortex_memories WHERE business_id = $1 AND type = 'weak_signal'`, ID.bizB);
+    expect(memory[0].n).toBe(1);
+  });
+
+  it('RED-BEFORE: a signal that lapsed (not seen for more than two scans) and comes back is raised again, once; a different signal is raised on its own', async () => {
+    const [first] = alerts(await eventRows(ID.bizB));
+    expect(first).toBeTruthy();
+    await db.$executeRawUnsafe(`UPDATE key_cortex_memories SET updated_at = now() - interval '3 hours' WHERE business_id = $1 AND type = 'weak_signal'`, ID.bizB);
+    const other = signal({ id: 'sig_cash', description: 'Cash on hand is falling week on week', category: 'operational', potentialImpact: 'critical' });
+    const { rows } = await rowsWrittenBy(ID.bizB, async () => {
+      await scan([signal(), other]);
+      await scan([signal(), other]);
+    });
+    const raised = alerts(rows);
+    expect(raised.map((r) => r.metadata.severity).sort()).toEqual(['critical', 'high']);
+    const again = raised.find((r) => r.metadata.severity === 'high')!;
+    expect(again.subject_id).toBe(first.subject_id);
+    expect(raised.find((r) => r.metadata.severity === 'critical')!.subject_id).not.toBe(first.subject_id);
+  });
+
+  it('RED-BEFORE: the daily churn analysis raises one alert for a customer it keeps predicting, and the row does not name the customer', async () => {
+    const customer = `${P}customer_1`;
+    const match = () => ({
+      id: 'v71j_match', pattern: 'declining_engagement', instances: [], currentMatch: 0.9, prediction: `${PAYER} is likely to stop buying`,
+      timeHorizon: '30_days', confidence: 0.8, matchedEntity: customer, matchedEntityType: 'customer', precursors: [], riskScore: 0.9,
+    });
+    const { rows } = await rowsWrittenBy(ID.bizB, async () => {
+      await consciousness.intuition.recordChurnRisk(ID.bizB, [match()]);
+      await consciousness.intuition.recordChurnRisk(ID.bizB, [match()]);
+    });
+    const raised = alerts(rows);
+    expect(raised).toHaveLength(1);
+    expectKeyRow(raised[0], ID.bizB);
+    expect(raised[0]).toMatchObject({ actor_id: 'intuition', action: 'alert', subject_type: 'churn_risk' });
+    expect(raised[0].subject_id).toMatch(/^churn_[0-9a-f]{24}$/);
+    expect(raised[0].metadata).toMatchObject({ severity: 'critical', details: { matchedEntityType: 'customer', riskScore: 0.9 } });
+    expect(JSON.stringify(raised)).not.toContain(customer);
+    expectNothingPersonal(raised);
   });
 });
 
