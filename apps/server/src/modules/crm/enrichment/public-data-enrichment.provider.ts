@@ -7,8 +7,9 @@
  * Organization data, og:site_name, application-name). This source reads that
  * one page and nothing else, with no account and no paid lookup. It never
  * makes a fact up: a name the site does not declare is not guessed from the
- * domain, a free-mail address names no business, and a site that cannot be
- * reached confirms nothing.
+ * domain, a free-mail address (webmail, or the mailbox an ISP gives its
+ * customers) names no business, and a site that cannot be reached confirms
+ * nothing.
  *
  * D-188: it runs only when a member who may edit the contact taps Enrich,
  * never in the background. ContactEnrichmentService is its only caller, after
@@ -27,15 +28,23 @@
  *     answers, so its connection never asks DNS again (no rebinding), with
  *     redirect 'manual'; each redirect target is checked the same way before
  *     it is asked for anything, at most WEBSITE_MAX_REDIRECTS of them;
+ *   - a redirect is followed only within the site the email names: that
+ *     host, or its www. pair (review SEC-WEB-1); any other host is a miss
+ *     before it is resolved, so the facts come from the business's own site;
  *   - http and https on their default ports only, no credentials in the URL,
  *     html only, at most WEBSITE_MAX_BYTES read, one deadline
- *     (WEBSITE_FETCH_TIMEOUT_MS) for the resolver, the headers and the body.
+ *     (WEBSITE_FETCH_TIMEOUT_MS) for the resolver, the headers and the body;
+ *   - the page is decoded in the encoding it declares (byte-order mark,
+ *     Content-Type, <meta> in its first 1024 bytes, else UTF-8), and a value
+ *     that still cannot be spelled is never written (review COR-WEB-2).
  *
  * Outcomes, as EnrichmentProvider defines them (never a throw): a refused
- * address, a name that does not resolve, a 4xx, a page that is not html or
- * declares nothing, a redirect loop: 'no_match' (stamped, so the 7-day guard
- * spares the next tap; force asks again). A 5xx, 408 or 429, a network failure
- * or the deadline: 'error' (not stamped, so the next tap retries).
+ * address, a name with no address (ENOTFOUND, ENODATA, an empty answer), a
+ * 4xx, a page that is not html or declares nothing, a redirect off the site
+ * or a redirect loop: 'no_match' (stamped, so the 7-day guard spares the next
+ * tap; force asks again). A 5xx, 408 or 429, a network failure, a resolver
+ * that cannot answer now (EAI_AGAIN, a timeout, a server failure; review
+ * COR-WEB-1) or the deadline: 'error' (not stamped, so the next tap retries).
  */
 import { Injectable, Logger } from '@nestjs/common';
 import { isIP } from 'node:net';
@@ -58,22 +67,49 @@ export const WEBSITE_MAX_REDIRECTS = 3;
 /** The longest value written to a contact field. */
 const MAX_VALUE_LENGTH = 200;
 
-/** Free-mail hosts: an address there names a person's mailbox, not a business website. */
+/**
+ * Free-mail hosts: an address there names a person's mailbox, not a business
+ * website. TOF-WEBSITE-ENRICHMENT review COR-WEB-3: webmail and the mailboxes
+ * ISPs give their customers too (a site there would name the mail provider,
+ * never the contact's business).
+ */
 const FREE_MAIL_HOSTS = new Set([
+  // Webmail.
   'gmail.com', 'googlemail.com', 'yahoo.com', 'ymail.com', 'rocketmail.com', 'outlook.com', 'hotmail.com',
-  'live.com', 'live.co.uk', 'msn.com', 'icloud.com', 'me.com', 'mac.com', 'aol.com', 'proton.me',
-  'protonmail.com', 'pm.me', 'gmx.com', 'gmx.net', 'gmx.de', 'mail.com', 'zoho.com', 'zohomail.com',
-  'yandex.com', 'yandex.ru', 'tutanota.com', 'fastmail.com', 'hey.com', 'qq.com', '163.com', '126.com',
-  'web.de', 't-online.de', 'btinternet.com', 'comcast.net', 'verizon.net', 'att.net', 'sbcglobal.net',
-  'tstt.net.tt',
+  'live.com', 'live.co.uk', 'msn.com', 'windowslive.com', 'passport.com', 'icloud.com', 'me.com', 'mac.com',
+  'aol.com', 'aim.com', 'proton.me', 'protonmail.com', 'pm.me', 'gmx.com', 'gmx.net', 'gmx.de', 'mail.com',
+  'email.com', 'usa.com', 'zoho.com', 'zohomail.com', 'yandex.com', 'yandex.ru', 'ya.ru', 'tutanota.com',
+  'tuta.io', 'tuta.com', 'tutamail.com', 'fastmail.com', 'fastmail.fm', 'hey.com', 'duck.com', 'posteo.de',
+  'posteo.net', 'mailbox.org', 'hushmail.com', 'runbox.com', 'mailfence.com', 'disroot.org', 'skiff.com',
+  'inbox.com', 'lycos.com', 'excite.com', 'rediffmail.com', 'naver.com', 'hanmail.net', 'daum.net', 'nate.com',
+  'qq.com', 'foxmail.com', '163.com', '126.com', 'yeah.net', '139.com', 'sina.com', 'sina.cn', 'sohu.com',
+  'aliyun.com', 'mail.ru', 'bk.ru', 'inbox.ru', 'list.ru', 'internet.ru', 'rambler.ru', 'ukr.net', 'i.ua',
+  'meta.ua', 'web.de', 'freenet.de', 'seznam.cz', 'email.cz', 'centrum.cz', 'atlas.cz', 'wp.pl', 'o2.pl',
+  'onet.pl', 'op.pl', 'interia.pl', 'poczta.fm', 'libero.it', 'virgilio.it', 'email.it', 'inwind.it',
+  'iol.it', 'laposte.net', 'mail.bg', 'abv.bg', 'uol.com.br', 'bol.com.br', 'ig.com.br', 'terra.com.br',
+  'r7.com',
+  // Mailboxes ISPs give their customers.
+  't-online.de', 'arcor.de', 'vodafone.de', 'orange.fr', 'wanadoo.fr', 'free.fr', 'sfr.fr', 'neuf.fr',
+  'bbox.fr', 'numericable.fr', 'alice.it', 'tin.it', 'tiscali.it', 'tiscali.co.uk', 'btinternet.com',
+  'btopenworld.com', 'sky.com', 'virginmedia.com', 'ntlworld.com', 'blueyonder.co.uk', 'talktalk.net',
+  'tiscali.net', 'plus.net', 'comcast.net', 'verizon.net', 'att.net', 'sbcglobal.net', 'bellsouth.net',
+  'cox.net', 'charter.net', 'spectrum.net', 'earthlink.net', 'optonline.net', 'frontier.com',
+  'frontiernet.net', 'windstream.net', 'centurylink.net', 'q.com', 'juno.com', 'netzero.net', 'roadrunner.com',
+  'rr.com', 'twc.com', 'mediacombb.net', 'suddenlink.net', 'rogers.com', 'shaw.ca', 'sympatico.ca',
+  'bell.net', 'telus.net', 'videotron.ca', 'cogeco.ca', 'eastlink.ca', 'bigpond.com', 'bigpond.net.au',
+  'optusnet.com.au', 'iinet.net.au', 'tpg.com.au', 'internode.on.net', 'westnet.com.au', 'xtra.co.nz',
+  'slingshot.co.nz', 'orcon.net.nz', 'telkomsa.net', 'mweb.co.za', 'vodamail.co.za', 'tstt.net.tt',
+  'docomo.ne.jp', 'ezweb.ne.jp', 'softbank.ne.jp', 'nifty.com', 'ocn.ne.jp', 'biglobe.ne.jp',
 ]);
 
 /**
- * Free-mail brands that also run regional domains (yahoo.co.uk, hotmail.fr):
- * a host of the brand's name followed by a country-style suffix only.
+ * Free-mail brands that also run regional domains (yahoo.co.uk, hotmail.fr,
+ * live.com.au, msn.co.uk): a host of the brand's name followed by a
+ * country-style suffix only (one or two labels of at most 3 letters).
  */
 const FREE_MAIL_BRANDS = new Set([
-  'gmail', 'googlemail', 'yahoo', 'ymail', 'hotmail', 'outlook', 'aol', 'icloud', 'protonmail', 'gmx', 'yandex',
+  'gmail', 'googlemail', 'yahoo', 'ymail', 'hotmail', 'outlook', 'live', 'msn', 'windowslive', 'aol', 'icloud',
+  'protonmail', 'gmx', 'yandex', 'tutanota', 'zoho', 'rediffmail', 'rocketmail',
 ]);
 
 const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -183,14 +219,16 @@ export class PublicDataEnrichmentProvider implements EnrichmentProvider {
   }
 
   /**
-   * The site's root page, following at most WEBSITE_MAX_REDIRECTS redirects.
-   * Each hop: checked (checkHop), fetched through its own PinnedDispatcher
-   * with redirect 'manual', and the dispatcher destroyed once the hop is done.
+   * The site's root page, following at most WEBSITE_MAX_REDIRECTS redirects,
+   * each within the site (withinSite). Each hop: checked (checkHop), fetched
+   * through its own PinnedDispatcher with redirect 'manual', and the
+   * dispatcher destroyed once the hop is done.
    */
   private async readSite(start: URL, deadline: AbortSignal): Promise<Hop> {
     let url = start;
     for (let hops = 0; ; hops++) {
       const target = await this.checkHop(url, deadline);
+      if (target === 'transient') return { kind: 'transient' };
       if (!target) return { kind: 'miss' };
       const dispatcher = new PinnedDispatcher(target);
       try {
@@ -214,6 +252,9 @@ export class PublicDataEnrichmentProvider implements EnrichmentProvider {
           } catch {
             return { kind: 'miss' };
           }
+          // Review SEC-WEB-1: only within the site the contact's email names;
+          // any other host is a miss before it is resolved or asked anything.
+          if (!withinSite(start, url)) return { kind: 'miss' };
           continue;
         }
         if (response.status >= 500 || response.status === 408 || response.status === 429) {
@@ -224,7 +265,8 @@ export class PublicDataEnrichmentProvider implements EnrichmentProvider {
           await discard(response);
           return { kind: 'miss' };
         }
-        const html = await readBounded(response, WEBSITE_MAX_BYTES, deadline);
+        const bytes = await readBounded(response, WEBSITE_MAX_BYTES, deadline);
+        const html = decodePage(bytes, response.headers.get('content-type'));
         return { kind: 'page', html, website: `${url.protocol}//${url.host}/` };
       } finally {
         void dispatcher.destroy().catch(() => undefined);
@@ -237,24 +279,52 @@ export class PublicDataEnrichmentProvider implements EnrichmentProvider {
    * scheme other than http or https, a port other than the scheme's default
    * (WHATWG URL drops a default port, so any port left is another one),
    * credentials, a localhost name, or a host whose answers are not all public
-   * or that does not resolve (resolvePublicAddress). The resolver runs under
-   * the lookup's deadline.
+   * or that has no address (resolvePublicAddress). 'transient' when the
+   * resolver could not answer now (review COR-WEB-1: EAI_AGAIN, a timeout, a
+   * server failure), which says nothing about the site. The resolver runs
+   * under the lookup's deadline.
    */
-  private async checkHop(url: URL, deadline: AbortSignal): Promise<CheckedAddress | null> {
+  private async checkHop(url: URL, deadline: AbortSignal): Promise<CheckedAddress | 'transient' | null> {
     if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
     if (url.port !== '' || url.username || url.password) return null;
-    const hostname = url.hostname.toLowerCase().replace(/^\[(.*)\]$/, '$1').replace(/\.$/, '');
+    const hostname = hostOf(url);
     if (!hostname || hostname === 'localhost' || hostname.endsWith('.localhost')) return null;
     try {
       return await underDeadline(resolvePublicAddress(hostname), deadline);
     } catch (err: unknown) {
       if (err instanceof OutboundAddressRefusedError) {
         if (err.reason === 'non_public') this.logger.warn('Website enrichment refused a site that is not at a public address');
+        if (err.transient) {
+          this.logger.warn(`Website enrichment could not resolve the site now (${err.lookupCode ?? 'unknown'})`);
+          return 'transient';
+        }
         return null;
       }
       throw err;
     }
   }
+}
+
+/** A URL's host as it is resolved: lower case, no IPv6 brackets, no trailing dot. */
+function hostOf(url: URL): string {
+  return url.hostname.toLowerCase().replace(/^\[(.*)\]$/, '$1').replace(/\.$/, '');
+}
+
+/**
+ * TOF-WEBSITE-ENRICHMENT review SEC-WEB-1: true when a redirect target is on
+ * the site the contact's email names: that host, or its www. pair (acme.com
+ * and www.acme.com, either way round). Any other host, another subdomain or
+ * a parent domain included, is not followed: the facts written to the
+ * contact come only from the business's own site, and a member who controls
+ * a domain cannot point KEYFLOW's requests at an unrelated host. (A
+ * registrable-domain rule would need the public suffix list, a dependency;
+ * the pair is the redirect sites make in practice.)
+ */
+function withinSite(start: URL, target: URL): boolean {
+  const site = hostOf(start);
+  const bare = site.startsWith('www.') && site.slice(4).includes('.') ? site.slice(4) : site;
+  const host = hostOf(target);
+  return host === bare || host === `www.${bare}`;
 }
 
 function isHtml(contentType: string | null): boolean {
@@ -285,12 +355,11 @@ function underDeadline<T>(work: Promise<T>, deadline: AbortSignal): Promise<T> {
   });
 }
 
-/** At most `maxBytes` of the body as UTF-8 text; the rest is cancelled unread. Each read runs under the deadline. */
-async function readBounded(response: Response, maxBytes: number, deadline: AbortSignal): Promise<string> {
-  if (!response.body) return '';
+/** At most `maxBytes` of the body; the rest is cancelled unread. Each read runs under the deadline. */
+async function readBounded(response: Response, maxBytes: number, deadline: AbortSignal): Promise<Uint8Array> {
+  if (!response.body) return new Uint8Array(0);
   const reader = response.body.getReader();
-  const decoder = new TextDecoder('utf-8');
-  let text = '';
+  const chunks: Uint8Array[] = [];
   let total = 0;
   try {
     while (total < maxBytes) {
@@ -299,13 +368,116 @@ async function readBounded(response: Response, maxBytes: number, deadline: Abort
       const room = maxBytes - total;
       const bytes = value.byteLength > room ? value.subarray(0, room) : value;
       total += bytes.byteLength;
-      text += decoder.decode(bytes, { stream: true });
+      chunks.push(bytes);
     }
-    text += decoder.decode();
   } finally {
     reader.cancel().catch(() => undefined);
   }
+  const body = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return body;
+}
+
+// ---------------------------------------------------------------------------
+// Decoding (review COR-WEB-2). The page is decoded in the character encoding
+// it declares, in the order the HTML standard sniffs it: a byte-order mark,
+// then the charset of the Content-Type, then a <meta charset> or
+// <meta http-equiv="Content-Type"> within the first 1024 bytes, else UTF-8.
+// A label TextDecoder does not know is ignored. A value that still cannot be
+// spelled (U+FFFD) is never written (cleanValue).
+// ---------------------------------------------------------------------------
+
+/** How far into the page a <meta> charset is looked for (the HTML standard's prescan). */
+const META_PRESCAN_BYTES = 1024;
+
+/**
+ * Windows-1252 at 0x80-0x9F, where it differs from ISO-8859-1 (WHATWG
+ * index-windows-1252). Node's TextDecoder decodes 'windows-1252' (and every
+ * label for it: iso-8859-1, latin1, ascii) as ISO-8859-1, so 0x92 would be the
+ * control U+0092 rather than the right single quote; these are mapped here.
+ */
+const WINDOWS_1252_C1 = [
+  0x20ac, 0x81, 0x201a, 0x192, 0x201e, 0x2026, 0x2020, 0x2021, 0x2c6, 0x2030, 0x160, 0x2039, 0x152, 0x8d, 0x17d, 0x8f,
+  0x90, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014, 0x2dc, 0x2122, 0x161, 0x203a, 0x153, 0x9d, 0x17e, 0x178,
+];
+
+/** The encoding a label names (WHATWG labels, any case), or null for a label TextDecoder does not know. */
+function encodingFor(label: string | undefined): string | null {
+  const trimmed = (label ?? '').trim().replace(/^["']|["']$/g, '').trim();
+  if (!trimmed) return null;
+  try {
+    return new TextDecoder(trimmed).encoding;
+  } catch {
+    return null;
+  }
+}
+
+/** The charset parameter of a Content-Type (or of a <meta http-equiv> content), unquoted; undefined when none. */
+function charsetParameter(contentType: string | null | undefined): string | undefined {
+  for (const part of (contentType ?? '').split(';').slice(1)) {
+    const eq = part.indexOf('=');
+    if (eq < 0) continue;
+    if (part.slice(0, eq).trim().toLowerCase() === 'charset') return part.slice(eq + 1).trim();
+  }
+  return undefined;
+}
+
+/** The encoding a <meta> in the first META_PRESCAN_BYTES declares, or null. ASCII-compatible read, one linear pass. */
+function metaEncoding(bytes: Uint8Array): string | null {
+  const head = latin1Text(bytes.subarray(0, META_PRESCAN_BYTES));
+  let i = 0;
+  while (i < head.length) {
+    const open = head.indexOf('<', i);
+    if (open < 0) return null;
+    if (head.startsWith('<!--', open)) {
+      const close = head.indexOf('-->', open + 4);
+      if (close < 0) return null;
+      i = close + 3;
+      continue;
+    }
+    if (!readsAt(head, open + 1, 'meta') || isTagNameChar(head.charCodeAt(open + 5))) {
+      i = open + 1;
+      continue;
+    }
+    const read = readAttributes(head, open + 5);
+    if (!read) return null;
+    i = read.end;
+    const declared = read.attributes.has('charset')
+      ? read.attributes.get('charset')
+      : (read.attributes.get('http-equiv') ?? '').trim().toLowerCase() === 'content-type'
+        ? charsetParameter(`;${read.attributes.get('content') ?? ''}`)
+        : undefined;
+    const encoding = encodingFor(declared);
+    if (encoding) return encoding === 'utf-16le' || encoding === 'utf-16be' ? 'utf-8' : encoding;
+  }
+  return null;
+}
+
+/** Bytes as ISO-8859-1 text (one character per byte), in slices so no call takes too many arguments. */
+function latin1Text(bytes: Uint8Array, map?: (byte: number) => number): string {
+  let text = '';
+  for (let start = 0; start < bytes.length; start += 8192) {
+    const slice = Array.from(bytes.subarray(start, start + 8192), map ?? ((byte) => byte));
+    text += String.fromCharCode(...slice);
+  }
   return text;
+}
+
+/** TOF-WEBSITE-ENRICHMENT review COR-WEB-2: the page's text, decoded in the encoding it declares. */
+function decodePage(bytes: Uint8Array, contentType: string | null): string {
+  let encoding: string;
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) encoding = 'utf-8';
+  else if (bytes[0] === 0xfe && bytes[1] === 0xff) encoding = 'utf-16be';
+  else if (bytes[0] === 0xff && bytes[1] === 0xfe) encoding = 'utf-16le';
+  else encoding = encodingFor(charsetParameter(contentType)) ?? metaEncoding(bytes) ?? 'utf-8';
+  if (encoding === 'windows-1252') {
+    return latin1Text(bytes, (byte) => (byte >= 0x80 && byte <= 0x9f ? WINDOWS_1252_C1[byte - 0x80] : byte));
+  }
+  return new TextDecoder(encoding).decode(bytes);
 }
 
 // ---------------------------------------------------------------------------
@@ -333,8 +505,14 @@ function decodeReferences(value: string): string {
   });
 }
 
-/** A value as written to a contact: control characters dropped, bidi and zero-width marks removed, whitespace collapsed, at most MAX_VALUE_LENGTH characters. */
+/**
+ * A value as written to a contact: control characters dropped, bidi and
+ * zero-width marks removed, whitespace collapsed, at most MAX_VALUE_LENGTH
+ * characters. Review COR-WEB-2: a value carrying U+FFFD (bytes the page's
+ * encoding could not spell, or the reference itself) is no value at all.
+ */
 function cleanValue(value: string): string | undefined {
+  if (value.includes('\ufffd')) return undefined;
   const cleaned = value
     // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
