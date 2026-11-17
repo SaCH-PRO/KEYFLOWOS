@@ -66,6 +66,9 @@ type FillableField = typeof FILLABLE_REQUIRED_FIELDS[number];
 /** What bulk-apply reports for a fix that failed for a reason that is not the caller's to read. */
 const FIX_FAILED_MESSAGE = 'The fix could not be applied.';
 
+/** What a contact the member may not open answers (GET contacts/:contactId's 404). */
+const CONTACT_NOT_FOUND_MESSAGE = 'Contact not found';
+
 type IssueDraft = {
   contactId: string;
   kind: DataQualityKind;
@@ -86,6 +89,8 @@ type ScanSummary = {
 
 type IssueListFilters = {
   businessId: string;
+  /** The member the list is for: it lists only issues of contacts they may open. */
+  actorId: string;
   kinds?: DataQualityKind[];
   severities?: Array<'low' | 'medium' | 'high'>;
   status?: 'open' | 'resolved' | 'dismissed';
@@ -400,49 +405,74 @@ export class CrmDataQualityService {
     return { upserted, resolved };
   }
 
-  async markContactVerified(businessId: string, contactId: string): Promise<{ ok: boolean }> {
-    const contact = await this.prisma.client.contact.findFirst({
-      where: contactWhereWithId(businessId, contactId),
-      select: { id: true },
-    });
-    if (!contact) {
-      throw new NotFoundException('Contact not found');
-    }
-    await this.prisma.client.contact.update({
-      where: { id: contactId },
-      data: { lastVerifiedAt: new Date() },
-    });
-    // Resolve any open stale_data issues for this contact since the user
-    // explicitly verified the record.
+  /**
+   * Mark a contact verified (POST contacts/:contactId/data-quality/mark-verified), as `actorId`.
+   * FU-DATAQUALITY-MASS-ASSIGN review repair SEC-DQ-3: the route writes the contact, so it keeps
+   * what the 'mark_verified' fix through apply keeps: the contact PATCH's edit rule
+   * (CrmService.assertCanEditContact: 403 for crm_edit 'none' and for a contact outside crm_edit
+   * 'owned'; the controller has already answered a contact the member may not open 404), the
+   * stamp written with its ContactAuditEntry in one transaction (writeAudited, owner ruling D-25),
+   * and the contact's open stale-data issue resolved by the member.
+   */
+  async markContactVerified(businessId: string, contactId: string, actorId: string): Promise<{ ok: boolean }> {
+    await this.crm.assertCanEditContact(businessId, contactId, actorId);
+    await this.writeAudited(businessId, contactId, actorId, { lastVerifiedAt: new Date() }, CONTACT_NOT_FOUND_MESSAGE);
+    // Resolve any open stale_data issue of this contact: the member explicitly verified the record.
     await this.prisma.client.contactDataIssue.updateMany({
       where: { businessId, contactId, kind: 'stale_data', status: 'open' },
-      data: { status: 'resolved', resolvedAt: new Date(), resolvedBy: 'user' },
+      data: { status: 'resolved', resolvedAt: new Date(), resolvedBy: actorId },
     });
     return { ok: true };
   }
 
+  /**
+   * The contacts of the business `actorId` may open, by the rule GET contacts/:contactId applies
+   * (assertContactVisible: the business, deletedAt null, visibilityClause). resolveCrmAccess
+   * refuses a non-member 403. The OWNER and SUPER_ADMIN open every live contact.
+   */
+  private async contactsOpenTo(businessId: string, actorId: string): Promise<Prisma.ContactWhereInput> {
+    const access = await resolveCrmAccess(this.prisma, businessId, actorId);
+    const visClause = visibilityClause(access, actorId);
+    const where: Prisma.ContactWhereInput = { ...contactWhereBase(businessId) };
+    if (visClause) where.AND = [visClause as Prisma.ContactWhereInput];
+    return where;
+  }
+
+  /**
+   * The data-quality queue (GET .../data-quality/issues) for `filters.actorId`.
+   *
+   * FU-DATAQUALITY-MASS-ASSIGN review repairs SEC-DQ-1 / COR-DQMA-2 (owner rulings D-63, D-133;
+   * the W11-CRM-COUNTS-RULING hand-off SEC-W11CCR-2): the items, the total and the open counts
+   * by kind (byKind) cover only the issues of the contacts the member may open (contactsOpenTo),
+   * so a member a visibility rule hides a contact from is not served its issue, its name, email
+   * or phone, is not counted it, and cannot find it by searching; the issues listed are the ones
+   * apply, bulk-apply and dismiss act on (findIssueFor). Review repair COR-DQMA-1: for every
+   * member, the OWNER included, the issues of a soft-deleted contact (deleted, or merged into
+   * another) are neither listed nor counted: no fix or dismissal can reach them, and the scan
+   * visits live contacts only.
+   */
   async listIssues(filters: IssueListFilters) {
     const limit = Math.min(Math.max(filters.limit ?? 50, 1), 200);
     const offset = Math.max(filters.offset ?? 0, 0);
     const status = filters.status ?? 'open';
+    const openable = await this.contactsOpenTo(filters.businessId, filters.actorId);
+    const searched: Prisma.ContactWhereInput | null = filters.search
+      ? {
+          OR: [
+            { firstName: { contains: filters.search, mode: 'insensitive' } },
+            { lastName: { contains: filters.search, mode: 'insensitive' } },
+            { displayName: { contains: filters.search, mode: 'insensitive' } },
+            { email: { contains: filters.search, mode: 'insensitive' } },
+            { phone: { contains: filters.search } },
+          ],
+        }
+      : null;
     const where: Prisma.ContactDataIssueWhereInput = {
       businessId: filters.businessId,
       status,
       ...(filters.kinds && filters.kinds.length > 0 ? { kind: { in: filters.kinds } } : {}),
       ...(filters.severities && filters.severities.length > 0 ? { severity: { in: filters.severities } } : {}),
-      ...(filters.search
-        ? {
-            contact: {
-              OR: [
-                { firstName: { contains: filters.search, mode: 'insensitive' } },
-                { lastName: { contains: filters.search, mode: 'insensitive' } },
-                { displayName: { contains: filters.search, mode: 'insensitive' } },
-                { email: { contains: filters.search, mode: 'insensitive' } },
-                { phone: { contains: filters.search } },
-              ],
-            },
-          }
-        : {}),
+      contact: { is: searched ? { AND: [openable, searched] } : openable },
     };
 
     const [items, total, openCounts] = await Promise.all([
@@ -470,7 +500,7 @@ export class CrmDataQualityService {
       this.prisma.client.contactDataIssue.count({ where }),
       this.prisma.client.contactDataIssue.groupBy({
         by: ['kind'],
-        where: { businessId: filters.businessId, status: 'open' },
+        where: { businessId: filters.businessId, status: 'open', contact: { is: openable } },
         _count: { _all: true },
       }),
     ]);
@@ -490,11 +520,18 @@ export class CrmDataQualityService {
     return { items };
   }
 
+  /**
+   * The business-wide data-quality stats (GET .../data-quality/stats for the OWNER and
+   * SUPER_ADMIN; CrmStatsService.dataQualityCountsFor works out a member's over the contacts they
+   * may open, D-133). FU-DATAQUALITY-MASS-ASSIGN review repair COR-DQMA-1: issueCounts counts the
+   * open issues of live contacts only, as totalContacts and averageScore count live contacts: an
+   * issue left on a deleted or merged contact is in no list and no fix can reach it.
+   */
   async getStats(businessId: string) {
     const [byKind, totals, scoreAgg, business] = await Promise.all([
       this.prisma.client.contactDataIssue.groupBy({
         by: ['kind'],
-        where: { businessId, status: 'open' },
+        where: { businessId, status: 'open', contact: { is: contactWhereBase(businessId) } },
         _count: { _all: true },
       }),
       this.prisma.client.contact.count({ where: { ...contactWhereBase(businessId) } }),
@@ -531,12 +568,12 @@ export class CrmDataQualityService {
    * not found'. resolveCrmAccess refuses a non-member 403 first.
    */
   private async findIssueFor(businessId: string, issueId: string, actorId: string) {
-    const access = await resolveCrmAccess(this.prisma, businessId, actorId);
-    const visClause = visibilityClause(access, actorId);
-    const contactWhere: Prisma.ContactWhereInput = { ...contactWhereBase(businessId) };
-    if (visClause) contactWhere.AND = [visClause as Prisma.ContactWhereInput];
+    const contactWhere = await this.contactsOpenTo(businessId, actorId);
+    // An id is text: anything else (a filter object Prisma would read as a pattern) names no
+    // issue (review SEC-DQ-2; bulkApplyFix refuses it 400 before this).
+    if (typeof issueId !== 'string') throw new NotFoundException(ISSUE_NOT_FOUND_MESSAGE);
     const issue = await this.prisma.client.contactDataIssue.findFirst({
-      where: { id: issueId, businessId, contact: contactWhere },
+      where: { id: issueId, businessId, contact: { is: contactWhere } },
     });
     if (!issue) throw new NotFoundException(ISSUE_NOT_FOUND_MESSAGE);
     return issue;
@@ -687,18 +724,21 @@ export class CrmDataQualityService {
    * FU-DATAQUALITY-MASS-ASSIGN): the row is locked and read in the business,
    * written, and its ContactAuditEntry ('updated', the member as USER actor,
    * the diff) is written in the same transaction, so the change and its entry
-   * commit together or not at all.
+   * commit together or not at all. A contact gone by then answers 404 with
+   * `notFoundMessage` (an issue's fix: 'Issue not found'; mark-verified:
+   * 'Contact not found').
    */
   private async writeAudited(
     businessId: string,
     contactId: string,
     actorId: string,
     data: Prisma.ContactUpdateInput,
+    notFoundMessage: string = ISSUE_NOT_FOUND_MESSAGE,
   ): Promise<void> {
     await this.prisma.client.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM contacts WHERE id = ${contactId} AND business_id = ${businessId} FOR UPDATE`;
       const before = await tx.contact.findFirst({ where: contactWhereWithId(businessId, contactId) });
-      if (!before) throw new NotFoundException(ISSUE_NOT_FOUND_MESSAGE);
+      if (!before) throw new NotFoundException(notFoundMessage);
       const after = await tx.contact.update({ where: { id: contactId }, data });
       await this.contactAudit.write({
         businessId,
@@ -711,12 +751,19 @@ export class CrmDataQualityService {
     });
   }
 
-  async bulkApplyFix(input: { businessId: string; issueIds: string[]; actorId: string }) {
+  async bulkApplyFix(input: { businessId: string; issueIds: unknown[]; actorId: string }) {
     if (!Array.isArray(input.issueIds) || input.issueIds.length === 0) {
       throw new BadRequestException('issueIds is required');
     }
     if (input.issueIds.length > 200) {
       throw new BadRequestException('Maximum 200 issues per bulk fix');
+    }
+    // FU-DATAQUALITY-MASS-ASSIGN review repair SEC-DQ-2: every element is an issue id (text). An
+    // object would reach the issue lookup as a Prisma filter ({ endsWith: ... }) and apply the fix
+    // of an issue the member never named, or probe ids by prefix; the whole request is refused 400
+    // before any fix is applied, and the element is not echoed back.
+    if (!input.issueIds.every((id): id is string => typeof id === 'string')) {
+      throw new BadRequestException('issueIds must be a list of issue ids');
     }
     const results: Array<{ issueId: string; ok: boolean; error?: string }> = [];
     for (const id of input.issueIds) {
@@ -836,9 +883,19 @@ export class CrmDataQualityService {
     return { issueId: issue.id, status: 'dismissed' as const };
   }
 
-  async wizardQueue(businessId: string, limit = 25) {
+  /**
+   * The fix wizard's queue (GET .../data-quality/wizard) for `actorId`: the open issues of the
+   * contacts the member may open (FU-DATAQUALITY-MASS-ASSIGN review repairs SEC-DQ-1 /
+   * COR-DQMA-2, as listIssues), so a hidden contact's issue is neither offered nor takes one of
+   * the queue's places; the issues of a deleted or merged contact are left out for every member
+   * (COR-DQMA-1).
+   */
+  async wizardQueue(input: { businessId: string; actorId: string; limit?: number }) {
+    const { businessId } = input;
+    const limit = input.limit ?? 25;
+    const openable = await this.contactsOpenTo(businessId, input.actorId);
     const items = await this.prisma.client.contactDataIssue.findMany({
-      where: { businessId, status: 'open' },
+      where: { businessId, status: 'open', contact: { is: openable } },
       orderBy: [{ severity: 'desc' }, { createdAt: 'asc' }],
       take: Math.min(Math.max(limit, 1), 100),
       include: {
