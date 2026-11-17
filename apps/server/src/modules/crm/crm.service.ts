@@ -16,7 +16,7 @@ import { ContactCustomFieldValueService } from './contact-custom-field-value.ser
 import { CrmStatsService, type ContactMeta, type ContactWithStats } from './crm-stats.service';
 import { CrmListsService } from './crm-lists.service';
 import { CrmFlowService } from './crm-flow.service';
-import { ContactAuditService, ContactAuditActor } from './privacy/contact-audit.service';
+import { ContactAuditService, ContactAuditActor, type ContactAuditClient, type ContactAuditWriteOptions } from './privacy/contact-audit.service';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
 import { buildContactWhere, findSearchTags } from './contact-filters.helper';
 import { resolveCrmAccess, visibilityClause, type CrmAccess } from './crm-permissions.helper';
@@ -259,6 +259,19 @@ export function withoutListMoney(contact: ContactWithStats): ContactWithStats {
   return served;
 }
 
+/** What CrmService's audit helpers record for one contact (actor, ip and user agent from `ctx`). */
+interface AuditContactInput {
+  businessId: string;
+  contactId: string;
+  action: ContactAuditWriteOptions['action'];
+  before?: unknown;
+  after?: unknown;
+  entityType?: ContactAuditWriteOptions['entityType'];
+  entityId?: string | null;
+  ctx?: AuditContext | null;
+  extraReason?: string | null;
+}
+
 @Injectable()
 export class CrmService {
   private readonly logger = new Logger(CrmService.name);
@@ -277,21 +290,36 @@ export class CrmService {
   ) {}
 
   /**
-   * Internal helper: write a per-contact audit entry. Always
-   * fire-and-forget — never block a mutation on its audit row.
+   * Internal helper: write a per-contact audit entry.
+   *
+   * With `tx` (owner ruling D-25: every contact write records a
+   * ContactAuditEntry; TOF-CONTACT-AUDIT-AWAIT) the entry is written in that
+   * transaction, the contact write's own, and the caller awaits it: when the
+   * entry cannot be written the error propagates, the transaction rolls back
+   * with the contact rows and their ContactEvents, and the request fails. The
+   * contact writes that pass it: createContact, updateContact,
+   * softDeleteContact, bulkUpdateContacts, bulkDeleteContacts,
+   * reassignContacts, mergeContacts and the import merge
+   * (mergeContactDetails). Each writes its entries right
+   * after the contact rows and before any ContactEvent, so a refused entry
+   * also leaves no Activity feed copy or crm.contact_event.logged
+   * announcement behind (CrmTimelineService.logEvent makes both as it writes
+   * the event, inside the transaction or not).
+   *
+   * Without `tx` it stays fire-and-forget, never blocking or failing the write
+   * it reports (the returned promise is already settled): the note and task
+   * writes (the R0 job-role-tool-families ESC-1 wrapper pin keeps
+   * addNote/addTask to `this.timeline.addNote(input)` plus this helper, so
+   * their entry cannot join the note's transaction there).
    */
-  private auditContact(opts: {
-    businessId: string;
-    contactId: string;
-    action: Parameters<ContactAuditService['write']>[0]['action'];
-    before?: unknown;
-    after?: unknown;
-    entityType?: Parameters<ContactAuditService['write']>[0]['entityType'];
-    entityId?: string | null;
-    ctx?: AuditContext | null;
-    extraReason?: string | null;
-  }): void {
-    void this.contactAudit.write({
+  private auditContact(opts: AuditContactInput, tx?: ContactAuditClient): Promise<void> {
+    if (tx) return this.contactAudit.write(this.auditEntry(opts), tx);
+    void this.contactAudit.write(this.auditEntry(opts));
+    return Promise.resolve();
+  }
+
+  private auditEntry(opts: AuditContactInput): ContactAuditWriteOptions {
+    return {
       businessId: opts.businessId,
       contactId: opts.contactId,
       action: opts.action,
@@ -303,7 +331,7 @@ export class CrmService {
       ip: opts.ctx?.ip ?? null,
       userAgent: opts.ctx?.userAgent ?? null,
       reason: opts.extraReason ?? opts.ctx?.reason ?? null,
-    });
+    };
   }
 
   /**
@@ -794,6 +822,15 @@ export class CrmService {
           archivedAt: this.parseDateOrNull(input.archivedAt),
         },
       });
+      // D-25 (TOF-CONTACT-AUDIT-AWAIT): the 'created' entry commits with the
+      // contact or neither does, before its ContactEvent.
+      await this.auditContact({
+        businessId: input.businessId,
+        contactId: created.id,
+        action: 'created',
+        after: created,
+        ctx: _audit,
+      }, tx);
 
       // W3-V1-55c (CR-V155b-1, D-08): the feed's one row for this contact is
       // ActivityEventListener's 'New contact', from the contact.created emit
@@ -820,13 +857,6 @@ export class CrmService {
         ...this.eventActor(_audit),
       };
       this.events.emit('contact.created', payload);
-      this.auditContact({
-        businessId: input.businessId,
-        contactId: contact.id,
-        action: 'created',
-        after: contact,
-        ctx: _audit,
-      });
     }
     if (contact && input.customFieldValues && Object.keys(input.customFieldValues).length > 0) {
       await this.customFieldValues.setValuesForContact(contact.id, input.customFieldValues).catch((err) => {
@@ -964,7 +994,9 @@ export class CrmService {
    * Fill `existing`'s empty fields from `input` (and union the tags). With an
    * audit context (findOrCreateContact on behalf of a member), a merge that
    * changes the contact writes an 'updated' audit entry naming that actor, as
-   * updateContact does; system-context merges write none, as before.
+   * updateContact does, in one transaction with the change (D-25,
+   * TOF-CONTACT-AUDIT-AWAIT): a refused entry leaves the contact as it was and
+   * fails the import. System-context merges write no entry, as before.
    */
   private async mergeContactDetails(
     existing: Contact,
@@ -1002,12 +1034,20 @@ export class CrmService {
     if (Object.keys(data).length === 0) {
       return existing;
     }
-    const updated = await this.prisma.client.contact.update({
-      where: { id: existing.id },
-      data,
-    });
-    if (audit) {
-      this.auditContact({
+    if (!audit) {
+      return this.prisma.client.contact.update({
+        where: { id: existing.id },
+        data,
+      });
+    }
+    // Its own transaction, as the update had its own statement before: the
+    // caller's serializable lookup transaction is left as it was.
+    return this.prisma.client.$transaction(async (tx) => {
+      const updated = await tx.contact.update({
+        where: { id: existing.id },
+        data,
+      });
+      await this.auditContact({
         businessId,
         contactId: existing.id,
         action: 'updated',
@@ -1015,9 +1055,9 @@ export class CrmService {
         after: updated as unknown as Record<string, unknown>,
         ctx: audit,
         extraReason: `merged ${input.source ?? 'unknown'} input into existing contact`,
-      });
-    }
-    return updated;
+      }, tx);
+      return updated;
+    });
   }
 
   /**
@@ -1206,6 +1246,21 @@ export class CrmService {
         where: { id: input.contactId },
         data,
       });
+      // D-25 (TOF-CONTACT-AUDIT-AWAIT): the entry commits with the change or
+      // neither does. An ownership change is a "reassigned" entry; everything
+      // else is a generic "updated" entry with the diff.
+      const reassigned = existingContact.ownerId !== updatedContact.ownerId;
+      await this.auditContact({
+        businessId: input.businessId,
+        contactId: updatedContact.id,
+        action: reassigned ? 'reassigned' : 'updated',
+        before: existingContact as unknown as Record<string, unknown>,
+        after: updatedContact as unknown as Record<string, unknown>,
+        ctx: audit,
+        extraReason: reassigned
+          ? `owner ${existingContact.ownerId ?? 'none'} → ${updatedContact.ownerId ?? 'none'}`
+          : undefined,
+      }, tx);
 
       const updatedFields = Object.keys(data).filter(
         (key) => data[key as keyof Prisma.ContactUpdateInput] !== undefined,
@@ -1242,21 +1297,6 @@ export class CrmService {
       toStatus: updated.status,
     };
     this.events.emit('contact.updated', payload);
-
-    // Detect ownership changes -> "reassigned" action; everything
-    // else is recorded as a generic "updated" entry with diff.
-    const reassigned = existing?.ownerId !== updated.ownerId;
-    this.auditContact({
-      businessId: input.businessId,
-      contactId: updated.id,
-      action: reassigned ? 'reassigned' : 'updated',
-      before: existing as unknown as Record<string, unknown>,
-      after: updated as unknown as Record<string, unknown>,
-      ctx: audit,
-      extraReason: reassigned
-        ? `owner ${existing?.ownerId ?? 'none'} → ${updated.ownerId ?? 'none'}`
-        : undefined,
-    });
 
     if (input.customFieldValues && Object.keys(input.customFieldValues).length > 0) {
       await this.customFieldValues.setValuesForContact(input.contactId, input.customFieldValues).catch((err) => {
@@ -1466,6 +1506,16 @@ export class CrmService {
         }
         throw err;
       });
+      // D-25 (TOF-CONTACT-AUDIT-AWAIT): the entry commits with the deletion
+      // or neither does.
+      await this.auditContact({
+        businessId: input.businessId,
+        contactId: input.contactId,
+        action: 'deleted',
+        before: { deletedAt: contact.deletedAt },
+        after: { deletedAt: claimed.deletedAt },
+        ctx: audit,
+      }, tx);
       await this.timeline.logEvent(
         input.businessId,
         input.contactId,
@@ -1475,14 +1525,6 @@ export class CrmService {
         tx,
       );
       return claimed;
-    });
-    this.auditContact({
-      businessId: input.businessId,
-      contactId: input.contactId,
-      action: 'deleted',
-      before: { deletedAt: contact.deletedAt },
-      after: { deletedAt: deleted.deletedAt },
-      ctx: audit,
     });
     const deletedPayload: ContactDeletedPayload = {
       contact: deleted,
@@ -1591,16 +1633,18 @@ export class CrmService {
       ...(typeof input.favorite === 'boolean' ? { favorite: input.favorite } : {}),
       ...(typeof input.archived === 'boolean' ? { archived: input.archived } : {}),
     };
-    // Audited once the write has committed, and only for the rows it wrote.
-    const auditWritten = (writtenIds: string[]) => {
+    // Audited in the write's own transaction, only for the rows it wrote and
+    // before any of their events (D-25, TOF-CONTACT-AUDIT-AWAIT): a refused
+    // entry rolls the whole call back and fails it.
+    const auditWritten = async (writtenIds: string[], tx: ContactAuditClient) => {
       for (const cid of writtenIds) {
-        this.auditContact({
+        await this.auditContact({
           businessId: input.businessId,
           contactId: cid,
           action: 'bulk_updated',
           after: auditAfter,
           ctx: audit,
-        });
+        }, tx);
       }
     };
     const eventMeta = this.eventActor(audit);
@@ -1625,6 +1669,9 @@ export class CrmService {
           const merged = Array.from(new Set([...(c.tags ?? []), ...(input.addTags ?? [])]));
           const u = await tx.contact.update({ where: { id: c.id }, data: { ...data, tags: merged } });
           updated.push(u);
+        }
+        await auditWritten(updated.map((u) => u.id), tx);
+        for (const c of contacts) {
           await this.timeline.logEvent(input.businessId, c.id, 'bulk.updated', {
             ...(input.status ? { status: input.status } : {}),
             ...(input.addTags ? { addedTags: input.addTags } : {}),
@@ -1636,7 +1683,6 @@ export class CrmService {
         }
         return updated;
       });
-      auditWritten(results.map((u) => u.id));
       this.stats.invalidateCache(input.businessId);
       this.flow.invalidateCache(input.businessId);
       return { updated: results.length };
@@ -1646,13 +1692,14 @@ export class CrmService {
     }
     const writtenIds = await this.prisma.client.$transaction(async (tx) => {
       // The same scope again at the write, which also says exactly which rows
-      // this call wrote: only those get an event (and, after commit, an audit
-      // entry), so a row deleted meanwhile leaves no trace either.
+      // this call wrote: only those get an audit entry and an event, so a row
+      // deleted meanwhile leaves no trace either.
       const rows = await tx.contact.updateManyAndReturn({
         where: { ...scopedWhere, id: { in: input.contactIds } },
         data,
         select: { id: true },
       });
+      await auditWritten(rows.map((row) => row.id), tx);
       for (const { id: cid } of rows) {
         await this.timeline.logEvent(input.businessId, cid, 'bulk.updated', {
           ...(input.status ? { status: input.status } : {}),
@@ -1664,7 +1711,6 @@ export class CrmService {
       }
       return rows.map((row) => row.id);
     });
-    auditWritten(writtenIds);
     this.stats.invalidateCache(input.businessId);
     this.flow.invalidateCache(input.businessId);
     return { updated: writtenIds.length };
@@ -1701,28 +1747,33 @@ export class CrmService {
       }
     }
     // Delete first, scoped to this tenant's live rows the caller can see, and
-    // learn exactly which rows this call deleted. Only those get an event and
-    // an audit entry: an id from another tenant, a missing or hidden id, or one
-    // already deleted (including by a concurrent request) gets no trace.
-    const deletedRows = await this.prisma.client.contact.updateManyAndReturn({
-      where: { id: { in: input.contactIds }, ...contactWhereBase(input.businessId), ...(visClause ? { AND: [visClause] } : {}) },
-      data: { deletedAt: new Date() },
-      select: { id: true },
+    // learn exactly which rows this call deleted. Only those get an audit
+    // entry and an event: an id from another tenant, a missing or hidden id, or
+    // one already deleted (including by a concurrent request) gets no trace.
+    // Each entry is written in the deletion's own transaction (D-25,
+    // TOF-CONTACT-AUDIT-AWAIT): a refused entry rolls every deletion back and
+    // fails the call. The events follow the commit, best-effort as before.
+    const deletedIds = await this.prisma.client.$transaction(async (tx) => {
+      const deletedRows = await tx.contact.updateManyAndReturn({
+        where: { id: { in: input.contactIds }, ...contactWhereBase(input.businessId), ...(visClause ? { AND: [visClause] } : {}) },
+        data: { deletedAt: new Date() },
+        select: { id: true },
+      });
+      for (const { id: cid } of deletedRows) {
+        await this.auditContact({
+          businessId: input.businessId,
+          contactId: cid,
+          action: 'bulk_deleted',
+          ctx: _audit,
+        }, tx);
+      }
+      return deletedRows.map((row) => row.id);
     });
-    const deletedIds = deletedRows.map((row) => row.id);
     const eventMeta = this.eventActor(_audit);
     const eventOps = deletedIds.map((cid) =>
       this.timeline.logEvent(input.businessId, cid, 'contact.deleted', { bulk: true }, eventMeta),
     );
     await Promise.allSettled(eventOps);
-    for (const cid of deletedIds) {
-      this.auditContact({
-        businessId: input.businessId,
-        contactId: cid,
-        action: 'bulk_deleted',
-        ctx: _audit,
-      });
-    }
     this.stats.invalidateCache(input.businessId);
     this.flow.invalidateCache(input.businessId);
     return { deleted: deletedIds.length };
@@ -1757,7 +1808,23 @@ export class CrmService {
    *   - the new owner is a member of the same business; and
    *   - every target contact lives in the business and is currently
    *     visible to the actor under their effective scope.
-   * Logs a `contact.reassigned` timeline event per contact for full audit.
+   * Writes a 'reassigned' ContactAuditEntry per contact it moved, from the old
+   * owner to the new, in the ownership change's own transaction (D-25,
+   * TOF-CONTACT-AUDIT-AWAIT; review repair SEC-CAA-2: an ownership change
+   * widens what a 'my book' member can open, and it had no audit row): a
+   * refused entry leaves every owner as it was and fails the call. The entry
+   * names the member (actorUserId) as USER, as updateContact's 'reassigned'
+   * entry does; a call with no actor is SYSTEM. A `contact.reassigned`
+   * timeline event per contact follows the commit, as before.
+   *
+   * The owner each entry and event names as `from`, and whether the member may
+   * still see the contact, are decided on the rows the transaction locks
+   * (review repair SEC-TCAC-1), as updateContact decides on its locked row: the
+   * read before the transaction only refuses early when nothing is eligible. A
+   * concurrent ownership change that commits first is waited for and seen, so
+   * the trail records the transition this reassign really made, and a contact
+   * that has left a member's book in the meantime is not moved (when none is
+   * left, 403 and nothing is written).
    */
   async reassignContacts(input: {
     businessId: string;
@@ -1799,13 +1866,42 @@ export class CrmService {
     }
 
     const eligibleIds = eligible.map((c) => c.id);
-    const result = await this.prisma.client.contact.updateMany({
-      where: { id: { in: eligibleIds }, ...contactWhereBase(input.businessId) },
-      data: { ownerId: input.newOwnerId },
+    const audit = this.memberAuditContext(undefined, input.actorUserId);
+    const moved = await this.prisma.client.$transaction(async (tx) => {
+      // Lock the rows first (in id order, so overlapping reassigns queue rather
+      // than deadlock), then read them again under the lock with the same
+      // tenant, liveness and visibility predicate: the owner each one moves
+      // from, and whether the member may still see it, are those of the row
+      // this transaction writes (SEC-TCAC-1).
+      await tx.$queryRaw`SELECT id FROM contacts WHERE id = ANY(${eligibleIds}) AND business_id = ${input.businessId} AND deleted_at IS NULL ORDER BY id FOR UPDATE`;
+      const locked = await tx.contact.findMany({
+        where: { ...eligibleWhere, id: { in: eligibleIds } },
+        select: { id: true, ownerId: true },
+      });
+      if (locked.length === 0) {
+        throw new ForbiddenException('No eligible contacts to reassign');
+      }
+      await tx.contact.updateMany({
+        where: { id: { in: locked.map((c) => c.id) }, ...contactWhereBase(input.businessId) },
+        data: { ownerId: input.newOwnerId },
+      });
+      for (const { id: cid, ownerId } of locked) {
+        const from = ownerId ?? null;
+        await this.auditContact({
+          businessId: input.businessId,
+          contactId: cid,
+          action: 'reassigned',
+          before: { ownerId: from },
+          after: { ownerId: input.newOwnerId },
+          ctx: audit,
+          extraReason: `owner ${from ?? 'none'} → ${input.newOwnerId}`,
+        }, tx);
+      }
+      return locked;
     });
 
     await Promise.allSettled(
-      eligible.map((c) =>
+      moved.map((c) =>
         this.timeline.logEvent(input.businessId, c.id, 'contact.reassigned', {
           fromOwnerId: c.ownerId ?? null,
           toOwnerId: input.newOwnerId,
@@ -1817,7 +1913,7 @@ export class CrmService {
     this.stats.invalidateCache(input.businessId);
     this.flow.invalidateCache(input.businessId);
 
-    return { reassigned: result.count, newOwnerId: input.newOwnerId };
+    return { reassigned: moved.length, newOwnerId: input.newOwnerId };
   }
 
   async mergeContacts(input: { businessId: string; primaryId: string; duplicateId: string; fieldOverrides?: Record<string, unknown>; actorId?: string; actorType?: string }, _audit?: AuditContext) {
@@ -1827,6 +1923,10 @@ export class CrmService {
 
     const primary = await this.assertContact(input.businessId, input.primaryId);
     const duplicate = await this.assertContact(input.businessId, input.duplicateId);
+    // The merge's audit entries name the member who merged (the route passes
+    // actorId with actorType USER and no audit context), as its ContactEvent
+    // does; KEY and other callers without a member stay SYSTEM.
+    const audit = this.memberAuditContext(_audit, input.actorType === 'USER' ? input.actorId : undefined);
 
     const mergedTags = Array.from(new Set([...(primary.tags ?? []), ...(duplicate.tags ?? [])]));
     const mergedLeadScore = Math.max(primary.leadScore ?? 0, duplicate.leadScore ?? 0);
@@ -2062,6 +2162,28 @@ export class CrmService {
         data: { deletedAt: new Date(), lastMergeId: mergeOp.id, mergedIntoId: input.primaryId },
       });
 
+      // D-25 (TOF-CONTACT-AUDIT-AWAIT; review repair SEC-CAA-2): both entries
+      // commit with the merge or nothing does, and they come before the
+      // merge's ContactEvent, so a refused entry leaves no feed copy either.
+      await this.auditContact({
+        businessId: input.businessId,
+        contactId: input.primaryId,
+        action: 'merged',
+        before: primary as unknown as Record<string, unknown>,
+        after: mergedContact as unknown as Record<string, unknown>,
+        ctx: audit,
+        extraReason: `merged duplicate ${input.duplicateId} into primary`,
+      }, tx);
+      await this.auditContact({
+        businessId: input.businessId,
+        contactId: input.duplicateId,
+        action: 'merged',
+        before: duplicate as unknown as Record<string, unknown>,
+        after: { mergedInto: input.primaryId },
+        ctx: audit,
+        extraReason: `duplicate merged into ${input.primaryId}`,
+      }, tx);
+
       const repointedCountsForEvent = Object.fromEntries(
         Object.entries(repointedRows).map(([k, v]) => [k, v.count]),
       );
@@ -2091,24 +2213,6 @@ export class CrmService {
         duplicateId: input.duplicateId,
       };
       this.events.emit('contact.merged', payload);
-      this.auditContact({
-        businessId: input.businessId,
-        contactId: input.primaryId,
-        action: 'merged',
-        before: primary as unknown as Record<string, unknown>,
-        after: merged as unknown as Record<string, unknown>,
-        ctx: _audit,
-        extraReason: `merged duplicate ${input.duplicateId} into primary`,
-      });
-      this.auditContact({
-        businessId: input.businessId,
-        contactId: input.duplicateId,
-        action: 'merged',
-        before: duplicate as unknown as Record<string, unknown>,
-        after: { mergedInto: input.primaryId },
-        ctx: _audit,
-        extraReason: `duplicate merged into ${input.primaryId}`,
-      });
     }
     this.stats.invalidateCache(input.businessId);
     return { ...merged, mergeId: result.mergeId, revertableUntil: expiresAt.toISOString() };
