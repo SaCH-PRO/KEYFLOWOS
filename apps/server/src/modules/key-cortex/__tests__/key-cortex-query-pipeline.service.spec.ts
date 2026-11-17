@@ -480,7 +480,11 @@ describe('W10-CORTEX-CHAT-SCOPE: the chat reads episodic memory as the requestin
         const systemPrompt = mockPromptContextService.buildMessages.mock.calls[0][2] as string;
         const label = access ? 'member' : 'no member';
         expect(systemPrompt, label).toContain('v96r business-wide fact');
-        expect(systemPrompt, label).toContain('v96r a pending KEY proposal');
+        // FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): the proposal reaches both; a requester who is no member
+        // sees it as its action, status and risk level only (no title, no figure).
+        expect(systemPrompt, label).toContain('[business_event] GOVERNANCE_DECISION: ');
+        if (access) expect(systemPrompt, label).toContain('v96r a pending KEY proposal');
+        else expect(systemPrompt, label).not.toContain('v96r a pending KEY proposal');
         if (access) expect(systemPrompt, label).toContain('v96r a KEY insight about the business');
         else expect(systemPrompt, label).not.toContain('v96r a KEY insight about the business');
         for (const leaked of [

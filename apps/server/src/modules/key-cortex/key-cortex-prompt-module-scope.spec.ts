@@ -603,8 +603,11 @@ describe('FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4): a memberless turn sees a pro
   const ALL_RECORDS = [...PROPOSE, ...APPROVE, ...REJECT, OUTCOME];
   const FIGURES = ['12,345', '12345', 'outstanding', '9,876', 'not now', 'v71o_owner_id', 'draft_payment_reminder'];
 
-  for (const reader of [null, 'stranger'] as const) {
-    it(`${reader === null ? 'no reader' : 'a reader who is no member'}: every proposal record renders as its action, status and risk level, and nothing else`, async () => {
+  // A turn with no member reader reaches readersOwnPromptMemory with reader null: its callers resolve the reader by
+  // membership first (promptMemoryReader, the pipeline's episodicMemoryReader), so a SUPER_ADMIN who is no member, a
+  // removed member and a contact-only position all arrive as null (the real-DB suite drives each through its route).
+  for (const reader of [null] as const) {
+    it('no reader (a memberless turn): every proposal record renders as its action, status and risk level, and nothing else', async () => {
       const kept = await readersOwnPromptMemory(prisma as any, 'biz_1', reader, ALL_RECORDS as any, 1000);
       expect(kept.map((f) => f.id)).toEqual(ALL_RECORDS.map((f) => f.id));
       const byId = new Map(kept.map((f) => [f.id, f]));

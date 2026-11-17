@@ -492,7 +492,9 @@ describe("only the reader's own cognition memory, and no KEY tool-call record (W
       const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', userId, server);
       expect(out, label).not.toContain('[cognition_memory]');
       expect(out, label).not.toContain('INV-014 overdue');
-      expect(out, label).toContain('PROPOSAL-PENDING');
+      // FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): the proposal still reaches a memberless turn, as its action, status and risk level only (no title, no figure).
+      expect(out, label).toContain('- [business_event] GOVERNANCE_DECISION: proposal ');
+      expect(out, label).not.toContain('PROPOSAL-PENDING');
     }
   });
 
@@ -503,7 +505,9 @@ describe("only the reader's own cognition memory, and no KEY tool-call record (W
     expectNoReaderRead(memory, 'check failed');
     // W1F-PERCEPTION-MODULE-SCOPE: no reader, so no module scope: the money event is left out too.
     expect(out).not.toContain('INV-014 overdue');
-    expect(out).toContain('PROPOSAL-PENDING');
+    // FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): the proposal still reaches a memberless turn, as its action, status and risk level only (no title, no figure).
+    expect(out).toContain('- [business_event] GOVERNANCE_DECISION: proposal ');
+    expect(out).not.toContain('PROPOSAL-PENDING');
   });
 });
 
@@ -636,7 +640,9 @@ describe("a staff position's turn sees the modules the policy resolved for the p
     expectNoReaderRead(memory, 'contact-only');
     expect(out).toContain('BOOKING-0900');
     expect(out).toContain('PROJECT-ROOF');
-    expect(out).toContain('PROPOSAL-PENDING');
+    // FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): the proposal still reaches a memberless turn, as its action, status and risk level only (no title, no figure).
+    expect(out).toContain('- [business_event] GOVERNANCE_DECISION: proposal ');
+    expect(out).not.toContain('PROPOSAL-PENDING');
     expect(out).not.toContain('EXPENSE-7777');
     expect(out).not.toContain('CONTACT-ADA');
   });
@@ -656,7 +662,9 @@ describe("a staff position's turn sees the modules the policy resolved for the p
     const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', undefined, positionTurn('user_9', { readerUserId: 'user_9', modules: STAFF_MODULES }));
     expectNoReaderRead(memory, 'removed holder');
     for (const marker of ['BOOKING-0900', 'PROJECT-ROOF', 'EXPENSE-7777', 'CONTACT-ADA']) expect(out, marker).not.toContain(marker);
-    expect(out).toContain('PROPOSAL-PENDING');
+    // FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): the proposal still reaches a memberless turn, as its action, status and risk level only (no title, no figure).
+    expect(out).toContain('- [business_event] GOVERNANCE_DECISION: proposal ');
+    expect(out).not.toContain('PROPOSAL-PENDING');
   });
 });
 
@@ -707,7 +715,10 @@ describe("no business-wide record of one person's KEY turn or KEY action, for an
       // Review SEC-W1FPMS-1: a record that names no module (insight.generated) needs read on every module, which no
       // STAFF member on role defaults (team none) and no caller who is no member holds; the business-wide proposal stays.
       expect(out, String(userId)).not.toContain('CASHFLOW-DIP');
-      expect(out, String(userId)).toContain('PROPOSAL-PENDING');
+      expect(out, String(userId)).toContain('- [business_event] GOVERNANCE_DECISION: ');
+      // FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): the proposal still reaches a memberless turn, as its action, status and risk level only (no title, no figure).
+      if (userId === 'user_9') expect(out, String(userId)).not.toContain('PROPOSAL-PENDING');
+      else expect(out, String(userId)).toContain('PROPOSAL-PENDING');
     }
   });
 });
