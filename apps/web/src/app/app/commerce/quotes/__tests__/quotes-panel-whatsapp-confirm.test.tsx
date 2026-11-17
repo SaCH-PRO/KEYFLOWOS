@@ -89,7 +89,7 @@ function jsonResponse(status: number, body: unknown): Response {
 /** The customer as the server holds it: the member's read serves it, a granted PATCH writes it. */
 let customer: Contact;
 /** How the server answers the contact update: granted (200) or refused (403 with the guard's words). */
-let patchAnswer: { status: number; message?: string } = { status: 200 };
+let patchAnswer: { status: number; message?: string; gate?: Promise<void> } = { status: 200 };
 let patches: Array<Record<string, unknown>> = [];
 
 function installServer() {
@@ -107,6 +107,7 @@ function installServer() {
       if (method === "PATCH" && url.pathname === CONTACT_PATH) {
         const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
         patches.push(body);
+        if (patchAnswer.gate) await patchAnswer.gate;
         if (patchAnswer.status !== 200) return jsonResponse(patchAnswer.status, { statusCode: patchAnswer.status, message: patchAnswer.message });
         customer = { ...customer, ...body } as Contact;
         return jsonResponse(200, customer);
@@ -153,6 +154,7 @@ beforeEach(() => {
   customer = { id: "ct_maria", firstName: "Maria", lastName: "Lee", email: "maria@example.test", phone: "755-0123", whatsappNumber: null } as Contact;
   patchAnswer = { status: 200 };
   patches = [];
+  for (const fn of [toastMock.success, toastMock.error, toastMock.info]) fn!.mockClear();
   windowOpen = vi.fn(() => null);
   vi.stubGlobal("open", windowOpen);
   window.open = windowOpen as unknown as typeof window.open;
@@ -195,7 +197,10 @@ describe("FU-WA-CONTACT-PHONE quotes panel: a phone-only customer's share asks o
   it("the next share opens the saved number straight away: the step is asked once", async () => {
     renderPanel();
     share();
-    fireEvent.click(within(await confirmStep()).getByRole("button", { name: "Use this as their WhatsApp number" }));
+    const use = within(await confirmStep()).getByRole("button", { name: "Use this as their WhatsApp number" });
+    // A real press: the pointer goes down on the step (outside the row's menu, which closes) and clicks.
+    fireEvent.mouseDown(use);
+    fireEvent.click(use);
     await waitFor(() => expect(windowOpen).toHaveBeenCalledTimes(1));
     share();
     await waitFor(() => expect(windowOpen).toHaveBeenCalledTimes(2));
@@ -255,6 +260,22 @@ describe("FU-WA-CONTACT-PHONE quotes panel: a phone-only customer's share asks o
     await waitFor(() => expect(screen.queryByRole("dialog", { name: /whatsapp number/i })).toBeNull());
     expect(windowOpen).not.toHaveBeenCalled();
     expect(patches).toEqual([]);
+  });
+
+  it("closing the step while the save is in flight: the number is saved, but no chat opens behind the member's back", async () => {
+    let release!: () => void;
+    patchAnswer = { status: 200, gate: new Promise<void>((resolve) => { release = resolve; }) };
+    renderPanel();
+    share();
+    const step = await confirmStep();
+    fireEvent.click(within(step).getByRole("button", { name: "Use this as their WhatsApp number" }));
+    await waitFor(() => expect(patches).toHaveLength(1));
+    fireEvent.keyDown(step, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /whatsapp number/i })).toBeNull());
+    release();
+    await waitFor(() => expect(toastMock.success).toHaveBeenCalledWith(expect.stringMatching(/Maria Lee's WhatsApp number/)));
+    expect(customer.whatsappNumber).toBe("+18687550123");
+    expect(windowOpen).not.toHaveBeenCalled();
   });
 
   it("a phone the business's country cannot read is never offered: the chooser, as before (SEC-WAH-2)", async () => {

@@ -1,5 +1,6 @@
 import { getCachedBusiness } from "./workspace";
-import { fetchContactDetail } from "./client";
+import { fetchContactDetail, updateContact } from "./client";
+import { isModuleScopeRefusal } from "./module-scope-refusal";
 
 /**
  * One WhatsApp helper (WA-HELPER, whatsapp ruling D-153: outbound WhatsApp is a
@@ -19,6 +20,10 @@ import { fetchContactDetail } from "./client";
  * A quote or invoice share carries the document's bearer link, so it opens
  * only the WhatsApp number the business saved on the contact
  * (savedWhatsAppNumber), read by id at share time (readSavedWhatsAppNumber).
+ * A customer with only a phone is asked about once (FU-WA-CONTACT-PHONE):
+ * the share offers the phone's E.164 reading for the member to confirm
+ * (readWhatsAppShareNumber), and the confirmation saves it as the customer's
+ * WhatsApp number through the contact update route (saveWhatsAppNumber).
  */
 
 type CountryRule = {
@@ -270,5 +275,117 @@ export async function readSavedWhatsAppNumber(
     return error ? null : savedWhatsAppNumber(data?.contact);
   } catch {
     return null;
+  }
+}
+
+/**
+ * FU-WA-CONTACT-PHONE (V1-71; D-153, D-221): where a quote or invoice share may
+ * open the chat.
+ *  - saved: the WhatsApp number the business saved on the contact.
+ *  - confirm: none saved, and the contact's phone reads as E.164 under the
+ *    business's country. The share shows that reading and asks the member,
+ *    once, to save it as the customer's WhatsApp number (saveWhatsAppNumber);
+ *    unconfirmed, the phone never receives the document's link (SEC-WAH-1: a
+ *    public form can fill a phone). `phone` is the phone as stored, `name` the
+ *    customer's name for the step's words (null: none on file).
+ *  - none: neither, or a phone the helper cannot read (an unknown country, too
+ *    short): WhatsApp's chooser. A number that cannot be read is never offered.
+ */
+export type WhatsAppShareNumber =
+  | { kind: "saved"; number: string }
+  | { kind: "confirm"; phone: string; e164: string; name: string | null }
+  | { kind: "none" };
+
+type ShareContact = {
+  firstName?: string | null;
+  lastName?: string | null;
+  displayName?: string | null;
+  phone?: string | null;
+  whatsappNumber?: string | null;
+};
+
+function customerName(contact: ShareContact): string | null {
+  const full = [contact.firstName, contact.lastName].map((part) => part?.trim()).filter(Boolean).join(" ");
+  return full || contact.displayName?.trim() || null;
+}
+
+/** The share's number for a contact read at share time, with the business's country (see WhatsAppShareNumber). */
+export function whatsAppShareNumber(contact: ShareContact | null | undefined, country?: string | null): WhatsAppShareNumber {
+  if (!contact) return { kind: "none" };
+  const saved = savedWhatsAppNumber(contact);
+  if (saved) return { kind: "saved", number: saved };
+  const phone = contact.phone?.trim();
+  const e164 = phone ? toE164(phone, country) : null;
+  return phone && e164 ? { kind: "confirm", phone, e164, name: customerName(contact) } : { kind: "none" };
+}
+
+/**
+ * The share's number, read by id when the share is made through the member's
+ * own contact read (as readSavedWhatsAppNumber; WAH-CR-1). A refused or failed
+ * read, or no ids, is WhatsApp's chooser.
+ */
+export async function readWhatsAppShareNumber(
+  businessId: string | null | undefined,
+  contactId: string | null | undefined,
+  country?: string | null,
+): Promise<WhatsAppShareNumber> {
+  if (!businessId || !contactId) return { kind: "none" };
+  try {
+    const { data, error } = await fetchContactDetail(contactId, businessId);
+    return error ? { kind: "none" } : whatsAppShareNumber(data?.contact, country);
+  } catch {
+    return { kind: "none" };
+  }
+}
+
+/**
+ * What saving the confirmed number answered: the number the server stored, or
+ * why it was not saved, in words for the member. `permission` is true when the
+ * server refused this member the write (no crm write, or a customer they may
+ * not edit): trying again will not help, sharing without a number will.
+ */
+export type WhatsAppNumberSave =
+  | { ok: true; number: string }
+  | { ok: false; permission: boolean; refusal: string };
+
+/**
+ * Saves the confirmed E.164 number as the customer's WhatsApp number through
+ * the existing contact update route (PATCH /crm/businesses/:id/contacts/:id
+ * with { whatsappNumber } alone). The server checks the member's own crm write
+ * and visibility and audits the change; nothing here decides who may write.
+ */
+export async function saveWhatsAppNumber(
+  businessId: string | null | undefined,
+  contactId: string | null | undefined,
+  e164: string,
+): Promise<WhatsAppNumberSave> {
+  if (!businessId || !contactId) {
+    return { ok: false, permission: false, refusal: "The WhatsApp number was not saved: this customer could not be found." };
+  }
+  try {
+    const res = await updateContact({ businessId, contactId, whatsappNumber: e164 });
+    if (!res.error) {
+      const stored = (res.data as { whatsappNumber?: string | null } | null)?.whatsappNumber?.trim();
+      return { ok: true, number: stored || e164 };
+    }
+    if (isModuleScopeRefusal(res, "crm")) {
+      return {
+        ok: false,
+        permission: true,
+        refusal:
+          "You can't save a customer's WhatsApp number: your role in this business can't edit customers. " +
+          "Ask the owner to save it on the customer, or share without a number and pick the chat in WhatsApp.",
+      };
+    }
+    if (res.status === 403 || res.status === 404) {
+      return {
+        ok: false,
+        permission: true,
+        refusal: `You can't save this customer's WhatsApp number: ${res.error}. Share without a number and pick the chat in WhatsApp.`,
+      };
+    }
+    return { ok: false, permission: false, refusal: `The WhatsApp number was not saved: ${res.error}. Try again, or share without a number.` };
+  } catch {
+    return { ok: false, permission: false, refusal: "The WhatsApp number was not saved. Check your connection and try again, or share without a number." };
   }
 }
