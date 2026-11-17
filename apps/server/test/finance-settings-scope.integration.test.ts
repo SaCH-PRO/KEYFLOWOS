@@ -18,11 +18,10 @@
  *     before the sender's configuration is read, the export built, anything sent or anything written: a refusal is a
  *     403 with the whole request undone (no email, Business row byte-identical). A saveRecipient that names the address
  *     already saved changes nothing and is not refused.
- * NOT APPLIED HERE (a CONTRADICTION reported by the packet): settings admin for PATCH accountantEmail and revenue write
- * for PATCH's other fields. Three required Release 0 cases (d11-sibling-writes.json: D11F-F05, F06, F11 of
- * d11-finance-settings.integration.test.ts) pin a STAFF member on role defaults (revenue read, settings none) and an
- * ADMIN with settings write changing accountantEmail, accountingBasis, fiscalYearStartMonth and defaultCashAccountId
- * (200); no r0_register row approves changing them. This suite pins nothing of that rule either way.
+ * NOT APPLIED HERE (a CONTRADICTION this packet reported; owner question 19): settings admin for PATCH accountantEmail
+ * and revenue write for PATCH's other fields. Owner ruling D-205 (2026-11-16) amended the three Release 0 cases that
+ * pinned the old rule (d11-sibling-writes.json D11F-F05, F06, F11) and FU-FINANCE-SETTINGS-PATCH applies it; its proof is
+ * test/finance-settings-patch.integration.test.ts (v71e_). This suite pins nothing of that rule either way.
  *
  * HOW THE APP IS COMPOSED (the d11-finance-settings model): a real Nest app with the real FinanceController,
  * FinanceSettingsService, AccountantExportEmailService, PrismaService, AuthGuard, BusinessGuard, ModuleScopeGuard and the

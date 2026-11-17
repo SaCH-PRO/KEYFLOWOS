@@ -12,14 +12,20 @@ import { isModuleScopeRefusal } from "@/lib/module-scope-refusal";
  * address, which receives the business's books (the accountant export), needs settings admin access (you have none)".
  * The whole request is undone (nothing sent, nothing written), so the box says that and claims nothing.
  *
- * Repair (review FSS-CR-2): the words say what this box refused, saving a new default from here, and no wider rule:
- * PATCH settings still writes the address for every revenue reader until owner question 19 is answered (required
- * Release 0 cases D11F-F05, F06 and F11 pin it). Review FSS-CR-3: with no saved address "Remember" starts ticked, so a
- * member without settings admin is refused on a first send; the box unticks it and offers "Send without saving", the
- * same address in one click.
+ * Repair (review FSS-CR-2): the words say what this box refused, saving a new default from here. Review FSS-CR-3: a
+ * refused save unticks "Remember" and offers "Send without saving", the same address in one click.
+ *
+ * FU-FINANCE-SETTINGS-PATCH (owner ruling D-205): PATCH settings now holds the address to the same rule, and GET
+ * settings says in advance whether the member may save it (mayChangeAccountantEmail), which the pages pass here as
+ * `mayRemember`. When it is false the box offers no "Remember" (nothing to tick, nothing to be refused) and says why in
+ * one line; when it is not known (an older answer) the box offers it as before and the refusal path above still holds.
  */
 export const ACCOUNTANT_SAVE_REFUSED =
   "Nothing was sent, and the saved accountant address was not changed: saving a new default recipient from here needs settings admin access in this business. You can still send the export to this address without saving it.";
+
+/** What the box says, in place of "Remember", to a member who may not save the address (mayRemember false). */
+export const ACCOUNTANT_SEND_ONLY =
+  "This address is not saved as the default recipient: saving one needs settings admin access in this business.";
 
 type SendAnswer = { error?: string | null; status?: number } | null | undefined;
 
@@ -40,20 +46,24 @@ export function accountantSendRefusal(res: SendAnswer): string | null {
  * The "Send to accountant" box of the Reports and Tax pages (one component: the two copies had drifted apart only in
  * their icons). Sends the accountant export ZIP for a period to an address; "Remember this as the default recipient"
  * asks the server to save it as Business.accountantEmail, and `onSavedDefault` runs only when the server says it did.
+ * `mayRemember` is GET settings' mayChangeAccountantEmail: false hides "Remember" (FU-FINANCE-SETTINGS-PATCH); undefined
+ * (not known) offers it.
  */
 export function SendAccountantExportModal({
-  businessId, start, end, defaultEmail, onClose, onSavedDefault,
+  businessId, start, end, defaultEmail, mayRemember, onClose, onSavedDefault,
 }: {
   businessId: string;
   start: string;
   end: string;
   defaultEmail: string | null;
+  mayRemember?: boolean;
   onClose: () => void;
   onSavedDefault: (v: string | null) => void;
 }) {
+  const offerRemember = mayRemember !== false;
   const [to, setTo] = useState(defaultEmail ?? "");
   const [message, setMessage] = useState("");
-  const [saveDefault, setSaveDefault] = useState(!defaultEmail);
+  const [saveDefault, setSaveDefault] = useState(offerRemember && !defaultEmail);
   const [sending, setSending] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   // Review FSS-CR-3: the saveRecipient was refused, so the box offers the same send without saving.
@@ -130,15 +140,19 @@ export function SendAccountantExportModal({
               className="mt-1 w-full rounded-lg border border-border/50 bg-background px-2.5 py-1.5 text-sm resize-none"
             />
           </label>
-          <label className="flex items-center gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={saveDefault}
-              onChange={(e) => setSaveDefault(e.target.checked)}
-              className="rounded border-border"
-            />
-            Remember this as the default recipient
-          </label>
+          {offerRemember ? (
+            <label className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={saveDefault}
+                onChange={(e) => setSaveDefault(e.target.checked)}
+                className="rounded border-border"
+              />
+              Remember this as the default recipient
+            </label>
+          ) : (
+            <p className="text-xs text-muted-foreground">{ACCOUNTANT_SEND_ONLY}</p>
+          )}
           {refusal && (
             <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800">
               {refusal}
@@ -166,7 +180,7 @@ export function SendAccountantExportModal({
           </button>
           <button
             type="button"
-            onClick={() => submit(saveDefault)}
+            onClick={() => submit(offerRemember && saveDefault)}
             disabled={sending || !to.trim()}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50"
           >

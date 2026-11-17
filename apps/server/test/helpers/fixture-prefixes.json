@@ -1071,6 +1071,11 @@
       "prefix": "v71n_",
       "owner": "apps/server/test/data-quality-fix-scope.integration.test.ts",
       "packet": "V1-71 (FU-DATAQUALITY-MASS-ASSIGN)"
+    },
+    {
+      "prefix": "v71e_",
+      "owner": "apps/server/test/finance-settings-patch.integration.test.ts",
+      "packet": "V1-71 (FU-FINANCE-SETTINGS-PATCH)"
     }
   ],
   "pendingRenames": [],

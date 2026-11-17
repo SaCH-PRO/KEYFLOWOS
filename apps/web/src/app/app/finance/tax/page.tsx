@@ -54,6 +54,8 @@ export default function FinanceTaxPage() {
   const [exporting, setExporting] = useState(false);
   const [emailModal, setEmailModal] = useState<{ start: string; end: string } | null>(null);
   const [defaultAccountantEmail, setDefaultAccountantEmail] = useState<string | null>(null);
+  // FU-FINANCE-SETTINGS-PATCH (D-205): whether the member may save the address ("Remember"); undefined when not known.
+  const [mayRememberRecipient, setMayRememberRecipient] = useState<boolean | undefined>(undefined);
   /**
    * PR195-KEY-GATES (review finding SEC-P195BW-4; D-146): the tax liabilities are a Books read, revenue read on the
    * server. A refused read is a refusal, not "No tax periods yet".
@@ -64,7 +66,10 @@ export default function FinanceTaxPage() {
     if (!businessId) return;
     void (async () => {
       const r = await fetchFinanceSettings(businessId);
-      if (r.data) setDefaultAccountantEmail(r.data.accountantEmail ?? null);
+      if (r.data) {
+        setDefaultAccountantEmail(r.data.accountantEmail ?? null);
+        setMayRememberRecipient(r.data.mayChangeAccountantEmail);
+      }
     })();
   }, [businessId]);
 
@@ -248,6 +253,7 @@ export default function FinanceTaxPage() {
           liability={drawer}
           onClose={() => setDrawer(null)}
           defaultAccountantEmail={defaultAccountantEmail}
+          mayRememberRecipient={mayRememberRecipient}
           onSavedDefault={(v) => setDefaultAccountantEmail(v)}
         />
       )}
@@ -258,6 +264,7 @@ export default function FinanceTaxPage() {
           start={emailModal.start}
           end={emailModal.end}
           defaultEmail={defaultAccountantEmail}
+          mayRemember={mayRememberRecipient}
           onClose={() => setEmailModal(null)}
           onSavedDefault={(v) => setDefaultAccountantEmail(v)}
         />
@@ -384,12 +391,13 @@ async function exportLiability(businessId: string, liab: Liab) {
 }
 
 function ContributingDrawer({
-  businessId, liability, onClose, defaultAccountantEmail, onSavedDefault,
+  businessId, liability, onClose, defaultAccountantEmail, mayRememberRecipient, onSavedDefault,
 }: {
   businessId: string;
   liability: Liab;
   onClose: () => void;
   defaultAccountantEmail: string | null;
+  mayRememberRecipient?: boolean;
   onSavedDefault: (v: string | null) => void;
 }) {
   const [invoices, setInvoices] = useState<TaxContributingInvoice[] | null>(null);
@@ -464,6 +472,7 @@ function ContributingDrawer({
               start={periodStart}
               end={periodEnd}
               defaultEmail={defaultAccountantEmail}
+              mayRemember={mayRememberRecipient}
               onClose={() => setShowSend(false)}
               onSavedDefault={onSavedDefault}
             />

@@ -24,12 +24,12 @@
  *                      saveRecipient false and says "Sent to …" (one click, not untick-and-resend)
  *   TX-01  RED-BEFORE  Tax accountant box: the same refusal, the same words
  *
- * FU-FINANCE-SETTINGS-SCOPE repair (review FSS-CR-2, FSS-CR-3): PATCH settings still writes accountantEmail for every
- * revenue reader at this head (required Release 0 cases D11F-F05, F06 and F11 pin it; owner question 19), so the box
- * says what it refused, not "only a member who manages this business's settings ... can change where the accountant
- * export goes", and a member the save is refused to sends in one more click. The settings page's accountant branch and
- * its case FS-04 covered a 403 PATCH settings never answers at this head and are gone (FS-05 covers the refusal it does
- * answer); they come back with the PATCH rule.
+ * FU-FINANCE-SETTINGS-SCOPE repair (review FSS-CR-2, FSS-CR-3): the box says what it refused (saving a new default
+ * from here), not "only a member who manages this business's settings ... can change where the accountant export
+ * goes", and a member the save is refused to sends in one more click. FU-FINANCE-SETTINGS-PATCH (owner ruling D-205)
+ * holds PATCH settings to the same rule and brings back the settings page's accountant refusal, with the box's
+ * in-advance "Remember" hint: finance-settings-access.test.tsx (FSA-*, RM-*). These cases mount answers without the
+ * hint (not known), where the box offers "Remember" as before.
  *
  * Mounted on the real pages and the real api client (lib/api.ts, lib/client.ts); only `fetch`, the toast,
  * next/navigation and the stored business are stubbed.
@@ -210,8 +210,7 @@ function expectPlainSaveRefusal(box: HTMLElement) {
   // what this box refused, in plain words
   expect(alert.textContent).toMatch(/saving a new default recipient from here needs settings admin access/);
   expect(alert.textContent).toMatch(/You can still send the export to this address without saving it/);
-  // review FSS-CR-2: no rule the server does not hold (PATCH settings writes the address for every revenue reader
-  // until owner question 19 is answered)
+  // review FSS-CR-2: the box says what it refused, saving from here, and no wider rule
   expect(alert.textContent).not.toMatch(/only a member who manages this business's settings/i);
   expect(alert.textContent).not.toMatch(/can change where the accountant export goes/);
   expect(alert.textContent).not.toMatch(/Insufficient permissions/);
