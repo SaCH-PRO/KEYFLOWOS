@@ -25,6 +25,8 @@ function makeService(opts: {
   provider: EnrichmentProvider;
   /** Row(s) returned by findFirst, in call order. A single value repeats. */
   contact: ContactRow | null | Array<ContactRow | null>;
+  /** TOF-WEBSITE-ENRICHMENT: the website source; absent in the cases written before it. */
+  website?: EnrichmentProvider & { appliesTo: (query: unknown) => boolean };
 }) {
   const updateContact = vi.fn().mockResolvedValue({});
   const updateMany = vi.fn().mockResolvedValue({ count: 1 });
@@ -38,7 +40,9 @@ function makeService(opts: {
   // A CrmService carrying only what its contact edit check reads (prisma), so
   // the enrichment service runs the real CrmService rule; updateContact is a spy.
   const crm = Object.assign(Object.create(CrmService.prototype), { prisma, updateContact });
-  const svc = new ContactEnrichmentService(prisma as never, crm as never, opts.provider as never);
+  const svc = opts.website
+    ? new ContactEnrichmentService(prisma as never, crm as never, opts.provider as never, opts.website as never)
+    : new ContactEnrichmentService(prisma as never, crm as never, opts.provider as never);
   return { svc, updateContact, updateMany, findFirst, crm };
 }
 
@@ -216,5 +220,126 @@ describe('ContactEnrichmentService', () => {
     expect(findFirst).toHaveBeenCalledTimes(2); // initial read + re-read, both bounded by the check
     for (const call of findFirst.mock.calls) expect(call[0]).toEqual({ where: reachableWhere });
     expect(updateContact.mock.calls[0][0]).toMatchObject({ contactId: 'c1', actorUserId: 'member-1', jobTitle: 'CTO' });
+  });
+});
+
+/**
+ * TOF-WEBSITE-ENRICHMENT (V1-63; #63; owner ruling D-188 'enrichment'): the
+ * website source. It runs only on the explicit enrich action of a member who
+ * may edit the contact (the edit check comes first, as for Apollo), only when
+ * Apollo is not configured, and it counts as configured only when its flag is
+ * on and the contact has a business website (Release 0 register: the required
+ * case 'is a no-op when the provider is not configured' still holds). A match
+ * is written through CrmService.updateContact like any other provider's.
+ */
+describe('ContactEnrichmentService: the website source (TOF-WEBSITE-ENRICHMENT, D-188)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function websiteSource(outcome: ProviderOutcome, opts: { enabled?: boolean; applies?: boolean } = {}) {
+    return {
+      key: 'website',
+      enabled: opts.enabled ?? true,
+      appliesTo: vi.fn().mockReturnValue(opts.applies ?? true),
+      enrich: vi.fn().mockResolvedValue(outcome),
+    };
+  }
+
+  const WEBSITE_MATCH: ProviderOutcome = {
+    status: 'match',
+    result: { companyName: 'Acme Bakery', city: 'San Fernando', raw: { source: 'website', website: 'https://acme.example/' } },
+  };
+
+  it('with Apollo not configured and the website flag on, the website source enriches: the blank fields are filled through CrmService.updateContact and the provenance names the website', async () => {
+    const apollo = fakeProvider(null, false);
+    const website = websiteSource(WEBSITE_MATCH);
+    const { svc, updateContact } = makeService({ provider: apollo, website, contact: baseContact });
+
+    const out = await svc.enrichContact({ businessId: 'b1', contactId: 'c1', actorUserId: undefined });
+
+    expect(out).toEqual({ status: 'enriched', provider: 'website', filled: ['companyName', 'city'] });
+    expect(apollo.enrich).not.toHaveBeenCalled();
+    expect(website.appliesTo).toHaveBeenCalledWith(expect.objectContaining({ email: 'jane@acme.com', domain: 'acme.com' }));
+    expect(website.enrich).toHaveBeenCalledTimes(1);
+    const patch = updateContact.mock.calls[0][0];
+    expect(patch).toMatchObject({ businessId: 'b1', contactId: 'c1', companyName: 'Acme Bakery', city: 'San Fernando' });
+    expect(patch.custom.enrichment).toMatchObject({ provider: 'website', filled: ['companyName', 'city'], raw: { source: 'website', website: 'https://acme.example/' } });
+  });
+
+  it('the website source never overwrites: a company name the member typed is kept and only blank fields are filled', async () => {
+    const website = websiteSource(WEBSITE_MATCH);
+    const { svc, updateContact } = makeService({ provider: fakeProvider(null, false), website, contact: { ...baseContact, companyName: 'Typed by member' } });
+
+    const out = await svc.enrichContact({ businessId: 'b1', contactId: 'c1' });
+
+    expect(out).toEqual({ status: 'enriched', provider: 'website', filled: ['city'] });
+    expect(updateContact.mock.calls[0][0].companyName).toBeUndefined();
+  });
+
+  it("counts as configured for a contact only when the contact has a business website: none answers not_configured after the member's edit check, with no lookup and no stamp", async () => {
+    const website = websiteSource(WEBSITE_MATCH, { applies: false });
+    const { svc, crm, updateContact, updateMany, findFirst } = makeService({ provider: fakeProvider(null, false), website, contact: baseContact });
+    crm.assertCanEditContact = vi.fn().mockResolvedValue({ access: null, reachableWhere: { id: 'c1', businessId: 'b1', deletedAt: null } });
+
+    const out = await svc.enrichContact({ businessId: 'b1', contactId: 'c1', actorUserId: 'member-1' });
+
+    expect(out).toEqual({ status: 'not_configured', provider: 'website', filled: [] });
+    expect(crm.assertCanEditContact).toHaveBeenCalledWith('b1', 'c1', 'member-1');
+    expect(findFirst).toHaveBeenCalledTimes(1);
+    expect(website.enrich).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(updateContact).not.toHaveBeenCalled();
+  });
+
+  it('with the website flag off and Apollo not configured, enrich is the same no-op as before: not_configured, nothing read, nothing asked', async () => {
+    const apollo = fakeProvider(null, false);
+    const website = websiteSource(WEBSITE_MATCH, { enabled: false });
+    const { svc, findFirst, updateContact, updateMany } = makeService({ provider: apollo, website, contact: baseContact });
+
+    const out = await svc.enrichContact({ businessId: 'b1', contactId: 'c1' });
+
+    expect(out).toEqual({ status: 'not_configured', provider: 'apollo', filled: [] });
+    expect(findFirst).not.toHaveBeenCalled();
+    expect(apollo.enrich).not.toHaveBeenCalled();
+    expect(website.appliesTo).not.toHaveBeenCalled();
+    expect(website.enrich).not.toHaveBeenCalled();
+    expect(updateContact).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
+  it('Apollo, when configured, stays the provider: the website source is never asked', async () => {
+    const apollo = fakeProvider({ status: 'match', result: { jobTitle: 'CTO' } });
+    const website = websiteSource(WEBSITE_MATCH);
+    const { svc } = makeService({ provider: apollo, website, contact: baseContact });
+
+    const out = await svc.enrichContact({ businessId: 'b1', contactId: 'c1' });
+
+    expect(out).toEqual({ status: 'enriched', provider: 'apollo', filled: ['jobTitle'] });
+    expect(website.appliesTo).not.toHaveBeenCalled();
+    expect(website.enrich).not.toHaveBeenCalled();
+  });
+
+  it('a member refused by the edit check triggers no website lookup and no read', async () => {
+    const website = websiteSource(WEBSITE_MATCH);
+    const { svc, crm, findFirst, updateContact, updateMany } = makeService({ provider: fakeProvider(null, false), website, contact: baseContact });
+    crm.assertCanEditContact = vi.fn().mockRejectedValue(new ForbiddenException('You can only edit contacts you own'));
+
+    await expect(svc.enrichContact({ businessId: 'b1', contactId: 'c1', actorUserId: 'member-1' })).rejects.toThrow('You can only edit contacts you own');
+    expect(findFirst).not.toHaveBeenCalled();
+    expect(website.appliesTo).not.toHaveBeenCalled();
+    expect(website.enrich).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(updateContact).not.toHaveBeenCalled();
+  });
+
+  it('a website miss is stamped (the recent guard spares the next tap) and a transient website failure is not', async () => {
+    const miss = makeService({ provider: fakeProvider(null, false), website: websiteSource({ status: 'no_match' }), contact: baseContact });
+    expect(await miss.svc.enrichContact({ businessId: 'b1', contactId: 'c1' })).toEqual({ status: 'no_match', provider: 'website', filled: [] });
+    expect(miss.updateMany).toHaveBeenCalledTimes(1);
+    expect(miss.updateMany.mock.calls[0][0].data.custom.enrichment).toMatchObject({ provider: 'website', filled: [] });
+
+    const failed = makeService({ provider: fakeProvider(null, false), website: websiteSource({ status: 'error' }), contact: baseContact });
+    expect(await failed.svc.enrichContact({ businessId: 'b1', contactId: 'c1' })).toEqual({ status: 'provider_error', provider: 'website', filled: [] });
+    expect(failed.updateMany).not.toHaveBeenCalled();
+    expect(failed.updateContact).not.toHaveBeenCalled();
   });
 });
