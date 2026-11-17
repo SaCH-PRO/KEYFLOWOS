@@ -978,6 +978,11 @@
       "packet": "V1-63 (BIZ-SETTINGS-SERVER)"
     },
     {
+      "prefix": "v63f_",
+      "owner": "apps/server/test/orderby-multikey-routes.integration.test.ts",
+      "packet": "V1-63 (SWP-ORDERBY-SINGLE-KEY)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true

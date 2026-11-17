@@ -234,8 +234,9 @@ export class CrmController {
    * only (FOLLOW3-D2, review ST-4). The merge preview and DELETE
    * relationships check both of their contacts with contactVisibilityFilter,
    * and the note and task routes keyed by the row's own id go through
-   * assertVisibleChildRow. Not gated yet (follow-up): the
-   * conversations/stream SSE route and GET tasks?contactId=. It returns the
+   * assertVisibleChildRow. GET tasks?contactId= is gated here too (V1-63
+   * review repair SEC-OB-1 / OB-COR-1). Not gated yet (follow-up): the
+   * conversations/stream SSE route. It returns the
    * member and their CRM access, which the relationship and network reads use
    * to drop the neighbours the member cannot open (review ST-1).
    */
@@ -1670,17 +1671,32 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/tasks')
-  listTasks(
+  async listTasks(
     @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: string } },
     @Query('contactId') contactId?: string,
     @Query('status') status?: string,
     @Query('dueBefore') dueBefore?: string,
   ) {
-    return this.crm.listContactTasks({
+    // V1-63 review repair (SEC-OB-1, OB-COR-1; D-37, W9-CRM-RESIDUALS SEC-L81-3):
+    // read as tasks/due reads. With ?contactId= a contact the member cannot open
+    // answers 404 like an unknown id, as GET contacts/:contactId/notes does;
+    // without it, only the tasks of contacts the member may open are listed.
+    // CrmTimelineService.listContactTasks names each task's contact by its
+    // summary and leaves soft-deleted contacts out (SEC-OB-2).
+    let visibility: Prisma.ContactWhereInput | null;
+    if (contactId) {
+      const { actorUserId, access } = await this.assertVisibleContact(businessId, contactId, req);
+      visibility = visibilityClause(access, actorUserId) as Prisma.ContactWhereInput | null;
+    } else {
+      visibility = await this.memberVisibility(businessId, req);
+    }
+    return this.timeline.listContactTasks({
       businessId,
       contactId,
       status,
       dueBefore: dueBefore ? new Date(dueBefore) : undefined,
+      visibility,
     });
   }
 
