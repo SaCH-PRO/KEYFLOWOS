@@ -10,6 +10,11 @@
  *
  * A select field's own option label, where the field defines one, is still the better word (SWP-CONTACT-DETAIL);
  * humanizeCode is the fallback for a value with no label.
+ *
+ * A code that means different things in different places has no global word (review FK-COR-3): PARTIAL is a
+ * part-paid invoice, a part-received purchase order (the inventory screen's PO_STATUS_CONFIG and the marketplace PO
+ * filter say "Partial") and a partial integration sync. Globally it reads "Partial"; a screen asks for its domain's
+ * word by passing the domain (statusLabel("PARTIAL", "invoice") is "Part-paid").
  */
 
 /** Statuses by their upper-snake code. Every label is plain words: no underscores, never the code itself. */
@@ -20,7 +25,6 @@ export const STATUS_LABELS: Readonly<Record<string, string>> = Object.freeze({
   VIEWED: "Viewed",
   PAID: "Paid",
   PARTIALLY_PAID: "Part-paid",
-  PARTIAL: "Part-paid",
   OVERDUE: "Overdue",
   VOID: "Void",
   FAILED: "Failed",
@@ -60,6 +64,17 @@ export const STATUS_LABELS: Readonly<Record<string, string>> = Object.freeze({
   OPEN: "Open",
   WON: "Won",
   LOST: "Lost",
+});
+
+/** The domains whose words for a code differ from the global one. */
+export type StatusDomain = "invoice";
+
+/**
+ * A domain's own words, on top of STATUS_LABELS: only the codes whose word differs there. InvoiceStatus PARTIAL
+ * (packages/db schema) is a part-paid invoice, as the invoice list and detail say it.
+ */
+const DOMAIN_STATUS_LABELS: Readonly<Record<StatusDomain, Readonly<Record<string, string>>>> = Object.freeze({
+  invoice: Object.freeze({ PARTIAL: "Part-paid" }),
 });
 
 /** What an event's subject is called on screen, where the code names it differently. */
@@ -108,10 +123,15 @@ export function humanizeCode(code: string | null | undefined): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-/** A status code in plain words: "PARTIALLY_PAID" -> "Part-paid", "NO_SHOW" -> "No-show"; an unknown code humanized. */
-export function statusLabel(code: string | null | undefined): string {
+/**
+ * A status code in plain words: "PARTIALLY_PAID" -> "Part-paid", "NO_SHOW" -> "No-show"; an unknown code humanized.
+ * With a domain, that domain's word where it has its own ("PARTIAL" is "Partial", and "Part-paid" for an invoice).
+ */
+export function statusLabel(code: string | null | undefined, domain?: StatusDomain): string {
   if (blank(code)) return "";
-  return STATUS_LABELS[statusKey(code)] ?? humanizeCode(code);
+  const key = statusKey(code);
+  const own = domain ? DOMAIN_STATUS_LABELS[domain]?.[key] : undefined;
+  return own ?? STATUS_LABELS[key] ?? humanizeCode(code);
 }
 
 /**
@@ -130,9 +150,12 @@ export function eventLabel(type: string | null | undefined): string {
   return `${subject} ${action}`;
 }
 
-/** Any raw code in plain words: a dotted event type by eventLabel, anything else by statusLabel. Empty for none. */
-export function plainLabel(code: string | null | undefined): string {
+/**
+ * Any raw code in plain words: a dotted event type by eventLabel, anything else by statusLabel (in `domain`'s words
+ * when given). Empty for none.
+ */
+export function plainLabel(code: string | null | undefined, domain?: StatusDomain): string {
   if (blank(code)) return "";
   const text = code.trim();
-  return /^[A-Za-z][\w-]*(\.[A-Za-z][\w-]*)+$/.test(text) ? eventLabel(text) : statusLabel(text);
+  return /^[A-Za-z][\w-]*(\.[A-Za-z][\w-]*)+$/.test(text) ? eventLabel(text) : statusLabel(text, domain);
 }
