@@ -17,7 +17,7 @@
  * shows 'No access' and to ask the business owner, with no score, no checks and no toast.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, within } from "@testing-library/react";
+import { render, screen, cleanup, within, fireEvent } from "@testing-library/react";
 
 const REFUSAL_READ = "Insufficient permissions: settings requires read access (you have none)";
 
@@ -139,4 +139,39 @@ describe("security audit page: what the audit measured", () => {
     expect(screen.queryByText(/security score/i)).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
   });
+});
+
+/**
+ * Review finding SAT-COR-1 (repair): only ModuleScopeGuard's refusal of settings says the member lacks
+ * the audit's access (isModuleScopeRefusal, review CRR-P195JS-2). BusinessGuard also answers 403 when it
+ * cannot complete its check ("Unable to verify business access" on a database error such as a statement
+ * timeout, "Service unavailable" when Prisma is missing), and another module's refusal names another
+ * module: none of these says anything about settings. The page told an OWNER "No access, ask the owner"
+ * and hid Run audit on each of them, so the owner could not retry without reloading.
+ */
+describe("security audit page: a 403 that is not the settings refusal", () => {
+  it.each([
+    ["BusinessGuard's transient database failure", "Unable to verify business access"],
+    ["BusinessGuard without its database", "Service unavailable"],
+    ["another module's refusal", "Insufficient permissions: revenue requires read access (you have none)"],
+  ])(
+    "[WEB-SAT-05] %s (403 %j) is not told as 'No access': the toast says the server's words and Run audit stays, so a re-run shows the audit (RED: 'No access, ask the owner', no button)",
+    async (_what, error) => {
+      api.apiGet.mockResolvedValueOnce({ data: null, error, status: 403 });
+      render(<SecurityAuditPage />);
+
+      await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith(error));
+      expect(screen.queryByRole("alert"), "no refusal notice").toBeNull();
+      expect(screen.queryByText(/no access, ask the owner/i)).toBeNull();
+      expect(screen.queryByText(/security score/i)).toBeNull();
+
+      // The owner retries in place once the server can answer again.
+      api.apiGet.mockResolvedValueOnce({ data: AUDIT, error: null, status: 200 });
+      const rerun = screen.getByRole("button", { name: /run audit/i });
+      fireEvent.click(rerun);
+      await screen.findByText("Multi-factor authentication");
+      expect(screen.getByText(/1 of 2 checks passed/)).toBeInTheDocument();
+      expect(api.apiGet).toHaveBeenCalledTimes(2);
+    },
+  );
 });
