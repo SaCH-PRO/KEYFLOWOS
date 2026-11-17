@@ -1091,6 +1091,11 @@
       "prefix": "v71c_",
       "owner": "apps/server/test/seed-super-admin-placeholder.integration.test.ts",
       "packet": "V1-71 (FU-SEED-SUPERADMIN-PLACEHOLDER)"
+    },
+    {
+      "prefix": "v71f_",
+      "owner": "apps/server/test/identity-finance-columns.integration.test.ts",
+      "packet": "V1-71 (FU-IDENTITY-FINANCE-COLUMNS)"
     }
   ],
   "pendingRenames": [],
