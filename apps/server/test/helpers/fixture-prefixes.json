@@ -1051,6 +1051,11 @@
       "prefix": "v71n_",
       "owner": "apps/server/test/data-quality-fix-scope.integration.test.ts",
       "packet": "V1-71 (FU-DATAQUALITY-MASS-ASSIGN)"
+    },
+    {
+      "prefix": "v71o_",
+      "owner": "apps/server/test/key-memory-money-sight.integration.test.ts",
+      "packet": "V1-71 (FU-KEY-MEMORY-MONEY-SIGHT)"
     }
   ],
   "pendingRenames": [],

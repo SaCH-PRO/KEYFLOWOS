@@ -26,7 +26,7 @@ import fs from 'fs';
 import path from 'path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { eventModulesOf, isPersonalKeyRecord, readersOwnPromptMemory } from './key-cortex-prompt-context.service';
+import { eventModulesOf, isPersonalKeyRecord, moduleSightOf, readersOwnPromptMemory } from './key-cortex-prompt-context.service';
 import { EventEmitterFlowBridgeService } from './event-emitter-flow-bridge.service';
 
 type Fragment = {
@@ -80,12 +80,14 @@ const be = (id: string, title: string, entityType: string | null = null, after?:
 /**
  * A cognitive_events row as UnifiedMemoryRetrievalService hands it over: metadata.sourceType the bus source, content
  * `${eventType}: ${JSON.stringify(payload)}`.
+ * FU-KEY-MEMORY-MONEY-SIGHT (COR-W1FPMS-1 follow-up): and metadata.payload the row's payload, which the projection reads
+ * (it no longer parses the rendered content).
  */
 const ce = (id: string, title: string, source?: string, payload?: Record<string, unknown>): Fragment => ({
   id,
   sourceType: 'cognitive_event',
   title,
-  metadata: source ? { sourceType: source } : undefined,
+  metadata: source || payload ? { ...(source ? { sourceType: source } : {}), ...(payload ? { payload } : {}) } : undefined,
   ...(payload ? { content: `${title}: ${JSON.stringify(payload)}` } : {}),
 });
 
@@ -243,9 +245,16 @@ describe('W1F-PERCEPTION-MODULE-SCOPE: readersOwnPromptMemory projects the busin
   });
 
   it('the stores that are not events (ai_memory, genome, temporal flow, episodic rows) are not projected by module', async () => {
+    // FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-3): a genome record that carries no money is not projected; a money one
+    // (FINANCE_GENOME, CROSS_DOMAIN, the customer-sales snapshot) needs revenue read (the describe block at the end).
     const others: Fragment[] = [
       { id: 'mem', sourceType: 'ai_memory', title: 'fact' },
-      { id: 'genome', sourceType: 'genome_memory_event', title: 'FINANCE_SNAPSHOT_COMPUTED' },
+      {
+        id: 'genome',
+        sourceType: 'genome_memory_event',
+        title: 'Operations snapshot computed',
+        metadata: { genomeRow: { sourceType: 'OPERATIONS_GENOME', eventType: 'OPERATIONS_SNAPSHOT_COMPUTED', domain: 'OPERATIONS', section: 'OPERATIONS' } },
+      },
       { id: 'temporal', sourceType: 'temporal_flow_memory', title: 'invoice' },
       { id: 'exec', sourceType: 'ai_execution_log', title: 'invoice.create' },
       { id: 'action', sourceType: 'cortex_action_log', title: 'payment.record' },
@@ -417,4 +426,219 @@ describe('W1F-PERCEPTION-MODULE-SCOPE review (SEC-W1FPMS-1): census of what the 
       expect(/\bthis\.publish\(/.test(fs.readFileSync(file, 'utf8')), path.relative(root, file)).toBe(false);
     }
   });
+});
+
+/**
+ * FU-KEY-MEMORY-MONEY-SIGHT (V1-71; review SEC-W1FPMS-3; D-128, D-100): the genome's money memory events reach no KEY
+ * prompt of a reader without revenue read. GenomeMemoryEvent rows are read business-wide by UnifiedMemoryRetrievalService,
+ * and FinanceGenomeService writes FINANCE_SNAPSHOT_COMPUTED (the health score and the overall risk), the cross-domain
+ * services CROSS_DOMAIN rows (the composite that averages the finance health score) and the customer-sales snapshot its
+ * revenue quality: the genome's REST routes withhold exactly these from such a reader (isMoneyMemoryEvent). The fragment
+ * now carries the row's own sourceType, eventType, domain and section (metadata.genomeRow), so the prompt's projection
+ * applies the same rule; a genome fragment that carries no row is read as money (fail closed).
+ */
+describe('FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-3): a genome money memory event renders only at revenue read', () => {
+  beforeEach(() => {
+    prisma.client.membership.findUnique.mockClear();
+  });
+
+  type GenomeRow = { sourceType: string; eventType: string; domain: string | null; section: string | null };
+  /** A genome_memory_events row as UnifiedMemoryRetrievalService hands it over: title and summary, the row's columns in metadata.genomeRow. */
+  const ge = (id: string, title: string, row: GenomeRow | null, own: Record<string, unknown> = {}): Fragment => ({
+    id,
+    sourceType: 'genome_memory_event',
+    title,
+    content: `${title}: summary`,
+    metadata: row ? { ...own, genomeRow: row } : own,
+  });
+
+  /** Each genome fragment, and whether it is money (needs revenue read). */
+  const GENOME: Array<[Fragment, boolean]> = [
+    [ge('g_fin', 'Finance snapshot computed', { sourceType: 'FINANCE_GENOME', eventType: 'FINANCE_SNAPSHOT_COMPUTED', domain: 'FINANCIAL', section: 'FINANCIAL' }), true],
+    [ge('g_fin_signal', 'Signal accepted', { sourceType: 'GENOME_SIGNAL', eventType: 'SIGNAL_ACCEPTED', domain: 'finance', section: 'FINANCIAL' }), true],
+    [ge('g_cross', 'Cross-domain snapshot computed', { sourceType: 'CROSS_DOMAIN_GENOME', eventType: 'CROSS_DOMAIN_SNAPSHOT_COMPUTED', domain: 'CROSS_DOMAIN', section: 'CROSS_DOMAIN' }), true],
+    [ge('g_cross_domain', 'Recommendations ranked', { sourceType: 'GENOME_RECOMMENDATION', eventType: 'CROSS_DOMAIN_RECOMMENDATIONS_RANKED', domain: 'CROSS_DOMAIN', section: null }), true],
+    [ge('g_sales_snapshot', 'Customer/sales snapshot computed', { sourceType: 'CUSTOMER_SALES_GENOME', eventType: 'CUSTOMER_SALES_SNAPSHOT_COMPUTED', domain: 'SALES', section: 'SALES' }), true],
+    // A writer's own metadata cannot pass a money row off as another: the row's columns are what is read.
+    [ge('g_fin_disguised', 'Finance snapshot computed', { sourceType: 'FINANCE_GENOME', eventType: 'FINANCE_SNAPSHOT_COMPUTED', domain: 'FINANCIAL', section: 'FINANCIAL' }, { sourceType: 'OPERATIONS_GENOME', domain: 'OPERATIONS' }), true],
+    // Fail closed: a genome fragment that carries no row.
+    [ge('g_rowless', 'Finance snapshot computed', null), true],
+    // Not money: these stay business-wide.
+    [ge('g_sales_signal', 'Customer/sales signals generated', { sourceType: 'CUSTOMER_SALES_GENOME', eventType: 'CUSTOMER_SALES_SIGNAL_GENERATED', domain: 'SALES', section: 'SALES' }), false],
+    [ge('g_ops', 'Operations snapshot computed', { sourceType: 'OPERATIONS_GENOME', eventType: 'OPERATIONS_SNAPSHOT_COMPUTED', domain: 'OPERATIONS', section: 'OPERATIONS' }), false],
+    [ge('g_ops_disguised', 'Operations snapshot computed', { sourceType: 'OPERATIONS_GENOME', eventType: 'OPERATIONS_SNAPSHOT_COMPUTED', domain: 'OPERATIONS', section: 'OPERATIONS' }, { sourceType: 'FINANCE_GENOME' }), false],
+  ];
+
+  const keptGenome = async (reader: string | null, sight?: (module: string) => boolean) =>
+    new Set((await readersOwnPromptMemory(prisma as any, 'biz_1', reader, GENOME.map(([f]) => f) as any, 1000, undefined, undefined, sight as any)).map((f) => f.id));
+
+  for (const reader of Object.keys(READS)) {
+    it(`${reader}: a genome money memory event renders only with revenue read; the genome's other records render`, async () => {
+      const kept = await keptGenome(reader);
+      for (const [fragment, money] of GENOME) {
+        expect(kept.has(fragment.id), `${reader}: ${fragment.id} (${money ? 'money' : 'not money'})`).toBe(!money || READS[reader]('revenue'));
+      }
+    });
+  }
+
+  it('no reader, and a reader who is no member, sees no genome money memory event', async () => {
+    for (const reader of [null, 'stranger']) {
+      const kept = await keptGenome(reader);
+      for (const [fragment, money] of GENOME) expect(kept.has(fragment.id), `${String(reader)}: ${fragment.id}`).toBe(!money);
+    }
+  });
+
+  it("a staff position's turn sees a genome money memory event only when its position's modules hold revenue", async () => {
+    const without = await keptGenome(null, moduleSightOf(['crm', 'expenses', 'operations']));
+    const withRevenue = await keptGenome(null, moduleSightOf(['crm', 'revenue']));
+    for (const [fragment, money] of GENOME) {
+      expect(without.has(fragment.id), `no revenue: ${fragment.id}`).toBe(!money);
+      expect(withRevenue.has(fragment.id), `revenue: ${fragment.id}`).toBe(true);
+    }
+  });
+
+  it('a genome money memory event reads the membership once, as a module-named event does', async () => {
+    await readersOwnPromptMemory(prisma as any, 'biz_1', 'blind', [GENOME[0][0], { id: 'mem', sourceType: 'ai_memory', title: 'fact' }] as any, 1000);
+    expect(prisma.client.membership.findUnique).toHaveBeenCalledTimes(1);
+  });
+
+  it('the window is cut after the projection: a withheld genome money event does not take a line of it', async () => {
+    const kept = await readersOwnPromptMemory(prisma as any, 'biz_1', 'blind', [GENOME[0][0], GENOME[7][0]] as any, 1);
+    expect(kept.map((f) => f.id)).toEqual(['g_sales_signal']);
+  });
+});
+
+/**
+ * FU-KEY-MEMORY-MONEY-SIGHT (V1-71; review COR-W1FPMS-1 follow-up): a cognitive event's payload is read from the payload
+ * UnifiedMemoryRetrievalService carries in the fragment (metadata.payload), never parsed back out of its rendered content.
+ */
+describe('FU-KEY-MEMORY-MONEY-SIGHT (COR-W1FPMS-1 follow-up): a task record is classified by the payload its fragment carries', () => {
+  it('the carried payload decides, whatever the rendered content says', () => {
+    const fragment = {
+      id: 'ce_task',
+      sourceType: 'cognitive_event',
+      title: 'task.assigned',
+      metadata: { sourceType: 'task_assignments', payload: { taskType: 'ProjectTask', taskId: 'pt_1' } },
+      content: `task.assigned: ${JSON.stringify({ taskType: 'ContactTask', taskId: 'pt_1' })}`,
+    };
+    expect(eventModulesOf(fragment as any)).toEqual(['projects']);
+  });
+
+  it('a fragment that carries no payload is not parsed from its text: it needs every module a task can be filed under', () => {
+    const fragment = {
+      id: 'ce_task_text',
+      sourceType: 'cognitive_event',
+      title: 'task.assigned',
+      metadata: { sourceType: 'task_assignments' },
+      content: `task.assigned: ${JSON.stringify({ taskType: 'ContactTask', taskId: 'ct_1' })}`,
+    };
+    expect([...eventModulesOf(fragment as any)].sort()).toEqual(['automations', 'crm', 'projects']);
+  });
+});
+
+/**
+ * FU-KEY-MEMORY-MONEY-SIGHT (V1-71; review SEC-W1FPMS-4; D-73, D-93): a GOVERNANCE_DECISION proposal stays business-wide,
+ * but a turn with no member reader (a contact-only position on the staff bridge, a SUPER_ADMIN who is no member) sees only
+ * the proposal's action, status and risk level: never its title (the Pro Auto monitor writes '$12,345 outstanding across
+ * 7 invoices'), a rejection reason, an approver or any other figure. The records as the three stores hold them: the
+ * approval orchestrator's ledger row (KeyCortexAuditService: action column, after { status, riskLevel }, the title in
+ * its metadata), its bridged business_events copy (after: the whole ledger input) and its cognitive_events copy
+ * (payload: the whole ledger input); and the genome's record of a proposal's outcome (OutcomeLearningService: title
+ * 'Action executed: <the proposal's title>').
+ */
+describe('FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4): a memberless turn sees a proposal\'s action, status and risk level only', () => {
+  const TITLE = '$12,345 outstanding across 7 invoices';
+  const ledgerInput = (action: string, after: Record<string, unknown>, metadata: Record<string, unknown>) => ({
+    businessId: 'biz_1',
+    eventType: 'GOVERNANCE_DECISION',
+    subjectType: 'key_action_proposal',
+    subjectId: 'kap_1',
+    actorType: action === 'propose' ? 'ai' : 'human',
+    actorId: action === 'propose' ? 'key_ai' : 'owner',
+    action,
+    source: action === 'propose' ? 'ai' : 'web',
+    approvalId: 'kap_1',
+    metadata,
+    after,
+  });
+  /** The three records one GOVERNANCE_DECISION ledger row lands as, as UnifiedMemoryRetrievalService hands them over. */
+  const recordsOf = (tag: string, action: string, after: Record<string, unknown>, metadata: Record<string, unknown>): Fragment[] => {
+    const input = ledgerInput(action, after, metadata);
+    return [
+      {
+        id: `${tag}_ledger`,
+        sourceType: 'business_event',
+        title: 'GOVERNANCE_DECISION',
+        entityType: 'key_action_proposal',
+        content: `${input.actorType} ${action} key_action_proposal: ${JSON.stringify(after)}`,
+        metadata: { after, metadata, actorType: input.actorType, action },
+      },
+      {
+        id: `${tag}_bridged`,
+        sourceType: 'business_event',
+        title: 'GOVERNANCE_DECISION',
+        entityType: 'Key_action_proposal',
+        content: `${input.source} PUBLISHED Key_action_proposal: ${JSON.stringify(input)}`,
+        metadata: { after: input, metadata: { importance: 'normal' }, actorType: input.source, action: 'PUBLISHED' },
+      },
+      {
+        id: `${tag}_cognitive`,
+        sourceType: 'cognitive_event',
+        title: 'GOVERNANCE_DECISION',
+        content: `GOVERNANCE_DECISION: ${JSON.stringify(input)}`,
+        metadata: { sourceType: input.source, payload: input },
+      },
+    ];
+  };
+  const PROPOSE = recordsOf('p', 'propose', { status: 'PENDING', riskLevel: 'MEDIUM' }, { toolName: 'draft_payment_reminder', module: 'revenue', title: TITLE });
+  const APPROVE = recordsOf('a', 'approve', { status: 'APPROVED', approvedBy: 'v71o_owner_id' }, {});
+  const REJECT = recordsOf('r', 'reject', { status: 'REJECTED', rejectedBy: 'v71o_owner_id', rejectionReason: 'not now: $9,876 is due first' }, { reason: 'not now: $9,876 is due first' });
+  const OUTCOME: Fragment = {
+    id: 'g_outcome',
+    sourceType: 'genome_memory_event',
+    title: `Action executed: ${TITLE}`,
+    content: 'KEY action EXECUTE_TOOL was executed.',
+    metadata: { actionType: 'EXECUTE_TOOL', executionResult: { success: true, amount: 12345 }, genomeRow: { sourceType: 'KEY_ACTION_PROPOSAL', eventType: 'ACTION_EXECUTED', domain: null, section: null } },
+  };
+  const ALL_RECORDS = [...PROPOSE, ...APPROVE, ...REJECT, OUTCOME];
+  const FIGURES = ['12,345', '12345', 'outstanding', '9,876', 'not now', 'v71o_owner_id', 'draft_payment_reminder'];
+
+  for (const reader of [null, 'stranger'] as const) {
+    it(`${reader === null ? 'no reader' : 'a reader who is no member'}: every proposal record renders as its action, status and risk level, and nothing else`, async () => {
+      const kept = await readersOwnPromptMemory(prisma as any, 'biz_1', reader, ALL_RECORDS as any, 1000);
+      expect(kept.map((f) => f.id)).toEqual(ALL_RECORDS.map((f) => f.id));
+      const byId = new Map(kept.map((f) => [f.id, f]));
+      for (const tag of ['p_ledger', 'p_bridged', 'p_cognitive']) expect(byId.get(tag)!.content, tag).toBe('proposal propose, status PENDING, risk MEDIUM');
+      for (const tag of ['a_ledger', 'a_bridged', 'a_cognitive']) expect(byId.get(tag)!.content, tag).toBe('proposal approve, status APPROVED');
+      for (const tag of ['r_ledger', 'r_bridged', 'r_cognitive']) expect(byId.get(tag)!.content, tag).toBe('proposal reject, status REJECTED');
+      expect(byId.get('g_outcome')!.title).toBe('ACTION_EXECUTED');
+      expect(byId.get('g_outcome')!.content).toBe('proposal ACTION_EXECUTED');
+      for (const fragment of kept) {
+        expect(fragment.title === 'GOVERNANCE_DECISION' || fragment.id === 'g_outcome', fragment.id).toBe(true);
+        const whole = JSON.stringify(fragment);
+        for (const figure of FIGURES) expect(whole, `${fragment.id}: ${figure}`).not.toContain(figure);
+      }
+    });
+  }
+
+  it("a staff position's turn with no member reader (a contact-only position) sees the same, whatever modules its position holds", async () => {
+    const kept = await readersOwnPromptMemory(prisma as any, 'biz_1', null, PROPOSE as any, 1000, undefined, undefined, moduleSightOf(['crm', 'operations', 'revenue']));
+    expect(kept.map((f) => f.content)).toEqual(Array(3).fill('proposal propose, status PENDING, risk MEDIUM'));
+    for (const figure of FIGURES) expect(JSON.stringify(kept), figure).not.toContain(figure);
+  });
+
+  it('a value that is not one plain word (a status or risk that carries a figure) is not rendered', async () => {
+    const odd = recordsOf('o', 'propose', { status: '$12,345 due', riskLevel: 'HIGH' }, { title: TITLE });
+    const kept = await readersOwnPromptMemory(prisma as any, 'biz_1', null, odd as any, 1000);
+    expect(kept.map((f) => f.content)).toEqual(Array(3).fill('proposal propose, risk HIGH'));
+  });
+
+  for (const reader of ['blind', 'owner', 'staff']) {
+    it(`${reader} (a member): the proposal records render whole, title included (proposals stay business-wide)`, async () => {
+      const kept = await readersOwnPromptMemory(prisma as any, 'biz_1', reader, ALL_RECORDS as any, 1000);
+      expect(kept).toEqual(ALL_RECORDS);
+      expect(kept.find((f) => f.id === 'p_cognitive')!.content).toContain(TITLE);
+      expect(kept.find((f) => f.id === 'g_outcome')!.title).toContain(TITLE);
+    });
+  }
 });

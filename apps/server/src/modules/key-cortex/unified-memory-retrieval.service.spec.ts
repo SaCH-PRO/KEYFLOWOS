@@ -290,4 +290,88 @@ describe('UnifiedMemoryRetrievalService', () => {
     expect(fragments).toHaveLength(1);
     expect(fragments[0].sourceType).toBe('cortex_action_log');
   });
+  // FU-KEY-MEMORY-MONEY-SIGHT (V1-71; review SEC-W1FPMS-3; D-128, D-100): a genome fragment carries its row's own
+  // sourceType, eventType, domain and section (metadata.genomeRow), beside the row's metadata, so a prompt's projection can
+  // withhold the genome's money memory events (isMoneyMemoryEvent) from a reader without revenue read. The row's columns
+  // are written last: a writer's own metadata cannot stand in for them.
+  it('a genome fragment carries its row\'s sourceType, eventType, domain and section in metadata.genomeRow, beside the row\'s own metadata', async () => {
+    const now = new Date();
+    const prisma = makePrisma({
+      genomeMemoryEvent: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 'gme_fin',
+            sourceType: 'FINANCE_GENOME',
+            sourceEntityId: null,
+            eventType: 'FINANCE_SNAPSHOT_COMPUTED',
+            domain: 'FINANCIAL',
+            section: 'FINANCIAL',
+            title: 'Finance snapshot computed',
+            summary: 'Overall risk HIGH, health score 42.',
+            confidenceDelta: 0,
+            createdAt: now,
+            metadata: { healthScore: 42, overallRisk: 'HIGH', genomeRow: { sourceType: 'OPERATIONS_GENOME', domain: 'OPERATIONS' } },
+          },
+        ]),
+      },
+    });
+
+    service = new UnifiedMemoryRetrievalService(prisma as any, makeSemanticMemory() as any);
+    const fragments = await service.retrieveContext('biz_1', { sourceTypes: ['genome_memory_event'] });
+
+    expect(fragments).toHaveLength(1);
+    expect(fragments[0]).toMatchObject({ sourceType: 'genome_memory_event', title: 'Finance snapshot computed', content: 'Overall risk HIGH, health score 42.' });
+    expect(fragments[0].metadata).toEqual({
+      healthScore: 42,
+      overallRisk: 'HIGH',
+      genomeRow: { sourceType: 'FINANCE_GENOME', eventType: 'FINANCE_SNAPSHOT_COMPUTED', domain: 'FINANCIAL', section: 'FINANCIAL' },
+    });
+    const select = prisma.client.genomeMemoryEvent.findMany.mock.calls[0][0].select;
+    expect(select).toMatchObject({ sourceType: true, eventType: true, domain: true, section: true });
+  });
+
+  it('a genome row with no domain or section, or no metadata of its own, still carries its row', async () => {
+    const now = new Date();
+    const prisma = makePrisma({
+      genomeMemoryEvent: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 'gme_1', sourceType: 'KEY_ACTION_PROPOSAL', sourceEntityId: 'kap_1', eventType: 'ACTION_EXECUTED', domain: null, section: null, title: 'Action executed: x', summary: 'KEY action CREATE_TASK was executed.', confidenceDelta: 0.1, createdAt: now, metadata: null },
+        ]),
+      },
+    });
+
+    service = new UnifiedMemoryRetrievalService(prisma as any, makeSemanticMemory() as any);
+    const [fragment] = await service.retrieveContext('biz_1', { sourceTypes: ['genome_memory_event'] });
+
+    expect(fragment.metadata).toEqual({ genomeRow: { sourceType: 'KEY_ACTION_PROPOSAL', eventType: 'ACTION_EXECUTED', domain: null, section: null } });
+  });
+
+  // FU-KEY-MEMORY-MONEY-SIGHT (review COR-W1FPMS-1 follow-up): a cognitive fragment carries the row's payload (and its
+  // source), so the projection reads a task's own type without parsing the rendered content; a business-event fragment
+  // carries its actor type and action, which a memberless turn's proposal line is built from (SEC-W1FPMS-4).
+  it('a cognitive fragment carries its payload in metadata.payload, and a business-event fragment its actorType and action', async () => {
+    const now = new Date();
+    const payload = { taskType: 'ContactTask', taskId: 'ct_1' };
+    const prisma = makePrisma({
+      cognitiveEvent: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 'ce_1', sourceType: 'task_assignments', sourceId: 'ct_1', eventType: 'task.assigned', payload, confidence: 0.8, createdAt: now },
+        ]),
+      },
+      businessEvent: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 'be_1', eventType: 'GOVERNANCE_DECISION', subjectType: 'key_action_proposal', subjectId: 'kap_1', actorType: 'ai', actorId: 'key_ai', action: 'propose', before: null, after: { status: 'PENDING', riskLevel: 'LOW' }, metadata: { title: 't' }, createdAt: now },
+        ]),
+      },
+    });
+
+    service = new UnifiedMemoryRetrievalService(prisma as any, makeSemanticMemory() as any);
+    const fragments = await service.retrieveContext('biz_1', { sourceTypes: ['cognitive_event', 'business_event'] });
+    const cognitive = fragments.find((f) => f.sourceType === 'cognitive_event')!;
+    const business = fragments.find((f) => f.sourceType === 'business_event')!;
+
+    expect(cognitive.metadata).toEqual({ sourceType: 'task_assignments', payload });
+    expect(cognitive.content).toBe(`task.assigned: ${JSON.stringify(payload)}`);
+    expect(business.metadata).toMatchObject({ after: { status: 'PENDING', riskLevel: 'LOW' }, metadata: { title: 't' }, actorType: 'ai', action: 'propose' });
+  });
 });
