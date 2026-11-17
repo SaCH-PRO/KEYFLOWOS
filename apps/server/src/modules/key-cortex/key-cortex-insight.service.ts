@@ -13,8 +13,75 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { ModelGatewayService } from '../ai/model-gateway.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
-import { InvoiceStatus } from '@prisma/client';
+import { BookingStatus, DealStatus, InvoiceStatus, Prisma } from '@prisma/client';
+import { CLIENT_STATUS, LEGACY_CLIENT_STATUS, LEGACY_DORMANT_STATUS } from '../crm/crm.constants';
 import { startOfMonth, startOfWeek, startOfDay, subDays, subMonths, subWeeks, format, differenceInDays } from 'date-fns';
+
+/* ─────────────────────────── Query vocabulary ───────────────────────────
+ * W11-CORTEX-INSIGHT-QUERIES (review SEC-W11CRR-2). Every query below ran
+ * through `(this.prisma.client as any)`, which hid from tsc that it selected
+ * columns Contact does not have (name, score, stage, lastActivityAt,
+ * estimatedValue), a Product `status` and an AutopilotTask `source` that do
+ * not exist, and lower-case enum values Prisma refuses ('draft', 'paid',
+ * 'cancelled'). Each method caught the throw and answered its empty payload,
+ * so on a real business revenue read 0 and there were no opportunities,
+ * risks or pipeline. The casts are gone: tsc now checks every query against
+ * the schema, and the vocabulary is spelled once here.
+ */
+
+/** Contact has no `name` column: these are the columns a display name is made from. */
+const CONTACT_NAME_SELECT = { displayName: true, firstName: true, lastName: true, companyName: true } as const;
+
+/**
+ * A contact's display name, in the order RevenueReportingService.contactDisplayName
+ * uses: the explicit displayName, else first + last name, else the company name.
+ */
+function contactDisplayName(
+  c: { displayName?: string | null; firstName?: string | null; lastName?: string | null; companyName?: string | null } | null | undefined,
+): string {
+  if (!c) return 'Unknown';
+  const explicit = c.displayName?.trim();
+  if (explicit) return explicit;
+  const composed = `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim();
+  if (composed) return composed;
+  return c.companyName?.trim() || 'Unknown';
+}
+
+/**
+ * An invoice that counts as revenue: issued (not a draft), not voided, not
+ * soft-deleted. The db client's soft-delete extension filters findMany and
+ * count, but not groupBy, aggregate or a relation include, so it is spelled
+ * here for all of them.
+ */
+const REVENUE_INVOICE: Prisma.InvoiceWhereInput = {
+  status: { notIn: [InvoiceStatus.DRAFT, InvoiceStatus.VOID] },
+  deletedAt: null,
+};
+
+/** Issued and not paid at all: the customer owes the whole total (OVERDUE is what the overdue pass sets). */
+const UNPAID_STATUSES: InvoiceStatus[] = [InvoiceStatus.SENT, InvoiceStatus.PENDING, InvoiceStatus.OVERDUE];
+
+/** Issued and not fully paid (the unpaid statuses and both part-paid spellings). */
+const OUTSTANDING_STATUSES: InvoiceStatus[] = [...UNPAID_STATUSES, InvoiceStatus.PARTIAL, InvoiceStatus.PARTIALLY_PAID];
+
+/**
+ * Contact.status vocabulary (crm.constants): a lead is LEAD; a customer is
+ * CLIENT or a legacy spelling isClientStatus reads as CLIENT.
+ */
+const LEAD_STATUS = 'LEAD';
+const CLIENT_STATUSES = [CLIENT_STATUS, LEGACY_CLIENT_STATUS, LEGACY_DORMANT_STATUS];
+
+/**
+ * AutopilotTask has no `source`. A task an automation created carries one of
+ * these categories (the split KeyCortexContextV2Service's automation rate
+ * reads); every other task was made by hand.
+ */
+const AUTOMATED_TASK_CATEGORIES = ['workflow', 'automation', 'delegation_loop'];
+
+/** A contact's open deals: Contact has no estimatedValue; the value of its open deals is what it is worth now. */
+const OPEN_DEAL_VALUES = { where: { status: DealStatus.OPEN, deletedAt: null }, select: { value: true } } as const;
+const openDealValue = (deals: Array<{ value: number | null }>): number =>
+  deals.reduce((s, d) => s + (d.value ?? 0), 0);
 
 /* ─────────────────────────── Types ─────────────────────────── */
 
@@ -154,28 +221,28 @@ export class KeyCortexInsightService {
     const opportunities: ProfitOpportunity[] = [];
 
     try {
-      // 1a. Overdue invoices = quick cash
-      const overdueInvoices = await (this.prisma.client as any).invoice.findMany({
+      // 1a. Overdue invoices = quick cash (unpaid, past due; OVERDUE is the status the overdue pass sets)
+      const overdueInvoices = await this.prisma.client.invoice.findMany({
         where: {
           businessId,
-          status: { in: [InvoiceStatus.SENT, InvoiceStatus.PENDING] },
+          deletedAt: null,
+          status: { in: UNPAID_STATUSES },
           dueDate: { lt: new Date() },
         },
         include: {
-          contact: { select: { id: true, name: true, email: true } },
-          items: { select: { total: true } },
+          contact: { select: { id: true, email: true, ...CONTACT_NAME_SELECT } },
         },
         orderBy: { dueDate: 'asc' },
         take: 20,
       });
 
-      overdueInvoices.forEach((inv: any) => {
+      overdueInvoices.forEach((inv) => {
         const amount = inv.total || 0;
-        const daysOverdue = differenceInDays(new Date(), inv.dueDate);
+        const daysOverdue = differenceInDays(new Date(), inv.dueDate ?? new Date());
         opportunities.push({
           id: `inv-${inv.id}`,
           type: 'overdue_invoice',
-          title: `Collect $${amount.toLocaleString()} from ${inv.contact?.name || 'Unknown'}`,
+          title: `Collect $${amount.toLocaleString()} from ${contactDisplayName(inv.contact)}`,
           description: `Invoice ${inv.invoiceNumber || inv.id} is ${daysOverdue} days overdue. Follow up to collect payment.`,
           estimatedValue: amount,
           confidence: Math.min(0.9, 0.5 + daysOverdue * 0.01),
@@ -186,62 +253,70 @@ export class KeyCortexInsightService {
         });
       });
 
-      // 1b. Stale leads = revenue waiting
-      const staleLeads = await (this.prisma.client as any).contact.findMany({
+      // 1b. Stale leads = revenue waiting (Contact: leadScore, lastInteractionAt, pipelineStage)
+      const staleLeads = await this.prisma.client.contact.findMany({
         where: {
           businessId,
-          status: 'lead',
-          lastActivityAt: { lt: subDays(new Date(), 14) },
-          score: { gte: 50 },
+          deletedAt: null,
+          status: LEAD_STATUS,
+          lastInteractionAt: { lt: subDays(new Date(), 14) },
+          leadScore: { gte: 50 },
         },
-        orderBy: { score: 'desc' },
+        orderBy: { leadScore: 'desc' },
         take: 15,
         select: {
           id: true,
-          name: true,
           email: true,
-          score: true,
-          lastActivityAt: true,
-          stage: true,
-          estimatedValue: true,
+          ...CONTACT_NAME_SELECT,
+          leadScore: true,
+          lastInteractionAt: true,
+          pipelineStage: true,
+          deals: OPEN_DEAL_VALUES,
         },
       });
 
-      staleLeads.forEach((lead: any) => {
-        const daysStale = lead.lastActivityAt
-          ? differenceInDays(new Date(), lead.lastActivityAt)
+      staleLeads.forEach((lead) => {
+        const name = contactDisplayName(lead);
+        const score = lead.leadScore ?? 0;
+        const daysStale = lead.lastInteractionAt
+          ? differenceInDays(new Date(), lead.lastInteractionAt)
           : 30;
-        const estValue = lead.estimatedValue || 500;
+        // The lead's open deals are its value; a lead with none has no invented figure.
+        const estValue = openDealValue(lead.deals);
         opportunities.push({
           id: `lead-${lead.id}`,
           type: 'stale_lead',
-          title: `Re-engage ${lead.name || 'lead'} (score: ${lead.score})`,
-          description: `High-value lead hasn't been contacted in ${daysStale} days. Estimated deal value: $${estValue.toLocaleString()}.`,
+          title: `Re-engage ${name} (score: ${score})`,
+          description: estValue > 0
+            ? `High-value lead hasn't been contacted in ${daysStale} days. Open deal value: $${estValue.toLocaleString()}.`
+            : `High-value lead hasn't been contacted in ${daysStale} days.`,
           estimatedValue: estValue,
-          confidence: Math.min(0.8, 0.4 + (lead.score || 0) * 0.005),
-          recommendedAction: `Send personalized re-engagement email to ${lead.name}. Offer a time-sensitive incentive.`,
-          sourceData: { contactId: lead.id, daysStale, score: lead.score },
-          priority: (lead.score || 0) > 80 ? 'high' : 'medium',
+          confidence: Math.min(0.8, 0.4 + score * 0.005),
+          recommendedAction: `Send personalized re-engagement email to ${name}. Offer a time-sensitive incentive.`,
+          sourceData: { contactId: lead.id, daysStale, score },
+          priority: score > 80 ? 'high' : 'medium',
           timeframe: 'this_week',
         });
       });
 
-      // 1c. Underutilized products
-      const underutilized = await (this.prisma.client as any).product.findMany({
+      // 1c. Underutilized products (Product has isActive, not a status)
+      const underutilized = await this.prisma.client.product.findMany({
         where: {
           businessId,
-          status: 'active',
+          deletedAt: null,
+          isActive: true,
         },
         include: {
-          _count: { select: { invoiceItems: true } },
+          // Sold = on an issued invoice (not a draft, void or deleted one).
+          _count: { select: { invoiceItems: { where: { invoice: REVENUE_INVOICE } } } },
         },
         orderBy: { price: 'desc' },
         take: 10,
       });
 
       underutilized
-        .filter((p: any) => p._count.invoiceItems < 3 && p.price > 100)
-        .forEach((product: any) => {
+        .filter((p) => p._count.invoiceItems < 3 && p.price > 100)
+        .forEach((product) => {
           opportunities.push({
             id: `prod-${product.id}`,
             type: 'underutilized_product',
@@ -256,11 +331,11 @@ export class KeyCortexInsightService {
           });
         });
 
-      // 1d. Automation opportunities
-      const manualTasks = await (this.prisma.client as any).autopilotTask.count({
+      // 1d. Automation opportunities (AutopilotTask has no source: a task outside the automation categories was made by hand)
+      const manualTasks = await this.prisma.client.autopilotTask.count({
         where: {
           businessId,
-          source: 'manual',
+          category: { notIn: AUTOMATED_TASK_CATEGORIES },
           createdAt: { gte: subDays(new Date(), 30) },
         },
       });
@@ -280,17 +355,22 @@ export class KeyCortexInsightService {
         });
       }
 
-      // 1e. Upsell opportunities — customers with repeat purchases
-      const repeatCustomers = await (this.prisma.client as any).contact.findMany({
+      // 1e. Upsell opportunities — customers (CLIENT, or a legacy spelling of it) with repeat purchases
+      const repeatCustomers = await this.prisma.client.contact.findMany({
         where: {
           businessId,
-          status: 'customer',
+          deletedAt: null,
+          status: { in: CLIENT_STATUSES },
         },
-        include: {
+        select: {
+          id: true,
+          ...CONTACT_NAME_SELECT,
+          // A purchase is an issued invoice (relation reads are not soft-delete filtered).
           _count: {
-            select: { invoices: true },
+            select: { invoices: { where: REVENUE_INVOICE } },
           },
           invoices: {
+            where: REVENUE_INVOICE,
             orderBy: { createdAt: 'desc' },
             take: 1,
             select: { total: true, createdAt: true },
@@ -301,8 +381,9 @@ export class KeyCortexInsightService {
       });
 
       repeatCustomers
-        .filter((c: any) => c._count.invoices >= 2)
-        .forEach((customer: any) => {
+        .filter((c) => c._count.invoices >= 2)
+        .forEach((customer) => {
+          const name = contactDisplayName(customer);
           const lastInvoice = customer.invoices[0];
           const daysSincePurchase = lastInvoice?.createdAt
             ? differenceInDays(new Date(), lastInvoice.createdAt)
@@ -312,11 +393,11 @@ export class KeyCortexInsightService {
             opportunities.push({
               id: `upsell-${customer.id}`,
               type: 'upsell',
-              title: `Upsell ${customer.name || 'customer'} — repeat buyer, ${daysSincePurchase}d since last purchase`,
+              title: `Upsell ${name} — repeat buyer, ${daysSincePurchase}d since last purchase`,
               description: `Loyal customer with ${customer._count.invoices} purchases. Last order: $${avgValue.toLocaleString()}. Ready for next purchase.`,
               estimatedValue: avgValue * 1.2,
               confidence: 0.7,
-              recommendedAction: `Send personalized upsell offer to ${customer.name || 'customer'}. Recommend premium tier or bundle.`,
+              recommendedAction: `Send personalized upsell offer to ${name}. Recommend premium tier or bundle.`,
               sourceData: { contactId: customer.id, purchaseCount: customer._count.invoices, daysSincePurchase },
               priority: 'medium',
               timeframe: 'this_week',
@@ -363,32 +444,30 @@ export class KeyCortexInsightService {
           periodLabel = 'This Month';
       }
 
+      // Revenue = issued invoices: not drafts ('draft' was never an InvoiceStatus), voids or deleted rows.
       const [currentInvoices, previousInvoices, topCustomersRaw] = await Promise.all([
-        (this.prisma.client as any).invoice.findMany({
+        this.prisma.client.invoice.findMany({
           where: {
             businessId,
             createdAt: { gte: periodStart },
-            status: { not: 'draft' },
+            ...REVENUE_INVOICE,
           },
-          include: {
-            contact: { select: { id: true, name: true } },
-            items: true,
-          },
+          select: { total: true, createdAt: true },
         }),
-        (this.prisma.client as any).invoice.findMany({
+        this.prisma.client.invoice.findMany({
           where: {
             businessId,
             createdAt: { gte: previousStart, lt: periodStart },
-            status: { not: 'draft' },
+            ...REVENUE_INVOICE,
           },
           select: { total: true },
         }),
-        (this.prisma.client as any).invoice.groupBy({
+        this.prisma.client.invoice.groupBy({
           by: ['contactId'],
           where: {
             businessId,
             createdAt: { gte: periodStart },
-            status: { not: 'draft' },
+            ...REVENUE_INVOICE,
           },
           _sum: { total: true },
           _count: { id: true },
@@ -397,8 +476,8 @@ export class KeyCortexInsightService {
         }),
       ]);
 
-      const totalRevenue = currentInvoices.reduce((s: any, i: any) => s + (i.total || 0), 0);
-      const previousRevenue = previousInvoices.reduce((s: any, i: any) => s + (i.total || 0), 0);
+      const totalRevenue = currentInvoices.reduce((s, i) => s + (i.total || 0), 0);
+      const previousRevenue = previousInvoices.reduce((s, i) => s + (i.total || 0), 0);
       const growthRate = previousRevenue > 0
         ? Math.round(((totalRevenue - previousRevenue) / previousRevenue) * 100)
         : 0;
@@ -407,26 +486,30 @@ export class KeyCortexInsightService {
       const avgInvoiceValue = invoiceCount > 0 ? Math.round(totalRevenue / invoiceCount) : 0;
 
       // Top customers
-      const contactIds = topCustomersRaw.map((c: any) => c.contactId).filter(Boolean);
+      const contactIds = topCustomersRaw.map((c) => c.contactId).filter(Boolean);
       const contacts = contactIds.length
-        ? await (this.prisma.client as any).contact.findMany({
-            where: { id: { in: contactIds } },
-            select: { id: true, name: true },
+        ? await this.prisma.client.contact.findMany({
+            where: { businessId, id: { in: contactIds } },
+            select: { id: true, ...CONTACT_NAME_SELECT },
           })
         : [];
-      const contactMap = new Map(contacts.map((c: any) => [c.id, c.name]));
+      const contactMap = new Map(contacts.map((c) => [c.id, contactDisplayName(c)]));
 
-      const topCustomers = topCustomersRaw.map((c: any) => ({
-        id: c.contactId || 'unknown',
-        name: contactMap.get(c.contactId || '') || 'Unknown',
-        revenue: c._sum.total || 0,
-        invoices: c._count.id || 0,
-        avgInvoice: c._count.id > 0 ? Math.round((c._sum.total || 0) / c._count.id) : 0,
-      }));
+      const topCustomers = topCustomersRaw.map((c) => {
+        const revenue = c._sum?.total || 0;
+        const invoices = c._count?.id || 0;
+        return {
+          id: c.contactId || 'unknown',
+          name: contactMap.get(c.contactId || '') || 'Unknown',
+          revenue,
+          invoices,
+          avgInvoice: invoices > 0 ? Math.round(revenue / invoices) : 0,
+        };
+      });
 
       // Revenue by day
       const revenueByDayMap = new Map<string, number>();
-      currentInvoices.forEach((inv: any) => {
+      currentInvoices.forEach((inv) => {
         const day = format(new Date(inv.createdAt), 'yyyy-MM-dd');
         revenueByDayMap.set(day, (revenueByDayMap.get(day) || 0) + (inv.total || 0));
       });
@@ -470,17 +553,18 @@ export class KeyCortexInsightService {
       const thirtyDaysAgo = subDays(now, 30);
       const sixtyDaysAgo = subDays(now, 60);
 
-      // Get all customers with engagement signals
-      const customers = await (this.prisma.client as any).contact.findMany({
+      // Get all customers (CLIENT, or a legacy spelling of it) with engagement signals
+      const customers = await this.prisma.client.contact.findMany({
         where: {
           businessId,
-          status: { in: ['customer', 'active'] },
+          deletedAt: null,
+          status: { in: CLIENT_STATUSES },
         },
         select: {
           id: true,
-          name: true,
+          ...CONTACT_NAME_SELECT,
           email: true,
-          lastActivityAt: true,
+          lastInteractionAt: true,
           createdAt: true,
         },
       });
@@ -488,13 +572,13 @@ export class KeyCortexInsightService {
       const risks: ChurnRisk[] = [];
 
       await Promise.all(
-        customers.map(async (customer: any) => {
+        customers.map(async (customer) => {
           const factors: string[] = [];
           let riskScore = 0;
 
           // Days since last interaction
-          const daysSinceInteraction = customer.lastActivityAt
-            ? differenceInDays(now, customer.lastActivityAt)
+          const daysSinceInteraction = customer.lastInteractionAt
+            ? differenceInDays(now, customer.lastInteractionAt)
             : 999;
           if (daysSinceInteraction > 60) {
             riskScore += 40;
@@ -505,17 +589,19 @@ export class KeyCortexInsightService {
           }
 
           // Outstanding invoices
-          const outstanding = await (this.prisma.client as any).invoice.findMany({
+          const outstanding = await this.prisma.client.invoice.findMany({
             where: {
+              businessId,
               contactId: customer.id,
-              status: { in: [InvoiceStatus.SENT, InvoiceStatus.PENDING, InvoiceStatus.PARTIAL] },
+              deletedAt: null,
+              status: { in: OUTSTANDING_STATUSES },
             },
             select: { total: true, dueDate: true },
           });
-          const outstandingBalance = outstanding.reduce((s: any, i: any) => s + (i.total || 0), 0);
+          const outstandingBalance = outstanding.reduce((s, i) => s + (i.total || 0), 0);
           const overdueBalance = outstanding
-            .filter((i: any) => i.dueDate && i.dueDate < now)
-            .reduce((s: any, i: any) => s + (i.total || 0), 0);
+            .filter((i) => i.dueDate && i.dueDate < now)
+            .reduce((s, i) => s + (i.total || 0), 0);
 
           if (overdueBalance > 0) {
             riskScore += 30;
@@ -526,10 +612,11 @@ export class KeyCortexInsightService {
           }
 
           // Cancelled bookings
-          const cancelledBookings = await (this.prisma.client as any).booking.count({
+          const cancelledBookings = await this.prisma.client.booking.count({
             where: {
+              businessId,
               contactId: customer.id,
-              status: 'cancelled',
+              status: BookingStatus.CANCELLED,
               updatedAt: { gte: thirtyDaysAgo },
             },
           });
@@ -539,11 +626,12 @@ export class KeyCortexInsightService {
           }
 
           // No bookings at all recently
-          const recentBookings = await (this.prisma.client as any).booking.count({
+          const recentBookings = await this.prisma.client.booking.count({
             where: {
+              businessId,
               contactId: customer.id,
               startTime: { gte: sixtyDaysAgo },
-              status: { not: 'cancelled' },
+              status: { not: BookingStatus.CANCELLED },
             },
           });
           if (recentBookings === 0) {
@@ -552,10 +640,11 @@ export class KeyCortexInsightService {
           }
 
           // Calculate recovery value
-          const totalRevenue = await (this.prisma.client as any).invoice.aggregate({
+          const totalRevenue = await this.prisma.client.invoice.aggregate({
             where: {
+              businessId,
               contactId: customer.id,
-              status: { not: 'draft' },
+              ...REVENUE_INVOICE,
             },
             _sum: { total: true },
           });
@@ -573,7 +662,7 @@ export class KeyCortexInsightService {
 
             risks.push({
               contactId: customer.id,
-              contactName: customer.name || 'Unknown',
+              contactName: contactDisplayName(customer),
               email: customer.email || '',
               riskScore,
               riskLevel,
@@ -600,46 +689,55 @@ export class KeyCortexInsightService {
 
   async analyzePipeline(businessId: string): Promise<PipelineAnalysis> {
     try {
-      // Get all leads grouped by stage
-      const leadsByStage = await (this.prisma.client as any).contact.groupBy({
-        by: ['stage'],
+      // Get all leads grouped by stage (Contact's stage column is pipelineStage; groupBy is
+      // not soft-delete filtered by the db client, so deletedAt is spelled out)
+      const leadsByStage = await this.prisma.client.contact.groupBy({
+        by: ['pipelineStage'],
         where: {
           businessId,
-          status: 'lead',
+          deletedAt: null,
+          status: LEAD_STATUS,
         },
-        _count: { stage: true },
+        _count: { pipelineStage: true },
       });
 
-      // Get estimated values per stage
-      const leadsWithValue = await (this.prisma.client as any).contact.findMany({
+      // Each lead's value is its open deals (Contact has no estimatedValue)
+      const leads = await this.prisma.client.contact.findMany({
         where: {
           businessId,
-          status: 'lead',
+          deletedAt: null,
+          status: LEAD_STATUS,
         },
         select: {
-          stage: true,
-          estimatedValue: true,
+          pipelineStage: true,
           createdAt: true,
-          lastActivityAt: true,
+          lastInteractionAt: true,
+          deals: OPEN_DEAL_VALUES,
         },
       });
+      const leadsWithValue = leads.map((l) => ({
+        stage: l.pipelineStage,
+        value: openDealValue(l.deals),
+        createdAt: l.createdAt,
+        lastInteractionAt: l.lastInteractionAt,
+      }));
 
       const stageConfig = ['new', 'contacted', 'qualified', 'proposal', 'negotiation', 'closed_won', 'closed_lost'];
-      const stageOrder = new Map(stageConfig.map((s: any, i: any) => [s, i]));
+      const stageOrder = new Map(stageConfig.map((s, i) => [s, i]));
 
       // Build stage data
       const stages: PipelineAnalysis['stages'] = [];
       const funnel: PipelineAnalysis['funnel'] = [];
 
       for (const stageName of stageConfig) {
-        const stageLeads = leadsWithValue.filter((l: any) => l.stage === stageName || (!l.stage && stageName === 'new'));
+        const stageLeads = leadsWithValue.filter((l) => l.stage === stageName || (!l.stage && stageName === 'new'));
         const count = stageLeads.length;
-        const value = stageLeads.reduce((s: any, l: any) => s + (l.estimatedValue || 0), 0);
+        const value = stageLeads.reduce((s, l) => s + l.value, 0);
 
         const avgDaysInStage = stageLeads.length > 0
           ? Math.round(
-              stageLeads.reduce((sum: any, l: any) => {
-                const lastActivity = l.lastActivityAt || l.createdAt || new Date();
+              stageLeads.reduce((sum, l) => {
+                const lastActivity = l.lastInteractionAt || l.createdAt || new Date();
                 return sum + differenceInDays(new Date(), lastActivity);
               }, 0) / stageLeads.length,
             )
@@ -648,7 +746,7 @@ export class KeyCortexInsightService {
         // Conversion rate to next stage (simplified estimate)
         const stageIdx = stageOrder.get(stageName) || 0;
         const nextStageName = stageConfig[stageIdx + 1];
-        const nextStageCount = leadsByStage.find((s: any) => s.stage === nextStageName)?._count.stage || 0;
+        const nextStageCount = leadsByStage.find((s) => s.pipelineStage === nextStageName)?._count.pipelineStage || 0;
         const conversionRate = count > 0 ? Math.round((nextStageCount / count) * 100) : 0;
 
         stages.push({
@@ -660,7 +758,8 @@ export class KeyCortexInsightService {
         });
 
         if (count > 0 && stageName !== 'closed_lost') {
-          const totalLeads = leadsWithValue.filter((l: any) => l.status === 'lead').length || 1;
+          // Every row here is a lead (the query selects no status; filtering on one counted none).
+          const totalLeads = leadsWithValue.length || 1;
           funnel.push({
             stage: stageName,
             count,
@@ -669,28 +768,29 @@ export class KeyCortexInsightService {
         }
       }
 
-      const activeLeads = leadsWithValue.filter((l: any) => l.stage !== 'closed_won' && l.stage !== 'closed_lost');
-      const totalPipelineValue = activeLeads.reduce((s: any, l: any) => s + (l.estimatedValue || 0), 0);
+      const activeLeads = leadsWithValue.filter((l) => l.stage !== 'closed_won' && l.stage !== 'closed_lost');
+      const totalPipelineValue = activeLeads.reduce((s, l) => s + l.value, 0);
       const wonDeals = stages.find((s) => s.name === 'closed_won');
       const avgDealSize = wonDeals && wonDeals.count > 0 ? Math.round(wonDeals.value / wonDeals.count) : 0;
 
       // Calculate avg days to close
-      const wonContacts = await (this.prisma.client as any).contact.findMany({
+      const wonContacts = await this.prisma.client.contact.findMany({
         where: {
           businessId,
-          status: 'customer',
+          deletedAt: null,
+          status: { in: CLIENT_STATUSES },
         },
         select: {
           createdAt: true,
-          lastActivityAt: true,
+          lastInteractionAt: true,
         },
         take: 50,
       });
       const avgDaysToClose = wonContacts.length > 0
         ? Math.round(
-            wonContacts.reduce((sum: any, c: any) => {
+            wonContacts.reduce((sum, c) => {
               const created = c.createdAt || new Date();
-              const closed = c.lastActivityAt || new Date();
+              const closed = c.lastInteractionAt || new Date();
               return sum + differenceInDays(closed, created);
             }, 0) / wonContacts.length,
           )
@@ -742,18 +842,19 @@ export class KeyCortexInsightService {
       const monthStart = startOfMonth(now);
 
       // Money in = paid invoices
-      const paidInvoices = await (this.prisma.client as any).invoice.findMany({
+      const paidInvoices = await this.prisma.client.invoice.findMany({
         where: {
           businessId,
-          status: 'paid',
+          deletedAt: null,
+          status: InvoiceStatus.PAID,
           updatedAt: { gte: monthStart },
         },
         select: { total: true },
       });
-      const moneyIn = paidInvoices.reduce((s: any, i: any) => s + (i.total || 0), 0);
+      const moneyIn = paidInvoices.reduce((s, i) => s + (i.total || 0), 0);
 
       // Money out = expenses (if tracked) or estimated from costs
-      const expenses = await (this.prisma.client as any).expense.findMany({
+      const expenses = await this.prisma.client.expense.findMany({
         where: {
           businessId,
           date: { gte: monthStart },
@@ -761,23 +862,24 @@ export class KeyCortexInsightService {
         select: { amount: true },
       });
       const moneyOut = expenses.length > 0
-        ? expenses.reduce((s: any, e: any) => s + (e.amount || 0), 0)
+        ? expenses.reduce((s, e) => s + (e.amount || 0), 0)
         : Math.round(moneyIn * 0.4); // Estimate 40% costs if no expense tracking
 
       const netFlow = moneyIn - moneyOut;
 
       // Days sales outstanding
-      const outstandingInvoices = await (this.prisma.client as any).invoice.findMany({
+      const outstandingInvoices = await this.prisma.client.invoice.findMany({
         where: {
           businessId,
-          status: { in: [InvoiceStatus.SENT, InvoiceStatus.PENDING, InvoiceStatus.PARTIAL] },
+          deletedAt: null,
+          status: { in: OUTSTANDING_STATUSES },
         },
         select: { total: true, dueDate: true, createdAt: true },
       });
-      const totalOutstanding = outstandingInvoices.reduce((s: any, i: any) => s + (i.total || 0), 0);
+      const totalOutstanding = outstandingInvoices.reduce((s, i) => s + (i.total || 0), 0);
       const avgDaysOutstanding = outstandingInvoices.length > 0
         ? Math.round(
-            outstandingInvoices.reduce((sum: any, i: any) => {
+            outstandingInvoices.reduce((sum, i) => {
               const created = i.createdAt || new Date();
               return sum + differenceInDays(now, created);
             }, 0) / outstandingInvoices.length,
@@ -789,22 +891,23 @@ export class KeyCortexInsightService {
         : 0;
 
       // Upcoming payments due
-      const upcomingDue = await (this.prisma.client as any).invoice.findMany({
+      const upcomingDue = await this.prisma.client.invoice.findMany({
         where: {
           businessId,
-          status: { in: [InvoiceStatus.SENT, InvoiceStatus.PENDING, InvoiceStatus.PARTIAL] },
+          deletedAt: null,
+          status: { in: OUTSTANDING_STATUSES },
           dueDate: { gte: now, lte: subDays(now, -30) },
         },
         include: {
-          contact: { select: { name: true } },
+          contact: { select: CONTACT_NAME_SELECT },
         },
         orderBy: { dueDate: 'asc' },
         take: 10,
       });
 
-      const upcomingPaymentsDue = upcomingDue.map((inv: any) => ({
+      const upcomingPaymentsDue = upcomingDue.map((inv) => ({
         id: inv.id,
-        contactName: inv.contact?.name || 'Unknown',
+        contactName: contactDisplayName(inv.contact),
         amount: inv.total || 0,
         dueDate: inv.dueDate || new Date(),
         daysUntilDue: differenceInDays(inv.dueDate || now, now),
@@ -819,17 +922,18 @@ export class KeyCortexInsightService {
         collectionIssues.push(`Collection rate is ${collectionRate}% — improve follow-up`);
       }
 
-      // Simple forecast — project next 30 days
-      const last30Days = await (this.prisma.client as any).payment.findMany({
+      // Simple forecast — project next 30 days from the money received in the last 30
+      // (Payment.status is PENDING, SUCCESSFUL or FAILED; no writer records 'completed')
+      const last30Days = await this.prisma.client.payment.findMany({
         where: {
           businessId,
           createdAt: { gte: subDays(now, 30) },
-          status: 'completed',
+          status: 'SUCCESSFUL',
         },
         select: { amount: true },
       });
       const avgDailyInflow = last30Days.length > 0
-        ? last30Days.reduce((s: any, p: any) => s + (p.amount || 0), 0) / 30
+        ? last30Days.reduce((s, p) => s + (p.amount || 0), 0) / 30
         : moneyIn / 30;
 
       const projectedInflow = Math.round(avgDailyInflow * 30);
