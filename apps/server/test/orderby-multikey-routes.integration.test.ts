@@ -25,6 +25,23 @@
  * Controls (green before and after): a customer of another business is 404, a
  * non-member is 403.
  *
+ * Review repair (SEC-OB-1, OB-COR-1, SEC-OB-2; rules D-37, D-63, D-90, D-100;
+ * W9-CRM-RESIDUALS SEC-L81-3): once the list answers 200 it is a read like its
+ * sibling GET .../tasks/due, so in a second business (v63f_bizV, its own
+ * contacts and tasks; the cases above keep theirs) it is pinned that:
+ *   - with ?contactId= a contact the member cannot open (a PRIVATE contact of
+ *     the owner for a STAFF member; another member's contact for one limited to
+ *     their own book, crm_view 'owned') is 404 'Contact not found', as GET
+ *     contacts/:id/notes answers, and nothing of it is served;
+ *   - without contactId the list holds only the tasks of contacts the member
+ *     may open (a PRIVATE contact shared with them included), in the same order;
+ *   - every task carries the contact summary tasks/due serves (id, names,
+ *     email, phone, status), never the stored row: no notesInternal, custom
+ *     fields or the stored money fields (lifetimeValue, averageSpend,
+ *     paymentReliability, leadScore) a member with revenue 'none' is not served;
+ *   - a soft-deleted contact's tasks are not listed, for the OWNER either
+ *     (?contactId= on it is 404, as before).
+ *
  * Harness (as test/team-invite-email-case.integration.test.ts): the real
  * AuthMiddleware and AuthGuard (HS256 tokens on the test-only verifyLocal path,
  * signed with a secret built at run time), the real BusinessGuard,
@@ -41,8 +58,10 @@
  * carries it; a skill the POST route creates is named with it too. Skill is a
  * global catalogue (no businessId), so the list assertions read this suite's
  * skills in the response and compare the whole response with the database's own
- * ORDER BY over the same rows. Everything is hard-deleted by raw SQL through
- * sqlLikePrefix(P) before and after the suite.
+ * ORDER BY over the same rows. The review-repair business (v63f_bizV) has its
+ * own users, memberships, contacts, contact share and tasks, all named with the
+ * prefix. Everything is hard-deleted by raw SQL through sqlLikePrefix(P) before
+ * and after the suite.
  */
 import 'reflect-metadata';
 import path from 'path';
@@ -82,12 +101,39 @@ const ID = {
   ivan: `${P}c_ivan`,
   /** A customer of the outsider's business. */
   other: `${P}c_other`,
+  /** The review-repair business (SEC-OB-1, OB-COR-1, SEC-OB-2): the owner's second business. */
+  bizV: `${P}bizV`,
+  /** A STAFF member of bizV: crm read, revenue 'none', every TEAM/SHARED contact (crm_view defaults to 'all'). */
+  staff: `${P}staff`,
+  /** A STAFF member of bizV limited to their own book: crm read, revenue 'none', crm_view 'owned'. */
+  book: `${P}book`,
+  /** bizV contacts: the owner's TEAM contact with stored money figures. */
+  vTeam: `${P}cv_team`,
+  /** The owner's PRIVATE contact, shared with nobody. */
+  vPriv: `${P}cv_priv`,
+  /** The owner's PRIVATE contact, shared with the staff member. */
+  vShared: `${P}cv_shared`,
+  /** A TEAM contact the book-limited member owns. */
+  vBook: `${P}cv_book`,
+  /** A soft-deleted contact (a forget in its grace period). */
+  vGone: `${P}cv_gone`,
 };
 
 const EMAIL = {
   owner: `${P}owner@test.local`,
   outsider: `${P}outsider@test.local`,
+  staff: `${P}staff@test.local`,
+  book: `${P}book@test.local`,
 };
+
+/** Who a request is sent as: the session user and their address. */
+const AS = {
+  owner: { id: ID.owner, email: EMAIL.owner },
+  outsider: { id: ID.outsider, email: EMAIL.outsider },
+  staff: { id: ID.staff, email: EMAIL.staff },
+  book: { id: ID.book, email: EMAIL.book },
+} as const;
+type As = keyof typeof AS;
 
 const DAY = 86_400_000;
 /** One fixed instant the seeded due dates and creation times count from (no wall-clock ties). */
@@ -125,6 +171,37 @@ const SKILL_ORDER = [SKILL.eta.name, SKILL.zeta.name, SKILL.alpha.name];
 /** The skill the owner adds through POST, as the Skills tab does. */
 const ADDED_SKILL = { name: `${P}beta reels`, category: `${P}cat_a` };
 
+/**
+ * The review-repair business's contacts. Every one carries an internal note and
+ * stored money figures, so a full row on the wire is seen; the amounts are
+ * distinctive enough to be searched for in a response body.
+ */
+const VCONTACT = {
+  team: { id: ID.vTeam, firstName: 'Tomas', visibility: 'TEAM', ownerId: ID.owner, lifetimeValue: 4321.5, deleted: false },
+  priv: { id: ID.vPriv, firstName: 'Priya', visibility: 'PRIVATE', ownerId: ID.owner, lifetimeValue: 98765.43, deleted: false },
+  shared: { id: ID.vShared, firstName: 'Sana', visibility: 'PRIVATE', ownerId: ID.owner, lifetimeValue: 5555.25, deleted: false },
+  book: { id: ID.vBook, firstName: 'Bo', visibility: 'TEAM', ownerId: ID.book, lifetimeValue: 777.75, deleted: false },
+  gone: { id: ID.vGone, firstName: 'Greta', visibility: 'TEAM', ownerId: ID.owner, lifetimeValue: 3333.5, deleted: true },
+};
+const vEmail = (c: { firstName: string }) => `${P}${c.firstName.toLowerCase()}@private.local`;
+const vNote = (c: { firstName: string }) => `${P}internal note on ${c.firstName}`;
+/** The stored money figures besides lifetimeValue (the same on every bizV contact). */
+const V_AVERAGE_SPEND = 1234.5;
+const V_PAYMENT_RELIABILITY = 87;
+const V_LEAD_SCORE = 91;
+
+/** One OPEN task per bizV contact, due on distinct days (the deleted contact's first, were it listed). */
+const VTASK = {
+  gone: { id: `${P}tv_gone`, contactId: ID.vGone, title: `${P}call Greta about the refund`, due: T0 + 0.5 * DAY, created: T0 - 15 * 60_000, status: 'OPEN' },
+  book: { id: `${P}tv_book`, contactId: ID.vBook, title: `${P}send Bo the price list`, due: T0 + 1 * DAY, created: T0 - 14 * 60_000, status: 'OPEN' },
+  priv: { id: `${P}tv_priv`, contactId: ID.vPriv, title: `${P}discuss the private settlement`, due: T0 + 2 * DAY, created: T0 - 13 * 60_000, status: 'OPEN' },
+  team: { id: `${P}tv_team`, contactId: ID.vTeam, title: `${P}confirm Tomas's booking`, due: T0 + 3 * DAY, created: T0 - 12 * 60_000, status: 'OPEN' },
+  shared: { id: `${P}tv_shared`, contactId: ID.vShared, title: `${P}follow up with Sana`, due: T0 + 4 * DAY, created: T0 - 11 * 60_000, status: 'OPEN' },
+};
+
+/** The contact summary GET .../tasks/due serves (CrmTimelineService.dueTasks): never the stored row. */
+const CONTACT_SUMMARY_KEYS = ['displayName', 'email', 'firstName', 'id', 'lastName', 'phone', 'status'];
+
 let app: INestApplication;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the @keyflow/db client is loaded after env
 let db: any;
@@ -148,10 +225,10 @@ function token(sub: string, email: string): string {
   return `${header}.${body}.${sig}`;
 }
 
-function get(url: string, as: 'owner' | 'outsider' = 'owner', businessId: string = ID.biz) {
+function get(url: string, as: As = 'owner', businessId: string = ID.biz) {
   return request(app.getHttpServer())
     .get(url)
-    .set('Authorization', `Bearer ${as === 'owner' ? token(ID.owner, EMAIL.owner) : token(ID.outsider, EMAIL.outsider)}`)
+    .set('Authorization', `Bearer ${token(AS[as].id, AS[as].email)}`)
     .set('x-business-id', businessId);
 }
 
@@ -172,6 +249,7 @@ const said = (res: { status: number; body: unknown; text?: string }) => `${res.s
 async function cleanup() {
   for (const sql of [
     `DELETE FROM contact_tasks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contact_shares WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM skills WHERE name LIKE ${sqlLikePrefix(P)} OR id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -217,6 +295,45 @@ async function seed() {
   await task(OTHER_TASK, ID.bizB);
 
   for (const s of Object.values(SKILL)) await db.skill.create({ data: s });
+
+  // The review-repair business: the same owner, two STAFF members without revenue read.
+  await db.user.create({ data: { id: ID.staff, email: EMAIL.staff, name: 'Staff', role: 'USER' } });
+  await db.user.create({ data: { id: ID.book, email: EMAIL.book, name: 'Book', role: 'USER' } });
+  await db.business.create({ data: { id: ID.bizV, name: `${P}review business`, ownerId: ID.owner } });
+  await db.membership.create(skipTenantIsolation({ data: { id: `${P}m_owner_v`, userId: ID.owner, businessId: ID.bizV, role: 'OWNER' } }));
+  await db.membership.create(
+    skipTenantIsolation({ data: { id: `${P}m_staff_v`, userId: ID.staff, businessId: ID.bizV, role: 'STAFF', permissionScopes: { crm: 'read', revenue: 'none' } } }),
+  );
+  await db.membership.create(
+    skipTenantIsolation({
+      data: { id: `${P}m_book_v`, userId: ID.book, businessId: ID.bizV, role: 'STAFF', permissionScopes: { crm: 'read', revenue: 'none', crm_view: 'owned' } },
+    }),
+  );
+  for (const c of Object.values(VCONTACT)) {
+    await db.contact.create(
+      skipTenantIsolation({
+        data: {
+          id: c.id,
+          businessId: ID.bizV,
+          firstName: c.firstName,
+          lastName: `${P}${c.firstName}`,
+          email: vEmail(c),
+          phone: '+18685550101',
+          ownerId: c.ownerId,
+          visibility: c.visibility,
+          notesInternal: vNote(c),
+          custom: { [`${P}field`]: `${P}custom value of ${c.firstName}` },
+          lifetimeValue: c.lifetimeValue,
+          averageSpend: V_AVERAGE_SPEND,
+          paymentReliability: V_PAYMENT_RELIABILITY,
+          leadScore: V_LEAD_SCORE,
+          ...(c.deleted ? { deletedAt: new Date(T0 - DAY) } : {}),
+        },
+      }),
+    );
+  }
+  await db.contactShare.create(skipTenantIsolation({ data: { id: `${P}share_v`, businessId: ID.bizV, contactId: ID.vShared, userId: ID.staff, createdBy: ID.owner } }));
+  for (const t of Object.values(VTASK)) await task(t, ID.bizV);
 }
 
 beforeAll(async () => {
@@ -373,6 +490,16 @@ describe('fixture sanity (real rows)', () => {
     expect(await db.contactTask.count(skipTenantIsolation({ where: { businessId: ID.bizB } }))).toBe(1);
     expect(await db.skill.count({ where: { id: { in: Object.values(SKILL).map((s) => s.id) } } })).toBe(3);
   });
+
+  it('seeded the review-repair business: five contacts (one soft-deleted, one shared with the staff member) and one task each', async () => {
+    expect(await db.contactTask.count(skipTenantIsolation({ where: { businessId: ID.bizV } }))).toBe(Object.keys(VTASK).length);
+    const rows: Array<{ id: string; deleted_at: Date | null }> = await db.$queryRawUnsafe(
+      `SELECT id, deleted_at FROM contacts WHERE business_id = '${ID.bizV}' ORDER BY id`,
+    );
+    expect(rows.map((r) => r.id)).toEqual(Object.values(VCONTACT).map((c) => c.id).sort());
+    expect(rows.filter((r) => r.deleted_at !== null).map((r) => r.id)).toEqual([ID.vGone]);
+    expect(await db.contactShare.count(skipTenantIsolation({ where: { businessId: ID.bizV, userId: ID.staff } }))).toBe(1);
+  });
 });
 
 describe('BUG-012: GET .../ai/settings/skills (Settings > AI, Skills tab)', () => {
@@ -459,6 +586,147 @@ describe("BUG-036: GET .../crm/businesses/:id/tasks (a customer's Tasks tab)", (
   it('control: a member of another business is refused (403)', async () => {
     const res = await get(tasksUrl({ contactId: ID.hana }), 'outsider', ID.biz);
     expect(res.status, said(res)).toBe(403);
+  });
+});
+
+describe('SEC-OB-1, OB-COR-1, SEC-OB-2: GET .../tasks is read by the rules its sibling tasks/due applies (D-37, D-63, D-90, D-100)', () => {
+  const ids = (body: unknown) => (body as Array<{ id: string }>).map((t) => t.id);
+  const vUrl = (query: Record<string, string> = {}) => tasksUrl(query, ID.bizV);
+  const contactsOf = (body: unknown) => (body as Array<{ contact?: Record<string, unknown> | null }>).map((t) => t.contact);
+
+  /** Nothing of a contact's stored row beyond the summary is in a response body. */
+  function expectNoStoredRow(body: unknown) {
+    const text = JSON.stringify(body);
+    for (const c of Object.values(VCONTACT)) {
+      expect(text).not.toContain(vNote(c));
+      expect(text).not.toContain(`custom value of ${c.firstName}`);
+      expect(text).not.toContain(String(c.lifetimeValue));
+    }
+    // Contact-only keys (a ContactTask row has none of these; its own deletedAt is its own).
+    for (const key of ['notesInternal', 'custom', 'lifetimeValue', 'averageSpend', 'paymentReliability', 'leadScore', 'visibility', 'ownerId']) {
+      expect(text).not.toContain(`"${key}"`);
+    }
+  }
+
+  describe('controls: the gates the sibling reads already apply (green before and after)', () => {
+    it("a STAFF member cannot open the owner's PRIVATE contact: GET contacts/:id/notes is 404", async () => {
+      const res = await get(`/crm/businesses/${ID.bizV}/contacts/${ID.vPriv}/notes`, 'staff', ID.bizV);
+      expect(res.status, said(res)).toBe(404);
+      expect(JSON.stringify(res.body)).toContain('Contact not found');
+    });
+
+    it("GET tasks/due omits the PRIVATE contact's task for the STAFF member", async () => {
+      const res = await get(`/crm/businesses/${ID.bizV}/tasks/due?windowDays=30`, 'staff', ID.bizV);
+      expect(res.status, said(res)).toBe(200);
+      expect(ids(res.body)).not.toContain(VTASK.priv.id);
+      expect(JSON.stringify(res.body)).not.toContain(VTASK.priv.title);
+    });
+
+    it('?contactId= on a soft-deleted contact is 404 for the OWNER', async () => {
+      const res = await get(vUrl({ contactId: ID.vGone }), 'owner', ID.bizV);
+      expect(res.status, said(res)).toBe(404);
+      expect(JSON.stringify(res.body)).not.toContain(VTASK.gone.title);
+    });
+
+    it('?contactId= on a PRIVATE contact shared with the STAFF member answers 200 with its task', async () => {
+      const res = await get(vUrl({ contactId: ID.vShared }), 'staff', ID.bizV);
+      expect(res.status, said(res)).toBe(200);
+      expect(ids(res.body)).toEqual([VTASK.shared.id]);
+    });
+  });
+
+  describe('?contactId=: a contact the member cannot open is 404, as GET contacts/:id/notes answers', () => {
+    it("a STAFF member (crm read, revenue 'none'): the owner's PRIVATE contact is 404 and nothing of it is served", async () => {
+      const res = await get(vUrl({ contactId: ID.vPriv }), 'staff', ID.bizV);
+      expect(res.status, said(res)).toBe(404);
+      expect(JSON.stringify(res.body)).toContain('Contact not found');
+      const text = JSON.stringify(res.body);
+      expect(text).not.toContain(VTASK.priv.title);
+      expect(text).not.toContain(vEmail(VCONTACT.priv));
+      expect(text).not.toContain(String(VCONTACT.priv.lifetimeValue));
+    });
+
+    it("a member limited to their own book (crm_view 'owned'): another member's TEAM contact is 404", async () => {
+      const res = await get(vUrl({ contactId: ID.vTeam }), 'book', ID.bizV);
+      expect(res.status, said(res)).toBe(404);
+      expect(JSON.stringify(res.body)).not.toContain(VTASK.team.title);
+    });
+
+    it("a member limited to their own book: the owner's PRIVATE contact is 404 too", async () => {
+      const res = await get(vUrl({ contactId: ID.vPriv }), 'book', ID.bizV);
+      expect(res.status, said(res)).toBe(404);
+      expect(JSON.stringify(res.body)).not.toContain(VTASK.priv.title);
+    });
+
+    it('a member limited to their own book: their own contact answers 200 with its task, the contact as a summary', async () => {
+      const res = await get(vUrl({ contactId: ID.vBook }), 'book', ID.bizV);
+      expect(res.status, said(res)).toBe(200);
+      expect(ids(res.body)).toEqual([VTASK.book.id]);
+      expect(Object.keys(contactsOf(res.body)[0] ?? {}).sort()).toEqual(CONTACT_SUMMARY_KEYS);
+      expectNoStoredRow(res.body);
+    });
+  });
+
+  describe("without contactId: only the tasks of contacts the member may open, a soft-deleted contact's for nobody", () => {
+    it('the STAFF member: the TEAM contacts and the PRIVATE contact shared with them, by due date; not the unshared PRIVATE one', async () => {
+      const res = await get(vUrl(), 'staff', ID.bizV);
+      expect(res.status, said(res)).toBe(200);
+      expect(ids(res.body)).toEqual([VTASK.book.id, VTASK.team.id, VTASK.shared.id]);
+      const text = JSON.stringify(res.body);
+      expect(text).not.toContain(VTASK.priv.title);
+      expect(text).not.toContain(vEmail(VCONTACT.priv));
+      expect(text).not.toContain(VTASK.gone.title);
+    });
+
+    it('the member limited to their own book: only their own contact', async () => {
+      const res = await get(vUrl(), 'book', ID.bizV);
+      expect(res.status, said(res)).toBe(200);
+      expect(ids(res.body)).toEqual([VTASK.book.id]);
+    });
+
+    it("the STAFF member with ?status=OPEN&dueBefore=: the same rule (no PRIVATE or deleted contact's task)", async () => {
+      const res = await get(vUrl({ status: 'OPEN', dueBefore: new Date(T0 + 2.5 * DAY).toISOString() }), 'staff', ID.bizV);
+      expect(res.status, said(res)).toBe(200);
+      expect(ids(res.body)).toEqual([VTASK.book.id]);
+    });
+
+    it("the OWNER: every live contact's task, the PRIVATE one included; the soft-deleted contact's task is not listed (SEC-OB-2)", async () => {
+      const res = await get(vUrl(), 'owner', ID.bizV);
+      expect(res.status, said(res)).toBe(200);
+      expect(ids(res.body)).toEqual([VTASK.book.id, VTASK.priv.id, VTASK.team.id, VTASK.shared.id]);
+      const text = JSON.stringify(res.body);
+      expect(text).not.toContain(VTASK.gone.title);
+      expect(text).not.toContain(vEmail(VCONTACT.gone));
+    });
+  });
+
+  describe('every task carries the contact summary, never the stored row (money withheld, D-63, D-90, D-100)', () => {
+    it("the STAFF member (revenue 'none'): no notesInternal, custom fields, lifetimeValue, averageSpend, paymentReliability or leadScore", async () => {
+      const res = await get(vUrl(), 'staff', ID.bizV);
+      expect(res.status, said(res)).toBe(200);
+      const contacts = contactsOf(res.body);
+      expect(contacts.length).toBe(3);
+      for (const contact of contacts) expect(Object.keys(contact ?? {}).sort()).toEqual(CONTACT_SUMMARY_KEYS);
+      expectNoStoredRow(res.body);
+      // The summary is the contact the Tasks tab names.
+      const team = (res.body as Array<{ id: string; contact: Record<string, unknown> }>).find((t) => t.id === VTASK.team.id);
+      expect(team?.contact).toMatchObject({ id: ID.vTeam, firstName: 'Tomas', email: vEmail(VCONTACT.team) });
+    });
+
+    it('the STAFF member with ?contactId=: the same summary', async () => {
+      const res = await get(vUrl({ contactId: ID.vTeam }), 'staff', ID.bizV);
+      expect(res.status, said(res)).toBe(200);
+      expect(ids(res.body)).toEqual([VTASK.team.id]);
+      expect(Object.keys(contactsOf(res.body)[0] ?? {}).sort()).toEqual(CONTACT_SUMMARY_KEYS);
+      expectNoStoredRow(res.body);
+    });
+
+    it('the OWNER: the same summary, as tasks/due serves it', async () => {
+      const res = await get(vUrl(), 'owner', ID.bizV);
+      expect(res.status, said(res)).toBe(200);
+      for (const contact of contactsOf(res.body)) expect(Object.keys(contact ?? {}).sort()).toEqual(CONTACT_SUMMARY_KEYS);
+      expectNoStoredRow(res.body);
+    });
   });
 });
 
