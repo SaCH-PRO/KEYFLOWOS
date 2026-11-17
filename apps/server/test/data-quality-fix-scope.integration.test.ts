@@ -113,6 +113,17 @@ const C = {
   hPriv: `${P}c_hPriv`,       // PRIVATE, owned by the OWNER: hidden from staffAll
   edTeam: `${P}c_edTeam`,     // TEAM, owned by the OWNER: visible to staffEdOwn, not theirs to edit
   gone: `${P}c_gone`,         // soft-deleted, with an open issue left behind
+  // the queue's reads: list, wizard, stats (review repairs SEC-DQ-1, COR-DQMA-1, COR-DQMA-2)
+  lHeld: `${P}c_lHeld`,       // TEAM, owned by the OWNER: outside staffBook's book; a searchable email
+  lMine: `${P}c_lMine`,       // TEAM, owned by staffBook
+  lShared: `${P}c_lShared`,   // TEAM, owned by the OWNER, shared with staffBook
+  dDel: `${P}c_dDel`,         // TEAM, deleted in a case through DELETE contacts/:contactId
+  mgP: `${P}c_mgP`,           // suspected duplicates of each other, merged in a case through
+  mgD: `${P}c_mgD`,           //   POST contacts/:mgP/merge/:mgD, as their issues recommend
+  // bulk-apply with ids that are not text (review repair SEC-DQ-2)
+  bOwn: `${P}c_bOwn`,         // TEAM, owned by staffBook
+  // POST contacts/:contactId/data-quality/mark-verified (review repair SEC-DQ-3)
+  mvNoEd: `${P}c_mvNoEd`,     // TEAM, owned by the OWNER
 };
 /** The open issue seeded for contact `c` is `${c}_i`. */
 const issueOf = (contactId: string) => `${contactId}_i`;
@@ -122,6 +133,9 @@ const issueOf = (contactId: string) => `${contactId}_i`;
 const OTHER_EMAIL = `${P}mina.holder@test.local`;
 const CORRECTED_HELD = `${P}tomas@gmail.com`;
 const HELD_PHONE_E164 = '+18687123601';
+/** lHeld's email and phone: what would tell staffBook of a contact outside their book. */
+const HIDDEN_EMAIL = `${P}held.hidden@test.local`;
+const HIDDEN_PHONE = '+18687123699';
 
 let db: any;
 let app: any;
@@ -139,6 +153,7 @@ async function cleanup() {
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_shares WHERE contact_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM merge_operations WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)} OR id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -166,13 +181,85 @@ function dismiss(actor: string, issueId: string) {
     .send({});
 }
 
-function bulkApply(actor: string, issueIds: string[]) {
+function bulkApply(actor: string, issueIds: unknown[]) {
   return request(app.getHttpServer())
     .post(`/crm/businesses/${ID.bizA}/data-quality/bulk-apply`)
     .set('x-test-user', actor)
     .set('x-forwarded-for', nextIp())
     .send({ issueIds });
 }
+
+/** GET /crm/businesses/bizA/data-quality/<routePath> as `actor`. */
+function getDq(actor: string, routePath: string) {
+  return request(app.getHttpServer())
+    .get(`/crm/businesses/${ID.bizA}/data-quality/${routePath}`)
+    .set('x-test-user', actor)
+    .set('x-forwarded-for', nextIp());
+}
+
+async function okDq(actor: string, routePath: string) {
+  const res = await getDq(actor, routePath);
+  expect(res.status, `${actor} GET data-quality/${routePath}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(200);
+  return res.body;
+}
+
+function markVerified(actor: string, contactId: string) {
+  return request(app.getHttpServer())
+    .post(`/crm/businesses/${ID.bizA}/contacts/${contactId}/data-quality/mark-verified`)
+    .set('x-test-user', actor)
+    .set('x-forwarded-for', nextIp())
+    .send({});
+}
+
+function deleteContact(actor: string, contactId: string) {
+  return request(app.getHttpServer())
+    .delete(`/crm/businesses/${ID.bizA}/contacts/${contactId}`)
+    .set('x-test-user', actor)
+    .set('x-forwarded-for', nextIp());
+}
+
+function mergeContacts(actor: string, primaryId: string, duplicateId: string) {
+  return request(app.getHttpServer())
+    .post(`/crm/businesses/${ID.bizA}/contacts/${primaryId}/merge/${duplicateId}`)
+    .set('x-test-user', actor)
+    .set('x-forwarded-for', nextIp())
+    .send({});
+}
+
+const idsOf = (items: Array<{ id: string }>) => items.map((item) => item.id).sort();
+
+/**
+ * The test's own statement of the rule GET contacts/:contactId applies (CrmStatsService.contactDetail:
+ * the business, deletedAt null, visibilityClause), over raw SQL: the OWNER opens every live contact;
+ * a view-all STAFF its TEAM and SHARED rows, its own and the ones shared with it (never another
+ * member's PRIVATE row); a 'my book' STAFF its own and the ones shared with it.
+ */
+const OPENS_SQL = {
+  owner: 'TRUE',
+  viewAll: `(c.visibility IN ('TEAM', 'SHARED') OR c.owner_id = $2 OR EXISTS (SELECT 1 FROM contact_shares s WHERE s.contact_id = c.id AND s.user_id = $2))`,
+  myBook: `(c.owner_id = $2 OR EXISTS (SELECT 1 FROM contact_shares s WHERE s.contact_id = c.id AND s.user_id = $2))`,
+} as const;
+
+/** The open issues of bizA on the live contacts `userId` may open, by OPENS_SQL[rule]. */
+async function openIssuesFor(rule: keyof typeof OPENS_SQL, userId: string): Promise<Array<{ id: string; kind: string }>> {
+  const rows: Array<{ id: string; kind: string }> = await db.$queryRawUnsafe(
+    `SELECT i.id, i.kind FROM contact_data_issues i JOIN contacts c ON c.id = i.contact_id
+      WHERE i.business_id = $1 AND i.status = 'open' AND c.business_id = $1 AND c.deleted_at IS NULL
+        AND ${OPENS_SQL[rule]} AND $2::text IS NOT NULL
+      ORDER BY i.id`,
+    ID.bizA, userId,
+  );
+  // Sorted as idsOf sorts (code units), not by the database's collation.
+  return rows.map((r) => ({ id: r.id, kind: r.kind })).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+function countByKind(issues: Array<{ kind: string }>): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const issue of issues) counts[issue.kind] = (counts[issue.kind] ?? 0) + 1;
+  return counts;
+}
+
+const NO_ISSUES = { invalid_email: 0, invalid_phone: 0, missing_required: 0, stale_data: 0, suspected_duplicate: 0 };
 
 // ---- reads ------------------------------------------------------------------
 
@@ -408,6 +495,30 @@ beforeAll(async () => {
   await issue(C.edTeam, stale);
   await contact(C.gone, { firstName: 'Gus', deletedAt: new Date('2026-11-01T00:00:00Z') });
   await issue(C.gone, stale);
+  // The queue's reads (review repairs SEC-DQ-1, COR-DQMA-1, COR-DQMA-2).
+  await contact(C.lHeld, { firstName: 'Hidden', email: HIDDEN_EMAIL, emailNormalized: HIDDEN_EMAIL, phone: HIDDEN_PHONE, phoneNormalized: HIDDEN_PHONE });
+  await issue(C.lHeld, stale);
+  await contact(C.lMine, { firstName: 'Mia', ownerId: ID.staffBook });
+  await issue(C.lMine, stale);
+  await contact(C.lShared, { firstName: 'Sid' });
+  await issue(C.lShared, stale);
+  await db.contactShare.create({ data: { id: `${P}share_lShared`, businessId: ID.bizA, contactId: C.lShared, userId: ID.staffBook, createdBy: ID.owner } });
+  await contact(C.dDel, { firstName: 'Del' });
+  await issue(C.dDel, stale);
+  // The scan maps both sides of a suspected pair, each recommending the merge of the duplicate into the primary.
+  await contact(C.mgP, { firstName: 'Gia', email: `${P}gia@test.local`, emailNormalized: `${P}gia@test.local` });
+  await contact(C.mgD, { firstName: 'Gia', email: `${P}gia.two@test.local`, emailNormalized: `${P}gia.two@test.local` });
+  for (const id of [C.mgP, C.mgD]) {
+    await issue(id, {
+      kind: 'suspected_duplicate', severity: 'medium', field: null, message: 'Possible duplicate of another contact (same name).',
+      recommendedFix: { action: 'merge', primaryId: C.mgP, duplicateId: C.mgD, confidence: 0.92 },
+    });
+  }
+  // Bulk-apply with ids that are not text (SEC-DQ-2); mark-verified under the edit rule (SEC-DQ-3).
+  await contact(C.bOwn, { firstName: 'Bree', ownerId: ID.staffBook });
+  await issue(C.bOwn, stale);
+  await contact(C.mvNoEd, { firstName: 'Vera' });
+  await issue(C.mvNoEd, stale);
 
   // The answer for an issue id this business does not have, which a hidden one must match.
   unknownAnswer = answerOf(await apply(ID.staffBook, `${P}no_such_issue`));
@@ -644,5 +755,196 @@ describe('apply, bulk-apply and dismiss act only on contacts the member may open
       `SELECT id FROM contacts WHERE id LIKE ${sqlLikePrefix(P)} AND business_id <> $1 ORDER BY id`, ID.bizA,
     );
     expect(moved).toEqual([]);
+  });
+});
+
+// ---- review repairs SEC-DQ-1 and COR-DQMA-2 (owner rulings D-63, D-133) -----------------------
+describe('the data-quality queue lists, counts and offers only the issues of contacts the member may open (review SEC-DQ-1, COR-DQMA-2)', () => {
+  it("RED-BEFORE: a 'my book' STAFF's GET .../data-quality/issues lists, totals and counts by kind only the open issues of the live contacts in their book (owned by them or shared with them); a contact outside it is not named", async () => {
+    const served = await okDq(ID.staffBook, 'issues?limit=200');
+    const expected = await openIssuesFor('myBook', ID.staffBook);
+    expect(idsOf(served.items)).toEqual(expected.map((i) => i.id));
+    expect(served.total).toBe(expected.length);
+    expect(served.byKind).toEqual(countByKind(expected));
+    expect(idsOf(served.items)).toEqual(expect.arrayContaining([issueOf(C.lMine), issueOf(C.lShared), issueOf(C.bOwn)]));
+    for (const hidden of [C.lHeld, C.hBook, C.hPriv, C.mvNoEd]) expect(idsOf(served.items), hidden).not.toContain(issueOf(hidden));
+    const text = JSON.stringify(served);
+    for (const mark of [C.lHeld, HIDDEN_EMAIL, HIDDEN_PHONE]) expect(text.includes(mark), `names ${mark}`).toBe(false);
+  });
+
+  it("RED-BEFORE: the list's search finds no contact outside the member's book (a hidden email answers as an absent one); the OWNER's same search finds it", async () => {
+    const hidden = await okDq(ID.staffBook, 'issues?search=held.hidden');
+    expect({ total: hidden.total, items: hidden.items }).toEqual({ total: 0, items: [] });
+    const absent = await okDq(ID.staffBook, `issues?search=${P}no.such.address`);
+    expect({ total: absent.total, items: absent.items }).toEqual({ total: 0, items: [] });
+    // Control: the OWNER may open lHeld, so the OWNER's search finds it.
+    const owner = await okDq(ID.owner, 'issues?search=held.hidden');
+    expect(owner.total).toBe(1);
+    expect(idsOf(owner.items)).toEqual([issueOf(C.lHeld)]);
+  });
+
+  it("RED-BEFORE: a view-all STAFF's list and counts leave out another member's PRIVATE contact (its issue, its email); the TEAM contacts they do not own are listed", async () => {
+    const served = await okDq(ID.staffAll, 'issues?limit=200');
+    const expected = await openIssuesFor('viewAll', ID.staffAll);
+    expect(idsOf(served.items)).toEqual(expected.map((i) => i.id));
+    expect(served.total).toBe(expected.length);
+    expect(served.byKind).toEqual(countByKind(expected));
+    expect(idsOf(served.items)).not.toContain(issueOf(C.hPriv));
+    expect(idsOf(served.items)).toEqual(expect.arrayContaining([issueOf(C.hBook), issueOf(C.lHeld)]));
+    expect(JSON.stringify(served).includes(`${P}priya@test.local`), "names hPriv's email").toBe(false);
+  });
+
+  it("RED-BEFORE: the fix wizard (GET .../data-quality/wizard) offers a 'my book' STAFF and a view-all STAFF only the open issues of the contacts they may open", async () => {
+    for (const [actor, rule] of [[ID.staffBook, 'myBook'], [ID.staffAll, 'viewAll']] as const) {
+      const served = await okDq(actor, 'wizard?limit=100');
+      const expected = await openIssuesFor(rule, actor);
+      expect(expected.length, `${actor}: fewer open issues than the wizard's page`).toBeLessThan(100);
+      expect(idsOf(served.items), actor).toEqual(expected.map((i) => i.id));
+    }
+    const book = await okDq(ID.staffBook, 'wizard?limit=100');
+    expect(JSON.stringify(book).includes(HIDDEN_EMAIL), "staffBook's wizard names lHeld's email").toBe(false);
+  });
+
+  it("CONTROL: every issue the list shows a 'my book' STAFF is one they may act on: dismissing one of them answers 201 dismissed", async () => {
+    const served = await okDq(ID.staffBook, 'issues?limit=200');
+    expect(idsOf(served.items)).toContain(issueOf(C.lShared));
+    const res = await dismiss(ID.staffBook, issueOf(C.lShared));
+    expect(res.status, JSON.stringify(res.body).slice(0, 400)).toBe(201);
+    expect(res.body).toEqual({ issueId: issueOf(C.lShared), status: 'dismissed' });
+  });
+});
+
+// ---- review repair COR-DQMA-1 --------------------------------------------------------------
+describe('the issues of a contact deleted or merged away leave the queue and its counts (review COR-DQMA-1)', () => {
+  it("RED-BEFORE: the OWNER's list, wizard and stats cover the live contacts only: the open issue left on a soft-deleted contact is neither listed, offered, totalled nor counted by kind", async () => {
+    const expected = await openIssuesFor('owner', ID.owner);
+    const listed = await okDq(ID.owner, 'issues?limit=200');
+    expect(idsOf(listed.items)).toEqual(expected.map((i) => i.id));
+    expect(idsOf(listed.items)).not.toContain(issueOf(C.gone));
+    // Control: the OWNER's list is business-wide over the live contacts (hidden from a member, not from the OWNER).
+    expect(idsOf(listed.items)).toEqual(expect.arrayContaining([issueOf(C.hBook), issueOf(C.hPriv), issueOf(C.lHeld)]));
+    expect(listed.total).toBe(expected.length);
+    expect(listed.byKind).toEqual(countByKind(expected));
+    const wizard = await okDq(ID.owner, 'wizard?limit=100');
+    expect(expected.length).toBeLessThan(100);
+    expect(idsOf(wizard.items)).toEqual(expected.map((i) => i.id));
+    const stats = await okDq(ID.owner, 'stats');
+    expect(stats.issueCounts).toEqual({ ...NO_ISSUES, ...countByKind(expected) });
+  });
+
+  it("RED-BEFORE: once the OWNER deletes a contact (DELETE contacts/:contactId), its open issue leaves the list, the wizard and the stats; dismissing it answers as an unknown issue id, since nothing shows it", async () => {
+    const before = await okDq(ID.owner, 'issues?limit=200');
+    expect(idsOf(before.items)).toContain(issueOf(C.dDel));
+    const staleBefore = (await okDq(ID.owner, 'stats')).issueCounts.stale_data;
+
+    const del = await deleteContact(ID.owner, C.dDel);
+    expect(del.status, JSON.stringify(del.body).slice(0, 400)).toBe(200);
+    expect((await row(C.dDel))?.deleted_at).toBeTruthy();
+
+    const after = await okDq(ID.owner, 'issues?limit=200');
+    expect(idsOf(after.items)).not.toContain(issueOf(C.dDel));
+    expect(after.total).toBe(before.total - 1);
+    expect(after.byKind.stale_data).toBe(before.byKind.stale_data - 1);
+    expect(idsOf((await okDq(ID.owner, 'wizard?limit=100')).items)).not.toContain(issueOf(C.dDel));
+    expect((await okDq(ID.owner, 'stats')).issueCounts.stale_data).toBe(staleBefore - 1);
+    expect(answerOf(await dismiss(ID.owner, issueOf(C.dDel)))).toEqual(unknownAnswer);
+  });
+
+  it("RED-BEFORE: once the OWNER merges a suspected duplicate into its primary (POST contacts/:primaryId/merge/:duplicateId, the fix both issues recommend), the duplicate's issue leaves the queue and the primary's is cleared by applying it: no issue of the pair is left listed or counted", async () => {
+    const before = await okDq(ID.owner, 'issues?kinds=suspected_duplicate&limit=200');
+    expect(idsOf(before.items)).toEqual(expect.arrayContaining([issueOf(C.mgP), issueOf(C.mgD)]));
+
+    const merged = await mergeContacts(ID.owner, C.mgP, C.mgD);
+    expect(merged.status, JSON.stringify(merged.body).slice(0, 400)).toBe(201);
+    expect((await row(C.mgD))?.deleted_at).toBeTruthy();
+
+    const afterMerge = await okDq(ID.owner, 'issues?kinds=suspected_duplicate&limit=200');
+    expect(idsOf(afterMerge.items)).not.toContain(issueOf(C.mgD));
+    expect(idsOf(afterMerge.items)).toContain(issueOf(C.mgP));
+
+    const cleared = await apply(ID.owner, issueOf(C.mgP));
+    expect(cleared.status, JSON.stringify(cleared.body).slice(0, 400)).toBe(201);
+    expect(cleared.body).toEqual({ issueId: issueOf(C.mgP), status: 'resolved', applied: true });
+
+    const after = await okDq(ID.owner, 'issues?kinds=suspected_duplicate&limit=200');
+    for (const id of [C.mgP, C.mgD]) expect(idsOf(after.items)).not.toContain(issueOf(id));
+    const expected = await openIssuesFor('owner', ID.owner);
+    expect((await okDq(ID.owner, 'stats')).issueCounts.suspected_duplicate).toBe(countByKind(expected).suspected_duplicate ?? 0);
+    expect(idsOf((await okDq(ID.owner, 'wizard?limit=100')).items)).not.toContain(issueOf(C.mgD));
+  });
+});
+
+// ---- review repair SEC-DQ-2 ----------------------------------------------------------------
+describe('bulk-apply takes issue ids, nothing else (review SEC-DQ-2)', () => {
+  it("RED-BEFORE: an issueIds element that is not text (a filter object such as { endsWith: ... }) is refused 400 and nothing is applied: the member's own contact keeps its stamp, its issue stays open, no audit entry is written", async () => {
+    const before = await snapshot(C.bOwn);
+    expect(before.issue).toMatchObject({ status: 'open' });
+    const res = await bulkApply(ID.staffBook, [{ endsWith: 'c_bOwn_i' }]);
+    expectBadRequest(res);
+    expect(res.body.message).toBe('issueIds must be a list of issue ids');
+    expect(JSON.stringify(res.body).includes('endsWith')).toBe(false);
+    expect(await snapshot(C.bOwn)).toEqual(before);
+  });
+
+  it('RED-BEFORE: a list mixing a real issue id with a filter object is refused whole (400); the real one is not applied either', async () => {
+    const before = await snapshot(C.bOwn);
+    const res = await bulkApply(ID.staffBook, [issueOf(C.bOwn), { startsWith: `${P}x_` }]);
+    expectBadRequest(res);
+    expect(res.body.message).toBe('issueIds must be a list of issue ids');
+    expect(await snapshot(C.bOwn)).toEqual(before);
+  });
+
+  it("RED-BEFORE: a prefix probe ({ startsWith: ... }) gets the same 400 whether or not an issue id starts with it, so it tells nothing", async () => {
+    const hit = await bulkApply(ID.staffBook, [{ startsWith: `${P}c_bOwn` }]);
+    const miss = await bulkApply(ID.staffBook, [{ startsWith: `${P}zzz` }]);
+    expect(answerOf(hit)).toEqual(answerOf(miss));
+    expect(hit.status).toBe(400);
+  });
+
+  it("CONTROL: the same member's bulk-apply of the issue's id applies it", async () => {
+    const res = await bulkApply(ID.staffBook, [issueOf(C.bOwn)]);
+    expect(res.status, JSON.stringify(res.body).slice(0, 400)).toBe(201);
+    expect(res.body).toEqual({ results: [{ issueId: issueOf(C.bOwn), ok: true }], applied: 1, failed: 0 });
+    expect((await row(C.bOwn))?.last_verified_at).toBeTruthy();
+  });
+});
+
+// ---- review repair SEC-DQ-3 (owner ruling D-25) ---------------------------------------------
+describe("POST contacts/:contactId/data-quality/mark-verified keeps the contact PATCH's edit rule and is audited (review SEC-DQ-3)", () => {
+  it("CONTROL: a 'my book' STAFF marking a contact outside their book verified gets 404 Contact not found (GET detail's rule); nothing is written", async () => {
+    const before = await snapshot(C.mvNoEd);
+    const res = await markVerified(ID.staffBook, C.mvNoEd);
+    expect(res.status, JSON.stringify(res.body).slice(0, 400)).toBe(404);
+    expect(res.body.message).toBe('Contact not found');
+    expect(await snapshot(C.mvNoEd)).toEqual(before);
+  });
+
+  it("RED-BEFORE: a STAFF with crm_edit 'none' gets 403 as the contact PATCH answers; the stamp, the stale-data issue and the audit trail are unchanged", async () => {
+    const before = await snapshot(C.mvNoEd);
+    expect(before.contact?.last_verified_at).toBeNull();
+    const res = await markVerified(ID.staffNoEd, C.mvNoEd);
+    expect(res.status, JSON.stringify(res.body).slice(0, 400)).toBe(403);
+    expect(res.body.message).toBe('You do not have permission to edit contacts');
+    expect(await snapshot(C.mvNoEd)).toEqual(before);
+  });
+
+  it("RED-BEFORE: a STAFF who may see every contact but edit only their own (crm_edit 'owned') gets 403 'You can only edit contacts you own'; nothing is written", async () => {
+    const before = await snapshot(C.mvNoEd);
+    const res = await markVerified(ID.staffEdOwn, C.mvNoEd);
+    expect(res.status, JSON.stringify(res.body).slice(0, 400)).toBe(403);
+    expect(res.body.message).toBe('You can only edit contacts you own');
+    expect(await snapshot(C.mvNoEd)).toEqual(before);
+  });
+
+  it("RED-BEFORE: a member who may edit the contact (crm 'write') marks it verified: the stamp is set, its stale-data issue is resolved by that member (not 'user'), and one 'updated' ContactAuditEntry names the member", async () => {
+    const res = await markVerified(ID.staffAll, C.mvNoEd);
+    expect(res.status, JSON.stringify(res.body).slice(0, 400)).toBe(201);
+    expect(res.body).toEqual({ ok: true });
+    expect((await row(C.mvNoEd))?.last_verified_at).toBeTruthy();
+    expect(await issueRow(issueOf(C.mvNoEd))).toMatchObject({ status: 'resolved', resolvedBy: ID.staffAll });
+    const entries = await audits(C.mvNoEd);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ businessId: ID.bizA, action: 'updated', actor: { type: 'USER', id: ID.staffAll } });
+    expect(entries[0].changedFields).toContain('lastVerifiedAt');
   });
 });
