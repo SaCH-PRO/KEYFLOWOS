@@ -126,9 +126,10 @@ describe('PR195-KEY-GATES: Books reads need revenue read (D-146, SEC-P195BW-4)',
  * FU-FINANCE-SETTINGS-SCOPE (V1-71): GET settings answers the accountant export's saved recipient (Business.accountantEmail,
  * where every send without a `to` goes) beside the basis, fiscal year and default accounts, so it is no longer a reviewed
  * exemption: it needs revenue read, the read of the books that address receives. Its web readers are the finance pages
- * (settings, tax, reports), which read the books already. Not a confinement (review SEC-V71-2, open follow-up): GET
- * /identity/businesses and /identity/businesses/:businessId still answer accountantEmail and the finance settings
- * columns to every member (sanitizeBusiness keeps them).
+ * (settings, tax, reports), which read the books already. Review SEC-V71-2 (closed by FU-IDENTITY-FINANCE-COLUMNS,
+ * V1-71): GET /identity/businesses and /identity/businesses/:businessId answered accountantEmail and the default account
+ * ids to every member; they now answer them only with revenue read, by this gate's rule
+ * (test/identity-finance-columns.integration.test.ts, v71f_).
  */
 describe('FU-FINANCE-SETTINGS-SCOPE: the finance settings read needs revenue read', () => {
   it('BRS-U05 RED-BEFORE: getSettings (GET settings) runs ModuleScopeGuard with revenue read', () => {
