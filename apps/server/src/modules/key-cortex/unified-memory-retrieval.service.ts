@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { SemanticMemoryService } from '../ai/semantic-memory.service';
+import { SemanticMemoryService, aiMemoryWithoutSettings } from '../ai/semantic-memory.service';
 import type { MemoryFragment, MemoryRetrievalOptions, MemorySourceType } from './unified-memory.types';
 
 interface RawMemoryRow {
@@ -119,6 +119,9 @@ export class UnifiedMemoryRetrievalService {
     const since = options.boostRecency !== false ? new Date(Date.now() - 90 * 24 * 60 * 60 * 1000) : undefined;
     const whereBase: any = { businessId };
     if (since) whereBase.createdAt = { gte: since };
+    // FU-MEMORY-COPIES-REWRITE review SEC-FUMCR-2: not the settings rows (the owner's AI preferences with the BYOK keys'
+    // ciphertext, the routing table, the autonomy settings): configuration, not memory, for no prompt.
+    const aiMemoryWhere = { ...whereBase, category: aiMemoryWithoutSettings() };
 
     const includeEpisodic = options.includeEpisodic !== false;
     const episodicSince = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
@@ -163,7 +166,7 @@ export class UnifiedMemoryRetrievalService {
       cortexActionLogs,
     ] = await Promise.all([
       this.prisma.client.aiMemory.findMany({
-        where: whereBase,
+        where: aiMemoryWhere,
         orderBy: { createdAt: 'desc' },
         take: 50,
         select: { id: true, category: true, key: true, value: true, confidence: true, createdAt: true },

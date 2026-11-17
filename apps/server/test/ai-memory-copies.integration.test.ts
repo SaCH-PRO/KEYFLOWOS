@@ -959,22 +959,30 @@ describe('W1F-MEMORY-COPIES: memory consolidation promotes on a code point and w
       expect(await app.api.backfill(ID.member)).toBe(1);
       expect(await copiesOf(leaked.id)).toHaveLength(1);
 
-      // The promotion's write fails (any refusal of the database: here a stand-in for aiMemory.upsert). Every other
-      // call is the real client's.
-      const refusingClient = new Proxy(prisma.client, {
-        get(target: any, prop: string | symbol) {
-          const value = Reflect.get(target, prop);
-          if (prop !== 'aiMemory') return typeof value === 'function' ? value.bind(target) : value;
-          return new Proxy(value, {
-            get(model: any, method: string | symbol) {
-              if (method === 'upsert') return async () => { throw new Error('v70b: the promotion write is refused'); };
-              const m = Reflect.get(model, method);
-              return typeof m === 'function' ? m.bind(model) : m;
-            },
-          });
-        },
-      });
-      const consolidation = new MemoryConsolidationService({ client: refusingClient } as any);
+      // The promotion's write fails (any refusal of the database: here a stand-in for aiMemory.upsert), on the client
+      // or inside a transaction (FU-MEMORY-COPIES-REWRITE: promotion writes through upsertAiMemoryDroppingStaleCopies,
+      // whose upsert is the transaction's). Every other call is the real client's.
+      const refusing = (client: any): any =>
+        new Proxy(client, {
+          get(target: any, prop: string | symbol) {
+            const value = Reflect.get(target, prop);
+            if (prop === '$transaction' && typeof value === 'function') {
+              return (arg: unknown, ...rest: unknown[]) =>
+                typeof arg === 'function'
+                  ? value.call(target, (tx: unknown) => (arg as (tx: unknown) => unknown)(refusing(tx)), ...rest)
+                  : value.call(target, arg, ...rest);
+            }
+            if (prop !== 'aiMemory') return typeof value === 'function' ? value.bind(target) : value;
+            return new Proxy(value, {
+              get(model: any, method: string | symbol) {
+                if (method === 'upsert') return async () => { throw new Error('v70b: the promotion write is refused'); };
+                const m = Reflect.get(model, method);
+                return typeof m === 'function' ? m.bind(model) : m;
+              },
+            });
+          },
+        });
+      const consolidation = new MemoryConsolidationService({ client: refusing(prisma.client) } as any);
       await expect(consolidation.run(ID.biz)).rejects.toThrow('v70b: the promotion write is refused');
 
       expect(await db.aiMemory.count({ where: { id: leaked.id } }), 'withdrawn before the promotion ran').toBe(0);

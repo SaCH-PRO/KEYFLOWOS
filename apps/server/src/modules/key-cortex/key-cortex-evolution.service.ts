@@ -3,6 +3,8 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
 import { ModelGatewayService } from '../ai/model-gateway.service';
 import { AiUsageService } from '../ai/ai-usage.service';
+import { upsertAiMemoryDroppingStaleCopies } from '../ai/ai-memory.service';
+import { SemanticMemoryService } from '../ai/semantic-memory.service';
 
 // ── Genome Integration Layer v3 (optional — services may not exist yet) ──
 import { KeyCortexGenomeBridgeService } from './key-cortex-genome-bridge.service';
@@ -179,6 +181,10 @@ export class KeyCortexEvolutionService {
     @Optional()
     @Inject(KeyCortexEventService)
     private readonly eventService?: KeyCortexEventService,
+    // FU-MEMORY-COPIES-REWRITE review COR-V71I-3: copies a tuning row the door rewrote again (AiModule's).
+    @Optional()
+    @Inject(SemanticMemoryService)
+    private readonly semanticMemory?: SemanticMemoryService,
   ) {}
 
   // ========================================================================
@@ -1890,19 +1896,10 @@ Be warm, specific, and insightful.`;
       case 'response_length':
       case 'recommendation_types':
       case 'proactive_frequency': {
-        // Store these in aiMemory as tuning-specific settings
-        await (this.prisma.client as any).aiMemory.upsert({
-          where: {
-            businessId_category_key: {
-              businessId,
-              category: 'evolution_tuning',
-              key: adj.parameter,
-            },
-          },
+        // Store these in aiMemory as tuning-specific settings. FU-MEMORY-COPIES-REWRITE: through the write door, so
+        // a re-tuned parameter leaves no copy of its old value, and its copies are made again with the new one.
+        await upsertAiMemoryDroppingStaleCopies(this.prisma, businessId, { category: 'evolution_tuning', key: adj.parameter }, {
           create: {
-            businessId,
-            category: 'evolution_tuning',
-            key: adj.parameter,
             value: JSON.stringify(adj.newValue),
             source: 'key_self_tuning',
           },
@@ -1910,7 +1907,7 @@ Be warm, specific, and insightful.`;
             value: JSON.stringify(adj.newValue),
             source: 'key_self_tuning',
           },
-        });
+        }, this.semanticMemory);
         this.logger.log(
           `Tuned ${adj.parameter} to ${JSON.stringify(adj.newValue)} for business=${businessId}`,
         );

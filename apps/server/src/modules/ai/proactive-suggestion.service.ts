@@ -1,9 +1,10 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ProAutoMonitorService, ProAutoInsight } from './pro-auto-monitor.service';
 import { AiOversightService } from './ai-oversight.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { deleteAiMemoriesWithCopies } from './ai-memory.service';
+import { deleteAiMemoriesWithCopies, upsertAiMemoryDroppingStaleCopies } from './ai-memory.service';
+import { SemanticMemoryService } from './semantic-memory.service';
 
 export interface ChatSuggestion {
   id: string;
@@ -32,6 +33,8 @@ export class ProactiveSuggestionService {
     @Inject(ProAutoMonitorService) private readonly monitor: ProAutoMonitorService,
     @Inject(AiOversightService) private readonly governance: AiOversightService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    // FU-MEMORY-COPIES-REWRITE review COR-V71I-3: copies a suggestion row the door rewrote again. AiModule provides it.
+    @Optional() @Inject(SemanticMemoryService) private readonly semantic?: SemanticMemoryService,
   ) {}
 
   /**
@@ -69,20 +72,19 @@ export class ProactiveSuggestionService {
       const suggestion = this.insightToSuggestion(insight);
       if (suggestion) {
         suggestions.push(suggestion);
-        // Store in memory so we don't repeat
-        await this.prisma.client.aiMemory.upsert({
-          where: { businessId_category_key: { businessId, category: 'suggestion', key: `${insight.category}_${Date.now()}` } },
-          update: { value: JSON.stringify(suggestion), expiresAt: new Date(Date.now() + SUGGESTION_COOLDOWN_HOURS * 60 * 60 * 1000) },
+        // Store in memory so we don't repeat. FU-MEMORY-COPIES-REWRITE: through the write door, so a suggestion
+        // rewritten in place (the same key) leaves no copy of the one it replaced.
+        const key = `${insight.category}_${Date.now()}`;
+        const expiresAt = new Date(Date.now() + SUGGESTION_COOLDOWN_HOURS * 60 * 60 * 1000);
+        await upsertAiMemoryDroppingStaleCopies(this.prisma, businessId, { category: 'suggestion', key }, {
+          update: { value: JSON.stringify(suggestion), expiresAt },
           create: {
-            businessId,
-            category: 'suggestion',
-            key: `${insight.category}_${Date.now()}`,
             value: JSON.stringify(suggestion),
             confidence: insight.severity === 'critical' ? 0.95 : insight.severity === 'warning' ? 0.8 : 0.7,
             source: 'key_ai',
-            expiresAt: new Date(Date.now() + SUGGESTION_COOLDOWN_HOURS * 60 * 60 * 1000),
+            expiresAt,
           },
-        });
+        }, this.semantic);
       }
     }
 
@@ -130,18 +132,12 @@ export class ProactiveSuggestionService {
    * Mark a suggestion category as "never suggest again" (7-day block).
    */
   async blockCategory(businessId: string, category: string): Promise<void> {
-    await this.prisma.client.aiMemory.upsert({
-      where: { businessId_category_key: { businessId, category: 'suggestion_block', key: category } },
-      update: { expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) },
-      create: {
-        businessId,
-        category: 'suggestion_block',
-        key: category,
-        value: 'blocked',
-        source: 'user',
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      },
-    });
+    // FU-MEMORY-COPIES-REWRITE: through the write door (a re-block only moves the expiry; nothing is rewritten).
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    await upsertAiMemoryDroppingStaleCopies(this.prisma, businessId, { category: 'suggestion_block', key: category }, {
+      update: { expiresAt },
+      create: { value: 'blocked', source: 'user', expiresAt },
+    }, this.semantic);
   }
 
   private insightToSuggestion(insight: ProAutoInsight): ChatSuggestion | null {

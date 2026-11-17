@@ -1,10 +1,10 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { KeyCortexCircadianService } from './key-cortex-circadian.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { keyCronsDisabled } from '../../core/config/env';
-import { deleteAiMemoriesWithCopies } from '../ai/ai-memory.service';
-import { AI_MEMORY_COPY_SOURCE_TYPE } from '../ai/semantic-memory.service';
+import { deleteAiMemoriesWithCopies, upsertAiMemoryDroppingStaleCopies } from '../ai/ai-memory.service';
+import { AI_MEMORY_COPY_SOURCE_TYPE, SemanticMemoryService } from '../ai/semantic-memory.service';
 
 /** The AiMemory rows promotion writes: category, key prefix and source. */
 const PROMOTED_CATEGORY = 'learning';
@@ -81,6 +81,9 @@ export class MemoryConsolidationService {
   constructor(
     private readonly prisma: PrismaService,
     @Optional() private readonly circadian?: KeyCortexCircadianService,
+    // FU-MEMORY-COPIES-REWRITE review COR-V71I-3: copies a promoted row the door rewrote again (AiModule's, which
+    // KeyCortexModule imports).
+    @Optional() @Inject(SemanticMemoryService) private readonly semantic?: SemanticMemoryService,
   ) {}
 
   /**
@@ -240,12 +243,10 @@ export class MemoryConsolidationService {
     for (const memory of highConfidence) {
       const key = promotedKey(memory.functionId);
       const value = promotedValue(memory.recommendation);
-      await this.prisma.client.aiMemory.upsert({
-        where: { businessId_category_key: { businessId, category: PROMOTED_CATEGORY, key } },
+      // FU-MEMORY-COPIES-REWRITE: a recommendation promoted into the same key rewrites the row in place; the door
+      // deletes the copies of the value it replaces and (review COR-V71I-3) copies the row again with the new one.
+      await upsertAiMemoryDroppingStaleCopies(this.prisma, businessId, { category: PROMOTED_CATEGORY, key }, {
         create: {
-          businessId,
-          category: PROMOTED_CATEGORY,
-          key,
           value,
           source: PROMOTED_SOURCE,
           confidence: memory.confidence,
@@ -254,7 +255,7 @@ export class MemoryConsolidationService {
           value,
           confidence: memory.confidence,
         },
-      });
+      }, this.semantic);
       promoted++;
     }
     return promoted;

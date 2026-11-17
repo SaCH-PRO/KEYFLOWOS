@@ -1041,6 +1041,11 @@
       "prefix": "v71b_",
       "owner": "apps/server/test/delivery-token-decrypt.integration.test.ts",
       "packet": "V1-71 (FU-DELIVERY-TOKEN-DECRYPT)"
+    },
+    {
+      "prefix": "v71i_",
+      "owner": "apps/server/test/ai-memory-copies-rewrite.integration.test.ts",
+      "packet": "V1-71 (FU-MEMORY-COPIES-REWRITE)"
     }
   ],
   "pendingRenames": [],
