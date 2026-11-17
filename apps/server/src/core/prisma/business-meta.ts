@@ -75,14 +75,25 @@ export async function lockBusinessMeta(
  * default (BUSINESS_SETTINGS_DEFAULTS: 'both', false, every hub 'standard'),
  * so a business that existed before these settings keeps every v1 hub.
  *
- * WRITER: the owner-only profile PATCH (PATCH /identity/businesses/:businessId,
- * owner ruling D-11) is the one writer. IdentityService.updateBusiness checks
+ * WRITERS: the owner-only profile PATCH (PATCH /identity/businesses/:businessId,
+ * owner ruling D-11) writes all three. IdentityService.updateBusiness checks
  * every value first (businessSettingsWriteOf: the field and the metaData bag
  * alike, an unknown value refused 400 BUSINESS_SETTING_INVALID before
  * anything is read or written) and applies them with
  * applyBusinessSettingsWrites inside its transaction, after the business row
- * lock and before its write. core/prisma/business-meta-writers.spec.ts
- * (MW-V63a/b) is the census: a second writer of one of these keys fails it.
+ * lock and before its write.
+ *
+ * BIZ-SETTINGS-ADMIN-DOOR (owner ruling D-150: the Advanced CRM switch and
+ * the depth choices are changed by the owner or an admin) adds the second
+ * writer, of advancedCrm and depth only (BUSINESS_ADVANCED_SETTINGS_KEYS):
+ * PATCH /identity/businesses/:businessId/advanced-settings,
+ * IdentityService.updateAdvancedSettings, for the owner or an ADMIN holding
+ * settings admin. It checks the body with advancedSettingsWriteOf (a key the
+ * door does not take, sells included, refused 400 BUSINESS_SETTING_INVALID)
+ * and writes under lockBusinessMeta. What the business sells stays
+ * owner-only (D-11). core/prisma/business-meta-writers.spec.ts (MW-V63a/b/d)
+ * is the census and core/config/d11-owner-writes.spec.ts (D11W-11) the
+ * authority sweep: a third writer of one of these keys fails them.
  */
 export const BUSINESS_SELLS = ['services', 'products', 'both'] as const;
 export type BusinessSells = (typeof BUSINESS_SELLS)[number];
@@ -150,10 +161,13 @@ export function readBusinessSettings(metaData: unknown): BusinessSettings {
   };
 }
 
-/** The most characters of a refused depth entry's name a refusal repeats (review SEC-V63-1). */
+/** The most characters of a refused depth entry's (or body key's) name a refusal repeats (review SEC-V63-1). */
 const REFUSED_DEPTH_KEY_SHOWN = 32;
 
-/** A refused depth entry's name as a refusal shows it: cut to REFUSED_DEPTH_KEY_SHOWN characters. */
+/**
+ * A refused depth entry's name as a refusal shows it: cut to REFUSED_DEPTH_KEY_SHOWN characters.
+ * BIZ-SETTINGS-ADMIN-DOOR shows a refused body key the same way.
+ */
 const shownDepthKey = (key: string) =>
   key.length > REFUSED_DEPTH_KEY_SHOWN ? `${key.slice(0, REFUSED_DEPTH_KEY_SHOWN)}...` : key;
 
@@ -228,7 +242,119 @@ export function mergeBusinessSettingsWrites(under: BusinessSettingsWrite, over: 
 export function applyBusinessSettingsWrites(merged: Record<string, unknown>, stored: Record<string, unknown>, write: BusinessSettingsWrite): void {
   if (write.sells !== undefined) merged.sells = write.sells;
   if (write.advancedCrm !== undefined) merged.advancedCrm = write.advancedCrm;
-  if (write.depth !== undefined) merged.depth = { ...storedDepth(stored.depth), ...write.depth };
+  if (write.depth !== undefined) merged.depth = depthAfterWrite(stored.depth, write.depth);
+}
+
+/**
+ * The depth map a depth write leaves: the stored hubs that are settings
+ * (`stored`, the depth read under the business row lock) with the written
+ * hubs over them, so a hub the write does not name keeps its depth.
+ */
+export function depthAfterWrite(stored: unknown, write: Partial<Record<BusinessHub, HubDepth>>): Partial<Record<BusinessHub, HubDepth>> {
+  return { ...storedDepth(stored), ...write };
+}
+
+// --------------------------------------------------------------------------
+// BIZ-SETTINGS-ADMIN-DOOR: the owner-or-admin door for advancedCrm and depth
+// --------------------------------------------------------------------------
+
+/**
+ * BIZ-SETTINGS-ADMIN-DOOR (owner ruling D-150 'hubs', adopting the
+ * product-audit Settings hub text: the Advanced CRM switch and the other
+ * advanced depth choices are a server-side business setting that only the
+ * owner or an admin can change): the settings keys
+ * PATCH /identity/businesses/:businessId/advanced-settings writes. sells is
+ * not one: what the business sells is part of the business profile, which
+ * only the owner changes (D-11).
+ */
+export const BUSINESS_ADVANCED_SETTINGS_KEYS = ['advancedCrm', 'depth'] as const;
+export type BusinessAdvancedSettingsKey = (typeof BUSINESS_ADVANCED_SETTINGS_KEYS)[number];
+
+/** A checked write through the door: advancedCrm, depth or both, never sells. */
+export type BusinessAdvancedSettingsWrite = Pick<BusinessSettingsWrite, BusinessAdvancedSettingsKey>;
+
+/**
+ * The most keys the door does not take that a refusal names one by one; a
+ * body with more is refused with one problem naming the count (the bound
+ * SEC-V63-1 puts on a depth, for the whole body).
+ */
+const REFUSED_BODY_KEYS_NAMED = 3;
+
+const isAdvancedSettingsKey = (key: string): key is BusinessAdvancedSettingsKey =>
+  (BUSINESS_ADVANCED_SETTINGS_KEYS as readonly string[]).includes(key);
+
+/**
+ * The door's body, checked: `write` holds the settings it names, and
+ * `problems` every reason it is not a write through the door, each bounded
+ * (empty when it is one):
+ *   - a body that is not an object;
+ *   - sells (one problem saying where sells is changed);
+ *   - any other key the door does not take: each named, cut short, or, past
+ *     REFUSED_BODY_KEYS_NAMED of them, one problem naming the count;
+ *   - a value of advancedCrm or depth that is not a setting, exactly as the
+ *     profile PATCH refuses it (businessSettingsWriteOf, hubDepthProblems);
+ *   - a body that names neither advancedCrm nor depth.
+ * When there is a problem `write` is empty.
+ */
+export function advancedSettingsWriteOf(body: unknown): { write: BusinessAdvancedSettingsWrite; problems: string[] } {
+  const takes = BUSINESS_ADVANCED_SETTINGS_KEYS.join(' and ');
+  if (!isPlainObject(body)) return { write: {}, problems: [`the body must be an object naming ${BUSINESS_ADVANCED_SETTINGS_KEYS.join(', ')} or both`] };
+  const problems: string[] = [];
+  const keys = Object.keys(body);
+  if (keys.includes('sells')) {
+    problems.push('sells is not changed here: what the business sells is part of the business profile, which only the owner changes');
+  }
+  const others = keys.filter((k) => k !== 'sells' && !isAdvancedSettingsKey(k));
+  if (others.length > REFUSED_BODY_KEYS_NAMED) {
+    problems.push(`the body names ${others.length} keys this door does not take; it takes ${takes}`);
+  } else {
+    for (const key of others) problems.push(`${shownDepthKey(key)} is not changed here; this door takes ${takes}`);
+  }
+  const named: Record<string, unknown> = {};
+  for (const key of BUSINESS_ADVANCED_SETTINGS_KEYS) if (hasOwn(body, key)) named[key] = body[key];
+  const checked = businessSettingsWriteOf(named);
+  problems.push(...checked.problems);
+  if (problems.length > 0) return { write: {}, problems };
+  const write: BusinessAdvancedSettingsWrite = {};
+  if (checked.write.advancedCrm !== undefined) write.advancedCrm = checked.write.advancedCrm;
+  if (checked.write.depth !== undefined) write.depth = checked.write.depth;
+  if (write.advancedCrm === undefined && write.depth === undefined) {
+    return { write: {}, problems: [`name ${BUSINESS_ADVANCED_SETTINGS_KEYS.join(', ')} or both: the body names neither`] };
+  }
+  return { write, problems };
+}
+
+/** One setting before and after a write (the effective values: an absent key at its default). */
+export interface SettingChange<T> {
+  from: T;
+  to: T;
+}
+
+/** What a write through the door changed, as its audit row records it: each setting it named, before and after. */
+export interface BusinessAdvancedSettingsChanges {
+  advancedCrm?: SettingChange<boolean>;
+  depth?: Partial<Record<BusinessHub, SettingChange<HubDepth>>>;
+}
+
+/**
+ * Each setting a door write names, before (read from `stored`, the metaData
+ * read under the business row lock, defaults applied as GET applies them)
+ * and after: the audit row's record of the write. A hub the write does not
+ * name is not listed.
+ */
+export function advancedSettingsChanges(stored: unknown, write: BusinessAdvancedSettingsWrite): BusinessAdvancedSettingsChanges {
+  const before = readBusinessSettings(stored);
+  const changes: BusinessAdvancedSettingsChanges = {};
+  if (write.advancedCrm !== undefined) changes.advancedCrm = { from: before.advancedCrm, to: write.advancedCrm };
+  if (write.depth !== undefined) {
+    const hubs: Partial<Record<BusinessHub, SettingChange<HubDepth>>> = {};
+    for (const hub of BUSINESS_HUBS) {
+      const to = write.depth[hub];
+      if (to !== undefined) hubs[hub] = { from: before.depth[hub], to };
+    }
+    changes.depth = hubs;
+  }
+  return changes;
 }
 
 /**

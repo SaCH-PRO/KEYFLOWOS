@@ -1359,14 +1359,24 @@ describe('FOLLOW3-D12 Business.metaData writers take the business row lock (cens
  * V1-63 BIZ-SETTINGS-SERVER (owner ruling D-150 'hubs'; D-11): what the
  * business sells, the Advanced CRM switch and the depth of each hub are three
  * Business.metaData keys, BUSINESS_SETTINGS_META_KEYS in
- * core/prisma/business-meta.ts (sells, advancedCrm, depth). Their one writer
- * is the owner-only profile PATCH, IdentityService.updateBusiness: it applies
+ * core/prisma/business-meta.ts (sells, advancedCrm, depth). The owner-only
+ * profile PATCH, IdentityService.updateBusiness, writes all three: it applies
  * them with applyBusinessSettingsWrites (business-meta.ts) inside its
  * transaction, after its inline row lock (the statement lockBusinessMeta
  * runs) and before its write, so a concurrent metaData writer cannot lose one
- * and one cannot undo a concurrent write. A second writer of one of these
- * keys would be a door around the owner check and the value checks; this is
- * the census of them.
+ * and one cannot undo a concurrent write.
+ *
+ * BIZ-SETTINGS-ADMIN-DOOR (owner ruling D-150: the Advanced CRM switch and
+ * the depth choices are changed by the owner or an admin) adds the second
+ * writer, of two keys only: IdentityService.updateAdvancedSettings
+ * (PATCH /identity/businesses/:businessId/advanced-settings, the owner or an
+ * ADMIN with settings admin). It names advancedCrm and depth as assignment
+ * targets on the copy it read under lockBusinessMeta, never sells (D-11
+ * keeps what the business sells owner-only) and never the general
+ * applyBusinessSettingsWrites, so this reader sees exactly which keys it
+ * writes (MW-V63d). Any other writer of one of these keys would be a door
+ * around the owner check, the owner-or-admin check and the value checks;
+ * this is the census of them.
  *
  * WHAT IS READ: every metaData writer the census reader finds (scanMetaWrites)
  * outside HELPER_FILE. In the method or function that makes the write it
@@ -1380,6 +1390,8 @@ describe('FOLLOW3-D12 Business.metaData writers take the business row lock (cens
  * test/business-v1-settings.integration.test.ts.
  */
 const SETTINGS_WRITER = 'modules/identity/identity.service.ts#IdentityService.updateBusiness';
+/** BIZ-SETTINGS-ADMIN-DOOR: the owner-or-admin door's writer, of advancedCrm and depth only. */
+const ADMIN_DOOR_WRITER = 'modules/identity/identity.service.ts#IdentityService.updateAdvancedSettings';
 const SETTINGS_KEYS_CONST = 'BUSINESS_SETTINGS_META_KEYS';
 const SETTINGS_APPLY_FN = 'applyBusinessSettingsWrites';
 
@@ -1468,8 +1480,8 @@ export function settingsKeyWriters(sources: { rel: string; source: string }[], k
   return [...out].sort();
 }
 
-describe('V1-63 BIZ-SETTINGS-SERVER: the v1 business settings keys have one writer, the owner-only profile PATCH under its row lock (census)', () => {
-  it('[MW-V63a] RED-BEFORE: business-meta.ts declares BUSINESS_SETTINGS_META_KEYS (sells, advancedCrm, depth) and applyBusinessSettingsWrites, and the one metaData writer that names a settings key is IdentityService.updateBusiness, through applyBusinessSettingsWrites', () => {
+describe('V1-63 BIZ-SETTINGS-SERVER: the v1 business settings keys have two writers, the owner-only profile PATCH and (advancedCrm and depth only) the owner-or-admin door, each under its row lock (census)', () => {
+  it('[MW-V63a] RED-BEFORE: business-meta.ts declares BUSINESS_SETTINGS_META_KEYS (sells, advancedCrm, depth) and applyBusinessSettingsWrites, and the metaData writers that name a settings key are IdentityService.updateBusiness, through applyBusinessSettingsWrites, and (BIZ-SETTINGS-ADMIN-DOOR) IdentityService.updateAdvancedSettings, naming advancedCrm and depth', () => {
     const helper = SOURCES.find((s) => s.rel === HELPER_FILE);
     expect(helper, `${HELPER_FILE} is read`).toBeDefined();
     const keys = stringArrayConst(HELPER_FILE, helper!.source, SETTINGS_KEYS_CONST);
@@ -1477,7 +1489,11 @@ describe('V1-63 BIZ-SETTINGS-SERVER: the v1 business settings keys have one writ
     expect(helper!.source, `${HELPER_FILE} exports ${SETTINGS_APPLY_FN}`).toMatch(new RegExp(`export function ${SETTINGS_APPLY_FN}\\(`));
 
     const writers = settingsKeyWriters(SOURCES, keys ?? ['sells', 'advancedCrm', 'depth']);
-    expect(writers.map((w) => w.replace(/ \(.*?:\d+\)/, '')), 'every writer of a v1 settings key').toEqual([`${SETTINGS_WRITER} calls ${SETTINGS_APPLY_FN}`]);
+    expect(writers.map((w) => w.replace(/ \(.*?:\d+\)/, '')), 'every writer of a v1 settings key').toEqual([
+      `${ADMIN_DOOR_WRITER} names 'advancedCrm' as an assignment target`,
+      `${ADMIN_DOOR_WRITER} names 'depth' as an assignment target`,
+      `${SETTINGS_WRITER} calls ${SETTINGS_APPLY_FN}`,
+    ]);
     expect(WRITES.filter((w) => w.key === SETTINGS_WRITER).every((w) => w.locked), 'IdentityService.updateBusiness writes metaData under the row lock').toBe(true);
   });
 
@@ -1519,6 +1535,19 @@ describe('V1-63 BIZ-SETTINGS-SERVER: the v1 business settings keys have one writ
     expect(writeAt, `the transaction writes the business on ${rx}`).toBeGreaterThan(-1);
     expect(apply.getStart(sf), `${SETTINGS_APPLY_FN} runs after the row lock`).toBeGreaterThan(lockAt);
     expect(apply.getStart(sf), `${SETTINGS_APPLY_FN} runs before the write`).toBeLessThan(writeAt);
+  });
+
+  it('[MW-V63d] RED-BEFORE (BIZ-SETTINGS-ADMIN-DOOR, owner ruling D-150): IdentityService.updateAdvancedSettings writes metaData under lockBusinessMeta on its transaction client, names advancedCrm and depth (each once, as an assignment target on that copy) and never sells, and does not call applyBusinessSettingsWrites', () => {
+    const rows = WRITES.filter((w) => w.key === ADMIN_DOOR_WRITER);
+    expect(rows.length, `${ADMIN_DOOR_WRITER} writes Business.metaData`).toBeGreaterThan(0);
+    expect(rows.every((w) => w.locked), `${ADMIN_DOOR_WRITER} writes under the row lock (lockBusinessMeta)`).toBe(true);
+    const named = settingsKeyWriters(SOURCES, ['sells', 'advancedCrm', 'depth']).filter((w) => w.startsWith(`${ADMIN_DOOR_WRITER} `));
+    expect(named.map((w) => w.replace(/ \(.*?:\d+\)/, '')), 'the door names exactly advancedCrm and depth').toEqual([
+      `${ADMIN_DOOR_WRITER} names 'advancedCrm' as an assignment target`,
+      `${ADMIN_DOOR_WRITER} names 'depth' as an assignment target`,
+    ]);
+    expect(named.some((w) => w.includes("'sells'")), 'the door never names sells (D-11)').toBe(false);
+    expect(named.some((w) => w.includes(SETTINGS_APPLY_FN)), `the door does not call ${SETTINGS_APPLY_FN} (it could carry sells)`).toBe(false);
   });
 
   it('[MW-V63c] the settings-key reader finds a settings key written in every form, and passes a writer of other keys and a non-metaData write (self-test)', () => {
