@@ -64,7 +64,7 @@ import {
   readersOwnPromptMemory,
 } from './key-cortex-prompt-context.service';
 import { userCanAccessBusiness } from '../../core/auth/business.guard';
-import { defaultScopesForRole } from '../../core/authority/module-vocabulary';
+import { memberScopeMap } from '../../core/authority/module-vocabulary';
 import type { CortexMemberAuthority } from './key-cortex.controller';
 import { KeyCortexToolLoopService } from './key-cortex-tool-loop.service';
 import { KeyCortexActionDetectionService } from './key-cortex-action-detection.service';
@@ -1990,8 +1990,9 @@ export class KeyCortexQueryPipelineService {
    * W10-CORTEX-CHAT-SCOPE: the member a chat turn acts for, as CortexMemberAuthorityGuard loads it
    * for POST cortex/execute: a platform SUPER_ADMIN (its User role) keeps the bypass, a member only
    * of the businesses it holds a membership in (D-46); anyone else is its membership's role and
-   * scopes, the explicit scope map or else the role's defaults (as ModuleScopeGuard computes them),
-   * or null when it holds no membership. The chat routes run no such guard, so it is read here.
+   * scopes, the explicit scope map (a stored JSON array names no module) or else the role's defaults
+   * (as ModuleScopeGuard computes them: memberScopeMap), or null when it holds no membership. The
+   * chat routes run no such guard, so it is read here.
    */
   private async memberAuthority(businessId: string, userId: string | undefined): Promise<CortexMemberAuthority | null> {
     if (!userId) return null;
@@ -2006,12 +2007,9 @@ export class KeyCortexQueryPipelineService {
       return { userId, businessId, role: 'SUPER_ADMIN', superAdmin: true, scopes: {}, member: !!membership };
     }
     if (!membership) return null;
-    const explicit = membership.permissionScopes;
-    const scopes: Record<string, string> =
-      explicit && typeof explicit === 'object' && !Array.isArray(explicit)
-        ? (explicit as Record<string, string>)
-        : defaultScopesForRole(membership.role);
-    return { userId, businessId, role: membership.role, superAdmin: false, scopes, member: true };
+    // TOF-GRAPH-SCOPE-ARRAY review repair (SEC-TGSA-1, COR-TOFGSA-1): ModuleScopeGuard's own reading (memberScopeMap),
+    // so a stored JSON array is an explicit map that names no module; it had been read as the role's defaults.
+    return { userId, businessId, role: membership.role, superAdmin: false, scopes: memberScopeMap(membership), member: true };
   }
 
   /**

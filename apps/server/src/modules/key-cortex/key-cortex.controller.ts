@@ -143,7 +143,7 @@ import {
   DEFAULT_APPROVAL_TIERS,
   LEVEL_RANK,
   MAX_APPROVAL_TIER,
-  defaultScopesForRole,
+  memberScopeMap,
   rankOf,
   type CanonicalModule,
 } from '../../core/authority/module-vocabulary';
@@ -339,9 +339,10 @@ export function cortexCommandRequirement(module: unknown, action: unknown): Cort
 /**
  * The member a direct command acts for, in the tenant BusinessGuard checked,
  * as CortexMemberAuthorityGuard loaded it: the membership role and its scopes
- * as ModuleScopeGuard computes them (the explicit scope map, else the role's
- * defaults), or the SUPER_ADMIN platform bypass (which, for a SUPER_ADMIN who
- * holds no membership, stops at the business's invoice writes: D-46).
+ * as ModuleScopeGuard computes them (memberScopeMap: the explicit scope map, a
+ * stored JSON array naming no module, else the role's defaults), or the
+ * SUPER_ADMIN platform bypass (which, for a SUPER_ADMIN who holds no
+ * membership, stops at the business's invoice writes: D-46).
  */
 export interface CortexMemberAuthority {
   userId: string;
@@ -508,11 +509,9 @@ export class CortexMemberAuthorityGuard implements CanActivate {
       return true;
     }
     if (!membership) throw new ForbiddenException('Not a member of this business');
-    const explicit = membership.permissionScopes;
-    const scopes: Record<string, string> =
-      explicit && typeof explicit === 'object' && !Array.isArray(explicit)
-        ? (explicit as Record<string, string>)
-        : defaultScopesForRole(membership.role);
+    // TOF-GRAPH-SCOPE-ARRAY review repair (SEC-TGSA-1, COR-TOFGSA-1): ModuleScopeGuard's own reading (memberScopeMap),
+    // so a stored JSON array is an explicit map that names no module; it had been read as the role's defaults.
+    const scopes = memberScopeMap(membership);
     req.cortexMemberAuthority = { userId: user.id, businessId, role: membership.role, superAdmin: false, scopes, member: true };
     return true;
   }
