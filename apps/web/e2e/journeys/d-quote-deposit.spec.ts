@@ -269,8 +269,10 @@ async function whatsAppTarget(page: Page, control: Locator): Promise<string> {
  * FU-WA-CONTACT-PHONE (D-153, D-221): a customer the owner created with a
  * phone and no WhatsApp number is asked about once. The share shows the
  * phone's E.164 reading and 'Use this as their WhatsApp number'; pressing it
- * saves the number on the customer and opens the chat. A share that opens
- * straight away (a saved WhatsApp number) passes through.
+ * saves the number on the customer and opens the chat. The step does not vouch
+ * for the phone (a public form can fill it): it asks the member to save it only
+ * if they know it is the customer's WhatsApp. A share that opens straight away
+ * (a saved WhatsApp number) passes through.
  */
 async function confirmWhatsAppNumberOnce(page: Page): Promise<void> {
   const step = page.getByRole("dialog", { name: /whatsapp number/i });
@@ -278,6 +280,7 @@ async function confirmWhatsAppNumberOnce(page: Page): Promise<void> {
   await expect.poll(async () => (await opened()) > 0 || (await step.isVisible()), { message: "the share opens a chat or asks to confirm the number" }).toBe(true);
   if ((await opened()) > 0) return;
   await expect(step, "the confirm step shows the phone's E.164 reading").toContainText(/\+\d{8,15}/);
+  await expect(step, "the step does not vouch for the phone on file (SEC-WACP-1)").toContainText(/only if you know it is .*WhatsApp/i);
   await press(step.getByRole("button", { name: /^use this as their whatsapp number$/i }), "the confirm step's Use this as their WhatsApp number");
 }
 
