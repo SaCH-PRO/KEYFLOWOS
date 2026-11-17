@@ -30,6 +30,11 @@
  * every outage case answers 400 BAD_REQUEST with the same message; the
  * refusal controls and the success control pass.
  *
+ * FU-PROVIDER-ERROR-HYGIENE (D-221): POST /drive/businesses/:b/files/:f/share
+ * answered 'Drive share failed: <status> <Drive's body>' (since this packet in
+ * a 503 as well as a 400); it answers 'Drive share failed: <status>', the body
+ * nowhere in the answer. RED-BEFORE (chain head b00e5f78): V63Z-11.
+ *
  * WHAT IS REAL: PrismaService, AuthGuard, BusinessGuard, ModuleScopeGuard,
  * FinanceController (ensureAccess, assertGoogleConnectOwner),
  * StatementSourceService, GmailService, GoogleDriveController,
@@ -96,6 +101,7 @@ const isGmailSearch = (u: string, m: string) => m === 'GET' && u.startsWith('htt
 const isDriveList = (u: string, m: string) => m === 'GET' && u.startsWith('https://www.googleapis.com/drive/v3/files?');
 const isDriveCreate = (u: string, m: string) => m === 'POST' && u === 'https://www.googleapis.com/drive/v3/files';
 const isTokenEndpoint = (u: string, m: string) => m === 'POST' && u === 'https://oauth2.googleapis.com/token';
+const isDriveShare = (u: string, m: string) => m === 'POST' && u.startsWith(`https://www.googleapis.com/drive/v3/files/${P}f1/permissions?`);
 
 function googleError(code: number, status: string, reasons: string[] = []) {
   return JSON.stringify({ error: { code, message: `upstream ${status}`, status, errors: reasons.map((reason) => ({ reason })) } });
@@ -127,6 +133,7 @@ const sweep = (businessId: string, source: 'gmail' | 'drive') =>
   as(agent().post(`/finance/businesses/${businessId}/accounts/${ACCOUNT[businessId]}/statement-sources/${source}/sweep`)).send({});
 const listDrive = (businessId: string) => as(agent().get(`/drive/businesses/${businessId}/files`));
 const createFolder = (businessId: string) => as(agent().post(`/drive/businesses/${businessId}/folders`)).send({ name: `${P}Statements` });
+const shareFile = (businessId: string) => as(agent().post(`/drive/businesses/${businessId}/files/${P}f1/share`)).send({ type: 'anyone', role: 'reader' });
 
 /** The structured 503 of an upstream outage, through the production filter. */
 function expectUnavailable(res: { status: number; body: any }, service: 'gmail' | 'drive', message: string, upstreamStatus: number) {
@@ -404,6 +411,22 @@ describe('W11-PROVIDER-OUTAGE-503: a Google outage answers 503 provider_unavaila
     expect(refusal.status).toBe(400);
     expect(JSON.stringify(outage.body)).not.toContain(CANARY);
     expect(JSON.stringify(refusal.body)).not.toContain(CANARY);
+  });
+
+  it('[V63Z-11] RED-BEFORE: FU-PROVIDER-ERROR-HYGIENE (D-221): POST /drive/.../files/:f/share whose Drive permissions answer 503 answers 503 {service: drive, message: "Drive share failed: 503"}; a 403 insufficientPermissions keeps a 400 "Drive share failed: 403"; Drive\'s body is in neither answer', async () => {
+    const CANARY = `${P}canary-share-body`;
+    google = [{ when: isDriveShare, status: 503, body: googleError(503, CANARY, ['backendError']) }];
+    const outage = await shareFile(ID.bizLive);
+    expectUnavailable(outage, 'drive', 'Drive share failed: 503', 503);
+
+    google = [{ when: isDriveShare, status: 403, body: googleError(403, CANARY, ['insufficientPermissions']) }];
+    const refusal = await shareFile(ID.bizLive);
+    expectRefused(refusal, 'Drive share failed: 403');
+
+    expect(JSON.stringify(outage.body)).not.toContain(CANARY);
+    expect(JSON.stringify(refusal.body)).not.toContain(CANARY);
+    expect(answered.map((a) => a.method)).toEqual(['POST', 'POST']);
+    for (const a of answered) expect(isDriveShare(a.url, a.method), a.url).toBe(true);
   });
 
   it('[V63Z-10] no case made an outbound call: every Google request was answered in process', () => {
