@@ -19,6 +19,19 @@
  *     words for any other error; a BusinessGuard 403 is never said as "no access";
  *   - the kit does not touch transport: lib/client.ts, lib/api.ts, lib/api/*, lib/fetch-with-retry.ts do not
  *     import it, and it imports none of them (fetch-with-retry-503.test.ts stays unchanged and green).
+ *
+ * Review repair (FK-SEC-1, FK-COR-1, FK-COR-2), FK-13..FK-18:
+ *   - lib/client.ts is the transport most screens use, and it is not lib/api.ts: its own apiGet (94 GET call
+ *     sites) and about 32 write helpers rebuild the answer as { data, error } and drop `status`, and 8 helpers
+ *     answer `{ error: res.statusText }`. Customers quick add (BUG-009) sends through client.ts createContact.
+ *     A ModuleScopeGuard refusal through client.ts must still be said with what it needs and "Ask the owner"
+ *     (write) and be "no-access" (read): only a 403 carries the guard's exact sentence (FK-13, FK-14).
+ *   - production serves the API over HTTP/2 (Caddy), where Response.statusText is "", so those helpers answer a
+ *     refusal or a proxy 502 as `error: ""`. Only a null or absent error is a success: an empty one is a loud
+ *     failure, never "it went through" or an empty list (FK-15, FK-16).
+ *   - every refusal shares one toast id, and sonner updates a toast by merging; a refusal with no next step must
+ *     clear the last one's, so a 409 after a 5xx is not told to try again and a BusinessGuard 403 after a scope
+ *     refusal is not told to ask the owner (FK-17, FK-18, on the real sonner Toaster).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createElement, useState } from "react";
@@ -33,9 +46,11 @@ vi.mock("sonner", () => ({
 }));
 
 import { apiPost } from "@/lib/api";
+import { createContact, fetchContacts, fetchInvoices, updatePlaybook } from "@/lib/client";
 import { moduleReadRefusal, moduleWriteRefusal } from "@/lib/module-access";
 import {
   REFUSAL_TOAST_ID,
+  type ApiAnswer,
   answerFromThrown,
   readRefusal,
   readState,
@@ -58,6 +73,38 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
+/**
+ * ModuleScopeGuard's refusal as the server sends it: the guard's sentence (apps/server core/auth/module-scope.guard.ts)
+ * in GlobalHttpExceptionFilter's body (core/filters/http-exception.filter.ts).
+ */
+function serverBody(statusCode: number, message: string, path: string) {
+  const code: Record<number, string> = { 403: "FORBIDDEN", 409: "CONFLICT", 500: "INTERNAL_SERVER_ERROR" };
+  const error: Record<number, string> = { 403: "Forbidden", 409: "Conflict", 500: "Internal Server Error" };
+  return { statusCode, code: code[statusCode] ?? "UNKNOWN_ERROR", message, error: error[statusCode] ?? "Error", timestamp: new Date().toISOString(), path };
+}
+
+/**
+ * fetch answering every request with `status` and `body` (no body when null) and the reason phrase `statusText`.
+ * Over HTTP/2 (production: Caddy in front of the api) a browser's Response.statusText is always "". Records what
+ * was sent.
+ */
+function stubFetch(status: number, body: unknown, statusText: string): string[] {
+  const sent: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      sent.push(`${(init?.method ?? "GET").toUpperCase()} ${new URL(url, "http://localhost").pathname}`);
+      return new Response(body === null ? null : JSON.stringify(body), {
+        status,
+        statusText,
+        headers: body === null ? {} : { "content-type": "application/json" },
+      });
+    }),
+  );
+  return sent;
+}
+
 /** fetch answering every POST with `status`/`body`; records what was sent. */
 function stubPost(status: number, body: unknown): string[] {
   const sent: string[] = [];
@@ -72,17 +119,23 @@ function stubPost(status: number, body: unknown): string[] {
   return sent;
 }
 
+type Send = (firstName: string) => Promise<ApiAnswer>;
+/** lib/api.ts apiPost: answers a refusal as { data: null, error, status }. */
+const viaApi: Send = (firstName) => apiPost({ path: "/crm/businesses/biz_fk/contacts", body: { firstName } });
+/** lib/client.ts createContact, the helper Customers quick add uses (pipeline-tab-content.tsx): drops `status`. */
+const viaClient: Send = (firstName) => createContact({ businessId: "biz_fk", firstName });
+
 /**
  * The shape of the Customers quick add (BUG-009) with the kit adopted: await the create, ask the kit whether it
  * was refused, and close only when it was not. Built with createElement so this file stays .ts.
  */
-function QuickAdd() {
+function QuickAdd({ send = viaApi }: { send?: Send }) {
   const [open, setOpen] = useState(true);
   const [name, setName] = useState("");
   const { refused, message } = useRefusal();
   if (!open) return createElement("p", null, "Closed");
   const submit = async () => {
-    const res = await apiPost({ path: "/crm/businesses/biz_fk/contacts", body: { firstName: name } });
+    const res = await send(name);
     if (refused(res, { what: "add customers" })) return;
     setOpen(false);
   };
@@ -264,6 +317,151 @@ describe("FAILURE-KIT: the words, built on PR195's moduleWriteRefusal / moduleRe
     expect(answerFromThrown(new Error("boom"))).toEqual({ data: null, error: "boom" });
     expect(answerFromThrown("nope")).toEqual({ data: null, error: "Something went wrong." });
     expect(refusalMessage(answerFromThrown(new Error("boom")))).toBe("boom");
+  });
+});
+
+const CRM_READ_NONE = "Insufficient permissions: crm requires read access (you have none)";
+
+describe("FAILURE-KIT review repair: lib/client.ts answers, which carry no status (FK-COR-1, FK-SEC-2)", () => {
+  it("[FK-13] RED-BEFORE: BUG-009's own transport: a crm write refusal through lib/client.ts createContact is said with what it needs and to ask the owner, and the form stays open", async () => {
+    const sent = stubFetch(403, serverBody(403, CRM_WRITE_REFUSAL, "/crm/businesses/biz_fk/contacts"), "Forbidden");
+    // What the screen is handed: client.ts rebuilds the answer and drops the status (lib/client.ts, not changed here).
+    await expect(createContact({ businessId: "biz_fk", firstName: "Jada" })).resolves.toEqual({ data: null, error: CRM_WRITE_REFUSAL });
+    sent.length = 0;
+
+    render(createElement(QuickAdd, { send: viaClient }));
+    fireEvent.change(screen.getByLabelText("First name"), { target: { value: "Jada" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add contact" }));
+    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
+    expect(sent).toEqual(["POST /crm/businesses/biz_fk/contacts"]);
+
+    const [title, options] = toastError.mock.calls[0] as [string, { id?: string; description?: string }];
+    expect(title).toBe(moduleWriteRefusal({ status: 403, error: CRM_WRITE_REFUSAL }, "crm", "add customers"));
+    expect(options.id).toBe(REFUSAL_TOAST_ID);
+    expect(options.description).toMatch(/ask the owner/i);
+    expect(screen.getByRole("dialog", { name: "Add contact" })).toBeInTheDocument();
+    expect(screen.getByLabelText("First name")).toHaveValue("Jada");
+    expect(screen.getByRole("alert")).toHaveTextContent("You can't add customers in this business: it needs crm write access.");
+  });
+
+  it("[FK-14] RED-BEFORE: a crm read refusal through lib/client.ts fetchContacts (its own apiGet) is 'no-access' in PR195's words, not a failed load or an empty list", async () => {
+    stubFetch(403, serverBody(403, CRM_READ_NONE, "/crm/businesses/biz_fk/contacts"), "Forbidden");
+    const res = await fetchContacts("biz_fk");
+    // client.ts apiGet answers the fallback list and the server's words, and no status.
+    expect(res).toEqual({ data: { contacts: [], nextCursor: null, hasMore: false }, error: CRM_READ_NONE });
+    expect(readState(res, { what: "your customers" })).toEqual({
+      kind: "no-access",
+      message: moduleReadRefusal({ status: 403, error: CRM_READ_NONE }, "crm", "your customers"),
+    });
+    expect(scopeRefusalOf(res)).toEqual({ module: "crm", level: "read" });
+    expect(showRefusal(res, { what: "see customers" })).toBe(true);
+    expect(toastError).toHaveBeenLastCalledWith(
+      `You can't see customers in this business: it needs crm read access. ${CRM_READ_NONE}`,
+      expect.objectContaining({ id: REFUSAL_TOAST_ID, description: expect.stringMatching(/ask the owner/i) }),
+    );
+
+    // Without a status only the guard's exact sentence counts (only a 403 carries it): not a sentence that merely
+    // contains it, not a KEY plan step's longer refusal, not BusinessGuard's words.
+    const noStatus = (error: string) => ({ data: null, error });
+    expect(scopeRefusalOf(noStatus(CRM_WRITE_REFUSAL))).toEqual({ module: "crm", level: "write" });
+    expect(scopeRefusalOf(noStatus(`Error: ${CRM_WRITE_REFUSAL}`))).toBeNull();
+    expect(scopeRefusalOf(noStatus(`${CRM_WRITE_REFUSAL}; KEY runs "create_contact" for a member only with the module access its routes require (D-98)`))).toBeNull();
+    expect(scopeRefusalOf(noStatus("No access to this business"))).toBeNull();
+    expect(readState(noStatus("Unable to verify business access"), { what: "your customers" })).toEqual({
+      kind: "failed",
+      message: "Couldn't load your customers: Unable to verify business access",
+    });
+    // A status that is not 403 still rules it out, sentence or not.
+    expect(scopeRefusalOf({ data: null, error: CRM_WRITE_REFUSAL, status: 400 })).toBeNull();
+    expect(scopeRefusalOf({ data: null, error: CRM_WRITE_REFUSAL, status: 500 })).toBeNull();
+  });
+});
+
+describe("FAILURE-KIT review repair: an empty error is a failure, never a success (FK-SEC-1)", () => {
+  it("[FK-15] RED-BEFORE: only a null or absent error is a success; error \"\" (or blank) is refused loudly and is a failed load", () => {
+    const blank = { data: null, error: "" };
+    expect(refusalMessage(blank)).toBe("That didn't go through.");
+    expect(refusalMessage(blank, { what: "change playbooks" })).toBe("Couldn't change playbooks.");
+    expect(refusalMessage({ data: null, error: "   " }, { what: "save" })).toBe("Couldn't save.");
+    expect(scopeRefusalOf(blank)).toBeNull();
+
+    expect(showRefusal(blank, { what: "change playbooks" })).toBe(true);
+    expect(toastError).toHaveBeenCalledTimes(1);
+    expect(toastError).toHaveBeenLastCalledWith("Couldn't change playbooks.", expect.objectContaining({ id: REFUSAL_TOAST_ID }));
+
+    const { result } = renderHook(() => useRefusal());
+    let refused = false;
+    act(() => {
+      refused = result.current.refused({ data: null, error: "" });
+    });
+    expect(refused).toBe(true);
+    expect(result.current.message).toBe("That didn't go through.");
+    expect(toastError).toHaveBeenCalledTimes(2);
+
+    expect(readState({ data: [], error: "" }, { what: "your invoices" })).toEqual({ kind: "failed", message: "Couldn't load your invoices." });
+    expect(readState({ data: [], error: " " })).toEqual({ kind: "failed", message: "Couldn't load this." });
+
+    // A null or absent error is still a success (deleteService answers { error: null }).
+    expect(refusalMessage({ error: null })).toBeNull();
+    expect(refusalMessage({ data: { id: "pb_1" } })).toBeNull();
+    expect(readState({ data: [] })).toEqual({ kind: "ok" });
+    expect(readState({ data: [], error: null })).toEqual({ kind: "ok" });
+  });
+
+  it("[FK-16] RED-BEFORE: over HTTP/2 (no reason phrase) a refused lib/client.ts updatePlaybook and an empty-body 502 on fetchInvoices are loud, not success", async () => {
+    // A member of another business renames its playbook: BusinessGuard refuses; client.ts answers res.statusText.
+    stubFetch(403, serverBody(403, "No access to this business", "/automation/businesses/biz_b/playbooks/pb_b"), "");
+    const res = await updatePlaybook({ businessId: "biz_b", playbookId: "pb_b", name: "renamed", enabled: false });
+    expect(res).toEqual({ data: null, error: "" });
+    expect(refusalMessage(res, { what: "change playbooks" })).toBe("Couldn't change playbooks.");
+    expect(showRefusal(res, { what: "change playbooks" })).toBe(true);
+    expect(toastError).toHaveBeenCalledTimes(1);
+    expect(readState(res).kind).toBe("failed");
+
+    // The api is down behind the proxy: 502 with no body; client.ts apiGet answers res.statusText and an empty list.
+    stubFetch(502, null, "");
+    const invoices = await fetchInvoices("biz_fk");
+    expect(invoices).toEqual({ data: [], error: "" });
+    expect(readState(invoices, { what: "your invoices" })).toEqual({ kind: "failed", message: "Couldn't load your invoices." });
+  });
+});
+
+describe("FAILURE-KIT review repair: the one refusal toast on the real sonner Toaster (FK-COR-2)", () => {
+  let sonner: typeof import("sonner");
+
+  beforeEach(async () => {
+    sonner = await vi.importActual<typeof import("sonner")>("sonner");
+    // The kit's toast.error goes to the real sonner for these cases only.
+    toastError.mockImplementation((message: string, data?: Parameters<typeof sonner.toast.error>[1]) => sonner.toast.error(message, data));
+  });
+
+  afterEach(() => {
+    toastError.mockReset();
+  });
+
+  const toasts = () => document.querySelectorAll("[data-sonner-toast]");
+
+  it("[FK-17] RED-BEFORE: a 409 shown after a 5xx is one toast in the 409's words, without the 5xx's 'Try again in a moment.'", async () => {
+    render(createElement(sonner.Toaster));
+    expect(showRefusal({ data: null, error: "Internal server error", status: 500 })).toBe(true);
+    expect(await screen.findByText("Try again in a moment.")).toBeInTheDocument();
+
+    expect(showRefusal({ data: null, error: PHONE_TAKEN, status: 409 })).toBe(true);
+    expect(await screen.findByText(PHONE_TAKEN)).toBeInTheDocument();
+    expect(toasts()).toHaveLength(1);
+    expect(screen.queryByText("Internal server error")).not.toBeInTheDocument();
+    expect(screen.queryByText("Try again in a moment.")).not.toBeInTheDocument();
+  });
+
+  it("[FK-18] RED-BEFORE: a BusinessGuard 403 shown after a scope refusal is not told to ask the owner (CRR-P195JS-2)", async () => {
+    render(createElement(sonner.Toaster));
+    expect(showRefusal({ data: null, error: CRM_WRITE_REFUSAL, status: 403 }, { what: "add customers" })).toBe(true);
+    expect(await screen.findByText("Ask the owner for access.")).toBeInTheDocument();
+
+    expect(showRefusal({ data: null, error: "No access to this business", status: 403 }, { what: "add customers" })).toBe(true);
+    expect(await screen.findByText("No access to this business")).toBeInTheDocument();
+    expect(toasts()).toHaveLength(1);
+    expect(screen.queryByText("Ask the owner for access.")).not.toBeInTheDocument();
   });
 });
 

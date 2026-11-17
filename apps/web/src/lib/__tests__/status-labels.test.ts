@@ -9,6 +9,11 @@
  *
  * Required here: the three shapes (UPPER_SNAKE status, dotted event type, snake_case value) map to plain labels; a
  * label that is already plain is left as it is; an unknown code is still readable; nothing returns the raw code.
+ *
+ * Review repair (FK-COR-3): a code that means different things in different places has no one global word.
+ * PARTIAL is an invoice status (part-paid), a purchase-order status (part-received: the inventory screen's
+ * PO_STATUS_CONFIG and the marketplace PO filter say "Partial") and an integration sync result. The global word is
+ * the neutral "Partial"; the invoice word "Part-paid" is asked for by domain (FK-SL-05).
  */
 import { describe, it, expect } from "vitest";
 import { eventLabel, humanizeCode, plainLabel, statusLabel, STATUS_LABELS } from "@/lib/status-labels";
@@ -23,7 +28,7 @@ describe("FAILURE-KIT status-labels: raw codes in plain words (BUG-091, BUG-127,
   it("[FK-SL-02] invoice, quote and booking statuses, in any letter case, use the words the screens already use", () => {
     expect(statusLabel("PARTIALLY_PAID")).toBe("Part-paid");
     expect(statusLabel("partially_paid")).toBe("Part-paid");
-    expect(statusLabel("PARTIAL")).toBe("Part-paid");
+    expect(statusLabel("PARTIAL", "invoice")).toBe("Part-paid");
     expect(statusLabel("OVERDUE")).toBe("Overdue");
     expect(statusLabel("VOID")).toBe("Void");
     expect(statusLabel("DRAFT")).toBe("Draft");
@@ -68,5 +73,18 @@ describe("FAILURE-KIT status-labels: raw codes in plain words (BUG-091, BUG-127,
     expect(plainLabel("")).toBe("");
     expect(statusLabel(null)).toBe("");
     expect(eventLabel(undefined)).toBe("");
+  });
+
+  it("[FK-SL-05] RED-BEFORE: PARTIAL is not a global 'Part-paid': a part-received purchase order and a partial sync read 'Partial'; an invoice reads 'Part-paid'", () => {
+    expect(statusLabel("PARTIAL")).toBe("Partial");
+    expect(plainLabel("PARTIAL")).toBe("Partial");
+    expect(statusLabel("partial")).toBe("Partial");
+    expect(statusLabel("PARTIAL", "invoice")).toBe("Part-paid");
+    expect(statusLabel("PARTIALLY_PAID", "invoice")).toBe("Part-paid");
+    // The invoice map adds to the global one; it changes nothing else.
+    for (const code of ["OVERDUE", "VOID", "DRAFT", "PAID", "FULLY_CREDITED", "SOME_NEW_STATE"]) {
+      expect(statusLabel(code, "invoice"), code).toBe(statusLabel(code));
+    }
+    expect(STATUS_LABELS).not.toHaveProperty("PARTIAL");
   });
 });
