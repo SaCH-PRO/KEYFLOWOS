@@ -8,6 +8,13 @@ import { PrismaService } from '../../core/prisma/prisma.service';
  */
 export type SecurityCheckStatus = 'passed' | 'failed' | 'not_tracked';
 
+/**
+ * What a check is about. 'business': the business's own state (its members, contacts and privacy
+ * settings). 'platform': the server's process.env, so the whole deployment, the same answer for every
+ * tenant; it is served to a platform SUPER_ADMIN only (checksVisibleTo; review SEC-AUDIT-ENV-1).
+ */
+export type SecurityCheckScope = 'business' | 'platform';
+
 export interface SecurityCheck {
   id: string;
   category: 'auth' | 'data' | 'config' | 'network';
@@ -15,6 +22,7 @@ export interface SecurityCheck {
   title: string;
   description: string;
   status: SecurityCheckStatus;
+  scope: SecurityCheckScope;
   /** True exactly when status is 'passed' (kept for readers of the earlier shape). */
   passed: boolean;
   recommendation?: string;
@@ -28,8 +36,25 @@ function measured(check: MeasuredCheck): SecurityCheck {
 }
 
 /** A check the audit lists but cannot measure: no pass, no failure, no recommendation. */
-function notTracked(check: Pick<SecurityCheck, 'id' | 'category' | 'title' | 'description'>): SecurityCheck {
+function notTracked(check: Pick<SecurityCheck, 'id' | 'category' | 'title' | 'description' | 'scope'>): SecurityCheck {
   return { ...check, severity: 'info', status: 'not_tracked', passed: false };
+}
+
+/** The member a check list is served to, as AuthMiddleware attaches it (User.role read from the row). */
+export type AuditViewer = { role?: string } | null | undefined;
+
+/**
+ * The checks this viewer may read (V1-63 SWP-SEC-AUDIT-TRUTH, review SEC-AUDIT-ENV-1). A platform check
+ * describes the whole deployment's configuration, not the business: the settings read gate is scoped to
+ * one business and every self-signup owns one (D-03), so that gate cannot protect it, and a tenant could
+ * read the platform's secret-configuration posture ("SUPABASE_SERVICE_ROLE_KEY is identical to the public
+ * anon key" says the key in the browser bundle is the privileged one). Only a platform SUPER_ADMIN, the
+ * platform's operator, is served the platform checks; everyone else gets the business's own checks. A
+ * check that does not say 'business' is withheld from a tenant (fails closed).
+ */
+export function checksVisibleTo(checks: SecurityCheck[], viewer: AuditViewer): SecurityCheck[] {
+  if (viewer?.role === 'SUPER_ADMIN') return checks;
+  return checks.filter((c) => c.scope === 'business');
 }
 
 export interface SecurityAuditSummary {
@@ -66,23 +91,27 @@ export function summarizeAudit(checks: SecurityCheck[]): SecurityAuditSummary {
 export class SecurityAuditService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
+  /**
+   * Every check, the business's and the platform's (scope). The route serves each viewer what
+   * checksVisibleTo allows: a tenant member gets the business checks only.
+   */
   async runAudit(businessId: string): Promise<SecurityCheck[]> {
     const checks: SecurityCheck[] = [];
 
-    // Auth checks
+    // Auth checks (MFA and inactive users: the business's members; password policy: the platform)
     checks.push(this.checkMfaEnforcement());
     checks.push(await this.checkPasswordPolicy(businessId));
     checks.push(this.checkInactiveUsers());
 
-    // Data checks
+    // Data checks (the business)
     checks.push(await this.checkConsentCoverage(businessId));
     checks.push(await this.checkPrivacySettings(businessId));
 
-    // Config checks
+    // Config checks (the platform)
     checks.push(this.checkEnvSecrets());
     checks.push(this.checkSslConfig());
 
-    // Network checks
+    // Network checks (the platform)
     checks.push(await this.checkRateLimiting(businessId));
 
     return checks;
@@ -98,6 +127,7 @@ export class SecurityAuditService {
     return notTracked({
       id: 'mfa-enforcement',
       category: 'auth',
+      scope: 'business',
       title: 'Multi-factor authentication',
       description:
         'Not tracked: KEYFLOWOS does not record whether team members use multi-factor authentication, so this audit makes no claim about it.',
@@ -109,6 +139,7 @@ export class SecurityAuditService {
     return measured({
       id: 'password-policy',
       category: 'auth',
+      scope: 'platform',
       severity: minLength < 8 ? 'warning' : 'info',
       title: 'Password policy',
       description: `Minimum password length is ${minLength} characters.`,
@@ -126,6 +157,7 @@ export class SecurityAuditService {
     return notTracked({
       id: 'inactive-users',
       category: 'auth',
+      scope: 'business',
       title: 'Inactive users',
       description:
         'Not tracked: KEYFLOWOS does not record when a team member last signed in, so this audit makes no claim about inactive members.',
@@ -140,6 +172,7 @@ export class SecurityAuditService {
     return measured({
       id: 'consent-coverage',
       category: 'data',
+      scope: 'business',
       severity: coverage < 0.5 ? 'warning' : 'info',
       title: 'Consent coverage',
       description: `${Math.round(coverage * 100)}% of contacts have consent records (${consentCount}/${contactCount}).`,
@@ -157,6 +190,7 @@ export class SecurityAuditService {
     return measured({
       id: 'privacy-settings',
       category: 'data',
+      scope: 'business',
       severity: hasGraceDays ? 'info' : 'warning',
       title: 'Privacy settings',
       description: hasGraceDays ? `Forget grace window is ${biz.forgetGraceDays} days.` : 'No forget grace window configured.',
@@ -200,6 +234,7 @@ export class SecurityAuditService {
     return measured({
       id: 'env-secrets',
       category: 'config',
+      scope: 'platform',
       severity: exposed.length > 0 ? 'critical' : 'info',
       title: 'Environment secrets',
       description: exposed.length > 0 ? `Issues: ${exposed.join('; ')}` : 'No obvious secret configuration issues detected.',
@@ -213,6 +248,7 @@ export class SecurityAuditService {
     return measured({
       id: 'ssl-config',
       category: 'config',
+      scope: 'platform',
       severity: hasHttps ? 'info' : 'warning',
       title: 'SSL / HTTPS',
       description: hasHttps ? 'App URL uses HTTPS.' : 'App URL does not explicitly use HTTPS.',
@@ -226,6 +262,7 @@ export class SecurityAuditService {
     return measured({
       id: 'rate-limiting',
       category: 'network',
+      scope: 'platform',
       severity: hasRateLimit ? 'info' : 'warning',
       title: 'Rate limiting',
       description: hasRateLimit ? 'Rate limiting is configured.' : 'Rate limiting is not explicitly configured.',
