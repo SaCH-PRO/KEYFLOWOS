@@ -27,6 +27,22 @@ type TimelineEntry = {
 };
 
 /**
+ * The contact a task list names (GET tasks/due, GET tasks): who it is and how
+ * to reach them, never the stored row (notesInternal, custom fields, the stored
+ * money fields). W9-CRM-RESIDUALS SEC-L81-3; V1-63 review repair SEC-OB-1 /
+ * OB-COR-1 (D-37, D-63, D-90, D-100).
+ */
+const CONTACT_TASK_SUMMARY_SELECT = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  displayName: true,
+  email: true,
+  phone: true,
+  status: true,
+} as const satisfies Prisma.ContactSelect;
+
+/**
  * The top-level ContactEvent data fields that carry an amount, as the copy
  * writers put them (an invoice or order total, a payment, a refund, a
  * storefront booking's deposit, a referral's invoice total).
@@ -256,13 +272,30 @@ export class CrmTimelineService {
     });
   }
 
+  /**
+   * GET tasks (a customer's Tasks tab with ?contactId=, the business's list
+   * without it) and the KEY CRM adapter. V1-63 review repair (SEC-OB-1,
+   * OB-COR-1, SEC-OB-2; D-37, D-63, D-90, D-100), as dueTasks reads
+   * (W9-CRM-RESIDUALS SEC-L81-3): only tasks of live contacts of the business
+   * are listed, so a soft-deleted contact's (a forget in its grace period) is
+   * not, for the OWNER either; `visibility` is the caller's CRM visibility
+   * clause (GET tasks passes the member's; null or absent for the OWNER,
+   * SUPER_ADMIN and internal callers), and with one only the tasks of contacts
+   * the member may open are listed. Every task carries the contact summary,
+   * never the stored row (notesInternal, custom fields, the stored money fields
+   * withoutStoredMoney withholds).
+   */
   async listContactTasks(input: {
     businessId: string;
     contactId?: string;
     status?: string;
     dueBefore?: Date;
+    visibility?: Prisma.ContactWhereInput | null;
   }) {
-    const where: any = { businessId: input.businessId };
+    const where: any = {
+      businessId: input.businessId,
+      contact: { ...contactWhereBase(input.businessId), ...(input.visibility ? { AND: [input.visibility] } : {}) },
+    };
     if (input.contactId) {
       await this.assertContact(input.businessId, input.contactId);
       where.contactId = input.contactId;
@@ -275,7 +308,7 @@ export class CrmTimelineService {
     return this.prisma.client.contactTask.findMany({
       where,
       orderBy: [{ dueDate: 'asc' }, { createdAt: 'desc' }],
-      include: { contact: true },
+      include: { contact: { select: CONTACT_TASK_SUMMARY_SELECT } },
       take: 100,
     });
   }
@@ -627,9 +660,7 @@ export class CrmTimelineService {
           ...(input.visibility ? { contact: { ...contactWhereBase(input.businessId), AND: [input.visibility] } } : {}),
         },
       orderBy: { dueDate: 'asc' },
-      include: {
-        contact: { select: { id: true, firstName: true, lastName: true, displayName: true, email: true, phone: true, status: true } },
-      },
+      include: { contact: { select: CONTACT_TASK_SUMMARY_SELECT } },
       take: 50,
     });
   }
