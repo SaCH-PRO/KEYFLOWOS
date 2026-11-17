@@ -5,6 +5,7 @@ import { ShieldCheck, Loader2, AlertTriangle, CheckCircle2, Info, RefreshCw, Cir
 import { toast } from "sonner";
 import { apiGet } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { isModuleScopeRefusal } from "@/lib/module-scope-refusal";
 
 /**
  * What a check concluded (apps/server security-audit.service.ts). 'not_tracked': nothing records the
@@ -71,7 +72,11 @@ export default function SecurityAuditPage() {
     setLoading(true);
     try {
       const res = await apiGet<AuditResult>(`/security/businesses/${businessId}/audit`);
-      if (res.status === 403) {
+      // Only ModuleScopeGuard's refusal of settings says this member lacks the audit's access. Any
+      // other 403 (BusinessGuard's transient "Unable to verify business access" or "Service
+      // unavailable", another module's refusal) says nothing about it: it keeps the toast and Run
+      // audit, so the owner can retry (review SAT-COR-1, as CRR-P195JS-2).
+      if (isModuleScopeRefusal(res, "settings")) {
         setResult(null);
         setRefused(true);
         return;
