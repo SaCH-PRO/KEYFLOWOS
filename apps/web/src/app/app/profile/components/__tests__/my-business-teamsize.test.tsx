@@ -12,6 +12,9 @@
  *   - every team size the form offers is a value of the server's TeamSize enum, read from the DTO itself, and
  *     choosing it sends exactly that value (RED: SOLO, SMALL_TEAM, ... are not);
  *   - no team size chosen sends no teamSize at all (RED: it sent "");
+ *   - clearing a stored team size sends teamSize null, which the PATCH clears with, and a save that leaves teamSize
+ *     out tells the page nothing about it (PTS-COR-1, review: the clear was left out of the body, so the stored size
+ *     stayed while the form said "Business info updated" and told the page there was none);
  *   - a value stored by the old form (SMALL_TEAM, ...) or another spelling the server takes (small, 1, ...)
  *     shows as the option it means and is saved as that option's enum value (RED: SMALL_TEAM was sent back);
  *   - a refused save (a 400, the owner-only 403) is loud and kind: one refusal toast with the server's words, the
@@ -196,6 +199,78 @@ describe("SWP-PROFILE-TEAMSIZE: the team sizes are the server's (BUG-006)", () =
     fireEvent.change(taglineInput(), { target: { value: "Baked before sunrise" } });
     await save(sent);
     expect(sent.find((s) => s.method === "PATCH")!.body).not.toHaveProperty("teamSize");
+  });
+});
+
+/**
+ * PTS-COR-1 (review of SWP-PROFILE-TEAMSIZE): with a size stored, the select still offers "Select team size". Picking
+ * it left teamSize out of the body, so the PATCH kept the stored size, while the form said "Business info updated",
+ * went clean and told the page (onSaved) the team size was "": a false success, the other profile tabs showing no
+ * team size until a reload brought the old one back. The PATCH clears with teamSize null (200, team_size NULL:
+ * apps/server/test/business-profile-save.integration.test.ts V63M-C05).
+ */
+describe("SWP-PROFILE-TEAMSIZE: clearing a stored team size clears it, and a save says only what it wrote (PTS-COR-1)", () => {
+  it.each([
+    ["2-5", "2-5"],
+    ["SMALL_TEAM", "2-5"],
+    ["large", "50+"],
+  ])("[WEB-PTS-08] RED-BEFORE: clearing a stored '%s' (shown as '%s') sends teamSize null, says it saved, and the next save has nothing to clear", async (stored, shown) => {
+    const { onStatus, onSaved } = mount({ teamSize: stored });
+    expect(teamSizeSelect().value).toBe(shown);
+
+    let sent = stubFetch(200, { id: BIZ });
+    fireEvent.change(teamSizeSelect(), { target: { value: "" } });
+    expect(screen.getByText("You have unsaved changes")).toBeInTheDocument();
+    await save(sent);
+    const patch = sent.find((s) => s.method === "PATCH")!;
+    expect(Object.keys(patch.body ?? {}).sort()).toEqual(["businessHours", "description", "name", "tagline", "teamSize"]);
+    expect(patch.body?.teamSize, "the clear is sent, as the PATCH clears it").toBeNull();
+    await waitFor(() => expect(onStatus).toHaveBeenCalledWith({ type: "success", message: "Business info updated" }));
+    expect(onSaved).toHaveBeenCalledTimes(1);
+    expect(onSaved.mock.calls[0][0]).toMatchObject({ teamSize: "" });
+    expect(teamSizeSelect().value).toBe("");
+    expect(screen.queryByText("You have unsaved changes")).toBeNull();
+    vi.unstubAllGlobals();
+
+    // The size is cleared now: the next save has none to clear and sends no teamSize.
+    sent = stubFetch(200, { id: BIZ });
+    fireEvent.change(taglineInput(), { target: { value: "Baked before sunrise" } });
+    await save(sent);
+    expect(sent.find((s) => s.method === "PATCH")!.body).not.toHaveProperty("teamSize");
+  });
+
+  it("[WEB-PTS-09] RED-BEFORE: a refused clear keeps the clear unsaved, and pressing Save again sends it again", async () => {
+    const REASON = "tagline must be shorter than or equal to 100 characters";
+    const { onSaved } = mount({ teamSize: "6-10" });
+    let sent = stubFetch(400, badRequest([REASON]));
+    fireEvent.change(teamSizeSelect(), { target: { value: "" } });
+    await save(sent);
+    expect(sent.find((s) => s.method === "PATCH")!.body?.teamSize).toBeNull();
+    expect(await screen.findByRole("alert")).toHaveTextContent(REASON);
+    expect(teamSizeSelect().value).toBe("");
+    expect(screen.getByText("You have unsaved changes")).toBeInTheDocument();
+    expect(onSaved).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+
+    sent = stubFetch(200, { id: BIZ });
+    await save(sent);
+    expect(sent.find((s) => s.method === "PATCH")!.body?.teamSize).toBeNull();
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+  });
+
+  it.each([
+    ["no team size stored", null],
+    ["a stored value the form cannot name", "Me and my sister"],
+  ])("[WEB-PTS-10] RED-BEFORE: with %s, a save that leaves teamSize out tells the page nothing about the team size (it keeps what is stored)", async (_what, stored) => {
+    const { onSaved } = mount({ teamSize: stored });
+    const sent = stubFetch(200, { id: BIZ });
+    fireEvent.change(taglineInput(), { target: { value: "Baked before sunrise" } });
+    await save(sent);
+    expect(sent.find((s) => s.method === "PATCH")!.body).not.toHaveProperty("teamSize");
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    const reported = onSaved.mock.calls[0][0] as Record<string, unknown>;
+    expect(reported, "the PATCH left the stored team size as it was").not.toHaveProperty("teamSize");
+    expect(reported).toMatchObject({ name: "Point Fortin Pastries", tagline: "Baked before sunrise", description: "A family bakery.", businessHours: HOURS });
   });
 });
 

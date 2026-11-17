@@ -20,7 +20,12 @@ import { JOURNEY_VIEWPORTS } from "./journeys/harness-settings";
  *   1. The save goes through with no team size chosen, and again with each
  *      team size the form offers; each PATCH answers 200 and the reload shows
  *      what was saved (RED at the base: every PATCH answers 400).
- *   2. A save the server refuses is said where the person is looking and
+ *   2. Clearing the stored team size clears it: the PATCH sends teamSize
+ *      null and answers 200, the API then reads no team size, and the reload
+ *      shows none (PTS-COR-1, review; RED before it: the clear was left out
+ *      of the PATCH, which answered 200 and kept the stored size while the
+ *      form said "Business info updated").
+ *   3. A save the server refuses is said where the person is looking and
  *      keeps what they typed: a STAFF member (owner ruling D-11: the profile
  *      is the owner's) presses Save, the real PATCH answers 403, and the
  *      server's words are in a toast and beside the Save button, inside the
@@ -113,7 +118,7 @@ for (const [project, viewport] of Object.entries(JOURNEY_VIEWPORTS)) {
         : { viewport },
     );
 
-    test("the owner's save goes through with no team size and with each team size offered, and survives a reload", async ({ page, request, owner }) => {
+    test("the owner's save goes through with no team size and with each team size offered, survives a reload, and clears the team size", async ({ page, request, owner }) => {
       test.setTimeout(4 * 60_000);
       const name = `${owner.businessName} & Bakes`;
       const tagline = "Fresh from the oven daily";
@@ -155,6 +160,18 @@ for (const [project, viewport] of Object.entries(JOURNEY_VIEWPORTS)) {
         await expect(page.getByPlaceholder("A short tagline for your business")).toHaveValue(tagline);
         await expect(page.getByRole("textbox", { name: "Business description" })).toHaveValue(description);
         await expect(await teamSizeSelect(page)).toHaveValue(offered[offered.length - 1].value);
+      });
+
+      await test.step("clearing the team size clears it, and a reload shows none (PTS-COR-1)", async () => {
+        await (await teamSizeSelect(page)).selectOption("");
+        await expect(page.getByText("You have unsaved changes")).toBeVisible();
+        const res = await save(page, owner.businessId);
+        expect(res.status(), `PATCH answered ${await res.text()}`).toBe(200);
+        await expect(page.getByText("You have unsaved changes")).toHaveCount(0);
+        expect(await storedBusiness(request, owner), "the stored team size is cleared").toMatchObject({ name, tagline, description, teamSize: null });
+        expect(res.request().postDataJSON(), "the clear is sent").toHaveProperty("teamSize", null);
+        await openBusinessProfile(page);
+        await expect(await teamSizeSelect(page)).toHaveValue("");
       });
     });
 
