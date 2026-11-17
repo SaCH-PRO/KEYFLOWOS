@@ -31,6 +31,22 @@
  * Control (green before and after): a non-member is refused by BusinessGuard
  * and the audit does not run.
  *
+ * Review finding SEC-AUDIT-ENV-1 (repair): four of the audit's checks
+ * (env-secrets, password-policy, ssl-config, rate-limiting) read the server's
+ * process.env, not the business. They describe the whole deployment, so the
+ * settings read gate, which is scoped to one business, cannot protect them:
+ * every self-signup is the OWNER of a business (D-03), and any owner could read
+ * the platform's secret-configuration posture, down to "SUPABASE_SERVICE_ROLE_KEY
+ * is identical to the public anon key" (an oracle that the key in the browser
+ * bundle is the privileged one). Pinned here:
+ *   - a member of the business (the OWNER, an ADMIN, a STAFF settings reader)
+ *     and the OWNER of any other business get the business's own checks only,
+ *     each with scope 'business': no platform check and no word of the
+ *     deployment's configuration, even when it is misconfigured;
+ *   - a platform SUPER_ADMIN (the platform operator, no membership) still gets
+ *     the platform configuration checks, scope 'platform', measured and counted
+ *     in the score (control: the checks are kept, only their audience narrows).
+ *
  * Harness (as test/orderby-multikey-routes.integration.test.ts): the real
  * AuthMiddleware and AuthGuard (HS256 tokens on the test-only verifyLocal path,
  * signed with a secret built at run time), the real BusinessGuard and
@@ -93,8 +109,10 @@ const ID = {
   desk: `${P}desk`,
   /** STAFF with settings 'read' and nothing else. */
   reader: `${P}reader`,
-  /** A member of another business only. */
+  /** A member of another business only: the OWNER of bizB. */
   outsider: `${P}outsider`,
+  /** A platform SUPER_ADMIN (User.role), member of no business. */
+  platform: `${P}platform`,
   biz: `${P}biz`,
   bizB: `${P}bizB`,
 };
@@ -106,6 +124,7 @@ const EMAIL = {
   desk: `${P}desk@test.local`,
   reader: `${P}reader@test.local`,
   outsider: `${P}outsider@test.local`,
+  platform: `${P}platform@test.local`,
 };
 
 const AS = {
@@ -115,15 +134,27 @@ const AS = {
   desk: { id: ID.desk, email: EMAIL.desk },
   reader: { id: ID.reader, email: EMAIL.reader },
   outsider: { id: ID.outsider, email: EMAIL.outsider },
+  platform: { id: ID.platform, email: EMAIL.platform },
 } as const;
 type As = keyof typeof AS;
 
 /** The checks that measure nothing today: no MFA state and no last sign-in are recorded. */
 const NOT_TRACKED_IDS = ['inactive-users', 'mfa-enforcement'];
 
+/** The checks about the business itself (its members, contacts and privacy settings). */
+const BUSINESS_CHECK_IDS = ['consent-coverage', 'inactive-users', 'mfa-enforcement', 'privacy-settings'];
+
+/** The checks that read the server's process.env: the whole deployment, not the business (SEC-AUDIT-ENV-1). */
+const PLATFORM_CHECK_IDS = ['env-secrets', 'password-policy', 'rate-limiting', 'ssl-config'];
+
+/** Words only the platform configuration checks say: variable names, their findings and their titles. */
+const PLATFORM_WORDS =
+  /SUPABASE|anon key|DATABASE_URL|AI_INTEGRATIONS|PASSWORD_MIN_LENGTH|RATE_LIMIT|NEXT_PUBLIC_APP_URL|short\/weak|Environment secrets|Password policy|Rate limiting|SSL \/ HTTPS/i;
+
 interface Check {
   id: string;
   status?: string;
+  scope?: string;
   passed: boolean;
   severity: string;
   title: string;
@@ -191,7 +222,9 @@ async function cleanup() {
 
 async function seed() {
   for (const who of Object.keys(AS) as As[]) {
-    await db.user.create({ data: { id: AS[who].id, email: AS[who].email, name: who, role: 'USER' } });
+    // The platform operator is a SUPER_ADMIN by User.role (AuthMiddleware reads the role from this row).
+    const role = who === 'platform' ? 'SUPER_ADMIN' : 'USER';
+    await db.user.create({ data: { id: AS[who].id, email: AS[who].email, name: who, role } });
   }
   // A forget grace window, so the privacy check passes and the score is not all failures.
   await db.business.create({ data: { id: ID.biz, name: `${P}business`, ownerId: ID.owner, forgetGraceDays: 30 } });
@@ -297,16 +330,20 @@ describe('fixture sanity (real rows)', () => {
     );
     expect(await db.membership.count(skipTenantIsolation({ where: { businessId: ID.bizB } }))).toBe(1);
   });
+
+  it('seeded the platform operator as a SUPER_ADMIN user who is a member of no business', async () => {
+    const rows: Array<{ role: string }> = await db.$queryRawUnsafe(`SELECT role FROM users WHERE id = '${ID.platform}'`);
+    expect(rows.map((r) => r.role)).toEqual(['SUPER_ADMIN']);
+    expect(await db.membership.count(skipTenantIsolation({ where: { userId: ID.platform } }))).toBe(0);
+  });
 });
 
 describe('BUG-065: the audit claims nothing it does not track', () => {
-  it('[V63G-01] the OWNER runs the audit: 200 with every check listed (control)', async () => {
+  it("[V63G-01] the OWNER runs the audit: 200 with every check about the business listed, and only those (control; the deployment's configuration checks are V63G-10..12)", async () => {
     const res = await audit('owner');
     expect(res.status, said(res)).toBe(200);
     const body = res.body as Audit;
-    expect(body.checks.map((c) => c.id).sort()).toEqual(
-      ['consent-coverage', 'env-secrets', 'inactive-users', 'mfa-enforcement', 'password-policy', 'privacy-settings', 'rate-limiting', 'ssl-config'],
-    );
+    expect(body.checks.map((c) => c.id).sort()).toEqual(BUSINESS_CHECK_IDS);
     expect(runAudit).toHaveBeenCalledTimes(1);
   });
 
@@ -356,12 +393,98 @@ describe('BUG-065: the audit claims nothing it does not track', () => {
     expect(body.passed).toBe(passed);
     expect(body.notTracked).toBe(NOT_TRACKED_IDS.length);
     expect(body.score).toBe(Math.round((passed / measured.length) * 100));
-    // The pinned environment: the privacy, consent, password, HTTPS and rate-limit checks pass;
-    // whatever env-secrets concludes is counted as measured, never as not tracked.
-    for (const id of ['privacy-settings', 'consent-coverage', 'password-policy', 'ssl-config', 'rate-limiting']) {
+    // The seeded business: a forget grace window and no contacts, so the privacy and consent checks pass.
+    // The deployment's configuration checks are the platform operator's (V63G-12 pins how they are counted).
+    for (const id of ['privacy-settings', 'consent-coverage']) {
       expect(statuses[id], id).toBe('passed');
     }
+  });
+});
+
+describe("SEC-AUDIT-ENV-1: the deployment's configuration is not a tenant's to read", () => {
+  /** The deployment misconfigured as the review reproduced it; values built at run time from fragments. */
+  const MISCONFIGURED: Record<string, string> = (() => {
+    const shared = [P, 'shared', 'project', 'key', 'value', 'for', 'the', 'audit', 'oracle'].join('.');
+    return {
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: shared,
+      SUPABASE_SERVICE_ROLE_KEY: shared,
+      AI_INTEGRATIONS_OPENAI_API_KEY: [P, 'short'].join(''),
+    };
+  })();
+
+  /** Runs `fn` with the deployment misconfigured, then puts the suite's pinned environment back. */
+  async function misconfigured<T>(fn: () => Promise<T>): Promise<T> {
+    const before = Object.fromEntries(Object.keys(MISCONFIGURED).map((k) => [k, process.env[k]]));
+    Object.assign(process.env, MISCONFIGURED);
+    try {
+      return await fn();
+    } finally {
+      for (const [k, v] of Object.entries(before)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  }
+
+  /** The business's own checks only, each scoped to the business, and no word of the deployment's configuration. */
+  function expectBusinessChecksOnly(body: Audit, who: string) {
+    expect(body.checks.map((c) => c.id).sort(), who).toEqual(BUSINESS_CHECK_IDS);
+    for (const c of body.checks) expect(c.scope, `${who}: ${c.id} is about the business`).toBe('business');
+    expect(JSON.stringify(body), `${who}: nothing of the deployment's configuration`).not.toMatch(PLATFORM_WORDS);
+    // The summary counts what this viewer was shown: the measured business checks only.
+    const measured = body.checks.filter((c) => c.status !== 'not_tracked');
+    expect(body.total, who).toBe(measured.length);
+    expect(body.passed, who).toBe(measured.filter((c) => c.status === 'passed').length);
+    expect(body.notTracked, who).toBe(NOT_TRACKED_IDS.length);
+  }
+
+  it("[V63G-10] the OWNER of another business runs the audit of their own business with the deployment misconfigured: 200 with its own checks only, no platform check and no word of the configuration (RED: env-secrets 'SUPABASE_SERVICE_ROLE_KEY is identical to the public anon key')", async () => {
+    const res = await misconfigured(() => audit('outsider', ID.bizB));
+    expect(res.status, said(res)).toBe(200);
+    const body = res.body as Audit;
+    for (const id of PLATFORM_CHECK_IDS) expect(byId(body, id), `${id} is not served to a tenant`).toBeUndefined();
+    expect(JSON.stringify(body)).not.toMatch(/identical to the public anon key/);
+    expectBusinessChecksOnly(body, 'the OWNER of another business');
+    expect(runAudit).toHaveBeenCalledTimes(1);
+  });
+
+  it('[V63G-11] no member of the business is served the platform checks: the OWNER, an ADMIN and a STAFF settings reader each get the business checks only (RED: all eight)', async () => {
+    for (const who of ['owner', 'admin', 'reader'] as const) {
+      const res = await misconfigured(() => audit(who));
+      expect(res.status, `${who}: ${said(res)}`).toBe(200);
+      expectBusinessChecksOnly(res.body as Audit, who);
+    }
+  });
+
+  it('[V63G-12] a platform SUPER_ADMIN (member of no business) still gets the platform configuration checks, scoped to the platform, measured and counted in the score (control)', async () => {
+    const res = await audit('platform');
+    expect(res.status, said(res)).toBe(200);
+    const body = res.body as Audit;
+    expect(body.checks.map((c) => c.id).sort()).toEqual([...BUSINESS_CHECK_IDS, ...PLATFORM_CHECK_IDS].sort());
+    const scopes = Object.fromEntries(body.checks.map((c) => [c.id, c.scope]));
+    for (const id of BUSINESS_CHECK_IDS) expect(scopes[id], id).toBe('business');
+    for (const id of PLATFORM_CHECK_IDS) expect(scopes[id], id).toBe('platform');
+    const statuses = Object.fromEntries(body.checks.map((c) => [c.id, c.status]));
+    // The pinned environment: the password, HTTPS and rate-limit checks pass; whatever env-secrets
+    // concludes is counted as measured, never as not tracked.
+    for (const id of ['password-policy', 'ssl-config', 'rate-limiting']) expect(statuses[id], id).toBe('passed');
     expect(['passed', 'failed']).toContain(statuses['env-secrets']);
+    const measured = body.checks.filter((c) => c.status !== 'not_tracked');
+    const passed = measured.filter((c) => c.status === 'passed').length;
+    expect(body.total).toBe(BUSINESS_CHECK_IDS.length + PLATFORM_CHECK_IDS.length - NOT_TRACKED_IDS.length);
+    expect(body.total).toBe(measured.length);
+    expect(body.passed).toBe(passed);
+    expect(body.notTracked).toBe(NOT_TRACKED_IDS.length);
+    expect(body.score).toBe(Math.round((passed / measured.length) * 100));
+    expect(runAudit).toHaveBeenCalledTimes(1);
+  });
+
+  it('[V63G-13] the misconfiguration is still reported to the platform SUPER_ADMIN (control: the check measures the deployment)', async () => {
+    const res = await misconfigured(() => audit('platform'));
+    expect(res.status, said(res)).toBe(200);
+    const env = byId(res.body as Audit, 'env-secrets');
+    expect(env?.status, JSON.stringify(env)).toBe('failed');
+    expect(env!.description).toMatch(/identical to the public anon key/);
   });
 });
 
