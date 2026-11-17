@@ -18,6 +18,22 @@ export type MemorySourceType =
   | 'ai_execution_log'
   | 'cortex_action_log';
 
+/**
+ * FU-KEY-MEMORY-MONEY-SIGHT (review SEC-W1FPMS-3; D-128, D-100): the key under which a genome_memory_event fragment's
+ * metadata carries its GenomeMemoryEvent row's own columns (GenomeRowColumns). UnifiedMemoryRetrievalService writes it
+ * after the row's own metadata, so a writer's metadata cannot stand in for the row; a prompt's memory projection
+ * (readersOwnPromptMemory) reads it to withhold the genome's money memory events from a reader without revenue read.
+ */
+export const GENOME_ROW_METADATA_KEY = 'genomeRow';
+
+/** FU-KEY-MEMORY-MONEY-SIGHT: the GenomeMemoryEvent columns a genome fragment carries (GENOME_ROW_METADATA_KEY). */
+export interface GenomeRowColumns {
+  sourceType: string | null;
+  eventType: string | null;
+  domain: string | null;
+  section: string | null;
+}
+
 export interface MemoryFragment {
   /** Unique ID of the underlying record */
   id: string;
