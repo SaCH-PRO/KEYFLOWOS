@@ -115,10 +115,11 @@ export function noMemberToolRefusal(toolName: string): string | null {
  *   - the business owner (an OWNER membership: owner rulings D-116, D-125) runs every tool the
  *     authority map does not map (D-119) and holds every module (the OWNER defaults) unless its
  *     membership carries an explicit scope map, which binds it as it binds any member (review
- *     SEC-W11D116K-1); with no such map it also runs every mapped KEY organ (dotted) tool, the
- *     connector reads whose connect read no role default holds included (W11A-SEAM-REPAIR, D-131
- *     binds members), but a tool the authority map never runs (execute_custom_logic) is refused to
- *     the owner too (KEY-R3b review SEC-R3b-2).
+ *     SEC-W11D116K-1) and refuses it every unmapped tool (D-140, W11-OWNER-MAP-UNMAPPED-TOOLS); with
+ *     no such map it also runs every mapped KEY organ (dotted) tool, the connector reads whose connect
+ *     read no role default holds included (W11A-SEAM-REPAIR, D-131 binds members), but a tool the
+ *     authority map never runs (execute_custom_logic) is refused to the owner too (KEY-R3b review
+ *     SEC-R3b-2).
  * A plan not of `businessId` is refused as not found.
  */
 export async function planStepRunRefusal(
@@ -235,7 +236,11 @@ async function systemPlanOwner(
  *     D-131): the exception is a mapped KEY organ (dotted) tool, which an OWNER with no explicit map runs
  *     in this arm, as it ran every dotted tool before D-131 mapped them: the OWNER defaults hold no
  *     connect (no role default does), so through the next arm the owner alone would be refused the
- *     connector reads D-131 opens to members holding connect read;
+ *     connector reads D-131 opens to members holding connect read. W11-OWNER-MAP-UNMAPPED-TOOLS (owner
+ *     ruling D-140; seam review SEC-SR-3): the unmapped tools are the owner's only while its OWNER
+ *     membership carries no explicit scope map; one that carries a map (an object map or a JSON array,
+ *     as ModuleScopeGuard reads it) is refused every unmapped tool (ownerScopeMapUnmappedRefusal), as it
+ *     is any mapped tool its map does not reach;
  *   - any other member: assertMayRunGraphAction with the member as the caller, either with no
  *     principal (`asPrincipal` false: the rule POST ai/plans/:planId/approve applies, so a contact read
  *     no visibility clause bounds is the OWNER's only) or as the principal (`asPrincipal`: the rule
@@ -275,11 +280,19 @@ export async function memberToolRunAuthority(
       select: { role: true, permissionScopes: true },
     });
     if (membership?.role === 'OWNER') {
-      if (!requirement || 'refused' in requirement) {
-        const refusal = requirement ? `Tool "${toolName}" is not executed for a KEY plan, whoever asks: ${requirement.refused}` : null;
-        return { refusal, principal: !!options.asPrincipal };
+      if (requirement && 'refused' in requirement) {
+        return { refusal: `Tool "${toolName}" is not executed for a KEY plan, whoever asks: ${requirement.refused}`, principal: !!options.asPrincipal };
       }
-      if (!isExplicitScopeMap(membership.permissionScopes)) return { refusal: null, principal: !!options.asPrincipal };
+      // W11-OWNER-MAP-UNMAPPED-TOOLS (owner ruling D-140; seam review SEC-SR-3): an OWNER membership that carries an
+      // explicit scope map (an object map or a JSON array: isExplicitScopeMap, memberModuleLevel's reading) is bound
+      // by it on KEY as ModuleScopeGuard binds it on REST, so it is refused every tool the authority map does not map
+      // (fail closed: no module scope of its map can admit one). An OWNER membership with no explicit map keeps
+      // every tool, mapped and unmapped.
+      if (isExplicitScopeMap(membership.permissionScopes)) {
+        if (!requirement) return { refusal: ownerScopeMapUnmappedRefusal(toolName), principal: false };
+      } else {
+        return { refusal: null, principal: !!options.asPrincipal };
+      }
     }
   }
   const user = await prisma.client.user.findUnique({ where: { id: memberId }, select: { role: true } });
@@ -292,6 +305,15 @@ export async function memberToolRunAuthority(
     if (err instanceof ForbiddenException) return { refusal: err.message, principal: false };
     throw err;
   }
+}
+
+/**
+ * W11-OWNER-MAP-UNMAPPED-TOOLS (owner ruling D-140): what an OWNER membership that carries an explicit scope map is
+ * told for a tool the authority map does not map (memberToolRunAuthority). Stable words: the KEY chat says them, the
+ * plan queue records them on the step and an approved proposal on its row (`Refused: ...`).
+ */
+export function ownerScopeMapUnmappedRefusal(toolName: string): string {
+  return `Tool "${toolName}" needs the business owner's unrestricted access (it is mapped to no module scope), and this OWNER membership is bound by its explicit scope map (D-140)`;
 }
 
 /**
