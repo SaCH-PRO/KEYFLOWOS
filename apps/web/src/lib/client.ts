@@ -781,6 +781,10 @@ export async function fetchInvoices(businessId: string = selectedBusinessId()) {
     issueDate: z.string().nullable().optional(),
     dueDate: z.string().nullable().optional(),
     paidAt: z.string().nullable().optional(),
+    // FU-WA-CONTACT-PHONE: the customer's id, kept from the server's row. The WhatsApp share reads
+    // the customer by it (the saved WhatsApp number, or the phone for the confirm step); without it
+    // every list share went to WhatsApp's chooser.
+    contactId: z.string().nullable().optional(),
     contact: z
       .object({
         firstName: z.string().nullable().optional(),
