@@ -884,6 +884,7 @@ export class CrmController {
   @Get('businesses/:businessId/data-quality/issues')
   dqIssues(
     @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: string } },
     @Query('kinds') kinds?: string | string[],
     @Query('severities') severities?: string | string[],
     @Query('status') status?: string,
@@ -897,8 +898,11 @@ export class CrmController {
     const filteredSeverities = (toArr(severities) ?? []).filter((s) => ['low', 'medium', 'high'].includes(s)) as Array<'low' | 'medium' | 'high'>;
     const allowedStatus = ['open', 'resolved', 'dismissed'] as const;
     const safeStatus = allowedStatus.find((s) => s === status) ?? 'open';
+    // FU-DATAQUALITY-MASS-ASSIGN review repairs SEC-DQ-1 / COR-DQMA-2 (D-63, D-133): the items,
+    // the total and byKind cover only the live contacts the member may open.
     return this.dataQuality.listIssues({
       businessId,
+      actorId: this.requireActorUserId(req),
       kinds: filteredKinds.length ? filteredKinds : undefined,
       severities: filteredSeverities.length ? filteredSeverities : undefined,
       status: safeStatus,
@@ -914,9 +918,11 @@ export class CrmController {
   @Get('businesses/:businessId/data-quality/wizard')
   dqWizard(
     @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: string } },
     @Query('limit') limit?: string,
   ) {
-    return this.dataQuality.wizardQueue(businessId, limit ? Number(limit) : 25);
+    // The open issues of the live contacts the member may open (review SEC-DQ-1, as dqIssues).
+    return this.dataQuality.wizardQueue({ businessId, actorId: this.requireActorUserId(req), limit: limit ? Number(limit) : 25 });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -948,9 +954,11 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @Param('issueId') issueId: string,
     @Body() body: { override?: Record<string, unknown> } | undefined,
-    @Req() req: any,
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.dataQuality.applyFix({ businessId, issueId, override: body?.override, actorId: req?.user?.id });
+    // FU-DATAQUALITY-MASS-ASSIGN: the fix is applied as the member, on a
+    // contact they may open and edit, writing only the fields its issue fixes.
+    return this.dataQuality.applyFix({ businessId, issueId, override: body?.override, actorId: this.requireActorUserId(req) });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -960,9 +968,9 @@ export class CrmController {
   dqDismiss(
     @Param('businessId') businessId: string,
     @Param('issueId') issueId: string,
-    @Req() req: any,
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.dataQuality.dismissIssue({ businessId, issueId, actorId: req?.user?.id });
+    return this.dataQuality.dismissIssue({ businessId, issueId, actorId: this.requireActorUserId(req) });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -971,13 +979,14 @@ export class CrmController {
   @Post('businesses/:businessId/data-quality/bulk-apply')
   dqBulkApply(
     @Param('businessId') businessId: string,
-    @Body() body: { issueIds: string[] },
-    @Req() req: any,
+    @Body() body: { issueIds: unknown[] },
+    @Req() req: { user?: { id?: string } },
   ) {
     if (!body?.issueIds || !Array.isArray(body.issueIds)) {
       throw new BadRequestException('issueIds is required');
     }
-    return this.dataQuality.bulkApplyFix({ businessId, issueIds: body.issueIds, actorId: req?.user?.id });
+    // Each element must be an issue id (text): bulkApplyFix refuses anything else 400 (review SEC-DQ-2).
+    return this.dataQuality.bulkApplyFix({ businessId, issueIds: body.issueIds, actorId: this.requireActorUserId(req) });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -1001,7 +1010,9 @@ export class CrmController {
     @Req() req: { user?: { id?: string } },
   ) {
     await this.assertVisibleContact(businessId, contactId, req);
-    return this.dataQuality.markContactVerified(businessId, contactId);
+    // FU-DATAQUALITY-MASS-ASSIGN review repair SEC-DQ-3: the contact PATCH's edit rule, the write
+    // audited as the member (D-25), the stale-data issue resolved by them.
+    return this.dataQuality.markContactVerified(businessId, contactId, this.requireActorUserId(req));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
