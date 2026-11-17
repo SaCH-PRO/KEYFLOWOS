@@ -5,7 +5,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { KeyCortexEventService } from './key-cortex-event.service';
+import { EXECUTED_ACTION_RESULTS, KeyCortexEventService } from './key-cortex-event.service';
 import { KeyCortexEvidenceService } from './key-cortex-evidence.service';
 import { BusinessEventType } from '@prisma/client';
 import {
@@ -292,10 +292,16 @@ export class KeyCortexMetacognitionService {
   }
 
   /**
-   * Record the result of exercising a capability.
+   * Record the result of exercising a capability: KEY's capability claim, kept
+   * once, in business_events, through the event writer (owner ruling D-220,
+   * FU-KEY-EVENT-COLUMNS). queryCapabilityRecords reads these rows back for the
+   * self-model.
    *
-   * Updates proficiency scores and logs evidence for long-term
-   * capability tracking.
+   * It used to write three times: a business_events row of its own
+   * (upsertCapabilityRecord), the event writer's log (which named columns the
+   * table does not have, so it always failed), and a cortex claim into
+   * `evidence` (which refuses it: that table is the business's proof list,
+   * V61-07 / V70H-03). The claim is now the one row.
    */
   async trackCapability(
     businessId: string,
@@ -306,36 +312,17 @@ export class KeyCortexMetacognitionService {
       `[Metacognition] Tracking capability "${capability}" → ${result}`,
     );
 
-    // Upsert the capability record
-    await this.upsertCapabilityRecord(businessId, capability, result);
-
-    // Log to event service for audit trail
-    await this.eventService.logEvent({
-      businessId,
-      type: BusinessEventType.DECISION_MADE,
-      module: 'key_cortex',
+    await this.eventService.recordClaim(businessId, {
+      kind: 'capability',
       source: 'metacognition',
       action: 'capability_tracked',
-      payload: {
+      subject: { type: 'capability', id: capability },
+      details: {
         capability,
         result,
-        timestamp: new Date().toISOString(),
+        confidence: result === 'success' ? 1.0 : result === 'partial' ? 0.5 : 0.0,
+        claimType: 'TASK_COMPLETED',
       },
-    });
-
-    // Log to evidence service for tamper-proof record
-    await this.evidenceService.createEvidence({
-      businessId,
-      claim: `Capability "${capability}" executed with result: ${result}`,
-      claimType: 'TASK_COMPLETED',
-      proof: {
-        capability,
-        result,
-        businessId,
-      },
-      confidence: result === 'success' ? 1.0 : result === 'partial' ? 0.5 : 0.0,
-      source: 'metacognition',
-      relatedModule: 'key_cortex',
     });
   }
 
@@ -612,6 +599,11 @@ export class KeyCortexMetacognitionService {
 
   /**
    * Compute action success rate: % of executed actions that worked.
+   *
+   * FU-KEY-EVENT-COLUMNS review (KEC-COR-1): only the observations of an action that ran count
+   * (EXECUTED_ACTION_RESULTS). The ACTION_EXECUTED rows also hold KEY's cortex claims about an action (cortex_action,
+   * action_outcome: no result of their own) and the outcomes of actions that never ran (pending_approval, blocked,
+   * skipped); counting them as failures put a successful action at 1 in 3.
    */
   private async computeActionSuccessRate(
     businessId: string,
@@ -621,14 +613,15 @@ export class KeyCortexMetacognitionService {
       limit: 500,
     });
 
-    if (events.length === 0) return 0;
+    const ran = events.filter((e) => {
+      const payload = (e.metadata ?? {}) as Record<string, unknown>;
+      return typeof payload.result === 'string' && EXECUTED_ACTION_RESULTS.has(payload.result);
+    });
+    if (ran.length === 0) return 0;
 
-    const successes = events.filter((e) => {
-      const payload = e.metadata as Record<string, unknown>;
-      return payload.result === 'success';
-    }).length;
+    const successes = ran.filter((e) => (e.metadata as Record<string, unknown>).result === 'success').length;
 
-    return Math.round((successes / events.length) * 100) / 100;
+    return Math.round((successes / ran.length) * 100) / 100;
   }
 
   /**
@@ -717,12 +710,14 @@ export class KeyCortexMetacognitionService {
     const bucket70: number[] = [];
     const bucket50: number[] = [];
 
+    // inferOutcome reads the business's five most recent events whatever the
+    // decision: read them once, not once per decision (up to 500 identical
+    // queries per self-model, now that the decisions are kept).
+    const outcome = decisions.length > 0 ? await this.inferOutcome(businessId) : 0.5;
+
     for (const d of decisions) {
       const payload = d.metadata as Record<string, unknown>;
       const confidence = (payload.confidence as number) ?? 0.5;
-
-      // Check outcome via follow-up autonomy events
-      const outcome = await this.inferOutcome(businessId, d.id);
 
       if (confidence >= 0.8) bucket90.push(outcome);
       else if (confidence >= 0.6) bucket70.push(outcome);
@@ -746,7 +741,6 @@ export class KeyCortexMetacognitionService {
    */
   private async inferOutcome(
     businessId: string,
-    eventId: string,
   ): Promise<number> {
     // Look for follow-up events that reference this decision
     const followUps = await this.prisma.client.businessEvent.findMany({
@@ -1003,38 +997,6 @@ export class KeyCortexMetacognitionService {
   // ═══════════════════════════════════════════════════════════════
   //  PRIVATE HELPERS — Database Operations
   // ═══════════════════════════════════════════════════════════════
-
-  /**
-   * Upsert a capability execution record in the database.
-   */
-  private async upsertCapabilityRecord(
-    businessId: string,
-    capability: string,
-    result: 'success' | 'failure' | 'partial',
-  ): Promise<void> {
-    // Use a Prisma upsert pattern via the event system
-    // The event log is the source of truth for capability tracking
-    await this.prisma.client.businessEvent.create({
-      // BusinessEvent's real columns: eventType (not type), subjectType/subjectId
-      // and actorType/actorId are required, and extensible context is `metadata`
-      // (there is no `module` or `payload` column).
-      data: {
-        businessId,
-        eventType: BusinessEventType.ACTION_EXECUTED,
-        subjectType: 'capability',
-        subjectId: capability,
-        actorType: 'ai',
-        actorId: 'metacognition',
-        source: 'worker',
-        action: 'capability_tracked',
-        metadata: {
-          capability,
-          result,
-          timestamp: new Date().toISOString(),
-        },
-      },
-    });
-  }
 
   // ═══════════════════════════════════════════════════════════════
   //  PRIVATE HELPERS — Formatting

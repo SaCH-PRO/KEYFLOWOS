@@ -751,7 +751,10 @@ export class KeyCortexReflectionService {
       .getEvents(businessId, { startDate: new Date(Date.now() - hours * 60 * 60 * 1000) })
       .catch(() => []);
 
-    return [...events, ...cortexEvents];
+    // FU-KEY-EVENT-COLUMNS: KEY's observations are business_events rows too, so the two reads overlap now that
+    // getEvents answers; each row is read once.
+    const seen = new Set(events.map((e) => e.id));
+    return [...events, ...cortexEvents.filter((e) => !seen.has(e.id))];
   }
 
   private async extractKeyDecisions(

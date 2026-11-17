@@ -41,42 +41,16 @@ export class KeyCortexInteractionService {
     this.logger.debug(`[explainDecision] Looking up decision: ${decisionId}`);
 
     try {
-      let eventLog: Array<{
+      const eventLog: Array<{
         step: string;
         timestamp: Date;
         data: Record<string, unknown>;
       }> = [];
 
-      if (this.eventService) {
-        try {
-          // getEventLog() has never existed on KeyCortexEventService. The cast
-          // silenced the compiler, the call threw on every invocation, and the
-          // catch below turned that into an empty log — so explainDecision has
-          // always fallen through to the cortexSession branch and never once
-          // used a business event.
-          //
-          // getEventChain(correlationId) is the method that was wanted. That
-          // decisionId IS a correlationId is not a guess: the fallback directly
-          // beneath queries cortexSession for metadata.correlationId equal to
-          // this same decisionId.
-          const chain = await this.eventService.getEventChain(decisionId);
-          eventLog = chain.map((e) => ({
-            step: `${e.eventType}:${e.action}`,
-            timestamp: e.createdAt,
-            data: {
-              subjectType: e.subjectType,
-              subjectId: e.subjectId,
-              actorType: e.actorType,
-              actorId: e.actorId,
-              source: e.source,
-              ...(e.before ? { before: e.before } : {}),
-              ...(e.after ? { after: e.after } : {}),
-            },
-          }));
-        } catch {
-          // A decision with no recorded events is normal, not an error.
-        }
-      }
+      // FU-KEY-EVENT-COLUMNS: no event chain is read here. getEventChain is business-scoped (it used to read a
+      // correlation id across every business), and this method names no business, so it cannot ask for one; it
+      // reconstructs the decision from the session below, as it always has (no route calls it; the decision
+      // route is KeyCortexEvolutionService.explainDecision, which names the guarded business).
 
       let decisionData: Record<string, unknown> = {};
       if (eventLog.length === 0) {
