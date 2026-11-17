@@ -8,6 +8,10 @@ import { providerFailure, readProviderFailureBody } from '../../core/connectors/
  * is an outage (5xx, 408, 429, a rate-limited 403, an ABORTED 409) is 503
  * provider_unavailable (service google_forms); a refusal keeps its 400. Every
  * message is the existing one.
+ *
+ * FU-PROVIDER-ERROR-HYGIENE (D-221): createForm's message is 'Forms API error
+ * <status>', like the other sites; it carried the Forms API's body after a
+ * colon, to the client in the 400 and the 503.
  */
 @Injectable()
 export class GoogleFormsService {
@@ -35,7 +39,7 @@ export class GoogleFormsService {
     });
     if (!res.ok) {
       const body = await res.text();
-      throw providerFailure('google_forms', res.status, body, `Forms API error ${res.status}: ${body}`);
+      throw providerFailure('google_forms', res.status, body, `Forms API error ${res.status}`);
     }
     return res.json();
   }

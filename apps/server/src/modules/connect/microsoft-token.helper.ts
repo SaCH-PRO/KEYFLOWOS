@@ -13,6 +13,11 @@ import { providerFailure } from '../../core/connectors/provider-failure';
  * (service microsoft); every other failure (invalid_grant, invalid_client:
  * reconnect) keeps its 400. The message is the existing one; no token is
  * written.
+ *
+ * FU-PROVIDER-ERROR-HYGIENE (D-221): that message is 'Failed to refresh
+ * Outlook Contacts token', without the identity platform's body, which it
+ * carried after a colon to the client in the 400 and the 503. The body is
+ * still read, to classify the failure.
  */
 export class MicrosoftTokenHelper {
   constructor(private readonly prisma: PrismaService) {}
@@ -59,8 +64,8 @@ export class MicrosoftTokenHelper {
       },
     );
     if (!res.ok) {
-      const err = await res.text();
-      throw providerFailure('microsoft', res.status, err, `Failed to refresh Outlook Contacts token: ${err}`);
+      const body = await res.text();
+      throw providerFailure('microsoft', res.status, body, 'Failed to refresh Outlook Contacts token');
     }
     const tokens = (await res.json()) as {
       access_token: string;
