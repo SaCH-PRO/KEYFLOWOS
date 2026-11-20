@@ -102,18 +102,38 @@ const EMPTY_BIZ_INFO: BizInfo = {
 };
 
 /**
- * What Save sends. teamSize goes only when one of the options is chosen: "" is not a team size (the PATCH refuses
- * it), and leaving it out keeps whatever the business has stored.
+ * What Save sends as teamSize when the owner clears a team size the business has stored ("Select team size" picked
+ * over a stored size): the PATCH clears team_size with null, while "" is refused and a body without teamSize keeps
+ * the stored size. PTS-COR-1 (review): the clear was left out of the body, so the size stayed while the form said
+ * "Business info updated". Read from this file by apps/server/test/business-profile-save.integration.test.ts
+ * (V63M-C05), which saves it through the real PATCH.
  */
-function businessInfoBody(form: BizInfo): Record<string, unknown> {
+const CLEARED_TEAM_SIZE = null;
+
+/**
+ * What Save sends. teamSize goes when one of the options is chosen; when the owner cleared the size the form loaded
+ * or last saved (`stored`), it goes as CLEARED_TEAM_SIZE; otherwise it is left out: "" is not a team size (the PATCH
+ * refuses it), and leaving it out keeps whatever the business has stored (none, or a value the form cannot name).
+ */
+function businessInfoBody(form: BizInfo, stored: BizInfo): Record<string, unknown> {
   const teamSize = teamSizeOption(form.teamSize);
+  const cleared = !teamSize && teamSizeOption(stored.teamSize) !== "";
   return {
     name: form.name,
     tagline: form.tagline,
     description: form.description,
-    ...(teamSize ? { teamSize } : {}),
+    ...(teamSize ? { teamSize } : cleared ? { teamSize: CLEARED_TEAM_SIZE } : {}),
     businessHours: form.businessHours,
   };
+}
+
+/**
+ * What a save wrote, for the page (onSaved): the form's fields the body carried. A body without teamSize left the
+ * stored team size as it was, so none is reported; a clear is reported as "" (no team size).
+ */
+function savedFields(form: BizInfo, body: Record<string, unknown>): Partial<BizInfo> {
+  const { teamSize, ...rest } = form;
+  return "teamSize" in body ? { ...rest, teamSize } : rest;
 }
 
 /** What Save does, in the words a refusal is said with. */
@@ -192,7 +212,7 @@ export default function MyBusinessSection({
   onStatus,
   onSaved,
 }: MyBusinessSectionProps) {
-  const { form, setForm, setInitialForm, isDirty, saving, setSaving } = useProfileSection<BizInfo>({
+  const { form, setForm, initialForm, setInitialForm, isDirty, saving, setSaving } = useProfileSection<BizInfo>({
     initialState: EMPTY_BIZ_INFO,
     isDirtyFn: isBizInfoDirty,
     onDirtyChange,
@@ -247,12 +267,14 @@ export default function MyBusinessSection({
   const handleSave = async () => {
     if (!businessId) return;
     const saved = { ...form };
+    // Against what the form loaded or last saved, so that clearing a stored team size is sent as a clear.
+    const body = businessInfoBody(saved, initialForm);
     setSaving(true);
     onStatus(null);
     clearRefusal();
     let res: ApiAnswer;
     try {
-      res = await apiPatch<BizInfo>(`/identity/businesses/${businessId}`, businessInfoBody(saved));
+      res = await apiPatch<BizInfo>(`/identity/businesses/${businessId}`, body);
     } catch (err) {
       res = answerFromThrown(err);
     }
@@ -265,7 +287,7 @@ export default function MyBusinessSection({
     }
     onStatus({ type: "success", message: "Business info updated" });
     setInitialForm(saved);
-    onSaved?.(saved);
+    onSaved?.(savedFields(saved, body));
   };
 
   const handleAiGenerateField = async (field: "tagline" | "description") => {
