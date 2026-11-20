@@ -988,6 +988,11 @@
       "packet": "V1-63 (SWP-SEC-AUDIT-TRUTH)"
     },
     {
+      "prefix": "v63m_",
+      "owner": "apps/server/test/business-profile-save.integration.test.ts",
+      "packet": "V1-63 (SWP-PROFILE-TEAMSIZE)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
