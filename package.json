@@ -87,7 +87,7 @@
     }
   },
   "dependencies": {
-    "@sentry/nestjs": "^10.53.1",
+    "@sentry/nestjs": "^11.11.0",
     "@sentry/nextjs": "^10.53.1",
     "@sentry/node": "^10.53.1",
     "@swc-node/register": "^1.11.1",
