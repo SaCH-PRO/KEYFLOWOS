@@ -133,6 +133,7 @@ let app: any;
 async function cleanup() {
   for (const sql of [
     // The real-data block's rows, children first (invoices.contact_id is NO ACTION).
+    `DELETE FROM expenses WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM deals WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM deal_stages WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -572,6 +573,7 @@ describe('W11-CORTEX-INSIGHT-QUERIES (SEC-W11CRR-2): the REAL insight service an
     maraval: `${P}r_c_maraval`, // companyName only, CUSTOMER (the legacy CLIENT spelling)
     marcus: `${P}r_c_marcus`, // displayName wins over firstName/lastName, CLIENT
     kerry: `${P}r_c_kerry`, // LEAD, score 85, quiet 20 days, one open deal
+    priya: `${P}r_c_priya`, // PROSPECT (a lead in the CRM's vocabulary, review COR-CIQ-2), score 90, quiet 25 days, one open deal
     nadia: `${P}r_c_nadia`, // LEAD, score 40, no stage, no deal
     ghost: `${P}r_c_ghost`, // soft-deleted LEAD with an open deal
     zed: `${P}x_c_zed`, // bizX
@@ -582,6 +584,7 @@ describe('W11-CORTEX-INSIGHT-QUERIES (SEC-W11CRR-2): the REAL insight service an
     maraval: 'Maraval Hardware Ltd',
     marcus: 'Marcus Lee',
     kerry: 'Kerry Mohammed',
+    priya: 'Priya Ramdial',
     nadia: 'Nadia',
     ghost: 'Ghost Deleted',
     zed: 'Zed Outsider',
@@ -739,6 +742,7 @@ describe('W11-CORTEX-INSIGHT-QUERIES (SEC-W11CRR-2): the REAL insight service an
       { id: C.marcus, businessId: R.biz, displayName: 'Marcus Lee', firstName: 'Marc', lastName: 'Leeroy', email: `${P}marcus@test.local`, status: 'CLIENT', lastInteractionAt: daysAgo(70) },
       { id: C.kerry, businessId: R.biz, firstName: 'Kerry', lastName: 'Mohammed', status: 'LEAD', leadScore: 85, lastInteractionAt: daysAgo(20), pipelineStage: 'qualified' },
       { id: C.nadia, businessId: R.biz, firstName: 'Nadia', status: 'LEAD', leadScore: 40 },
+      { id: C.priya, businessId: R.biz, firstName: 'Priya', lastName: 'Ramdial', status: 'PROSPECT', leadScore: 90, lastInteractionAt: daysAgo(25), pipelineStage: 'proposal' },
       { id: C.ghost, businessId: R.biz, firstName: 'Ghost', lastName: 'Deleted', status: 'LEAD', leadScore: 95, lastInteractionAt: daysAgo(30), pipelineStage: 'qualified', deletedAt: now },
       { id: C.zed, businessId: R.bizX, firstName: 'Zed', lastName: 'Outsider', status: 'CLIENT' },
       { id: C.yara, businessId: R.bizX, firstName: 'Yara', lastName: 'Elsewhere', status: 'LEAD', leadScore: 95, lastInteractionAt: daysAgo(30), pipelineStage: 'proposal' },
@@ -751,9 +755,20 @@ describe('W11-CORTEX-INSIGHT-QUERIES (SEC-W11CRR-2): the REAL insight service an
       { id: `${P}r_deal_kerry_open`, businessId: R.biz, contactId: C.kerry, stageId: `${P}r_stage`, title: 'Kerry fit-out', value: 2500, status: 'OPEN' },
       { id: `${P}r_deal_kerry_won`, businessId: R.biz, contactId: C.kerry, stageId: `${P}r_stage`, title: 'Kerry earlier job', value: 9000, status: 'WON' },
       { id: `${P}r_deal_ghost_open`, businessId: R.biz, contactId: C.ghost, stageId: `${P}r_stage`, title: 'Ghost deal', value: 4444, status: 'OPEN' },
+      { id: `${P}r_deal_priya_open`, businessId: R.biz, contactId: C.priya, stageId: `${P}r_stage`, title: 'Priya proposal', value: 700, status: 'OPEN' },
       { id: `${P}x_deal_yara_open`, businessId: R.bizX, contactId: C.yara, stageId: `${P}x_stage`, title: 'Yara deal', value: 3333, status: 'OPEN' },
     ] as const) {
       await db.deal.create({ data: d });
+    }
+
+    // Expenses this month (review COR-CIQ-1): a live one, a soft-deleted one (the db client does not
+    // soft-delete filter Expense), and another business's.
+    for (const e of [
+      { id: `${P}r_exp_live`, businessId: R.biz, description: 'Supplies', amount: 100 },
+      { id: `${P}r_exp_gone`, businessId: R.biz, description: 'Deleted supplies', amount: 5000, deletedAt: now },
+      { id: `${P}x_exp_other`, businessId: R.bizX, description: 'Outsider supplies', amount: 777 },
+    ]) {
+      await db.expense.create({ data: e });
     }
 
     for (const p of [
@@ -850,6 +865,7 @@ describe('W11-CORTEX-INSIGHT-QUERIES (SEC-W11CRR-2): the REAL insight service an
       `inv-${INV.overdueM}`,
       `inv-${INV.sent}`,
       `lead-${C.kerry}`,
+      `lead-${C.priya}`,
       `prod-${PRODUCT.premium}`,
       `upsell-${C.marcus}`,
     ].sort());
@@ -874,6 +890,13 @@ describe('W11-CORTEX-INSIGHT-QUERIES (SEC-W11CRR-2): the REAL insight service an
       estimatedValue: 2500,
       sourceData: { contactId: C.kerry, daysStale: 20, score: 85 },
       priority: 'high',
+    });
+    // COR-CIQ-2: a PROSPECT is a lead too (crm.constants CONTACT_STATUSES; the CRM's pipeline counts LEAD and PROSPECT).
+    expect(byId.get(`lead-${C.priya}`)).toMatchObject({
+      type: 'stale_lead',
+      title: `Re-engage ${NAME.priya} (score: 90)`,
+      estimatedValue: 700,
+      sourceData: { contactId: C.priya, daysStale: 25, score: 90 },
     });
     expect(byId.get(`prod-${PRODUCT.premium}`)).toMatchObject({
       type: 'underutilized_product',
@@ -923,14 +946,17 @@ describe('W11-CORTEX-INSIGHT-QUERIES (SEC-W11CRR-2): the REAL insight service an
     const res = await get2('insights/pipeline', R.owner, R.biz);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     const p = res.body.pipeline;
-    expect(p.totalLeads).toBe(2);
-    expect(p.totalPipelineValue).toBe(2500);
+    expect(p.totalLeads).toBe(3);
+    expect(p.totalPipelineValue).toBe(3200);
     const stage = (name: string) => p.stages.find((s: any) => s.name === name);
     expect(stage('new')).toMatchObject({ count: 1, value: 0 });
     expect(stage('qualified')).toMatchObject({ count: 1, value: 2500, avgDaysInStage: 20 });
+    // COR-CIQ-2: the PROSPECT in 'proposal' with her open deal.
+    expect(stage('proposal')).toMatchObject({ count: 1, value: 700, avgDaysInStage: 25 });
     expect(p.funnel).toEqual([
-      { stage: 'new', count: 1, percentage: 50 },
-      { stage: 'qualified', count: 1, percentage: 50 },
+      { stage: 'new', count: 1, percentage: 33 },
+      { stage: 'qualified', count: 1, percentage: 33 },
+      { stage: 'proposal', count: 1, percentage: 33 },
     ]);
   });
 
@@ -944,9 +970,12 @@ describe('W11-CORTEX-INSIGHT-QUERIES (SEC-W11CRR-2): the REAL insight service an
     expect(r.revenue.topCustomers.map((c: any) => c.name)).toEqual([NAME.alicia, NAME.maraval]);
     expect(r.opportunities.map((o: any) => o.title)).toContain(`Collect $1,000 from ${NAME.alicia}`);
     expect(r.churnRisks.map((c: any) => c.contactName).sort()).toEqual([NAME.alicia, NAME.maraval, NAME.marcus].sort());
-    expect(r.pipeline.totalPipelineValue).toBe(2500);
+    expect(r.pipeline.totalPipelineValue).toBe(3200);
     // Paid invoices of this business (400 + 600 + 500 + 300 + 350; all rows were written this month).
     expect(r.cashFlow.moneyIn).toBe(2150);
+    // COR-CIQ-1: money out is this business's live expenses (100), not the soft-deleted 5000 nor bizX's 777.
+    expect(r.cashFlow.moneyOut).toBe(100);
+    expect(r.cashFlow.netFlow).toBe(2050);
     expect(r.cashFlow.upcomingPaymentsDue).toEqual([
       expect.objectContaining({ id: INV.upcoming, contactName: NAME.alicia, amount: 120 }),
     ]);
@@ -978,7 +1007,7 @@ describe('W11-CORTEX-INSIGHT-QUERIES (SEC-W11CRR-2): the REAL insight service an
     expect(churn.body.risks.map((r: any) => r.contactName).sort()).toEqual([NAME.alicia, NAME.maraval, NAME.marcus].sort());
     const pipeline = await get2('insights/pipeline', R.staffRevenueRead, R.biz);
     expect(pipeline.status, JSON.stringify(pipeline.body)).toBe(200);
-    expect(pipeline.body.pipeline.totalPipelineValue).toBe(2500);
+    expect(pipeline.body.pipeline.totalPipelineValue).toBe(3200);
   });
 
   it('the owner of bizX gets bizX\'s own figures and names, and nothing of bizR', async () => {
