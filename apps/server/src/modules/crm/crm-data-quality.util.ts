@@ -185,7 +185,8 @@ export function resolvePhoneCountry(country?: string | null): PhoneCountry | nul
   if (!written) return PHONE_COUNTRY_BY_NAME.get(DEFAULT_PHONE_COUNTRY_ISO.toLowerCase()) ?? null;
   if (written.startsWith('+')) {
     const digits = written.replace(/\D/g, '');
-    if (!digits) return null;
+    // No country calling code starts with 0 (CR-CODEX-E164-1).
+    if (!digits || digits.startsWith('0')) return null;
     if (digits.startsWith('1') && digits.length === 4) {
       return { iso: '', ...NANP, areaCode: digits.slice(1), names: [] };
     }
@@ -207,6 +208,8 @@ function validNanpNational(national: string): boolean {
 /** The digits of a number written with its country code, if they can be an E.164 number. */
 function readInternational(digits: string): string | null {
   if (digits.length < MIN_PHONE_DIGITS || digits.length > MAX_E164_DIGITS) return null;
+  // No country calling code starts with 0 (CR-CODEX-E164-1), as the web reader also holds.
+  if (digits.startsWith('0')) return null;
   // A North American number is +1 and ten digits.
   if (digits.startsWith('1') && !(digits.length === 11 && validNanpNational(digits.slice(1)))) return null;
   return digits;

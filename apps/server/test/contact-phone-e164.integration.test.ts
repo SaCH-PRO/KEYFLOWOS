@@ -743,13 +743,13 @@ describe('a number that cannot be read is kept as typed and flagged, never dropp
     expect(await issues(ID.bizXX, intl)).toEqual([]);
   });
 
-  it("RED-BEFORE (CR-CODEX-E164-1): a phone written '+0000000' and a WhatsApp number written '00 0123 45678' (a country code starting with 0) are kept as typed and both flagged, not stored as valid E.164", async () => {
-    const id = await created(ID.owner, ID.bizTT, { firstName: 'Zed', phone: '+0000000', whatsappNumber: '00 0123 45678' });
-    expect(await stored(id)).toMatchObject({ phone: '+0000000', whatsappNumber: '00 0123 45678' });
-    expect((await issues(ID.bizTT, id)).map((i) => `${i.kind}:${i.field}:${i.status}`).sort()).toEqual([
-      'invalid_phone:phone:open',
-      'invalid_phone:whatsappNumber:open',
-    ]);
+  it("RED-BEFORE (CR-CODEX-E164-1): a phone written '+0000000' and a WhatsApp number written '00 0123 45678' (a country code starting with 0) are kept as typed and flagged, not stored as valid E.164 (one invalid_phone issue per contact, so one contact each)", async () => {
+    const zed = await created(ID.owner, ID.bizTT, { firstName: 'Zed', phone: '+0000000' });
+    expect(await stored(zed)).toMatchObject({ phone: '+0000000' });
+    expect((await issues(ID.bizTT, zed)).map((i) => `${i.kind}:${i.field}:${i.status}`)).toEqual(['invalid_phone:phone:open']);
+    const zia = await created(ID.owner, ID.bizTT, { firstName: 'Zia', phone: '712-3520', whatsappNumber: '00 0123 45678' });
+    expect(await stored(zia)).toMatchObject({ phone: '+18687123520', whatsappNumber: '00 0123 45678' });
+    expect((await issues(ID.bizTT, zia)).map((i) => `${i.kind}:${i.field}:${i.status}`)).toEqual(['invalid_phone:whatsappNumber:open']);
   });
 
   it("CONTROL (COR-E164-6, written here, scanned below): a phone typed with '+' and spaces ('+1 868 712 3511', kept as typed) beside a WhatsApp number that cannot be read: the contact is flagged on 'whatsappNumber'", async () => {
