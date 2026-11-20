@@ -1445,7 +1445,10 @@ export class FlowOrchestratorService {
           // readersOwnPromptMemory keeps only what the reader's module scopes
           // allow (a staff position's turn: its position's modules); no reader
           // has no module, so it keeps only GOVERNANCE_DECISION proposals (a
-          // record naming no module needs every module: review SEC-W1FPMS-1).
+          // record naming no module needs every module: review SEC-W1FPMS-1),
+          // and a memberless turn sees each as its action, status and risk
+          // level only, never its title or figures (FU-KEY-MEMORY-MONEY-SIGHT,
+          // SEC-W1FPMS-4; D-73, D-93, D-226).
           ...(reader ? { userId: reader } : { sourceTypes: [...BUSINESS_WIDE_MEMORY_SOURCES] }),
           limit: window + PROMPT_MEMORY_HEADROOM,
           // 0.3 was decorative — it could not reject a single row.
