@@ -709,7 +709,7 @@ describe('W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R1: the chat\'s model tool cal
    * The member the chat runs for: the business owner (Business.ownerId holding an OWNER membership: owner
    * rulings D-116, D-125, W11-D116-KEY-OWNER), or a membership row (null: none) and a User role.
    */
-  function setup(member: { owner?: boolean; membership?: { role: string; permissionScopes: Record<string, string> | null } | null; role?: string; fail?: boolean }) {
+  function setup(member: { owner?: boolean; membership?: { role: string; permissionScopes: Record<string, string> | string[] | null } | null; role?: string; fail?: boolean }) {
     vi.clearAllMocks();
     mockContextService.buildContextSnapshot.mockResolvedValue(mockContextSnapshot);
     mockSessionService.getOrCreateSession.mockResolvedValue(mockSession);
@@ -864,6 +864,9 @@ describe('W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R1: the chat\'s model tool cal
   // owner's only (D-119). Each case runs through the tool loop and the blocked actions on both chat paths.
   const ADMIN_DEFAULTS = defaultScopesForRole('ADMIN');
   const NOT_MAPPED = (name: string) => `Tool "${name}" is mapped to no module scope, so it is not executed from this route`;
+  /** D-140: the refusal an OWNER membership with an explicit scope map gets for an unmapped tool. */
+  const OWNER_MAP_UNMAPPED = (name: string) =>
+    `Tool "${name}" needs the business owner's unrestricted access (it is mapped to no module scope), and this OWNER membership is bound by its explicit scope map (D-140)`;
   const W11_ORGAN_CASES: Array<{
     title: string;
     member: Parameters<typeof setup>[0];
@@ -947,19 +950,57 @@ describe('W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R1: the chat\'s model tool cal
     },
     {
       // W11A-SEAM-REPAIR control (review SEC-W11D116K-1 stays closed; D-125, D-71): an explicit scope map on an OWNER
-      // membership binds it on every mapped tool, organ tools included; only an unmapped tool is the owner arm's (D-119).
-      // Open, awaiting an owner ruling (review SEC-SR-3): the `runs` half pins D-119/D-125/D-131 as written (an OWNER
-      // membership runs every unmapped tool, cortex.query_database and key_connector.execute_internal included, whatever
-      // its explicit map says). Refusing an unmapped tool to an OWNER membership that holds an explicit map would narrow
-      // those rulings, so it waits for the owner; if so ruled, key_connector.execute_internal moves to `refused` here.
-      title: 'W11A-SEAM-REPAIR control (SEC-W11D116K-1): an OWNER membership whose explicit map leaves out connect and sets revenue none is refused the three KEY connector reads and temporal_flow.list_events, and still runs the unmapped key_connector.execute_internal and cortex.create_task (ai write in its map)',
+      // membership binds it on every mapped tool, organ tools included. W11-OWNER-MAP-UNMAPPED-TOOLS (owner ruling D-140,
+      // closing review SEC-SR-3): it binds it on the unmapped tools too, so key_connector.execute_internal moved from
+      // `runs` to `refused` here, as this case's earlier comment said it would if so ruled. RED at e4e3b35b: it ran.
+      title: 'W11A-SEAM-REPAIR control (SEC-W11D116K-1), updated to D-140: an OWNER membership whose explicit map leaves out connect and sets revenue none is refused the three KEY connector reads, temporal_flow.list_events and the unmapped key_connector.execute_internal, and still runs cortex.create_task (ai write in its map)',
       member: { membership: { role: 'OWNER', permissionScopes: { ai: 'write', revenue: 'none' } } },
-      runs: ['key_connector.execute_internal', 'cortex.create_task'],
+      runs: ['cortex.create_task'],
       refused: [
         ['key_connector.list_providers', 'Insufficient permissions: connect requires read access (you have none)'],
         ['key_connector.list_connections', 'Insufficient permissions: connect requires read access (you have none)'],
         ['key_connector.check_health', 'Insufficient permissions: connect requires read access (you have none)'],
         ['temporal_flow.list_events', 'Insufficient permissions: revenue requires read access (you have none)'],
+        ['key_connector.execute_internal', OWNER_MAP_UNMAPPED('key_connector.execute_internal')],
+      ],
+    },
+    // W11-OWNER-MAP-UNMAPPED-TOOLS (owner ruling D-140, 2026-11-12; review SEC-SR-3): an OWNER membership that carries an
+    // explicit permissionScopes map is bound by it on KEY as on REST: it is refused every unmapped KEY tool (fail closed),
+    // with a refusal naming that the tool needs the business owner's unrestricted access. An OWNER membership with no
+    // explicit map keeps every tool, mapped and unmapped. Non-owners are unchanged (D-119: refused every unmapped tool).
+    {
+      title: 'D-140 RED-BEFORE: an OWNER membership with the explicit map {operations: write} is refused cortex.execute_tool, key_connector.execute_internal, cortex.query_database and key_genome.update_dna_section (unmapped), and still runs key_inbox.list_threads (operations read reached by its map) (was run: every unmapped tool)',
+      member: { membership: { role: 'OWNER', permissionScopes: { operations: 'write' } } },
+      runs: ['key_inbox.list_threads'],
+      refused: [
+        ['cortex.execute_tool', OWNER_MAP_UNMAPPED('cortex.execute_tool')],
+        ['key_connector.execute_internal', OWNER_MAP_UNMAPPED('key_connector.execute_internal')],
+        ['cortex.query_database', OWNER_MAP_UNMAPPED('cortex.query_database')],
+        ['key_genome.update_dna_section', OWNER_MAP_UNMAPPED('key_genome.update_dna_section')],
+      ],
+    },
+    {
+      title: 'D-140 RED-BEFORE: an OWNER membership stored as a JSON array (an explicit map naming no module, as ModuleScopeGuard reads it) is refused cortex.execute_tool and key_connector.execute_internal (was run)',
+      member: { membership: { role: 'OWNER', permissionScopes: [] } },
+      runs: [],
+      refused: [
+        ['cortex.execute_tool', OWNER_MAP_UNMAPPED('cortex.execute_tool')],
+        ['key_connector.execute_internal', OWNER_MAP_UNMAPPED('key_connector.execute_internal')],
+      ],
+    },
+    {
+      title: 'D-140 control: a co-owner (an OWNER membership with no explicit map, not Business.ownerId, D-125) runs cortex.execute_tool, key_connector.execute_internal and cortex.query_database',
+      member: { membership: { role: 'OWNER', permissionScopes: null } },
+      runs: ['cortex.execute_tool', 'key_connector.execute_internal', 'cortex.query_database'],
+      refused: [],
+    },
+    {
+      title: 'D-140 control (non-owners unchanged, D-119): a STAFF member with the same explicit map {operations: write} is refused the unmapped tools with the mapped-to-no-module-scope refusal, and runs key_inbox.list_threads',
+      member: { membership: { role: 'STAFF', permissionScopes: { operations: 'write' } } },
+      runs: ['key_inbox.list_threads'],
+      refused: [
+        ['cortex.execute_tool', NOT_MAPPED('cortex.execute_tool')],
+        ['key_connector.execute_internal', NOT_MAPPED('key_connector.execute_internal')],
       ],
     },
   ];

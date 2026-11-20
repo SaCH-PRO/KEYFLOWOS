@@ -203,9 +203,15 @@ describe('memberToolRunAuthority (KEY chat\'s tool calls, the plan queue, approv
     }
   });
 
-  it('control (D-119): the OWNER stored as [] still runs the unmapped dotted tool, the business owner\'s only', async () => {
-    expect(await memberToolRunAuthority(prismaStandIn(), BIZ, 'ownerEmpty', UNMAPPED_ORGAN)).toEqual({ refusal: null, principal: false });
-    expect(await memberToolRunAuthority(prismaStandIn(), BIZ, 'ownerEmpty', UNMAPPED_ORGAN, { asPrincipal: true })).toEqual({ refusal: null, principal: true });
+  // W11-OWNER-MAP-UNMAPPED-TOOLS (owner ruling D-140): this was a D-119 control (the OWNER stored as [] ran the unmapped
+  // dotted tool). D-140 binds an OWNER membership's explicit map on the unmapped tools too, an array included (the
+  // explicit map naming no module, as ModuleScopeGuard and isExplicitScopeMap read it). RED at e4e3b35b: admitted (null).
+  it('RED-BEFORE (D-140): the OWNER stored as [] is refused the unmapped dotted tool, with or without the principal, with the refusal naming the business owner\'s unrestricted access (was admitted: null)', async () => {
+    const refusal = `Tool "${UNMAPPED_ORGAN}" needs the business owner's unrestricted access (it is mapped to no module scope), and this OWNER membership is bound by its explicit scope map (D-140)`;
+    expect(await memberToolRunAuthority(prismaStandIn(), BIZ, 'ownerEmpty', UNMAPPED_ORGAN)).toEqual({ refusal, principal: false });
+    expect(await memberToolRunAuthority(prismaStandIn(), BIZ, 'ownerEmpty', UNMAPPED_ORGAN, { asPrincipal: true })).toEqual({ refusal, principal: false });
+    // An object map binds it the same way (ownerAiMap: ai write alone).
+    expect(await memberToolRunAuthority(prismaStandIn(), BIZ, 'ownerAiMap', UNMAPPED_ORGAN)).toEqual({ refusal, principal: false });
   });
 
   it('control (unchanged): an OWNER with no map runs all four; an OWNER whose object map grants ai write runs the organ tool and is refused the revenue read', async () => {
