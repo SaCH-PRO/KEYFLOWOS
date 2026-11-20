@@ -56,6 +56,11 @@
  *   V71F-D01  RED-BEFORE  POST /identity/bootstrap answering a business the caller is a member of without revenue read
  *                         (a Business.ownerId holder with no membership on that business, STAFF on bizA) answers it
  *                         without the five; the owner's bootstrap still answers them
+ *   V71F-D02  RED-BEFORE  (review SEC-IFC-1) the bootstrap's revenue-read check is the caller's own membership of the
+ *                         business it answers, whatever ambient tenant context the request carries: inside a tenant
+ *                         context for bizA, the OWNER of bizB bootstrapping is answered bizB with the five (RED: the
+ *                         membership read was narrowed to bizA, so the five were withheld from the business's owner);
+ *                         the stranded caller is still withheld under the same context (control: fails closed only)
  */
 import 'reflect-metadata';
 import path from 'path';
@@ -428,5 +433,42 @@ describe('FU-IDENTITY-FINANCE-COLUMNS: the business reads answer the finance set
     expect(owner.status, JSON.stringify(owner.body)).toBe(201);
     expect(owner.body.isNewBusiness).toBe(false);
     expectAnswered(owner.body.business, ID.bizA, 'owner (bootstrap)');
+  });
+
+  it('V71F-D02 RED-BEFORE (review SEC-IFC-1): the bootstrap reads the caller\'s own membership of the business it answers whatever tenant context the request carries: inside a tenant context for bizA, the OWNER of bizB is answered bizB with the five; the stranded caller is still withheld', async () => {
+    // POST /identity/bootstrap has no business in its path, so TenantInterceptor's context is whatever
+    // `?businessId=` or body businessId the caller belongs to (the test app registers no interceptor: the
+    // context is set here as the interceptor would). mixed is STAFF { bookings: read } of bizA and OWNER of
+    // bizB; bootstrap answers bizB (the oldest membership is bizA's, but Business.ownerId names bizB: the
+    // route's own rule, V71F-D01 covers it). The revenue-read check must read mixed's membership of bizB,
+    // not a membership of bizB narrowed to the ambient tenant bizA (which finds nothing and withholds).
+    const { runWithTenant, getCurrentBusinessId } = await import('../src/core/tenant/tenant-context');
+    const { setTenantContextProvider } = await import('@keyflow/db');
+    const { IdentityService } = await import('../src/modules/identity/identity.service');
+    // As main.ts wires it: every Prisma read of a business-scoped model is narrowed to the ambient tenant.
+    setTenantContextProvider({ getCurrentBusinessId });
+    const identity = app.get(IdentityService);
+
+    const mixed = await runWithTenant(ID.bizA, ID.mixed, () =>
+      identity.bootstrapUser({ userId: ID.mixed, email: emailOf(ID.mixed) }),
+    );
+    expect(mixed.isNewBusiness).toBe(false);
+    expect(mixed.business?.id).toBe(ID.bizB);
+    expectAnswered(mixed.business, ID.bizB, 'mixed, OWNER of bizB, bootstrap under tenant context bizA');
+
+    // Without a context the answer is the same (the route as the web calls it: no businessId).
+    const plain = await identity.bootstrapUser({ userId: ID.mixed, email: emailOf(ID.mixed) });
+    expect(plain.business?.id).toBe(ID.bizB);
+    expectAnswered(plain.business, ID.bizB, 'mixed, OWNER of bizB, bootstrap with no tenant context');
+
+    // Control: the check never opens. stranded (STAFF { bookings: read } of bizA) under bizA's context is
+    // answered bizA without the five, as V71F-D01 proves without a context; and under bizB's context too.
+    for (const ctx of [ID.bizA, ID.bizB]) {
+      const stranded = await runWithTenant(ctx, ID.stranded, () =>
+        identity.bootstrapUser({ userId: ID.stranded, email: emailOf(ID.stranded) }),
+      );
+      expect(stranded.isNewBusiness).toBe(false);
+      expectWithheld(stranded.business, ID.bizA, `stranded, bootstrap under tenant context ${ctx}`);
+    }
   });
 });
