@@ -44,7 +44,8 @@ import { apiDelete } from "@/lib/api";
 import { invoiceBalanceOfStoredRows, invoicePaidPercent } from "@keyflow/shared";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { useCompose } from "@/components/email/compose-context";
-import { buildWhatsAppLink, ownBusinessCountry, readSavedWhatsAppNumber } from "@/lib/whatsapp";
+import { ownBusinessCountry, readWhatsAppShareNumber } from "@/lib/whatsapp";
+import { useWhatsAppDocumentShare } from "@/components/whatsapp/whatsapp-document-share";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { formatAmount, getDaysUntilDue } from "../utils/commerce-utils";
 import { INVOICE_STATUS_FILTERS, BILLING_SORT_OPTIONS, BillingSortKey } from "../components/commerce-types";
@@ -57,6 +58,7 @@ const PAGE_SIZE = 10;
 export default function InvoicesHubPage() {
   const router = useRouter();
   const { open: openComposer } = useCompose();
+  const whatsApp = useWhatsAppDocumentShare();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [businessCurrency, _setBusinessCurrency] = useState<string>("TTD");
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -233,13 +235,15 @@ export default function InvoicesHubPage() {
     return null;
   };
 
-  // The share carries the invoice's bearer link: only the WhatsApp number the business saved
-  // (read by id alongside the link, not from the loaded list), else the chooser.
+  // The share carries the invoice's bearer link: the WhatsApp number the business saved (read by id
+  // alongside the link, not from the loaded list); a phone only once the member confirms it as that
+  // number (FU-WA-CONTACT-PHONE); else the chooser.
   const shareWhatsApp = async (inv: Invoice) => {
-    const savedNumber = readSavedWhatsAppNumber(businessId, inv.contactId);
+    const country = ownBusinessCountry();
+    const number = readWhatsAppShareNumber(businessId, inv.contactId, country);
     const url = await buildPublicUrl(inv);
     if (!url) return;
-    window.open(buildWhatsAppLink({ to: await savedNumber, text: "Your invoice:", link: url, country: ownBusinessCountry() }), "_blank");
+    whatsApp.share({ number: await number, businessId, contactId: inv.contactId, text: "Your invoice:", link: url, country, what: "invoice" });
   };
 
   return (
@@ -422,6 +426,7 @@ export default function InvoicesHubPage() {
       )}
 
       <ConfirmDialog open={confirmOpen} onCancel={() => setConfirmOpen(false)} title="Delete invoice?" message="This action cannot be undone." confirmLabel="Delete" variant="danger" onConfirm={() => { confirmAction?.(); setConfirmOpen(false); }} />
+      {whatsApp.dialog}
     </motion.div>
   );
 }

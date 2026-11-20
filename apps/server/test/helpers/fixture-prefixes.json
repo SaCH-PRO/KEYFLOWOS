@@ -1081,6 +1081,11 @@
       "prefix": "v71j_",
       "owner": "apps/server/test/key-event-columns.integration.test.ts",
       "packet": "V1-71 (FU-KEY-EVENT-COLUMNS)"
+    },
+    {
+      "prefix": "v71m_",
+      "owner": "apps/server/test/contact-whatsapp-confirm.integration.test.ts",
+      "packet": "V1-71 (FU-WA-CONTACT-PHONE)"
     }
   ],
   "pendingRenames": [],

@@ -24,6 +24,9 @@
  *   business checked. The share opens only the WhatsApp number the business
  *   saved on the contact (Contact.whatsappNumber, which no public route
  *   writes); a phone alone gets WhatsApp's chooser, as before the packet.
+ *   FU-WA-CONTACT-PHONE (D-221): a phone alone is now offered for the member
+ *   to confirm as the WhatsApp number first (invoices-whatsapp-confirm
+ *   .test.tsx); unconfirmed it still never receives the link.
  * - WAH-CR-1: the screens' contacts are the 50 newest (fetchContacts sends no
  *   take), so the customer is read by id at share time (GET
  *   /crm/businesses/:id/contacts/:contactId, the member's own read).
@@ -32,7 +35,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
-import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import type { Contact, Invoice } from "@/lib/client";
 
 const hub = vi.hoisted(() => ({
@@ -246,9 +249,18 @@ describe("WA-HELPER Sales > Invoices panel: Share via WhatsApp opens the custome
     expect(target.searchParams.get("text")).toContain(`/public/invoice/${TOKEN}`);
   });
 
-  // SEC-WAH-1 (RED at 087b0365: wa.me/18685550199 with the bearer invoice link).
-  it("a phone with no WhatsApp number saved by the business (a public form can write it) never receives the invoice link: the chooser", async () => {
-    const target = await panelShare(contact({ phone: "+1 868 555 0199", whatsappNumber: null }));
+  // SEC-WAH-1 (RED at 087b0365: wa.me/18685550199 with the bearer invoice link). Since
+  // FU-WA-CONTACT-PHONE the phone is offered for the member to confirm first
+  // (invoices-whatsapp-confirm.test.tsx); unconfirmed it never receives the link.
+  it("a phone with no WhatsApp number saved by the business (a public form can write it) never receives the invoice link unconfirmed: the confirm step, and without confirming, the chooser", async () => {
+    served = { status: 200, contact: contact({ phone: "+1 868 555 0199", whatsappNumber: null }) };
+    render(<Panel contacts={[]} />);
+    fireEvent.click(screen.getAllByLabelText("More actions")[0]!);
+    fireEvent.click(screen.getByText("Share via WhatsApp"));
+    const step = await screen.findByRole("dialog", { name: /whatsapp number/i });
+    expect(windowOpen).not.toHaveBeenCalled();
+    fireEvent.click(within(step).getByRole("button", { name: "Share without a number" }));
+    const target = await opened();
     expect(target.origin + target.pathname).toBe("https://wa.me/");
     expect(target.searchParams.get("text")).toContain(`/public/invoice/${TOKEN}`);
   });
@@ -290,9 +302,23 @@ describe("WA-HELPER Invoices hub: Share WhatsApp opens the customer's own number
     expect(target.searchParams.get("text")).toContain(`/public/invoice/${TOKEN}`);
   });
 
-  // SEC-WAH-1 (RED at 087b0365: wa.me/18685550199 with the bearer invoice link).
-  it("a phone planted through the public intake (no WhatsApp number saved by the business): the chooser, never the planted chat", async () => {
-    const target = await hubShare(contact({ phone: "+1 868 555 0199", whatsappNumber: null }));
+  // SEC-WAH-1 (RED at 087b0365: wa.me/18685550199 with the bearer invoice link). Since
+  // FU-WA-CONTACT-PHONE the phone is offered for the member to confirm first; unconfirmed,
+  // the planted chat never receives the link.
+  it("a phone planted through the public intake (no WhatsApp number saved by the business): the confirm step, and without confirming, the chooser, never the planted chat", async () => {
+    served = { status: 200, contact: contact({ phone: "+1 868 555 0199", whatsappNumber: null }) };
+    hub.invoices = [invoice()];
+    hub.contacts = [];
+    render(<InvoicesHubPage />);
+    const number = await screen.findAllByText("INV-0042");
+    const row = number[0]!.closest("tr")!;
+    const menu = row.querySelectorAll("button");
+    fireEvent.click(menu[menu.length - 1]!);
+    fireEvent.click(await screen.findByText("Share WhatsApp"));
+    const step = await screen.findByRole("dialog", { name: /whatsapp number/i });
+    expect(windowOpen).not.toHaveBeenCalled();
+    fireEvent.click(within(step).getByRole("button", { name: "Share without a number" }));
+    const target = await opened();
     expect(target.origin + target.pathname).toBe("https://wa.me/");
     expect(target.searchParams.get("text")).toMatch(new RegExp(`^Your invoice: \\S+/public/invoice/${TOKEN}$`));
   });
