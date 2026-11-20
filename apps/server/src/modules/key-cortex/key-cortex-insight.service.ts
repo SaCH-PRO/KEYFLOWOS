@@ -65,10 +65,12 @@ const UNPAID_STATUSES: InvoiceStatus[] = [InvoiceStatus.SENT, InvoiceStatus.PEND
 const OUTSTANDING_STATUSES: InvoiceStatus[] = [...UNPAID_STATUSES, InvoiceStatus.PARTIAL, InvoiceStatus.PARTIALLY_PAID];
 
 /**
- * Contact.status vocabulary (crm.constants): a lead is LEAD; a customer is
- * CLIENT or a legacy spelling isClientStatus reads as CLIENT.
+ * Contact.status vocabulary (crm.constants CONTACT_STATUSES): a lead is LEAD or
+ * PROSPECT, as the CRM's own pipeline counts them (crm-actions.service; review
+ * COR-CIQ-2); a customer is CLIENT or a legacy spelling isClientStatus reads as
+ * CLIENT.
  */
-const LEAD_STATUS = 'LEAD';
+const LEAD_STATUSES = ['LEAD', 'PROSPECT'];
 const CLIENT_STATUSES = [CLIENT_STATUS, LEGACY_CLIENT_STATUS, LEGACY_DORMANT_STATUS];
 
 /**
@@ -258,7 +260,7 @@ export class KeyCortexInsightService {
         where: {
           businessId,
           deletedAt: null,
-          status: LEAD_STATUS,
+          status: { in: LEAD_STATUSES },
           lastInteractionAt: { lt: subDays(new Date(), 14) },
           leadScore: { gte: 50 },
         },
@@ -696,7 +698,7 @@ export class KeyCortexInsightService {
         where: {
           businessId,
           deletedAt: null,
-          status: LEAD_STATUS,
+          status: { in: LEAD_STATUSES },
         },
         _count: { pipelineStage: true },
       });
@@ -706,7 +708,7 @@ export class KeyCortexInsightService {
         where: {
           businessId,
           deletedAt: null,
-          status: LEAD_STATUS,
+          status: { in: LEAD_STATUSES },
         },
         select: {
           pipelineStage: true,
@@ -853,10 +855,12 @@ export class KeyCortexInsightService {
       });
       const moneyIn = paidInvoices.reduce((s, i) => s + (i.total || 0), 0);
 
-      // Money out = expenses (if tracked) or estimated from costs
+      // Money out = expenses (if tracked) or estimated from costs. Expense has deletedAt but the db
+      // client does not soft-delete filter it (review COR-CIQ-1), so it is spelled out.
       const expenses = await this.prisma.client.expense.findMany({
         where: {
           businessId,
+          deletedAt: null,
           date: { gte: monthStart },
         },
         select: { amount: true },
