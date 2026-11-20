@@ -524,6 +524,23 @@ describe('normalizeToE164 reads a number under the business country (crm-data-qu
     expect(normalizeToE164('', 'TT')).toEqual({ ok: true });
     expect(normalizeToE164(null, 'TT')).toEqual({ ok: true });
   });
+
+  it("RED-BEFORE (CR-CODEX-E164-1, Codex review of https://github.com/SaCH-PRO/KEYFLOWOS/pull/214): no country calling code starts with 0, so a number written internationally whose code would (after '+', 00 or 011) is not ok, as the web WhatsApp reader refuses it; nor is a business country written as a '+0' code", async () => {
+    const { normalizeToE164, resolvePhoneCountry } = await import('../src/modules/crm/crm-data-quality.util');
+    for (const typed of ['+0000000', '+0 868 712 3401', '+00 44 20 7946 0958', '00 0 1234 5678', '0001234567']) {
+      expect(normalizeToE164(typed, 'TT').ok, typed).toBe(false);
+      expect(normalizeToE164(typed, 'Atlantis').ok, `${typed} (Atlantis)`).toBe(false);
+    }
+    expect(normalizeToE164('011 0 1234 5678', 'TT').ok).toBe(false);
+    expect(resolvePhoneCountry('+0')).toBeNull();
+    expect(resolvePhoneCountry('+044')).toBeNull();
+    expect(normalizeToE164('712-3401', '+0').ok).toBe(false);
+    // Controls: the same numbers with a real code still read.
+    expect(normalizeToE164('+1 868 712 3401', 'TT')).toMatchObject({ ok: true, e164: '+18687123401' });
+    expect(normalizeToE164('00 44 20 7946 0958', 'TT')).toMatchObject({ ok: true, e164: '+442079460958' });
+    expect(normalizeToE164('011 44 20 7946 0958', 'TT')).toMatchObject({ ok: true, e164: '+442079460958' });
+    expect(resolvePhoneCountry('+44')).toMatchObject({ callingCode: '44' });
+  });
 });
 
 // -----------------------------------------------------------------------------
@@ -724,6 +741,15 @@ describe('a number that cannot be read is kept as typed and flagged, never dropp
     const intl = await created(ID.owner, ID.bizXX, { firstName: 'In', phone: '+44 20 7946 0958' });
     expect(await stored(intl)).toMatchObject({ phone: '+44 20 7946 0958', phoneNormalized: '+442079460958' });
     expect(await issues(ID.bizXX, intl)).toEqual([]);
+  });
+
+  it("RED-BEFORE (CR-CODEX-E164-1): a phone written '+0000000' and a WhatsApp number written '00 0123 45678' (a country code starting with 0) are kept as typed and both flagged, not stored as valid E.164", async () => {
+    const id = await created(ID.owner, ID.bizTT, { firstName: 'Zed', phone: '+0000000', whatsappNumber: '00 0123 45678' });
+    expect(await stored(id)).toMatchObject({ phone: '+0000000', whatsappNumber: '00 0123 45678' });
+    expect((await issues(ID.bizTT, id)).map((i) => `${i.kind}:${i.field}:${i.status}`).sort()).toEqual([
+      'invalid_phone:phone:open',
+      'invalid_phone:whatsappNumber:open',
+    ]);
   });
 
   it("CONTROL (COR-E164-6, written here, scanned below): a phone typed with '+' and spaces ('+1 868 712 3511', kept as typed) beside a WhatsApp number that cannot be read: the contact is flagged on 'whatsappNumber'", async () => {
