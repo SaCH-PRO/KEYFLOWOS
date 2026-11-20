@@ -363,6 +363,24 @@ export class IdentityService {
     return LEVEL_RANK[await viewerModuleLevel(this.prisma, businessId, viewer, 'revenue')] >= LEVEL_RANK.read;
   }
 
+  /**
+   * FU-IDENTITY-FINANCE-COLUMNS review SEC-IFC-1: whether the bootstrapping caller holds revenue read on the
+   * business the bootstrap answers, read from their own membership of it outside the ambient tenant context
+   * (`skipTenantIsolation`: the context can name another business the caller belongs to, which would narrow
+   * the read to nothing and withhold the columns from a member who may read them). The rule is the list read's
+   * (membershipReadsRevenue, ModuleScopeGuard's; a SUPER_ADMIN passes as the guard passes them).
+   */
+  private async bootstrapReadsRevenue(businessId: string, user: { id: string; role?: string | null }): Promise<boolean> {
+    if (user.role === 'SUPER_ADMIN') return true;
+    const membership = await this.prisma.client.membership.findUnique(
+      skipTenantIsolation({
+        where: { userId_businessId: { userId: user.id, businessId } },
+        select: { role: true, permissionScopes: true },
+      }),
+    );
+    return membershipReadsRevenue(membership);
+  }
+
   private static readonly PUBLIC_BUSINESS_FIELDS = {
     id: true,
     name: true,
@@ -1876,7 +1894,13 @@ export class IdentityService {
     // found can be one the caller is only a member of (the oldest membership of a
     // Business.ownerId holder with no membership on the business they are recorded
     // as owning, ensureBootstrapWorkspace); one created here is the caller's own.
-    const mayReadRevenue = isNewBusiness || (await this.readsRevenue(business.id, { id: user.id, role: user.role }));
+    // Review SEC-IFC-1: this route has no business in its path, so the ambient tenant
+    // context (TenantInterceptor: any `?businessId=` or body businessId the caller
+    // belongs to) can name another business, and a tenant-scoped membership read
+    // would be narrowed to it and find nothing. The caller's own membership of the
+    // business answered is read outside that context, as ensureBootstrapWorkspace
+    // reads its siblings, and judged by the same rule as the list read.
+    const mayReadRevenue = isNewBusiness || (await this.bootstrapReadsRevenue(business.id, user));
     return { user, business: withholdBusinessFinanceSettings(sanitizeBusiness(business), mayReadRevenue), isNewBusiness };
   }
 
