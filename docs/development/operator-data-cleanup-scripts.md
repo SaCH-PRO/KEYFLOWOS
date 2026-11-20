@@ -39,6 +39,11 @@ lists each stale copy's id (an opaque generated id) with its reason, so the
 operator can see what `--apply` will delete. It still never prints a copy's
 content or a business id.
 
+Section 5 does the same for phone keys: its dry run lists each contact id it
+would rewrite or leave, with the action, and never prints a phone number, a
+name or a business id. Its proof is
+`apps/server/test/phone-country-duplicates.integration.test.ts` (V71L-30..33).
+
 ## 1. Cross-tenant custom-field values (SF-1)
 
 ```bash
@@ -444,6 +449,52 @@ and one `stale copy <id> <reason>` line per copy (dry run), or `deleted`
 **After a cleanup.** A row whose only copies were stale has no copy until a
 member runs the backfill route again (or the row is rewritten with the
 embedding path on).
+
+## 5. Phone keys stored before E.164 (FU-PHONE-COUNTRY-DUPLICATES, D-211)
+
+```bash
+cd apps/server
+pnpm backfill:phone-keys                     # dry run: list and count, every business
+pnpm backfill:phone-keys --business=<id>     # dry run, one business
+pnpm backfill:phone-keys --apply             # rewrite the keys
+```
+
+**Why.** `contacts.phone_normalized` is a contact's phone identity key: the
+partial unique `(business_id, phone_normalized)` over live contacts makes one
+number one contact. Since WA-E164-SERVER a contact write stores the phone read
+under the business's country (`Business.country`; unset is Trinidad and
+Tobago, +1 868) and keys it in E.164; since FU-PHONE-COUNTRY-DUPLICATES the
+connector door (EntityResolutionService) and the Google and Outlook contact
+syncs do too (owner ruling D-211: a number written without a country code is
+read in the business's country only). Rows written before keep the key of the
+spelling (`8685550101`, or the seven-digit `5550101`), or none (contacts the
+connector door created). The readers bridge that, but the unique only sees
+equal keys.
+
+**What it writes.** For each contact with a phone (or a key), the key a write
+stores for its phone today: the E.164 number when the phone reads under its
+business's country, the spelling's digits when it does not, no key when the
+phone has no digit. Only `phone_normalized` changes; the phone a contact shows
+and `updated_at` are left as they were. Soft-deleted contacts are rewritten
+too (the unique does not cover them). Each row is one `UPDATE` that still
+requires the phone and key the run read, so a row edited since is left
+(`changed_since_read`) for the next run.
+
+**What it leaves.** `needs_merge`: another live contact of the business holds
+the number now, or would after the run (two old spellings of one number).
+Rewriting one would break the unique, and which customer is the real one is
+the owner's call: merge them in Customers, then run again. `unreadable`: the
+phone does not read (too short, or a local number under a country with no
+dialling rules); its key stays as typed and the data-quality scan flags it.
+
+**Output.** `contacts_scanned`, `key_current`, `unreadable_kept`,
+`needs_merge`, `would_rewrite` (and `rewritten`, `changed_since_read`, `failed`
+with `--apply`), then one `<contact id>  <action>` line per row that is not
+current (`rewrite`, `needs_merge`, `unreadable`). It never prints a phone
+number, a name or a business id. Exit status as above. It imports the reading
+from `apps/server/src/modules/crm/crm-duplicate.util.ts`, so on the production
+box mount `src/` beside `scripts/` (as for `backfill-google-identities.ts`).
+Not run against production by the packet.
 
 ## Proof
 

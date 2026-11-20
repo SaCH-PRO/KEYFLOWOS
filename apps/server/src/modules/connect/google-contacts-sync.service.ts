@@ -5,6 +5,7 @@ import { mergeConnectorMetadata } from '../../core/connectors/connector-metadata
 import { getTenantContext } from '../../core/tenant/tenant-context';
 import { CONTACT_STATUSES, canonicalContactStatus, type ContactStatus } from '../crm/crm.constants';
 import { resolveCrmAccess } from '../crm/crm-permissions.helper';
+import { contactPhoneRead, livePhoneKeyHolderIds } from '../crm/crm-duplicate.util';
 import { CrmService } from '../crm/crm.service';
 import { ContactAuditService, type ContactAuditActor } from '../crm/privacy/contact-audit.service';
 import { GoogleTokenHelper } from './google-token.helper';
@@ -221,6 +222,63 @@ export async function contactWritableBy(
 }
 
 /**
+ * FU-PHONE-COUNTRY-DUPLICATES (owner ruling D-211): a synced person's phone as
+ * the CRM write stores it (contactPhoneRead: E.164 read under the business's
+ * country, Business.country; a number typed with '+' as written; one that does
+ * not read as typed) and its identity key. The Google and Outlook syncs keyed
+ * the spelling ('868-555-0101' was '8685550101'), so a person whose number a
+ * live contact holds in another spelling was created again.
+ */
+export type SyncPhone = ReturnType<typeof contactPhoneRead>;
+
+/**
+ * FU-PHONE-COUNTRY-DUPLICATES (D-211): the live contact a person who is not
+ * linked yet is: the holder of their email (its key), else the oldest live
+ * holder of their number in any spelling under the business's country
+ * (livePhoneKeyHolderIds). Undefined when none is.
+ */
+export async function syncMatchedContactId(
+  prisma: PrismaService,
+  businessId: string,
+  emailNorm: string | null,
+  phone: SyncPhone,
+  country: string | null,
+): Promise<string | undefined> {
+  if (emailNorm) {
+    const byEmail = await prisma.client.contact.findFirst({
+      where: { businessId, emailNormalized: emailNorm, deletedAt: null },
+      select: { id: true },
+    });
+    if (byEmail) return byEmail.id;
+  }
+  const [holderId] = await livePhoneKeyHolderIds(prisma.client, businessId, phone, country);
+  return holderId;
+}
+
+/**
+ * FU-PHONE-COUNTRY-DUPLICATES (D-211): the phone fields a sync writes onto
+ * `contactId`: the person's phone and its key, unless another live contact
+ * holds that number (in any spelling, under the business's country); then
+ * none, and the number stays with its holder. The sync wrote it before, so a
+ * person matched by email took a number another contact holds (a second live
+ * holder under another key, or a unique violation that ended the run).
+ */
+export async function syncPhoneFields(
+  prisma: PrismaService,
+  businessId: string,
+  contactId: string,
+  phone: SyncPhone,
+  country: string | null,
+): Promise<{ phone?: string; phoneNormalized?: string }> {
+  if (!phone.phone) return {};
+  if (phone.phoneNormalized) {
+    const others = await livePhoneKeyHolderIds(prisma.client, businessId, phone, country, { exceptId: contactId });
+    if (others.length > 0) return {};
+  }
+  return { phone: phone.phone, phoneNormalized: phone.phoneNormalized ?? undefined };
+}
+
+/**
  * W6-CONNECT-TAG-MERGE review repair SEC-W6CTM-3: whether a run may create
  * contacts: every one of `members` passes the CRM create door's own check
  * (CrmService.assertCanCreateContacts: a member, and an edit scope other than
@@ -319,12 +377,6 @@ export class GoogleContactsSyncService {
   private normalizeEmail(s: string | null | undefined): string | null {
     if (!s) return null;
     return s.trim().toLowerCase() || null;
-  }
-
-  private normalizePhone(s: string | null | undefined): string | null {
-    if (!s) return null;
-    const digits = s.replace(/[^\d+]/g, '');
-    return digits || null;
   }
 
   /** Read mapping rules stored on the connector_status row metadata. */
@@ -520,8 +572,10 @@ export class GoogleContactsSyncService {
     const token = await this.accessToken(businessId);
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
-      select: { contactsSyncToken: true },
+      select: { contactsSyncToken: true, country: true },
     });
+    // D-211: a person's phone is read under the business's country, as POST .../contacts reads it.
+    const country = business?.country ?? null;
     const stored = await this.getMappingRules(businessId);
     // SEC-D92R-3: the default owner is applied only while they are a member of this business.
     const rules: ContactMappingRules = {
@@ -602,8 +656,8 @@ export class GoogleContactsSyncService {
         const phone = conn.phoneNumbers?.[0]?.value ?? null;
         const company = conn.organizations?.[0]?.name ?? null;
         const emailNorm = this.normalizeEmail(email);
-        const phoneNorm = this.normalizePhone(phone);
-        if (!emailNorm && !phoneNorm) {
+        const phoneRead = contactPhoneRead(phone, country);
+        if (!emailNorm && !phoneRead.phoneNormalized) {
           skipped += 1;
           continue;
         }
@@ -623,17 +677,8 @@ export class GoogleContactsSyncService {
         let isNew = false;
         let createdRow: Contact | null = null;
         if (!contactId) {
-          const existing = await this.prisma.client.contact.findFirst({
-            where: {
-              businessId,
-              OR: [
-                ...(emailNorm ? [{ emailNormalized: emailNorm }] : []),
-                ...(phoneNorm ? [{ phoneNormalized: phoneNorm }] : []),
-              ],
-            },
-            select: { id: true },
-          });
-          contactId = existing?.id;
+          // D-211: the holder of the email, else of the number in any spelling.
+          contactId = await syncMatchedContactId(this.prisma, businessId, emailNorm, phoneRead, country);
         }
 
         if (contactId) {
@@ -648,13 +693,15 @@ export class GoogleContactsSyncService {
             refused += 1;
             continue;
           }
+          // D-211: the number as the CRM write stores it, unless another live contact holds it.
+          const phoneFields = await syncPhoneFields(this.prisma, businessId, contactId, phoneRead, country);
           const data = {
             firstName: firstName ?? undefined,
             lastName: lastName ?? undefined,
             email: email ?? undefined,
             emailNormalized: emailNorm ?? undefined,
-            phone: phone ?? undefined,
-            phoneNormalized: phoneNorm ?? undefined,
+            phone: phoneFields.phone,
+            phoneNormalized: phoneFields.phoneNormalized,
             companyName: company ?? undefined,
           };
           updated += 1;
@@ -688,8 +735,8 @@ export class GoogleContactsSyncService {
               lastName,
               email,
               emailNormalized: emailNorm,
-              phone,
-              phoneNormalized: phoneNorm,
+              phone: phoneRead.phone,
+              phoneNormalized: phoneRead.phoneNormalized,
               companyName: company,
               source: 'google_contacts',
               status: 'LEAD',

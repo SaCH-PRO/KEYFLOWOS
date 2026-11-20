@@ -88,6 +88,12 @@ export async function findSearchTags(
 export type ContactWhereOptions = {
   /** findSearchTags(search): the business's tags that contain the search text. */
   searchTags?: string[];
+  /**
+   * Business.country as written: a phone searched with its country code also finds the national
+   * spelling of a key stored before E.164 only when it is a number of this country
+   * (phoneSearchKeys; owner ruling D-211). Unset reads as Trinidad and Tobago.
+   */
+  phoneCountry?: string | null;
 };
 
 /**
@@ -129,8 +135,9 @@ export function buildContactWhere(
       { tags: { hasSome: [...new Set([searchValue, ...(options.searchTags ?? [])])] } },
     ];
     if (normalizedEmail) orConditions.push({ emailNormalized: { contains: escapeContainsText(normalizedEmail) } });
-    // The phone typed in any spelling of the number (BUG-083); keys hold only digits and '+'.
-    for (const key of phoneSearchKeys(searchValue)) orConditions.push({ phoneNormalized: { contains: key } });
+    // The phone typed in any spelling of the number (BUG-083), read in the business's country
+    // only (D-211); keys hold only digits and '+'.
+    for (const key of phoneSearchKeys(searchValue, options.phoneCountry)) orConditions.push({ phoneNormalized: { contains: key } });
     where.OR = orConditions;
   }
   if (filters.hasUnpaidInvoices) {
