@@ -1086,6 +1086,11 @@
       "prefix": "v71m_",
       "owner": "apps/server/test/contact-whatsapp-confirm.integration.test.ts",
       "packet": "V1-71 (FU-WA-CONTACT-PHONE)"
+    },
+    {
+      "prefix": "v71c_",
+      "owner": "apps/server/test/seed-super-admin-placeholder.integration.test.ts",
+      "packet": "V1-71 (FU-SEED-SUPERADMIN-PLACEHOLDER)"
     }
   ],
   "pendingRenames": [],

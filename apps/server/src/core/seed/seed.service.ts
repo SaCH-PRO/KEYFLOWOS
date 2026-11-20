@@ -11,6 +11,21 @@ export function superAdminEmailFrom(env: NodeJS.ProcessEnv): string | null {
   return email ? email : null;
 }
 
+/**
+ * V1-71 (FU-SEED-SUPERADMIN-PLACEHOLDER): whether a users row's `meta_data` carries
+ * the invite marker inviteTeamMember sets on the placeholder it makes for an address
+ * with no account. The same key and the same test as IdentityService's private
+ * INVITE_PLACEHOLDER_KEY and isMarkedInvitePlaceholder (the seed spec pins the two
+ * equal): such a row is a pending invitation, not an account.
+ */
+function isInvitePlaceholder(metaData: unknown): boolean {
+  return (
+    typeof metaData === 'object' &&
+    metaData !== null &&
+    (metaData as Record<string, unknown>).invitePlaceholder === true
+  );
+}
+
 @Injectable()
 export class SeedService implements OnApplicationBootstrap {
   private readonly logger = new Logger(SeedService.name);
@@ -42,6 +57,20 @@ export class SeedService implements OnApplicationBootstrap {
    *
    * Never creates a user. Read through the `env` parameter (process.env by
    * default), the way main.ts reads LISTEN_HOST, so the spec can drive it.
+   *
+   * V1-71 (FU-SEED-SUPERADMIN-PLACEHOLDER, SEC-V63-1): never promotes a team-invite
+   * placeholder (isInvitePlaceholder). An owner can invite the admin's address
+   * before the admin has signed in (stored lower-cased since V1-63, so an invite
+   * typed in any case lands on it); the placeholder is that pending invitation, not
+   * the admin's account. Promoted, it failed the role-USER check bootstrap adopts a
+   * placeholder under (IdentityService.assertAdoptableInvitePlaceholder), and the
+   * admin's first sign-in got 409 account_email_in_use. Left a USER, the sign-in
+   * adopts it under the ordinary rules; the adopted row carries no marker, and the
+   * next run promotes it as any account. A placeholder an earlier run promoted is
+   * not written here either (this method only ever promotes); it is logged for the
+   * operator. The invite route does not treat the address specially: a distinct
+   * answer there would let anyone with team:write probe for it. The address is
+   * never logged.
    */
   async seedSuperAdmin(env: NodeJS.ProcessEnv = process.env) {
     const email = superAdminEmailFrom(env);
@@ -52,10 +81,24 @@ export class SeedService implements OnApplicationBootstrap {
     try {
       const user = await this.prisma.client.user.findUnique({
         where: { email },
-        select: { id: true, role: true },
+        select: { id: true, role: true, metaData: true },
       });
       if (!user) {
         this.logger.log('SUPER_ADMIN_EMAIL names no existing user yet — skipping promotion');
+        return;
+      }
+      if (isInvitePlaceholder(user.metaData)) {
+        if (user.role === 'SUPER_ADMIN') {
+          this.logger.warn(
+            `The SUPER_ADMIN_EMAIL user (${user.id}) is a pending team invitation an earlier seed promoted; ` +
+              'its first sign-in is refused until an operator sets its role back to USER',
+          );
+        } else {
+          this.logger.log(
+            `The SUPER_ADMIN_EMAIL user (${user.id}) is a pending team invitation, not an account yet — ` +
+              'not promoted; the first boot after its first sign-in promotes it',
+          );
+        }
         return;
       }
       if (user.role === 'SUPER_ADMIN') {
