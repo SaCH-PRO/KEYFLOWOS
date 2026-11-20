@@ -11,6 +11,8 @@
 
 KEYFLOW OS unifies the tools you need to run a business — CRM, invoicing, bookings, automations, content, analytics, and an AI assistant named **KEY** — into one cohesive platform.
 
+> **Picking up the v1 work?** Start with [`docs/reconstruction/V1-HANDOFF-2026-11-20.md`](docs/reconstruction/V1-HANDOFF-2026-11-20.md): where the code stands, the half-finished packets and their branches, what comes next, how to run and verify it, and what waits on the owner. The plan of record is [`docs/reconstruction/V1-PLAN-RECUT.json`](docs/reconstruction/V1-PLAN-RECUT.json), and the owner rulings are in [`docs/reconstruction/BUILD-MAP-001.md`](docs/reconstruction/BUILD-MAP-001.md).
+
 ---
 
 ## ✨ What It Does

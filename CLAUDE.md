@@ -8,7 +8,7 @@ Before substantial work, read:
 3. `docs/development/AGENT_CONTROL_PLANE.md`
 4. `docs/intelligence/execution/MULTI-AGENT-EXECUTION-PROTOCOL.md` (in main since the 2026-11-13 tie-off, D-141, as a dated historical record, not live state)
 5. `docs/intelligence/execution/IMPLEMENTATION-WAVE-EXECUTION-BOARD.md` (in main since the 2026-11-13 tie-off, as a dated historical record; the current plan is `docs/reconstruction/BUILD-MAP-001.md`)
-6. canonical handoff/current-state files
+6. canonical handoff/current-state files: the latest is `docs/reconstruction/V1-HANDOFF-2026-11-20.md` (v1 status, work in progress, next packets, how to run and verify), with `docs/reconstruction/V1-PLAN-RECUT.json` as the plan of record
 7. the active packet and latest ChatGPT DIRECTIVE in GitHub issue #80
 
 ## Control room
