@@ -80,6 +80,8 @@ import { useCompose } from "@/components/email/compose-context";
 import { quoteConvertDefaults, quoteConvertRequest, type QuoteConvertForm } from "../../finance/components/quote-convert-modal";
 import { newPaymentAttemptKey } from "../../finance/components/payment-record-modal";
 import { ArrowRightLeft, Eye } from "lucide-react";
+import { ownBusinessCountry, readWhatsAppShareNumber } from "@/lib/whatsapp";
+import { useWhatsAppDocumentShare } from "@/components/whatsapp/whatsapp-document-share";
 
 type QuoteBulkAction = "send" | "reject" | "delete";
 /** One row the bulk route left as it is (V1-50 / V1-QUOTE-CHAIN-finish bulk contract). */
@@ -174,6 +176,7 @@ export default function QuotesPanel({
   const { businessData, saveBranding, savingBranding } = useBusinessPreview();
   const { getOriginContext } = useNavigationContext();
   const { open: openComposer } = useCompose();
+  const whatsApp = useWhatsAppDocumentShare();
   const quoteTaskIdRef = useRef<string | null>(null);
   const quoteSessionIdRef = useRef<string | null>(null);
   // V1-45b (D-15): the quote create's Idempotency-Key, one per open of the
@@ -705,6 +708,9 @@ export default function QuotesPanel({
   }
 
   async function shareQuoteViaWhatsApp(quote: Quote) {
+    const country = ownBusinessCountry();
+    // The customer's number, read by id alongside the link (not from the loaded list).
+    const number = readWhatsAppShareNumber(businessId, quote.contactId, country);
     const { url, forbidden, error } = await fetchQuoteLink(quote);
     if (!url) {
       const shareable = quote.status !== "DRAFT" && !quote.invoiceId;
@@ -716,7 +722,16 @@ export default function QuotesPanel({
         description: "Sharing the customer link needs revenue write access.",
       });
     }
-    window.open(`https://wa.me/?text=${encodeURIComponent(shareMessage(quote, url))}`, "_blank", "noopener,noreferrer");
+    // The share carries the quote's bearer link: the WhatsApp number the business saved; a phone
+    // only once the member confirms it as that number (FU-WA-CONTACT-PHONE); else the chooser.
+    whatsApp.share({
+      number: await number,
+      businessId,
+      contactId: quote.contactId,
+      text: shareMessage(quote, url),
+      country,
+      what: "quote",
+    });
   }
 
   async function handleConvert() {
@@ -1337,6 +1352,7 @@ export default function QuotesPanel({
             lifecycleStep={selectedQuote.lifecycleStep}
             contact={selectedQuote.contact ?? null}
             contactId={selectedQuote.contactId}
+            businessId={businessId}
             total={Number(selectedQuote.total)}
             currency={selectedQuote.currency}
             items={(selectedQuote.items ?? []) as Array<{ id?: string; description?: string | null; quantity?: number; unitPrice?: number; total?: number; productId?: string | null }>}
@@ -1524,6 +1540,7 @@ export default function QuotesPanel({
           />
         );
       })()}
+      {whatsApp.dialog}
     </motion.div>
   );
 }

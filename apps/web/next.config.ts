@@ -208,6 +208,9 @@ const nextConfig: NextConfig = {
         destination: "/app/schedule/calendar",
         permanent: true,
       },
+      // The destination renders the marketing screen outside the marketing
+      // tree, so it wears that tree's DormantFeatureGate itself
+      // (MARKETING-REDIRECT-GATE, src/__tests__/marketing-redirect-gate.test.ts).
       {
         source: "/app/marketing",
         destination: "/app/communicate/campaigns",

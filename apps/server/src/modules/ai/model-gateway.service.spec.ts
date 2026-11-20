@@ -758,6 +758,12 @@ describe('ModelGatewayService', () => {
     it('opens circuit after 3 consecutive failures', async () => {
       const callOpenAiSpy = vi.fn().mockRejectedValue(new Error('rate limit exceeded'));
       (service as any).callOpenAi = callOpenAiSpy;
+      // The fallbacks fail too, in process. Left real, the anthropic fallback sent
+      // a POST to api.anthropic.com with the test key in some test orders; the
+      // unit network guard refuses that (FU-UNIT-MOCK-ISOLATION).
+      for (const fallback of ['callAnthropic', 'callXai', 'callKimi', 'callGoogle', 'callNative', 'callOpensource']) {
+        (service as any)[fallback] = vi.fn().mockRejectedValue(new Error(`${fallback}: provider unavailable`));
+      }
 
       // Exhaust primary and fallbacks
       await expect(service.complete(baseRequest())).rejects.toThrow();

@@ -12,11 +12,16 @@ import { MetaSocialIngestionService } from './meta-social-ingestion.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { WebhookIngressLoggerService } from '../../core/connectors/webhook-ingress-logger.service';
 import { oauthRedirect } from '../../core/config/runtime-urls';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
+
+/** The social networks a social connection may name (the OAuth starts and the publishers handle these). */
+const SOCIAL_PLATFORMS = ['FACEBOOK', 'INSTAGRAM', 'LINKEDIN', 'TWITTER', 'TIKTOK'] as const;
 
 interface RawBodyRequest extends Request {
   rawBody?: Buffer;
 }
 
+@HiddenModuleWrites('social', 'content')
 @Controller('social')
 export class SocialController {
   private readonly logger = new Logger(SocialController.name);
@@ -326,9 +331,8 @@ export class SocialController {
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/connections/oauth-availability')
   async oauthAvailability(@Param('businessId') businessId: string) {
-    const platforms = ['FACEBOOK', 'INSTAGRAM', 'LINKEDIN', 'TWITTER', 'TIKTOK'];
     const result: Record<string, boolean> = {};
-    for (const p of platforms) {
+    for (const p of SOCIAL_PLATFORMS) {
       const creds = await this.connections.getPlatformCredentials(businessId, p);
       result[p] = !!creds;
     }
@@ -660,6 +664,8 @@ export class SocialController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  // D-181 (connectorauth): only a settings admin connects, syncs or tests the other connectors (SWP-CENSUS-HIDDEN).
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/connections/:platform/test')
   async testConnection(
     @Param('businessId') businessId: string,
@@ -739,12 +745,19 @@ export class SocialController {
       scopes?: string;
     },
   ) {
+    // SWP-CENSUS-HIDDEN (SWEEP-P0-FOLLOWUP wave-2 note): a social connection is a social network's account.
+    // The route took any platform string, so a settings admin could store an EMAIL, GOOGLE or WHATSAPP row here,
+    // which a channel sync from social then read as that sending account (it skips them now, SEC-FU-1).
+    const socialPlatform = platform.toUpperCase();
+    if (!(SOCIAL_PLATFORMS as readonly string[]).includes(socialPlatform)) {
+      throw new BadRequestException(`A manual connection is for a social network: ${SOCIAL_PLATFORMS.join(', ')}`);
+    }
     if (!body.token) {
       throw new BadRequestException('Token is required');
     }
 
     const connection = await this.connections.upsertConnection(businessId, {
-      platform: platform.toUpperCase(),
+      platform: socialPlatform,
       platformId: body.platformId,
       accountName: body.accountName,
       token: body.token,

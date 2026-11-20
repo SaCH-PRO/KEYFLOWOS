@@ -84,8 +84,10 @@
  * the member may open, so it cannot be compared with contact-stats to learn of
  * c3Priv; SEC-W11CCR-2 (D-63), GET .../contacts/favorites lists only the
  * favourites the member may open. The same finding's data-quality issues and
- * wizard and relationship-health at-risk reads are it.todo hand-offs: their
- * contacts come from services outside that packet's write set.
+ * wizard reads, handed off as it.todo, are closed by FU-DATAQUALITY-MASS-ASSIGN's
+ * review repair SEC-DQ-1 (CrmDataQualityService.listIssues and wizardQueue apply
+ * the member's visibility); the relationship-health at-risk read is still an
+ * it.todo hand-off: its contacts come from a service outside both write sets.
  *
  * The AI rate limit (checkAiRateLimit: 10 AI calls a minute per business)
  * bounds the AI routes this suite calls: 4 to ai-insight and the recompute,
@@ -1565,10 +1567,34 @@ describe('W10-MONEY-SIGNALS-REST: the highlights are worked out from the contact
       }
     });
 
-    // SEC-W11CCR-2 hand-offs: these reads take their contacts from services outside this packet's write
-    // set (crm-stats, crm controller); the visibility clause belongs in their own queries (a follow-up packet).
-    it.todo("SEC-W11CCR-2 (D-63) (W11-CRM-COUNTS-RULING review, hand-off): GET .../data-quality/issues (CrmDataQualityService.listIssues) serves a STAFF member the open issue of another member's PRIVATE contact with the contact's id, name, email and phone, and counts it in total and byKind; GET contacts/:c answers that contact 404. The visibility clause belongs in listIssues' where (crm-data-quality.service.ts, outside this packet's write set); a controller filter of one page would leave total and byKind counting it");
-    it.todo("SEC-W11CCR-2 (D-63) (W11-CRM-COUNTS-RULING review, hand-off): GET .../data-quality/wizard (CrmDataQualityService.wizardQueue) serves a STAFF member the open issue of another member's PRIVATE contact with the contact's id, name, email and phone. The visibility clause belongs in wizardQueue's where (crm-data-quality.service.ts, outside this packet's write set), so hidden issues neither show nor take the queue's places");
+    // SEC-W11CCR-2 hand-offs, data-quality issues and wizard: closed by FU-DATAQUALITY-MASS-ASSIGN's
+    // review repair SEC-DQ-1 (the visibility clause is in CrmDataQualityService.listIssues and wizardQueue).
+    it("SEC-W11CCR-2 (D-63) (W11-CRM-COUNTS-RULING review hand-off, closed by FU-DATAQUALITY-MASS-ASSIGN review repair SEC-DQ-1): GET .../data-quality/issues serves each STAFF member (crm read; revenue read and revenue 'none') only the open issue of the contact that member may open (c3Team's), and total and byKind count only it: the open issue of c3Priv (another member's PRIVATE contact) and c3Priv's id, name and email appear nowhere in the response; the owner's list stays business-wide (both issues)", async () => {
+      // Control: the owner (no visibility clause) is served both issues.
+      const owner = await ok3(ID.owner, 'data-quality/issues');
+      expect((owner.items as Array<{ id: string }>).map((i) => i.id).sort(), 'owner').toEqual([DQ.privIssue, DQ.teamIssue].sort());
+      expect({ total: owner.total, byKind: owner.byKind }, 'owner').toEqual({ total: 2, byKind: { [DQ.privKind]: 1, [DQ.teamKind]: 1 } });
+
+      for (const user of [ID.rev, ID.noRev]) {
+        const served = await ok3(user, 'data-quality/issues');
+        expect((served.items as Array<{ id: string }>).map((i) => i.id), user).toEqual([DQ.teamIssue]);
+        expect({ total: served.total, byKind: served.byKind }, user).toEqual({ total: 1, byKind: { [DQ.teamKind]: 1 } });
+        expectNoPriv(served, `${user} GET data-quality/issues`);
+      }
+    });
+
+    it("SEC-W11CCR-2 (D-63) (W11-CRM-COUNTS-RULING review hand-off, closed by FU-DATAQUALITY-MASS-ASSIGN review repair SEC-DQ-1): GET .../data-quality/wizard offers each STAFF member (crm read; revenue read and revenue 'none') only c3Team's open issue, never c3Priv's, whose id, name and email appear nowhere in the response; the owner's wizard offers both", async () => {
+      const owner = await ok3(ID.owner, 'data-quality/wizard');
+      expect((owner.items as Array<{ id: string }>).map((i) => i.id).sort(), 'owner').toEqual([DQ.privIssue, DQ.teamIssue].sort());
+
+      for (const user of [ID.rev, ID.noRev]) {
+        const served = await ok3(user, 'data-quality/wizard');
+        expect((served.items as Array<{ id: string }>).map((i) => i.id), user).toEqual([DQ.teamIssue]);
+        expectNoPriv(served, `${user} GET data-quality/wizard`);
+      }
+    });
+    // SEC-W11CCR-2 hand-off: this read takes its contacts from a service outside this packet's write set; the
+    // visibility clause belongs in its own query (a follow-up packet).
     it.todo("SEC-W11CCR-2 (D-63) (W11-CRM-COUNTS-RULING review, hand-off): GET .../relationship-health/at-risk (CrmRelationshipHealthService.listAtRisk) serves a STAFF member another member's AT_RISK or DORMANT PRIVATE contact with its id, name, email and phone. The visibility clause belongs in listAtRisk's where (crm-relationship-health.service.ts, outside this packet's write set), so hidden contacts neither show nor take the list's places");
   });
 });

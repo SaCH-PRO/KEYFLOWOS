@@ -1537,6 +1537,7 @@ function PublicBookingPageInner() {
           removeFromCart={removeFromCart}
           relatedItems={catalogItems.filter(i => i.itemType === selectedItem.itemType && i.id !== selectedItem.id).slice(0, 4)}
           businessPhone={business?.phone}
+          businessCountry={business?.country}
           onClose={() => setSelectedItem(null)}
           onSelectItem={(item) => setSelectedItem(item)}
           badges={storefrontConfig?.merchandising?.badges}

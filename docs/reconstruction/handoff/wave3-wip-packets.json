@@ -1,0 +1,487 @@
+[
+ {
+  "packet": "SWP-SEC-AUDIT-TRUTH",
+  "branch": "pkt/V1-SWP-SEC-AUDIT-TRUTH",
+  "branch_head_local": "ddd322224c7c9c733a21ea1c080318fc52ab4a12",
+  "next_stage": "repair",
+  "status": "Both reviews ran: security accepted, correctness asked for a repair. The repair agent committed a fix on the branch and was cut off by the usage limit before it verified it.",
+  "built": {
+   "head": "1d068715a6b985907e0819b46cc4f50ed134e8b0",
+   "red": "Commit ce867bbb8 holds the tests alone, on base ca0c12e3d, with real Postgres 16 (keyflowos_v1_swp_sec_audit_truth, all migrations applied) and Redis 6380 db 12.\n\nServer: `vitest run -c vitest.integration.config.ts test/security-audit-truth.integration.test.ts` gave 5 failed and 6 passed (11 tests).\n- V63G-02: the MFA check had no status. The base answered passed true and '100% of team members have MFA enabled (5 total).'\n- V63G-03: inactive-users had no status. The base hard-codes inactive = 0 and passes it.\n- V63G-04: no check was not_tracked, and the score counted the MFA claim as a pass (score 88, passed 7, total 8).\n- V63G-05: a STAFF member on the role defaults (settings none) got 200 and the full audit.\n- V63G-06: a STAFF member whose explicit scope map leaves settings out got 200.\n- The controls were green at base: fixture sanity, OWNER 200, settings-read 200, ADMIN 200, non-member 403, no outbound fetch.\n\nWeb: `vitest run src/app/app/settings/security/__tests__/security-audit-truth.test.tsx` gave 3 failed and 1 passed.\n- WEB-SAT-01: a not-tracked check was drawn with the failure styling and never said 'Not tracked'.\n- WEB-SAT-02: the summary had no 'not tracked' count.\n- WEB-SAT-03: a 403 was a toast over an empty page, with no 'No access' alert.\n- WEB-SAT-04 (a 500 keeps the toast) was the control and was green at base.\n\nfixture-prefix-registry was green at the RED commit (16/16).",
+   "what": "BUG-065 is fixed. The security audit no longer claims MFA or inactive-user results it does not track, and only members with settings read can run it.\n\nServer (`apps/server/src/modules/security-audit`):\n- Every check now carries a `status`: passed, failed or not_tracked. `passed` stays and is true only when the status is passed.\n- **MFA check:** it is now not_tracked. It states no percentage, no member count and no recommendation, and it no longer reads the memberships. It used to report a hard-coded `mfaRate = 1` as \"100% of team members have MFA enabled\" and count it as a pass.\n- **Inactive-users check:** it is also not_tracked, because no last sign-in is recorded. It used to hard-code `inactive = 0` and pass. This is a small extension beyond the MFA wording; see open_issues.\n- **Score:** a new exported `summarizeAudit` counts only measured checks in score, passed and total. A new `notTracked` field counts the rest, and score is null if nothing was measured.\n- **Access:** GET `security/businesses/:businessId/audit` now runs `ModuleScopeGuard` with `@RequireModuleScope('settings', 'read')`. A member without settings read gets 403 before the audit reads anything; the test proves this with a spy on `runAudit`.\n\nWeb (`apps/web/src/app/app/settings/security/page.tsx`):\n- A not-tracked check shows a 'Not tracked' label and is drawn as neither a pass nor a failure, with no recommendation.\n- The summary reads 'N of M checks passed \u00b7 K not tracked'.\n- A 403 shows an alert headed 'No access, ask the owner' (matching the journey J6 wording) with the line 'Ask the business owner for access.' It shows no score, no checks, no toast and no 'Run audit' button.\n- Other errors still show a toast.\n\nCommits:\n- ce867bbb8: tests only (RED).\n- af18371d6: the server and web fix.\n- 1d068715a: the refusal heading wording for journey J.\n\nEvery item of the definition of done that can be reached locally is met: tests first with a recorded RED, real-DB proof through the HTTP route, web unit tests, typecheck and lint clean, and proof:release0 MET.",
+   "tests": [
+    {
+     "file": "apps/server/test/security-audit-truth.integration.test.ts",
+     "passed": 11,
+     "failed": 0
+    },
+    {
+     "file": "apps/web/src/app/app/settings/security/__tests__/security-audit-truth.test.tsx",
+     "passed": 4,
+     "failed": 0
+    },
+    {
+     "file": "apps/server/src/modules/security-audit/security-audit.service.spec.ts",
+     "passed": 13,
+     "failed": 0
+    },
+    {
+     "file": "apps/server/src/core/config/fixture-prefix-registry.spec.ts",
+     "passed": 16,
+     "failed": 0
+    },
+    {
+     "file": "apps/server/src/core/auth/public-surface.spec.ts",
+     "passed": 5,
+     "failed": 0
+    },
+    {
+     "file": "apps/server/src/core/config/rest-scope-census.spec.ts",
+     "passed": 24,
+     "failed": 0
+    },
+    {
+     "file": "scripts/proof-admission/run-manifests.mjs (full run at 1d068715a: 122 files, 4182 passed, 10 todo, vitest exit 0; 36/44 SATISFIED, 8 KF_PROOF_REPORT_STALE because the run took 838s against a 600s limit; those 8 rerun with --only at the same head: 23 files, 527 passed, 8/8 SATISFIED, so 44/44 SATISFIED)",
+     "passed": 4709,
+     "failed": 0
+    },
+    {
+     "file": "pnpm --filter server proof:release0 --skip-build at 1d068715a (passing attempt: 107 files, 3724 passed, 9 todo, 39/39 manifests SATISFIED, release0-proof-coverage 19/19, R0 EXIT GATE MET exit 0)",
+     "passed": 3743,
+     "failed": 0
+    }
+   ],
+   "tsc": "Server: `tsc --project tsconfig.json` (the server build, the same config as typecheck) exited 0 with 0 errors at 1d068715a. Two earlier plain `tsc --noEmit` runs were killed by the shared memory limit, which is an environment problem, not a code one. Web: `tsc --noEmit` exited 0 with 0 errors, after `next typegen` as CI does. eslint on the changed files: server warnings went from 2 to 0 (two unused variables removed), web stayed at 1 (an existing warning), and the new web test file is clean.",
+   "release0": "MET at 1d068715a6b985907e0819b46cc4f50ed134e8b0: 39/39 Release 0 manifests SATISFIED, the coverage spec exited 0, all 9 not-run cases explained, R0 EXIT GATE MET (exit 0). Two earlier attempts at the same head were rejected only because of machine load (load average 25 to 33 on 4 CPUs). Those runs took 723s and 800s against the 600s report-age limit, and 1 to 3 tests hit their default 5000ms timeout. The timed-out tests were in key-cortex.controller.spec, the evidence-feed briefing, shadowed-routes bulk move-stage and R0-SEC2c, all outside this packet. They passed in the full run-manifests run and in the passing release0 attempt. No Release 0 case or manifest was changed (r0_impact none).",
+   "files_changed": [
+    "apps/server/src/modules/security-audit/security-audit.service.ts",
+    "apps/server/src/modules/security-audit/security-audit.controller.ts",
+    "apps/web/src/app/app/settings/security/page.tsx",
+    "apps/server/test/security-audit-truth.integration.test.ts",
+    "apps/server/test/helpers/fixture-prefixes.json",
+    "apps/web/src/app/app/settings/security/__tests__/security-audit-truth.test.tsx"
+   ],
+   "open_issues": [
+    "Scope extension for the reviewer: inactive-users is now also not_tracked. Its code said 'lastLoginAt not yet tracked' and hard-coded inactive = 0 as a pass, which is the same false claim as MFA in the same audit. It is one method plus case V63G-03. To drop it, revert checkInactiveUsers and remove V63G-03 and 'inactive-users' from NOT_TRACKED_IDS.",
+    "Other untrue checks in the same audit, left out of scope as a possible follow-up packet. (1) password-policy reads PASSWORD_MIN_LENGTH, which nothing else reads, and reports 8 characters, but the signup, reset and change-password DTOs enforce 12 (and hosted Supabase has its own rule, D-02). (2) rate-limiting warns 'not explicitly configured' unless RATE_LIMIT_WINDOW_MS is set, but app-bootstrap.ts always installs a limiter with defaults (60000 ms, 200 requests), so this is a false fail. (3) env-secrets flags any '@localhost' DATABASE_URL, even outside production.",
+    "The response contract changed. `total` now counts measured checks only, `status` and `notTracked` are new, and `score` can be null. A grep found the security page as the only consumer; KEY's SandboxSecurityAudit is unrelated.",
+    "Not reachable here: no journey J step covers /app/settings/security. J6 covers Expenses and Settings > Team, and the GATE-JOURNEYS-G-L specs are not in this base. The refusal heading matches the J6 regexes so a future step would pass.",
+    "Not reachable here: the browser sweep repro for BUG-065 was not re-run, because it needs the running app with real auth. The integration and web unit tests cover the same steps.",
+    "The Settings tab list in apps/web/src/app/app/settings/layout.tsx still shows 'Security' to every member. A STAFF member without settings read now gets the refusal notice there. Hiding the tab belongs to the NAV packets (NAV-B-HIDE); I did not touch it.",
+    "Environment: the session's shared memory limit killed two plain server `tsc --noEmit` runs (OOM at about 3 GB while other agents' builds and tests were running). The server build, which runs the same tsc config, passed with 0 errors. proof:release0 needed a third attempt for the load reasons in the release0 field.",
+    "As the workflow instructed: no push, no PR, no issue #80 ACK/RETURN, no .agent-control files. The CLAUDE.md control-room steps are left to the orchestrator. The hawkscan post-commit hook prompt was not acted on: there was no running app or HAWK_API_KEY, and the task forbids outside traffic.",
+    "Base suites outside the write set: none seen failing apart from the load timeouts listed in the release0 field."
+   ],
+   "owner_questions": [
+    "Should the security audit keep the inactive-users check as 'Not tracked' (as on this branch) or drop the check from the list? The same question applies to MFA if the owner would rather not show checks that cannot be measured at all.",
+    "Should a follow-up packet make password-policy and rate-limiting report what the server actually enforces (12-character minimum; limiter on by default), or remove those two checks?"
+   ]
+  },
+  "reviews": [
+   {
+    "lens": "security-tenancy",
+    "verdict": "accept",
+    "findings": [
+     {
+      "id": "SEC-AUDIT-ENV-1",
+      "severity": "minor",
+      "claim": "This was already true before the packet, and it is outside the packet's scope. The audit's config checks (env-secrets, ssl-config, rate-limiting, password-policy) describe the whole deployment's process.env, not the tenant. The new settings:read gate is scoped to a business, so it does not protect this deployment-wide information. Any user who owns a business (every self-signup is an OWNER, D-03) can read the platform's secret-configuration posture. That includes the oracle line 'SUPABASE_SERVICE_ROLE_KEY is identical to the public anon key', which would tell an attacker that the anon key in the browser bundle is the privileged key. Values are never shown, only flags. Suggested follow-up: make the platform-config checks SUPER_ADMIN only, or remove them from the tenant audit. Not a reason to block this packet.",
+      "failure_path": "Reproduced on a real DB (keyflowos_v1_swp_sec_audit_truth_sec, branch head 1d068715a, the packet's own harness with the real AuthMiddleware, AuthGuard, BusinessGuard, ModuleScopeGuard and TenantInterceptor). Setup: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY and process.env.SUPABASE_SERVICE_ROLE_KEY set to the same value (built from fragments), and AI_INTEGRATIONS_OPENAI_API_KEY set to a short value. Actor: user v63r_outsider, who is OWNER of their own business v63r_bizB and has no link to any other tenant. Request: GET /security/businesses/v63r_bizB/audit. Response: 200, and the env-secrets check reads {severity:'critical', status:'failed', description:'Issues: AI_INTEGRATIONS_OPENAI_API_KEY appears short/weak; SUPABASE_SERVICE_ROLE_KEY appears short/weak; SUPABASE_SERVICE_ROLE_KEY is identical to the public anon key; DATABASE_URL points to localhost'}. Any other tenant's owner gets the same answer, because the check reads process.env and never businessId."
+     }
+    ],
+    "checked": "I accept the packet. The new settings-read gate works and I found no new security or tenancy problem. My one finding (SEC-AUDIT-ENV-1, minor) was already there before this packet. The review database is dropped, Redis 6380 db 13 is flushed and the worktree is removed; the branch pkt/V1-SWP-SEC-AUDIT-TRUTH is kept.\n\n**Setup.** Detached worktree at 1d068715a, packages built, a fresh database with every migration applied, Redis 6380 db 13.\n\n**Packet suite.** apps/server/test/security-audit-truth.integration.test.ts passes 11/11 at the head. With apps/server/src/modules/security-audit put back to ca0c12e3 and the same tests, 5 fail as the commit message says: V63G-02, 03, 04, and V63G-05/06 (STAFF gets 200 instead of 403). After restoring the head code it passes again.\n\n**Who can run the audit.** I read the guard path: ModuleScopeGuard, resolveRequestBusinessId (path, then body, then query) and memberModuleLevel. The route now needs settings read, and both guards check the business named in the path, which is the one the handler uses. Extra probes I wrote and ran on the real DB:\n- **P1:** the owner of business B names A in the path and B in the query, the x-business-id header and a JSON body. Result: 403 'No access to this business' from BusinessGuard, and runAudit never ran.\n- **P2:** an ADMIN whose explicit map sets settings to 'none' (D-114). Result: 403 'settings requires read access (you have none)'.\n- **P3:** an ADMIN whose permissionScopes is an empty array, which counts as an explicit empty map. Result: 403.\n- **P4:** a member with role 'owner' in lowercase, which falls back to the STAFF defaults. Result: 403.\n\nThe packet's own cases also cover a STAFF member on the role defaults (403), a STAFF member whose map leaves settings out (403), a STAFF member with settings 'read' (200), ADMIN (200), OWNER (200) and a non-member (403). In every refusal the spy shows runAudit did not run.\n\n**No other way in.** Nothing outside its module calls SecurityAuditService, no KEY tool or tool map reaches it, and the route is not on the public surface list. The KEY genome ontology only mentions it as a label.\n\n**Data in the answer.**\n- The MFA and inactive-users checks no longer read the memberships.\n- The answer holds only counts and flags: no personal data, no secret values, and no new logging.\n- The 403 body is the standard guard message.\n- A STAFF member with only settings read still sees the business's total contact and consent counts through consent-coverage. That was already the case and these are totals only, so I did not raise it as a finding.\n\n**Web page.** The security page uses apiGet's status. On a 403 it clears any earlier result, so nothing from another business stays on screen, and shows the refusal notice without a score, checks or the Run audit button. Its 4/4 tests pass.\n\n**Other checks.**\n- The security-audit unit spec passes 13/13, and fixture-prefix-registry.spec passes 16/16 with v63g_ registered.\n- No secret shapes in the diff.\n- The commits carry the right trailers, and the tests-only commit holds only test files.\n- ModuleScopeGuard's dependencies are available to SecurityAuditModule (PrismaModule and AuthorityModule are global), so the app still boots.\n- No outbound fetch.\n\n**Not run:** server and web tsc (the machine had about 4 GB free), lint, and proof:release0.\n\n**Noted, not a finding:** the suite falls back to redis://localhost:6379 when REDIS_URL is unset, as 74 other suites do. I ran it with REDIS_URL set to 6380/13."
+   },
+   {
+    "lens": "correctness-regression",
+    "verdict": "repair",
+    "findings": [
+     {
+      "id": "SAT-COR-1",
+      "severity": "minor",
+      "claim": "apps/web/src/app/app/settings/security/page.tsx treats every 403 as a settings refusal: `if (res.status === 403) { setResult(null); setRefused(true); return; }`. BusinessGuard also answers 403 when it cannot complete its check: 'Unable to verify business access' on any database error, and 'Service unavailable' when Prisma is missing (core/auth/business.guard.ts). In that case an OWNER is told 'No access, ask the owner ... Ask the business owner for access.' and the 'Run audit' button is hidden, so the owner cannot retry without reloading the page. At base the same 403 showed a toast and kept the button. The repo already has a helper for exactly this distinction, isModuleScopeRefusal(res, 'settings') in apps/web/src/lib/module-scope-refusal.ts (review CRR-P195JS-2: 'Any other 403 (BusinessGuard's transient \"Unable to verify business access\" or \"Service unavailable\"...) says nothing about it, so a screen must not tell the member they lack the module'). The page does not use it.",
+      "failure_path": "Server, reproduced on real Postgres with the packet's own harness (real AuthMiddleware, AuthGuard, BusinessGuard and ModuleScopeGuard, the real controller and service). Actor: OWNER v63g_owner. Request: GET /security/businesses/v63g_biz/audit. With no lock it answers 200. A second session runs BEGIN; LOCK TABLE businesses IN ACCESS EXCLUSIVE MODE (6 s), and the server pool has statement_timeout 1500 ms. The same OWNER request then answers 403 {\"code\":\"FORBIDDEN\",\"message\":\"Unable to verify business access\"} (Postgres 57014, statement timeout, caught by BusinessGuard). After the lock is released the request answers 200 again. Web, reproduced with a vitest probe of the page, apiGet answering {data:null, error:'Unable to verify business access', status:403}: the alert reads 'No access, ask the ownerThe security audit reads this business's settings. Ask the business owner for access.', the Run audit button is absent and no toast fires. 'Service unavailable' renders the same way. Repair: show the notice only when isModuleScopeRefusal(res, 'settings') is true (optionally also BusinessGuard's 'No access to this business'). Any other 403 keeps the toast and the Run audit button. WEB-SAT-03 uses ModuleScopeGuard's refusal text, so it stays green; add a case for the transient 403."
+     }
+    ],
+    "checked": "Reviewed git diff ca0c12e3..1d068715 on pkt/V1-SWP-SEC-AUDIT-TRUTH in a detached worktree (pnpm install --offline; shared, db and api built; prisma generate), against database keyflowos_v1_swp_sec_audit_truth_cor (template0, ICU en-US, all migrations) and Redis 6380 db 14.\n\n(1) Definition of done.\n- RED reproduced exactly with the base source files and the new tests. Server: 5 failed and 6 passed (V63G-02, 03, 04, 05, 06 RED; MFA answered passed true with '100% of team members have MFA enabled (5 total).'; STAFF got 200 with score 88). Web: 3 failed and 1 passed. Both match the RED recorded in commit ce867bbb8.\n- GREEN at head: security-audit-truth.integration.test.ts 11/11 on real Postgres; the existing security-audit.service.spec.ts 13/13 (unchanged, still passes); web security-audit-truth.test.tsx 4/4.\n- Server tsc --noEmit: 0 errors. Web tsc --noEmit after next typegen, as CI runs it: 0 errors.\n- eslint on the changed files: server 0 problems; web 1 warning, the pre-existing exhaustive-deps warning.\n- Gate specs all pass: fixture-prefix-registry (16), release0-proof-coverage (19), rest-scope-census (24) and public-surface (5). v63g_ is registered with packet 'V1-63 (SWP-SEC-AUDIT-TRUTH)', matching the plan's prefix table.\n\n(2) Access.\n- ModuleScopeGuard and @RequireModuleScope('settings','read') follow the same pattern as 17 other settings-read routes.\n- Guard order is AuthGuard, BusinessGuard, ModuleScopeGuard. The tenant comes from the path parameter first (resolveRequestBusinessId).\n- SUPER_ADMIN still passes.\n- Role defaults (module-vocabulary.ts): OWNER is admin, ADMIN is admin, STAFF is none. Explicit maps get settings read only when granted. Legacy explicit maps were only missing operations and analytics, so ADMINs keep settings.\n- Owners, admins and STAFF with settings read get 200, proven by the integration tests.\n- No other consumer of the audit or of its response shape exists in apps or packages (grep). It is not in the REST census population (GET, no credential write).\n- The module wiring needs nothing new, because PrismaModule is global. The real dist/main.js was built and booted inside Release 0 suites.\n\n(3) Truth of claims.\n- The MFA and inactive-users checks are not_tracked with no claim.\n- summarizeAudit counts only measured checks; score is null when nothing was measured, and the web shows '-'.\n- The web draws not-tracked checks neutrally and shows no recommendation for them.\n- The inactive-users extension is disclosed and consistent with the 'every number is true or absent' principle (D-150..D-190 adopted as recommended). It is not a regression.\n- The journey J spec (pkt/V1-GATE-JOURNEYS-G-L j-team.spec.ts, J6) does not visit /app/settings/security; the notice wording matches its /no access/ and /ask (the|your) owner/ patterns.\n\n(4) No test weakened. The diff adds only new test files and one registry entry; no existing assertion or Release 0 manifest changed. r0_impact 'none' holds.\n\n(5) Release 0, all on a clean tree at 1d068715 (exact-head receipts).\n- Full run: vitest 107/107 files and 3724 tests passed (9 explained todos), 0 OPEN, runtime skip check clean.\n- 31 of 39 manifests SATISFIED in that run. The other 8 were rejected only as KF_PROOF_REPORT_STALE: the run took 709 s against a 600 s window, with host load around 22 to 29 on 4 cores from parallel workers.\n- Re-running those 8 alone gave 6 SATISFIED. The 2 others hit 5 s timeouts under load (d11-sibling-writes D11-S13, key-cortex controller spec), both unrelated to this packet. Re-run alone, both were SATISFIED with 245/245 passing.\n- So all 39 manifests are SATISFIED at exact head. The single-command proof:release0 never printed MET, because of host load only.\n- An earlier run failed only because of my own uncommitted probe file, which duplicated the v63g_ prefix; I removed it.\n\n(6) Secret-shape scan of the diff: clean. All three commits end with exactly the two required trailers.\n\nCleanup: probe files deleted, database dropped, Redis 6380 db 14 flushed, worktree removed and pruned. Branch pkt/V1-SWP-SEC-AUDIT-TRUTH kept at 1d068715."
+   }
+  ]
+ },
+ {
+  "packet": "SWP-PROFILE-TEAMSIZE",
+  "branch": "pkt/V1-SWP-PROFILE-TEAMSIZE",
+  "branch_head_local": "1fa49b3bbec3db1067423531d6f04020ca7df272",
+  "next_stage": "repair",
+  "status": "Both reviews ran: security accepted, correctness asked for a repair. The repair agent committed its RED tests and had one uncommitted web edit (committed on the branch as a WIP commit) when the usage limit cut it off.",
+  "built": {
+   "head": "36cd44f661cf768c44799ac9bd78ec3735381050",
+   "red": "d9cb1e408 (tests only, on base 384a3891). The web unit run gave 15 failed and 1 passed out of 16. The options sent SOLO, SMALL_TEAM and the other old values, which are not in the server's TeamSize enum. With no team size chosen the form sent teamSize \"\". Old stored values were sent back unchanged. A 400 or 403 made no toast, put no alert beside Save and scrolled nothing into view. The server integration run gave 2 failed and 4 passed out of 6. V63M-C01: all 5 option values the form offers were refused with 400 \"teamSize must be one of: solo, small, medium, large, 1, 2-5, 6-10, 11-50, 50+\" and nothing was written. V63M-C03: the form has no map for old stored values. The live e2e run (ai-disabled) failed 4 of 4. On desktop the owner's save answered 400 (BUG-006), and the STAFF member got 400 instead of the owner-only 403. On the phone the bottom bar covered Save Business Info even with the page scrolled as far as it goes. fixture-prefix-registry passed 16 of 16 with v63m_ registered.",
+   "what": "Web-only fix to apps/web/src/app/app/profile/components/my-business-section.tsx; no server change, and D-11 (only the owner edits the profile) is unchanged. (1) The team size options are now values of the server's enum: solo, 2-5, 6-10, 11-50 and 50+, keeping the same labels with corrected ranges. (2) Save sends teamSize only when an option is chosen. When none is chosen it is left out and the stored value stays. (3) STORED_TEAM_SIZE and teamSizeOption() read old stored values as the option they mean. SOLO and 1 become solo; SMALL_TEAM and small become 2-5; GROWING becomes 6-10; MEDIUM and medium become 11-50; LARGE and large become 50+. Saving then writes the enum value. A value it cannot map shows as no team size and is left as stored; lookups check own properties only. (4) A refused save now uses the failure kit's useRefusal. One toast (id kf-refusal) gives the server's words, the same words appear in a role=alert beside Save scrolled to the middle of the screen, and every edit stays unsaved so Save can be pressed again. A thrown error goes through answerFromThrown, and the page banner still gets the status. (5) On a phone the section adds bottom padding (pb-24 below md) so the page can scroll Save clear of the bottom bar. Tests: a new web unit test using the real api client (WEB-PTS-00..07), which reads the TeamSize enum from the server DTO. A new real-DB contract test (V63M-X01, C01..C04, D11) drives the real IdentityController, guards and production body pipe on Postgres, and reads the form's option and mapping lists from its source. A new live e2e spec, sweep-profile-save.spec.ts, runs at 375x812 and 1440x900: the owner saves with no team size and then with each option, the values survive a reload, and a STAFF member's real 403 shows in a toast and an in-view alert with the typed text kept.",
+   "tests": [
+    {
+     "file": "apps/web/src/app/app/profile/components/__tests__/my-business-teamsize.test.tsx",
+     "passed": 16,
+     "failed": 0
+    },
+    {
+     "file": "apps/web/src/app/app/profile (3 files: teamsize, profile-refusals, blueprint-onboarding-transcript)",
+     "passed": 27,
+     "failed": 0
+    },
+    {
+     "file": "apps/server/test/business-profile-save.integration.test.ts (real DB)",
+     "passed": 6,
+     "failed": 0
+    },
+    {
+     "file": "apps/server/src/core/config/fixture-prefix-registry.spec.ts",
+     "passed": 16,
+     "failed": 0
+    },
+    {
+     "file": "apps/server/src/core/auth/public-surface.spec.ts",
+     "passed": 5,
+     "failed": 0
+    },
+    {
+     "file": "keep-green real-DB identity/D-11 suites: owner-role-profile, identity-business-config, business-v1-settings, d11-sibling-writes, identity-boundary (178 passed, 1 todo)",
+     "passed": 178,
+     "failed": 0
+    },
+    {
+     "file": "apps/web/e2e/sweep-profile-save.spec.ts live ai-disabled (chromium; phone+desktop)",
+     "passed": 4,
+     "failed": 0
+    },
+    {
+     "file": "apps/web/e2e/sweep-profile-save.spec.ts live key-disabled (chromium; phone+desktop)",
+     "passed": 4,
+     "failed": 0
+    },
+    {
+     "file": "apps/web/e2e/release0-live.spec.ts live key-disabled (--project=phone --project=desktop)",
+     "passed": 2,
+     "failed": 0
+    },
+    {
+     "file": "apps/web/e2e/journeys/a-start-business.spec.ts live key-disabled (phone+desktop; A1, A3-A9 red on defects other packets own; no A step covers the profile save)",
+     "passed": 0,
+     "failed": 16
+    },
+    {
+     "file": "apps/web full vitest under load (10 failures in 6 unrelated files; all pass when rerun alone)",
+     "passed": 1204,
+     "failed": 10
+    },
+    {
+     "file": "scripts/proof-admission/run-manifests.mjs at 36cd44f6 (exact head). Best single run: 43 of 44 manifests SATISFIED; key-cortex-actor-binding.json failed only on a 5s load timeout and was SATISFIED 173/173 with --only",
+     "passed": 43,
+     "failed": 1
+    },
+    {
+     "file": "pnpm --filter server proof:release0 (release0.mjs --skip-build) at 36cd44f6: 39 of 39 manifests SATISFIED, R0 EXIT GATE MET",
+     "passed": 39,
+     "failed": 0
+    }
+   ],
+   "tsc": "Web: npx tsc --noEmit gives 0 errors at head. Server: tsc --project tsconfig.json exit 0 (dist built). The server source is unchanged by this packet, so the result holds at head. ESLint on the changed web files: 0 problems (web lint ratchet unaffected).",
+   "release0": "MET. Running node scripts/proof-admission/release0.mjs --skip-build (the same as pnpm --filter server proof:release0) at exact head 36cd44f661cf768c44799ac9bd78ec3735381050 gave 39 of 39 manifests SATISFIED with vitest exit 0. release0-proof-coverage.spec.ts passed. The runtime skip check found 9 cases not run, each explained, and no suite missing. Result: R0 EXIT GATE MET (exit 0). Two earlier attempts at the same head were rejected under machine load, solely for STALE report age and one 5s timeout. r0_impact is none: no required Release 0 case or manifest was touched.",
+   "files_changed": [
+    "apps/web/src/app/app/profile/components/my-business-section.tsx",
+    "apps/web/src/app/app/profile/components/__tests__/my-business-teamsize.test.tsx",
+    "apps/server/test/business-profile-save.integration.test.ts",
+    "apps/web/e2e/sweep-profile-save.spec.ts",
+    "apps/server/test/helpers/fixture-prefixes.json"
+   ],
+   "open_issues": [
+    "App shell defect, outside this packet's files (web-shell area, apps/web/src/components/transitions/page-transition.tsx). PageTransition wraps every page in an h-full motion.div inside the scroll root, which has pb-28. A long page overflows that wrapper, so the root's bottom padding sits above the overflow. On a 375px phone the last ~112px of every long page stays under the bottom bar however far you scroll. Here it covered Save Business Info, which made the phone e2e RED. I worked around it only inside my-business-section.tsx (pb-24 below md). A shell packet (SWP-LAYERS follow-up or NAV-A1) should fix the wrapper, for example min-h-full plus a check of the full-height pages, and could then drop the local padding.",
+    "Definition of done item 'journey spec step(s) for A that cover it turn green' cannot be shown. No step of e2e/journeys/a-start-business.spec.ts covers the Business Profile save. A1 and A3-A9 stay red, on both phone and desktop (key-disabled), for defects other packets own: the pricing hand-off, the onboarding form layout, Today and its Get set up list, and the KEY drawer. The new sweep-profile-save.spec.ts is the browser proof for BUG-006.",
+    "The sweep's own repro script (scratchpad sweep/onboarding/21-business-profile.mjs) uses the sweep session harness on :3101, so I did not run it. The same steps are now apps/web/e2e/sweep-profile-save.spec.ts, green live in both the ai-disabled and key-disabled variants at both viewports.",
+    "Machine load (load average 16-34 on 4 cores, shared with other agents) made gate runs flaky, none because of this change. (a) The first full run-manifests and the first two proof:release0 runs rejected 8 manifests with KF_PROOF_REPORT_STALE: vitest took 739s against a maxReportAgeSeconds of 600. Rerun with --only at the same exact head they were all SATISFIED, and a later proof:release0 run was MET with 39 of 39 at 36cd44f6. (b) The case in key-cortex.controller.spec.ts that runs tsc to check the emitted @Body() types times out at 5s under load and passes alone in 1.8s. It is the only miss in the best full run-manifests (43 of 44); key-cortex-actor-binding.json was SATISFIED 173/173 with --only at the same head. (c) The full web vitest run had 10 failures in 6 unrelated files (journey-harness, record-invoice-payment-idempotency, operations-nav-scope, continental-ops-refusals, orders-complete-offline, inventory-sheet-link-refusal), mostly timing; all pass when rerun alone. The plan's W11-LOAD-SENSITIVE-TESTS packet covers this class.",
+    "Environment notes. Symlinked node_modules break the Turbopack production build ('Symlink [project]/node_modules ... points out of the filesystem root'), so the worktree used pnpm install --offline --frozen-lockfile. Prisma generate then ran inside the worktree's own store, not the shared client. Chromium was /opt/pw-browsers/chromium-1243 through PW_CHROMIUM_EXECUTABLE, because Playwright 1.59.1 expects revision 1217.",
+    "Minor display gap outside this packet's files. Other profile surfaces print the stored teamSize raw with replace(/_/g,' '), so the new values show as 'solo' or '2-5' rather than the option labels: overview-tab.tsx and business-context-card.tsx. Server AI context strings show 'Team: 2-5'. Not changed here.",
+    "Done and cleaned up. Database keyflowos_v1_swp_profile_teamsize dropped, Redis 6380 db 10 flushed, worktree removed and pruned, branch kept. No GitHub post, no push, nothing in .agent-control touched, no provider traffic (API ran AI_DISABLED with no provider keys)."
+   ],
+   "owner_questions": [
+    "The old form's 'Growing (6-15)' option (stored as GROWING) straddles two server sizes. I read it as 6-10 and the option now says 'Growing (6-10)'. Should GROWING map to 11-50 instead?",
+    "The form offers 'solo' for one person rather than the enum's '1'; the KEY onboarding card offers 'Solo'. Should the profile store 'solo' or '1' for a one-person business?"
+   ]
+  },
+  "reviews": [
+   {
+    "lens": "security-tenancy",
+    "verdict": "accept",
+    "findings": [],
+    "checked": "Diff 384a3891..36cd44f6 on pkt/V1-SWP-PROFILE-TEAMSIZE: 5 files, 2 commits (RED d9cb1e408, fix 36cd44f66). I reviewed it in a detached worktree at 36cd44f6, set up with pnpm install --offline --frozen-lockfile and with shared, db (prisma generate) and api built. I used a fresh database, keyflowos_v1_swp_profile_teamsize_sec (ICU template0, all migrations applied, pgvector), and Redis 6380 db 11. When done I dropped the database, flushed the Redis db and removed the worktree. The branch is kept.\n\nTenancy and request shape (apps/web/src/app/app/profile/components/my-business-section.tsx):\n- The save still goes only to PATCH /identity/businesses/${businessId}, with businessId from the prop that business-tab.tsx and identity-tab.tsx already pass. The `if (!businessId) return` guard is unchanged.\n- businessInfoBody sends exactly name, tagline, description, businessHours and, optionally, teamSize, which must be a value from TEAM_SIZE_OPTIONS. No new field reaches the request.\n- teamSizeOption checks own properties only. __proto__ and constructor resolve to \"\" and send no teamSize.\n- The refusal text appears in a sonner toast and in a {refusal} span. Both are React text nodes, so there is no HTML sink.\n- The text shown is the same string the page banner already showed, from lib/api.ts handleErrorResponse or err.message. This packet adds no new exposure, no console logging and no new outbound fetch. failure-kit.ts is used, not modified.\n\nAuthority (server unchanged; IdentityController.updateBusiness = AuthGuard + BusinessGuard + assertBusinessOwner, D-11):\n- I ran the builder's real-DB suite test/business-profile-save.integration.test.ts on Postgres: 6/6 pass, covering V63M-X01, C01 to C04 and D11.\n- I also ran a throwaway probe (not committed, file deleted) on the same harness, with the real controller, guards and production pipe options (whitelist + transform, matching app-bootstrap.ts):\n  - STAFF with settings:write, ADMIN and OWNER of bizA each PATCH bizB: 403 \"No access to this business\", and the bizB row is byte-identical.\n  - Unauthenticated PATCH: 401.\n  - Owner PATCH with ownerId, onboardingComplete, deletedAt and plan added: 200. Whitelist strips the extras; ownerId stays the owner, onboardingComplete stays false and deletedAt stays null.\n  - teamSize as ['solo'], {a:1}, '__proto__', 'SOLO ', ' solo', 'constructor' and the number 1: each 400, with the row byte-identical.\n  - STAFF GET of bizB: 403.\n- I noted, outside this packet's scope, that GET and PATCH return sanitizeBusiness rows that include contactsSyncToken and msContactsDeltaLink, which are sync cursors and not credentials. This is unchanged by this diff.\n\nFixtures and registry:\n- v63m_ matches ^[kv]NN[a-z]_$ and is registered as 'V1-63 (SWP-PROFILE-TEAMSIZE)'.\n- src/core/config/fixture-prefix-registry.spec.ts passes 16/16, including the LIKE-reach check.\n- Cleanup uses sqlLikePrefix. The test-only x-test-user middleware accepts only v63m_ ids and exists only in the test app.\n\nWeb: vitest src/app/app/profile gives 3 files, 27/27 passing, including WEB-PTS-00 to 07.\n\ne2e/sweep-profile-save.spec.ts:\n- It uses the journey harness test fixture and signedInContext. Watched contexts record off-host requests, and preflight asserts that E2E_API_URL and the web URL are local.\n- memberOf is an existing helper.\n- The spec contains no token or secret literals.\n- I did not run it live (it needs a production web build and a live API).\n\nSecret scan: none of AC[0-9a-f]{32}, sk_live/sk_test, eyJ JWTs, private keys, ghp_, AKIA, password literals or console. appears in the added lines.\n\nRelease 0: no R0 manifest or suite references my-business-section, and no server source changed. src/core/config/d11-owner-writes.spec.ts ran with test/identity-boundary.integration.test.ts. identity-boundary failed only because it needs dist/main.js. My attempt to build the server was OOM-killed (exit 137) under host memory pressure, so the real-server suites were not rerun.\n\nMoney integrity: no money path is touched."
+   },
+   {
+    "lens": "correctness-regression",
+    "verdict": "repair",
+    "findings": [
+     {
+      "id": "PTS-COR-1",
+      "severity": "minor",
+      "claim": "Clearing a stored team size reports success but clears nothing. The Team size select still lets you pick the empty 'Select team size' option once a size is stored. businessInfoBody() then leaves teamSize out of the body, so the PATCH keeps the stored value. handleSave still shows 'Business info updated', marks the form clean and calls onSaved({teamSize: \"\"}). The page merges that into businessData, so the other profile tabs show no team size until a reload brings the old value back. Before this packet the same clear sent \"\" and got a loud 400. It is now a false success, against the packet's 'never claim success' principle. The PATCH can clear: teamSize null gives 200 and team_size NULL. File: apps/web/src/app/app/profile/components/my-business-section.tsx, businessInfoBody (about lines 108-116), handleSave (about lines 247-269), and <option value=\"\">Select team size</option> (about line 474).",
+      "failure_path": "Real DB keyflowos_v1_swp_profile_teamsize_cor, review copy of the packet's own harness (real IdentityController, AuthGuard, BusinessGuard and the production ValidationPipe). Business v63z_bizA has team_size '2-5'. The owner v63z_owner sends PATCH /identity/businesses/v63z_bizA with the exact body the form sends after the clear: {name, tagline, description, businessHours}, no teamSize. Result: 200, and GET then returns teamSize \"2-5\" (REV-S1). Web half, jsdom with the real lib/api.ts apiPatch: mount MyBusinessSection with stored teamSize '2-5', pick '' in 'Team size' (the form shows 'You have unsaved changes'), press Save. The PATCH body keys are businessHours, description, name, tagline (no teamSize). onStatus gets {type:'success', message:'Business info updated'}, onSaved gets teamSize \"\", the select reads \"\" and the form is no longer dirty (REV-1). Control: the same PATCH with teamSize null gives 200 and team_size NULL (REV-S2). Suggested fix: send teamSize null when the owner clears a size that was stored, and keep leaving it out when none was ever chosen (WEB-PTS-02 stays green). Or disable the placeholder option once a size is stored. Either way, add a unit case and a real-DB case for the clear."
+     },
+     {
+      "id": "PTS-COR-2",
+      "severity": "nit",
+      "claim": "A save that touches no team size still rewrites the stored team size. Each stored spelling the form maps is sent back as the option it means, even when the owner never touched the select. GROWING (the old label read 'Growing (6-15)') is narrowed to '6-10'. The same rewrite turns small into 2-5, medium into 11-50, large into 50+ and 1 into solo. The packet text ('map legacy stored values') allows this and the builder documents it. But the business's size changes without the owner choosing it. The impact is small: the old form could never save, so legacy rows only come from writers outside this form. Same file: STORED_TEAM_SIZE, teamSizeOption, businessInfoBody.",
+      "failure_path": "Real DB: v63z_bizA has team_size 'GROWING'. The owner sends PATCH /identity/businesses/v63z_bizA with the body the form builds after editing only the name: {name:'v63z_renamed only', tagline, description, teamSize:'6-10', businessHours}. Result: 200, stored team_size '6-10' (REV-S3). The web half, a stored GROWING shown as 6-10 and sent as 6-10 on a tagline-only save, is pinned by the packet's own WEB-PTS-03. Option: include teamSize only when the owner changed the select, so a stored value is left untouched until the owner picks a size."
+     }
+    ],
+    "checked": "Reviewed 384a3891..36cd44f6 on pkt/V1-SWP-PROFILE-TEAMSIZE (2 commits, 5 files) in a detached worktree, with pnpm install --offline and packages/shared, db and api built. Real DB: keyflowos_v1_swp_profile_teamsize_cor (ICU, all migrations), Redis 6380 db 15. Both have since been dropped or flushed and the worktree removed; the branch is kept.\n\n1. Server truth. UpdateBusinessDto TeamSize is solo, small, medium, large, 1, 2-5, 6-10, 11-50, 50+ (@IsEnum + @IsOptional). The controller's PATCH is AuthGuard + BusinessGuard + assertBusinessOwner, so D-11 is unchanged. There is no server diff.\n\n2. Other writers and readers of teamSize. The KEY settings adapter does not write it. GenerateFieldDto does not validate context.teamSize. The display readers (overview, context card, business-context.service) take enum values. No reader compares against SOLO etc.\n\n3. RED reproduced at the base by restoring the base my-business-section.tsx in the worktree. The web unit test gives 15 failed, 1 passed. The integration test gives C01 and C03 failed, 4 passed. Both match the RED commit message.\n\n4. GREEN at the head:\n- my-business-teamsize.test.tsx: 16/16.\n- business-profile-save.integration.test.ts: 6/6 on Postgres.\n- fixture-prefix-registry.spec: 16/16, so v63m_ is registered against packet 'V1-63 (SWP-PROFILE-TEAMSIZE)'.\n- owner-role-profile.integration (the D-11 suite): 22/22.\n- Web vitest over src/app/app/profile and src/lib: 386/387. The one failure is fetch-with-retry-503, a load flake; the file is untouched and passes alone 3/3.\n\n5. Typecheck and lint:\n- Server tsc: 0 errors.\n- Web tsc: only TS2688 'next' (an environment typeRoots issue; the tsconfig is untouched); the touched files typecheck.\n- eslint on the component and the unit test: clean. The e2e file is ignored by config.\n\n6. No existing test was modified. The diff adds 3 test files and one registry row. Assertions were read for weakening: none.\n\n7. Release 0 proof (pnpm --filter server proof:release0) at exact head 36cd44f6:\n- Full gate run: 30/39 manifests SATISFIED. Eight were REJECTED KF_PROOF_REPORT_STALE because the run took 700s against a 600s maxReportAge, and one hit a 5s timeout in a tsc-emitting case (shadowed-routes) under load average about 24 on 4 CPUs. The release0-proof-coverage spec passed 19/19.\n- Rerun of the 9 with run-manifests --only: 8 SATISFIED. key-cortex-actor-binding again hit the 5s tsc timeout; that case passes alone in 3.2s.\n- Rerun of that one with --no-file-parallelism: SATISFIED, 173/173.\n- So all 39 are SATISFIED at the exact head, but a single-pass MET could not be produced on this loaded machine.\n- No R0 manifest, required case or suite is changed. r0_impact 'none' holds.\n\n8. Definition of done:\n- Each option sends an enum value and '' sends none: yes.\n- A 400 gives one kf-refusal toast, the role=alert beside Save is scrolled into view, and edits are kept: yes.\n- Real-DB contract test and live e2e spec: present. The e2e skips without E2E_LIVE; I did not run it live.\n- The journey A spec has no step that covers the profile save. I confirmed this by reading a-start-business.spec.ts A1-A9, so the builder's CONTRADICTION is correct.\n- The PageTransition pb-28 shell defect is correctly left to the web-shell chain, with a local pb-24 below md.\n\n9. Diff secret scan: clean. Scratch repro tests (REV-1 web, REV-S1..S3 real DB) are kept at /tmp/claude-0/-home-user-KEYFLOWOS/cf5549a6-57e4-58a8-b329-64e335b1b598/scratchpad/rev-pts/. Proof logs are in the same folder: proof.txt, proof-rerun.txt, proof-rerun2.txt and proof-rerun3.txt."
+   }
+  ]
+ },
+ {
+  "packet": "FU-KEY-MEMORY-MONEY-SIGHT",
+  "branch": "pkt/V1-FU-KEY-MEMORY-MONEY-SIGHT",
+  "branch_head_local": "ef4df3c86efe3c35392e04e61d6dcacfdc6da8a0",
+  "next_stage": "review",
+  "status": "Built. The security review accepted it; the correctness review never returned (usage limit). Needs the correctness review, then a repair of any findings.",
+  "built": {
+   "head": "ef4df3c86efe3c35392e04e61d6dcacfdc6da8a0",
+   "red": "Two tests-first commits, then one fix commit.\n\nCommit 2555f87a9 (tests first, part 1). RED at base on keyflowos_v1_fu_key_memory_money_sight with Redis 6379 db 1: `vitest run test/key-memory-money-sight.integration.test.ts src/modules/key-cortex/key-cortex-prompt-module-scope.spec.ts src/modules/key-cortex/unified-memory-retrieval.service.spec.ts` gave 3 files failed, 23 failed | 34 passed (57).\n- The new real-DB suite (prefix v71o_): 7 failed, 1 passed (8). Every write goes through its real route: POST .../key-genome/finance/snapshot/compute, POST .../cross-domain/snapshot/compute, and POST /key-autonomy/businesses/:id/actions/proposals and .../reject through the real orchestrator, audit and bus. Every read goes through POST .../flow/chat and its stream, the signed WhatsApp webhook and staff bridge, and POST /cortex/chat's buildMemoryContext and pipeline reads.\n  - SEC-W1FPMS-3: the blind STAFF member (revenue none) got '[genome_memory_event] Finance snapshot computed: Overall risk MEDIUM, health score 50...'. So did their own bridge position, and a SUPER_ADMIN who is no member. After the cross-domain compute, the cross-domain and customer-sales snapshots reached them too.\n  - SEC-W1FPMS-4: the SUPER_ADMIN who is no member and a contact-only bridge position got the proposal title '$12,345 outstanding across 7 invoices' from the bridged copies. After a rejection they also got its reason ('$9,876 is due first') and the rejecter's id.\n- Module-scope spec: 13 failed (37).\n- Retrieval spec: 3 failed (12). The genome fragment had no row columns (domain and section are not even selected), the cognitive fragment had no payload, and the business-event fragment had no actorType or action.\n\nCommit 73d4a0fab (tests first, part 2). RED at the part-1 commit with base sources: 19 failed | 155 passed (174).\n- It updates the suites that pinned a proposal's whole content for every reader: perception-join.spec 5 cases, key-cortex-query-pipeline.service.spec 2 cases.\n- It drops the 'stranger' reader from the new memberless unit case: callers resolve the reader by membership first, so every memberless turn arrives as null.\n\nExact counts and the reason each case fails are in the commit messages.",
+   "what": "Fix commit ef4df3c86 changes three files.\n\n**SEC-W1FPMS-3 (genome money memory, D-128/D-100)**\n- UnifiedMemoryRetrievalService now selects the GenomeMemoryEvent row's domain and section. Every genome fragment carries the row's sourceType, eventType, domain and section in metadata.genomeRow (GENOME_ROW_METADATA_KEY in unified-memory.types.ts). These are written after the row's own metadata, so a writer's metadata cannot stand in for them.\n- readersOwnPromptMemory now projects genome records too (recordModulesOf \u2192 genomeModulesOf). It is the shared rule of buildMemoryContext, the pipeline's chatMemoryFragments and the /ai flow chat perception block (so also the staff bridge).\n  - A money memory event needs revenue read. \"Money\" is the rule the genome REST routes already apply (isMoneyMemoryEvent): FINANCE_GENOME or a finance-filed row, CROSS_DOMAIN, and the customer-sales snapshot.\n  - A genome fragment that carries no row is treated as money (fails closed).\n  - Other genome records stay business-wide.\n  - A staff position's turn uses the modules its position resolved.\n\n**SEC-W1FPMS-4 (memberless proposals, D-73/D-93)**\n- When the reader is null, every proposal record is replaced by memberlessProposalView. Reader null covers a contact-only bridge position, a SUPER_ADMIN who is no member and a removed member. Proposal records are GOVERNANCE_DECISION ledger rows, their bridged business_events and cognitive_events copies, and genome KEY_ACTION_PROPOSAL / GOVERNANCE_DECISION records.\n- The view keeps the record's id, store and event-type title. Its content becomes, for example, 'proposal propose, status PENDING, risk LOW'.\n  - Action, status and risk level are each shown only when they are one plain word.\n  - They are read from the ledger row (its action column and `after`), or for a bridged copy from the ledger input it carries.\n  - Title, rejection reason, approver or rejecter and figures never render.\n- Members still see proposals whole, which keeps them business-wide.\n\n**COR-W1FPMS-1 follow-up**\n- Cognitive fragments carry their payload in metadata.payload. Business-event fragments carry actorType and action.\n- eventPayloadOf reads the carried payload and no longer parses the rendered content. A task record without a payload fails closed.\n\n**GREEN**\n- The DoD is met. The blind STAFF member and memberless turns get no FINANCE_SNAPSHOT_COMPUTED, cross-domain or customer-sales memory, and memberless turns get no proposal title or figure. The owner, the revenue reader, the role-default STAFF member and the revenue holder's bridge position still see the money memory. Members still see proposal titles.\n- The perception suites pass.\n- Each of nine mutations of the fix fails the unit specs.\n- Release 0 is unchanged (r0_impact KEEP): no Release 0 manifest or required case was edited.\n- Cleanup is done: the database was dropped, Redis 6379 db 1 flushed, the worktree removed and pruned, and the branch kept.",
+   "tests": [
+    {
+     "file": "apps/server/test/key-memory-money-sight.integration.test.ts (new, real DB)",
+     "passed": 8,
+     "failed": 0
+    },
+    {
+     "file": "apps/server/test/perception-module-scope.integration.test.ts",
+     "passed": 21,
+     "failed": 0
+    },
+    {
+     "file": "apps/server/test/ai-memory-copies.integration.test.ts",
+     "passed": 14,
+     "failed": 0
+    },
+    {
+     "file": "apps/server/test/key-chat-ops-scope.integration.test.ts",
+     "passed": 20,
+     "failed": 0
+    },
+    {
+     "file": "apps/server/test/key-contact-reads-visibility.integration.test.ts",
+     "passed": 17,
+     "failed": 0
+    },
+    {
+     "file": "apps/server/test/key-cortex-conscious-answer.integration.test.ts",
+     "passed": 23,
+     "failed": 0
+    },
+    {
+     "file": "apps/server/test/key-genome-finance-scope.integration.test.ts",
+     "passed": 23,
+     "failed": 0
+    },
+    {
+     "file": "apps/server/test/key-cortex-action-audit.integration.test.ts (alone, twice; one 5000ms load timeout when run beside 7 other suites)",
+     "passed": 65,
+     "failed": 0
+    },
+    {
+     "file": "apps/server/src/modules/key-cortex/key-cortex-prompt-module-scope.spec.ts",
+     "passed": 36,
+     "failed": 0
+    },
+    {
+     "file": "apps/server/src/modules/key-cortex/unified-memory-retrieval.service.spec.ts",
+     "passed": 12,
+     "failed": 0
+    },
+    {
+     "file": "apps/server/src/modules/ai/perception-join.spec.ts",
+     "passed": 38,
+     "failed": 0
+    },
+    {
+     "file": "apps/server/src/modules/key-cortex/__tests__/key-cortex-query-pipeline.service.spec.ts",
+     "passed": 100,
+     "failed": 0
+    },
+    {
+     "file": "unit sweep: src/modules/key-cortex, src/modules/ai, src/modules/structure, src/modules/business-genome, money-reports-key-parity.spec, fixture-prefix-registry.spec (231 files, 2 todo)",
+     "passed": 3768,
+     "failed": 0
+    },
+    {
+     "file": "apps/server/src/core/config/fixture-prefix-registry.spec.ts + src/core/auth/public-surface.spec.ts",
+     "passed": 21,
+     "failed": 0
+    },
+    {
+     "file": "run-manifests.mjs at ef4df3c86 (full run: 122 files, vitest exit 0; 36/44 SATISFIED, 8 REJECTED only KF_PROOF_REPORT_STALE (750s run > 600s); those 8 re-run with --only at the same head: 8/8 SATISFIED, 527 passed)",
+     "passed": 4182,
+     "failed": 0
+    },
+    {
+     "file": "proof:release0 at ef4df3c86 (second run: 39/39 SATISFIED, R0 EXIT GATE MET; first run lost d11-sibling-writes D11-S13 to a 5000ms timeout at load average about 20, unrelated to this change)",
+     "passed": 3724,
+     "failed": 0
+    }
+   ],
+   "tsc": "Server: tsc --noEmit -p apps/server/tsconfig.json, NODE_OPTIONS=--max-old-space-size=6144: exit 0, 0 errors.\nWeb: tsc --noEmit -p apps/web/tsconfig.json gives 0 errors once ./node_modules is added as a type root (--typeRoots ./node_modules,./node_modules/@types,../../node_modules/@types). Without it, the known worktree-layout TS2688 for 'next' appears. No web file was changed.\neslint on the 3 changed sources: 0 errors, 20 warnings, the same 20 as base.",
+   "release0": "MET at the exact head ef4df3c86. On the second run, `pnpm --filter server proof:release0 -- --skip-build` reported 39 of 39 manifests SATISFIED, vitest exit 0, release0-proof-coverage.spec exit 0, 9 cases not run and each explained, and R0 EXIT GATE MET (exit 0). The first run was REJECTED on one load timeout in d11-sibling-writes D11-S13, a suite this change does not touch. No Release 0 manifest or required case was changed (r0_impact KEEP; no r0_register row for this packet).",
+   "files_changed": [
+    "apps/server/src/modules/key-cortex/unified-memory.types.ts",
+    "apps/server/src/modules/key-cortex/unified-memory-retrieval.service.ts",
+    "apps/server/src/modules/key-cortex/key-cortex-prompt-context.service.ts",
+    "apps/server/src/modules/key-cortex/key-cortex-prompt-module-scope.spec.ts",
+    "apps/server/src/modules/key-cortex/unified-memory-retrieval.service.spec.ts",
+    "apps/server/src/modules/ai/perception-join.spec.ts",
+    "apps/server/src/modules/key-cortex/__tests__/key-cortex-query-pipeline.service.spec.ts",
+    "apps/server/test/key-memory-money-sight.integration.test.ts",
+    "apps/server/test/helpers/fixture-prefixes.json"
+   ],
+   "open_issues": [
+    "Scope, not a CONTRADICTION: the SEC-W1FPMS-4 rule changes what three existing suites pinned. The memberless cases in src/modules/ai/perception-join.spec.ts (5 cases) and src/modules/key-cortex/__tests__/key-cortex-query-pipeline.service.spec.ts (2 cases) now assert both halves: the GOVERNANCE_DECISION line still reaches the turn, and its stand-in content does not. The pipeline spec is bound by auth-fail-closed-001-negative-controls.json, which is not a Release 0 manifest (it is absent from release0-index.json) and names neither case; its controls still pass. The old 'not projected' genome fragment in key-cortex-prompt-module-scope.spec.ts (a FINANCE_SNAPSHOT_COMPUTED kept for a blind reader, which was the leak itself) became an operations record. No assertion was dropped. Member assertions are unchanged.",
+    "Possible merge overlap: the in-flight server-key chain (W11-CORTEX-INSIGHT-QUERIES, W1F follow-ons) also works in apps/server/src/modules/key-cortex. Expect an overlap on key-cortex-prompt-context.service.ts and the query pipeline spec when it merges. FlowOrchestratorService was not edited. Its comment that a reader-less turn 'keeps only GOVERNANCE_DECISION proposals' is now slightly stale: those proposals are rendered as action, status and risk only.",
+    "Memberlessness is reader === null. readersOwnPromptMemory trusts its callers (promptMemoryReader, the pipeline's episodicMemoryReader, the flow orchestrator's position perception) to resolve membership first, as every caller does today. A future caller that passes the id of a non-member would see proposals whole (though still no module event). I chose not to read the membership for proposals: doing so would break the existing W1F assertion that no membership is read when no event names a module.",
+    "The genome money projection fails closed: a genome_memory_event fragment without metadata.genomeRow is treated as money (revenue read). Only UnifiedMemoryRetrievalService produces genome fragments, and it always carries the row now.",
+    "The memberless redaction also covers genome KEY_ACTION_PROPOSAL / GOVERNANCE_DECISION records, whose title repeats the proposal's own title. Their only writer, OutcomeLearningService.recordActionOutcome, has no caller in the server today, so this path is proven by the unit spec only, not on a real database.",
+    "Not examined in this packet: KeyCortexDigestService.generateDigest reads retrieveContext with no reader projection; semantic-memory (ai_memory_embedding) fragments and temporal_flow_memory fragments are not projected by module. None of these was in the packet's scope, and all are candidates for a follow-up audit.",
+    "Not reached: journey K's Playwright item K5 (a member without revenue read is refused money in KEY's answer) needs the ai-on variant with a capped model key on staging, so it was not run. This packet's DoD items were all met through the real-DB HTTP suite.",
+    "Load flakes at load average about 20, none in the changed code paths, each green when re-run: key-cortex-action-audit (5000ms timeout when run in parallel; 65/65 alone, twice), d11-sibling-writes D11-S13 (5000ms timeout in the first proof:release0 run; MET on the rerun), and 8 manifests KF_PROOF_REPORT_STALE in the 750s full run (8/8 SATISFIED on an --only rerun at the same head).",
+    "Web tsc in a fresh worktree reports TS2688 for the 'next' type library unless ./node_modules is added as a type root. This is the known worktree-layout artefact."
+   ],
+   "owner_questions": [
+    "Should the genome's non-money memory events also follow module sight? For example, OPERATIONS_GENOME snapshots at operations read, or CUSTOMER_SALES signals at crm read. This packet withholds only the money events (isMoneyMemoryEvent, as the genome REST routes do); every other genome record stays business-wide, including for memberless turns.",
+    "Should a memberless turn (a contact-only bridge position, a SUPER_ADMIN who is no member) see that a proposal exists at all, or no proposal line? As built, it gets 'proposal <action>, status <status>, risk <level>' per the packet spec."
+   ]
+  },
+  "reviews": [
+   {
+    "lens": "security-tenancy",
+    "verdict": "accept",
+    "findings": [
+     {
+      "id": "SEC-FUKMMS-R1",
+      "severity": "minor",
+      "claim": "Pre-existing, outside this packet's diff and scope; follow-up only, not a repair of this packet. readersOwnPromptMemory still reads two of KEY's own memory stores, temporal_flow_memory and ai_memory, business-wide (recordModulesOf returns [] for them). So money that KEY was told to remember reaches readers the packet title says must not see it: a STAFF member with revenue none, a SUPER_ADMIN who is no member, and a contact-only bridge position. The temporal.store_memory capability's own example is 'Remember the Q3 revenue target'. This breaks D-100/D-57 (no money signal without revenue read) and D-73/D-93 (no member, no figure) for these stores.",
+      "failure_path": "Reproduced on a real database (keyflowos_v1_fu_key_memory_money_sight_sec), using the packet suite's harness at ef4df3c86. The owner's KEY turn runs the temporal.store_memory action. Its row was written through the real TemporalAdapterService.storeMemory and TemporalFlowMemoryService (semantic store stubbed) with key q3_revenue_target and value {note:'V71P-TEMPORAL: Q3 revenue target $250,000; we are at $61,400'}, importance high. Then: (1) STAFF v71o_blind (permissionScopes revenue none, expenses none) sent POST /ai/businesses/v71o_biz/flow/chat. The system prompt held '- [temporal_flow_memory] insight: {\"note\":\"V71P-TEMPORAL: Q3 revenue target $250,000; we are at $61,400\"}'. (2) A SUPER_ADMIN who is no member sent the same request and got the same line. (3) A contact-only position texted the Twilio-signed POST /whatsapp/webhook/v71o_biz (staff bridge, memberless turn) and got the same line. (4) buildMemoryContext for v71o_blind (POST /cortex/chat memory) got '2. [temporal_flow_memory] insight: ...$250,000...'. The fix belongs in a follow-up packet that gives these stores a module or money rule, the way this packet did for genome rows."
+     }
+    ],
+    "checked": "Reviewed the diff 1af8a03c..ef4df3c8 (three commits) on pkt/V1-FU-KEY-MEMORY-MONEY-SIGHT. I worked in a detached worktree at ef4df3c86 with my own database (keyflowos_v1_fu_key_memory_money_sight_sec: icu/en-US, pgvector, all migrations applied) and Redis 6379 db 2. The workspace packages were built in the worktree. Prisma generate was skipped because the shared generated client differs from the worktree schema only in formatting.\n\nVerified:\n(1) The builder's suite key-memory-money-sight.integration.test.ts passes 8/8 on my database. The four changed unit specs pass 186/186: perception-join, the __tests__ pipeline spec, prompt-module-scope and unified-memory-retrieval.\n\n(2) Tenancy. The genome read stays on whereBase {businessId}. Membership reads key on userId_businessId. A probe wrote another tenant's genome row (v71o_biz_other, same owner user); the owner's flow chat on v71o_biz never rendered it.\n\n(3) Forged row data. A FINANCE_SNAPSHOT_COMPUTED row whose writer metadata carried genomeRow={sourceType OPERATIONS_GENOME, domain OPERATIONS} does not reach the blind STAFF member: genomeMetadata writes the real columns last. I checked this over flow chat and stream, the blind member's own bridge phone, the contact-only bridge and buildMemoryContext. The owner still sees it.\n\n(4) Outcome-learning copies. A finance signal's copy (domain 'finance', section FINANCIAL) and a FINANCIAL recommendation's copy are withheld from the blind member and shown to the owner.\n\n(5) Executed proposals. A proposal was created through POST /key-autonomy/.../actions/proposals and then recorded as executed through the real OutcomeLearningService.recordActionOutcome. A memberless turn renders the genome row as 'ACTION_EXECUTED: proposal ACTION_EXECUTED' and the ledger copies as 'proposal propose, status PENDING, risk LOW'. I checked the SUPER_ADMIN non-member over flow chat, stream, buildMemoryContext and processQuery, and the contact-only bridge. Neither the title, the figure nor the executionResult values rendered. A member sees the record whole, by the ruling that proposals stay business-wide; that is the same title the GOVERNANCE_DECISION copy already shows them.\n\n(6) Code paths. reader null covers a SUPER_ADMIN who is no member: userCanAccessBusiness is membership-only. It also covers a removed member, the Chatwoot desk and a contact-only position. perceptionForPosition drops crm, revenue and expenses for a memberless position, so genome money can never pass on moduleSight. Memberless turns get NO_MODULE_SIGHT, so the only event records they see are GOVERNANCE_DECISION rows, and those are masked. Every renderer prints only the title and content (formatUnifiedMemory, formatMemoryContextBlock, buildPerceptionSection). No fragment metadata is logged, persisted or returned over HTTP; the pipeline logs only the count. The new metadata (cognitive payload, actorType and action, genome columns) adds nothing beyond what the rendered content already held.\n\n(7) isMoneyMemoryEvent is the same rule the genome REST routes apply, so the prompt and REST agree. I checked every createMemoryEvent writer; customer-sales and operations text carries no figures.\n\n(8) No new outbound requests, logs or secrets. The secret-shape scan of the diff is clean, and the Twilio token is built at runtime. Prefix v71o_ is registered to 'V1-71 (FU-KEY-MEMORY-MONEY-SIGHT)'.\n\n(9) Release 0. None of the changed suites are in release0-index.json. The edited __tests__ pipeline spec is named by the V1-02 negative-controls manifest, which is not part of Release 0, and the edited case is not in any manifest's mustFail list. I did not run proof:release0.\n\n(10) The test edits tighten assertions (memberless turns must not see the title). Nothing was skipped or weakened.\n\nFindings: none against this packet. One pre-existing residual in the same class is reported as SEC-FUKMMS-R1: temporal_flow_memory and ai_memory are still business-wide.\n\nNot checked: the pipeline's separate genome-intelligence context (getGenomeEnrichedContext) and the key-cortex digest; both are outside this diff.\n\nCleanup is done: database dropped, Redis 6379 db 2 flushed, probe file and node_modules symlinks removed (the main tree's node_modules is intact), worktree removed and pruned, branch kept."
+   }
+  ]
+ },
+ {
+  "packet": "FU-IDENTITY-FINANCE-COLUMNS",
+  "branch": "pkt/V1-FU-IDENTITY-FINANCE-COLUMNS",
+  "branch_head_local": "7787efe407c878117929b6fb184da5bb7e677775",
+  "next_stage": "review",
+  "status": "Built, but NEITHER review returned (usage limit). Needs both reviews and a repair before it can merge.",
+  "built": {
+   "head": "7787efe407c878117929b6fb184da5bb7e677775",
+   "red": "20a319172 (tests only, on 696b30ff): cd apps/server && npx vitest run -c vitest.integration.config.ts test/identity-finance-columns.integration.test.ts gave 7 failed and 2 passed (9 tests). Each RED case failed for the same reason: a member without revenue read got accountantEmail ('books@v71f_accountant-a...') and the default account ids back. V71F-A01: STAFF {bookings: read, crm: read} on GET /identity/businesses/:id. A02: STAFF and ADMIN maps with revenue none, and scopes stored as a JSON array. A03: the answer had 108 keys against the owner's 103 after removing the five. B01/B02: the GET /identity/businesses list entry. C01: the identity reads answered the five where GET finance settings answered 403. D01: POST /identity/bootstrap answering a business where the caller is STAFF {bookings: read}. Passing at RED: X01 (fixture check) and A04 (control: owner, STAFF on role defaults, revenue:read STAFF, ADMIN defaults and SUPER_ADMIN all read the five). The web IFC-01..03 are controls and passed 3/3 at RED. No web screen reads the five from an identity read.",
+   "what": "The identity business reads now give accountantEmail and the four default ledger account ids (defaultCashAccountId, defaultArAccountId, defaultApAccountId, defaultTaxAccountId) only to a reader with revenue read on that business. Revenue read is checked exactly as ModuleScopeGuard checks it for GET /finance/businesses/:id/settings: the explicit permissionScopes map (a JSON array counts as a map with nothing in it), otherwise the role defaults; SUPER_ADMIN passes. So for every member the identity reads give those columns exactly when GET settings does (V71F-C01 proves this per member kind).\n\nChanges in IdentityService:\n- New BUSINESS_FINANCE_SETTINGS_FIELDS and withholdBusinessFinanceSettings().\n- getBusiness(businessId, viewer?): the GET :businessId route now passes the authenticated member (null if none, which means no access).\n- listBusinesses(userId, userRole?): reads the caller's own membership of each business through a relation include, which is never sent back, and applies the rule per business.\n- bootstrapUser applies the same rule to the business it returns. That business can be one the caller is only a member of (the oldest-membership case in ensureBootstrapWorkspace).\n\nEvery other column stays for every member: currency, the default tax rate (the invoice form and business settings page read it), accountingBasis, fiscalYearStartMonth, timezone, profile, masked metaData and the v1 settings.\n\nIn-process server reads with no viewer (the KEY settings adapter, the document-guidance route) still get the full row, as before. The owner-only profile PATCH (D-11) is unchanged.\n\nComments that called the GET settings gate \"not a confinement\" are updated in finance.controller.ts and books-read-scope.spec.ts (comment only). The REST scope census now records SEC-V71-2 as closed.\n\nNo web screen changed. Every screen that shows the five (the finance settings page, and the accountant box on the Reports and Tax pages) reads them from GET settings, which the IFC tests pin. No Release 0 required case or manifest changed (r0_impact KEEP; no case pins these fields).",
+   "tests": [
+    {
+     "file": "apps/server/test/identity-finance-columns.integration.test.ts (new, v71f_; GREEN at head)",
+     "passed": 9,
+     "failed": 0
+    },
+    {
+     "file": "apps/web/src/app/app/finance/__tests__/identity-finance-columns.test.tsx (new, controls)",
+     "passed": 3,
+     "failed": 0
+    },
+    {
+     "file": "real-DB suites that touch identity reads or bootstrap (30 files incl. payment-secrets-write-only, business-v1-settings, business-token-disclosure, tenant-founding-membership, owner-membership-backfill, d11-sibling-writes, d11-finance-settings, identity-business-config, whatsapp-config-authority, team-invite-email-case, owner-role-profile, identity-local-auth, finance-settings-scope, finance-settings-patch, ...)",
+     "passed": 707,
+     "failed": 0
+    },
+    {
+     "file": "dist-backed real-DB suites: identity-boundary, onboarding-manual-complete, release0-journey (after server build; 1 todo)",
+     "passed": 138,
+     "failed": 0
+    },
+    {
+     "file": "server unit specs: src/modules/identity/*, key-cortex/adapters/settings-adapter.service.spec, finance/books-read-scope.spec, core/config/fixture-prefix-registry, rest-scope-census, d11-owner-writes",
+     "passed": 218,
+     "failed": 0
+    },
+    {
+     "file": "apps/server/test/identity.service.test.ts (mock listBusinesses)",
+     "passed": 3,
+     "failed": 0
+    },
+    {
+     "file": "src/core/auth/public-surface.spec.ts + fixture-prefix-registry.spec.ts",
+     "passed": 21,
+     "failed": 0
+    },
+    {
+     "file": "web vitest src/app/app/finance, src/app/app/reports, src/app/app/settings/business (21 files)",
+     "passed": 116,
+     "failed": 0
+    },
+    {
+     "file": "proof:release0 (scripts/proof-admission/release0.mjs --skip-build) at 7787efe4: R0 EXIT GATE MET, 39/39 R0 manifests, 107/107 files, 9 todo all explained",
+     "passed": 3725,
+     "failed": 0
+    },
+    {
+     "file": "run-manifests.mjs at 7787efe4 (exact-head): 44/44 case manifests SATISFIED across runs: 36 in the full run, the other 8 re-run with --only (load-only re-runs, see open_issues)",
+     "passed": 44,
+     "failed": 0
+    }
+   ],
+   "tsc": "Server: 0 errors. apps/server tsc --project tsconfig.json (the build, same tsconfig as typecheck) exited 0 at the committed tree and produced dist/main.js. A first build found one TS2322 in the new helper's return type; it was fixed before the fix commit. Web: tsc --noEmit -p tsconfig.json stops at TS2688 \"Cannot find type definition file for 'next'\" before any semantic check. The cause is environmental, not this diff: tsconfig sets types [\"next\", ...] with custom typeRoots, TS 5.9 does not look in node_modules for them, and no @types/next exists in the main tree either. With --types react,react-dom,node, web tsc reports 0 errors, including the new test file.",
+   "release0": "MET. proof:release0 at exact head 7787efe4: run-manifests exit 0 (39/39 Release 0 manifests SATISFIED, 107 files, 3725 passed, 9 todo each explained), release0-proof-coverage.spec 19/19, runtime skip check clean, \"R0 EXIT GATE MET (exit 0)\". An earlier attempt while the machine was at load average about 25 was rejected for load reasons only: the 600s report age limit was exceeded (KF_PROOF_REPORT_STALE) and three 5s test timeouts occurred (SEC2c-R06, the R0-13f deals bulk move-stage case, key-cortex.controller.spec 'tsc emits'). Each of those passed when re-run alone, and the full gate was then re-run once load dropped. No required Release 0 case or manifest was changed.",
+   "files_changed": [
+    "apps/server/test/identity-finance-columns.integration.test.ts",
+    "apps/server/test/helpers/fixture-prefixes.json",
+    "apps/web/src/app/app/finance/__tests__/identity-finance-columns.test.tsx",
+    "apps/server/src/modules/identity/identity.service.ts",
+    "apps/server/src/modules/identity/identity.controller.ts",
+    "apps/server/src/modules/finance/finance.controller.ts",
+    "apps/server/src/modules/finance/books-read-scope.spec.ts",
+    "docs/reconstruction/REST-SCOPE-CENSUS-2026-11-13.md"
+   ],
+   "open_issues": [
+    "DoD items reached: RED (STAFF without revenue read gets accountantEmail from GET /identity/businesses/:id); GREEN (absent for them, present for the owner and revenue readers); web screens still work (web vitest); no required case changed. None needed production, staging or a provider.",
+    "Scope addition: POST /identity/bootstrap gets the same projection. It also returns a Business read and can return a business the caller is only a member of. It is in the same file and is tested by V71F-D01.",
+    "Possible remaining door, in the server-key chain's area, left untouched: KeyCortexContextAssemblyService.getFullContext calls SettingsAdapter.getBusinessProfile, which calls IdentityService.getBusiness(businessId) with no viewer. So KEY's 'settings' context still holds the full Business row, accountantEmail and the default account ids included. Whether any member-facing KEY path returns that context unfiltered to a member without revenue read was not checked here. A KEY packet can pass the acting member as viewer (getBusiness(businessId, actor)).",
+    "PATCH /identity/businesses/:id is left unprojected on purpose. It is owner-only (D-11), and an OWNER's scopes cannot be narrowed through the product ('Cannot modify owner permissions'), so only revenue readers or SUPER_ADMIN ever get its answer.",
+    "Load-only re-runs: the machine was shared with other agents (load average 20-27 on 4 cores, 14GB memory cgroup). Server tsc was OOM-killed twice before it completed. In the full run-manifests run (806s), 8 manifests with maxReportAgeSeconds 600 were rejected as KF_PROOF_REPORT_STALE, and key-cortex.controller.spec 'tsc emits' timed out at 5s. Re-runs at the same exact head: the 8 together with --only (6 SATISFIED; d11-sibling-writes D11-S13 timed out at 5051ms), then d11-sibling-writes with key-cortex-actor-binding (d11-sibling-writes SATISFIED; the key-cortex 'tsc emits' case timed out again at 5s), then key-cortex-actor-binding alone (SATISFIED; the case passes alone in about 3s). proof:release0 MET on its own once load dropped.",
+    "Web tsc as configured (apps/web tsconfig types ['next'] with custom typeRoots) stops at TS2688 in this environment, so no semantic check runs. This is outside the write set. The override run (--types react,react-dom,node) is clean.",
+    "No CONTRADICTION: the packet premise held at 696b30ff (identity reads returned the columns to every member; GET settings is gated on revenue read), and no required Release 0 case pins these fields in the identity projections."
+   ],
+   "owner_questions": [
+    "The packet names accountantEmail and the four default account ids, and only those are dropped. accountingBasis and fiscalYearStartMonth are also behind revenue read on GET finance settings, but the identity reads still return them to every member, and no non-revenue web screen reads them. Should they also be withheld from members without revenue read?"
+   ]
+  },
+  "reviews": []
+ },
+ {
+  "packet": "FU-PHONE-COUNTRY-DUPLICATES",
+  "branch": "pkt/V1-FU-PHONE-COUNTRY-DUPLICATES",
+  "branch_head_local": "4c1cee536e9eb1f13eb8da532f3b689f31d75dcb",
+  "next_stage": "build",
+  "status": "Build cut off by the usage limit. The agent's uncommitted work (tracked files) is committed on the branch as a WIP commit; an untracked new file apps/server/scripts/backfill-phone-keys.ts was lost. Needs the build finished (tests first), then reviews.",
+  "reviews": []
+ },
+ {
+  "packet": "FU-PROVIDER-ERROR-HYGIENE",
+  "branch": "pkt/V1-FU-PROVIDER-ERROR-HYGIENE",
+  "branch_head_local": "758f7a3a8102e081433f9c0185d26f7613df8198",
+  "next_stage": "build",
+  "status": "Build cut off by the usage limit. Branch holds what the agent committed. Needs the build finished, then reviews.",
+  "reviews": []
+ },
+ {
+  "packet": "W11-CORTEX-INSIGHT-QUERIES",
+  "branch": "pkt/V1-W11-CORTEX-INSIGHT-QUERIES",
+  "branch_head_local": "7e32e9ff3de98526f6401806c1eb420603abc449",
+  "next_stage": "build",
+  "status": "Build cut off by the usage limit. Branch holds what the agent committed. Needs the build finished, then reviews.",
+  "reviews": []
+ }
+]

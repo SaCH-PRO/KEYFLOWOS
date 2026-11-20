@@ -24,7 +24,9 @@ import { CreateAttendeeDto } from './dto/create-attendee.dto';
 import { UpdateAttendeeDto } from './dto/update-attendee.dto';
 import { CheckInDto } from './dto/check-in.dto';
 import { EventListQueryDto } from './dto/event-list-query.dto';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('events', 'bookings')
 @Controller()
 @UseGuards(AuthGuard, BusinessGuard)
 export class EventsController {

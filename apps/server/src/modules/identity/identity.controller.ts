@@ -958,6 +958,28 @@ export class IdentityController {
     return this.identity.updateBusiness(businessId, body);
   }
 
+  /**
+   * BIZ-SETTINGS-ADMIN-DOOR (owner ruling D-150 'hubs'): the Advanced CRM
+   * switch and the depth of each hub, changed by the owner or an ADMIN holding
+   * settings admin (IdentityService.assertAdvancedSettingsWriter runs first,
+   * before the body is read). The body names advancedCrm, depth or both and
+   * nothing else: what the business sells stays on the owner-only profile
+   * PATCH above (D-11), and any other key is refused 400. It is declared
+   * Record<string, unknown> on purpose: tsc emits Object for it, which the
+   * global whitelist pipe hands on as sent, so the service sees, and refuses,
+   * a key this door does not take instead of the pipe dropping it. It answers
+   * what GET answers.
+   */
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Patch('businesses/:businessId/advanced-settings')
+  updateAdvancedSettings(
+    @Param('businessId') businessId: string,
+    @Body() body: Record<string, unknown>,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.identity.updateAdvancedSettings(businessId, body, user);
+  }
+
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/ai-generate-field')
   async generateField(

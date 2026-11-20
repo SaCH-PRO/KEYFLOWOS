@@ -12,7 +12,7 @@ import {
 import { KeyCortexSagaService } from './key-cortex-saga.service';
 import { KeyCortexCompensationService } from './key-cortex-compensation.service';
 import { ConnectorCommand } from './key-cortex-connector.types';
-import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+import { LEVEL_RANK, explicitScopeMap, memberModuleLevel, memberScopeMap, rankOf } from '../../core/authority/module-vocabulary';
 import { contactVisibilityFilter, resolveCrmAccess, visibilityClause, type CrmAccess } from '../crm/crm-permissions.helper';
 import {
   CRM_DELETE_ACTIONS,
@@ -467,7 +467,8 @@ export class KeyCortexPlannerService {
    * runs only once it is claimed out of RUNNABLE_PLAN_STATUSES (409 'not
    * claimable' otherwise: running, completed, or a concurrent execute claimed
    * it first; V1-10, PRS-M24). `options.skipApproval` is honoured only for the
-   * business OWNER or SUPER_ADMIN (V1-10 review ST-3). A plan stopped at an
+   * business OWNER with no explicit scope map or SUPER_ADMIN (V1-10 review ST-3;
+   * D-140: isUnscopedBusinessOwner). A plan stopped at an
    * approval pause runs none of its completed or parked steps again (review
    * ST-2), and its saga is closed SAGA_STOPPED_FOR_APPROVAL (review ST-1).
    *
@@ -505,11 +506,13 @@ export class KeyCortexPlannerService {
     // requiresApproval flag, the spending threshold and the hourly cap), and
     // POST plans/:planId/execute passed it from the request body. So a STAFF
     // member who created a plan ran the steps the OWNER's policy parks. It is
-    // honoured only for the business OWNER or SUPER_ADMIN; for anyone else (and
-    // for a system caller, none of which sends it) the steps follow the policy.
+    // honoured only for the business OWNER with no explicit scope map (D-140) or
+    // SUPER_ADMIN; for anyone else (an OWNER membership bound by its map
+    // included, and a system caller, none of which sends it) the steps follow
+    // the policy.
     let runOptions = options;
     if (options.skipApproval && !(await this.mayOverrideApproval(plan.businessId, member))) {
-      this.logger.warn(`[plans] execute ${planId}: skipApproval ignored for ${member ? member.userId : 'a system caller'} (only the business OWNER or SUPER_ADMIN may skip approval)`);
+      this.logger.warn(`[plans] execute ${planId}: skipApproval ignored for ${member ? member.userId : 'a system caller'} (only the business OWNER with no explicit scope map or SUPER_ADMIN may skip approval)`);
       runOptions = { ...options, skipApproval: false };
     }
 
@@ -776,7 +779,10 @@ export class KeyCortexPlannerService {
    * business's invoices or payments (INVOICE_WRITE_MODULES) runs only for a
    * member who holds revenue write: the commerce adapter writes as
    * KEY_SYSTEM_ACTOR_ID, so the service membership and scope checks that apply
-   * over HTTP never run on this path. A SUPER_ADMIN who is not a member of the
+   * over HTTP never run on this path. D-140 (W11-OWNER-MAP-UNMAPPED-TOOLS
+   * review repair): an OWNER membership with an explicit scope map may run
+   * another member's plan (it is the owner) but holds revenue write only if its
+   * map does (assertRevenueWrite). A SUPER_ADMIN who is not a member of the
    * business is refused such a plan (D-46); one who is a member keeps the
    * platform bypass, as on POST cortex/execute (cortexCommandRefusal). The
    * check runs before the claim, so a refused plan is left as it was.
@@ -826,8 +832,11 @@ export class KeyCortexPlannerService {
    * module held by the member it runs as (`principal`: the executing member over HTTP, else the
    * plan's creator), write for a write and read for a read, as ModuleScopeGuard computes scopes
    * (memberPlanStepScopeRefusal). This used to hold a plan only to revenue write, and only for
-   * commerce steps. The business OWNER (either arm) and SUPER_ADMIN (the platform bypass; D-46 is
-   * checked above) pass every step; an ADMIN keeps every module (D-71). A crm step also keeps to the
+   * commerce steps. The business OWNER with no explicit scope map (isUnscopedBusinessOwner) and
+   * SUPER_ADMIN (the platform bypass; D-46 is checked above) pass every step; an OWNER membership that
+   * carries an explicit map is held to it as any member is (D-140: memberPlanStepScopeRefusal on its
+   * map, so a module mapped to no module scope, such as genome or activity, is refused to it); an
+   * ADMIN keeps every module (D-71). A crm step also keeps to the
    * member's own-contact rules (assertCrmStepWithinView), an ADMIN's included: D-71 keeps an ADMIN
    * every module scope, not another member's PRIVATE contact, which an ADMIN's visibility excludes
    * (D-37; KEY-R3b review CR-R3b-1, kept deliberately). Checked before the claim: a refused plan
@@ -839,7 +848,7 @@ export class KeyCortexPlannerService {
     principal: { userId: string; role?: string | null },
   ): Promise<void> {
     if (principal.role === 'SUPER_ADMIN') return;
-    if (await this.isBusinessOwner(plan.businessId, principal.userId)) return;
+    if (await this.isUnscopedBusinessOwner(plan.businessId, principal.userId)) return;
     try {
       await this.assertMemberSteps(plan, principal.userId);
     } catch (err) {
@@ -849,7 +858,9 @@ export class KeyCortexPlannerService {
   }
 
   /**
-   * D-71 for a member who is neither the business OWNER nor SUPER_ADMIN (assertStepsWithinAuthority).
+   * D-71 for a member who is neither the business OWNER with no explicit scope map nor SUPER_ADMIN
+   * (assertStepsWithinAuthority; an OWNER membership with an explicit map is held here like any member
+   * other than an ADMIN, D-140).
    * W10-KEY-PLAN-SCOPE (owner ruling D-114, amending D-71 for an explicit revenue 'none' only;
    * SEC-W9MRK-1): an ADMIN keeps every module, except that an ADMIN whose explicit scope map sets
    * revenue to none is refused money steps (adminPlanStepScopeRefusal: the money reports and the
@@ -864,10 +875,12 @@ export class KeyCortexPlannerService {
     if (!membership) {
       throw new ForbiddenException('Not a member of this business: a KEY plan runs only as a member of its business (D-73)');
     }
-    const explicit = membership.permissionScopes;
-    const explicitScopes: Record<string, string> | null =
-      explicit && typeof explicit === 'object' && !Array.isArray(explicit) ? (explicit as Record<string, string>) : null;
-    const scopes: Record<string, string> = explicitScopes ?? defaultScopesForRole(membership.role);
+    // TOF-GRAPH-SCOPE-ARRAY review repair (SEC-TGSA-1; D-71, D-114): read as ModuleScopeGuard reads it. A stored JSON
+    // array is an explicit map that names no module (explicitScopeMap): it had been read as the role's defaults, so an
+    // ADMIN stored as [] ran money steps (D-114 binds an ADMIN's explicit map) and a STAFF member stored as [] ran the
+    // STAFF defaults' reads, while the guard refuses both every module route.
+    const scopes: Record<string, string> = memberScopeMap(membership);
+    const explicitScopes: Record<string, string> | null = explicitScopeMap(membership.permissionScopes) ? scopes : null;
     let crm: { access: CrmAccess; clause: unknown } | undefined;
     for (const step of plan.steps ?? []) {
       const refusal =
@@ -1010,19 +1023,17 @@ export class KeyCortexPlannerService {
   }
 
   /**
-   * Revenue write as ModuleScopeGuard computes it (the membership's explicit scope
-   * map, else its role's defaults); the business OWNER (either arm) holds it.
+   * Revenue write as ModuleScopeGuard computes it (memberModuleLevel: the membership's explicit
+   * scope map, a stored JSON array included, else its role's defaults); the business OWNER with no
+   * explicit scope map holds it (isUnscopedBusinessOwner), and an OWNER membership with an explicit
+   * map holds it only if its map does (D-140).
    */
   private async assertRevenueWrite(businessId: string, userId: string): Promise<void> {
-    if (await this.isBusinessOwner(businessId, userId)) return;
+    if (await this.isUnscopedBusinessOwner(businessId, userId)) return;
     const membership = await this.membershipOf(businessId, userId);
     if (!membership) throw new ForbiddenException('Not a member of this business');
-    const explicit = membership.permissionScopes;
-    const scopes: Record<string, string> =
-      explicit && typeof explicit === 'object' && !Array.isArray(explicit)
-        ? (explicit as Record<string, string>)
-        : defaultScopesForRole(membership.role);
-    const level = scopes.revenue || 'none';
+    // TOF-GRAPH-SCOPE-ARRAY review repair (SEC-TGSA-1): ModuleScopeGuard's own reading, a stored JSON array included.
+    const level = memberModuleLevel(membership, 'revenue');
     if (rankOf(level) < LEVEL_RANK.write) {
       throw new ForbiddenException(
         `Insufficient permissions: revenue requires write access (you have ${level}); this plan writes the business's invoices or payments`,
@@ -1039,14 +1050,34 @@ export class KeyCortexPlannerService {
 
   /**
    * Whether a run may skip the executor's approval policy (V1-10 review ST-3):
-   * only for the business OWNER (an OWNER membership: D-116, D-125) or
-   * SUPER_ADMIN, who hold authority over that policy. Never for a STAFF
-   * creator or a system caller.
+   * only for the business OWNER (an OWNER membership: D-116, D-125) with no
+   * explicit scope map (isUnscopedBusinessOwner, D-140) or SUPER_ADMIN, who
+   * hold authority over that policy. Never for a STAFF creator, an OWNER
+   * membership bound by its explicit map, or a system caller.
    */
   private async mayOverrideApproval(businessId: string, member?: PlanExecutionActor): Promise<boolean> {
     if (!member) return false;
     if (member.role === 'SUPER_ADMIN') return true;
-    return this.isBusinessOwner(businessId, member.userId);
+    return this.isUnscopedBusinessOwner(businessId, member.userId);
+  }
+
+  /**
+   * W11-OWNER-MAP-UNMAPPED-TOOLS review repair (SEC-W11OMU-1, COR-W11OMU-1; owner ruling D-140): the
+   * business owner whose authority no scope map bounds: an OWNER membership (isBusinessOwner) that
+   * carries no explicit permissionScopes map (explicitScopeMap, ModuleScopeGuard's reading: an object
+   * map or a JSON array is one). Only this owner passes every plan step (assertStepsWithinAuthority),
+   * holds revenue write (assertRevenueWrite) and may skip the approval policy (mayOverrideApproval).
+   * An OWNER membership with an explicit map is bound by it on this door as on REST and on the other
+   * KEY surfaces (memberToolRunAuthority; the plan read rule, graphPlanReadScope): its steps are held
+   * to its map (assertMemberSteps), its invoice and payment writes to its revenue level, and its
+   * skipApproval is ignored. It is still the business owner for who may run a plan
+   * (assertMayExecutePlan: another member's plan, or one no member created) and for contact
+   * visibility (a role rule, not a module scope).
+   */
+  private async isUnscopedBusinessOwner(businessId: string, userId: string): Promise<boolean> {
+    if (!(await this.isBusinessOwner(businessId, userId))) return false;
+    const membership = await this.membershipOf(businessId, userId);
+    return !!membership && !explicitScopeMap(membership.permissionScopes);
   }
 
   /**

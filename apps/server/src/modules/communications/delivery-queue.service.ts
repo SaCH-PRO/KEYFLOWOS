@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy, NotFoundException, BadRequestException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'node:crypto';
+import { decryptNestedRecord } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import type { ModuleLevelActor } from '../../core/auth/member-module-level';
 import { channelRecipients, channelSendRefusal, RECEIVER_MAY_NOT_OPEN } from './channel-audience';
@@ -86,6 +87,37 @@ type ResendDeliveryRuntime = {
   content?: DeliveryContentRuntime | null;
   variant?: DeliveryVariantRuntime | null;
 };
+
+/**
+ * FU-DELIVERY-TOKEN-DECRYPT (V1-71): a delivery with its sending account's stored secrets decrypted.
+ *
+ * The account (ChannelConnection) is read as a NESTED include of the delivery (destination -> connection), and the
+ * Prisma token-encryption extension decrypts only the top-level rows of a query on an encrypted model, so the
+ * nested token is the stored 'enc:v1:...' value. The Gmail and WhatsApp adapters put connection.token in the
+ * Authorization header: every queued send went out with the ciphertext as its bearer and the provider refused it.
+ * decryptNestedRecord is the extension's own decrypt step (same columns, same key as a top-level read). The plaintext
+ * stays on the in-memory delivery handed to the adapter or to the retry decision: it is never returned, logged or
+ * written (the delivery rows and events record the provider's answer, not the connection).
+ *
+ * A stored value that does not decrypt (saved under another key, or damaged) is no usable credential: the account
+ * reads as having none, so its delivery fails visibly (EMAIL_ACCOUNT_NOT_CONNECTED for Gmail, MISSING_CREDENTIALS for
+ * WhatsApp) and the rest of the batch is still sent. Throwing here would leave the claimed delivery in Sending and
+ * abort the tick (DTD-07); sending the ciphertext is what this fixes.
+ */
+const decryptLogger = new Logger('DeliveryQueueService');
+function withDecryptedConnection<T extends { destination?: { connection?: unknown } | null }>(delivery: T): T {
+  const destination = delivery.destination;
+  if (!destination?.connection) return delivery;
+  let connection: unknown;
+  try {
+    connection = decryptNestedRecord('ChannelConnection', destination.connection);
+  } catch {
+    const id = (destination.connection as { id?: unknown }).id;
+    decryptLogger.warn(`Sending account ${String(id)}: its stored token cannot be decrypted; the account is treated as not connected`);
+    connection = { ...(destination.connection as Record<string, unknown>), token: null, refreshToken: null };
+  }
+  return { ...delivery, destination: { ...destination, connection } };
+}
 
 function resolveScheduledAtUtc(scheduledAt: string, timezone?: string): Date {
   const tz = timezone || DEFAULT_TIMEZONE;
@@ -193,7 +225,8 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
             variant: true,
           },
         });
-        if (full) claimed.push(full);
+        // V1-71: the sending account is a nested read: decrypt its token before an adapter sends with it.
+        if (full) claimed.push(withDecryptedConnection(full));
       }
     }
     return claimed;
@@ -1541,11 +1574,13 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   async retry(businessId: string, deliveryId: string) {
-    const delivery = await this.prisma.client.outboundDelivery.findFirst({
+    const found = await this.prisma.client.outboundDelivery.findFirst({
       where: { id: deliveryId, businessId, status: 'Failed' },
       include: { destination: { include: { connection: true } } },
     });
-    if (!delivery) throw new NotFoundException('Failed delivery not found');
+    if (!found) throw new NotFoundException('Failed delivery not found');
+    // V1-71: the retry decision reads the account's token (resolveEmailFor): the decrypted one, as the send does.
+    const delivery = withDecryptedConnection(found);
 
     if (!(await this.isResendManualRetrySafe(delivery))) {
       throw new BadRequestException(
@@ -1662,10 +1697,13 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   async retryAllFailed(businessId: string, contentId: string) {
-    const failed = await this.prisma.client.outboundDelivery.findMany({
-      where: { businessId, contentId, status: 'Failed' },
-      include: { destination: { include: { connection: true } } },
-    });
+    // V1-71: the retry decision reads each account's token (resolveEmailFor): the decrypted one, as the send does.
+    const failed = (
+      await this.prisma.client.outboundDelivery.findMany({
+        where: { businessId, contentId, status: 'Failed' },
+        include: { destination: { include: { connection: true } } },
+      })
+    ).map((delivery) => withDecryptedConnection(delivery));
 
     if (failed.length === 0) return { retried: 0, blocked: 0 };
 

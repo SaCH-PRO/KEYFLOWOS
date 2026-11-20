@@ -16,6 +16,7 @@
  * behavior change.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as tokenEncryption from './token-encryption';
 import { encryptToken, decryptToken } from './token-encryption';
 
 const KEY_VARS = ['CONNECTOR_CREDENTIALS_KEY', 'CREDENTIALS_ENCRYPTION_KEY', 'JWT_SECRET'] as const;
@@ -99,5 +100,54 @@ describe('encryptToken / decryptToken', () => {
     const ct = encryptToken('secret');
     expect(ct).toMatch(/^enc:v1:/);
     expect(decryptToken(ct)).toBe('secret');
+  });
+});
+
+/**
+ * FU-DELIVERY-TOKEN-DECRYPT (V1-71). The extension decrypts only the top-level rows of a query on an encrypted model;
+ * a row read as a nested include/select of another query keeps the stored ciphertext. decryptNestedRecord is the
+ * decrypt step for such a row: the extension's own field map and key, so a nested row reads as a top-level one does.
+ */
+describe('decryptNestedRecord: the decrypt step for a nested row', () => {
+  const { decryptNestedRecord, ENCRYPTED_FIELDS } = tokenEncryption as unknown as {
+    decryptNestedRecord: <T>(model: string, row: T) => T;
+    ENCRYPTED_FIELDS: Record<string, readonly string[]>;
+  };
+  const key = () => ['nested', 'row', 'key'].join('-');
+
+  it('the field map names the four encrypted models and their columns', () => {
+    expect(ENCRYPTED_FIELDS).toBeDefined();
+    expect(Object.keys(ENCRYPTED_FIELDS).sort()).toEqual(['Business', 'ChannelConnection', 'SocialConnection', 'Webhook']);
+    expect(ENCRYPTED_FIELDS.ChannelConnection).toEqual(['token', 'refreshToken']);
+    expect(ENCRYPTED_FIELDS.SocialConnection).toEqual(['token', 'refreshToken']);
+    expect(ENCRYPTED_FIELDS.Webhook).toEqual(['secret']);
+    expect(ENCRYPTED_FIELDS.Business).toContain('gmailAccessToken');
+    expect(ENCRYPTED_FIELDS.Business).toContain('calendarRefreshToken');
+    expect(ENCRYPTED_FIELDS.Business).toHaveLength(16);
+    expect(Object.isFrozen(ENCRYPTED_FIELDS) && Object.isFrozen(ENCRYPTED_FIELDS.ChannelConnection)).toBe(true);
+  });
+
+  it('decrypts every encrypted column of a nested ChannelConnection and leaves the rest as read, without changing the row in place', () => {
+    process.env.CONNECTOR_CREDENTIALS_KEY = key();
+    const stored = { id: 'cc_1', provider: 'EMAIL', token: encryptToken('access-1'), refreshToken: encryptToken('refresh-1'), accountEmail: 'a@b.example', providerMeta: { boundBy: 'u1' } };
+    const out = decryptNestedRecord('ChannelConnection', stored);
+    expect(out).toEqual({ ...stored, token: 'access-1', refreshToken: 'refresh-1' });
+    expect(stored.token).toMatch(/^enc:v1:/);
+    expect(out).not.toBe(stored);
+  });
+
+  it('reads a legacy plaintext value as itself, leaves null and missing columns alone, and maps a list relation row by row', () => {
+    process.env.CONNECTOR_CREDENTIALS_KEY = key();
+    expect(decryptNestedRecord('ChannelConnection', { id: 'x', token: 'legacy-plain', refreshToken: null })).toEqual({ id: 'x', token: 'legacy-plain', refreshToken: null });
+    expect(decryptNestedRecord('Webhook', { id: 'w' })).toEqual({ id: 'w' });
+    const rows = [{ token: encryptToken('s1') }, { token: encryptToken('s2') }];
+    expect(decryptNestedRecord('SocialConnection', rows)).toEqual([{ token: 's1' }, { token: 's2' }]);
+    expect(decryptNestedRecord('Business', { gmailAccessToken: encryptToken('g'), name: 'Biz' })).toEqual({ gmailAccessToken: 'g', name: 'Biz' });
+  });
+
+  it('passes null and undefined through, and refuses a model outside the field map', () => {
+    expect(decryptNestedRecord('ChannelConnection', null)).toBeNull();
+    expect(decryptNestedRecord('ChannelConnection', undefined)).toBeUndefined();
+    expect(() => decryptNestedRecord('Contact', { token: 'x' })).toThrow(/Contact/);
   });
 });

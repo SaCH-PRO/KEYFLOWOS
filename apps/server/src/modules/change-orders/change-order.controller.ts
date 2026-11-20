@@ -8,6 +8,7 @@ import { RateLimit } from '../../core/decorators/rate-limit.decorator';
 import { RateLimitGuard } from '../../core/guards/rate-limit.guard';
 import { ChangeOrderService } from './change-order.service';
 import { IsNumber, IsOptional, IsString } from 'class-validator';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
 /*
  * Required for these bodies to survive the global ValidationPipe
@@ -88,6 +89,7 @@ class UpdateChangeOrderDto {
   invoiceId?: string;
 }
 
+@HiddenModuleWrites('projects', 'projects')
 @Controller('change-orders')
 @UseGuards(AuthGuard, BusinessGuard, RateLimitGuard)
 export class ChangeOrderController {

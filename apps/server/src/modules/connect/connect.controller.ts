@@ -42,6 +42,7 @@ import {
   isSupportedSource,
   ConnectorFormSource,
 } from './connector-form-mapping.service';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
 function ensureSource(s: string): ConnectorFormSource {
   if (!isSupportedSource(s)) {
@@ -50,6 +51,7 @@ function ensureSource(s: string): ConnectorFormSource {
   return s;
 }
 
+@HiddenModuleWrites('connectors', 'settings')
 @Controller('connect')
 @UseGuards(AuthGuard, BusinessGuard)
 export class ConnectController {
@@ -190,6 +192,8 @@ export class ConnectController {
    * (AuthGuard's user); a run whose caller may not is refused with 403 before
    * any response is read (review CR-W9FQG-2: not a 201 with zero counts).
    */
+  // D-181 (connectorauth): only a settings admin connects, syncs or tests the other connectors (SWP-CENSUS-HIDDEN).
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/forms/:formId/backfill')
   backfillFormResponses(
     @Param('businessId') businessId: string,
@@ -199,6 +203,8 @@ export class ConnectController {
     return this.formsMapping.backfill(businessId, formId, req.user?.id ?? null);
   }
 
+  // D-181 (connectorauth): only a settings admin connects, syncs or tests the other connectors (SWP-CENSUS-HIDDEN).
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/forms/:formId/process-new')
   processNewFormResponses(
     @Param('businessId') businessId: string,
@@ -297,6 +303,8 @@ export class ConnectController {
   // twins resync google_contacts and sync-all are (they run the same
   // GoogleContactsSyncService.sync): assertGoogleConnectOwner, 403
   // GOOGLE_CONNECT_OWNER_ONLY first, before anything is synced.
+  // D-181 (connectorauth): only a settings admin connects, syncs or tests the other connectors (SWP-CENSUS-HIDDEN).
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/contacts/sync')
   async syncContacts(
     @Param('businessId') businessId: string,
@@ -344,6 +352,8 @@ export class ConnectController {
   }
 
   // ----- Outlook Contacts -----
+  // D-181 (connectorauth): only a settings admin connects, syncs or tests the other connectors (SWP-CENSUS-HIDDEN).
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/outlook-contacts/sync')
   syncOutlookContacts(@Param('businessId') businessId: string) {
     return this.outlook.sync(businessId);
@@ -400,6 +410,8 @@ export class ConnectController {
    * Google Contacts not connected it syncs no Google source and stays a
    * member's (Outlook Contacts is a Microsoft connection, outside D-99).
    */
+  // D-181 (connectorauth): only a settings admin connects, syncs or tests the other connectors (SWP-CENSUS-HIDDEN).
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/contact-sources/sync-all')
   async syncAllSources(
     @Param('businessId') businessId: string,
@@ -433,6 +445,8 @@ export class ConnectController {
   // disconnecting the Google Contacts source is the owner's
   // (assertGoogleConnectOwner, 403 GOOGLE_CONNECT_OWNER_ONLY first, before
   // anything is synced or cleared). The Outlook source is unchanged.
+  // D-181 (connectorauth): only a settings admin connects, syncs or tests the other connectors (SWP-CENSUS-HIDDEN).
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/contact-sources/:source/resync')
   async resyncSource(
     @Param('businessId') businessId: string,
@@ -447,6 +461,9 @@ export class ConnectController {
     throw new BadRequestException(`Unknown source "${source}"`);
   }
 
+  // D-181 (connectorauth): only a settings admin connects, syncs or tests the other connectors (SWP-CENSUS-HIDDEN); a
+  // disconnect is the same settings admin door (the Outlook branch already checked it; the Google one keeps D-99's owner).
+  @RequireModuleScope('settings', 'admin')
   @Delete('businesses/:businessId/contact-sources/:source')
   async disconnectSource(
     @Param('businessId') businessId: string,

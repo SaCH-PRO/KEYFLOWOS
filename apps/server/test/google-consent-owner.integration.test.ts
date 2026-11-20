@@ -763,6 +763,25 @@ function expectGoogleOwnerOnly(res: { status: number; body: any }, who: string) 
   expect(JSON.stringify(res.body)).not.toContain('accounts.google.com');
 }
 
+/**
+ * SWP-CENSUS-HIDDEN (V1-62; D-152, D-181): the Drive and Connect write routes run ModuleScopeGuard first
+ * (@HiddenModuleWrites): Drive writes need operations write, the Connect contact syncs and source disconnect settings
+ * admin. A member below that scope (the STAFF member and the other business's owner here, who hold bookings write
+ * only) is refused there, before the owner rule: 403 naming the scope, no Google URL. The ADMIN holds both scopes by
+ * role default and still meets the owner rule (GOOGLE_CONNECT_OWNER_ONLY).
+ */
+function expectRefusedBelowScope(res: { status: number; body: any }, scope: string, who: string) {
+  expect(res.status, `${who} ${JSON.stringify(res.body)}`).toBe(403);
+  expect(String(res.body?.message ?? ''), `${who} ${JSON.stringify(res.body)}`).toMatch(new RegExp(`^Insufficient permissions: ${scope} requires `));
+  expect(JSON.stringify(res.body)).not.toContain('accounts.google.com');
+}
+
+/** The refusal REFUSED's members meet on a gated Drive or Connect write: the owner rule for the ADMIN, the scope for the others. */
+function expectRefusedOnGatedWrite(res: { status: number; body: any }, scope: string, member: string, who: string) {
+  if (member === ID.admin) expectGoogleOwnerOnly(res, who);
+  else expectRefusedBelowScope(res, scope, who);
+}
+
 /** An admitted consent: a Google URL whose signed state names `businessId` (and the flow tag `flow`, if any). */
 function expectConsentFor(res: { status: number; body: any }, businessId: string, flow: string | undefined, who: string) {
   expect(res.status, `${who} ${JSON.stringify(res.body)}`).toBe(200);
@@ -848,10 +867,10 @@ describe('W8-GOOGLE-CONSENT-OWNER: starting or disconnecting the Google Drive co
     expectConsentFor(await driveAuthUrl(ID.biz, ID.superAdmin), ID.biz, 'drive', 'superAdmin');
   });
 
-  it('[V94D-B03] RED-BEFORE (D-99): DELETE /drive/businesses/:b/disconnect answers an ADMIN, a STAFF member and the owner of another business who is STAFF here 403 GOOGLE_CONNECT_OWNER_ONLY, and the business\'s stored drive connection (and its calendar connection) stays exactly as it was', async () => {
+  it('[V94D-B03] RED-BEFORE (D-99): DELETE /drive/businesses/:b/disconnect answers an ADMIN 403 GOOGLE_CONNECT_OWNER_ONLY and a STAFF member and the owner of another business who is STAFF here 403 below operations write (SWP-CENSUS-HIDDEN), and the business\'s stored drive connection (and its calendar connection) stays exactly as it was', async () => {
     await connect(ID.biz);
     for (const member of REFUSED) {
-      expectGoogleOwnerOnly(await driveDisconnect(ID.biz, member), member);
+      expectRefusedOnGatedWrite(await driveDisconnect(ID.biz, member), 'operations', member, member);
       expect(await stored(ID.biz)).toEqual(connectedRow(ID.biz));
     }
   });
@@ -1069,14 +1088,15 @@ describe('W9-GOOGLE-DOORS-SERVER: the generic connector doors of the Google Suit
 });
 
 describe('W9-GOOGLE-DOORS-SERVER: the Google Contacts source doors are the business owner\'s (D-99)', () => {
-  it('[V94D-T03] (W9-GOOGLE-DOORS-SERVER, was it.todo) RED-BEFORE (D-99): POST /connect/businesses/:b/contact-sources/google_contacts/resync, DELETE .../contact-sources/google_contacts and POST .../contact-sources/sync-all (which syncs Google Contacts while it is connected) answer an ADMIN, a STAFF member and the owner of another business who is STAFF here 403 GOOGLE_CONNECT_OWNER_ONLY with nothing synced (neither Google nor Outlook) and the stored Google Contacts connection exactly as it was', async () => {
+  it('[V94D-T03] (W9-GOOGLE-DOORS-SERVER, was it.todo) RED-BEFORE (D-99): POST /connect/businesses/:b/contact-sources/google_contacts/resync, DELETE .../contact-sources/google_contacts and POST .../contact-sources/sync-all (which syncs Google Contacts while it is connected) answer an ADMIN 403 GOOGLE_CONNECT_OWNER_ONLY, and a STAFF member and the owner of another business who is STAFF here 403 below settings admin (D-181, SWP-CENSUS-HIDDEN), with nothing synced (neither Google nor Outlook) and the stored Google Contacts connection exactly as it was', async () => {
     await connectContacts(ID.biz);
     clearContactSyncs();
     for (const member of REFUSED) {
-      expectGoogleOwnerOnly(await contactSourceResync(ID.biz, 'google_contacts', member), `${member} resync`);
-      expectGoogleOwnerOnly(await contactSourceDisconnect(ID.biz, 'google_contacts', member), `${member} disconnect`);
+      // SWP-CENSUS-HIDDEN (D-181): the resync, the disconnect and sync-all need settings admin first.
+      expectRefusedOnGatedWrite(await contactSourceResync(ID.biz, 'google_contacts', member), 'settings', member, `${member} resync`);
+      expectRefusedOnGatedWrite(await contactSourceDisconnect(ID.biz, 'google_contacts', member), 'settings', member, `${member} disconnect`);
       expect(await storedContacts(ID.biz), `${member} disconnect`).toEqual(contactsConnectedRow(ID.biz));
-      expectGoogleOwnerOnly(await contactSourcesSyncAll(ID.biz, member), `${member} sync-all`);
+      expectRefusedOnGatedWrite(await contactSourcesSyncAll(ID.biz, member), 'settings', member, `${member} sync-all`);
     }
     expect(googleContactsSync).not.toHaveBeenCalled();
     expect(outlookContacts.sync).not.toHaveBeenCalled();
@@ -1106,9 +1126,13 @@ describe('W9-GOOGLE-DOORS-SERVER: the Google Contacts source doors are the busin
     }
   });
 
-  it('[V94D-G02] control (D-99, W9-GOOGLE-DOORS-SERVER; the smaller sync-all change): with Google Contacts not connected, POST .../contact-sources/sync-all syncs no Google source and stays a member\'s (an ADMIN and a STAFF member sync Outlook, Google is not run); the Outlook source resync stays a member\'s (a Microsoft connection, outside D-99)', async () => {
+  it('[V94D-G02] control (D-99, W9-GOOGLE-DOORS-SERVER; the smaller sync-all change): with Google Contacts not connected, POST .../contact-sources/sync-all syncs no Google source and is a settings admin\'s, not only the owner\'s (an ADMIN syncs Outlook, Google is not run); the Outlook source resync likewise (a Microsoft connection, outside D-99). D-181 (SWP-CENSUS-HIDDEN): a STAFF member without settings admin syncs neither', async () => {
     await connectContacts(ID.biz, { google: false });
-    for (const member of [ID.admin, ID.staff]) {
+    clearContactSyncs();
+    expectRefusedBelowScope(await contactSourcesSyncAll(ID.biz, ID.staff), 'settings', 'staff sync-all');
+    expectRefusedBelowScope(await contactSourceResync(ID.biz, 'outlook_contacts', ID.staff), 'settings', 'staff outlook resync');
+    expect(outlookContacts.sync).not.toHaveBeenCalled();
+    for (const member of [ID.admin]) {
       clearContactSyncs();
       const all = await contactSourcesSyncAll(ID.biz, member);
       expect(all.status, `${member} sync-all ${JSON.stringify(all.body)}`).toBe(201);
@@ -1198,18 +1222,18 @@ function expectKeyGoogleOwnerOnly(result: any, who: string) {
 const OWNER_ARMS: Array<[string, string]> = [[ID.biz, ID.owner], [ID.biz, ID.coOwner], [ID.bizOther, ID.otherOwner], [ID.biz, ID.superAdmin]];
 
 describe('W10-GOOGLE-DOORS-REST: starting a Google Contacts sync is the business owner\'s (D-99)', () => {
-  it('[V94D-T05] (W10-GOOGLE-DOORS-REST, D-99, was it.todo) RED-BEFORE: POST /connect/businesses/:b/contacts/sync (the Google Contacts sync: the GoogleContactsSyncService.sync [V94D-T03] refuses at contact-sources/google_contacts/resync and sync-all; review SEC-W9GD-2) answers an ADMIN, a STAFF member and the owner of another business who is STAFF here 403 GOOGLE_CONNECT_OWNER_ONLY with nothing synced and the stored Google Contacts connection exactly as it was', async () => {
+  it('[V94D-T05] (W10-GOOGLE-DOORS-REST, D-99, was it.todo) RED-BEFORE: POST /connect/businesses/:b/contacts/sync (the Google Contacts sync: the GoogleContactsSyncService.sync [V94D-T03] refuses at contact-sources/google_contacts/resync and sync-all; review SEC-W9GD-2) answers an ADMIN 403 GOOGLE_CONNECT_OWNER_ONLY, and a STAFF member and the owner of another business who is STAFF here 403 below settings admin (D-181, SWP-CENSUS-HIDDEN), with nothing synced and the stored Google Contacts connection exactly as it was', async () => {
     await connectContacts(ID.biz);
     clearContactSyncs();
     for (const member of REFUSED) {
-      expectGoogleOwnerOnly(await contactsSync(ID.biz, member), `${member} contacts/sync`);
+      expectRefusedOnGatedWrite(await contactsSync(ID.biz, member), 'settings', member, `${member} contacts/sync`);
       expect(await storedContacts(ID.biz), member).toEqual(contactsConnectedRow(ID.biz));
     }
     expect(googleContactsSync).not.toHaveBeenCalled();
     expect(outlookContacts.sync).not.toHaveBeenCalled();
   });
 
-  it('[V94D-J01] control (W10-GOOGLE-DOORS-REST, D-99): the owner, a co-owner by OWNER membership, the distinguished owner (Business.ownerId, with the OWNER membership D-104 requires) on their own business and a SUPER_ADMIN with no membership start the Google Contacts sync for the route\'s business; the Outlook Contacts sync (a Microsoft connection, outside D-99) stays a member\'s (an ADMIN and a STAFF member start it); a user with no membership is refused by BusinessGuard (403) and an unauthenticated request by AuthGuard (401), with nothing synced', async () => {
+  it('[V94D-J01] control (W10-GOOGLE-DOORS-REST, D-99): the owner, a co-owner by OWNER membership, the distinguished owner (Business.ownerId, with the OWNER membership D-104 requires) on their own business and a SUPER_ADMIN with no membership start the Google Contacts sync for the route\'s business; the Outlook Contacts sync (a Microsoft connection, outside D-99) is a settings admin\'s (an ADMIN starts it; D-181, SWP-CENSUS-HIDDEN: a STAFF member without settings admin is refused); a user with no membership is refused by BusinessGuard (403) and an unauthenticated request by AuthGuard (401), with nothing synced', async () => {
     for (const [businessId, actor] of OWNER_ARMS) {
       await connectContacts(businessId);
       clearContactSyncs();
@@ -1218,7 +1242,10 @@ describe('W10-GOOGLE-DOORS-REST: starting a Google Contacts sync is the business
       expect(googleContactsSync).toHaveBeenCalledTimes(1);
       expect(googleContactsSync).toHaveBeenCalledWith(businessId);
     }
-    for (const member of [ID.admin, ID.staff]) {
+    clearContactSyncs();
+    expectRefusedBelowScope(await outlookContactsSync(ID.biz, ID.staff), 'settings', 'staff outlook');
+    expect(outlookContacts.sync).not.toHaveBeenCalled();
+    for (const member of [ID.admin]) {
       clearContactSyncs();
       const res = await outlookContactsSync(ID.biz, member);
       expect(res.status, `${member} outlook ${JSON.stringify(res.body)}`).toBe(201);

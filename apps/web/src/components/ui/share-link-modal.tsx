@@ -14,6 +14,7 @@ import {
   Facebook,
   Twitter,
 } from "lucide-react";
+import { buildWhatsAppLink } from "@/lib/whatsapp";
 
 interface ShareLinkModalProps {
   open: boolean;
@@ -48,11 +49,8 @@ export function ShareLinkModal({
   }, [url]);
 
   const shareWhatsApp = useCallback(() => {
-    const text = description
-      ? `${description}\n\n${url}`
-      : url;
     window.open(
-      `https://wa.me/?text=${encodeURIComponent(text)}`,
+      buildWhatsAppLink({ text: description ? `${description}\n\n` : null, link: url }),
       "_blank",
       "noopener,noreferrer"
     );

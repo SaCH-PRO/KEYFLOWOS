@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { CardListSkeleton } from "@/components/ui/skeleton";
-import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
+import { buildWhatsAppLink, getContactPhone, ownBusinessCountry } from "@/lib/whatsapp";
 import type { Booking, StatusFilter } from "./bookings-types";
 import { STATUS_STYLE, formatTime, formatDate, contactName } from "./bookings-types";
 
@@ -171,7 +171,7 @@ export default function BookingList({
                     const serviceName = b.service?.name ?? "upcoming";
                     return (
                       <a
-                        href={buildWhatsAppLink(waPhone, `Hi ${name}, regarding your ${serviceName} appointment...`)}
+                        href={buildWhatsAppLink({ to: waPhone, text: `Hi ${name}, regarding your ${serviceName} appointment...`, country: ownBusinessCountry() })}
                         target="_blank"
                         rel="noopener noreferrer"
                         aria-label="Message on WhatsApp"

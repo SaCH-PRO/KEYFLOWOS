@@ -45,10 +45,12 @@
  * THE BODY PIPE: production runs one global ValidationPipe({ whitelist: true,
  * transform: true }) whose metatype for @Body() comes from the parameter
  * types tsc emits; vitest's esbuild transform emits none, so this app
- * installs the same pipe options for the body with UpdateBusinessDto as its
- * expected type (the route's declared body type). Params and the current-user
- * decorator pass through untouched. The pipe over UpdateBusinessDto is also
- * run directly ([V63E-D01], [V63E-D02]), as R0-09-O03 does.
+ * reflects the types tsc emits for the PATCH handlers (design:paramtypes:
+ * UpdateBusinessDto for the profile PATCH's body, see THE BODY PIPE FOR THE
+ * DOOR below) and installs the production pipe. The current-user decorator
+ * passes through untouched (a custom decorator). The pipe over
+ * UpdateBusinessDto is also run directly ([V63E-D01], [V63E-D02]), as
+ * R0-09-O03 does.
  *
  * REVIEW REPAIR SEC-V63-1 ([V63E-S01..S04]): a depth names each hub at most
  * once, so the refusal of a depth that is not one is bounded whatever the
@@ -58,14 +60,54 @@
  * before the controller's D-11 check, so any member could ask for a refusal
  * many times the size of its body.
  *
+ * BIZ-SETTINGS-ADMIN-DOOR ([V63E-A04], [V63E-AD01..AD09]; owner ruling
+ * D-150 'hubs' adopts the product-audit Settings hub text: the Advanced CRM
+ * switch and the other advanced depth choices are a server-side business
+ * setting that only the owner or an admin can change). advancedCrm and depth
+ * get a second door, PATCH /identity/businesses/:businessId/advanced-settings
+ * (IdentityService.updateAdvancedSettings), open to the owner (an OWNER
+ * membership, the D-11 owner rule) or a member whose role is ADMIN and whose
+ * settings level is admin (the ADMIN preset, or an explicit map granting it);
+ * a SUPER_ADMIN keeps the platform bypass. A STAFF member (whatever its
+ * scopes, settings admin included) and an ADMIN whose map grants settings
+ * write only are refused 403 before the body is read, with the row
+ * byte-identical. What the business sells stays owner-only (D-11 lists 'what
+ * you sell' in the business profile): the door takes advancedCrm and depth
+ * only, and refuses sells, any other key, an empty body and a value V1-63
+ * refuses with 400 BUSINESS_SETTING_INVALID, bounded as SEC-V63-1 bounds it.
+ * The door writes under lockBusinessMeta (a depth merges per hub, as the
+ * profile PATCH merges it) and, in the same transaction, one
+ * team_activity_logs row naming the actor, its standing and each named
+ * setting before and after. The profile PATCH is unchanged: the owner sets
+ * all three there, everyone else is refused (D-11); GET answers all three to
+ * every member. [V63E-A01] is re-pinned by [V63E-A04]: the ADMIN refused on
+ * the profile PATCH is admitted on the door for advancedCrm and depth and
+ * refused sells on both.
+ *
+ * RED-BEFORE for the door (pkt/V1-BIZ-SETTINGS-ADMIN-DOOR at 172afb2f): no
+ * route PATCH .../advanced-settings exists (404 for every actor) and
+ * IdentityService has no updateAdvancedSettings, so an ADMIN with settings
+ * admin can change neither setting anywhere: the profile PATCH refuses it
+ * 403 ([V63E-A01]).
+ *
+ * THE BODY PIPE FOR THE DOOR: the door declares its body
+ * Record<string, unknown>, for which tsc emits Object, and the global
+ * ValidationPipe validates no Object body: the service receives the body as
+ * sent and refuses a key it does not take (a DTO class would let the
+ * whitelist pipe drop sells silently). This app reflects the parameter types
+ * tsc emits for the two PATCH handlers (UpdateBusinessDto for the profile
+ * PATCH, Object for the door) and installs the production pipe itself.
+ *
  * NO PROVIDER IS CALLED: nothing on these paths reaches one.
  *
  * FIXTURES: every user, business and membership id has the `v63e_` prefix
  * (registered in test/helpers/fixture-prefixes.json for V1-63
- * BIZ-SETTINGS-SERVER), every User.email contains it, and every row is
- * hard-deleted with LIKE ${sqlLikePrefix(P)} in beforeAll and afterAll. No
- * $transaction wraps a fixture; the transactions in [V63E-C01] are the
- * simulated concurrent writers.
+ * BIZ-SETTINGS-SERVER; BIZ-SETTINGS-ADMIN-DOOR extends this suite under the
+ * same prefix), every User.email contains it, and every row is hard-deleted
+ * with LIKE ${sqlLikePrefix(P)} in beforeAll and afterAll, the door's
+ * team_activity_logs rows (business_id or user_id under the prefix)
+ * included. No $transaction wraps a fixture; the transactions in [V63E-C01]
+ * and [V63E-AD09] are the simulated concurrent writers.
  */
 import 'reflect-metadata';
 import path from 'path';
@@ -83,6 +125,7 @@ const ID = {
   coOwner: `${P}coOwner`,     // a second OWNER membership on bizA
   staff: `${P}staff`,         // STAFF of bizA, role defaults (settings: none)
   staffW: `${P}staffW`,       // STAFF of bizA, granted settings: write
+  staffA: `${P}staffA`,       // STAFF of bizA, granted settings: admin (BIZ-SETTINGS-ADMIN-DOOR: a STAFF, not an ADMIN)
   admin: `${P}admin`,         // ADMIN of bizA, role defaults (settings: admin)
   adminW: `${P}adminW`,       // ADMIN of bizA, ADMIN defaults with settings: write
   nonMember: `${P}nonMember`, // no membership anywhere
@@ -91,7 +134,9 @@ const ID = {
   bizFresh: `${P}bizFresh`,   // never written by a test: the defaults
   bizB: `${P}bizB`,           // another tenant
 };
-const USERS = [ID.owner, ID.coOwner, ID.staff, ID.staffW, ID.admin, ID.adminW, ID.nonMember, ID.ownerB];
+const USERS = [ID.owner, ID.coOwner, ID.staff, ID.staffW, ID.staffA, ID.admin, ID.adminW, ID.nonMember, ID.ownerB];
+/** A platform SUPER_ADMIN the service is called for directly ([V63E-AD08]); no User row, no membership. */
+const PLATFORM = `${P}platform`;
 const emailOf = (id: string) => `${id}@v63e.test.local`;
 
 /** The seven v1 hubs (D-150, D-151), in the order GET answers them. */
@@ -105,6 +150,11 @@ const OTHER_META = { bankName: `${P}Republic`, paymentMethods: ['cash', 'bank_tr
 /** The code the PATCH answers a settings value it does not know with (field or metaData bag). */
 const SETTING_INVALID = 'BUSINESS_SETTING_INVALID';
 
+/** BIZ-SETTINGS-ADMIN-DOOR: the code the owner-or-admin door refuses a member it does not admit with. */
+const DOOR_FORBIDDEN = 'BUSINESS_ADVANCED_SETTINGS_FORBIDDEN';
+/** BIZ-SETTINGS-ADMIN-DOOR: the team_activity_logs action of a write through the door. */
+const DOOR_AUDIT_ACTION = 'advanced_settings_changed';
+
 let db: any;
 let app: any;
 let identityService: any;
@@ -114,6 +164,7 @@ let UpdateBusinessDtoClass: any;
 
 async function cleanup() {
   for (const sql of [
+    `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM business_blueprints WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)} OR owner_id LIKE ${sqlLikePrefix(P)}`,
@@ -150,6 +201,17 @@ function patch(actor: string | null, businessId: string, body: Record<string, un
 
 function get(actor: string, businessId: string) {
   return request(app.getHttpServer()).get(`/identity/businesses/${businessId}`).set('x-test-user', actor);
+}
+
+/** BIZ-SETTINGS-ADMIN-DOOR: PATCH /identity/businesses/:businessId/advanced-settings (the owner-or-admin door). */
+function door(actor: string | null, businessId: string, body: unknown) {
+  const req = request(app.getHttpServer()).patch(`/identity/businesses/${businessId}/advanced-settings`).send(body as any);
+  return actor ? req.set('x-test-user', actor) : req;
+}
+
+/** The door's audit rows on a business, oldest first. */
+async function doorAuditRows(businessId: string): Promise<any[]> {
+  return db.teamActivityLog.findMany({ where: { businessId, action: DOOR_AUDIT_ACTION }, orderBy: { createdAt: 'asc' } });
 }
 
 /** The three settings a Business read answers. */
@@ -253,11 +315,12 @@ beforeAll(async () => {
   }).compile();
 
   app = moduleRef.createNestApplication();
-  // The production body pipe options, with the route's declared body type (see the header).
-  const bodyPipe = new ValidationPipeClass({ whitelist: true, transform: true, expectedType: UpdateBusinessDtoClass });
-  app.useGlobalPipes({
-    transform: (value: unknown, metadata: { type: string }) => (metadata.type === 'body' ? bodyPipe.transform(value, metadata) : value),
-  });
+  // The parameter types tsc emits for the two PATCH handlers (vitest emits none; see the header): the
+  // profile PATCH's body is UpdateBusinessDto, the door's is Record<string, unknown> (Object), and
+  // AuthenticatedUser is an interface (Object). Then the production pipe itself.
+  Reflect.defineMetadata('design:paramtypes', [String, UpdateBusinessDtoClass, Object], IdentityController.prototype, 'updateBusiness');
+  Reflect.defineMetadata('design:paramtypes', [String, Object, Object], IdentityController.prototype, 'updateAdvancedSettings');
+  app.useGlobalPipes(new ValidationPipeClass({ whitelist: true, transform: true }));
   // Identity attachment only, as AuthMiddleware attaches it from the User row. No guard is overridden.
   app.use(async (req: any, _res: any, next: any) => {
     const header = req.headers['x-test-user'];
@@ -287,6 +350,7 @@ beforeAll(async () => {
     { userId: ID.coOwner, businessId: ID.bizA, role: 'OWNER' },
     { userId: ID.staff, businessId: ID.bizA, role: 'STAFF' },
     { userId: ID.staffW, businessId: ID.bizA, role: 'STAFF', permissionScopes: { settings: 'write' } },
+    { userId: ID.staffA, businessId: ID.bizA, role: 'STAFF', permissionScopes: { settings: 'admin' } },
     { userId: ID.admin, businessId: ID.bizA, role: 'ADMIN' },
     { userId: ID.adminW, businessId: ID.bizA, role: 'ADMIN', permissionScopes: { ...ROLE_DEFAULT_SCOPES.ADMIN, settings: 'write' } },
     { userId: ID.owner, businessId: ID.bizFresh, role: 'OWNER' },
@@ -303,10 +367,10 @@ afterAll(async () => {
 }, 60_000);
 
 describe('V1-63 fixture sanity (real rows)', () => {
-  it('[V63E-X01] seeded three tenants, eight users and eight memberships; no business stores a v1 setting', async () => {
+  it('[V63E-X01] seeded three tenants, nine users and nine memberships; no business stores a v1 setting', async () => {
     expect(await db.business.count({ where: { id: { startsWith: P } } })).toBe(3);
-    expect(await db.user.count({ where: { id: { startsWith: P } } })).toBe(8);
-    expect(await db.membership.count({ where: { id: { startsWith: P } } })).toBe(8);
+    expect(await db.user.count({ where: { id: { startsWith: P } } })).toBe(9);
+    expect(await db.membership.count({ where: { id: { startsWith: P } } })).toBe(9);
     for (const id of [ID.bizA, ID.bizFresh, ID.bizB]) {
       const meta = await storedMeta(id);
       for (const key of ['sells', 'advancedCrm', 'depth']) expect(meta, `${id} metaData.${key}`).not.toHaveProperty(key);
@@ -660,14 +724,15 @@ describe('V1-63 the refusal of a depth that is not one is bounded (review SEC-V6
   });
 });
 
-describe('V1-63 the settings ride the owner-only door (owner ruling D-11)', () => {
+describe('V1-63 the profile PATCH stays the owner-only door for all three settings (owner ruling D-11); BIZ-SETTINGS-ADMIN-DOOR re-pins A01 (D-150)', () => {
   const ATTEMPT = { sells: 'products', advancedCrm: true, depth: { money: 'advanced' } };
 
-  it('[V63E-A01] a STAFF or ADMIN member is refused 403 whatever its settings scope (none, write, admin), as are a non-member and another tenant\'s owner; no identity is 401; the row is byte-identical each time', async () => {
+  it('[V63E-A01] on the profile PATCH, a STAFF or ADMIN member is refused 403 whatever its settings scope (none, write, admin), as are a non-member and another tenant\'s owner; no identity is 401; the row is byte-identical each time', async () => {
     await resetBizA();
     for (const [actor, status, label] of [
       [ID.staff, 403, 'STAFF, settings:none'],
       [ID.staffW, 403, 'STAFF, settings:write'],
+      [ID.staffA, 403, 'STAFF, settings:admin'],
       [ID.admin, 403, 'ADMIN, settings:admin'],
       [ID.adminW, 403, 'ADMIN, settings:write'],
       [ID.nonMember, 403, 'non-member'],
@@ -688,7 +753,7 @@ describe('V1-63 the settings ride the owner-only door (owner ruling D-11)', () =
     await resetBizA();
     expect((await patch(ID.owner, ID.bizA, ATTEMPT)).status).toBe(200);
     const expected = { sells: 'products', advancedCrm: true, depth: { ...ALL_STANDARD, money: 'advanced' } };
-    for (const actor of [ID.staff, ID.staffW, ID.admin, ID.adminW, ID.coOwner]) {
+    for (const actor of [ID.staff, ID.staffW, ID.staffA, ID.admin, ID.adminW, ID.coOwner]) {
       const read = await get(actor, ID.bizA);
       expect(read.status, `${actor}: ${JSON.stringify(read.body)}`).toBe(200);
       expect(settingsOf(read.body), actor).toEqual(expected);
@@ -705,6 +770,295 @@ describe('V1-63 the settings ride the owner-only door (owner ruling D-11)', () =
     const meta = await storedMeta(ID.bizA);
     expect({ sells: meta.sells, advancedCrm: meta.advancedCrm }).toEqual({ sells: 'services', advancedCrm: true });
   });
+
+  it('[V63E-A04] RED-BEFORE (BIZ-SETTINGS-ADMIN-DOOR re-pins A01, owner ruling D-150): the ADMIN with settings admin that A01 refuses on the profile PATCH (403) sets advancedCrm and depth through PATCH .../advanced-settings (200), and is refused sells there (400) and on the profile PATCH (403)', async () => {
+    await resetBizA();
+    const profile = await patch(ID.admin, ID.bizA, { advancedCrm: true });
+    expect(profile.status, `the profile PATCH: ${JSON.stringify(profile.body)}`).toBe(403);
+    expect(await storedMeta(ID.bizA), 'the profile PATCH wrote nothing').not.toHaveProperty('advancedCrm');
+
+    const res = await door(ID.admin, ID.bizA, { advancedCrm: true, depth: { money: 'advanced' } });
+    expect(res.status, `the door: ${JSON.stringify(res.body)}`).toBe(200);
+    expect(settingsOf(res.body)).toEqual({ sells: 'both', advancedCrm: true, depth: { ...ALL_STANDARD, money: 'advanced' } });
+    const meta = await storedMeta(ID.bizA);
+    expect({ advancedCrm: meta.advancedCrm, depth: meta.depth }).toEqual({ advancedCrm: true, depth: { money: 'advanced' } });
+
+    const before = await businessRowText(ID.bizA);
+    const sellsOnDoor = await door(ID.admin, ID.bizA, { sells: 'products' });
+    expect(sellsOnDoor.status, `sells on the door: ${JSON.stringify(sellsOnDoor.body)}`).toBe(400);
+    expect(sellsOnDoor.body.code).toBe(SETTING_INVALID);
+    const sellsOnProfile = await patch(ID.admin, ID.bizA, { sells: 'products' });
+    expect(sellsOnProfile.status, `sells on the profile PATCH: ${JSON.stringify(sellsOnProfile.body)}`).toBe(403);
+    expect(await businessRowText(ID.bizA), 'sells refused on both doors: the row is byte-identical').toBe(before);
+    expect((await storedMeta(ID.bizA)).sells, 'sells was never written').toBeUndefined();
+  });
+});
+
+/** The body every member the door refuses sends ([V63E-AD03]). */
+const DOOR_ATTEMPT = { advancedCrm: true, depth: { money: 'advanced' } };
+
+describe('BIZ-SETTINGS-ADMIN-DOOR the owner or an ADMIN with settings admin changes advancedCrm and depth (owner ruling D-150); sells stays owner-only (D-11)', () => {
+  it('[V63E-AD01] RED-BEFORE: an ADMIN with settings admin (role defaults) sets advancedCrm true then false, and depth hub by hub, through PATCH .../advanced-settings (200): each stored in metaData and read back by GET to the ADMIN and a STAFF member; sells, the other metaData keys and the profile columns are untouched; the response answers the same keys as GET', async () => {
+    await resetBizA({ ...OTHER_META, sells: 'products' });
+    for (const advancedCrm of [true, false]) {
+      const res = await door(ID.admin, ID.bizA, { advancedCrm });
+      expect(res.status, `${advancedCrm}: ${JSON.stringify(res.body)}`).toBe(200);
+      expect(res.body.advancedCrm, `${advancedCrm}: the response`).toBe(advancedCrm);
+      expect((await storedMeta(ID.bizA)).advancedCrm, `${advancedCrm}: stored as a boolean`).toBe(advancedCrm);
+      for (const actor of [ID.admin, ID.staff]) {
+        const read = await get(actor, ID.bizA);
+        expect(read.status).toBe(200);
+        expect(settingsOf(read.body), `${advancedCrm}: read by ${actor}`).toEqual({ sells: 'products', advancedCrm, depth: ALL_STANDARD });
+      }
+    }
+
+    const steps: Array<[Record<string, string>, Record<string, string>]> = [
+      [{ money: 'advanced' }, { money: 'advanced' }],
+      [{ customers: 'advanced', sales: 'advanced' }, { money: 'advanced', customers: 'advanced', sales: 'advanced' }],
+      [{ sales: 'standard' }, { money: 'advanced', customers: 'advanced', sales: 'standard' }],
+      [{}, { money: 'advanced', customers: 'advanced', sales: 'standard' }],
+    ];
+    for (const [write, stored] of steps) {
+      const res = await door(ID.admin, ID.bizA, { depth: write });
+      expect(res.status, `${JSON.stringify(write)}: ${JSON.stringify(res.body)}`).toBe(200);
+      expect((await storedMeta(ID.bizA)).depth, `${JSON.stringify(write)}: a depth merges per hub`).toEqual(stored);
+      const read = await get(ID.staff, ID.bizA);
+      expect(read.body.depth, `${JSON.stringify(write)}: read`).toEqual({ ...ALL_STANDARD, ...stored });
+      expect(res.body.depth, `${JSON.stringify(write)}: the response`).toEqual(read.body.depth);
+    }
+
+    const both = await door(ID.admin, ID.bizA, { advancedCrm: true, depth: { schedule: 'advanced' } });
+    expect(both.status, JSON.stringify(both.body)).toBe(200);
+    const read = await get(ID.admin, ID.bizA);
+    const expected = { sells: 'products', advancedCrm: true, depth: { ...ALL_STANDARD, money: 'advanced', customers: 'advanced', sales: 'standard', schedule: 'advanced' } };
+    expect(settingsOf(read.body)).toEqual(expected);
+    expect(settingsOf(both.body)).toEqual(expected);
+    expect(Object.keys(both.body).sort(), 'the door and GET answer the same Business keys').toEqual(Object.keys(read.body).sort());
+
+    const meta = await storedMeta(ID.bizA);
+    expect(meta.sells, 'sells untouched').toBe('products');
+    for (const [k, v] of Object.entries(OTHER_META)) expect(meta[k], `metaData.${k} kept`).toEqual(v);
+    const row = await db.business.findUnique({ where: { id: ID.bizA } });
+    expect({ name: row.name, tagline: row.tagline, currency: row.currency, timezone: row.timezone })
+      .toEqual({ name: `${P}bizA-name`, tagline: null, currency: 'TTD', timezone: 'America/Port_of_Spain' });
+  });
+
+  it('[V63E-AD02] RED-BEFORE: the owner and a co-owner set advancedCrm and depth through the same door (200) and read them back; the owner\'s profile PATCH still takes all three settings (D-11 unchanged)', async () => {
+    await resetBizA();
+    const owner = await door(ID.owner, ID.bizA, { advancedCrm: true, depth: { money: 'advanced' } });
+    expect(owner.status, JSON.stringify(owner.body)).toBe(200);
+    const coOwner = await door(ID.coOwner, ID.bizA, { depth: { page: 'advanced' } });
+    expect(coOwner.status, JSON.stringify(coOwner.body)).toBe(200);
+    expect(settingsOf((await get(ID.owner, ID.bizA)).body)).toEqual({ sells: 'both', advancedCrm: true, depth: { ...ALL_STANDARD, money: 'advanced', page: 'advanced' } });
+
+    const profile = await patch(ID.owner, ID.bizA, { sells: 'services', advancedCrm: false, depth: { money: 'standard' } });
+    expect(profile.status, JSON.stringify(profile.body)).toBe(200);
+    const meta = await storedMeta(ID.bizA);
+    expect({ sells: meta.sells, advancedCrm: meta.advancedCrm, depth: meta.depth }).toEqual({ sells: 'services', advancedCrm: false, depth: { money: 'standard', page: 'advanced' } });
+  });
+
+  it('[V63E-AD03] RED-BEFORE: STAFF (settings none), STAFF granted settings write, STAFF granted settings admin (a STAFF, not an ADMIN), an ADMIN whose map grants settings write only, a non-member and another tenant\'s owner are refused 403 on the door (the members with the door\'s code, before the body is read: a junk body is refused 403 too, bounded); no identity is 401; the row is byte-identical and no audit row is written', async () => {
+    await resetBizA();
+    const auditBefore = (await doorAuditRows(ID.bizA)).length;
+    const junk = { sells: 'products', depth: Object.fromEntries(Array.from({ length: 5_000 }, (_, i) => [`k${i}`, 1])) };
+    for (const [actor, status, code, label] of [
+      [ID.staff, 403, DOOR_FORBIDDEN, 'STAFF, settings:none'],
+      [ID.staffW, 403, DOOR_FORBIDDEN, 'STAFF, settings:write'],
+      [ID.staffA, 403, DOOR_FORBIDDEN, 'STAFF, settings:admin'],
+      [ID.adminW, 403, DOOR_FORBIDDEN, 'ADMIN, settings:write'],
+      [ID.nonMember, 403, undefined, 'non-member'],
+      [ID.ownerB, 403, undefined, "the owner of B on A's path"],
+      [null, 401, undefined, 'no identity'],
+    ] as const) {
+      for (const body of [DOOR_ATTEMPT, { advancedCrm: false }, junk]) {
+        const before = await businessRowText(ID.bizA);
+        const res = await door(actor, ID.bizA, body);
+        const shown = (res.text ?? '').slice(0, 300);
+        expect(res.status, `${label}: ${shown}`).toBe(status);
+        if (code) expect(res.body.code, `${label}: ${shown}`).toBe(code);
+        expect(Buffer.byteLength(res.text ?? ''), `${label}: a bounded refusal`).toBeLessThanOrEqual(4_096);
+        expect(res.text, `${label}: no entry is named`).not.toMatch(/\bk\d+\b/);
+        expect(res.body, label).not.toHaveProperty('advancedCrm');
+        expect(await businessRowText(ID.bizA), `${label}: the Business row is byte-identical`).toBe(before);
+      }
+    }
+    expect((await doorAuditRows(ID.bizA)).length, 'no refused attempt writes an audit row').toBe(auditBefore);
+    expect(await storedMeta(ID.bizA)).not.toHaveProperty('advancedCrm');
+  });
+
+  it(`[V63E-AD04] RED-BEFORE: an ADMIN is refused sells everywhere: on the door (400 ${SETTING_INVALID} naming sells, alone and beside a valid advancedCrm, nothing written) and on the profile PATCH as a field and in the metaData bag (403); the owner is refused sells on the door too (sells is the profile's) and sets it through the profile PATCH`, async () => {
+    await resetBizA();
+    for (const actor of [ID.admin, ID.owner]) {
+      for (const body of [{ sells: 'products' }, { sells: 'products', advancedCrm: true }, { advancedCrm: true, depth: { money: 'advanced' }, sells: 'services' }]) {
+        const before = await businessRowText(ID.bizA);
+        const res = await door(actor, ID.bizA, body);
+        expect(res.status, `${actor} ${JSON.stringify(body)}: ${JSON.stringify(res.body)}`).toBe(400);
+        expect(res.body.code).toBe(SETTING_INVALID);
+        expect(JSON.stringify(res.body.problems), `${actor}: the refusal names sells`).toContain('sells');
+        expect(await businessRowText(ID.bizA), `${actor} ${JSON.stringify(body)}: the row is byte-identical`).toBe(before);
+      }
+    }
+    for (const body of [{ sells: 'products' }, { metaData: { sells: 'products' } }]) {
+      const before = await businessRowText(ID.bizA);
+      const res = await patch(ID.admin, ID.bizA, body);
+      expect(res.status, `the profile PATCH ${JSON.stringify(body)}: ${JSON.stringify(res.body)}`).toBe(403);
+      expect(await businessRowText(ID.bizA)).toBe(before);
+    }
+    expect((await storedMeta(ID.bizA)).sells, 'no refused attempt wrote sells').toBeUndefined();
+    const owner = await patch(ID.owner, ID.bizA, { sells: 'products' });
+    expect(owner.status, JSON.stringify(owner.body)).toBe(200);
+    expect((await storedMeta(ID.bizA)).sells).toBe('products');
+  });
+
+  it(`[V63E-AD05] RED-BEFORE: the door takes advancedCrm and depth only: a value V1-63 refuses, a key the door does not take (a profile field, the metaData bag), an empty body and a body that is not an object are refused 400 ${SETTING_INVALID} with the row byte-identical and no audit row`, async () => {
+    await resetBizA();
+    const auditBefore = (await doorAuditRows(ID.bizA)).length;
+    for (const body of [
+      { advancedCrm: 'yes' },
+      { advancedCrm: null },
+      { advancedCrm: 1 },
+      { depth: { crm: 'advanced' } },
+      { depth: { money: 'expert' } },
+      { depth: { money: null } },
+      { depth: 'advanced' },
+      { depth: null },
+      { depth: ['money'] },
+      { tagline: `${P}not-written` },
+      { name: `${P}not-written`, advancedCrm: true },
+      { metaData: { advancedCrm: true } },
+      { advancedCrm: true, metaData: { bankName: `${P}not-written` } },
+      {},
+      [],
+      [{ advancedCrm: true }],
+    ] as unknown[]) {
+      const before = await businessRowText(ID.bizA);
+      const res = await door(ID.admin, ID.bizA, body);
+      expect(res.status, `${JSON.stringify(body)}: ${JSON.stringify(res.body)}`).toBe(400);
+      expect(res.body.code, `${JSON.stringify(body)}: ${JSON.stringify(res.body)}`).toBe(SETTING_INVALID);
+      expect(Array.isArray(res.body.problems) && res.body.problems.length > 0, `${JSON.stringify(body)}: the problems are listed`).toBe(true);
+      expect(await businessRowText(ID.bizA), `${JSON.stringify(body)}: the row is byte-identical`).toBe(before);
+    }
+    expect((await doorAuditRows(ID.bizA)).length, 'no refused write writes an audit row').toBe(auditBefore);
+  });
+
+  it('[V63E-AD06] RED-BEFORE: the door\'s refusal is bounded as SEC-V63-1 bounds the profile PATCH\'s: a depth of 5,000 junk entries is one problem naming the count, 5,000 keys the door does not take are one problem naming the count, and a long key name comes back cut short; each body weighs at most 4,096 bytes and nothing is written', async () => {
+    await resetBizA();
+    const JUNK = 5_000;
+    const LONG = 'x'.repeat(9_000);
+    const ECHO = 'x'.repeat(64);
+    const cases: Array<[string, unknown, number | undefined]> = [
+      ['a depth of junk entries', { depth: Object.fromEntries(Array.from({ length: JUNK }, (_, i) => [`k${i}`, 1])) }, 1],
+      ['keys the door does not take', Object.fromEntries(Array.from({ length: JUNK }, (_, i) => [`k${i}`, 1])), 1],
+      ['two long key names', { [`${LONG}a`]: true, [`${LONG}b`]: true }, 2],
+      ['seven long depth entries', { depth: Object.fromEntries(Array.from({ length: 7 }, (_, i) => [`${LONG}${i}`, 'advanced'])) }, 7],
+      ['long names beside sells and a junk depth', { sells: 'x', [`${LONG}a`]: 1, depth: Object.fromEntries(Array.from({ length: JUNK }, (_, i) => [`k${i}`, 1])) }, undefined],
+    ];
+    for (const [label, body, problems] of cases) {
+      const before = await businessRowText(ID.bizA);
+      const res = await door(ID.admin, ID.bizA, body);
+      const bytes = Buffer.byteLength(res.text ?? '');
+      expect(res.status, `${label}: ${(res.text ?? '').slice(0, 300)}`).toBe(400);
+      expect(res.body.code, label).toBe(SETTING_INVALID);
+      expect(bytes, `${label}: the refusal weighs ${bytes} bytes`).toBeLessThanOrEqual(4_096);
+      expect(res.text, `${label}: no entry is named`).not.toMatch(/\bk\d+\b/);
+      expect(res.text, `${label}: no name comes back whole`).not.toContain(ECHO);
+      if (problems !== undefined) expect(res.body.problems, `${label}: ${problems} problem(s)`).toHaveLength(problems);
+      if (label === 'keys the door does not take') expect(res.body.problems[0], 'it names the count').toContain(String(JUNK));
+      expect(await businessRowText(ID.bizA), `${label}: the row is byte-identical`).toBe(before);
+    }
+  });
+
+  it('[V63E-AD07] RED-BEFORE: every write through the door writes one team_activity_logs row in its transaction naming the actor (user id, standing OWNER or ADMIN), module settings, the business as the entity and each named setting before and after; a refused write writes none', async () => {
+    await resetBizA();
+    await db.$executeRawUnsafe('DELETE FROM team_activity_logs WHERE business_id = $1', ID.bizA);
+
+    const admin = await door(ID.admin, ID.bizA, { advancedCrm: true, depth: { money: 'advanced' } });
+    expect(admin.status, JSON.stringify(admin.body)).toBe(200);
+    let rows = await doorAuditRows(ID.bizA);
+    expect(rows, 'one row for the ADMIN\'s write').toHaveLength(1);
+    expect({ userId: rows[0].userId, module: rows[0].module, entityType: rows[0].entityType, entityId: rows[0].entityId })
+      .toEqual({ userId: ID.admin, module: 'settings', entityType: 'business', entityId: ID.bizA });
+    expect(rows[0].meta).toEqual({
+      actorStanding: 'ADMIN',
+      changes: { advancedCrm: { from: false, to: true }, depth: { money: { from: 'standard', to: 'advanced' } } },
+    });
+
+    expect((await door(ID.staff, ID.bizA, { advancedCrm: false })).status).toBe(403);
+    expect((await door(ID.admin, ID.bizA, { sells: 'products' })).status).toBe(400);
+    expect((await door(ID.admin, ID.bizA, { advancedCrm: 'no' })).status).toBe(400);
+    expect(await doorAuditRows(ID.bizA), 'a refused write writes no row').toHaveLength(1);
+
+    const owner = await door(ID.owner, ID.bizA, { depth: { money: 'standard', sales: 'advanced' } });
+    expect(owner.status, JSON.stringify(owner.body)).toBe(200);
+    rows = await doorAuditRows(ID.bizA);
+    expect(rows).toHaveLength(2);
+    expect(rows[1].userId).toBe(ID.owner);
+    expect(rows[1].meta).toEqual({
+      actorStanding: 'OWNER',
+      changes: { depth: { money: { from: 'advanced', to: 'standard' }, sales: { from: 'standard', to: 'advanced' } } },
+    });
+  });
+
+  it('[V63E-AD08] RED-BEFORE: the service itself (no HTTP) admits a platform SUPER_ADMIN, the bypass BusinessGuard and the profile PATCH grant, and its audit row names that actor with standing SUPER_ADMIN; it refuses no actor (401) and a STAFF member (403) before it reads the body, the row byte-identical', async () => {
+    await resetBizA();
+    const result = await identityService.updateAdvancedSettings(ID.bizA, { advancedCrm: true }, { id: PLATFORM, role: 'SUPER_ADMIN' });
+    expect(result.advancedCrm).toBe(true);
+    const rows = await doorAuditRows(ID.bizA);
+    const last = rows[rows.length - 1];
+    expect({ userId: last.userId, standing: last.meta?.actorStanding }).toEqual({ userId: PLATFORM, standing: 'SUPER_ADMIN' });
+
+    for (const [actor, status, label] of [
+      [undefined, 401, 'no actor'],
+      [{ id: ID.staff, role: 'USER' }, 403, 'STAFF, settings:none'],
+      [{ id: ID.staffA, role: 'USER' }, 403, 'STAFF, settings:admin'],
+    ] as const) {
+      const before = await businessRowText(ID.bizA);
+      let error: any;
+      try { await identityService.updateAdvancedSettings(ID.bizA, { sells: 'products', depth: 'junk' }, actor); } catch (e) { error = e; }
+      expect(error, `${label} is refused`).toBeDefined();
+      expect(error.getStatus?.(), `${label}: refused before the body is read`).toBe(status);
+      expect(await businessRowText(ID.bizA), `${label}: the row is byte-identical`).toBe(before);
+    }
+  });
+
+  it('[V63E-AD09] RED-BEFORE: a concurrent profile PATCH loses neither key: while a lockBusinessMeta writer holds the row, an ADMIN\'s door write (advancedCrm, depth.sales), the owner\'s profile PATCH (sells, depth.money, metaData.bankName) and a co-owner\'s door write (depth.schedule) queue behind it; after the holder commits every write is kept', async () => {
+    await resetBizA();
+    const BANK = `${P}FirstCitizens`;
+    try {
+      const hold = await holdBusinessRow(ID.bizA, (tx, meta) =>
+        tx.business.update({ where: { id: ID.bizA }, data: { metaData: { ...meta, v63eHeld: 'held' } } }));
+      let adminWrite: Promise<any> | undefined;
+      let ownerWrite: Promise<any> | undefined;
+      let coOwnerWrite: Promise<any> | undefined;
+      try {
+        adminWrite = door(ID.admin, ID.bizA, { advancedCrm: true, depth: { sales: 'advanced' } }).then((r: any) => r);
+        await waitForBusinessLockWaiters(hold, 1);
+        ownerWrite = patch(ID.owner, ID.bizA, { sells: 'services', depth: { money: 'advanced' }, metaData: { bankName: BANK } }).then((r: any) => r);
+        await waitForBusinessLockWaiters(hold, 2);
+        coOwnerWrite = door(ID.coOwner, ID.bizA, { depth: { schedule: 'advanced' } }).then((r: any) => r);
+        await waitForBusinessLockWaiters(hold, 3);
+      } finally {
+        await hold.commit();
+      }
+      const [a, o, c] = await Promise.all([adminWrite, ownerWrite, coOwnerWrite]);
+      expect(a.status, `the ADMIN's door write: ${JSON.stringify(a.body)}`).toBe(200);
+      expect(o.status, `the owner's profile PATCH: ${JSON.stringify(o.body)}`).toBe(200);
+      expect(c.status, `the co-owner's door write: ${JSON.stringify(c.body)}`).toBe(200);
+
+      const meta = await storedMeta(ID.bizA);
+      expect(meta.v63eHeld, 'the holding writer\'s key').toBe('held');
+      expect(meta.advancedCrm, 'the ADMIN\'s advancedCrm').toBe(true);
+      expect(meta.sells, 'the owner\'s sells').toBe('services');
+      expect(meta.bankName, 'the owner\'s bankName').toBe(BANK);
+      expect(meta.depth, 'every hub each writer named').toEqual({ sales: 'advanced', money: 'advanced', schedule: 'advanced' });
+      expect(meta.paymentMethods, 'an untouched key').toEqual(OTHER_META.paymentMethods);
+      expect(settingsOf((await get(ID.staff, ID.bizA)).body))
+        .toEqual({ sells: 'services', advancedCrm: true, depth: { ...ALL_STANDARD, sales: 'advanced', money: 'advanced', schedule: 'advanced' } });
+    } finally {
+      await resetBizA();
+    }
+    // Above the default: a write that never queues fails the lock-waiter wait (10 s) and still commits the holder.
+  }, 30_000);
 });
 
 describe('V1-63 a concurrent metaData writer cannot lose a setting (the business row lock)', () => {

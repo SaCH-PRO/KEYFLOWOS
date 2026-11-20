@@ -10,9 +10,11 @@ import {
   Request,
 } from '@nestjs/common';
 import { BusinessGuard } from '../../core/auth/business.guard';
-import { ModuleScopeGuard } from '../../core/auth/module-scope.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { DeviceService } from './device.service';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('capture', 'crm')
 @Controller('api/device/businesses/:businessId')
 @UseGuards(BusinessGuard, ModuleScopeGuard)
 export class DeviceController {
@@ -76,6 +78,8 @@ export class DeviceController {
   }
 
   // ─── Visual Intakes ───
+  // SWP-CENSUS-HIDDEN: approving or rejecting an intake is operations work (the census row's module); the class
+  // gate's crm write covers the captures and the contacts made from cards.
 
   @Get('intakes')
   async listIntakes(
@@ -93,6 +97,7 @@ export class DeviceController {
     });
   }
 
+  @RequireModuleScope('operations', 'write')
   @Patch('intakes/:id/approve')
   async approveIntake(
     @Param('businessId') businessId: string,
@@ -103,6 +108,7 @@ export class DeviceController {
     return this.device.approveIntake(businessId, id, userId);
   }
 
+  @RequireModuleScope('operations', 'write')
   @Patch('intakes/:id/reject')
   async rejectIntake(
     @Param('businessId') businessId: string,

@@ -17,7 +17,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { CanonicalModule, LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+import { CanonicalModule, LEVEL_RANK, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
@@ -98,8 +98,9 @@ export class KeyInboxController {
 
   /**
    * V1-31b: the member's scope on `module`, as ModuleScopeGuard computes it
-   * (SUPER_ADMIN passes; else the membership's explicit scope map or its role
-   * defaults). A non-member, or a level below `minLevel`, is 403.
+   * (SUPER_ADMIN passes; else memberModuleLevel: the membership's explicit scope
+   * map, a stored JSON array included, or its role defaults). A non-member, or a
+   * level below `minLevel`, is 403.
    */
   private async requireModuleScope(
     businessId: string,
@@ -113,12 +114,9 @@ export class KeyInboxController {
       select: { role: true, permissionScopes: true },
     });
     if (!membership) throw new ForbiddenException('Not a member of this business');
-    const explicit = membership.permissionScopes;
-    const scopes: Record<string, string> =
-      explicit && typeof explicit === 'object' && !Array.isArray(explicit)
-        ? (explicit as Record<string, string>)
-        : defaultScopesForRole(membership.role);
-    const level = scopes[module] || 'none';
+    // TOF-GRAPH-SCOPE-ARRAY review repair (COR-TOFGSA-1): ModuleScopeGuard's own reading (memberModuleLevel), so a
+    // stored JSON array is an explicit map that names no module; it had been read as the role's defaults.
+    const level = memberModuleLevel(membership, module);
     if (rankOf(level) < LEVEL_RANK[minLevel]) {
       throw new ForbiddenException(`Insufficient permissions: ${module} requires ${minLevel} access (you have ${level})`);
     }

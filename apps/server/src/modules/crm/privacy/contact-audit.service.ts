@@ -13,8 +13,20 @@ import { PrismaService } from '../../../core/prisma/prisma.service';
  * `contactId` foreign-key is nulled and identifiers in the entries
  * are scrubbed.
  *
- * All writes are best-effort: a DB hiccup must never break the actual
- * mutation it audits. Failures are logged and swallowed.
+ * Two kinds of write (owner ruling D-25: every contact write records a
+ * ContactAuditEntry; TOF-CONTACT-AUDIT-AWAIT):
+ *   - write(opts, tx): the entry is part of the caller's transaction and a
+ *     failure throws, so the contact write it audits rolls back with it. A
+ *     failed INSERT aborts a Postgres transaction anyway: it cannot be
+ *     swallowed there. CrmService's contact writes pass it: createContact,
+ *     updateContact, softDeleteContact, bulkUpdateContacts, bulkDeleteContacts,
+ *     reassignContacts, mergeContacts and the import merge.
+ *   - write(opts) with no transaction: best-effort. A failure is logged and
+ *     swallowed, never breaking the operation it reports (the GDPR purge's
+ *     steps, the contact syncs' own entries, the paid-invoice lifecycle move,
+ *     and CrmService's note and task writes).
+ * writeOrThrow(opts, tx?) is the throwing write itself, for a caller that has
+ * no transaction and must fail with its audit row.
  */
 export type ContactAuditAction =
   | 'created'
@@ -72,6 +84,13 @@ export interface ContactAuditWriteOptions {
   ip?: string | null;
   userAgent?: string | null;
 }
+
+/**
+ * The client a durable write goes through: the caller's interactive
+ * transaction (the `tx` of `prisma.client.$transaction(async (tx) => ...)`),
+ * or the service's own client.
+ */
+export type ContactAuditClient = Pick<PrismaService['client'], 'contactAuditEntry'>;
 
 @Injectable()
 export class ContactAuditService {
@@ -138,30 +157,18 @@ export class ContactAuditService {
     return v;
   }
 
-  /** Write a single audit entry. Never throws. */
-  async write(opts: ContactAuditWriteOptions): Promise<void> {
+  /**
+   * Write a single audit entry.
+   *
+   * With `tx`, the entry is written in that transaction and a failure throws
+   * (D-25): the caller's write must not commit without its audit row. Without
+   * `tx`, the write is best-effort and never throws: a failure is logged and
+   * swallowed.
+   */
+  async write(opts: ContactAuditWriteOptions, tx?: ContactAuditClient): Promise<void> {
+    if (tx) return this.writeOrThrow(opts, tx);
     try {
-      const diffed =
-        opts.before !== undefined || opts.after !== undefined
-          ? this.diff(opts.before as any, opts.after as any)
-          : { changed: [], before: {}, after: {} };
-      await this.prisma.client.contactAuditEntry.create({
-        data: {
-          businessId: opts.businessId,
-          contactId: opts.contactId,
-          contactHash: this.hashContact(opts.businessId, opts.contactId),
-          action: opts.action,
-          entityType: opts.entityType ?? 'contact',
-          entityId: opts.entityId ?? null,
-          actor: (opts.actor ?? null) as never,
-          before: (diffed.before ?? null) as never,
-          after: (diffed.after ?? null) as never,
-          changedFields: diffed.changed,
-          reason: opts.reason?.slice(0, 500) ?? null,
-          ip: opts.ip?.slice(0, 64) ?? null,
-          userAgent: opts.userAgent?.slice(0, 512) ?? null,
-        },
-      });
+      await this.writeOrThrow(opts);
     } catch (err: any) {
       this.logger.warn(
         `[ContactAudit] write failed action=${opts.action} contact=${opts.contactId}: ${
@@ -169,6 +176,36 @@ export class ContactAuditService {
         }`,
       );
     }
+  }
+
+  /**
+   * Write a single audit entry through `tx` (the caller's transaction) or,
+   * without one, the service's own client, and throw when it cannot be
+   * written.
+   */
+  async writeOrThrow(opts: ContactAuditWriteOptions, tx?: ContactAuditClient): Promise<void> {
+    const client = tx ?? this.prisma.client;
+    const diffed =
+      opts.before !== undefined || opts.after !== undefined
+        ? this.diff(opts.before as any, opts.after as any)
+        : { changed: [], before: {}, after: {} };
+    await client.contactAuditEntry.create({
+      data: {
+        businessId: opts.businessId,
+        contactId: opts.contactId,
+        contactHash: this.hashContact(opts.businessId, opts.contactId),
+        action: opts.action,
+        entityType: opts.entityType ?? 'contact',
+        entityId: opts.entityId ?? null,
+        actor: (opts.actor ?? null) as never,
+        before: (diffed.before ?? null) as never,
+        after: (diffed.after ?? null) as never,
+        changedFields: diffed.changed,
+        reason: opts.reason?.slice(0, 500) ?? null,
+        ip: opts.ip?.slice(0, 64) ?? null,
+        userAgent: opts.userAgent?.slice(0, 512) ?? null,
+      },
+    });
   }
 
   /** List audit entries for a contact with optional filters. */

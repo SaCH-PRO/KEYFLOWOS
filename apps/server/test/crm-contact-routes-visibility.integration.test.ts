@@ -581,8 +581,13 @@ beforeAll(async () => {
       { provide: CrmFlowService, useValue: flow },
       { provide: ContactAuditService, useValue: new ContactAuditService(prisma) },
       { provide: CrmPlaybookService, useValue: new CrmPlaybookService(prisma) },
-      // CrmDuplicateDetectionService: not on mark-verified's path.
-      { provide: CrmDataQualityService, useValue: new CrmDataQualityService(prisma, {} as any) },
+      // CrmDuplicateDetectionService: not on mark-verified's path. The contact write's edit rule
+      // (CrmService) and its audit (ContactAuditService) are (FU-DATAQUALITY-MASS-ASSIGN review SEC-DQ-3).
+      {
+        provide: CrmDataQualityService,
+        useFactory: (crmService: any, contactAudit: any) => new CrmDataQualityService(prisma, {} as any, crmService, contactAudit),
+        inject: [CrmService, ContactAuditService],
+      },
       { provide: CrmRelationshipHealthService, useValue: new CrmRelationshipHealthService(prisma, crmTimeline, stats) },
       { provide: CrmCommunicationService, useValue: new CrmCommunicationService(prisma, events, crmTimeline, sender as any) },
       { provide: ConversationAiService, useValue: conversationAi },

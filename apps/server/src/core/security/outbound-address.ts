@@ -94,14 +94,41 @@ export interface CheckedAddress {
   addresses: PinnedAddress[];
 }
 
+/**
+ * TOF-WEBSITE-ENRICHMENT review COR-WEB-1: the lookup failures that are an
+ * answer, that the name has no address (NXDOMAIN, no record of the family
+ * asked for; node gives ENOTFOUND for both, ENODATA from the c-ares path).
+ * Any other failure (EAI_AGAIN, a timeout, a server failure, a resolver that
+ * refused the query, or no code at all) means the resolver could not answer
+ * now, which says nothing about the name.
+ */
+const NO_ADDRESS_LOOKUP_CODES: ReadonlySet<string> = new Set(['ENOTFOUND', 'ENODATA']);
+
 /** ST-38c-2: an outbound host refused because an address is not public, or because it does not resolve. */
 export class OutboundAddressRefusedError extends Error {
+  /**
+   * TOF-WEBSITE-ENRICHMENT review COR-WEB-1: true when the host was refused
+   * only because the resolver could not answer now (an 'unresolvable' whose
+   * lookupCode is not ENOTFOUND or ENODATA). The name may well resolve on the
+   * next try, so a caller that remembers a miss should treat this as a
+   * transient failure instead. False for a non-public answer, an empty
+   * answer and a name with no address.
+   */
+  readonly transient: boolean;
+
   constructor(
     readonly reason: 'non_public' | 'unresolvable',
     readonly hostname: string,
+    /**
+     * TOF-WEBSITE-ENRICHMENT review COR-WEB-1: for an 'unresolvable' host
+     * whose lookup failed, the resolver's error code ('UNKNOWN' when it gave
+     * none); undefined otherwise (a non-public answer, an empty answer).
+     */
+    readonly lookupCode?: string,
   ) {
     super(reason === 'non_public' ? `${hostname} is not a public address` : `${hostname} does not resolve`);
     this.name = 'OutboundAddressRefusedError';
+    this.transient = reason === 'unresolvable' && lookupCode !== undefined && !NO_ADDRESS_LOOKUP_CODES.has(lookupCode);
   }
 }
 
@@ -115,6 +142,9 @@ const sameHost = (a: string, b: string) => a.toLowerCase().replace(/\.$/, '') ==
  * could be served either) or when there is no answer. W4-IMPORT-SSRF-PIN
  * review CR-PIN-1: every answer is given back, in the resolver's order, not
  * only the first, so the pinned connection keeps the fallback between them.
+ * TOF-WEBSITE-ENRICHMENT review COR-WEB-1: a failed lookup's code is kept on
+ * the refusal (lookupCode), and a failure that is not an answer about the
+ * name (EAI_AGAIN, a timeout) is marked transient; the refusal is the same.
  */
 export async function resolvePublicAddress(hostname: string): Promise<CheckedAddress> {
   const literal = isIP(hostname);
@@ -125,8 +155,9 @@ export async function resolvePublicAddress(hostname: string): Promise<CheckedAdd
   let answers: Array<{ address: string; family: number }>;
   try {
     answers = await dnsPromises.lookup(hostname, { all: true });
-  } catch {
-    throw new OutboundAddressRefusedError('unresolvable', hostname);
+  } catch (err: unknown) {
+    const code = (err as { code?: unknown } | null)?.code;
+    throw new OutboundAddressRefusedError('unresolvable', hostname, typeof code === 'string' && code ? code : 'UNKNOWN');
   }
   if (!Array.isArray(answers) || answers.length === 0) throw new OutboundAddressRefusedError('unresolvable', hostname);
   if (answers.some((answer) => isNonPublicAddress(answer.address))) {

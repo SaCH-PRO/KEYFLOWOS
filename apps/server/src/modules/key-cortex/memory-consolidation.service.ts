@@ -1,26 +1,42 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { KeyCortexCircadianService } from './key-cortex-circadian.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { keyCronsDisabled } from '../../core/config/env';
+import { deleteAiMemoriesWithCopies, upsertAiMemoryDroppingStaleCopies } from '../ai/ai-memory.service';
+import { AI_MEMORY_COPY_SOURCE_TYPE, SemanticMemoryService } from '../ai/semantic-memory.service';
 
 /** The AiMemory rows promotion writes: category, key prefix and source. */
 const PROMOTED_CATEGORY = 'learning';
 const PROMOTED_KEY_PREFIX = 'learned:';
 const PROMOTED_SOURCE = 'key_cortex_learning';
-/** How much of a cognition row's recommendation promotion copies. */
+/** How much of a cognition row's recommendation promotion copies, in UTF-16 units (see promotedValue). */
 const PROMOTED_VALUE_LENGTH = 500;
 /**
  * The semantic copies of AiMemory rows in ai_memory_embeddings: source_type 'memory', source_id the row's id.
  * POST /ai/businesses/:id/agent/memory/backfill (SemanticMemoryService.backfillFromAiMemory) writes one per row,
  * its content `<category>: <key> = <value>`, so a promoted row's copy starts with COPY_CONTENT_PREFIX.
  */
-const COPY_SOURCE_TYPE = 'memory';
+const COPY_SOURCE_TYPE = AI_MEMORY_COPY_SOURCE_TYPE;
 const COPY_CONTENT_PREFIX = `${PROMOTED_CATEGORY}: ${PROMOTED_KEY_PREFIX}`;
 
 /** The business-wide AiMemory key a cognition row of `functionId` is promoted into. */
 function promotedKey(functionId: string | null): string {
   return `${PROMOTED_KEY_PREFIX}${functionId ?? 'general'}`;
+}
+
+/**
+ * The value promotion takes from a recommendation: its first PROMOTED_VALUE_LENGTH UTF-16 units, cut on a code point.
+ * W1F-MEMORY-COPIES: a plain slice(0, 500) split a character outside the Basic Multilingual Plane (an emoji) whose two
+ * units straddle the cut, leaving a lone surrogate; Prisma refuses that string ("unexpected end of hex escape"), and
+ * the refusal stopped run() for the business. So a cut that would end on a high surrogate ends one unit earlier, before
+ * the whole character. Whole recommendations are well-formed (the database holds no lone surrogate).
+ */
+function promotedValue(recommendation: string): string {
+  if (recommendation.length <= PROMOTED_VALUE_LENGTH) return recommendation;
+  const last = recommendation.charCodeAt(PROMOTED_VALUE_LENGTH - 1);
+  const splitsAPair = last >= 0xd800 && last <= 0xdbff;
+  return recommendation.slice(0, splitsAPair ? PROMOTED_VALUE_LENGTH - 1 : PROMOTED_VALUE_LENGTH);
 }
 
 /**
@@ -43,6 +59,9 @@ function promotedRowOfCopy(content: string): { key: string; value: string } | nu
  *  - Promotes high-confidence facts into structured AiMemory: only facts that
  *    belong to no member (W11-MEMORY-PROMOTE-SCOPE), withdrawing any an earlier
  *    run promoted from a member's own row, with their semantic copies.
+ *
+ * Every AiMemory row it deletes goes through deleteAiMemoriesWithCopies, so the
+ * row's semantic copies go with it (W1F-MEMORY-COPIES).
  */
 @Injectable()
 export class MemoryConsolidationService {
@@ -62,6 +81,9 @@ export class MemoryConsolidationService {
   constructor(
     private readonly prisma: PrismaService,
     @Optional() private readonly circadian?: KeyCortexCircadianService,
+    // FU-MEMORY-COPIES-REWRITE review COR-V71I-3: copies a promoted row the door rewrote again (AiModule's, which
+    // KeyCortexModule imports).
+    @Optional() @Inject(SemanticMemoryService) private readonly semantic?: SemanticMemoryService,
   ) {}
 
   /**
@@ -140,10 +162,12 @@ export class MemoryConsolidationService {
   }> {
     const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
 
+    // W1F-MEMORY-COPIES: the withdrawal of a member's leaked promotion runs first, so no later step that fails (a
+    // promotion the database refuses, a decay or conflict write) leaves the leak served for another night.
+    const { rows: withdrawn, copies: withdrawnCopies } = await this.withdrawMemberPromotions(businessId);
     const decayed = await this.decayOldMemories(businessId, cutoff);
     const conflictsResolved = await this.resolveConflicts(businessId);
     const promoted = await this.promoteFacts(businessId);
-    const { rows: withdrawn, copies: withdrawnCopies } = await this.withdrawMemberPromotions(businessId);
 
     this.logger.log(
       `[run][${businessId}] decayed=${decayed} promoted=${promoted} withdrawn=${withdrawn} ` +
@@ -188,8 +212,10 @@ export class MemoryConsolidationService {
       const winner = items[0];
       for (const item of items.slice(1)) {
         if ((item.confidence ?? 1) < (winner.confidence ?? 1) * 0.5) {
-          await this.prisma.client.aiMemory.delete({ where: { id: item.id } });
-          resolved++;
+          // W1F-MEMORY-COPIES: with its semantic copies. (ai_memories is unique on business, category and key, so a
+          // group holds one row today and this is not reached.)
+          const { rows } = await deleteAiMemoriesWithCopies(this.prisma, businessId, { id: item.id });
+          resolved += rows;
         }
       }
     }
@@ -216,21 +242,20 @@ export class MemoryConsolidationService {
     let promoted = 0;
     for (const memory of highConfidence) {
       const key = promotedKey(memory.functionId);
-      await this.prisma.client.aiMemory.upsert({
-        where: { businessId_category_key: { businessId, category: PROMOTED_CATEGORY, key } },
+      const value = promotedValue(memory.recommendation);
+      // FU-MEMORY-COPIES-REWRITE: a recommendation promoted into the same key rewrites the row in place; the door
+      // deletes the copies of the value it replaces and (review COR-V71I-3) copies the row again with the new one.
+      await upsertAiMemoryDroppingStaleCopies(this.prisma, businessId, { category: PROMOTED_CATEGORY, key }, {
         create: {
-          businessId,
-          category: PROMOTED_CATEGORY,
-          key,
-          value: memory.recommendation.slice(0, PROMOTED_VALUE_LENGTH),
+          value,
           source: PROMOTED_SOURCE,
           confidence: memory.confidence,
         },
         update: {
-          value: memory.recommendation.slice(0, PROMOTED_VALUE_LENGTH),
+          value,
           confidence: memory.confidence,
         },
-      });
+      }, this.semantic);
       promoted++;
     }
     return promoted;
@@ -247,7 +272,8 @@ export class MemoryConsolidationService {
    * member's conversation. Whatever the source row's confidence or response is now
    * (it may have decayed below the bar since); the source row itself is untouched,
    * and stays its member's own memory. Rows promoted from member-less rows, and
-   * learning memories anyone else wrote, are kept.
+   * learning memories anyone else wrote, are kept. W1F-MEMORY-COPIES: run() calls it
+   * first, before anything that can fail.
    *
    * Review SEC-W11MPS-1: a row also has semantic copies in ai_memory_embeddings
    * (POST .../agent/memory/backfill, which any member may send), which every member
@@ -288,16 +314,12 @@ export class MemoryConsolidationService {
     let copies = 0;
     for (const row of promotedRows) {
       if (!(await isMemberPromotion(row.key, row.value))) continue;
-      const removed = await this.prisma.client.$transaction(async (tx) => {
-        // Only the row as read: one rewritten since (by a member-less promotion) stays.
-        const deleted = await tx.aiMemory.deleteMany({
-          where: { id: row.id, businessId, source: PROMOTED_SOURCE, value: row.value },
-        });
-        if (deleted.count === 0) return { rows: 0, copies: 0 };
-        const deletedCopies = await tx.aiMemoryEmbedding.deleteMany({
-          where: { businessId, sourceType: COPY_SOURCE_TYPE, sourceId: row.id },
-        });
-        return { rows: deleted.count, copies: deletedCopies.count };
+      // Only the row as read: one rewritten since (by a member-less promotion) stays, with its copies. The door
+      // deletes the row, then its copies, in one transaction (W1F-MEMORY-COPIES).
+      const removed = await deleteAiMemoriesWithCopies(this.prisma, businessId, {
+        id: row.id,
+        source: PROMOTED_SOURCE,
+        value: row.value,
       });
       rows += removed.rows;
       copies += removed.copies;
@@ -342,12 +364,13 @@ export class MemoryConsolidationService {
     if (!key.startsWith(PROMOTED_KEY_PREFIX)) return false;
     const functionId = key.slice(PROMOTED_KEY_PREFIX.length);
     // A value shorter than the promoted length is a whole recommendation; one of
-    // that length is the start of a longer one. Prisma's startsWith is a SQL LIKE
-    // prefix that escapes nothing (%, _ and \ in the value would widen or miss the
-    // match), so it reads only the value's leading run free of those characters;
-    // the exact comparison is made below.
+    // that length is the start of a longer one, and so is one a unit shorter
+    // (promotedValue cuts before a character that straddles the cut). Prisma's
+    // startsWith is a SQL LIKE prefix that escapes nothing (%, _ and \ in the
+    // value would widen or miss the match), so it reads only the value's leading
+    // run free of those characters; the exact comparison is made below.
     const recommendation =
-      value.length < PROMOTED_VALUE_LENGTH
+      value.length < PROMOTED_VALUE_LENGTH - 1
         ? { equals: value }
         : { startsWith: value.split(/[\\%_]/, 1)[0] };
     const sources = await this.prisma.client.cognitionMemory.findMany({
@@ -361,7 +384,7 @@ export class MemoryConsolidationService {
       select: { userId: true, functionId: true, recommendation: true },
     });
     const promotedFrom = sources.filter(
-      (s) => promotedKey(s.functionId) === key && s.recommendation.slice(0, PROMOTED_VALUE_LENGTH) === value,
+      (s) => promotedKey(s.functionId) === key && promotedValue(s.recommendation) === value,
     );
     const fromAMember = promotedFrom.some((s) => s.userId !== null);
     const fromNoMember = promotedFrom.some((s) => s.userId === null);

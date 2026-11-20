@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { SemanticMemoryService } from '../ai/semantic-memory.service';
+import { SemanticMemoryService, aiMemoryWithoutSettings } from '../ai/semantic-memory.service';
+import { KEY_OBSERVATION_SOURCE } from './key-cortex-event.service';
 import type { MemoryFragment, MemoryRetrievalOptions, MemorySourceType } from './unified-memory.types';
 
 interface RawMemoryRow {
@@ -119,6 +120,9 @@ export class UnifiedMemoryRetrievalService {
     const since = options.boostRecency !== false ? new Date(Date.now() - 90 * 24 * 60 * 60 * 1000) : undefined;
     const whereBase: any = { businessId };
     if (since) whereBase.createdAt = { gte: since };
+    // FU-MEMORY-COPIES-REWRITE review SEC-FUMCR-2: not the settings rows (the owner's AI preferences with the BYOK keys'
+    // ciphertext, the routing table, the autonomy settings): configuration, not memory, for no prompt.
+    const aiMemoryWhere = { ...whereBase, category: aiMemoryWithoutSettings() };
 
     const includeEpisodic = options.includeEpisodic !== false;
     const episodicSince = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
@@ -144,6 +148,11 @@ export class UnifiedMemoryRetrievalService {
     // is a stale duplicate whose BusinessEvent DOES declare userId. The runtime
     // schema is packages/db/prisma/schema.prisma, which is what PrismaService
     // binds to.
+    // FU-KEY-EVENT-COLUMNS (D-220): the business's events, business-wide, but not KEY's own observations (its
+    // decision, process and calibration logs, its cortex claims), which the KEY event writer keeps in business_events
+    // for KEY's self-model: they are KEY's bookkeeping, not something that happened in the business, and would crowd
+    // the business's events out of the 50 read.
+    const episodicWhereOfEvents: any = { ...episodicWhere, NOT: { source: KEY_OBSERVATION_SOURCE } };
     const personalWhere: any = { ...episodicWhere };
     if (options.userId) personalWhere.userId = options.userId;
     // W11-FLOW-PERCEPTION-SCOPE review CR-W11FPS-1: a read that names the stores it wants (sourceTypes) does not
@@ -163,7 +172,7 @@ export class UnifiedMemoryRetrievalService {
       cortexActionLogs,
     ] = await Promise.all([
       this.prisma.client.aiMemory.findMany({
-        where: whereBase,
+        where: aiMemoryWhere,
         orderBy: { createdAt: 'desc' },
         take: 50,
         select: { id: true, category: true, key: true, value: true, confidence: true, createdAt: true },
@@ -232,7 +241,7 @@ export class UnifiedMemoryRetrievalService {
       }),
       includeEpisodic
         ? this.prisma.client.businessEvent.findMany({
-            where: episodicWhere,
+            where: episodicWhereOfEvents,
             orderBy: { createdAt: 'desc' },
             take: 50,
             select: {

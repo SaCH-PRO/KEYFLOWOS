@@ -3,6 +3,7 @@ import { TimelineModule } from '../timeline/timeline.module';
 import { ContactEnrichmentController } from './enrichment/contact-enrichment.controller';
 import { ContactEnrichmentService } from './enrichment/contact-enrichment.service';
 import { ApolloEnrichmentProvider } from './enrichment/apollo-enrichment.provider';
+import { PublicDataEnrichmentProvider } from './enrichment/public-data-enrichment.provider';
 import { CrmController } from './crm.controller';
 import { CrmAiController } from './crm-ai.controller';
 import { CrmGoogleController } from './crm-google.controller';
@@ -85,6 +86,8 @@ import { TaskAssignmentModule } from '../task-assignments/task-assignment.module
     CrmService,
     ContactEnrichmentService,
     ApolloEnrichmentProvider,
+    // TOF-WEBSITE-ENRICHMENT (D-188): the website source, off unless CONTACT_WEBSITE_ENRICHMENT is on.
+    PublicDataEnrichmentProvider,
     CustomFieldDefinitionService,
     ContactCustomFieldValueService,
     CrmTimelineService,

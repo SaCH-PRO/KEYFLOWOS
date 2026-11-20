@@ -436,8 +436,11 @@ describe("STAFF_OWNED on the owner's PRIVATE contact answers 404 'Contact not fo
     const r = route('NC-06');
     try {
       const res = await send(r, ID.staffOwned, ID.cPriv);
-      expect(res.status).toBe(404);
-      expect(res.body.message).toBe('Contact not found');
+      // SWP-CENSUS-HIDDEN (D-152): a conversion write needs crm write (@HiddenModuleWrites('referrals', 'crm')), so
+      // STAFF_OWNED (crm read) is refused before the handler, whichever contact it names (the same answer for an
+      // absent id, below); the 404 for a member who may write but not open the contact is RV-02's.
+      expect(res.status).toBe(403);
+      expect(res.body.message).toBe('Insufficient permissions: crm requires write access (you have read)');
       expectNoDisclosure(res.body);
       expectNoServiceCall();
       expect(await salesRepOf(ID.cPriv)).toBe(PRIV_REP);
@@ -487,7 +490,8 @@ describe('CONTROLS (pass before and after)', () => {
     try {
       const res = await send(route('NC-06'), ID.staffOwned, ID.cTeam, ID.bizA, { salesRepId: `${P}rep_team_new` });
       expect(res.status).toBe(403);
-      expect(res.body.message).toBe('You do not have permission to edit contacts');
+      // SWP-CENSUS-HIDDEN (D-152): refused at the crm write gate now, before the handler's edit rule.
+      expect(res.body.message).toBe('Insufficient permissions: crm requires write access (you have read)');
       expect(spies.setSalesRep).not.toHaveBeenCalled();
       expect(await salesRepOf(ID.cTeam)).toBe(TEAM_REP);
     } finally {

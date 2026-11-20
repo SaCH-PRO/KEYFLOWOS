@@ -14,7 +14,9 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { BusinessAssetsService } from './business-assets.service';
 import { CreateBusinessAssetDto } from './dto/create-business-asset.dto';
 import { UpdateBusinessAssetDto } from './dto/update-business-asset.dto';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('assets', 'content')
 @Controller('businesses/:businessId/business-assets')
 @UseGuards(AuthGuard, BusinessGuard)
 export class BusinessAssetsController {

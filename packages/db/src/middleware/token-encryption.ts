@@ -80,31 +80,45 @@ export function decryptToken(ciphertext: string | null | undefined): string | nu
   return decrypted.toString('utf8');
 }
 
+/**
+ * The extension's field map: for each model it hooks, the columns encrypted at rest. The hooks below are built
+ * from it, and so is decryptNestedRecord, the decrypt step for a row of one of these models read as a NESTED
+ * include or select of another query (which the hooks never see). One list, so a nested row and a top-level row
+ * read the same columns as plaintext.
+ *
+ * Why each model is here is written on its set below.
+ */
+export const ENCRYPTED_FIELDS = Object.freeze({
+  Business: Object.freeze([
+    'driveAccessToken',
+    'driveRefreshToken',
+    'gmailAccessToken',
+    'gmailRefreshToken',
+    'calendarAccessToken',
+    'calendarRefreshToken',
+    'formsAccessToken',
+    'formsRefreshToken',
+    'contactsAccessToken',
+    'contactsRefreshToken',
+    'contactsSyncToken',
+    'msContactsAccessToken',
+    'msContactsRefreshToken',
+    'msContactsDeltaLink',
+    'bpAccessToken',
+    'bpRefreshToken',
+  ] as const),
+  SocialConnection: Object.freeze(['token', 'refreshToken'] as const),
+  ChannelConnection: Object.freeze(['token', 'refreshToken'] as const),
+  Webhook: Object.freeze(['secret'] as const),
+});
+
+export type EncryptedModel = keyof typeof ENCRYPTED_FIELDS;
+
 // Fields on Business model that should be encrypted at rest
-const BUSINESS_ENCRYPTED_FIELDS = new Set([
-  'driveAccessToken',
-  'driveRefreshToken',
-  'gmailAccessToken',
-  'gmailRefreshToken',
-  'calendarAccessToken',
-  'calendarRefreshToken',
-  'formsAccessToken',
-  'formsRefreshToken',
-  'contactsAccessToken',
-  'contactsRefreshToken',
-  'contactsSyncToken',
-  'msContactsAccessToken',
-  'msContactsRefreshToken',
-  'msContactsDeltaLink',
-  'bpAccessToken',
-  'bpRefreshToken',
-]);
+const BUSINESS_ENCRYPTED_FIELDS = new Set<string>(ENCRYPTED_FIELDS.Business);
 
 // Fields on SocialConnection model that should be encrypted at rest
-const SOCIAL_ENCRYPTED_FIELDS = new Set([
-  'token',
-  'refreshToken',
-]);
+const SOCIAL_ENCRYPTED_FIELDS = new Set<string>(ENCRYPTED_FIELDS.SocialConnection);
 
 /**
  * Fields on ChannelConnection that should be encrypted at rest.
@@ -124,10 +138,7 @@ const SOCIAL_ENCRYPTED_FIELDS = new Set([
  * `findUnique/findFirst ... where: { token }` call sites), which is what makes
  * encrypting it safe — see the note on the bearer-link tokens below.
  */
-const CHANNEL_ENCRYPTED_FIELDS = new Set([
-  'token',
-  'refreshToken',
-]);
+const CHANNEL_ENCRYPTED_FIELDS = new Set<string>(ENCRYPTED_FIELDS.ChannelConnection);
 
 /**
  * Fields on Webhook that should be encrypted at rest.
@@ -136,7 +147,7 @@ const CHANNEL_ENCRYPTED_FIELDS = new Set([
  * (webhook-dispatcher.service.ts:265). It is loaded by webhook id and used to
  * sign; it is never itself a lookup key.
  */
-const WEBHOOK_ENCRYPTED_FIELDS = new Set(['secret']);
+const WEBHOOK_ENCRYPTED_FIELDS = new Set<string>(ENCRYPTED_FIELDS.Webhook);
 
 /**
  * WHAT IS DELIBERATELY NOT ENCRYPTED HERE, AND WHY IT IS NOT AN OVERSIGHT
@@ -178,6 +189,36 @@ function decryptWith<T>(fields: Set<string>, data: T): T {
     }
   }
   return result as T;
+}
+
+const FIELD_SETS: Record<EncryptedModel, Set<string>> = {
+  Business: BUSINESS_ENCRYPTED_FIELDS,
+  SocialConnection: SOCIAL_ENCRYPTED_FIELDS,
+  ChannelConnection: CHANNEL_ENCRYPTED_FIELDS,
+  Webhook: WEBHOOK_ENCRYPTED_FIELDS,
+};
+
+/**
+ * FU-DELIVERY-TOKEN-DECRYPT (V1-71): the decrypt step for a row of an encrypted model read as a NESTED include or
+ * select of another query.
+ *
+ * The hooks below run on queries whose top-level model is encrypted, and decrypt the rows those queries return.
+ * A row reached through a relation of another query (`outboundDelivery.findUnique({ include: { destination: {
+ * include: { connection: true } } } })`) is never seen by them and comes back with the stored ciphertext:
+ * DeliveryQueueService.claimDeliveries put 'enc:v1:...' in the bearer header of every queued Gmail and WhatsApp
+ * send that way. A caller that USES such a value passes the nested row here: the same columns and the same key as
+ * a top-level read. A list relation is decrypted row by row; null and undefined pass through; the row read is not
+ * changed in place. A model outside the field map is refused, so a typo cannot pass a row through undecrypted.
+ *
+ * The plaintext is for the outbound call or decision that needs it: never put the returned row in a response, a
+ * log line or a stored row. apps/server/src/core/prisma/nested-encrypted-reads.spec.ts is the census of the nested
+ * reads that need this step.
+ */
+export function decryptNestedRecord<T>(model: EncryptedModel, record: T): T {
+  const fields = FIELD_SETS[model];
+  if (!fields) throw new Error(`decryptNestedRecord: ${String(model)} has no encrypted fields in the token-encryption field map`);
+  if (Array.isArray(record)) return record.map((row) => decryptWith(fields, row)) as unknown as T;
+  return decryptWith(fields, record);
 }
 
 function encryptBusinessData(data: Record<string, unknown>): Record<string, unknown> {

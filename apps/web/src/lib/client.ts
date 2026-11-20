@@ -781,6 +781,10 @@ export async function fetchInvoices(businessId: string = selectedBusinessId()) {
     issueDate: z.string().nullable().optional(),
     dueDate: z.string().nullable().optional(),
     paidAt: z.string().nullable().optional(),
+    // FU-WA-CONTACT-PHONE: the customer's id, kept from the server's row. The WhatsApp share reads
+    // the customer by it (the saved WhatsApp number, or the phone for the confirm step); without it
+    // every list share went to WhatsApp's chooser.
+    contactId: z.string().nullable().optional(),
     contact: z
       .object({
         firstName: z.string().nullable().optional(),
@@ -13637,7 +13641,7 @@ export interface TaxRateRow {
   updatedAt: string;
 }
 
-export interface FinanceSettings {
+export interface FinanceSettings extends Partial<FinanceSettingsAccess> {
   accountingBasis: 'CASH' | 'ACCRUAL';
   fiscalYearStartMonth: number;
   defaultTaxRate: number;
@@ -13647,6 +13651,21 @@ export interface FinanceSettings {
   defaultTaxAccountId: string | null;
   currency: string;
   accountantEmail: string | null;
+}
+
+/**
+ * FU-FINANCE-SETTINGS-PATCH (owner ruling D-205): what the signed-in member may change, as GET and PATCH
+ * /finance/businesses/:id/settings answer it beside the settings (each the check the server's write runs). Absent from
+ * an older server's answer, which a screen reads as "not known" and offers the field as before; the server stays the
+ * enforcer.
+ *   mayChangeAccountantEmail  settings admin and revenue read (also the accountant box's "Remember")
+ *   mayChangeBooksSettings    revenue write: the accounting basis, fiscal year and default accounts
+ *   mayChangeTaxRate          the business owner (D-11)
+ */
+export interface FinanceSettingsAccess {
+  mayChangeAccountantEmail: boolean;
+  mayChangeBooksSettings: boolean;
+  mayChangeTaxRate: boolean;
 }
 
 export interface SendAccountantExportResult {

@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
+import type { PrismaService } from '../../core/prisma/prisma.service';
 import { contactWhereBase } from './crm.helpers';
-import { normalizeEmail, normalizePhone } from './crm-duplicate.util';
+import { normalizeEmail, phoneSearchKeys } from './crm-duplicate.util';
 
 /**
  * Shared filter primitives used by both the contacts list `where`-builder
@@ -43,6 +44,53 @@ export type ContactFilterPrimitives = {
 };
 
 /**
+ * A search typed into a contains filter matches the characters typed: '%' and '_' are the
+ * pattern wildcards of the SQL Prisma emits for `contains` (it passes the value through
+ * unescaped), so '%' found every contact and 'a_c' found 'abc' (SWP-CRM-SEARCH). Escaped with
+ * the default escape character, backslash, they (and a backslash) match only themselves.
+ */
+export function escapeContainsText(value: string): string {
+  return value.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+/** The most distinct tag spellings one search widens the tag match to. */
+const SEARCH_TAGS_MAX = 1000;
+
+/**
+ * The tags in use in a business that contain `search`, in any case, as typed ('%' and '_'
+ * literal) (SWP-CRM-SEARCH, BUG-081). Contact.tags is a text[] and Prisma's array filters match
+ * whole elements only (`has`, `hasSome`), so the list search first reads which spellings of the
+ * business's tags hold the text, then matches those whole tags (buildContactWhere's
+ * `searchTags`). Only tag strings are read here; which contacts the member may see is decided by
+ * the list query itself, so this read widens nothing. Capped at SEARCH_TAGS_MAX distinct tags.
+ */
+export async function findSearchTags(
+  prisma: PrismaService,
+  businessId: string,
+  search: string | null | undefined,
+): Promise<string[]> {
+  const text = search?.trim();
+  if (!text) return [];
+  const pattern = `%${escapeContainsText(text)}%`;
+  const rows = await prisma.client.$queryRaw<Array<{ tag: string }>>`
+    SELECT DISTINCT t.tag
+    FROM contacts c
+    CROSS JOIN LATERAL unnest(c.tags) AS t(tag)
+    WHERE c.business_id = ${businessId}
+      AND c.deleted_at IS NULL
+      AND t.tag ILIKE ${pattern} ESCAPE '\\'
+    LIMIT ${SEARCH_TAGS_MAX}
+  `;
+  return rows.map((r) => r.tag);
+}
+
+/** What a caller resolved before building the `where` (not part of a saved view or list rule). */
+export type ContactWhereOptions = {
+  /** findSearchTags(search): the business's tags that contain the search text. */
+  searchTags?: string[];
+};
+
+/**
  * Build a Prisma `where` clause for Contact queries from a primitives bag.
  * Excludes minRevenue (which requires an aggregate raw query — handled by
  * the lists service separately).
@@ -50,6 +98,7 @@ export type ContactFilterPrimitives = {
 export function buildContactWhere(
   businessId: string,
   filters: ContactFilterPrimitives | null | undefined,
+  options: ContactWhereOptions = {},
 ): Prisma.ContactWhereInput {
   const where: Prisma.ContactWhereInput & Record<string, unknown> = {
     ...contactWhereBase(businessId),
@@ -66,20 +115,22 @@ export function buildContactWhere(
   }
   const searchValue = filters.search?.trim();
   if (searchValue) {
+    const text = escapeContainsText(searchValue);
     const normalizedEmail = normalizeEmail(searchValue);
-    const normalizedPhone = normalizePhone(searchValue);
     const orConditions: Prisma.ContactWhereInput[] = [
-      { firstName: { contains: searchValue, mode: 'insensitive' } },
-      { lastName: { contains: searchValue, mode: 'insensitive' } },
-      { displayName: { contains: searchValue, mode: 'insensitive' } },
-      { email: { contains: searchValue, mode: 'insensitive' } },
-      { phone: { contains: searchValue, mode: 'insensitive' } },
-      { companyName: { contains: searchValue, mode: 'insensitive' } },
-      { segment: { contains: searchValue, mode: 'insensitive' } },
-      { tags: { has: searchValue } },
+      { firstName: { contains: text, mode: 'insensitive' } },
+      { lastName: { contains: text, mode: 'insensitive' } },
+      { displayName: { contains: text, mode: 'insensitive' } },
+      { email: { contains: text, mode: 'insensitive' } },
+      { phone: { contains: text, mode: 'insensitive' } },
+      { companyName: { contains: text, mode: 'insensitive' } },
+      { segment: { contains: text, mode: 'insensitive' } },
+      // The tag as typed, and every tag of the business holding the text in any case (BUG-081).
+      { tags: { hasSome: [...new Set([searchValue, ...(options.searchTags ?? [])])] } },
     ];
-    if (normalizedEmail) orConditions.push({ emailNormalized: { contains: normalizedEmail } });
-    if (normalizedPhone) orConditions.push({ phoneNormalized: { contains: normalizedPhone } });
+    if (normalizedEmail) orConditions.push({ emailNormalized: { contains: escapeContainsText(normalizedEmail) } });
+    // The phone typed in any spelling of the number (BUG-083); keys hold only digits and '+'.
+    for (const key of phoneSearchKeys(searchValue)) orConditions.push({ phoneNormalized: { contains: key } });
     where.OR = orConditions;
   }
   if (filters.hasUnpaidInvoices) {
@@ -105,6 +156,10 @@ export function buildContactWhere(
     where.NOT = [
       { bookings: { some: { startTime: { gt: cutoff }, deletedAt: null } } },
     ];
+    // Stale is known for longer than the window with no booking in it: a contact created inside
+    // the window is not stale yet (SWP-CRM-SEARCH; a contact added a minute ago was listed).
+    // An AND term, so createdAfter / createdWithinDays / newThisWeek below still apply.
+    where.AND = [{ createdAt: { lt: cutoff } }];
   }
   if (filters.newThisWeek) {
     const start = new Date();

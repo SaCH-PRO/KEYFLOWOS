@@ -18,9 +18,12 @@
  *     rows in, with one EXISTS per module over the same `tables`;
  *   - NAV-B-HIDE / NAV-B-HIDE-2 gate `routes` and `pages` on the web;
  *   - KEY-TOOL-ALLOWLIST / KEY-TOOL-DOMAIN-HIDE classify KEY tools by `keyTools`;
- *   - SWP-CENSUS-HIDDEN takes the module key for its write guard (it adds the
- *     permission scope each module's writes need; this list does not decide
- *     authority).
+ *   - SWP-CENSUS-HIDDEN names a module by its key here in its write gate,
+ *     @HiddenModuleWrites(<key>, <scope>) on each of the module's controllers
+ *     (apps/server/src/core/auth/hidden-module-writes.decorator.ts;
+ *     rest-scope-census.spec.ts CEN-12a checks every key against this list).
+ *     The permission scope the module's writes need is the decorator's second
+ *     argument, a canonical module: this list does not decide authority.
  * Nobody keeps a second list: a change to what v1 hides is a change here.
  *
  * Self-contained on purpose (no imports): the usage-count script imports this

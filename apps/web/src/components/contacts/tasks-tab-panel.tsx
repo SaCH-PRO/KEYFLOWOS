@@ -21,7 +21,7 @@ import {
   Pencil,
   X,
 } from "lucide-react";
-import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
+import { buildWhatsAppLink, getContactPhone, ownBusinessCountry } from "@/lib/whatsapp";
 import type { ContactDetailData, ContactTask } from "./contact-detail";
 import {
   TASK_PRIORITIES,
@@ -147,7 +147,7 @@ export function TasksTabPanel({ contact, tasks, onAddTask, onAddNote, onComplete
     const msg = dueDate
       ? `Reminder: ${title}\nDue: ${formatDateTimeTZ(dueDate)}`
       : `Reminder: ${title}`;
-    window.open(buildWhatsAppLink(waPhone, msg), "_blank");
+    window.open(buildWhatsAppLink({ to: waPhone, text: msg, country: ownBusinessCountry() }), "_blank");
   };
 
   const handleCreateNoteFromTask = async (taskId: string, title: string) => {

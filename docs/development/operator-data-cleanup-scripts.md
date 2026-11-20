@@ -34,6 +34,11 @@ Section 3 is a different kind of script: a **read-only** count the owner runs
 against production before v1 hides its deferred modules. It has no `--apply`
 and no write path at all.
 
+Section 4 follows the contract above with one difference: its dry run also
+lists each stale copy's id (an opaque generated id) with its reason, so the
+operator can see what `--apply` will delete. It still never prints a copy's
+content or a business id.
+
 ## 1. Cross-tenant custom-field values (SF-1)
 
 ```bash
@@ -379,6 +384,67 @@ Check `"scope": "aggregate"` at the top of `/tmp/v1-usage/v1-module-usage.json`
 before posting it. The script needs nothing but `DATABASE_URL`, which the
 `api` service already has.
 
+## 4. Stale semantic copies of AI memories (FU-MEMORY-COPIES-REWRITE, D-221)
+
+```bash
+cd apps/server
+pnpm cleanup:memory-copies                   # dry run: list and count, every business
+pnpm cleanup:memory-copies --business=<id>   # dry run, one business
+pnpm cleanup:memory-copies --apply           # delete
+```
+
+**Why.** An AI memory row (`ai_memories`) has semantic copies in
+`ai_memory_embeddings` (`source_type` `memory`, `source_id` the row's id): the
+backfill route (`POST /ai/businesses/:id/agent/memory/backfill`) writes
+`<category>: <key> = <value>`, and KEY's memory writer (indexSemantic) writes
+the value. Every member reads them back (`GET .../agent/memory/search` and
+KEY's memory block). Before W1F-MEMORY-COPIES a deleted row left its copies, and
+before FU-MEMORY-COPIES-REWRITE a row rewritten in place (the owner's
+`PUT .../ai/memory` of a new value, a document extracted again, a promotion into
+the same key) left the copies of its old value. Since those packets no such copy
+is served, every deletion and rewrite removes them, and a rewrite copies the row
+again with its new value when the embedding path is on (after the write has
+answered). The copies stored
+before are still in the table, holding text the owner removed or replaced.
+
+**What it deletes.** Every `memory` copy that no memory row of its business
+with its `source_id` holds, in either form (the same test as
+`copyHoldsRowValue` in `semantic-memory.service.ts`). A settings row
+(category `settings`: the owner's AI preferences, which hold the BYOK
+provider keys as ciphertext, the routing table, the autonomy settings) is
+configuration, not memory, and has no copy since the FU-MEMORY-COPIES-REWRITE
+review repair (`AI_MEMORY_SETTINGS_CATEGORIES`), so every copy of one is
+deleted whatever it holds:
+
+```sql
+DELETE FROM ai_memory_embeddings e
+ WHERE e.source_type = 'memory'
+   AND NOT EXISTS (SELECT 1 FROM ai_memories m
+                    WHERE m.id = e.source_id AND m.business_id = e.business_id
+                      AND m.category NOT IN ('settings')
+                      AND (e.content = m.value
+                           OR e.content = m.category || ': ' || m.key || ' = ' || m.value));
+```
+
+The reasons it reports: `row_gone` (no row with that id in the copy's business:
+deleted, or another business's row), `settings_row` (the row is a settings
+row: the backfill copied those before the review repair, and their writers
+rewrite them outside the write door, so after the owner rotated a BYOK key the
+copy still held the old key's ciphertext) and `value_rewritten` (the row holds
+another value). A copy of an expired row still holds what its row holds and is
+kept (search hides it while the row is expired). Other source types (document
+chunks, events, conversations) are never read or deleted. `--apply` deletes in
+batches of 1000, each one statement that re-checks the copy is still stale;
+a re-run deletes nothing new.
+
+**Output.** `stale_row_gone`, `stale_settings_row` and `stale_value_rewritten`, then `would_delete`
+and one `stale copy <id> <reason>` line per copy (dry run), or `deleted`
+(`--apply`). Exit status as above.
+
+**After a cleanup.** A row whose only copies were stale has no copy until a
+member runs the backfill route again (or the row is rewritten with the
+embedding path on).
+
 ## Proof
 
 `apps/server/test/data-cleanup-scripts.integration.test.ts` (prefix `v96o_`)
@@ -415,6 +481,20 @@ runs both scripts' `main()` in process against Postgres. It covers:
   `src/modules/timeline/timeline-visibility.spec.ts` (TV-10) pins the rule:
   `name_mismatch`, a missing or an unknown reason are owner-only, and
   `source_gone` stays OWNER and ADMIN.
+
+`apps/server/test/ai-memory-copies-rewrite.integration.test.ts` (prefix
+`v71i_`) proves section 4 against Postgres: V71I-07 runs `main()` in process
+(the dry run lists exactly the seeded stale copies by id and reason, prints no
+content and deletes nothing; its stale set is exactly the `memory` copies search
+does not serve, less an expired row's; `--apply` deletes exactly those and is
+idempotent; `--business` leaves another business's copies; bad arguments exit
+2), and V71I-08 runs `pnpm cleanup:memory-copies` as pnpm runs it, with only
+`DATABASE_URL` (dry run, then `--apply`; the database URL is never printed).
+V71I-14 covers the settings rows: after the owner rotates a BYOK key (the real
+gateway writer), the dry run lists the copies of the preferences row made
+before the review repair as `settings_row` without their content, its stale set
+is exactly what search does not serve, and `--apply` leaves no copy of either
+key's ciphertext.
 
 `apps/server/test/v1-module-usage-count.integration.test.ts` (prefix `v61a_`)
 proves section 3 against Postgres:

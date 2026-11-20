@@ -15,7 +15,8 @@ import {
   type FinanceSettings, type FinancialAccountRow, type ChartOfAccountRow, type TaxRateRow,
 } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
-import { moduleReadRefusal } from "@/lib/module-access";
+import { isModuleScopeRefusal, moduleReadRefusal } from "@/lib/module-access";
+import { isAccountantSaveRefusal } from "@/components/finance/send-accountant-export-modal";
 
 const SECTIONS = [
   { key: "general", label: "General", icon: SettingsIcon },
@@ -64,8 +65,54 @@ export default function FinanceSettingsPage() {
 
 // ---------- General (basis, fiscal year, default tax, default accounts) ----------
 
+/**
+ * FU-FINANCE-SETTINGS-SCOPE (V1-71): what the General section says when a save is answered with an error, in plain
+ * words, or null when it went through. The PATCH refuses a submission as a whole (nothing of it is written), so the page
+ * says nothing was saved and never shows "Settings saved". GET and PATCH settings need revenue read; the default tax
+ * rate is the owner's (D-11, the server's own words).
+ * FU-FINANCE-SETTINGS-PATCH (owner ruling D-205): PATCH settings holds each field to its scope, so a refusal now names
+ * what was refused: the accountant email (settings admin, the binding refusal saveRecipient answers too) or the basis,
+ * fiscal year and default accounts (revenue write: "revenue requires write access"). The page offers neither to a
+ * member the server says may not change it (FinanceSettingsAccess), so these answer a scope changed since the page
+ * loaded.
+ */
+function financeSettingsSaveRefusal(res: { error?: string | null; status?: number } | null | undefined): string | null {
+  if (!res || !res.error) return null;
+  if (isAccountantSaveRefusal(res)) return "Nothing was saved. You can't change the accountant email in this business: it needs settings admin access.";
+  if (isModuleScopeRefusal(res, "revenue") && /\brequires write access\b/.test(res.error)) {
+    return "Nothing was saved. You can't change the accounting basis, fiscal year or default accounts in this business: it needs permission to edit its books.";
+  }
+  if (isModuleScopeRefusal(res, "revenue")) return "Nothing was saved. You can't change the finance settings in this business: it needs access to its books.";
+  return `Nothing was saved. ${res.error}`;
+}
+
+/** The settings PATCH writes (the answer's capability hints are not settings). */
+function settingsToSave(settings: FinanceSettings): Partial<FinanceSettings> {
+  const { mayChangeAccountantEmail: _a, mayChangeBooksSettings: _b, mayChangeTaxRate: _t, ...rest } = settings;
+  return rest;
+}
+
+/**
+ * FU-FINANCE-SETTINGS-PATCH (D-205): what this member may change, as GET settings answers it, and why a field is
+ * view-only, in plain words. A hint the answer does not carry (an older server) is not known and the field is offered;
+ * the server stays the enforcer.
+ */
+function financeSettingsAccess(settings: FinanceSettings) {
+  const books = settings.mayChangeBooksSettings !== false;
+  const address = settings.mayChangeAccountantEmail !== false;
+  const rate = settings.mayChangeTaxRate !== false;
+  const locked: string[] = [];
+  if (!books) locked.push("The accounting basis, fiscal year and default accounts: changing them needs permission to edit this business's books.");
+  if (!address) locked.push("The accountant email: changing it needs settings admin access in this business.");
+  if (!rate) locked.push("The default tax rate: only the business owner can change it.");
+  return { books, address, rate, locked, anything: books || address || rate };
+}
+
 function GeneralSection({ businessId }: { businessId: string }) {
   const [settings, setSettings] = useState<FinanceSettings | null>(null);
+  // FU-FINANCE-SETTINGS-SCOPE: GET settings needs revenue read; a refused read is said, not "Loading settings…" forever.
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<FinancialAccountRow[]>([]);
   // PR195-KEY-GATES review repair (CRR-P195KG-1/2): GET accounts needs revenue read (D-146); the pickers say why they
   // list no account rather than offering an empty list.
@@ -77,7 +124,12 @@ function GeneralSection({ businessId }: { businessId: string }) {
       fetchFinanceSettings(businessId),
       fetchFinanceAccounts(businessId),
     ]);
-    if (s.data) setSettings(s.data);
+    if (s.data) {
+      setSettings(s.data);
+      setLoadError(null);
+    } else if (s.error) {
+      setLoadError(moduleReadRefusal(s, "revenue", "the finance settings") ?? `Couldn't load the finance settings: ${s.error}`);
+    }
     if (a.error) {
       setAccounts([]);
       setAccountsError(moduleReadRefusal(a, "revenue", "the financial accounts") ?? `Couldn't load the financial accounts: ${a.error}`);
@@ -89,13 +141,24 @@ function GeneralSection({ businessId }: { businessId: string }) {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, [load]);
 
-  if (!settings) return <p className="text-sm text-muted-foreground">Loading settings…</p>;
+  if (!settings) {
+    if (loadError) return <p className="text-sm text-amber-500" role="alert">{loadError}</p>;
+    return <p className="text-sm text-muted-foreground">Loading settings…</p>;
+  }
+
+  const access = financeSettingsAccess(settings);
 
   const save = async () => {
     setSaving(true);
-    const r = await updateFinanceSettings(businessId, settings);
+    setSaveError(null);
+    const r = await updateFinanceSettings(businessId, settingsToSave(settings));
     setSaving(false);
-    if (r.error) { toast.error(r.error); return; }
+    const refused = financeSettingsSaveRefusal(r);
+    if (refused) {
+      setSaveError(refused);
+      toast.error(refused);
+      return;
+    }
     toast.success("Settings saved");
     if (r.data) setSettings(r.data);
   };
@@ -106,6 +169,15 @@ function GeneralSection({ businessId }: { businessId: string }) {
 
   return (
     <div className="space-y-4 max-w-2xl">
+      {access.locked.length > 0 && (
+        <div role="note" className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-sm space-y-1">
+          <p className="font-medium">{access.anything ? "Some of these settings are view-only for you:" : "You can see these settings but can't change them."}</p>
+          <ul className="list-disc pl-5 text-xs text-muted-foreground space-y-0.5">
+            {access.locked.map((line) => <li key={line}>{line}</li>)}
+          </ul>
+        </div>
+      )}
+
       <div className="rounded-xl border border-border/40 bg-card/40 p-4 space-y-4">
         <h2 className="text-sm font-semibold">Accounting basis</h2>
         <div className="flex gap-2">
@@ -113,7 +185,8 @@ function GeneralSection({ businessId }: { businessId: string }) {
             <button
               key={b}
               onClick={() => update({ accountingBasis: b })}
-              className={`px-3 py-1.5 text-sm rounded-lg border ${settings.accountingBasis === b ? "border-primary bg-primary/10" : "border-border/40 hover:bg-card/80"}`}
+              disabled={!access.books}
+              className={`px-3 py-1.5 text-sm rounded-lg border disabled:opacity-60 disabled:cursor-not-allowed ${settings.accountingBasis === b ? "border-primary bg-primary/10" : "border-border/40 hover:bg-card/80"}`}
             >
               {b === "CASH" ? "Cash basis" : "Accrual basis"}
             </button>
@@ -129,8 +202,9 @@ function GeneralSection({ businessId }: { businessId: string }) {
         <label className="flex items-center gap-3 text-sm">
           Year starts in
           <select
-            className="rounded-lg border border-border/40 bg-background px-2 py-1.5 text-sm"
+            className="rounded-lg border border-border/40 bg-background px-2 py-1.5 text-sm disabled:opacity-60"
             value={settings.fiscalYearStartMonth}
+            disabled={!access.books}
             onChange={(e) => update({ fiscalYearStartMonth: parseInt(e.target.value, 10) })}
           >
             {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
@@ -146,8 +220,9 @@ function GeneralSection({ businessId }: { businessId: string }) {
             min={0}
             max={100}
             step={0.01}
-            className="w-24 rounded-lg border border-border/40 bg-background px-2 py-1.5 text-sm"
+            className="w-24 rounded-lg border border-border/40 bg-background px-2 py-1.5 text-sm disabled:opacity-60"
             value={settings.defaultTaxRate}
+            disabled={!access.rate}
             onChange={(e) => update({ defaultTaxRate: parseFloat(e.target.value) || 0 })}
           />
           <span>% applied to new invoices when no rate is selected</span>
@@ -165,9 +240,10 @@ function GeneralSection({ businessId }: { businessId: string }) {
           <input
             type="email"
             value={settings.accountantEmail ?? ""}
+            disabled={!access.address}
             onChange={(e) => update({ accountantEmail: e.target.value || null })}
             placeholder="accountant@firm.com"
-            className="flex-1 rounded-lg border border-border/40 bg-background px-2 py-1.5 text-sm"
+            className="flex-1 rounded-lg border border-border/40 bg-background px-2 py-1.5 text-sm disabled:opacity-60"
           />
         </label>
       </div>
@@ -176,32 +252,38 @@ function GeneralSection({ businessId }: { businessId: string }) {
         <h2 className="text-sm font-semibold">Default accounts</h2>
         <p className="text-xs text-muted-foreground">Used when posting to the ledger if no account is specified.</p>
         {accountsError && <p className="text-xs text-amber-500" role="alert">{accountsError}</p>}
-        <DefaultAccountSelect label="Cash / Bank" value={settings.defaultCashAccountId} options={accountOptions} onChange={(v) => update({ defaultCashAccountId: v })} />
-        <DefaultAccountSelect label="Accounts Receivable" value={settings.defaultArAccountId} options={accountOptions} onChange={(v) => update({ defaultArAccountId: v })} />
-        <DefaultAccountSelect label="Accounts Payable" value={settings.defaultApAccountId} options={accountOptions} onChange={(v) => update({ defaultApAccountId: v })} />
-        <DefaultAccountSelect label="Tax Payable" value={settings.defaultTaxAccountId} options={accountOptions} onChange={(v) => update({ defaultTaxAccountId: v })} />
+        <DefaultAccountSelect label="Cash / Bank" value={settings.defaultCashAccountId} options={accountOptions} disabled={!access.books} onChange={(v) => update({ defaultCashAccountId: v })} />
+        <DefaultAccountSelect label="Accounts Receivable" value={settings.defaultArAccountId} options={accountOptions} disabled={!access.books} onChange={(v) => update({ defaultArAccountId: v })} />
+        <DefaultAccountSelect label="Accounts Payable" value={settings.defaultApAccountId} options={accountOptions} disabled={!access.books} onChange={(v) => update({ defaultApAccountId: v })} />
+        <DefaultAccountSelect label="Tax Payable" value={settings.defaultTaxAccountId} options={accountOptions} disabled={!access.books} onChange={(v) => update({ defaultTaxAccountId: v })} />
       </div>
 
-      <div className="flex justify-end">
-        <button
-          onClick={save}
-          disabled={saving}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-3 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-50"
-        >
-          <Save className="w-4 h-4" /> {saving ? "Saving…" : "Save settings"}
-        </button>
-      </div>
+      {saveError && <p className="text-sm text-amber-500" role="alert">{saveError}</p>}
+
+      {/* FU-FINANCE-SETTINGS-PATCH: no Save for a member who may change nothing here (the notice above says why). */}
+      {access.anything && (
+        <div className="flex justify-end">
+          <button
+            onClick={save}
+            disabled={saving}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-3 py-2 text-sm font-medium hover:opacity-90 disabled:opacity-50"
+          >
+            <Save className="w-4 h-4" /> {saving ? "Saving…" : "Save settings"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
 
-function DefaultAccountSelect({ label, value, onChange, options }: { label: string; value: string | null; onChange: (v: string | null) => void; options: { id: string; label: string }[] }) {
+function DefaultAccountSelect({ label, value, onChange, options, disabled = false }: { label: string; value: string | null; onChange: (v: string | null) => void; options: { id: string; label: string }[]; disabled?: boolean }) {
   return (
     <label className="flex items-center justify-between gap-3 text-sm">
       <span className="min-w-[160px]">{label}</span>
       <select
-        className="flex-1 rounded-lg border border-border/40 bg-background px-2 py-1.5 text-sm"
+        className="flex-1 rounded-lg border border-border/40 bg-background px-2 py-1.5 text-sm disabled:opacity-60"
         value={value ?? ""}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.value || null)}
       >
         <option value="">— None —</option>

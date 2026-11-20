@@ -578,6 +578,21 @@
       "packet": "V1-61 (W11-STORE-OWN-PAYMENT-KEYS)"
     },
     {
+      "prefix": "v70b_",
+      "owner": "apps/server/test/ai-memory-copies.integration.test.ts",
+      "packet": "V1-70 (W1F-MEMORY-COPIES)"
+    },
+    {
+      "prefix": "v70c_",
+      "owner": "apps/server/test/perception-module-scope.integration.test.ts",
+      "packet": "V1-70 (W1F-PERCEPTION-MODULE-SCOPE)"
+    },
+    {
+      "prefix": "v70h_",
+      "owner": "apps/server/test/key-cortex-conscious-answer.integration.test.ts",
+      "packet": "V1-70 (W1F-KEY-EVIDENCE-WRITE)"
+    },
+    {
       "prefix": "v81a_",
       "owner": "apps/server/test/d46-commerce-writes.integration.test.ts",
       "packet": "V1-81 (FOLLOW3-A1-D46-COMMERCE-WRITES)"
@@ -963,6 +978,11 @@
       "packet": "V1-63 (BIZ-SETTINGS-SERVER)"
     },
     {
+      "prefix": "v63f_",
+      "owner": "apps/server/test/orderby-multikey-routes.integration.test.ts",
+      "packet": "V1-63 (SWP-ORDERBY-SINGLE-KEY)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
@@ -1006,6 +1026,71 @@
       "prefix": "v63y_",
       "owner": "apps/server/test/provider-outage-connect.integration.test.ts",
       "packet": "V1-63 (W11-PROVIDER-OUTAGE-CONNECT)"
+    },
+    {
+      "prefix": "v63i_",
+      "owner": "apps/server/test/crm-search-tags-phone.integration.test.ts",
+      "packet": "V1-63 (SWP-CRM-SEARCH)"
+    },
+    {
+      "prefix": "v71d_",
+      "owner": "apps/server/test/finance-settings-scope.integration.test.ts",
+      "packet": "V1-71 (FU-FINANCE-SETTINGS-SCOPE)"
+    },
+    {
+      "prefix": "v62a_",
+      "owner": "apps/server/test/census-hidden.integration.test.ts",
+      "packet": "V1-62 (SWP-CENSUS-HIDDEN)"
+    },
+    {
+      "prefix": "v71b_",
+      "owner": "apps/server/test/delivery-token-decrypt.integration.test.ts",
+      "packet": "V1-71 (FU-DELIVERY-TOKEN-DECRYPT)"
+    },
+    {
+      "prefix": "v71i_",
+      "owner": "apps/server/test/ai-memory-copies-rewrite.integration.test.ts",
+      "packet": "V1-71 (FU-MEMORY-COPIES-REWRITE)"
+    },
+    {
+      "prefix": "v63j_",
+      "owner": "apps/server/test/contact-audit-durable.integration.test.ts",
+      "packet": "V1-63 (TOF-CONTACT-AUDIT-AWAIT)"
+    },
+    {
+      "prefix": "v63k_",
+      "owner": "apps/server/test/contact-phone-e164.integration.test.ts",
+      "packet": "V1-63 (WA-E164-SERVER)"
+    },
+    {
+      "prefix": "v63l_",
+      "owner": "apps/server/test/contact-website-enrichment.integration.test.ts",
+      "packet": "V1-63 (TOF-WEBSITE-ENRICHMENT)"
+    },
+    {
+      "prefix": "v71n_",
+      "owner": "apps/server/test/data-quality-fix-scope.integration.test.ts",
+      "packet": "V1-71 (FU-DATAQUALITY-MASS-ASSIGN)"
+    },
+    {
+      "prefix": "v71e_",
+      "owner": "apps/server/test/finance-settings-patch.integration.test.ts",
+      "packet": "V1-71 (FU-FINANCE-SETTINGS-PATCH)"
+    },
+    {
+      "prefix": "v71j_",
+      "owner": "apps/server/test/key-event-columns.integration.test.ts",
+      "packet": "V1-71 (FU-KEY-EVENT-COLUMNS)"
+    },
+    {
+      "prefix": "v71m_",
+      "owner": "apps/server/test/contact-whatsapp-confirm.integration.test.ts",
+      "packet": "V1-71 (FU-WA-CONTACT-PHONE)"
+    },
+    {
+      "prefix": "v71c_",
+      "owner": "apps/server/test/seed-super-admin-placeholder.integration.test.ts",
+      "packet": "V1-71 (FU-SEED-SUPERADMIN-PLACEHOLDER)"
     }
   ],
   "pendingRenames": [],

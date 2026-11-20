@@ -16,12 +16,13 @@ import { ContactCustomFieldValueService } from './contact-custom-field-value.ser
 import { CrmStatsService, type ContactMeta, type ContactWithStats } from './crm-stats.service';
 import { CrmListsService } from './crm-lists.service';
 import { CrmFlowService } from './crm-flow.service';
-import { ContactAuditService, ContactAuditActor } from './privacy/contact-audit.service';
+import { ContactAuditService, ContactAuditActor, type ContactAuditClient, type ContactAuditWriteOptions } from './privacy/contact-audit.service';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
-import { buildContactWhere } from './contact-filters.helper';
+import { buildContactWhere, findSearchTags } from './contact-filters.helper';
 import { resolveCrmAccess, visibilityClause, type CrmAccess } from './crm-permissions.helper';
 import { resolveTimelineViewer } from '../timeline/timeline-visibility';
-import { normalizeEmail, normalizePhone, findExistingBulk } from './crm-duplicate.util';
+import { normalizeEmail, normalizePhone, findExistingBulk, findPhoneKeyMatch, livePhoneHolderIds } from './crm-duplicate.util';
+import { contactPhoneForStorage, phoneFlagFor, phoneKeyReadsAs, severityFor, type PhoneFlagField } from './crm-data-quality.util';
 import { CONTACT_EVENT } from '@keyflow/shared';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
 
@@ -164,6 +165,34 @@ export function contactIdentityViolation(err: unknown): 'email' | 'phone' | null
 }
 
 /**
+ * A contact write whose phone a live contact of the tenant already holds under
+ * another key (WA-E164-SERVER): a number stored before phones were kept in
+ * E.164 ('868-555-0160', key '8685550160') is the same number as the E.164 key
+ * the write would store ('+18685550160'), but the identity unique only sees
+ * equal keys. Raised inside the write's transaction, before anything is
+ * written; rejectContactIdentityTaken answers it as the same bounded 409
+ * contact_phone_taken a P2002 on the phone unique gets.
+ */
+class ContactPhoneHeldError extends Error {
+  constructor(readonly holderIds: readonly string[]) {
+    super('contact_phone_taken');
+    this.name = 'ContactPhoneHeldError';
+  }
+}
+
+/**
+ * The identity key a contact write stores for its phone (Contact.phoneNormalized,
+ * normalizePhone's digits-and-'+'), or null when the phone has no digit
+ * (WA-E164-SERVER): such a phone ('ask at the front desk') is kept as typed
+ * and flagged, and its key was '', which the identity unique read as one
+ * number, so a second contact so written answered 409.
+ */
+function phoneIdentityKey(phone: string | null | undefined): string | null {
+  const key = normalizePhone(phone);
+  return key && /\d/.test(key) ? key : null;
+}
+
+/**
  * PR196-CRM-LIFECYCLE (owner ruling D-81): the statuses a paid invoice moves
  * to CLIENT. Forward-only: every other status (CLIENT, LOST, ...) is left as it is.
  */
@@ -259,6 +288,19 @@ export function withoutListMoney(contact: ContactWithStats): ContactWithStats {
   return served;
 }
 
+/** What CrmService's audit helpers record for one contact (actor, ip and user agent from `ctx`). */
+interface AuditContactInput {
+  businessId: string;
+  contactId: string;
+  action: ContactAuditWriteOptions['action'];
+  before?: unknown;
+  after?: unknown;
+  entityType?: ContactAuditWriteOptions['entityType'];
+  entityId?: string | null;
+  ctx?: AuditContext | null;
+  extraReason?: string | null;
+}
+
 @Injectable()
 export class CrmService {
   private readonly logger = new Logger(CrmService.name);
@@ -277,21 +319,36 @@ export class CrmService {
   ) {}
 
   /**
-   * Internal helper: write a per-contact audit entry. Always
-   * fire-and-forget — never block a mutation on its audit row.
+   * Internal helper: write a per-contact audit entry.
+   *
+   * With `tx` (owner ruling D-25: every contact write records a
+   * ContactAuditEntry; TOF-CONTACT-AUDIT-AWAIT) the entry is written in that
+   * transaction, the contact write's own, and the caller awaits it: when the
+   * entry cannot be written the error propagates, the transaction rolls back
+   * with the contact rows and their ContactEvents, and the request fails. The
+   * contact writes that pass it: createContact, updateContact,
+   * softDeleteContact, bulkUpdateContacts, bulkDeleteContacts,
+   * reassignContacts, mergeContacts and the import merge
+   * (mergeContactDetails). Each writes its entries right
+   * after the contact rows and before any ContactEvent, so a refused entry
+   * also leaves no Activity feed copy or crm.contact_event.logged
+   * announcement behind (CrmTimelineService.logEvent makes both as it writes
+   * the event, inside the transaction or not).
+   *
+   * Without `tx` it stays fire-and-forget, never blocking or failing the write
+   * it reports (the returned promise is already settled): the note and task
+   * writes (the R0 job-role-tool-families ESC-1 wrapper pin keeps
+   * addNote/addTask to `this.timeline.addNote(input)` plus this helper, so
+   * their entry cannot join the note's transaction there).
    */
-  private auditContact(opts: {
-    businessId: string;
-    contactId: string;
-    action: Parameters<ContactAuditService['write']>[0]['action'];
-    before?: unknown;
-    after?: unknown;
-    entityType?: Parameters<ContactAuditService['write']>[0]['entityType'];
-    entityId?: string | null;
-    ctx?: AuditContext | null;
-    extraReason?: string | null;
-  }): void {
-    void this.contactAudit.write({
+  private auditContact(opts: AuditContactInput, tx?: ContactAuditClient): Promise<void> {
+    if (tx) return this.contactAudit.write(this.auditEntry(opts), tx);
+    void this.contactAudit.write(this.auditEntry(opts));
+    return Promise.resolve();
+  }
+
+  private auditEntry(opts: AuditContactInput): ContactAuditWriteOptions {
+    return {
       businessId: opts.businessId,
       contactId: opts.contactId,
       action: opts.action,
@@ -303,7 +360,7 @@ export class CrmService {
       ip: opts.ctx?.ip ?? null,
       userAgent: opts.ctx?.userAgent ?? null,
       reason: opts.extraReason ?? opts.ctx?.reason ?? null,
-    });
+    };
   }
 
   /**
@@ -430,17 +487,22 @@ export class CrmService {
       }
     }
 
+    // SWP-CRM-SEARCH (BUG-081): the full-text hits (search_vector, filled only where the archived
+    // trigger still runs) are added to the field search, never put in its place, and the field
+    // search matches a tag by any part of it, in any case (findSearchTags).
     let searchContactIds: string[] | undefined;
+    let searchTags: string[] | undefined;
     if (input.search?.trim()) {
       const tsIds = await this.searchContactIdsByTsvector(input.businessId, input.search.trim());
       if (tsIds.length > 0) {
         searchContactIds = tsIds;
       }
+      searchTags = await findSearchTags(this.prisma, input.businessId, input.search);
     }
 
     const where: any = buildContactWhere(input.businessId, {
       status: input.status,
-      search: searchContactIds ? undefined : input.search,
+      search: input.search,
       hasUnpaidInvoices: input.hasUnpaidInvoices,
       hasUpcomingBookings: input.hasUpcomingBookings,
       hasOpenDeals: input.hasOpenDeals,
@@ -463,10 +525,10 @@ export class CrmService {
       pipelineStages: input.pipelineStages,
       favorite: input.favorite,
       includeArchived: input.includeArchived,
-    });
+    }, { searchTags });
 
     if (searchContactIds) {
-      where.id = { in: searchContactIds };
+      where.OR = [...(where.OR ?? []), { id: { in: searchContactIds } }];
     }
 
     if (revenueContactIds) {
@@ -620,15 +682,20 @@ export class CrmService {
     identity: { emailNormalized?: string | null; phoneNormalized?: string | null },
     actorUserId?: string | null,
   ): Promise<never> {
-    const field = contactIdentityViolation(err);
+    // WA-E164-SERVER: a live holder of the same number under another key
+    // (ContactPhoneHeldError, raised before the write) is the same conflict.
+    const held = err instanceof ContactPhoneHeldError ? err : null;
+    const field = held ? 'phone' : contactIdentityViolation(err);
     if (!field) throw err;
 
     const value = field === 'email' ? identity.emailNormalized : identity.phoneNormalized;
     let existing: { id: string } | null = null;
-    if (value) {
-      const where: Prisma.ContactWhereInput = field === 'email'
-        ? { ...contactWhereBase(businessId), emailNormalized: value }
-        : { ...contactWhereBase(businessId), phoneNormalized: value };
+    if (held || value) {
+      const where: Prisma.ContactWhereInput = held
+        ? { ...contactWhereBase(businessId), id: { in: [...held.holderIds] } }
+        : field === 'email'
+          ? { ...contactWhereBase(businessId), emailNormalized: value }
+          : { ...contactWhereBase(businessId), phoneNormalized: value };
       if (actorUserId) {
         const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
         const visClause = visibilityClause(access, actorUserId);
@@ -641,6 +708,81 @@ export class CrmService {
       code: field === 'email' ? 'contact_email_taken' : 'contact_phone_taken',
       message: `A contact with this ${label} already exists in this business`,
       existingContactId: existing?.id ?? null,
+    });
+  }
+
+  /**
+   * Business.country as written, the country a contact's phone typed without
+   * its country code is read under (WA-E164-SERVER; unset reads as Trinidad
+   * and Tobago, see resolvePhoneCountry). Read through the write's own client
+   * (its transaction), so it is decided with the write.
+   */
+  private async businessPhoneCountry(
+    client: Pick<PrismaService['client'], 'business'>,
+    businessId: string,
+  ): Promise<string | null> {
+    const business = await client.business.findUnique({ where: { id: businessId }, select: { country: true } });
+    return business?.country ?? null;
+  }
+
+  /**
+   * The live contacts of the tenant, other than `exceptId`, that hold the
+   * number `e164` under ANOTHER key (WA-E164-SERVER): a contact stored before
+   * phones were kept in E.164 keeps the key of its spelling (no backfill in
+   * v1), and that key is this number when it reads as it under the business's
+   * country (review SEC-E164-1/2; livePhoneHolderIds): in Trinidad and Tobago
+   * '7123401', '8687123401' and '18687123401' are +18687123401, and '7123401'
+   * is not '+5927123401' or any other country's number ending in those
+   * digits. A holder under the E.164 key itself is left to the identity unique
+   * (the database decides; rejectContactIdentityTaken maps its P2002).
+   * Tenant-wide: the caller bounds what it discloses.
+   */
+  private phoneHoldersUnderAnotherKey(
+    client: Pick<PrismaService['client'], 'contact'>,
+    businessId: string,
+    e164: string,
+    country: string | null,
+    exceptId?: string,
+  ): Promise<string[]> {
+    return livePhoneHolderIds(client, businessId, e164, country, { exceptId, otherKeysOnly: true });
+  }
+
+  /**
+   * The contact's phone flag (WA-E164-SERVER): a phone or WhatsApp number that
+   * does not read under the business's country is kept as typed and flagged,
+   * never dropped, as the open 'invalid_phone' data-quality issue the scan
+   * writes for it (CrmDataQualityService keeps it). Written through the
+   * write's own client, so it commits with the contact or not at all. When
+   * the numbers written (`touched`) read, an open phone flag on those fields
+   * is resolved.
+   */
+  private async syncPhoneFlag(
+    client: Pick<PrismaService['client'], 'contactDataIssue'>,
+    businessId: string,
+    contact: { id: string; phone: string | null; whatsappNumber: string | null },
+    country: string | null,
+    touched: readonly PhoneFlagField[],
+  ): Promise<void> {
+    const flag = phoneFlagFor(contact, country);
+    if (flag) {
+      const fields = {
+        severity: severityFor('invalid_phone'),
+        field: flag.field,
+        message: flag.message,
+        recommendedFix: flag.recommendedFix as Prisma.InputJsonValue,
+        status: 'open',
+      };
+      await client.contactDataIssue.upsert({
+        where: { contactId_kind: { contactId: contact.id, kind: 'invalid_phone' } },
+        create: { businessId, contactId: contact.id, kind: 'invalid_phone', ...fields },
+        update: { ...fields, resolvedAt: null, resolvedBy: null },
+      });
+      return;
+    }
+    if (touched.length === 0) return;
+    await client.contactDataIssue.updateMany({
+      where: { businessId, contactId: contact.id, kind: 'invalid_phone', status: 'open', field: { in: [...touched] } },
+      data: { status: 'resolved', resolvedAt: new Date(), resolvedBy: 'system' },
     });
   }
 
@@ -735,12 +877,27 @@ export class CrmService {
     const firstName = sanitize(normalizeString(input.firstName));
     const lastName = sanitize(normalizeString(input.lastName));
     const email = normalizeString(input.email);
-    const phone = normalizeString(input.phone);
+    const typedPhone = normalizeString(input.phone);
+    const typedWhatsapp = normalizeString(input.whatsappNumber);
     const emailNormalized = normalizeEmail(email);
-    const phoneNormalized = normalizePhone(phone);
+    // The phone key the write stores; set in the transaction, read by the 409 mapping.
+    let phoneNormalized: string | null = null;
     const tags = this.normalizeTags(input.tags);
 
     const contact = await this.prisma.client.$transaction(async (tx) => {
+      // WA-E164-SERVER: the phone and WhatsApp number are stored in E.164, read
+      // under the business's country (contactPhoneForStorage); one that does
+      // not read is kept as typed and flagged below.
+      const country = typedPhone || typedWhatsapp ? await this.businessPhoneCountry(tx, input.businessId) : null;
+      const phone = contactPhoneForStorage(typedPhone, country);
+      const whatsapp = contactPhoneForStorage(typedWhatsapp, country);
+      phoneNormalized = phoneIdentityKey(phone.value);
+      if (phone.e164) {
+        // A live contact holding this number under another key (stored before
+        // E.164) is the same identity: refused before anything is written.
+        const holders = await this.phoneHoldersUnderAnotherKey(tx, input.businessId, phone.e164, country);
+        if (holders.length > 0) throw new ContactPhoneHeldError(holders);
+      }
       const created = await tx.contact.create({
         data: {
           businessId: input.businessId,
@@ -748,7 +905,7 @@ export class CrmService {
           lastName,
           email,
           emailNormalized,
-          phone,
+          phone: phone.value,
           phoneNormalized,
           status: input.status ?? 'LEAD',
           source: input.source ?? 'manual',
@@ -758,7 +915,7 @@ export class CrmService {
           displayName: normalizeString(input.displayName),
           secondaryEmail: normalizeString(input.secondaryEmail),
           secondaryPhone: normalizeString(input.secondaryPhone),
-          whatsappNumber: normalizeString(input.whatsappNumber),
+          whatsappNumber: whatsapp.value,
           preferredChannel: normalizeString(input.preferredChannel),
           addressLine1: normalizeString(input.addressLine1),
           addressLine2: normalizeString(input.addressLine2),
@@ -789,6 +946,18 @@ export class CrmService {
           archivedAt: this.parseDateOrNull(input.archivedAt),
         },
       });
+      // D-25 (TOF-CONTACT-AUDIT-AWAIT): the 'created' entry commits with the
+      // contact or neither does, before its ContactEvent.
+      await this.auditContact({
+        businessId: input.businessId,
+        contactId: created.id,
+        action: 'created',
+        after: created,
+        ctx: _audit,
+      }, tx);
+      if (phone.unreadable || whatsapp.unreadable) {
+        await this.syncPhoneFlag(tx, input.businessId, created, country, []);
+      }
 
       // W3-V1-55c (CR-V155b-1, D-08): the feed's one row for this contact is
       // ActivityEventListener's 'New contact', from the contact.created emit
@@ -815,13 +984,6 @@ export class CrmService {
         ...this.eventActor(_audit),
       };
       this.events.emit('contact.created', payload);
-      this.auditContact({
-        businessId: input.businessId,
-        contactId: contact.id,
-        action: 'created',
-        after: contact,
-        ctx: _audit,
-      });
     }
     if (contact && input.customFieldValues && Object.keys(input.customFieldValues).length > 0) {
       await this.customFieldValues.setValuesForContact(contact.id, input.customFieldValues).catch((err) => {
@@ -890,16 +1052,31 @@ export class CrmService {
       return trimmed ? trimmed : null;
     };
     const email = normalizeString(input.email);
-    const phone = normalizeString(input.phone);
+    const typedPhone = normalizeString(input.phone);
+    // WA-E164-SERVER: the phone as createContact stores it (E.164 under the
+    // business's country, or as typed when it does not read), so the match
+    // below and the contact created or merged into agree on one key.
+    const phoneCountry = typedPhone ? await this.businessPhoneCountry(this.prisma.client, businessId) : null;
+    const phoneRead = contactPhoneForStorage(typedPhone, phoneCountry);
+    const phone = phoneRead.value;
     const emailNormalized = normalizeEmail(email);
-    const phoneNormalized = normalizePhone(phone);
+    const phoneNormalized = phoneIdentityKey(phone);
     const tags = this.normalizeTags(input.tags);
 
-    const matched = await this.entityResolution.findContactIdByMatch(businessId, {
+    let matched = await this.entityResolution.findContactIdByMatch(businessId, {
       source: input.source ?? null,
       email,
       phone,
     });
+    if (!matched && phoneRead.e164) {
+      // A contact stored before E.164 under another spelling of this number
+      // (no backfill in v1) is this customer, as createContact's identity
+      // check reads it: merged into, not duplicated. EntityResolutionService
+      // matches on the exact key; its default match order reads the phone
+      // (configureMergeRules has no caller).
+      const [holderId] = await this.phoneHoldersUnderAnotherKey(this.prisma.client, businessId, phoneRead.e164, phoneCountry);
+      if (holderId) matched = { contactId: holderId, matchedOn: 'phone' };
+    }
 
     return this.prisma.client.$transaction(async (tx) => {
       if (matched) {
@@ -912,6 +1089,8 @@ export class CrmService {
             lastName: input.lastName,
             email,
             phone,
+            phoneUnreadable: phoneRead.unreadable,
+            phoneCountry,
             companyName: input.companyName,
             source: input.source,
             sourceDetail: input.sourceDetail,
@@ -959,7 +1138,9 @@ export class CrmService {
    * Fill `existing`'s empty fields from `input` (and union the tags). With an
    * audit context (findOrCreateContact on behalf of a member), a merge that
    * changes the contact writes an 'updated' audit entry naming that actor, as
-   * updateContact does; system-context merges write none, as before.
+   * updateContact does, in one transaction with the change (D-25,
+   * TOF-CONTACT-AUDIT-AWAIT): a refused entry leaves the contact as it was and
+   * fails the import. System-context merges write no entry, as before.
    */
   private async mergeContactDetails(
     existing: Contact,
@@ -968,7 +1149,11 @@ export class CrmService {
       firstName?: string | null;
       lastName?: string | null;
       email?: string | null;
+      /** As createContact stores it (findOrCreateContact reads it under the business's country). */
       phone?: string | null;
+      /** The phone did not read under `phoneCountry`: it is kept as typed and flagged (WA-E164-SERVER). */
+      phoneUnreadable?: boolean;
+      phoneCountry?: string | null;
       companyName?: string | null;
       source?: string | null;
       sourceDetail?: string | null;
@@ -985,7 +1170,7 @@ export class CrmService {
     }
     if (input.phone && !existing.phone) {
       data.phone = input.phone;
-      data.phoneNormalized = normalizePhone(input.phone);
+      data.phoneNormalized = phoneIdentityKey(input.phone);
     }
     if (input.companyName && !existing.companyName) data.companyName = sanitize(input.companyName);
     if (input.source && !existing.source) data.source = input.source;
@@ -997,12 +1182,30 @@ export class CrmService {
     if (Object.keys(data).length === 0) {
       return existing;
     }
-    const updated = await this.prisma.client.contact.update({
-      where: { id: existing.id },
-      data,
-    });
-    if (audit) {
-      this.auditContact({
+    // A phone filled in that does not read is flagged with the change (WA-E164-SERVER).
+    const flagsPhone = data.phone !== undefined && input.phoneUnreadable === true;
+    if (!audit) {
+      if (!flagsPhone) {
+        return this.prisma.client.contact.update({
+          where: { id: existing.id },
+          data,
+        });
+      }
+      return this.prisma.client.$transaction(async (tx) => {
+        const updated = await tx.contact.update({ where: { id: existing.id }, data });
+        await this.syncPhoneFlag(tx, businessId, updated, input.phoneCountry ?? null, []);
+        return updated;
+      });
+    }
+    // Its own transaction, as the update had its own statement before: the
+    // caller's serializable lookup transaction is left as it was.
+    return this.prisma.client.$transaction(async (tx) => {
+      const updated = await tx.contact.update({
+        where: { id: existing.id },
+        data,
+      });
+      if (flagsPhone) await this.syncPhoneFlag(tx, businessId, updated, input.phoneCountry ?? null, []);
+      await this.auditContact({
         businessId,
         contactId: existing.id,
         action: 'updated',
@@ -1010,9 +1213,9 @@ export class CrmService {
         after: updated as unknown as Record<string, unknown>,
         ctx: audit,
         extraReason: `merged ${input.source ?? 'unknown'} input into existing contact`,
-      });
-    }
-    return updated;
+      }, tx);
+      return updated;
+    });
   }
 
   /**
@@ -1092,9 +1295,13 @@ export class CrmService {
       return trimmed ? trimmed : null;
     };
     const email = trimOptional(input.email);
-    const phone = trimOptional(input.phone);
+    // WA-E164-SERVER: the phone and WhatsApp number as typed; what is stored
+    // (E.164 under the business's country) is decided in the transaction.
+    const typedPhone = trimOptional(input.phone);
+    const typedWhatsapp = trimOptional(input.whatsappNumber);
     const emailNormalized = email !== undefined ? normalizeEmail(email) : undefined;
-    const phoneNormalized = phone !== undefined ? normalizePhone(phone) : undefined;
+    // The phone key the write stores; set in the transaction, read by the 409 mapping.
+    let phoneNormalized: string | null | undefined;
     const tags = input.tags !== undefined ? this.normalizeTags(input.tags) : undefined;
 
     const sanitizeOptional = (value?: string | null) => {
@@ -1129,8 +1336,6 @@ export class CrmService {
       lastName: sanitizeOptional(trimOptional(input.lastName)),
       email,
       emailNormalized,
-      phone,
-      phoneNormalized,
       status: input.status ?? undefined,
       source: input.source ?? undefined,
       tags,
@@ -1139,7 +1344,6 @@ export class CrmService {
       displayName: trimOptional(input.displayName),
       secondaryEmail: trimOptional(input.secondaryEmail),
       secondaryPhone: trimOptional(input.secondaryPhone),
-      whatsappNumber: trimOptional(input.whatsappNumber),
       preferredChannel: trimOptional(input.preferredChannel),
       addressLine1: trimOptional(input.addressLine1),
       addressLine2: trimOptional(input.addressLine2),
@@ -1197,10 +1401,69 @@ export class CrmService {
         await this.assertNewOwnerIsMember(input.businessId, input.ownerId as string, 'ownerId', tx);
       }
 
+      // WA-E164-SERVER: a phone or WhatsApp number written is stored in E.164
+      // under the business's country (one that does not read is kept as typed
+      // and flagged below); a new phone a live contact holds under another key
+      // (stored before E.164) is refused as contact_phone_taken before the write.
+      const phonesTouched: PhoneFlagField[] = [];
+      let phoneCountry: string | null = null;
+      if (typedPhone !== undefined || typedWhatsapp !== undefined) {
+        phoneCountry = await this.businessPhoneCountry(tx, input.businessId);
+      }
+      if (typedPhone !== undefined) {
+        const phone = contactPhoneForStorage(typedPhone, phoneCountry);
+        const nextKey = phoneIdentityKey(phone.value);
+        let writesPhone = true;
+        if (phone.e164 && nextKey !== existingContact.phoneNormalized) {
+          if (phoneKeyReadsAs(existingContact.phoneNormalized, phone.e164, phoneCountry)) {
+            // Review COR-E164-3: the contact's own number (its stored key,
+            // read under the business's country), re-sent as the full edit
+            // form does with every edit, would be re-keyed to E.164. When
+            // another live contact holds that number too (two keys the base
+            // allowed), re-keying would collide and refuse every edit of the
+            // contact: the number did not change, so the phone and its key
+            // stay as stored. With no other holder it is stored in E.164.
+            const others = await livePhoneHolderIds(tx, input.businessId, phone.e164, phoneCountry, { exceptId: input.contactId });
+            if (others.length > 0) writesPhone = false;
+          } else {
+            const holders = await this.phoneHoldersUnderAnotherKey(tx, input.businessId, phone.e164, phoneCountry, input.contactId);
+            if (holders.length > 0) throw new ContactPhoneHeldError(holders);
+          }
+        }
+        if (writesPhone) {
+          phoneNormalized = nextKey;
+          data.phone = phone.value;
+          data.phoneNormalized = nextKey;
+          phonesTouched.push('phone');
+        }
+      }
+      if (typedWhatsapp !== undefined) {
+        data.whatsappNumber = contactPhoneForStorage(typedWhatsapp, phoneCountry).value;
+        phonesTouched.push('whatsappNumber');
+      }
+
       const updatedContact = await tx.contact.update({
         where: { id: input.contactId },
         data,
       });
+      if (phonesTouched.length > 0) {
+        await this.syncPhoneFlag(tx, input.businessId, updatedContact, phoneCountry, phonesTouched);
+      }
+      // D-25 (TOF-CONTACT-AUDIT-AWAIT): the entry commits with the change or
+      // neither does. An ownership change is a "reassigned" entry; everything
+      // else is a generic "updated" entry with the diff.
+      const reassigned = existingContact.ownerId !== updatedContact.ownerId;
+      await this.auditContact({
+        businessId: input.businessId,
+        contactId: updatedContact.id,
+        action: reassigned ? 'reassigned' : 'updated',
+        before: existingContact as unknown as Record<string, unknown>,
+        after: updatedContact as unknown as Record<string, unknown>,
+        ctx: audit,
+        extraReason: reassigned
+          ? `owner ${existingContact.ownerId ?? 'none'} → ${updatedContact.ownerId ?? 'none'}`
+          : undefined,
+      }, tx);
 
       const updatedFields = Object.keys(data).filter(
         (key) => data[key as keyof Prisma.ContactUpdateInput] !== undefined,
@@ -1237,21 +1500,6 @@ export class CrmService {
       toStatus: updated.status,
     };
     this.events.emit('contact.updated', payload);
-
-    // Detect ownership changes -> "reassigned" action; everything
-    // else is recorded as a generic "updated" entry with diff.
-    const reassigned = existing?.ownerId !== updated.ownerId;
-    this.auditContact({
-      businessId: input.businessId,
-      contactId: updated.id,
-      action: reassigned ? 'reassigned' : 'updated',
-      before: existing as unknown as Record<string, unknown>,
-      after: updated as unknown as Record<string, unknown>,
-      ctx: audit,
-      extraReason: reassigned
-        ? `owner ${existing?.ownerId ?? 'none'} → ${updated.ownerId ?? 'none'}`
-        : undefined,
-    });
 
     if (input.customFieldValues && Object.keys(input.customFieldValues).length > 0) {
       await this.customFieldValues.setValuesForContact(input.contactId, input.customFieldValues).catch((err) => {
@@ -1461,6 +1709,16 @@ export class CrmService {
         }
         throw err;
       });
+      // D-25 (TOF-CONTACT-AUDIT-AWAIT): the entry commits with the deletion
+      // or neither does.
+      await this.auditContact({
+        businessId: input.businessId,
+        contactId: input.contactId,
+        action: 'deleted',
+        before: { deletedAt: contact.deletedAt },
+        after: { deletedAt: claimed.deletedAt },
+        ctx: audit,
+      }, tx);
       await this.timeline.logEvent(
         input.businessId,
         input.contactId,
@@ -1470,14 +1728,6 @@ export class CrmService {
         tx,
       );
       return claimed;
-    });
-    this.auditContact({
-      businessId: input.businessId,
-      contactId: input.contactId,
-      action: 'deleted',
-      before: { deletedAt: contact.deletedAt },
-      after: { deletedAt: deleted.deletedAt },
-      ctx: audit,
     });
     const deletedPayload: ContactDeletedPayload = {
       contact: deleted,
@@ -1586,16 +1836,18 @@ export class CrmService {
       ...(typeof input.favorite === 'boolean' ? { favorite: input.favorite } : {}),
       ...(typeof input.archived === 'boolean' ? { archived: input.archived } : {}),
     };
-    // Audited once the write has committed, and only for the rows it wrote.
-    const auditWritten = (writtenIds: string[]) => {
+    // Audited in the write's own transaction, only for the rows it wrote and
+    // before any of their events (D-25, TOF-CONTACT-AUDIT-AWAIT): a refused
+    // entry rolls the whole call back and fails it.
+    const auditWritten = async (writtenIds: string[], tx: ContactAuditClient) => {
       for (const cid of writtenIds) {
-        this.auditContact({
+        await this.auditContact({
           businessId: input.businessId,
           contactId: cid,
           action: 'bulk_updated',
           after: auditAfter,
           ctx: audit,
-        });
+        }, tx);
       }
     };
     const eventMeta = this.eventActor(audit);
@@ -1620,6 +1872,9 @@ export class CrmService {
           const merged = Array.from(new Set([...(c.tags ?? []), ...(input.addTags ?? [])]));
           const u = await tx.contact.update({ where: { id: c.id }, data: { ...data, tags: merged } });
           updated.push(u);
+        }
+        await auditWritten(updated.map((u) => u.id), tx);
+        for (const c of contacts) {
           await this.timeline.logEvent(input.businessId, c.id, 'bulk.updated', {
             ...(input.status ? { status: input.status } : {}),
             ...(input.addTags ? { addedTags: input.addTags } : {}),
@@ -1631,7 +1886,6 @@ export class CrmService {
         }
         return updated;
       });
-      auditWritten(results.map((u) => u.id));
       this.stats.invalidateCache(input.businessId);
       this.flow.invalidateCache(input.businessId);
       return { updated: results.length };
@@ -1641,13 +1895,14 @@ export class CrmService {
     }
     const writtenIds = await this.prisma.client.$transaction(async (tx) => {
       // The same scope again at the write, which also says exactly which rows
-      // this call wrote: only those get an event (and, after commit, an audit
-      // entry), so a row deleted meanwhile leaves no trace either.
+      // this call wrote: only those get an audit entry and an event, so a row
+      // deleted meanwhile leaves no trace either.
       const rows = await tx.contact.updateManyAndReturn({
         where: { ...scopedWhere, id: { in: input.contactIds } },
         data,
         select: { id: true },
       });
+      await auditWritten(rows.map((row) => row.id), tx);
       for (const { id: cid } of rows) {
         await this.timeline.logEvent(input.businessId, cid, 'bulk.updated', {
           ...(input.status ? { status: input.status } : {}),
@@ -1659,7 +1914,6 @@ export class CrmService {
       }
       return rows.map((row) => row.id);
     });
-    auditWritten(writtenIds);
     this.stats.invalidateCache(input.businessId);
     this.flow.invalidateCache(input.businessId);
     return { updated: writtenIds.length };
@@ -1696,28 +1950,33 @@ export class CrmService {
       }
     }
     // Delete first, scoped to this tenant's live rows the caller can see, and
-    // learn exactly which rows this call deleted. Only those get an event and
-    // an audit entry: an id from another tenant, a missing or hidden id, or one
-    // already deleted (including by a concurrent request) gets no trace.
-    const deletedRows = await this.prisma.client.contact.updateManyAndReturn({
-      where: { id: { in: input.contactIds }, ...contactWhereBase(input.businessId), ...(visClause ? { AND: [visClause] } : {}) },
-      data: { deletedAt: new Date() },
-      select: { id: true },
+    // learn exactly which rows this call deleted. Only those get an audit
+    // entry and an event: an id from another tenant, a missing or hidden id, or
+    // one already deleted (including by a concurrent request) gets no trace.
+    // Each entry is written in the deletion's own transaction (D-25,
+    // TOF-CONTACT-AUDIT-AWAIT): a refused entry rolls every deletion back and
+    // fails the call. The events follow the commit, best-effort as before.
+    const deletedIds = await this.prisma.client.$transaction(async (tx) => {
+      const deletedRows = await tx.contact.updateManyAndReturn({
+        where: { id: { in: input.contactIds }, ...contactWhereBase(input.businessId), ...(visClause ? { AND: [visClause] } : {}) },
+        data: { deletedAt: new Date() },
+        select: { id: true },
+      });
+      for (const { id: cid } of deletedRows) {
+        await this.auditContact({
+          businessId: input.businessId,
+          contactId: cid,
+          action: 'bulk_deleted',
+          ctx: _audit,
+        }, tx);
+      }
+      return deletedRows.map((row) => row.id);
     });
-    const deletedIds = deletedRows.map((row) => row.id);
     const eventMeta = this.eventActor(_audit);
     const eventOps = deletedIds.map((cid) =>
       this.timeline.logEvent(input.businessId, cid, 'contact.deleted', { bulk: true }, eventMeta),
     );
     await Promise.allSettled(eventOps);
-    for (const cid of deletedIds) {
-      this.auditContact({
-        businessId: input.businessId,
-        contactId: cid,
-        action: 'bulk_deleted',
-        ctx: _audit,
-      });
-    }
     this.stats.invalidateCache(input.businessId);
     this.flow.invalidateCache(input.businessId);
     return { deleted: deletedIds.length };
@@ -1752,7 +2011,23 @@ export class CrmService {
    *   - the new owner is a member of the same business; and
    *   - every target contact lives in the business and is currently
    *     visible to the actor under their effective scope.
-   * Logs a `contact.reassigned` timeline event per contact for full audit.
+   * Writes a 'reassigned' ContactAuditEntry per contact it moved, from the old
+   * owner to the new, in the ownership change's own transaction (D-25,
+   * TOF-CONTACT-AUDIT-AWAIT; review repair SEC-CAA-2: an ownership change
+   * widens what a 'my book' member can open, and it had no audit row): a
+   * refused entry leaves every owner as it was and fails the call. The entry
+   * names the member (actorUserId) as USER, as updateContact's 'reassigned'
+   * entry does; a call with no actor is SYSTEM. A `contact.reassigned`
+   * timeline event per contact follows the commit, as before.
+   *
+   * The owner each entry and event names as `from`, and whether the member may
+   * still see the contact, are decided on the rows the transaction locks
+   * (review repair SEC-TCAC-1), as updateContact decides on its locked row: the
+   * read before the transaction only refuses early when nothing is eligible. A
+   * concurrent ownership change that commits first is waited for and seen, so
+   * the trail records the transition this reassign really made, and a contact
+   * that has left a member's book in the meantime is not moved (when none is
+   * left, 403 and nothing is written).
    */
   async reassignContacts(input: {
     businessId: string;
@@ -1794,13 +2069,42 @@ export class CrmService {
     }
 
     const eligibleIds = eligible.map((c) => c.id);
-    const result = await this.prisma.client.contact.updateMany({
-      where: { id: { in: eligibleIds }, ...contactWhereBase(input.businessId) },
-      data: { ownerId: input.newOwnerId },
+    const audit = this.memberAuditContext(undefined, input.actorUserId);
+    const moved = await this.prisma.client.$transaction(async (tx) => {
+      // Lock the rows first (in id order, so overlapping reassigns queue rather
+      // than deadlock), then read them again under the lock with the same
+      // tenant, liveness and visibility predicate: the owner each one moves
+      // from, and whether the member may still see it, are those of the row
+      // this transaction writes (SEC-TCAC-1).
+      await tx.$queryRaw`SELECT id FROM contacts WHERE id = ANY(${eligibleIds}) AND business_id = ${input.businessId} AND deleted_at IS NULL ORDER BY id FOR UPDATE`;
+      const locked = await tx.contact.findMany({
+        where: { ...eligibleWhere, id: { in: eligibleIds } },
+        select: { id: true, ownerId: true },
+      });
+      if (locked.length === 0) {
+        throw new ForbiddenException('No eligible contacts to reassign');
+      }
+      await tx.contact.updateMany({
+        where: { id: { in: locked.map((c) => c.id) }, ...contactWhereBase(input.businessId) },
+        data: { ownerId: input.newOwnerId },
+      });
+      for (const { id: cid, ownerId } of locked) {
+        const from = ownerId ?? null;
+        await this.auditContact({
+          businessId: input.businessId,
+          contactId: cid,
+          action: 'reassigned',
+          before: { ownerId: from },
+          after: { ownerId: input.newOwnerId },
+          ctx: audit,
+          extraReason: `owner ${from ?? 'none'} → ${input.newOwnerId}`,
+        }, tx);
+      }
+      return locked;
     });
 
     await Promise.allSettled(
-      eligible.map((c) =>
+      moved.map((c) =>
         this.timeline.logEvent(input.businessId, c.id, 'contact.reassigned', {
           fromOwnerId: c.ownerId ?? null,
           toOwnerId: input.newOwnerId,
@@ -1812,7 +2116,7 @@ export class CrmService {
     this.stats.invalidateCache(input.businessId);
     this.flow.invalidateCache(input.businessId);
 
-    return { reassigned: result.count, newOwnerId: input.newOwnerId };
+    return { reassigned: moved.length, newOwnerId: input.newOwnerId };
   }
 
   async mergeContacts(input: { businessId: string; primaryId: string; duplicateId: string; fieldOverrides?: Record<string, unknown>; actorId?: string; actorType?: string }, _audit?: AuditContext) {
@@ -1822,6 +2126,10 @@ export class CrmService {
 
     const primary = await this.assertContact(input.businessId, input.primaryId);
     const duplicate = await this.assertContact(input.businessId, input.duplicateId);
+    // The merge's audit entries name the member who merged (the route passes
+    // actorId with actorType USER and no audit context), as its ContactEvent
+    // does; KEY and other callers without a member stay SYSTEM.
+    const audit = this.memberAuditContext(_audit, input.actorType === 'USER' ? input.actorId : undefined);
 
     const mergedTags = Array.from(new Set([...(primary.tags ?? []), ...(duplicate.tags ?? [])]));
     const mergedLeadScore = Math.max(primary.leadScore ?? 0, duplicate.leadScore ?? 0);
@@ -2057,6 +2365,28 @@ export class CrmService {
         data: { deletedAt: new Date(), lastMergeId: mergeOp.id, mergedIntoId: input.primaryId },
       });
 
+      // D-25 (TOF-CONTACT-AUDIT-AWAIT; review repair SEC-CAA-2): both entries
+      // commit with the merge or nothing does, and they come before the
+      // merge's ContactEvent, so a refused entry leaves no feed copy either.
+      await this.auditContact({
+        businessId: input.businessId,
+        contactId: input.primaryId,
+        action: 'merged',
+        before: primary as unknown as Record<string, unknown>,
+        after: mergedContact as unknown as Record<string, unknown>,
+        ctx: audit,
+        extraReason: `merged duplicate ${input.duplicateId} into primary`,
+      }, tx);
+      await this.auditContact({
+        businessId: input.businessId,
+        contactId: input.duplicateId,
+        action: 'merged',
+        before: duplicate as unknown as Record<string, unknown>,
+        after: { mergedInto: input.primaryId },
+        ctx: audit,
+        extraReason: `duplicate merged into ${input.primaryId}`,
+      }, tx);
+
       const repointedCountsForEvent = Object.fromEntries(
         Object.entries(repointedRows).map(([k, v]) => [k, v.count]),
       );
@@ -2086,24 +2416,6 @@ export class CrmService {
         duplicateId: input.duplicateId,
       };
       this.events.emit('contact.merged', payload);
-      this.auditContact({
-        businessId: input.businessId,
-        contactId: input.primaryId,
-        action: 'merged',
-        before: primary as unknown as Record<string, unknown>,
-        after: merged as unknown as Record<string, unknown>,
-        ctx: _audit,
-        extraReason: `merged duplicate ${input.duplicateId} into primary`,
-      });
-      this.auditContact({
-        businessId: input.businessId,
-        contactId: input.duplicateId,
-        action: 'merged',
-        before: duplicate as unknown as Record<string, unknown>,
-        after: { mergedInto: input.primaryId },
-        ctx: _audit,
-        extraReason: `duplicate merged into ${input.primaryId}`,
-      });
     }
     this.stats.invalidateCache(input.businessId);
     return { ...merged, mergeId: result.mergeId, revertableUntil: expiresAt.toISOString() };
@@ -2647,16 +2959,43 @@ export class CrmService {
     return this.lists.removeContactFromList(input);
   }
 
-  async checkDuplicates(businessId: string, contacts: Array<{ email?: string | null; phone?: string | null; firstName?: string | null; lastName?: string | null }>) {
+  /**
+   * POST .../contacts/check-duplicates: which rows of an import already have a contact, and which
+   * one. Only contacts `actorUserId` may open are matched (findExistingBulk applies the M7
+   * visibility clause; SWP-CRM-SEARCH review SEC-CRMS-1): the answer names the holder, and a
+   * holder the member is denied on GET detail reads as a new row here.
+   *
+   * A phone is read the way POST .../contacts and the import read it
+   * (WA-E164-SERVER review COR-E164-5): under the business's country, to the
+   * E.164 key a create would store ('712-3401' in Trinidad and Tobago is
+   * '+18687123401'), and a contact holds it when its stored key reads as that
+   * number under the same country (a key stored before E.164 included). A
+   * phone that does not read is matched by its exact key only.
+   */
+  async checkDuplicates(
+    businessId: string,
+    contacts: Array<{ email?: string | null; phone?: string | null; firstName?: string | null; lastName?: string | null }>,
+    actorUserId: string,
+  ) {
     const limited = contacts.slice(0, 100);
     const emails = limited
       .map((c) => normalizeEmail(c.email))
       .filter((e): e is string => !!e);
+    const country = limited.some((c) => c.phone?.trim())
+      ? await this.businessPhoneCountry(this.prisma.client, businessId)
+      : null;
+    // The identity key a create would store for the phone (E.164 when it reads).
+    const phoneKeyOf = (phone?: string | null): string | null => {
+      const read = contactPhoneForStorage(phone, country);
+      return read.e164 ?? phoneIdentityKey(read.value);
+    };
+    const samePhone = (storedKey: string | null, asked: string) =>
+      asked.startsWith('+') ? phoneKeyReadsAs(storedKey, asked, country) : storedKey === asked;
     const phones = limited
-      .map((c) => normalizePhone(c.phone))
+      .map((c) => phoneKeyOf(c.phone))
       .filter((p): p is string => !!p);
 
-    const { existingByEmail, existingByPhone } = await findExistingBulk(this.prisma, businessId, emails, phones);
+    const { existingByEmail, existingByPhone } = await findExistingBulk(this.prisma, businessId, emails, phones, actorUserId, samePhone);
 
     const duplicates: Array<{
       importIndex: number;
@@ -2670,7 +3009,7 @@ export class CrmService {
     for (let i = 0; i < limited.length; i++) {
       const c = limited[i];
       const normalizedEmailVal = normalizeEmail(c.email);
-      const normalizedPhoneVal = normalizePhone(c.phone);
+      const normalizedPhoneVal = phoneKeyOf(c.phone);
       let matched = false;
 
       if (normalizedEmailVal) {
@@ -2681,7 +3020,9 @@ export class CrmService {
         }
       }
       if (!matched && normalizedPhoneVal) {
-        const match = existingByPhone.find((e) => e.phoneNormalized === normalizedPhoneVal);
+        // The same number in any spelling (SWP-CRM-SEARCH, BUG-083), read under the
+        // business's country (WA-E164-SERVER review COR-E164-5), the exact key first.
+        const match = findPhoneKeyMatch(existingByPhone, normalizedPhoneVal, samePhone);
         if (match) {
           duplicates.push({ importIndex: i, importContact: c, existingContact: match, matchField: 'phone' });
           matched = true;

@@ -334,7 +334,9 @@ beforeAll(async () => {
     // SWEEP-P0-FOLLOWUP (CW3-2, D-181): saving a connector form mapping and running its backfill need settings admin
     // now, so in the connector form business the two STAFF members also hold settings admin. Their crm level (what
     // these cases are about: it caps what a backfill writes) is unchanged; settings admin opens no contact.
-    const formAdmin = biz === ID.bizF ? { settings: 'admin' } : {};
+    // SWP-CENSUS-HIDDEN (D-152, D-181): so do the Google and Outlook contact syncs (settings admin) and their mapping
+    // rules (settings write, @HiddenModuleWrites on ConnectController), so they hold it in every business here.
+    const formAdmin = { settings: 'admin' };
     await db.membership.create({ data: { id: `${P}m_staff_${biz}`, userId: ID.staff, businessId: biz, role: 'STAFF', permissionScopes: { crm: 'write', ...formAdmin } } });
     await db.membership.create({ data: { id: `${P}m_reader_${biz}`, userId: ID.reader, businessId: biz, role: 'STAFF', permissionScopes: { crm: 'read', ...formAdmin } } });
   }
@@ -579,10 +581,11 @@ describe('W6-CONNECT-TAG-MERGE (SEC-D92R-2): an Outlook tombstone', () => {
 
   beforeAll(async () => {
     // SEC-W6CTM-1: a STAFF member who may edit every contact but delete none
-    // (crm write, crm_delete none), in this business only.
+    // (crm write, crm_delete none), in this business only. SWP-CENSUS-HIDDEN (D-181): starting the sync needs settings
+    // admin, which opens no contact and deletes none.
     await db.user.create({ data: { id: ID.noDelete, email: `${P}nodelete@test.local`, role: 'USER' } });
     await db.membership.create({
-      data: { id: `${P}m_nodelete_${biz}`, userId: ID.noDelete, businessId: biz, role: 'STAFF', permissionScopes: { crm: 'write', crm_delete: 'none' } },
+      data: { id: `${P}m_nodelete_${biz}`, userId: ID.noDelete, businessId: biz, role: 'STAFF', permissionScopes: { crm: 'write', crm_delete: 'none', settings: 'admin' } },
     });
   });
 

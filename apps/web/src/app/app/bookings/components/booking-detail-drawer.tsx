@@ -32,6 +32,7 @@ import { formatAmount } from "../../commerce/utils/commerce-utils";
 import Link from "next/link";
 import { googleDeepLinks } from "@/lib/google-deep-links";
 import { TimeLogWidget } from "../../commerce/components/time-log-widget";
+import { buildWhatsAppLink, ownBusinessCountry } from "@/lib/whatsapp";
 
 interface BookingDetailDrawerProps {
   selectedBooking: Booking;
@@ -211,7 +212,7 @@ export default function BookingDetailDrawer({
   const compose = useCompose();
   const contactPhone = selectedBooking.contact?.phone;
   const contactEmail = selectedBooking.contact?.email;
-  const whatsappLink = contactPhone ? `https://wa.me/${contactPhone.replace(/[^0-9]/g, "")}` : null;
+  const whatsappLink = contactPhone ? buildWhatsAppLink({ to: contactPhone, country: ownBusinessCountry() }) : null;
 
   return (
     <motion.div

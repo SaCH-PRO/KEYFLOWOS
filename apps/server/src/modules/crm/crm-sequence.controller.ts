@@ -4,6 +4,7 @@ import { CrmSequenceAnalyticsService, type AnalyticsRange } from './crm-sequence
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CrmRateLimitGuard, CrmRateLimit } from './guards/rate-limit.guard';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
 function parseRange(from?: string, to?: string): AnalyticsRange {
   const range: AnalyticsRange = {};
@@ -18,6 +19,7 @@ function parseRange(from?: string, to?: string): AnalyticsRange {
   return range;
 }
 
+@HiddenModuleWrites('sequences', 'crm')
 @Controller('crm')
 @UseGuards(CrmRateLimitGuard)
 export class CrmSequenceController {

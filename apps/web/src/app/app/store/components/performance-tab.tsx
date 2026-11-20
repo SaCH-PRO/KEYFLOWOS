@@ -34,6 +34,7 @@ import { OrdersPanel } from "./orders-panel";
 import { ProfitPanel } from "./profit-panel";
 import { CustomersPanel } from "./customers-panel";
 import { PromosPanel } from "./promos-panel";
+import { buildWhatsAppLink } from "@/lib/whatsapp";
 
 type DashboardSubTab = "overview" | "orders" | "profits" | "customers" | "analytics" | "promos";
 
@@ -379,10 +380,7 @@ function QuickActions({ publicUrl, businessName, storeEnabled, onToggleStore }: 
 
   function handleWhatsApp() {
     if (!publicUrl) return;
-    const text = encodeURIComponent(
-      `Check out ${businessName ? businessName + "'s" : "our"} store! Browse & book: ${publicUrl}`
-    );
-    window.open(`https://wa.me/?text=${text}`, "_blank");
+    window.open(buildWhatsAppLink({ text: `Check out ${businessName ? businessName + "'s" : "our"} store! Browse & book:`, link: publicUrl }), "_blank");
   }
 
   return (

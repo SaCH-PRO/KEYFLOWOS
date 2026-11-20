@@ -1,6 +1,6 @@
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { KeyCortexEventService } from './key-cortex-event.service';
+import { KeyCortexEventService, actionResultOf, type KeyActionResult, type KeyCortexClaim } from './key-cortex-event.service';
 import { KeyCortexEvidenceService } from './key-cortex-evidence.service';
 
 // Key Genome domain services (optional — graceful degradation)
@@ -88,9 +88,12 @@ export interface OutcomeRecord {
   success: boolean;
   module: string;
   action: string;
-  result: 'success' | 'error' | 'partial';
+  /** What became of the action: it ran (success, error, partial) or never ran (pending_approval, blocked, skipped). */
+  result: KeyActionResult;
   approvalRequired: boolean;
   details?: Record<string, unknown>;
+  /** The turn or command the action ran in (business_events.correlation_id of its observation). */
+  correlationId?: string;
 }
 
 interface DnaScores {
@@ -394,14 +397,20 @@ export class KeyCortexGenomeBridgeService {
     }
 
     if (this.eventService) {
+      // FU-KEY-EVENT-COLUMNS review (KEC-COR-1): the row says what became of the action (a pending approval, a block
+      // or a skip is not a failure) and is on the action's correlation. The correlation id is its column, not a
+      // parameter; the writer keeps the rest of the details only where they are allowed (the description, the
+      // tool's data and the timestamp are withheld by name).
+      const parameters = Object.fromEntries(Object.entries(outcome.details ?? {}).filter(([key]) => key !== 'correlationId'));
       await this.eventService
         .logActionExecuted(businessId, {
           module: outcome.module,
           source: 'key_cortex',
           action: outcome.action,
-          parameters: outcome.details ?? {},
-          result: outcome.success ? 'success' : 'error',
+          parameters,
+          result: outcome.result,
           executionTimeMs: 0,
+          correlationId: outcome.correlationId,
         })
         .catch(() => undefined);
     }
@@ -439,12 +448,25 @@ export class KeyCortexGenomeBridgeService {
     return this.createGenomeSignal(businessId, signal);
   }
 
+  /**
+   * Attach a piece of KEY's evidence to the genome, and keep it as KEY's cortex claim (owner ruling D-220,
+   * FU-KEY-EVENT-COLUMNS).
+   *
+   * The genome's evidence store (GenomeEvidenceService, wired in production) is tried first, as before. The claim
+   * itself (a pattern KEY detected, an action outcome, positive feedback, a DNA proposal) is then kept in
+   * business_events through KeyCortexEventService.recordClaim, with or without the genome store: one row, its free
+   * text (the description, a recommendation, a recipient) withheld by name. It used to fall back to
+   * KeyCortexEvidenceService.createEvidence, which refuses every cortex claim (the `evidence` table is the business's
+   * proof list, V61-07), so without the genome store the claim was lost and the caller's next step skipped. A claim
+   * that cannot be kept is logged and costs nothing else.
+   */
   async createEvidence(
     businessId: string,
     evidence: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
     this.logger.debug(`[createEvidence] ${businessId}`);
 
+    let attached: Record<string, unknown> | undefined;
     if (this.genomeEvidenceService) {
       try {
         const created = await this.genomeEvidenceService.attachEvidence({
@@ -457,7 +479,7 @@ export class KeyCortexGenomeBridgeService {
           evidenceStrength: (evidence.evidenceStrength as number) ?? 0.7,
           occurredAt: evidence.occurredAt ? new Date(evidence.occurredAt as string).toISOString() : new Date().toISOString(),
         });
-        return created as unknown as Record<string, unknown>;
+        attached = created as unknown as Record<string, unknown>;
       } catch (err: any) {
         this.logger.warn(
           `[createEvidence] Genome evidence attach failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -465,13 +487,31 @@ export class KeyCortexGenomeBridgeService {
       }
     }
 
-    if (this.evidenceService) {
-      return this.evidenceService.createEvidence({ businessId, ...evidence } as any);
+    let claim: Record<string, unknown> | undefined;
+    if (this.eventService) {
+      try {
+        claim = (await this.eventService.recordClaim(businessId, cortexClaimOf(evidence))) as unknown as Record<string, unknown>;
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        const reason = message.split('\n').map((line) => line.trim()).filter(Boolean).pop() ?? 'unknown error';
+        this.logger.warn(`[createEvidence] Cortex claim not kept: ${reason.slice(0, 300)}`);
+      }
     }
 
-    return { id: `ev_${Date.now()}`, businessId, ...evidence };
+    return attached ?? claim ?? { id: `ev_${Date.now()}`, businessId, ...evidence };
   }
 
+  /**
+   * Report what became of an action KEY ran (or was asked to run): kept once as its ACTION_EXECUTED observation, and,
+   * when it succeeded, as KEY's cortex_action claim (D-220).
+   *
+   * FU-KEY-EVENT-COLUMNS review (KEC-COR-1): every caller (command execution, the query pipeline's processQuery and
+   * streamQuery, reasoning, interaction, evolution) sends `{ actionId, status, description, result: the tool's data,
+   * timestamp, correlationId }`. This read `outcome.result === 'success'` and `outcome.action`, which none of them
+   * sends, so a real success was kept as a failed action called 'unknown' and its claim was never written. The status
+   * is the outcome (actionResultOf; `result` is read as one only when it is a status word, as an older shape sent it),
+   * the action is named by `action` or else `actionId`, and the correlation id goes to both rows.
+   */
   async reportActionOutcome(
     businessId: string,
     outcome: Record<string, unknown>,
@@ -479,42 +519,38 @@ export class KeyCortexGenomeBridgeService {
   ): Promise<void> {
     this.logger.debug(`[reportActionOutcome] ${businessId}`);
 
+    const result = actionResultOf(outcome.status) ?? actionResultOf(outcome.result) ?? 'error';
+    const named = (value: unknown) => (typeof value === 'string' && value.trim() ? value : undefined);
+    const action = named(outcome.action) ?? named(outcome.actionId) ?? 'unknown';
+    const correlationId = named(metadata?.correlationId) ?? named(outcome.correlationId);
+
     // Record outcome for learning
     await this.recordOutcome(businessId, {
-      success: (outcome.result as string) === 'success',
+      success: result === 'success',
       module: String(outcome.module ?? 'key_cortex'),
-      action: String(outcome.action ?? 'unknown'),
-      result: (outcome.result as 'success' | 'error' | 'partial') ?? 'success',
-      approvalRequired: false,
+      action,
+      result,
+      approvalRequired: result === 'pending_approval',
       details: { ...outcome, ...metadata },
+      correlationId,
     });
 
     // Create evidence for successful actions
-    if ((outcome.result as string) === 'success') {
+    if (result === 'success') {
       await this.createEvidence(businessId, {
         sourceModule: String(outcome.module ?? 'key_cortex'),
         sourceEntityType: 'cortex_action',
-        sourceEntityId: String(outcome.actionId ?? ''),
-        description: `KEY executed ${outcome.action}: ${outcome.description ?? ''}`,
+        sourceEntityId: action,
+        description: `KEY executed ${action}: ${outcome.description ?? ''}`,
         evidenceStrength: 0.8,
         occurredAt: new Date().toISOString(),
+        ...(correlationId ? { correlationId } : {}),
         ...metadata,
       }).catch(() => undefined);
     }
 
-    // Emit event for monitoring
-    if (this.eventService) {
-      await this.eventService
-        .logActionExecuted(businessId, {
-          module: String(outcome.module ?? 'key_cortex'),
-          source: String(outcome.source ?? 'key_cortex'),
-          action: String(outcome.action ?? 'unknown'),
-          parameters: { ...(outcome.parameters as Record<string, unknown> ?? {}), ...metadata },
-          result: (outcome.result as 'success' | 'error') ?? 'success',
-          executionTimeMs: Number(outcome.executionTimeMs ?? 0),
-        })
-        .catch(() => undefined);
-    }
+    // The outcome's ACTION_EXECUTED observation is recordOutcome's (above): logging it here too kept every outcome
+    // twice once the event writer could write (FU-KEY-EVENT-COLUMNS).
   }
 
   async getCrossDomainInsights(businessId: string): Promise<Array<Record<string, unknown>>> {
@@ -714,4 +750,46 @@ export class KeyCortexGenomeBridgeService {
       confidence: opp.confidence,
     };
   }
+}
+
+const isClaimObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * FU-KEY-EVENT-COLUMNS (D-220): the cortex claim a piece of genome-bridge evidence makes. Its kind is the evidence's
+ * `type` (pattern_detection, action_outcome, user_feedback_positive, dna_influence_proposal) or its source entity type
+ * (cortex_action, from reportActionOutcome); its subject the pattern, proposal or action it names; its correlation and
+ * session ids go to their columns; everything else is offered as details, which the event writer keeps only where
+ * it is an allowed field (the description and every other free text are withheld).
+ */
+function cortexClaimOf(evidence: Record<string, unknown>): KeyCortexClaim {
+  const nested = isClaimObject(evidence.metadata) ? evidence.metadata : {};
+  const kind =
+    typeof evidence.type === 'string' ? evidence.type
+      : typeof evidence.sourceEntityType === 'string' ? evidence.sourceEntityType
+        : 'cortex_claim';
+  const details: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries({ ...evidence, ...nested })) {
+    if (['type', 'source', 'metadata', 'correlationId', 'sessionId'].includes(key)) continue;
+    details[key] = value;
+  }
+  const id = (value: unknown) => (typeof value === 'string' && value ? value : undefined);
+  const subjectId =
+    kind === 'pattern_detection' ? id(nested.patternId)
+      : kind === 'dna_influence_proposal' ? id(nested.proposalId)
+        : kind === 'action_outcome' ? id(nested.actionType)
+          : kind === 'cortex_action' ? id(evidence.sourceEntityId)
+            : undefined;
+  const subjectType =
+    kind === 'pattern_detection' ? 'pattern'
+      : kind === 'dna_influence_proposal' ? 'genome_proposal'
+        : 'cortex_action';
+  return {
+    kind,
+    source: 'key_cortex',
+    subject: subjectId ? { type: subjectType, id: subjectId } : undefined,
+    details,
+    correlationId: id(nested.correlationId) ?? id(evidence.correlationId),
+    sessionId: id(nested.sessionId) ?? id(evidence.sessionId),
+  };
 }

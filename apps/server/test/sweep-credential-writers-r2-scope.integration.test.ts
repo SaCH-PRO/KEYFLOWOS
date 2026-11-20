@@ -298,12 +298,15 @@ describe('CW-2: a page destination\'s own access token (ChannelDestination.desti
 describe('CW-3: the Google Business Profile account and location the owner\'s tokens act on (D-99)', () => {
   const loc = `/connect/businesses/${ID.bizA}/business-profile/active-location`;
 
-  it('[CW2-BP-01] RED-BEFORE: every member who is not the owner, an ADMIN and a settings admin included, is refused with 403 GOOGLE_CONNECT_OWNER_ONLY, and the stored account and location are unchanged', async () => {
+  it('[CW2-BP-01] RED-BEFORE: every member who is not the owner, an ADMIN and a settings admin included, is refused with 403 (GOOGLE_CONNECT_OWNER_ONLY once they hold settings write), and the stored account and location are unchanged', async () => {
     const before = await bpBinding();
+    // SWP-CENSUS-HIDDEN (D-152): ConnectController's writes need settings write first (@HiddenModuleWrites('connectors',
+    // 'settings')); a member below it is refused there, before the owner rule.
+    const settingsWriters = new Set([ID.setWrite, ID.admin, ID.settingsAdmin]);
     for (const actor of NON_OWNERS) {
       const res = await send('post', loc, actor, { accountId: `acct_${actor.slice(P.length)}`, locationId: `loc_${actor.slice(P.length)}` });
       expect(res.status, actor).toBe(403);
-      expect(JSON.stringify(res.body), actor).toMatch(/GOOGLE_CONNECT_OWNER_ONLY/);
+      expect(JSON.stringify(res.body), actor).toMatch(settingsWriters.has(actor) ? /GOOGLE_CONNECT_OWNER_ONLY/ : /settings requires write access/);
     }
     expect(await bpBinding()).toEqual(before);
   });

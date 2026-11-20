@@ -1,18 +1,73 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  HttpException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
+import { CrmService, contactIdentityViolation } from './crm.service';
 import { CrmDuplicateDetectionService } from './crm-duplicate-detection.service';
+import { livePhoneHolderIds, normalizeEmail, normalizePhone } from './crm-duplicate.util';
+import { resolveCrmAccess, visibilityClause } from './crm-permissions.helper';
+import { UpdateContactDto } from './dto/update-contact.dto';
+import { ContactAuditService } from './privacy/contact-audit.service';
 import {
   DATA_QUALITY_KINDS,
   type DataQualityKind,
   computeQualityScore,
+  contactPhoneForStorage,
   isStale,
   missingRequiredFields,
   normalizeToE164,
+  phoneFlagFor,
   severityFor,
   validateEmail,
 } from './crm-data-quality.util';
+
+/** The answer a contact write gets when a live contact already holds the number (CrmService's 409). */
+const PHONE_TAKEN_MESSAGE = 'A contact with this phone number already exists in this business';
+
+/** The answer a contact write gets when a live contact already holds the email (CrmService's 409). */
+const EMAIL_TAKEN_MESSAGE = 'A contact with this email already exists in this business';
+
+/** What an issue id the member may not act on answers: an unknown id's answer, word for word. */
+const ISSUE_NOT_FOUND_MESSAGE = 'Issue not found';
+
+/**
+ * FU-DATAQUALITY-MASS-ASSIGN: the action a fix of each issue kind takes (the action the scan
+ * recommends for it; an invalid_email issue with no suggested address recommends edit_email,
+ * and the member then sends replace_email with the address). A request may name only its
+ * issue kind's action; any other is refused 400 with nothing written, so an issue of one kind
+ * cannot write the fields another kind fixes.
+ */
+const FIX_ACTIONS: Readonly<Record<DataQualityKind, readonly string[]>> = {
+  invalid_email: ['replace_email'],
+  invalid_phone: ['replace_phone'],
+  missing_required: ['fill_fields'],
+  stale_data: ['mark_verified'],
+  suspected_duplicate: ['merge'],
+};
+
+/**
+ * The contact fields a missing_required fill may write: the fields a relationship type can
+ * require (crm-data-quality.util requiredFieldsFor). An issue fills only the ones it lists.
+ */
+const FILLABLE_REQUIRED_FIELDS = ['email', 'phone', 'companyName'] as const;
+type FillableField = typeof FILLABLE_REQUIRED_FIELDS[number];
+
+/** What bulk-apply reports for a fix that failed for a reason that is not the caller's to read. */
+const FIX_FAILED_MESSAGE = 'The fix could not be applied.';
+
+/** What a contact the member may not open answers (GET contacts/:contactId's 404). */
+const CONTACT_NOT_FOUND_MESSAGE = 'Contact not found';
 
 type IssueDraft = {
   contactId: string;
@@ -34,6 +89,8 @@ type ScanSummary = {
 
 type IssueListFilters = {
   businessId: string;
+  /** The member the list is for: it lists only issues of contacts they may open. */
+  actorId: string;
   kinds?: DataQualityKind[];
   severities?: Array<'low' | 'medium' | 'high'>;
   status?: 'open' | 'resolved' | 'dismissed';
@@ -52,6 +109,10 @@ export class CrmDataQualityService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CrmDuplicateDetectionService) private readonly duplicates: CrmDuplicateDetectionService,
+    // FU-DATAQUALITY-MASS-ASSIGN: a fill is the contact PATCH's own write (normalisers,
+    // identity rules, edit scope, audit); the other fixes audit their own write.
+    @Inject(CrmService) private readonly crm: CrmService,
+    @Inject(ContactAuditService) private readonly contactAudit: ContactAuditService,
   ) {}
 
   /**
@@ -94,6 +155,7 @@ export class CrmDataQualityService {
       id: string;
       email: string | null;
       phone: string | null;
+      whatsappNumber: string | null;
       firstName: string | null;
       lastName: string | null;
       companyName: string | null;
@@ -112,6 +174,7 @@ export class CrmDataQualityService {
           id: true,
           email: true,
           phone: true,
+          whatsappNumber: true,
           firstName: true,
           lastName: true,
           companyName: true,
@@ -144,6 +207,17 @@ export class CrmDataQualityService {
         }
 
         const phoneRes = normalizeToE164(contact.phone, business.country ?? undefined);
+        // WA-E164-SERVER: the write paths flag a WhatsApp number that does not
+        // read under the business's country (CrmService.syncPhoneFlag); the
+        // scan reads it the same way, so it keeps that flag open. A contact has
+        // one invalid_phone issue (ContactDataIssue is unique per contact and
+        // kind): a phone that does not read comes first, then a WhatsApp number
+        // that does not read, and only then a phone that reads but can be
+        // reformatted (review COR-E164-6: a phone kept as typed with '+' and
+        // spaces must not take the slot from the WhatsApp flag).
+        const whatsappFlag = contact.phone && !phoneRes.ok
+          ? null
+          : phoneFlagFor({ whatsappNumber: contact.whatsappNumber }, business.country);
         if (contact.phone && !phoneRes.ok) {
           drafts.push({
             contactId: contact.id,
@@ -154,6 +228,15 @@ export class CrmDataQualityService {
             recommendedFix: phoneRes.suggestedFix
               ? { action: 'replace_phone', value: phoneRes.suggestedFix }
               : { action: 'edit_phone' },
+          });
+        } else if (whatsappFlag) {
+          drafts.push({
+            contactId: contact.id,
+            kind: 'invalid_phone',
+            severity: severityFor('invalid_phone'),
+            field: whatsappFlag.field,
+            message: whatsappFlag.message,
+            recommendedFix: whatsappFlag.recommendedFix,
           });
         } else if (contact.phone && phoneRes.ok && phoneRes.suggestedFix && phoneRes.suggestedFix !== contact.phone) {
           drafts.push({
@@ -322,49 +405,74 @@ export class CrmDataQualityService {
     return { upserted, resolved };
   }
 
-  async markContactVerified(businessId: string, contactId: string): Promise<{ ok: boolean }> {
-    const contact = await this.prisma.client.contact.findFirst({
-      where: contactWhereWithId(businessId, contactId),
-      select: { id: true },
-    });
-    if (!contact) {
-      throw new NotFoundException('Contact not found');
-    }
-    await this.prisma.client.contact.update({
-      where: { id: contactId },
-      data: { lastVerifiedAt: new Date() },
-    });
-    // Resolve any open stale_data issues for this contact since the user
-    // explicitly verified the record.
+  /**
+   * Mark a contact verified (POST contacts/:contactId/data-quality/mark-verified), as `actorId`.
+   * FU-DATAQUALITY-MASS-ASSIGN review repair SEC-DQ-3: the route writes the contact, so it keeps
+   * what the 'mark_verified' fix through apply keeps: the contact PATCH's edit rule
+   * (CrmService.assertCanEditContact: 403 for crm_edit 'none' and for a contact outside crm_edit
+   * 'owned'; the controller has already answered a contact the member may not open 404), the
+   * stamp written with its ContactAuditEntry in one transaction (writeAudited, owner ruling D-25),
+   * and the contact's open stale-data issue resolved by the member.
+   */
+  async markContactVerified(businessId: string, contactId: string, actorId: string): Promise<{ ok: boolean }> {
+    await this.crm.assertCanEditContact(businessId, contactId, actorId);
+    await this.writeAudited(businessId, contactId, actorId, { lastVerifiedAt: new Date() }, CONTACT_NOT_FOUND_MESSAGE);
+    // Resolve any open stale_data issue of this contact: the member explicitly verified the record.
     await this.prisma.client.contactDataIssue.updateMany({
       where: { businessId, contactId, kind: 'stale_data', status: 'open' },
-      data: { status: 'resolved', resolvedAt: new Date(), resolvedBy: 'user' },
+      data: { status: 'resolved', resolvedAt: new Date(), resolvedBy: actorId },
     });
     return { ok: true };
   }
 
+  /**
+   * The contacts of the business `actorId` may open, by the rule GET contacts/:contactId applies
+   * (assertContactVisible: the business, deletedAt null, visibilityClause). resolveCrmAccess
+   * refuses a non-member 403. The OWNER and SUPER_ADMIN open every live contact.
+   */
+  private async contactsOpenTo(businessId: string, actorId: string): Promise<Prisma.ContactWhereInput> {
+    const access = await resolveCrmAccess(this.prisma, businessId, actorId);
+    const visClause = visibilityClause(access, actorId);
+    const where: Prisma.ContactWhereInput = { ...contactWhereBase(businessId) };
+    if (visClause) where.AND = [visClause as Prisma.ContactWhereInput];
+    return where;
+  }
+
+  /**
+   * The data-quality queue (GET .../data-quality/issues) for `filters.actorId`.
+   *
+   * FU-DATAQUALITY-MASS-ASSIGN review repairs SEC-DQ-1 / COR-DQMA-2 (owner rulings D-63, D-133;
+   * the W11-CRM-COUNTS-RULING hand-off SEC-W11CCR-2): the items, the total and the open counts
+   * by kind (byKind) cover only the issues of the contacts the member may open (contactsOpenTo),
+   * so a member a visibility rule hides a contact from is not served its issue, its name, email
+   * or phone, is not counted it, and cannot find it by searching; the issues listed are the ones
+   * apply, bulk-apply and dismiss act on (findIssueFor). Review repair COR-DQMA-1: for every
+   * member, the OWNER included, the issues of a soft-deleted contact (deleted, or merged into
+   * another) are neither listed nor counted: no fix or dismissal can reach them, and the scan
+   * visits live contacts only.
+   */
   async listIssues(filters: IssueListFilters) {
     const limit = Math.min(Math.max(filters.limit ?? 50, 1), 200);
     const offset = Math.max(filters.offset ?? 0, 0);
     const status = filters.status ?? 'open';
+    const openable = await this.contactsOpenTo(filters.businessId, filters.actorId);
+    const searched: Prisma.ContactWhereInput | null = filters.search
+      ? {
+          OR: [
+            { firstName: { contains: filters.search, mode: 'insensitive' } },
+            { lastName: { contains: filters.search, mode: 'insensitive' } },
+            { displayName: { contains: filters.search, mode: 'insensitive' } },
+            { email: { contains: filters.search, mode: 'insensitive' } },
+            { phone: { contains: filters.search } },
+          ],
+        }
+      : null;
     const where: Prisma.ContactDataIssueWhereInput = {
       businessId: filters.businessId,
       status,
       ...(filters.kinds && filters.kinds.length > 0 ? { kind: { in: filters.kinds } } : {}),
       ...(filters.severities && filters.severities.length > 0 ? { severity: { in: filters.severities } } : {}),
-      ...(filters.search
-        ? {
-            contact: {
-              OR: [
-                { firstName: { contains: filters.search, mode: 'insensitive' } },
-                { lastName: { contains: filters.search, mode: 'insensitive' } },
-                { displayName: { contains: filters.search, mode: 'insensitive' } },
-                { email: { contains: filters.search, mode: 'insensitive' } },
-                { phone: { contains: filters.search } },
-              ],
-            },
-          }
-        : {}),
+      contact: { is: searched ? { AND: [openable, searched] } : openable },
     };
 
     const [items, total, openCounts] = await Promise.all([
@@ -392,7 +500,7 @@ export class CrmDataQualityService {
       this.prisma.client.contactDataIssue.count({ where }),
       this.prisma.client.contactDataIssue.groupBy({
         by: ['kind'],
-        where: { businessId: filters.businessId, status: 'open' },
+        where: { businessId: filters.businessId, status: 'open', contact: { is: openable } },
         _count: { _all: true },
       }),
     ]);
@@ -412,11 +520,18 @@ export class CrmDataQualityService {
     return { items };
   }
 
+  /**
+   * The business-wide data-quality stats (GET .../data-quality/stats for the OWNER and
+   * SUPER_ADMIN; CrmStatsService.dataQualityCountsFor works out a member's over the contacts they
+   * may open, D-133). FU-DATAQUALITY-MASS-ASSIGN review repair COR-DQMA-1: issueCounts counts the
+   * open issues of live contacts only, as totalContacts and averageScore count live contacts: an
+   * issue left on a deleted or merged contact is in no list and no fix can reach it.
+   */
   async getStats(businessId: string) {
     const [byKind, totals, scoreAgg, business] = await Promise.all([
       this.prisma.client.contactDataIssue.groupBy({
         by: ['kind'],
-        where: { businessId, status: 'open' },
+        where: { businessId, status: 'open', contact: { is: contactWhereBase(businessId) } },
         _count: { _all: true },
       }),
       this.prisma.client.contact.count({ where: { ...contactWhereBase(businessId) } }),
@@ -443,48 +558,83 @@ export class CrmDataQualityService {
     };
   }
 
-  async applyFix(input: { businessId: string; issueId: string; actorId?: string; override?: Record<string, unknown> }) {
+  /**
+   * The issue `issueId` of the business, on a contact `actorId` may open
+   * (FU-DATAQUALITY-MASS-ASSIGN): a live contact of the business inside the
+   * member's visibilityClause, the rule GET contacts/:contactId applies
+   * (assertContactVisible). An issue of any other contact (outside the
+   * member's book, another member's PRIVATE contact, a soft-deleted contact's
+   * leftover issue) answers exactly as an unknown issue id does: 404 'Issue
+   * not found'. resolveCrmAccess refuses a non-member 403 first.
+   */
+  private async findIssueFor(businessId: string, issueId: string, actorId: string) {
+    const contactWhere = await this.contactsOpenTo(businessId, actorId);
+    // An id is text: anything else (a filter object Prisma would read as a pattern) names no
+    // issue (review SEC-DQ-2; bulkApplyFix refuses it 400 before this).
+    if (typeof issueId !== 'string') throw new NotFoundException(ISSUE_NOT_FOUND_MESSAGE);
     const issue = await this.prisma.client.contactDataIssue.findFirst({
-      where: { id: input.issueId, businessId: input.businessId },
-      include: { contact: true },
+      where: { id: issueId, businessId, contact: { is: contactWhere } },
     });
-    if (!issue) throw new NotFoundException('Issue not found');
+    if (!issue) throw new NotFoundException(ISSUE_NOT_FOUND_MESSAGE);
+    return issue;
+  }
+
+  /**
+   * Apply an issue's fix, as `actorId` (FU-DATAQUALITY-MASS-ASSIGN):
+   *  - the issue must be on a contact the member may open (findIssueFor), and,
+   *    since every fix writes the contact, the member must be allowed to edit
+   *    it by the contact PATCH's rule (CrmService.assertCanEditContact: 403
+   *    for crm_edit 'none', and for a contact outside crm_edit 'owned');
+   *  - the action is the issue kind's (FIX_ACTIONS), and it writes only the
+   *    fields the issue fixes: replace_email the email, replace_phone the
+   *    phone of an issue that flags the phone, fill_fields the fields a
+   *    missing_required issue lists, mark_verified the verification stamp,
+   *    merge nothing. Any other action or key is refused 400 with nothing
+   *    written and the issue left open;
+   *  - a value the member sends is checked as the contact PATCH DTO checks it
+   *    (UpdateContactDto); a fill is written by the PATCH's own write
+   *    (CrmService.updateContact: its normalisers, E.164 phones, the identity
+   *    409s, its audit entry), and the other fixes record their
+   *    ContactAuditEntry in their write's transaction (owner ruling D-25).
+   */
+  async applyFix(input: { businessId: string; issueId: string; actorId: string; override?: Record<string, unknown> }) {
+    const issue = await this.findIssueFor(input.businessId, input.issueId, input.actorId);
+    const contactId = issue.contactId;
+    await this.crm.assertCanEditContact(input.businessId, contactId, input.actorId);
     if (issue.status !== 'open') return { issueId: issue.id, status: issue.status, applied: false };
 
     const fix = (issue.recommendedFix as Record<string, unknown> | null) ?? null;
-    const action = (input.override?.action ?? fix?.action) as string | undefined;
-    const contactId = issue.contactId;
+    const override = this.overrideOf(input.override);
+    const action = override?.action ?? fix?.action;
+    const kindActions = (FIX_ACTIONS as Readonly<Record<string, readonly string[] | undefined>>)[issue.kind] ?? [];
+    if (typeof action !== 'string' || !kindActions.includes(action)) {
+      const named = typeof action === 'string' && /^[a-z_]{1,40}$/.test(action) ? action : 'unknown';
+      throw new BadRequestException(`Unsupported fix action: ${named}`);
+    }
 
     switch (action) {
       case 'replace_email': {
-        const value = String(input.override?.value ?? fix?.value ?? '').trim();
-        if (!value) throw new BadRequestException('Replacement email is required');
-        await this.prisma.client.contact.update({
-          where: { id: contactId },
-          data: { email: value, emailNormalized: value.toLowerCase(), lastVerifiedAt: new Date() },
-        });
+        const value = await this.checkedValue('email', override?.value ?? fix?.value, 'Replacement email is required');
+        await this.replaceEmail(input.businessId, contactId, value, input.actorId);
         break;
       }
       case 'replace_phone': {
-        const value = String(input.override?.value ?? fix?.value ?? '').trim();
-        if (!value) throw new BadRequestException('Replacement phone is required');
-        const normalized = value.replace(/[^0-9+]/g, '');
-        await this.prisma.client.contact.update({
-          where: { id: contactId },
-          data: { phone: value, phoneNormalized: normalized, lastVerifiedAt: new Date() },
-        });
+        // An invalid_phone issue that flags the WhatsApp number does not fix the phone.
+        if (issue.field && issue.field !== 'phone') {
+          throw new BadRequestException('This issue does not flag the phone number');
+        }
+        const value = await this.checkedValue('phone', override?.value ?? fix?.value, 'Replacement phone is required');
+        await this.replacePhone(input.businessId, contactId, value, input.actorId);
         break;
       }
       case 'mark_verified': {
-        await this.prisma.client.contact.update({ where: { id: contactId }, data: { lastVerifiedAt: new Date() } });
+        await this.writeAudited(input.businessId, contactId, input.actorId, { lastVerifiedAt: new Date() });
         break;
       }
       case 'fill_fields': {
-        const values = (input.override?.values ?? {}) as Record<string, unknown>;
-        if (!values || Object.keys(values).length === 0) {
-          throw new BadRequestException('No field values provided');
-        }
-        await this.prisma.client.contact.update({ where: { id: contactId }, data: values as Prisma.ContactUpdateInput });
+        const values = await this.checkedFill(issue, override?.values);
+        // The contact PATCH's own write, as the member.
+        await this.crm.updateContact({ businessId: input.businessId, contactId, actorUserId: input.actorId, ...values });
         break;
       }
       case 'merge':
@@ -492,51 +642,260 @@ export class CrmDataQualityService {
         // just acknowledge here so the issue can be dismissed once the merge
         // completes.
         break;
-      default:
-        throw new BadRequestException(`Unsupported fix action: ${action ?? 'unknown'}`);
     }
 
     await this.prisma.client.contactDataIssue.update({
       where: { id: issue.id },
-      data: { status: 'resolved', resolvedAt: new Date(), resolvedBy: input.actorId ?? 'system' },
+      data: { status: 'resolved', resolvedAt: new Date(), resolvedBy: input.actorId },
     });
     return { issueId: issue.id, status: 'resolved' as const, applied: true };
   }
 
-  async bulkApplyFix(input: { businessId: string; issueIds: string[]; actorId?: string }) {
+  /** The request's override: absent, or an object (anything else is refused 400). */
+  private overrideOf(override: unknown): Record<string, unknown> | undefined {
+    if (override === undefined || override === null) return undefined;
+    if (typeof override !== 'object' || Array.isArray(override)) {
+      throw new BadRequestException('override must be an object');
+    }
+    return override as Record<string, unknown>;
+  }
+
+  /**
+   * The fields a missing_required issue lists (its recommendedFix.fields, else
+   * its field) among FILLABLE_REQUIRED_FIELDS: the only fields its fill may
+   * write.
+   */
+  private fillableFields(issue: { field: string | null; recommendedFix: unknown }): FillableField[] {
+    const fix = issue.recommendedFix as { fields?: unknown } | null;
+    const listed: unknown[] = Array.isArray(fix?.fields) ? fix.fields : issue.field ? [issue.field] : [];
+    return FILLABLE_REQUIRED_FIELDS.filter((field) => listed.includes(field));
+  }
+
+  /**
+   * A fill's values (FU-DATAQUALITY-MASS-ASSIGN): an object whose keys are
+   * fields the issue lists, each a non-blank text checked as the contact
+   * PATCH DTO checks it. Anything else is refused 400 before anything is
+   * written.
+   */
+  private async checkedFill(
+    issue: { field: string | null; recommendedFix: unknown },
+    values: unknown,
+  ): Promise<Partial<Record<FillableField, string>>> {
+    if (values === undefined || values === null) throw new BadRequestException('No field values provided');
+    if (typeof values !== 'object' || Array.isArray(values)) {
+      throw new BadRequestException('Field values must be an object of field names and values');
+    }
+    const keys = Object.keys(values);
+    if (keys.length === 0) throw new BadRequestException('No field values provided');
+    const fillable: readonly string[] = this.fillableFields(issue);
+    if (fillable.length === 0 || keys.some((key) => !fillable.includes(key))) {
+      throw new BadRequestException(fillable.length > 0 ? `This fix fills only: ${fillable.join(', ')}` : 'This fix fills no field');
+    }
+    const checked: Partial<Record<FillableField, string>> = {};
+    for (const key of keys as FillableField[]) {
+      checked[key] = await this.checkedValue(key, (values as Record<string, unknown>)[key], `${key} is required`);
+    }
+    return checked;
+  }
+
+  /**
+   * One value a fix writes to `field`, checked as the contact PATCH DTO checks
+   * it (UpdateContactDto, with its transforms: IsEmail, the lengths, the
+   * sanitiser). It must be a non-blank text; the DTO's refusal is answered
+   * 400 with its messages (one line, so bulk-apply can report it).
+   */
+  private async checkedValue(field: FillableField, value: unknown, requiredMessage: string): Promise<string> {
+    if (value === undefined || value === null || (typeof value === 'string' && value.trim() === '')) {
+      throw new BadRequestException(requiredMessage);
+    }
+    if (typeof value !== 'string') throw new BadRequestException(`${field} must be a text value`);
+    const dto = plainToInstance(UpdateContactDto, { [field]: value });
+    const errors = await validate(dto, { whitelist: true, forbidNonWhitelisted: true });
+    if (errors.length > 0) {
+      throw new BadRequestException(errors.flatMap((error) => Object.values(error.constraints ?? {})).join('; '));
+    }
+    const checked = (dto as unknown as Record<string, unknown>)[field];
+    if (typeof checked !== 'string' || checked.trim() === '') throw new BadRequestException(requiredMessage);
+    return checked;
+  }
+
+  /**
+   * A fix's own contact write, audited (owner ruling D-25;
+   * FU-DATAQUALITY-MASS-ASSIGN): the row is locked and read in the business,
+   * written, and its ContactAuditEntry ('updated', the member as USER actor,
+   * the diff) is written in the same transaction, so the change and its entry
+   * commit together or not at all. A contact gone by then answers 404 with
+   * `notFoundMessage` (an issue's fix: 'Issue not found'; mark-verified:
+   * 'Contact not found').
+   */
+  private async writeAudited(
+    businessId: string,
+    contactId: string,
+    actorId: string,
+    data: Prisma.ContactUpdateInput,
+    notFoundMessage: string = ISSUE_NOT_FOUND_MESSAGE,
+  ): Promise<void> {
+    await this.prisma.client.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM contacts WHERE id = ${contactId} AND business_id = ${businessId} FOR UPDATE`;
+      const before = await tx.contact.findFirst({ where: contactWhereWithId(businessId, contactId) });
+      if (!before) throw new NotFoundException(notFoundMessage);
+      const after = await tx.contact.update({ where: { id: contactId }, data });
+      await this.contactAudit.write({
+        businessId,
+        contactId,
+        action: 'updated',
+        before,
+        after,
+        actor: { type: 'USER', id: actorId },
+      }, tx);
+    });
+  }
+
+  async bulkApplyFix(input: { businessId: string; issueIds: unknown[]; actorId: string }) {
     if (!Array.isArray(input.issueIds) || input.issueIds.length === 0) {
       throw new BadRequestException('issueIds is required');
     }
     if (input.issueIds.length > 200) {
       throw new BadRequestException('Maximum 200 issues per bulk fix');
     }
+    // FU-DATAQUALITY-MASS-ASSIGN review repair SEC-DQ-2: every element is an issue id (text). An
+    // object would reach the issue lookup as a Prisma filter ({ endsWith: ... }) and apply the fix
+    // of an issue the member never named, or probe ids by prefix; the whole request is refused 400
+    // before any fix is applied, and the element is not echoed back.
+    if (!input.issueIds.every((id): id is string => typeof id === 'string')) {
+      throw new BadRequestException('issueIds must be a list of issue ids');
+    }
     const results: Array<{ issueId: string; ok: boolean; error?: string }> = [];
     for (const id of input.issueIds) {
       try {
         await this.applyFix({ businessId: input.businessId, issueId: id, actorId: input.actorId });
         results.push({ issueId: id, ok: true });
-      } catch (err: any) {
-        results.push({ issueId: id, ok: false, error: (err as Error).message });
+      } catch (err: unknown) {
+        // The refusals applyFix raises itself (not found, unsupported, the
+        // phone another contact holds) are written for the caller; anything
+        // else (a database error, with its query and server path) is logged
+        // here and reported plainly (WA-E164-SERVER review COR-E164-4).
+        if (err instanceof HttpException) {
+          results.push({ issueId: id, ok: false, error: err.message });
+        } else {
+          this.logger.warn(`Bulk fix of issue ${id} failed: ${(err as Error)?.message ?? String(err)}`);
+          results.push({ issueId: id, ok: false, error: FIX_FAILED_MESSAGE });
+        }
       }
     }
     return { results, applied: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length };
   }
 
-  async dismissIssue(input: { businessId: string; issueId: string; actorId?: string }) {
-    const issue = await this.prisma.client.contactDataIssue.findFirst({
-      where: { id: input.issueId, businessId: input.businessId },
+  /**
+   * The 'replace_email' fix (FU-DATAQUALITY-MASS-ASSIGN): the address, checked
+   * as the contact PATCH DTO checks it, is stored with the PATCH's normaliser
+   * (normalizeEmail) and the verification stamp, audited; an address another
+   * live contact of the business holds is refused by the identity unique and
+   * answered with the contact writes' 409 contact_email_taken, naming the
+   * holder only when the actor may open it.
+   */
+  private async replaceEmail(businessId: string, contactId: string, value: string, actorId: string): Promise<void> {
+    const email = value.trim();
+    const emailNormalized = normalizeEmail(email);
+    try {
+      await this.writeAudited(businessId, contactId, actorId, { email, emailNormalized, lastVerifiedAt: new Date() });
+    } catch (err: unknown) {
+      if (contactIdentityViolation(err) !== 'email') throw err;
+      const holders = await this.prisma.client.contact.findMany({
+        where: { ...contactWhereBase(businessId), emailNormalized, id: { not: contactId } },
+        select: { id: true },
+      });
+      await this.rejectIdentityTaken('email', businessId, holders.map((h: { id: string }) => h.id), actorId);
+    }
+  }
+
+  /**
+   * The 'replace_phone' fix (WA-E164-SERVER review COR-E164-4): the phone is
+   * stored as a contact write stores it (read under the business's country:
+   * E.164, or as written with its country code), and it keeps the identity
+   * rule the writes keep: a number another live contact of the business holds
+   * (under its E.164 key, or under a key stored before E.164 that reads as it)
+   * is refused with the same 409 contact_phone_taken, naming the holder only
+   * when the actor may open it (the M7 clause CrmService applies). The scan
+   * offers a reformat for a number stored before E.164 that may be held so.
+   */
+  private async replacePhone(businessId: string, contactId: string, value: string, actorId: string): Promise<void> {
+    const business = await this.prisma.client.business.findUnique({ where: { id: businessId }, select: { country: true } });
+    const country = business?.country ?? null;
+    const phone = contactPhoneForStorage(value, country);
+    if (!phone.e164 || !phone.value) {
+      throw new BadRequestException('Replacement phone is not a recognisable phone number');
+    }
+    const holders = await livePhoneHolderIds(this.prisma.client, businessId, phone.e164, country, { exceptId: contactId });
+    if (holders.length > 0) await this.rejectIdentityTaken('phone', businessId, holders, actorId);
+    try {
+      // Audited in the write's own transaction (FU-DATAQUALITY-MASS-ASSIGN, D-25).
+      await this.writeAudited(businessId, contactId, actorId, {
+        phone: phone.value,
+        phoneNormalized: normalizePhone(phone.value),
+        lastVerifiedAt: new Date(),
+      });
+    } catch (err: unknown) {
+      // A holder that committed after the read: the identity unique refuses it (D-16).
+      if ((err as { code?: unknown } | null)?.code !== 'P2002') throw err;
+      const raced = await livePhoneHolderIds(this.prisma.client, businessId, phone.e164, country, { exceptId: contactId });
+      await this.rejectIdentityTaken('phone', businessId, raced, actorId);
+    }
+  }
+
+  /**
+   * CrmService's bounded 409 contact_phone_taken / contact_email_taken: the
+   * holder's id only when the actor may open it (the M7 clause CrmService
+   * applies).
+   */
+  private async rejectIdentityTaken(
+    field: 'phone' | 'email',
+    businessId: string,
+    holderIds: string[],
+    actorId: string,
+  ): Promise<never> {
+    let existing: { id: string } | null = null;
+    if (holderIds.length > 0) {
+      const where: Prisma.ContactWhereInput = { ...contactWhereBase(businessId), id: { in: holderIds } };
+      const access = await resolveCrmAccess(this.prisma, businessId, actorId);
+      const visClause = visibilityClause(access, actorId);
+      if (visClause) where.AND = [visClause as Prisma.ContactWhereInput];
+      existing = await this.prisma.client.contact.findFirst({ where, select: { id: true }, orderBy: { createdAt: 'asc' } });
+    }
+    throw new ConflictException({
+      code: field === 'email' ? 'contact_email_taken' : 'contact_phone_taken',
+      message: field === 'email' ? EMAIL_TAKEN_MESSAGE : PHONE_TAKEN_MESSAGE,
+      existingContactId: existing?.id ?? null,
     });
-    if (!issue) throw new NotFoundException('Issue not found');
+  }
+
+  /**
+   * Dismiss an issue, as `actorId`: only an issue on a contact the member may
+   * open (findIssueFor; any other answers as an unknown issue id does).
+   * FU-DATAQUALITY-MASS-ASSIGN.
+   */
+  async dismissIssue(input: { businessId: string; issueId: string; actorId: string }) {
+    const issue = await this.findIssueFor(input.businessId, input.issueId, input.actorId);
     await this.prisma.client.contactDataIssue.update({
       where: { id: issue.id },
-      data: { status: 'dismissed', resolvedAt: new Date(), resolvedBy: input.actorId ?? 'system' },
+      data: { status: 'dismissed', resolvedAt: new Date(), resolvedBy: input.actorId },
     });
     return { issueId: issue.id, status: 'dismissed' as const };
   }
 
-  async wizardQueue(businessId: string, limit = 25) {
+  /**
+   * The fix wizard's queue (GET .../data-quality/wizard) for `actorId`: the open issues of the
+   * contacts the member may open (FU-DATAQUALITY-MASS-ASSIGN review repairs SEC-DQ-1 /
+   * COR-DQMA-2, as listIssues), so a hidden contact's issue is neither offered nor takes one of
+   * the queue's places; the issues of a deleted or merged contact are left out for every member
+   * (COR-DQMA-1).
+   */
+  async wizardQueue(input: { businessId: string; actorId: string; limit?: number }) {
+    const { businessId } = input;
+    const limit = input.limit ?? 25;
+    const openable = await this.contactsOpenTo(businessId, input.actorId);
     const items = await this.prisma.client.contactDataIssue.findMany({
-      where: { businessId, status: 'open' },
+      where: { businessId, status: 'open', contact: { is: openable } },
       orderBy: [{ severity: 'desc' }, { createdAt: 'asc' }],
       take: Math.min(Math.max(limit, 1), 100),
       include: {

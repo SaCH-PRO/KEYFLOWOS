@@ -12,11 +12,13 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { MessageIntakeOrchestrator } from './message-intake-orchestrator.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
 interface AuthenticatedRequest {
   user?: { id: string };
 }
 
+@HiddenModuleWrites('inbox', 'crm')
 @Controller('communications/businesses/:businessId/message-intake')
 @UseGuards(AuthGuard, BusinessGuard)
 export class MessageIntakeController {

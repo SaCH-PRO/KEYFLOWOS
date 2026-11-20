@@ -14,7 +14,9 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { OptionalAuthGuard } from '../../core/auth/optional-auth.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('community', 'content')
 @Controller()
 @UseGuards(CrmRateLimitGuard)
 export class CommunityController {
@@ -92,6 +94,12 @@ export class CommunityController {
     return this.community.deletePost(businessId, postId);
   }
 
+  /**
+   * A like by the signed-in caller on any business's network post, by its bare id. AuthGuard alone and no tenant in
+   * the path, so @HiddenModuleWrites leaves it (SWP-CENSUS-HIDDEN review COR-HID-2, SEC-HID-3): ModuleScopeGuard
+   * could only read a business the caller names, not the post's (the web sends none, and every caller was refused).
+   * Its census row stays open for a rule bound to the post.
+   */
   @UseGuards(AuthGuard)
   @CrmRateLimit(30, 60_000)
   @Post('community/posts/:postId/like')

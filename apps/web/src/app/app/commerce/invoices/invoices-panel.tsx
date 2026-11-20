@@ -88,6 +88,8 @@ import { DunningRulesPanel } from "../components/dunning-rules";
 
 import { formatAmount, getDaysUntilDue } from "../utils/commerce-utils";
 import { useCommerceSearch } from "../hooks/use-commerce-search";
+import { ownBusinessCountry, readWhatsAppShareNumber } from "@/lib/whatsapp";
+import { useWhatsAppDocumentShare } from "@/components/whatsapp/whatsapp-document-share";
 import type { ReactNode } from "react";
 
 /**
@@ -162,6 +164,7 @@ export default function InvoicesPanel({
   const { businessData, saveBranding, savingBranding } = useBusinessPreview();
   const { getOriginContext } = useNavigationContext();
   const { open: openComposer } = useCompose();
+  const whatsApp = useWhatsAppDocumentShare();
   const invoiceTaskIdRef = useRef<string | null>(null);
   const invoiceSessionIdRef = useRef<string | null>(null);
 
@@ -421,6 +424,9 @@ export default function InvoicesPanel({
   }
 
   async function shareViaWhatsApp(inv: Invoice) {
+    const country = ownBusinessCountry();
+    // The customer's number, read by id alongside the link (not from the loaded list).
+    const number = readWhatsAppShareNumber(businessId, inv.contactId, country);
     const link = await buildPublicInvoiceUrl(inv.id);
     if (!link) {
       setInvoiceError("Could not create a payment link for this invoice");
@@ -429,8 +435,10 @@ export default function InvoicesPanel({
     const contactName = inv.contact
       ? `${inv.contact.firstName ?? ""} ${inv.contact.lastName ?? ""}`.trim()
       : "there";
-    const msg = `Hi ${contactName}, here is your invoice ${inv.invoiceNumber ?? ""} for ${formatAmount(inv.total, inv.currency)}. You can view and pay it here: ${link}`;
-    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
+    const msg = `Hi ${contactName}, here is your invoice ${inv.invoiceNumber ?? ""} for ${formatAmount(inv.total, inv.currency)}. You can view and pay it here:`;
+    // The share carries the invoice's bearer link: the WhatsApp number the business saved; a phone
+    // only once the member confirms it as that number (FU-WA-CONTACT-PHONE); else the chooser.
+    whatsApp.share({ number: await number, businessId, contactId: inv.contactId, text: msg, link, country, what: "invoice" });
   }
 
   async function handleResendReceipt(inv: Invoice) {
@@ -1233,6 +1241,7 @@ export default function InvoicesPanel({
             status={selectedInvoice.status}
             contact={selectedInvoice.contact ?? null}
             contactId={selectedInvoice.contactId ?? null}
+            businessId={businessId}
             total={Number(selectedInvoice.total)}
             currency={selectedInvoice.currency}
             items={selectedInvoice.items ?? []}
@@ -1561,6 +1570,7 @@ export default function InvoicesPanel({
           />
         );
       })()}
+      {whatsApp.dialog}
     </motion.div>
   );
 }

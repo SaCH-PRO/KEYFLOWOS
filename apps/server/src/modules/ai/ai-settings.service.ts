@@ -102,9 +102,15 @@ export class AiSettingsService {
     return { staff: updated };
   }
 
+  /**
+   * The global skill catalogue, by category, then by name. Two sort fields are an
+   * array, one object each: an object with both answered 500 on every visit of
+   * Settings > AI (sweep BUG-012, PrismaClientValidationError; the census
+   * core/prisma/orderby-single-key.census.spec.ts refuses the shape).
+   */
   async listSkills() {
     return this.prisma.client.skill.findMany({
-      orderBy: { category: 'asc', name: 'asc' },
+      orderBy: [{ category: 'asc' }, { name: 'asc' }],
     });
   }
 

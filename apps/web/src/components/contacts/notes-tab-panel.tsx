@@ -17,7 +17,7 @@ import {
   Pencil,
   X,
 } from "lucide-react";
-import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
+import { buildWhatsAppLink, getContactPhone, ownBusinessCountry } from "@/lib/whatsapp";
 import type { ContactDetailData, ContactNote } from "./contact-detail";
 import {
   NOTE_CATEGORIES,
@@ -117,7 +117,7 @@ export function NotesTabPanel({ contact, notes, onAddNote, onAddTask, onDeleteNo
 
   const handleShareWhatsApp = (body: string) => {
     if (!waPhone) return;
-    window.open(buildWhatsAppLink(waPhone, body), "_blank");
+    window.open(buildWhatsAppLink({ to: waPhone, text: body, country: ownBusinessCountry() }), "_blank");
   };
 
   const handleCreateTaskFromNote = async (noteId: string, body: string) => {

@@ -6,7 +6,9 @@ import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-sco
 import { SupplierService } from './supplier.service';
 import { CreateConnectionDto, UpdateConnectionDto } from './dto';
 import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('suppliers', 'storefront')
 @Controller('supplier')
 @UseGuards(AuthGuard, BusinessGuard, CrmRateLimitGuard)
 export class SupplierController {

@@ -3,11 +3,12 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { assertMayExport, contactIdsEveryReceiverMayOpen } from '../../core/auth/receiver-reads';
-import type { ModuleLevelActor } from '../../core/auth/member-module-level';
+import { assertMemberModuleLevel, type ModuleLevelActor } from '../../core/auth/member-module-level';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CONNECTOR_EXPORT_READS, exportAudience } from '../../core/connectors/connector-exports';
 import { QuickbooksConnector } from '../../core/connectors/implementations/quickbooks.connector';
 import { XeroConnector } from '../../core/connectors/implementations/xero.connector';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
 type AccountingProvider = 'quickbooks' | 'xero';
 type AccountingRequest = { user?: ModuleLevelActor };
@@ -30,7 +31,13 @@ const NOT_IN_VIEW = 'Not sent: the contact is outside the view of the member pus
  *     sends only the records every receiver may open: the member pushing and the member who bound the
  *     account (exportAudience; contactIdsEveryReceiverMayOpen). A record outside that view is answered
  *     as not sent, with why.
+ *
+ * SWP-CENSUS-HIDDEN review repair (SEC-HID-1; owner ruling D-181, connectorauth: only a member with settings admin
+ * connects, syncs or tests a connector): a push to QuickBooks or Xero is a sync, so it also needs settings admin,
+ * checked first in the handler (the route keeps its revenue write; the export and receiver checks follow). A member
+ * with revenue write and no settings access had pushed invoices and customers to the bound account.
  */
+@HiddenModuleWrites('accounting_sync', 'revenue')
 @Controller('accounting')
 @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
 export class AccountingController {
@@ -93,6 +100,7 @@ export class AccountingController {
   @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/invoices/push')
   async pushInvoice(@Param('businessId') businessId: string, @Body() body: { invoiceIds: string[] }, @Req() req?: AccountingRequest) {
+    await assertMemberModuleLevel(this.prisma, businessId, req?.user, 'settings', 'admin');
     const ids = (body?.invoiceIds ?? []).filter((id): id is string => typeof id === 'string' && id.length > 0);
     if (ids.length === 0) throw new BadRequestException('invoiceIds required');
     const resolved = await this.resolveProvider(businessId);
@@ -124,6 +132,7 @@ export class AccountingController {
   @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/customers/push')
   async pushCustomers(@Param('businessId') businessId: string, @Body() body: { contactIds?: string[] }, @Req() req?: AccountingRequest) {
+    await assertMemberModuleLevel(this.prisma, businessId, req?.user, 'settings', 'admin');
     const resolved = await this.resolveProvider(businessId);
     if (!resolved) throw new ForbiddenException('No accounting provider is connected');
     await assertMayExport(this.prisma, businessId, req?.user, CONNECTOR_EXPORT_READS[resolved.provider], `pushing customers to ${resolved.provider}`);

@@ -1180,3 +1180,234 @@ describe('R0-09f D-11 static guard: every write of an owner-only Business field 
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// BIZ-SETTINGS-ADMIN-DOOR (owner ruling D-150 'hubs'): the owner-or-admin door
+// ---------------------------------------------------------------------------
+
+/**
+ * BIZ-SETTINGS-ADMIN-DOOR. Owner ruling D-150 ('hubs') adopts the product-audit
+ * Settings hub text: the Advanced CRM switch and the other advanced depth
+ * choices are a server-side business setting that only the owner or an admin
+ * can change. Two of the three v1 settings keys of Business.metaData
+ * (core/prisma/business-meta.ts BUSINESS_SETTINGS_META_KEYS: sells,
+ * advancedCrm, depth), advancedCrm and depth, get a second door beside the
+ * owner-only profile PATCH: PATCH /identity/businesses/:businessId/
+ * advanced-settings, IdentityService.updateAdvancedSettings, open to the
+ * owner or an ADMIN holding settings admin. What the business sells stays
+ * owner-only: D-11 lists 'what you sell' in the business profile.
+ *
+ * WHAT STAYS EXACT: sells, advancedCrm and depth stay UpdateBusinessDto
+ * properties, so OWNER_COLUMNS holds them owner-only on the profile PATCH
+ * (D11W-02 and D11W-03 keep that door's entry, PROFILE_PATCH_WRITER, behind
+ * assertBusinessOwner). The new route takes no UpdateBusinessDto, so that
+ * list does not widen to it, and the door's writer names its two keys as
+ * literal metaData keys, which OWNER_COLUMNS and OWNER_META do not hold:
+ * D11W-02 does not see it, and SETTINGS_ADMIN_WRITES is its entry instead.
+ *
+ * WHAT D11W-11 REQUIRES: every writer the reader finds naming
+ * metaData.advancedCrm, metaData.depth or metaData.sells as a literal key is
+ * in SETTINGS_ADMIN_WRITES with exactly those keys, and every entry still
+ * matches a writer; an entry writes nothing else this guard tracks (no
+ * owner-only column, no owner-only metaData key, no metaData.sells, nothing
+ * opaque); it is reached only through one of its named checks on every path
+ * the reader resolves; each check implements the owner-or-settings-admin rule
+ * (the owner rule through isBusinessOwnerMember with the SUPER_ADMIN bypass,
+ * else a membership whose role is 'ADMIN' and whose settings level, read by
+ * ModuleScopeGuard's rule memberModuleLevel, is 'admin'; no Business.ownerId
+ * on its chain); and the route hands the service the body as sent (declared
+ * Record<string, unknown>, no UpdateBusinessDto and no DTO class the
+ * whitelist pipe would strip a key with) with the request's principal.
+ * Behaviour is proven on a real database by
+ * test/business-v1-settings.integration.test.ts ([V63E-A04], [V63E-AD01..AD09]).
+ */
+const SETTINGS_ADMIN_META_KEYS = ['advancedCrm', 'depth'];
+/** The settings key that stays owner-only (D-11): the profile PATCH is its one door. */
+const SETTINGS_OWNER_META_KEY = 'sells';
+const ADMIN_DOOR_WRITER = 'modules/identity/identity.service.ts#IdentityService.updateAdvancedSettings';
+const ADMIN_DOOR_ROUTE = 'businesses/:businessId/advanced-settings';
+const BUSINESS_META_FILE = join(SRC, 'core/prisma/business-meta.ts');
+const IDENTITY_CONTROLLER_FILE = join(SRC, 'modules/identity/identity.controller.ts');
+
+type SettingsAdminEntry = { writes: string[]; guards: string[]; why: string };
+
+/** Every writer of an owner-or-admin settings key (and, as a refusal, of metaData.sells outside the profile PATCH). */
+const SETTINGS_ADMIN_WRITES: Record<string, SettingsAdminEntry> = {
+  [ADMIN_DOOR_WRITER]: {
+    writes: ['metaData.advancedCrm', 'metaData.depth'],
+    guards: ['assertAdvancedSettingsWriter'],
+    why: 'BIZ-SETTINGS-ADMIN-DOOR (D-150): PATCH /identity/businesses/:businessId/advanced-settings. updateAdvancedSettings runs assertAdvancedSettingsWriter (the owner, an ADMIN with settings admin, or SUPER_ADMIN) first, then checks the body (advancedCrm and depth only), then writes under lockBusinessMeta with its audit row.',
+  },
+};
+
+/** The settings keys (metaData.<key>) a writer names as literal keys. */
+const SETTINGS_META = new Set([...SETTINGS_ADMIN_META_KEYS, SETTINGS_OWNER_META_KEY].map((k) => `metaData.${k}`));
+
+function settingsAdminWritesByFn(): Map<string, string[]> {
+  const by = new Map<string, Set<string>>();
+  for (const w of A.writes) {
+    const named = w.keys.filter((k) => SETTINGS_META.has(k));
+    if (named.length === 0) continue;
+    const s = by.get(w.fn) ?? new Set<string>();
+    for (const k of named) s.add(k);
+    by.set(w.fn, s);
+  }
+  return new Map([...by].map(([k, v]) => [k, [...v].sort()]));
+}
+
+/**
+ * Whether every function named `name` implements the owner-or-settings-admin rule: the owner rule
+ * (it calls isBusinessOwnerMember and names 'SUPER_ADMIN'), else an ADMIN membership (it names the
+ * role 'ADMIN') at settings admin by ModuleScopeGuard's rule (it calls memberModuleLevel and names
+ * 'settings' and 'admin'); no Business.ownerId on its chain.
+ */
+function implementsSettingsAdminRule(name: string, fns: Map<string, Fn> = A.fns): boolean {
+  const decls = [...fns.values()].filter((f) => f.name === name);
+  if (decls.length === 0) return false;
+  return decls.every((f) => {
+    if (restatesOwnerArm(f.name, fns)) return false;
+    const called = calledNames(f);
+    return called.has(OWNER_HELPER) && namesLiteral(f, 'SUPER_ADMIN')
+      && namesLiteral(f, 'ADMIN') && called.has('memberModuleLevel') && namesLiteral(f, 'settings') && namesLiteral(f, 'admin');
+  });
+}
+
+/** The string elements of a top-level `const <name> = [...]` in a file, or undefined. */
+function stringArrayConstOf(file: string, name: string): string[] | undefined {
+  const sf = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  let out: string[] | undefined;
+  forEachDeep(sf, (n) => {
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === name && n.initializer) {
+      const init = unwrap(n.initializer);
+      if (ts.isArrayLiteralExpression(init)) out = init.elements.filter((e): e is ts.StringLiteral => ts.isStringLiteral(e)).map((e) => e.text);
+    }
+  });
+  return out;
+}
+
+describe('BIZ-SETTINGS-ADMIN-DOOR: the owner-or-admin door for advancedCrm and depth is accounted for and sits behind its named check (owner ruling D-150); sells stays owner-only (D-11)', () => {
+  it('[D11W-11] RED-BEFORE (BIZ-SETTINGS-ADMIN-DOOR): every writer naming metaData.advancedCrm, metaData.depth or metaData.sells is in SETTINGS_ADMIN_WRITES with exactly those keys and writes nothing else this guard tracks; IdentityService.updateAdvancedSettings is that writer, reached only through assertAdvancedSettingsWriter, which implements the owner-or-settings-admin rule; the route takes no UpdateBusinessDto; the profile PATCH keeps all three owner-only', () => {
+    // The vocabulary: the door's keys are the settings keys without sells.
+    expect(stringArrayConstOf(BUSINESS_META_FILE, 'BUSINESS_SETTINGS_META_KEYS')).toEqual([SETTINGS_OWNER_META_KEY, ...SETTINGS_ADMIN_META_KEYS]);
+    expect(stringArrayConstOf(BUSINESS_META_FILE, 'BUSINESS_ADVANCED_SETTINGS_KEYS'), 'business-meta.ts declares the door\'s keys').toEqual(SETTINGS_ADMIN_META_KEYS);
+
+    // The profile PATCH keeps all three owner-only (D-11): UpdateBusinessDto properties, behind assertBusinessOwner.
+    for (const k of [SETTINGS_OWNER_META_KEY, ...SETTINGS_ADMIN_META_KEYS]) expect(OWNER_COLUMNS.has(k), `${k} is owner-only on the profile PATCH`).toBe(true);
+    expect(OWNER_WRITES[PROFILE_PATCH_WRITER]?.kind).toBe('owner');
+    expect((OWNER_WRITES[PROFILE_PATCH_WRITER] as OwnerEntry).guards).toContain('assertBusinessOwner');
+
+    // Every writer naming a settings key is listed with exactly those keys; every entry matches a writer.
+    const found = settingsAdminWritesByFn();
+    const unlisted = [...found].filter(([fn]) => !SETTINGS_ADMIN_WRITES[fn]).map(([fn, w]) => `${fn} writes ${w.join(', ')}`);
+    expect(unlisted, 'a writer of a v1 settings key that no entry accounts for').toEqual([]);
+    const drifted = Object.entries(SETTINGS_ADMIN_WRITES)
+      .filter(([fn, e]) => JSON.stringify(found.get(fn) ?? []) !== JSON.stringify([...e.writes].sort()))
+      .map(([fn, e]) => `${fn}: recorded ${JSON.stringify([...e.writes].sort())}, found ${JSON.stringify(found.get(fn) ?? [])}`);
+    expect(drifted, 'an entry whose writer moved, vanished or writes other settings keys').toEqual([]);
+    expect(Object.keys(SETTINGS_ADMIN_WRITES)).toEqual([ADMIN_DOOR_WRITER]);
+
+    for (const [fn, e] of Object.entries(SETTINGS_ADMIN_WRITES)) {
+      // It writes nothing else this guard tracks: no sells, no owner-only column or metaData key, nothing opaque.
+      const keys = [...new Set(A.writes.filter((w) => w.fn === fn).flatMap((w) => w.keys))].sort();
+      expect(keys, `${fn} writes metaData with the door's keys only`).toEqual(['metaData', ...e.writes].sort());
+      expect(e.writes.every((k) => SETTINGS_ADMIN_META_KEYS.map((x) => `metaData.${x}`).includes(k)), `${fn}: no metaData.${SETTINGS_OWNER_META_KEY}`).toBe(true);
+      // Reached only through one of its checks, on every resolved path.
+      expect(unguardedPaths(fn, e.guards).paths, `${fn}: a path with no ${e.guards.join(' or ')}`).toEqual([]);
+      // Each check implements the owner-or-settings-admin rule.
+      for (const g of e.guards) expect(implementsSettingsAdminRule(g), `${g} implements the owner-or-settings-admin rule`).toBe(true);
+    }
+
+    // The predicate is not vacuous: on synthetic checks it accepts the full rule and refuses each one missing a part.
+    const probe = probeFns(`
+      async function isBusinessOwnerMember(db: any, businessId: string, userId: string) { return false; }
+      function memberModuleLevel(m: any, module: string) { return 'none'; }
+      class ZzAdminDoorProbeService {
+        constructor(private readonly prisma: any) {}
+        private async membership(businessId: string, userId: string) {
+          return this.prisma.client.membership.findUnique({ where: { userId_businessId: { userId, businessId } } });
+        }
+        async assertFullRule(businessId: string, actor: { id: string; role?: string }) {
+          if (actor.role === 'SUPER_ADMIN') return 'SUPER_ADMIN';
+          if (await isBusinessOwnerMember(this.prisma.client, businessId, actor.id)) return 'OWNER';
+          const m = await this.membership(businessId, actor.id);
+          if (m?.role === 'ADMIN' && memberModuleLevel(m, 'settings') === 'admin') return 'ADMIN';
+          throw new Error('no');
+        }
+        async assertOwnerOnly(businessId: string, actor: { id: string; role?: string }) {
+          if (actor.role === 'SUPER_ADMIN') return 'SUPER_ADMIN';
+          if (await isBusinessOwnerMember(this.prisma.client, businessId, actor.id)) return 'OWNER';
+          throw new Error('no');
+        }
+        async assertAnyAdminRole(businessId: string, actor: { id: string; role?: string }) {
+          if (actor.role === 'SUPER_ADMIN') return 'SUPER_ADMIN';
+          if (await isBusinessOwnerMember(this.prisma.client, businessId, actor.id)) return 'OWNER';
+          const m = await this.membership(businessId, actor.id);
+          if (m?.role === 'ADMIN') return 'ADMIN';
+          throw new Error('no');
+        }
+        async assertAnyRoleAtSettingsAdmin(businessId: string, actor: { id: string; role?: string }) {
+          if (actor.role === 'SUPER_ADMIN') return 'SUPER_ADMIN';
+          if (await isBusinessOwnerMember(this.prisma.client, businessId, actor.id)) return 'OWNER';
+          const m = await this.membership(businessId, actor.id);
+          if (memberModuleLevel(m, 'settings') === 'admin') return 'MEMBER';
+          throw new Error('no');
+        }
+        async assertNoBypass(businessId: string, actor: { id: string; role?: string }) {
+          if (await isBusinessOwnerMember(this.prisma.client, businessId, actor.id)) return 'OWNER';
+          const m = await this.membership(businessId, actor.id);
+          if (m?.role === 'ADMIN' && memberModuleLevel(m, 'settings') === 'admin') return 'ADMIN';
+          throw new Error('no');
+        }
+        async assertRestatedOwnerArm(businessId: string, actor: { id: string; role?: string }) {
+          if (actor.role === 'SUPER_ADMIN') return 'SUPER_ADMIN';
+          const owned = await this.prisma.client.business.findFirst({ where: { id: businessId, ownerId: actor.id } });
+          if (owned || await isBusinessOwnerMember(this.prisma.client, businessId, actor.id)) return 'OWNER';
+          const m = await this.membership(businessId, actor.id);
+          if (m?.role === 'ADMIN' && memberModuleLevel(m, 'settings') === 'admin') return 'ADMIN';
+          throw new Error('no');
+        }
+      }
+    `);
+    const verdicts = Object.fromEntries([...probe.values()].filter((f) => f.className && f.name.startsWith('assert')).map((f) => [f.name, implementsSettingsAdminRule(f.name, probe)]));
+    expect(verdicts).toEqual({
+      assertFullRule: true,
+      assertOwnerOnly: false,
+      assertAnyAdminRole: false,
+      assertAnyRoleAtSettingsAdmin: false,
+      assertNoBypass: false,
+      assertRestatedOwnerArm: false,
+    });
+
+    // The route: PATCH businesses/:businessId/advanced-settings takes no UpdateBusinessDto; its body is declared
+    // Record<string, unknown> (tsc emits Object, which the global whitelist pipe hands on as sent, so the service
+    // sees and refuses a key the door does not take), and it hands the service the request's principal.
+    const text = readFileSync(IDENTITY_CONTROLLER_FILE, 'utf8');
+    const sf = ts.createSourceFile(IDENTITY_CONTROLLER_FILE, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const handlers: ts.MethodDeclaration[] = [];
+    forEachDeep(sf, (n) => {
+      if (!ts.isMethodDeclaration(n)) return;
+      const routed = (ts.getDecorators(n) ?? []).some((d) => {
+        const call = d.expression;
+        return ts.isCallExpression(call) && ts.isIdentifier(call.expression) && call.expression.text === 'Patch'
+          && call.arguments.length === 1 && ts.isStringLiteralLike(call.arguments[0]) && call.arguments[0].text === ADMIN_DOOR_ROUTE;
+      });
+      if (routed) handlers.push(n);
+    });
+    expect(handlers.length, `one @Patch('${ADMIN_DOOR_ROUTE}') handler`).toBe(1);
+    const handler = handlers[0];
+    const decoratorOf = (p: ts.ParameterDeclaration) => (ts.getDecorators(p) ?? []).map((d) => {
+      const call = d.expression;
+      return ts.isCallExpression(call) && ts.isIdentifier(call.expression) ? call.expression.text : '';
+    });
+    for (const p of handler.parameters) expect(p.type?.getText(sf), 'the door takes no UpdateBusinessDto').not.toBe('UpdateBusinessDto');
+    const body = handler.parameters.find((p) => decoratorOf(p).includes('Body'));
+    expect(body?.type?.getText(sf), 'the body is declared Record<string, unknown>').toBe('Record<string, unknown>');
+    const principal = handler.parameters.find((p) => decoratorOf(p).includes('CurrentUser'));
+    expect(principal && ts.isIdentifier(principal.name), 'the handler takes the request principal (@CurrentUser)').toBe(true);
+    const calls: ts.CallExpression[] = [];
+    forEachDeep(handler, (n) => { if (ts.isCallExpression(n) && calleeName(n) === 'updateAdvancedSettings') calls.push(n); });
+    expect(calls.length, 'the handler calls updateAdvancedSettings once').toBe(1);
+    const args = calls[0].arguments.map((a) => unwrap(a).getText(sf));
+    expect(args[2], 'with the request principal as the actor').toBe((principal!.name as ts.Identifier).text);
+  });
+});

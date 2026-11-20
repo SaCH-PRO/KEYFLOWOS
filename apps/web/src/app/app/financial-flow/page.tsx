@@ -14,7 +14,7 @@ import { apiGet } from "@/lib/api";
 import { fetchReserveBuckets, createReserveBucket, deleteReserveBucket, type ReserveBucket } from "@/lib/api/finance";
 import { fetchRoleFlowQueue, resolveFlowSignal, type FlowSignal } from "@/lib/api/flow-signal";
 import { apiPost } from "@/lib/api";
-import { moduleReadRefusal } from "@/lib/module-access";
+import { moduleReadRefusal, moduleWriteRefusal } from "@/lib/module-access";
 
 interface FinancialOverview {
   cashBalance: number;
@@ -62,6 +62,9 @@ export default function FinancialFlowPage() {
   const [signals, setSignals] = useState<FlowSignal[]>([]);
   const [signalsLoading, setSignalsLoading] = useState(false);
   const [actingId, setActingId] = useState<string | null>(null);
+  // SWP-CENSUS-HIDDEN review repair (COR-HID-1): what the queue says when the reminder or the clear is refused. The
+  // api client answers a refusal as { data: null, error, status } and does not throw.
+  const [queueError, setQueueError] = useState<string | null>(null);
 
   const loadSignals = useCallback(async () => {
     if (!businessId || !roleKey) return;
@@ -83,9 +86,19 @@ export default function FinancialFlowPage() {
     const invoiceId = signal.payload?.invoiceId as string | undefined;
     if (!invoiceId) return;
     setActingId(signal.id);
+    setQueueError(null);
     try {
-      await apiPost({ path: `/commerce/businesses/${businessId}/invoices/${invoiceId}/send-reminder`, body: {} });
-      await resolveFlowSignal(businessId, signal.id);
+      const sent = await apiPost({ path: `/commerce/businesses/${businessId}/invoices/${invoiceId}/send-reminder`, body: {} });
+      const notSent = moduleWriteRefusal(sent, "revenue", "send invoice reminders");
+      if (notSent) {
+        // Nothing went out: the item stays, and is not cleared.
+        setQueueError(notSent);
+        return;
+      }
+      const cleared = await resolveFlowSignal(businessId, signal.id);
+      const notCleared = moduleWriteRefusal(cleared, "revenue", "clear items from this queue");
+      // The reminder went out: say so, so it is not sent again from the item that stays.
+      if (notCleared) setQueueError(`The reminder was sent, but this item could not be cleared. ${notCleared}`);
       await loadSignals();
     } finally {
       setActingId(null);
@@ -502,6 +515,12 @@ export default function FinancialFlowPage() {
               Refresh
             </button>
           </div>
+
+          {queueError && (
+            <p className="text-xs text-amber-500" role="alert">
+              {queueError}
+            </p>
+          )}
 
           {signalsLoading ? (
             <div className="space-y-2">

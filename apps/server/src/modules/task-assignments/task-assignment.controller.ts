@@ -20,7 +20,9 @@ import { AssignTaskDto } from './dto/assign-task.dto';
 import { BulkAssignDto } from './dto/bulk-assign.dto';
 import { TransferAssignmentsDto } from './dto/transfer-assignments.dto';
 import { UnassignTaskDto } from './dto/unassign-task.dto';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('projects', 'team')
 @Controller()
 @UseGuards(AuthGuard, BusinessGuard, RateLimitGuard)
 export class TaskAssignmentController {

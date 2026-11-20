@@ -2,7 +2,9 @@ import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, UseGuards } 
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { PaymentReceiptService, type CreateReceiptInput, type UpdateReceiptInput } from './payment-receipt.service';
+import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+@HiddenModuleWrites('continental_ops', 'revenue')
 @Controller('continental-ops/businesses/:businessId/receipts')
 @UseGuards(AuthGuard, BusinessGuard)
 export class ReceiptController {
