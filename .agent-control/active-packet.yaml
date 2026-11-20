@@ -10,7 +10,7 @@ ack_comment_id: 7051421733
 source_main: 8c11a847c7bf1841f46c529055e033e24f4191f8
 implementation_branch: pkt/V1-DIRECTIVE-RECORD
 integration_branch: int/v1-base   # cut from main 8c11a847 when the first finished packet joins it
-state: IMPLEMENTING
+state: READY_TO_MERGE
 health: GREEN
 scope_changed: false
 production_touched: false

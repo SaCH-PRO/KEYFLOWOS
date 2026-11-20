@@ -5,9 +5,9 @@ directive_comment_id: 7051296684
 ack_message_id: CC-ACK-V1-STANDING-001
 ack_comment_id: 7051421733
 source_main: 8c11a847c7bf1841f46c529055e033e24f4191f8
-source_head: ""   # set at RETURN: the semantic head of pkt/V1-DIRECTIVE-RECORD
+source_head: d0310ec9fbc67a08aaf5f8064013d6d25900e4bb   # the semantic head; this metadata commit follows it
 implementation_branch: pkt/V1-DIRECTIVE-RECORD
-state: IMPLEMENTING
+state: READY_TO_MERGE
 health: GREEN
 scope_changed: false
 production_touched: false
@@ -30,7 +30,10 @@ tests:
   commands:
     - "git diff --stat origin/main..HEAD   # docs-only"
     - "node scripts/proof-admission/run-manifests.mjs --skip-build   # unchanged at the head"
-  passed: []
+  passed:
+    - "git diff --stat origin/main..d0310ec9: 5 files, all in allowed_scope, docs and .agent-control only"
+    - "run-manifests at d0310ec9 (cloud container, local Postgres 16 + pgvector, Redis): 122 test files passed; 44 of 44 manifests SATISFIED, 0 not, 2 resource manifests skipped; vitest exit 0; exact-head receipt"
+    - "secret-shape scan of the diff: nothing found"
   failed: []
   skipped: []
 negative_controls:
@@ -42,6 +45,7 @@ rollback_floor:
   - revert the packet commit; no runtime effect
 open_questions: []
 evidence_refs:
+  - "pkt/V1-DIRECTIVE-RECORD at d0310ec9 (semantic head)"
   - "#80 comment 7051296684 (directive)"
   - "#80 comment 7051421733 (ACK)"
   - "cloud-environment proof at 8c11a847: 122 test files passed, 44 of 44 manifests SATISFIED, Release 0 MET"
