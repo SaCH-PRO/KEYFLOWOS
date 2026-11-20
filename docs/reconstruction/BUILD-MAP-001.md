@@ -1226,10 +1226,22 @@ Ruled by the owner on 2026-11-13: "All 41 recommended please", and every decisio
 | D-219 | KEY tools for the hidden modules: Leave them to KEY-TOOL-ALLOWLIST and KEY-TOOL-DOMAIN-HIDE; no Release 0 amendment for the census. (`hiddenkeytools`) | SWP-CENSUS-HIDDEN, KEY-TOOL-ALLOWLIST, KEY-TOOL-DOMAIN-HIDE |
 | D-220 | Where KEY's own observations are kept: In business_events, through the corrected KEY event writer. (`cortexclaims`) | FU-KEY-EVENT-COLUMNS |
 | D-221 | The follow-ups the reviews found: Add all of them to the plan. (`followups`) | FU-IDENTITY-FINANCE-COLUMNS, FU-CONTACT-AUDIT-RESIDUAL, FU-MERGE-CONTACTS-UNIQUE, FU-MEMORY-COPIES-REWRITE, FU-KEY-EVENT-COLUMNS, FU-UNIT-GUARD-CI, FU-OVERLAY-LAYER-TABLE, FU-PROVIDER-ERROR-HYGIENE and 4 more |
+| D-222 | The control plane for v1 (standing owner directive OWNER-DIR-V1-STANDING-001, #80 comment 7051296684): The owner releases v1 steps 3 to 8 to Claude Code as a standing packet series: the handoff's section 2 rules unchanged; a security-tenancy and a correctness-regression review per packet from an independent agent session; one PR per wave, the owner merges; a recommended ruling unanswered after 48 hours is taken as PROVISIONAL and may be reversed; the per-packet ChatGPT DIRECTIVE is retired for v1 and ChatGPT review is advisory; supersedes CG-HOLD-CLAUDE-CAPACITY-20261106-001. (`v1standing`) | V1-DIRECTIVE-RECORD, every v1 packet |
+| D-223 | A5, the Release 0 case that pins a `+1 868 555 0100` create to that spelling: Approve the amendment, so numbers typed with `+` are also stored in E.164; the r0_register row is added by the packet that changes the case. (`e164plus`) | FU-PHONE-COUNTRY-DUPLICATES |
+| D-224 | O1, whose KEY history a position's phone unlocks: Confirmed: the holder's own history, only when it is the holder's own account phone and no other member's. (`positionphone`) | FU-KEY-MEMORY-MONEY-SIGHT |
+| D-225 | O2, what a memberless bridge turn perceives: Confirmed: the modules the JobRole grants, capped by any phone member's scopes, never contacts or money. (`memberlessmodules`) | FU-KEY-MEMORY-MONEY-SIGHT |
+| D-226 | O3, what a memberless turn sees of a proposal: Confirmed: its action, status and risk level only. (`memberlessproposal`) | FU-KEY-MEMORY-MONEY-SIGHT |
+| D-227 | O4, an unclassified KEY event type: Confirmed: it fails closed. (`eventfailclosed`) | FU-KEY-EVENT-COLUMNS, FU-KEY-MEMORY-MONEY-SIGHT |
+| D-228 | O5, journey C4's doors: Confirmed: built by SWP-CONTACT-DETAIL, TODAY-4BLOCK and SWP-INV-DETAIL; the journey stays strict. (`c4doors`) | SWP-CONTACT-DETAIL, TODAY-4BLOCK, SWP-INV-DETAIL |
+| D-229 | O6, "Refer / Link" in v1: Confirmed: hidden. (`referlinkhide`) | NAV-B-HIDE |
+| D-230 | O7, a local number in the import preview: Confirmed: read under the business country. (`importlocalnumber`) | FU-PHONE-COUNTRY-DUPLICATES |
+| D-231 | O8, data-quality mass assignment: Confirmed as the P0 packet FU-DATAQUALITY-MASS-ASSIGN, already merged. (`massassign`) | FU-DATAQUALITY-MASS-ASSIGN |
 
 D-191 to D-203 were ruled on 2026-11-16 ("All recommended"): the four Team-permission questions from the SWEEP-P0 round-3 rechecks and the nine questions from v1 wave 1. D-195 and D-196 approve the Release 0 amendments recorded for W1F-KEYCHAT-OWNSESSION and W1F-STORE-STRIPE-R0 in the plan's r0_register.
 
 D-204 to D-221 were ruled on 2026-11-16 ("all recommended and best"): the questions from v1 wave 2 (#211) and wave 2b. D-204, D-205, D-206 and D-207 approve Release 0 amendments recorded in the plan's r0_register; D-206 is retroactive, because its change merged in #211 before it was ruled. D-221 adds the reviews' follow-up packets to the plan (V1-PLAN-RECUT.json).
+
+D-222 to D-231 were ruled on 2026-11-20. D-222 records the owner's standing directive for v1 (#80 comment 7051296684), under which Claude Code builds the remaining v1 packets without a per-packet ChatGPT directive. D-223 to D-231 are the owner's answers ("A5 approve, O1 to O8 confirm") to the questions in `V1-HANDOFF-2026-11-20.md` section 6; D-223 approves a Release 0 amendment, whose r0_register row is added by FU-PHONE-COUNTRY-DUPLICATES when it changes the case.
 
 ---
 
