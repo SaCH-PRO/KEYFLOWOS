@@ -140,7 +140,7 @@ jobs:
 
       - name: Publish actionable wake event
         if: fromJSON(steps.event.outputs.json).actionable == true
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           EVENT_JSON: ${{ steps.event.outputs.json }}
           DECISION_JSON: ${{ steps.decide.outputs.json }}
