@@ -578,21 +578,6 @@
       "packet": "V1-61 (W11-STORE-OWN-PAYMENT-KEYS)"
     },
     {
-      "prefix": "v70b_",
-      "owner": "apps/server/test/ai-memory-copies.integration.test.ts",
-      "packet": "V1-70 (W1F-MEMORY-COPIES)"
-    },
-    {
-      "prefix": "v70c_",
-      "owner": "apps/server/test/perception-module-scope.integration.test.ts",
-      "packet": "V1-70 (W1F-PERCEPTION-MODULE-SCOPE)"
-    },
-    {
-      "prefix": "v70h_",
-      "owner": "apps/server/test/key-cortex-conscious-answer.integration.test.ts",
-      "packet": "V1-70 (W1F-KEY-EVIDENCE-WRITE)"
-    },
-    {
       "prefix": "v81a_",
       "owner": "apps/server/test/d46-commerce-writes.integration.test.ts",
       "packet": "V1-81 (FOLLOW3-A1-D46-COMMERCE-WRITES)"
@@ -978,14 +963,9 @@
       "packet": "V1-63 (BIZ-SETTINGS-SERVER)"
     },
     {
-      "prefix": "v63f_",
-      "owner": "apps/server/test/orderby-multikey-routes.integration.test.ts",
-      "packet": "V1-63 (SWP-ORDERBY-SINGLE-KEY)"
-    },
-    {
-      "prefix": "v63g_",
-      "owner": "apps/server/test/security-audit-truth.integration.test.ts",
-      "packet": "V1-63 (SWP-SEC-AUDIT-TRUTH)"
+      "prefix": "v63m_",
+      "owner": "apps/server/test/business-profile-save.integration.test.ts",
+      "packet": "V1-63 (SWP-PROFILE-TEAMSIZE)"
     },
     {
       "prefix": "zz_credit_",
@@ -1031,6 +1011,31 @@
       "prefix": "v63y_",
       "owner": "apps/server/test/provider-outage-connect.integration.test.ts",
       "packet": "V1-63 (W11-PROVIDER-OUTAGE-CONNECT)"
+    },
+    {
+      "prefix": "v70b_",
+      "owner": "apps/server/test/ai-memory-copies.integration.test.ts",
+      "packet": "V1-70 (W1F-MEMORY-COPIES)"
+    },
+    {
+      "prefix": "v70c_",
+      "owner": "apps/server/test/perception-module-scope.integration.test.ts",
+      "packet": "V1-70 (W1F-PERCEPTION-MODULE-SCOPE)"
+    },
+    {
+      "prefix": "v70h_",
+      "owner": "apps/server/test/key-cortex-conscious-answer.integration.test.ts",
+      "packet": "V1-70 (W1F-KEY-EVIDENCE-WRITE)"
+    },
+    {
+      "prefix": "v63f_",
+      "owner": "apps/server/test/orderby-multikey-routes.integration.test.ts",
+      "packet": "V1-63 (SWP-ORDERBY-SINGLE-KEY)"
+    },
+    {
+      "prefix": "v63g_",
+      "owner": "apps/server/test/security-audit-truth.integration.test.ts",
+      "packet": "V1-63 (SWP-SEC-AUDIT-TRUTH)"
     },
     {
       "prefix": "v63i_",
