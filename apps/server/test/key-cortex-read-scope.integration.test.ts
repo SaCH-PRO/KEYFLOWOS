@@ -1073,9 +1073,9 @@ describe('W11-CORTEX-SESSION-SNAPSHOT-SCOPE (KC-SEC-3, D-57, D-100): POST cortex
     paid: `${P}s_inv_paid`,
   };
   /** The PAID invoice total the real snapshot sums (keyMetrics.totalRevenue). */
-  const PAID_TOTAL = 4321;
+  const PAID_TOTAL = 43219.37;
   /** The money figures the chat pipeline adds to the snapshot from the V2 context (enrichSnapshotFromV2). */
-  const OUTSTANDING = 8765;
+  const OUTSTANDING = 87653.19;
   let app3: any;
   let createdSessions = 0;
 
@@ -1173,6 +1173,9 @@ describe('W11-CORTEX-SESSION-SNAPSHOT-SCOPE (KC-SEC-3, D-57, D-100): POST cortex
     await db.invoice.create({
       data: { id: S.paid, businessId: S.biz, contactId: `${P}s_c_client`, invoiceNumber: `${P}S-1`, total: PAID_TOTAL, subtotal: PAID_TOTAL, status: 'PAID' },
     });
+    await db.invoice.create({
+      data: { id: `${P}s_inv_sent`, businessId: S.biz, contactId: `${P}s_c_client`, invoiceNumber: `${P}S-2`, total: 50, subtotal: 50, status: 'SENT' },
+    });
   }, 180_000);
 
   afterAll(async () => {
@@ -1183,6 +1186,9 @@ describe('W11-CORTEX-SESSION-SNAPSHOT-SCOPE (KC-SEC-3, D-57, D-100): POST cortex
   const noMoney = (snapshot: any) => {
     expect(snapshot, 'a snapshot shape still answers').toBeTruthy();
     for (const k of MONEY_KEYS) expect(snapshot.keyMetrics?.[k], `keyMetrics.${k}`).toBeUndefined();
+    // SEC review of this packet (finding 2): the count of unpaid invoices is a receivables
+    // signal (D-100), withheld as ai-advisor and the business graph withhold overdue counts.
+    expect(snapshot, 'pendingInvoices').not.toHaveProperty('pendingInvoices');
     const text = JSON.stringify(snapshot);
     for (const figure of [String(PAID_TOTAL), String(OUTSTANDING)]) expect(text).not.toContain(figure);
   };
@@ -1214,6 +1220,7 @@ describe('W11-CORTEX-SESSION-SNAPSHOT-SCOPE (KC-SEC-3, D-57, D-100): POST cortex
     const res = await postSession(user);
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect(res.body.contextSnapshot.keyMetrics.totalRevenue).toBe(PAID_TOTAL);
+    expect(res.body.contextSnapshot.pendingInvoices).toBe(1);
   });
 
   it('KC-SEC-3 control: a user with no membership is refused and is answered no snapshot', async () => {
