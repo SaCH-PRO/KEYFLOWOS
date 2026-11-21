@@ -124,7 +124,11 @@ export class CrmListsService {
       const source = (list.rules ?? list.filters) as Record<string, unknown> | null;
       if (!source) return { contacts: [], total: 0, truncated: false, limit: SMART_LIST_MAX_RESULTS };
 
-      const where = buildContactWhere(input.businessId, source as ContactFilterPrimitives);
+      // D-211 (FU-PHONE-COUNTRY-DUPLICATES): a phone in the rule's search is read in the business's country only.
+      const phoneCountry = typeof source.search === 'string' && source.search.trim()
+        ? (await this.prisma.client.business.findUnique({ where: { id: input.businessId }, select: { country: true } }))?.country ?? null
+        : null;
+      const where = buildContactWhere(input.businessId, source as ContactFilterPrimitives, { phoneCountry });
 
       const minRevenue = typeof source.minRevenue === 'number' ? source.minRevenue : 0;
       if (minRevenue > 0) {
