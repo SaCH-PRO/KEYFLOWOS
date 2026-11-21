@@ -38,8 +38,10 @@ export const NON_MONEY_SNAPSHOT_METRICS: ReadonlySet<string> = new Set([
 /**
  * The snapshot as a viewer may read it over HTTP (POST cortex/sessions, the
  * contextUsed of POST cortex/chat): unchanged for a revenue reader; for anyone
- * else a copy whose keyMetrics keep only NON_MONEY_SNAPSHOT_METRICS. The genome,
- * activity, counts and team fields are not money and stay. The snapshot handed
+ * else a copy whose keyMetrics keep only NON_MONEY_SNAPSHOT_METRICS and without
+ * pendingInvoices. The genome, activity, project and team fields stay. Non-money
+ * metrics added to keyMetrics by enrichment (dna_*, genome counts) are withheld too
+ * until listed: the list fails closed. The snapshot handed
  * in is not changed (it may be the cached one).
  */
 export function snapshotForViewer<T extends CortexContextSnapshot | null | undefined>(
@@ -51,7 +53,10 @@ export function snapshotForViewer<T extends CortexContextSnapshot | null | undef
   for (const [name, value] of Object.entries(snapshot.keyMetrics ?? {})) {
     if (NON_MONEY_SNAPSHOT_METRICS.has(name)) keyMetrics[name] = value;
   }
-  return { ...snapshot, keyMetrics } as T;
+  // pendingInvoices (the count of unpaid invoices) is a receivables signal (D-100):
+  // omitted, not zeroed, so the reader is not told there are none.
+  const { pendingInvoices: _withheld, ...rest } = snapshot;
+  return { ...rest, keyMetrics } as unknown as T;
 }
 
 @Injectable()

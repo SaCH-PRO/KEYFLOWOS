@@ -485,6 +485,9 @@ type CortexMemberRequest = BusinessGuardedRequest & {
  * so the handler signatures key-cortex-tenant-binding.spec.ts and the
  * real-database suites pin keep their first parameters; it refuses nothing
  * BusinessGuard admitted except a request with no user or no tenant.
+ * Routes: execute, query, batch, the flows run, and (W11-CORTEX-SESSION-SNAPSHOT-SCOPE)
+ * POST sessions and POST chat, which read it only to project the context snapshot
+ * for the viewer (viewerReadsRevenue, snapshotForViewer).
  */
 @Injectable()
 export class CortexMemberAuthorityGuard implements CanActivate {
