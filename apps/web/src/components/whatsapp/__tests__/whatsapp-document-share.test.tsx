@@ -220,10 +220,13 @@ describe("FU-WA-CONTACT-PHONE confirm step: Escape closes the step alone (COR-WA
     const onDocument = (event: KeyboardEvent) => {
       if (event.key === "Escape") underneath();
     };
-    let api: ReturnType<typeof useWhatsAppDocumentShare> | null = null;
+    const api: { share: ReturnType<typeof useWhatsAppDocumentShare>["share"] | null } = { share: null };
     function AsyncHarness() {
       const whatsApp = useWhatsAppDocumentShare();
-      api = whatsApp;
+      const { share: shareNow } = whatsApp;
+      React.useEffect(() => {
+        api.share = shareNow;
+      }, [shareNow]);
       return <>{whatsApp.dialog}</>;
     }
     render(<AsyncHarness />);
@@ -238,7 +241,7 @@ describe("FU-WA-CONTACT-PHONE confirm step: Escape closes the step alone (COR-WA
     document.addEventListener("keydown", onDocument);
     observer.observe(document.body, { childList: true, subtree: true });
     try {
-      await Promise.resolve().then(() => api!.share(share()));
+      await Promise.resolve().then(() => api.share!(share()));
       await waitFor(() => expect(pressed).toBe(true));
       await waitFor(() => expect(screen.queryByRole("dialog", { name: /whatsapp number/i })).toBeNull());
       expect(underneath).not.toHaveBeenCalled();
