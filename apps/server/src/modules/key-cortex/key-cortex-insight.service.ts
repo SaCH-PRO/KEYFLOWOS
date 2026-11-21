@@ -13,6 +13,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { ModelGatewayService } from '../ai/model-gateway.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
+import { CASH_NET_PAYMENT_WHERE, roundMoney } from '../commerce/invoice-workflow.service';
 import { BookingStatus, DealStatus, InvoiceStatus, Prisma } from '@prisma/client';
 import { CLIENT_STATUS, LEGACY_CLIENT_STATUS, LEGACY_DORMANT_STATUS } from '../crm/crm.constants';
 import { startOfMonth, startOfWeek, startOfDay, subDays, subMonths, subWeeks, format, differenceInDays } from 'date-fns';
@@ -924,18 +925,21 @@ export class KeyCortexInsightService {
         collectionIssues.push(`Collection rate is ${collectionRate}% — improve follow-up`);
       }
 
-      // Simple forecast — project next 30 days from the money received in the last 30
-      // (Payment.status is PENDING, SUCCESSFUL or FAILED; no writer records 'completed')
-      const last30Days = await this.prisma.client.payment.findMany({
+      // Simple forecast — project next 30 days from the cash received in the last 30, net of
+      // refunds (CASH_NET_PAYMENT_WHERE, the database form of balanceOfStoredRows, D-14).
+      // A SUCCESSFUL-only sum counted refunded money as received (BA-04); no writer records
+      // 'completed', the status main read before W11-CORTEX-INSIGHT-QUERIES.
+      const last30Days = await this.prisma.client.payment.aggregate({
         where: {
           businessId,
           createdAt: { gte: subDays(now, 30) },
-          status: 'SUCCESSFUL',
+          ...CASH_NET_PAYMENT_WHERE,
         },
-        select: { amount: true },
+        _sum: { amount: true },
+        _count: true,
       });
-      const avgDailyInflow = last30Days.length > 0
-        ? last30Days.reduce((s, p) => s + (p.amount || 0), 0) / 30
+      const avgDailyInflow = last30Days._count > 0
+        ? roundMoney(Number(last30Days._sum.amount ?? 0)) / 30
         : moneyIn / 30;
 
       const projectedInflow = Math.round(avgDailyInflow * 30);
