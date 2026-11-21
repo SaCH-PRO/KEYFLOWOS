@@ -1,0 +1,223 @@
+/**
+ * FU-KEY-CHAT-GENOME-MONEY-SIGHT (security review of W11-CORTEX-SESSION-SNAPSHOT-SCOPE, finding 1;
+ * D-128, D-100, D-57). A KEY chat turn (KeyCortexQueryPipelineService.processQuery, the POST cortex/chat
+ * body, and streamQuery, the SSE and WS key:chat streams) loads the business genome
+ * (KeyCortexGenomeContextService: cached per business, no viewer) and hands it, unprojected, to:
+ *   - the model prompt (KeyCortexSystemPromptService.buildGenomeContextBlock: URGENT SIGNALS, TOP
+ *     RECOMMENDATIONS, and TOP OPPORTUNITIES with their dollar values);
+ *   - the answer (genomeInsights.urgentSignals / topRecommendation / proactiveSuggestions and
+ *     proactiveSuggestions);
+ *   - the stream's "thought" chunks (the genome alert lists the urgent signals' messages).
+ * A member without revenue read must get none of the finance genome rows (isFinanceSignal /
+ * isFinanceRecommendation, the projection the gated genome routes apply, D-128) and no opportunity
+ * (each carries an estimatedValue). Operations rows stay. The owner and a revenue reader keep all.
+ *
+ * Real: Postgres (users, business, memberships; the pipeline's own memberAuthority read), the
+ * pipeline, the real genome prompt block. Stand-ins: the model provider, the genome collaborators
+ * (they answer a fixed genome), session store, the other prompt parts. No provider traffic.
+ */
+import 'reflect-metadata';
+import path from 'path';
+import { config as loadEnv } from 'dotenv';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { sqlLikePrefix } from './helpers/sql-like.js';
+
+loadEnv({ path: path.resolve(__dirname, '../../../.env') });
+
+const P = 'v71p_';
+const ID = {
+  biz: `${P}biz`,
+  owner: `${P}owner`, // OWNER membership
+  blind: `${P}blind`, // STAFF, revenue none
+  revenue: `${P}revenue`, // STAFF, revenue read
+  emptyAdmin: `${P}empty_admin`, // ADMIN, explicit map naming no module (JSON array)
+};
+const READS_REVENUE: Record<string, boolean> = { owner: true, revenue: true, blind: false, emptyAdmin: false };
+
+const FIN = {
+  signal: 'v71p runway is 0.8 months',
+  rec: 'v71p raise prices on retainers',
+  sugg: 'v71p chase the overdue invoices',
+  opp: 'v71p upsell the maintenance plan',
+  value: 98765,
+};
+const OPS = {
+  signal: 'v71p delivery backlog growing',
+  rec: 'v71p automate the intake form',
+  sugg: 'v71p schedule the crew earlier',
+};
+const MONEY_MARKERS = [FIN.signal, FIN.rec, FIN.sugg, FIN.opp, '98,765', '98765'];
+
+function genome() {
+  return {
+    dnaScores: { finance: 40, operations: 70 },
+    genomeStage: 'growth',
+    executiveReadiness: 55,
+    recommendations: [
+      { id: `${P}rec_fin`, title: FIN.rec, description: 'fin', impact: 'high', category: 'FINANCIAL', confidence: 0.9, genomeScore: 9 },
+      { id: `${P}rec_ops`, title: OPS.rec, description: 'ops', impact: 'high', category: 'OPERATIONS', confidence: 0.9, genomeScore: 8 },
+    ],
+    signals: [
+      { id: `${P}sig_fin`, type: 'risk', message: FIN.signal, module: 'finance', severity: 'high', createdAt: new Date() },
+      { id: `${P}sig_ops`, type: 'risk', message: OPS.signal, module: 'operations', severity: 'high', createdAt: new Date() },
+    ],
+    opportunities: [{ id: `${P}opp`, title: FIN.opp, estimatedValue: FIN.value, category: 'revenue', confidence: 0.8 }],
+    autonomyMap: {},
+    timestamp: new Date(),
+  };
+}
+
+let db: any;
+let turn: (userId: string, path: 'processQuery' | 'streamQuery') => Promise<{ prompt: string; output: string }>;
+
+async function cleanup() {
+  for (const sql of [
+    `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
+  ]) {
+    await db.$executeRawUnsafe(sql);
+  }
+}
+
+beforeAll(async () => {
+  const { PrismaService } = await import('../src/core/prisma/prisma.service');
+  const prisma = new PrismaService();
+  db = (await import('@keyflow/db')).db;
+  const { KeyCortexQueryPipelineService } = await import('../src/modules/key-cortex/key-cortex-query-pipeline.service');
+  const { KeyCortexSystemPromptService } = await import('../src/modules/key-cortex/key-cortex-system-prompt.service');
+  const realPrompt = new KeyCortexSystemPromptService({} as any);
+
+  turn = async (userId, path) => {
+    const prompts: string[] = [];
+    const session = { id: `${P}sess`, businessId: ID.biz, userId, status: 'active', persona: 'jarvis', messages: [], detectedRole: null, detectedFunction: null };
+    const route = {
+      taskCategory: 'general', layers: ['reasoning'], promptVariant: 'standard', includeGenomeContext: true, includeMemoryContext: false,
+      includeActions: false, complexity: 'simple', domain: 'general', urgency: 'low', emotionalWeight: 'low', timeHorizon: 'tactical', dataRequirement: 'none',
+    };
+    const genomeContextService = {
+      getGenomeEnrichedContext: async () => genome(),
+      getRankedRecommendations: async () => genome().recommendations,
+      shouldSuggestProactiveAction: async () => true,
+      getProactiveSuggestions: async () => [
+        { id: `${P}s_fin`, title: FIN.sugg, description: 'fin', impact: 'high', category: 'FINANCIAL', source: 'genome', confidence: 0.9, action: FIN.sugg },
+        { id: `${P}s_ops`, title: OPS.sugg, description: 'ops', impact: 'high', category: 'operations', source: 'genome', confidence: 0.9, action: OPS.sugg },
+      ],
+    };
+    const pipeline = new KeyCortexQueryPipelineService(
+      {
+        complete: async () => ({ content: 'ok', provider: 'openai', model: 'stand-in', usage: { totalTokens: 1, estimatedCost: 0 }, fallbackUsed: false }),
+        streamComplete: async function* () {
+          yield { content: 'ok', provider: 'openai', model: 'stand-in' };
+        },
+      } as any,
+      prisma,
+      { get: async () => null, setex: async () => undefined } as any,
+      {
+        getPersonalityConfig: () => ({ persona: 'jarvis', temperature: 0.5 }),
+        buildSystemPrompt: () => 'You are KEY.',
+        buildValueBlock: async () => '',
+        classifyPersona: async () => undefined,
+        selectTone: async () => ({ tone: '', temperatureAdjustment: 0 }),
+      } as any,
+      { buildContextSnapshot: async () => ({ businessId: ID.biz, genomeStage: 'growth', executiveReadiness: 55, keyMetrics: {} }), formatContextForPrompt: () => '' } as any,
+      { buildToolDefinitions: async () => [], executeActions: async () => [] } as any,
+      {
+        getOrCreateSession: async () => session,
+        generateId: () => `${P}msg`,
+        saveMessage: async () => undefined,
+        updateSessionCognitionMetadata: async () => undefined,
+        updateRunningSummary: async () => undefined,
+      } as any,
+      {
+        buildMemoryContext: async () => ({}),
+        buildMessages: (_q: unknown, _c: unknown, systemPrompt: string) => {
+          prompts.push(systemPrompt);
+          return [];
+        },
+      } as any,
+      { handleToolCalls: async () => null } as any,
+      { detectActions: () => [] } as any,
+      { generateSuggestions: async () => [] } as any,
+      genomeContextService as any,
+      {
+        buildV2SystemPrompt: () => 'V2',
+        // The real genome block: exactly the genome data the model would be handed.
+        buildV3SystemPrompt: (_p: unknown, _c: unknown, _v: unknown, g: any, r: any) => `V3\n${realPrompt.buildGenomeContextBlock(g, r)}`,
+        enrichSnapshotFromV2: () => undefined,
+        enrichSnapshotFromGenome: () => undefined,
+      } as any,
+      {
+        classifyTaskCategory: () => 'general',
+        buildStructuredOutputInstructions: () => '',
+        parseStructuredResponse: () => ({ role: 'assistant', recommendation: 'ok', confidence: 80 }),
+      } as any,
+      { detectMood: () => 'casual' } as any,
+      undefined,
+      { route: async () => route } as any,
+      undefined, // connector
+      undefined, // command
+      undefined, // executor
+      undefined, // contextV2
+      {} as any, // genome bridge: present, so the genome path runs
+      undefined, // events
+    );
+    const query = { text: 'how is the business doing', businessId: ID.biz, userId } as any;
+    const flags = { integrationV2Enabled: false, genomeV3Enabled: true };
+    let output: string;
+    if (path === 'processQuery') {
+      output = JSON.stringify(await pipeline.processQuery(query, flags));
+    } else {
+      const chunks: unknown[] = [];
+      for await (const chunk of pipeline.streamQuery(query, flags)) chunks.push(chunk);
+      output = JSON.stringify(chunks);
+    }
+    expect(prompts, `${path}: one model prompt`).toHaveLength(1);
+    return { prompt: prompts[0], output };
+  };
+
+  await cleanup();
+  for (const id of Object.values(ID).filter((v) => v !== ID.biz)) {
+    await db.user.create({ data: { id, email: `${id}@${P}test.local`, role: 'USER' } });
+  }
+  await db.business.create({ data: { id: ID.biz, name: 'V71P Biz', ownerId: ID.owner } });
+  for (const [userId, role, permissionScopes] of [
+    [ID.owner, 'OWNER', undefined],
+    [ID.blind, 'STAFF', { revenue: 'none' }],
+    [ID.revenue, 'STAFF', { revenue: 'read' }],
+    [ID.emptyAdmin, 'ADMIN', []],
+  ] as const) {
+    await db.membership.create({ data: { id: `${P}m_${userId.slice(P.length)}`, userId, businessId: ID.biz, role, ...(permissionScopes ? { permissionScopes } : {}) } });
+  }
+}, 120_000);
+
+afterAll(async () => {
+  if (db) await cleanup();
+});
+
+describe('FU-KEY-CHAT-GENOME-MONEY-SIGHT (D-128, D-100): a KEY chat turn hands finance genome rows and opportunity values only to members who may read revenue', () => {
+  for (const reader of ['owner', 'revenue', 'blind', 'emptyAdmin'] as const) {
+    for (const path of ['processQuery', 'streamQuery'] as const) {
+      const kind = READS_REVENUE[reader] ? 'control' : 'RED-BEFORE';
+      it(`${kind}: ${reader} (${path}): the prompt ${READS_REVENUE[reader] ? 'keeps' : 'carries no'} finance signal, finance recommendation or opportunity value, and operations rows stay`, async () => {
+        const { prompt } = await turn(ID[reader], path);
+        for (const ops of [OPS.signal, OPS.rec]) expect(prompt, `${reader} ${path}: ${ops}`).toContain(ops);
+        for (const marker of [FIN.signal, FIN.rec, FIN.opp, '98,765']) {
+          if (READS_REVENUE[reader]) expect(prompt, `${reader} ${path}: ${marker}`).toContain(marker);
+          else expect(prompt, `${reader} ${path}: ${marker}`).not.toContain(marker);
+        }
+      });
+
+      it(`${kind}: ${reader} (${path}): the answer ${READS_REVENUE[reader] ? 'keeps' : 'carries no'} finance genome insight or suggestion`, async () => {
+        const { output } = await turn(ID[reader], path);
+        if (READS_REVENUE[reader]) {
+          if (path === 'processQuery') for (const marker of [FIN.signal, FIN.rec, FIN.sugg]) expect(output, `${reader} ${path}: ${marker}`).toContain(marker);
+          else expect(output, `${reader} ${path}: the genome alert`).toContain(FIN.signal);
+        } else {
+          for (const marker of MONEY_MARKERS) expect(output, `${reader} ${path}: ${marker}`).not.toContain(marker);
+        }
+        if (path === 'processQuery') for (const ops of [OPS.signal, OPS.sugg]) expect(output, `${reader} ${path}: ${ops}`).toContain(ops);
+      });
+    }
+  }
+});
