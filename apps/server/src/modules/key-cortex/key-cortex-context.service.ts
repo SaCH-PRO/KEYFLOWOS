@@ -20,6 +20,40 @@ const CONTEXT_CACHE_PREFIX = 'key-cortex:context';
 // Genome Context Assembler Service
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * W11-CORTEX-SESSION-SNAPSHOT-SCOPE (KC-SEC-3; D-57, D-100): the keyMetrics of a
+ * context snapshot that are not money. A member without revenue read is answered
+ * only these (`snapshotForViewer`); every other metric, today totalRevenue and the
+ * V2 commerce figures (outstandingRevenue), and any metric added later, is
+ * withheld from them until it is listed here.
+ */
+export const NON_MONEY_SNAPSHOT_METRICS: ReadonlySet<string> = new Set([
+  'activeClients',
+  'openTasks',
+  'conversionRate',
+  'totalContacts',
+  'upcomingBookings',
+]);
+
+/**
+ * The snapshot as a viewer may read it over HTTP (POST cortex/sessions, the
+ * contextUsed of POST cortex/chat): unchanged for a revenue reader; for anyone
+ * else a copy whose keyMetrics keep only NON_MONEY_SNAPSHOT_METRICS. The genome,
+ * activity, counts and team fields are not money and stay. The snapshot handed
+ * in is not changed (it may be the cached one).
+ */
+export function snapshotForViewer<T extends CortexContextSnapshot | null | undefined>(
+  snapshot: T,
+  canReadRevenue: boolean,
+): T {
+  if (!snapshot || canReadRevenue) return snapshot;
+  const keyMetrics: Record<string, number> = {};
+  for (const [name, value] of Object.entries(snapshot.keyMetrics ?? {})) {
+    if (NON_MONEY_SNAPSHOT_METRICS.has(name)) keyMetrics[name] = value;
+  }
+  return { ...snapshot, keyMetrics } as T;
+}
+
 @Injectable()
 export class KeyCortexContextService {
   private readonly logger = new Logger(KeyCortexContextService.name);

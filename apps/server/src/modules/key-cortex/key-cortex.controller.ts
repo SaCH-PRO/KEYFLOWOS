@@ -86,7 +86,7 @@ import { KeyCortexConversationService } from './key-cortex-conversation.service'
 import { KeyCortexVoiceService } from './key-cortex-voice.service';
 import { KeyCortexPersonalityService } from './key-cortex-personality.service';
 import { KeyCortexActionsService, isUsableAutonomyVerdict } from './key-cortex-actions.service';
-import { KeyCortexContextService } from './key-cortex-context.service';
+import { KeyCortexContextService, snapshotForViewer } from './key-cortex-context.service';
 import { KeyCortexCapabilityRegistryService } from './key-cortex-capability-registry.service';
 import { randomUUID } from 'crypto';
 
@@ -560,6 +560,18 @@ export const CortexMember = createParamDecorator((_data: unknown, ctx: Execution
   if (!authority) throw new ForbiddenException('The member this command acts for was not established');
   return authority;
 });
+
+/**
+ * W11-CORTEX-SESSION-SNAPSHOT-SCOPE (KC-SEC-3; D-57, D-100): whether the member
+ * CortexMemberAuthorityGuard loaded may read revenue, as ModuleScopeGuard decides
+ * GET insights/revenue (memberScopeMap; a platform SUPER_ADMIN passes). No
+ * authority reads none (fails closed).
+ */
+export function viewerReadsRevenue(viewer: CortexMemberAuthority | undefined): boolean {
+  if (!viewer) return false;
+  if (viewer.superAdmin) return true;
+  return rankOf(viewer.scopes.revenue || 'none') >= LEVEL_RANK.read;
+}
 
 /** The membership roles that may write the KEY autonomy profile (V1-03). */
 const AUTONOMY_PROFILE_WRITER_ROLES = new Set(['OWNER', 'ADMIN']);
@@ -1707,9 +1719,11 @@ export class KeyCortexController {
    */
   @Post('sessions')
   @HttpCode(HttpStatus.CREATED)
+  @UseGuards(CortexMemberAuthorityGuard)
   async createSession(
     @Body() dto: CreateSessionDto,
     @CurrentUser() user?: AuthenticatedUser,
+    @CortexMember() viewer?: CortexMemberAuthority,
   ): Promise<CortexSession> {
     const actorId = requestActorId(user);
     this.logger.debug(`Creating session for business=${dto.businessId}`);
@@ -1726,9 +1740,12 @@ export class KeyCortexController {
         } as any,
       );
 
-      // Build and attach initial context snapshot
-      session.contextSnapshot =
-        await this.context.buildContextSnapshot(dto.businessId);
+      // Build and attach initial context snapshot, without its money figures for a
+      // member who may not read revenue (W11-CORTEX-SESSION-SNAPSHOT-SCOPE, KC-SEC-3).
+      session.contextSnapshot = snapshotForViewer(
+        await this.context.buildContextSnapshot(dto.businessId),
+        viewerReadsRevenue(viewer),
+      );
 
       return session;
     } catch (err: any) {
@@ -1842,9 +1859,11 @@ export class KeyCortexController {
    */
   @Post('chat')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(CortexMemberAuthorityGuard)
   async chat(
     @Body() query: ChatQueryDto,
     @CurrentUser() user?: AuthenticatedUser,
+    @CortexMember() viewer?: CortexMemberAuthority,
   ): Promise<CortexResponse> {
     const actorId = requestActorId(user);
     if (!query.text?.trim()) {
@@ -1858,6 +1877,8 @@ export class KeyCortexController {
     try {
       // The actor overrides any body userId (R0-09c).
       const response = await this.reasoning.processQuery({ ...query, userId: actorId, sessionId } as any);
+      // KC-SEC-3: the snapshot the answer used, as the viewer may read it.
+      if (response?.contextUsed) response.contextUsed = snapshotForViewer(response.contextUsed, viewerReadsRevenue(viewer));
       return response;
     } catch (err: any) {
       this.logger.error(`Chat error: ${err.message}`, err.stack);
