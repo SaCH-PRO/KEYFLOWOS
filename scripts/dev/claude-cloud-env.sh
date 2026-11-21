@@ -72,7 +72,7 @@ up_postgres() {
 }
 
 up_redis() {
-  redis-cli -h 127.0.0.1 ping >/dev/null 2>&1 || redis-server --bind 127.0.0.1 --daemonize yes >/dev/null
+  redis-cli -h 127.0.0.1 ping >/dev/null 2>&1 || { mkdir -p /tmp/kf-redis && redis-server --bind 127.0.0.1 --dir /tmp/kf-redis --daemonize yes >/dev/null; }
   log "redis up"
 }
 
