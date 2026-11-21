@@ -26,8 +26,14 @@ interface SchedulerMetadata {
  * that is an outage (5xx, 408, 429, a rate-limited 403, an ABORTED 409) is 503
  * provider_unavailable (service google_business_profile); a refusal keeps its
  * 400 and message. Unchanged: the business-validation 400s of the scheduled
- * posts, and the insights read (getInsights), which is outside this packet's
- * sites.
+ * posts.
+ *
+ * FU-PROVIDER-ERROR-HYGIENE (D-221): the insights read (getInsights), outside
+ * that packet's sites, answered every Performance API failure 400 with the
+ * first 200 characters of the API's body in the message. It answers through
+ * providerFailure too: an outage 503 provider_unavailable
+ * (google_business_profile), a refusal 400, both 'Performance API <status>',
+ * the body in neither.
  */
 @Injectable()
 export class GoogleBusinessProfileService {
@@ -162,8 +168,9 @@ export class GoogleBusinessProfileService {
 
   /**
    * Pulls performance metrics for a location from the Business Profile
-   * Performance API. Returns the raw multiDailyMetricsTimeSeries response so the UI
-   * can render charts. Falls back to a friendly message if the API rejects.
+   * Performance API, totalled per metric so the UI can render charts. A
+   * failure answers 'Performance API <status>': 503 provider_unavailable for
+   * an outage, 400 for a refusal (FU-PROVIDER-ERROR-HYGIENE, D-221).
    */
   async getInsights(
     businessId: string,
@@ -207,10 +214,7 @@ export class GoogleBusinessProfileService {
     const url = `https://businessprofileperformance.googleapis.com/v1/${locationName}:fetchMultiDailyMetricsTimeSeries?${params.toString()}`;
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      throw new BadRequestException(
-        `Performance API ${res.status}${body ? `: ${body.slice(0, 200)}` : ''}`,
-      );
+      throw providerFailure('google_business_profile', res.status, await readProviderFailureBody(res), `Performance API ${res.status}`);
     }
     const data = (await res.json()) as {
       multiDailyMetricTimeSeries?: Array<{

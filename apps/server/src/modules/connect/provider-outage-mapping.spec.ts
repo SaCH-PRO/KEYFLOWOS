@@ -30,13 +30,31 @@
  *     refresh): 400 / 401 (invalid_grant, invalid_client: reconnect) stay 400;
  *     a 503 or a 429 gives 503. A failed refresh writes no token.
  * Unchanged, and pinned: the connect-flow consent sites (CRM Google code
- * exchange, Calendar code exchange), the business-validation 400s, the
- * Business Profile insights answer (outside this packet's sites), and a fetch
- * that throws (its error propagates).
+ * exchange, Calendar code exchange), the business-validation 400s, and a fetch
+ * that throws (its error propagates). (The Business Profile insights answer
+ * was pinned here too, outside that packet's sites; FU-PROVIDER-ERROR-HYGIENE
+ * moves it into the table.)
  *
  * RED-BEFORE (pkt base c72069ac, int/v1-base + W11-PROVIDER-OUTAGE-503): every
  * outage case, both 410 cases and every refresh-outage case fail (each site
  * answered BadRequestException); the refusal and unchanged cases pass.
+ *
+ * FU-PROVIDER-ERROR-HYGIENE (D-221, review follow-up C8): the provider's body
+ * never reaches a message. Four of these sites put it there: the Google token
+ * refresh ('Failed to refresh <label> token: <body>'), the Microsoft one
+ * ('Failed to refresh Outlook Contacts token: <body>'), Forms create
+ * ('Forms API error <status>: <body>') and the Graph delta ('Graph API error
+ * <status>: <first 200 characters of the body>'), and since the rows above
+ * those messages reach the client in a 503 too. Each now keeps its message
+ * without the body ('Failed to refresh <label> token', 'Failed to refresh
+ * Outlook Contacts token', 'Forms API error <status>', 'Graph API error
+ * <status>'), for an outage and a refusal alike. And the Business Profile
+ * insights read (getInsights), which answered every Performance API failure
+ * 400 'Performance API <status>: <body>', answers an outage 503
+ * provider_unavailable (google_business_profile) through providerFailure and
+ * a refusal 400, both 'Performance API <status>'. RED-BEFORE (chain head
+ * b00e5f78): the message rows of those sites (the body is still in them), the
+ * insights outage rows (400) and every PEH case fail; the rest pass.
  */
 import 'reflect-metadata';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -156,6 +174,7 @@ const isGoogleToken: Match = (u, m) => m === 'POST' && u === 'https://oauth2.goo
 const isMicrosoftToken: Match = (u, m) => m === 'POST' && u.startsWith('https://login.microsoftonline.com/') && u.endsWith('/oauth2/v2.0/token');
 const isPeopleList: Match = (u, m) => m === 'GET' && u.startsWith('https://people.googleapis.com/v1/people/me/connections?');
 const isGraphDelta: Match = (u, m) => m === 'GET' && u.startsWith('https://graph.microsoft.com/v1.0/me/contacts/delta');
+const isPerformance: Match = (u, m) => m === 'GET' && u.startsWith(`https://businessprofileperformance.googleapis.com/v1/${LOCATION}:fetchMultiDailyMetricsTimeSeries?`);
 
 async function failureOf(p: Promise<unknown>): Promise<any> {
   return p.then(() => {
@@ -246,7 +265,7 @@ const GOOGLE_SITES: Site[] = [
     service: 'google_forms',
     match: (u, m) => m === 'POST' && u === 'https://forms.googleapis.com/v1/forms',
     call: (c) => c.forms.createForm(BIZ, 'POC form'),
-    message: (s, body) => `Forms API error ${s}: ${body}`,
+    message: (s) => `Forms API error ${s}`,
   },
   {
     name: 'GoogleFormsService.getForm',
@@ -326,6 +345,14 @@ const GOOGLE_SITES: Site[] = [
     message: (s) => `Business Profile API error ${s}`,
   },
   {
+    // FU-PROVIDER-ERROR-HYGIENE (D-221): the insights read joins the table (it answered every failure 400 with the body).
+    name: 'GoogleBusinessProfileService.getInsights (Performance API)',
+    service: 'google_business_profile',
+    match: isPerformance,
+    call: (c) => c.bp.getInsights(BIZ, LOCATION, 7),
+    message: (s) => `Performance API ${s}`,
+  },
+  {
     name: 'CrmGoogleService.fetchContacts (the CRM Google import)',
     service: 'google_contacts',
     match: isPeopleList,
@@ -374,7 +401,8 @@ describe('W11-PROVIDER-OUTAGE-CONNECT: the Google clients answer an outage 503 p
 });
 
 describe('W11-PROVIDER-OUTAGE-CONNECT: the Graph client (Outlook Contacts sync) maps by status alone', () => {
-  const graphMessage = (status: number, body: string) => `Graph API error ${status}: ${body.slice(0, 200)}`;
+  // FU-PROVIDER-ERROR-HYGIENE (D-221): the status, never the body.
+  const graphMessage = (status: number) => `Graph API error ${status}`;
 
   it.each([
     [503, graphError('serviceNotAvailable')],
@@ -385,7 +413,7 @@ describe('W11-PROVIDER-OUTAGE-CONNECT: the Graph client (Outlook Contacts sync) 
     const c = clients();
     stubFetch(isGraphDelta, status, body);
     const err = await failureOf(c.outlook.sync(BIZ));
-    expectUnavailable(err, 'outlook_contacts', graphMessage(status, body), status);
+    expectUnavailable(err, 'outlook_contacts', graphMessage(status), status);
     expect(fetched.filter((f) => isGraphDelta(f.url, f.method)).map((f) => f.url)).toEqual([DELTA_LINK]);
     expect(businessWrites(c.writes)).toEqual([]);
   });
@@ -400,7 +428,7 @@ describe('W11-PROVIDER-OUTAGE-CONNECT: the Graph client (Outlook Contacts sync) 
   ] as Array<[number, string]>)('[POC-M] a Graph %i (a refusal, whatever its body says) stays BadRequestException with the existing message', async (status, body) => {
     const c = clients();
     stubFetch(isGraphDelta, status, body);
-    expectRefused(await failureOf(c.outlook.sync(BIZ)), graphMessage(status, body));
+    expectRefused(await failureOf(c.outlook.sync(BIZ)), graphMessage(status));
     expect(businessWrites(c.writes)).toEqual([]);
   });
 });
@@ -429,71 +457,71 @@ describe('W11-PROVIDER-OUTAGE-CONNECT: the two "please retry" 410s clear their c
   });
 });
 
-describe('W11-PROVIDER-OUTAGE-CONNECT: token refreshes keep 400 for invalid_grant and give 503 for an outage', () => {
-  /** Each refresh site: the call (with every token expired), its service id, its existing message. */
-  const REFRESH_SITES: Array<{ name: string; service: string; match: Match; call: (c: Clients) => Promise<unknown>; message: (body: string) => string }> = [
-    {
-      name: 'GoogleTokenHelper, Google Contacts columns (GoogleContactsSyncService.sync)',
-      service: 'google_contacts', match: isGoogleToken,
-      call: (c) => c.contacts.sync(BIZ),
-      message: (body) => `Failed to refresh Google Contacts token: ${body}`,
-    },
-    {
-      name: 'GoogleTokenHelper, Google Forms columns (GoogleFormsService.getForm)',
-      service: 'google_forms', match: isGoogleToken,
-      call: (c) => c.forms.getForm(BIZ, 'form1'),
-      message: (body) => `Failed to refresh Google Forms token: ${body}`,
-    },
-    {
-      name: 'GoogleTokenHelper, Drive columns (GoogleFormsService.listForms)',
-      service: 'drive', match: isGoogleToken,
-      call: (c) => c.forms.listForms(BIZ),
-      message: (body) => `Failed to refresh Google Drive (required to list Forms) token: ${body}`,
-    },
-    {
-      name: 'GoogleTokenHelper, Business Profile columns (GoogleBusinessProfileService.listAccounts)',
-      service: 'google_business_profile', match: isGoogleToken,
-      call: (c) => c.bp.listAccounts(BIZ),
-      message: (body) => `Failed to refresh Google Business Profile token: ${body}`,
-    },
-    {
-      name: 'GoogleTokenHelper, Calendar columns',
-      service: 'google_calendar', match: isGoogleToken,
-      call: (c) => new GoogleTokenHelper(c.prisma).getValidAccessToken(BIZ, { access: 'calendarAccessToken', refresh: 'calendarRefreshToken', expiry: 'calendarTokenExpiry' }, 'Google Calendar'),
-      message: (body) => `Failed to refresh Google Calendar token: ${body}`,
-    },
-    {
-      name: 'GoogleTokenHelper, Gmail columns (the gmail ingestion read)',
-      service: 'gmail', match: isGoogleToken,
-      call: (c) => new GoogleTokenHelper(c.prisma).getValidAccessToken(BIZ, { access: 'gmailAccessToken', refresh: 'gmailRefreshToken', expiry: 'gmailTokenExpiry' }, 'Gmail'),
-      message: (body) => `Failed to refresh Gmail token: ${body}`,
-    },
-    {
-      name: 'MicrosoftTokenHelper (OutlookContactsSyncService.sync)',
-      service: 'microsoft', match: isMicrosoftToken,
-      call: (c) => c.outlook.sync(BIZ),
-      message: (body) => `Failed to refresh Outlook Contacts token: ${body}`,
-    },
-    {
-      name: 'MicrosoftTokenHelper, direct',
-      service: 'microsoft', match: isMicrosoftToken,
-      call: (c) => new MicrosoftTokenHelper(c.prisma).getValidAccessToken(BIZ),
-      message: (body) => `Failed to refresh Outlook Contacts token: ${body}`,
-    },
-    {
-      name: 'CrmGoogleService.refreshAccessToken',
-      service: 'google_contacts', match: isGoogleToken,
-      call: (c) => c.crmGoogle.refreshAccessToken('ref_import'),
-      message: () => 'Failed to refresh access token',
-    },
-    {
-      name: 'CalendarService refresh (listAvailableCalendars with an expired token)',
-      service: 'google_calendar', match: isGoogleToken,
-      call: (c) => c.calendar.listAvailableCalendars(BIZ),
-      message: () => 'Failed to refresh Google Calendar token',
-    },
-  ];
+/** Each refresh site: the call (with every token expired), its service id, its existing message. */
+const REFRESH_SITES: Array<{ name: string; service: string; match: Match; call: (c: Clients) => Promise<unknown>; message: (body: string) => string }> = [
+  {
+    name: 'GoogleTokenHelper, Google Contacts columns (GoogleContactsSyncService.sync)',
+    service: 'google_contacts', match: isGoogleToken,
+    call: (c) => c.contacts.sync(BIZ),
+    message: () => 'Failed to refresh Google Contacts token',
+  },
+  {
+    name: 'GoogleTokenHelper, Google Forms columns (GoogleFormsService.getForm)',
+    service: 'google_forms', match: isGoogleToken,
+    call: (c) => c.forms.getForm(BIZ, 'form1'),
+    message: () => 'Failed to refresh Google Forms token',
+  },
+  {
+    name: 'GoogleTokenHelper, Drive columns (GoogleFormsService.listForms)',
+    service: 'drive', match: isGoogleToken,
+    call: (c) => c.forms.listForms(BIZ),
+    message: () => 'Failed to refresh Google Drive (required to list Forms) token',
+  },
+  {
+    name: 'GoogleTokenHelper, Business Profile columns (GoogleBusinessProfileService.listAccounts)',
+    service: 'google_business_profile', match: isGoogleToken,
+    call: (c) => c.bp.listAccounts(BIZ),
+    message: () => 'Failed to refresh Google Business Profile token',
+  },
+  {
+    name: 'GoogleTokenHelper, Calendar columns',
+    service: 'google_calendar', match: isGoogleToken,
+    call: (c) => new GoogleTokenHelper(c.prisma).getValidAccessToken(BIZ, { access: 'calendarAccessToken', refresh: 'calendarRefreshToken', expiry: 'calendarTokenExpiry' }, 'Google Calendar'),
+    message: () => 'Failed to refresh Google Calendar token',
+  },
+  {
+    name: 'GoogleTokenHelper, Gmail columns (the gmail ingestion read)',
+    service: 'gmail', match: isGoogleToken,
+    call: (c) => new GoogleTokenHelper(c.prisma).getValidAccessToken(BIZ, { access: 'gmailAccessToken', refresh: 'gmailRefreshToken', expiry: 'gmailTokenExpiry' }, 'Gmail'),
+    message: () => 'Failed to refresh Gmail token',
+  },
+  {
+    name: 'MicrosoftTokenHelper (OutlookContactsSyncService.sync)',
+    service: 'microsoft', match: isMicrosoftToken,
+    call: (c) => c.outlook.sync(BIZ),
+    message: () => 'Failed to refresh Outlook Contacts token',
+  },
+  {
+    name: 'MicrosoftTokenHelper, direct',
+    service: 'microsoft', match: isMicrosoftToken,
+    call: (c) => new MicrosoftTokenHelper(c.prisma).getValidAccessToken(BIZ),
+    message: () => 'Failed to refresh Outlook Contacts token',
+  },
+  {
+    name: 'CrmGoogleService.refreshAccessToken',
+    service: 'google_contacts', match: isGoogleToken,
+    call: (c) => c.crmGoogle.refreshAccessToken('ref_import'),
+    message: () => 'Failed to refresh access token',
+  },
+  {
+    name: 'CalendarService refresh (listAvailableCalendars with an expired token)',
+    service: 'google_calendar', match: isGoogleToken,
+    call: (c) => c.calendar.listAvailableCalendars(BIZ),
+    message: () => 'Failed to refresh Google Calendar token',
+  },
+];
 
+describe('W11-PROVIDER-OUTAGE-CONNECT: token refreshes keep 400 for invalid_grant and give 503 for an outage', () => {
   for (const site of REFRESH_SITES) {
     describe(site.name, () => {
       it.each([
@@ -540,12 +568,6 @@ describe('W11-PROVIDER-OUTAGE-CONNECT: unchanged', () => {
     expect(fetched).toEqual([]);
   });
 
-  it('[POC-U3] the Business Profile insights read is outside this packet\'s sites (its MUST NOT CHANGE list): a Performance API 503 still answers its 400', async () => {
-    const c = clients();
-    const body = googleError(503, 'UNAVAILABLE');
-    stubFetch((u) => u.startsWith('https://businessprofileperformance.googleapis.com/'), 503, body);
-    expectRefused(await failureOf(c.bp.getInsights(BIZ, LOCATION, 7)), `Performance API 503: ${body.slice(0, 200)}`);
-  });
 
   it('[POC-U4] a fetch that throws propagates its own error (no status to classify)', async () => {
     const c = clients();
@@ -579,5 +601,129 @@ describe('W11-PROVIDER-OUTAGE-CONNECT: unchanged', () => {
     expect(writes.find((w) => w.model === 'connectorStatus' && w.method === 'upsert')?.args.update).toEqual({});
     expect(merges).toHaveLength(1);
     expect(merges[0].scheduledPosts[0]).toMatchObject({ id: 'sched_1', status: 'failed', error: 'Business Profile API error 503' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FU-PROVIDER-ERROR-HYGIENE (D-221): no provider body in any message or answer.
+// ---------------------------------------------------------------------------
+describe('FU-PROVIDER-ERROR-HYGIENE (D-221): the provider body never reaches the message, for an outage or a refusal', () => {
+  /** A marker no message may carry: it appears only in what the provider answered. */
+  const CANARY = ['peh', 'canary', 'upstream', 'body'].join('-');
+  const googleBody = (code: number, status: string, reason: string) =>
+    JSON.stringify({ error: { code, message: `${CANARY} ${status}`, status, errors: [{ reason, message: CANARY }] } });
+  const graphBody = (code: string) => JSON.stringify({ error: { code, message: `${CANARY} ${code}` } });
+
+  function expectNoBody(err: any) {
+    expect(String(err?.message)).not.toContain(CANARY);
+    expect(JSON.stringify(err?.getResponse?.() ?? null)).not.toContain(CANARY);
+  }
+
+  for (const site of GOOGLE_SITES) {
+    it(`[PEH-01] RED-BEFORE where the body was echoed: ${site.name}: a 503 and a 404 whose body carries text answer the bare message, the body nowhere in the answer`, async () => {
+      for (const [status, body, unavailable] of [
+        [503, googleBody(503, 'UNAVAILABLE', 'backendError'), true],
+        [404, googleBody(404, 'NOT_FOUND', 'notFound'), false],
+      ] as Array<[number, string, boolean]>) {
+        const c = clients();
+        stubFetch(site.match, status, body);
+        const err = await failureOf(site.call(c));
+        if (unavailable) expectUnavailable(err, site.service, site.message(status, body), status);
+        else expectRefused(err, site.message(status, body));
+        expectNoBody(err);
+      }
+    });
+  }
+
+  it('[PEH-02] RED-BEFORE: the Graph delta (Outlook Contacts sync): a 503, a 404 and a 409 answer "Graph API error <status>", the body nowhere in the answer', async () => {
+    for (const [status, body, unavailable] of [
+      [503, graphBody('serviceNotAvailable'), true],
+      [404, graphBody('ErrorItemNotFound'), false],
+      [409, graphBody('ErrorIrresolvableConflict'), false],
+    ] as Array<[number, string, boolean]>) {
+      const c = clients();
+      stubFetch(isGraphDelta, status, body);
+      const err = await failureOf(c.outlook.sync(BIZ));
+      if (unavailable) expectUnavailable(err, 'outlook_contacts', `Graph API error ${status}`, status);
+      else expectRefused(err, `Graph API error ${status}`);
+      expectNoBody(err);
+      expect(businessWrites(c.writes)).toEqual([]);
+    }
+  });
+
+  for (const site of REFRESH_SITES) {
+    it(`[PEH-03] RED-BEFORE where the body was echoed: ${site.name}: a token endpoint 503 (temporarily_unavailable) and 400 (invalid_grant) whose description carries text answer the bare message, the body nowhere in the answer; no token is written`, async () => {
+      for (const [status, body, unavailable] of [
+        [503, JSON.stringify({ error: 'temporarily_unavailable', error_description: CANARY }), true],
+        [400, JSON.stringify({ error: 'invalid_grant', error_description: CANARY }), false],
+      ] as Array<[number, string, boolean]>) {
+        const c = clients({ expired: true });
+        stubFetch(site.match, status, body);
+        const err = await failureOf(site.call(c));
+        if (unavailable) expectUnavailable(err, site.service, site.message(body), status);
+        else expectRefused(err, site.message(body));
+        expectNoBody(err);
+        expect(businessWrites(c.writes)).toEqual([]);
+      }
+    });
+  }
+
+  it('[PEH-04] RED-BEFORE: the Business Profile insights read answers a Performance API outage (503, 500, 429, a rate-limited 403) 503 provider_unavailable {service: google_business_profile, message: "Performance API <status>"}; a refusal (400, 404, a 403 insufficientPermissions) stays 400 with that message', async () => {
+    for (const [status, body] of [
+      [503, googleError(503, 'UNAVAILABLE', ['backendError'])],
+      [500, googleError(500, 'INTERNAL', ['backendError'])],
+      [429, googleError(429, 'RESOURCE_EXHAUSTED', ['rateLimitExceeded'])],
+      [403, googleError(403, 'PERMISSION_DENIED', ['userRateLimitExceeded'])],
+    ] as Array<[number, string]>) {
+      const c = clients();
+      stubFetch(isPerformance, status, body);
+      expectUnavailable(await failureOf(c.bp.getInsights(BIZ, LOCATION, 7)), 'google_business_profile', `Performance API ${status}`, status);
+    }
+    for (const [status, body] of [
+      [400, googleError(400, 'INVALID_ARGUMENT', ['invalidArgument'])],
+      [404, googleError(404, 'NOT_FOUND', ['notFound'])],
+      [403, googleError(403, 'PERMISSION_DENIED', ['insufficientPermissions'])],
+    ] as Array<[number, string]>) {
+      const c = clients();
+      stubFetch(isPerformance, status, body);
+      expectRefused(await failureOf(c.bp.getInsights(BIZ, LOCATION, 7)), `Performance API ${status}`);
+    }
+  });
+
+  it('[PEH-05] control: the insights read answered 200 still totals each metric', async () => {
+    const c = clients();
+    vi.stubGlobal('fetch', async (input: any) => {
+      const url = String(input);
+      fetched.push({ url, method: 'GET' });
+      if (!isPerformance(url, 'GET')) throw new Error(`unit: unexpected ${url}`);
+      return new Response(JSON.stringify({
+        multiDailyMetricTimeSeries: [{ dailyMetricTimeSeries: [{
+          dailyMetric: 'CALL_CLICKS',
+          timeSeries: { datedValues: [{ date: { year: 2026, month: 11, day: 1 }, value: '3' }, { date: { year: 2026, month: 11, day: 2 }, value: '4' }] },
+        }] }],
+      }), { status: 200 });
+    });
+    const out = await c.bp.getInsights(BIZ, LOCATION, 7);
+    expect(out).toMatchObject({ locationName: LOCATION, rangeDays: 7, metrics: [{ metric: 'CALL_CLICKS', total: 7, daily: [{ date: '2026-11-01', value: 3 }, { date: '2026-11-02', value: 4 }] }] });
+  });
+
+  it('[PEH-06] RED-BEFORE: a scheduled post whose publish meets a token refusal is marked failed with the bare refresh message, the body nowhere in what is stored', async () => {
+    const { prisma } = recordingPrisma({ expired: true });
+    const due = { id: 'sched_peh', location: LOCATION, summary: 'due post', scheduledFor: new Date(Date.now() - 60_000).toISOString(), status: 'scheduled', createdAt: new Date().toISOString() };
+    const merges: Array<Record<string, any>> = [];
+    const bp = new GoogleBusinessProfileService({
+      client: new Proxy(prisma.client, {
+        get: (t, key: string) => {
+          if (key === 'connectorStatus') return { findUnique: async () => ({ metadata: { scheduledPosts: [due] } }), upsert: async () => ({}) };
+          if (key === '$executeRaw') return async (_sql: TemplateStringsArray, ...values: unknown[]) => { merges.push(JSON.parse(String(values[0]))); return 1; };
+          return t[key];
+        },
+      }),
+    } as any);
+    stubFetch(isGoogleToken, 400, JSON.stringify({ error: 'invalid_grant', error_description: CANARY }));
+    expect(await bp.publishDueScheduledPosts(BIZ)).toEqual({ published: 0, failed: 1 });
+    expect(merges).toHaveLength(1);
+    expect(merges[0].scheduledPosts[0]).toMatchObject({ id: 'sched_peh', status: 'failed', error: 'Failed to refresh Google Business Profile token' });
+    expect(JSON.stringify(merges)).not.toContain(CANARY);
   });
 });
