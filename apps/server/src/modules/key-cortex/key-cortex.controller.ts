@@ -2664,6 +2664,8 @@ export class KeyCortexController {
    * Generate business insights using the v2 insight engine.
    */
   @Post('insights')
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @HttpCode(HttpStatus.OK)
   async generateInsights(
     @Body() dto: GenerateInsightsDto,
@@ -2774,9 +2776,18 @@ export class KeyCortexController {
   /**
    * GET /api/v1/cortex/insights/churn
    * Churn risk analysis from CRM and engagement data.
+   *
+   * W11-CORTEX-INSIGHT-QUERIES (owner ruling D-57): each risk names a
+   * customer with their owed and overdue balance and a recovery value, a
+   * money report, and GET report already serves this analysis behind
+   * revenue:read. Until the insight queries selected real columns this route
+   * answered an empty list on every business; now that it answers real
+   * figures it carries the same gate.
    */
   @Get('insights/churn')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   async analyzeChurnRisk(
     @GuardedBusinessId() businessId: string,
   ): Promise<{
@@ -2799,9 +2810,16 @@ export class KeyCortexController {
   /**
    * GET /api/v1/cortex/insights/pipeline
    * Sales pipeline analysis.
+   *
+   * W11-CORTEX-INSIGHT-QUERIES (owner ruling D-57): the pipeline sums open
+   * deal values by stage, and GET report already serves this analysis behind
+   * revenue:read. It answered an empty pipeline on every business until the
+   * insight queries selected real columns; it now carries the report's gate.
    */
   @Get('insights/pipeline')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   async analyzePipeline(
     @GuardedBusinessId() businessId: string,
   ): Promise<{
