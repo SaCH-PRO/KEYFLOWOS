@@ -983,6 +983,11 @@
       "packet": "V1-63 (SWP-ORDERBY-SINGLE-KEY)"
     },
     {
+      "prefix": "v63g_",
+      "owner": "apps/server/test/security-audit-truth.integration.test.ts",
+      "packet": "V1-63 (SWP-SEC-AUDIT-TRUTH)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
