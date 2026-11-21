@@ -47,6 +47,13 @@ import { BadRequestException, HttpException, ServiceUnavailableException } from 
  * decided the failure is an outage itself: the People and Graph 410 ("please
  * retry"), whose cursor the client has just cleared so the retry does a full
  * sync.
+ *
+ * FU-PROVIDER-ERROR-HYGIENE (D-221): the message a call site hands in is the
+ * client's, so it never carries the upstream body either. Five sites did (the
+ * Google and Microsoft token refreshes, Forms create, the Graph contacts delta
+ * and the Drive share); they pass the bare message now, and
+ * provider-failure.spec.ts (POF-21) reads every call site so none does again.
+ * The Business Profile insights read answers through providerFailure too.
  */
 export type ProviderService =
   | 'gmail'

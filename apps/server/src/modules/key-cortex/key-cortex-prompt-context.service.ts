@@ -5,7 +5,9 @@ import { LEVEL_RANK, memberModuleLevel, rankOf, type CanonicalModule } from '../
 import { KeyCortexContextService } from './key-cortex-context.service';
 import { UnifiedMemoryRetrievalService } from './unified-memory-retrieval.service';
 import { KeyCortexLearningService } from './key-cortex-learning.service';
+import { GENOME_ROW_METADATA_KEY } from './unified-memory.types';
 import type { MemoryFragment, MemorySourceType } from './unified-memory.types';
+import { isMoneyMemoryEvent } from '../business-genome/key-genome/genome-finance-scope';
 import {
   CortexQuery,
   CortexContextSnapshot,
@@ -268,22 +270,15 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 
 /**
  * Review COR-W1FPMS-1: the payload of a business-wide event record. A business_events row the bus wrote carries it as
- * `after` (KeyCortexEventBusService.persistAudit); a cognitive_events row renders it into its content as
- * `${eventType}: ${JSON.stringify(payload)}` (UnifiedMemoryRetrievalService). Unreadable: none.
+ * `after` (KeyCortexEventBusService.persistAudit); a cognitive_events row's payload is carried in its fragment's
+ * metadata.payload (UnifiedMemoryRetrievalService). Unreadable: none.
+ * FU-KEY-MEMORY-MONEY-SIGHT (COR-W1FPMS-1 follow-up): read from the carried payload, never parsed back out of the
+ * rendered content (`${eventType}: ${JSON.stringify(payload)}`): a fragment that carries none has none, and a task
+ * record with none fails closed (taskModulesOf: every module a task can be filed under).
  */
 function eventPayloadOf(fragment: RecordFragment): Record<string, unknown> | undefined {
-  if (fragment.sourceType === 'business_event') {
-    const after = fragment.metadata?.after;
-    return isPlainObject(after) ? after : undefined;
-  }
-  const prefix = `${fragment.title ?? ''}: `;
-  if (typeof fragment.content !== 'string' || !fragment.content.startsWith(prefix)) return undefined;
-  try {
-    const payload: unknown = JSON.parse(fragment.content.slice(prefix.length));
-    return isPlainObject(payload) ? payload : undefined;
-  } catch {
-    return undefined;
-  }
+  const payload = fragment.sourceType === 'business_event' ? fragment.metadata?.after : fragment.metadata?.payload;
+  return isPlainObject(payload) ? payload : undefined;
 }
 
 /** Review COR-W1FPMS-1: TaskAssignmentService's task types and the module each is served under. */
@@ -387,9 +382,103 @@ export async function readersModuleSight(
   }
 }
 
-/** W1F-PERCEPTION-MODULE-SCOPE: whether a reader with `sight` may see `fragment` (every module it names). */
+/**
+ * FU-KEY-MEMORY-MONEY-SIGHT (review SEC-W1FPMS-3): the GenomeMemoryEvent row a genome fragment carries
+ * (GENOME_ROW_METADATA_KEY, written by UnifiedMemoryRetrievalService after the row's own metadata). undefined for a
+ * fragment of another store, and for a genome fragment that carries none.
+ */
+function genomeRowOf(fragment: RecordFragment): Record<string, unknown> | undefined {
+  if (fragment.sourceType !== 'genome_memory_event') return undefined;
+  const row = fragment.metadata?.[GENOME_ROW_METADATA_KEY];
+  return isPlainObject(row) ? row : undefined;
+}
+
+const stringOrNull = (value: unknown): string | null => (typeof value === 'string' ? value : null);
+
+/**
+ * FU-KEY-MEMORY-MONEY-SIGHT (review SEC-W1FPMS-3; D-128, D-100): the modules a reader needs to see a genome memory
+ * record. The genome's money memory events (isMoneyMemoryEvent, the rule its REST routes withhold them by: a
+ * FINANCE_GENOME or finance-filed row, a CROSS_DOMAIN row, the customer-sales snapshot) need revenue read; a genome
+ * fragment that carries no row is read as money (fail closed); any other genome record stays business-wide ([]).
+ * [] for a fragment of another store.
+ */
+export function genomeModulesOf(fragment: RecordFragment): CanonicalModule[] {
+  if (fragment.sourceType !== 'genome_memory_event') return [];
+  const row = genomeRowOf(fragment);
+  if (!row) return ['revenue'];
+  return isMoneyMemoryEvent({
+    sourceType: stringOrNull(row.sourceType),
+    eventType: stringOrNull(row.eventType),
+    domain: stringOrNull(row.domain),
+    section: stringOrNull(row.section),
+  })
+    ? ['revenue']
+    : [];
+}
+
+/**
+ * FU-KEY-MEMORY-MONEY-SIGHT: the modules a reader needs to see any memory record a prompt renders: a business-wide
+ * event's (eventModulesOf) or a genome record's (genomeModulesOf); [] for the other stores.
+ */
+export function recordModulesOf(fragment: RecordFragment): CanonicalModule[] {
+  return fragment.sourceType === 'genome_memory_event' ? genomeModulesOf(fragment) : eventModulesOf(fragment);
+}
+
+/**
+ * W1F-PERCEPTION-MODULE-SCOPE: whether a reader with `sight` may see `fragment` (every module it names).
+ * FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-3): a genome money memory event names revenue (recordModulesOf).
+ */
 export function withinModuleSight(fragment: RecordFragment, sight: ModuleSight): boolean {
-  return eventModulesOf(fragment).every(sight);
+  return recordModulesOf(fragment).every(sight);
+}
+
+/**
+ * FU-KEY-MEMORY-MONEY-SIGHT (review SEC-W1FPMS-4): the genome sources that record a KEY proposal (OutcomeLearningService's
+ * record of a proposal's outcome is titled with the proposal's own title).
+ */
+const PROPOSAL_GENOME_SOURCES = new Set(['KEY_ACTION_PROPOSAL', 'GOVERNANCE_DECISION']);
+/** A value a memberless turn's proposal line renders: one plain word (an action, a status, a risk level), never a figure. */
+const PROPOSAL_WORD = /^[A-Za-z][A-Za-z_]{0,39}$/;
+const proposalWord = (value: unknown): string | undefined =>
+  typeof value === 'string' && PROPOSAL_WORD.test(value) ? value : undefined;
+
+/**
+ * FU-KEY-MEMORY-MONEY-SIGHT (review SEC-W1FPMS-4): whether a fragment is the record of a KEY proposal: a
+ * GOVERNANCE_DECISION record of either business-wide event store (the approval orchestrator's ledger row and its bridged
+ * copies), or a genome record of a proposal.
+ */
+export function isProposalRecord(fragment: RecordFragment): boolean {
+  if (isBusinessWideEventRecord(fragment)) return BUSINESS_WIDE_EVENT_TYPES.has(fragment.title ?? '');
+  const row = genomeRowOf(fragment);
+  return typeof row?.sourceType === 'string' && PROPOSAL_GENOME_SOURCES.has(row.sourceType);
+}
+
+/**
+ * FU-KEY-MEMORY-MONEY-SIGHT (review SEC-W1FPMS-4; D-73/D-93: no member, no figure): what a memberless turn (a
+ * contact-only position on the staff bridge, a SUPER_ADMIN who is no member, a removed member) renders of a proposal
+ * record: its action, status and risk level, each only when it is one plain word, and nothing else. GOVERNANCE_DECISION
+ * proposals stay business-wide, but their bridged copies carry the proposal's title (the Pro Auto monitor writes
+ * '$12,345 outstanding across 7 invoices'), and a rejection its reason and the rejecter. The action and state are read
+ * from the ledger row (its action column and `after`) or, for a bridged copy, from the ledger input it carries (its
+ * action and `after`); a genome record of a proposal renders its event type. The fragment keeps its id, store, title
+ * (the event type) and subject; its content and metadata are replaced.
+ */
+export function memberlessProposalView<F extends RecordFragment>(fragment: F): F {
+  if (fragment.sourceType === 'genome_memory_event') {
+    const action = proposalWord(genomeRowOf(fragment)?.eventType);
+    return { ...fragment, title: action ?? 'KEY_ACTION_PROPOSAL', content: `proposal ${action ?? 'recorded'}`, metadata: { action } };
+  }
+  const payload = eventPayloadOf(fragment);
+  // A bridged copy carries the whole ledger input (BusinessEventService.emit's): its own action and `after`.
+  const copied = payload?.eventType === 'GOVERNANCE_DECISION' && isPlainObject(payload.after) ? payload : undefined;
+  const state = copied ? (copied.after as Record<string, unknown>) : payload;
+  const action = proposalWord(copied ? copied.action : fragment.sourceType === 'business_event' ? fragment.metadata?.action : payload?.action);
+  const status = proposalWord(state?.status);
+  const riskLevel = proposalWord(state?.riskLevel);
+  const parts = [`proposal ${action ?? 'recorded'}`];
+  if (status) parts.push(`status ${status}`);
+  if (riskLevel) parts.push(`risk ${riskLevel}`);
+  return { ...fragment, content: parts.join(', '), metadata: { action, status, riskLevel } };
 }
 
 const cognitionMemoryLogger = new Logger('ReadersOwnCognitionMemory');
@@ -471,6 +560,13 @@ export async function promptMemoryReader(
  * that names no module needs every module (review SEC-W1FPMS-1). The membership is read only when an event names a
  * module. `moduleSight`, when given, replaces the reader's (a staff position's turn: review SEC-W1FPMS-2, COR-W1FPMS-2).
  *
+ * FU-KEY-MEMORY-MONEY-SIGHT: a genome money memory event (FINANCE_GENOME, a finance-filed row, CROSS_DOMAIN, the
+ * customer-sales snapshot: isMoneyMemoryEvent, by the row the fragment carries) needs revenue read, as the genome's REST
+ * routes require (D-128, D-100; review SEC-W1FPMS-3). And a turn with no member reader (`reader` null: a contact-only
+ * position on the staff bridge, a SUPER_ADMIN who is no member, a removed member) sees a proposal record as its action,
+ * status and risk level only, never its title, a rejection reason or any figure (memberlessProposalView; D-73/D-93,
+ * review SEC-W1FPMS-4); a member sees it whole.
+ *
  * The one rule of KeyCortexPromptContextService.buildMemoryContext and the pipeline's chatMemoryFragments (POST
  * /cortex/chat and its stream) and of FlowOrchestratorService.buildPerceptionSection (POST
  * /ai/businesses/:id/flow/chat and its stream, the staff bridge).
@@ -488,7 +584,8 @@ export async function readersOwnPromptMemory<
   moduleSight?: ModuleSight,
 ): Promise<F[]> {
   const withoutKeyRecords = fragments.filter((fragment) => !isPersonalKeyRecord(fragment));
-  const namesAModule = withoutKeyRecords.some((fragment) => eventModulesOf(fragment).length > 0);
+  // FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-3): a genome money memory event names revenue too (recordModulesOf).
+  const namesAModule = withoutKeyRecords.some((fragment) => recordModulesOf(fragment).length > 0);
   // Review SEC-W1FPMS-2 / COR-W1FPMS-2: a staff position's turn hands the sight its position resolved (moduleSight);
   // every other turn's is its reader's membership (readersModuleSight).
   const [sight, own] = await Promise.all([
@@ -502,7 +599,10 @@ export async function readersOwnPromptMemory<
   return withoutKeyRecords
     .filter((fragment) => withinModuleSight(fragment, sight))
     .filter((fragment) => fragment.sourceType !== 'cognition_memory' || own.has(fragment.id))
-    .slice(0, limit);
+    .slice(0, limit)
+    // FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): a turn with no member reader sees a proposal as its action,
+    // status and risk level only (memberlessProposalView); a member sees it whole (business-wide).
+    .map((fragment) => (reader === null && isProposalRecord(fragment) ? memberlessProposalView(fragment) : fragment));
 }
 
 /**

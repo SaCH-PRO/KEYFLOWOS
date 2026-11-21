@@ -1091,6 +1091,26 @@
       "prefix": "v71c_",
       "owner": "apps/server/test/seed-super-admin-placeholder.integration.test.ts",
       "packet": "V1-71 (FU-SEED-SUPERADMIN-PLACEHOLDER)"
+    },
+    {
+      "prefix": "v71f_",
+      "owner": "apps/server/test/identity-finance-columns.integration.test.ts",
+      "packet": "V1-71 (FU-IDENTITY-FINANCE-COLUMNS)"
+    },
+    {
+      "prefix": "v63m_",
+      "owner": "apps/server/test/business-profile-save.integration.test.ts",
+      "packet": "V1-63 (SWP-PROFILE-TEAMSIZE)"
+    },
+    {
+      "prefix": "v63g_",
+      "owner": "apps/server/test/security-audit-truth.integration.test.ts",
+      "packet": "V1-63 (SWP-SEC-AUDIT-TRUTH)"
+    },
+    {
+      "prefix": "v71o_",
+      "owner": "apps/server/test/key-memory-money-sight.integration.test.ts",
+      "packet": "V1-71 (FU-KEY-MEMORY-MONEY-SIGHT)"
     }
   ],
   "pendingRenames": [],

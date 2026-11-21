@@ -33,6 +33,25 @@
  * (c72069ac) every outage case answers 400 BAD_REQUEST with the same message;
  * the refusal controls, the retry after a 410 and the owner door pass.
  *
+ * FU-PROVIDER-ERROR-HYGIENE (D-221, review follow-up C8): the provider's body
+ * never reaches the answer. Four sites put it in their message, and since the
+ * cases above those messages reach the client in a 503 as well as a 400:
+ *
+ *   an expired connection's token refresh (Google)  -> 'Failed to refresh <label> token: <body>'
+ *   an expired connection's token refresh (Microsoft) -> 'Failed to refresh Outlook Contacts token: <body>'
+ *   POST /connect/businesses/:b/outlook-contacts/sync (Graph delta) -> 'Graph API error <status>: <body, 200 chars>'
+ *   POST /connect/businesses/:b/forms (Forms create) -> 'Forms API error <status>: <body>'
+ *
+ * and a scheduled Business Profile post that failed on a refresh kept that
+ * message, body and all, in connector_statuses.metadata and in GET
+ * .../business-profile/scheduled-posts. Each message is now the same text
+ * without the body. And GET .../business-profile/insights, which answered
+ * every Performance API failure 400 'Performance API <status>: <body>',
+ * answers an outage 503 provider_unavailable (google_business_profile) and a
+ * refusal 400, both 'Performance API <status>'. RED-BEFORE (chain head
+ * b00e5f78): V63Y-05, -06, -07, -08, -10, -13 (their messages carry the body)
+ * and V63Y-21 to V63Y-24 fail; the rest pass.
+ *
  * WHAT IS REAL: PrismaService, AuthGuard, BusinessGuard, ModuleScopeGuard,
  * CrmRateLimitGuard, the TenantInterceptor, ConnectController,
  * GoogleContactsSyncService, OutlookContactsSyncService, GoogleFormsService,
@@ -111,6 +130,8 @@ const isDriveFormsList: Match = (u, m) => m === 'GET' && u.startsWith('https://w
 const isBpAccounts: Match = (u, m) => m === 'GET' && u === 'https://mybusinessaccountmanagement.googleapis.com/v1/accounts';
 const isBpCreatePost: Match = (u, m) => m === 'POST' && u === `https://mybusiness.googleapis.com/v4/${LOCATION}/localPosts`;
 const isCalendarList: Match = (u, m) => m === 'GET' && u.startsWith('https://www.googleapis.com/calendar/v3/users/me/calendarList?');
+const isFormCreate: Match = (u, m) => m === 'POST' && u === 'https://forms.googleapis.com/v1/forms';
+const isBpInsights: Match = (u, m) => m === 'GET' && u.startsWith(`https://businessprofileperformance.googleapis.com/v1/${LOCATION}:fetchMultiDailyMetricsTimeSeries?`);
 
 function googleError(code: number, status: string, reasons: string[] = []) {
   return JSON.stringify({ error: { code, message: `upstream ${status}`, status, errors: reasons.map((reason) => ({ reason })) } });
@@ -152,6 +173,9 @@ const bpCreatePost = (b: string) => as(agent().post(`/connect/businesses/${b}/bu
 const crmImport = (b: string) => as(agent().post(`/crm/businesses/${b}/google/import`)).send({ accessToken: `${P}import-access` });
 const bookingsCalendarList = (b: string) => as(agent().get(`/bookings/businesses/${b}/calendar/list`));
 const syncCalendars = (b: string) => as(agent().get(`/calendar/businesses/${b}/sync/calendars`));
+const createForm = (b: string) => as(agent().post(`/connect/businesses/${b}/forms`)).send({ title: `${P} form` });
+const bpInsights = (b: string) => as(agent().get(`/connect/businesses/${b}/business-profile/insights?location=${encodeURIComponent(LOCATION)}&days=7`));
+const bpScheduled = (b: string) => as(agent().get(`/connect/businesses/${b}/business-profile/scheduled-posts`));
 
 /** The structured 503 of an upstream outage, through the production filter. */
 function expectUnavailable(res: { status: number; body: any }, service: string, message: string, upstreamStatus: number) {
@@ -464,7 +488,8 @@ describe('W11-PROVIDER-OUTAGE-CONNECT: a provider outage answers 503 provider_un
     providers = [{ when: isGoogleToken, status, body }];
     const before = await connectionOf(ID.bizExpired);
 
-    expectUnavailable(await googleContactsSync(ID.bizExpired), 'google_contacts', `Failed to refresh Google Contacts token: ${body}`, status);
+    // FU-PROVIDER-ERROR-HYGIENE (D-221): the message, never the token endpoint's body.
+    expectUnavailable(await googleContactsSync(ID.bizExpired), 'google_contacts', 'Failed to refresh Google Contacts token', status);
     const after = await connectionOf(ID.bizExpired);
     expect(after.contactsAccessToken).toBe(before.contactsAccessToken);
     expect(after.contactsTokenExpiry.getTime()).toBe(before.contactsTokenExpiry.getTime());
@@ -474,7 +499,7 @@ describe('W11-PROVIDER-OUTAGE-CONNECT: a provider outage answers 503 provider_un
   it('[V63Y-06] control: an expired Google Contacts connection whose refresh answers 400 invalid_grant (reconnect) keeps the existing 400', async () => {
     providers = [{ when: isGoogleToken, status: 400, body: INVALID_GRANT }];
 
-    expectRefused(await googleContactsSync(ID.bizExpired), `Failed to refresh Google Contacts token: ${INVALID_GRANT}`);
+    expectRefused(await googleContactsSync(ID.bizExpired), 'Failed to refresh Google Contacts token');
     expect((await connectionOf(ID.bizExpired)).contactsAccessToken).toBe(`${ID.bizExpired}-contacts-access`);
   });
 
@@ -486,7 +511,8 @@ describe('W11-PROVIDER-OUTAGE-CONNECT: a provider outage answers 503 provider_un
   ] as Array<[number, string]>)('[V63Y-07] RED-BEFORE: an Outlook Contacts sync whose Graph delta answers %i answers 503 {service: outlook_contacts} with the existing "Graph API error" message; the delta link stays', async (status, body) => {
     providers = [{ when: isGraphDelta, status, body }];
 
-    expectUnavailable(await outlookSync(ID.bizLive), 'outlook_contacts', `Graph API error ${status}: ${body}`, status);
+    // FU-PROVIDER-ERROR-HYGIENE (D-221): the status, never Graph's body.
+    expectUnavailable(await outlookSync(ID.bizLive), 'outlook_contacts', `Graph API error ${status}`, status);
     expect((await connectionOf(ID.bizLive)).msContactsDeltaLink).toBe(DELTA_LINK);
     expect(answered.map((a) => a.url)).toEqual([DELTA_LINK]);
     expect(await contactCount(ID.bizLive)).toBe(0);
@@ -498,7 +524,7 @@ describe('W11-PROVIDER-OUTAGE-CONNECT: a provider outage answers 503 provider_un
   ] as Array<[number, string]>)('[V63Y-08] control: an Outlook Contacts sync whose Graph delta answers %i keeps the existing 400 and the delta link', async (status, body) => {
     providers = [{ when: isGraphDelta, status, body }];
 
-    expectRefused(await outlookSync(ID.bizLive), `Graph API error ${status}: ${body}`);
+    expectRefused(await outlookSync(ID.bizLive), `Graph API error ${status}`);
     expect((await connectionOf(ID.bizLive)).msContactsDeltaLink).toBe(DELTA_LINK);
   });
 
@@ -518,10 +544,10 @@ describe('W11-PROVIDER-OUTAGE-CONNECT: a provider outage answers 503 provider_un
 
   it('[V63Y-10] RED-BEFORE: an expired Outlook Contacts connection whose Microsoft token endpoint answers 503 answers 503 {service: microsoft}; a 400 invalid_grant keeps the existing 400; no token is stored', async () => {
     providers = [{ when: isMicrosoftToken, status: 503, body: TOKEN_DOWN }];
-    expectUnavailable(await outlookSync(ID.bizExpired), 'microsoft', `Failed to refresh Outlook Contacts token: ${TOKEN_DOWN}`, 503);
+    expectUnavailable(await outlookSync(ID.bizExpired), 'microsoft', 'Failed to refresh Outlook Contacts token', 503);
 
     providers = [{ when: isMicrosoftToken, status: 400, body: INVALID_GRANT }];
-    expectRefused(await outlookSync(ID.bizExpired), `Failed to refresh Outlook Contacts token: ${INVALID_GRANT}`);
+    expectRefused(await outlookSync(ID.bizExpired), 'Failed to refresh Outlook Contacts token');
 
     const after = await connectionOf(ID.bizExpired);
     expect(after.msContactsAccessToken).toBe(`${ID.bizExpired}-ms-access`);
@@ -548,7 +574,7 @@ describe('W11-PROVIDER-OUTAGE-CONNECT: a provider outage answers 503 provider_un
   it('[V63Y-13] RED-BEFORE: an expired Google Forms connection whose token endpoint answers 503 answers 503 {service: google_forms}; no token is stored', async () => {
     providers = [{ when: isGoogleToken, status: 503, body: TOKEN_DOWN }];
 
-    expectUnavailable(await getForm(ID.bizExpired), 'google_forms', `Failed to refresh Google Forms token: ${TOKEN_DOWN}`, 503);
+    expectUnavailable(await getForm(ID.bizExpired), 'google_forms', 'Failed to refresh Google Forms token', 503);
     expect((await connectionOf(ID.bizExpired)).formsAccessToken).toBe(`${ID.bizExpired}-forms-access`);
   });
 
@@ -607,6 +633,104 @@ describe('W11-PROVIDER-OUTAGE-CONNECT: a provider outage answers 503 provider_un
     const after = await connectionOf(ID.bizExpired);
     expect(after.calendarAccessToken).toBe(`${ID.bizExpired}-calendar-access`);
     expect(after.calendarTokenExpiry.getTime()).toBe(PAST_EXPIRY.getTime());
+  });
+
+  // ---- FU-PROVIDER-ERROR-HYGIENE (D-221) ----
+
+  it('[V63Y-21] RED-BEFORE: GET business-profile/insights whose Performance API answers 503 or 429 answers 503 {service: google_business_profile, message: "Performance API <status>"}; a 404 and a 403 insufficientPermissions keep a 400 "Performance API <status>"; a 200 still totals the metrics', async () => {
+    for (const [status, body] of [
+      [503, googleError(503, 'UNAVAILABLE', ['backendError'])],
+      [429, googleError(429, 'RESOURCE_EXHAUSTED', ['rateLimitExceeded'])],
+    ] as Array<[number, string]>) {
+      providers = [{ when: isBpInsights, status, body }];
+      expectUnavailable(await bpInsights(ID.bizLive), 'google_business_profile', `Performance API ${status}`, status);
+    }
+    for (const [status, body] of [
+      [404, googleError(404, 'NOT_FOUND', ['notFound'])],
+      [403, googleError(403, 'PERMISSION_DENIED', ['insufficientPermissions'])],
+    ] as Array<[number, string]>) {
+      providers = [{ when: isBpInsights, status, body }];
+      expectRefused(await bpInsights(ID.bizLive), `Performance API ${status}`);
+    }
+
+    providers = [{
+      when: isBpInsights,
+      status: 200,
+      body: JSON.stringify({
+        multiDailyMetricTimeSeries: [{ dailyMetricTimeSeries: [{
+          dailyMetric: 'CALL_CLICKS',
+          timeSeries: { datedValues: [{ date: { year: 2026, month: 11, day: 1 }, value: '3' }, { date: { year: 2026, month: 11, day: 2 }, value: '4' }] },
+        }] }],
+      }),
+    }];
+    const ok = await bpInsights(ID.bizLive);
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect(ok.body).toMatchObject({ locationName: LOCATION, rangeDays: 7, metrics: [{ metric: 'CALL_CLICKS', total: 7 }] });
+    for (const a of answered) expect(isBpInsights(a.url, a.method), a.url).toBe(true);
+  });
+
+  it('[V63Y-22] RED-BEFORE: POST forms (Forms create) whose Forms API answers 503 answers 503 {service: google_forms, message: "Forms API error 503"}; a 400 keeps a 400 "Forms API error 400"', async () => {
+    providers = [{ when: isFormCreate, status: 503, body: googleError(503, 'UNAVAILABLE', ['backendError']) }];
+    expectUnavailable(await createForm(ID.bizLive), 'google_forms', 'Forms API error 503', 503);
+
+    providers = [{ when: isFormCreate, status: 400, body: googleError(400, 'INVALID_ARGUMENT', ['invalidArgument']) }];
+    expectRefused(await createForm(ID.bizLive), 'Forms API error 400');
+    expect(answered.map((a) => [a.method, a.url])).toEqual([['POST', 'https://forms.googleapis.com/v1/forms'], ['POST', 'https://forms.googleapis.com/v1/forms']]);
+  });
+
+  it('[V63Y-23] RED-BEFORE: the provider body is never in the answer: the Google and Microsoft token refreshes, the Graph delta, Forms create and the insights read, for an outage and a refusal; no token is stored and the delta link stays', async () => {
+    const CANARY = `${P}canary-upstream-body`;
+    const google = (code: number, status: string, reason: string) =>
+      JSON.stringify({ error: { code, message: `${CANARY} ${status}`, status, errors: [{ reason, message: CANARY }] } });
+    const cases: Array<[string, () => Promise<{ status: number; body: any }>, Match, number, string, number]> = [
+      ['Google refresh, outage', () => googleContactsSync(ID.bizExpired), isGoogleToken, 503, JSON.stringify({ error: 'temporarily_unavailable', error_description: CANARY }), 503],
+      ['Google refresh, refusal', () => googleContactsSync(ID.bizExpired), isGoogleToken, 400, JSON.stringify({ error: 'invalid_grant', error_description: CANARY }), 400],
+      ['Microsoft refresh, outage', () => outlookSync(ID.bizExpired), isMicrosoftToken, 503, JSON.stringify({ error: 'temporarily_unavailable', error_description: CANARY }), 503],
+      ['Microsoft refresh, refusal', () => outlookSync(ID.bizExpired), isMicrosoftToken, 400, JSON.stringify({ error: 'invalid_grant', error_description: CANARY }), 400],
+      ['Graph delta, outage', () => outlookSync(ID.bizLive), isGraphDelta, 503, JSON.stringify({ error: { code: 'serviceNotAvailable', message: CANARY } }), 503],
+      ['Graph delta, refusal', () => outlookSync(ID.bizLive), isGraphDelta, 404, JSON.stringify({ error: { code: 'ErrorItemNotFound', message: CANARY } }), 400],
+      ['Forms create, outage', () => createForm(ID.bizLive), isFormCreate, 503, google(503, 'UNAVAILABLE', 'backendError'), 503],
+      ['Forms create, refusal', () => createForm(ID.bizLive), isFormCreate, 400, google(400, 'INVALID_ARGUMENT', 'invalidArgument'), 400],
+      ['insights, outage', () => bpInsights(ID.bizLive), isBpInsights, 503, google(503, 'UNAVAILABLE', 'backendError'), 503],
+      ['insights, refusal', () => bpInsights(ID.bizLive), isBpInsights, 404, google(404, 'NOT_FOUND', 'notFound'), 400],
+    ];
+    const before = await connectionOf(ID.bizExpired);
+    for (const [label, call, when, status, body, expected] of cases) {
+      providers = [{ when, status, body }];
+      const res = await call();
+      expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(expected);
+      expect(JSON.stringify(res.body), label).not.toContain(CANARY);
+    }
+    const after = await connectionOf(ID.bizExpired);
+    expect(after.contactsAccessToken).toBe(before.contactsAccessToken);
+    expect(after.msContactsAccessToken).toBe(before.msContactsAccessToken);
+    expect((await connectionOf(ID.bizLive)).msContactsDeltaLink).toBe(DELTA_LINK);
+  });
+
+  it('[V63Y-24] RED-BEFORE: a scheduled Business Profile post that falls due on a connection whose token refresh is refused is listed failed with the bare refresh message; the provider body is in neither the answer nor the stored row', async () => {
+    const CANARY = `${P}canary-scheduled-body`;
+    const due = { id: `${P}sched_1`, location: LOCATION, summary: `${P} due post`, scheduledFor: new Date(Date.now() - 60_000).toISOString(), status: 'scheduled', createdAt: new Date().toISOString() };
+    await db.connectorStatus.create({ data: { id: `${P}cs_bp_exp`, businessId: ID.bizExpired, connectorType: 'google_business_profile', status: 'connected', metadata: { scheduledPosts: [due] } } });
+    try {
+      providers = [{ when: isGoogleToken, status: 400, body: JSON.stringify({ error: 'invalid_grant', error_description: CANARY }) }];
+
+      const res = await bpScheduled(ID.bizExpired);
+
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body).toEqual([expect.objectContaining({ id: due.id, status: 'failed', error: 'Failed to refresh Google Business Profile token' })]);
+      expect(JSON.stringify(res.body)).not.toContain(CANARY);
+      const row = await db.connectorStatus.findUnique({
+        where: { businessId_connectorType: { businessId: ID.bizExpired, connectorType: 'google_business_profile' } },
+        select: { metadata: true },
+      });
+      expect(row.metadata.scheduledPosts).toEqual([expect.objectContaining({ id: due.id, status: 'failed', error: 'Failed to refresh Google Business Profile token' })]);
+      expect(JSON.stringify(row.metadata)).not.toContain(CANARY);
+      // The refresh was asked once and refused: nothing was posted and no token stored.
+      expect(answered.map((a) => a.url)).toEqual(['https://oauth2.googleapis.com/token']);
+      expect((await db.business.findUnique({ where: { id: ID.bizExpired }, select: { bpTokenExpiry: true } })).bpTokenExpiry.getTime()).toBe(PAST_EXPIRY.getTime());
+    } finally {
+      await db.connectorStatus.deleteMany({ where: { businessId: ID.bizExpired, connectorType: 'google_business_profile' } });
+    }
   });
 
   it('[V63Y-20] no provider was called for real: every request this suite made was answered in process', () => {

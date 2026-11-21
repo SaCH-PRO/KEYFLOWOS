@@ -588,12 +588,16 @@ export class FinanceController {
    * It was membership-only: a STAFF member with bookings and crm read only
    * read every setting. Its web readers are the finance pages (settings, tax,
    * reports). ensureAccess stays (D-46).
-   * NOT A CONFINEMENT (review SEC-V71-2, open follow-up): GET
-   * /identity/businesses and GET /identity/businesses/:businessId still answer
-   * accountantEmail and the finance settings columns (basis, fiscal year,
-   * default tax rate, default account ids) to every member (sanitizeBusiness
-   * keeps them), so this gate does not keep the saved recipient from a member
-   * without revenue read; the identity projections are outside this packet.
+   * Review SEC-V71-2 (closed by FU-IDENTITY-FINANCE-COLUMNS, V1-71, owner
+   * rulings D-205, D-221): GET /identity/businesses, GET
+   * /identity/businesses/:businessId and POST /identity/bootstrap answered
+   * accountantEmail and the default account ids to every member, so this gate
+   * confined nothing; they now answer those columns only to a member holding
+   * revenue read on the business, by this gate's rule (IdentityService
+   * withholdBusinessFinanceSettings; proof:
+   * test/identity-finance-columns.integration.test.ts, v71f_). The basis,
+   * fiscal year, currency and default tax rate stay on the identity reads for
+   * every member (the screens a member without revenue read opens read them).
    *
    * FU-FINANCE-SETTINGS-PATCH (V1-71, owner ruling D-205): the answer carries
    * the caller's capability hints (mayChangeAccountantEmail,
