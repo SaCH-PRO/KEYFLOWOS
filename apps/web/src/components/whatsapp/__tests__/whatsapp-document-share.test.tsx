@@ -214,8 +214,8 @@ describe("FU-WA-CONTACT-PHONE confirm step: Escape closes the step alone (COR-WA
     // The panels call share() once the pay link is made, so the step mounts from a
     // non-event update. Its Escape listener must be there when its DOM is: an Escape
     // in between went to the detail modal under it (CI flake on PR #216, run
-    // 44845430001, invoices-whatsapp-confirm-escape.test.tsx). A raw dispatch, not
-    // fireEvent: fireEvent runs in act, which flushes effects first and hides the gap.
+    // 44845430001, invoices-whatsapp-confirm-escape.test.tsx). A fireEvent after findByRole
+    // lands in the gap only sometimes; a raw dispatch timed by the DOM mutation always does.
     const underneath = vi.fn();
     const onDocument = (event: KeyboardEvent) => {
       if (event.key === "Escape") underneath();
@@ -234,7 +234,7 @@ describe("FU-WA-CONTACT-PHONE confirm step: Escape closes the step alone (COR-WA
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = false;
     let pressed = false;
     const observer = new MutationObserver(() => {
-      if (pressed || !document.querySelector('[role="dialog"]')) return;
+      if (pressed || !screen.queryByRole("dialog", { name: /whatsapp number/i })) return;
       pressed = true;
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     });
