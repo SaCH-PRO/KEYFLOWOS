@@ -22,9 +22,11 @@ This checkpoint continues `docs/reconstruction/V1-HANDOFF-2026-11-20.md`; that f
 
 | Work | Branch | State |
 |---|---|---|
-| W11-CORTEX-INSIGHT-QUERIES repair (BA-04) | `pkt/V1-W11-CORTEX-INSIGHT-QUERIES-R1`, onto `wave/v1-wave-3a` (#215) | RED `1d6c1822`, fix `d4fd4118`. Full server suite green (see §3). |
-| W11-CORTEX-SESSION-SNAPSHOT-SCOPE (KC-SEC-3, step 3, P0) | `pkt/V1-W11-CORTEX-SESSION-SNAPSHOT-SCOPE`, stacked on the repair | RED `1c8ce693`, fix `f550c3e9`. Two independent reviews (security-tenancy and correctness-regression), then repair. |
+| W11-CORTEX-INSIGHT-QUERIES repair (BA-04) | pushed to `wave/v1-wave-3a` (#215) | RED `1d6c1822`, fix `d4fd4118`. Full server and web suites green, R0 MET (see §3). |
+| W11-CORTEX-SESSION-SNAPSHOT-SCOPE (KC-SEC-3, step 3, P0) | `pkt/V1-W11-CORTEX-SESSION-SNAPSHOT-SCOPE` (pushed), stacked on the repair | RED `1c8ce693`, fix `f550c3e9`, review repair `99238115`/`17639719` (pendingInvoices). 199/199 passing, tsc 0. The full server suite is the remaining check. |
+| FU-WA-ESCAPE-RACE (new follow-up of COR-WACP-1; the #216 CI failure) | pushed to `wave/v1-wave-3a-phone` (#216) | RED `51605d36` (deterministic), fix `048e5fcf` (`useLayoutEffect`), `3a73999f`, `63119d06`. Reviewed: no blocking or major findings. |
 | Local test environment | `scripts/dev/claude-cloud-env.sh` (on the session branch) | `up` and `verify`. `verify` passes, with a negative control. |
+| Cloud environment `keyflowos` (personal) | Claude environment settings | The setup script is saved; this session runs on it. It is unproven until a fresh session starts. |
 
 ## 3. Proof
 
@@ -37,7 +39,12 @@ This checkpoint continues `docs/reconstruction/V1-HANDOFF-2026-11-20.md`; that f
 | Snapshot packet RED, at `1c8ce693` | 4 failed / 76 passed: STAFF with revenue none and ADMIN with an empty map get `totalRevenue: 4321` on POST sessions and on POST chat `contextUsed` |
 | Snapshot packet GREEN, at `f550c3e9` | 80/80 |
 
-Web suite, lint ratchets and `proof:release0` for #215: see the RETURN on #80.
+| #215 web suite, at `d4fd4118` | 166/166 files, 1476 passed |
+| #215 server lint | 0 errors / 3155 warnings (≤ 3343) |
+| #215 `proof:release0` | 39/39 SATISFIED, R0 EXIT GATE MET |
+| #216 web suite, at `3a73999f` | 163/163 files, 1445 passed; web tsc 0; web lint 0 errors / 25 warnings |
+
+The RETURN is CC-RETURN-V1-SESSION-20261121-001 (#80 comment 7071174439).
 
 ## 4. Lessons for the next session
 
@@ -46,6 +53,8 @@ Web suite, lint ratchets and `proof:release0` for #215: see the RETURN on #80.
   - A worktree also needs its own `apps/server/dist` (run `pnpm --filter server build`) for suites that spawn the server.
 - Vitest's esbuild emits no decorator metadata. In a hand-built Nest testing module, build services with a `useFactory` (as the suites do), or their constructor dependencies are undefined.
 - Before trusting a PR body, check the PR head's CI check runs.
+- Web `next typegen` needs `NEXT_PUBLIC_API_BASE_URL=http://localhost:3001` locally, as CI sets it. Without it, typegen fails silently and tsc reports a missing `next` type library.
+- In Redis 7, `CONFIG SET dir` is protected. Start redis-server with `--dir` outside the repository (the bootstrap does), so `dump.rdb` never lands in the tree.
 
 ## 5. How to resume (phone or terminal)
 
@@ -57,14 +66,15 @@ Web suite, lint ratchets and `proof:release0` for #215: see the RETURN on #80.
 ## 6. Next executable work, in order
 
 1. **Owner:** merge #215, then #216 when CI is green (Claude does not merge).
-2. **W11-CORTEX-SESSION-SNAPSHOT-SCOPE:**
-   - finish the review repairs;
-   - run the touched suites, tsc, run-manifests and proof:release0;
-   - join a wave 3b PR once #215 is on main.
-3. **Next eligible packets** (`deps_met` per `V1-STATUS-2026-11-20.json`, counting wave 2b and 3a as done):
+2. **W11-CORTEX-SESSION-SNAPSHOT-SCOPE:** run the full server suite and proof:release0 on its head, then join a wave 3b PR once #215 is on main.
+3. **FU-KEY-CHAT-GENOME-MONEY-SIGHT** (proposed; security review finding 1, major, deferred by name):
+   - **The gap:** POST chat `genomeInsights` / `proactiveSuggestions` and the model prompt's genome block (`key-cortex-query-pipeline.service.ts`, `key-cortex-genome-context.service.ts`, `key-cortex-system-prompt.service.ts`) carry finance genome signals and opportunity values to a member without revenue read.
+   - **The fix:** project them with `isFinanceSignal` / `isFinanceRecommendation` (`genome-finance-scope.ts`, D-128) before both the response and the prompt are built.
+   - **When:** next, unless the owner redirects.
+4. **Next eligible packets** (`deps_met` per `V1-STATUS-2026-11-20.json`, counting wave 2b and 3a as done):
    - step 3: BIZ-SETTINGS-WEB (P0, web), FU-MERGE-CONTACTS-UNIQUE, FU-CONTACT-AUDIT-RESIDUAL (D-207), SWP-COA-UNIQUE-CODE, FU-UNIT-GUARD-CI, FU-OVERLAY-LAYER-TABLE, FU-COMMUNITY-LIKE-OWN-ACTION;
    - step 4: SWP-INV-MONEY-TOTALS (P0), SWP-BOOKING-PAYMENT-GATE, W11-GENOME-RECS-DOMAIN, SWP-CENSUS-KEY-B, SWP-CENSUS-GENOME, W1F-ORDER-TRANSITIONS, W1F-STORE-STRIPE-R0.
-4. **Gate packets with no dependencies:** S0-SEC-LANE-DEPLOY (P0), S0-DEPENDABOT-FREEZE, TOF-STALE-GATES-PKT, SWEEP-RERUN-S2.
+5. **Gate packets with no dependencies:** S0-SEC-LANE-DEPLOY (P0), S0-DEPENDABOT-FREEZE, TOF-STALE-GATES-PKT, SWEEP-RERUN-S2.
 
 ## 7. Operator console (mobile)
 
