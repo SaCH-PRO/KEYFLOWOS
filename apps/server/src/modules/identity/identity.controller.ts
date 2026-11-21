@@ -837,17 +837,26 @@ export class IdentityController {
     return this.identity.updateUser(user.id, body);
   }
 
+  /**
+   * FU-IDENTITY-FINANCE-COLUMNS (V1-71, owner rulings D-205, D-221): each business is answered by the caller's
+   * membership of it: the finance settings columns (the accountant export's address, the default ledger account ids)
+   * only where the caller holds revenue read, as GET /finance/businesses/:id/settings answers them.
+   */
   @UseGuards(AuthGuard)
   @Get('businesses')
   listBusinesses(@CurrentUser() user: AuthenticatedUser) {
     if (!user?.id) throw new UnauthorizedException('Missing authenticated user');
-    return this.identity.listBusinesses(user.id);
+    return this.identity.listBusinesses(user.id, user.role);
   }
 
+  /**
+   * FU-IDENTITY-FINANCE-COLUMNS (V1-71, owner rulings D-205, D-221): every member reads the business, the finance
+   * settings columns only with revenue read (IdentityService.getBusiness with the member as viewer).
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId')
-  getBusiness(@Param('businessId') businessId: string) {
-    return this.identity.getBusiness(businessId);
+  getBusiness(@Param('businessId') businessId: string, @CurrentUser() user?: AuthenticatedUser) {
+    return this.identity.getBusiness(businessId, user ?? null);
   }
 
   /**
