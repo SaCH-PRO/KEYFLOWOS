@@ -964,6 +964,29 @@ describe('W11-CORTEX-INSIGHT-QUERIES (SEC-W11CRR-2): the REAL insight service an
     for (const absent of ['Unknown', NAME.zed, NAME.yara]) expect(text).not.toContain(absent);
   });
 
+  it('BA-04 (W11-CORTEX-INSIGHT-QUERIES repair): the report forecast reads cash received net of refunds (CASH_NET_PAYMENT_WHERE), so refunded money is not projected as inflow', async () => {
+    // A 250 payment of which 100 was refunded (D-14: a separate negative REFUNDED row), and a
+    // legacy flipped original (positive REFUNDED, net 0 under readStoredPayments). With the
+    // 400 SUCCESSFUL payment of the fixture, cash net of refunds over the last 30 days is 550.
+    // A SUCCESSFUL-only sum reads 650 (the refund counted as received).
+    for (const pay of [
+      { id: `${P}r_pay_refundable`, status: 'SUCCESSFUL', amount: 250 },
+      { id: `${P}r_pay_refund`, status: 'REFUNDED', amount: -100 },
+      { id: `${P}r_pay_legacy_flip`, status: 'REFUNDED', amount: 77 },
+    ]) {
+      await db.payment.create({
+        data: { ...pay, businessId: R.biz, invoiceId: INV.paidA, currency: 'TTD', provider: 'cash', method: 'cash', providerPaymentId: `${P}${pay.id.slice(P.length)}` },
+      });
+    }
+    try {
+      const res = await get2('report', R.owner, R.biz).query({ scope: 'monthly' });
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body.cashFlow.forecast.projectedInflow).toBe(550);
+    } finally {
+      await db.$executeRawUnsafe(`DELETE FROM payments WHERE id IN ('${P}r_pay_refundable', '${P}r_pay_refund', '${P}r_pay_legacy_flip')`);
+    }
+  });
+
   it.each([
     ['insights/revenue'],
     ['insights/profit'],
