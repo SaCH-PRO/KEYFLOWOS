@@ -3521,6 +3521,7 @@ describe('W11-INV-SET-MOVEMENT a direct stock set writes one ADJUSTMENT movement
         await Promise.race([gathered, sleep(HOLD_WINDOW_MS)]);
       }, 'findFirst');
       let outcome: any;
+      let transactions = 0;
       try {
         outcome = await movementsAddedBy(() =>
           Promise.all([
@@ -3528,6 +3529,7 @@ describe('W11-INV-SET-MOVEMENT a direct stock set writes one ADJUSTMENT movement
             upsertAnswer(upsertByRoute(ID.biz, { ...NEW, quantity: second }, SET_MEMBER)),
           ]),
         );
+        transactions = hook.transactions();
       } finally {
         hook.restore();
       }
@@ -3535,6 +3537,8 @@ describe('W11-INV-SET-MOVEMENT a direct stock set writes one ADJUSTMENT movement
       const changes: number[] = outcome.added.map((m: any[]) => m[2]);
       outcomes[name] = {
         answer: outcome.answer,
+        // Review COR-2: both first runs and the loser's run again (the two did overlap; not one set after the other).
+        transactions,
         rows: held.length,
         allSetByTheMember: outcome.added.every((m: any[]) => m[0] === 'ADJUSTMENT' && m[1] === 'SET' && m[3] === SET_MEMBER && m[4] === null),
         movements: changes.length,
@@ -3544,8 +3548,8 @@ describe('W11-INV-SET-MOVEMENT a direct stock set writes one ADJUSTMENT movement
     }
     // At 5c17e7b4: no movement at all (movements 0, the sum 0 against a row holding 3 or 5).
     expect(outcomes).toEqual({
-      '3 and 5': { answer: ['committed', 'committed'], rows: 1, allSetByTheMember: true, movements: 2, sumEqualsFinalQuantity: true, finalIsOneOfTheSets: true },
-      '3 twice': { answer: ['committed', 'committed'], rows: 1, allSetByTheMember: true, movements: 1, sumEqualsFinalQuantity: true, finalIsOneOfTheSets: true },
+      '3 and 5': { answer: ['committed', 'committed'], transactions: 3, rows: 1, allSetByTheMember: true, movements: 2, sumEqualsFinalQuantity: true, finalIsOneOfTheSets: true },
+      '3 twice': { answer: ['committed', 'committed'], transactions: 3, rows: 1, allSetByTheMember: true, movements: 1, sumEqualsFinalQuantity: true, finalIsOneOfTheSets: true },
     });
   });
 
@@ -3567,5 +3571,84 @@ describe('W11-INV-SET-MOVEMENT a direct stock set writes one ADJUSTMENT movement
       'the service called with no member': refused,
       'a body claiming its own actor and import path': refused,
     });
+  });
+
+  it("RC-53 (W11-INV-SET-MOVEMENT review SEC-1, COR-1; D-139) a member's POST .../inventory whose body names its own actor, reason, type, reference, note and import path (createdBy, actorId, userId, reasonCode, type, referenceId, note, source, skipSetMovement) writes the one movement as the route's: ADJUSTMENT/SET, createdBy the authenticated member, referenceId and note null", async () => {
+    await resetBusinessStock();
+    const outcome = await movementsAddedBy(() =>
+      upsertAnswer(
+        upsertByRoute(
+          ID.biz,
+          {
+            ...A,
+            quantity: 7,
+            createdBy: ID.owner,
+            actorId: ID.owner,
+            userId: ID.owner,
+            reasonCode: 'EXCEL_IMPORT',
+            type: 'RECEIPT',
+            referenceId: 'x',
+            note: 'x',
+            source: 'EXCEL_IMPORT',
+            skipSetMovement: true,
+            label: 'x',
+            quantityChange: 99,
+            businessId: ID.bizB,
+          },
+          SET_MEMBER,
+        ),
+      ),
+    );
+    expect(outcome).toEqual({ answer: 'committed', added: [setMovement(-3, A)] });
+  });
+
+  it('RC-54 (W11-INV-SET-MOVEMENT review SEC-2; D-139 one transaction) a set whose movement write fails (stockMovement.create made to throw inside the transaction) leaves the stock row as it was, for an existing row and for a new pair: no stock change commits without its movement', async () => {
+    const outcomes: Record<string, unknown> = {};
+    const rows: Record<string, unknown> = {};
+    for (const [name, pair] of [
+      ['existing row 10 to 7', A],
+      ['new pair holding 7', NEW],
+    ] as Array<[string, { productId: string; warehouseId: string }]>) {
+      await resetBusinessStock();
+      const real = prismaService.client;
+      const bound = (target: any, prop: PropertyKey) => {
+        const value = Reflect.get(target, prop);
+        return typeof value === 'function' ? value.bind(target) : value;
+      };
+      let movementWritesTried = 0;
+      prismaService.client = new Proxy(real, {
+        get(target, prop) {
+          if (prop !== '$transaction') return bound(target, prop);
+          return (arg: any, options?: any) =>
+            target.$transaction(
+              (tx: any) =>
+                arg(
+                  new Proxy(tx, {
+                    get(t, p) {
+                      if (p !== 'stockMovement') return bound(t, p);
+                      return {
+                        create: async () => {
+                          movementWritesTried++;
+                          throw new Error('rc54: the movement write fails');
+                        },
+                      };
+                    },
+                  }),
+                ),
+              options,
+            );
+        },
+      });
+      try {
+        const writes = await answerAndWrites(() => upsertAnswer(upsertByRoute(ID.biz, { ...pair, quantity: 7 }, SET_MEMBER)));
+        outcomes[name] = { ...writes, movementWritesTried };
+      } finally {
+        prismaService.client = real;
+      }
+      rows[name] = await pairCounts(pair.productId, pair.warehouseId);
+    }
+    const rolledBack = { answer: '500: Error', stockRowsWritten: 0, movementsWritten: 0, movementWritesTried: 1 };
+    expect(outcomes).toEqual({ 'existing row 10 to 7': rolledBack, 'new pair holding 7': rolledBack });
+    expect(rows).toEqual({ 'existing row 10 to 7': [[ID.biz, IN_STOCK, 0]], 'new pair holding 7': null });
   });
 });
