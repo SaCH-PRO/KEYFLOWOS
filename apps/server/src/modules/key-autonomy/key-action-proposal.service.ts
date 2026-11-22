@@ -176,7 +176,7 @@ export class KeyActionProposalService {
   /**
    * D-238 (round 3): what an action on a proposal (approve, reject, cancel, execute, a legacy resolve) answers the actor.
    * The action stays governed by the existing authority (risk tiers, D-140, D-119); a reader without revenue read is
-   * answered a financial proposal's redacted view (id and status only).
+   * answered a financial proposal's redacted view (id, status and a failure reason that states no money).
    */
   async viewForReader<T extends KeyActionProposalData>(businessId: string, proposal: T, reader: GenomeReader | null): Promise<T | ReturnType<typeof redactedProposalView>> {
     if (!proposal || typeof proposal !== 'object' || typeof (proposal as { id?: unknown }).id !== 'string') return proposal;

@@ -326,22 +326,23 @@ export function isFinancialProposal(proposal: ProposalFields | null | undefined)
 /**
  * D-238: a proposal as a reader may be handed it after acting on it (approve, reject, cancel, execute). A revenue reader,
  * or any reader of a non-financial proposal, gets it whole; a reader without revenue read gets only its id, its status
- * and nothing else (round 7: no failure reason). The action itself stays governed by the existing authority (tiers, D-140,
+ * and a failure reason that states no money (round 13). The action itself stays governed by the existing authority (tiers, D-140,
  * D-119); only what is answered is redacted.
  */
 export function proposalViewForReader<T extends { id: string; status?: unknown; failureReason?: unknown }>(
   proposal: T,
   readsRevenue: boolean,
-): T | { id: string; status?: unknown } {
+): T | { id: string; status?: unknown; failureReason?: string } {
   if (readsRevenue || !isFinancialProposal(proposal as unknown as ProposalFields)) return proposal;
   return redactedProposalView(proposal);
 }
 
-/** D-238: the redacted view of a financial proposal: its id and its status (D-226), nothing else. */
-export function redactedProposalView(proposal: { id: string; status?: unknown; failureReason?: unknown }): { id: string; status?: unknown } {
-  // Round 7 (security m2): a financial proposal's failure reason is withheld whatever it says, as execution status
-  // withholds it ("Customer was charged twice" states money the vocabulary cannot all name).
-  return { id: proposal.id, status: proposal.status };
+/** D-238: the redacted view of a financial proposal: its id, its status (D-226) and a failure reason that states no money. */
+export function redactedProposalView(proposal: { id: string; status?: unknown; failureReason?: unknown }): { id: string; status?: unknown; failureReason?: string } {
+  // A failure reason that states no money stays: it is the authority's own refusal (D-140, D-119), which the action
+  // answers pin (round 13; round 7 had dropped it). One that states money is withheld.
+  const reason = typeof proposal.failureReason === 'string' && proposal.failureReason && !proposalMentionsMoney(proposal.failureReason) ? proposal.failureReason : undefined;
+  return reason === undefined ? { id: proposal.id, status: proposal.status } : { id: proposal.id, status: proposal.status, failureReason: reason };
 }
 
 /**
