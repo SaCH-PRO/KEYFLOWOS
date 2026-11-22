@@ -600,11 +600,12 @@ describe("V1-64 owner ruling D-256: the web's owed statuses cannot drift from th
     // The server list (apps/server/src/modules/commerce/commerce-stats.service.ts), read as source text: no
     // import crosses the package boundary.
     const source = readFileSync(resolve(__dirname, "../../../../../../../server/src/modules/commerce/commerce-stats.service.ts"), "utf8");
-    const match = source.match(/export const OPEN_RECEIVABLE_STATUSES[^=]*=\s*new Set\(\[([^\]]*)\]\)/);
+    const match = source.match(/export const OPEN_RECEIVABLE_STATUSES\b\s*(?::[^=]*)?=\s*new Set\(\[([^\]]*)\]\)/);
     expect(match, "the server's OPEN_RECEIVABLE_STATUSES").not.toBeNull();
+    // Only string literals: an entry this read cannot see (an enum member, a spread, a comment) fails here.
+    expect(match![1].replace(/'[A-Z_]+'/g, "").replace(/[,\s]/g, ""), "the server list holds string literals only").toBe("");
     const server = [...match![1].matchAll(/'([A-Z_]+)'/g)].map((m) => m[1]);
     expect(server.filter((status) => status !== "PARTIALLY_CREDITED").sort()).toEqual([...OWED_STATUSES].sort());
     expect(server).toContain("PARTIALLY_CREDITED");
   });
 });
-
