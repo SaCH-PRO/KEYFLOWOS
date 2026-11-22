@@ -38,6 +38,22 @@ import {
   toCents,
 } from './booking-payment-status.listener';
 import { CANCEL_INITIATORS, CancelInitiator } from './dto/update-booking-status.dto';
+import {
+  PAYMENT_METHOD_NOT_OFFERED,
+  STOREFRONT_CHECKOUT_METHODS,
+  normalizeStorefrontMethod,
+  storePaypalCredentials,
+  storeStripeCredentials,
+  storefrontMethodNotOffered,
+  storefrontMethodUnsupported,
+} from '../payments/storefront-checkout-methods';
+import { paypalTakesCurrency } from '../payments/paypal-currency';
+import {
+  WIPAY_CURRENCY,
+  resolveWipayMerchant,
+  wipayMerchantComplete,
+  wipayTakesCurrency,
+} from '../../core/connectors/implementations/wipay-merchant';
 
 interface DayHours {
   open: string;
@@ -1920,6 +1936,66 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * V1-64 (SWP-BOOKING-PAYMENT-GATE, BUG-037; owner rulings D-138, D-106,
+   * D-105, D-69, D-18): the payment method a public booking names, checked for
+   * the business being booked before anything is written. The storefront
+   * checkout-method rule (storefront-checkout-methods.ts): no method, CASH and
+   * MANUAL start no provider and are always taken; WIPAY, PAYPAL and STRIPE
+   * only where the storefront gateway list offers them for this business in
+   * its own currency (PaymentsService.getStorefrontGateways with no payable
+   * currency, what GET /site/storefront/public/:slug/gateways answers), read
+   * here from the same settings by the same functions:
+   *   WIPAY   the business's own WiPay merchant pair (D-105) and a TTD business (D-69);
+   *   PAYPAL  the business's own complete PayPal pair (D-138) and a currency PayPal supports (D-106);
+   *   STRIPE  the business's own complete Stripe set (D-138).
+   * The platform env never stands in for a business and is never mixed in, and
+   * only the settings of the business in the route are read: a slug or a
+   * service of another business changes nothing. A known method this business
+   * does not offer is 400 PAYMENT_METHOD_NOT_OFFERED; any other name is 400
+   * PAYMENT_METHOD_UNSUPPORTED (refused by the controller first; refused here
+   * too, for a caller that is not the controller). The refusal names the method
+   * and the reason only, never a key or setting value.
+   *
+   * At 5c17e7b4 the route took no method: a booking naming PAYPAL at a TTD
+   * business with no PayPal was written PENDING / UNPAID and confirmed to the
+   * customer as "Payment: PayPal".
+   */
+  private assertPublicPaymentMethodOffered(
+    business: { metaData?: unknown; currency?: string | null },
+    rawMethod: string | null | undefined,
+  ): void {
+    const method = normalizeStorefrontMethod(rawMethod);
+    if (method === null || method === 'CASH' || method === 'MANUAL') return;
+    if (!STOREFRONT_CHECKOUT_METHODS.includes(method)) {
+      throw new BadRequestException(storefrontMethodUnsupported(rawMethod as string));
+    }
+    // The settings as the gateway list reads them (PaymentsService.listGateways).
+    const meta = (business.metaData as Record<string, unknown>) || {};
+    const currency = business.currency ?? null;
+    const notOffered = (message: string) =>
+      new BadRequestException({ code: PAYMENT_METHOD_NOT_OFFERED, message: `${message}: choose another payment method` });
+
+    if (method === 'WIPAY') {
+      if (!wipayMerchantComplete(resolveWipayMerchant(meta))) throw notOffered('WiPay is not configured for this business');
+      if (!wipayTakesCurrency(currency)) throw notOffered(`WiPay takes ${WIPAY_CURRENCY} only`);
+      return;
+    }
+    if (method === 'PAYPAL') {
+      if (!storePaypalCredentials(meta)) throw new BadRequestException(storefrontMethodNotOffered('PAYPAL'));
+      if (!paypalTakesCurrency(currency)) {
+        throw notOffered(`PayPal does not take ${(currency ?? '').trim().toUpperCase() || 'this currency'}`);
+      }
+      return;
+    }
+    if (method === 'STRIPE') {
+      if (!storeStripeCredentials(meta)) throw new BadRequestException(storefrontMethodNotOffered('STRIPE'));
+      return;
+    }
+    // A method added to STOREFRONT_CHECKOUT_METHODS with no rule here is refused, not booked.
+    throw notOffered(`${method} is not offered by this business`);
+  }
+
   async publicCreateBooking(input: {
     businessId: string;
     serviceId: string;
@@ -1934,6 +2010,8 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     visitorId?: string | null;
     referralCode?: string | null;
     orgUnitId?: string | null;
+    /** V1-64: the method the customer chose, as sent or normalised; null / undefined is no method. */
+    paymentMethod?: string | null;
   }) {
     const business = await this.prisma.client.business.findFirstOrThrow({
       where: { id: input.businessId, deletedAt: null },
@@ -1943,6 +2021,12 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     if (businessConfig.storeEnabled === false) {
       throw new BadRequestException('This store is currently unavailable.');
     }
+
+    // V1-64 (SWP-BOOKING-PAYMENT-GATE, BUG-037): before anything else is read
+    // or written (no contact, storefront event, booking or invoice), and only
+    // for an open store, so a closed store's answer says nothing of its
+    // payment settings.
+    this.assertPublicPaymentMethodOffered(business, input.paymentMethod);
 
     const service = await this.prisma.client.service.findFirstOrThrow({
       where: { id: input.serviceId, businessId: input.businessId, deletedAt: null },
