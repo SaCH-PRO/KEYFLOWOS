@@ -75,11 +75,22 @@ const PROPOSAL_MONEY_WORDS =
  * correctness minor 2); "total" and the money verbs never are exempted (round-6 security MAJOR-1: a booking total or
  * rate is the sale amount).
  */
-const NEAR_FIGURE = `(?![a-z])["']?(?:[^a-z0-9\\n]{0,4}(?:[a-z]+[^a-z0-9\\n]{1,4}){0,3})["']?[$€£¥₹]?\\d`;
+/**
+ * The figure after a money word (rounds 4-7): a JSON value right after the key ({"total":1200}, {"rate":"150"}), or prose
+ * within three words whose separators hold no quote, so the window never runs across a JSON key boundary ("Call Bill",
+ * "dueDate":"2026-..."). A date or phone shape (2026-11-25, 868-555-0101), and a figure followed by a non-money unit
+ * (3 hours, 2 files, 3 posts, 2 open tickets, 10am), are no money figure (round-7 correctness MAJOR-1).
+ */
+const NON_MONEY_UNITS =
+  'hours?|hrs?|h|days?|weeks?|wks?|months?|years?|yrs?|minutes?|mins?|seconds?|secs?|s|am|pm|files?|tickets?|posts?|tasks?|contacts?|guests?|people|persons?|forms?|speakers?|retries|attempts?|rows?|times?|items?|leads?|disputes?|steps?|calls?|emails?|messages?|bookings?|stars?|reviews?|webhooks?|issues?|records?|members?|seats?|pages?|slides?|photos?|videos?';
+const FIGURE = `[$€£¥₹]?\\d(?!\\d{0,3}[-/]\\d{1,2}[-/]?\\d)(?![\\d.,]*\\s*(?:[a-z]+\\s+)?(?:${NON_MONEY_UNITS})(?![a-z]))`;
+const NEAR_FIGURE = `(?![a-z])(?:["']?\\s*[:=]\\s*["']?\\s*${FIGURE}|(?:[ \\t,:;()–-]{1,4}(?:[a-z]+[ \\t,:;()–-]{1,4}){0,3})${FIGURE})`;
 const PROPOSAL_FIGURE_WORDS = new RegExp(
   [
-    `(?<!(?:response|reply|show|no[\\s_-]?show|completion|open|click|attendance|retention|bounce|success|error|occupancy|star|heart|frame|bit|sample|refresh)[\\s_]?)(?<![a-z])rates?${NEAR_FIGURE}`,
-    `(?<![a-z])(?:totals?|bill(?:s|ed|ing)?|settle(?:s|d)?|wire[sd]?|transfer(?:s|red)?|tips?|loans?|retainers?|spent|spend(?:s|ing)?)${NEAR_FIGURE}`,
+    `(?<!(?:response|reply|show|no[\\s_-]?show|completion|open|click|attendance|retention|bounce|success|error|occupancy|star|heart|frame|bit|sample|refresh)[\\s_]?)(?<![a-z])rates?(?!\\s*limit)${NEAR_FIGURE}`,
+    `(?<![a-z])(?:totals?|bill(?:s|ed|ing)?|settle(?:s|d)?|wire[sd]?|transfer(?:s|red)?|tips?|loans?|retainers?|spent|spend(?:s|ing)?|charged)${NEAR_FIGURE}`,
+    // A figure that is outstanding, owed or overdue ("Chase the 900 outstanding").
+    `[$€£¥₹]?\\d[\\d,.]*\\s*k?\\s+(?:outstanding|owed|overdue|unpaid|past\\s+due)(?![a-z])`,
   ].join('|'),
   'i',
 );
@@ -218,6 +229,19 @@ const NON_MONEY_PROPOSAL_ACTIONS: ReadonlySet<string> = new Set([
   'OPEN_TEMPORAL_FLOW', 'REVIEW_ASSETS', 'ENABLE_LOOP', 'CREATE_LOOP', 'COMPLETE_SETUP', 'DISMISS', 'ACCEPT', 'REJECT',
   'REQUEST_APPROVAL',
 ]);
+/** D-238 (round 7): the approvals-module request types that carry no money (APPROVAL_REQUEST_TYPES). */
+const NON_MONEY_REQUEST_TYPES: ReadonlySet<string> = new Set(['content_delivery', 'time_off', 'task_completion', 'evidence_verification']);
+
+function requestTypeOf(p: ProposalFields): string | null {
+  for (const source of [p.affectedEntities, p.payload]) {
+    if (source && typeof source === 'object' && !Array.isArray(source)) {
+      const t = (source as Record<string, unknown>).requestType;
+      if (t !== undefined && t !== null) return typeof t === 'string' ? t.trim().toLowerCase() : '?';
+    }
+  }
+  return null;
+}
+
 /** D-238: KEY modules whose tools carry no money (CORTEX_MODULE_RULES: crm, bookings, content, projects, operations). */
 const NON_MONEY_PROPOSAL_MODULES: ReadonlySet<string> = new Set([
   'crm', 'contacts', 'bookings', 'calendar', 'content', 'social', 'communications', 'projects', 'tasks', 'inbox',
@@ -242,6 +266,13 @@ export function isFinancialProposal(proposal: ProposalFields | null | undefined)
   const tool = typeof toolName === 'string' && toolName.trim() ? toolName.trim() : null;
   const authority = tool ? keyOrganToolAuthority(tool) : null;
   if (authority && 'scopes' in authority) return authority.scopes.some((s) => MONEY_SCOPES.has(s.module));
+  // Round 7 (security m1): an approvals-module request (its shadow carries affectedEntities.requestType) is decided by its
+  // request type: only the listed non-money types are non-financial; a purchase order, a general request or an unknown
+  // type fails closed. A KEY approval request with no request type is classified as before (D-226).
+  const requestType = requestTypeOf(proposal);
+  if (requestType !== null && typeof actionType === 'string' && actionType.trim().toUpperCase() === 'REQUEST_APPROVAL') {
+    return !NON_MONEY_REQUEST_TYPES.has(requestType);
+  }
   if (typeof actionType === 'string' && NON_MONEY_PROPOSAL_ACTIONS.has(actionType.trim().toUpperCase())) return false;
   const owner = (typeof module === 'string' && module.trim() ? module : tool?.includes('.') ? tool.split('.')[0] : '').trim().toLowerCase();
   if (owner && NON_MONEY_PROPOSAL_MODULES.has(owner)) return false;
@@ -262,10 +293,11 @@ export function proposalViewForReader<T extends { id: string; status?: unknown; 
   return redactedProposalView(proposal);
 }
 
-/** D-238: the redacted view of a financial proposal: its id, its status and a failure reason that states no money. */
-export function redactedProposalView(proposal: { id: string; status?: unknown; failureReason?: unknown }): { id: string; status?: unknown; failureReason?: string } {
-  const reason = typeof proposal.failureReason === 'string' && proposal.failureReason && !proposalMentionsMoney(proposal.failureReason) ? proposal.failureReason : undefined;
-  return reason === undefined ? { id: proposal.id, status: proposal.status } : { id: proposal.id, status: proposal.status, failureReason: reason };
+/** D-238: the redacted view of a financial proposal: its id and its status (D-226), nothing else. */
+export function redactedProposalView(proposal: { id: string; status?: unknown; failureReason?: unknown }): { id: string; status?: unknown } {
+  // Round 7 (security m2): a financial proposal's failure reason is withheld whatever it says, as execution status
+  // withholds it ("Customer was charged twice" states money the vocabulary cannot all name).
+  return { id: proposal.id, status: proposal.status };
 }
 
 /**
