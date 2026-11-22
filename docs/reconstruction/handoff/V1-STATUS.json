@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "37f9c451ec7b18c80b9f5a0716c207a7ba776c3d",
-  "main_commit_date": "2026-11-22T22:39:11+00:00",
+  "main_sha": "583b79bea643a8db0a9333faa23f36dd3ec5a9a0",
+  "main_commit_date": "2026-11-22T22:43:02+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 395.5,
   "by_status": {
    "done": {
-    "packets": 62,
-    "points": 93.5,
-    "pct_by_points": 23.6
+    "packets": 69,
+    "points": 104.5,
+    "pct_by_points": 26.4
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 182,
-    "points": 302,
-    "pct_by_points": 76.4
+    "packets": 175,
+    "points": 291,
+    "pct_by_points": 73.6
    }
   },
   "by_step": {
@@ -66,27 +66,27 @@
     "total": 7
    },
    "3": {
-    "done": 44,
+    "done": 46,
     "in-progress": 0,
-    "todo": 33,
+    "todo": 31,
     "total": 77
    },
    "4": {
-    "done": 1,
+    "done": 2,
     "in-progress": 0,
-    "todo": 42,
+    "todo": 41,
     "total": 43
    },
    "5": {
-    "done": 0,
+    "done": 3,
     "in-progress": 0,
-    "todo": 50,
+    "todo": 47,
     "total": 50
    },
    "6": {
-    "done": 1,
+    "done": 2,
     "in-progress": 0,
-    "todo": 30,
+    "todo": 29,
     "total": 31
    },
    "7": {
@@ -103,11 +103,11 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 156,
+   "prior-status-file": 151,
    "prior-status-file+wave-2b-commit": 28,
    "code-commit-subject": 8,
-   "compacted-commit": 7,
-   "no-evidence": 45
+   "compacted-commit": 14,
+   "no-evidence": 43
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -119,7 +119,7 @@
    "FU-KEY-MEMORY-MONEY-SIGHT",
    "FU-WA-ESCAPE-RACE"
   ],
-  "todo_with_dependencies_met": 44
+  "todo_with_dependencies_met": 53
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -192,15 +192,6 @@
    "unblocks": 81
   },
   {
-   "id": "SWP-INV-MONEY-TOTALS",
-   "step": 4,
-   "priority": "P0",
-   "size": "M",
-   "lane": "both",
-   "on_critical_path": false,
-   "unblocks": 52
-  },
-  {
    "id": "W11-KEY-TRANSFER-INTEGER",
    "step": 3,
    "priority": "P2",
@@ -219,18 +210,27 @@
    "unblocks": 49
   },
   {
-   "id": "W11-RUNWAY-LEDGER-CASH",
-   "step": 5,
-   "priority": "P1",
+   "id": "SWP-INV-PUBLIC-LINK",
+   "step": 4,
+   "priority": "P0",
    "size": "M",
-   "lane": "server",
+   "lane": "both",
    "on_critical_path": false,
-   "unblocks": 28
+   "unblocks": 46
   },
   {
    "id": "W11-GENOME-RECS-DOMAIN",
    "step": 4,
    "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 24
+  },
+  {
+   "id": "W11-RUNWAY-BURN-CURRENCY",
+   "step": 5,
+   "priority": "P2",
    "size": "M",
    "lane": "server",
    "on_critical_path": false,
@@ -246,18 +246,9 @@
    "unblocks": 21
   },
   {
-   "id": "SWP-FIN-LEDGER",
+   "id": "SWP-CENSUS-OPEN-WRITES",
    "step": 6,
    "priority": "P1",
-   "size": "M",
-   "lane": "both",
-   "on_critical_path": false,
-   "unblocks": 12
-  },
-  {
-   "id": "SWP-COA-UNIQUE-CODE",
-   "step": 3,
-   "priority": "P2",
    "size": "S",
    "lane": "server",
    "on_critical_path": false,
@@ -354,24 +345,6 @@
    "unblocks": 2
   },
   {
-   "id": "FU-SEND-REMINDER-SERVER-GATE",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 2
-  },
-  {
-   "id": "FU-CONTRACT-FETCH-OUTBOUND-GUARD",
-   "step": 3,
-   "priority": "P0",
-   "size": "M",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 1
-  },
-  {
    "id": "MEM-TEMPORAL-SCOPE",
    "step": 3,
    "priority": "P0",
@@ -435,8 +408,44 @@
    "unblocks": 0
   },
   {
+   "id": "FU-DOC-FETCH-BODY-CAP",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-HEALTH-MONEY-SCOPE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-KEY-INVOICE-EMAIL-PAY-LINK",
    "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-KEY-OVERDUE-SENT-ONLY",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-MARKETPLACE-PAID-PAYMENT-ROW",
+   "step": 5,
    "priority": "P1",
    "size": "M",
    "lane": "server",
@@ -449,6 +458,33 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-PAY-LINK-STATUS-GATE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-PENDING-OWED-SERVER",
+   "step": 5,
+   "priority": "P1",
+   "size": "L",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-PENDING-OWED-WEB",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -525,6 +561,24 @@
    "unblocks": 0
   },
   {
+   "id": "FU-CASH-LABEL-SANITISER",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-COA-SEEDER-AND-INPUT",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-CONTACTS-AUDIT-FLAKE",
    "step": 5,
    "priority": "P2",
@@ -534,11 +588,38 @@
    "unblocks": 0
   },
   {
+   "id": "FU-LEDGER-ZONED-FROM",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "both",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-LIST-CREDIT-AWARE-REMAINING",
+   "step": 5,
+   "priority": "P2",
+   "size": "M",
+   "lane": "both",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-OVERLAY-LAYER-TABLE",
    "step": 3,
    "priority": "P2",
    "size": "M",
    "lane": "web",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-REMINDER-HONESTY",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "both",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -1191,15 +1272,17 @@
    "priority": "P2",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "53b0450a"
+   ],
    "depends_on": [
     "SWP-SEC-AUDIT-TRUTH"
    ],
    "title": "Chart of Accounts refuses a duplicate account code",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "W11-PROVIDER-OUTAGE-503",
@@ -1892,15 +1975,17 @@
    "priority": "P0",
    "size": "M",
    "lane": "both",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "f87f4716"
+   ],
    "depends_on": [
     "S0-LAND-INFLIGHT"
    ],
    "title": "Money totals count deposits and part payments: commerce stats, Executive Summary outstanding, Collections health",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWP-INV-PUBLIC-LINK",
@@ -1916,7 +2001,7 @@
     "SWP-INV-MONEY-TOTALS"
    ],
    "title": "Invoice links: no customer link for a draft; a voided link says voided; the customer page shows tax, discount and the currency code",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "MIGRATION-SET-A",
@@ -2170,15 +2255,17 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "95b0fda9"
+   ],
    "depends_on": [
     "S0-LAND-INFLIGHT"
    ],
    "title": "FIN_CASHFLOW_RISK and the 'Protect cash runway' money move read the ledger cash position in the business currency and name other-currency cash (D-107)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "W11-CASH-READERS-LEDGER",
@@ -2186,15 +2273,17 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "6778bfb9"
+   ],
    "depends_on": [
     "W11-RUNWAY-LEDGER-CASH"
    ],
    "title": "Cashflow forecast and health score read the ledger cash position, not the currentBalance snapshot",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "W11-RUNWAY-BURN-CURRENCY",
@@ -2210,7 +2299,7 @@
     "W11-CASH-READERS-LEDGER"
    ],
    "title": "Runway burn counts business-currency expenses; money-moves burn window stops at now",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "TOF-PAYROLL-DISCARD",
@@ -2913,15 +3002,17 @@
    "priority": "P1",
    "size": "M",
    "lane": "both",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "3d3d91ec"
+   ],
    "depends_on": [
     "S0-LAND-INFLIGHT"
    ],
    "title": "General Ledger: the end date is inclusive; the page sends pageSize, formats dates and money, picks accounts by name; Accounts opens its tab",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWP-CENSUS-OPEN-WRITES",
@@ -2937,7 +3028,7 @@
     "SWP-FIN-LEDGER"
    ],
    "title": "Chart-of-accounts writes under Money write (D-146, coawrite) and the census batch plan",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "W11-CALLS-LIST-PAGING",
@@ -4181,15 +4272,17 @@
    "priority": "P0",
    "size": "M",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "6ddce04c"
+   ],
    "depends_on": [
     "W11-DISPATCH-REFUSAL-FINAL"
    ],
    "title": "Contract document fetches pass the outbound-address guard (no SSRF through contract_extract_clauses)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-KEY-INVOICE-EMAIL-PAY-LINK",
@@ -4221,7 +4314,7 @@
     "SWP-INV-MONEY-TOTALS"
    ],
    "title": "The marketplace order writer records a payment row for a PAID invoice, and rowless PAID invoices are backfilled",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-PENDING-OWED-SERVER",
@@ -4237,7 +4330,7 @@
     "SWP-INV-MONEY-TOTALS"
    ],
    "title": "Every server owed figure counts PENDING invoices (D-256)",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-PENDING-OWED-WEB",
@@ -4253,7 +4346,7 @@
     "SWP-INV-MONEY-TOTALS"
    ],
    "title": "Every web owed figure counts PENDING invoices (D-256)",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-SEND-REMINDER-SERVER-GATE",
@@ -4261,13 +4354,15 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "d533d598"
+   ],
    "depends_on": [],
    "title": "The server refuses an invoice reminder unless the invoice is SENT, OVERDUE or PARTIALLY_PAID",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-LIST-CREDIT-AWARE-REMAINING",
@@ -4283,7 +4378,7 @@
     "SWP-INV-MONEY-TOTALS"
    ],
    "title": "Invoice list rows serve a credit-aware remaining amount, so web owed figures can count PARTIALLY_CREDITED",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-CASH-LABEL-SANITISER",
@@ -4299,7 +4394,7 @@
     "W11-CASH-READERS-LEDGER"
    ],
    "title": "One code-only currency label sanitiser for every structured other-currency cash list",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-DOC-FETCH-BODY-CAP",
@@ -4315,7 +4410,7 @@
     "FU-CONTRACT-FETCH-OUTBOUND-GUARD"
    ],
    "title": "Contract document fetches cap the body size, decompressed",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-CONTACTS-AUDIT-FLAKE",
@@ -4563,7 +4658,7 @@
     "W11-CASH-READERS-LEDGER"
    ],
    "title": "Health withholds money figures from readers without revenue read (D-259)",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-KEY-OVERDUE-SENT-ONLY",
@@ -4579,7 +4674,7 @@
     "SWP-INV-MONEY-TOTALS"
    ],
    "title": "KEY's overdue list and reminder drafts exclude never-sent invoices (D-260)",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-RESEARCH-CORPUS-YAML",
@@ -4695,7 +4790,7 @@
     "FU-SEND-REMINDER-SERVER-GATE"
    ],
    "title": "Public pay links are minted only for invoices someone owes",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-REMINDER-HONESTY",
@@ -4711,7 +4806,7 @@
     "FU-SEND-REMINDER-SERVER-GATE"
    ],
    "title": "Reminders record the real recipient, re-check status at send, and the web never claims a send that failed",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-LEDGER-ZONED-FROM",
@@ -4727,7 +4822,7 @@
     "SWP-FIN-LEDGER"
    ],
    "title": "General ledger date-only `from` starts at the business-zone day and dates show in the business zone",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-COA-SEEDER-AND-INPUT",
@@ -4743,7 +4838,7 @@
     "SWP-COA-UNIQUE-CODE"
    ],
    "title": "Chart-of-accounts seeder respects the code rule and update input is validated",
-   "deps_met": false
+   "deps_met": true
   }
  ]
 }
