@@ -158,7 +158,8 @@ describe("NAV-A1: the hubs a member is shown", () => {
     expect(labelsOf(hubsFor("both", member))).toEqual(["Today"]);
     const { hubSections } = menuSectionsFor("both", member);
     const money = hubSections.find((s) => s.id === "money");
-    expect(money?.items.map((i) => i.label)).toEqual(["Expenses"]);
+    // Budgets reads expense budgets (expenses read, acceptance M1's table), so it stays with Expenses.
+    expect(money?.items.map((i) => i.label)).toEqual(["Expenses", "Budgets"]);
     expect(money?.href, "the Money heading opens nothing for a member who may not open Money").toBeUndefined();
     const settingsHub = hubSections.find((s) => s.id === "settings");
     expect(settingsHub?.items.map((i) => i.label)).toEqual(["Team", "Org chart"]);

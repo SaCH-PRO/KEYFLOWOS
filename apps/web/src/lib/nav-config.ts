@@ -92,7 +92,10 @@ export type NavModule =
   | "analytics"
   | "operations"
   | "expenses"
-  | "team";
+  | "team"
+  | "projects"
+  | "content"
+  | "automations";
 
 export type AccessLevel = "none" | "read" | "write" | "admin";
 
@@ -123,8 +126,11 @@ export interface NavItem {
   exactMatch?: boolean;
   featureKey?: string;
   dormantFlag?: DormantFeatureFlagKey;
-  /** The module scope that opens it; a hub entry without one takes its hub's. */
-  module?: NavModule;
+  /**
+   * The module scope(s) its page's server reads require (every one named must be open to the member); a hub entry
+   * without one takes its hub's. nav-member-scope.spec.ts holds the cited table (controller path:line or D-179).
+   */
+  module?: NavModule | NavModule[];
 }
 
 /**
@@ -199,8 +205,7 @@ export const hubNav: HubNavItem[] = [
       { label: "Relationship map", href: "/app/crm/network", icon: Share2 },
       // At-risk contacts, due tasks, next actions, the presence funnel.
       { label: "Customer dashboard", href: "/app/crm/dashboard", icon: LayoutDashboard },
-      // The sales team's performance and commissions: revenue figures, so it needs revenue read.
-      { label: "Rep performance", href: "/app/sales-team", icon: Users, module: "revenue" },
+      { label: "Rep performance", href: "/app/sales-team", icon: Users },
     ],
   },
   {
@@ -232,10 +237,10 @@ export const hubNav: HubNavItem[] = [
       // Purchasing is money leaving on a promise. Every procurement route needs operations (D-40).
       { label: "Purchasing", href: "/app/procurement", icon: Truck, module: "operations" },
       { label: "Retainers", href: "/app/retainers", icon: RefreshCw },
-      { label: "Budgets", href: "/app/budgeting", icon: Target },
-      { label: "Payroll", href: "/app/payroll", icon: Wallet },
-      // Reports read analytics: an older member with no analytics entry is refused until re-granted (D-179).
-      { label: "Reports", href: "/app/reports", icon: BarChart3, module: "analytics" },
+      { label: "Budgets", href: "/app/budgeting", icon: Target, module: "expenses" },
+      { label: "Payroll", href: "/app/payroll", icon: Wallet, module: "operations" },
+      // The report reads need revenue; D-179 also keeps Reports from a member with no analytics entry.
+      { label: "Reports", href: "/app/reports", icon: BarChart3, module: ["revenue", "analytics"] },
       // The books. "Accounts & tax setup" first: the rows below it are unusable until it exists.
       { label: "Accounts & tax setup", href: "/app/finance/settings", icon: Cog },
       { label: "Reconcile bank", href: "/app/finance/reconciliation", icon: RefreshCw },
@@ -270,7 +275,7 @@ export const hubNav: HubNavItem[] = [
       { label: "Plan & billing", href: "/app/settings/billing", icon: CreditCard },
       { label: "Team", href: "/app/settings/team", icon: Users, module: "team" },
       { label: "Org chart", href: "/app/structure", icon: Layers, module: "team" },
-      { label: "AI", href: "/app/settings/ai", icon: Bot },
+      { label: "AI", href: "/app/settings/ai", icon: Bot, module: "operations" },
       { label: "Compliance", href: "/app/settings/compliance", icon: ShieldCheck },
       { label: "Developers", href: "/app/settings/developers", icon: Code },
       { label: "Integrations", href: "/app/key-connect", icon: Activity },
@@ -303,11 +308,11 @@ export const buildSections: NavSection[] = [
     icon: Bot,
     items: [
       { label: "Chat", href: "/app/key/chat", icon: MessageSquare },
-      { label: "Inbox", href: "/app/key-inbox", icon: Inbox },
+      { label: "Inbox", href: "/app/key-inbox", icon: Inbox, module: "operations" },
       { label: "Worker", href: "/app/key", icon: Bot },
       { label: "Autonomy", href: "/app/key-autonomy", icon: CheckSquare },
       { label: "Modes", href: "/app/key-modes", icon: BrainCircuit },
-      { label: "Data Inbox", href: "/app/data-inbox", icon: Layers },
+      { label: "Data Inbox", href: "/app/data-inbox", icon: Layers, module: "operations" },
       { label: "Capture", href: "/app/capture", icon: Camera },
     ],
   },
@@ -317,10 +322,10 @@ export const buildSections: NavSection[] = [
     icon: FolderKanban,
     items: [
       // /app/projects forwards here.
-      { label: "Projects", href: "/app/work/projects", icon: FolderKanban },
-      { label: "Approvals", href: "/app/approvals", icon: CheckSquare },
-      { label: "Performance", href: "/app/performance", icon: Activity },
-      { label: "Time tracking", href: "/app/time-tracking", icon: Clock },
+      { label: "Projects", href: "/app/work/projects", icon: FolderKanban, module: "projects" },
+      { label: "Approvals", href: "/app/approvals", icon: CheckSquare, module: "operations" },
+      { label: "Performance", href: "/app/performance", icon: Activity, module: "operations" },
+      { label: "Time tracking", href: "/app/time-tracking", icon: Clock, module: "projects" },
       // Operations surfaces need operations (D-40); an older member with no entry is refused (D-179).
       { label: "Operations", href: "/app/operations", icon: Briefcase, module: "operations" },
       { label: "SOPs", href: "/app/operations-flow", icon: BookOpen, module: "operations" },
@@ -334,13 +339,13 @@ export const buildSections: NavSection[] = [
     items: [
       // /app/marketing forwards to the campaigns; all three wear the contentScheduler dormant gate.
       { label: "Campaigns", href: "/app/communicate/campaigns", icon: Mail, dormantFlag: "contentScheduler" },
-      { label: "Mailing lists", href: "/app/marketing/lists", icon: Users, dormantFlag: "contentScheduler" },
+      { label: "Mailing lists", href: "/app/marketing/lists", icon: Users, dormantFlag: "contentScheduler", module: "content" },
       { label: "Case studies", href: "/app/marketing/case-studies", icon: FileText, dormantFlag: "contentScheduler" },
       { label: "Content", href: "/app/content-ops", icon: PenTool },
       { label: "Social", href: "/app/social", icon: Share2 },
       { label: "SEO", href: "/app/seo", icon: Globe, dormantFlag: "webPresencePack" },
       { label: "Events", href: "/app/events", icon: Calendar },
-      { label: "WhatsApp", href: "/app/whatsapp", icon: MessageCircle },
+      { label: "WhatsApp", href: "/app/whatsapp", icon: MessageCircle, module: "operations" },
       { label: "Campaign plans", href: "/app/marketing-flow", icon: Megaphone },
     ],
   },
@@ -350,7 +355,7 @@ export const buildSections: NavSection[] = [
     icon: ShieldCheck,
     items: [
       { label: "Evidence", href: "/app/evidence", icon: ShieldCheck },
-      { label: "Contracts", href: "/app/contracts", icon: FileText },
+      { label: "Contracts", href: "/app/contracts", icon: FileText, module: "operations" },
       { label: "Legal", href: "/app/legal", icon: Scale },
     ],
   },
@@ -369,11 +374,11 @@ export const buildSections: NavSection[] = [
     label: "Automate",
     icon: Wrench,
     items: [
-      { label: "Flows", href: "/app/flows", icon: RefreshCw },
+      { label: "Flows", href: "/app/flows", icon: RefreshCw, module: "automations" },
       { label: "Automations", href: "/app/automations", icon: Zap },
       { label: "Role flows", href: "/app/key-flows", icon: Layers },
       // The brand-asset library: files and folders (not Money's "Assets & depreciation").
-      { label: "Asset library", href: "/app/assets", icon: Layers },
+      { label: "Asset library", href: "/app/assets", icon: Layers, module: "content" },
     ],
   },
 ];
@@ -417,11 +422,22 @@ export function memberModuleLevelsOf(answer: unknown): ModuleLevels {
   return out;
 }
 
-/** Whether a member with `levels` is shown an entry that needs `module`: hidden only on a known 'none'. */
-export function canOpenModule(levels: ModuleLevels, module: NavModule | undefined): boolean {
+/**
+ * Whether a member with `levels` is shown an entry that needs `module` (every module, when several): hidden only on
+ * a known 'none'.
+ */
+export function canOpenModule(levels: ModuleLevels, module: NavModule | NavModule[] | undefined): boolean {
   if (!module || !levels) return true;
-  const level = levels[module];
-  return level === undefined || level !== "none";
+  return (Array.isArray(module) ? module : [module]).every((m) => {
+    const level = levels[m];
+    return level === undefined || level !== "none";
+  });
+}
+
+/** The modules an entry needs: its own, else (inside a hub) its hub's, else none. */
+export function entryModules(item: NavItem, hub?: { module?: NavModule }): NavModule[] {
+  const own = item.module ?? hub?.module;
+  return own === undefined ? [] : Array.isArray(own) ? own : [own];
 }
 
 /**
