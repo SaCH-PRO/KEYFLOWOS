@@ -241,12 +241,29 @@ function BusinessSetupSettings({
   // The failed view's "Try again" stays mounted, and says it is busy, while the settings are read again (COR2-1).
   const [retrying, setRetrying] = useState(false);
 
+  // Set synchronously, so a double press reads once; and, after a retry, where the keyboard goes on recovery.
+  const retryingRef = useRef(false);
+  const focusOnReadyRef = useRef(false);
+  const sellsGroupRef = useRef<HTMLDivElement>(null);
+
   const retry = async () => {
-    if (retrying) return;
+    if (retryingRef.current) return;
+    retryingRef.current = true;
     setRetrying(true);
+    focusOnReadyRef.current = true;
     await settings.reload();
+    retryingRef.current = false;
     setRetrying(false);
   };
+
+  // "Try again" worked: the failed view (and its focused button) is gone, so the keyboard is put on the controls
+  // that took its place (review COR3-2), not left on the page's body.
+  useEffect(() => {
+    if (settings.status !== "ready" || !focusOnReadyRef.current) return;
+    focusOnReadyRef.current = false;
+    const group = sellsGroupRef.current;
+    (group?.querySelector<HTMLInputElement>("input:checked") ?? group?.querySelector<HTMLInputElement>("input"))?.focus();
+  }, [settings.status]);
 
   const write = async (which: "sells" | "advancedCrm", what: string, done: string, send: () => Promise<ApiAnswer>) => {
     if (settings.status !== "ready") return;
@@ -289,7 +306,7 @@ function BusinessSetupSettings({
   if (settings.status === "failed") {
     return (
       <div className="space-y-2 p-1 text-xs" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
-        <p className="flex items-start gap-1.5">
+        <p role="status" className="flex items-start gap-1.5">
           <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" aria-hidden="true" />
           <span>
             Couldn&apos;t load what you sell and the Advanced CRM switch{settings.error ? `: ${settings.error}` : "."}
@@ -314,7 +331,7 @@ function BusinessSetupSettings({
           <LayoutGrid className="h-3 w-3" aria-hidden="true" />
           What you sell
         </div>
-        <div role="radiogroup" aria-labelledby={sellsLabelId} aria-busy={busy || undefined} className="flex flex-wrap gap-x-5 gap-y-1">
+        <div ref={sellsGroupRef} role="radiogroup" aria-labelledby={sellsLabelId} aria-busy={busy || undefined} className="flex flex-wrap gap-x-5 gap-y-1">
           {BUSINESS_SELLS.map((value) => (
             <label key={value} className="flex items-center gap-2 text-sm text-foreground cursor-pointer min-h-[44px]">
               <input

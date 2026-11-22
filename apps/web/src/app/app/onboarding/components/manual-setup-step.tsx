@@ -245,8 +245,8 @@ async function completeManualSetup(
 export interface ManualSetup {
   profile: MinimalBusinessProfile;
   /**
-   * What the form shows for "What do you sell?": the owner's answer, else what the business holds (both when it
-   * never answered), else null: what it holds could not be read, and no answer is drawn as its own.
+   * What the form shows for "What do you sell?": the owner's answer, else what the business holds (the server
+   * answers both for one that never said), else null: what it holds was not read, and no answer is drawn as its own.
    */
   sells: BusinessSells | null;
   setSells: (value: BusinessSells) => void;
@@ -295,8 +295,9 @@ export function useManualSetup(): ManualSetup {
       if (cancelled || !data || data.id !== businessId) return;
       ownerIdRef.current = data.ownerId ?? null;
       const held = (data as { sells?: unknown }).sells;
-      // The server answers 'both' for a business that never said; an answer without one is read the same.
-      storedSellsRef.current = isBusinessSells(held) ? held : "both";
+      // The server answers 'both' for a business that never said. An answer that carries none is not read as
+      // one (review SEC3-4): nothing is drawn, and whatever the owner presses is an answer to save.
+      storedSellsRef.current = isBusinessSells(held) ? held : null;
       setStoredSells(storedSellsRef.current);
       storedRef.current = normalise({
         name: data.name ?? "",

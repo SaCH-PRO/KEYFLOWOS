@@ -248,9 +248,13 @@ describe("the form asks what the business sells", () => {
   });
 
   it("review SEC3-4: an answer that carries no 'sells' is not read as 'both': nothing is drawn, and pressing Both is saved", async () => {
+    // A read that carries no sells (an older server); the PATCH answers the settings as the server does.
     const stored = { id: BIZ, ownerId: OWNER, name: VALID.name, currency: "TTD", timezone: VALID.timezone };
     const sent = stubRoutes(
-      ownerRoutes(stored, { "GET /identity/me": { status: 200, body: { id: "user_bsw_coowner", email: "c@example.test", role: "USER" } } }),
+      ownerRoutes(stored, {
+        [`PATCH ${BUSINESS_PATH}`]: (body) => ({ status: 200, body: { ...stored, advancedCrm: false, ...(body ?? {}) } }),
+        "GET /identity/me": { status: 200, body: { id: "user_bsw_coowner", email: "c@example.test", role: "USER" } },
+      }),
     );
     await mount(sent);
     await waitFor(() => expect((currency() as HTMLInputElement).value).toBe("TTD"));

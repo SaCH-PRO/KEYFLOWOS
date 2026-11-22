@@ -304,6 +304,8 @@ export function noteBusinessSettings(businessId: string, answer: unknown, sentAs
     // Sent as one member, answered after another took the browser (review SEC2-2): the answer is not theirs to be
     // shown, and whatever the first member was shown is gone with them.
     if (entries.get(businessId)?.member === sentAs && entries.delete(businessId)) emit();
+    // The counter above overtook any read the member now acting has in flight (review SEC3-1): read again for them.
+    if (watched.has(businessId)) void loadBusinessSettings(businessId, { force: true });
     return own;
   }
   const settings = confirmedBusinessSettings(businessId, answer);
@@ -337,6 +339,8 @@ const notSent = (error: string): WriteAnswer => ({ data: null, error });
 
 /** A 2xx whose answer is not this business's: not a success anyone can vouch for (review SEC-2). */
 const UNREADABLE_ANSWER = "The change was sent, but the answer could not be read. Check what is shown here before trying again.";
+/** A 2xx that landed after the member who sent the write was no longer the one acting (review SEC3-2). */
+const MEMBER_CHANGED = "The change was sent by someone who is no longer signed in here. Check what is shown before changing it again.";
 /** A 2xx for this business that does not hold what was sent (review SEC2-1). */
 const UNCONFIRMED_ANSWER = "The change was sent, but the business does not show it. Check what is shown here before trying again.";
 
@@ -347,6 +351,12 @@ const UNCONFIRMED_ANSWER = "The change was sent, but the business does not show 
  */
 function recorded(businessId: string, sentAs: string, res: WriteAnswer, holds: (settings: BusinessSettings) => boolean): WriteAnswer {
   if (res.error !== null) return res;
+  if (sentAs !== actingMember()) {
+    // Answered after another member took the browser (review SEC3-2): nothing is recorded for them, and the
+    // outcome of a change they did not make is not announced on their screen as theirs.
+    noteBusinessSettings(businessId, res.data, sentAs);
+    return { data: null, error: MEMBER_CHANGED, status: res.status };
+  }
   if (!noteBusinessSettings(businessId, res.data, sentAs)) return { data: null, error: UNREADABLE_ANSWER, status: res.status };
   const confirmed = confirmedBusinessSettings(businessId, res.data);
   if (confirmed && holds(confirmed)) return res;
@@ -401,6 +411,8 @@ export async function saveAdvancedSettings(businessId: string, write: BusinessAd
     res,
     (held) =>
       (body.advancedCrm === undefined || held.advancedCrm === body.advancedCrm) &&
+      // A depth sent is confirmed only by a depth answered (review SEC3-3), never by the default of a missing one.
+      (body.depth === undefined || (isPlainObject(res.data) && isPlainObject(res.data.depth))) &&
       Object.entries(body.depth ?? {}).every(([hub, depth]) => held.depth[hub as BusinessHub] === depth),
   );
 }
