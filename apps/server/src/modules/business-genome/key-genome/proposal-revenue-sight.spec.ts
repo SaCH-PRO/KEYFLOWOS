@@ -54,3 +54,21 @@ describe('a KEY_ACTION_PROPOSAL outcome event (D-238 replaces the provisional ex
     expect(isMoneyMemoryEvent(ev({ actionType: 'EXECUTE_TOOL', module: 'crm', toolName: 'crm.create_contact' }))).toBe(false);
   });
 });
+
+describe('review repairs (security MAJOR-3, correctness MINOR-3)', () => {
+  it.each([
+    ['an approval request whose request type is an expense reimbursement', { actionType: 'REQUEST_APPROVAL', title: 'Reimburse John', affectedEntities: { requestType: 'expense_reimbursement' } }],
+    ['an approval request whose summary states money', { actionType: 'REQUEST_APPROVAL', title: 'Approve this', summary: 'Refund the deposit to the client' }],
+    ['a bookings tool whose parameters carry a price', { actionType: 'EXECUTE_TOOL', module: 'bookings', toolName: 'bookings.add_service', title: 'Add a service', payload: { params: { name: 'Haircut', price: 20 } } }],
+    ['a promo code (a discount)', { actionType: 'EXECUTE_TOOL', toolName: 'storelink.create_promo_code', title: 'Create a code' }],
+    ['a product-health read of the store', { actionType: 'EXECUTE_TOOL', toolName: 'storelink.get_product_health', title: 'Check products' }],
+    ['a rationale naming a payout', { actionType: 'CREATE_TASK', title: 'Ping Ana', rationale: 'Her payout failed' }],
+    ['a trailing currency amount', { actionType: 'CREATE_TASK', title: 'Send 500 USD to the supplier' }],
+  ])('%s is financial', (_l, p) => expect(isFinancialProposal(p as any)).toBe(true));
+
+  it.each([
+    'Buy costume', 'Apricot recipe', 'Cashier training', 'Suspend the old page', 'Data collection form', 'Fix CI pipeline',
+  ])('the ordinary title %j does not make a task financial', (title) => {
+    expect(isFinancialProposal({ actionType: 'CREATE_TASK', title } as any)).toBe(false);
+  });
+});

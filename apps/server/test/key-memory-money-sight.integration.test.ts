@@ -793,7 +793,7 @@ describe("FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): a memberless turn
   /** The owner proposes, as the Pro Auto monitor does, over POST .../actions/proposals: the real orchestrator writes the ledger row. */
   // FU-PROPOSAL-REVENUE-SIGHT (D-238): D-226's view is pinned on a non-financial proposal (a task); the Pro Auto monitor's
   // money proposal is withheld from readers without revenue read (the D-238 cases at the end).
-  async function propose(title = NF_PROPOSAL_TITLE, summary = 'Call the supplier about the delivery slot.'): Promise<string> {
+  async function propose(title = NF_PROPOSAL_TITLE, summary = 'Call the supplier about the delivery slot.', ledgerRows = 1): Promise<string> {
     const res = await agent().post(proposalsRoute()).set(HEADER, ID.owner).send({
       sourceType: 'KEY_CORTEX',
       actionType: 'REQUEST_APPROVAL',
@@ -802,10 +802,10 @@ describe("FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): a memberless turn
     });
     expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
     expect(res.body).toMatchObject({ title, status: 'PENDING', riskLevel: 'LOW' });
-    await waitForProposalRows(1);
+    await waitForProposalRows(ledgerRows);
     // Premise: the bridged copies carry the proposal's title (the bus copies the whole ledger input).
-    const cognitive = await db.cognitiveEvent.findFirst({ where: { businessId: ID.biz, eventType: 'GOVERNANCE_DECISION' } });
-    expect(JSON.stringify(cognitive.payload)).toContain(title);
+    const cognitive = await db.cognitiveEvent.findMany({ where: { businessId: ID.biz, eventType: 'GOVERNANCE_DECISION' } });
+    expect(JSON.stringify(cognitive.map((c: any) => c.payload))).toContain(title);
     return res.body.id as string;
   }
 
@@ -918,6 +918,38 @@ describe("FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): a memberless turn
       }
       expect(await promptContextFor(ID.owner)).toContain(PROPOSAL_TITLE);
       expect(outbound, 'no outbound request').toEqual([]);
+    } finally {
+      await clearPerceivedStores();
+    }
+  }, 120_000);
+
+  it("RED-BEFORE (D-238; security review BLOCKING-1): the KEY proposal REST API serves the blind member (revenue none) the task proposal and not the money one: GET proposals leaves it out, GET proposals/:id, approve, reject, cancel and execute answer 404; the owner and the revenue reader see and act on both", async () => {
+    await clearPerceivedStores();
+    const money = await propose(PROPOSAL_TITLE, 'Outstanding invoices exceed 1.5x your monthly revenue.');
+    const task = await propose(undefined, undefined, 2);
+    try {
+      const list = await agent().get(proposalsRoute()).set(HEADER, ID.blind);
+      expect(list.status, JSON.stringify(list.body).slice(0, 300)).toBe(200);
+      const ids = (list.body as any[]).map((p) => p.id);
+      expect(ids).toContain(task);
+      expect(ids).not.toContain(money);
+      expect(JSON.stringify(list.body)).not.toContain('12,345');
+      const one = await agent().get(proposalsRoute(`/${money}`)).set(HEADER, ID.blind);
+      expect(one.status, JSON.stringify(one.body).slice(0, 300)).toBe(404);
+      expect(JSON.stringify(one.body)).not.toContain('12,345');
+      expect((await agent().get(proposalsRoute(`/${task}`)).set(HEADER, ID.blind)).status).toBe(200);
+      for (const action of ['approve', 'reject', 'cancel', 'execute']) {
+        const res = await agent().post(proposalsRoute(`/${money}/${action}`)).set(HEADER, ID.blind).send(action === 'reject' ? { reason: 'no' } : {});
+        expect(res.status, `${action}: ${JSON.stringify(res.body).slice(0, 200)}`).toBe(404);
+        expect(JSON.stringify(res.body), action).not.toContain('12,345');
+      }
+      const still = await db.keyActionProposal.findUnique({ where: { id: money } });
+      expect(still.status, 'the refused actions changed nothing').toBe('PENDING');
+      for (const reader of [ID.owner, ID.revenue]) {
+        const seen = ((await agent().get(proposalsRoute()).set(HEADER, reader)).body as any[]).map((p) => p.id);
+        expect(seen, reader).toEqual(expect.arrayContaining([money, task]));
+        expect((await agent().get(proposalsRoute(`/${money}`)).set(HEADER, reader)).status, reader).toBe(200);
+      }
     } finally {
       await clearPerceivedStores();
     }

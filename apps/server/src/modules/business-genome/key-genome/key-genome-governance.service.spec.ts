@@ -356,3 +356,31 @@ describe('KeyGenomeGovernanceService', () => {
     expect(summary.urgentReviewItems[1].id).toBe('signal-sig_high');
   });
 });
+
+describe('FU-PROPOSAL-REVENUE-SIGHT review repairs (security MAJOR-1, MAJOR-2; D-238, D-234)', () => {
+  it('[PRS-04a] RED-BEFORE (MAJOR-2): for a reader without revenue read the experiment queue and counts leave out an experiment made from a money signal; a revenue reader keeps it', async () => {
+    const { service, experiments, prisma } = makeService() as any;
+    prisma.client.genomeMemoryEvent.findMany = vi.fn().mockResolvedValue([]);
+    experiments.listExperiments.mockResolvedValue([
+      { id: 'exp_money', status: 'PROPOSED', hypothesis: 'Validating revenue pattern: concentration in the top three accounts', action: 'Concentrate on the top three accounts.', successMetric: 'Revenue share' },
+      { id: 'exp_ops', status: 'PROPOSED', hypothesis: 'Documented SOPs cut delivery delays', action: 'Write the SOPs.', successMetric: 'Delays per week' },
+    ] as any);
+    const blind = await service.summary('biz_1', { readsRevenue: false });
+    expect(JSON.stringify(blind)).not.toContain('exp_money');
+    expect(blind.counts.proposedExperiments).toBe(1);
+    const reader = await service.summary('biz_1');
+    expect(JSON.stringify(reader)).toContain('exp_money');
+  });
+
+  it('[PRS-03a] RED-BEFORE (MAJOR-1): for a reader without revenue read an autonomy block of a money proposal (by its action, module and tool, not only its title) is withheld and not counted', async () => {
+    const { service, prisma } = makeService() as any;
+    prisma.client.genomeMemoryEvent.findMany = vi.fn().mockResolvedValue([]);
+    prisma.client.keyActionProposal.findMany.mockResolvedValue([
+      { id: 'kap_money', title: '3 clients overdue', summary: 'Chase them.', riskLevel: 'HIGH', createdAt: new Date(), actionType: 'EXECUTE_TOOL', module: 'monitoring', toolName: 'monitor.flag' },
+      { id: 'kap_task', title: 'Call the supplier', summary: 'About the delivery slot.', riskLevel: 'HIGH', createdAt: new Date(), actionType: 'CREATE_TASK', module: 'crm', toolName: null },
+    ]);
+    const blind = await service.summary('biz_1', { readsRevenue: false });
+    expect(blind.autonomyBlocks.map((b) => b.sourceId)).toEqual(['kap_task']);
+    expect(blind.counts.autonomyBlockedActions).toBe(1);
+  });
+});

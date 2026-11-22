@@ -1220,3 +1220,31 @@ describe('FU-PROPOSAL-REVENUE-SIGHT (D-238; D-226, D-227, D-234): a KEY proposal
     }
   }, 30_000);
 });
+
+describe('FU-PROPOSAL-REVENUE-SIGHT review repairs (security MAJOR-1, MAJOR-2; D-238, D-234): governance and experiments tell a member without revenue read nothing of a money proposal or a money experiment', () => {
+  const R = { kapMoney: `${P}kap_money`, kapTask: `${P}kap_task`, expMoney: `${P}exp_money`, expOps: `${P}exp_ops` };
+  beforeAll(async () => {
+    await db.keyActionProposal.create({ data: { id: R.kapMoney, businessId: ID.biz, sourceType: 'KEY_CORTEX', actionType: 'EXECUTE_TOOL', module: 'monitoring', toolName: 'monitor.flag', title: '3 clients overdue', summary: 'Chase them this week.', riskLevel: 'HIGH', status: 'PENDING', requiresApproval: true } });
+    await db.keyActionProposal.create({ data: { id: R.kapTask, businessId: ID.biz, sourceType: 'KEY_CORTEX', actionType: 'CREATE_TASK', module: 'crm', title: 'V97U call the supplier', summary: 'About the delivery slot.', riskLevel: 'HIGH', status: 'PENDING', requiresApproval: true } });
+    await db.genomeExperiment.create({ data: { id: R.expMoney, businessId: ID.biz, hypothesis: 'Validating revenue pattern: concentration in the top three accounts', action: 'Concentrate on the top three accounts.', successMetric: 'Revenue share of the top three accounts' } });
+    await db.genomeExperiment.create({ data: { id: R.expOps, businessId: ID.biz, hypothesis: 'Documented SOPs cut delivery delays', action: 'Write the SOPs.', successMetric: 'Delivery delays per week' } });
+  }, 60_000);
+  afterAll(async () => {
+    await db.$executeRawUnsafe(`DELETE FROM key_action_proposals WHERE business_id LIKE ${sqlLikePrefix(P)}`);
+    await db.$executeRawUnsafe(`DELETE FROM genome_experiments WHERE business_id LIKE ${sqlLikePrefix(P)}`);
+  }, 60_000);
+
+  it('[PRS-03] RED-BEFORE (MAJOR-1): GET governance serves the revenue none STAFF member the task proposal as an autonomy block and not the money one, and counts only what it serves; the revenue read member sees both', async () => {
+    const res = await get('governance', ID.staffNone);
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(200);
+    const text = JSON.stringify(res.body);
+    expect(text).toContain(R.kapTask);
+    expect(text).not.toContain(R.kapMoney);
+    expect(text).not.toContain('3 clients overdue');
+    expect(res.body.counts.autonomyBlockedActions).toBe((res.body.autonomyBlocks as any[]).length);
+    const control = JSON.stringify((await get('governance', ID.staffRead)).body);
+    for (const id of [R.kapMoney, R.kapTask]) expect(control, id).toContain(id);
+  }, 30_000);
+
+  // [PRS-04] (MAJOR-2, experiments) is in key-genome.controller.spec.ts: this suite stands in GenomeExperimentService.
+});
