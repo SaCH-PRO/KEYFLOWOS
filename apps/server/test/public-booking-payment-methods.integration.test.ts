@@ -55,6 +55,11 @@
  *                  business offers them, with the same body a business that does not offer them
  *                  answers, so the route is no read of a business's payment settings by id; a
  *                  business with no slug takes no provider method; CASH and no method need no slug
+ *   PM-16 RED      review SEC2-BPG-1 / COR2-BPG-1 (RED at f647c73a): the slug is compared as sent. A
+ *                  store whose slug holds a token the request sanitiser strips ('--') books PAYPAL
+ *                  through its own link, as its gateway list offers (it was refused: the
+ *                  sanitised slug never equalled the stored one); a slug that only becomes the
+ *                  store's after sanitising (tags, '--', padding) is refused
  *   PM-15 RED      review SEC-BPG-3: BookingsService.publicCreateBooking itself refuses an unknown
  *                  and an unoffered method for a caller that is not the controller (green at
  *                  24e946e8, pinned), and a method that is not a string (RED at 24e946e8: read as
@@ -66,7 +71,10 @@
  *   SV-04 RED      review SEC-BPG-2 / COR-BPG-3 (RED at 24e946e8): a NUL character in the name, the
  *                  description or sourceProductId (Postgres text refuses it: 500) -> 400, no row
  *                  (a fractional duration is not in SV-02: the route answers 201 and stores the whole
- *                  minutes, at 5c17e7b4 and now; measured, left as it is)
+ *                  minutes, 30.5 as 30 and 0.4 as 0, at 5c17e7b4 and now; measured, left as it is
+ *                  and reported as a follow-up for the catalog's own check)
+ *   SV-06 RED      review round 2 (RED at f647c73a): an unpaired UTF-16 surrogate in a text field
+ *                  (Postgres refuses it: 500) -> 400, no row; a well-formed pair is stored
  *   SV-03 CONTROL  a valid body -> 201 and the row; another business's owner -> 403; anonymous -> 401
  *
  * Fixture prefix v64g_ (registered in test/helpers/fixture-prefixes.json);
@@ -105,7 +113,7 @@ const OWN_STRIPE = {
 const OWN_WIPAY = { wipayApiKey: `${CANARY}wipay_key`, wipayAccountNumber: '4400000000' };
 
 /** The businesses: [currency, settings]. Each is an open store with one bookable service. */
-const BUSINESSES: Record<string, { currency: string; meta: Record<string, unknown> | null; storeEnabled?: boolean; noSlug?: boolean }> = {
+const BUSINESSES: Record<string, { currency: string; meta: Record<string, unknown> | null; storeEnabled?: boolean; noSlug?: boolean; slug?: string }> = {
   ttdBare: { currency: 'TTD', meta: null },
   ttdCashOnly: { currency: 'TTD', meta: { cashEnabled: true } },
   ttdPaypal: { currency: 'TTD', meta: { ...OWN_PAYPAL } },
@@ -124,13 +132,15 @@ const BUSINESSES: Record<string, { currency: string; meta: Record<string, unknow
   // Every provider configured, but no slug: no share link, so no storefront gateway list (PM-14).
   usdAllNoSlug: { currency: 'USD', meta: { ...OWN_PAYPAL, ...OWN_STRIPE }, noSlug: true },
   ttdWipayNoSlug: { currency: 'TTD', meta: { ...OWN_WIPAY }, noSlug: true },
+  // A slug the presence editor produces ("joe & co" -> "joe---co"): '--' is a token sanitizeString strips (PM-16).
+  usdDashes: { currency: 'USD', meta: { ...OWN_PAYPAL, ...OWN_STRIPE }, slug: `${P}joe---co--salon` },
 };
 type Biz = keyof typeof BUSINESSES;
 
 const bizId = (b: Biz) => `${P}biz_${b}`;
 const ownerId = (b: Biz) => `${P}owner_${b}`;
 const svcId = (b: Biz) => `${P}svc_${b}`;
-const slugOf = (b: Biz) => `${P}store-${String(b).toLowerCase()}`;
+const slugOf = (b: Biz): string => BUSINESSES[b].slug ?? `${P}store-${String(b).toLowerCase()}`;
 const UNKNOWN_BIZ = `${P}biz_nosuch`;
 
 /** The platform's own provider env, set for the D-138 cases and restored after each test. */
@@ -578,7 +588,7 @@ describe('V1-64 POST /bookings/public/businesses/:businessId — the payment met
     expect(await db.booking.count({ where: { businessId: UNKNOWN_BIZ } })).toBe(0);
   });
 
-  it('PM-13 RED-BEFORE: a refusal names the method and the reason only, never a key, a secret or a setting value', async () => {
+  it('PM-13 RED-BEFORE: a refusal names the method only, never a key, a secret or a setting value', async () => {
     setPlatformEnv();
     for (const [b, method] of [
       ['usdPaypalIdOnly', 'PAYPAL'],
@@ -598,7 +608,11 @@ describe('V1-64 POST /bookings/public/businesses/:businessId — the payment met
   });
 
   it('PM-14 RED-BEFORE (review SEC-BPG-1): a provider method is taken only with the business\'s own storefront slug, and the refusal is the same whatever the business holds', async () => {
-    const shape = (res: any) => ({ status: res.status, code: res.body.code, message: res.body.message });
+    // The whole answer, less the two fields that differ on every request and the path (the business id the caller sent).
+    const shape = (res: any) => {
+      const { timestamp: _t, correlationId: _c, path: _p, ...body } = res.body;
+      return { status: res.status, body };
+    };
     for (const [has, lacks, method] of [
       ['usdAll', 'usdBare', 'PAYPAL'],
       ['usdAll', 'usdBare', 'STRIPE'],
@@ -611,6 +625,9 @@ describe('V1-64 POST /bookings/public/businesses/:businessId — the payment met
         const res = await expectRefused(has, { paymentMethod: method, storefrontSlug: slug }, 'PAYMENT_METHOD_NOT_OFFERED');
         expect(shape(res), `${String(has)} ${method} slug=${JSON.stringify(slug)}`).toEqual(reference);
       }
+      // By id alone with a service that does not exist: the same refusal, not the service's error (no later step answers).
+      const bogus = await expectRefused(has, { paymentMethod: method, storefrontSlug: undefined, serviceId: `${P}svc_nosuch` }, 'PAYMENT_METHOD_NOT_OFFERED');
+      expect(shape(bogus)).toEqual(reference);
       // And a business that does not offer it answers the same without a slug.
       expect(shape(await expectRefused(lacks, { paymentMethod: method, storefrontSlug: undefined }, 'PAYMENT_METHOD_NOT_OFFERED'))).toEqual(reference);
       // Through its own link the method books.
@@ -631,6 +648,24 @@ describe('V1-64 POST /bookings/public/businesses/:businessId — the payment met
     await expectBooked('usdAllNoSlug', { paymentMethod: 'MANUAL' });
     await expectBooked('usdAllNoSlug', {});
   }, 120_000);
+
+  it('PM-16 RED-BEFORE (review SEC2-BPG-1): the slug is compared as sent, not as the request sanitiser rewrites it', async () => {
+    // Its own link, with the '--' the sanitiser strips: the gateway list offers PayPal and Stripe, and both book.
+    const listed: string[] = (await payments.getStorefrontGateways(bizId('usdDashes'))).map((g: { id: string }) => g.id);
+    expect(listed.sort()).toEqual(['paypal', 'stripe']);
+    await expectBooked('usdDashes', { paymentMethod: 'PAYPAL' });
+    await expectBooked('usdDashes', { paymentMethod: 'STRIPE' });
+
+    // A slug that is the store's only after sanitising is not the store's.
+    const own = slugOf('usdAll');
+    for (const slug of [`<b>${own}</b>`, own.replace('store', 'st--ore'), ` ${own} `, `${own}/*`, `${own}--`, slugOf('usdDashes').replace(/-/g, '')]) {
+      await expectRefused('usdAll', { paymentMethod: 'PAYPAL', storefrontSlug: slug }, 'PAYMENT_METHOD_NOT_OFFERED');
+    }
+    await expectRefused('usdDashes', { paymentMethod: 'PAYPAL', storefrontSlug: `${P}joe-co-salon` }, 'PAYMENT_METHOD_NOT_OFFERED');
+    await expectRefused('usdDashes', { paymentMethod: 'PAYPAL', storefrontSlug: `${P}joe---cosalon` }, 'PAYMENT_METHOD_NOT_OFFERED');
+    // The exact slug still books.
+    await expectBooked('usdAll', { paymentMethod: 'PAYPAL', storefrontSlug: own });
+  });
 
   it('PM-15 RED-BEFORE (review SEC-BPG-3): the service itself refuses an unknown, an unoffered and a non-string method for a caller that is not the controller', async () => {
     const direct = (b: Biz, paymentMethod: unknown, storefrontSlug: string | null = slugOf(b)) =>
@@ -726,6 +761,33 @@ describe('V1-64 POST /bookings/businesses/:businessId/services — a body the ca
     }
     expect(wrong).toEqual([]);
     expect(await serviceCount('ttdBare')).toBe(before);
+  });
+
+  it('SV-06 RED-BEFORE (review round 2, Q1): an unpaired UTF-16 surrogate in a text field is 400 (was 500) and writes no service', async () => {
+    const before = await serviceCount('ttdBare');
+    // Sent as raw JSON: the escape is what a client can put on the wire.
+    const raw = (json: string) =>
+      request(app.getHttpServer())
+        .post(`/bookings/businesses/${bizId('ttdBare')}/services`)
+        .set(asOwner('ttdBare'))
+        .set('content-type', 'application/json')
+        .send(json);
+    const wrong: string[] = [];
+    for (const [label, json] of [
+      ['name, lone high', '{"name":"V64G Sur\\ud800","duration":30,"price":50}'],
+      ['name, lone low', '{"name":"V64G \\udc00Sur","duration":30,"price":50}'],
+      ['description', '{"name":"V64G Sur","duration":30,"price":50,"description":"cut\\ud83d"}'],
+      ['sourceProductId', '{"name":"V64G Sur","duration":30,"price":50,"sourceProductId":"p\\ude00"}'],
+    ]) {
+      const res = await raw(json);
+      if (res.status !== 400) wrong.push(`${label}: ${res.status}`);
+    }
+    expect(wrong).toEqual([]);
+    expect(await serviceCount('ttdBare')).toBe(before);
+    // A well-formed pair (an emoji) is text like any other.
+    const emoji = await raw('{"name":"V64G Cut \\ud83d\\ude00","duration":30,"price":50}');
+    expect(emoji.status, JSON.stringify(emoji.body)).toBe(201);
+    expect(emoji.body.name).toBe('V64G Cut \u{1F600}');
   });
 
   it('SV-03 CONTROL: a valid body creates the service; another business\'s owner is 403 and an anonymous caller 401', async () => {
