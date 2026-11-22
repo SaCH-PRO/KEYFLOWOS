@@ -485,7 +485,10 @@ the number now, or would after the run (two old spellings of one number).
 Rewriting one would break the unique, and which customer is the real one is
 the owner's call: merge them in Customers, then run again. `unreadable`: the
 phone does not read (too short, or a local number under a country with no
-dialling rules); its key stays as typed and the data-quality scan flags it.
+dialling rules); it is kept when its key is already its digits (the key a
+contact write stores) and the data-quality scan flags it. An unreadable phone
+whose key is missing or stale is a `rewrite` to its digits (or `needs_merge`
+when another live contact holds or wants that key).
 
 **Output.** `contacts_scanned`, `key_current`, `unreadable_kept`,
 `needs_merge`, `would_rewrite` (and `rewritten`, `changed_since_read`, `failed`

@@ -4,7 +4,7 @@
  * (packet FU-PHONE-COUNTRY-DUPLICATES, owner ruling D-211).
  *
  * Dry run by default: scans contacts, classifies every row as current,
- * unreadable (kept as typed), needs_merge (another live contact in the same
+ * unreadable (kept: its key is already its digits; a missing or stale key is a rewrite), needs_merge (another live contact in the same
  * business holds or wants the same E.164 key), or rewrite, prints counts and
  * `<contact_id>  <action>` lines without printing any phone number, name, or
  * business id, and writes nothing unless `--apply` is passed.
