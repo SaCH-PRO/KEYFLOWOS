@@ -43,6 +43,10 @@
  *   GLD-15  RED-BEFORE  (final review C-1) the order is total: lines tied on date and creation time (the two
  *                       lines of one posting) come in id order, so a page boundary between them neither
  *                       repeats nor drops a line (the tie was left to Postgres)
+ *   GLD-16  RED-BEFORE  (acceptance review B-1) the running balance does not start over on a later page: page N
+ *                       carries on from the lines of pages 1 to N-1 in the same range and order, so every line's
+ *                       balance is the one the whole range on one page gives it (page 2 started from the lines
+ *                       dated before `from`, or from nothing without `from`, and dropped page 1's lines)
  *   GLD-09  KEEP        tenancy and scope hold on the date-only read: another business's owner and a
  *                       revenue-none member are refused 403 and get no line; no answer carries another
  *                       business's line
@@ -463,6 +467,27 @@ describe('V1-66 SWP-FIN-LEDGER: the General Ledger end date covers its whole day
       paged.push(one.body.rows[0].entryId);
     }
     expect(paged).toEqual(expected.map((r) => r.entryId));
+  });
+
+  it('GLD-16: a later page carries the running balance on from the pages before it', async () => {
+    for (const range of [{ to: '2026-12-31' }, { from: D, to: D }]) {
+      const whole = await ledger(ID.bizA, range);
+      expect(whole.status).toBe(200);
+      const expected = new Map<string, string>(whole.body.rows.map((r: any) => [r.entryId, String(r.runningBalance)]));
+      const total: number = whole.body.total;
+      expect(total).toBeGreaterThan(10);
+      const seen: string[] = [];
+      for (let page = 1; (page - 1) * 5 < total; page += 1) {
+        const res = await ledger(ID.bizA, { ...range, pageSize: 5, page });
+        expect(res.status).toBe(200);
+        for (const row of res.body.rows) {
+          seen.push(row.entryId);
+          expect(String(row.runningBalance), `${JSON.stringify(range)} page ${page} ${row.description} ${row.accountName}`)
+            .toBe(expected.get(row.entryId));
+        }
+      }
+      expect(seen).toEqual(whole.body.rows.map((r: any) => r.entryId));
+    }
   });
 
   it('GLD-09: tenancy and scope hold on the date-only read', async () => {
