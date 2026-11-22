@@ -102,10 +102,10 @@ describe('round-3 review repairs (security M2, correctness MAJOR-2, minors)', ()
 describe('proposalViewForReader (D-238: an action on a proposal the reader may not see answers a safely redacted view)', () => {
   const money = { id: 'kap_1', status: 'FAILED', title: '$12,345 outstanding', summary: 'x', riskLevel: 'HIGH', failureReason: 'Refused: not mapped', executionResult: { amount: 12345 }, actionType: 'EXECUTE_TOOL', module: 'commerce' };
   it('a revenue reader gets the proposal whole', () => expect(proposalViewForReader(money, true)).toBe(money));
-  it('a reader without revenue read gets id and status only, and nothing else', () => {
-    // Round 7 (security m2, correctness minor 2): a financial proposal's failure reason is withheld whatever it says, as
-    // execution status withholds it; the vocabulary cannot be complete ("Customer was charged twice").
-    expect(proposalViewForReader(money, false)).toEqual({ id: 'kap_1', status: 'FAILED' });
+  it('a reader without revenue read gets id, status and a failure reason that states no money, and nothing else', () => {
+    // A failure reason that states no money stays (round 13: the authority's own refusals, D-140 / D-119, are pinned in
+    // the action answers by owner-role-key; round 7 had dropped it). One that states money is withheld.
+    expect(proposalViewForReader(money, false)).toEqual({ id: 'kap_1', status: 'FAILED', failureReason: 'Refused: not mapped' });
     expect(proposalViewForReader({ ...money, failureReason: 'balance $12,345 too low' }, false)).toEqual({ id: 'kap_1', status: 'FAILED' });
   });
   it('a non-financial proposal is unchanged for any reader', () => {

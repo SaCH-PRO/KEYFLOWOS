@@ -956,7 +956,7 @@ describe("FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): a memberless turn
         for (const marker of ['12,345', 'outstanding across', 'monthly revenue']) expect(body, `${action} (${res.status}): ${marker}`).not.toContain(marker);
         expect([200, 201, 400, 403], `${action}: ${body.slice(0, 200)}`).toContain(res.status);
         if (res.status < 300) {
-          for (const key of Object.keys(res.body)) expect(['id', 'status'], `${action} answers ${key}`).toContain(key);
+          for (const key of Object.keys(res.body)) expect(['id', 'status', 'failureReason'], `${action} answers ${key}`).toContain(key);
           expect(res.body.id).toBe(target);
           const row = await db.keyActionProposal.findUnique({ where: { id: target }, select: { status: true } });
           expect(row?.status, action).toBe({ approve: 'APPROVED', reject: 'REJECTED', cancel: 'CANCELLED' }[action]);
@@ -974,7 +974,7 @@ describe("FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): a memberless turn
         // answers only the redacted keys, as approve, reject and cancel do).
         expect((res.body as { message?: string }).message, body.slice(0, 200)).not.toBe('Action proposal not found');
         expect(res.status, body.slice(0, 200)).toBeLessThan(500);
-        if (res.status < 300) for (const key of Object.keys(res.body)) expect(['id', 'status'], `execute answers ${key}`).toContain(key);
+        if (res.status < 300) for (const key of Object.keys(res.body)) expect(['id', 'status', 'failureReason'], `execute answers ${key}`).toContain(key);
       }
       for (const reader of [ID.owner, ID.revenue]) {
         const seen = ((await agent().get(proposalsRoute()).set(HEADER, reader)).body as any[]).map((p) => p.id);
