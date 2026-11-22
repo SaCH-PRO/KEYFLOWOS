@@ -1115,6 +1115,11 @@ export class ModelGatewayService {
         );
       }
 
+      // RR-STREAM-ERROR-NO-EFFECTS (D-261): once a chunk of this candidate has
+      // reached the consumer, its failure ends the stream; the next candidate is
+      // tried only while nothing has been yielded, so no second answer is spliced
+      // onto a partial one and no tool deltas of two providers mix.
+      let yieldedFromCandidate = false;
       try {
         const startTime = Date.now();
         const stream = this.callProviderStream(request, candidate.provider, candidate.model, preferences);
@@ -1133,6 +1138,7 @@ export class ModelGatewayService {
             lastUsageChunk = enriched;
           }
 
+          yieldedFromCandidate = true;
           yield enriched;
         }
 
@@ -1168,6 +1174,17 @@ export class ModelGatewayService {
         this.logger.error(
           `Stream provider ${candidate.provider}/${candidate.model} failed: ${lastError.message}`,
         );
+        if (yieldedFromCandidate) {
+          yield {
+            type: 'error',
+            error: lastError.message,
+            provider: candidate.provider,
+            model: candidate.model,
+            fallbackUsed,
+            fallbackProvider,
+          };
+          return;
+        }
       }
     }
 
