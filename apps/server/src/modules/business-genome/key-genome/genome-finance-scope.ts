@@ -60,7 +60,7 @@ const MONEY_TERMS = new RegExp(
 /** Short money words, matched only as a whole word (letters on neither side), so snake_case values (cac_payback, first_sale) match. */
 const MONEY_WORDS = /(?<![a-z])(cac|ltv|mrr|arr|roi|sale|deal|order|tax|vat|fee)s?(?![a-z])/i;
 /** A money amount in free text ("$12,345", "TTD 500", "£9.99"): a title, summary or reason that states a figure (D-238). */
-const MONEY_AMOUNT = /[$€£¥₹]\s?\d|(?<![a-z0-9])(ttd|usd|eur|gbp|jmd|bbd|xcd|cad)\s?\d|(?<![a-z0-9])(?<![\d.,][.,])\d[\d.,]*\s?(ttd|usd|eur|gbp|jmd|bbd|xcd|cad)(?![a-z0-9])/i;
+const MONEY_AMOUNT = /[$€£¥₹]\s?\d|(?<![a-z0-9])(ttd|usd|eur|gbp|jmd|bbd|xcd|cad)\s?\d|(?<![a-z0-9])(?<!\d[.,]*)\d[\d.,]*\s?(ttd|usd|eur|gbp|jmd|bbd|xcd|cad)(?![a-z0-9])/i;
 /**
  * Words that make a KEY action proposal's text or parameters financial (round-3 security M2): an amount, a total, a
  * balance, what is owed or paid, a rate. Read for proposals only: a genome row's domain is classified by the vocabulary
@@ -86,30 +86,44 @@ const PROPOSAL_MONEY_WORDS =
 const DATE_OR_PHONE = `(?:\\d{4}-\\d{2}-\\d{2}|\\d{1,2}/\\d{1,2}/(?:\\d{4}|\\d{2})|\\d{3}-\\d{3}-\\d{4})(?![\\d.,])`;
 const FIGURE = `[$€£¥₹]?(?!${DATE_OR_PHONE})\\d`;
 /**
- * Count and duration words: a key that ENDS in one is a count, not money (totalCount, total_items, totalHours,
- * totalDurationMs, timeSpentMinutes, tipsShown: round 10, correctness m2). A count word inside a key does not stop
- * it (total_items_value is money: security M3).
+ * Count and duration words: a key whose only segment after the money word is one of them is a count, not money
+ * (totalCount, total_items, totalHours, totalDurationMs, timeSpentMinutes, tipsShown: round 10, correctness m2). In a
+ * longer key it is money (total_items_value, rate_per_hour: security M3), and a time unit after "rate" is the hourly
+ * rate (rateHour, rate_minute: round 11, security m1).
  */
-const COUNT_WORDS =
-  'counts?|items?|pages?|results?|records?|rows?|tasks?|hits?|matches|entries|contacts?|bookings?|leads?|messages?|tokens?|runs?|hours?|minutes?|seconds?|ms|duration(?:_?ms)?|latency(?:_?ms)?|steps?|clicks?|views?|shown|users?|members?|events?|calls?|emails?|posts?|files?|attempts?|retries';
+const QUANTITY_WORDS =
+  'counts?|items?|pages?|results?|records?|rows?|tasks?|hits?|matches|entries|contacts?|bookings?|leads?|messages?|tokens?|runs?|ms|duration(?:_?ms)?|latency(?:_?ms)?|steps?|clicks?|views?|shown|users?|members?|events?|calls?|emails?|posts?|files?|attempts?|retries';
+/** Time units: a count of time after most money words (totalHours), but the hourly rate after "rate" (rateHour). */
+const TIME_WORDS = 'hours?|minutes?|seconds?';
+const COUNT_WORDS = `${QUANTITY_WORDS}|${TIME_WORDS}`;
 // A key suffix after the money word: up to four segments of up to 30 letters, joined by '_', '-', a space or a doubled
 // '_' (totalDue -> total_Due, total_due, "Total Due", total-due, total__due). Bounded, so a money-word chain
 // (total_total_...) is linear (round 10, both reviews).
 // The count exemption applies only to a count word right after the money word (totalCount, totalHours); in a longer key
 // (rate_per_hour, total_items_value) the key is money.
-const KEY_SUFFIX = `(?:[_ -]{1,2}(?!(?:${COUNT_WORDS})["']?\\s*[:=])[a-z]{1,30}(?:[_ -]{1,2}[a-z]{1,30}){0,3})?`;
+// Up to eight segments (round 11: a longer key is still read); a key that runs past the bound fails closed (below).
+const KEY_SUFFIX = `(?:[_ -]{1,2}(?!(?:${COUNT_WORDS})["']?\\s*[:=])[a-z]{1,30}(?:[_ -]{1,2}[a-z]{1,30}){0,7})?`;
+const RATE_KEY_SUFFIX = `(?:[_ -]{1,2}(?!(?:${QUANTITY_WORDS})["']?\\s*[:=])[a-z]{1,30}(?:[_ -]{1,2}[a-z]{1,30}){0,7})?`;
+// A money word followed by more than eight key segments: fails closed (round 11, both reviews).
+const LONG_KEY = `(?:[_ -]{1,2}[a-z]{1,30}){9}`;
 // The prose window: up to three words (or exempt dates or phones) of up to 30 letters, separated by whitespace
 // (newlines included), punctuation, '=', markdown '*', '~', '>', and dashes (round 10, security M4).
 const SEP = `[\\s,:;()=*~>—–-]{1,4}`;
 const WINDOW_WORD = `(?:[a-z]{1,30}|${DATE_OR_PHONE})`;
-const NEAR_FIGURE = `(?:${KEY_SUFFIX}["']?\\s*[:=]\\s*["']?\\s*${FIGURE}|(?![a-z])(?:${SEP}(?:${WINDOW_WORD}${SEP}){0,3})${FIGURE})`;
+// One whitespace run each side of the colon (round 11, security M2: two \\s* around an optional quote were quadratic).
+const KEY_VALUE = `["']?\\s*[:=]\\s*(?:["']\\s*)?${FIGURE}`;
+const PROSE_FIGURE = `(?![a-z])(?:${SEP}(?:${WINDOW_WORD}${SEP}){0,3})${FIGURE}`;
+const NEAR_FIGURE = `(?:${KEY_SUFFIX}${KEY_VALUE}|${LONG_KEY}|${PROSE_FIGURE})`;
+const RATE_NEAR_FIGURE = `(?:${RATE_KEY_SUFFIX}${KEY_VALUE}|${LONG_KEY}|${PROSE_FIGURE})`;
 const PROPOSAL_FIGURE_WORDS = new RegExp(
   [
-    `(?<!(?:response|reply|show|no[\\s_-]?show|completion|open|click|attendance|retention|bounce|success|error|occupancy|star|heart|frame|bit|sample|refresh)[\\s_]?)(?<![a-z])rates?(?![\\s_-]*limit)${NEAR_FIGURE}`,
+    `(?<!(?:response|reply|show|no[\\s_-]?show|completion|open|click|attendance|retention|bounce|success|error|occupancy|star|heart|frame|bit|sample|refresh)[\\s_]?)(?<![a-z])rates?(?![\\s_-]*limit)${RATE_NEAR_FIGURE}`,
     `(?<![a-z])(?:totals?|bill(?:s|ed|ing)?|settle(?:s|d)?|wire[sd]?|transfer(?:s|red)?|tips?|loans?|retainers?|spent|spend(?:s|ing)?|charged)${NEAR_FIGURE}`,
     // A figure that is outstanding, owed or overdue ("Chase the 900 outstanding"), at the start of its number: not after
     // a digit, nor after a digit and one mark (round 10: linear on "9..9.." runs; "them,900 outstanding" is money).
-    `(?<!\\d)(?<![\\d.,][.,])[$€£¥₹]?\\d[\\d,.]*(?:\\s*k)?\\s+(?:outstanding|owed|overdue|unpaid|past\\s+due)(?![a-z])`,
+    // At the start of its number: not after a digit and its marks (round 11, correctness M2: "Chase...900 outstanding"
+    // is money); linear, as each start looks back only over its own marks.
+    `(?<!\\d[.,]*)[$€£¥₹]?\\d[\\d,.]*(?:\\s*k)?\\s+(?:outstanding|owed|overdue|unpaid|past\\s+due)(?![a-z])`,
   ].join('|'),
   'i',
 );
