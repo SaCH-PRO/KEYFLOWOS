@@ -4774,6 +4774,9 @@ export class CommerceService {
     return { invoiceId, entries };
   }
 
+  /** The statuses a reminder may be sent for (fail closed: every other status is refused). */
+  private static readonly REMINDABLE_INVOICE_STATUSES: ReadonlySet<string> = new Set(['SENT', 'OVERDUE', 'PARTIALLY_PAID']);
+
   /**
    * Sends a payment reminder for the given invoice via Gmail (if connected)
    * and persists the canonical `invoice.payment_reminder_sent` ContactEvent
@@ -4802,8 +4805,15 @@ export class CommerceService {
       include: { contact: true, items: true, payments: true, business: true },
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
-    if (invoice.status === 'PAID' || invoice.status === 'VOID') {
-      throw new BadRequestException(`Cannot send reminder for ${invoice.status} invoice`);
+    // FU-SEND-REMINDER-SERVER-GATE: only an invoice the customer has been sent and still owes is
+    // reminded (the web's canRemind set; D-256 keeps reminder lists apart from owed figures). Any
+    // other status, including one added later, is refused here, before a pay link is looked up,
+    // rotated or minted, an email is sent, or an event or timeline entry is written. The answer
+    // names the status only, never the invoice's contents.
+    if (!CommerceService.REMINDABLE_INVOICE_STATUSES.has(invoice.status)) {
+      throw new ConflictException(
+        `A reminder can only be sent for a SENT, OVERDUE or PARTIALLY_PAID invoice; this invoice is ${invoice.status}`,
+      );
     }
 
     // Always provide a pay CTA in the reminder. Reuse the active link if one
@@ -4820,7 +4830,7 @@ export class CommerceService {
       try {
         link = await this.createPaymentLink(invoice.id, input.businessId);
       } catch (err: any) {
-        // Reminders are only sent for non-PAID/non-VOID invoices, so the
+        // Reminders are only sent for SENT/OVERDUE/PARTIALLY_PAID invoices, so the
         // "paid or voided" refusal shouldn't normally fire — but if a
         // payment landed between the status check above and link creation
         // we degrade to a CTA-less reminder rather than 500. Anything else
