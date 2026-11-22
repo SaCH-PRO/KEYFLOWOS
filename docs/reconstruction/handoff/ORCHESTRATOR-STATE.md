@@ -88,12 +88,12 @@ Format: `docs/development/agent-memory/OWNER-QUESTION-FORMAT.md`. Safe defaults 
    cash; should money-area figures be withheld without revenue read (D-100)? (Default: do not widen Health readers.)
 9. KEY's overdue list now includes never-sent PENDING invoices (D-256); a drafted reminder would say "N days overdue".
    Keep PENDING there? (Default: yes for figures; the server reminder gate packet keeps sends off PENDING.)
+10. Should the server's own storage host (`S3_PUBLIC_URL`) be exempt from the document-fetch guard when it is private
+    (self-hosted MinIO)? (Default: keep refusing.)
 11. Should a filtered general ledger's running balance start from the account's true opening balance instead of zero?
     (Default: as built, column labelled.)
 12. Should `GET chart-of-accounts` (membership-only; names and codes, seeds defaults on read) require a module scope?
     (Default: unchanged.)
-10. Should the server's own storage host (`S3_PUBLIC_URL`) be exempt from the document-fetch guard when it is private
-    (self-hosted MinIO)? (Default: keep refusing.)
 
 ## 5. How to work here (learned the hard way)
 
