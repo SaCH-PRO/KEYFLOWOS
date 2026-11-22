@@ -105,8 +105,9 @@
  * (AiUsageService.callAi) answers a fixed text; EventEmitter2, the contact
  * timeline and the AI / Gmail / Drive services are stubs off the boundary.
  *
- * The stats service caches an answer per business for 60 s and no commerce
- * write clears it; each read here clears it first (CommerceStatsService
+ * The stats service caches an answer per business for 60 s. The commerce
+ * writes clear it (recordPayment, the refund), rows seeded straight into the
+ * database do not; each read here clears it first (CommerceStatsService
  * .invalidateCache), so a case reads the rows as they are.
  *
  * Fixtures: prefix `v64e_` (registered in test/helpers/fixture-prefixes.json);
@@ -171,6 +172,9 @@ let readInvoiceMoney: any;
 let prismaClient: any;
 let balanceOfStoredRows: any;
 let creditAwareBalance: any;
+
+/** Every prompt the Executive Summary handed the AI narrative (AiUsageService.callAi stand-in), in order. */
+const narrativePrompts: string[] = [];
 
 /** The invoices the real routes created, by a short key. */
 const INV: Record<string, string> = {};
@@ -495,7 +499,11 @@ beforeAll(async () => {
 
   // The real report route over the real ReportsService (fixed AI narrative).
   const reporting = new LedgerReportingService(prismaService, moduleRef.get(LedgerBalanceService), receivables);
-  const reports = new ReportsService(prismaService, { callAi: async () => ({ content: 'v64e narrative' }) } as any, reporting);
+  const reports = new ReportsService(
+    prismaService,
+    { callAi: async (call: any) => { narrativePrompts.push(String(call?.messages?.[1]?.content ?? '')); return { content: 'v64e narrative' }; } } as any,
+    reporting,
+  );
   const reportsRef = await Test.createTestingModule({
     controllers: [ReportsController],
     providers: [
@@ -804,8 +812,20 @@ describe('V1-64 review repairs', () => {
     expect(net.totalRevenue).toBe(60);
   });
 
-  it('MT-12 RED-BEFORE (COR-4): the Executive Summary states what is owed per currency; the headline stays the business currency', async () => {
+  it('MT-12 RED-BEFORE (COR-4; round 2 C2-9): the Executive Summary states what is owed per currency, in its figures and to its narrative; the headline stays the business currency', async () => {
+    // Stands on its own (round 2 C2-8): the USD invoice of MT-05 is made here when that case did not run.
+    if (!INV.a_usd) {
+      await issuedInvoice('a_usd', ID.bizA, ID.contactA, 250, { currency: 'USD' });
+      const paid = await agent().post(`/commerce/businesses/${ID.bizA}/invoices/${INV.a_usd}/payments`).set(HEADER, ID.ownerA).send({ amount: 100, method: 'cash' });
+      expect(paid.status, JSON.stringify(paid.body)).toBe(201);
+    }
+    narrativePrompts.length = 0;
     const r = await reportOf(ID.bizA);
+    // The narrative is told the other currency's receivable too, never added to the TTD figure.
+    expect(narrativePrompts).toHaveLength(1);
+    expect(narrativePrompts[0]).toMatch(/Outstanding Receivables: \$13,323 TTD \(1 invoices, 0 overdue\)/);
+    expect(narrativePrompts[0]).toMatch(/Outstanding Receivables in other currencies: USD 150 \(1 invoices, 0 overdue\)/);
+    expect(narrativePrompts[0]).not.toMatch(/13,473/);
     expect(r.metrics.currency).toBe('TTD');
     expect(r.metrics.revenue).toMatchObject({ outstanding: 13323, outstandingCount: 1, overdueCount: 0 });
     expect(r.metrics.revenue.outstandingByCurrency).toEqual({
@@ -813,8 +833,10 @@ describe('V1-64 review repairs', () => {
       USD: { outstanding: 150, count: 1, overdueCount: 0 },
     });
     // A single-currency book states one bucket, equal to the headline.
+    narrativePrompts.length = 0;
     const single = await reportOf(ID.bizR);
     expect(single.metrics.revenue.outstandingByCurrency).toEqual({ TTD: { outstanding: 340, count: 2, overdueCount: 1 } });
+    expect(narrativePrompts[0]).not.toMatch(/other currencies/);
     // The other tenant's report carries none of it.
     expect((await reportOf(ID.bizB)).metrics.revenue.outstandingByCurrency).toEqual({ TTD: { outstanding: 70, count: 1, overdueCount: 0 } });
   });
