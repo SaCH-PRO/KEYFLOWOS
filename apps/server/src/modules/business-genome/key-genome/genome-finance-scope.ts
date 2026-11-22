@@ -45,9 +45,10 @@ const MONEY_TERMS = new RegExp(
   [
     'financ', 'revenue', 'sales', 'commerce', 'payment', 'invoice', 'profit', 'billing', 'refund', 'payroll', 'treasury',
     // Compensation is money (Codex P1 on #218: commission rates are real data in conversion/sales-team).
-    // Letter-bounded at the start (review of the Codex fixes: decommission and overcompensation are not money);
-    // compensate, incentive and stipend are compensation too.
-    '(?<![a-z])commission', '(?<![a-z])compensat', '(?<![a-z])bonus(?:es)?(?![a-z])', '(?<![a-z])incentive', '(?<![a-z])stipend',
+    // Only the two known false matches are excluded (decommission, overcompensation); every other compound, key or
+    // acronym-prefixed name fails closed (confirmation review m2/m4). Compensate, incentivise and stipend are
+    // compensation too.
+    '(?<!de)commission', '(?<!over)compensat', '(?<![a-z])bonus(?:es)?(?![a-z])', 'incentiv', 'stipend',
     'lifetime', 'acquisition_?cost', 'budget', 'expense', 'conversion', 'forecast', 'churn', 'transaction', 'opportunit',
     'unit_?economics', 'cross_?domain', 'money', 'receivable', 'payable', 'quote', 'quotation', 'reimburs', 'discount',
     // A promo code is money; promote / promotion is not (round-3 correctness minor).
@@ -355,15 +356,27 @@ export function proposalViewForReader<T extends { id: string; status?: unknown; 
  * reason that states money, which is blanked.
  */
 export function nonFinancialProposalForReader<T extends { failureReason?: unknown; outcomeEvidence?: unknown }>(proposal: T): T {
-  const states = (v: unknown) => typeof v === 'string' && proposalMentionsMoney(v);
-  // The action boundary writes the same message to outcomeEvidence.reason (review of the Codex fixes, security m1).
+  const reasonStates = typeof proposal.failureReason === 'string' && proposalMentionsMoney(proposal.failureReason);
+  // The action boundary writes the same message into outcomeEvidence (review of the Codex fixes, security m1). Evidence
+  // that states money anywhere in it is reduced to its status (confirmation review m6); oversized evidence fails closed.
   const evidence = proposal.outcomeEvidence;
-  const evidenceReason = evidence && typeof evidence === 'object' && !Array.isArray(evidence) ? (evidence as Record<string, unknown>).reason : undefined;
-  if (!states(proposal.failureReason) && !states(evidenceReason)) return proposal;
+  let evidenceStates = false;
+  if (evidence !== null && evidence !== undefined) {
+    let text: string;
+    try {
+      text = typeof evidence === 'string' ? evidence : JSON.stringify(evidence) ?? '';
+    } catch {
+      text = '';
+      evidenceStates = true;
+    }
+    evidenceStates = evidenceStates || text.length > MAX_CLASSIFIED_CONTENT || proposalMentionsMoney(text);
+  }
+  if (!reasonStates && !evidenceStates) return proposal;
+  const status = evidence && typeof evidence === 'object' && !Array.isArray(evidence) ? (evidence as Record<string, unknown>).status : undefined;
   return {
     ...proposal,
-    ...(states(proposal.failureReason) ? { failureReason: null } : {}),
-    ...(states(evidenceReason) ? { outcomeEvidence: { ...(evidence as Record<string, unknown>), reason: null } } : {}),
+    ...(reasonStates ? { failureReason: null } : {}),
+    ...(evidenceStates ? { outcomeEvidence: { ...(status === undefined ? {} : { status }), reason: null } } : {}),
   };
 }
 

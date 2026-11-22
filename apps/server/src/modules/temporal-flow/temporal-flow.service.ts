@@ -35,11 +35,25 @@ function eventTextStatesMoney(e: { payload?: unknown; metadata?: unknown }): boo
   }
   // The proposal vocabulary, as the proposal's own row is read (review of the Codex fixes, security MAJOR-1: 'card
   // declined', 'paid late' and 'balance owed' are not money labels).
-  return texts.some((t) => typeof t === 'string' && (isMoneyLabel(t) || proposalTextStatesMoney(t)));
+  if (texts.some((t) => typeof t === 'string' && (isMoneyLabel(t) || proposalTextStatesMoney(t)))) return true;
+  // The event's own copy of the execution result: the row may not hold it (confirmation review m5).
+  for (const o of [e.payload, e.metadata]) {
+    const result = o && typeof o === 'object' && !Array.isArray(o) ? (o as Record<string, unknown>).executionResult : undefined;
+    if (result === undefined || result === null) continue;
+    let text: string;
+    try {
+      text = typeof result === 'string' ? result : JSON.stringify(result) ?? '';
+    } catch {
+      return true;
+    }
+    if (text.length > 50_000 || proposalTextStatesMoney(text)) return true;
+  }
+  return false;
 }
 
-/** The most rows one filtered timeline read scans before it answers what it has. */
-const MAX_READER_SCAN = 10_000;
+/** The most rows a reader may ask one timeline read for, and the most rows that read scans before it answers what it has. */
+const MAX_READER_LIMIT = 500;
+const MAX_READER_SCAN = 5_000;
 
 @Injectable()
 export class TemporalFlowService {
@@ -85,11 +99,13 @@ export class TemporalFlowService {
     businessId: string,
     events: E[],
     reader: GenomeReader | null | undefined,
+    /** The reader's revenue read when the caller has already resolved it (the paged list resolves it once). */
+    readsRevenue?: boolean,
   ): Promise<E[]> {
     if (reader === undefined) return events;
     const proposals = events.filter((e) => e.entityType === 'key_action_proposal');
     if (proposals.length === 0) return events;
-    if (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined)) return events;
+    if (readsRevenue ?? (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined))) return events;
     const ids = [...new Set(proposals.map((e) => e.entityId).filter((id): id is string => typeof id === 'string' && !!id))];
     let rows: Map<string, Record<string, unknown>>;
     try {
@@ -137,23 +153,28 @@ export class TemporalFlowService {
     if (reader === undefined) {
       return this.prisma.client.temporalFlowEvent.findMany({ where, orderBy: { occurredAt: 'desc' }, take: limit });
     }
-    // Codex P2 on #218 and its review: when the rows are filtered for a reader, the limit counts what the reader may
-    // see. The first read is `limit` rows (all a revenue reader, or a page with nothing hidden, needs); while rows were
-    // withheld the read pages on, in a stable order, until the limit is met, the rows end, or MAX_READER_SCAN rows have
-    // been scanned (then the page may be short). A negative limit serves nothing and a fraction is truncated.
-    const want = Math.max(0, Math.trunc(Number(limit)) || 0);
+    // Codex P2 on #218 and its reviews: when the rows are filtered for a reader, the limit counts what the reader may
+    // see. A reader's limit is capped (MAX_READER_LIMIT); a negative limit serves nothing and a fraction is truncated.
+    // The reader's revenue read is resolved once. A revenue reader costs one read of `limit` rows. For any other reader
+    // the first read is `limit` rows; while rows were withheld the read pages on, in a stable order and never serving a
+    // row twice, until the limit is met, the rows end, or MAX_READER_SCAN rows have been scanned (then the page may be
+    // short).
+    const want = Math.min(Math.max(0, Math.trunc(Number(limit)) || 0), MAX_READER_LIMIT);
     if (want === 0) return [];
+    const orderBy = [{ occurredAt: 'desc' as const }, { id: 'desc' as const }];
+    const readsRevenue = await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined);
+    if (readsRevenue) return this.prisma.client.temporalFlowEvent.findMany({ where, orderBy, take: want });
     const visible: Awaited<ReturnType<typeof this.prisma.client.temporalFlowEvent.findMany>> = [];
+    const seen = new Set<string>();
     let skip = 0;
     while (visible.length < want && skip < MAX_READER_SCAN) {
-      const take = Math.min(skip === 0 ? want : Math.min(Math.max(want, 100), 1000), Math.max(MAX_READER_SCAN - skip, 1));
-      const page = await this.prisma.client.temporalFlowEvent.findMany({
-        where,
-        orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
-        skip,
-        take,
-      });
-      visible.push(...(await this.forReader(businessId, page, reader)));
+      const take = Math.min(skip === 0 ? want : Math.max(want, 100), MAX_READER_SCAN - skip);
+      const page = await this.prisma.client.temporalFlowEvent.findMany({ where, orderBy, skip, take });
+      for (const event of await this.forReader(businessId, page, reader, false)) {
+        if (seen.has(event.id)) continue;
+        seen.add(event.id);
+        visible.push(event);
+      }
       skip += page.length;
       if (page.length < take) break;
     }
