@@ -402,3 +402,53 @@ describe('FU-TEMPORAL-FLOW-INBOX-SCOPE: cross-tenant', () => {
     }
   });
 });
+
+describe('FU-TEMPORAL-FLOW-INBOX-SCOPE review repairs: the timeline writes do not reach a withheld event', () => {
+  const resolveOf = (actor: string, key: string, businessId = ID.biz) =>
+    as(agent().patch(`/temporal-flow/businesses/${businessId}/${idOf(key)}/resolve`), actor);
+  const statusOf = async (key: string) =>
+    (await db.temporalFlowEvent.findUnique({ where: { id: idOf(key) }, select: { status: true } }))?.status;
+
+  it('SEC N-2: a bookings writer cannot resolve a KEY Inbox event, and the answer is the one an unknown event gets', async () => {
+    const res = await resolveOf(ID.bookingsWriter, 'inboxRisk');
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toEqual({ count: 0 });
+    expect(await statusOf('inboxRisk')).toBe('ACTION_REQUIRED');
+    const unknown = await as(agent().patch(`/temporal-flow/businesses/${ID.biz}/${P}ev_nope/resolve`), ID.bookingsWriter);
+    expect(unknown.status).toBe(200);
+    expect(unknown.body).toEqual({ count: 0 });
+    // the other tenant's event, by a writer of biz
+    const other = await resolveOf(ID.opsWriter, 'otherInbox');
+    expect(other.body).toEqual({ count: 0 });
+    expect(await statusOf('otherInbox')).toBe('RECORDED');
+  });
+
+  it('SEC N-2: an operations writer still resolves it', async () => {
+    const res = await resolveOf(ID.opsWriter, 'inboxRisk');
+    expect(res.body).toEqual({ count: 1 });
+    expect(await statusOf('inboxRisk')).toBe('RESOLVED');
+  });
+
+  it('SEC N-3: a bookings writer cannot upsert over a KEY Inbox event by its external id, nor read it back', async () => {
+    const externalId = `${P}key-inbox:key_inbox.message_received:thread`;
+    await db.temporalFlowEvent.update({ where: { id: idOf('inboxReceived') }, data: { externalId } });
+    const res = await as(
+      agent().post(`/temporal-flow/businesses/${ID.biz}`).send({ source: 'key_inbox', type: 'manual.note', title: `${P}overwrite`, externalId }),
+      ID.bookingsWriter,
+    );
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expectNoSecret(res.body, 'bookingsWriter upsert');
+    const row = await db.temporalFlowEvent.findUnique({ where: { id: idOf('inboxReceived') }, select: { title: true, summary: true } });
+    expect(row).toEqual({ title: 'key_inbox message received', summary: SENDER_HANDLE });
+  });
+
+  it('SEC N-3: a bookings writer still creates and upserts their own business-wide events', async () => {
+    const externalId = `${P}own-note`;
+    const first = await as(agent().post(`/temporal-flow/businesses/${ID.biz}`).send({ source: 'MANUAL', type: 'manual.event', title: `${P}own 1`, externalId }), ID.bookingsWriter);
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    const again = await as(agent().post(`/temporal-flow/businesses/${ID.biz}`).send({ source: 'MANUAL', type: 'manual.event', title: `${P}own 2`, externalId }), ID.bookingsWriter);
+    expect(again.status, JSON.stringify(again.body)).toBe(201);
+    expect(again.body.id).toBe(first.body.id);
+    expect(again.body.title).toBe(`${P}own 2`);
+  });
+});
