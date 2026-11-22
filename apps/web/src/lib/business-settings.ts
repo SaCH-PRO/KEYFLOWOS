@@ -366,7 +366,17 @@ const UNCONFIRMED_ANSWER = "The change was sent, but the business does not show 
  * The answer is recorded for the member who sent the write (`sentAs`), never for one who took the browser since.
  */
 function recorded(businessId: string, sentAs: string, res: WriteAnswer, holds: (settings: BusinessSettings) => boolean): WriteAnswer {
-  if (res.error !== null) return res;
+  if (res.error !== null) {
+    // No status: the server's answer never arrived (a dropped connection, a timeout), so the write may have been
+    // applied all the same (review SEC5-1). It is still answered as the failure it is, and what the business holds
+    // is read again rather than left as it was read before. A refusal the server did answer changes nothing.
+    if (res.status === undefined) {
+      answerRecorded(businessId);
+      if (watched.has(businessId)) void loadBusinessSettings(businessId, { force: true });
+      else if (entries.delete(businessId)) emit();
+    }
+    return res;
+  }
   if (sentAs !== actingMember()) {
     // Answered after another member took the browser (review SEC3-2): nothing is recorded for them, and the
     // outcome of a change they did not make is not announced on their screen as theirs.
