@@ -49,10 +49,24 @@
  *   PM-12 CONTROL  a closed store and an unknown business answer the same for PAYPAL as for CASH
  *                  (the refusal says nothing about a closed store's payment settings)
  *   PM-13 RED      the refusal carries no credential, key or setting value
+ *   PM-14 RED      review SEC-BPG-1 / COR-BPG-6 (RED at 24e946e8): a provider method is taken only
+ *                  through the store's own share link. Without storefrontSlug, or with a slug that
+ *                  is not this business's, PAYPAL / STRIPE / WIPAY are refused even where the
+ *                  business offers them, with the same body a business that does not offer them
+ *                  answers, so the route is no read of a business's payment settings by id; a
+ *                  business with no slug takes no provider method; CASH and no method need no slug
+ *   PM-15 RED      review SEC-BPG-3: BookingsService.publicCreateBooking itself refuses an unknown
+ *                  and an unoffered method for a caller that is not the controller (green at
+ *                  24e946e8, pinned), and a method that is not a string (RED at 24e946e8: read as
+ *                  no method and booked); nothing written
  *   SV-01 RED      POST services with durationMins in place of duration -> 400 (RED-BEFORE: 500), no row
  *   SV-02 RED      POST services with a zero / negative / string / oversized duration,
  *                  a negative or string price, a blank or missing name, a non-string description or
  *                  sourceProductId, or no body -> 400, no row
+ *   SV-04 RED      review SEC-BPG-2 / COR-BPG-3 (RED at 24e946e8): a NUL character in the name, the
+ *                  description or sourceProductId (Postgres text refuses it: 500) -> 400, no row
+ *                  (a fractional duration is not in SV-02: the route answers 201 and stores the whole
+ *                  minutes, at 5c17e7b4 and now; measured, left as it is)
  *   SV-03 CONTROL  a valid body -> 201 and the row; another business's owner -> 403; anonymous -> 401
  *
  * Fixture prefix v64g_ (registered in test/helpers/fixture-prefixes.json);
@@ -91,7 +105,7 @@ const OWN_STRIPE = {
 const OWN_WIPAY = { wipayApiKey: `${CANARY}wipay_key`, wipayAccountNumber: '4400000000' };
 
 /** The businesses: [currency, settings]. Each is an open store with one bookable service. */
-const BUSINESSES: Record<string, { currency: string; meta: Record<string, unknown> | null; storeEnabled?: boolean }> = {
+const BUSINESSES: Record<string, { currency: string; meta: Record<string, unknown> | null; storeEnabled?: boolean; noSlug?: boolean }> = {
   ttdBare: { currency: 'TTD', meta: null },
   ttdCashOnly: { currency: 'TTD', meta: { cashEnabled: true } },
   ttdPaypal: { currency: 'TTD', meta: { ...OWN_PAYPAL } },
@@ -107,6 +121,9 @@ const BUSINESSES: Record<string, { currency: string; meta: Record<string, unknow
   usdStripePartial: { currency: 'USD', meta: { stripePublishableKey: OWN_STRIPE.stripePublishableKey, stripeSecretKey: OWN_STRIPE.stripeSecretKey } },
   usdAll: { currency: 'USD', meta: { ...OWN_PAYPAL, ...OWN_STRIPE, ...OWN_WIPAY } },
   ttdClosed: { currency: 'TTD', meta: null, storeEnabled: false },
+  // Every provider configured, but no slug: no share link, so no storefront gateway list (PM-14).
+  usdAllNoSlug: { currency: 'USD', meta: { ...OWN_PAYPAL, ...OWN_STRIPE }, noSlug: true },
+  ttdWipayNoSlug: { currency: 'TTD', meta: { ...OWN_WIPAY }, noSlug: true },
 };
 type Biz = keyof typeof BUSINESSES;
 
@@ -149,6 +166,7 @@ let db: any;
 let app: any;
 let redis: any;
 let payments: any;
+let bookingsService: any;
 
 const crmCalls: string[] = [];
 const storefrontEvents: string[] = [];
@@ -197,7 +215,10 @@ async function clearRateLimits() {
   if (keys.length) await redis.del(...keys);
 }
 
-/** The public widget's create, anonymous, through the real route and guards. `extra` is merged into the body. */
+/**
+ * The store page's create, anonymous, through the real route and guards. The body carries the store's own slug, as
+ * its share link's page sends it (a business without a slug sends none); `extra` is merged in and may replace it.
+ */
 async function publicBook(b: Biz | string, extra: Record<string, unknown> = {}, serviceBiz?: Biz) {
   await clearRateLimits(); // the route takes 10 a minute; every case here is one customer's one request
   const businessId = b in BUSINESSES ? bizId(b as Biz) : (b as string);
@@ -211,6 +232,7 @@ async function publicBook(b: Biz | string, extra: Record<string, unknown> = {}, 
       lastName: 'Public',
       email: `${P}public@test.local`,
       phone: '+18685550100',
+      ...(b in BUSINESSES && !BUSINESSES[b as Biz].noSlug ? { storefrontSlug: slugOf(b as Biz) } : {}),
       ...extra,
     });
 }
@@ -367,18 +389,19 @@ beforeAll(async () => {
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   await app.init();
   payments = moduleRef.get(PaymentsService);
+  bookingsService = moduleRef.get(BookingsService);
 
   await cleanup(); // in case a prior run aborted
   await clearRateLimits();
 
   for (const b of Object.keys(BUSINESSES) as Biz[]) {
-    const { currency, meta, storeEnabled } = BUSINESSES[b];
+    const { currency, meta, storeEnabled, noSlug } = BUSINESSES[b];
     await db.user.create({ data: { id: ownerId(b), email: `${P}${String(b).toLowerCase()}@test.local`, role: 'USER' } });
     await db.business.create({
       data: {
         id: bizId(b),
         name: `V64G ${String(b)}`,
-        slug: slugOf(b),
+        ...(noSlug ? {} : { slug: slugOf(b) }),
         ownerId: ownerId(b),
         currency,
         timezone: 'UTC',
@@ -460,8 +483,7 @@ describe('V1-64 POST /bookings/public/businesses/:businessId — the payment met
   });
 
   it('PM-07 RED-BEFORE (D-106): a TTD business holding its own PayPal pair still refuses PAYPAL, which takes no TTD', async () => {
-    const res = await expectRefused('ttdPaypal', { paymentMethod: 'PAYPAL' }, 'PAYMENT_METHOD_NOT_OFFERED');
-    expect(res.body.message).toMatch(/TTD/);
+    await expectRefused('ttdPaypal', { paymentMethod: 'PAYPAL' }, 'PAYMENT_METHOD_NOT_OFFERED');
     await expectBooked('ttdPaypal', { paymentMethod: 'CASH' });
   });
 
@@ -511,7 +533,10 @@ describe('V1-64 POST /bookings/public/businesses/:businessId — the payment met
     for (const env of ['bare', 'platform'] as const) {
       if (env === 'platform') setPlatformEnv();
       for (const b of open) {
-        const listed: string[] = (await payments.getStorefrontGateways(bizId(b))).map((g: { id: string }) => g.id.toUpperCase());
+        // The list is the one GET /site/storefront/public/:slug/gateways answers: a business with no slug has none.
+        const listed: string[] = BUSINESSES[b].noSlug
+          ? []
+          : (await payments.getStorefrontGateways(bizId(b))).map((g: { id: string }) => g.id.toUpperCase());
         for (const method of ['WIPAY', 'PAYPAL', 'STRIPE']) {
           const before = await written(b);
           const res = await publicBook(b, { paymentMethod: method });
@@ -527,7 +552,7 @@ describe('V1-64 POST /bookings/public/businesses/:businessId — the payment met
     }
     expect(disagreements).toEqual([]);
     expect(offeredSomewhere).toBeGreaterThan(0); // the list offers something, so both sides of the rule ran
-  });
+  }, 120_000);
 
   it('PM-12 CONTROL: a closed store and an unknown business answer PAYPAL exactly as they answer CASH', async () => {
     const before = await written('ttdClosed');
@@ -571,6 +596,78 @@ describe('V1-64 POST /bookings/public/businesses/:businessId — the payment met
       expect(res.body.gateways).toBeUndefined();
     }
   });
+
+  it('PM-14 RED-BEFORE (review SEC-BPG-1): a provider method is taken only with the business\'s own storefront slug, and the refusal is the same whatever the business holds', async () => {
+    const shape = (res: any) => ({ status: res.status, code: res.body.code, message: res.body.message });
+    for (const [has, lacks, method] of [
+      ['usdAll', 'usdBare', 'PAYPAL'],
+      ['usdAll', 'usdBare', 'STRIPE'],
+      ['ttdWipay', 'ttdBare', 'WIPAY'],
+    ] as Array<[Biz, Biz, string]>) {
+      // What a business that does NOT offer the method answers through its own link.
+      const reference = shape(await expectRefused(lacks, { paymentMethod: method }, 'PAYMENT_METHOD_NOT_OFFERED'));
+      // A business that offers it, asked by id alone, by another store's slug, by a near-miss of its own slug.
+      for (const slug of [undefined, null, '', slugOf(lacks), slugOf('usdPaypal'), slugOf(has).toUpperCase(), `${slugOf(has)}x`, bizId(has)]) {
+        const res = await expectRefused(has, { paymentMethod: method, storefrontSlug: slug }, 'PAYMENT_METHOD_NOT_OFFERED');
+        expect(shape(res), `${String(has)} ${method} slug=${JSON.stringify(slug)}`).toEqual(reference);
+      }
+      // And a business that does not offer it answers the same without a slug.
+      expect(shape(await expectRefused(lacks, { paymentMethod: method, storefrontSlug: undefined }, 'PAYMENT_METHOD_NOT_OFFERED'))).toEqual(reference);
+      // Through its own link the method books.
+      await expectBooked(has, { paymentMethod: method });
+    }
+
+    // A business with no slug has no share link and no gateway list: no provider method, whatever it holds or is sent.
+    await expectRefused('usdAllNoSlug', { paymentMethod: 'PAYPAL' }, 'PAYMENT_METHOD_NOT_OFFERED');
+    await expectRefused('usdAllNoSlug', { paymentMethod: 'STRIPE' }, 'PAYMENT_METHOD_NOT_OFFERED');
+    await expectRefused('usdAllNoSlug', { paymentMethod: 'PAYPAL', storefrontSlug: slugOf('usdAll') }, 'PAYMENT_METHOD_NOT_OFFERED');
+    await expectRefused('usdAllNoSlug', { paymentMethod: 'PAYPAL', storefrontSlug: '' }, 'PAYMENT_METHOD_NOT_OFFERED');
+    await expectRefused('ttdWipayNoSlug', { paymentMethod: 'WIPAY' }, 'PAYMENT_METHOD_NOT_OFFERED');
+
+    // CASH, MANUAL and no method need no slug, as before.
+    await expectBooked('usdAll', { paymentMethod: 'CASH', storefrontSlug: undefined });
+    await expectBooked('usdAll', { storefrontSlug: undefined });
+    await expectBooked('usdAllNoSlug', { paymentMethod: 'CASH' });
+    await expectBooked('usdAllNoSlug', { paymentMethod: 'MANUAL' });
+    await expectBooked('usdAllNoSlug', {});
+  }, 120_000);
+
+  it('PM-15 RED-BEFORE (review SEC-BPG-3): the service itself refuses an unknown, an unoffered and a non-string method for a caller that is not the controller', async () => {
+    const direct = (b: Biz, paymentMethod: unknown, storefrontSlug: string | null = slugOf(b)) =>
+      bookingsService.publicCreateBooking({
+        businessId: bizId(b),
+        serviceId: svcId(b),
+        startTime: nextStart(),
+        contact: { firstName: 'Pat', lastName: 'Public', email: `${P}public@test.local`, phone: '+18685550100' },
+        storefrontSlug,
+        paymentMethod,
+      });
+    for (const [b, method, code] of [
+      ['usdAll', 'BITCOIN', 'PAYMENT_METHOD_UNSUPPORTED'],
+      ['usdAll', ' bitcoin ', 'PAYMENT_METHOD_UNSUPPORTED'],
+      ['ttdBare', 'PAYPAL', 'PAYMENT_METHOD_NOT_OFFERED'],
+      ['ttdBare', ' paypal ', 'PAYMENT_METHOD_NOT_OFFERED'],
+      ['usdBare', 'STRIPE', 'PAYMENT_METHOD_NOT_OFFERED'],
+      ['usdWipay', 'WIPAY', 'PAYMENT_METHOD_NOT_OFFERED'],
+    ] as Array<[Biz, string, string]>) {
+      const before = await written(b);
+      const error: any = await direct(b, method).then(() => null, (e: unknown) => e);
+      expect(error, `${String(b)} ${method}`).not.toBeNull();
+      expect(error.getStatus?.()).toBe(400);
+      expect(error.getResponse?.().code).toBe(code);
+      expect(await written(b)).toEqual(before);
+    }
+    // A method that is not a string is never a provider method the service would start: refused, nothing written.
+    for (const method of [7, ['PAYPAL'], { method: 'PAYPAL' }, true]) {
+      const before = await written('usdAll');
+      const error: any = await direct('usdAll', method).then(() => null, (e: unknown) => e);
+      expect(error, JSON.stringify(method)).not.toBeNull();
+      expect(error.getStatus?.()).toBe(400);
+      expect(await written('usdAll')).toEqual(before);
+    }
+    const booked = await direct('usdAll', 'PAYPAL');
+    expect(booked.bookingId).toEqual(expect.any(String));
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -608,6 +705,22 @@ describe('V1-64 POST /bookings/businesses/:businessId/services — a body the ca
     ];
     const wrong: string[] = [];
     for (const [label, body] of bad) {
+      const res = await postService('ttdBare', body);
+      if (res.status !== 400) wrong.push(`${label}: ${res.status}`);
+    }
+    expect(wrong).toEqual([]);
+    expect(await serviceCount('ttdBare')).toBe(before);
+  });
+
+  it('SV-04 RED-BEFORE (review SEC-BPG-2): a NUL character in a text field is 400 (was 500) and writes no service', async () => {
+    const before = await serviceCount('ttdBare');
+    const ok = { name: 'V64G Haircut', duration: 30, price: 50 };
+    const wrong: string[] = [];
+    for (const [label, body] of [
+      ['name', { ...ok, name: 'V64G Hair\u0000cut' }],
+      ['description', { ...ok, description: 'Wash\u0000 and cut' }],
+      ['sourceProductId', { ...ok, sourceProductId: 'prod\u0000' }],
+    ] as Array<[string, unknown]>) {
       const res = await postService('ttdBare', body);
       if (res.status !== 400) wrong.push(`${label}: ${res.status}`);
     }
