@@ -553,7 +553,7 @@ async function financialProposalRecordIds(
     try {
       const found = (await prisma?.client.keyActionProposal.findMany({
         where: { businessId, id: { in: ids } },
-        select: { id: true, actionType: true, module: true, toolName: true, title: true },
+        select: { id: true, actionType: true, module: true, toolName: true, title: true, summary: true, rationale: true, payload: true, inputPayload: true, affectedEntities: true },
       })) ?? [];
       rows = new Map(found.map((r: { id: string } & ProposalFields) => [r.id, r]));
     } catch (err) {
@@ -564,10 +564,12 @@ async function financialProposalRecordIds(
   }
   for (const f of proposals) {
     const row = proposalIdsOf(f).map((id) => rows.get(id)).find((r) => r !== undefined);
-    const fields = row ?? proposalFieldsOfRecord(f);
-    // D-238 ("directly or indirectly"): a record's own text (a rejection reason, a title or summary it carries) that
-    // states money withholds that record even when its proposal is non-financial.
-    if (isFinancialProposal(fields) || recordTextMentionsMoney(f)) withheld.add(f.id);
+    const own = proposalFieldsOfRecord(f);
+    // D-238 ("directly or indirectly"): withheld when the proposal row or the record's own fields (security review
+    // MINOR-1: a record naming a money tool under a non-financial proposal's id) are financial, when neither can be
+    // read, or when the record's own text (a rejection reason, a title or summary) states money.
+    const financial = row || own ? (row ? isFinancialProposal(row) : false) || (own ? isFinancialProposal(own) : false) : true;
+    if (financial || recordTextMentionsMoney(f)) withheld.add(f.id);
   }
   return withheld;
 }

@@ -20,6 +20,9 @@ describe('KeyActionProposalController', () => {
           provide: KeyActionProposalService,
           useValue: {
             list: vi.fn(async () => [{ id: 'prop_1' }]),
+            // FU-PROPOSAL-REVENUE-SIGHT (D-238): the reader-scoped reads the routes go through.
+            listForReader: vi.fn(async () => [{ id: 'prop_1' }]),
+            getForReader: vi.fn(async () => ({ id: 'prop_1' })),
             create: vi.fn(async () => ({ id: 'prop_1', status: 'PENDING' })),
             get: vi.fn(async () => ({ id: 'prop_1' })),
             cancel: vi.fn(async () => ({ id: 'prop_1', status: 'CANCELLED' })),
@@ -51,7 +54,8 @@ describe('KeyActionProposalController', () => {
 
   it('lists proposals with query filters', async () => {
     const result = await controller.list('biz_1', 'PENDING', 'EXECUTIVE_MODE', 'CREATE_TASK');
-    expect(service.list).toHaveBeenCalledWith('biz_1', { status: 'PENDING', sourceType: 'EXECUTIVE_MODE', actionType: 'CREATE_TASK' });
+    // D-238: the list is the reader's (no request user here: read as no reader, null).
+    expect(service.listForReader).toHaveBeenCalledWith('biz_1', { status: 'PENDING', sourceType: 'EXECUTIVE_MODE', actionType: 'CREATE_TASK' }, null);
     expect(result).toEqual([{ id: 'prop_1' }]);
   });
 

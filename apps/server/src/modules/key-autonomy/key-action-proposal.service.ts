@@ -11,6 +11,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { genomeReaderReadsRevenue, isFinancialProposal, type GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { KeyActionExecutorService } from './key-action-executor.service';
 import { KeyActionPolicyService } from './key-action-policy.service';
@@ -148,6 +149,29 @@ export class KeyActionProposalService {
       orderBy: { createdAt: 'desc' },
     });
     return rows.map((row) => this.serialize(row));
+  }
+
+  /**
+   * FU-PROPOSAL-REVENUE-SIGHT (owner ruling D-238; security review BLOCKING-1): the proposals a reader is served over
+   * REST (GET actions/proposals, ai/approvals and its history). A reader without revenue read (ModuleScopeGuard's
+   * reading: SUPER_ADMIN passes; no reader or no membership reads none) is served only the non-financial ones, by their
+   * type, module, tool, text and parameters (isFinancialProposal; unknown fails closed). Revenue readers: unchanged.
+   */
+  async listForReader(businessId: string, query: ListKeyActionProposalsQuery, reader: GenomeReader | null): Promise<KeyActionProposalData[]> {
+    const rows = await this.list(businessId, query);
+    if (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined)) return rows;
+    return rows.filter((row) => !isFinancialProposal(row as unknown as Parameters<typeof isFinancialProposal>[0]));
+  }
+
+  /**
+   * D-238: a financial proposal does not exist for a reader without revenue read: reading it (GET proposals/:id) or
+   * acting on it (approve, reject, cancel, execute) answers 404, exactly as an unknown id, before anything is written.
+   */
+  async getForReader(businessId: string, proposalId: string, reader: GenomeReader | null): Promise<KeyActionProposalData> {
+    const proposal = await this.get(businessId, proposalId);
+    if (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined)) return proposal;
+    if (isFinancialProposal(proposal as unknown as Parameters<typeof isFinancialProposal>[0])) throw new NotFoundException('Action proposal not found');
+    return proposal;
   }
 
   async get(businessId: string, proposalId: string): Promise<KeyActionProposalData> {

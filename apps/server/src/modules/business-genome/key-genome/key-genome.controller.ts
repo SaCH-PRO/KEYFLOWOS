@@ -24,6 +24,7 @@ import {
   genomeReaderRevenueLevel,
   isFinanceRecommendation,
   isFinanceSignal,
+  isMoneyLabel,
   isMoneyMemoryEvent,
   listRecommendationsForReader,
   listSignalsForReader,
@@ -501,11 +502,20 @@ export class KeyGenomeController {
     @Param('businessId') businessId: string,
     @Query('status') status?: string,
     @Query('limit') limit?: string,
+    @Req() req?: GenomeRequest,
   ) {
-    return this.experimentService.listExperiments(businessId, {
-      status,
-      limit: limit !== undefined ? Number(limit) : undefined,
-    });
+    const asked = limit !== undefined ? Number(limit) : undefined;
+    // FU-PROPOSAL-REVENUE-SIGHT (security review MAJOR-2; D-234): an experiment made from a money signal or
+    // recommendation says so in its hypothesis, action or success metric; a reader without revenue read is not served
+    // it, and the limit counts what they are served.
+    if (await this.readsRevenue(businessId, req)) {
+      return this.experimentService.listExperiments(businessId, { status, limit: asked });
+    }
+    const rows = await this.experimentService.listExperiments(businessId, { status, limit: 1000 });
+    return firstN(
+      rows.filter((e: any) => !isMoneyLabel(e.hypothesis) && !isMoneyLabel(e.action) && !isMoneyLabel(e.successMetric)),
+      asked,
+    );
   }
 
   @Post('experiments')

@@ -766,10 +766,11 @@ export class AiController {
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/approvals')
-  async getPendingApprovals(@Param('businessId') businessId: string) {
+  async getPendingApprovals(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
     // Phase 0.6: all pending approvals are served from the canonical
     // KeyActionProposal table (legacy AI items, PRO_AUTO insights, etc.).
-    return this.proposals.list(businessId, { status: 'PENDING' });
+    // FU-PROPOSAL-REVENUE-SIGHT (D-238): a reader without revenue read is served the non-financial ones only.
+    return this.proposals.listForReader(businessId, { status: 'PENDING' }, req?.user?.id ? { id: req.user.id, role: req.user.role } : null);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -777,10 +778,11 @@ export class AiController {
   async getApprovalHistory(
     @Param('businessId') businessId: string,
     @Query('limit') limit?: string,
+    @Req() req?: AuthenticatedRequest,
   ) {
     // Phase 0.6: approval history is now read from KeyActionProposal.
     // See getPendingApprovals for the migration note on response shape.
-    const proposals = await this.proposals.list(businessId, { sourceType: 'AI_LEGACY' });
+    const proposals = await this.proposals.listForReader(businessId, { sourceType: 'AI_LEGACY' }, req?.user?.id ? { id: req.user.id, role: req.user.role } : null);
     const history = proposals
       .filter((p) => p.status !== 'PENDING')
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -798,7 +800,7 @@ export class AiController {
   ) {
     const userId = req?.user?.id;
     if (!userId) throw new UnauthorizedException('Authenticated user required to resolve approvals');
-    return this.resolveLegacyApproval(businessId, approvalId, body.resolution, userId);
+    return this.resolveLegacyApproval(businessId, approvalId, body.resolution, userId, req.user?.role);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -811,7 +813,7 @@ export class AiController {
     const userId = req?.user?.id;
     if (!userId) throw new UnauthorizedException('Authenticated user required to resolve approvals');
     const results = await Promise.allSettled(
-      body.approvalIds.map((id) => this.resolveLegacyApproval(businessId, id, body.resolution, userId)),
+      body.approvalIds.map((id) => this.resolveLegacyApproval(businessId, id, body.resolution, userId, req.user?.role)),
     );
     const succeeded = results.filter((r) => r.status === 'fulfilled').length;
     const failed = results.filter((r) => r.status === 'rejected').length;
@@ -823,11 +825,13 @@ export class AiController {
     approvalId: string,
     resolution: 'approved' | 'rejected' | 'deferred',
     userId: string,
+    role?: string,
   ) {
     // Canonical path: resolve directly from KeyActionProposal.
+    // FU-PROPOSAL-REVENUE-SIGHT (D-238): a financial proposal does not exist for a resolver without revenue read.
     let proposal: any;
     try {
-      proposal = await this.proposals.get(businessId, approvalId);
+      proposal = await this.proposals.getForReader(businessId, approvalId, { id: userId, role });
     } catch {
       proposal = null;
     }

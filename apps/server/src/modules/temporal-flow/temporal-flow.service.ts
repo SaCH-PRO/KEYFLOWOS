@@ -1,4 +1,5 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
+import { genomeReaderReadsRevenue, isFinancialProposal, isMoneyLabel, type GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
@@ -54,7 +55,44 @@ export class TemporalFlowService {
     });
   }
 
-  async list(businessId: string, query: TemporalFlowListQuery = {}) {
+  /**
+   * FU-PROPOSAL-REVENUE-SIGHT (owner ruling D-238; security review MAJOR-5): KeyActionProposalService writes each KEY
+   * proposal's lifecycle here (entityType key_action_proposal: proposed, executed with its result, approval lapsed with
+   * its reason). For a reader without revenue read, an event of a financial proposal, of a proposal that cannot be read
+   * (fail closed) or whose own title or description states money is left out; every other event is unchanged. A call
+   * with no `reader` argument (the scheduler, KEY tools applying their own authority) is unchanged; a request with no
+   * user passes `null` and reads none.
+   */
+  private async forReader<E extends { entityType?: string | null; entityId?: string | null; title?: string | null; description?: string | null }>(
+    businessId: string,
+    events: E[],
+    reader: GenomeReader | null | undefined,
+  ): Promise<E[]> {
+    if (reader === undefined) return events;
+    const proposals = events.filter((e) => e.entityType === 'key_action_proposal');
+    if (proposals.length === 0) return events;
+    if (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined)) return events;
+    const ids = [...new Set(proposals.map((e) => e.entityId).filter((id): id is string => typeof id === 'string' && !!id))];
+    let rows = new Map<string, Record<string, unknown>>();
+    try {
+      const found = ids.length
+        ? await this.prisma.client.keyActionProposal.findMany({
+            where: { businessId, id: { in: ids } },
+            select: { id: true, actionType: true, module: true, toolName: true, title: true, summary: true, rationale: true, payload: true, inputPayload: true, affectedEntities: true },
+          })
+        : [];
+      rows = new Map(found.map((r: { id: string }) => [r.id, r as Record<string, unknown>]));
+    } catch {
+      return events.filter((e) => e.entityType !== 'key_action_proposal');
+    }
+    return events.filter((e) => {
+      if (e.entityType !== 'key_action_proposal') return true;
+      const row = e.entityId ? rows.get(e.entityId) : undefined;
+      return !!row && !isFinancialProposal(row as never) && !isMoneyLabel(e.title) && !isMoneyLabel(e.description);
+    });
+  }
+
+  async list(businessId: string, query: TemporalFlowListQuery = {}, reader?: GenomeReader | null) {
     const where: Record<string, unknown> = { businessId };
 
     if (query.source) where.source = query.source;
@@ -73,18 +111,19 @@ export class TemporalFlowService {
 
     where.visibility = { not: 'HIDDEN' };
 
-    return this.prisma.client.temporalFlowEvent.findMany({
+    const events = await this.prisma.client.temporalFlowEvent.findMany({
       where,
       orderBy: { occurredAt: 'desc' },
       take: query.limit ?? 100,
     });
+    return this.forReader(businessId, events, reader);
   }
 
-  async calendarRange(businessId: string, from: string, to: string) {
+  async calendarRange(businessId: string, from: string, to: string, reader?: GenomeReader | null) {
     const fromDate = new Date(from);
     const toDate = new Date(to);
 
-    return this.prisma.client.temporalFlowEvent.findMany({
+    const events = await this.prisma.client.temporalFlowEvent.findMany({
       where: {
         businessId,
         visibility: { not: 'HIDDEN' },
@@ -96,10 +135,11 @@ export class TemporalFlowService {
       },
       orderBy: [{ startsAt: 'asc' }, { occurredAt: 'asc' }],
     });
+    return this.forReader(businessId, events, reader);
   }
 
-  async remindersDue(businessId: string) {
-    return this.prisma.client.temporalFlowEvent.findMany({
+  async remindersDue(businessId: string, reader?: GenomeReader | null) {
+    const events = await this.prisma.client.temporalFlowEvent.findMany({
       where: {
         businessId,
         reminderAt: { lte: new Date() },
@@ -109,6 +149,7 @@ export class TemporalFlowService {
       orderBy: { reminderAt: 'asc' },
       take: 50,
     });
+    return this.forReader(businessId, events, reader);
   }
 
   async markResolved(businessId: string, eventId: string) {

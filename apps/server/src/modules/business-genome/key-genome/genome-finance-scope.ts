@@ -41,12 +41,23 @@ import type { ListGenomeRecommendationsQuery, ListGenomeSignalsQuery } from './k
  * prompt memory and the KEY chat genome) applies the same rule, and the actions on such a row keep
  * needing revenue write (D-128).
  */
-const MONEY_TERMS =
-  /financ|revenue|sales|cash|commerce|payment|invoice|pric|profit|billing|collection|refund|payroll|treasury|margin|lifetime|acquisition_?cost|cost|budget|spend|expense|conversion|forecast|churn|transaction|opportunit|pipeline|unit_?economics|cross_?domain|money|receivable|payable|quote|quotation/i;
+const MONEY_TERMS = new RegExp(
+  [
+    'financ', 'revenue', 'sales', 'commerce', 'payment', 'invoice', 'profit', 'billing', 'refund', 'payroll', 'treasury',
+    'lifetime', 'acquisition_?cost', 'budget', 'expense', 'conversion', 'forecast', 'churn', 'transaction', 'opportunit',
+    'unit_?economics', 'cross_?domain', 'money', 'receivable', 'payable', 'quote', 'quotation', 'reimburs', 'discount',
+    'promo', 'coupon', 'deposit', 'payout', 'purchase', 'wallet', 'ledger', 'salar', 'subscription', 'overdue', 'storelink',
+    // Letter-bounded (correctness review MINOR-3: apricot, costume, cashier, suspend, data collection are not money).
+    '(?<![a-z])pric', '(?<![a-z])cash(?!ier)', '(?<![a-z])costs?(?![a-z])', '(?<![a-z])costing', '(?<![a-z])spend',
+    '(?<![a-z])margins?(?![a-z])', '(?<![a-z])collections(?![a-z])', '(?<![a-z])charges?(?![a-z])',
+    '(?<![a-z])credits?(?![a-z])', '(?<![a-z])wages?(?![a-z])',
+  ].join('|'),
+  'i',
+);
 /** Short money words, matched only as a whole word (letters on neither side), so snake_case values (cac_payback, first_sale) match. */
 const MONEY_WORDS = /(?<![a-z])(cac|ltv|mrr|arr|roi|sale|deal|order|tax|vat|fee)s?(?![a-z])/i;
 /** A money amount in free text ("$12,345", "TTD 500", "£9.99"): a title, summary or reason that states a figure (D-238). */
-const MONEY_AMOUNT = /[$€£¥₹]\s?\d|(?<![a-z])(ttd|usd|eur|gbp|jmd|bbd|xcd|cad)\s?\d/i;
+const MONEY_AMOUNT = /[$€£¥₹]\s?\d|(?<![a-z])(ttd|usd|eur|gbp|jmd|bbd|xcd|cad)\s?\d|\d\s?(ttd|usd|eur|gbp|jmd|bbd|xcd|cad)(?![a-z])/i;
 /** Genome sections whose rows are money by default (D-234: the revenue model and pricing; fail closed). */
 const MONEY_SECTIONS = new Set(['BUSINESS_MODEL']);
 
@@ -119,7 +130,22 @@ export type ProposalFields = {
   module?: string | null;
   toolName?: string | null;
   title?: string | null;
+  /** Content fields (security review MAJOR-3): a proposal's money may live only in its text or its parameters. */
+  summary?: string | null;
+  description?: string | null;
+  rationale?: string | null;
+  expectedBenefit?: string | null;
+  risks?: unknown;
+  payload?: unknown;
+  inputPayload?: unknown;
+  affectedEntities?: unknown;
 };
+
+/** A proposal's content as text: its string fields and its structured fields (parameters, request type) serialised. */
+function proposalContent(p: ProposalFields): Array<string | null | undefined> {
+  const asText = (v: unknown) => (v === null || v === undefined ? null : typeof v === 'string' ? v : JSON.stringify(v));
+  return [p.summary, p.description, p.rationale, p.expectedBenefit, asText(p.risks), asText(p.payload), asText(p.inputPayload), asText(p.affectedEntities)];
+}
 
 /**
  * D-238: the KEY action types that are not financial in themselves. Any other action type is classified by its
@@ -149,7 +175,9 @@ const MONEY_SCOPES: ReadonlySet<string> = new Set(['revenue', 'expenses']);
 export function isFinancialProposal(proposal: ProposalFields | null | undefined): boolean {
   if (!proposal) return true;
   const { actionType, module, toolName, title } = proposal;
-  if (mentionsMoney(actionType, module, toolName, title)) return true;
+  // The content is read before any list (review MAJOR-3): an approval request, a listed action or a mapped tool whose
+  // text or parameters carry money is financial.
+  if (mentionsMoney(actionType, module, toolName, title, ...proposalContent(proposal))) return true;
   const tool = typeof toolName === 'string' && toolName.trim() ? toolName.trim() : null;
   const authority = tool ? keyOrganToolAuthority(tool) : null;
   if (authority && 'scopes' in authority) return authority.scopes.some((s) => MONEY_SCOPES.has(s.module));
