@@ -220,7 +220,7 @@ export class FinanceIntelligenceService {
         detections.push(...found);
       } catch (e) {
         failedKinds.add(kind);
-        this.logger.warn(`detector failed: ${(e as Error).message}`);
+        this.logger.warn(`detector ${kind} failed for ${businessId}: ${(e as Error).message}`);
       }
     }
 
@@ -287,9 +287,10 @@ export class FinanceIntelligenceService {
    *
    * Acceptance review C1 (CP-23): the ledger cash can be negative (more spent from the till than it
    * held), which the snapshot sum was not. The runway shown is never below zero ("~0 days", never
-   * "~-0"), and the amount (the amount at risk the mirrors order by, the command item's value and
-   * score) is zero for a shortfall, never negative. The real balance stays in the body and in
-   * evidence.cash.
+   * "~-0"), and the amount (the amount at risk the revenue-actions mirror orders by) is zero for a
+   * shortfall, never negative. The command item reads a zero amount as it reads no amount (no
+   * expected value, the default score of 50), as it did for cash of exactly zero. The real balance
+   * stays in the body and in evidence.cash.
    */
   private async detectCashflowRisk(businessId: string, now: Date): Promise<Detection[]> {
     const ninetyAgo = new Date(now.getTime() - 90 * MS_DAY);

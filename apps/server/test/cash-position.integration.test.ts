@@ -1831,8 +1831,8 @@ describe('W11-RUNWAY-LEDGER-CASH: every runway alarm reads the ledger cash in th
         const commands = await commandRows(ID.bizK);
         expect(commands.length).toBe(1);
         expect(commands[0].title).toBe('Low cash runway — ~0 days');
-        expect(commands[0].impactScore, 'never a negative score').toBeGreaterThanOrEqual(0);
-        expect(Number(commands[0].expectedValue ?? 0), 'never a negative value').toBeGreaterThanOrEqual(0);
+        // A zero amount reads as no amount on the command item: no expected value, the default score.
+        expect([commands[0].impactScore, commands[0].expectedValue], 'never a negative score or value').toEqual([50, null]);
 
         const res = await moneyMoves(ID.bizK, ID.ownerK);
         expect(res.status).toBe(200);
@@ -1905,10 +1905,17 @@ describe('W11-RUNWAY-LEDGER-CASH: every runway alarm reads the ledger cash in th
     // Control: the detector runs and finds nothing (no burn in the last 90 days): the self-heal
     // supersedes the row and completes its revenue action, as it always has.
     await db.expense.updateMany({ where: { businessId: ID.bizK }, data: { date: daysAgo(200) } });
-    const healed = await real.scan(ID.bizK);
-    expect(healed.superseded).toBeGreaterThanOrEqual(1);
-    const after = await state();
-    expect(after.item[0]).toBe('SUPERSEDED');
-    expect(after.action[0]).toBe('COMPLETED');
+    try {
+      const healed = await real.scan(ID.bizK);
+      expect(healed.superseded).toBeGreaterThanOrEqual(1);
+      const after = await state();
+      expect(after.item[0]).toBe('SUPERSEDED');
+      expect(after.action[0]).toBe('COMPLETED');
+    } finally {
+      // K's burn as the describe set it (10, 40 and 70 days ago).
+      for (const [n, age] of [[1, 10], [2, 40], [3, 70]] as const) {
+        await db.expense.update({ where: { id: `${P}expK${n}` }, data: { date: daysAgo(age) } });
+      }
+    }
   }, 120_000);
 });
