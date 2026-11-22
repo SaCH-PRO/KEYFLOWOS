@@ -18,6 +18,14 @@
  *   LPF-06  RED-BEFORE  a refused read says so; it is not an empty ledger
  *   LPF-07  RED-BEFORE  paging follows the server's total at 25 a page, and Next asks for page 2 with pageSize=25
  *   ACC-01  RED-BEFORE  /app/finance/accounts redirects to /app/finance/settings?tab=accounts
+ *
+ * Where a RED-BEFORE case failed on the base (origin/main's page, api client and redirect) at a step before its
+ * label (review MINOR-4; re-run 2026-11-22, 8 failed | 2 passed):
+ *   LPF-05  failed at its first step, 'Unable to find a label with the text of: From' (the date boxes had no
+ *           name); its date-only and pageSize assertions did not run on the base.
+ *   LPF-07  passed '60 entries — Page 1 of 3' and failed at 'Unable to find an accessible element with the role
+ *           "button" and name "Next page"'; the page-2 request with pageSize=25 was not reached on the base.
+ *   The others failed on the assertion their label names.
  *   ACC-02  control     Finance settings opened with ?tab=accounts shows Accounts
  *   ACC-03  control     Finance settings opened with #accounts shows Accounts
  *
