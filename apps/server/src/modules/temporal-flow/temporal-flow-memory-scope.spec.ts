@@ -56,4 +56,29 @@ describe('MEM-TEMPORAL-SCOPE: TemporalFlowMemoryService by-id writes', () => {
     } as any);
     expect(tfm.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'm1', businessId: 'biz' } }));
   });
+
+  it.each([undefined, '', 42, null, { not: 'x' }, { in: ['m1'] }, ['m1']])(
+    'a memory id that is not a non-empty string (%o) is refused before any query',
+    async (memoryId) => {
+      const { service, tfm } = makeService();
+      expect(await service.findById('biz', memoryId as any)).toBeNull();
+      expect(await service.deleteMemory('biz', memoryId as any)).toBe(false);
+      await expect(service.updateMemory('biz', memoryId as any, { content: 'x' })).rejects.toThrow('Memory not found');
+      expect(tfm.findFirst).not.toHaveBeenCalled();
+      expect(tfm.deleteMany).not.toHaveBeenCalled();
+      expect(tfm.update).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([undefined, '', null])('createMemory with no business (%s) writes nothing', async (businessId) => {
+    const { service, tfm } = makeService();
+    await expect(
+      service.createMemory({
+        businessId, entityType: 'business', entityId: 'k', type: 'insight', content: 'c', sourceModule: 'x',
+      } as any),
+    ).rejects.toThrow();
+    expect(tfm.findFirst).not.toHaveBeenCalled();
+    expect(tfm.update).not.toHaveBeenCalled();
+    expect(tfm.create).not.toHaveBeenCalled();
+  });
 });

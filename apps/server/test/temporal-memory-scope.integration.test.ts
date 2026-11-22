@@ -311,3 +311,16 @@ describe('MEM-TEMPORAL-SCOPE review round 2: no business means no memory, and ta
     expect((await read(ID.memA)).sourceEventIds).toEqual(['a-tag', 'ok']);
   });
 });
+
+describe('MEM-TEMPORAL-SCOPE review round 3: an operator object as memoryId never widens a by-id where', () => {
+  it.each([{ not: 'x' }, { in: [ID.memA, ID.memB] }, 42])('delete, update and tag with memoryId %o act on no memory', async (memoryId) => {
+    const before = await snapshot();
+    const del = await connector.execute(cmd(ID.bizA, 'delete_memory', { memoryId }));
+    expect(del).toMatchObject({ success: true, data: { deleted: false } });
+    const upd = await connector.execute(cmd(ID.bizA, 'update_memory', { memoryId, value: { x: 1 } }));
+    expect(upd).toMatchObject({ success: false, error: 'Memory not found' });
+    const tag = await connector.execute(cmd(ID.bizA, 'tag_memory', { memoryId, tags: ['t'] }));
+    expect(tag).toMatchObject({ success: false, error: 'Memory not found' });
+    expect(await snapshot()).toEqual(before);
+  });
+});
