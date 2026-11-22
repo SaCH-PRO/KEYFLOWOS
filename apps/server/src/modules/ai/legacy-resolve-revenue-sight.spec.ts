@@ -4,6 +4,7 @@
  * resolver what they may see: a financial proposal's redacted view for a resolver without revenue read.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { NotFoundException } from '@nestjs/common';
 import { AiController } from './ai.controller';
 
 const ITEM = { id: 'item_1', businessId: 'b1', toolName: 'create_invoice', title: 'Invoice Acme TTD 4,000', riskTier: 1, rationale: null };
@@ -12,7 +13,7 @@ const RESOLVED = { ...MIGRATED, status: 'APPROVED', payload: { amount: 4000 } };
 
 function controller(viewForReader: (b: string, p: any, r: any) => Promise<unknown>) {
   const c = Object.create(AiController.prototype) as any;
-  c.proposals = { get: vi.fn(async () => { throw new Error('not a proposal id'); }), viewForReader: vi.fn(viewForReader) };
+  c.proposals = { get: vi.fn(async () => { throw new NotFoundException('Action proposal not found'); }), viewForReader: vi.fn(viewForReader) };
   c.prisma = { client: { aiApprovalItem: { findFirst: vi.fn(async () => ITEM), update: vi.fn(async () => ITEM) } } };
   c.assertCanResolveApproval = vi.fn(async () => undefined);
   c.migrateAiApprovalItemToProposal = vi.fn(async () => MIGRATED);

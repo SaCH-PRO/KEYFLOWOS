@@ -835,7 +835,9 @@ export class AiController {
     let proposal: any;
     try {
       proposal = await this.proposals.get(businessId, approvalId);
-    } catch {
+    } catch (err) {
+      // Only a missing proposal falls through to the legacy path (round 5, security m3).
+      if (!(err instanceof NotFoundException)) throw err;
       proposal = null;
     }
     const reader = { id: userId, role };

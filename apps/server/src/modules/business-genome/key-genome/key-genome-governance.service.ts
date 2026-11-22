@@ -6,7 +6,7 @@ import { GenomeExperimentService } from './genome-experiment.service';
 import { GenomeModuleReadinessService } from './genome-module-readiness.service';
 import { GenomeScoringService } from './genome-scoring.service';
 import { GenomeDepartmentService } from './genome-department.service';
-import { isFinanceRecommendation, isFinanceSignal, isMoneyLabel, readableMemoryEvents, financialProposalsWithProvenance, PROPOSAL_CLASSIFY_SELECT } from './genome-finance-scope';
+import { isFinanceRecommendation, isFinanceSignal, isMoneyLabel, readableMemoryEvents, financialProposalsWithProvenance, PROPOSAL_CLASSIFY_SELECT, type ProposalFields } from './genome-finance-scope';
 import type {
   GenomeExperimentData,
   GenomeRecommendationData,
@@ -244,7 +244,7 @@ export class KeyGenomeGovernanceService {
 
   private async loadAutonomyBlocks(
     businessId: string,
-  ): Promise<Array<{ id: string; title: string; summary?: string | null; riskLevel: string; createdAt: Date; actionType?: string | null; module?: string | null; toolName?: string | null; payload?: unknown }>> {
+  ): Promise<Array<ProposalFields & { id: string; title: string; summary?: string | null; riskLevel: string; createdAt: Date }>> {
     const rows = await this.prisma.client.keyActionProposal.findMany({
       where: {
         businessId,

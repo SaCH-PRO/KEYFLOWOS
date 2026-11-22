@@ -66,12 +66,13 @@ const MONEY_AMOUNT = /[$€£¥₹]\s?\d|(?<![a-z0-9])(ttd|usd|eur|gbp|jmd|bbd|x
  * balance, what is owed or paid, a rate. Read for proposals only: a genome row's domain is classified by the vocabulary
  * above, where "rate" would take every response or completion rate.
  */
-const PROPOSAL_MONEY_WORDS = /(?<![a-z])(amounts?|subtotals?|balances?|owed|owes|owing|paid|unpaid|dollars?|euros?|cents?)(?![a-z])/i;
+const PROPOSAL_MONEY_WORDS = /(?<![a-z])(amounts?|subtotals?|balances?|owed|owes|owing|paid|unpaid|dollars?|euros?|cents?|rent)(?![a-z])|(?<![a-z])(pay|pays|paying)(?![a-z])(?!\s+(?:a\s+|close\s+)?(?:visit|attention|heed|respects?|tribute|homage|mind)(?![a-z]))/i;
 /**
  * "rate" and "total" are money only beside a figure (round-4 correctness minor 3: a response rate, "3 tasks in total"
  * are not): "the hourly rate to 150", "Total: 1,200", a JSON {"total":1200}.
  */
-const PROPOSAL_FIGURE_WORDS = /(?<![a-z])(rates?|totals?)(?![a-z])["']?\s*(?:[:=]|of|is|to|at)?\s*[$€£¥₹]?\d/i;
+const PROPOSAL_FIGURE_WORDS =
+  /(?<!(?:response|reply|show|no[\s_-]?show|completion|open|click|attendance|retention|bounce|success|error|booking|fill|occupancy|star|heart|frame|bit|sample|refresh|growth)[\s_]?)(?<![a-z])(rates?|totals?)(?![a-z])["']?\s*(?:[:=]|of|is|are|to|at|by|up|down|for)?\s*["']?\s*[$€£¥₹]?\d/i;
 /** camelCase keys and words split at their humps (estimatedCost, unitPrice, adSpend), so the bounded terms see them (correctness MAJOR-2). */
 function splitHumps(v: string): string {
   return v.replace(/([a-z0-9])([A-Z])/g, '$1_$2');
@@ -182,7 +183,8 @@ function proposalContent(p: ProposalFields): Array<string | null | undefined> {
     typeof t === 'string'
       ? t
           .replace(/(?<![A-Za-z0-9])[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}(?![A-Za-z0-9])/gi, ' ')
-          .replace(/(?<![A-Za-z0-9-])(?=[A-Za-z0-9]*\d)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{16,}(?![A-Za-z0-9-])/g, ' ')
+          // A cuid (Prisma cuid(): "c" and 24 lowercase letters and digits). A camelCase name (unpaidInvoices2026) is read.
+          .replace(/(?<![A-Za-z0-9-])c[a-z0-9]{24}(?![A-Za-z0-9-])/g, ' ')
       : t;
   return [p.summary, p.description, p.rationale, p.expectedBenefit, asText(p.risks), asText(p.evidence), asText(p.payload), asText(p.inputPayload), asText(p.affectedEntities)].map(withoutIdTokens);
 }

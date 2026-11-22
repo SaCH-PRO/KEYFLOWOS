@@ -570,7 +570,13 @@ async function financialProposalRecordIds(
     // D-238 ("directly or indirectly"): withheld when the proposal row or the record's own fields (security review
     // MINOR-1: a record naming a money tool under a non-financial proposal's id) are financial, when neither can be
     // read, or when the record's own text (a rejection reason, a title or summary) states money.
-    const financial = rowFinancial !== undefined || own ? rowFinancial === true || (own ? isFinancialProposal(own) : false) : true;
+    // Round 5 (security m2): a record that names a proposal whose row is not found is withheld, as memory and the
+    // timeline withhold it; a record that names none is judged on its own fields (unclassifiable fails closed).
+    const namesProposal = proposalIdsOf(f).length > 0;
+    const financial =
+      rowFinancial !== undefined
+        ? rowFinancial || (own ? isFinancialProposal(own) : false)
+        : namesProposal || !own || isFinancialProposal(own);
     if (financial || recordTextMentionsMoney(f)) withheld.add(f.id);
   }
   return withheld;
