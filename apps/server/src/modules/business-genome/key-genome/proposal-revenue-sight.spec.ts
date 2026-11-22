@@ -424,3 +424,30 @@ describe('Codex P1s on #218: lifecycle fields and compensation vocabulary', () =
     // failureReason is read so it can be redacted field by field (it is not classified as content).
   });
 });
+
+describe('review of the Codex fixes on #218: compensation words and the failure reason copies', () => {
+  const task = (title: string) => ({ actionType: 'CREATE_TASK', module: 'crm', title });
+  it.each(['Decommission the old tablet', 'Decommission unused tools', 'Thermal overcompensation check'])('RED-BEFORE (correctness m1): "%s" is not financial (the compensation words are letter-bounded)', (title) => {
+    expect(isFinancialProposal(task(title))).toBe(false);
+    expect(isMoneyLabel(title)).toBe(false);
+  });
+  it.each(['Compensate the customer for the delay', 'Raise Ana\'s incentive to 12%', 'Approve the stipend for interns'])('RED-BEFORE (security m4): "%s" is financial', (title) => {
+    expect(isFinancialProposal(task(title))).toBe(true);
+  });
+  it.each(["Set Ana's commission to 12%", 'Review the compensation plan', 'Review the bonus plan', 'Announce the bonuses'])('control: "%s" is financial', (title) => {
+    expect(isFinancialProposal(task(title))).toBe(true);
+  });
+  it('RED-BEFORE (security m1): the copy of a money-stating failure reason in outcomeEvidence.reason is blanked with it', () => {
+    const row = { id: 'kap_t', status: 'FAILED', title: 'Open a ticket', actionType: 'CREATE_TASK', module: 'crm', failureReason: 'the balance owed is 900', outcomeEvidence: { status: 'FAILED', reason: 'the balance owed is 900' } };
+    const out = proposalViewForReader(row, false) as any;
+    expect(out.failureReason).toBeNull();
+    expect(out.outcomeEvidence).toEqual({ status: 'FAILED', reason: null });
+    expect(JSON.stringify(out)).not.toContain('900');
+  });
+  it('control: an outcome evidence reason that states no money is kept, and a revenue reader gets the row itself', () => {
+    const row = { id: 'kap_t', status: 'FAILED', title: 'Open a ticket', actionType: 'CREATE_TASK', module: 'crm', failureReason: 'Rate limited: retry after 30s', outcomeEvidence: { status: 'FAILED', reason: 'Rate limited: retry after 30s' } };
+    expect(proposalViewForReader(row, false)).toBe(row);
+    const money = { ...row, failureReason: 'the balance owed is 900', outcomeEvidence: { status: 'FAILED', reason: 'the balance owed is 900' } };
+    expect(proposalViewForReader(money, true)).toBe(money);
+  });
+});

@@ -105,3 +105,69 @@ describe('Codex P2 on #218: the timeline limit counts what the reader may see', 
     expect((await (svc as any).list('biz_1', { limit: 1 }, { id: 'blind', role: 'USER' })).map((e: any) => e.id)).toEqual(['ev_book']);
   });
 });
+
+describe('review of the Codex fixes on #218: the timeline', () => {
+  const blind = { id: 'blind', role: 'USER' };
+  const base = (events: any[], proposals: any[]) => {
+    const findMany = vi.fn(async ({ take, skip }: any) => events.slice(skip ?? 0, (skip ?? 0) + (take ?? events.length)));
+    const prisma = {
+      client: {
+        temporalFlowEvent: { findMany },
+        keyActionProposal: { findMany: vi.fn(async ({ where }: any) => proposals.filter((p) => where.id.in.includes(p.id))) },
+        genomeRecommendation: { findMany: vi.fn(async () => []) },
+        membership: { findUnique: vi.fn(async ({ where }: any) => (where.userId_businessId.userId === 'owner' ? { role: 'OWNER', permissionScopes: null } : { role: 'STAFF', permissionScopes: { revenue: 'none' } })) },
+      },
+    };
+    return { svc: new TemporalFlowService(prisma as any) as any, findMany };
+  };
+  const TASK = { id: 'kap_task', actionType: 'CREATE_TASK', module: 'crm', toolName: null, title: 'Call Kerry back' };
+  const FIN = { id: 'kap_fin', actionType: 'EXECUTE_TOOL', toolName: 'commerce.create_invoice', title: 'Invoice Acme' };
+  const ev = (id: string, entityType: string, entityId: string, extra: object = {}) => ({ id, businessId: 'biz_1', entityType, entityId, title: 'Event', description: null, payload: {}, metadata: {}, ...extra });
+
+  it.each(['card declined', 'Total due 900', 'unpaid for 3 months', 'Acme paid late', 'the balance owed is 900'])(
+    'RED-BEFORE (security MAJOR-1): a failed event of a non-financial proposal whose failure reason reads "%s" is withheld from a reader without revenue read',
+    async (failureReason) => {
+      const { svc } = base([ev('ev_fail', 'key_action_proposal', 'kap_task', { title: 'KEY action failed', payload: { actionType: 'CREATE_TASK', failureReason } })], [TASK]);
+      expect((await svc.list('biz_1', {}, blind)).map((e: any) => e.id)).toEqual([]);
+    },
+  );
+  it('control: a failed event whose reason states no money is served', async () => {
+    const { svc } = base([ev('ev_fail', 'key_action_proposal', 'kap_task', { title: 'KEY action failed', payload: { actionType: 'CREATE_TASK', failureReason: 'Rate limited: retry after 30s' } })], [TASK]);
+    expect((await svc.list('biz_1', {}, blind)).map((e: any) => e.id)).toEqual(['ev_fail']);
+  });
+
+  it('RED-BEFORE (security m2): with limit 1, five newest hidden proposal events do not hide the older booking (the read pages on until the limit is met)', async () => {
+    const events = [...Array.from({ length: 5 }, (_, i) => ev(`ev_fin_${i}`, 'key_action_proposal', 'kap_fin')), ev('ev_book', 'booking', 'b1')];
+    const { svc } = base(events, [FIN]);
+    expect((await svc.list('biz_1', { limit: 1 }, blind)).map((e: any) => e.id)).toEqual(['ev_book']);
+  });
+  it('RED-BEFORE (security m2): with limit 100, 500 newest hidden events do not hide the older booking', async () => {
+    const events = [...Array.from({ length: 500 }, (_, i) => ev(`ev_fin_${i}`, 'key_action_proposal', 'kap_fin')), ev('ev_book', 'booking', 'b1')];
+    const { svc } = base(events, [FIN]);
+    expect((await svc.list('biz_1', { limit: 100 }, blind)).map((e: any) => e.id)).toEqual(['ev_book']);
+  });
+  it('the paged read is bounded: an endless run of hidden events ends the read', async () => {
+    const findMany = vi.fn(async ({ take }: any) => Array.from({ length: take }, (_, i) => ev(`ev_${i}`, 'key_action_proposal', 'kap_fin')));
+    const { svc } = base([], [FIN]);
+    svc.prisma.client.temporalFlowEvent.findMany = findMany;
+    expect(await svc.list('biz_1', { limit: 10 }, blind)).toEqual([]);
+    const scanned = (findMany.mock.calls as any[]).reduce((n, c) => n + c[0].take, 0);
+    expect(scanned).toBeLessThanOrEqual(10_000);
+  });
+  it('the limit still holds after the filter, the order is kept, and a reader who reads revenue costs one read of `limit` rows', async () => {
+    const events = [ev('b1', 'booking', 'x1'), ev('f1', 'key_action_proposal', 'kap_fin'), ev('b2', 'booking', 'x2'), ev('b3', 'booking', 'x3')];
+    const { svc } = base(events, [FIN]);
+    expect((await svc.list('biz_1', { limit: 2 }, blind)).map((e: any) => e.id)).toEqual(['b1', 'b2']);
+    const owner = base(events, [FIN]);
+    expect((await owner.svc.list('biz_1', { limit: 2 }, { id: 'owner', role: 'USER' })).map((e: any) => e.id)).toEqual(['b1', 'f1']);
+    expect(owner.findMany).toHaveBeenCalledTimes(1);
+    expect((owner.findMany.mock.calls[0] as any[])[0].take).toBe(2);
+  });
+  it('RED-BEFORE (correctness m6): a negative or fractional limit from a reader is not passed to the database: negative serves nothing, a fraction is truncated', async () => {
+    const events = [ev('b1', 'booking', 'x1'), ev('b2', 'booking', 'x2')];
+    const { svc, findMany } = base(events, []);
+    expect(await svc.list('biz_1', { limit: -5 }, blind)).toEqual([]);
+    expect((await svc.list('biz_1', { limit: 1.5 }, blind)).map((e: any) => e.id)).toEqual(['b1']);
+    for (const call of findMany.mock.calls as any[]) expect(Number.isInteger(call[0].take) && call[0].take > 0, String(call[0].take)).toBe(true);
+  });
+});

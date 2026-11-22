@@ -46,3 +46,29 @@ describe('FU-PROPOSAL-REVENUE-SIGHT round 4 (security minor 6): POST cortex/acti
     expect(res.result).toEqual({ id: 'kap_t', status: 'APPROVED' });
   });
 });
+
+describe('review of the Codex fixes on #218 (correctness MAJOR-1): the provenance check runs although the failure reason was blanked', () => {
+  it('RED-BEFORE: a task bridged from a financial recommendation, carrying a failure reason the vocabulary reads as money, is answered redacted to a member without revenue read', async () => {
+    const TASK = { id: 'kap_b', status: 'APPROVED', title: 'Review the plan', summary: 'Next step', actionType: 'CREATE_TASK', module: 'crm', payload: { recommendationId: 'rec_fin' }, failureReason: 'Transfer failed after 3 retries' };
+    const orchestrator = { approve: vi.fn(async () => ({ ...TASK })), reject: vi.fn(async () => ({ ...TASK, status: 'REJECTED' })), isFinancial: vi.fn(async () => true) };
+    const args: any[] = Array(22).fill({});
+    args[19] = orchestrator;
+    const ctl = new (KeyCortexController as any)(...args);
+    const viewer = { userId: 'u1', businessId: 'b1', role: 'STAFF', superAdmin: false, scopes: { revenue: 'none' }, member: true };
+    for (const approved of [true, false]) {
+      const res = await ctl.approveAction({ sessionId: 's1', businessId: 'b1', actionId: 'kap_b', approved }, { user: { id: 'u1' } }, viewer);
+      expect(res.result, String(approved)).toEqual({ id: 'kap_b', status: approved ? 'APPROVED' : 'REJECTED' });
+    }
+    expect(orchestrator.isFinancial).toHaveBeenCalledTimes(2);
+  });
+  it('control: the same task with no financial provenance is answered whole, its money-reading failure reason blanked', async () => {
+    const TASK = { id: 'kap_c', status: 'APPROVED', title: 'Review the plan', actionType: 'CREATE_TASK', module: 'crm', failureReason: 'Transfer failed after 3 retries' };
+    const orchestrator = { approve: vi.fn(async () => ({ ...TASK })), reject: vi.fn(), isFinancial: vi.fn(async () => false) };
+    const args: any[] = Array(22).fill({});
+    args[19] = orchestrator;
+    const ctl = new (KeyCortexController as any)(...args);
+    const viewer = { userId: 'u1', businessId: 'b1', role: 'STAFF', superAdmin: false, scopes: { revenue: 'none' }, member: true };
+    const res = await ctl.approveAction({ sessionId: 's1', businessId: 'b1', actionId: 'kap_c', approved: true }, { user: { id: 'u1' } }, viewer);
+    expect(res.result).toEqual({ ...TASK, failureReason: null });
+  });
+});
