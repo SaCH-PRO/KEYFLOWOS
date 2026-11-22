@@ -223,7 +223,7 @@ const COULD_NOT_LOAD = "Couldn't load this business's settings.";
 /**
  * Reads the business's settings, as the member acting now, and records them for every reader. Readers that ask
  * together share one read, and settings read within BUSINESS_SETTINGS_FRESH_MS are not asked for again unless
- * `force` is set. Settings already shown stay while they are read again; they are kept through a failure that says
+ * `force` is set. What is already shown (settings, or a failure) stays while it is read again; settings are kept through a failure that says
  * nothing about access (a network failure, a 5xx) and dropped on a refusal (401, 403, 404). A read records nothing
  * when a newer read or a write's answer has overtaken it, or when the member acting has changed since it was asked.
  */
@@ -241,7 +241,9 @@ export function loadBusinessSettings(businessId: string, options: { force?: bool
   bump(readsStarted, businessId);
   const read = readsStarted.get(businessId);
   const answersAtStart = answersRecorded.get(businessId) ?? 0;
-  if (held?.status !== "ready") setEntry(businessId, { ...LOADING, member });
+  // Whatever this member is shown stays while it is read again: settings that are ready, and a failure too (review
+  // COR2-1: a failed view is not swapped away, and its "Try again" keeps the keyboard, on every re-read).
+  if (!held) setEntry(businessId, { ...LOADING, member });
 
   const flight = (async () => {
     const res = await apiGet<Record<string, unknown>>(`/identity/businesses/${encodeURIComponent(businessId)}`);

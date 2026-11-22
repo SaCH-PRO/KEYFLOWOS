@@ -236,8 +236,24 @@ function BusinessSetupSettings({
   const sellsLabelId = `${uid}-sells-label`;
   const crmLabelId = `${uid}-advanced-crm-label`;
 
+  // A press made while another change is being saved is not sent; the member is told so (review COR2-2).
+  const [notTaken, setNotTaken] = useState(false);
+  // The failed view's "Try again" stays mounted, and says it is busy, while the settings are read again (COR2-1).
+  const [retrying, setRetrying] = useState(false);
+
+  const retry = async () => {
+    if (retrying) return;
+    setRetrying(true);
+    await settings.reload();
+    setRetrying(false);
+  };
+
   const write = async (which: "sells" | "advancedCrm", what: string, done: string, send: () => Promise<ApiAnswer>) => {
-    if (savingRef.current || settings.status !== "ready") return;
+    if (settings.status !== "ready") return;
+    if (savingRef.current) {
+      setNotTaken(true);
+      return;
+    }
     savingRef.current = true;
     setSaving(which);
     onStatus(null);
@@ -250,6 +266,7 @@ function BusinessSetupSettings({
     }
     savingRef.current = false;
     setSaving(null);
+    setNotTaken(false);
     if (refused(res, { what })) {
       onStatus({ type: "error", message: refusalMessage(res, { what }) ?? `Couldn't ${what}.` });
       return;
@@ -278,8 +295,8 @@ function BusinessSetupSettings({
             Couldn&apos;t load what you sell and the Advanced CRM switch{settings.error ? `: ${settings.error}` : "."}
           </span>
         </p>
-        <Button variant="outline" onClick={() => void settings.reload()} className="min-h-[44px]">
-          Try again
+        <Button variant="outline" onClick={() => void retry()} aria-busy={retrying || undefined} className="min-h-[44px]">
+          {retrying ? "Trying again..." : "Try again"}
         </Button>
       </div>
     );
@@ -346,6 +363,12 @@ function BusinessSetupSettings({
       </div>
 
       {loading && <p className="text-[10px] text-muted-foreground">Loading these settings...</p>}
+
+      {notTaken && (
+        <p role="status" className="text-xs" style={{ color: "hsl(var(--kf-warning))" }}>
+          Still saving your last change. Press again in a moment.
+        </p>
+      )}
 
       {refusal && (
         <p
