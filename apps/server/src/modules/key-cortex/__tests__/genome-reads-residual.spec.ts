@@ -276,3 +276,77 @@ describe('creativity and GET cortex/awareness (D-235 inventory row 9)', () => {
     expect(none.items.map((i: any) => i.id), 'no reader fails closed').toEqual(['i2']);
   });
 });
+
+describe('round-2 review repairs (security MAJOR-1..3; correctness MAJOR-1, minors 1-4)', () => {
+  const projected = genomeContextForReader(CTX, false);
+
+  it('RED-BEFORE (correctness MAJOR-1): no prompt renders "undefined" for the withheld genome stage', async () => {
+    const { KeyCortexSystemPromptService } = await import('../key-cortex-system-prompt.service');
+    const sp = Object.create(KeyCortexSystemPromptService.prototype) as any;
+    expect(sp.buildGenomeContextBlock(projected, [])).not.toContain('undefined');
+    const { KeyCortexSuggestionService } = await import('../key-cortex-suggestion.service');
+    const sg = Object.create(KeyCortexSuggestionService.prototype) as any;
+    sg.logger = { warn: vi.fn(), debug: vi.fn(), error: vi.fn() };
+    sg.modelGateway = { complete: vi.fn(async () => ({ content: '[]' })) };
+    const snap = snapshotForViewer({ businessId: 'b', genomeStage: 'growth', executiveReadiness: 30, genomeDna: DNA, keyMetrics: {}, recentTasks: [], recentEvents: [], activeProjects: [], teamMembers: [], unreadMessages: 0 } as any, false);
+    await sg.generateSuggestions('b', 'hello', undefined, false, snap);
+    expect(promptOf(sg.modelGateway)).not.toContain('undefined');
+    const r = Object.create(KeyCortexReasoningService.prototype) as any;
+    r.logger = { debug: vi.fn(), warn: vi.fn(), error: vi.fn(), log: vi.fn() };
+    r.genomeBridgeService = {};
+    r.getGenomeEnrichedContext = vi.fn(async () => CTX);
+    r.modelGateway = { complete: vi.fn(async () => ({ content: 'ok' })) };
+    r.prisma = { client: { cortexSession: { findFirst: vi.fn(async () => ({ id: 's', businessId: 'biz_A', messages: [] })) } } };
+    await r.explainDecision('corr_1', 'biz_A', false);
+    expect(promptOf(r.modelGateway)).not.toContain('undefined');
+  });
+
+  it('RED-BEFORE (security MAJOR-3): a decision is explained only to the user who made it, unless the reader is an owner; patterns are withheld from other readers', async () => {
+    const { svc, prompts } = evolution({ ...OPS_DECISION, userId: 'owner_1' }, [], [{ type: 'delivery', description: 'Deliveries slip on Fridays', confidence: 0.8 }]);
+    await expect(svc.explainDecision('dec_ops', 'biz_A', { readsRevenue: true, userId: 'staff_1', ownerView: false })).rejects.toBeInstanceOf(NotFoundException);
+    const own = await svc.explainDecision('dec_ops', 'biz_A', { readsRevenue: true, userId: 'owner_1', ownerView: false });
+    expect(own.recommendation).toBe('Write the delivery SOPs');
+    expect(prompts.join('')).not.toContain('Deliveries slip');
+    const owner = await svc.explainDecision('dec_ops', 'biz_A', { readsRevenue: true, userId: 'other_owner', ownerView: true });
+    expect(owner.recommendation).toBe('Write the delivery SOPs');
+  });
+
+  it('RED-BEFORE (security MAJOR-1, MAJOR-2): awareness withholds from a reader without revenue read the kinds made from unprojected context or finance provenance (ideas, hypotheses, reflections, statement-sweep integrations)', async () => {
+    const svc = Object.create(KeyCortexAwarenessService.prototype) as any;
+    svc.logger = { warn: vi.fn(), debug: vi.fn() };
+    const rows: Record<string, unknown[]> = {
+      creative_idea: [{ key: 'i', value: JSON.stringify({ title: 'Launch a Monday-only offer to lift your slowest day' }), confidence: 0.8, createdAt: new Date() }],
+      dream_hypothesis: [{ key: 'h', value: JSON.stringify({ hypothesis: 'Mondays are quiet' }), confidence: 0.8, createdAt: new Date() }],
+      reflection_session: [{ key: 'r', value: JSON.stringify({ summary: 'Reflected on the week' }), confidence: 0.8, createdAt: new Date() }],
+      integration_health: [{ key: 'statement_source:acc_1', value: JSON.stringify({ message: 'Republic Bank Chequing: nothing has imported in 23 days', source: 'statement_sweep' }), confidence: 0.8, createdAt: new Date() }],
+      salience_momentum: [{ key: 'm', value: JSON.stringify({ headline: 'New bookings up this week', valence: 'opportunity' }), confidence: 0.8, createdAt: new Date() }],
+      churn_risk: [{ key: 'c', value: JSON.stringify({ prediction: 'Acme Ltd likely to lapse', churnRisk: 0.8 }), confidence: 0.8, createdAt: new Date() }],
+    };
+    svc.prisma = { client: { keyCortexMemory: { findMany: vi.fn(async ({ where }: any) => rows[where.type] ?? []) } } };
+    const out = await svc.getAwareness('biz_A', { readsRevenue: false });
+    const ids = out.items.map((i: any) => i.id).sort();
+    // correctness minor 4: values are checked, not key names ("valence":"opportunity", "churnRisk").
+    expect(ids).toEqual(['c', 'm']);
+    const owner = await svc.getAwareness('biz_A', { readsRevenue: true });
+    expect(owner.items.map((i: any) => i.id).sort()).toEqual(['c', 'h', 'i', 'm', 'r', 'statement_source:acc_1']);
+  });
+
+  it('RED-BEFORE (correctness minor 2): getActiveGoals reads the ranked recommendations with headroom before taking five for a reader without revenue read', async () => {
+    const svc = Object.create(KeyCortexConsciousnessService.prototype) as any;
+    svc.activeGoalsCache = new Map();
+    const ranked = [1, 2, 3, 4, 5].map((i) => ({ id: `f${i}`, title: `Raise prices ${i}`, domain: 'FINANCIAL' })).concat([{ id: 'o', title: 'Write the SOPs', domain: 'OPERATIONS' }]);
+    svc.genomeBridge = { getRankedRecommendations: vi.fn(async (_b: string, limit = 5) => ranked.slice(0, limit)) };
+    svc.eventService = { getEvents: vi.fn(async () => []) };
+    svc.intuition = { detectWeakSignals: vi.fn(async () => []) };
+    expect((await svc.getActiveGoals('biz_A', false)).join('\n')).toContain('Write the SOPs');
+  });
+
+  it('RED-BEFORE (correctness minor 3): creativity keeps a non-money recommendation in the production shape (a string) and drops a money one', async () => {
+    const { KeyCortexCreativityService } = await import('../key-cortex-creativity.service');
+    const svc = Object.create(KeyCortexCreativityService.prototype) as any;
+    svc.contextService = { getGenomeContext: vi.fn(async () => ({ dnaScores: DNA, recommendations: ['Raise prices 10% on the retainer', 'Write the delivery SOPs'] })) };
+    const text = (await svc.getGenomeInsights('biz_A')).join('\n');
+    expect(text).toContain('Write the delivery SOPs');
+    expect(text).not.toContain('Raise prices');
+  });
+});
