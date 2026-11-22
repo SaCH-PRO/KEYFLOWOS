@@ -1077,7 +1077,8 @@ describe('V1-64 second pass: owner rulings D-250 and D-251', () => {
   it('MT-18 (D-251, D-57, D-75): the aging is the caller\'s own business\'s, for revenue readers only', async () => {
     for (const refused of [await aging(ID.bizA, ID.ownerB), await aging(ID.bizA, ID.staffNone), await aging(ID.bizCr, ID.ownerA)]) {
       expect(refused.status, JSON.stringify(refused.body)).toBe(403);
-      expect(JSON.stringify(refused.body)).not.toMatch(/totalOutstanding|byCurrency|customers|13323|160|210/);
+      // The refusal's own timestamp is left out: its milliseconds can spell a figure (…05.160Z).
+      expect(JSON.stringify({ ...refused.body, timestamp: undefined })).not.toMatch(/totalOutstanding|byCurrency|customers|13323|160|210/);
     }
     expect((await request(financeApp.getHttpServer()).get(`/finance/businesses/${ID.bizA}/receivables/aging`)).status).toBe(401);
     const owner = await agingOf(ID.bizA);
@@ -1122,32 +1123,49 @@ describe('V1-64 second pass: owner rulings D-250 and D-251', () => {
     expect(cents((await reportOf(ID.bizCr)).metrics.revenue.outstanding) - cents(r0), 'the summary: the rows leave 60').toBe(cents(60));
     expect(drift.ledgerReconciled).toBe(true);
 
-    // P2S-2: the ledger's credit-note entries reach an invoice only through this business's own note rows.
+    // P2S-2 / P3S-1: the ledger's entries reach an invoice only through this business's own note and payment rows.
     //  (a) a posting in bizCr's ledger sourced by a note that carries bizB's id and names cr_drift: not this
-    //      invoice's credit, so it stays 100 (it would read 75 if the note were mapped).
-    //  (b) a bizCr note naming bizB's invoice: bizB's aging does not move.
+    //      invoice's credit, so it stays 100 (it would read 75 if the note map were not tenant-bound).
+    //  (b) a posting in bizCr's ledger sourced by a payment row that carries bizB's id and names cr_drift: not
+    //      this invoice's money (D-75), so it stays 100 (70 if the payment map were not tenant-bound).
+    //  (c) a posting in bizCr's ledger sourced by bizCr's own note that names bizB's invoice: attributed to no
+    //      invoice of bizCr; bizB's figures do not move. (The rows side of a foreign note on a credited invoice is
+    //      MT-08: 120 with another tenant's APPLIED 25 on it.)
     const ar = await coa.getBySystemKey(ID.bizCr, 'ACCOUNTS_RECEIVABLE');
     const revenue = await coa.getBySystemKey(ID.bizCr, 'REVENUE');
-    await db.creditNote.create({ data: { id: `${P}cn_adv_foreign`, businessId: ID.bizB, invoiceId: INV.cr_drift, creditNoteNumber: `${P}CN-adv1`, status: 'APPLIED', amount: 25, appliedAt: new Date() } });
-    const now = new Date(Date.now() - 1000);
-    await db.financialTransaction.create({
-      data: {
-        id: `${P}txn_adv`, businessId: ID.bizCr, type: 'REVERSAL', status: 'POSTED', date: now, amount: 25, currency: 'TTD',
-        sourceType: 'CREDIT_NOTE', sourceId: `${P}cn_adv_foreign`, description: 'v64e adversarial',
-        entries: {
-          create: [
-            { id: `${P}le_adv_1`, businessId: ID.bizCr, accountId: ar.id, credit: 25, currency: 'TTD', date: now },
-            { id: `${P}le_adv_2`, businessId: ID.bizCr, accountId: (revenue ?? ar).id, debit: 25, currency: 'TTD', date: now },
-          ],
+    expect(ar?.id && revenue?.id && ar.id !== revenue.id, 'two distinct accounts, so each posting moves AR').toBeTruthy();
+    const at = new Date(Date.now() - 1000);
+    const arCredit = (tag: string, sourceType: string, sourceId: string, amount: number) =>
+      db.financialTransaction.create({
+        data: {
+          id: `${P}txn_${tag}`, businessId: ID.bizCr, type: 'REVERSAL', status: 'POSTED', date: at, amount, currency: 'TTD',
+          sourceType, sourceId, description: `v64e adversarial ${tag}`,
+          entries: {
+            create: [
+              { id: `${P}le_${tag}_1`, businessId: ID.bizCr, accountId: ar.id, credit: amount, currency: 'TTD', date: at },
+              { id: `${P}le_${tag}_2`, businessId: ID.bizCr, accountId: revenue.id, debit: amount, currency: 'TTD', date: at },
+            ],
+          },
         },
-      },
-    });
-    const adv = await agingOf(ID.bizCr);
-    expect(cents(adv.totalOutstanding), 'a foreign-tenant note is no credit on this invoice').toBe(cents(drift.totalOutstanding));
+      });
+    const driftRow = async () => (await agingOf(ID.bizCr)).totalOutstanding;
+
+    await db.creditNote.create({ data: { id: `${P}cn_adv_foreign`, businessId: ID.bizB, invoiceId: INV.cr_drift, creditNoteNumber: `${P}CN-adv1`, status: 'APPLIED', amount: 25, appliedAt: new Date() } });
+    await arCredit('adv_note', 'CREDIT_NOTE', `${P}cn_adv_foreign`, 25);
+    expect(cents(await driftRow()), '(a) a foreign-tenant note is no credit on this invoice').toBe(cents(drift.totalOutstanding));
+
+    const foreignPay = await seedPayment('cr_drift', 'foreignpay', ID.bizB, 30, 'SUCCESSFUL');
+    await arCredit('adv_pay', 'Payment', foreignPay.id, 30);
+    expect(cents(await driftRow()), '(b) a foreign-tenant payment row is not this invoice\'s money').toBe(cents(drift.totalOutstanding));
+
     await db.creditNote.create({ data: { id: `${P}cn_adv_own`, businessId: ID.bizCr, invoiceId: INV.b_sent, creditNoteNumber: `${P}CN-adv2`, status: 'APPLIED', amount: 30, appliedAt: new Date() } });
+    await arCredit('adv_own', 'CREDIT_NOTE', `${P}cn_adv_own`, 30);
+    expect(cents(await driftRow()), '(c) a note naming another business\'s invoice credits none of this one\'s').toBe(cents(drift.totalOutstanding));
     const b = await agingOf(ID.bizB);
     expect({ totalOutstanding: b.totalOutstanding, customers: b.customers.map((c: any) => [c.contactId, c.total]) }).toEqual({ totalOutstanding: 70, customers: [[ID.contactB, 70]] });
     expect((await reportOf(ID.bizB)).metrics.revenue.outstanding).toBe(70);
-    expect(cents((await agingOf(ID.bizCr)).totalOutstanding)).toBe(cents(drift.totalOutstanding));
+    // The three postings are on the AR account and tied to no invoice: the aging says the ledger does not reconcile.
+    const end = await agingOf(ID.bizCr);
+    expect({ ledgerReconciled: end.ledgerReconciled, ledgerDelta: end.ledgerDelta }).toEqual({ ledgerReconciled: false, ledgerDelta: 85 });
   });
 });
