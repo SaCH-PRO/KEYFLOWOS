@@ -156,6 +156,11 @@ jobs:
         run: pnpm db:deploy
 
       - name: Build server
+        # The server type-check needs ~4.1 GB of heap on main itself (measured
+        # with --incremental false); the runner's Node default is ~4 GB, so tsc
+        # died mid-build. This raises the ceiling only; no check is skipped.
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: cd apps/server && pnpm run build
 
       # A per-run HS256 secret: the API verifies the specs' tokens with it, and
@@ -361,6 +366,11 @@ jobs:
         run: pnpm db:deploy
 
       - name: Build server
+        # The server type-check needs ~4.1 GB of heap on main itself (measured
+        # with --incremental false); the runner's Node default is ~4 GB, so tsc
+        # died mid-build. This raises the ceiling only; no check is skipped.
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: cd apps/server && pnpm run build
 
       - name: Generate the run's token secret
