@@ -498,8 +498,12 @@ describe("NAV-A1: the surfaces as a member sees them", () => {
     expect(screen.getByRole("link", { name: "Sales" }).getAttribute("aria-current")).toBe("true");
     expect(screen.getByRole("link", { name: "Today" }).getAttribute("aria-current")).toBeNull();
     first.unmount();
-    bar("/app/commerce");
+    const second = bar("/app/commerce");
     expect(screen.getByRole("link", { name: "Sales" }).getAttribute("aria-current")).toBe("page");
+    second.unmount();
+    // Orchestrator acceptance m5: /app is Today's own page (it lands on /app/command-center), so "page", not "true".
+    bar("/app");
+    expect(screen.getByRole("link", { name: "Today" }).getAttribute("aria-current")).toBe("page");
   });
 
   const sidebar = (hubs: ReturnType<typeof hubsFor>) =>

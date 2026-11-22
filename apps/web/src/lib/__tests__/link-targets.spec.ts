@@ -498,6 +498,17 @@ describe('the cockpit is linked directly, not through its redirect stub', () => 
     );
   });
 
+  it('NAV-A1 (acceptance m3): in-app doors to the cockpit name /app/command-center, not the stub', () => {
+    // dormant-feature-gate.tsx's back link is NAV-B-HIDE's (that packet's write set); it is not listed here.
+    const doors = [
+      'components/command-palette.tsx',
+      'app/app/operations/page.tsx',
+      'app/app/keyflow-command/components/cockpit-key-panel.tsx',
+    ];
+    expect(doors.filter((f) => /["'`]\/app\/keyflow-command["'`#]/.test(read(f)))).toEqual([]);
+    for (const f of doors) expect(read(f), f).toMatch(/["'`]\/app\/command-center["'`]/);
+  });
+
   it('NAV-A1: the three stubs answer 307 to /app/command-center from the redirect table', () => {
     // Before NAV-A1 /app/control-tower answered 308 to /app/keyflow-command, itself a page stub, and
     // /app/briefing a page stub to that stub: two or three hops to the cockpit.
