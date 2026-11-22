@@ -5,7 +5,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { Plus, Menu } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { bottomBarFor, hubNav, isHubActive, type HubNavItem } from "@/lib/nav-config";
+import { bottomBarFor, hubNav, isHubActive, isHubPage, type HubNavItem } from "@/lib/nav-config";
 import {
   ModuleLauncherSheet,
   type ModuleLauncherSection,
@@ -117,7 +117,7 @@ export function MobileBottomNavV2({
     const Icon = hub.icon;
     const active = isHubActive(hub, pathname);
     // "page" on the hub's own page; "true" anywhere else inside the hub (review COR-4).
-    const current = active ? (pathname === hub.href ? "page" : "true") : undefined;
+    const current = active ? (isHubPage(hub, pathname) ? "page" : "true") : undefined;
     return (
       <Link
         key={hub.id}

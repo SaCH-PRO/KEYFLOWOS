@@ -504,6 +504,11 @@ export function menuSectionsFor(
   return { hubSections, moreSections };
 }
 
+/** Whether `pathname` is the hub's own page (aria-current "page"); /app lands on Today (acceptance m5). */
+export function isHubPage(hub: HubNavItem, pathname: string): boolean {
+  return pathname === hub.href || (hub.id === "today" && pathname === "/app");
+}
+
 /** Whether `pathname` is in a hub: its own page, its screens, or a path it claims. */
 export function isHubActive(hub: HubNavItem, pathname: string): boolean {
   const under = (p: string) => {

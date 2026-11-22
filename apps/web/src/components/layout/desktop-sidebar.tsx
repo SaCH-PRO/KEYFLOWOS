@@ -17,7 +17,7 @@ import {
   LayoutGrid,
   User,
 } from "lucide-react";
-import { hubNav } from "@/lib/nav-config";
+import { hubNav, isHubPage } from "@/lib/nav-config";
 import { NAV_ROUTE_LABELS } from "@/lib/semantic-routes";
 import type { HubNavItem, NavItem, NavSection, DrawerSurface } from "@/lib/nav-config";
 import { navItemsForOperationsAccess, sectionsForOperationsAccess, useOperationsAccess } from "./operations-nav";
@@ -319,7 +319,7 @@ export function DesktopSidebar({
                 isActive ? "text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
               )}
               aria-label={hub.label}
-              aria-current={isActive ? (pathname === hub.href ? "page" : "true") : undefined}
+              aria-current={isActive ? (isHubPage(hub, pathname) ? "page" : "true") : undefined}
               onClick={() => setDrawerSurface(null)}
             >
               <RailIndicator active={isActive} />
