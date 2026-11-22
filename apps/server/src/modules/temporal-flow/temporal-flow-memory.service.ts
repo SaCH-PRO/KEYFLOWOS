@@ -9,9 +9,12 @@ import type {
 
 const EMBEDDING_CONFIDENCE_THRESHOLD = 0.7;
 
-/** A memory id a by-id query can use: a non-empty string (an absent id must never widen a where). */
-function isMemoryId(memoryId: unknown): memoryId is string {
-  return typeof memoryId === 'string' && memoryId.length > 0;
+/**
+ * An id or business a by-id query can use: a non-empty string. Prisma drops an undefined field from a
+ * where, so an absent id or business must never reach one (it would widen it).
+ */
+function isKey(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
 }
 
 @Injectable()
@@ -44,7 +47,8 @@ export class TemporalFlowMemoryService {
     let record;
     if (existing) {
       record = await this.prisma.client.temporalFlowMemory.update({
-        where: { id: existing.id },
+        // MEM-TEMPORAL-SCOPE: the tenant predicate is in the update itself.
+        where: { id: existing.id, businessId: input.businessId },
         data,
       });
     } else {
@@ -127,7 +131,7 @@ export class TemporalFlowMemoryService {
    * MEM-TEMPORAL-SCOPE: one memory of this business by id, or null. A foreign id reads as a missing one.
    */
   async findById(businessId: string, memoryId: string): Promise<TemporalFlowMemoryData | null> {
-    if (!isMemoryId(memoryId)) return null;
+    if (!isKey(businessId) || !isKey(memoryId)) return null;
     return this.prisma.client.temporalFlowMemory.findFirst({ where: { id: memoryId, businessId } });
   }
 
@@ -135,7 +139,7 @@ export class TemporalFlowMemoryService {
     // MEM-TEMPORAL-SCOPE: the tenant predicate is in the delete itself, not only in a read before it.
     // Prisma drops an undefined field from a where, so without an id deleteMany would match every row
     // of the business: no id deletes nothing.
-    if (!isMemoryId(memoryId)) return false;
+    if (!isKey(businessId) || !isKey(memoryId)) return false;
     const { count } = await this.prisma.client.temporalFlowMemory.deleteMany({
       where: { id: memoryId, businessId },
     });
@@ -157,7 +161,7 @@ export class TemporalFlowMemoryService {
       metadata?: Record<string, unknown>;
     },
   ): Promise<TemporalFlowMemoryData> {
-    if (!isMemoryId(memoryId)) throw new NotFoundException('Memory not found');
+    if (!isKey(businessId) || !isKey(memoryId)) throw new NotFoundException('Memory not found');
     try {
       return await this.prisma.client.temporalFlowMemory.update({
         where: { id: memoryId, businessId },

@@ -79,7 +79,9 @@ export class TemporalAdapterService {
       throw new NotFoundException('Memory not found');
     }
     const existingTags = Array.isArray(existing.sourceEventIds) ? existing.sourceEventIds : [];
-    const tags = Array.from(new Set([...existingTags, ...input.tags]));
+    // Only string tags: a string is not spread into characters, a missing list adds none.
+    const added = Array.isArray(input.tags) ? input.tags.filter((t): t is string => typeof t === 'string') : [];
+    const tags = Array.from(new Set([...existingTags, ...added]));
     return this.temporal.updateMemory(input.businessId, input.memoryId, {
       sourceEventIds: tags,
       metadata: {
