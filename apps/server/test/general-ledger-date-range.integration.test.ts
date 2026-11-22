@@ -38,6 +38,11 @@
  *   GLD-13  RED-BEFORE  (review C-4) the running balance is per account AND currency: the USD line's balance is
  *                       its own 107, not 107 added to the TTD lines before it (D-13: two currencies are never
  *                       added into one figure)
+ *   GLD-14  RED-BEFORE  (final review C-2) a skipped stretch that straddles midnight: Toronto, 1919-03-30, 23:30
+ *                       jumped to 00:30, so 30 March ends at the jump (04:30Z), not half an hour later
+ *   GLD-15  RED-BEFORE  (final review C-1) the order is total: lines tied on date and creation time (the two
+ *                       lines of one posting) come in id order, so a page boundary between them neither
+ *                       repeats nor drops a line (the tie was left to Postgres)
  *   GLD-09  KEEP        tenancy and scope hold on the date-only read: another business's owner and a
  *                       revenue-none member are refused 403 and get no line; no answer carries another
  *                       business's line
@@ -75,6 +80,7 @@ const ID = {
   bizBad: `${P}bizBad`, // timezone 'Not/AZone'
   bizHav: `${P}bizHav`, // America/Havana
   bizAmm: `${P}bizAmm`, // Asia/Amman
+  bizTor: `${P}bizTor`, // America/Toronto
 };
 
 const D = '2026-03-10';
@@ -244,6 +250,7 @@ beforeAll(async () => {
     [ID.bizBad, ID.owner, 'Not/AZone'],
     [ID.bizHav, ID.owner, 'America/Havana'],
     [ID.bizAmm, ID.owner, 'Asia/Amman'],
+    [ID.bizTor, ID.owner, 'America/Toronto'],
   ] as const) {
     await db.business.create({
       data: { id, name: `V66G ${id.slice(P.length)}`, slug: id, ownerId, currency: 'TTD', timezone, accountingBasis: 'CASH' },
@@ -274,6 +281,9 @@ beforeAll(async () => {
   // Amman, 2019-10-24: the clocks go back at 01:00 on the 25th (to 00:00), so the 25th starts at the first 00:00, 21:00Z.
   await post(ID.bizAmm, 'amman-last', '2019-10-24T20:59:59.999Z');
   await post(ID.bizAmm, 'amman-next-day', '2019-10-24T21:00:00.000Z');
+  // Toronto, 1919-03-30: 23:30 jumped to 00:30 (no instant reads 00:00 on the 31st), so the 30th ends 04:30Z.
+  await post(ID.bizTor, 'toronto-last', '1919-03-31T04:29:59.999Z');
+  await post(ID.bizTor, 'toronto-next-day', '1919-03-31T04:30:00.000Z');
 }, 120_000);
 
 afterAll(async () => {
@@ -426,6 +436,35 @@ describe('V1-66 SWP-FIN-LEDGER: the General Ledger end date covers its whole day
     expect(usd.map((r) => Math.abs(Number(r.runningBalance)))).toEqual([Number(usd[0].debit) + Number(usd[0].credit), Number(usd[1].debit) + Number(usd[1].credit)]);
   });
 
+  it('GLD-14: a skipped stretch that straddles midnight ends the day at the jump', async () => {
+    const res = await ledger(ID.bizTor, { to: '1919-03-30' });
+    expect(res.status).toBe(200);
+    expect(labels(res.body)).toEqual(twice({ 'toronto-last': '' }));
+  });
+
+  it('GLD-15: the order is total: date, then creation time, then id', async () => {
+    const res = await ledger(ID.bizA, { to: '2026-12-31' });
+    const rows: any[] = res.body.rows;
+    expect(rows).toHaveLength(22);
+    const created: Array<{ id: string; created_at: Date }> = await db.$queryRawUnsafe(
+      `SELECT id, created_at FROM ledger_entries WHERE business_id = $1`, ID.bizA,
+    );
+    const createdAt = new Map(created.map((r) => [r.id, new Date(r.created_at).getTime()]));
+    const expected = [...rows].sort((a, b) =>
+      new Date(a.date).getTime() - new Date(b.date).getTime()
+      || createdAt.get(a.entryId)! - createdAt.get(b.entryId)!
+      || (a.entryId < b.entryId ? -1 : a.entryId > b.entryId ? 1 : 0));
+    expect(rows.map((r) => r.entryId)).toEqual(expected.map((r) => r.entryId));
+    // The same order page by page: one line a page, nothing repeated, nothing dropped.
+    const paged: string[] = [];
+    for (let page = 1; page <= 22; page += 1) {
+      const one = await ledger(ID.bizA, { to: '2026-12-31', pageSize: 1, page });
+      expect(one.body.rows).toHaveLength(1);
+      paged.push(one.body.rows[0].entryId);
+    }
+    expect(paged).toEqual(expected.map((r) => r.entryId));
+  });
+
   it('GLD-09: tenancy and scope hold on the date-only read', async () => {
     // Another business's owner.
     const outsider = await ledger(ID.bizA, { from: D, to: D }, ID.ownerB);
@@ -451,6 +490,6 @@ describe('V1-66 SWP-FIN-LEDGER: the General Ledger end date covers its whole day
     const own = await ledger(ID.bizA, { to: '2026-12-31' });
     expect(own.status).toBe(200);
     expect(own.body.total).toBe(22);
-    for (const row of own.body.rows) expect(String(row.description)).not.toMatch(/kolkata|ny-|bad-|havana|amman/);
+    for (const row of own.body.rows) expect(String(row.description)).not.toMatch(/kolkata|ny-|bad-|havana|amman|toronto/);
   });
 });
