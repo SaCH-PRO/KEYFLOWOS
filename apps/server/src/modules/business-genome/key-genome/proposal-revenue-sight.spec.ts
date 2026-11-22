@@ -492,7 +492,7 @@ describe('third review of the #218 repairs: structured text is read as the propo
   it('RED-BEFORE (correctness m1): ids and fingerprints in real success evidence are not read as money', () => {
     for (const [fingerprint, entityId, claimKey] of [
       ['a1b208cac7457d9e00112233445566778899aabbccddeeff0011223344556677', 'cmzcku666tax29xx90fuyj0uu', '0001fee2-9arr-4ltv-8tax-0123456789ab'],
-      ['00fee11tax22arr33ltv44cac55fee66tax77arr88ltv99cac00fee11tax22arr3', 'c9fee1tax2arr3ltv4cac5fee', '9cac7457-1fee-4tax-8arr-2ltv3cac4fee'],
+      ['00FEE11CAC22FEE33CAC44FEE55CAC66FEE77CAC88FEE99CAC00FEE11CAC22FEE3', 'c9fee1tax2arr3ltv4cac5fee', '9cac7457-1fee-4tax-8arr-2ltv3cac4fee'],
     ]) {
       const row = { ...task, status: 'EXECUTED', outcomeEvidence: { v: 1, status: 'SUCCEEDED', fingerprint, claimKey, entity: { entityType: 'helpdesk_ticket', entityId }, principalChain: [{ userId: entityId }] } };
       expect(proposalViewForReader(row, false), fingerprint).toBe(row);
@@ -503,5 +503,58 @@ describe('third review of the #218 repairs: structured text is read as the propo
       const out = proposalViewForReader({ ...task, outcomeEvidence: { status, reason: 'invoice overdue' } }, false) as any;
       expect(out.outcomeEvidence, JSON.stringify(status).slice(0, 40)).toEqual({ reason: null });
     }
+  });
+});
+
+describe('fourth review of the #218 repairs: the structured reader fails closed', () => {
+  const task = (extra: object) => ({ actionType: 'CREATE_TASK', module: 'crm', title: 'Follow up', ...extra });
+  const circular: any = { note: 'plain' };
+  circular.self = circular;
+  it.each([
+    ['a BigInt', { note: 'plain', big: 1n }],
+    ['a cycle', circular],
+    ['a throwing toJSON', { toJSON() { throw new Error('no'); } }],
+  ])('RED-BEFORE (m1): a parameter that cannot be read (%s) makes the proposal financial', (_l, payload) => {
+    expect(isFinancialProposal(task({ payload }) as any)).toBe(true);
+    expect(isFinancialProposal(task({ executionResult: payload }) as any)).toBe(true);
+  });
+  it.each([
+    ['a squashed phrase', { summary: 'totaldue900usdforacmeinvoice2026paidlate' }],
+    ['a squashed file name', { payload: { file: 'acmeinvoice2026novemberfinalsignedcopy.pdf' } }],
+    ['an email local part', { payload: { to: 'invoice4500overdueacmeholdingsltd2026@x.io' } }],
+    ['a squashed key', { payload: { invoice4471overdueforacmeholdingslimited2026: true } }],
+    ['a figure glued into a run', { summary: `Total due 900${'a'.repeat(30)}` }],
+  ])('RED-BEFORE (m2): %s holding a money word is read, not stripped as an id', (_l, extra) => expect(isFinancialProposal(task(extra) as any)).toBe(true));
+  it('control (m2): a hex digest, in either case, and a cuid are still not read as money', () => {
+    for (const hash of ['a1b208cac7457d9e00112233445566778899aabbccddeeff0011223344556677', 'A1B208CAC7457D9E00112233445566778899AABBCCDDEEFF0011223344556677', 'sha256:08cac74570fee11223344556677889900aabbccddeeff00112233445566fee1'])
+      expect(isFinancialProposal(task({ payload: { fingerprint: hash, ref: 'cmzcku666tax29xx90fuyj0uu' } }) as any), hash).toBe(false);
+  });
+  it.each([
+    ['text under an id-named key', { payload: { noteId: 'balance owed 900' } }],
+    ['texts under an ids key', { payload: { noteIds: ['fee 500', 'refund 4000'] } }],
+    ['a worded id', { payload: { entityId: 'invoice-900-usd' } }],
+    ['an object under an ids key', { payload: { lineIds: [{ amount: 900, note: 'invoice' }] } }],
+  ])('RED-BEFORE (m3/m4): %s is read', (_l, extra) => expect(isFinancialProposal(task(extra) as any)).toBe(true));
+  it('RED-BEFORE (m3): money under an id-named key of the outcome evidence reduces it to its status', () => {
+    const row = { id: 'kap_t', status: 'FAILED', title: 'Open a ticket', actionType: 'CREATE_TASK', module: 'crm', outcomeEvidence: { status: 'FAILED', noteId: 'balance owed 900' } };
+    expect((proposalViewForReader(row, false) as any).outcomeEvidence).toEqual({ status: 'FAILED', reason: null });
+  });
+  it('control (m3/m4): real ids under id-named keys are not read, whatever letters and digits they hold', () => {
+    for (const payload of [{ contactId: 'cmzcku666tax29xx90fuyj0uu' }, { id: 'x1usd9cad2zz' }, { taskIds: ['tsk_1', 'kap_2x9cad'] }, { ownerId: '9cac7457-1fee-4tax-8arr-2ltv3cac4fee' }])
+      expect(isFinancialProposal(task({ payload }) as any), JSON.stringify(payload)).toBe(false);
+  });
+  it.each([
+    ['a control character in a key', { payload: { 'x\ncost': 5 } }],
+    ['a tab in a key', { payload: { 'a\tfee': 'yes' } }],
+    ['a literal backslash-n in text', { summary: 'see\\ncost 900' }],
+    ['JSON inside a JSON value', { executionResult: { output: JSON.stringify({ note: 'Summary\ncost 900' }) } }],
+    ['a lone surrogate before the word', { payload: { note: 'x\uD83Dfee waived' } }],
+    ['a zero-width space inside a word', { summary: 'in\u200bvoice 900' }],
+    ['a soft hyphen inside a word', { summary: 'in\u00advoice overdue' }],
+    ['fullwidth digits', { summary: 'total due \uFF19\uFF10\uFF10' }],
+  ])('RED-BEFORE (m5-m7): %s does not hide the money', (_l, extra) => expect(isFinancialProposal(task(extra) as any)).toBe(true));
+  it('control: ordinary multi-line notes, paths and addresses stay non-financial', () => {
+    for (const note of ['Line one\nLine two', 'C:\\new\\folder\\readme.txt', '12 Main Street\nPort of Spain', 'Call back\tafter 3pm'])
+      expect(isFinancialProposal(task({ payload: { note } }) as any), note).toBe(false);
   });
 });
