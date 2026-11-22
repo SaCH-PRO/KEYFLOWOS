@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
 import type {
@@ -17,6 +17,11 @@ function isKey(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }
 
+/** An entity id a where can use: absent (null or undefined: a business-level memory) or a non-empty string. */
+function isEntityId(value: unknown): value is string | null | undefined {
+  return value === undefined || value === null || isKey(value);
+}
+
 @Injectable()
 export class TemporalFlowMemoryService {
   private readonly logger = new Logger(TemporalFlowMemoryService.name);
@@ -28,7 +33,9 @@ export class TemporalFlowMemoryService {
 
   async createMemory(input: CreateTemporalFlowMemoryInput): Promise<TemporalFlowMemoryData> {
     // MEM-TEMPORAL-SCOPE: without a business the lookup and the rewrite below would have no tenant predicate.
-    if (!isKey(input.businessId)) throw new Error('Temporal memory needs a business');
+    if (!isKey(input.businessId)) throw new BadRequestException('Temporal memory needs a business');
+    // An operator object ({not}, {in}) as the entity id would match, and rewrite, another memory.
+    if (!isEntityId(input.entityId)) throw new BadRequestException('Memory key must be a non-empty string');
     const existing = await this.prisma.client.temporalFlowMemory.findFirst({
       where: {
         businessId: input.businessId,
@@ -95,6 +102,8 @@ export class TemporalFlowMemoryService {
     entityType: string,
     entityId?: string,
   ): Promise<TemporalFlowMemoryData[]> {
+    // MEM-TEMPORAL-SCOPE: an entity id that is not a string (an operator object, a list) matches nothing.
+    if (!isEntityId(entityId)) return [];
     return this.prisma.client.temporalFlowMemory.findMany({
       where: {
         businessId,

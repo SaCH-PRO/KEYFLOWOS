@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
 import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { TemporalFlowMemoryService } from '../../temporal-flow/temporal-flow-memory.service';
@@ -7,6 +7,19 @@ import type {
   TemporalFlowMemoryEntityType,
   TemporalFlowMemoryType,
 } from '../../temporal-flow/temporal-flow-memory.types';
+
+const KEY_ERROR = 'Memory key must be a non-empty string';
+
+/** MEM-TEMPORAL-SCOPE: a memory key from a command is used only as a non-empty string (never an operator object). */
+function requireKey(key: unknown): string {
+  if (typeof key !== 'string' || key.length === 0) throw new BadRequestException(KEY_ERROR);
+  return key;
+}
+
+/** Only string tags: a string is not spread into characters, a missing list adds none. */
+function stringTags(tags: unknown): string[] {
+  return Array.isArray(tags) ? tags.filter((t): t is string => typeof t === 'string') : [];
+}
 
 /**
  * Typed adapter that exposes the temporal-memory methods expected by
@@ -28,15 +41,17 @@ export class TemporalAdapterService {
     tags?: string[];
     importance?: string;
   }) {
+    const key = requireKey(input.key);
+    const tags = stringTags(input.tags);
     return this.temporal.createMemory({
       businessId: input.businessId,
       entityType: 'business',
-      entityId: input.key,
+      entityId: key,
       type: 'insight',
       content: JSON.stringify(input.value),
       sourceModule: 'key_cortex',
-      sourceEventIds: input.tags ?? [],
-      metadata: { ttlDays: input.ttlDays, importance: input.importance, key: input.key },
+      sourceEventIds: tags,
+      metadata: { ttlDays: input.ttlDays, importance: input.importance, key },
       confidence: input.importance === 'high' ? 0.9 : input.importance === 'low' ? 0.3 : 0.5,
     });
   }
@@ -45,7 +60,7 @@ export class TemporalAdapterService {
     const memories = await this.temporal.findByEntity(
       input.businessId,
       'business',
-      input.key,
+      requireKey(input.key),
     );
     return memories[0] ?? null;
   }
@@ -79,8 +94,7 @@ export class TemporalAdapterService {
       throw new NotFoundException('Memory not found');
     }
     const existingTags = Array.isArray(existing.sourceEventIds) ? existing.sourceEventIds : [];
-    // Only string tags: a string is not spread into characters, a missing list adds none.
-    const added = Array.isArray(input.tags) ? input.tags.filter((t): t is string => typeof t === 'string') : [];
+    const added = stringTags(input.tags);
     const tags = Array.from(new Set([...existingTags, ...added]));
     return this.temporal.updateMemory(input.businessId, input.memoryId, {
       sourceEventIds: tags,
