@@ -22,6 +22,11 @@ import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-
 import { HoneypotGuard, Honeypot } from '../../core/guards/honeypot.guard';
 import { sanitize, sanitizeObject } from '../../core/utils/sanitize';
 
+/** The member a request acts for, as AuthMiddleware attaches it (read by the revenue-read checks below). */
+function requestActor(req: Request): { id?: string; role?: string } | undefined {
+  return (req as Request & { user?: { id?: string; role?: string } }).user;
+}
+
 @Controller('site')
 export class SiteController {
   constructor(
@@ -36,16 +41,20 @@ export class SiteController {
     @Inject(StorefrontConversionService) private readonly conversionService: StorefrontConversionService,
   ) {}
 
+  // FU-SITE-ANALYTICS-REVENUE-SCOPE (D-100, D-234; security review M2): each
+  // row's revenue and orders are withheld from a member without revenue read.
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/conversion-funnel/daily')
   async getConversionFunnelDaily(
     @Param('businessId') businessId: string,
+    @Req() req: Request,
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('kind') kind?: 'overall' | 'product' | 'service',
     @Query('refId') refId?: string,
   ) {
-    return this.conversionService.getFunnel(businessId, {
+    const readsRevenue = await this.siteService.readsRevenue(businessId, requestActor(req));
+    return this.conversionService.getFunnelForReader(businessId, readsRevenue, {
       from: from ? new Date(from) : undefined,
       to: to ? new Date(to) : undefined,
       kind,
@@ -118,8 +127,7 @@ export class SiteController {
     @Req() req: Request,
     @Query('days') days?: string,
   ) {
-    const actor = (req as Request & { user?: { id?: string; role?: string } }).user;
-    return this.siteService.getAnalyticsForReader(businessId, actor, days ? parseInt(days, 10) : undefined);
+    return this.siteService.getAnalyticsForReader(businessId, requestActor(req), days ? parseInt(days, 10) : undefined);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -352,10 +360,14 @@ export class SiteController {
     });
   }
 
+  // FU-SITE-ANALYTICS-REVENUE-SCOPE (D-100, D-234; security review M1):
+  // totalRevenue, completedOrders and totalOrders are withheld from a member
+  // without revenue read; the fulfilment queue counts stay.
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/orders/summary')
-  getOrderSummary(@Param('businessId') businessId: string) {
-    return this.storeOrderService.getOrderSummary(businessId);
+  async getOrderSummary(@Param('businessId') businessId: string, @Req() req: Request) {
+    const readsRevenue = await this.siteService.readsRevenue(businessId, requestActor(req));
+    return this.storeOrderService.getOrderSummaryForReader(businessId, readsRevenue);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

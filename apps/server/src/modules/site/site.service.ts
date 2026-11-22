@@ -271,8 +271,17 @@ export class SiteService {
    * Bookings, catalog counts and storefront events stay for every member.
    */
   async getAnalyticsForReader(businessId: string, actor: ModuleLevelActor, days = 30) {
-    const readsRevenue = rankOf(await memberModuleLevel(this.prisma, businessId, actor, 'revenue')) >= LEVEL_RANK.read;
-    return this.analytics(businessId, days, readsRevenue);
+    return this.analytics(businessId, days, await this.readsRevenue(businessId, actor));
+  }
+
+  /**
+   * Whether the member a request acts for reads revenue in this business, by
+   * ModuleScopeGuard's reading (memberModuleLevel). The site routes that serve
+   * money beside storefront data (analytics, orders/summary,
+   * conversion-funnel/daily) withhold it below read (D-100, D-234).
+   */
+  async readsRevenue(businessId: string, actor: ModuleLevelActor): Promise<boolean> {
+    return rankOf(await memberModuleLevel(this.prisma, businessId, actor, 'revenue')) >= LEVEL_RANK.read;
   }
 
   /**
