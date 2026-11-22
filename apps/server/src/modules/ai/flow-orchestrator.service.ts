@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException, ConflictException, ForbiddenException, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException, ConflictException, ForbiddenException, HttpException, HttpStatus, ServiceUnavailableException } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { createHash, randomUUID } from 'crypto';
 import type { Prisma } from '@prisma/client';
@@ -30,7 +30,7 @@ import { BankMatchingService } from '../finance/bank-matching.service';
 import { FinanceCoaService } from '../finance/finance-coa.service';
 import { PostingService } from '../finance/posting.service';
 import { ContractsService } from '../contracts/contracts.service';
-import { ContractClauseService } from '../contracts/contract-clause.service';
+import { ContractClauseService, DocumentHostUnavailableError } from '../contracts/contract-clause.service';
 import { CommunicationsService } from '../communications/communications.service';
 import { KeyInboxService } from '../key-inbox/key-inbox.service';
 import { McpClientManagerService } from '../mcp/mcp-client-manager.service';
@@ -53,10 +53,11 @@ import { PlannerService } from './planner.service';
 import { getOpenAiToolDefinitions, getToolByName, RiskLevel, ToolFamily, wrapToolResult, FlowTool, CORTEX_TOOL_BRIDGE, isCortexBridgedTool } from './flow-tool-registry';
 import { KeyCortexToolRegistryService } from '../key-cortex/key-cortex-tool-registry.service';
 import { KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
+import { RetryableConflictException } from '../../core/utils/retryable-conflict';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { AiMemoryService } from './ai-memory.service';
 import { ModelGatewayService, GatewayMessage, StreamChunk } from './model-gateway.service';
-import { DocumentIntelligenceService } from './document-intelligence.service';
+import { DocumentIntelligenceService, DocumentExtractionFailedError } from './document-intelligence.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { AiMessageSenderService } from './ai-message-sender.service';
@@ -201,24 +202,34 @@ export interface FlowToolResult {
  * beside the failed FlowToolResult executeTool answers rather than on it, so the envelope the chat, a
  * plan run over HTTP and executeToolDirect's callers read keeps its shape, and executeToolDirectly
  * rethrows it with its status. executeToolDirectly used to rethrow a plain Error(result.error), so
- * ActionDispatcherService, its production caller (the plan queue), could not tell a member's 404/403
- * refusal from a failure: it retried the refusal and counted it toward that business's circuit for
- * the tool (five of a STAFF member's refused plans held the OWNER's call_create_task; QW-07b).
+ * ActionDispatcherService, its production caller (the plan queue), could not tell a member's refusal
+ * from a failure: it retried the refusal and counted it toward that business's circuit for the tool
+ * (five of a STAFF member's refused plans held the OWNER's call_create_task; QW-07b).
+ *
+ * W11-DISPATCH-REFUSAL-FINAL (owner ruling D-134): every status is carried, 400 and 409 included.
+ * W10's review CR-W10DS-1 had kept those two a plain Error (retried, counted), because a provider
+ * outage was then reported as 400 and ProjectsService.updateTask's stale write is a 409 worth
+ * retrying. A provider outage is a 503 since W11-PROVIDER-OUTAGE-503, and the one retryable conflict
+ * says so by its class (RetryableConflictException), so executeToolDirectly no longer has to guess
+ * from the status.
  */
 const TOOL_HTTP_EXCEPTIONS = new WeakMap<FlowToolResult, HttpException>();
 
 /**
- * W10-DISPATCH-STATUS review CR-W10DS-1 (D-73): the statuses executeToolDirectly does not hand the
- * dispatcher as the tool's HttpException, because in this codebase they do not say that asking again
- * gets the same answer. A 409 is also the optimistic-concurrency conflict that tells the caller to try
- * again (ProjectsService.updateTask's ConflictException, reached by projects_complete_task and
- * projects_update_task), and a 400 is also a provider that did not answer (GmailService.searchMessages'
- * BadRequestException('Gmail search failed (503)'), reached by reconcile_sweep_statements; the Drive,
- * Google and Graph clients do the same). The dispatcher takes every 4xx but 408 and 429 as final
- * (isToolRefusal), so these reach it as the plain Error they did before this packet: retried, and
- * counted toward that business's circuit for the tool, with the HttpException as the Error's cause.
+ * W11-DISPATCH-REFUSAL-FINAL reviews SEC-1, COR-1, SEC2-1, COR2-1 (owner ruling D-134). A 400 is the
+ * tool's final answer for the plan queue (answered once, counted toward no circuit), so a service that
+ * answers 400 both for a request it refuses and for something that did not answer (a document's host,
+ * the model that reads it) must not have the second taken as final. Those services mark it as the 400's
+ * cause; for a 400 so marked this answers the 503 the tool's case throws instead, with the service's own
+ * message (so the envelope's error text is what it was) and the 400 as its cause: a failure the plan
+ * queue retries and counts toward that business's circuit, as it did before 400 became final. Null for
+ * anything else.
  */
-const TOOL_STATUSES_RETRIED: ReadonlySet<number> = new Set([HttpStatus.BAD_REQUEST, HttpStatus.CONFLICT]);
+function keyToolOutage(e: unknown): ServiceUnavailableException | null {
+  if (!(e instanceof BadRequestException)) return null;
+  if (!(e.cause instanceof DocumentHostUnavailableError || e.cause instanceof DocumentExtractionFailedError)) return null;
+  return new ServiceUnavailableException(e.message, { cause: e });
+}
 
 export interface PendingConfirmation {
   toolCallId: string;
@@ -3436,6 +3447,18 @@ ${triage.standingContext}`;
     };
   }
 
+  /**
+   * Runs one KEY tool and answers its result, or throws. Callers: the plan queue's dispatcher
+   * (ActionDispatcherService, which retries and keeps a circuit per business and tool), an approved
+   * proposal's executor, the KEY-cortex efferent bridge and an inbound conversation (which read the
+   * thrown error's message only). What it throws tells the dispatcher what to do next:
+   *   - ActionNotClearedError: the action boundary answered (waiting for a human, or refused);
+   *   - the tool's own HttpException: a 4xx (but 408 and 429) is the tool's final answer, given once
+   *     and counted toward no circuit; a 408, 429 or 5xx is a failure, retried and counted;
+   *   - a plain Error: a failure, retried and counted. A RetryableConflictException arrives this
+   *     way, as the Error's cause (W11-DISPATCH-REFUSAL-FINAL, D-134).
+   * A call the tool's schema refuses (validateToolInput) is a 400, so it is final too.
+   */
   async executeToolDirectly(
     businessId: string,
     toolName: string,
@@ -3455,12 +3478,16 @@ ${triage.standingContext}`;
           result.notCleared.disposition as ActionNotClearedError['disposition'],
         );
       }
-      // W10-DISPATCH-STATUS (SEC-W9DC-1, D-73): the tool's own HttpException, its status and its
-      // message (result.error), so the dispatcher answers a 4xx refusal once and counts it toward no
-      // circuit (isToolRefusal). Review CR-W10DS-1 (D-73): a 400 or 409 (TOOL_STATUSES_RETRIED) and
-      // anything else stay the plain Error they were, a 400 or 409 with the HttpException as its cause.
+      // W10-DISPATCH-STATUS (SEC-W9DC-1, D-73) and W11-DISPATCH-REFUSAL-FINAL (D-134): the tool's own
+      // HttpException, its status and its message (result.error), so the dispatcher answers a 4xx
+      // refusal once and counts it toward no circuit (isToolRefusal: every 4xx but 408 and 429, a 400
+      // and a plain 409 included), and still retries and counts a 408, 429 or 5xx. The one exception
+      // is the conflict a service marks as worth asking again (RetryableConflictException, D-134:
+      // today ProjectsService.updateTask's stale write): it reaches the dispatcher as a plain Error,
+      // a failure it retries and counts, with the exception as its cause. An error that was no
+      // HttpException stays the plain Error it was.
       const httpException = TOOL_HTTP_EXCEPTIONS.get(result);
-      if (httpException && !TOOL_STATUSES_RETRIED.has(httpException.getStatus())) throw httpException;
+      if (httpException && !(httpException instanceof RetryableConflictException)) throw httpException;
       throw new Error(result.error ?? `Tool ${toolName} failed`, httpException ? { cause: httpException } : undefined);
     }
     return result.result;
@@ -3550,6 +3577,13 @@ ${triage.standingContext}`;
     }
   }
 
+  /**
+   * The call against the tool's own schema: every required field present, each named field of its
+   * type (a number or boolean sent as text is read). W11-DISPATCH-REFUSAL-FINAL (D-134): a call the
+   * schema refuses is a 400 with the message it always had, not a plain Error, so the plan queue
+   * answers it once and counts it toward no circuit; the envelope executeTool answers the chat and a
+   * plan run over HTTP carries the same message as before.
+   */
   private validateToolInput(toolName: string, args: Record<string, any>): void {
     const tool = getToolByName(toolName);
     if (!tool) return;
@@ -3558,30 +3592,30 @@ ${triage.standingContext}`;
       (field) => args[field] === undefined || args[field] === null || args[field] === '',
     );
     if (missing.length > 0) {
-      throw new Error(`Missing required fields for ${toolName}: ${missing.join(', ')}`);
+      throw new BadRequestException(`Missing required fields for ${toolName}: ${missing.join(', ')}`);
     }
 
     for (const [key, value] of Object.entries(args)) {
       const schema = tool.parameters.properties[key];
       if (!schema) continue;
       if (schema.type === 'string' && typeof value !== 'string') {
-        throw new Error(`Field "${key}" for ${toolName} must be a string`);
+        throw new BadRequestException(`Field "${key}" for ${toolName} must be a string`);
       }
       if (schema.type === 'number' && typeof value !== 'number') {
         const num = Number(value);
-        if (isNaN(num)) throw new Error(`Field "${key}" for ${toolName} must be a number`);
+        if (isNaN(num)) throw new BadRequestException(`Field "${key}" for ${toolName} must be a number`);
         args[key] = num;
       }
       if (schema.type === 'boolean' && typeof value !== 'boolean') {
         if (value === 'true') args[key] = true;
         else if (value === 'false') args[key] = false;
-        else throw new Error(`Field "${key}" for ${toolName} must be a boolean`);
+        else throw new BadRequestException(`Field "${key}" for ${toolName} must be a boolean`);
       }
       if (schema.type === 'array' && !Array.isArray(value)) {
-        throw new Error(`Field "${key}" for ${toolName} must be an array`);
+        throw new BadRequestException(`Field "${key}" for ${toolName} must be an array`);
       }
       if (schema.enum && typeof value === 'string' && !schema.enum.includes(value)) {
-        throw new Error(`Field "${key}" for ${toolName} must be one of: ${schema.enum.join(', ')}`);
+        throw new BadRequestException(`Field "${key}" for ${toolName} must be one of: ${schema.enum.join(', ')}`);
       }
     }
   }
@@ -7000,11 +7034,14 @@ ${triage.standingContext}`;
       }
       // === CONTRACTS / LEGAL ===
       case 'contract_extract_terms': {
+        // W11-DISPATCH-REFUSAL-FINAL review SEC2-1, COR2-1 (D-134): a model that failed to read the
+        // document is answered by ContractsService as the 400 it gives a document that is no contract.
+        // The failed read, marked as the 400's cause, is handed on as a 503 (keyToolOutage).
         const contract = await this.getContracts().extractTermsFromDocument(businessId, args.contractId, {
           sourceAssetId: args.sourceAssetId,
           sourceDocumentInstanceId: args.sourceDocumentInstanceId,
           sourceDriveFileId: args.sourceDriveFileId,
-        });
+        }).catch((e: unknown) => { throw keyToolOutage(e) ?? e; });
         return { contract };
       }
       case 'contract_list_tags': {
@@ -7016,9 +7053,13 @@ ${triage.standingContext}`;
         return { id: tag.id, name: tag.name };
       }
       case 'contract_extract_clauses': {
+        // W11-DISPATCH-REFUSAL-FINAL review SEC-1, COR-1 (D-134): ContractClauseService answers a
+        // document host that did not answer (5xx, 408, 429; the URL the call names or the contract's
+        // own asset) as a 400, as it answers a host that refused or a contract with no document. The
+        // outage, marked as the 400's cause, is handed on as a 503 (keyToolOutage).
         const result = await this.getContractClauses().extractClauses(businessId, args.contractId, {
           url: args.url,
-        });
+        }).catch((e: unknown) => { throw keyToolOutage(e) ?? e; });
         return result;
       }
       // === SUPPORT & COMMS ===
