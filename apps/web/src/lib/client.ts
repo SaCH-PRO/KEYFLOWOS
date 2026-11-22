@@ -5395,8 +5395,10 @@ export interface StorefrontConfig {
 export interface StoreAnalytics {
   period: { days: number; since: string };
   bookings: { total: number; inPeriod: number; last7Days: number };
-  invoices: { total: number; inPeriod: number };
-  revenue: { inPeriod: number };
+  /** FU-SITE-ANALYTICS-REVENUE-SCOPE (D-100, D-234): absent for a member without revenue read. */
+  invoices?: { total: number; inPeriod: number };
+  /** Paid revenue in the period; absent (not zero) for a member without revenue read (D-100). */
+  revenue?: { inPeriod: number };
   catalog: { products: number; services: number };
   storefrontEvents: Record<string, number>;
 }
