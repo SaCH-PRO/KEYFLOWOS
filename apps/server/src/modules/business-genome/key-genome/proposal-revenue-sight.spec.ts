@@ -358,3 +358,23 @@ describe('round-10 review repairs (both reviews: quadratic regressions; security
     ['a totalCount key', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { items: [], totalCount: 12, total_items: 3 } }],
   ])('%s is not', (_l, p) => expect(isFinancialProposal(p as any)).toBe(false));
 });
+
+describe('round-11 review repairs (both reviews: long keys, ellipsis; security M2, m1)', () => {
+  it('stays linear on whitespace after a colon or equals sign (security M2: 17 s before)', () => {
+    const inputs = ['total:' + ' '.repeat(100_000) + 'x', 'rate=' + ' '.repeat(100_000) + 'x', 'Total due:' + ' '.repeat(100_000) + 'x', 'total"=' + ' '.repeat(100_000) + 'x'];
+    const t0 = Date.now();
+    for (const summary of inputs) isFinancialProposal({ actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', summary } as any);
+    expect(Date.now() - t0).toBeLessThan(1500);
+  });
+
+  it.each([
+    ['a five-segment snake key', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { total_due_for_the_main_client: 900 } }],
+    ['a six-segment camel key', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { totalDueForTheCurrentMonth: 900 } }],
+    ['a long spent key', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { spent_on_ads_last_thirty_days: 900 } }],
+    ['a key past any bound (fails closed)', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { rate_for_a_b_c_d_e_f_g_h_i_j: 150 } }],
+    ['an ellipsis before an outstanding figure', { actionType: 'CREATE_TASK', module: 'crm', title: 'Chase...900 outstanding' }],
+    ['an ellipsis before a currency code', { actionType: 'CREATE_TASK', module: 'crm', title: 'Note...900 TTD' }],
+    ['doubled commas before a currency code', { actionType: 'CREATE_TASK', module: 'crm', title: 'Note,,900 usd' }],
+    ['a rate per hour key', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { rateHour: 150, rate_minute: 2 } }],
+  ])('%s is financial', (_l, p) => expect(isFinancialProposal(p as any)).toBe(true));
+});
