@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "3efa3821f4a72bf15d2bbd548b7236253c875e11",
-  "main_commit_date": "2026-11-22T21:49:42+00:00",
+  "main_sha": "ea0e19299875f901e3b1f4128e3318ee20f97983",
+  "main_commit_date": "2026-11-22T22:20:40+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -27,8 +27,8 @@
   ]
  },
  "summary": {
-  "packets": 233,
-  "points": 384.5,
+  "packets": 234,
+  "points": 385.5,
   "by_status": {
    "done": {
     "packets": 62,
@@ -41,8 +41,8 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 171,
-    "points": 291,
+    "packets": 172,
+    "points": 292,
     "pct_by_points": 75.7
    }
   },
@@ -68,8 +68,8 @@
    "3": {
     "done": 44,
     "in-progress": 0,
-    "todo": 32,
-    "total": 76
+    "todo": 33,
+    "total": 77
    },
    "4": {
     "done": 1,
@@ -107,7 +107,7 @@
    "prior-status-file+wave-2b-commit": 28,
    "code-commit-subject": 8,
    "compacted-commit": 7,
-   "no-evidence": 34
+   "no-evidence": 35
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -119,7 +119,7 @@
    "FU-KEY-MEMORY-MONEY-SIGHT",
    "FU-WA-ESCAPE-RACE"
   ],
-  "todo_with_dependencies_met": 38
+  "todo_with_dependencies_met": 39
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -494,6 +494,15 @@
    "priority": "P2",
    "size": "M",
    "lane": "web",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-RESEARCH-CORPUS-YAML",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "docs",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -4526,6 +4535,20 @@
    ],
    "title": "KEY's overdue list and reminder drafts exclude never-sent invoices (D-260)",
    "deps_met": false
+  },
+  {
+   "id": "FU-RESEARCH-CORPUS-YAML",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "docs",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "The research ledger RESEARCH-CORPUS.yaml parses, and a test keeps it parsing",
+   "deps_met": true
   }
  ]
 }
