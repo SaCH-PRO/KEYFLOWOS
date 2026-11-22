@@ -462,12 +462,9 @@ export class KeyCortexGateway
   private async approvalResultForReader(clientInfo: { businessId: string; userId: string; role?: string }, result: KeyCortexApprovalRequest) {
     const { financial, ...whole } = result;
     if (financial === false) return whole;
-    let readsRevenue = false;
-    try {
-      readsRevenue = await this.approvalService.readerReadsRevenue(clientInfo.businessId, clientInfo.userId, clientInfo.role);
-    } catch {
-      readsRevenue = false;
-    }
+    const readsRevenue = await Promise.resolve()
+      .then(() => this.approvalService.readerReadsRevenue(clientInfo.businessId, clientInfo.userId, clientInfo.role))
+      .catch(() => false);
     return readsRevenue ? whole : { id: result.id, status: result.status };
   }
 

@@ -86,7 +86,7 @@ export class TemporalFlowService {
     if (proposals.length === 0) return events;
     if (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined)) return events;
     const ids = [...new Set(proposals.map((e) => e.entityId).filter((id): id is string => typeof id === 'string' && !!id))];
-    let rows = new Map<string, Record<string, unknown>>();
+    let rows: Map<string, Record<string, unknown>>;
     try {
       const found = ids.length
         ? await this.prisma.client.keyActionProposal.findMany({
