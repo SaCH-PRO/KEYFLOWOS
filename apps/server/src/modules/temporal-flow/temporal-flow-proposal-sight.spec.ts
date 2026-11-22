@@ -226,3 +226,16 @@ describe('confirmation review of the #218 repairs: the paged timeline read', () 
     expect((findMany.mock.calls[0] as any[])[0].skip).toBeUndefined();
   });
 });
+
+describe('third review of the #218 repairs: an event\'s execution result is read as the proposal content is', () => {
+  const TASK = { id: 'kap_task', actionType: 'CREATE_TASK', module: 'crm', toolName: null, title: 'Call Kerry back' };
+  const list = async (executionResult: unknown) => {
+    const rows = [{ id: 'ev', businessId: 'biz_1', entityType: 'key_action_proposal', entityId: 'kap_task', title: 'KEY action executed', description: null, payload: { actionType: 'CREATE_TASK', executionResult }, metadata: {} }];
+    const prisma = { client: { temporalFlowEvent: { findMany: vi.fn(async () => rows) }, keyActionProposal: { findMany: vi.fn(async () => [TASK]) }, genomeRecommendation: { findMany: vi.fn(async () => []) }, membership: { findUnique: vi.fn(async () => ({ role: 'STAFF', permissionScopes: { revenue: 'none' } })) } } };
+    return ((await (new TemporalFlowService(prisma as any) as any).list('biz_1', {}, { id: 'blind', role: 'USER' })) as any[]).map((e) => e.id);
+  };
+  it.each(['done\nbalance 900', 'ok\tfee waived'])('RED-BEFORE (security m1): a result note reading %j withholds the event', async (note) => expect(await list({ note })).toEqual([]));
+  it('RED-BEFORE (correctness m1): a result naming rows by id is served, whatever letters the ids hold', async () => {
+    expect(await list({ entityType: 'task', entityId: 'cmzcku666tax29xx90fuyj0uu', requestId: '9cac7457-1fee-4tax-8arr-2ltv3cac4fee', fingerprint: 'a1b208cac7457d9e00112233445566778899aabbccddeeff0011223344556677' })).toEqual(['ev']);
+  });
+});

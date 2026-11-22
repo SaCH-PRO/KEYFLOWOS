@@ -475,3 +475,33 @@ describe('confirmation review of the #218 repairs: the compensation words fail c
     expect(proposalViewForReader(row, false)).toBe(row);
   });
 });
+
+describe('third review of the #218 repairs: structured text is read as the proposal content is', () => {
+  const task = { id: 'kap_t', status: 'FAILED', title: 'Open a ticket', actionType: 'CREATE_TASK', module: 'crm' };
+  it.each(['Could not record the note:\nfee waived for this client', 'Step 2 failed:\tbalance is 900', 'Tool said:\nowed since March', 'Total\n900', 'x\r\n500 usd'])(
+    'RED-BEFORE (security m1): a line break or tab before the money word does not hide it in the evidence copy (%j)',
+    (msg) => {
+      const out = proposalViewForReader({ ...task, failureReason: msg, outcomeEvidence: { v: 1, status: 'FAILED', reason: msg, entity: null } }, false) as any;
+      expect(out.failureReason).toBeNull();
+      expect(out.outcomeEvidence).toEqual({ status: 'FAILED', reason: null });
+    },
+  );
+  it.each(['Line one\nfee waived', 'a\nbalance 900', 'done\ttotal due 40'])('RED-BEFORE (security m1): a multi-line parameter that states money makes the proposal financial (%j)', (note) => {
+    expect(isFinancialProposal({ actionType: 'CREATE_TASK', module: 'crm', title: 'Follow up', payload: { note } })).toBe(true);
+  });
+  it('RED-BEFORE (correctness m1): ids and fingerprints in real success evidence are not read as money', () => {
+    for (const [fingerprint, entityId, claimKey] of [
+      ['a1b208cac7457d9e00112233445566778899aabbccddeeff0011223344556677', 'cmzcku666tax29xx90fuyj0uu', '0001fee2-9arr-4ltv-8tax-0123456789ab'],
+      ['00fee11tax22arr33ltv44cac55fee66tax77arr88ltv99cac00fee11tax22arr3', 'c9fee1tax2arr3ltv4cac5fee', '9cac7457-1fee-4tax-8arr-2ltv3cac4fee'],
+    ]) {
+      const row = { ...task, status: 'EXECUTED', outcomeEvidence: { v: 1, status: 'SUCCEEDED', fingerprint, claimKey, entity: { entityType: 'helpdesk_ticket', entityId }, principalChain: [{ userId: entityId }] } };
+      expect(proposalViewForReader(row, false), fingerprint).toBe(row);
+    }
+  });
+  it('RED-BEFORE (m2/m6): an evidence status that is not a short money-free string is not kept', () => {
+    for (const status of [{ amount: 900 }, 'Paid $500 commission', 'x'.repeat(200)]) {
+      const out = proposalViewForReader({ ...task, outcomeEvidence: { status, reason: 'invoice overdue' } }, false) as any;
+      expect(out.outcomeEvidence, JSON.stringify(status).slice(0, 40)).toEqual({ reason: null });
+    }
+  });
+});
