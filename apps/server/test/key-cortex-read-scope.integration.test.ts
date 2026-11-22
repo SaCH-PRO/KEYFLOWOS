@@ -1061,3 +1061,191 @@ describe('W11-CORTEX-INSIGHT-QUERIES (SEC-W11CRR-2): the REAL insight service an
     }
   });
 });
+
+describe('W11-CORTEX-SESSION-SNAPSHOT-SCOPE (KC-SEC-3, D-57, D-100): POST cortex/sessions and POST cortex/chat answer no money figure of the KEY context snapshot to a member without revenue read', () => {
+  const S = {
+    biz: `${P}bizS`,
+    owner: `${P}s_owner`,
+    staffNoRevenue: `${P}s_staff_norev`,
+    staffRevenueRead: `${P}s_staff_revread`,
+    staffDefault: `${P}s_staff_default`, // STAFF, no explicit map: the role's defaults
+    adminNoScopes: `${P}s_admin_noscopes`, // ADMIN, an explicit map naming no module (JSON array)
+    paid: `${P}s_inv_paid`,
+  };
+  /** The PAID invoice total the real snapshot sums (keyMetrics.totalRevenue). */
+  const PAID_TOTAL = 43219.37;
+  /** The money figures the chat pipeline adds to the snapshot from the V2 context (enrichSnapshotFromV2). */
+  const OUTSTANDING = 87653.19;
+  let app3: any;
+  let createdSessions = 0;
+
+  const postSession = (user: string) =>
+    request(app3.getHttpServer()).post('/api/v1/cortex/sessions').set(HEADER, user).send({ businessId: S.biz });
+  const postChat = (user: string) =>
+    request(app3.getHttpServer()).post('/api/v1/cortex/chat').set(HEADER, user).send({ businessId: S.biz, text: 'how are we doing' });
+
+  beforeAll(async () => {
+    const { Test } = await import('@nestjs/testing');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+    const { ValidationPipe } = await import('@nestjs/common');
+    const { AuthGuard } = await import('../src/core/auth/auth.guard');
+    const { BusinessGuard } = await import('../src/core/auth/business.guard');
+    const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
+    const { KeyCortexController } = await import('../src/modules/key-cortex/key-cortex.controller');
+    const { KeyCortexContextService } = await import('../src/modules/key-cortex/key-cortex-context.service');
+    const { KeyCortexConversationService } = await import('../src/modules/key-cortex/key-cortex-conversation.service');
+    const { KeyCortexReasoningService } = await import('../src/modules/key-cortex/key-cortex-reasoning.service');
+    const { KeyCortexSessionService } = await import('../src/modules/key-cortex/key-cortex-session.service');
+
+    // The snapshot cache always misses, so every snapshot is assembled from the seeded rows.
+    const redis = { get: async () => null, set: async () => undefined, del: async () => undefined };
+    let context: InstanceType<typeof KeyCortexContextService>;
+    const conversation = {
+      createSession: async (businessId: string, userId: string) => {
+        createdSessions += 1;
+        return { id: `${P}s_session_${createdSessions}`, businessId, userId, status: 'active', persona: 'jarvis', messages: [] };
+      },
+      getSession: async () => null,
+    };
+    // The chat answer carries the snapshot it used, as KeyCortexQueryPipelineService returns it:
+    // the real snapshot, enriched with the V2 commerce figures.
+    const reasoning = {
+      processQuery: async (q: { businessId: string }) => {
+        const snapshot = await context.buildContextSnapshot(q.businessId);
+        snapshot.keyMetrics.outstandingRevenue = OUTSTANDING;
+        return { message: { role: 'assistant', content: 'v97o chat answer' }, actions: [], contextUsed: snapshot, suggestions: [] };
+      },
+    };
+
+    const moduleRef = await Test.createTestingModule({
+      controllers: [KeyCortexController],
+      providers: [
+        PrismaService,
+        AuthGuard,
+        BusinessGuard,
+        ModuleScopeGuard,
+        {
+          provide: KeyCortexContextService,
+          useFactory: (prisma: InstanceType<typeof PrismaService>) => new KeyCortexContextService(prisma, redis as any),
+          inject: [PrismaService],
+        },
+        { provide: KeyCortexConversationService, useValue: conversation },
+        { provide: KeyCortexReasoningService, useValue: reasoning },
+        { provide: KeyCortexSessionService, useValue: { findSession: async () => null } },
+      ],
+    })
+      .useMocker((token: any) => {
+        const name = typeof token === 'function' ? token.name : String(token);
+        return OFF_BOUNDARY.has(name) || name === 'KeyCortexContextV2Service' || name === 'KeyCortexInsightService' ? {} : undefined;
+      })
+      .compile();
+    context = moduleRef.get(KeyCortexContextService);
+
+    app3 = moduleRef.createNestApplication();
+    app3.use(async (req: any, _res: any, next: any) => {
+      const header = req.headers[HEADER];
+      const id = typeof header === 'string' ? header : undefined;
+      if (id && id.startsWith(P)) {
+        const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+        if (user) req.user = { id: user.id, email: user.email, role: user.role };
+      }
+      next();
+    });
+    app3.useGlobalFilters(new GlobalHttpExceptionFilter());
+    app3.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    await app3.init();
+
+    for (const id of [S.owner, S.staffNoRevenue, S.staffRevenueRead, S.staffDefault, S.adminNoScopes]) {
+      await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role: 'USER' } });
+    }
+    await db.business.create({ data: { id: S.biz, name: 'V97O Biz S', ownerId: S.owner } });
+    for (const m of [
+      { userId: S.owner, businessId: S.biz, role: 'OWNER' },
+      { userId: S.staffNoRevenue, businessId: S.biz, role: 'STAFF', permissionScopes: { revenue: 'none' } },
+      { userId: S.staffRevenueRead, businessId: S.biz, role: 'STAFF', permissionScopes: { revenue: 'read' } },
+      { userId: S.staffDefault, businessId: S.biz, role: 'STAFF' },
+      { userId: S.adminNoScopes, businessId: S.biz, role: 'ADMIN', permissionScopes: [] },
+    ]) {
+      await db.membership.create({ data: { id: `${P}m_${m.userId.slice(P.length)}`, ...m } });
+    }
+    await db.contact.create({ data: { id: `${P}s_c_client`, businessId: S.biz, firstName: 'Sasha', status: 'CLIENT' } });
+    await db.invoice.create({
+      data: { id: S.paid, businessId: S.biz, contactId: `${P}s_c_client`, invoiceNumber: `${P}S-1`, total: PAID_TOTAL, subtotal: PAID_TOTAL, status: 'PAID' },
+    });
+    await db.invoice.create({
+      data: { id: `${P}s_inv_sent`, businessId: S.biz, contactId: `${P}s_c_client`, invoiceNumber: `${P}S-2`, total: 50, subtotal: 50, status: 'SENT' },
+    });
+  }, 180_000);
+
+  afterAll(async () => {
+    if (app3) await app3.close();
+  });
+
+  const MONEY_KEYS = ['totalRevenue', 'outstandingRevenue'];
+  const noMoney = (snapshot: any) => {
+    expect(snapshot, 'a snapshot shape still answers').toBeTruthy();
+    for (const k of MONEY_KEYS) expect(snapshot.keyMetrics?.[k], `keyMetrics.${k}`).toBeUndefined();
+    // SEC review of this packet (finding 2): the count of unpaid invoices is a receivables
+    // signal (D-100), withheld as ai-advisor and the business graph withhold overdue counts.
+    expect(snapshot, 'pendingInvoices').not.toHaveProperty('pendingInvoices');
+    const text = JSON.stringify(snapshot);
+    for (const figure of [String(PAID_TOTAL), String(OUTSTANDING)]) expect(text).not.toContain(figure);
+  };
+
+  it('fixture sanity (real rows): the real snapshot sums the PAID invoice of bizS', async () => {
+    const res = await postSession(S.owner);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.contextSnapshot.keyMetrics.totalRevenue).toBe(PAID_TOTAL);
+  });
+
+  it.each([
+    ['a STAFF member holding revenue none', S.staffNoRevenue],
+    ['an ADMIN whose explicit scope map names no module (revenue none)', S.adminNoScopes],
+  ])('KC-SEC-3 RED-BEFORE: POST sessions answers %s the session and its snapshot without totalRevenue or any money figure', async (_label, user) => {
+    const res = await postSession(user);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.id).toMatch(new RegExp(`^${P}s_session_`));
+    noMoney(res.body.contextSnapshot);
+    // The figures that are not money stay (genome, counts, team).
+    expect(res.body.contextSnapshot.businessId).toBe(S.biz);
+    expect(typeof res.body.contextSnapshot.keyMetrics.openTasks).toBe('number');
+  });
+
+  it.each([
+    ['the OWNER', S.owner],
+    ['a STAFF member holding revenue read', S.staffRevenueRead],
+    ['a STAFF member on the role defaults (revenue read)', S.staffDefault],
+  ])('KC-SEC-3 control: POST sessions answers %s the snapshot with totalRevenue', async (_label, user) => {
+    const res = await postSession(user);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.contextSnapshot.keyMetrics.totalRevenue).toBe(PAID_TOTAL);
+    expect(res.body.contextSnapshot.pendingInvoices).toBe(1);
+  });
+
+  it('KC-SEC-3 control: a user with no membership is refused and is answered no snapshot', async () => {
+    const res = await postSession(ID.nonMember);
+    expect(res.status).toBe(403);
+    expect(JSON.stringify(res.body)).not.toContain(String(PAID_TOTAL));
+  });
+
+  it.each([
+    ['a STAFF member holding revenue none', S.staffNoRevenue],
+    ['an ADMIN whose explicit scope map names no module (revenue none)', S.adminNoScopes],
+  ])('KC-SEC-3 RED-BEFORE (every other route that returns the snapshot): POST chat answers %s the reply with a contextUsed holding no money figure', async (_label, user) => {
+    const res = await postChat(user);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.message.content).toBe('v97o chat answer');
+    noMoney(res.body.contextUsed);
+  });
+
+  it.each([
+    ['the OWNER', S.owner],
+    ['a STAFF member holding revenue read', S.staffRevenueRead],
+  ])('KC-SEC-3 control: POST chat answers %s the contextUsed with its money figures', async (_label, user) => {
+    const res = await postChat(user);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.contextUsed.keyMetrics.totalRevenue).toBe(PAID_TOTAL);
+    expect(res.body.contextUsed.keyMetrics.outstandingRevenue).toBe(OUTSTANDING);
+  });
+});
