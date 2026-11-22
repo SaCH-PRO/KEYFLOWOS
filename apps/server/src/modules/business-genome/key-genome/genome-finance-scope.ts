@@ -26,7 +26,21 @@ import type { ListGenomeRecommendationsQuery, ListGenomeSignalsQuery } from './k
  * which D-131's map opens to members holding settings read, apply the same
  * projection the REST routes apply (one rule, two doors).
  */
-const FINANCE_FIELD = /financ/i;
+/**
+ * FU-GENOME-REVENUE-CLASSIFIER (owner rulings D-233, D-234; D-128 widened, D-100). The rows a reader
+ * without revenue read is not served are classified by provenance and meaning, not by a "financ" label
+ * alone (the rule before, which let SALES rows and unlabelled money rows through):
+ *   - money or sales meaning in any field the writer files: its module, source type, section, domain,
+ *     event type or signal type (finance, revenue, sales, cash, commerce, payments, invoices, pricing,
+ *     profit, billing, collections, refunds, payroll, treasury, margins, lifetime value, acquisition cost,
+ *     costs and budgets, and the cross-domain composite, which averages the finance health score);
+ *   - a row with nothing to classify it by (no section and no domain, or only 'general') fails closed.
+ * The names of the three predicates are kept, so every reader (the REST routes, the organ tools, the KEY
+ * prompt memory and the KEY chat genome) applies the same rule, and the actions on such a row keep
+ * needing revenue write (D-128).
+ */
+const MONEY_FIELD =
+  /financ|revenue|sales|\bsale\b|cash|commerce|payment|invoice|pric|profit|billing|collection|refund|payroll|treasury|margin|lifetime_value|\bltv\b|\bcac\b|acquisition_cost|\bcost|budget|spend|cross_domain|money/i;
 
 export type GenomeRowFields = {
   sourceModule?: string | null;
@@ -34,30 +48,58 @@ export type GenomeRowFields = {
   section?: string | null;
   domain?: string | null;
   eventType?: string | null;
+  signalType?: string | null;
 };
 
-function mentionsFinance(...values: Array<string | null | undefined>): boolean {
-  return values.some((v) => typeof v === 'string' && FINANCE_FIELD.test(v));
+function mentionsMoney(...values: Array<string | null | undefined>): boolean {
+  return values.some((v) => typeof v === 'string' && MONEY_FIELD.test(v));
 }
 
-/** A genome signal the finance genome (or any writer filing under finance) wrote: D-128. */
+/** Nothing to classify a row by: no value, or only the 'general' placeholder. */
+function unclassified(...values: Array<string | null | undefined>): boolean {
+  return values.every((v) => typeof v !== 'string' || v.trim() === '' || /^general$/i.test(v.trim()));
+}
+
+/** A genome signal with money or sales provenance, or with nothing to classify it by: D-128, D-234. */
 export function isFinanceSignal(row: GenomeRowFields): boolean {
-  return mentionsFinance(row.sourceModule, row.section, row.domain);
+  return mentionsMoney(row.sourceModule, row.section, row.domain, row.signalType) || unclassified(row.section, row.domain);
 }
 
-/** A genome recommendation in the finance domain (FINANCIAL): D-128. */
+/** A genome recommendation in a money or sales domain (FINANCIAL, SALES, ...), or with no domain: D-128, D-234. */
 export function isFinanceRecommendation(row: GenomeRowFields): boolean {
-  return mentionsFinance(row.domain);
+  return mentionsMoney(row.domain) || unclassified(row.domain);
 }
 
-/** A memory event that carries a finance or composite money signal: D-128, D-100. */
+/** A memory event that carries a money, sales or composite signal, or that has nothing to classify it by: D-128, D-100, D-234. */
 export function isMoneyMemoryEvent(row: GenomeRowFields): boolean {
   return (
-    mentionsFinance(row.sourceType, row.domain, row.section) ||
+    mentionsMoney(row.sourceType, row.domain, row.section, row.eventType) ||
     row.sourceType === 'CROSS_DOMAIN_GENOME' ||
     row.domain === 'CROSS_DOMAIN' ||
-    row.eventType === 'CUSTOMER_SALES_SNAPSHOT_COMPUTED'
+    unclassified(row.domain, row.section)
   );
+}
+
+/**
+ * D-233: the DNA dimensions a reader without revenue read is shown. A finance or sales score is finance
+ * even with no currency in it, and a key that is not listed here (a money dimension, a key written from
+ * a KEY action type) is withheld: the list fails closed. Marketing stays: it is the marketing module's
+ * own score (the ruling's separable non-financial guidance); its acquisition-cost targets are withheld
+ * with the marketing-growth figures, not through this score.
+ */
+const NON_MONEY_DNA_KEYS: ReadonlySet<string> = new Set([
+  'execution', 'strategy', 'operations', 'marketing', 'founder', 'vision', 'business', 'market', 'legal',
+  'growth', 'technology', 'risk', 'customer_success', 'product', 'talent',
+]);
+
+export function dnaScoresForReader<T extends Record<string, unknown>>(scores: T | null | undefined, readsRevenue: boolean): Partial<T> {
+  if (!scores) return {};
+  if (readsRevenue) return scores;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(scores)) {
+    if (NON_MONEY_DNA_KEYS.has(key.toLowerCase())) out[key] = value;
+  }
+  return out as Partial<T>;
 }
 
 export function firstN<T>(rows: T[], limit: number | undefined): T[] {

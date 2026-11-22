@@ -60,8 +60,8 @@ function genome() {
       { id: `${P}rec_ops`, title: OPS.rec, description: 'ops', impact: 'high', category: 'OPERATIONS', confidence: 0.9, genomeScore: 8 },
     ],
     signals: [
-      { id: `${P}sig_fin`, type: 'risk', message: FIN.signal, module: 'finance', severity: 'high', createdAt: new Date() },
-      { id: `${P}sig_ops`, type: 'risk', message: OPS.signal, module: 'operations', severity: 'high', createdAt: new Date() },
+      { id: `${P}sig_fin`, type: 'risk', message: FIN.signal, module: 'finance', section: 'FINANCIAL', domain: 'finance', severity: 'high', createdAt: new Date() },
+      { id: `${P}sig_ops`, type: 'risk', message: OPS.signal, module: 'operations', section: 'OPERATIONS_DELIVERY', domain: 'operations', severity: 'high', createdAt: new Date() },
       // As key-proactive-engine files it: another module, section FINANCE (review BLOCKING-1).
       { id: `${P}sig_auto_fin`, type: 'risk', message: FIN.autoSignal, module: 'key_autonomy', section: 'FINANCE', domain: 'cashflow', severity: 'high', createdAt: new Date() },
     ],

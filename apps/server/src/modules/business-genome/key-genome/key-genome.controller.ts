@@ -929,11 +929,15 @@ export class KeyGenomeController {
     });
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write') // D-234 with D-128 (option a): sales-derived rows are finance
   @Post('customer-sales/signals/generate')
   async generateCustomerSalesSignals(@Param('businessId') businessId: string) {
     return this.customerSalesGenome.generateCustomerSalesSignals(businessId);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write') // D-234 with D-128 (option a): sales-derived rows are finance
   @Post('customer-sales/recommendations/generate')
   async generateCustomerSalesRecommendations(@Param('businessId') businessId: string) {
     return this.customerSalesGenome.generateCustomerSalesRecommendations(businessId);

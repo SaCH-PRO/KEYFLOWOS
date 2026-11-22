@@ -581,7 +581,7 @@ describe('W11-GENOME-FINANCE-SCOPE (D-128): the other key-genome routes are unch
     expect((res.body as any[]).map((d) => [d.id, d.code])).toEqual([[ID.department, 'OPERATIONS']]);
   }, 30_000);
 
-  it('[GFS-08] the module-scoped handlers are exactly the finance, cross-domain, customer-sales snapshot, outcome and memory-summary routes (revenue read; revenue write on the six that write the finance metrics, signals or recommendations or recompute the finance snapshot); the other 67 routes carry none', () => {
+  it('[GFS-08] the module-scoped handlers are exactly the finance, cross-domain, customer-sales snapshot, outcome and memory-summary routes (revenue read; revenue write on the six that write the finance metrics, signals or recommendations or recompute the finance snapshot, and (D-234) on the two that generate the customer-sales signals and recommendations); the other 65 routes carry none', () => {
     const proto = controllerClass.prototype;
     const handlers = Object.getOwnPropertyNames(proto).filter(
       (name) => name !== 'constructor' && Reflect.getMetadata('path', proto[name]) !== undefined,
@@ -616,6 +616,9 @@ describe('W11-GENOME-FINANCE-SCOPE (D-128): the other key-genome routes are unch
       getCustomerSalesSnapshot: read,
       computeCustomerSalesSnapshot: read,
       listCustomerSalesSnapshots: read,
+      // FU-GENOME-REVENUE-CLASSIFIER (D-234 with D-128 option a): the sales-derived signals and recommendations.
+      generateCustomerSalesSignals: write,
+      generateCustomerSalesRecommendations: write,
       // GFS-R2: outcome health scores (the composite's) and the memory summary.
       getRecommendationOutcome: read,
       listRecommendationOutcomes: read,
