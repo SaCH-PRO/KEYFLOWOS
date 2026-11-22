@@ -828,9 +828,10 @@ export class AiController {
     role?: string,
   ) {
     // Canonical path: resolve directly from KeyActionProposal.
-    // FU-PROPOSAL-REVENUE-SIGHT (D-238, round 3): the resolve keeps its own authority (assertCanResolveApproval, the
-    // orchestrator); a resolver without revenue read is answered a financial proposal's redacted view. The proposal is
-    // read as before, so a financial proposal never falls through to the legacy aiApprovalItem path.
+    // FU-PROPOSAL-REVENUE-SIGHT (D-238, rounds 3-4): the resolve keeps its own authority (assertCanResolveApproval, the
+    // orchestrator); every branch that resolves a proposal (canonical, deferred, the legacy aiApprovalItem migration)
+    // answers a resolver without revenue read a financial proposal's redacted view. The proposal is read as before, so
+    // a financial proposal never falls through to the legacy aiApprovalItem path.
     let proposal: any;
     try {
       proposal = await this.proposals.get(businessId, approvalId);
@@ -911,7 +912,8 @@ export class AiController {
       },
     });
 
-    return resolved;
+    // D-238 (round 4, correctness MAJOR-1): the migrated proposal is answered as the resolver may see it.
+    return this.proposals.viewForReader(businessId, resolved, reader);
   }
 
   private async migrateAiApprovalItemToProposal(

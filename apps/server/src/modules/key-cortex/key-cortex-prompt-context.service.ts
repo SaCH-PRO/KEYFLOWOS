@@ -7,7 +7,7 @@ import { UnifiedMemoryRetrievalService } from './unified-memory-retrieval.servic
 import { KeyCortexLearningService } from './key-cortex-learning.service';
 import { GENOME_ROW_METADATA_KEY } from './unified-memory.types';
 import type { MemoryFragment, MemorySourceType } from './unified-memory.types';
-import { isFinancialProposal, isMoneyLabel, isMoneyMemoryEvent, type ProposalFields } from '../business-genome/key-genome/genome-finance-scope';
+import { financialProposalsWithProvenance, isFinancialProposal, isMoneyLabel, isMoneyMemoryEvent, PROPOSAL_CLASSIFY_SELECT, type ProposalFields } from '../business-genome/key-genome/genome-finance-scope';
 import {
   CortexQuery,
   CortexContextSnapshot,
@@ -548,14 +548,16 @@ async function financialProposalRecordIds(
   const withheld = new Set<string>();
   if (proposals.length === 0) return withheld;
   const ids = [...new Set(proposals.flatMap(proposalIdsOf))];
-  let rows = new Map<string, ProposalFields>();
+  // Round 4 (security minor 2): the row on every classify field, judged with the recommendation it was bridged from.
+  let rows = new Map<string, boolean>();
   if (ids.length > 0) {
     try {
-      const found = (await prisma?.client.keyActionProposal.findMany({
+      const found = ((await prisma?.client.keyActionProposal.findMany({
         where: { businessId, id: { in: ids } },
-        select: { id: true, actionType: true, module: true, toolName: true, title: true, summary: true, rationale: true, payload: true, inputPayload: true, affectedEntities: true },
-      })) ?? [];
-      rows = new Map(found.map((r: { id: string } & ProposalFields) => [r.id, r]));
+        select: PROPOSAL_CLASSIFY_SELECT,
+      })) ?? []) as Array<{ id: string } & ProposalFields>;
+      const flags = await financialProposalsWithProvenance(prisma, businessId, found);
+      rows = new Map(found.map((r, i) => [r.id, flags[i]]));
     } catch (err) {
       logger.warn(`[${logTag}] the KEY proposals behind the proposal records could not be read; they are withheld: ${err instanceof Error ? err.message : String(err)}`);
       for (const f of proposals) withheld.add(f.id);
@@ -563,12 +565,12 @@ async function financialProposalRecordIds(
     }
   }
   for (const f of proposals) {
-    const row = proposalIdsOf(f).map((id) => rows.get(id)).find((r) => r !== undefined);
+    const rowFinancial = proposalIdsOf(f).map((id) => rows.get(id)).find((r) => r !== undefined);
     const own = proposalFieldsOfRecord(f);
     // D-238 ("directly or indirectly"): withheld when the proposal row or the record's own fields (security review
     // MINOR-1: a record naming a money tool under a non-financial proposal's id) are financial, when neither can be
     // read, or when the record's own text (a rejection reason, a title or summary) states money.
-    const financial = row || own ? (row ? isFinancialProposal(row) : false) || (own ? isFinancialProposal(own) : false) : true;
+    const financial = rowFinancial !== undefined || own ? rowFinancial === true || (own ? isFinancialProposal(own) : false) : true;
     if (financial || recordTextMentionsMoney(f)) withheld.add(f.id);
   }
   return withheld;

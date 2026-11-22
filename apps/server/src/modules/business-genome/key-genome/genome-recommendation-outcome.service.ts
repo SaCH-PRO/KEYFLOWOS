@@ -1,3 +1,4 @@
+import { financialProposalsWithProvenance, proposalTextStatesMoney, type ProposalFields } from './genome-finance-scope';
 import { Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { GenomeCrossDomainService } from './genome-cross-domain.service';
@@ -498,9 +499,14 @@ export class GenomeRecommendationOutcomeService {
     };
   }
 
+  /**
+   * `reader.readsRevenue === false` (D-238, round 4): a financial linked KEY proposal's execution result is withheld, and
+   * a failure reason that states money; its status stays (D-226). Left out, the internal callers get it whole.
+   */
   async getExecutionStatus(
     businessId: string,
     recommendationId: string,
+    reader?: { readsRevenue: boolean },
   ): Promise<GenomeRecommendationExecutionStatus | null> {
     const outcome = await this.prisma.client.genomeRecommendationOutcome.findFirst({
       where: { businessId, recommendationId },
@@ -536,6 +542,11 @@ export class GenomeRecommendationOutcomeService {
         executedBy = proposal.executedBy ?? null;
         executionResult = proposal.executionResult ? JSON.stringify(proposal.executionResult) : null;
         failureReason = proposal.failureReason ?? null;
+        if (reader && !reader.readsRevenue) {
+          const [financial] = await financialProposalsWithProvenance(this.prisma, businessId, [proposal as unknown as ProposalFields]);
+          if (financial) executionResult = null;
+          if (failureReason && (financial || proposalTextStatesMoney(failureReason))) failureReason = null;
+        }
       }
     } else if (linkedActionType === 'genome_experiment') {
       const experiment = await this.prisma.client.genomeExperiment.findFirst({

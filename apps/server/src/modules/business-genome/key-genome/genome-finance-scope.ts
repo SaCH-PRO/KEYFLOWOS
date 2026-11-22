@@ -66,7 +66,12 @@ const MONEY_AMOUNT = /[$€£¥₹]\s?\d|(?<![a-z0-9])(ttd|usd|eur|gbp|jmd|bbd|x
  * balance, what is owed or paid, a rate. Read for proposals only: a genome row's domain is classified by the vocabulary
  * above, where "rate" would take every response or completion rate.
  */
-const PROPOSAL_MONEY_WORDS = /(?<![a-z])(amounts?|totals?|subtotals?|balances?|owed|owes|owing|paid|unpaid|pays?|rates?)(?![a-z])/i;
+const PROPOSAL_MONEY_WORDS = /(?<![a-z])(amounts?|subtotals?|balances?|owed|owes|owing|paid|unpaid|dollars?|euros?|cents?)(?![a-z])/i;
+/**
+ * "rate" and "total" are money only beside a figure (round-4 correctness minor 3: a response rate, "3 tasks in total"
+ * are not): "the hourly rate to 150", "Total: 1,200", a JSON {"total":1200}.
+ */
+const PROPOSAL_FIGURE_WORDS = /(?<![a-z])(rates?|totals?)(?![a-z])["']?\s*(?:[:=]|of|is|to|at)?\s*[$€£¥₹]?\d/i;
 /** camelCase keys and words split at their humps (estimatedCost, unitPrice, adSpend), so the bounded terms see them (correctness MAJOR-2). */
 function splitHumps(v: string): string {
   return v.replace(/([a-z0-9])([A-Z])/g, '$1_$2');
@@ -169,14 +174,26 @@ function proposalContent(p: ProposalFields): Array<string | null | undefined> {
       ? null
       : typeof v === 'string'
         ? v
-        : JSON.stringify(v, (k, val) => (k && idKey.test(k) && (typeof val === 'string' || Array.isArray(val)) ? undefined : val));
+        : // The id's name is kept (an invoiceId names an invoice: round-4 correctness minor 4); only its value is dropped.
+          JSON.stringify(v, (k, val) => (k && idKey.test(k) && (typeof val === 'string' || Array.isArray(val)) ? '[id]' : val));
+  // Only real id shapes are stripped from text: a UUID, or one unbroken run of 16+ letters and digits holding both
+  // (a cuid). A hyphenated phrase (overdue-invoices-2026) is words, and is read.
   const withoutIdTokens = (t: string | null | undefined) =>
-    typeof t === 'string' ? t.replace(/(?<![A-Za-z0-9])(?=[A-Za-z0-9-]*\d)(?=[A-Za-z0-9-]*[A-Za-z])[A-Za-z0-9-]{16,}(?![A-Za-z0-9])/g, ' ') : t;
+    typeof t === 'string'
+      ? t
+          .replace(/(?<![A-Za-z0-9])[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}(?![A-Za-z0-9])/gi, ' ')
+          .replace(/(?<![A-Za-z0-9-])(?=[A-Za-z0-9]*\d)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]{16,}(?![A-Za-z0-9-])/g, ' ')
+      : t;
   return [p.summary, p.description, p.rationale, p.expectedBenefit, asText(p.risks), asText(p.evidence), asText(p.payload), asText(p.inputPayload), asText(p.affectedEntities)].map(withoutIdTokens);
 }
 
+/** D-238: whether a proposal's free text (a failure or rejection reason) states money, by the proposal vocabulary. */
+export function proposalTextStatesMoney(text: string | null | undefined): boolean {
+  return proposalMentionsMoney(text);
+}
+
 function proposalMentionsMoney(...values: Array<string | null | undefined>): boolean {
-  return mentionsMoney(...values) || values.some((v) => typeof v === 'string' && [v, splitHumps(v)].some((t) => PROPOSAL_MONEY_WORDS.test(t)));
+  return mentionsMoney(...values) || values.some((v) => typeof v === 'string' && [v, splitHumps(v)].some((t) => PROPOSAL_MONEY_WORDS.test(t) || PROPOSAL_FIGURE_WORDS.test(t)));
 }
 
 /**
@@ -239,6 +256,60 @@ export function redactedProposalView(proposal: { id: string; status?: unknown; f
   return reason === undefined ? { id: proposal.id, status: proposal.status } : { id: proposal.id, status: proposal.status, failureReason: reason };
 }
 
+/**
+ * D-238 (round 4, correctness MAJOR-2): the KeyActionProposal columns every surface classifies a proposal by, so the
+ * event, timeline, memory, governance and prompt paths judge it on the same fields as the REST routes.
+ */
+export const PROPOSAL_CLASSIFY_SELECT = {
+  id: true,
+  actionType: true,
+  module: true,
+  toolName: true,
+  title: true,
+  summary: true,
+  description: true,
+  rationale: true,
+  expectedBenefit: true,
+  risks: true,
+  evidence: true,
+  payload: true,
+  inputPayload: true,
+  affectedEntities: true,
+} as const;
+
+/**
+ * financialProposalWithProvenance over a list (round-4 correctness minor 5): the bridged recommendations are read in
+ * one query, in `businessId` only. A recommendation that is not found, or a read that fails, makes its proposal
+ * financial (fail closed).
+ */
+export async function financialProposalsWithProvenance(
+  prisma: Pick<PrismaService, 'client'> | undefined,
+  businessId: string,
+  proposals: Array<ProposalFields | null | undefined>,
+): Promise<boolean[]> {
+  const own = proposals.map((p) => isFinancialProposal(p));
+  const recIds = proposals.map((p, i) => (own[i] ? null : recommendationIdOf(p!)));
+  const wanted = [...new Set(recIds.filter((id): id is string => !!id))];
+  if (wanted.length === 0) return own;
+  let recs: Map<string, GenomeRowFields> | null;
+  try {
+    const found = ((await prisma?.client.genomeRecommendation.findMany({
+      where: { businessId, id: { in: wanted } },
+      select: { id: true, domain: true, title: true, diagnosis: true },
+    })) ?? []) as Array<{ id: string } & GenomeRowFields>;
+    recs = new Map(found.map((r) => [r.id, r]));
+  } catch {
+    recs = null;
+  }
+  return own.map((financial, i) => {
+    if (financial) return true;
+    const recId = recIds[i];
+    if (!recId) return false;
+    const rec = recs?.get(recId);
+    return !rec || isFinanceRecommendation(rec);
+  });
+}
+
 /** The genome recommendation a bridged proposal was made from (GenomeKeyBridge writes payload.recommendationId). */
 function recommendationIdOf(p: ProposalFields): string | null {
   for (const source of [p.payload, p.inputPayload]) {
@@ -294,12 +365,14 @@ export async function readableMemoryEvents<T extends GenomeRowFields & { sourceE
     const rows = ids.length
       ? ((await prisma?.client.keyActionProposal.findMany({
           where: { businessId, id: { in: ids } },
-          select: { id: true, actionType: true, module: true, toolName: true, title: true, summary: true, rationale: true, evidence: true, payload: true, inputPayload: true, affectedEntities: true },
+          select: PROPOSAL_CLASSIFY_SELECT,
         })) ?? [])
       : [];
-    for (const row of rows as Array<{ id: string } & ProposalFields>) {
-      if (!(await financialProposalWithProvenance(prisma, businessId, row))) readable.add(row.id);
-    }
+    const list = rows as Array<{ id: string } & ProposalFields>;
+    const financial = await financialProposalsWithProvenance(prisma, businessId, list);
+    list.forEach((row, i) => {
+      if (!financial[i]) readable.add(row.id);
+    });
   } catch {
     return kept.filter((e) => e.sourceType !== 'KEY_ACTION_PROPOSAL');
   }

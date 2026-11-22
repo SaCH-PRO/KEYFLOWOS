@@ -1,5 +1,5 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
-import { genomeReaderReadsRevenue, financialProposalWithProvenance, isMoneyLabel, type GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
+import { genomeReaderReadsRevenue, financialProposalsWithProvenance, isMoneyLabel, PROPOSAL_CLASSIFY_SELECT, type GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
@@ -91,7 +91,7 @@ export class TemporalFlowService {
       const found = ids.length
         ? await this.prisma.client.keyActionProposal.findMany({
             where: { businessId, id: { in: ids } },
-            select: { id: true, actionType: true, module: true, toolName: true, title: true, summary: true, rationale: true, evidence: true, payload: true, inputPayload: true, affectedEntities: true },
+            select: PROPOSAL_CLASSIFY_SELECT,
           })
         : [];
       rows = new Map(found.map((r: { id: string }) => [r.id, r as Record<string, unknown>]));
@@ -99,8 +99,9 @@ export class TemporalFlowService {
       return events.filter((e) => e.entityType !== 'key_action_proposal');
     }
     // Financial by the proposal row (its own fields or the recommendation it was bridged from), fail closed.
-    const financial = new Map<string, boolean>();
-    for (const [id, row] of rows) financial.set(id, await financialProposalWithProvenance(this.prisma, businessId, row as never));
+    const entries = [...rows.entries()];
+    const flags = await financialProposalsWithProvenance(this.prisma, businessId, entries.map(([, row]) => row as never));
+    const financial = new Map<string, boolean>(entries.map(([id], i) => [id, flags[i]]));
     return events.filter((e) => {
       if (e.entityType !== 'key_action_proposal') return true;
       const known = e.entityId ? financial.get(e.entityId) : undefined;

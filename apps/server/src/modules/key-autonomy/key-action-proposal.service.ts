@@ -11,7 +11,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { financialProposalWithProvenance, genomeReaderReadsRevenue, redactedProposalView, type GenomeReader, type ProposalFields } from '../business-genome/key-genome/genome-finance-scope';
+import { financialProposalsWithProvenance, financialProposalWithProvenance, genomeReaderReadsRevenue, redactedProposalView, type GenomeReader, type ProposalFields } from '../business-genome/key-genome/genome-finance-scope';
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { KeyActionExecutorService } from './key-action-executor.service';
 import { KeyActionPolicyService } from './key-action-policy.service';
@@ -160,7 +160,8 @@ export class KeyActionProposalService {
   async listForReader(businessId: string, query: ListKeyActionProposalsQuery, reader: GenomeReader | null): Promise<KeyActionProposalData[]> {
     const rows = await this.list(businessId, query);
     if (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined)) return rows;
-    const financial = await Promise.all(rows.map((row) => this.isFinancial(businessId, row)));
+    // One query for the recommendations the rows were bridged from (round-4 correctness minor 5).
+    const financial = await financialProposalsWithProvenance(this.prisma, businessId, rows as unknown as ProposalFields[]);
     return rows.filter((_row, i) => !financial[i]);
   }
 
@@ -179,8 +180,12 @@ export class KeyActionProposalService {
    */
   async viewForReader<T extends KeyActionProposalData>(businessId: string, proposal: T, reader: GenomeReader | null): Promise<T | ReturnType<typeof redactedProposalView>> {
     if (!proposal || typeof proposal !== 'object' || typeof (proposal as { id?: unknown }).id !== 'string') return proposal;
-    if (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined)) return proposal;
-    return (await this.isFinancial(businessId, proposal)) ? redactedProposalView(proposal) : proposal;
+    // The action has committed: a failed read answers the redacted view (fail closed), never an error for an action that
+    // took effect (round-4 correctness minor 7).
+    const readsRevenue = await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined).catch(() => false);
+    if (readsRevenue) return proposal;
+    const financial = await this.isFinancial(businessId, proposal).catch(() => true);
+    return financial ? redactedProposalView(proposal) : proposal;
   }
 
   /** D-238: whether a proposal of `businessId` is financial, by its own fields or the recommendation it was bridged from. */

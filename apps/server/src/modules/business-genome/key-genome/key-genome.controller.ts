@@ -417,7 +417,8 @@ export class KeyGenomeController {
         throw err;
       });
     if (recommendation && isFinanceRecommendation(recommendation)) await this.requireRevenue(businessId, req, 'read');
-    return this.outcomeService.getExecutionStatus(businessId, recommendationId);
+    // D-238 (round 4, security minor 4): the linked KEY proposal is answered as the reader may see it.
+    return this.outcomeService.getExecutionStatus(businessId, recommendationId, { readsRevenue: await this.readsRevenue(businessId, req) });
   }
 
   @UseGuards(ModuleScopeGuard)

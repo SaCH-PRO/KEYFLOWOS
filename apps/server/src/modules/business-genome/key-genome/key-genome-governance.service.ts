@@ -6,7 +6,7 @@ import { GenomeExperimentService } from './genome-experiment.service';
 import { GenomeModuleReadinessService } from './genome-module-readiness.service';
 import { GenomeScoringService } from './genome-scoring.service';
 import { GenomeDepartmentService } from './genome-department.service';
-import { isFinancialProposal, isFinanceRecommendation, isFinanceSignal, isMoneyLabel, readableMemoryEvents } from './genome-finance-scope';
+import { isFinanceRecommendation, isFinanceSignal, isMoneyLabel, readableMemoryEvents, financialProposalsWithProvenance, PROPOSAL_CLASSIFY_SELECT } from './genome-finance-scope';
 import type {
   GenomeExperimentData,
   GenomeRecommendationData,
@@ -147,8 +147,10 @@ export class KeyGenomeGovernanceService {
       .map((r) => this.readinessToGovernanceItem(r));
 
     // Security review MAJOR-1: an autonomy block is a proposal, classified as one (D-238: its type, module, tool and text).
+    // Round 4 (security minor 2): on every classify field, with the recommendation a block was bridged from.
+    const blockFinancial = readsRevenue ? [] : await financialProposalsWithProvenance(this.prisma, businessId, autonomyBlocks);
     const autonomyItems = autonomyBlocks
-      .filter((b) => readsRevenue || !isFinancialProposal(b))
+      .filter((_b, i) => readsRevenue || !blockFinancial[i])
       .map((b) => this.autonomyBlockToGovernanceItem(b));
 
     const weakSectionItems = score.sections
@@ -249,17 +251,8 @@ export class KeyGenomeGovernanceService {
         status: 'PENDING',
         requiresApproval: true,
       },
-      select: {
-        id: true,
-        title: true,
-        summary: true,
-        riskLevel: true,
-        createdAt: true,
-        actionType: true,
-        module: true,
-        toolName: true,
-        payload: true,
-      },
+      // Round 4 (security minor 2): every field the classifier reads (PROPOSAL_CLASSIFY_SELECT), as the REST routes judge it.
+      select: { ...PROPOSAL_CLASSIFY_SELECT, riskLevel: true, createdAt: true },
       orderBy: { createdAt: 'desc' },
       take: 25,
     });

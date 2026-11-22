@@ -2441,7 +2441,11 @@ export class KeyCortexController {
       // bridged from).
       const readsRevenue = viewerReadsRevenue(viewer);
       let view: unknown = proposalViewForReader(proposal, readsRevenue);
-      if (!readsRevenue && view === proposal && (await this.approvalOrchestrator.isFinancial(dto.businessId, proposal))) view = redactedProposalView(proposal);
+      if (!readsRevenue && view === proposal) {
+        // The decision has been applied: a failed read answers the redacted view, not a 503 (round 4, security minor 6).
+        const financial = await this.approvalOrchestrator.isFinancial(dto.businessId, proposal).catch(() => true);
+        if (financial) view = redactedProposalView(proposal);
+      }
       return { result: view as unknown as CortexActionResult };
     } catch (err: any) {
       this.logger.error(`Action approval error: ${err.message}`, err.stack);
