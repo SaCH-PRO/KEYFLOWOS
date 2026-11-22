@@ -40,7 +40,7 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 
 ## 2. Rulings not yet on main
 
-D-255 to D-260, seven follow-up packets, the 13 memory packets and three ruling packets (plan now 244) are recorded on `pkt/V1-RULINGS-3E` (main merged in): it
+D-255 to D-260, seven follow-up packets, the 13 memory packets and three ruling packets (plan now 341) are recorded on `pkt/V1-RULINGS-3E` (main merged in): it
 joins wave 3e. D-249 to D-254 are on main (wave 3d, #221).
 
 ## 3. Work in flight (what git on main cannot show)
@@ -99,6 +99,10 @@ Format: `docs/development/agent-memory/OWNER-QUESTION-FORMAT.md`. Safe defaults 
 13. release0-live AMEND: contacts page h1 "Customers" (spec ~286, ~475)? (Default: h1 stays "Contacts", menu says
     "Customers".)
 14. Should the menu fail open (show every hub) when the my-access read fails? (Default: yes; the server is the gate.)
+
+15. The research index's 41 owner questions (`docs/reconstruction/research-recommendations/README.md` section 6 on
+    branch `docs/v1-research-recommendations`): OQ-1 (MCP servers in production) and OQ-4 (bank access tokens in
+    production) decide whether RR-MCP-TENANT-BOUND and RR-BANK-TOKEN-ENCRYPT become P0. (Defaults: as recommended.)
 
 ## 5. How to work here (learned the hard way)
 
