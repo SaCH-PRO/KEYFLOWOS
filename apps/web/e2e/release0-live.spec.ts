@@ -253,7 +253,7 @@ test.describe(LIVE ? "Release 0 live journey (R0-25)" : "Release 0 live journey 
       const manual = page.locator("section", { has: page.getByRole("heading", { name: /set up manually/i }) });
       await expect(manual).toBeVisible();
       await manual.getByLabel("Business name").fill(businessName);
-      await manual.getByLabel("Currency").fill("TTD");
+      await manual.getByLabel("Currency").selectOption("TTD");
       await manual.getByLabel("Timezone").fill("America/Port_of_Spain");
       await manual.getByRole("button", { name: /finish setup/i }).click();
       await page.waitForURL(/\/app\/command-center/);
