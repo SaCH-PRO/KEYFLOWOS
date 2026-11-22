@@ -463,8 +463,9 @@ describe('FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-3): a genome money memory event 
     [ge('g_fin_disguised', 'Finance snapshot computed', { sourceType: 'FINANCE_GENOME', eventType: 'FINANCE_SNAPSHOT_COMPUTED', domain: 'FINANCIAL', section: 'FINANCIAL' }, { sourceType: 'OPERATIONS_GENOME', domain: 'OPERATIONS' }), true],
     // Fail closed: a genome fragment that carries no row.
     [ge('g_rowless', 'Finance snapshot computed', null), true],
+    // D-234 (owner ruling 2026-11-22) reverses this pin: sales-derived rows are money.
+    [ge('g_sales_signal', 'Customer/sales signals generated', { sourceType: 'CUSTOMER_SALES_GENOME', eventType: 'CUSTOMER_SALES_SIGNAL_GENERATED', domain: 'SALES', section: 'SALES' }), true],
     // Not money: these stay business-wide.
-    [ge('g_sales_signal', 'Customer/sales signals generated', { sourceType: 'CUSTOMER_SALES_GENOME', eventType: 'CUSTOMER_SALES_SIGNAL_GENERATED', domain: 'SALES', section: 'SALES' }), false],
     [ge('g_ops', 'Operations snapshot computed', { sourceType: 'OPERATIONS_GENOME', eventType: 'OPERATIONS_SNAPSHOT_COMPUTED', domain: 'OPERATIONS', section: 'OPERATIONS' }), false],
     [ge('g_ops_disguised', 'Operations snapshot computed', { sourceType: 'OPERATIONS_GENOME', eventType: 'OPERATIONS_SNAPSHOT_COMPUTED', domain: 'OPERATIONS', section: 'OPERATIONS' }, { sourceType: 'FINANCE_GENOME' }), false],
   ];
@@ -503,8 +504,10 @@ describe('FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-3): a genome money memory event 
   });
 
   it('the window is cut after the projection: a withheld genome money event does not take a line of it', async () => {
-    const kept = await readersOwnPromptMemory(prisma as any, 'biz_1', 'blind', [GENOME[0][0], GENOME[7][0]] as any, 1);
-    expect(kept.map((f) => f.id)).toEqual(['g_sales_signal']);
+    // The kept row is the operations event (D-234 made the customer-sales signal event, used here before, money).
+    const ops = GENOME.find(([f]) => f.id === 'g_ops')![0];
+    const kept = await readersOwnPromptMemory(prisma as any, 'biz_1', 'blind', [GENOME[0][0], ops] as any, 1);
+    expect(kept.map((f) => f.id)).toEqual(['g_ops']);
   });
 });
 

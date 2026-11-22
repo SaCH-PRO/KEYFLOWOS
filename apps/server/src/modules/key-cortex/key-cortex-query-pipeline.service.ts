@@ -29,7 +29,7 @@ import {
   CortexPersona,
 } from './key-cortex.types';
 import { KeyCortexPersonalityService } from './key-cortex-personality.service';
-import { KeyCortexContextService } from './key-cortex-context.service';
+import { KeyCortexContextService, snapshotForViewer } from './key-cortex-context.service';
 import { KeyCortexActionsService } from './key-cortex-actions.service';
 import {
   AdaptiveRouterService,
@@ -121,6 +121,8 @@ function toolCallName(call: unknown): string {
  */
 /** The per-turn memo of readsRevenue, keyed by the turn's query object (nothing is written on the query). */
 const READS_REVENUE = new WeakMap<object, Promise<boolean>>();
+/** The per-turn memo of the turn's member authority, keyed by the turn's query object. */
+const MEMBER_AUTHORITY = new WeakMap<object, Promise<CortexMemberAuthority | null>>();
 
 @Injectable()
 export class KeyCortexQueryPipelineService {
@@ -394,6 +396,11 @@ export class KeyCortexQueryPipelineService {
           genomeContext,
         );
       }
+      // FU-GENOME-REVENUE-CLASSIFIER (review BLOCKING-1 / MAJOR-1; D-233, KC-SEC-3): every prompt this turn
+      // builds (V3, V2, the personality's business context block, formatContextForPrompt) and the answer's
+      // contextUsed read the snapshot as this reader may see it: no revenue figure, pending-invoice count or
+      // finance or sales DNA score for a reader without revenue read.
+      contextSnapshot = snapshotForViewer(contextSnapshot, await this.readsRevenue(query));
 
       await this.logEvent(correlationId, 'STEP_3_FULL_CONTEXT', {
         v2Available: !!v2Context,
@@ -1192,7 +1199,7 @@ export class KeyCortexQueryPipelineService {
         }
       }
 
-      const contextSnapshot =
+      let contextSnapshot =
         await this.contextService.buildContextSnapshot(query.businessId);
 
       let v2Context: any;
@@ -1211,6 +1218,11 @@ export class KeyCortexQueryPipelineService {
           genomeContext,
         );
       }
+      // FU-GENOME-REVENUE-CLASSIFIER (review BLOCKING-1 / MAJOR-1; D-233, KC-SEC-3): every prompt this turn
+      // builds (V3, V2, the personality's business context block, formatContextForPrompt) and the answer's
+      // contextUsed read the snapshot as this reader may see it: no revenue figure, pending-invoice count or
+      // finance or sales DNA score for a reader without revenue read.
+      contextSnapshot = snapshotForViewer(contextSnapshot, await this.readsRevenue(query));
 
       let detectedPersona: CortexPersona | undefined;
       if (!query.persona) {
@@ -1901,7 +1913,7 @@ export class KeyCortexQueryPipelineService {
     // Loaded on use: the controller module imports this service's own consumers (the
     // reasoning service), so a top-level import would be a cycle.
     const { cortexCommandRefusal } = await import('./key-cortex.controller');
-    const authority = await this.memberAuthority(query.businessId, query.userId);
+    const authority = await this.turnAuthority(query);
     for (const command of commands) {
       const refusal = authority
         ? cortexCommandRefusal(authority, command.module, command.action)
@@ -2002,6 +2014,20 @@ export class KeyCortexQueryPipelineService {
   }
 
   /**
+   * The turn's member authority (memberAuthority), read once per turn and shared by the command checks
+   * and the reader projections (FU-GENOME-REVENUE-CLASSIFIER review: two reads per turn could disagree).
+   * A failed read stays a rejection here: the command checks fail closed on it as before.
+   */
+  private turnAuthority(query: CortexQuery): Promise<CortexMemberAuthority | null> {
+    let authority = MEMBER_AUTHORITY.get(query);
+    if (!authority) {
+      authority = this.memberAuthority(query.businessId, query.userId);
+      MEMBER_AUTHORITY.set(query, authority);
+    }
+    return authority;
+  }
+
+  /**
    * FU-KEY-CHAT-GENOME-MONEY-SIGHT (D-128, D-100): whether the turn's reader may read revenue, as
    * ModuleScopeGuard decides it (memberAuthority: a platform SUPER_ADMIN passes; else the member's
    * scopes). No user or no membership reads none (fails closed). Read once per turn.
@@ -2009,7 +2035,7 @@ export class KeyCortexQueryPipelineService {
   private readsRevenue(query: CortexQuery): Promise<boolean> {
     let decided = READS_REVENUE.get(query);
     if (!decided) {
-      decided = this.memberAuthority(query.businessId, query.userId)
+      decided = this.turnAuthority(query)
         .then((a) => !!a && (a.superAdmin || rankOf(a.scopes.revenue || 'none') >= LEVEL_RANK.read))
         .catch((err: unknown) => {
           this.logger.warn(

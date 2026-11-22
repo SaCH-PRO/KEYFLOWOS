@@ -31,7 +31,8 @@ import type { ListGenomeRecommendationsQuery, ListGenomeSignalsQuery } from './k
  * without revenue read is not served are classified by provenance and meaning, not by a "financ" label
  * alone (the rule before, which let SALES rows and unlabelled money rows through):
  *   - money or sales meaning in any field the writer files: its module, source type, section, domain,
- *     event type or signal type (finance, revenue, sales, cash, commerce, payments, invoices, pricing,
+ *     event type, signal type or field, a recommendation's title, or the source signal of a recommendation
+ *     made from one (BUSINESS_MODEL, the revenue model and pricing, counts as money) (finance, revenue, sales, cash, commerce, payments, invoices, pricing,
  *     profit, billing, collections, refunds, payroll, treasury, margins, lifetime value, acquisition cost,
  *     costs and budgets, and the cross-domain composite, which averages the finance health score);
  *   - a row with nothing to classify it by (no section and no domain, or only 'general') fails closed.
@@ -39,8 +40,12 @@ import type { ListGenomeRecommendationsQuery, ListGenomeSignalsQuery } from './k
  * prompt memory and the KEY chat genome) applies the same rule, and the actions on such a row keep
  * needing revenue write (D-128).
  */
-const MONEY_FIELD =
-  /financ|revenue|sales|\bsale\b|cash|commerce|payment|invoice|pric|profit|billing|collection|refund|payroll|treasury|margin|lifetime_value|\bltv\b|\bcac\b|acquisition_cost|\bcost|budget|spend|cross_domain|money/i;
+const MONEY_TERMS =
+  /financ|revenue|sales|cash|commerce|payment|invoice|pric|profit|billing|collection|refund|payroll|treasury|margin|lifetime|acquisition_?cost|cost|budget|spend|expense|conversion|forecast|churn|transaction|opportunit|pipeline|unit_?economics|cross_?domain|money/i;
+/** Short money words, matched only as a whole word (letters on neither side), so snake_case values (cac_payback, first_sale) match. */
+const MONEY_WORDS = /(?<![a-z])(cac|ltv|mrr|arr|roi|sale|deal|order)s?(?![a-z])/i;
+/** Genome sections whose rows are money by default (D-234: the revenue model and pricing; fail closed). */
+const MONEY_SECTIONS = new Set(['BUSINESS_MODEL']);
 
 export type GenomeRowFields = {
   sourceModule?: string | null;
@@ -49,10 +54,15 @@ export type GenomeRowFields = {
   domain?: string | null;
   eventType?: string | null;
   signalType?: string | null;
+  field?: string | null;
+  title?: string | null;
+  diagnosis?: string | null;
 };
 
 function mentionsMoney(...values: Array<string | null | undefined>): boolean {
-  return values.some((v) => typeof v === 'string' && MONEY_FIELD.test(v));
+  return values.some(
+    (v) => typeof v === 'string' && (MONEY_TERMS.test(v) || MONEY_WORDS.test(v) || MONEY_SECTIONS.has(v.trim().toUpperCase())),
+  );
 }
 
 /** Nothing to classify a row by: no value, or only the 'general' placeholder. */
@@ -60,14 +70,29 @@ function unclassified(...values: Array<string | null | undefined>): boolean {
   return values.every((v) => typeof v !== 'string' || v.trim() === '' || /^general$/i.test(v.trim()));
 }
 
-/** A genome signal with money or sales provenance, or with nothing to classify it by: D-128, D-234. */
-export function isFinanceSignal(row: GenomeRowFields): boolean {
-  return mentionsMoney(row.sourceModule, row.section, row.domain, row.signalType) || unclassified(row.section, row.domain);
+/**
+ * GenomeRecommendationService files a recommendation made from a signal with the signal's section as
+ * its domain and "A <type> signal was detected in <signal domain>..." as its diagnosis: the domain the
+ * money classification of the source signal rests on (review MAJOR-2 / MAJOR-3).
+ */
+function signalDomainOf(diagnosis: string | null | undefined): string | null {
+  const m = typeof diagnosis === 'string' ? /signal was detected in ([^\s]+)/i.exec(diagnosis) : null;
+  return m ? m[1] : null;
 }
 
-/** A genome recommendation in a money or sales domain (FINANCIAL, SALES, ...), or with no domain: D-128, D-234. */
+/** A module, section, department or action label with money or sales meaning (governance, readiness): D-233, D-234. */
+export function isMoneyLabel(value: string | null | undefined): boolean {
+  return mentionsMoney(value);
+}
+
+/** A genome signal with money or sales provenance, or with nothing to classify it by: D-128, D-234. */
+export function isFinanceSignal(row: GenomeRowFields): boolean {
+  return mentionsMoney(row.sourceModule, row.section, row.domain, row.signalType, row.field) || unclassified(row.section, row.domain);
+}
+
+/** A genome recommendation in a money or sales domain (FINANCIAL, SALES, ...), titled for a money figure, made from a money signal, or with no domain: D-128, D-234. */
 export function isFinanceRecommendation(row: GenomeRowFields): boolean {
-  return mentionsMoney(row.domain) || unclassified(row.domain);
+  return mentionsMoney(row.domain, row.title, signalDomainOf(row.diagnosis)) || unclassified(row.domain);
 }
 
 /** A memory event that carries a money, sales or composite signal, or that has nothing to classify it by: D-128, D-100, D-234. */
@@ -76,7 +101,11 @@ export function isMoneyMemoryEvent(row: GenomeRowFields): boolean {
     mentionsMoney(row.sourceType, row.domain, row.section, row.eventType) ||
     row.sourceType === 'CROSS_DOMAIN_GENOME' ||
     row.domain === 'CROSS_DOMAIN' ||
-    unclassified(row.domain, row.section)
+    // A KEY action proposal's outcome event carries no domain; it is a proposal record, which stays business-wide
+    // under D-226 (O3: a memberless turn sees its action, status and risk level only). PROVISIONAL reading of
+    // D-234 against D-226, put to the owner (FU-GENOME-REVENUE-CLASSIFIER): only it is exempt from the
+    // nothing-to-classify rule; any money field still withholds it.
+    (row.sourceType !== 'KEY_ACTION_PROPOSAL' && unclassified(row.domain, row.section))
   );
 }
 

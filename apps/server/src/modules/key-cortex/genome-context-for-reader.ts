@@ -19,7 +19,7 @@ export function genomeContextForReader(context: GenomeEnrichedContext, readsReve
   return {
     ...context,
     dnaScores: dnaScoresForReader(context.dnaScores, false) as Record<string, number>,
-    signals: (context.signals ?? []).filter((s) => !isFinanceSignal({ sourceModule: s.module, section: s.section, domain: s.domain })),
+    signals: (context.signals ?? []).filter((s) => !isFinanceSignal({ sourceModule: s.module, section: s.section, domain: s.domain, signalType: s.type })),
     recommendations: genomeRecommendationsForReader(context.recommendations ?? [], false),
     opportunities: [],
   };
@@ -27,7 +27,14 @@ export function genomeContextForReader(context: GenomeEnrichedContext, readsReve
 
 export function genomeRecommendationsForReader<T extends Pick<GenomeRecommendation, 'category'>>(rows: T[], readsRevenue: boolean): T[] {
   if (readsRevenue) return rows;
-  return rows.filter((r) => !isFinanceRecommendation({ domain: r.category }));
+  // The ranking score weighs the financial value (GenomeRecommendationRanker): withheld (security review MINOR-7).
+  return rows
+    .filter((r) => !isFinanceRecommendation({ domain: r.category, title: (r as { title?: string }).title }))
+    .map((r) => {
+      if (!('genomeScore' in r)) return r;
+      const { genomeScore: _withheld, ...rest } = r as T & { genomeScore?: number };
+      return rest as T;
+    });
 }
 
 /** Proactive suggestions carry the recommendation's domain, or the signal's module, as their category. */
