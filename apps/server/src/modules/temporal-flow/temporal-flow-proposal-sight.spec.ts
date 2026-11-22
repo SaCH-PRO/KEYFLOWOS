@@ -236,6 +236,6 @@ describe('third review of the #218 repairs: an event\'s execution result is read
   };
   it.each(['done\nbalance 900', 'ok\tfee waived'])('RED-BEFORE (security m1): a result note reading %j withholds the event', async (note) => expect(await list({ note })).toEqual([]));
   it('RED-BEFORE (correctness m1): a result naming rows by id is served, whatever letters the ids hold', async () => {
-    expect(await list({ entityType: 'task', entityId: 'cmzcku666tax29xx90fuyj0uu', requestId: '9cac7457-1fee-4cad-8fee-2cac3cac4fee', fingerprint: 'a1b208cac7457d9e00112233445566778899aabbccddeeff0011223344556677' })).toEqual(['ev']);
+    expect(await list({ entityType: 'task', entityId: 'cmzcku666tax29xx90fuyj0uu', requestId: '9cac7457-1fee-4tax-8arr-2ltv3cac4fee', fingerprint: 'a1b208cac7457d9e00112233445566778899aabbccddeeff0011223344556677' })).toEqual(['ev']);
   });
 });

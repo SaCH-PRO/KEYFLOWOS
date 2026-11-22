@@ -540,7 +540,7 @@ describe('fourth review of the #218 repairs: the structured reader fails closed'
     expect((proposalViewForReader(row, false) as any).outcomeEvidence).toEqual({ status: 'FAILED', reason: null });
   });
   it('control (m3/m4): real ids under id-named keys are not read, whatever letters and digits they hold', () => {
-    for (const payload of [{ contactId: 'cmzcku666tax29xx90fuyj0uu' }, { id: 'x1usd9cad2zz' }, { taskIds: ['tsk_1', 'kap_2x9cad'] }, { ownerId: '9cac7457-1fee-4cad-8fee-2cac3cac4fee' }])
+    for (const payload of [{ contactId: 'cmzcku666tax29xx90fuyj0uu' }, { id: 'x1usd9cad2zz' }, { taskIds: ['tsk_1', 'kap_2x9cad'] }, { ownerId: '9cac7457-1fee-4tax-8arr-2ltv3cac4fee' }])
       expect(isFinancialProposal(task({ payload }) as any), JSON.stringify(payload)).toBe(false);
   });
   it.each([
@@ -675,5 +675,47 @@ describe('sixth review of the #218 repairs: readings are only ever added', () =>
     for (const note of ['Call\u200bback Tuesday', 'C:\\new\\folder\\readme.txt', '\uFF23\uFF41\uFF4C\uFF4C back', 'Caf\u00e9 visit']) expect(isFinancialProposal(task({ summary: note, payload: { note } }) as any), note).toBe(false);
     const row = { id: 'k', status: 'FAILED', ...task({ failureReason: 'Rate\u200blimited: retry\\later' }) };
     expect(proposalViewForReader(row, false)).toBe(row);
+  });
+});
+
+describe('seventh review of the #218 repairs: a reading budget, not a length cap; the remaining readings', () => {
+  const task = (extra: object) => ({ actionType: 'CREATE_TASK', module: 'crm', title: 'Follow up', ...extra });
+  const blind = (extra: object) => proposalViewForReader({ id: 'k', status: 'FAILED', ...task(extra) }, false) as any;
+  const prose = (n: number) => 'Please call the client back about the garden plan. '.repeat(Math.ceil(n / 51)).slice(0, n);
+  it.each([
+    ['one quoted word in a long payload body', { payload: { body: `${prose(40_000)} She said "ok" twice.` } }],
+    ['one Windows path in a long description', { description: `${prose(40_000)} See C:\\Users\\ana\\plan.docx` }],
+    ['one emoji joiner in a long summary', { summary: `${prose(40_000)} \ud83d\udc68\u200d\ud83d\udc69 family` }],
+    ['one no-break space in a long summary', { summary: `${prose(40_000)} 10\u00a0am` }],
+    ['a long contact list with a quoted nickname', { executionResult: { contacts: Array.from({ length: 600 }, (_, i) => ({ name: i === 7 ? 'Ana "AJ" Perez' : `Person ${i}`, city: 'Port of Spain' })) } }],
+  ])('RED-BEFORE (correctness m1): long ordinary content with %s is read, not refused for its length', (_l, extra) => {
+    expect(isFinancialProposal(task(extra) as any)).toBe(false);
+  });
+  it('RED-BEFORE (security MINOR-1): one maximal crafted proposal costs a bounded amount, in the classifier and in the view', () => {
+    const crafted = (n: number) => `\u200b\\\uFF19 ${'rate '.repeat(Math.floor(n / 5))}`.slice(0, n);
+    const row = task({ title: crafted(4_000), summary: crafted(15_000), description: crafted(15_000), payload: { note: crafted(15_000) }, failureReason: crafted(49_000), outcomeEvidence: { status: 'FAILED', reason: crafted(40_000) } });
+    for (let i = 0; i < 2; i++) isFinancialProposal(row as any);
+    let started = performance.now();
+    expect(isFinancialProposal(row as any)).toBe(true);
+    expect(performance.now() - started, 'classifier').toBeLessThan(150);
+    const plain = task({ title: 'Call back', failureReason: crafted(49_000), outcomeEvidence: { status: 'FAILED', reason: crafted(40_000) } });
+    started = performance.now();
+    const out = proposalViewForReader({ id: 'k', status: 'FAILED', ...plain }, false) as any;
+    expect(performance.now() - started, 'view').toBeLessThan(250);
+    expect(out.failureReason).toBeNull();
+  });
+  it.each(['Chase the 900\\noutstanding', 'Total due\\n900', '0\\routstanding', '\\u000bill\\n40'])('RED-BEFORE (security MINOR-2): an escape read as a space keeps the other backslashes as written, and a decoded text reads its escapes as spaces (%j)', (summary) => {
+    expect(isFinancialProposal(task({ summary }))).toBe(true);
+    expect(proposalTextStatesMoney(summary)).toBe(true);
+  });
+  it.each(['customerowes900dollars111', 'cbalance900unpaid1200usd9', 'c9unpaid90000000000000000', 'c9owing900000000000000000'])('RED-BEFORE (security MINOR-3, correctness m2): a cuid-shaped run is kept when the proposal vocabulary reads a word in it (%s)', (token) => {
+    expect(token).toHaveLength(25);
+    expect(isFinancialProposal(task({ title: token }))).toBe(true);
+    expect(isFinancialProposal(task({ summary: `see ${token}` }))).toBe(true);
+    expect(blind({ failureReason: `failed: ${token}` }).failureReason).toBeNull();
+  });
+  it('control: a real cuid is still not read, and the fourth- and fifth-round cases stay read', () => {
+    expect(isFinancialProposal(task({ title: 'Ticket cmzcku666tax29xx90fuyj0uu' }))).toBe(false);
+    for (const summary of ['see\\ncost 900', 'c:\\clients\\tax\\2026', 'tax\u200Bdue Friday', 'Fees\u1D43: see note']) expect(isFinancialProposal(task({ summary })), summary).toBe(true);
   });
 });
