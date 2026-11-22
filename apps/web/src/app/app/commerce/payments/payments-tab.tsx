@@ -16,7 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import type { Invoice } from "@/lib/client";
+import type { Invoice, PaymentRecord } from "@/lib/client";
 import {
   getInvoice,
   markInvoicePaid,
@@ -89,7 +89,10 @@ export function invoiceMoney(inv: Invoice, now: Date) {
   // D-249 / D-250: a PAID invoice counts its full total. What its rows do not
   // record as received (all of it, or the rest of it) counts on the day it was
   // paid; refund rows still come off.
-  const unrecordedCents = inv.status === "PAID" ? cents(balance.total) - cents(balance.paid) : 0;
+  // Nothing is unrecorded once the payments settle the total as the balance
+  // contract reads it (a legacy sub-cent total settled by its row: review P2C-5).
+  const paidSettles = invoiceBalanceOfStoredRows(total, [{ amount: balance.paid, status: "SUCCESSFUL" }], inv.currency).isFullyPaid;
+  const unrecordedCents = inv.status === "PAID" && !paidSettles ? cents(balance.total) - cents(balance.paid) : 0;
   if (unrecordedCents > 0) {
     cash.push({ cents: unrecordedCents, at: inv.paidAt ? new Date(inv.paidAt) : null, method: "Other", payment: true });
   }
@@ -112,8 +115,8 @@ export function invoiceMoney(inv: Invoice, now: Date) {
  * the invoice is credited (it stays PARTIALLY_CREDITED, with no paid date).
  *
  * When that read fails the tab falls back to what it can know: on a PAID
- * answer the invoice is PAID as of now, which counts its full total (D-250);
- * on any other answer nothing is guessed. A paid date is never invented for
+ * answer, the row mark-paid records (what the rows left of the total, dated
+ * now); on any other answer nothing is guessed. A paid date is never invented for
  * an invoice the server did not answer PAID.
  */
 async function afterMarkPaid(inv: Invoice, answered: Partial<Invoice>, businessId: string | null): Promise<Invoice> {
@@ -129,9 +132,26 @@ async function afterMarkPaid(inv: Invoice, answered: Partial<Invoice>, businessI
   }
   const status = answered.status ?? "PAID";
   if (status !== "PAID") return { ...inv, status, paidAt: answered.paidAt ?? inv.paidAt ?? null };
-  // PAID: the invoice counts its full total from here on (D-250), the part its
-  // rows do not record on its paid date; no row is made up.
-  return { ...inv, status, paidAt: answered.paidAt ?? inv.paidAt ?? new Date().toISOString() };
+  // PAID: mark-paid recorded what the rows left of the total (D-05). That row
+  // is added here, dated now, so the invoice reads as received in full also
+  // when it carries refund rows (review P2C-4: 500 paid and 100 refunded,
+  // marked paid, is 500 received, not 400). A reload replaces it with the
+  // server's rows.
+  const paidAt = answered.paidAt ?? inv.paidAt ?? new Date().toISOString();
+  const { leftCents } = invoiceMoney(inv, new Date());
+  if (leftCents <= 0) return { ...inv, status, paidAt };
+  const settled: PaymentRecord = {
+    id: `local-markpaid-${inv.id}`,
+    amount: leftCents / 100,
+    currency: inv.currency,
+    status: "SUCCESSFUL",
+    provider: "manual",
+    providerPaymentId: `local-markpaid-${inv.id}`,
+    createdAt: new Date().toISOString(),
+    businessId: businessId ?? "",
+    invoiceId: inv.id,
+  };
+  return { ...inv, status, paidAt, payments: [...(inv.payments ?? []), settled] };
 }
 
 function getContactName(contact: { firstName?: string | null; lastName?: string | null } | null | undefined): string {

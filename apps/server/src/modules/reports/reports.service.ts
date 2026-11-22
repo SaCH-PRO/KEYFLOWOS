@@ -103,9 +103,9 @@ export class ReportsService {
     // owed is the remaining balance of the open receivables (SENT, OVERDUE,
     // PARTIALLY_PAID, PARTIALLY_CREDITED) over their own-tenant payment rows,
     // the read the commerce stats total from (readInvoiceMoney) and the figure
-    // the A/R aging states on a book where both read the same invoices (the
-    // aging also reads PENDING, adds every currency and nets no credit note;
-    // review COR-3). It summed the totals of SENT and DRAFT invoices: a
+    // the A/R aging states (D-251: the aging reads the same invoices through
+    // the same read; on an ACCRUAL book it keeps the AR ledger per invoice, so
+    // the two agree wherever the ledger agrees with the rows). It summed the totals of SENT and DRAFT invoices: a
     // draft nobody was sent counted as owed, a part-paid invoice did not, and a
     // deposit never reduced it. The report is labelled in the business
     // currency, so the figure and its counts are that currency's invoices only

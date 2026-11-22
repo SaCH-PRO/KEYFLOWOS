@@ -125,10 +125,14 @@ const EMPTY_TOTALS = (): AgingBucket[] => [
  * `ledgerArBalance` / `ledgerReconciled` are returned in both cases so
  * Reports can surface posting drift.
  *
- * V1-64, owner ruling D-251 (with D-13, D-250): the aging states the figure
- * the Executive Summary and the commerce stats state, on credited and
- * multi-currency books too. It reads the same invoices through the same read
- * (readInvoiceMoney, open receivables only):
+ * V1-64, owner ruling D-251 (with D-13, D-250): the aging reads the invoices
+ * the Executive Summary and the commerce stats read, through the same read
+ * (readInvoiceMoney, open receivables only), on credited and multi-currency
+ * books too. On a CASH book the three state one figure. On an ACCRUAL book
+ * they state one figure wherever the AR ledger agrees with the payment rows;
+ * where it does not (a payment row or an APPLIED note that was never posted),
+ * the aging states the ledger's figure and the other two the rows' (review
+ * P2C-1: the basis is kept as it was and reported for a ruling):
  *   - the open statuses are SENT, OVERDUE, PARTIALLY_PAID and
  *     PARTIALLY_CREDITED. A credited invoice was left out; a PENDING one was
  *     read and no longer is (the summary's rule; reported for a ruling);
@@ -263,7 +267,8 @@ export class ReceivablesService {
     const paymentMap = new Map<string, string>();
     if (paymentSourceIds.size > 0) {
       const payments = await this.prisma.client.payment.findMany({
-        where: { id: { in: Array.from(paymentSourceIds) } },
+        // Own-tenant rows only (D-75; review P2S-3), as every other read here.
+        where: { businessId, id: { in: Array.from(paymentSourceIds) } },
         select: { id: true, invoiceId: true },
       });
       for (const p of payments) if (p.invoiceId) paymentMap.set(p.id, p.invoiceId);

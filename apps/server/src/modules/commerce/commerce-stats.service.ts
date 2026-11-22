@@ -129,7 +129,11 @@ export async function readInvoiceMoney(
     // D-249 / D-250: a PAID invoice counts its full total. What its own rows
     // do not record as received (all of it, or the rest of it) counts on the
     // day it was paid; refund rows still come off.
-    const unrecordedCents = inv.status === 'PAID' ? toCents(rowsBalance.total) - toCents(rowsBalance.paid) : 0;
+    // Nothing is unrecorded once the payments settle the total as the balance
+    // contract reads it (a legacy sub-cent total, 9.405, is settled by the
+    // 9.40 the base recorded: no phantom cent; review P2C-5).
+    const paidSettles = balanceOfStoredRows(total, [{ amount: rowsBalance.paid, status: 'SUCCESSFUL' }], inv.currency).isFullyPaid;
+    const unrecordedCents = inv.status === 'PAID' && !paidSettles ? toCents(rowsBalance.total) - toCents(rowsBalance.paid) : 0;
     if (unrecordedCents > 0) cash.push({ amount: fromCents(unrecordedCents), at: inv.paidAt ?? null });
     return {
       id: inv.id,
