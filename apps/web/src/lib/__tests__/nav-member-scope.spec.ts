@@ -32,6 +32,8 @@
  *          hub); the bar's New toggles the New menu.
  *   NMS-14 review round 2 (R2-COR-1, R2-COR-2): a failed re-read keeps the levels already known for the same member
  *          and business; looking again within BUSINESS_SETTINGS_FRESH_MS (30 s) of the last answer asks nothing.
+ *   NMS-15 review round 3: a first read that failed is retried on the next look (only an answer with levels is
+ *          fresh), and a return to the tab (visibilitychange and focus together) asks once.
  *   NMS-09 the desktop menu (Main navigation) shows the hubs as links named by their plain labels, and a products
  *          business's menu names no Schedule (journey A4); a front-desk member's menu offers no Sales, Money, Your
  *          page or Settings hub (J5).
@@ -293,8 +295,9 @@ describe("NAV-A1 review round 1: the levels belong to the member who read them",
     });
     expect(asked.length).toBe(1);
 
-    // Later, the re-read fails (a blip): what is known stays.
-    answers[BIZ] = { status: 503, body: { message: "Service Unavailable" } };
+    // Later, the re-read is refused (403, which lib/api does not retry; it is also what a removed member gets): what
+    // is known for this member and business stays.
+    answers[BIZ] = { status: 403, body: { statusCode: 403, message: "No access to this business", error: "Forbidden" } };
     const now = Date.now();
     vi.spyOn(Date, "now").mockReturnValue(now + 31_000);
     act(() => {
@@ -302,9 +305,44 @@ describe("NAV-A1 review round 1: the levels belong to the member who read them",
     });
     await waitFor(() => expect(asked.length).toBe(2));
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 200));
     });
     expect(result.current).toEqual({ crm: "read", revenue: "none" });
+  });
+
+  it("NMS-15 a failed first read is retried on the next look; a return to the tab asks once", async () => {
+    window.localStorage.setItem("kf_token", tokenFor("usr_a"));
+    const answers: Record<string, { status: number; body: unknown }> = {
+      [BIZ]: { status: 403, body: { statusCode: 403, message: "Unable to verify business access", error: "Forbidden" } },
+    };
+    const asked = serveAccess(answers);
+    const { result } = renderHook(() => useMemberModuleLevels());
+    await waitFor(() => expect(asked.length).toBe(1));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 200));
+    });
+    expect(result.current).toBeNull();
+
+    // Looked at again at once: nothing was known, so it asks again.
+    answers[BIZ] = { status: 200, body: { modules: { crm: "read" } } };
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() => expect(result.current).toEqual({ crm: "read" }));
+    expect(asked.length).toBe(2);
+
+    // Later, a return to the tab fires visibilitychange and focus together: one ask.
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now + 31_000);
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() => expect(asked.length).toBeGreaterThanOrEqual(3));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(asked.length).toBe(3);
   });
 });
 
