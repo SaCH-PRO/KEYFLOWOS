@@ -11,14 +11,36 @@
  * Everything else (stage, readiness, the other modules' rows and scores) is unchanged. A revenue
  * reader gets the genome as loaded. The inputs are never changed (the context may be the cached one).
  */
-import { dnaScoresForReader, isFinanceRecommendation, isFinanceSignal } from '../business-genome/key-genome/genome-finance-scope';
+import { dnaScoresForReader, isFinanceRecommendation, isFinanceSignal, isMoneyLabel } from '../business-genome/key-genome/genome-finance-scope';
 import type { GenomeEnrichedContext, GenomeRecommendation } from './key-cortex-reasoning.types';
+
+/**
+ * FU-KEY-GENOME-READS-RESIDUAL (D-235, D-233 "no inference via a score, grade or categorical indicator"): executive
+ * readiness is recomputed as the mean of the DNA dimensions the reader may see (it averages, and the bridge can set it
+ * to, the finance score); 0 when none is visible.
+ */
+export function readinessFromVisibleDna(visible: Record<string, unknown>): number {
+  const values = Object.values(visible).filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+  return values.length ? Math.round(values.reduce((a, b) => a + b, 0) / values.length) : 0;
+}
+
+/** The autonomy map without its money modules (finance, revenue, sales ... by name). */
+export function autonomyMapForReader(map: Record<string, boolean> | undefined): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const [module, allowed] of Object.entries(map ?? {})) if (!isMoneyLabel(module)) out[module] = allowed;
+  return out;
+}
 
 export function genomeContextForReader(context: GenomeEnrichedContext, readsRevenue: boolean): GenomeEnrichedContext {
   if (readsRevenue) return context;
+  const dnaScores = dnaScoresForReader(context.dnaScores, false) as Record<string, number>;
+  // D-235: the genome stage is a categorical indicator of the whole genome, money dimensions included: withheld.
+  const { genomeStage: _stage, ...rest } = context;
   return {
-    ...context,
-    dnaScores: dnaScoresForReader(context.dnaScores, false) as Record<string, number>,
+    ...rest,
+    executiveReadiness: readinessFromVisibleDna(dnaScores),
+    autonomyMap: autonomyMapForReader(context.autonomyMap),
+    dnaScores,
     signals: (context.signals ?? []).filter((s) => !isFinanceSignal({ sourceModule: s.module, section: s.section, domain: s.domain, signalType: s.type })),
     recommendations: genomeRecommendationsForReader(context.recommendations ?? [], false),
     opportunities: [],
@@ -27,14 +49,23 @@ export function genomeContextForReader(context: GenomeEnrichedContext, readsReve
 
 export function genomeRecommendationsForReader<T extends Pick<GenomeRecommendation, 'category'>>(rows: T[], readsRevenue: boolean): T[] {
   if (readsRevenue) return rows;
-  // The ranking score weighs the financial value (GenomeRecommendationRanker): withheld (security review MINOR-7).
+  // The ranking weighs the financial value (GenomeRecommendationRanker): its score, reason and the financial viability
+  // are withheld (security review MINOR-7; D-235), and the rows are re-ordered by their own impact and confidence, so the
+  // order itself is not the money-weighted rank.
+  const impactOf = (v: unknown) => (typeof v === 'number' ? v : v === 'high' ? 3 : v === 'medium' ? 2 : v === 'low' ? 1 : 0);
   return rows
     .filter((r) => !isFinanceRecommendation({ domain: r.category, title: (r as { title?: string }).title }))
     .map((r) => {
-      if (!('genomeScore' in r)) return r;
-      const { genomeScore: _withheld, ...rest } = r as T & { genomeScore?: number };
-      return rest as T;
-    });
+      const { genomeScore: _s, rankScore: _r, rankReason: _rr, financialViability: _f, ...rest } = r as T & Record<string, unknown>;
+      return rest as unknown as T;
+    })
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => {
+      const x = a.r as unknown as { impact?: unknown; confidence?: unknown };
+      const y = b.r as unknown as { impact?: unknown; confidence?: unknown };
+      return impactOf(y.impact) - impactOf(x.impact) || (Number(y.confidence) || 0) - (Number(x.confidence) || 0) || a.i - b.i;
+    })
+    .map(({ r }) => r);
 }
 
 /** Proactive suggestions carry the recommendation's domain, or the signal's module, as their category. */

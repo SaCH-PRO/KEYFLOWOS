@@ -139,14 +139,16 @@ export class KeyCortexGenomeContextService {
   /**
    * Determine whether KEY should suggest a proactive action based on genome signals.
    */
-  async shouldSuggestProactiveAction(businessId: string, readsRevenue = true): Promise<boolean> {
+  // D-235: no reader given is a reader without revenue read (fails closed).
+  async shouldSuggestProactiveAction(businessId: string, readsRevenue = false): Promise<boolean> {
     if (!this.genomeBridgeService) {
       return false;
     }
 
     try {
       // FU-KEY-CHAT-GENOME-MONEY-SIGHT (minor 1): decided on the genome the reader may see.
-      const genomeContext = genomeContextForReader(await this.getGenomeEnrichedContext(businessId), readsRevenue);
+      const fullContext = await this.getGenomeEnrichedContext(businessId);
+      const genomeContext = genomeContextForReader(fullContext, readsRevenue);
 
       const hasCriticalSignals = genomeContext.signals.some(
         (s: GenomeSignal) => s.severity === 'critical' || s.severity === 'high',
@@ -175,9 +177,11 @@ export class KeyCortexGenomeContextService {
         }
       }
 
+      // D-235: the business-wide cache holds the whole DNA map (each reader compares only the keys it may see), so one
+      // reader's projection never stands in for another's.
       await this.redis.setJson(
         `genome:dna:previous:${businessId}`,
-        genomeContext.dnaScores,
+        fullContext.dnaScores,
         3600,
       );
 
@@ -206,7 +210,8 @@ export class KeyCortexGenomeContextService {
   async getProactiveSuggestions(
     businessId: string,
     integrationV2Enabled = false,
-    readsRevenue = true,
+    // D-235: no reader given is a reader without revenue read (fails closed).
+    readsRevenue = false,
   ): Promise<Suggestion[]> {
     if (!this.genomeBridgeService) {
       return [];

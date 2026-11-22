@@ -17,6 +17,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { isMoneyLabel, proposalTextStatesMoney } from '../business-genome/key-genome/genome-finance-scope';
 
 /** Record types written by the cognition layers. */
 export const AWARENESS_TYPES = {
@@ -91,8 +92,11 @@ export class KeyCortexAwarenessService {
    */
   async getAwareness(
     businessId: string,
-    opts: { kinds?: Array<keyof typeof AWARENESS_TYPES>; sinceDays?: number } = {},
+    // D-235: readsRevenue false (or left out: fails closed) withholds every item whose content states money (an idea or
+    // a hypothesis made from finance DNA, a concern about receivables); the counts are of what is served.
+    opts: { kinds?: Array<keyof typeof AWARENESS_TYPES>; sinceDays?: number; readsRevenue?: boolean } = {},
   ): Promise<AwarenessSummary> {
+    const readsRevenue = opts.readsRevenue === true;
     const kinds = opts.kinds?.length
       ? opts.kinds
       : (Object.keys(AWARENESS_TYPES) as Array<keyof typeof AWARENESS_TYPES>);
@@ -128,12 +132,13 @@ export class KeyCortexAwarenessService {
         continue;
       }
 
-      counts[kind] = rows.length;
-
+      let served = 0;
       for (const row of rows) {
         // One malformed row must not lose the rest of the feed.
         try {
           const parsed = JSON.parse(row.value) as Record<string, unknown>;
+          if (!readsRevenue && (proposalTextStatesMoney(row.value) || isMoneyLabel(row.value))) continue;
+          served += 1;
           items.push({
             id: row.key,
             kind,
@@ -147,6 +152,8 @@ export class KeyCortexAwarenessService {
           this.logger.debug(`[Awareness] Skipping unparseable ${kind} ${row.key}`);
         }
       }
+      // A revenue reader's counts are as before (every row read); anyone else's are of what is served (D-235).
+      counts[kind] = readsRevenue ? rows.length : served;
     }
 
     items.sort((a, b) => b.noticedAt.getTime() - a.noticedAt.getTime());

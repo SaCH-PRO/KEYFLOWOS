@@ -4430,9 +4430,13 @@ export class KeyCortexController {
    */
   @Get('evolution/decision')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(CortexMemberAuthorityGuard)
   async evolutionExplainDecision(
     @GuardedBusinessId() businessId: string,
     @Query('decisionId') decisionId?: string,
+    // FU-KEY-GENOME-READS-RESIDUAL (D-235): explained for the reader (a finance or sales decision does not exist for a
+    // reader without revenue read).
+    @CortexMember() viewer?: CortexMemberAuthority,
   ): Promise<{
     explanation: string;
     factors: Array<{ name: string; weight: number; value: unknown }>;
@@ -4446,8 +4450,10 @@ export class KeyCortexController {
     }
 
     try {
-      return await this.evolution.explainDecision(decisionId, businessId);
+      return await this.evolution.explainDecision(decisionId, businessId, { readsRevenue: viewerReadsRevenue(viewer) });
     } catch (err: any) {
+      // A decision that does not exist (another business's, or a money decision the reader may not see) is a 404.
+      if (err instanceof NotFoundException) throw err;
       this.logger.error(`Evolution explain error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to explain decision');
     }
@@ -4613,10 +4619,13 @@ export class KeyCortexController {
    * this and nothing read it back — KEY was noticing into a drawer nobody opens.
    */
   @Get('awareness')
+  @UseGuards(CortexMemberAuthorityGuard)
   async getAwareness(
     @GuardedBusinessId() businessId: string,
     @Query('kinds') kinds?: string,
     @Query('sinceDays') sinceDays?: string,
+    // D-235: an item that states money is withheld from a reader without revenue read.
+    @CortexMember() viewer?: CortexMemberAuthority,
   ): Promise<{
     items: unknown[];
     counts: Record<string, number>;
@@ -4645,6 +4654,7 @@ export class KeyCortexController {
     const summary = await this.awareness.getAwareness(businessId, {
       kinds: requested as Array<keyof typeof AWARENESS_TYPES>,
       sinceDays: days,
+      readsRevenue: viewerReadsRevenue(viewer),
     });
 
     return {

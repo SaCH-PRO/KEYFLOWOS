@@ -9,6 +9,7 @@ import {
   InteractionFeedback,
   GenomeEnrichedContext,
 } from './key-cortex-reasoning.types';
+import { genomeContextForReader } from './genome-context-for-reader';
 
 /**
  * KeyCortexInteractionService
@@ -37,7 +38,9 @@ export class KeyCortexInteractionService {
    * Explain a decision by looking it up in the event log and generating
    * a human-readable explanation that includes genome context at the time.
    */
-  async explainDecision(decisionId: string): Promise<string> {
+  // FU-KEY-GENOME-READS-RESIDUAL (D-235): the decision is read in the business named (never across businesses), and
+  // the genome is projected for the reader; no reader given is a reader without revenue read (fails closed).
+  async explainDecision(decisionId: string, businessId?: string, readsRevenue = false): Promise<string> {
     this.logger.debug(`[explainDecision] Looking up decision: ${decisionId}`);
 
     try {
@@ -54,10 +57,11 @@ export class KeyCortexInteractionService {
 
       let decisionData: Record<string, unknown> = {};
       if (eventLog.length === 0) {
-        const session = await (this.prisma.client as any).cortexSession.findFirst(
+        const session = !businessId ? null : await (this.prisma.client as any).cortexSession.findFirst(
           {
-            where: {
-              messages: {
+          where: {
+            businessId,
+            messages: {
                 path: ['metadata', 'correlationId'],
                 equals: decisionId,
               },
@@ -82,8 +86,9 @@ export class KeyCortexInteractionService {
       let genomeContext: GenomeEnrichedContext | null = null;
       if (decisionData.businessId) {
         try {
-          genomeContext = await this.genomeContextService.getGenomeEnrichedContext(
-            decisionData.businessId as string,
+          genomeContext = genomeContextForReader(
+            await this.genomeContextService.getGenomeEnrichedContext(decisionData.businessId as string),
+            readsRevenue,
           );
         } catch {
           // Genome context may not be available
@@ -98,8 +103,7 @@ Decision Steps:
 ${eventLog.length > 0 ? eventLog.map((e: any) => `- ${e.step} at ${e.timestamp}`).join('\n') : 'Steps not available in event log'}
 
 ${genomeContext ? `Genome Context at Decision Time:
-- Genome Stage: ${genomeContext.genomeStage}
-- Executive Readiness: ${genomeContext.executiveReadiness}%
+${genomeContext.genomeStage ? `- Genome Stage: ${genomeContext.genomeStage}\n` : ''}- Executive Readiness: ${genomeContext.executiveReadiness}%
 - DNA Scores: ${JSON.stringify(genomeContext.dnaScores)}
 - Active Signals: ${genomeContext.signals.length}
 - Top Recommendation: ${genomeContext.recommendations[0]?.title ?? 'None'}` : 'Genome context not available'}

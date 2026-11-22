@@ -1335,8 +1335,8 @@ export class KeyCortexQueryPipelineService {
       yield {
         type: 'thought',
         thought: genomeContext
-          ? `Analyzing genome-aware context for ${contextSnapshot.genomeStage} stage business — ${genomeContext.signals.length} active signals, ${genomeContext.recommendations.length} recommendations available...`
-          : `Analyzing context for ${contextSnapshot.genomeStage} stage business${flags.integrationV2Enabled ? ' with full module awareness' : ''}...`,
+          ? `Analyzing genome-aware context for ${contextSnapshot.genomeStage ? `${contextSnapshot.genomeStage} stage ` : ''}business — ${genomeContext.signals.length} active signals, ${genomeContext.recommendations.length} recommendations available...`
+          : `Analyzing context for ${contextSnapshot.genomeStage ? `${contextSnapshot.genomeStage} stage ` : ''}business${flags.integrationV2Enabled ? ' with full module awareness' : ''}...`,
       };
 
       let accumulatedText = '';
@@ -2395,7 +2395,7 @@ export class KeyCortexQueryPipelineService {
     let score = 0.7;
 
     if (content.includes('$') || content.includes('%')) score += 0.1;
-    if (content.toLowerCase().includes(context.genomeStage.toLowerCase()))
+    if (context.genomeStage && content.toLowerCase().includes(context.genomeStage.toLowerCase()))
       score += 0.05;
     if (content.length > 200) score += 0.05;
 

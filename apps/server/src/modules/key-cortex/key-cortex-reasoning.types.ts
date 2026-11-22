@@ -8,7 +8,8 @@
 
 export interface GenomeEnrichedContext {
   dnaScores: Record<string, number>;
-  genomeStage: string;
+  /** Withheld (undefined) for a reader without revenue read (D-235: a categorical indicator of the whole genome). */
+  genomeStage?: string;
   executiveReadiness: number;
   recommendations: GenomeRecommendation[];
   signals: GenomeSignal[];

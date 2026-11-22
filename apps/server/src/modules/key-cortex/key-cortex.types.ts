@@ -134,7 +134,8 @@ export interface CortexSession {
 export interface CortexContextSnapshot {
   businessId: string;
   genomeDna: Record<string, number>;
-  genomeStage: string;
+  /** Withheld (undefined) in the snapshot a viewer without revenue read is handed (snapshotForViewer, D-235). */
+  genomeStage?: string;
   executiveReadiness: number;
   recentTasks: string[];
   recentEvents: string[];

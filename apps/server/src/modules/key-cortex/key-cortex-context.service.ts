@@ -9,6 +9,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
 import { CortexContextSnapshot } from './key-cortex.types';
 import { dnaScoresForReader } from '../business-genome/key-genome/genome-finance-scope';
+import { readinessFromVisibleDna } from './genome-context-for-reader';
 
 // ─────────────────────────────────────────────────────────────
 // Configuration
@@ -59,7 +60,10 @@ export function snapshotForViewer<T extends CortexContextSnapshot | null | undef
   const { pendingInvoices: _withheld, ...rest } = snapshot;
   // D-233: the finance and sales DNA scores are finance (dnaScoresForReader fails closed on unknown keys).
   const genomeDna = dnaScoresForReader(snapshot.genomeDna, false) as Record<string, number>;
-  return { ...rest, genomeDna, keyMetrics } as unknown as T;
+  // D-235 (D-233 "no inference via a score or categorical indicator"): executive readiness is recomputed from the DNA the
+  // viewer may see, and the genome stage is withheld.
+  const { genomeStage: _stage, ...withoutStage } = rest as typeof rest & { genomeStage?: string };
+  return { ...withoutStage, genomeDna, keyMetrics, executiveReadiness: readinessFromVisibleDna(genomeDna) } as unknown as T;
 }
 
 @Injectable()
@@ -312,8 +316,7 @@ export class KeyCortexContextService {
 
     return `=== BUSINESS CONTEXT ===
 Company: ${snapshot.businessId}
-Genome Stage: ${snapshot.genomeStage}
-Executive Readiness: ${snapshot.executiveReadiness}%
+${snapshot.genomeStage ? `Genome Stage: ${snapshot.genomeStage}\n` : ''}Executive Readiness: ${snapshot.executiveReadiness}%
 DNA Scores: ${dnaEntries}
 Active: ${snapshot.recentTasks.length} tasks, ${snapshot.recentEvents.length} events, ${snapshot.activeProjects.length} projects
 Pending: ${typeof snapshot.pendingInvoices === 'number' ? `${snapshot.pendingInvoices} invoices, ` : ''}${snapshot.unreadMessages} unread messages

@@ -51,7 +51,9 @@ describe('GET cortex/evolution/decision: KeyCortexEvolutionService.explainDecisi
 
   it('RED-BEFORE: an operations decision is explained to a reader without revenue read without the money decisions and money patterns of the business', async () => {
     const related = [{ query: 'raise the hourly rate to 150?', userAction: 'accepted' }, { query: 'write the SOPs?', userAction: 'accepted' }];
-    const patterns = [{ type: 'operations', description: 'Revenue concentrated in 3 accounts', confidence: 0.9 }, { type: 'operations', description: 'Deliveries slip on Fridays', confidence: 0.8 }];
+    // Both patterns pass the service's relevance filter (their type is a word of the recommendation), so only the money
+    // one is withheld by the reader projection.
+    const patterns = [{ type: 'delivery', description: 'Revenue concentrated in 3 accounts', confidence: 0.9 }, { type: 'delivery', description: 'Deliveries slip on Fridays', confidence: 0.8 }];
     const { svc, prompts } = evolution(OPS_DECISION, related, patterns);
     const out = await svc.explainDecision('dec_ops', 'biz_A', { readsRevenue: false });
     expect(out.recommendation).toBe('Write the delivery SOPs');

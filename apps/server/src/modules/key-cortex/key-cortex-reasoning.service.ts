@@ -73,6 +73,7 @@ import {
   Suggestion,
   InteractionFeedback,
 } from './key-cortex-reasoning.types';
+import { genomeContextForReader, genomeRecommendationsForReader } from './genome-context-for-reader';
 
 /**
  * KeyCortexReasoningService — The Core Reasoning Brain of KEY Cortex.
@@ -685,14 +686,16 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
   /**
    * Determine whether KEY should suggest a proactive action based on genome signals.
    */
-  async shouldSuggestProactiveAction(businessId: string): Promise<boolean> {
+  // D-235: projected for the reader; no reader given is a reader without revenue read (fails closed).
+  async shouldSuggestProactiveAction(businessId: string, readsRevenue = false): Promise<boolean> {
     if (!this.genomeBridgeService) {
       return false;
     }
 
     try {
-      // Get latest genome context (uses cache)
-      const genomeContext = await this.getGenomeEnrichedContext(businessId);
+      // Get latest genome context (uses cache), projected for the reader (D-235)
+      const fullContext = await this.getGenomeEnrichedContext(businessId);
+      const genomeContext = genomeContextForReader(fullContext, readsRevenue);
 
       // Check for urgent/critical signals
       const hasCriticalSignals = genomeContext.signals.some(
@@ -724,9 +727,10 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
       }
 
       // Store current scores for next comparison
+      // D-235: the cache holds the whole map; each reader compares only the keys it may see.
       await this.redis.setJson(
         `genome:dna:previous:${businessId}`,
-        genomeContext.dnaScores,
+        fullContext.dnaScores,
         3600,
       );
 
@@ -753,14 +757,15 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
   /**
    * Get proactive suggestions based on genome intelligence.
    */
-  async getProactiveSuggestions(businessId: string): Promise<Suggestion[]> {
+  // D-235: projected for the reader; no reader given is a reader without revenue read (fails closed).
+  async getProactiveSuggestions(businessId: string, readsRevenue = false): Promise<Suggestion[]> {
     if (!this.genomeBridgeService) {
       return [];
     }
 
     try {
-      // Get genome context (uses cache)
-      const genomeContext = await this.getGenomeEnrichedContext(businessId);
+      // Get genome context (uses cache), projected for the reader (D-235)
+      const genomeContext = genomeContextForReader(await this.getGenomeEnrichedContext(businessId), readsRevenue);
 
       // Also get v2 context for richer suggestions
       let v2Context: any = {};
@@ -773,11 +778,11 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
         }
       }
 
-      // Get genome-ranked recommendations
-      const rankedRecs = await this.genomeBridgeService.getRankedRecommendations(
-        businessId,
-        5,
-      );
+      // Get genome-ranked recommendations, filtered for the reader before the top rows are taken (D-235)
+      const rankedRecs = genomeRecommendationsForReader(
+        (await this.genomeBridgeService.getRankedRecommendations(businessId, readsRevenue ? 5 : 50)).map((r: any) => ({ ...r, category: r.domain })),
+        readsRevenue,
+      ).slice(0, 5) as Awaited<ReturnType<NonNullable<typeof this.genomeBridgeService>['getRankedRecommendations']>>;
 
       // Filter to top 3 most impactful
       const topRecs = rankedRecs
@@ -836,7 +841,9 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
    * Explain a decision by looking it up in the event log and generating
    * a human-readable explanation that includes genome context at the time.
    */
-  async explainDecision(decisionId: string): Promise<string> {
+  // FU-KEY-GENOME-READS-RESIDUAL (D-235): the decision is read in the business named (never across businesses), and
+  // the genome is projected for the reader; no reader given is a reader without revenue read (fails closed).
+  async explainDecision(decisionId: string, businessId?: string, readsRevenue = false): Promise<string> {
     this.logger.debug(`[explainDecision] Looking up decision: ${decisionId}`);
 
     try {
@@ -856,8 +863,10 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
       let decisionData: Record<string, unknown> = {};
       if (eventLog.length === 0) {
         // Try to find the session message with this correlation ID
-        const session = await (this.prisma.client as any).cortexSession.findFirst({
+        const session = !businessId ? null : await (this.prisma.client as any).cortexSession.findFirst(
+          {
           where: {
+            businessId,
             messages: {
               path: ['metadata', 'correlationId'],
               equals: decisionId,
@@ -883,8 +892,9 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
       let genomeContext: GenomeEnrichedContext | null = null;
       if (this.genomeBridgeService && decisionData.businessId) {
         try {
-          genomeContext = await this.getGenomeEnrichedContext(
-            decisionData.businessId as string,
+          genomeContext = genomeContextForReader(
+            await this.getGenomeEnrichedContext(decisionData.businessId as string),
+            readsRevenue,
           );
         } catch {
           // Genome context may not be available

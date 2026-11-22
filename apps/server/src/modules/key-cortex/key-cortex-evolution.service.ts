@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
 import { ModelGatewayService } from '../ai/model-gateway.service';
@@ -10,6 +10,7 @@ import { SemanticMemoryService } from '../ai/semantic-memory.service';
 import { KeyCortexGenomeBridgeService } from './key-cortex-genome-bridge.service';
 import { KeyCortexEventService } from './key-cortex-event.service';
 import { BusinessEventType } from '@prisma/client';
+import { isMoneyLabel, proposalTextStatesMoney } from '../business-genome/key-genome/genome-finance-scope';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -164,6 +165,7 @@ export interface UnifiedReport {
  * v3 makes it genome-aware, so KEY's learning feeds genome evolution
  * and genome evolution feeds KEY's adaptation.
  */
+
 @Injectable()
 export class KeyCortexEvolutionService {
   private readonly logger = new Logger(KeyCortexEvolutionService.name);
@@ -814,20 +816,29 @@ Write 3-4 engaging paragraphs as if KEY is speaking directly to the business own
    * @param decisionId  The keyEvolutionLog entry ID
    * @returns           Human-readable explanation of the decision
    */
-  async explainDecision(decisionId: string): Promise<DecisionExplanation> {
+  async explainDecision(
+    decisionId: string,
+    businessId?: string,
+    // D-235: no reader given is a reader without revenue read (fails closed).
+    reader: { readsRevenue: boolean } = { readsRevenue: false },
+  ): Promise<DecisionExplanation> {
     this.logger.debug(`Explaining decision: ${decisionId}`);
-
-    // Fetch the decision record
-    const decision = await (this.prisma.client as any).keyEvolutionLog.findUnique({
-      where: { id: decisionId },
+    // FU-KEY-GENOME-READS-RESIDUAL (D-235): the decision is read in the business the route names (it was read by id
+    // alone, bound only by the tenant extension), and a finance or sales decision does not exist for a reader without
+    // revenue read: nothing about it is sent to the model or answered.
+    if (!businessId) throw new NotFoundException('Decision not found');
+    const decision = await (this.prisma.client as any).keyEvolutionLog.findFirst({
+      where: { id: decisionId, businessId },
     });
-
-    if (!decision) {
-      throw new Error(`Decision not found: ${decisionId}`);
+    if (!decision) throw new NotFoundException('Decision not found');
+    const statesMoney = (...texts: unknown[]) => texts.some((t) => typeof t === 'string' && (proposalTextStatesMoney(t) || isMoneyLabel(t)));
+    const readsRevenue = reader.readsRevenue === true;
+    if (!readsRevenue && statesMoney(decision.query, decision.recommendation, decision.recommendationType, decision.outcome)) {
+      throw new NotFoundException('Decision not found');
     }
 
     // Gather related context
-    const relatedDecisions = await (this.prisma.client as any).keyEvolutionLog.findMany({
+    const relatedAll = await (this.prisma.client as any).keyEvolutionLog.findMany({
       where: {
         businessId: decision.businessId,
         userId: decision.userId,
@@ -839,11 +850,15 @@ Write 3-4 engaging paragraphs as if KEY is speaking directly to the business own
       orderBy: { createdAt: 'desc' },
       take: 20,
     });
+    const relatedDecisions = readsRevenue
+      ? relatedAll
+      : relatedAll.filter((d: any) => !statesMoney(d.query, d.recommendation, d.recommendationType, d.outcome));
 
-    // Fetch detected patterns for this business
-    const patterns = await this.redis.getJson<DetectedPattern[]>(
+    // Fetch detected patterns for this business (the reader's money patterns are withheld, D-235)
+    const patternsAll = await this.redis.getJson<DetectedPattern[]>(
       `evolution:patterns:${decision.businessId}`,
     );
+    const patterns = readsRevenue ? patternsAll : (patternsAll ?? []).filter((p: any) => !statesMoney(p?.description, p?.type));
 
     const relevantPatterns =
       patterns?.filter((p: any) =>
