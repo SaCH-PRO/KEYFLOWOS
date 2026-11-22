@@ -1131,6 +1131,11 @@
       "prefix": "v64g_",
       "owner": "apps/server/test/public-booking-payment-methods.integration.test.ts",
       "packet": "V1-64 (SWP-BOOKING-PAYMENT-GATE)"
+    },
+    {
+      "prefix": "v57r_",
+      "owner": "apps/server/test/send-reminder-status-gate.integration.test.ts",
+      "packet": "FU-SEND-REMINDER-SERVER-GATE"
     }
   ],
   "pendingRenames": [],
