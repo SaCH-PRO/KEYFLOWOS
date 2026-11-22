@@ -92,6 +92,8 @@ function makeDispatcher(flow: FlowOrchestratorService) {
   internals.logger = quiet;
   // Production waits 1 s and 3 s between attempts; how many attempts there are is what these cases count.
   internals.RETRY_DELAYS = [0, 0];
+  // The cases loop to this private number: were it renamed or gone, their loops would run nothing and pass.
+  expect(internals.CIRCUIT_THRESHOLD).toBeGreaterThan(0);
   return { dispatcher, threshold: internals.CIRCUIT_THRESHOLD };
 }
 
@@ -625,6 +627,73 @@ describe('FlowOrchestratorService.executeToolDirectly hands the plan queue a ref
       expect(await dispatcher.dispatch({ businessId: BIZ_A, toolName: TOOL, args, retryCount: 2 })).toMatchObject({ success: false, error: REFUSAL });
       expect(notContract.calls()).toBe(i);
       expect(dispatcher.getCircuitStatus(TOOL, BIZ_A)).toEqual(CLOSED);
+    }
+  });
+
+  it('DS-11 W11-DISPATCH-REFUSAL-FINAL review COR3-1 (D-134): a refusal the model door gives before any read (the business has no AI credits left: 403) is not a failed read. contract_extract_terms answers it once and counts it toward no circuit, as contract_extract_clauses does; a 429, a 503 and an error that is no HttpException stay failed reads', async () => {
+    const TOOL = 'contract_extract_terms';
+    const REFUSAL = 'Document does not appear to be a contract or extraction failed';
+    const args = { contractId: 'w10ds_contract', sourceAssetId: 'w10ds_asset' };
+    /** The real tool case over the real ContractsService and DocumentIntelligenceService; the model door throws `thrown` on every call. */
+    const makeRefusedTermsFlow = (thrown: Error) => {
+      let calls = 0;
+      const prisma = {
+        client: {
+          contract: { findFirst: async () => ({ id: 'w10ds_contract', title: 'w10ds contract' }) },
+          asset: { findFirst: async () => ({ url: null, mimeType: 'text/plain', name: 'w10ds_asset.txt' }) },
+        },
+      };
+      const aiUsage = { trackAndComplete: async () => { calls += 1; throw thrown; } };
+      const docIntel = new DocumentIntelligenceService(
+        prisma as never, { emit: () => true } as never, {} as never, { log: async () => undefined } as never, {} as never, aiUsage as never,
+        { get: () => ({ parse: async () => null }) } as never,
+      );
+      (docIntel as unknown as { logger: unknown }).logger = quiet;
+      const contracts = new ContractsService(prisma as never, docIntel, { emit: () => true } as never);
+      const flow = Object.create(FlowOrchestratorService.prototype) as FlowOrchestratorService;
+      Object.assign(flow, {
+        logger: quiet,
+        governance: { getToolTier: () => 1 },
+        executionLog: { logToolExecution: async () => 'w10ds_log' },
+        businessGraph: { invalidateCache: () => undefined },
+        memberScopeRefusal: async () => null,
+        attributeExecutionLog: async () => undefined,
+        moduleRef: { get: () => contracts },
+      });
+      return { flow, calls: () => calls };
+    };
+
+    // Final: asking again gets the same answer.
+    for (const refusal of [new ForbiddenException('AI credit limit reached for this billing period'), new BadRequestException('The document is too large to read')]) {
+      const label = refusal.message;
+      const err = await thrownByExecuteToolDirectly(makeRefusedTermsFlow(refusal).flow, TOOL, args);
+      expect(err, label).toBeInstanceOf(BadRequestException);
+      expect((err as Error).message, label).toBe(REFUSAL);
+
+      const refused = makeRefusedTermsFlow(refusal);
+      const { dispatcher, threshold } = makeDispatcher(refused.flow);
+      for (let i = 1; i <= threshold + 1; i++) {
+        expect(await dispatcher.dispatch({ businessId: BIZ_A, toolName: TOOL, args, retryCount: 2 }), label).toMatchObject({ success: false, error: REFUSAL });
+        expect(refused.calls(), label).toBe(i);
+        expect(dispatcher.getCircuitStatus(TOOL, BIZ_A), label).toEqual(CLOSED);
+      }
+    }
+
+    // Failed reads: tried three times and counted.
+    const failedReads = [
+      new HttpException('Too Many Requests', HttpStatus.TOO_MANY_REQUESTS),
+      new HttpException('Request Timeout', HttpStatus.REQUEST_TIMEOUT),
+      new ServiceUnavailableException('KEY is switched off'),
+      new Error('connect ECONNRESET'),
+    ];
+    for (const failure of failedReads) {
+      const label = failure.message;
+      expect(await thrownByExecuteToolDirectly(makeRefusedTermsFlow(failure).flow, TOOL, args), label).toBeInstanceOf(ServiceUnavailableException);
+      const failing = makeRefusedTermsFlow(failure);
+      const { dispatcher } = makeDispatcher(failing.flow);
+      expect(await dispatcher.dispatch({ businessId: BIZ_A, toolName: TOOL, args, retryCount: 2 }), label).toMatchObject({ success: false, error: REFUSAL });
+      expect(failing.calls(), label).toBe(3);
+      expect(dispatcher.getCircuitStatus(TOOL, BIZ_A), label).toMatchObject({ open: false, failures: 1 });
     }
   });
 });

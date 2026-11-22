@@ -258,6 +258,7 @@ describe('W11-DISPATCH-REFUSAL-FINAL (D-134): the plan queue answers a tool\'s 4
   it('RF-01 RED-BEFORE: a 400 the tool itself answers (the evidence gate of ProjectsService.updateTask) reaches the dispatcher as the BadRequestException, is answered once and counts toward no circuit: threshold+1 refused steps leave projects_complete_task running for the business, and another business is unaffected', async () => {
     const { worker, dispatcher } = makeWorker();
     const threshold = (dispatcher as unknown as { CIRCUIT_THRESHOLD: number }).CIRCUIT_THRESHOLD;
+    expect(threshold).toBeGreaterThan(0); // else the loops below would run nothing
     const args = { taskId: ID.taskEvidence };
     for (let i = 1; i <= threshold + 1; i++) {
       const planId = `${P}rf01_refused_${i}`;
@@ -296,6 +297,7 @@ describe('W11-DISPATCH-REFUSAL-FINAL (D-134): the plan queue answers a tool\'s 4
   it('RF-02 RED-BEFORE: a call the tool\'s schema refuses (validateToolInput: no taskId, a taskId that is no string) reaches the dispatcher as a BadRequestException with the message it always had, before the tool does any work: answered once, not counted', async () => {
     const { worker, dispatcher } = makeWorker();
     const threshold = (dispatcher as unknown as { CIRCUIT_THRESHOLD: number }).CIRCUIT_THRESHOLD;
+    expect(threshold).toBeGreaterThan(0); // else the loops below would run nothing
     const before = toolWork.length;
     const cases: Array<[Record<string, unknown>, string]> = [
       [{}, `Missing required fields for ${TOOL}: taskId`],
@@ -370,6 +372,7 @@ describe('W11-DISPATCH-REFUSAL-FINAL (D-134): the plan queue answers a tool\'s 4
   it('RF-04 control (tenancy): another business\'s plan step naming this business\'s task is the tool\'s own 404, answered once and counted toward no circuit; the task is untouched, and that business completes its own task', async () => {
     const { worker, dispatcher } = makeWorker();
     const threshold = (dispatcher as unknown as { CIRCUIT_THRESHOLD: number }).CIRCUIT_THRESHOLD;
+    expect(threshold).toBeGreaterThan(0); // else the loops below would run nothing
     const args = { taskId: ID.taskTenancy };
     for (let i = 1; i <= threshold + 1; i++) {
       const planId = `${P}rf04_foreign_${i}`;
