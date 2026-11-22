@@ -6722,6 +6722,41 @@
    "fixture_prefix": null,
    "id": "OPS-CONSOLE-READONLY",
    "title": "The owner's read-only engineering console in the platform admin area"
+  },
+  {
+   "id": "FU-GENOME-SURFACES-REVENUE",
+   "title": "The genome's other surfaces show finance and sales scores and rows only to revenue readers",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 3,
+   "lane": "both",
+   "size": "M",
+   "priority": "P0",
+   "depends_on": [
+    "FU-GENOME-REVENUE-CLASSIFIER"
+   ],
+   "files": [
+    "apps/server/src/modules/blueprint/blueprint.controller.ts (genome, genome/integrity, genome/recommendations)",
+    "constitution and document-pack dna/export",
+    "business-command-center.service.ts + command-center-key-genome-bridge.service.ts (crossDomain, genome signal and recommendation items)",
+    "key-cortex organs/key-genome-adapter (get_blueprint, calculate_integrity, list_facts), adapters/bridge-adapter get_dna",
+    "key-genome.controller.ts marketing-growth/* CAC figures, customer-sales segments/motions",
+    "apps/web genome hub (genome-hero, dna-constellation, dna-sections-list, profile genome panels), command center cross-domain panels"
+   ],
+   "decisions": [
+    "D-100",
+    "D-128",
+    "D-233",
+    "D-234"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "Split from FU-GENOME-REVENUE-CLASSIFIER by its inventory (2026-11-22): the surfaces that read the genome's DNA sections and finance or sales rows without any reader projection. Apply dnaScoresForReader / the classifier server-side (blueprint genomeDnaScores.financial and .sales and dnaSections, constitution sourceDnaScores, document-pack export, command-center crossDomain and genome items, the KEY blueprint, integrity, facts and DNA tools, marketing-growth CAC targets, customer-sales segment and motion metrics), and make the web genome hub and command center render a withheld section as withheld (no score, no grade, no ring segment that lets it be inferred). Tests first: cross-role, cross-tenant, cache isolation, indirect inference through integrity totals and rankings.",
+   "definition_of_done": "RED: a STAFF member without revenue read gets the financial and sales DNA sections from GET blueprint genome and the command center, and the KEY integrity tool. GREEN: none of them, no inferable total; revenue readers unchanged; web shows the withheld state; server and web suites green; proof:release0 MET.",
+   "fixture_prefix": null
   }
  ],
  "moot": [
