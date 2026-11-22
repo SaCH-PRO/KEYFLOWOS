@@ -223,9 +223,12 @@ beforeAll(async () => {
 }, 120_000);
 
 afterAll(async () => {
-  if (app) await app.close();
-  if (db) await cleanup();
-  if (setTenantContextProvider) setTenantContextProvider({ getCurrentBusinessId: () => undefined });
+  try {
+    if (app) await app.close();
+  } finally {
+    if (db) await cleanup();
+    if (setTenantContextProvider) setTenantContextProvider({ getCurrentBusinessId: () => undefined });
+  }
 }, 60_000);
 
 describe('fixture sanity (real rows)', () => {

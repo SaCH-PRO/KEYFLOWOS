@@ -61,11 +61,12 @@ function storedCoaCode(code: string | null): string | null {
  *
  * V1-63 SWP-COA-UNIQUE-CODE (BUG-111; owner ruling D-167: the check stays in code, no unique index): a code
  * is used by at most one ACTIVE account of a business. create() and update() refuse a write that would make
- * a second one with 409 COA_CODE_TAKEN and write nothing:
- *   - a create with a code, an update that changes the code, and an update that brings an archived account
- *     back are checked against the business's other active accounts, system accounts included (so the
- *     system chart is seeded first: a custom 6100 on a chart never listed would otherwise be joined by the
- *     seed's own 6100);
+ * a second one with 409 COA_CODE_TAKEN and write no account (the system chart may have been seeded first):
+ *   - a create with a code, an update that changes the code (also on an account that is, or in the same
+ *     request becomes, archived: no row is left one step from a duplicate) and an update that brings an
+ *     archived account back are checked against the business's other active accounts, system accounts
+ *     included (so the system chart is seeded first: a custom 6100 on a chart never listed would otherwise
+ *     be joined by the seed's own 6100);
  *   - codes are compared trimmed and without letter case (as Postgres lower() folds it; the database alone
  *     decides a collision), and stored trimmed; a blank code is no code;
  *   - accounts without a code never collide, an archived account frees its code, and an account saved with
@@ -204,7 +205,8 @@ export class FinanceCoaService {
 
   /**
    * Refuse 409 COA_CODE_TAKEN when another ACTIVE account of the business holds `code` (already trimmed;
-   * the stored side is trimmed of the same whitespace here, and letter case is folded by the database). Raw SQL on purpose: Prisma's case-insensitive `equals` is an ILIKE, in which a
+   * the stored side is trimmed of the same whitespace here, and letter case is folded by the database).
+   * Raw SQL on purpose: Prisma's case-insensitive `equals` is an ILIKE, in which a
    * code's own '_' or '%' would match other codes. The message names the caller's own account only: the
    * query is bound to the one business.
    */
