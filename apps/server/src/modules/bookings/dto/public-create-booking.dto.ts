@@ -104,4 +104,17 @@ export class PublicCreateBookingDto {
   @IsString()
   @IsOptional()
   orgUnitId?: string | null;
+
+  /**
+   * V1-64 (SWP-BOOKING-PAYMENT-GATE, BUG-037): the payment method the customer
+   * chose, if any. Without this field the global ValidationPipe (whitelist)
+   * dropped it and no gate could read it. Read trimmed and upper-cased and
+   * checked against the storefront checkout-method rule before anything is
+   * written (BookingsController.publicCreateBooking,
+   * BookingsService.assertPublicPaymentMethodOffered).
+   */
+  @IsString()
+  @IsOptional()
+  @MaxLength(32)
+  paymentMethod?: string | null;
 }

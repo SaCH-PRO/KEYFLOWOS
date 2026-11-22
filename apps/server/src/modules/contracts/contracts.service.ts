@@ -4,7 +4,7 @@ import type { ContractStatus, ContractAlertType, Prisma } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { WORK_OBLIGATION_SETTLED, type ObligationSettledPayload } from '@keyflow/shared';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { DocumentIntelligenceService, DocumentExtractionResult } from '../ai/document-intelligence.service';
+import { DocumentIntelligenceService, DocumentExtractionResult, documentExtractionFailed, DocumentExtractionFailedError } from '../ai/document-intelligence.service';
 import type { CreateContractDto } from './dto/create-contract.dto';
 import type { UpdateContractDto } from './dto/update-contract.dto';
 import type { ExtractContractTermsDto } from './dto/extract-contract-terms.dto';
@@ -302,7 +302,13 @@ export class ContractsService {
     const result = await this.docIntel.extractFromDocument(request);
 
     if (result.documentType !== 'contract' || !result.contractData) {
-      throw new BadRequestException('Document does not appear to be a contract or extraction failed');
+      // W11-DISPATCH-REFUSAL-FINAL review SEC2-1 (D-134): the same 400 either way, as the route answers
+      // it. When the read itself failed (the model did not answer), that rides on the 400 as its cause,
+      // so KEY's plan queue retries it instead of taking it as the document's final answer.
+      throw new BadRequestException(
+        'Document does not appear to be a contract or extraction failed',
+        documentExtractionFailed(result) ? { cause: new DocumentExtractionFailedError(), description: 'Bad Request' } : undefined,
+      );
     }
 
     await this.applyExtractionResult(businessId, contract.id, result, userId);
