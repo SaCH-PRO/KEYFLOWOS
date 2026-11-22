@@ -1116,6 +1116,11 @@
       "prefix": "v71o_",
       "owner": "apps/server/test/key-memory-money-sight.integration.test.ts",
       "packet": "V1-71 (FU-KEY-MEMORY-MONEY-SIGHT)"
+    },
+    {
+      "prefix": "v71p_",
+      "owner": "apps/server/test/key-chat-genome-money-sight.integration.test.ts",
+      "packet": "V1-71 (FU-KEY-CHAT-GENOME-MONEY-SIGHT)"
     }
   ],
   "pendingRenames": [],

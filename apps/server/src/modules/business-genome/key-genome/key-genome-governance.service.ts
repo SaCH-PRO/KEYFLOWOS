@@ -6,6 +6,7 @@ import { GenomeExperimentService } from './genome-experiment.service';
 import { GenomeModuleReadinessService } from './genome-module-readiness.service';
 import { GenomeScoringService } from './genome-scoring.service';
 import { GenomeDepartmentService } from './genome-department.service';
+import { isFinanceRecommendation, isFinanceSignal, isMoneyLabel, isMoneyMemoryEvent } from './genome-finance-scope';
 import type {
   GenomeExperimentData,
   GenomeRecommendationData,
@@ -13,6 +14,7 @@ import type {
   KeyGenomeGovernanceItem,
   KeyGenomeGovernanceItemAction,
   KeyGenomeGovernanceSummary,
+  KeyGenomeScore,
   ModuleReadinessData,
 } from './key-genome.types';
 
@@ -60,41 +62,64 @@ export class KeyGenomeGovernanceService {
     private readonly departments: GenomeDepartmentService,
   ) {}
 
-  async summary(businessId: string): Promise<KeyGenomeGovernanceSummary> {
+  /**
+   * FU-GENOME-REVENUE-CLASSIFIER (security review MAJOR-6; D-233, D-234, D-128): for a reader without revenue
+   * read (`readsRevenue: false`) the summary is built from the rows that reader is served, so no item, count,
+   * queue position or health figure reveals a withheld row: no finance or sales signal or recommendation, no
+   * money or sales section (FINANCIAL, SALES, BUSINESS_MODEL), module, department or autonomy action, the
+   * memory counts over the events that reader may read, the composite health over the sections they see.
+   * Revenue readers (the default) get the summary unchanged.
+   */
+  async summary(businessId: string, opts: { readsRevenue?: boolean } = {}): Promise<KeyGenomeGovernanceSummary> {
+    const readsRevenue = opts.readsRevenue !== false;
+    const LIMIT = 25;
+    const served = <T>(rows: T[], hidden: (row: T) => boolean) => (readsRevenue ? rows : rows.filter((r) => !hidden(r)).slice(0, LIMIT));
+    const listLimit = readsRevenue ? LIMIT : undefined;
     const [
-      newSignals,
-      acceptedSignals,
-      activeRecommendations,
-      acceptedRecommendations,
+      allNewSignals,
+      allAcceptedSignals,
+      allActiveRecommendations,
+      allAcceptedRecommendations,
       experiments,
-      readinessList,
-      departments,
+      allReadiness,
+      allDepartments,
     ] = await Promise.all([
-      this.signals.listSignals(businessId, { status: 'NEW', limit: 25 }),
-      this.signals.listSignals(businessId, { status: 'ACCEPTED', limit: 25 }),
-      this.recommendations.listRecommendations(businessId, { status: 'ACTIVE', limit: 25 }),
-      this.recommendations.listRecommendations(businessId, { status: 'ACCEPTED', limit: 25 }),
+      this.signals.listSignals(businessId, { status: 'NEW', limit: listLimit }),
+      this.signals.listSignals(businessId, { status: 'ACCEPTED', limit: listLimit }),
+      this.recommendations.listRecommendations(businessId, { status: 'ACTIVE', limit: listLimit }),
+      this.recommendations.listRecommendations(businessId, { status: 'ACCEPTED', limit: listLimit }),
       this.experiments.listExperiments(businessId, { limit: 25 }),
       this.readiness.getReadiness(businessId) as Promise<ModuleReadinessData[]>,
       this.departments.listDepartments(businessId),
     ]);
+    const newSignals = served(allNewSignals, (r) => isFinanceSignal(r));
+    const acceptedSignals = served(allAcceptedSignals, (r) => isFinanceSignal(r));
+    const activeRecommendations = served(allActiveRecommendations, (r) => isFinanceRecommendation(r));
+    const acceptedRecommendations = served(allAcceptedRecommendations, (r) => isFinanceRecommendation(r));
+    const readinessList = readsRevenue ? allReadiness : allReadiness.filter((r) => !isMoneyLabel(r.module));
+    const departments = readsRevenue ? allDepartments : allDepartments.filter((d) => !isMoneyLabel(d.code) && !isMoneyLabel(d.name));
 
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const countEvents = async (where: Record<string, unknown>) => {
+      if (readsRevenue) return this.prisma.client.genomeMemoryEvent.count({ where: { businessId, ...where } });
+      const rows = await this.prisma.client.genomeMemoryEvent.findMany({
+        where: { businessId, ...where },
+        select: { sourceType: true, eventType: true, domain: true, section: true },
+      });
+      return rows.filter((r) => !isMoneyMemoryEvent(r)).length;
+    };
     const [memoryEventsLast7Days, failedOutcomesLast30Days] = await Promise.all([
-      this.prisma.client.genomeMemoryEvent.count({
-        where: { businessId, createdAt: { gte: sevenDaysAgo } },
-      }),
-      this.prisma.client.genomeMemoryEvent.count({
-        where: { businessId, outcome: 'FAILURE', createdAt: { gte: thirtyDaysAgo } },
-      }),
+      countEvents({ createdAt: { gte: sevenDaysAgo } }),
+      countEvents({ outcome: 'FAILURE', createdAt: { gte: thirtyDaysAgo } }),
     ]);
 
     const [autonomyBlocks, facts] = await Promise.all([
       this.loadAutonomyBlocks(businessId),
       this.scoring.computeFactScores(businessId),
     ]);
-    const score = this.scoring.computeBusinessScore(businessId, facts);
+    const fullScore = this.scoring.computeBusinessScore(businessId, facts);
+    const score = readsRevenue ? fullScore : this.withoutMoneySections(fullScore);
 
     const signalItems = [
       ...newSignals.map((s) => this.signalToGovernanceItem(s)),
@@ -112,7 +137,9 @@ export class KeyGenomeGovernanceService {
       .filter((r) => !r.automationAllowed || r.readinessScore < 70)
       .map((r) => this.readinessToGovernanceItem(r));
 
-    const autonomyItems = autonomyBlocks.map((b) => this.autonomyBlockToGovernanceItem(b));
+    const autonomyItems = autonomyBlocks
+      .filter((b) => readsRevenue || (!isMoneyLabel(b.title) && !isMoneyLabel(b.summary)))
+      .map((b) => this.autonomyBlockToGovernanceItem(b));
 
     const weakSectionItems = score.sections
       .filter((s) => s.score.overall < 0.75)
@@ -144,7 +171,7 @@ export class KeyGenomeGovernanceService {
         proposedExperiments: experiments.filter((e) => e.status === 'PROPOSED').length,
         blockedModules: readinessList.filter((r) => !r.automationAllowed).length,
         lowReadinessModules: readinessList.filter((r) => r.readinessScore < 70).length,
-        autonomyBlockedActions: autonomyBlocks.length,
+        autonomyBlockedActions: autonomyItems.length,
         memoryEventsLast7Days,
         failedOutcomesLast30Days,
         blockedDepartments: departments.filter((d) => !d.automationAllowed).length,
@@ -177,8 +204,28 @@ export class KeyGenomeGovernanceService {
     };
   }
 
-  async queue(businessId: string): Promise<KeyGenomeGovernanceItem[]> {
-    const summary = await this.summary(businessId);
+  /**
+   * The money and sales sections withheld, and the composite recomputed over the sections that remain, as
+   * GenomeScoringService.computeBusinessScore computes it (weighted overall; averaged integrity, readiness
+   * and confidence), so the composite cannot be used to infer the withheld scores.
+   */
+  private withoutMoneySections(score: KeyGenomeScore): KeyGenomeScore {
+    const sections = score.sections.filter((s) => !isMoneyLabel(s.section));
+    if (sections.length === 0) return { ...score, sections, overall: 0, integrity: 0, readiness: 0, confidence: 0 };
+    const weight = sections.reduce((sum, s) => sum + (s.weight ?? 0), 0);
+    const avg = (pick: (s: KeyGenomeScore['sections'][number]) => number) => sections.reduce((sum, s) => sum + (pick(s) ?? 0), 0) / sections.length;
+    return {
+      ...score,
+      sections,
+      overall: weight > 0 ? sections.reduce((sum, s) => sum + s.score.overall * (s.weight ?? 0), 0) / weight : avg((s) => s.score.overall),
+      integrity: avg((s) => s.score.completeness),
+      readiness: avg((s) => s.score.operationalReadiness),
+      confidence: avg((s) => s.score.confidence),
+    };
+  }
+
+  async queue(businessId: string, opts: { readsRevenue?: boolean } = {}): Promise<KeyGenomeGovernanceItem[]> {
+    const summary = await this.summary(businessId, opts);
     return summary.urgentReviewItems;
   }
 

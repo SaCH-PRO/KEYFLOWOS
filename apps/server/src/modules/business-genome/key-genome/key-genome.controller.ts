@@ -654,8 +654,10 @@ export class KeyGenomeController {
 
   @Get('governance')
   async governance(@Param('businessId') businessId: string, @Req() req?: GenomeRequest) {
-    const summary = await this.governanceService.summary(businessId);
-    if (await this.readsRevenue(businessId, req)) return summary;
+    const readsRevenue = await this.readsRevenue(businessId, req);
+    // FU-GENOME-REVENUE-CLASSIFIER (review MAJOR-6): built from the rows this reader is served; the item filter stays.
+    const summary = await this.governanceService.summary(businessId, { readsRevenue });
+    if (readsRevenue) return summary;
     const keep = await this.withoutFinanceItems(businessId, [
       summary.urgentReviewItems,
       summary.signalReviewQueue,
@@ -671,8 +673,9 @@ export class KeyGenomeController {
 
   @Get('governance/queue')
   async governanceQueue(@Param('businessId') businessId: string, @Req() req?: GenomeRequest) {
-    const queue = await this.governanceService.queue(businessId);
-    if (await this.readsRevenue(businessId, req)) return queue;
+    const readsRevenue = await this.readsRevenue(businessId, req);
+    const queue = await this.governanceService.queue(businessId, { readsRevenue });
+    if (readsRevenue) return queue;
     const keep = await this.withoutFinanceItems(businessId, [queue]);
     return keep(queue);
   }
@@ -820,6 +823,8 @@ export class KeyGenomeController {
   // Phase 14: Customer / Sales / Revenue Genome
   // ---------------------------------------------------------------------------
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read') // D-234: revenue, cost, LTV and CAC per segment or motion
   @Get('customer-sales/segments')
   async listCustomerSegments(
     @Param('businessId') businessId: string,
@@ -836,6 +841,8 @@ export class KeyGenomeController {
     });
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write') // D-234: revenue, cost, LTV and CAC per segment or motion
   @Post('customer-sales/segments')
   async upsertCustomerSegment(
     @Param('businessId') businessId: string,
@@ -844,6 +851,8 @@ export class KeyGenomeController {
     return this.customerSegments.upsertSegment({ ...body, businessId });
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write') // D-234
   @Delete('customer-sales/segments/:segmentId')
   async deleteCustomerSegment(
     @Param('businessId') businessId: string,
@@ -852,6 +861,8 @@ export class KeyGenomeController {
     return this.customerSegments.deleteSegment(businessId, segmentId);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read') // D-234: revenue, cost, LTV and CAC per segment or motion
   @Get('customer-sales/motions')
   async listSalesMotions(
     @Param('businessId') businessId: string,
@@ -872,6 +883,8 @@ export class KeyGenomeController {
     });
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write') // D-234: revenue, cost, LTV and CAC per segment or motion
   @Post('customer-sales/motions')
   async upsertSalesMotion(
     @Param('businessId') businessId: string,
@@ -880,6 +893,8 @@ export class KeyGenomeController {
     return this.salesMotions.upsertMotion({ ...body, businessId });
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write') // D-234
   @Delete('customer-sales/motions/:motionId')
   async deleteSalesMotion(
     @Param('businessId') businessId: string,
@@ -929,11 +944,15 @@ export class KeyGenomeController {
     });
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write') // D-234 with D-128 (option a): sales-derived rows are finance
   @Post('customer-sales/signals/generate')
   async generateCustomerSalesSignals(@Param('businessId') businessId: string) {
     return this.customerSalesGenome.generateCustomerSalesSignals(businessId);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write') // D-234 with D-128 (option a): sales-derived rows are finance
   @Post('customer-sales/recommendations/generate')
   async generateCustomerSalesRecommendations(@Param('businessId') businessId: string) {
     return this.customerSalesGenome.generateCustomerSalesRecommendations(businessId);

@@ -32,6 +32,9 @@ export interface GenomeSignal {
   type: 'urgent' | 'warning' | 'opportunity' | 'info';
   message: string;
   module: string;
+  /** The signal row's section and domain (FU-KEY-CHAT-GENOME-MONEY-SIGHT): the finance rule reads them. */
+  section?: string | null;
+  domain?: string | null;
   severity: 'low' | 'medium' | 'high' | 'critical';
   createdAt: Date;
 }

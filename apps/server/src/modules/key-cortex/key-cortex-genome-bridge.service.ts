@@ -729,6 +729,9 @@ export class KeyCortexGenomeBridgeService {
       type: signal.signalType ?? 'info',
       message: signal.reason ?? '',
       module: signal.sourceModule ?? 'general',
+      // FU-KEY-CHAT-GENOME-MONEY-SIGHT (BLOCKING-1): the finance rule (isFinanceSignal) reads these too.
+      section: signal.section ?? null,
+      domain: signal.domain ?? null,
       severity: this.signalSeverity(signal),
       createdAt: signal.createdAt,
     };

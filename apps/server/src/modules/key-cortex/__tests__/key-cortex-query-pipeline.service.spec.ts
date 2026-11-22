@@ -838,7 +838,9 @@ describe('W10-CORTEX-CHAT-SCOPE review SEC-W10CCS-R1: the chat\'s model tool cal
 
     const quiet = setup({ membership: { role: 'STAFF', permissionScopes: null } });
     await quiet.chat([]);
-    expect(quiet.prisma.client.membership.findUnique).not.toHaveBeenCalled();
+    // The tool authority reads no member for a turn with no tool call (business.findFirst stays unread).
+    // FU-GENOME-REVENUE-CLASSIFIER: the turn's reader projection (snapshot, genome) reads the member once.
+    expect(quiet.prisma.client.membership.findUnique).toHaveBeenCalledTimes(1);
     expect(quiet.prisma.client.business.findFirst).not.toHaveBeenCalled();
   });
 
