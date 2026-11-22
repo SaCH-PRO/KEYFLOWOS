@@ -222,6 +222,17 @@ describe('FU-KEY-CHAT-GENOME-MONEY-SIGHT (D-128, D-100): a KEY chat turn hands f
         }
         if (path === 'processQuery') for (const ops of [OPS.signal, OPS.sugg]) expect(output, `${reader} ${path}: ${ops}`).toContain(ops);
       });
+
+      it(`${kind} (D-233): ${reader} (${path}): the finance DNA score ${READS_REVENUE[reader] ? 'reaches' : 'reaches neither'} the prompt${path === 'processQuery' ? ' nor the genomeInsights' : ''}; other DNA scores stay`, async () => {
+        const { prompt, output } = await turn(ID[reader], path);
+        expect(prompt, `${reader} ${path}: operations DNA`).toMatch(/operations: [█░]+ 70%/);
+        if (READS_REVENUE[reader]) {
+          expect(prompt, `${reader} ${path}: finance DNA`).toMatch(/finance: [█░]+ 40%/);
+        } else {
+          expect(prompt, `${reader} ${path}: finance DNA`).not.toMatch(/finance: /);
+          expect(output, `${reader} ${path}: finance DNA in the answer`).not.toContain('"finance":40');
+        }
+      });
     }
   }
 });

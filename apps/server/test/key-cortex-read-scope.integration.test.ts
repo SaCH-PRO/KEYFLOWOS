@@ -1189,6 +1189,8 @@ describe('W11-CORTEX-SESSION-SNAPSHOT-SCOPE (KC-SEC-3, D-57, D-100): POST cortex
     // SEC review of this packet (finding 2): the count of unpaid invoices is a receivables
     // signal (D-100), withheld as ai-advisor and the business graph withhold overdue counts.
     expect(snapshot, 'pendingInvoices').not.toHaveProperty('pendingInvoices');
+    // FU-GENOME-REVENUE-CLASSIFIER (D-233): a finance DNA score is finance, even with no currency.
+    expect(Object.keys(snapshot.genomeDna ?? {}), 'genomeDna keys').not.toContain('finance');
     const text = JSON.stringify(snapshot);
     for (const figure of [String(PAID_TOTAL), String(OUTSTANDING)]) expect(text).not.toContain(figure);
   };
@@ -1221,6 +1223,7 @@ describe('W11-CORTEX-SESSION-SNAPSHOT-SCOPE (KC-SEC-3, D-57, D-100): POST cortex
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect(res.body.contextSnapshot.keyMetrics.totalRevenue).toBe(PAID_TOTAL);
     expect(res.body.contextSnapshot.pendingInvoices).toBe(1);
+    expect(res.body.contextSnapshot.genomeDna, 'D-233 control').toHaveProperty('finance');
   });
 
   it('KC-SEC-3 control: a user with no membership is refused and is answered no snapshot', async () => {

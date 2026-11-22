@@ -1030,3 +1030,98 @@ describe('W11A-SEAM-REPAIR (D-128, D-100, D-131): the KEY genome organ tools ser
     }
   }, 30_000);
 });
+
+describe('FU-GENOME-REVENUE-CLASSIFIER (D-234, D-128, D-100): sales-derived and unclassifiable genome rows need revenue read, by provenance, not only a "financ" label', () => {
+  const SALES = {
+    sigCustomerSales: `${P}sig_cs`, // CustomerSalesGenomeService: crm / SALES / customer_sales
+    sigTemporal: `${P}sig_tf`, // TemporalFlowGenomeBridge: temporal_flow / sales / collections
+    sigInbox: `${P}sig_inbox`, // KeyInboxService: key_inbox / sales / requests, REVENUE_PATTERN
+    sigAutonomy: `${P}sig_auto`, // KeyProactiveEngine: key_autonomy / SALES / leads
+    sigChat: `${P}sig_chat`, // ConversationGenomeExtractor: key-chat / SALES
+    sigUnclassified: `${P}sig_unclassified`, // KeyCortexGenomeBridge.createSignal default: key_cortex / general / general
+    recSales: `${P}rec_sales`, // CustomerSalesGenomeService: domain SALES
+    memSalesSignal: `${P}mem_cs_sig`, // CUSTOMER_SALES_SIGNAL_GENERATED
+    memOutcome: `${P}mem_outcome`, // outcome learning copying a SALES recommendation's domain
+  };
+  const SALES_TEXT = /Top customer is 62% of revenue|Collections follow-ups doubled|Invoice requests by email|Lead pipeline value dropped|Customer said monthly sales are|v97u unclassified insight|Concentrate on the top three accounts/;
+
+  beforeAll(async () => {
+    const signal = (id: string, sourceModule: string, section: string, domain: string, signalType: string, reason: string) =>
+      db.genomeSignal.create({ data: { id, businessId: ID.biz, sourceModule, signalType, section, domain, field: 'V97U', reason, confidence: 0.9, status: 'NEW' } });
+    await signal(SALES.sigCustomerSales, 'crm', 'SALES', 'customer_sales', 'REVENUE_PATTERN', 'Top customer is 62% of revenue.');
+    await signal(SALES.sigTemporal, 'temporal_flow', 'sales', 'collections', 'REVENUE_PATTERN', 'Collections follow-ups doubled this month.');
+    await signal(SALES.sigInbox, 'key_inbox', 'sales', 'requests', 'REVENUE_PATTERN', 'Invoice requests by email are rising.');
+    await signal(SALES.sigAutonomy, 'key_autonomy', 'SALES', 'leads', 'RISK_PATTERN', 'Lead pipeline value dropped 40%.');
+    await signal(SALES.sigChat, 'key-chat', 'SALES', 'stated_fact', 'NEW_FACT', 'Customer said monthly sales are about 30k.');
+    await signal(SALES.sigUnclassified, 'key_cortex', 'general', 'general', 'insight', 'v97u unclassified insight');
+    await db.genomeRecommendation.create({
+      data: {
+        id: SALES.recSales, businessId: ID.biz, domain: 'SALES', title: 'Concentrate on the top three accounts',
+        insight: 'Revenue is concentrated.', diagnosis: 'Concentration risk.', recommendation: 'Concentrate on the top three accounts.',
+        expectedGainScore: 70, riskLevel: 'HIGH', status: 'ACTIVE',
+      },
+    });
+    for (const [id, sourceType, eventType, domain, summary] of [
+      [SALES.memSalesSignal, 'CUSTOMER_SALES_GENOME', 'CUSTOMER_SALES_SIGNAL_GENERATED', 'SALES', 'Top customer is 62% of revenue.'],
+      [SALES.memOutcome, 'GENOME_RECOMMENDATION', 'RECOMMENDATION_ACCEPTED', 'SALES', 'Concentrate on the top three accounts accepted.'],
+    ] as const) {
+      await db.genomeMemoryEvent.create({
+        data: { id, businessId: ID.biz, sourceType, eventType, domain, section: domain, title: `${eventType} (${P})`, summary, outcome: 'MIXED', impactScore: 0.5, occurredAt: new Date() },
+      });
+    }
+  }, 60_000);
+
+  it('[GRC-01] RED-BEFORE (D-234): GET signals serves the revenue none STAFF member none of the sales-derived signals (customer-sales, collections, invoice requests, the lead pipeline, a sales fact told to KEY) and no unclassifiable signal; the operations signal stays; GET signals/:id of each answers 403', async () => {
+    const all = await get('signals', ID.staffNone);
+    expect(all.status, JSON.stringify(all.body)).toBe(200);
+    const ids = (all.body as any[]).map((r) => r.id);
+    expect(ids).toContain(ID.sigOps);
+    for (const id of [SALES.sigCustomerSales, SALES.sigTemporal, SALES.sigInbox, SALES.sigAutonomy, SALES.sigChat, SALES.sigUnclassified]) expect(ids, id).not.toContain(id);
+    expect(JSON.stringify(all.body)).not.toMatch(SALES_TEXT);
+    for (const id of [SALES.sigCustomerSales, SALES.sigUnclassified]) {
+      const res = await get(`signals/${id}`, ID.staffNone);
+      expect(res.status, `${id}: ${JSON.stringify(res.body)}`).toBe(403);
+    }
+  }, 30_000);
+
+  it('[GRC-02] control (D-234): the revenue read STAFF member and the OWNER are served every one of those signals', async () => {
+    for (const reader of [ID.staffRead, ID.owner]) {
+      const ids = ((await get('signals', reader)).body as any[]).map((r) => r.id);
+      for (const id of [SALES.sigCustomerSales, SALES.sigTemporal, SALES.sigInbox, SALES.sigAutonomy, SALES.sigChat, SALES.sigUnclassified, ID.sigOps]) expect(ids, `${reader}: ${id}`).toContain(id);
+    }
+  }, 30_000);
+
+  it('[GRC-03] RED-BEFORE (D-234): GET recommendations and recommendations/:id serve the revenue none STAFF member no SALES recommendation; the revenue read member reads it', async () => {
+    const all = await get('recommendations', ID.staffNone);
+    expect((all.body as any[]).map((r) => r.id)).not.toContain(SALES.recSales);
+    expect((all.body as any[]).map((r) => r.id)).toContain(ID.recOps);
+    expect((await get(`recommendations/${SALES.recSales}`, ID.staffNone)).status).toBe(403);
+    expect(((await get('recommendations', ID.staffRead)).body as any[]).map((r) => r.id)).toContain(SALES.recSales);
+  }, 30_000);
+
+  it('[GRC-04] RED-BEFORE (D-234): GET memory serves the revenue none STAFF member no customer-sales signal event and no outcome event copied from a SALES recommendation; the revenue read member reads both', async () => {
+    const ids = ((await get('memory', ID.staffNone)).body as any[]).map((r) => r.id);
+    expect(ids).toContain(ID.memOps);
+    for (const id of [SALES.memSalesSignal, SALES.memOutcome]) expect(ids, id).not.toContain(id);
+    expect((await get(`memory/${SALES.memSalesSignal}`, ID.staffNone)).status).toBe(403);
+    const control = ((await get('memory', ID.staffRead)).body as any[]).map((r) => r.id);
+    for (const id of [SALES.memSalesSignal, SALES.memOutcome]) expect(control, id).toContain(id);
+  }, 30_000);
+
+  it('[GRC-05] RED-BEFORE (D-234 with D-128 option a): POST customer-sales/signals/generate and customer-sales/recommendations/generate refuse the revenue none and the revenue read STAFF member 403 before the service runs, as the finance generate routes do', async () => {
+    for (const route of ['customer-sales/signals/generate', 'customer-sales/recommendations/generate']) {
+      for (const [who, has] of [[ID.staffNone, 'none'], [ID.staffRead, 'read']] as const) {
+        const res = await post(route, who);
+        expect(res.status, `${route} ${who}: ${JSON.stringify(res.body)}`).toBe(403);
+        expect(res.body, route).toMatchObject({ code: 'FORBIDDEN', message: WRITE_DENIED(has) });
+      }
+    }
+  }, 30_000);
+
+  it('[GRC-06] RED-BEFORE (D-234 with D-128): accepting the SALES recommendation and reviewing the customer-sales signal refuse the revenue read STAFF member 403; the operations rows stay open to them', async () => {
+    const acceptSales = await post(`recommendations/${SALES.recSales}/accept`, ID.staffRead, {});
+    expect(acceptSales.status, JSON.stringify(acceptSales.body)).toBe(403);
+    const reviewSales = await post(`signals/${SALES.sigCustomerSales}/review`, ID.staffRead, {});
+    expect(reviewSales.status, JSON.stringify(reviewSales.body)).toBe(403);
+  }, 30_000);
+});
