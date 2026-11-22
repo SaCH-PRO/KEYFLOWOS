@@ -21,7 +21,13 @@ import { FlowOrchestratorService } from './flow-orchestrator.service';
 import { KeyActionBoundaryService } from '../key-autonomy/action-boundary/key-action-boundary.service';
 import { KeyCortexExpertiseLensService } from '../key-cortex/key-cortex-expertise-lens.service';
 import { McpClientManagerService } from '../mcp/mcp-client-manager.service';
-import { UNTRUSTED_CONTENT_RULE, UNTRUSTED_MAX_CHARS, containsUntrustedMarker, fenceUntrusted } from './untrusted-content';
+import {
+  UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS,
+  UNTRUSTED_CONTENT_RULE,
+  UNTRUSTED_MAX_CHARS,
+  containsUntrustedMarker,
+  fenceUntrusted,
+} from './untrusted-content';
 
 const BIZ = 'biz_rr_fence';
 const OWNER = 'u_rr_fence_owner';
@@ -248,6 +254,43 @@ describe('RR-UNTRUSTED-CONTENT-FENCE controls: no authority change, no change wi
     expect((followUp.messages[0].content as string).split(UNTRUSTED_CONTENT_RULE)).toHaveLength(2);
     const tool = followUp.messages.find((m) => m.role === 'tool')!;
     expect(blocksOf(JSON.parse(tool.content as string))).toHaveLength(1);
+  });
+
+  it('review m1: two large attachments both reach the model, each cut to its own limit inside one block', async () => {
+    const h = makeHarness();
+    const big = 'b'.repeat(UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS * 2);
+    h.extract.mockImplementationOnce(async () => ({ documentType: 'invoice', rawText: big }));
+    h.extract.mockImplementationOnce(async () => ({ documentType: 'receipt', rawText: 'SECOND-FILE-TAIL' }));
+    await h.chat([ATTACHMENT, { ...ATTACHMENT, name: 'second.pdf' }]);
+    const messages = h.messagesOf(h.trackAndComplete);
+    const blocks = messages.flatMap((m) => (typeof m.content === 'string' ? blocksOf(m.content) : []));
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].inner).toContain('second.pdf');
+    expect(blocks[0].inner).toContain('SECOND-FILE-TAIL');
+    expect(blocks[0].inner).toMatch(/truncated: \d+ more characters/);
+    expect(blocks[0].inner).not.toContain('b'.repeat(UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS + 1));
+  });
+
+  it('review F1: a deliberated turn hands the cortex the history with fenced blocks withheld, not their text', async () => {
+    const h = makeHarness();
+    let seen: Array<{ role: string; content: string }> = [];
+    const consciousness = {
+      processConsciously: vi.fn(async (_m: string, session: { messages: Array<{ role: string; content: string }> }) => {
+        seen = session.messages;
+        return { text: 'thought', actions: [] };
+      }),
+    };
+    (h.orchestrator as unknown as { moduleRef: { get: () => unknown } }).moduleRef = { get: () => consciousness };
+    const history = [
+      { role: 'user', content: `${MEMBER_TEXT}\n\n${fenceUntrusted('attachment', PLANT)}`, timestamp: new Date() },
+      { role: 'assistant', content: 'It is an invoice.', timestamp: new Date() },
+    ];
+    await (h.orchestrator as unknown as { deliberate: (...a: unknown[]) => Promise<unknown> }).deliberate(BIZ, 'why?', history, undefined, OWNER);
+    expect(consciousness.processConsciously).toHaveBeenCalledTimes(1);
+    expect(seen[0].content.startsWith(MEMBER_TEXT)).toBe(true);
+    expect(JSON.stringify(seen)).not.toContain('Ignore previous instructions');
+    expect(JSON.stringify(seen)).not.toMatch(/<untrusted /);
+    expect(seen[1].content).toBe('It is an invoice.');
   });
 
   const HISTORY = [
