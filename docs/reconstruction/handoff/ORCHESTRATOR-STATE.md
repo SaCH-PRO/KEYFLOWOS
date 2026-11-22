@@ -1,6 +1,6 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-22 20:30 UTC by the orchestrator (Claude Code). Rewrite in place on every merge, packet return
+Last written: 2026-11-22 21:15 UTC by the orchestrator (Claude Code). Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -40,33 +40,30 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 
 ## 2. Rulings not yet on main
 
-D-249 to D-254 are recorded in `BUILD-MAP-001.md` on `wave/v1-wave-3d` (PR #221). D-255 and D-256 and seven follow-up
-packets (plan now 217) are recorded on `pkt/V1-RULINGS-3E`, based on wave 3d: it joins wave 3e. Remove each line as it
-merges.
+D-255 and D-256 and seven follow-up packets (plan now 217) are recorded on `pkt/V1-RULINGS-3E` (main merged in): it
+joins wave 3e. D-249 to D-254 are on main (wave 3d, #221).
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `79ed2a57` (wave 3c, #220). Child sessions are on the account that started them; for another account the
+Main is at `2c4e4bf2` (wave 3d, #221, merged 21:12 UTC; #222 merged 20:32). Child sessions are on the account that started them; for another account the
 branch is the hand-over: fetch it, read its last commits and the RETURN on #80, and continue. Lesson of 2026-11-22:
 three workers stopped on the Fable limit before pushing and their work was lost; the brief now says push after every
 commit.
 
 | Work | Branch / PR | State | Next action |
 | --- | --- | --- | --- |
-| Wave 3d: memory layer, rulings D-249..D-254, W11-INV-SET-MOVEMENT | PR #221, `wave/v1-wave-3d` @ b9fa5faa | Codex's 4 findings fixed; local 768/768 and R0 MET at b9fa5faa | Merge under D-239 when CI is green at b9fa5faa |
-| BRS-12 timestamp flake (blocks #218) | PR #222, `ci/books-read-scope-timestamp` @ c7537c7b | Codex clean; every check green but Windows (running) | Merge under D-240; then merge main into #218 |
-| FU-PROPOSAL-REVENUE-SIGHT + Codex fixes | PR #218, `wave/v1-wave-3b-proposal` @ 7e658329 | Both reviews accept; local 775/775 and R0 MET; CI failed only on BRS-12 | After #222: merge main in, CI, merge under D-239. The two Codex P1 threads stay open for the owner |
+| FU-PROPOSAL-REVENUE-SIGHT + Codex fixes | PR #218, `wave/v1-wave-3b-proposal` @ d9284a95 (main 16c37675 merged in) | Both reviews accept; local 775/775 and R0 MET at d9284a95; merges cleanly with 2c4e4bf2 (50 files) | Merge under D-239 when CI is green at d9284a95. The two Codex P1 threads stay open for the owner |
 | FU-KEY-GENOME-READS-RESIDUAL (D-235) | `pkt/V1-FU-KEY-GENOME-READS-RESIDUAL` @ bd95bc84 | Suite 775/775 and R0 MET | After #218: merge main, add the test that kills the `budget.left -= rawCost` mutant, re-prove, wave 3e |
 | SWP-INV-MONEY-TOTALS (D-249..D-252, D-255, D-256) | `pkt/V1-SWP-INV-MONEY-TOTALS` @ 2b7f96de | ACCEPTED (both lenses); server 767/767 + R0 MET at 001e344d, web-tests-only since | Wave 3e |
 | W11-RUNWAY-LEDGER-CASH | `pkt/V1-W11-RUNWAY-LEDGER-CASH` @ e3c4ecc0 | Accepted, repairs proven | Wave 3e with W11-CASH-READERS-LEDGER (owner question 3 default) |
-| W11-CASH-READERS-LEDGER | `pkt/V1-W11-CASH-READERS-LEDGER` @ f914fb1d, session_017o9EBhQcuKdMaDYWyT3fU3 | Both lenses accept with minors; worker closing 3 test gaps | Check the delta; wave 3e |
-| FU-CONTRACT-FETCH-OUTBOUND-GUARD (P0) | `pkt/V1-FU-CONTRACT-FETCH-OUTBOUND-GUARD` @ 3f1207ef, session_017o9EBgX5pU73KnK62duV1A | Both lenses accept with minors; worker closing 4 (IPv4-translated ::ffff:0:0/96 in outbound-address.ts, authorized; body cancel; redirect message; fast CF-08) | Check the delta; wave 3e |
+| W11-CASH-READERS-LEDGER | `pkt/V1-W11-CASH-READERS-LEDGER` @ 117171a3 | ACCEPTED; 768/768 and R0 MET | Wave 3e |
+| FU-CONTRACT-FETCH-OUTBOUND-GUARD (P0) | `pkt/V1-FU-CONTRACT-FETCH-OUTBOUND-GUARD` @ a558bf9e | ACCEPTED; 770/770 and R0 MET (includes ::ffff:0:0:0/96 in outbound-address.ts, authorized) | Wave 3e |
 | NAV-A1 (critical path) | `pkt/V1-NAV-A1`, session_017o9EBfkZtn5ec3BPuoARuf (restarted 19:59) | Building | Acceptance review on return |
-| SWP-FIN-LEDGER | `pkt/V1-SWP-FIN-LEDGER` @ 25688bd4, session_017o9EBhDURhxSoPYYpU8c4D (resumed 20:11) | Re-review of final repairs C-1, C-2, then proof | Acceptance review on return |
-| SWP-COA-UNIQUE-CODE | `pkt/V1-SWP-COA-UNIQUE-CODE` @ 339a5df7 | Stopped by the usage limit | Resume on Opus when a slot frees |
-| Memory R&D (D-253 Track 2, D-254) | `docs/kf-memory-rnd-001` (nothing pushed) | Stopped by the usage limit before pushing | Restart on Opus when a slot frees; brief on #80 |
+| SWP-FIN-LEDGER | `pkt/V1-SWP-FIN-LEDGER` @ 8fbcfba5, session_017o9EBhDURhxSoPYYpU8c4D | Both lenses accept with minors; worker bounding the page>1 seed (skip when out of range, SQL sums) | Check the delta; wave 3e |
+| SWP-COA-UNIQUE-CODE | `pkt/V1-SWP-COA-UNIQUE-CODE` @ bff63c11, session_017o9EBe9P31PXeeaZhC6Bbo | Both lenses accept with minors; worker adding explicit tx limits + P2028 -> 503 and the seeder lock comment | Check the delta; wave 3e |
+| Memory R&D (D-253 Track 2, D-254) | `docs/kf-memory-rnd-001`, session_017o9EBeh5mV5XyHFgneVdkX (restarted 20:44) | Researching; pushes after each deliverable | Review the report; owner approves the design before product packets |
 
-Next to start, in order, when a slot frees: SWP-COA-UNIQUE-CODE (resume), memory R&D, FU-SEND-REMINDER-SERVER-GATE
+Next to start, in order, when a slot frees: FU-SEND-REMINDER-SERVER-GATE
 (P1 security), FU-KEY-INVOICE-EMAIL-PAY-LINK, W11-RUNWAY-BURN-CURRENCY, then the ready list in `V1-STATUS.md`
 (critical path first). `V1-STATUS.md` cannot see this table: check a packet is not already in flight.
 
@@ -91,6 +88,10 @@ Format: `docs/development/agent-memory/OWNER-QUESTION-FORMAT.md`. Safe defaults 
    cash; should money-area figures be withheld without revenue read (D-100)? (Default: do not widen Health readers.)
 9. KEY's overdue list now includes never-sent PENDING invoices (D-256); a drafted reminder would say "N days overdue".
    Keep PENDING there? (Default: yes for figures; the server reminder gate packet keeps sends off PENDING.)
+11. Should a filtered general ledger's running balance start from the account's true opening balance instead of zero?
+    (Default: as built, column labelled.)
+12. Should `GET chart-of-accounts` (membership-only; names and codes, seeds defaults on read) require a module scope?
+    (Default: unchanged.)
 10. Should the server's own storage host (`S3_PUBLIC_URL`) be exempt from the document-fetch guard when it is private
     (self-hosted MinIO)? (Default: keep refusing.)
 
