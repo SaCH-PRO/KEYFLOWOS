@@ -210,6 +210,50 @@ describe("FU-WA-CONTACT-PHONE confirm step: Escape closes the step alone (COR-WA
     }
   });
 
+  it("FU-WA-ESCAPE-RACE: an Escape the moment the step appears is the step's, when the step opens after the pay link resolves (outside an event)", async () => {
+    // The panels call share() once the pay link is made, so the step mounts from a
+    // non-event update. Its Escape listener must be there when its DOM is: an Escape
+    // in between went to the detail modal under it (CI flake on PR #216, run
+    // 44845430001, invoices-whatsapp-confirm-escape.test.tsx). A fireEvent after findByRole
+    // lands in the gap only sometimes; a raw dispatch timed by the DOM mutation always does.
+    const underneath = vi.fn();
+    const onDocument = (event: KeyboardEvent) => {
+      if (event.key === "Escape") underneath();
+    };
+    const api: { share: ReturnType<typeof useWhatsAppDocumentShare>["share"] | null } = { share: null };
+    function AsyncHarness() {
+      const whatsApp = useWhatsAppDocumentShare();
+      const { share: shareNow } = whatsApp;
+      React.useEffect(() => {
+        api.share = shareNow;
+      }, [shareNow]);
+      return <>{whatsApp.dialog}</>;
+    }
+    render(<AsyncHarness />);
+    const actEnvironment = (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT;
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = false;
+    let pressed = false;
+    const observer = new MutationObserver(() => {
+      if (pressed || !screen.queryByRole("dialog", { name: /whatsapp number/i })) return;
+      pressed = true;
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    document.addEventListener("keydown", onDocument);
+    observer.observe(document.body, { childList: true, subtree: true });
+    try {
+      await Promise.resolve().then(() => api.share!(share()));
+      await waitFor(() => expect(pressed).toBe(true));
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: /whatsapp number/i })).toBeNull());
+      expect(underneath).not.toHaveBeenCalled();
+      expect(patches).toEqual([]);
+      expect(windowOpen).not.toHaveBeenCalled();
+    } finally {
+      observer.disconnect();
+      document.removeEventListener("keydown", onDocument);
+      (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = actEnvironment;
+    }
+  });
+
   it("once the step is closed, Escape reaches the screen again, and other keys always do", async () => {
     const seen: string[] = [];
     const onDocument = (event: KeyboardEvent) => {

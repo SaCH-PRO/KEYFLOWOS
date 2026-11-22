@@ -17,9 +17,12 @@ import {
   syncAuditActor,
   syncPrincipals,
   syncTokenAdvances,
+  syncMatchedContactId,
+  syncPhoneFields,
   syncWritesNothing,
   type SyncPrincipals,
 } from './google-contacts-sync.service';
+import { contactPhoneRead } from '../crm/crm-duplicate.util';
 import { MicrosoftTokenHelper } from './microsoft-token.helper';
 import { providerFailure, providerUnavailable } from '../../core/connectors/provider-failure';
 import { exportAudience } from '../../core/connectors/connector-exports';
@@ -95,12 +98,6 @@ export class OutlookContactsSyncService {
   private normalizeEmail(s: string | null | undefined): string | null {
     if (!s) return null;
     return s.trim().toLowerCase() || null;
-  }
-
-  private normalizePhone(s: string | null | undefined): string | null {
-    if (!s) return null;
-    const digits = s.replace(/[^\d+]/g, '');
-    return digits || null;
   }
 
   async getMappingRules(businessId: string): Promise<OutlookContactMappingRules> {
@@ -241,8 +238,10 @@ export class OutlookContactsSyncService {
     const token = await this.tokens.getValidAccessToken(businessId);
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
-      select: { msContactsDeltaLink: true },
+      select: { msContactsDeltaLink: true, country: true },
     });
+    // D-211: a contact's phone is read under the business's country, as POST .../contacts reads it.
+    const country = business?.country ?? null;
     const stored = await this.getMappingRules(businessId);
     // SEC-D92R-3: the default owner is applied only while they are a member of this business.
     const rules: OutlookContactMappingRules = {
@@ -353,8 +352,8 @@ export class OutlookContactsSyncService {
         const company = c.companyName ?? null;
         const jobTitle = c.jobTitle ?? null;
         const emailNorm = this.normalizeEmail(email);
-        const phoneNorm = this.normalizePhone(phone);
-        if (!emailNorm && !phoneNorm) {
+        const phoneRead = contactPhoneRead(phone, country);
+        if (!emailNorm && !phoneRead.phoneNormalized) {
           skipped += 1;
           continue;
         }
@@ -371,17 +370,8 @@ export class OutlookContactsSyncService {
 
         let contactId = mapping?.contactId;
         if (!contactId) {
-          const existing = await this.prisma.client.contact.findFirst({
-            where: {
-              businessId,
-              OR: [
-                ...(emailNorm ? [{ emailNormalized: emailNorm }] : []),
-                ...(phoneNorm ? [{ phoneNormalized: phoneNorm }] : []),
-              ],
-            },
-            select: { id: true, updatedAt: true },
-          });
-          contactId = existing?.id;
+          // D-211: the holder of the email, else of the number in any spelling.
+          contactId = await syncMatchedContactId(this.prisma, businessId, emailNorm, phoneRead, country);
         }
 
         if (contactId) {
@@ -413,13 +403,15 @@ export class OutlookContactsSyncService {
             : Date.now();
           const localTime = local.updatedAt ? new Date(local.updatedAt).getTime() : 0;
           if (remoteTime >= localTime) {
+            // D-211: the number as the CRM write stores it, unless another live contact holds it.
+            const phoneFields = await syncPhoneFields(this.prisma, businessId, contactId, phoneRead, country);
             const data = {
               firstName: firstName ?? undefined,
               lastName: lastName ?? undefined,
               email: email ?? undefined,
               emailNormalized: emailNorm ?? undefined,
-              phone: phone ?? undefined,
-              phoneNormalized: phoneNorm ?? undefined,
+              phone: phoneFields.phone,
+              phoneNormalized: phoneFields.phoneNormalized,
               companyName: company ?? undefined,
               jobTitle: jobTitle ?? undefined,
             };
@@ -480,8 +472,8 @@ export class OutlookContactsSyncService {
               lastName,
               email,
               emailNormalized: emailNorm,
-              phone,
-              phoneNormalized: phoneNorm,
+              phone: phoneRead.phone,
+              phoneNormalized: phoneRead.phoneNormalized,
               companyName: company,
               jobTitle,
               source: 'outlook_contacts',

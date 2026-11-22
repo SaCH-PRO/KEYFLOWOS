@@ -492,12 +492,15 @@ export class CrmService {
     // search matches a tag by any part of it, in any case (findSearchTags).
     let searchContactIds: string[] | undefined;
     let searchTags: string[] | undefined;
+    let phoneCountry: string | null | undefined;
     if (input.search?.trim()) {
       const tsIds = await this.searchContactIdsByTsvector(input.businessId, input.search.trim());
       if (tsIds.length > 0) {
         searchContactIds = tsIds;
       }
       searchTags = await findSearchTags(this.prisma, input.businessId, input.search);
+      // D-211 (FU-PHONE-COUNTRY-DUPLICATES): a phone searched is read in the business's country only.
+      phoneCountry = await this.businessPhoneCountry(this.prisma.client, input.businessId);
     }
 
     const where: any = buildContactWhere(input.businessId, {
@@ -525,7 +528,7 @@ export class CrmService {
       pipelineStages: input.pipelineStages,
       favorite: input.favorite,
       includeArchived: input.includeArchived,
-    }, { searchTags });
+    }, { searchTags, phoneCountry });
 
     if (searchContactIds) {
       where.OR = [...(where.OR ?? []), { id: { in: searchContactIds } }];
