@@ -197,38 +197,38 @@ describe("NAV-A1: the hubs a member is shown", () => {
 const SRV = (f: string, line: number) => `modules/${f}:${line}`;
 const MODULE_TABLE: Record<string, { modules: string[]; cite: string[] }> = {
   // Hubs
-  "/app/command-center": { modules: [], cite: ["every member's home (D-96)"] },
+  "/app/command-center": { modules: [], cite: ["unscoped:modules/business-command-center/business-command-center.controller.ts:25", "every member's home (D-96)"] },
   "/app/crm/contacts": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", 493)] },
   "/app/commerce": { modules: ["revenue"], cite: [SRV("commerce/commerce.controller.ts", 706)] },
   "/app/schedule/calendar": { modules: ["bookings"], cite: [SRV("calendar/calendar.controller.ts", 256)] },
   "/app/financial-flow": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 359)] },
-  "/app/store": { modules: ["storefront"], cite: ["D-150 hub rule: no read route checks storefront; the hub follows the scope (J5)"] },
-  "/app/settings/business": { modules: ["settings"], cite: ["D-150 hub rule (J5); its writes need settings"] },
+  "/app/store": { modules: ["storefront"], cite: ["unscoped:modules/bookings/bookings.controller.ts:358", "D-150 hub rule: no read route checks storefront; the hub follows the scope (J5)"] },
+  "/app/settings/business": { modules: ["settings"], cite: ["unscoped:modules/identity/identity.controller.ts:858", "D-150 hub rule (J5); its writes need settings"] },
   // Customers
   "/app/crm/deals": { modules: ["crm"], cite: [SRV("crm/crm-deals.controller.ts", 216)] },
   "/app/crm/accounts": { modules: ["crm"], cite: [SRV("crm/crm-accounts.controller.ts", 22)] },
-  "/app/people-flow": { modules: ["crm"], cite: ["hub:customers"] },
-  "/app/crm/sequences": { modules: ["crm"], cite: ["hub:customers"] },
-  "/app/helpdesk": { modules: ["crm"], cite: ["hub:customers"] },
+  "/app/people-flow": { modules: ["crm"], cite: ["unscoped:modules/people-flow/people-flow.controller.ts:18", "hub:customers"] },
+  "/app/crm/sequences": { modules: ["crm"], cite: ["unscoped:modules/crm/crm-sequence.controller.ts:33", "hub:customers"] },
+  "/app/helpdesk": { modules: ["crm"], cite: ["unscoped:modules/helpdesk/helpdesk.controller.ts:13", "hub:customers"] },
   "/app/call-tasks": { modules: ["crm"], cite: [SRV("call-tasks/call-task.controller.ts", 95)] },
   "/app/crm/intelligence": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", 1108)] },
   "/app/crm/data-quality": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", 865)] },
   "/app/crm/duplicates": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", 1558)] },
   "/app/crm/network": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", 338)] },
   "/app/crm/dashboard": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", 493)] },
-  "/app/sales-team": { modules: ["crm"], cite: ["hub:customers"] },
+  "/app/sales-team": { modules: ["crm", "revenue"], cite: ["unscoped:modules/conversion/conversion.controller.ts:67", "data:modules/conversion/sales-team.service.ts:80:revenue revenueAttributed, the PAID invoice totals per rep (security review: the route itself carries no scope)", "hub:customers"] },
   // Sales
   "/app/commerce/invoices": { modules: ["revenue"], cite: [SRV("commerce/commerce.controller.ts", 706)] },
   "/app/inventory": { modules: ["revenue"], cite: [SRV("commerce/commerce.controller.ts", 300)] },
   "/app/commerce/gateway": { modules: ["revenue"], cite: [SRV("payments/payments-ops.controller.ts", 78)] },
   // Schedule
-  "/app/bookings": { modules: ["bookings"], cite: ["hub:schedule"] },
-  "/app/temporal-flow": { modules: ["bookings"], cite: ["hub:schedule"] },
+  "/app/bookings": { modules: ["bookings"], cite: ["unscoped:modules/bookings/bookings.controller.ts:101", "hub:schedule"] },
+  "/app/temporal-flow": { modules: ["bookings"], cite: ["unscoped:modules/temporal-flow/temporal-flow.controller.ts:34", "hub:schedule"] },
   // Money
   "/app/payments": { modules: ["revenue"], cite: [SRV("payments/payments-ops.controller.ts", 90)] },
   "/app/money/expenses": { modules: ["expenses"], cite: [SRV("expenses/expenses.controller.ts", 20)] },
   "/app/procurement": { modules: ["operations"], cite: [SRV("procurement/procurement.controller.ts", 30)] },
-  "/app/retainers": { modules: ["revenue"], cite: ["hub:money"] },
+  "/app/retainers": { modules: ["revenue"], cite: ["unscoped:modules/retainers/retainer.controller.ts:151", "hub:money"] },
   "/app/budgeting": { modules: ["expenses"], cite: [SRV("expenses/expenses.controller.ts", 243)] },
   "/app/payroll": { modules: ["operations"], cite: [SRV("payroll/payroll.controller.ts", 22)] },
   "/app/reports": { modules: ["revenue", "analytics"], cite: [SRV("reports/reports.controller.ts", 56), "D-179"] },
@@ -243,61 +243,61 @@ const MODULE_TABLE: Record<string, { modules: string[]; cite: string[] }> = {
   "/app/finance/fixed-assets": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 1742)] },
   "/app/finance/bank-rules": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 662)] },
   "/app/finance/credit-notes": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 1493)] },
-  "/app/finance/exchange-rates": { modules: ["revenue"], cite: ["hub:money"] },
+  "/app/finance/exchange-rates": { modules: ["revenue"], cite: ["unscoped:modules/finance/finance.controller.ts:1698", "hub:money"] },
   "/app/money/books": { modules: ["revenue"], cite: [SRV("commerce/accounting.controller.ts", 61)] },
   // Your page
-  "/app/presence": { modules: ["storefront"], cite: ["hub:page"] },
-  "/app/portal": { modules: ["storefront"], cite: ["hub:page"] },
+  "/app/presence": { modules: ["storefront"], cite: ["unscoped:modules/site/presence/presence.controller.ts:79", "hub:page"] },
+  "/app/portal": { modules: ["storefront"], cite: ["unscoped:modules/portal/portal.controller.ts:29", "hub:page"] },
   // Settings
-  "/app/profile": { modules: ["settings"], cite: ["hub:settings"] },
-  "/app/genome": { modules: ["settings"], cite: ["hub:settings"] },
-  "/app/settings/billing": { modules: ["settings"], cite: ["hub:settings"] },
+  "/app/profile": { modules: ["settings"], cite: ["unscoped:modules/identity/identity.controller.ts:858", "hub:settings"] },
+  "/app/genome": { modules: ["settings"], cite: ["unscoped:modules/business-genome/key-genome/key-genome.controller.ts:248", "hub:settings"] },
+  "/app/settings/billing": { modules: ["settings"], cite: ["unscoped:modules/subscriptions/subscriptions.controller.ts:36", "hub:settings"] },
   "/app/settings/team": { modules: ["team"], cite: [SRV("identity/identity.controller.ts", 1255)] },
   "/app/structure": { modules: ["team"], cite: [SRV("structure/structure.controller.ts", 180)] },
   "/app/settings/ai": { modules: ["operations"], cite: [SRV("ai/ai-settings.controller.ts", 33)] },
-  "/app/settings/compliance": { modules: ["settings"], cite: ["hub:settings"] },
+  "/app/settings/compliance": { modules: ["settings"], cite: ["unscoped:modules/communications/omnichannel.controller.ts:253", "hub:settings"] },
   "/app/settings/developers": { modules: ["settings"], cite: [SRV("api-keys/api-keys.controller.ts", 25)] },
-  "/app/key-connect": { modules: ["settings"], cite: ["hub:settings"] },
-  "/app/templates": { modules: ["settings"], cite: ["hub:settings"] },
-  "/app/trash": { modules: ["settings"], cite: ["hub:settings"] },
+  "/app/key-connect": { modules: ["settings"], cite: ["unscoped:core/connectors/connector.controller.ts:156", "hub:settings"] },
+  "/app/templates": { modules: ["settings"], cite: ["unscoped:modules/templates/templates.controller.ts:13", "hub:settings"] },
+  "/app/trash": { modules: ["settings"], cite: ["hub:settings", "service-check:modules/trash/trash.controller.ts:325"] },
   // KEY
-  "/app/key/chat": { modules: [], cite: [] },
+  "/app/key/chat": { modules: [], cite: ["unscoped:modules/ai/flow.controller.ts:99"] },
   "/app/key-inbox": { modules: ["operations"], cite: [SRV("key-inbox/key-inbox.controller.ts", 125)] },
-  "/app/key": { modules: [], cite: [] },
-  "/app/key-autonomy": { modules: [], cite: [] },
-  "/app/key-modes": { modules: [], cite: [] },
+  "/app/key": { modules: [], cite: ["unscoped:modules/ai/ai.controller.ts:1643"] },
+  "/app/key-autonomy": { modules: [], cite: ["unscoped:modules/key-autonomy/key-action-proposal.controller.ts:36"] },
+  "/app/key-modes": { modules: [], cite: ["unscoped:modules/intelligence/key-executive-mode.controller.ts:14"] },
   "/app/data-inbox": { modules: ["operations"], cite: [SRV("ingestion/data-inbox.controller.ts", 23)] },
-  "/app/capture": { modules: [], cite: [] },
+  "/app/capture": { modules: [], cite: ["unscoped:modules/device/device.controller.ts:48"] },
   // Work
   "/app/work/projects": { modules: ["projects"], cite: [SRV("projects/projects.controller.ts", 43)] },
   "/app/approvals": { modules: ["operations"], cite: [SRV("ai/ai-approvals.controller.ts", 54), "D-179"] },
   "/app/performance": { modules: ["operations"], cite: [SRV("staff-performance/staff-performance.controller.ts", 30)] },
   "/app/time-tracking": { modules: ["projects"], cite: [SRV("projects/projects.controller.ts", 43)] },
-  "/app/operations": { modules: ["operations"], cite: ["D-179"] },
-  "/app/operations-flow": { modules: ["operations"], cite: ["D-179"] },
-  "/app/change-orders": { modules: [], cite: [] },
+  "/app/operations": { modules: ["operations"], cite: ["unscoped:modules/content-ops/content-ops.controller.ts:68", "D-179"] },
+  "/app/operations-flow": { modules: ["operations"], cite: ["unscoped:modules/sop/sop.controller.ts:13", "D-179"] },
+  "/app/change-orders": { modules: [], cite: ["unscoped:modules/change-orders/change-order.controller.ts:111"] },
   // Marketing
-  "/app/communicate/campaigns": { modules: [], cite: [] },
+  "/app/communicate/campaigns": { modules: [], cite: ["unscoped:modules/email-marketing/email-marketing.controller.ts:18"] },
   "/app/marketing/lists": { modules: ["content"], cite: [SRV("email-marketing/marketing-sync.controller.ts", 53)] },
-  "/app/marketing/case-studies": { modules: [], cite: [] },
-  "/app/content-ops": { modules: [], cite: [] },
-  "/app/social": { modules: [], cite: [] },
-  "/app/seo": { modules: [], cite: [] },
-  "/app/events": { modules: [], cite: [] },
+  "/app/marketing/case-studies": { modules: [], cite: ["unscoped:modules/site/site.controller.ts:688"] },
+  "/app/content-ops": { modules: [], cite: ["unscoped:modules/content-ops/content-ops.controller.ts:68"] },
+  "/app/social": { modules: [], cite: ["unscoped:modules/social/social.controller.ts:325"] },
+  "/app/seo": { modules: [], cite: ["unscoped:modules/seo/seo.controller.ts:71"] },
+  "/app/events": { modules: [], cite: ["unscoped:modules/events/events.controller.ts:41"] },
   "/app/whatsapp": { modules: ["operations"], cite: [SRV("whatsapp/whatsapp.controller.ts", 166)] },
-  "/app/marketing-flow": { modules: [], cite: [] },
+  "/app/marketing-flow": { modules: [], cite: ["unscoped:modules/marketing/marketing.controller.ts:13"] },
   // Legal
-  "/app/evidence": { modules: [], cite: [] },
+  "/app/evidence": { modules: [], cite: ["unscoped:modules/evidence/evidence.controller.ts:53"] },
   "/app/contracts": { modules: ["operations"], cite: [SRV("contracts/contracts.controller.ts", 28)] },
-  "/app/legal": { modules: [], cite: [] },
+  "/app/legal": { modules: [], cite: ["unscoped:modules/blueprint/blueprint.controller.ts:14"] },
   // Strategy
-  "/app/intelligence": { modules: [], cite: [] },
-  "/app/goals": { modules: [], cite: [] },
-  "/app/market": { modules: [], cite: [] },
+  "/app/intelligence": { modules: [], cite: ["unscoped:modules/intelligence/business-intelligence.controller.ts:14"] },
+  "/app/goals": { modules: [], cite: ["unscoped:modules/key-cortex/key-cortex-goals.controller.ts:233"] },
+  "/app/market": { modules: [], cite: ["unscoped:modules/business-genesis/business-genesis.controller.ts:99"] },
   // Automate
   "/app/flows": { modules: ["automations"], cite: [SRV("flow/flow.controller.ts", 206)] },
-  "/app/automations": { modules: [], cite: [] },
-  "/app/key-flows": { modules: [], cite: [] },
+  "/app/automations": { modules: [], cite: ["unscoped:modules/automation/automation.controller.ts:30"] },
+  "/app/key-flows": { modules: [], cite: ["unscoped:modules/flow-signal/flow-signal-role.controller.ts:14"] },
   "/app/assets": { modules: ["content"], cite: [SRV("assets/asset.controller.ts", 48)] },
 };
 
@@ -333,23 +333,64 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
     expect(stale, "rows for entries that left the nav").toEqual([]);
   });
 
-  it("NMS-18 every cited handler carries @RequireModuleScope of a module the row names", () => {
+  it("NMS-18 every row is a checked claim: each module justified, each citation true", () => {
+    /** The decorators stacked on the @Get at `at` (0-based), its own line included. */
+    const decorators = (lines: string[], at: number) => {
+      const block: string[] = [lines[at]];
+      for (let i = at - 1; i >= 0 && /^\s*@/.test(lines[i]); i--) block.push(lines[i]);
+      for (let i = at + 1; i < lines.length && /^\s*@/.test(lines[i]); i++) block.push(lines[i]);
+      return block.join("\n");
+    };
+    const at = (file: string, line: number) => {
+      const lines = fs.readFileSync(path.join(SERVER_SRC, file), "utf8").split("\n");
+      return { lines, i: line - 1 };
+    };
     const bad: string[] = [];
     for (const [href, row] of Object.entries(MODULE_TABLE)) {
+      if (row.cite.length === 0) bad.push(`${href}: no reason`);
+      const justified = new Set<string>();
       for (const cite of row.cite) {
-        const m = /^(modules\/.+\.ts):(\d+)$/.exec(cite);
-        if (!m) continue;
-        const lines = fs.readFileSync(path.join(SERVER_SRC, m[1]), "utf8").split("\n");
-        const at = Number(m[2]) - 1;
-        const window = lines.slice(Math.max(0, at - 4), at + 4).join("\n");
-        if (!/@Get\(/.test(lines[at] ?? "")) bad.push(`${href}: ${cite} is not a @Get`);
-        const scoped = [...window.matchAll(/RequireModuleScope\(\s*'([a-z]+)'/g)].map((x) => x[1]);
-        if (!scoped.some((mod) => row.modules.includes(mod))) bad.push(`${href}: ${cite} scopes ${JSON.stringify(scoped)}`);
+        let m: RegExpExecArray | null;
+        if ((m = /^((?:modules|core)\/[^:]+\.ts):(\d+)$/.exec(cite))) {
+          const { lines, i } = at(m[1], Number(m[2]));
+          if (!/@Get\(/.test(lines[i] ?? "")) bad.push(`${href}: ${cite} is not a @Get`);
+          const scoped = [...decorators(lines, i).matchAll(/RequireModuleScope\(\s*'([a-z]+)'/g)].map((x) => x[1]);
+          if (!scoped.some((mod) => row.modules.includes(mod))) bad.push(`${href}: ${cite} scopes ${JSON.stringify(scoped)}`);
+          scoped.forEach((mod) => justified.add(mod));
+        } else if ((m = /^unscoped:((?:modules|core)\/[^:]+\.ts):(\d+)$/.exec(cite))) {
+          const { lines, i } = at(m[1], Number(m[2]));
+          if (!/@Get\(/.test(lines[i] ?? "")) bad.push(`${href}: ${cite} is not a @Get`);
+          if (/RequireModuleScope\(/.test(decorators(lines, i))) bad.push(`${href}: ${cite} is scoped`);
+        } else if ((m = /^hub:([a-z]+)$/.exec(cite))) {
+          const hub = hubNav.find((h) => h.id === m![1]);
+          if (!hub || !hub.items.some((item) => item.href === href)) bad.push(`${href}: not in hub ${m[1]}`);
+          else if (hub.module) justified.add(hub.module);
+        } else if ((m = /^data:((?:modules|core)\/[^:]+\.ts):(\d+):([a-z]+) /.exec(cite))) {
+          const { lines, i } = at(m[1], Number(m[2]));
+          if (!(lines[i] ?? "").trim()) bad.push(`${href}: ${cite} points at nothing`);
+          justified.add(m[3]);
+        } else if ((m = /^service-check:((?:modules|core)\/[^:]+\.ts):(\d+)$/.exec(cite))) {
+          const { lines, i } = at(m[1], Number(m[2]));
+          if (!/@Get\(/.test(lines[i] ?? "")) bad.push(`${href}: ${cite} is not a @Get`);
+        } else if (/^D-\d+/.test(cite) || /\bD-\d+\b/.test(cite)) {
+          row.modules.forEach((mod) => justified.add(mod));
+        } else {
+          bad.push(`${href}: unknown citation ${cite}`);
+        }
       }
-      // A row with a module and no server citation says why (a hub rule, D-179, or the hub it sits in).
-      if (row.modules.length && !row.cite.length) bad.push(`${href}: a module with no reason`);
+      for (const mod of row.modules) if (!justified.has(mod)) bad.push(`${href}: ${mod} is not justified`);
+      if (row.modules.length === 0 && !row.cite.some((c) => c.startsWith("unscoped:") || /\bD-\d+/.test(c))) {
+        bad.push(`${href}: no module, and no unscoped read or ruling cited`);
+      }
     }
     expect(bad).toEqual([]);
+  });
+
+  it("NMS-18 a member with customers read and no revenue is not offered Rep performance (its read answers revenue per rep)", () => {
+    const { hubSections } = menuSectionsFor("both", levels({ crm: "read" }));
+    const shown = hubSections.flatMap((s) => s.items.map((i) => i.href));
+    expect(shown).not.toContain("/app/sales-team");
+    expect(shown).toContain("/app/crm/deals");
   });
 });
 
