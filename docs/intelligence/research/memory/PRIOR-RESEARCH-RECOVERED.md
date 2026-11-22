@@ -710,9 +710,172 @@ laws cover tenant and user scope only. The design closes this (design section 8.
 
 ## 3. Other issues and pull requests
 
-(Filled from the extraction of #126, #122, #123, PRs #127, #112, #148 and the memory sections of #153: see below.)
+All bodies and substantive comments below are on the `SaCH-PRO` account. The 2026-11-13 closing comments on #112, #127
+and #148 carry a Claude Code footer (written by an agent under the account); the 2026-10 research comments carry no
+footer, so who typed them (the owner, or the ChatGPT command centre recording the owner's direction) cannot be
+established from the record. Comments that say "User direction" or "Clarification from user" are owner-directed by their
+own words. Issues #106, #122, #123, #124, #125, #126 and #153 are all still open at 2026-11-22.
 
-PENDING-SECTION-3
+### 3.1 Issue #122, KF-META-MEMORY-TRUTH-AUDIT-001 (M0; opened 2026-10-04; 4 comments)
+
+Purpose: "Execute M0 of the Memory Programme in parallel with application/product delivery. Build a verified causal map of
+the current KEYFLOWOS memory system before canonical Context Genome persistence or behavioral cutover." Causal chain:
+"**Sources -> intake/writers -> durable stores -> indexes/caches -> retrieval -> prompt/cognition -> action -> outcomes ->
+learning/consolidation -> subsequent retrieval.**" Classification vocabulary: "LIVE_CANONICAL, LIVE_ADAPTER, LIVE_PARTIAL,
+DORMANT, DUPLICATED, LEGACY, BROKEN, FAKE_GREEN, UNKNOWN_PENDING_PROOF"; "No 'implemented' claim without a demonstrated
+live causal path." **Known defects "to verify, not assume" (verbatim):** "user-level persistence/scope gap; Redis user-key
+personalization over potentially unscoped DB data; hard recency cutoff hiding old authoritative facts; embedding timestamp
+recency distortion; zero-confidence fallback bug; destructive duplicate consolidation lacking lineage; consolidation
+promotion overwrite collisions; Evolution methods with no live callers; dormant KnowledgeIngestion; dream hypothesis
+validation unimplemented; self-assessment metrics mislabeled as precision/consistency; eval-harness weak checks;
+cron/circadian local-time inconsistencies." Completion gate: "M0 is complete only when the current memory system can be
+reconstructed from verified repository evidence and every important path is classified with proof."
+
+Comments: c5982171058 (2026-10-04) "M0 audits the current system specifically as the predecessor/evidence base for
+**KEY's canonical memory architecture**. The PROJECT/PROGRAMME development-memory path is the first proving-ground
+projection of KEY memory, not a separate target architecture." c5982230230 opened PR #127. c5982243130 "Exact-head M0
+static proof — PASS" (636 files scanned, 17 components found). **c5982337920 "M0 admission status — correction required":**
+"The static workflow ... is green, but M0 is **not complete/admitted**"; review found the harness could "accept incidental
+symbol mentions instead of actual declarations; count the audit's own manifest as external evidence; let test-only
+callsites satisfy an application-callsite claim; omit real server consumers"; "no component is promoted to LIVE from this
+static slice". **[INFERRED, checked against product code in section 4]:** several of the "known defects" are confirmed at
+`5c17e7b4`: the user-level persistence gap (writer drops userId), the hard 90-day window in unified retrieval, embedding
+recency distortion (semantic hits without `metadata.createdAt` get recency near 1), and the unreachable conflict resolution.
+
+### 3.2 Issue #123, KF-META-CONTEXT-GENOME-HARDEN-001 (M1; opened 2026-10-04; no comments)
+
+Goal: "Produce the executable M1 foundation for **KEY's canonical memory substrate**, generalized across BUSINESS /
+PROJECT / PROGRAMME / AGENT / WORKFLOW / USER." Required: "ContextScope and ContextKind contracts; authority, confidence,
+verification as distinct fields/types; valid-time separate from recorded/knowledge-time; provenance/evidence contract;
+immutable identity + non-destructive supersession lineage; contradiction/dispute state; explicit scope key sufficient for
+tenant/user isolation; compatibility adapter from current Business Genome semantics; no runtime cutover." **Hard
+invariants (verbatim):** "repeated observation cannot increase authority; inference cannot become FACT without an explicit
+promotion path; supersession never destroys history; inaccessible source memory cannot leak through a derived aggregate;
+vector score is never treated as truth/authority; USER scope and BUSINESS/tenant scope must be explicitly representable."
+Exit: "Additive contracts compile and pass deterministic tests; no Prisma migration or production behavior change."
+
+### 3.3 Issues #124 and #125 (M2, M3; opened 2026-10-04; no comments)
+
+#124 KF-META-CONTEXT-PERSISTENCE-SHADOW-001: flags `CONTEXT_GENOME_WRITE=OFF|SHADOW|ACTIVE` and
+`CONTEXT_GENOME_READ=OFF|SHADOW|ACTIVE`. **Hard invariants (verbatim):** "no destructive migration; no unscoped
+user-personalized cache over shared DB rows; original timestamps preserved; confidence=0 remains 0; old authoritative facts
+are not discarded solely by age; migration is idempotent; raw/source evidence remains source of truth." #125
+KF-META-ADAPTIVE-RECEPTOR-SHADOW-001: "RAW SOURCE -> receptor -> normalized observation -> entity/event/relation candidates
+-> salience/uncertainty -> Context Genome shadow write"; **hard invariants (verbatim):** "new receptor != permission;
+parsed claim != verified fact; no silent durable sensitive inference; duplicate source events are idempotent; untrusted
+content remains quarantinable; shadow first."
+
+### 3.4 Issue #126, KF-META-EPISODIC-ASSOCIATIVE-SHADOW-001 (M4; opened 2026-10-04; no comments)
+
+Named by D-253 with #106 as the research to recover. Goal: "Add KEY's first memory behavior beyond structured/vector top-k
+retrieval." **Required structures (verbatim):** "Episode / participant roles / temporal bounds; typed Association with
+strength distinct from confidence/verification; support/counterevidence counters and provenance; transient
+ActivationContext; bounded spreading activation; inhibition/competition; partial-cue recall; pattern-separation controls."
+**Retrieval pipeline (verbatim):** "Hard filter: scope -> permission -> current validity -> supersession ->
+authority/verification/risk. Then candidates: lexical/vector/entity/temporal/association. Then bounded activation/rerank.
+Return retrieved evidence separately from inferred completion." **Hard invariants (verbatim):** "association never promotes
+truth; inferred completion is labeled inference; activation is ephemeral; traversal has max nodes/depth/time/rank;
+inaccessible nodes cannot influence accessible aggregates; no unbounded graph expansion." Benchmarks: "partial-cue
+completion; false-merge/pattern-separation rate; stale/superseded leakage; cross-scope leakage; latency/cost vs current
+retrieval; ablation: current retrieval vs associative layer." Exit: "SHADOW results show measurable value on benchmark
+fixtures without scope/authority regressions." Entry gate: "M1 contracts stable". No implementation exists.
+
+The #126 invariant "inaccessible nodes cannot influence accessible aggregates" (with #123's "inaccessible source memory
+cannot leak through a derived aggregate") is the owner's earlier statement of what D-238 later ruled for money
+("directly or indirectly"). The design treats them as one rule (design section 8.2).
+
+### 3.5 PR #127 (M0 static audit; closed, not adopted, D-141)
+
+Opened 2026-10-04, closed 2026-11-13. Three files (`.github/workflows/memory-truth-audit.yml`,
+`scripts/memory-audit/manifest.json`, `scripts/memory-audit/memory-truth-audit.mjs`), none on main. It reported static
+evidence as `UNKNOWN_PENDING_PROOF`, never LIVE. Copilot review threads found over-escaped regexes, missing scan roots,
+manifest self-matches inflating counts, a bare-symbol fallback hiding missing declarations, and a test-only probe masking a
+missing application callsite; the owner's #122 correction adopted these. BUILD-MAP-001 PRS-M36: "#127's memory auditor
+cannot report DORMANT".
+
+### 3.6 PR #112 (Context Genome types; closed, not adopted, D-141)
+
+Opened 2026-09-30, closed 2026-11-13; not on main. Its type vocabulary is the owner's most concrete prior schema and is
+recorded here so it is not lost:
+- `ContextScopeType`: BUSINESS | PROJECT | PROGRAMME | AGENT | WORKFLOW | USER
+- `ContextKind`: FACT | PREFERENCE | OBSERVATION | EPISODE | DECISION | POLICY | PROCEDURE | HYPOTHESIS | DERIVED_STATE |
+  LESSON | CONSTRAINT
+- `ContextAuthorityClass`: USER_DECLARED | USER_VERIFIED | DOCUMENT_VERIFIED | SYSTEM_OBSERVED | AGENT_INFERRED | DERIVED |
+  EXTERNAL_UNVERIFIED
+- `ContextVerificationStatus`: VERIFIED | INFERRED | UNVERIFIED | STALE | DISPUTED
+- `ContextRiskIfWrong`: LOW | MEDIUM | HIGH | CRITICAL
+- `ContextTemporalWindow`: `validFrom` / `validTo` ("Real-world validity time"), `recordedAt` ("Knowledge time: when
+  KEYFLOWOS recorded this version.")
+- `ContextProvenance`: sourceType, sourceId, sourceUri, sourceRevision, sourceContentHash, actorType, actorId,
+  correlationId, causationId, runId
+- lineage utilities `isContextRecordActiveAt`, `supersedeContextFact`, `assertSingleActiveVersion`.
+Defect recorded by BUILD-MAP-001 PRS-M37: the Business Genome adapter set `validFrom` from verification time
+(`fact.lastVerifiedAt ?? fact.createdAt`), against the invariant that valid time and recorded time stay separate.
+
+### 3.7 PR #148 (KF-MEMORY-CONTEXT-GENOME-PLAN-001; closed, PORTED PARTS)
+
+Opened 2026-10-05 against the Atlas branch `impl/kf-mission-control-atlas-readmodel-001`, not main. Its three documents
+reached main in the tie-off with a dated correction note and status DEFER V1+ (section 2.1 and 2.2). Its body's findings
+include "AiMemory is already the canonical structured write path through UnifiedMemoryWriterService.
+UnifiedMemoryRetrievalService already normalizes multiple memory stores. Business Genome already provides the strongest
+evidence-backed claim admission pattern. TemporalFlowMemory is already an evidence-linked derived-memory pattern." Both
+Copilot reviews failed on quota; no review threads.
+
+### 3.8 Issue #153, KF-RD-GENAI-STACK-2026-001 (GenAI R&D ledger; memory sections only)
+
+Opened 2026-10-05, 94 comments to 2026-10-17. "This is **research and architectural memory**, not implementation
+authority." Holding finding: "Provider conversation state is ephemeral execution state, never canonical KEY memory."
+
+- **Context and compaction (Layer 1).** R&D-01B (c6005602036): "canonical memory stays durable and provider-independent; a
+  Context Compiler constructs a bounded active working set using relevance, recency, authority and task state. Context
+  pruning must never mutate truth." LAYER-1 CONVERGENCE (c6006014130): flow "canonical memory/state -> context candidates ->
+  relevance/authority/task-state scoring -> cache-affinity layout -> bounded active working set -> provider request";
+  **invariant: "context pruning/compaction changes the active working set, never canonical truth."** Part 2
+  (c6006031473): "**Do not add a ninth memory store for the new architecture.**"; target "`UnifiedMemoryRetrieval ->
+  Context Compiler -> provider-neutral cognitive input`"; invariants include "13. Coding-agent/private memory never becomes
+  project truth. 15. Long context does not eliminate retrieval, working memory or provenance."; proof obligations
+  "**P-CTX-01 Truth preservation** Context pruning/compaction can never delete or mutate canonical memory/evidence.
+  **P-CTX-02 Critical-fact retention** Challenge suite proves required workflow/business facts survive long-context
+  compilation." R&D-03A: "summaries are derived context artifacts and must retain provenance/version."
+- **LangGraph** (R&D-03B, c6006787358 to c6006824914): "checkpoint != memory: A checkpoint supports resumption of one
+  execution occurrence. Memory supports recall across executions/sessions."; "A replay may reconstruct cognition/state, but
+  external effects require idempotency/effect identity and must never repeat merely because computation re-runs."; "LangGraph
+  Store as canonical KEY memory: **REJECT**"; "**ABSORB the semantics; benchmark the framework.**"
+- **CrewAI memory** (R&D-03D): "memory scopes/privacy/consolidation: **ABSORB/BENCHMARK**. CrewAI Memory as canonical KEY
+  memory: **REJECT**." Candidate Agent Context Scope classes "CANONICAL_SHARED, TEAM_SHARED, AGENT_PRIVATE_EPHEMERAL,
+  AGENT_PRIVATE_DURABLE, RESTRICTED_ROLE, TENANT_PRIVATE"; "private/scratch agent state cannot silently become canonical
+  business truth."
+- **LlamaIndex** (R&D-03C): "**Absorb the data architecture; do not add a parallel LlamaIndex-owned knowledge plane.**";
+  Derivation Fingerprint ("derived knowledge must be reproducible and invalidatable"); Knowledge Tombstone ("deleted/revoked
+  knowledge must not remain retrievable through stale embeddings"); "Business Genome is not 'RAG content'"; "Retrieval
+  confidence must not become truth confidence"; "Fragment != memory".
+- **Embeddings and rerankers** (Layer 4, convergence c6008318382): "vectors never become authoritative facts ...
+  **CANONICAL LAW.**"; "`same dimensions != same vector space`"; retrieval and reranking are distinct stages, "Neither is
+  truth, authority or confidence"; RepresentationSpec (provider, model, revision, dimensions, chunking strategy, similarity
+  contract ...); honest failure vocabulary "MATCHES, NO_MATCH, SOURCE_NOT_ELIGIBLE, INDEX_UNAVAILABLE,
+  EMBEDDING_PROVIDER_FAILED, RERANKER_FAILED, INCOMPATIBLE_REPRESENTATION, INDEX_STALE, INDEX_INCOMPLETE,
+  TRUNCATED_REPRESENTATION, POLICY_BLOCKED" (R&D-04A gap EMB-GAP-04: "'No relevant memory exists' and 'retrieval
+  infrastructure failed' are semantically different states"). Name: "**Governed Representation & Retrieval Fabric**";
+  "Context Genome remains truth owner."
+- **Vector databases** (Layer 5, c6008343664): "Vector DBs are disposable projection stores"; "No DB-native tenant
+  primitive substitutes for KEY authorization"; "Filtered ANN has non-obvious recall effects ... **NEW PROOF OBLIGATION.**";
+  "**RETAIN PostgreSQL + pgvector as the architectural baseline until a measured benchmark proves it inadequate.**";
+  pgvector use in KEY is "underpowered" (no HNSW/IVFFlat, no hybrid, no representation-generation schema).
+- **Other**: "Adapter weights are not memory ... **CANONICAL.**" (Layer 6); Ragas gaps (RAGAS-GAP-04 outage masquerading
+  as no-match; -06 "no blocking tenant-leakage retrieval metric"; -08 "hard-coded unified-memory ranking weights lack a
+  mature benchmark/admission loop"); Rebuff (c6009953713): "Threat memory should be separated from Context Genome / business
+  memory"; "Unvalidated attacker input cannot self-register as a globally trusted attack signature"; "self-hardening via
+  automatic vector insertion: **REJECT unless evidence-gated**". Global convergence (c6010080039, file
+  `docs/intelligence/research/GENAI-RD-GLOBAL-CONVERGENCE.md` on main): "**Reject as canonical runtime:** ... second
+  canonical memory store, ... vector similarity as truth". Context compiler continuity (c6021579475): role "deterministic,
+  provenance-bearing development-context projection that compiles explicit task sources and proof requirements without
+  becoming a memory source of truth, execution authority, architecture authority or admission authority"; target
+  "`MINIMUM SUFFICIENT CONTEXT FOR CORRECT ACTION`".
+
+### 3.9 Not read or not verified
+
+Issue #80 REVIEW `CG-REVIEW-META-MEMORY-TRUTH-AUDIT-CORRECTION-001` (cited by #122); #153 layers other than those listed;
+`docs/intelligence/handoff/DURABLE-MEMORY-2026-10-06-SPEED-STRUCTURE-RND-CONVERGENCE.md` (exists on main, not read).
 
 ---
 
@@ -850,4 +1013,7 @@ by a subagent scored 10 of 10. Comparison with this design: `KEYFLOW-MEMORY-SYST
 | C-A | #106 c5982170811: "One memory architecture, many projections and consumers"; "Do NOT create a separate autonomous-development memory architecture" | Genome doc l.660: "Do not couple business runtime memory physically to development-control storage, but reuse the semantic laws." | **Not a contradiction on a careful reading** [INFERRED]: one architecture (semantic laws, contracts) with separate physical stores is consistent with both. The design adopts that reading and asks the owner to confirm it (open question Q1). |
 | C-B | #106 c5982087092: memory work at "20-30%" alongside product, "No memory/meta packet earns application-programme credit" | D-254 (2026-11-22): KEY's memory packets "join the v1 plan" | Later ruling governs for KEY's packets; whether they count toward v1 completion is open question Q6 |
 | C-C | #106 c5982087092: start with M0 truth audit; plan: "No production implementation packet should be released before the first two packets converge" | D-254: product packets join v1 "once the owner approves the Track 2 design" | The proposal keeps the audit first (MEM-0) and lets the scope-safety fixes run in parallel since they close existing D-100/D-238 exposure; open question Q4 |
+| C-E | #126: "Hard filter: scope -> permission -> current validity -> supersession -> authority/verification/risk. Then candidates"; #106 body: filter "before relevance/recency ranking" | Genome doc §12: "candidate identities -> graph expansion -> authoritative claim selection" (authority after expansion) | Tension: the design adopts #126's order (filter first) and #126's "inaccessible nodes cannot influence accessible aggregates" for every expansion step |
+| C-F | #123 and #106 rollout: PR #112 is "the starting implementation branch"; #106 checkpoint: "M0: #122 / PR #127" | BUILD-MAP-001 (D-141): #112 and #127 "CLOSED not adopted" | The later ruling governs; #123 and #122 have no comment recording it. The proposal starts M0 fresh and reuses #112's vocabulary as a reference, not as code |
+| C-G | #106 rollout: "Completion definition for 'memory v1'" | Product plan: the memory architecture was V1+ (DEFER) until D-254 | "Memory v1" in #106 is not the product v1; D-254 brings KEY's memory packets into v1 without saying which part of "memory v1" that covers (open question Q6) |
 | C-D | Rollout plan lanes M0-M12 (#106 c5982087092) | Plan phases 0-10 (`KF-MEMORY-CONTEXT-GENOME-PLAN-001.md`) | Two different numberings, both called "M"; M1 means "Canonical Context Genome Foundation" in one and "source claim identity provenance contract" in the other. The design maps both (design section 12). |
