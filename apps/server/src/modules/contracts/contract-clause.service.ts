@@ -79,6 +79,36 @@ const MAX_DOCUMENT_REDIRECTS = 5;
 const documentUrlRefused = () => new BadRequestException(DOCUMENT_URL_REFUSED);
 
 /**
+ * FU-CONTRACT-FETCH-OUTBOUND-GUARD review round 1 (correctness 1, security 1): the resolver could not answer
+ * now (EAI_AGAIN, a timeout, a server failure; OutboundAddressRefusedError.transient). That says nothing
+ * about the name, so it is no refusal: it stays the plain failure a fetch whose lookup failed was before
+ * the guard (no HttpException), which the plan queue retries and counts. It names no host and no code.
+ */
+export class DocumentHostUnresolvedError extends Error {
+  constructor() {
+    super('The document host could not be resolved right now');
+    this.name = 'DocumentHostUnresolvedError';
+  }
+}
+
+/**
+ * FU-CONTRACT-FETCH-OUTBOUND-GUARD review round 1 (correctness 2): the fetch's deadline bounds resolving each
+ * host as well as the requests (fetch rejects with the signal's reason, a TimeoutError, as it did before
+ * the guard when its own lookup stalled).
+ */
+function underSignal<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+    work.then(
+      (value) => { signal.removeEventListener('abort', onAbort); resolve(value); },
+      (err) => { signal.removeEventListener('abort', onAbort); reject(err); },
+    );
+  });
+}
+
+/**
  * FU-CONTRACT-FETCH-OUTBOUND-GUARD (D-246): the URL of a contract's document, checked as webhooks and the
  * CRM link import check theirs (core/security/outbound-address.ts): http or https only, no credentials, no
  * localhost name, an IP literal that is public (WHATWG URL has already turned a decimal, octal or hex IPv4
@@ -101,7 +131,7 @@ async function checkDocumentUrl(raw: string): Promise<{ url: URL; target: Checke
   try {
     return { url, target: await resolvePublicAddress(hostname) };
   } catch (err) {
-    if (err instanceof OutboundAddressRefusedError) throw documentUrlRefused();
+    if (err instanceof OutboundAddressRefusedError) throw err.transient ? new DocumentHostUnresolvedError() : documentUrlRefused();
     throw err;
   }
 }
@@ -116,7 +146,7 @@ async function checkDocumentUrl(raw: string): Promise<{ url: URL; target: Checke
  */
 async function fetchDocument(raw: string): Promise<Response> {
   const signal = AbortSignal.timeout(30_000);
-  let { url, target } = await checkDocumentUrl(raw);
+  let { url, target } = await underSignal(checkDocumentUrl(raw), signal);
   for (let hops = 0; ; hops++) {
     const dispatcher = new PinnedDispatcher(target);
     let response: Response;
@@ -136,7 +166,7 @@ async function fetchDocument(raw: string): Promise<Response> {
     } catch {
       throw documentUrlRefused();
     }
-    ({ url, target } = await checkDocumentUrl(next));
+    ({ url, target } = await underSignal(checkDocumentUrl(next), signal));
   }
 }
 
