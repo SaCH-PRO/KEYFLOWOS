@@ -1,6 +1,7 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { CANONICAL_MODULES, LEVEL_RANK, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
 import { TemporalFlowMemoryService } from './temporal-flow-memory.service';
 import type {
@@ -20,6 +21,71 @@ export interface TemporalFlowListQuery {
   from?: string;
   to?: string;
   limit?: number;
+}
+
+/**
+ * FU-TEMPORAL-FLOW-INBOX-SCOPE (NAV-A1 security review; D-100, D-179): who reads the timeline. The member a request
+ * acts for (AuthMiddleware's `req.user`). A read given no reader (an internal caller: the command center, KEY's
+ * timeline tools) reads as before; a read given a reader answers only the events of the modules they may read.
+ */
+export type TemporalFlowReader = { id?: string; role?: string } | null | undefined;
+
+/** The modules that own timeline events, and so may withhold them. */
+type OwningModule = (typeof CANONICAL_MODULES)[number];
+
+/**
+ * FU-TEMPORAL-FLOW-INBOX-SCOPE: how an event names the module that owns it, by its `module`, its `source` and its
+ * `type` (case-insensitive). An event names a module when any of the three does; a reader sees it only when they read
+ * every module it names. Every writer of the timeline, and the module its own reads require:
+ *   - TemporalFlowKeyInboxListener: module key_inbox, type key_inbox.*, source key_inbox or the thread's channel
+ *     (whatsapp, instagram, email, ...) -> operations (KeyInboxController: @RequireModuleScope('operations'));
+ *   - GoogleCalendarTemporalSyncService: module calendar, source GOOGLE_CALENDAR, type google_calendar.* ->
+ *     bookings (CalendarController's event reads: bookings read); booking.* types too;
+ *   - money-bearing types (invoice.*, payment.*, ...) and a module that names finance -> revenue (D-100);
+ *   - a `module` that is a canonical module's own name (a hand-written or KEY-written event) -> that module;
+ *   - BusinessAssetsService (module business-assets), BlueprintService and ConstitutionVersionService (module
+ *     business-genome), the KEY action services (module key-autonomy) and KEY's timeline notes (module null): their
+ *     owners' reads are membership only, so these stay business-wide.
+ */
+const OWNER_PATTERNS: Partial<Record<OwningModule, { modules: string[]; sources: string[]; typePrefixes: string[] }>> = {
+  operations: {
+    modules: ['key_inbox', 'key-inbox', 'keyinbox', 'inbox'],
+    sources: ['key_inbox', 'whatsapp', 'instagram', 'email', 'gmail', 'meta', 'facebook', 'messenger', 'slack', 'sms', 'telegram', 'tiktok'],
+    typePrefixes: ['key_inbox.', 'whatsapp.', 'instagram.', 'email.', 'gmail.', 'meta.', 'facebook.', 'messenger.', 'slack.', 'sms.', 'telegram.', 'tiktok.'],
+  },
+  bookings: {
+    modules: ['calendar', 'booking'],
+    sources: ['google_calendar'],
+    typePrefixes: ['google_calendar.', 'calendar.', 'booking.'],
+  },
+  revenue: {
+    modules: ['finance', 'invoice', 'invoices', 'payment', 'payments', 'billing', 'money'],
+    sources: ['stripe', 'paypal'],
+    typePrefixes: [
+      'invoice.', 'payment.', 'quote.', 'estimate.', 'refund.', 'payout.', 'deposit.', 'subscription.',
+      'credit_note.', 'revenue.', 'finance.', 'money.', 'stripe.', 'paypal.',
+    ],
+  },
+};
+
+const ci = (value: string) => ({ equals: value, mode: 'insensitive' as const });
+const ciPrefix = (value: string) => ({ startsWith: value, mode: 'insensitive' as const });
+
+/**
+ * FU-TEMPORAL-FLOW-INBOX-SCOPE: the condition an event of `module` meets. `module` is nullable: each of its terms is
+ * bound to a non-null value, so the NOT a reader's filter wraps it in keeps an event whose module is null (SQL's NOT of
+ * a NULL comparison would drop it).
+ */
+function ownedBy(module: OwningModule): Record<string, unknown> {
+  const p = OWNER_PATTERNS[module];
+  const modules = [module, ...(p?.modules ?? [])];
+  return {
+    OR: [
+      ...modules.map((m) => ({ AND: [{ module: { not: null } }, { module: ci(m) }] })),
+      ...(p?.sources ?? []).map((src) => ({ source: ci(src) })),
+      ...(p?.typePrefixes ?? []).map((prefix) => ({ type: ciPrefix(prefix) })),
+    ],
+  };
 }
 
 @Injectable()
@@ -54,7 +120,40 @@ export class TemporalFlowService {
     });
   }
 
-  async list(businessId: string, query: TemporalFlowListQuery = {}) {
+  /**
+   * FU-TEMPORAL-FLOW-INBOX-SCOPE (D-100, D-179): the condition that withholds from `reader` the events of every module
+   * they cannot read, applied in the query itself, before its order and limit, so a page holds as many events as the
+   * reader may see and no count or page boundary counts a withheld one. The reader's levels are read as
+   * ModuleScopeGuard reads them (memberModuleLevel: the membership of this business, its explicit permissionScopes
+   * map, a JSON array included, a missing key being none, D-179; else its role's defaults); a platform SUPER_ADMIN
+   * passes, as the guard passes them. No reader, or no membership of this business: every owning module is withheld.
+   * undefined: nothing is withheld.
+   */
+  async readerFilter(businessId: string, reader: TemporalFlowReader): Promise<Record<string, unknown> | undefined> {
+    if (reader?.role === 'SUPER_ADMIN' && reader.id) return undefined;
+    const membership = reader?.id
+      ? await this.prisma.client.membership.findUnique({
+          where: { userId_businessId: { userId: reader.id, businessId } },
+          select: { role: true, permissionScopes: true },
+        })
+      : null;
+    const reads = (module: OwningModule) =>
+      !!membership && rankOf(memberModuleLevel(membership, module)) >= LEVEL_RANK.read;
+    const withheld = CANONICAL_MODULES.filter((module) => !reads(module));
+    if (!withheld.length) return undefined;
+    return { NOT: { OR: withheld.map(ownedBy) } };
+  }
+
+  /** FU-TEMPORAL-FLOW-INBOX-SCOPE: `where` with the reader's filter (readerFilter) added, when one is given. */
+  private scoped(where: Record<string, unknown>, filter: Record<string, unknown> | undefined) {
+    return filter ? { AND: [where, filter] } : where;
+  }
+
+  async list(
+    businessId: string,
+    query: TemporalFlowListQuery = {},
+    readerFilter?: Record<string, unknown>,
+  ) {
     const where: Record<string, unknown> = { businessId };
 
     if (query.source) where.source = query.source;
@@ -74,38 +173,44 @@ export class TemporalFlowService {
     where.visibility = { not: 'HIDDEN' };
 
     return this.prisma.client.temporalFlowEvent.findMany({
-      where,
+      where: this.scoped(where, readerFilter),
       orderBy: { occurredAt: 'desc' },
       take: query.limit ?? 100,
     });
   }
 
-  async calendarRange(businessId: string, from: string, to: string) {
+  async calendarRange(businessId: string, from: string, to: string, readerFilter?: Record<string, unknown>) {
     const fromDate = new Date(from);
     const toDate = new Date(to);
 
     return this.prisma.client.temporalFlowEvent.findMany({
-      where: {
-        businessId,
-        visibility: { not: 'HIDDEN' },
-        OR: [
-          { startsAt: { gte: fromDate, lte: toDate } },
-          { occurredAt: { gte: fromDate, lte: toDate } },
-          { reminderAt: { gte: fromDate, lte: toDate } },
-        ],
-      },
+      where: this.scoped(
+        {
+          businessId,
+          visibility: { not: 'HIDDEN' },
+          OR: [
+            { startsAt: { gte: fromDate, lte: toDate } },
+            { occurredAt: { gte: fromDate, lte: toDate } },
+            { reminderAt: { gte: fromDate, lte: toDate } },
+          ],
+        },
+        readerFilter,
+      ),
       orderBy: [{ startsAt: 'asc' }, { occurredAt: 'asc' }],
     });
   }
 
-  async remindersDue(businessId: string) {
+  async remindersDue(businessId: string, readerFilter?: Record<string, unknown>) {
     return this.prisma.client.temporalFlowEvent.findMany({
-      where: {
-        businessId,
-        reminderAt: { lte: new Date() },
-        status: { in: ['RECORDED', 'ACTION_REQUIRED'] },
-        visibility: { not: 'HIDDEN' },
-      },
+      where: this.scoped(
+        {
+          businessId,
+          reminderAt: { lte: new Date() },
+          status: { in: ['RECORDED', 'ACTION_REQUIRED'] },
+          visibility: { not: 'HIDDEN' },
+        },
+        readerFilter,
+      ),
       orderBy: { reminderAt: 'asc' },
       take: 50,
     });
@@ -121,8 +226,8 @@ export class TemporalFlowService {
     });
   }
 
-  async analyze(businessId: string): Promise<TemporalFlowAnalysis> {
-    const recent = await this.list(businessId, { limit: 500 });
+  async analyze(businessId: string, readerFilter?: Record<string, unknown>): Promise<TemporalFlowAnalysis> {
+    const recent = await this.list(businessId, { limit: 500 }, readerFilter);
 
     const urgentItems: TemporalFlowAnalysis['urgentItems'] = [];
     const opportunities: TemporalFlowAnalysis['opportunities'] = [];

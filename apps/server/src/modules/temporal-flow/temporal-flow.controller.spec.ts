@@ -2,8 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { TemporalFlowController } from './temporal-flow.controller';
 import type { TemporalFlowService } from './temporal-flow.service';
 
+// FU-TEMPORAL-FLOW-INBOX-SCOPE: each timeline read asks the service for its reader's filter and passes it on.
+const READER = { id: 'user_1', role: 'USER' };
+const REQ = { user: READER };
+const FILTER = { NOT: { OR: [{ module: 'key_inbox' }] } };
+
 function makeController() {
   const temporal = {
+    readerFilter: vi.fn().mockResolvedValue(FILTER),
     list: vi.fn().mockResolvedValue([{ id: 'tf_1' }]),
     calendarRange: vi.fn().mockResolvedValue([{ id: 'tf_2' }]),
     remindersDue: vi.fn().mockResolvedValue([{ id: 'tf_3' }]),
@@ -32,7 +38,8 @@ describe('TemporalFlowController', () => {
       source: 'APP',
       status: 'RECORDED',
       importance: 'HIGH',
-    } as any);
+    } as any, REQ);
+    expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', READER);
     expect(temporal.list).toHaveBeenCalledWith('biz_1', {
       source: 'APP',
       type: undefined,
@@ -42,21 +49,23 @@ describe('TemporalFlowController', () => {
       from: undefined,
       to: undefined,
       limit: undefined,
-    });
+    }, FILTER);
     expect(result).toEqual([{ id: 'tf_1' }]);
   });
 
   it('GET /calendar returns calendar range', async () => {
     const { controller, temporal } = makeController();
-    const result = await controller.calendar('biz_1', '2026-06-01', '2026-06-30');
-    expect(temporal.calendarRange).toHaveBeenCalledWith('biz_1', '2026-06-01', '2026-06-30');
+    const result = await controller.calendar('biz_1', '2026-06-01', '2026-06-30', REQ);
+    expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', READER);
+    expect(temporal.calendarRange).toHaveBeenCalledWith('biz_1', '2026-06-01', '2026-06-30', FILTER);
     expect(result).toEqual([{ id: 'tf_2' }]);
   });
 
   it('GET /reminders returns reminders', async () => {
     const { controller, temporal } = makeController();
-    const result = await controller.reminders('biz_1');
-    expect(temporal.remindersDue).toHaveBeenCalledWith('biz_1');
+    const result = await controller.reminders('biz_1', REQ);
+    expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', READER);
+    expect(temporal.remindersDue).toHaveBeenCalledWith('biz_1', FILTER);
     expect(result).toEqual([{ id: 'tf_3' }]);
   });
 
@@ -81,8 +90,9 @@ describe('TemporalFlowController', () => {
 
   it('POST /analyze returns analysis', async () => {
     const { controller, temporal } = makeController();
-    const result = await controller.analyze('biz_1');
-    expect(temporal.analyze).toHaveBeenCalledWith('biz_1');
+    const result = await controller.analyze('biz_1', REQ);
+    expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', READER);
+    expect(temporal.analyze).toHaveBeenCalledWith('biz_1', FILTER);
     expect(result.summary).toBe('Analysis complete.');
   });
 });

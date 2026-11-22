@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
@@ -14,12 +15,21 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { CreateTemporalFlowEventDto } from './dto/create-temporal-flow-event.dto';
 import { TemporalFlowQueryDto } from './dto/temporal-flow-query.dto';
 import { TemporalFlowMemoryQueryDto } from './dto/temporal-flow-memory-query.dto';
-import { TemporalFlowService } from './temporal-flow.service';
+import { TemporalFlowService, type TemporalFlowReader } from './temporal-flow.service';
 import { TemporalFlowMemoryService } from './temporal-flow-memory.service';
 import { TemporalFlowMemoryQueueService } from './temporal-flow-memory.queue.service';
 import { TemporalFlowGenomeBridgeService } from './temporal-flow-genome-bridge.service';
 import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorator';
 
+/** The member a request acts for, as AuthMiddleware attaches it. */
+type ReaderRequest = { user?: TemporalFlowReader };
+
+/**
+ * FU-TEMPORAL-FLOW-INBOX-SCOPE (NAV-A1 security review; D-100, D-179): every read of the timeline (the list, the
+ * calendar, the reminders and the analysis, which answers event titles and counts) answers only the events of the
+ * modules its reader may read (TemporalFlowService.readerFilter, applied in the query before its order and limit): the
+ * KEY Inbox's events need operations read, calendar events bookings read, money events revenue read (D-100).
+ */
 @HiddenModuleWrites('flow_hubs', 'bookings')
 @Controller('temporal-flow/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -32,7 +42,12 @@ export class TemporalFlowController {
   ) {}
 
   @Get()
-  list(@Param('businessId') businessId: string, @Query() query: TemporalFlowQueryDto) {
+  async list(
+    @Param('businessId') businessId: string,
+    @Query() query: TemporalFlowQueryDto,
+    @Req() req: ReaderRequest,
+  ) {
+    const readerFilter = await this.temporal.readerFilter(businessId, req.user);
     return this.temporal.list(businessId, {
       source: query.source,
       type: query.type,
@@ -42,21 +57,22 @@ export class TemporalFlowController {
       from: query.from,
       to: query.to,
       limit: query.limit ? Number(query.limit) : undefined,
-    });
+    }, readerFilter);
   }
 
   @Get('calendar')
-  calendar(
+  async calendar(
     @Param('businessId') businessId: string,
     @Query('from') from: string,
     @Query('to') to: string,
+    @Req() req: ReaderRequest,
   ) {
-    return this.temporal.calendarRange(businessId, from, to);
+    return this.temporal.calendarRange(businessId, from, to, await this.temporal.readerFilter(businessId, req.user));
   }
 
   @Get('reminders')
-  reminders(@Param('businessId') businessId: string) {
-    return this.temporal.remindersDue(businessId);
+  async reminders(@Param('businessId') businessId: string, @Req() req: ReaderRequest) {
+    return this.temporal.remindersDue(businessId, await this.temporal.readerFilter(businessId, req.user));
   }
 
   @Post()
@@ -80,8 +96,8 @@ export class TemporalFlowController {
   }
 
   @Post('analyze')
-  analyze(@Param('businessId') businessId: string) {
-    return this.temporal.analyze(businessId);
+  async analyze(@Param('businessId') businessId: string, @Req() req: ReaderRequest) {
+    return this.temporal.analyze(businessId, await this.temporal.readerFilter(businessId, req.user));
   }
 
   @Get('memory')
