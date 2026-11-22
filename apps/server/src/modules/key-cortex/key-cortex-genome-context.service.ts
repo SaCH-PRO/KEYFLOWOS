@@ -1,3 +1,4 @@
+import { genomeContextForReader, genomeRecommendationsForReader } from './genome-context-for-reader';
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { RedisService } from '../../core/redis/redis.service';
 import { KeyCortexGenomeBridgeService } from './key-cortex-genome-bridge.service';
@@ -40,7 +41,8 @@ export class KeyCortexGenomeContextService {
   async getGenomeEnrichedContext(
     businessId: string,
   ): Promise<GenomeEnrichedContext> {
-    const cacheKey = `genome:context:${businessId}`;
+    // v2 (FU-KEY-CHAT-GENOME-MONEY-SIGHT): signals carry section and domain; a v1 entry lacks them.
+    const cacheKey = `genome:context:v2:${businessId}`;
     const cached = await this.redis.getJson<GenomeEnrichedContext>(cacheKey);
     if (cached) {
       this.logger.debug(
@@ -80,6 +82,8 @@ export class KeyCortexGenomeContextService {
         type: sig.type ?? 'info',
         message: sig.message ?? '',
         module: sig.module ?? 'general',
+        section: sig.section ?? null,
+        domain: sig.domain ?? null,
         severity: sig.severity ?? 'low',
         createdAt: sig.createdAt ? new Date(sig.createdAt) : new Date(),
       })),
@@ -135,13 +139,14 @@ export class KeyCortexGenomeContextService {
   /**
    * Determine whether KEY should suggest a proactive action based on genome signals.
    */
-  async shouldSuggestProactiveAction(businessId: string): Promise<boolean> {
+  async shouldSuggestProactiveAction(businessId: string, readsRevenue = true): Promise<boolean> {
     if (!this.genomeBridgeService) {
       return false;
     }
 
     try {
-      const genomeContext = await this.getGenomeEnrichedContext(businessId);
+      // FU-KEY-CHAT-GENOME-MONEY-SIGHT (minor 1): decided on the genome the reader may see.
+      const genomeContext = genomeContextForReader(await this.getGenomeEnrichedContext(businessId), readsRevenue);
 
       const hasCriticalSignals = genomeContext.signals.some(
         (s: GenomeSignal) => s.severity === 'critical' || s.severity === 'high',
@@ -201,13 +206,16 @@ export class KeyCortexGenomeContextService {
   async getProactiveSuggestions(
     businessId: string,
     integrationV2Enabled = false,
+    readsRevenue = true,
   ): Promise<Suggestion[]> {
     if (!this.genomeBridgeService) {
       return [];
     }
 
     try {
-      const genomeContext = await this.getGenomeEnrichedContext(businessId);
+      // FU-KEY-CHAT-GENOME-MONEY-SIGHT (MAJOR-1): suggestions, and the fallback, come from the genome the
+      // reader may see, so all-finance recommendations do not hide the reader's other suggestions.
+      const genomeContext = genomeContextForReader(await this.getGenomeEnrichedContext(businessId), readsRevenue);
 
       let v2Context: any = {};
       if (integrationV2Enabled && this.contextV2Service) {
@@ -219,8 +227,10 @@ export class KeyCortexGenomeContextService {
         }
       }
 
-      const rankedRecs =
-        await this.genomeBridgeService.getRankedRecommendations(businessId, 5);
+      const rankedRecs = genomeRecommendationsForReader(
+        (await this.genomeBridgeService.getRankedRecommendations(businessId, 5)).map((r: any) => ({ ...r, category: r.domain })),
+        readsRevenue,
+      );
 
       const topRecs = rankedRecs
         .filter((r: any) => r.impact >= 0.7 || r.confidence > 0.7)
