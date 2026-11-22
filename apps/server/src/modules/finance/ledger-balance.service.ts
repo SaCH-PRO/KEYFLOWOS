@@ -317,14 +317,16 @@ export class LedgerBalanceService {
     const running = new Map<string, Prisma.Decimal>();
     const runningKey = (e: { accountId: string; currency: string | null }) => `${e.accountId}:${normalizeCurrency(e.currency)}`;
 
-    // For page > 1, pre-compute opening balances from prior entries
+    // For page > 1 the balance carries on from the lines of the earlier pages:
+    // the same range in the same order, so a line's balance is the one it has
+    // when the whole range is on one page (page 1 starts from zero). Review
+    // B-1: page N started from the lines dated before `from` (none without
+    // `from`) and left out pages 1 to N-1.
     if (page > 1) {
-      const priorWhere: Prisma.LedgerEntryWhereInput = { businessId };
-      if (opts.accountId) priorWhere.accountId = opts.accountId;
-      const cutoff = opts.from ?? new Date(0);
-      priorWhere.date = { lt: cutoff };
       const priorEntries = await this.prisma.client.ledgerEntry.findMany({
-        where: priorWhere,
+        where,
+        orderBy: [{ date: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+        take: (page - 1) * pageSize,
         select: { accountId: true, currency: true, debit: true, credit: true },
       });
       for (const e of priorEntries) {
