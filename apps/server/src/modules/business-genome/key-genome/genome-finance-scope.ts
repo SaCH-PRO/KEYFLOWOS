@@ -60,7 +60,7 @@ const MONEY_TERMS = new RegExp(
 /** Short money words, matched only as a whole word (letters on neither side), so snake_case values (cac_payback, first_sale) match. */
 const MONEY_WORDS = /(?<![a-z])(cac|ltv|mrr|arr|roi|sale|deal|order|tax|vat|fee)s?(?![a-z])/i;
 /** A money amount in free text ("$12,345", "TTD 500", "£9.99"): a title, summary or reason that states a figure (D-238). */
-const MONEY_AMOUNT = /[$€£¥₹]\s?\d|(?<![a-z0-9])(ttd|usd|eur|gbp|jmd|bbd|xcd|cad)\s?\d|(?<![a-z0-9])\d[\d.,]*\s?(ttd|usd|eur|gbp|jmd|bbd|xcd|cad)(?![a-z0-9])/i;
+const MONEY_AMOUNT = /[$€£¥₹]\s?\d|(?<![a-z0-9])(ttd|usd|eur|gbp|jmd|bbd|xcd|cad)\s?\d|(?<![a-z0-9.,])\d[\d.,]*\s?(ttd|usd|eur|gbp|jmd|bbd|xcd|cad)(?![a-z0-9])/i;
 /**
  * Words that make a KEY action proposal's text or parameters financial (round-3 security M2): an amount, a total, a
  * balance, what is owed or paid, a rate. Read for proposals only: a genome row's domain is classified by the vocabulary
@@ -76,21 +76,21 @@ const PROPOSAL_MONEY_WORDS =
  * rate is the sale amount).
  */
 /**
- * The figure after a money word (rounds 4-7): a JSON value right after the key ({"total":1200}, {"rate":"150"}), or prose
+ * The figure after a money word (rounds 4-8): a JSON value right after the key ({"total":1200}, {"rate":"150"}), or prose
  * within three words whose separators hold no quote, so the window never runs across a JSON key boundary ("Call Bill",
- * "dueDate":"2026-..."). A date or phone shape (2026-11-25, 868-555-0101), and a figure followed by a non-money unit
- * (3 hours, 2 files, 3 posts, 2 open tickets, 10am), are no money figure (round-7 correctness MAJOR-1).
+ * "dueDate":"2026-..."). Only a real date or phone shape (2026-11-25, 25/11/2026, 868-555-0101) is no money figure.
+ * Whatever follows the figure ("150 per hour", "3 hours") is not read: wording that cannot be told from money fails
+ * closed (D-238; round-8, both reviews), and the structural follow-up FU-PROPOSAL-MONEY-TAG has the writers tag money.
  */
-const NON_MONEY_UNITS =
-  'hours?|hrs?|h|days?|weeks?|wks?|months?|years?|yrs?|minutes?|mins?|seconds?|secs?|s|am|pm|files?|tickets?|posts?|tasks?|contacts?|guests?|people|persons?|forms?|speakers?|retries|attempts?|rows?|times?|items?|leads?|disputes?|steps?|calls?|emails?|messages?|bookings?|stars?|reviews?|webhooks?|issues?|records?|members?|seats?|pages?|slides?|photos?|videos?';
-const FIGURE = `[$€£¥₹]?\\d(?!\\d{0,3}[-/]\\d{1,2}[-/]?\\d)(?![\\d.,]*\\s*(?:[a-z]+\\s+)?(?:${NON_MONEY_UNITS})(?![a-z]))`;
+const FIGURE = `[$€£¥₹]?(?!\\d{4}-\\d{2}-\\d{2}|\\d{1,2}/\\d{1,2}/\\d{2,4}|\\d{3}-\\d{3}-\\d{4})\\d`;
 const NEAR_FIGURE = `(?![a-z])(?:["']?\\s*[:=]\\s*["']?\\s*${FIGURE}|(?:[ \\t,:;()–-]{1,4}(?:[a-z]+[ \\t,:;()–-]{1,4}){0,3})${FIGURE})`;
 const PROPOSAL_FIGURE_WORDS = new RegExp(
   [
-    `(?<!(?:response|reply|show|no[\\s_-]?show|completion|open|click|attendance|retention|bounce|success|error|occupancy|star|heart|frame|bit|sample|refresh)[\\s_]?)(?<![a-z])rates?(?!\\s*limit)${NEAR_FIGURE}`,
+    `(?<!(?:response|reply|show|no[\\s_-]?show|completion|open|click|attendance|retention|bounce|success|error|occupancy|star|heart|frame|bit|sample|refresh)[\\s_]?)(?<![a-z])rates?(?![\\s-]*limit)${NEAR_FIGURE}`,
     `(?<![a-z])(?:totals?|bill(?:s|ed|ing)?|settle(?:s|d)?|wire[sd]?|transfer(?:s|red)?|tips?|loans?|retainers?|spent|spend(?:s|ing)?|charged)${NEAR_FIGURE}`,
-    // A figure that is outstanding, owed or overdue ("Chase the 900 outstanding").
-    `[$€£¥₹]?\\d[\\d,.]*\\s*k?\\s+(?:outstanding|owed|overdue|unpaid|past\\s+due)(?![a-z])`,
+    // A figure that is outstanding, owed or overdue ("Chase the 900 outstanding"). Anchored at the start of the number
+    // so a long digit run is not rescanned from every digit (correctness M1).
+    `(?<![\\d,.])[$€£¥₹]?\\d[\\d,.]*\\s*k?\\s+(?:outstanding|owed|overdue|unpaid|past\\s+due)(?![a-z])`,
   ].join('|'),
   'i',
 );
@@ -178,6 +178,8 @@ export type ProposalFields = {
   rationale?: string | null;
   expectedBenefit?: string | null;
   risks?: unknown;
+  /** Where the proposal came from (HUMAN_WORKFLOW: the approvals module's shadow; round 8). */
+  sourceType?: string | null;
   /** The evidence the proposal cites (round-3 security M2). */
   evidence?: unknown;
   payload?: unknown;
@@ -270,9 +272,11 @@ export function isFinancialProposal(proposal: ProposalFields | null | undefined)
   // request type: only the listed non-money types are non-financial; a purchase order, a general request or an unknown
   // type fails closed. A KEY approval request with no request type is classified as before (D-226).
   const requestType = requestTypeOf(proposal);
-  if (requestType !== null && typeof actionType === 'string' && actionType.trim().toUpperCase() === 'REQUEST_APPROVAL') {
-    return !NON_MONEY_REQUEST_TYPES.has(requestType);
-  }
+  const isApproval = typeof actionType === 'string' && actionType.trim().toUpperCase() === 'REQUEST_APPROVAL';
+  if (isApproval && requestType !== null) return !NON_MONEY_REQUEST_TYPES.has(requestType);
+  // An approvals-module shadow (sourceType HUMAN_WORKFLOW) with no request type (a KEY tool that left it out) fails
+  // closed (round 8, correctness m4).
+  if (isApproval && proposal.sourceType === 'HUMAN_WORKFLOW') return true;
   if (typeof actionType === 'string' && NON_MONEY_PROPOSAL_ACTIONS.has(actionType.trim().toUpperCase())) return false;
   const owner = (typeof module === 'string' && module.trim() ? module : tool?.includes('.') ? tool.split('.')[0] : '').trim().toLowerCase();
   if (owner && NON_MONEY_PROPOSAL_MODULES.has(owner)) return false;
@@ -282,13 +286,13 @@ export function isFinancialProposal(proposal: ProposalFields | null | undefined)
 /**
  * D-238: a proposal as a reader may be handed it after acting on it (approve, reject, cancel, execute). A revenue reader,
  * or any reader of a non-financial proposal, gets it whole; a reader without revenue read gets only its id, its status
- * and a failure reason that states no money. The action itself stays governed by the existing authority (tiers, D-140,
+ * and nothing else (round 7: no failure reason). The action itself stays governed by the existing authority (tiers, D-140,
  * D-119); only what is answered is redacted.
  */
 export function proposalViewForReader<T extends { id: string; status?: unknown; failureReason?: unknown }>(
   proposal: T,
   readsRevenue: boolean,
-): T | { id: string; status?: unknown; failureReason?: string } {
+): T | { id: string; status?: unknown } {
   if (readsRevenue || !isFinancialProposal(proposal as unknown as ProposalFields)) return proposal;
   return redactedProposalView(proposal);
 }
@@ -306,6 +310,7 @@ export function redactedProposalView(proposal: { id: string; status?: unknown; f
  */
 export const PROPOSAL_CLASSIFY_SELECT = {
   id: true,
+  sourceType: true,
   actionType: true,
   module: true,
   toolName: true,
