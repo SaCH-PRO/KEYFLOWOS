@@ -54,6 +54,7 @@ const B_TAGS = ['b-tag'];
 
 let db: any;
 let connector: any;
+let memoryService: any;
 const semanticCalls: string[] = [];
 
 async function cleanup() {
@@ -121,6 +122,7 @@ beforeAll(async () => {
   });
   const flow = new Proxy({}, { get: (_t, prop) => () => { throw new Error(`v71t: TemporalFlowService.${String(prop)} reached`); } });
   const memory = new TemporalFlowMemoryService(new PrismaService() as any, semantic as any);
+  memoryService = memory;
   const temporal = new TemporalAdapterService(memory, flow as any);
   // Constructor order: registry, contextAssembly, crm, commerce, bookings, content, communications, flow,
   // autopilot, temporal, inbox, notifications, projects, activity, social, finance, analytics, intelligence,
@@ -167,6 +169,7 @@ describe('MEM-TEMPORAL-SCOPE: update_memory through the KEY connector', () => {
     const missing = await connector.execute(cmd(ID.bizA, 'update_memory', { memoryId: ID.missing, value: { x: 1 } }));
     expect(answer(foreign)).toEqual(answer(missing));
     expect(missing.success).toBe(false);
+    expect(missing.error).toBe('Memory not found');
   });
 
   it("A's own update still works", async () => {
@@ -204,6 +207,7 @@ describe('MEM-TEMPORAL-SCOPE: tag_memory through the KEY connector', () => {
     const missing = await connector.execute(cmd(ID.bizA, 'tag_memory', { memoryId: ID.missing, tags: ['t'] }));
     expect(answer(foreign)).toEqual(answer(missing));
     expect(missing.success).toBe(false);
+    expect(missing.error).toBe('Memory not found');
   });
 
   it('tag_memory on a memory id tags that memory, not the rows whose entityId equals it', async () => {
@@ -247,5 +251,41 @@ describe('MEM-TEMPORAL-SCOPE: SemanticMemoryService.deleteForSource', () => {
   it('the unscoped deleteForSource (no business predicate, no caller) is removed', async () => {
     const { SemanticMemoryService } = await import('../src/modules/ai/semantic-memory.service');
     expect('deleteForSource' in SemanticMemoryService.prototype).toBe(false);
+  });
+});
+
+/** Every seeded row, as stored, so a case can show nothing at all was written or deleted. */
+async function snapshot() {
+  return db.temporalFlowMemory.findMany({ where: { id: { startsWith: P } }, orderBy: { id: 'asc' } });
+}
+
+describe('MEM-TEMPORAL-SCOPE review repair: a command without a memoryId acts on no memory', () => {
+  it('delete_memory with no memoryId deletes nothing (a where without the id must not become every row of the business)', async () => {
+    const before = await snapshot();
+    expect(before.length).toBe(5);
+    const r = await connector.execute(cmd(ID.bizA, 'delete_memory', {}));
+    expect(r.data?.deleted ?? false).toBe(false);
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it('update_memory with no memoryId is refused as not found and writes nothing', async () => {
+    const before = await snapshot();
+    const r = await connector.execute(cmd(ID.bizA, 'update_memory', { value: { x: 1 }, importance: 'high' }));
+    expect(r.success).toBe(false);
+    expect(r.error).toBe('Memory not found');
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it('tag_memory with no memoryId is refused as not found and writes nothing', async () => {
+    const before = await snapshot();
+    const r = await connector.execute(cmd(ID.bizA, 'tag_memory', { tags: ['x'] }));
+    expect(r.success).toBe(false);
+    expect(r.error).toBe('Memory not found');
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it('findById with no id finds nothing (not an arbitrary memory of the business)', async () => {
+    expect(await memoryService.findById(ID.bizA, undefined)).toBeNull();
+    expect(await memoryService.findById(ID.bizA, '')).toBeNull();
   });
 });
