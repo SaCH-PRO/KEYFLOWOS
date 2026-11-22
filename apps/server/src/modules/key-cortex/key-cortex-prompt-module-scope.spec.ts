@@ -705,6 +705,16 @@ describe('FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4): a memberless turn sees a pro
     expect(await readersOwnPromptMemory(prisma as any, 'biz_1', 'owner', NF_MONEY_REJECT as any, 1000)).toEqual(NF_MONEY_REJECT);
   });
 
+  it('RED-BEFORE (review of the Codex fixes on #218, security MAJOR-1): the records of a non-financial proposal that failed with a reason the proposal vocabulary reads as money are withheld', async () => {
+    for (const reason of ['card declined', 'Acme paid late', 'the balance owed is 900']) {
+      const records = recordsOf('nf', 'fail', { status: 'FAILED', failureReason: reason }, { failureReason: reason }, 'kap_2');
+      for (const reader of ['blind', null] as const) {
+        expect((await readersOwnPromptMemory(prisma as any, 'biz_1', reader, records as any, 1000)).map((f) => f.id), `${reason} ${String(reader)}`).toEqual([]);
+      }
+      expect(await readersOwnPromptMemory(prisma as any, 'biz_1', 'owner', records as any, 1000)).toEqual(records);
+    }
+  });
+
   it('RED-BEFORE (D-238, D-227): a proposal whose classification is missing (no underlying row, nothing in the record) is withheld from a reader without revenue read and from a memberless turn; the owner sees it', async () => {
     const unknown = [...recordsOf('u', 'approve', { status: 'APPROVED' }, {}, 'kap_404'), {
       id: 'ug_outcome', entityId: 'kap_404', sourceType: 'genome_memory_event', title: 'Action executed: something', content: 'KEY action EXECUTE_TOOL was executed.',
