@@ -24,7 +24,8 @@ const COA_CODE_LOCK_NAMESPACE = 'coa-code:';
 /**
  * The whitespace trimmed off a code, on both sides of the comparison: the SQL check trims the stored code
  * with this same set (rows written before this rule were stored verbatim), so the service and the database
- * agree on what a code is.
+ * agree on what a code is. ASCII whitespace only: a no-break or other Unicode space, a zero-width
+ * character or full-width digits make a different code here, though it may look the same on screen.
  */
 const COA_CODE_WHITESPACE = ' \t\n\r\f\v';
 
@@ -39,7 +40,8 @@ function trimCoaCode(code: string): string {
 /**
  * An account code as it is stored: text, trimmed; a blank code is no code (null). The body is not
  * validated before it reaches here, so a code that is not text (a JSON number, an object) is refused
- * 400 instead of reaching Prisma, where it raised a validation error (a 500).
+ * 400 instead of reaching Prisma, where it raised a validation error (a 500) or, on update, a Prisma
+ * operator object ({ set: '6100' }) was written as given, which would pass around the check.
  */
 function normalizeCoaCode(raw: unknown): string | null {
   if (raw === null || raw === undefined) return null;
@@ -56,8 +58,8 @@ function storedCoaCode(code: string | null): string | null {
 
 /**
  * FIN5 — CRUD on ChartOfAccount. System rows (`isSystem=true`) are
- * read-only except for `isActive` toggling, which is also blocked for
- * accounts referenced by the system seed (they back the postings engine).
+ * read-only: update() and archive() refuse them (they back the postings
+ * engine).
  *
  * V1-63 SWP-COA-UNIQUE-CODE (BUG-111; owner ruling D-167: the check stays in code, no unique index): a code
  * is used by at most one ACTIVE account of a business. create() and update() refuse a write that would make
@@ -72,9 +74,9 @@ function storedCoaCode(code: string | null): string | null {
  *   - accounts without a code never collide, an archived account frees its code, and an account saved with
  *     the code it already has is not checked, so rows that shared a code before this rule can still be
  *     renamed and archived (nothing rewrites them);
- *   - a code that is not text, or an isActive that is not true or false, is refused 400: the body is not
- *     validated before it reaches here, and a Prisma operator object ({ set: true }) would otherwise be
- *     written without the check;
+ *   - a code that is neither text nor null, or an isActive that is neither true, false nor null (null
+ *     leaves the flag alone), is refused 400: the body is not validated before it reaches here, and a
+ *     Prisma operator object ({ set: true }, { set: '6100' }) would otherwise be written without the check;
  *   - check and write run in one transaction under a per-business advisory lock: with no unique index, two
  *     concurrent writers would otherwise both pass the check.
  */

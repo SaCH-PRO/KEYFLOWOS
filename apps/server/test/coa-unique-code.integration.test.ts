@@ -30,6 +30,9 @@
  *                       any other: they cannot come back beside its holder, and they block a new one
  *   CUC-14  RED-BEFORE  under an active tenant that differs from the businessId argument, the check runs on
  *                       the business the write lands in (the active tenant); the other chart is untouched
+ *   CUC-15  CONTROL then RED-BEFORE  '_', '%' and a quote in a code are plain characters: 71_0 and 71% do
+ *                       not collide with 7160 (the check is an equality, not a LIKE) and a quote is kept as
+ *                       typed; a second account on each of those codes is refused
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard, TenantInterceptor,
  * FinanceController, FinanceCoaService and ChartOfAccountsSeederService run against DATABASE_URL, and the
@@ -452,7 +455,8 @@ describe('CUC-09: a code that is not text', () => {
   it('CUC-09 RED-BEFORE: a number or an object as the code is 400 on create and update, and nothing is written', async () => {
     const id = await make(ID.bizA, ID.ownerA, 'v63h Typed', '7110');
     const before = await chart(ID.bizA);
-    for (const code of [6100, { equals: '6100' }, ['6100'], true]) {
+    // { set: '6100' } is a Prisma update operator: before the rule, PATCH wrote it as given (200).
+    for (const code of [6100, { equals: '6100' }, { set: '6100' }, ['6100'], true]) {
       const created = await post(ID.bizA, ID.ownerA, { name: 'v63h typed', type: 'EXPENSE', code });
       expect(created.status, JSON.stringify(created.body)).toBe(400);
       const updated = await patch(ID.bizA, ID.ownerA, id, { code });
@@ -593,5 +597,28 @@ describe('CUC-14: an active tenant that differs from the businessId argument', (
       coaService.update(ID.bizB, landed.id, { code: '7150' }).then(() => null, (e: unknown) => e));
     expect(err).toBeInstanceOf(ConflictException);
     expect(await chart(ID.bizB)).toEqual(beforeB);
+  });
+});
+
+describe('CUC-15: wildcard characters in a code', () => {
+  it('CUC-15 CONTROL then RED-BEFORE: _ and % match only themselves, and a quote is stored as typed', async () => {
+    await make(ID.bizA, ID.ownerA, 'v63h Holder 7160', '7160');
+    // CONTROL: under a LIKE these would match 7160; they are different codes.
+    const under = await make(ID.bizA, ID.ownerA, 'v63h Underscore', '71_0');
+    await make(ID.bizA, ID.ownerA, 'v63h Percent', '71%');
+    await make(ID.bizA, ID.ownerA, 'v63h Percent only', '%');
+    const quoted = await post(ID.bizA, ID.ownerA, { name: 'v63h Quote', type: 'EXPENSE', code: "71'6\"0" });
+    expect(quoted.status, JSON.stringify(quoted.body)).toBe(201);
+    expect(quoted.body.code).toBe("71'6\"0");
+    // And the other way round: a plain code is not caught by a stored wildcard.
+    await make(ID.bizA, ID.ownerA, 'v63h Plain 7170', '7170');
+    const renamed = await patch(ID.bizA, ID.ownerA, under, { code: '71_1' });
+    expect(renamed.status, JSON.stringify(renamed.body)).toBe(200);
+    const before = await chart(ID.bizA);
+    // RED-BEFORE: each is still one code.
+    expectTaken(await post(ID.bizA, ID.ownerA, { name: 'v63h Underscore 2', type: 'EXPENSE', code: '71_1' }));
+    expectTaken(await post(ID.bizA, ID.ownerA, { name: 'v63h Percent 2', type: 'EXPENSE', code: '71%' }));
+    expectTaken(await post(ID.bizA, ID.ownerA, { name: 'v63h Quote 2', type: 'EXPENSE', code: "71'6\"0" }));
+    expect(await chart(ID.bizA)).toEqual(before);
   });
 });
