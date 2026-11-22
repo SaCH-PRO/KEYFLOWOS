@@ -246,6 +246,16 @@ export class ReportsService {
       };
       const reportTitle = reportTypeTitles[type] || 'Executive Summary';
 
+      // Round 2 review C2-9 (D-13): what is owed in another currency is told
+      // to the narrative on its own line, never added to the business currency's.
+      const otherCurrencyReceivables = Object.entries(outstandingByCurrency)
+        .filter(([code]) => code !== reportCurrency)
+        .map(([code, owed]) => `${code} ${owed.outstanding.toLocaleString()} (${owed.count} invoices, ${owed.overdueCount} overdue)`)
+        .join('; ');
+      const otherCurrencyLine = otherCurrencyReceivables
+        ? `\n- Outstanding Receivables in other currencies: ${otherCurrencyReceivables} (not added to the ${currency} figure)`
+        : '';
+
       const prompt = `You are a professional business analyst preparing a ${reportTitle} report for "${metrics.business.name}". Generate a concise, professional narrative suitable for high-level stakeholder meetings.
 
 BUSINESS DATA (${start.toLocaleDateString()} to ${end.toLocaleDateString()}):
@@ -253,7 +263,7 @@ BUSINESS DATA (${start.toLocaleDateString()} to ${end.toLocaleDateString()}):
 - Revenue Model: ${metrics.business.revenueModel || 'Not specified'}
 - Total Revenue: $${totalRevenue.toLocaleString()} ${currency} from ${metrics.revenue.invoiceCount} paid invoices
 - Average Invoice Value: $${metrics.revenue.averageInvoice.toLocaleString()} ${currency}
-- Outstanding Receivables: $${metrics.revenue.outstanding.toLocaleString()} ${currency} (${metrics.revenue.outstandingCount} invoices, ${metrics.revenue.overdueCount} overdue)
+- Outstanding Receivables: $${metrics.revenue.outstanding.toLocaleString()} ${currency} (${metrics.revenue.outstandingCount} invoices, ${metrics.revenue.overdueCount} overdue)${otherCurrencyLine}
 - Total Expenses: $${totalExpenses.toLocaleString()} ${currency} across ${metrics.expenses.count} entries
 - Top Expense Categories: ${expenseCategoryBreakdown.slice(0, 5).map(c => `${c.category}: $${c.total.toLocaleString()}`).join(', ') || 'None recorded'}
 - Net Profit: $${netProfit.toLocaleString()} ${currency}
