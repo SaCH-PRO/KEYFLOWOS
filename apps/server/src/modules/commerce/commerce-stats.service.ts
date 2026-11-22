@@ -157,7 +157,7 @@ export async function readInvoiceMoney(
   });
 }
 
-type InvoiceStatusName = 'SENT' | 'OVERDUE' | 'PARTIALLY_PAID' | 'PARTIALLY_CREDITED';
+type InvoiceStatusName = 'PENDING' | 'SENT' | 'OVERDUE' | 'PARTIALLY_PAID' | 'PARTIALLY_CREDITED';
 
 /** One currency's money figures (V1-37): never added to another currency's. */
 export interface CurrencyCommerceStats {
@@ -240,8 +240,8 @@ export class CommerceStatsService {
    * money received net of refunds on the business's own invoices, read from
    * their own-tenant payment rows (readInvoiceMoney), by the date of each row
    * for this month and the six-month series; outstanding is the remaining
-   * balance of the open receivables (SENT, OVERDUE, PARTIALLY_PAID,
-   * PARTIALLY_CREDITED) and overdue the part of it past due. It summed the
+   * balance of the open receivables (OPEN_RECEIVABLE_STATUSES: PENDING, D-256,
+   * SENT, OVERDUE, PARTIALLY_PAID, PARTIALLY_CREDITED) and overdue the part of it past due. It summed the
    * totals of PAID invoices as revenue and of SENT / OVERDUE invoices as
    * outstanding, so an invoice of 13,723 with a 400 deposit was neither
    * (revenue 0, outstanding 0), and a part-paid one counted whole once it

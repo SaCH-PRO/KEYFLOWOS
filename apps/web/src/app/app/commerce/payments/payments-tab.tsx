@@ -532,18 +532,21 @@ export default function PaymentsTab({
                           {formatCurrency(invoiceMoney(inv, new Date()).owedCents / 100, currency)}
                         </span>
                         <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            onClick={() => handleSendReminder(inv.id)}
-                            disabled={!!isLoading}
-                            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors disabled:opacity-50"
-                            title="Send Reminder"
-                          >
-                            {isLoading === "send" ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                            ) : (
-                              <Send className="w-3.5 h-3.5" />
-                            )}
-                          </button>
+                          {/* D-256 review B1: a past-due PENDING invoice is owed and queued, but it was never issued, so it is not remindable (canRemind, as the list row). */}
+                          {canRemind(inv.status) && (
+                            <button
+                              onClick={() => handleSendReminder(inv.id)}
+                              disabled={!!isLoading}
+                              className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors disabled:opacity-50"
+                              title="Send Reminder"
+                            >
+                              {isLoading === "send" ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <Send className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          )}
                           <button
                             onClick={() => handleMarkPaid(inv.id)}
                             disabled={!!isLoading}
