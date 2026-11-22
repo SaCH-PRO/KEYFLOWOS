@@ -288,3 +288,18 @@ describe('MEM-SALIENCE-SIGHT review CR F3: a strand residue below the noise floo
     expect(partial).toBeLessThanOrEqual(owner + 1e-9);
   });
 });
+
+describe('MEM-SALIENCE-SIGHT review SEC-MSS-4: a strand residue below the noise floor carries no stale reason', () => {
+  it('after the owner level decays out, a partial reader is told only the fresh reason, as the owner is', () => {
+    const endocrine = new KeyCortexEndocrineService();
+    const t0 = new Date('2026-11-22T00:00:00Z').getTime();
+    endocrine.release(BIZ, [{ hormone: 'cortisol', magnitude: 0.35, reason: 'an old anomaly' }], new Date(t0));
+    const later = new Date(t0 + 31 * HOUR);
+    expect(endocrine.read(BIZ, later)).toEqual([]);
+    endocrine.release(BIZ, [{ hormone: 'cortisol', magnitude: 0.35, reason: 'a fresh anomaly' }], later);
+    const owner = endocrine.read(BIZ, later).find((h) => h.name === 'cortisol')!.reasons;
+    const partial = endocrine.readFor(BIZ, NO_MODULE_SIGHT, later).find((h) => h.name === 'cortisol')!.reasons;
+    expect(owner).toEqual(['a fresh anomaly']);
+    expect(partial).toEqual(owner);
+  });
+});
