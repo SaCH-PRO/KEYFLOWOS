@@ -576,8 +576,16 @@ export class MarketplaceService {
     // SEC-UPS-1 / W11-STOCK-ROW-RACE: a create that loses the pair to the business's own row is run again once.
     return retryOnOwnStockRowRace(this.prisma.client, businessId, () =>
       this.prisma.client.$transaction(async (tx) => {
-        await lockStockRowPairsInOrder(tx, businessId, [{ productId, warehouseId }]);
-        const existing = await tx.inventoryStock.findFirst({ where: { businessId, productId, warehouseId } });
+        const locked = await lockStockRowPairsInOrder(tx, businessId, [{ productId, warehouseId }]);
+        let existing = await tx.inventoryStock.findFirst({ where: { businessId, productId, warehouseId } });
+        // W11-INV-SET-MOVEMENT review (SEC-R2-1): a row created and committed between the lock statement (which then
+        // locked nothing) and this read was read unlocked, so a reservation or a receipt committing after the read was
+        // not seen by the checks below, nor by the movement's difference. Such a row is locked now and read again
+        // (one row, the pair's: no new edge in the stock lock order); a row gone meanwhile reads as none.
+        if (existing && !locked.includes(existing.id)) {
+          await lockStockRowPairsInOrder(tx, businessId, [{ productId, warehouseId }]);
+          existing = await tx.inventoryStock.findFirst({ where: { businessId, productId, warehouseId } });
+        }
 
         // D-139: checked against the row as read under its lock (a pair with no row reserves nothing).
         const storedReserved = existing?.reserved ?? 0;
