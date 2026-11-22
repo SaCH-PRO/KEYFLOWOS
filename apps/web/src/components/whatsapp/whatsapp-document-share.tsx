@@ -35,7 +35,7 @@
  * Used by the quotes panel, the Sales > Invoices panel and the Invoices hub;
  * every chat URL is built by lib/whatsapp.ts.
  */
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { X } from "lucide-react";
@@ -158,7 +158,10 @@ function WhatsAppNumberConfirm({ reading, what, saving, refusal, refused, onConf
   const descriptionId = useId();
   const fallbackRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
+  // A layout effect (FU-WA-ESCAPE-RACE): the listener is on window when the step's DOM is.
+  // The step mounts from a non-event update (the pay link resolved), and a passive effect
+  // runs a scheduler task later, so an Escape in between went to the modal under the step.
+  useLayoutEffect(() => {
     const returnTo = typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null;
     // The safe choice has the focus: Enter never saves a number the member has not read.
     fallbackRef.current?.focus();
