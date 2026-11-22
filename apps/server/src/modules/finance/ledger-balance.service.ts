@@ -322,16 +322,33 @@ export class LedgerBalanceService {
     // when the whole range is on one page (page 1 starts from zero). Review
     // B-1: page N started from the lines dated before `from` (none without
     // `from`) and left out pages 1 to N-1.
-    if (page > 1) {
-      const priorEntries = await this.prisma.client.ledgerEntry.findMany({
-        where,
-        orderBy: [{ date: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-        take: (page - 1) * pageSize,
-        select: { accountId: true, currency: true, debit: true, credit: true },
+    //
+    // Review S-1: the opening sums are taken in the database, one per
+    // (account, currency), over the lines of the range that come before this
+    // page's first line in the (date, createdAt, id) order: no earlier line is
+    // loaded into the server. A page past the end shows no row and reads
+    // nothing to seed.
+    if (page > 1 && entries.length > 0) {
+      const first = entries[0];
+      const sums = await this.prisma.client.ledgerEntry.groupBy({
+        by: ['accountId', 'currency'],
+        where: {
+          AND: [
+            where,
+            {
+              OR: [
+                { date: { lt: first.date } },
+                { date: first.date, createdAt: { lt: first.createdAt } },
+                { date: first.date, createdAt: first.createdAt, id: { lt: first.id } },
+              ],
+            },
+          ],
+        },
+        _sum: { debit: true, credit: true },
       });
-      for (const e of priorEntries) {
-        const net = new D(e.debit.toString()).sub(new D(e.credit.toString()));
-        running.set(runningKey(e), (running.get(runningKey(e)) ?? ZERO).add(net));
+      for (const s of sums) {
+        const net = new D((s._sum.debit ?? ZERO).toString()).sub(new D((s._sum.credit ?? ZERO).toString()));
+        running.set(runningKey(s), (running.get(runningKey(s)) ?? ZERO).add(net));
       }
     }
 
