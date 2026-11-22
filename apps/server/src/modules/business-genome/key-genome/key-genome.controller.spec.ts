@@ -655,11 +655,12 @@ describe('W11-GENOME-FINANCE-SCOPE review repairs (D-128, D-100): finance rows o
   const finance = { id: 'rec_fin', domain: 'FINANCIAL', title: 'Business is losing money', insight: 'Net margin is negative (-28.6%).' };
   const ops = { id: 'rec_ops', domain: 'OPERATIONS', title: 'Document SOPs', insight: 'No SOP.' };
 
-  it('[GFS-U1] the predicates match the rows the finance genome, outcome learning and the cross-domain service write, and no other domain', () => {
+  it('[GFS-U1] the predicates match the rows the finance genome, outcome learning, the cross-domain service and (D-234) the customer-sales genome write, and not the operations rows', () => {
     expect(isFinanceSignal({ sourceModule: 'finance', section: 'FINANCIAL', domain: 'finance' })).toBe(true);
     // A temporal or KEY writer filing a signal under section FINANCIAL is caught too.
     expect(isFinanceSignal({ sourceModule: 'temporal_flow', section: 'FINANCIAL', domain: 'cash' })).toBe(true);
-    expect(isFinanceSignal({ sourceModule: 'crm', section: 'SALES', domain: 'customer_sales' })).toBe(false);
+    // D-234 (owner ruling 2026-11-22) reverses this pin: sales-derived rows are finance.
+    expect(isFinanceSignal({ sourceModule: 'crm', section: 'SALES', domain: 'customer_sales' })).toBe(true);
     expect(isFinanceRecommendation({ domain: 'FINANCIAL' })).toBe(true);
     expect(isFinanceRecommendation({ domain: 'OPERATIONS' })).toBe(false);
     expect(isMoneyMemoryEvent({ sourceType: 'FINANCE_GENOME', domain: 'FINANCIAL', eventType: 'FINANCE_SNAPSHOT_COMPUTED' })).toBe(true);
@@ -667,7 +668,8 @@ describe('W11-GENOME-FINANCE-SCOPE review repairs (D-128, D-100): finance rows o
     expect(isMoneyMemoryEvent({ sourceType: 'GENOME_SIGNAL', domain: 'finance', section: 'FINANCIAL', eventType: 'SIGNAL_ACCEPTED' })).toBe(true);
     expect(isMoneyMemoryEvent({ sourceType: 'CROSS_DOMAIN_GENOME', domain: 'CROSS_DOMAIN', eventType: 'CROSS_DOMAIN_RECOMMENDATIONS_RANKED' })).toBe(true);
     expect(isMoneyMemoryEvent({ sourceType: 'CUSTOMER_SALES_GENOME', domain: 'SALES', eventType: 'CUSTOMER_SALES_SNAPSHOT_COMPUTED' })).toBe(true);
-    expect(isMoneyMemoryEvent({ sourceType: 'CUSTOMER_SALES_GENOME', domain: 'SALES', eventType: 'CUSTOMER_SALES_SIGNAL_GENERATED' })).toBe(false);
+    // D-234 reverses this pin too.
+    expect(isMoneyMemoryEvent({ sourceType: 'CUSTOMER_SALES_GENOME', domain: 'SALES', eventType: 'CUSTOMER_SALES_SIGNAL_GENERATED' })).toBe(true);
     expect(isMoneyMemoryEvent({ sourceType: 'OPERATIONS_GENOME', domain: 'OPERATIONS', eventType: 'OPERATIONS_SNAPSHOT_COMPUTED' })).toBe(false);
   });
 

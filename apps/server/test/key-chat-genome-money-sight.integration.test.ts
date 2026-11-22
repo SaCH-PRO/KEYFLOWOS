@@ -60,8 +60,8 @@ function genome() {
       { id: `${P}rec_ops`, title: OPS.rec, description: 'ops', impact: 'high', category: 'OPERATIONS', confidence: 0.9, genomeScore: 8 },
     ],
     signals: [
-      { id: `${P}sig_fin`, type: 'risk', message: FIN.signal, module: 'finance', severity: 'high', createdAt: new Date() },
-      { id: `${P}sig_ops`, type: 'risk', message: OPS.signal, module: 'operations', severity: 'high', createdAt: new Date() },
+      { id: `${P}sig_fin`, type: 'risk', message: FIN.signal, module: 'finance', section: 'FINANCIAL', domain: 'finance', severity: 'high', createdAt: new Date() },
+      { id: `${P}sig_ops`, type: 'risk', message: OPS.signal, module: 'operations', section: 'OPERATIONS_DELIVERY', domain: 'operations', severity: 'high', createdAt: new Date() },
       // As key-proactive-engine files it: another module, section FINANCE (review BLOCKING-1).
       { id: `${P}sig_auto_fin`, type: 'risk', message: FIN.autoSignal, module: 'key_autonomy', section: 'FINANCE', domain: 'cashflow', severity: 'high', createdAt: new Date() },
     ],
@@ -72,7 +72,7 @@ function genome() {
 }
 
 let db: any;
-let turn: (userId: string, path: 'processQuery' | 'streamQuery') => Promise<{ prompt: string; output: string }>;
+let turn: (userId: string, path: 'processQuery' | 'streamQuery', legacy?: boolean) => Promise<{ prompt: string; output: string }>;
 
 async function cleanup() {
   for (const sql of [
@@ -92,7 +92,7 @@ beforeAll(async () => {
   const { KeyCortexSystemPromptService } = await import('../src/modules/key-cortex/key-cortex-system-prompt.service');
   const realPrompt = new KeyCortexSystemPromptService({} as any);
 
-  turn = async (userId, path) => {
+  turn = async (userId, path, legacy = false) => {
     const prompts: string[] = [];
     const session = { id: `${P}sess`, businessId: ID.biz, userId, status: 'active', persona: 'jarvis', messages: [], detectedRole: null, detectedFunction: null };
     const route = {
@@ -119,12 +119,21 @@ beforeAll(async () => {
       { get: async () => null, setex: async () => undefined } as any,
       {
         getPersonalityConfig: () => ({ persona: 'jarvis', temperature: 0.5 }),
-        buildSystemPrompt: () => 'You are KEY.',
+        // As KeyCortexPersonalityService.buildBusinessContextBlock renders the snapshot (legacy prompt).
+        buildSystemPrompt: (_p: unknown, c: any) =>
+          `LEGACY DNA Scores: ${Object.entries(c.genomeDna ?? {}).map(([k, v]) => `${k}: ${v}`).join(', ')}\nPending: ${c.pendingInvoices} invoices\nMetrics: ${JSON.stringify(c.keyMetrics ?? {})}`,
         buildValueBlock: async () => '',
         classifyPersona: async () => undefined,
         selectTone: async () => ({ tone: '', temperatureAdjustment: 0 }),
       } as any,
-      { buildContextSnapshot: async () => ({ businessId: ID.biz, genomeStage: 'growth', executiveReadiness: 55, keyMetrics: {} }), formatContextForPrompt: () => '' } as any,
+      {
+        buildContextSnapshot: async () => ({
+          businessId: ID.biz, genomeStage: 'growth', executiveReadiness: 55,
+          genomeDna: { finance: 41, sales: 72, operations: 70 }, pendingInvoices: 7, keyMetrics: { totalRevenue: 98765, openTasks: 3 },
+          recentTasks: [], recentEvents: [], activeProjects: [], unreadMessages: 0,
+        }),
+        formatContextForPrompt: () => '',
+      } as any,
       { buildToolDefinitions: async () => [], executeActions: async () => [] } as any,
       {
         getOrCreateSession: async () => session,
@@ -167,7 +176,7 @@ beforeAll(async () => {
       undefined, // events
     );
     const query = { text: 'how is the business doing', businessId: ID.biz, userId } as any;
-    const flags = { integrationV2Enabled: false, genomeV3Enabled: true };
+    const flags = { integrationV2Enabled: false, genomeV3Enabled: !legacy };
     let output: string;
     if (path === 'processQuery') {
       output = JSON.stringify(await pipeline.processQuery(query, flags));
@@ -221,6 +230,26 @@ describe('FU-KEY-CHAT-GENOME-MONEY-SIGHT (D-128, D-100): a KEY chat turn hands f
           for (const marker of MONEY_MARKERS) expect(output, `${reader} ${path}: ${marker}`).not.toContain(marker);
         }
         if (path === 'processQuery') for (const ops of [OPS.signal, OPS.sugg]) expect(output, `${reader} ${path}: ${ops}`).toContain(ops);
+      });
+
+      it(`${kind} (D-233, KC-SEC-3; review MAJOR-1): ${reader} (${path}, legacy prompt): the snapshot the prompt renders ${READS_REVENUE[reader] ? 'keeps' : 'carries no'} finance or sales DNA score, pending-invoice count or revenue figure`, async () => {
+        const { prompt } = await turn(ID[reader], path, true);
+        expect(prompt, `${reader} ${path}: operations DNA`).toContain('operations: 70');
+        for (const marker of ['finance: 41', 'sales: 72', 'Pending: 7 invoices', '98765']) {
+          if (READS_REVENUE[reader]) expect(prompt, `${reader} ${path}: ${marker}`).toContain(marker);
+          else expect(prompt, `${reader} ${path}: ${marker}`).not.toContain(marker);
+        }
+      });
+
+      it(`${kind} (D-233): ${reader} (${path}): the finance DNA score ${READS_REVENUE[reader] ? 'reaches' : 'reaches neither'} the prompt${path === 'processQuery' ? ' nor the genomeInsights' : ''}; other DNA scores stay`, async () => {
+        const { prompt, output } = await turn(ID[reader], path);
+        expect(prompt, `${reader} ${path}: operations DNA`).toMatch(/operations: [█░]+ 70%/);
+        if (READS_REVENUE[reader]) {
+          expect(prompt, `${reader} ${path}: finance DNA`).toMatch(/finance: [█░]+ 40%/);
+        } else {
+          expect(prompt, `${reader} ${path}: finance DNA`).not.toMatch(/finance: /);
+          expect(output, `${reader} ${path}: finance DNA in the answer`).not.toContain('"finance":40');
+        }
       });
     }
   }
