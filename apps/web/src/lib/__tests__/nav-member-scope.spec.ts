@@ -22,6 +22,14 @@
  *          that business's answer; a failed read is unknown.
  *   NMS-08 the bottom bar as a phone renders it: its links and buttons read Today, Sales, New, Customers, More for a
  *          products business (journey A4), New opens the New menu and More opens the navigation drawer.
+ *   NMS-10 review round 1 (COR-1): a screen with a module of its own (Expenses, Team) stays in More for a member who
+ *          may open it even when they may not open its hub's page; the heading then opens nothing.
+ *   NMS-11 review round 1 (SEC-1, SEC-2, COR-7): the levels belong to the member who read them (another member's
+ *          sign-in in this browser is unknown until read for them), and they are read again when the tab is looked at.
+ *   NMS-12 review round 1 (COR-2): while what the business sells is still loading, no hub that depends on it shows
+ *          (no Schedule, no bar slots), so a products business never flashes the 'both' bar.
+ *   NMS-13 review round 1 (COR-4, COR-6): aria-current is "page" only on the hub's own page ("true" inside the
+ *          hub); the bar's New toggles the New menu.
  *   NMS-09 the desktop menu (Main navigation) shows the hubs as links named by their plain labels, and a products
  *          business's menu names no Schedule (journey A4); a front-desk member's menu offers no Sales, Money, Your
  *          page or Settings hub (J5).
@@ -128,6 +136,26 @@ describe("NAV-A1: the hubs a member is shown", () => {
     expect(labelsOf(bottomBarFor("products", null))).toEqual(["Sales", "Customers"]);
   });
 
+  it("NMS-10 a screen with its own module stays in More when its hub's page is closed to the member", () => {
+    const member = levels({ expenses: "write", team: "read" });
+    expect(labelsOf(hubsFor("both", member))).toEqual(["Today"]);
+    const { hubSections } = menuSectionsFor("both", member);
+    const money = hubSections.find((s) => s.id === "money");
+    expect(money?.items.map((i) => i.label)).toEqual(["Expenses"]);
+    expect(money?.href, "the Money heading opens nothing for a member who may not open Money").toBeUndefined();
+    const settingsHub = hubSections.find((s) => s.id === "settings");
+    expect(settingsHub?.items.map((i) => i.label)).toEqual(["Team", "Org chart"]);
+    expect(settingsHub?.href).toBeUndefined();
+    // A hub the member may open keeps its heading door.
+    expect(menuSectionsFor("both", OWNER).hubSections.find((s) => s.id === "money")?.href).toBe("/app/financial-flow");
+  });
+
+  it("NMS-12 while sells is loading no sells-dependent hub shows", () => {
+    expect(labelsOf(hubsFor(null, OWNER))).toEqual(["Today", "Customers", "Sales", "Money", "Your page", "Settings"]);
+    expect(bottomBarFor(null, OWNER)).toEqual([]);
+    expect(menuSectionsFor(null, OWNER).hubSections.map((s) => s.id)).not.toContain("schedule");
+  });
+
   it("NMS-06 the server's answer is read strictly", () => {
     expect(memberModuleLevelsOf({ modules: { crm: "read", revenue: "none", settings: "root", team: 3 } })).toEqual({ crm: "read", revenue: "none" });
     expect(memberModuleLevelsOf(null)).toBeNull();
@@ -215,6 +243,34 @@ describe("NAV-A1: the shell reads the member's levels for the selected business"
   });
 });
 
+/** A session token naming `sub` (lib/business-settings reads the subject; nothing verifies it here). */
+const tokenFor = (sub: string) => `h.${btoa(JSON.stringify({ sub })).replace(/=+$/, "")}.s`;
+
+describe("NAV-A1 review round 1: the levels belong to the member who read them", () => {
+  it("NMS-11 another member signing in here is unknown until read for them; the tab looked at again reads again", async () => {
+    window.localStorage.setItem("kf_token", tokenFor("usr_a"));
+    const asked = serveAccess({ [BIZ]: { status: 200, body: { modules: { crm: "read", revenue: "none" } } } });
+    const { result } = renderHook(() => useMemberModuleLevels());
+    await waitFor(() => expect(result.current).toEqual({ crm: "read", revenue: "none" }));
+    expect(asked.length).toBe(1);
+
+    // Another member's session in this browser (another tab signed in): the first member's levels are not theirs.
+    act(() => {
+      window.localStorage.setItem("kf_token", tokenFor("usr_b"));
+      window.dispatchEvent(new StorageEvent("storage", { key: "kf_token" }));
+    });
+    expect(result.current, "the previous member's levels never stand for the next").toBeNull();
+    await waitFor(() => expect(asked.length).toBe(2));
+    await waitFor(() => expect(result.current).toEqual({ crm: "read", revenue: "none" }));
+
+    // The owner changed this member's scopes elsewhere: looking at the tab again reads again.
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() => expect(asked.length).toBe(3));
+  });
+});
+
 /* ───────────────────────────── the surfaces ───────────────────────────── */
 
 const noop = () => {};
@@ -246,9 +302,35 @@ describe("NAV-A1: the surfaces as a member sees them", () => {
     expect(within(bar).getByRole("link", { name: "Customers" }).getAttribute("href")).toBe("/app/crm/contacts");
     expect(within(bar).getByRole("link", { name: "Today" }).getAttribute("aria-current")).toBe("page");
     fireEvent.click(within(bar).getByRole("button", { name: "New" }));
-    expect(openNew).toHaveBeenCalledWith(true);
+    // NMS-13: New toggles the New menu.
+    const toggle = openNew.mock.calls[0][0] as (v: boolean) => boolean;
+    expect(typeof toggle).toBe("function");
+    expect([toggle(false), toggle(true)]).toEqual([true, false]);
     fireEvent.click(within(bar).getByRole("button", { name: "More" }));
     expect(openDrawer).toHaveBeenCalledWith(true);
+  });
+
+  it("NMS-13 aria-current is page only on the hub's own page, true elsewhere inside the hub", () => {
+    serveAccess({});
+    const bar = (pathname: string) =>
+      render(
+        createElement(MobileBottomNavV2, {
+          pathname,
+          mobileDrawerOpen: false,
+          setMobileDrawerOpen: noop,
+          notifOpen: false,
+          setNotifOpen: noop,
+          unreadCount: 0,
+          setAddMenuOpen: noop,
+          bottomBarHubs: bottomBarFor("products", null),
+        } as never),
+      );
+    const first = bar("/app/inventory");
+    expect(screen.getByRole("link", { name: "Sales" }).getAttribute("aria-current")).toBe("true");
+    expect(screen.getByRole("link", { name: "Today" }).getAttribute("aria-current")).toBeNull();
+    first.unmount();
+    bar("/app/commerce");
+    expect(screen.getByRole("link", { name: "Sales" }).getAttribute("aria-current")).toBe("page");
   });
 
   const sidebar = (hubs: ReturnType<typeof hubsFor>) =>
