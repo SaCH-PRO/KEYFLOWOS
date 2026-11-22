@@ -232,13 +232,6 @@ describe('round-7 review repairs (correctness MAJOR-1, minor 1; security m1, m3)
     ['a contact named Bill with a phone', { actionType: 'CREATE_TASK', module: 'crm', title: 'Follow up', payload: { name: 'Bill', phone: '868-555-0101' } }],
     ['posting tips with a start time', { actionType: 'CREATE_EVENT', module: 'content', title: 'Share posting tips', payload: { title: 'Share posting tips', startTime: '2026-11-25T09:00:00Z' } }],
     ['a list count result', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { items: [], totalCount: 12 } }],
-    ['spent hours', { actionType: 'CREATE_TASK', module: 'crm', title: 'Spent 3 hours on outreach' }],
-    ['transfer files', { actionType: 'CREATE_TASK', module: 'crm', title: 'Transfer the 2 files to Ana' }],
-    ['tips for posts', { actionType: 'CREATE_TASK', module: 'content', title: 'Tips for the 3 posts' }],
-    ['settle tickets', { actionType: 'CREATE_TASK', module: 'crm', title: 'Settle the 2 open tickets' }],
-    ['wire up forms', { actionType: 'CREATE_TASK', module: 'crm', title: 'Wire up the 3 forms' }],
-    ['a total of tasks', { actionType: 'CREATE_TASK', module: 'crm', title: 'Total of 4 tasks this week' }],
-    ['meeting Bill at a time', { actionType: 'CREATE_EVENT', module: 'calendar', title: 'Meeting with Bill at 10am' }],
     ['a time-off approval', { actionType: 'REQUEST_APPROVAL', title: 'Time off Friday', affectedEntities: { requestType: 'time_off' } }],
     // A KEY approval request with no request type (not the approvals module's shadow) stays as D-226 pins it.
     ['a KEY approval request with no request type', { actionType: 'REQUEST_APPROVAL', title: 'Call the supplier about the delivery slot' }],
@@ -257,5 +250,52 @@ describe('round-7 review repairs (correctness MAJOR-1, minor 1; security m1, m3)
     for (const reason of ['Rate limited: retry after 30s', 'Transfer failed after 3 retries', 'Failed: total 0 rows updated']) {
       expect(proposalViewForReader({ ...task, failureReason: reason }, false)).toMatchObject({ failureReason: reason });
     }
+  });
+});
+
+describe('round-8 review repairs (security BLOCKING-1, MAJOR-1; correctness B1, M1, m4) — D-238 ambiguous fails closed', () => {
+  it.each([
+    ['a rate per hour', { actionType: 'CREATE_TASK', module: 'crm', title: 'Rate 150 per hour' }],
+    ['a rate an hour', { actionType: 'CREATE_TASK', module: 'crm', title: 'Rates 150 an hour' }],
+    ['a rate per hour in JSON', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { rate: '150 per hour' } }],
+    ['bill per hour', { actionType: 'CREATE_TASK', module: 'crm', title: 'Bill the client 150 per hour' }],
+    ['a retainer a month', { actionType: 'CREATE_TASK', module: 'crm', title: 'Retainer 900 a month' }],
+    ['tips per guest', { actionType: 'CREATE_TASK', module: 'crm', title: 'Tips 50 per guest' }],
+    ['spent on leads', { actionType: 'CREATE_TASK', module: 'crm', title: 'Spent 900 on leads' }],
+    ['spent this month', { actionType: 'CREATE_TASK', module: 'crm', title: 'Spent 900 this month' }],
+    ['wire to members', { actionType: 'CREATE_TASK', module: 'crm', title: 'Wire 900 to members' }],
+    ['a total per booking', { actionType: 'CREATE_TASK', module: 'crm', title: 'Total 1200 per booking' }],
+    ['charged last week', { actionType: 'CREATE_TASK', module: 'crm', title: 'Charged 900 last week' }],
+    ['a total per month in JSON', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { total: '900 per month' } }],
+    ['a rate range', { actionType: 'CREATE_TASK', module: 'crm', title: 'Rate 100-150' }],
+    ['a total range in JSON', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { total: '1200-1500' } }],
+    ['a bill range with a slash', { actionType: 'CREATE_TASK', module: 'crm', title: 'Bill 1200/1500' }],
+    ['spent a range on ads', { actionType: 'CREATE_TASK', module: 'crm', title: 'Spent 100-200 on ads' }],
+    ['a human-workflow approval with no request type', { actionType: 'REQUEST_APPROVAL', sourceType: 'HUMAN_WORKFLOW', title: 'Sign off', affectedEntities: { steps: [] } }],
+    // Accepted over-hiding (D-238: wording that cannot be told from money fails closed; the structural follow-up
+    // FU-PROPOSAL-MONEY-TAG makes the writers tag money at creation).
+    ['spent hours (fails closed)', { actionType: 'CREATE_TASK', module: 'crm', title: 'Spent 3 hours on outreach' }],
+    ['transfer files (fails closed)', { actionType: 'CREATE_TASK', module: 'crm', title: 'Transfer the 2 files to Ana' }],
+    ['tips for posts (fails closed)', { actionType: 'CREATE_TASK', module: 'content', title: 'Tips for the 3 posts' }],
+    ['settle tickets (fails closed)', { actionType: 'CREATE_TASK', module: 'crm', title: 'Settle the 2 open tickets' }],
+    ['wire up forms (fails closed)', { actionType: 'CREATE_TASK', module: 'crm', title: 'Wire up the 3 forms' }],
+    ['a total of tasks (fails closed)', { actionType: 'CREATE_TASK', module: 'crm', title: 'Total of 4 tasks this week' }],
+    ['meeting Bill at a time (fails closed)', { actionType: 'CREATE_EVENT', module: 'calendar', title: 'Meeting with Bill at 10am' }],
+  ])('%s is financial', (_l, p) => expect(isFinancialProposal(p as any)).toBe(true));
+
+  it.each([
+    ['an ISO date beside Bill in prose', { actionType: 'CREATE_TASK', module: 'crm', title: 'Call Bill on 2026-11-25' }],
+    ['a slash date beside a bill', { actionType: 'CREATE_TASK', module: 'crm', title: 'Call Bill 25/11/2026' }],
+    ['a phone beside Bill', { actionType: 'CREATE_TASK', module: 'crm', title: 'Call Bill 868-555-0101' }],
+    ['rate-limited', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', summary: 'Rate-limited after 5 requests' }],
+  ])('%s is not', (_l, p) => expect(isFinancialProposal(p as any)).toBe(false));
+
+  it('the classifier is linear on a long digit run and a large number array (correctness M1: no quadratic rescan)', () => {
+    const digits = '9'.repeat(100_000);
+    const ids = JSON.stringify({ ids2: Array.from({ length: 20_000 }, (_v, i) => i) });
+    const t0 = Date.now();
+    isFinancialProposal({ actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', summary: digits } as any);
+    isFinancialProposal({ actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: JSON.parse(ids) } as any);
+    expect(Date.now() - t0).toBeLessThan(500);
   });
 });
