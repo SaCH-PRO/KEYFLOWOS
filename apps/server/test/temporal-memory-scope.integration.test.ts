@@ -60,6 +60,7 @@ const semanticCalls: string[] = [];
 async function cleanup() {
   for (const sql of [
     `DELETE FROM temporal_flow_memories WHERE id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM temporal_flow_memories WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
   ]) {
@@ -370,5 +371,33 @@ describe('MEM-TEMPORAL-SCOPE orchestrator review M1: store_memory and recall_mem
     const mixed = await connector.execute(cmd(ID.bizA, 'store_memory', { key: 'v71t-tags-2', value: { v: 1 }, tags: ['ok', 7, null, { a: 1 }] }));
     expect(mixed.success).toBe(true);
     expect(mixed.data?.sourceEventIds).toEqual(['ok']);
+  });
+});
+
+describe('MEM-TEMPORAL-SCOPE delta review: consolidate_memories checks every key before any read', () => {
+  const KEYS_ERROR = 'Memory keys must be a list of non-empty strings';
+
+  it.each([
+    ['a string (spread into characters)', { keys: 'a-key', summaryKey: 'v71t-sum' }, KEYS_ERROR],
+    ['missing keys', { summaryKey: 'v71t-sum' }, KEYS_ERROR],
+    ['an operator-object key', { keys: ['a-key', { not: 'x' }], summaryKey: 'v71t-sum' }, KEYS_ERROR],
+    ['an operator-object summary key', { keys: ['a-key'], summaryKey: { not: 'x' } }, 'Memory key must be a non-empty string'],
+  ])('%s is refused and writes nothing', async (_label, parameters, error) => {
+    const before = await snapshot();
+    const r = await connector.execute(cmd(ID.bizA, 'consolidate_memories', parameters));
+    expect(answer(r)).toEqual({ success: false, data: undefined, error });
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it('string keys still consolidate within the business', async () => {
+    const r = await connector.execute(cmd(ID.bizA, 'consolidate_memories', { keys: ['a-key', 'b-key'], summaryKey: 'v71t-sum' }));
+    expect(r.success).toBe(true);
+    expect(r.data?.businessId).toBe(ID.bizA);
+    const summary = JSON.parse(r.data.content);
+    // 'b-key' is B's memory key: A's consolidation does not see it.
+    expect(summary.count).toBe(1);
+    expect(summary.summary).toContain('a-content');
+    expect(summary.summary).not.toContain(B_CONTENT);
+    await expectBUnchanged();
   });
 });

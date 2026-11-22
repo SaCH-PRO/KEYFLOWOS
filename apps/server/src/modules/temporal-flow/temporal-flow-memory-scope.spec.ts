@@ -131,4 +131,21 @@ describe('MEM-TEMPORAL-SCOPE: TemporalFlowMemoryService by-id writes', () => {
     expect(await service.findByEntity('biz', 'business', entityId as any)).toEqual([]);
     expect(tfm.findMany).not.toHaveBeenCalled();
   });
+
+  it.each([undefined, '', 42])('findByEntity and findMany with an absent business (%s) read nothing', async (businessId) => {
+    const { service } = makeService();
+    const tfm = (service as any).prisma.client.temporalFlowMemory;
+    tfm.findMany = vi.fn().mockResolvedValue([{ id: 'other' }]);
+    expect(await service.findByEntity(businessId as any, 'business', 'k')).toEqual([]);
+    expect(await service.findMany(businessId as any, {})).toEqual([]);
+    expect(tfm.findMany).not.toHaveBeenCalled();
+  });
+
+  it.each([{ not: 'x' }, ['k'], 42])('findMany with an entity id %o reads nothing', async (entityId) => {
+    const { service } = makeService();
+    const tfm = (service as any).prisma.client.temporalFlowMemory;
+    tfm.findMany = vi.fn().mockResolvedValue([{ id: 'other' }]);
+    expect(await service.findMany('biz', { entityId } as any)).toEqual([]);
+    expect(tfm.findMany).not.toHaveBeenCalled();
+  });
 });
