@@ -60,7 +60,7 @@ const MONEY_TERMS = new RegExp(
 /** Short money words, matched only as a whole word (letters on neither side), so snake_case values (cac_payback, first_sale) match. */
 const MONEY_WORDS = /(?<![a-z])(cac|ltv|mrr|arr|roi|sale|deal|order|tax|vat|fee)s?(?![a-z])/i;
 /** A money amount in free text ("$12,345", "TTD 500", "£9.99"): a title, summary or reason that states a figure (D-238). */
-const MONEY_AMOUNT = /[$€£¥₹]\s?\d|(?<![a-z0-9])(ttd|usd|eur|gbp|jmd|bbd|xcd|cad)\s?\d|(?<![a-z0-9])(?<!\d[.,]*)\d[\d.,]*\s?(ttd|usd|eur|gbp|jmd|bbd|xcd|cad)(?![a-z0-9])/i;
+const MONEY_AMOUNT = /[$€£¥₹]\s?\d|(?<![a-z0-9])(ttd|usd|eur|gbp|jmd|bbd|xcd|cad)\s?\d|(?:(?<![\d.,])[.,]+|(?<![a-z0-9.,]))\d[\d.,]*\s?(ttd|usd|eur|gbp|jmd|bbd|xcd|cad)(?![a-z0-9])/i;
 /**
  * Words that make a KEY action proposal's text or parameters financial (round-3 security M2): an amount, a total, a
  * balance, what is owed or paid, a rate. Read for proposals only: a genome row's domain is classified by the vocabulary
@@ -102,16 +102,18 @@ const COUNT_WORDS = `${QUANTITY_WORDS}|${TIME_WORDS}`;
 // The count exemption applies only to a count word right after the money word (totalCount, totalHours); in a longer key
 // (rate_per_hour, total_items_value) the key is money.
 // Up to eight segments (round 11: a longer key is still read); a key that runs past the bound fails closed (below).
-const KEY_SUFFIX = `(?:[_ -]{1,2}(?!(?:${COUNT_WORDS})["']?\\s*[:=])[a-z]{1,30}(?:[_ -]{1,2}[a-z]{1,30}){0,7})?`;
-const RATE_KEY_SUFFIX = `(?:[_ -]{1,2}(?!(?:${QUANTITY_WORDS})["']?\\s*[:=])[a-z]{1,30}(?:[_ -]{1,2}[a-z]{1,30}){0,7})?`;
-// A money word followed by more than eight key segments: fails closed (round 11, both reviews).
-const LONG_KEY = `(?:[_ -]{1,2}[a-z]{1,30}){9}`;
+const KEY_SUFFIX = `(?:[_ -]{1,2}(?!(?:${COUNT_WORDS})["']?\\s*[:=])[a-z0-9]{1,30}(?:[_ -]{1,2}[a-z0-9]{1,30}){0,7})?`;
+const RATE_KEY_SUFFIX = `(?:[_ -]{1,2}(?!(?:${QUANTITY_WORDS})["']?\\s*[:=])[a-z0-9]{1,30}(?:[_ -]{1,2}[a-z0-9]{1,30}){0,7})?`;
+// A money word followed by more than eight KEY segments ('_' or '-', never a space, so a long sentence is not one):
+// fails closed (rounds 11-12).
+const LONG_KEY = `(?:[_-]{1,2}[a-z0-9]{1,30}){9}`;
 // The prose window: up to three words (or exempt dates or phones) of up to 30 letters, separated by whitespace
 // (newlines included), punctuation, '=', markdown '*', '~', '>', and dashes (round 10, security M4).
 const SEP = `[\\s,:;()=*~>—–-]{1,4}`;
 const WINDOW_WORD = `(?:[a-z]{1,30}|${DATE_OR_PHONE})`;
 // One whitespace run each side of the colon (round 11, security M2: two \\s* around an optional quote were quadratic).
-const KEY_VALUE = `["']?\\s*[:=]\\s*(?:["']\\s*)?${FIGURE}`;
+// A value may be nested one level (round 12, security M2: {"total":{"value":900}}, {"total":[900]}).
+const KEY_VALUE = `["']?\\s*[:=]\\s*(?:[\\[{]\\s*(?:["'][a-z0-9_ -]{1,30}["']\\s*:\\s*)?)?(?:["']\\s*)?${FIGURE}`;
 const PROSE_FIGURE = `(?![a-z])(?:${SEP}(?:${WINDOW_WORD}${SEP}){0,3})${FIGURE}`;
 const NEAR_FIGURE = `(?:${KEY_SUFFIX}${KEY_VALUE}|${LONG_KEY}|${PROSE_FIGURE})`;
 const RATE_NEAR_FIGURE = `(?:${RATE_KEY_SUFFIX}${KEY_VALUE}|${LONG_KEY}|${PROSE_FIGURE})`;
@@ -121,9 +123,9 @@ const PROPOSAL_FIGURE_WORDS = new RegExp(
     `(?<![a-z])(?:totals?|bill(?:s|ed|ing)?|settle(?:s|d)?|wire[sd]?|transfer(?:s|red)?|tips?|loans?|retainers?|spent|spend(?:s|ing)?|charged)${NEAR_FIGURE}`,
     // A figure that is outstanding, owed or overdue ("Chase the 900 outstanding"), at the start of its number: not after
     // a digit, nor after a digit and one mark (round 10: linear on "9..9.." runs; "them,900 outstanding" is money).
-    // At the start of its number: not after a digit and its marks (round 11, correctness M2: "Chase...900 outstanding"
-    // is money); linear, as each start looks back only over its own marks.
-    `(?<!\\d[.,]*)[$€£¥₹]?\\d[\\d,.]*(?:\\s*k)?\\s+(?:outstanding|owed|overdue|unpaid|past\\s+due)(?![a-z])`,
+    // At the start of its number: a run of marks not after a digit may precede it ("Chase...900 outstanding"), a
+    // digit run may not (round 12: linear, each start is a mark run's first mark or a number's first digit).
+    `(?:(?<![\\d.,])[.,]+|(?<![\\d.,]))[$€£¥₹]?\\d[\\d,.]*(?:\\s*k)?\\s+(?:outstanding|owed|overdue|unpaid|past\\s+due)(?![a-z])`,
   ].join('|'),
   'i',
 );
@@ -292,12 +294,17 @@ const MONEY_SCOPES: ReadonlySet<string> = new Set(['revenue', 'expenses']);
  * non-financial only when its action type is listed non-financial, its tool is mapped to no money scope, or its tool
  * belongs to a listed non-money module, and nothing in it carries money.
  */
+/** Content beyond this many characters fails closed (round 12): no ordinary proposal is that long, and it bounds the cost. */
+const MAX_CLASSIFIED_CONTENT = 50_000;
+
 export function isFinancialProposal(proposal: ProposalFields | null | undefined): boolean {
   if (!proposal) return true;
+  const content = proposalContent(proposal);
+  if ([proposal.title, ...content].reduce((n, v) => n + (typeof v === 'string' ? v.length : 0), 0) > MAX_CLASSIFIED_CONTENT) return true;
   const { actionType, module, toolName, title } = proposal;
   // The content is read before any list (review MAJOR-3): an approval request, a listed action or a mapped tool whose
   // text or parameters carry money is financial.
-  if (proposalMentionsMoney(actionType, module, toolName, title, ...proposalContent(proposal))) return true;
+  if (proposalMentionsMoney(actionType, module, toolName, title, ...content)) return true;
   const tool = typeof toolName === 'string' && toolName.trim() ? toolName.trim() : null;
   const authority = tool ? keyOrganToolAuthority(tool) : null;
   if (authority && 'scopes' in authority) return authority.scopes.some((s) => MONEY_SCOPES.has(s.module));

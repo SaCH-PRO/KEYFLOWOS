@@ -4,7 +4,7 @@
  * title; anything unknown or inadequately classified fails closed.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { financialProposalWithProvenance, financialProposalsWithProvenance, isFinancialProposal, isMoneyMemoryEvent, PROPOSAL_CLASSIFY_SELECT, proposalViewForReader } from './genome-finance-scope';
+import { financialProposalWithProvenance, financialProposalsWithProvenance, isFinancialProposal, isMoneyLabel, isMoneyMemoryEvent, PROPOSAL_CLASSIFY_SELECT, proposalTextStatesMoney, proposalViewForReader } from './genome-finance-scope';
 
 describe('isFinancialProposal (D-238)', () => {
   it.each([
@@ -253,6 +253,10 @@ describe('round-7 review repairs (correctness MAJOR-1, minor 1; security m1, m3)
   });
 });
 
+// The timing cases run the regexes themselves: isFinancialProposal fails closed on content over 50,000 characters
+// (round 12) without reading it, so it would not exercise them.
+const timeRegexes = (text: string) => { proposalTextStatesMoney(text); isMoneyLabel(text); };
+
 describe('round-8 review repairs (security BLOCKING-1, MAJOR-1; correctness B1, M1, m4) — D-238 ambiguous fails closed', () => {
   it.each([
     ['a rate per hour', { actionType: 'CREATE_TASK', module: 'crm', title: 'Rate 150 per hour' }],
@@ -294,12 +298,12 @@ describe('round-8 review repairs (security BLOCKING-1, MAJOR-1; correctness B1, 
     const digits = '9'.repeat(100_000);
     const ids = JSON.stringify({ ids2: Array.from({ length: 20_000 }, (_v, i) => i) });
     const t0 = Date.now();
-    isFinancialProposal({ actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', summary: digits } as any);
-    isFinancialProposal({ actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: JSON.parse(ids) } as any);
+    timeRegexes(digits);
+    timeRegexes(ids);
     // Round 9 (correctness minor 1): a long whitespace run after a figure, too. A generous bound (minor 4): the quadratic
     // case took seconds.
-    isFinancialProposal({ actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', summary: '9' + ' '.repeat(50_000) } as any);
-    isFinancialProposal({ actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', summary: ('9' + ' '.repeat(20_000)).repeat(5) } as any);
+    timeRegexes('9' + ' '.repeat(50_000));
+    timeRegexes(('9' + ' '.repeat(20_000)).repeat(5));
     expect(Date.now() - t0).toBeLessThan(1500);
   });
 });
@@ -333,7 +337,7 @@ describe('round-10 review repairs (both reviews: quadratic regressions; security
   it('stays linear on every adversarial shape the reviews timed (dotted digit runs, money-word key chains, long words)', () => {
     const inputs = ['9..'.repeat(33_000), '9.,'.repeat(33_000), 'total_'.repeat(17_000), 'rate_'.repeat(20_000), 'bill_'.repeat(20_000), 'Total_Due_'.repeat(10_000), 'rate ' + 'a'.repeat(100_000), 'spent_'.repeat(17_000)];
     const t0 = Date.now();
-    for (const summary of inputs) isFinancialProposal({ actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', summary } as any);
+    for (const summary of inputs) timeRegexes(summary);
     expect(Date.now() - t0).toBeLessThan(1500);
   });
 
@@ -363,7 +367,7 @@ describe('round-11 review repairs (both reviews: long keys, ellipsis; security M
   it('stays linear on whitespace after a colon or equals sign (security M2: 17 s before)', () => {
     const inputs = ['total:' + ' '.repeat(100_000) + 'x', 'rate=' + ' '.repeat(100_000) + 'x', 'Total due:' + ' '.repeat(100_000) + 'x', 'total"=' + ' '.repeat(100_000) + 'x'];
     const t0 = Date.now();
-    for (const summary of inputs) isFinancialProposal({ actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', summary } as any);
+    for (const summary of inputs) timeRegexes(summary);
     expect(Date.now() - t0).toBeLessThan(1500);
   });
 
@@ -383,7 +387,7 @@ describe('round-12 review repairs (both reviews: mark runs, figure-free long pro
   it('stays linear on long runs of dots and commas (both reviews: 4-9 s before)', () => {
     const inputs = ['.'.repeat(100_000), '9' + '.'.repeat(100_000) + 'x', '.'.repeat(100_000) + '9', '9' + ','.repeat(100_000) + 'x', '$' + '.,'.repeat(50_000)];
     const t0 = Date.now();
-    for (const summary of inputs) isFinancialProposal({ actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', summary } as any);
+    for (const summary of inputs) timeRegexes(summary);
     expect(Date.now() - t0).toBeLessThan(1500);
   });
 
