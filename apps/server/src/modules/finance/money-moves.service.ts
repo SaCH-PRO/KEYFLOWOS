@@ -152,12 +152,15 @@ export class MoneyMovesService {
     const avgMonthlyBurn = Number(sixMonthExpenses._sum.amount ?? 0) / 6;
     const runwayMonths = avgMonthlyBurn > 0 ? cashBalance / avgMonthlyBurn : null;
     if (runwayMonths != null && runwayMonths < 3) {
+      // Acceptance review C1 (CP-23): the ledger cash can be negative. The runway shown is never
+      // below zero and the expected impact is zero for a shortfall, never negative.
+      const shownMonths = Math.max(0, runwayMonths);
       moves.push({
         id: `mm-runway-${businessId}`,
         type: 'CUT_EXPENSE',
         title: 'Protect cash runway',
-        summary: `Runway is ~${runwayMonths.toFixed(1)} months. Reducing burn or increasing collections is urgent.${otherCashNote ? ` ${otherCashNote}` : ''}`,
-        expectedImpact: cashBalance * 0.2,
+        summary: `Runway is ~${shownMonths.toFixed(1)} months. Reducing burn or increasing collections is urgent.${otherCashNote ? ` ${otherCashNote}` : ''}`,
+        expectedImpact: Math.max(0, cashBalance * 0.2),
         currency: position.currency,
         confidence: 80,
         riskTier: 2,
