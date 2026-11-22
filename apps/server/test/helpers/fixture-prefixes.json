@@ -1146,6 +1146,11 @@
       "prefix": "v66g_",
       "owner": "apps/server/test/general-ledger-date-range.integration.test.ts",
       "packet": "V1-66 (SWP-FIN-LEDGER)"
+    },
+    {
+      "prefix": "v63h_",
+      "owner": "apps/server/test/coa-unique-code.integration.test.ts",
+      "packet": "V1-63 (SWP-COA-UNIQUE-CODE)"
     }
   ],
   "pendingRenames": [],
