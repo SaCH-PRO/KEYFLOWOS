@@ -1,5 +1,6 @@
 import {
   BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -20,6 +21,14 @@ export type UpdateCoaInput = Partial<Omit<CreateCoaInput, 'type'>> & { isActive?
 
 /** Namespace of the per-business advisory lock that serializes account-code writes. */
 const COA_CODE_LOCK_NAMESPACE = 'coa-code:';
+
+/**
+ * Wait and run limits of the account-code transaction, stated rather than left to Prisma's defaults (maxWait
+ * 2 s, timeout 5 s), in line with the repo's other short lock-holding transactions (bookings
+ * SLOT_CLAIM_TX_OPTIONS). A writer that still cannot get a connection or the lock in time gets P2028, which
+ * withCodeLock answers 503 (try again), not a 500.
+ */
+const COA_CODE_TX_OPTIONS = { isolationLevel: 'ReadCommitted', maxWait: 5_000, timeout: 10_000 } as const;
 
 /**
  * The whitespace trimmed off a code, on both sides of the comparison: the SQL check trims the stored code
@@ -191,8 +200,16 @@ export class FinanceCoaService {
    * allows are one step against every other write that takes this lock: every create() and update() that
    * can put an active account on a code. (A create without a code, an update that neither carries a code
    * nor sets isActive true, and archive() do not take it: none of them can put an active account on a
-   * code.) READ COMMITTED is set on purpose: the check must see what the previous holder of the lock
+   * code.) The other writer of chart codes, the system-chart seeder (ChartOfAccountsSeederService
+   * ensureDefaults, an upsert by systemKey), takes neither the lock nor the check. That is safe today because
+   * every create() and update() that takes the lock runs ensureDefaults first, so the seed has landed before
+   * the check runs and the check counts the system accounts; and the SYSTEM_COA codes are fixed, so the seeder
+   * only ever writes the codes it wrote before. A code added to SYSTEM_COA later could be seeded next to a
+   * custom account that already holds it (a recorded follow-up).
+   * READ COMMITTED is set on purpose: the check must see what the previous holder of the lock
    * committed, and under a snapshot isolation level it would read a snapshot taken before that commit.
+   * A transaction that cannot start or expires waiting (P2028) answers 503 with a generic message: the
+   * write did not happen and may be tried again; a 409 from the check and any other error pass through.
    * `tenant` is the
    * business the transaction's Prisma calls act on: the active tenant when there is one (the `@keyflow/db`
    * extension rewrites every `where.businessId` and `create.businessId` to it), else the argument. The
@@ -207,7 +224,15 @@ export class FinanceCoaService {
       const tx = rawTx as unknown as Prisma.TransactionClient;
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${COA_CODE_LOCK_NAMESPACE + tenant}))`;
       return fn(tx, tenant);
-    }, { isolationLevel: 'ReadCommitted' });
+    }, COA_CODE_TX_OPTIONS).catch((err: unknown) => {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2028') {
+        throw new ServiceUnavailableException({
+          code: 'COA_CODE_BUSY',
+          message: 'The chart of accounts is busy. Please try again.',
+        });
+      }
+      throw err;
+    });
   }
 
   /**
