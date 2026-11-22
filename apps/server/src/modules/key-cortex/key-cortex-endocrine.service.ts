@@ -220,7 +220,10 @@ export class KeyCortexEndocrineService {
     const byKey = byHormone.get(signal.hormone) ?? new Map<string, HormoneStrand>();
     const push = Math.min(Math.max(signal.magnitude, 0), MAX_SINGLE_PUSH);
     const strengthen = (strandKey: string, strandModules: readonly CanonicalModule[], from: HormoneStrand | undefined) => {
-      const base = from ? this.levelAt(from, now) : 0;
+      // Review CR F3: a residue below the noise floor counts as 0, as read() drops the unprojected level there, so a
+      // strand never starts a dose higher than the level the owner is told.
+      const raw = from ? this.levelAt(from, now) : 0;
+      const base = raw < NOISE_FLOOR ? 0 : raw;
       byKey.set(strandKey, {
         level: base + push * (1 - base),
         reasons: [...new Set([signal.reason, ...(from?.reasons ?? [])])].slice(0, 5),
