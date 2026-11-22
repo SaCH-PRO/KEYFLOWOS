@@ -412,6 +412,35 @@ describe("review round 2 (COR2-1, COR2-2): the keyboard is not dropped, and a pr
     expect(writes(sent)).toHaveLength(1);
     // Once the save is in, the note is gone and the next press is taken.
     await waitFor(() => expect(screen.queryByText(/still saving your last change/i)).toBeNull());
+    fireEvent.click(sells("Services"));
+    await waitFor(() => expect(writes(sent)).toHaveLength(2));
+    expect(writes(sent)[1].body).toEqual({ sells: "services" });
+    release({ status: 200, body: business({ sells: "services" }) });
+    await waitFor(() => expect(sells("Services").checked).toBe(true));
+  });
+
+  it("review COR3-2: the failure is announced, a double press of 'Try again' reads once, and on recovery the keyboard lands on the controls", async () => {
+    let release: (a: Answer) => void = () => {};
+    let reads = 0;
+    stubRoutes({
+      [`GET ${PROFILE}`]: () => {
+        reads += 1;
+        if (reads === 1) return { status: 500, body: { statusCode: 500, message: "Internal server error" } };
+        return new Promise<Answer>((resolve) => (release = resolve));
+      },
+    });
+    mount();
+    const retry = await screen.findByRole("button", { name: /try again/i });
+    expect(screen.getByRole("status")).toHaveTextContent(/couldn't load what you sell and the advanced crm switch/i);
+    retry.focus();
+    fireEvent.click(retry);
+    fireEvent.click(retry);
+    await waitFor(() => expect(reads).toBe(2));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(reads).toBe(2);
+    release({ status: 200, body: business({ sells: "products" }) });
+    await ready();
+    await waitFor(() => expect(document.activeElement).toBe(sells("Products")));
   });
 });
 

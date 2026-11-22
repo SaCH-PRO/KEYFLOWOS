@@ -236,15 +236,46 @@ describe("the form asks what the business sells", () => {
     expect(patches(sent)).toEqual([{ method: "PATCH", path: BUSINESS_PATH, body: { name: VALID.name, currency: "TTD", timezone: VALID.timezone } }]);
   });
 
-  it("shows the answer the business already holds, and both when it holds none", async () => {
+  it("shows the answer the business holds: both for one that never answered (the server answers its default)", async () => {
     const sent = stubRoutes(ownerRoutes({ ...STORED, sells: "services" }));
     await mount(sent);
     await waitFor(() => expect(choice("Services").checked).toBe(true));
     cleanup();
 
-    const fresh = stubRoutes(ownerRoutes({ id: BIZ, ownerId: OWNER, name: "" }));
+    const fresh = stubRoutes(ownerRoutes(STORED));
     await mount(fresh);
     await waitFor(() => expect(choice("Both").checked).toBe(true));
+  });
+
+  it("review SEC3-4: an answer that carries no 'sells' is not read as 'both': nothing is drawn, and pressing Both is saved", async () => {
+    const stored = { id: BIZ, ownerId: OWNER, name: VALID.name, currency: "TTD", timezone: VALID.timezone };
+    const sent = stubRoutes(
+      ownerRoutes(stored, { "GET /identity/me": { status: 200, body: { id: "user_bsw_coowner", email: "c@example.test", role: "USER" } } }),
+    );
+    await mount(sent);
+    await waitFor(() => expect((currency() as HTMLInputElement).value).toBe("TTD"));
+    expect((within(question()).getAllByRole("radio") as HTMLInputElement[]).filter((r) => r.checked)).toEqual([]);
+    fireEvent.click(choice("Both"));
+    fireEvent.click(finish());
+    await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/app/command-center"));
+    expect(patches(sent)).toHaveLength(1);
+    expect(patches(sent)[0].body).toMatchObject({ sells: "both" });
+  });
+
+  it("review COR3-3: on the complete-first path, a save the server did not confirm is said, not passed over", async () => {
+    const stored = { ...STORED, name: VALID.name, currency: "TTD", timezone: VALID.timezone };
+    const sent = stubRoutes(
+      ownerRoutes(stored, {
+        "GET /identity/me": { status: 200, body: { id: "user_bsw_coowner", email: "c@example.test", role: "USER" } },
+        [`PATCH ${BUSINESS_PATH}`]: { status: 200, body: { ...stored, sells: "both" } },
+      }),
+    );
+    await mount(sent);
+    await waitFor(() => expect((currency() as HTMLInputElement).value).toBe("TTD"));
+    fireEvent.click(choice("Services"));
+    fireEvent.click(finish());
+    expect(await screen.findByRole("alert")).toHaveTextContent(/setup is finished, but your changes were not saved/i);
+    expect(router.replace).not.toHaveBeenCalled();
   });
 
   it("a late prefill does not overwrite an answer the owner already gave", async () => {

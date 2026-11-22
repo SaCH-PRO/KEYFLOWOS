@@ -689,3 +689,41 @@ describe("review round 2 (SEC2-1, SEC2-2): a write is saved only when the server
   });
 });
 
+describe("review round 3 (SEC3-1/COR3-1, SEC3-2, SEC3-3)", () => {
+  it("the next member's own read is not lost when the last member's write answers while it is in flight", async () => {
+    setStoredToken(tokenFor("user_bsw_one"));
+    let releaseWrite: (a: Answer) => void = () => {};
+    let releaseRead: (a: Answer) => void = () => {};
+    stubRoutes({
+      [`PATCH /identity/businesses/${BIZ_A}`]: () => new Promise<Answer>((resolve) => (releaseWrite = resolve)),
+      [`GET /identity/businesses/${BIZ_A}`]: () => new Promise<Answer>((resolve) => (releaseRead = resolve)),
+    });
+    const sending = lib.saveBusinessSells(BIZ_A, "products");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    setStoredToken(tokenFor("user_bsw_two"));
+    const second = renderHook(() => lib.useBusinessSettings(BIZ_A));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    let res: { error: string | null } = { error: null };
+    await act(async () => {
+      releaseWrite({ status: 200, body: business(BIZ_A, { sells: "products" }) });
+      res = await sending;
+    });
+    // SEC3-2: not said as a success on what is now another member's screen.
+    expect((res.error ?? "").trim()).not.toBe("");
+    await act(async () => {
+      releaseRead({ status: 200, body: business(BIZ_A, { sells: "products" }) });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    // Member two's own read (or the one started for them) lands: not stuck on loading.
+    await waitFor(() => expect(second.result.current.status).toBe("ready"));
+    expect(second.result.current.sells).toBe("products");
+  });
+
+  it("a hub depth write answered without any depth is not confirmed", async () => {
+    stubRoutes({ [`PATCH /identity/businesses/${BIZ_A}/advanced-settings`]: { status: 200, body: { id: BIZ_A, sells: "both", advancedCrm: false } } });
+    const res = await lib.saveAdvancedSettings(BIZ_A, { depth: { money: "standard" } });
+    expect((res.error ?? "").trim()).not.toBe("");
+  });
+});
+
