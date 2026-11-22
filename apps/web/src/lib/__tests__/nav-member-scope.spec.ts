@@ -339,12 +339,26 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
   });
 
   it("NMS-18 every row is a checked claim: each module justified, each citation true", () => {
-    /** The decorators stacked on the @Get at `at` (0-based), its own line included. */
+    /**
+     * The decorator block of the handler whose @Get is at `at` (0-based): from the end of the previous member (a blank
+     * line, a lone "}", a line ending in ";" or a class opening "{") down to the method signature, so multi-line
+     * decorators and comment lines inside the stack are read whole (review round 2).
+     */
     const decorators = (lines: string[], at: number) => {
-      const block: string[] = [lines[at]];
-      for (let i = at - 1; i >= 0 && /^\s*@/.test(lines[i]); i--) block.push(lines[i]);
-      for (let i = at + 1; i < lines.length && /^\s*@/.test(lines[i]); i++) block.push(lines[i]);
-      return block.join("\n");
+      let top = at;
+      while (top > 0) {
+        const prev = lines[top - 1].trim();
+        if (prev === "" || prev === "}" || prev.endsWith(";") || prev.endsWith("{") && !prev.startsWith("@")) break;
+        top--;
+      }
+      const SIGNATURE = /^\s*(?:(?:public|private|protected)\s+)?(?:async\s+)?\w+\s*\(/;
+      let bottom = at;
+      while (bottom + 1 < lines.length && bottom - at < 40) {
+        const next = lines[bottom + 1];
+        if (!/^\s*@/.test(next) && SIGNATURE.test(next)) break;
+        bottom++;
+      }
+      return lines.slice(top, bottom + 1).join("\n");
     };
     const at = (file: string, line: number) => {
       const lines = fs.readFileSync(path.join(SERVER_SRC, file), "utf8").split("\n");
@@ -372,7 +386,9 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
           else if (hub.module) justified.add(hub.module);
         } else if ((m = /^data:((?:modules|core)\/[^:]+\.ts):(\d+):([a-z]+) /.exec(cite))) {
           const { lines, i } = at(m[1], Number(m[2]));
-          if (!(lines[i] ?? "").trim()) bad.push(`${href}: ${cite} points at nothing`);
+          // The identifier the citation names first must be on that line, so a moved line fails rather than passes.
+          const named = cite.slice(m[0].length).split(/[\s,]/)[0];
+          if (!named || !(lines[i] ?? "").includes(named)) bad.push(`${href}: ${cite}: "${named}" is not on that line`);
           if (!row.modules.includes(m[3])) bad.push(`${href}: ${cite} names ${m[3]}, which the row lacks`);
           justified.add(m[3]);
         } else if ((m = /^service-check:((?:modules|core)\/[^:]+\.ts):(\d+)$/.exec(cite))) {
@@ -383,14 +399,14 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
           if (!row.modules.includes(m[1])) bad.push(`${href}: ${cite} names ${m[1]}, which the row lacks`);
           justified.add(m[1]);
         } else if (/\bD-\d+\b/.test(cite) && row.modules.length === 0) {
-          // A ruling for a row that needs no module (Today, D-96).
+          // A ruling beside the unscoped read a row with no module rests on (Today, D-96).
         } else {
           bad.push(`${href}: unknown citation ${cite}`);
         }
       }
       for (const mod of row.modules) if (!justified.has(mod)) bad.push(`${href}: ${mod} is not justified`);
-      if (row.modules.length === 0 && !row.cite.some((c) => c.startsWith("unscoped:") || /\bD-\d+/.test(c))) {
-        bad.push(`${href}: no module, and no unscoped read or ruling cited`);
+      if (row.modules.length === 0 && !row.cite.some((c) => c.startsWith("unscoped:"))) {
+        bad.push(`${href}: no module, and no unscoped read cited`);
       }
     }
     expect(bad).toEqual([]);
