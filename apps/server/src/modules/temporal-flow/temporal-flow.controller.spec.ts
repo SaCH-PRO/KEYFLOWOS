@@ -85,6 +85,7 @@ describe('TemporalFlowController', () => {
   it('PATCH /:eventId/resolve marks resolved', async () => {
     const { controller, temporal } = makeController();
     const result = await controller.resolve('biz_1', 'tf_1', REQ);
+    expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', READER);
     expect(temporal.markResolved).toHaveBeenCalledWith('biz_1', 'tf_1', FILTER);
     expect(result).toEqual({ count: 1 });
   });

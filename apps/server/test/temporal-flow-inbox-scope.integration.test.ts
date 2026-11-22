@@ -19,16 +19,29 @@
  *     whatsapp, instagram, email, ... as the listener writes the thread's channel);
  *   - bookings: calendar events (module calendar, source GOOGLE_CALENDAR, type google_calendar.* / booking.*),
  *     the Google Calendar reads requiring bookings read (CalendarController);
- *   - revenue (D-100): money-bearing types (invoice.*, payment.*, ...) and module revenue;
- *   - every other event (business assets, the Business Genome and constitution, KEY actions, KEY's notes) is
- *     business-wide, as its owners' own reads are (membership only).
+ *   - revenue (D-100): money-bearing types (invoice.*, payment.*, ...), module revenue, and KEY's timeline notes
+ *     (source key_cortex: the temporal_flow.create_event tool's text can carry money) unless their module says
+ *     otherwise;
+ *   - storefront and revenue: Shopify events;
+ *   - business-wide, as their owners' own reads are (membership only): business assets, the Business Genome and
+ *     constitution, KEY actions, and events recorded by hand (source MANUAL);
+ *   - anything else (an unknown module, source or type: WEBHOOK, module connect) fails closed (D-63, D-227, D-234):
+ *     visible only to a reader who reads every module that owns events.
+ * Withholding is computed only over the modules that own events, so a reader who reads all of them (the owner, an
+ * ADMIN or STAFF member on role defaults) sees every event, as before.
+ *
+ * The memory routes (GET memory, memory/search, memory/by-entity, the analysis's memory insights) withhold, from a
+ * reader who cannot read every event-owning module, a memory whose sourceModule they cannot read (key_inbox:
+ * operations; any other fails closed) or that was built from an event withheld from them; compaction and pattern
+ * detection are refused to them (403).
  *
  * Nothing on the authorization or persistence path is mocked: PrismaService, the user, business, membership and
  * temporal_flow_events rows, AuthGuard, BusinessGuard, ModuleScopeGuard, TemporalFlowController and
  * TemporalFlowService are real against DATABASE_URL. The stand-ins: identity attachment (a test middleware reads
  * `x-test-user`, loads that seeded user and attaches `{ id, email, role }` as AuthMiddleware would), the
- * temporal memory service (no memory row: the analysis's memory insights are MEM-TEMPORAL-SCOPE's), the
- * semantic memory (absent), the memory queue and the genome bridge (no case reaches them).
+ * semantic memory (search answers a hit for every seeded memory of the business, store writes nothing), the
+ * memory queue (records what is enqueued) and the genome bridge (no case reaches it). TemporalFlowMemoryService
+ * is real.
  *
  * Requires DATABASE_URL. Every seeded row carries the `v71w_` prefix and is hard-deleted by raw SQL in beforeAll
  * and afterAll. No $transaction wrapping.
@@ -56,6 +69,8 @@ const ID = {
   legacy: `${P}legacy`, // D-179: an older explicit map with no operations key (none)
   arrayScopes: `${P}array`, // ADMIN of biz whose stored scopes are a JSON array: every module none
   staffDefault: `${P}staffdef`, // STAFF of biz, role defaults (operations read, revenue read)
+  allOwners: `${P}allowners`, // STAFF of biz, explicit map reading every event-owning module and nothing else
+  shopReader: `${P}shop`, // STAFF of biz, { bookings: read, revenue: read, storefront: read }
   crossOps: `${P}crossops`, // OWNER of bizOther, { bookings: read } STAFF of biz
   otherOwner: `${P}otherowner`, // OWNER of bizOther, no membership of biz
   superAdmin: `${P}super`, // SUPER_ADMIN, no membership
@@ -66,7 +81,7 @@ const ID = {
 
 const USERS = [
   ID.owner, ID.bookingsOnly, ID.bookingsWriter, ID.opsReader, ID.opsWriter, ID.revenueReader, ID.legacy,
-  ID.arrayScopes, ID.staffDefault, ID.crossOps, ID.otherOwner, ID.superAdmin, ID.stranger,
+  ID.arrayScopes, ID.staffDefault, ID.allOwners, ID.shopReader, ID.crossOps, ID.otherOwner, ID.superAdmin, ID.stranger,
 ];
 
 // Obviously fake values that must never reach a reader without the owning module's read.
@@ -115,19 +130,45 @@ const SEEDS: Seed[] = [
   { key: 'assetExpiring', source: 'APP', type: 'asset.expiring_soon', module: 'business-assets', title: `${P}Licence expiring soon`, occurredAt: at(20), reminderAt: at(30) },
   { key: 'constitution', source: 'KEY', type: 'constitution.version_generated', module: 'business-genome', title: `${P}Constitution v2 generated`, occurredAt: at(21) },
   { key: 'keyAction', source: 'KEY', type: 'key.action.create_task', module: 'key-autonomy', title: `${P}Follow up`, occurredAt: at(22), status: 'ACTION_REQUIRED' },
+  // revenue: a KEY timeline note (the temporal_flow.create_event tool's free text can carry money)
   { key: 'keyNote', source: 'key_cortex', type: 'note', module: null, title: `${P}KEY note`, occurredAt: at(23), importance: 'CRITICAL' },
+  // business-wide: recorded by hand on the Schedule hub
+  { key: 'manualNote', source: 'MANUAL', type: 'manual.event', module: null, title: `${P}Team offsite`, occurredAt: at(24) },
+  // storefront and revenue
+  { key: 'shopifyOrder', source: 'SHOPIFY', type: 'shopify.order.created', module: null, title: `${P}Order #1001 350.00`, occurredAt: at(25) },
+  // unclassified: fails closed
+  { key: 'connectModule', source: 'APP', type: 'connect.synced', module: 'connect', title: `${P}Connector synced`, occurredAt: at(26) },
+  { key: 'webhookEvent', source: 'WEBHOOK', type: 'webhook.received', module: null, title: `${P}Webhook payload`, occurredAt: at(27) },
+  { key: 'unknownApp', source: 'APP', type: 'misc.thing', module: null, title: `${P}Misc`, occurredAt: at(28) },
   // the other tenant's inbox
   { key: 'otherInbox', businessId: ID.bizOther, source: 'key_inbox', type: 'key_inbox.message_received', module: 'key_inbox', title: OTHER_TENANT, summary: OTHER_TENANT, occurredAt: at(1), reminderAt: at(2) },
   { key: 'otherWide', businessId: ID.bizOther, source: 'KEY', type: 'note', module: null, title: `${OTHER_TENANT} wide`, occurredAt: at(1) },
 ];
 
 const OPS = ['inboxReceived', 'inboxAnalyzed', 'inboxRisk', 'instagramDm', 'inboxTypeOnly'];
-const REVENUE = ['invoiceOverdue', 'revenueModule'];
+const REVENUE = ['invoiceOverdue', 'revenueModule', 'keyNote'];
 const BOOKINGS = ['calendarSynced'];
-const WIDE = ['assetExpiring', 'constitution', 'keyAction', 'keyNote'];
-const ALL_BIZ = [...OPS, ...REVENUE, ...BOOKINGS, ...WIDE];
+const WIDE = ['assetExpiring', 'constitution', 'keyAction', 'manualNote'];
+const SHOP = ['shopifyOrder'];
+const UNKNOWN = ['connectModule', 'webhookEvent', 'unknownApp'];
+/** SEEDS order is newest first. */
+const ALL_BIZ = SEEDS.filter((s) => !s.businessId).map((s) => s.key);
 
 const idOf = (key: string) => `${P}ev_${key}`;
+
+// Temporal memories (as TemporalFlowMemoryService.summarize* and the genome bridge write them).
+const MEM = { inbox: `${P}mem_inbox`, money: `${P}mem_money`, pattern: `${P}mem_pattern`, other: `${P}mem_other` };
+const MEM_INBOX = `Latest: Analysis: ${AI_SUMMARY}.`;
+const MEM_MONEY = `${P}contact memory with an invoice`;
+const MEM_PATTERN = `${P}pattern over every module`;
+const MEMORY_SEEDS = [
+  { id: MEM.inbox, businessId: ID.biz, entityType: 'thread', entityId: `${P}thread1`, type: 'summary', content: MEM_INBOX, sourceModule: 'key_inbox', sourceEventIds: [idOf('inboxReceived'), idOf('inboxAnalyzed')], updatedAt: at(1) },
+  { id: MEM.money, businessId: ID.biz, entityType: 'contact', entityId: `${P}contact1`, type: 'summary', content: MEM_MONEY, sourceModule: 'key_inbox', sourceEventIds: [idOf('inboxRisk'), idOf('invoiceOverdue')], updatedAt: at(2) },
+  { id: MEM.pattern, businessId: ID.biz, entityType: 'business', entityId: null, type: 'summary', content: MEM_PATTERN, sourceModule: 'temporal_flow', sourceEventIds: [], updatedAt: at(3) },
+  { id: MEM.other, businessId: ID.bizOther, entityType: 'thread', entityId: `${P}thread1`, type: 'summary', content: OTHER_TENANT, sourceModule: 'key_inbox', sourceEventIds: [idOf('otherInbox')], updatedAt: at(1) },
+];
+/** What the memory queue stand-in was asked to enqueue. */
+const enqueued: unknown[] = [];
 const keyOfId = new Map(SEEDS.map((s) => [idOf(s.key), s.key]));
 
 let db: any;
@@ -135,6 +176,7 @@ let app: any;
 
 async function cleanup() {
   for (const sql of [
+    `DELETE FROM temporal_flow_memories WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM temporal_flow_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -172,9 +214,19 @@ beforeAll(async () => {
       BusinessGuard,
       ModuleScopeGuard,
       TemporalFlowService,
-      { provide: TemporalFlowMemoryService, useValue: { findMany: async () => [] } },
-      { provide: SemanticMemoryService, useValue: null },
-      { provide: TemporalFlowMemoryQueueService, useValue: {} },
+      TemporalFlowMemoryService,
+      {
+        provide: SemanticMemoryService,
+        // A hit for every seeded memory of the business, most similar first; nothing is stored or embedded.
+        useValue: {
+          search: async ({ businessId, limit }: { businessId: string; limit?: number }) =>
+            MEMORY_SEEDS.filter((m) => m.businessId === businessId)
+              .map((m, i) => ({ id: `${m.id}_hit`, content: m.content, sourceType: 'temporal_memory', sourceId: m.id, metadata: { sourceModule: m.sourceModule }, similarity: 0.95 - i * 0.01 }))
+              .slice(0, limit ?? 10),
+          store: async () => undefined,
+        },
+      },
+      { provide: TemporalFlowMemoryQueueService, useValue: { enqueue: async (job: unknown) => { enqueued.push(job); return { queued: true }; } } },
       { provide: TemporalFlowGenomeBridgeService, useValue: {} },
     ],
   }).compile();
@@ -210,6 +262,8 @@ beforeAll(async () => {
     [ID.legacy, ID.biz, 'STAFF', { crm: 'read', bookings: 'write', revenue: 'none' }],
     [ID.arrayScopes, ID.biz, 'ADMIN', []],
     [ID.staffDefault, ID.biz, 'STAFF', null],
+    [ID.allOwners, ID.biz, 'STAFF', { operations: 'read', bookings: 'write', revenue: 'read', storefront: 'read' }],
+    [ID.shopReader, ID.biz, 'STAFF', { bookings: 'read', revenue: 'read', storefront: 'read' }],
     [ID.otherOwner, ID.bizOther, 'OWNER', null],
     [ID.crossOps, ID.bizOther, 'OWNER', null],
     [ID.crossOps, ID.biz, 'STAFF', { bookings: 'read' }],
@@ -239,6 +293,9 @@ beforeAll(async () => {
       },
     });
   }
+  for (const m of MEMORY_SEEDS) {
+    await db.temporalFlowMemory.create({ data: { ...m, metadata: {}, confidence: 0.9 } });
+  }
 }, 120_000);
 
 afterAll(async () => {
@@ -263,7 +320,6 @@ function keysOf(res: { status: number; body: any }, who: string): string[] {
 }
 
 const sorted = (keys: string[]) => [...keys].sort();
-const without = (keys: string[], ...hidden: string[][]) => keys.filter((k) => !hidden.flat().includes(k));
 
 function expectNoSecret(body: unknown, who: string, secrets = [SENDER_HANDLE, AI_SUMMARY]) {
   const text = JSON.stringify(body);
@@ -302,7 +358,7 @@ describe('FU-TEMPORAL-FLOW-INBOX-SCOPE: GET /temporal-flow/businesses/:b (the ti
 
   it('D-179: an older explicit map with no operations key, and a stored JSON array, see no KEY Inbox event', async () => {
     const legacy = await listOf(ID.legacy);
-    expect(sorted(keysOf(legacy, 'legacy'))).toEqual(sorted(without(ALL_BIZ, OPS, REVENUE)));
+    expect(sorted(keysOf(legacy, 'legacy'))).toEqual(sorted([...BOOKINGS, ...WIDE]));
     expectNoSecret(legacy.body, 'legacy');
     const arr = await listOf(ID.arrayScopes);
     expect(sorted(keysOf(arr, 'arrayScopes'))).toEqual(sorted(WIDE));
@@ -317,7 +373,7 @@ describe('FU-TEMPORAL-FLOW-INBOX-SCOPE: GET /temporal-flow/businesses/:b (the ti
   });
 
   it('a filter naming the hidden module answers nothing, not a refusal that tells the events exist', async () => {
-    for (const q of ['?module=key_inbox', '?source=key_inbox', '?type=key_inbox.message_received', '?source=instagram', '?type=invoice.overdue']) {
+    for (const q of ['?module=key_inbox', '?source=key_inbox', '?type=key_inbox.message_received', '?source=instagram', '?type=invoice.overdue', '?source=WEBHOOK', '?module=connect', '?source=key_cortex']) {
       const res = await listOf(ID.bookingsOnly, q);
       expect(keysOf(res, `bookingsOnly ${q}`), q).toEqual([]);
     }
@@ -350,10 +406,10 @@ describe('FU-TEMPORAL-FLOW-INBOX-SCOPE: POST .../analyze (titles and counts of t
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     const visible = BOOKINGS.length + WIDE.length;
     expect(res.body.summary).toContain(`${visible} events analyzed.`);
-    // keyNote is the one CRITICAL event the writer may see; the CRITICAL inbox and invoice events are withheld.
-    expect(res.body.urgentItems.map((u: any) => u.eventId ?? u.title)).toEqual(['Assets expiring soon', idOf('keyNote')]);
+    // The CRITICAL inbox, invoice and KEY note events are withheld: no critical item.
+    expect(res.body.urgentItems.map((u: any) => u.eventId ?? u.title)).toEqual(['Assets expiring soon']);
     expect(res.body.risks.map((r: any) => r.title)).toEqual(['Operational/legal risk from expiring assets']);
-    expectNoSecret(res.body, 'bookingsWriter analyze', [SENDER_HANDLE, AI_SUMMARY, `${P}Invoice`]);
+    expectNoSecret(res.body, 'bookingsWriter analyze', [SENDER_HANDLE, AI_SUMMARY, `${P}Invoice`, `${P}KEY note`, MEM_PATTERN, MEM_MONEY]);
   });
 
   it('an operations writer sees the inbox in the analysis; a revenue reader sees the overdue invoice', async () => {
@@ -399,6 +455,123 @@ describe('FU-TEMPORAL-FLOW-INBOX-SCOPE: cross-tenant', () => {
       for (const res of [await listOf(who), await calendarOf(who), await remindersOf(who)]) {
         expect(JSON.stringify(res.body), who).not.toContain(OTHER_TENANT);
       }
+    }
+  });
+});
+
+describe('FU-TEMPORAL-FLOW-INBOX-SCOPE delta (orchestrator items 2, 3): unclassified fails closed; the owner sees what they saw', () => {
+  it('an event no rule classifies (module connect, source WEBHOOK, an unknown APP type) is withheld from a reader who misses any event-owning module', async () => {
+    for (const who of [ID.bookingsOnly, ID.opsReader, ID.revenueReader, ID.shopReader, ID.legacy, ID.arrayScopes]) {
+      const keys = keysOf(await listOf(who), who);
+      for (const k of UNKNOWN) expect(keys, `${who} saw ${k}`).not.toContain(k);
+    }
+  });
+
+  it('a reader of every event-owning module, on an explicit map with nothing else, sees every event, the unclassified ones included', async () => {
+    const res = await listOf(ID.allOwners);
+    expect(keysOf(res, 'allOwners')).toEqual(ALL_BIZ);
+  });
+
+  it('M-1: the owner, an ADMIN-like reader on defaults and STAFF on defaults see the module connect event (no event-owning module withheld)', async () => {
+    for (const who of [ID.owner, ID.staffDefault, ID.superAdmin]) {
+      expect(keysOf(await listOf(who), who), who).toContain('connectModule');
+    }
+  });
+
+  it('a KEY timeline note (source key_cortex) is revenue-owned: withheld from bookings and operations readers, shown to a revenue reader', async () => {
+    expect(keysOf(await listOf(ID.bookingsOnly), 'bookingsOnly')).not.toContain('keyNote');
+    expect(keysOf(await listOf(ID.opsReader), 'opsReader')).not.toContain('keyNote');
+    expect(keysOf(await listOf(ID.revenueReader), 'revenueReader')).toContain('keyNote');
+  });
+
+  it('a Shopify event needs storefront and revenue read', async () => {
+    expect(keysOf(await listOf(ID.revenueReader), 'revenueReader')).not.toContain('shopifyOrder');
+    const shop = await listOf(ID.shopReader);
+    expect(sorted(keysOf(shop, 'shopReader'))).toEqual(sorted([...REVENUE, ...SHOP, ...BOOKINGS, ...WIDE]));
+  });
+
+  it('an event recorded by hand (source MANUAL) stays business-wide', async () => {
+    for (const who of [ID.bookingsOnly, ID.arrayScopes, ID.legacy]) {
+      expect(keysOf(await listOf(who), who), who).toContain('manualNote');
+    }
+  });
+});
+
+describe('FU-TEMPORAL-FLOW-INBOX-SCOPE delta (orchestrator item 1): the memory routes', () => {
+  const memIds = (res: { status: number; body: any }, who: string) => {
+    expect(res.status, `${who} ${JSON.stringify(res.body)}`).toBe(200);
+    return (res.body as any[]).map((m) => m.sourceId ?? m.id).sort();
+  };
+  const memoryOf = (actor: string, query = '') => as(agent().get(`/temporal-flow/businesses/${ID.biz}/memory${query}`), actor);
+  const byEntityOf = (actor: string, type: string, id: string) =>
+    as(agent().get(`/temporal-flow/businesses/${ID.biz}/memory/by-entity/${type}/${id}`), actor);
+  const searchOf = (actor: string) => as(agent().get(`/temporal-flow/businesses/${ID.biz}/memory/search?q=anything&limit=5`), actor);
+
+  it('GET memory: a bookings-only member sees no KEY Inbox memory and no memory built from every module; the owner sees all', async () => {
+    const res = await memoryOf(ID.bookingsOnly);
+    expect(memIds(res, 'bookingsOnly')).toEqual([]);
+    expectNoSecret(res.body, 'bookingsOnly memory', [SENDER_HANDLE, AI_SUMMARY, MEM_PATTERN, MEM_MONEY]);
+    expect(memIds(await memoryOf(ID.owner), 'owner')).toEqual(sorted([MEM.inbox, MEM.money, MEM.pattern]));
+    expect(memIds(await memoryOf(ID.allOwners), 'allOwners')).toEqual(sorted([MEM.inbox, MEM.money, MEM.pattern]));
+  });
+
+  it('GET memory: an operations reader without revenue sees the inbox memory, not one built from a money event, nor the fail-closed pattern', async () => {
+    const res = await memoryOf(ID.opsReader);
+    expect(memIds(res, 'opsReader')).toEqual([MEM.inbox]);
+    expect(JSON.stringify(res.body)).not.toContain(MEM_MONEY);
+    expect(JSON.stringify(res.body)).not.toContain(MEM_PATTERN);
+  });
+
+  it('GET memory: the limit counts only memories the reader may see', async () => {
+    const res = await memoryOf(ID.opsReader, '?limit=1');
+    expect(memIds(res, 'opsReader limit 1')).toEqual([MEM.inbox]);
+  });
+
+  it('GET memory/by-entity: withheld the same way', async () => {
+    expect(memIds(await byEntityOf(ID.bookingsOnly, 'thread', `${P}thread1`), 'bookingsOnly')).toEqual([]);
+    expect(memIds(await byEntityOf(ID.opsReader, 'thread', `${P}thread1`), 'opsReader')).toEqual([MEM.inbox]);
+    expect(memIds(await byEntityOf(ID.opsReader, 'contact', `${P}contact1`), 'opsReader contact')).toEqual([]);
+    expect(memIds(await byEntityOf(ID.owner, 'contact', `${P}contact1`), 'owner contact')).toEqual([MEM.money]);
+  });
+
+  it('GET memory/search: hits of withheld memories are dropped before the limit', async () => {
+    const res = await searchOf(ID.bookingsOnly);
+    expect(memIds(res, 'bookingsOnly search')).toEqual([]);
+    expectNoSecret(res.body, 'bookingsOnly search', [AI_SUMMARY, MEM_PATTERN, MEM_MONEY]);
+    expect(memIds(await searchOf(ID.opsReader), 'opsReader search')).toEqual([MEM.inbox]);
+    expect(memIds(await searchOf(ID.owner), 'owner search')).toEqual(sorted([MEM.inbox, MEM.money, MEM.pattern]));
+  });
+
+  it("POST analyze: the memory insights and the semantic recall carry only memories the reader may see", async () => {
+    const writer = await analyzeOf(ID.bookingsWriter);
+    expect(writer.status, JSON.stringify(writer.body)).toBe(201);
+    expectNoSecret(writer.body, 'bookingsWriter analyze memory', [AI_SUMMARY, MEM_PATTERN, MEM_MONEY]);
+    const ops = await analyzeOf(ID.opsWriter);
+    expect(ops.status).toBe(201);
+    const text = JSON.stringify(ops.body.memoryInsights ?? []);
+    expect(text).toContain(MEM_INBOX);
+    expect(text).not.toContain(MEM_MONEY);
+    expect(text).not.toContain(MEM_PATTERN);
+  });
+
+  it('POST memory/compact and memory/detect-patterns are refused to a reader who misses an event-owning module; the owner enqueues', async () => {
+    for (const who of [ID.bookingsWriter, ID.opsWriter, ID.revenueReader]) {
+      for (const route of ['memory/compact', 'memory/detect-patterns']) {
+        enqueued.length = 0;
+        const res = await as(agent().post(`/temporal-flow/businesses/${ID.biz}/${route}`), who);
+        expect(res.status, `${who} ${route} ${JSON.stringify(res.body)}`).toBe(403);
+        expect(enqueued, `${who} ${route}`).toEqual([]);
+      }
+    }
+    enqueued.length = 0;
+    const owner = await as(agent().post(`/temporal-flow/businesses/${ID.biz}/memory/compact`), ID.owner);
+    expect(owner.status, JSON.stringify(owner.body)).toBe(201);
+    expect(enqueued).toEqual([{ businessId: ID.biz, operation: 'compact' }]);
+  });
+
+  it('no memory route of biz answers a memory of bizOther', async () => {
+    for (const res of [await memoryOf(ID.owner), await searchOf(ID.owner), await byEntityOf(ID.owner, 'thread', `${P}thread1`)]) {
+      expect(JSON.stringify(res.body)).not.toContain(OTHER_TENANT);
     }
   });
 });
