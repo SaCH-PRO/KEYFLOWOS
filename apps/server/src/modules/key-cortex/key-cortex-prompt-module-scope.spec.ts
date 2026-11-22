@@ -55,6 +55,12 @@ const MEMBERSHIPS: Record<string, { role: string; permissionScopes: unknown }> =
   arrayMap: { role: 'ADMIN', permissionScopes: [] },
 };
 
+/** FU-PROPOSAL-REVENUE-SIGHT (D-238): kap_1 is a money proposal (the Pro Auto monitor's), kap_2 a task; kap_404 has no row. */
+const PROPOSAL_ROWS: Record<string, { id: string; actionType: string; module: string | null; toolName: string | null; title: string }> = {
+  kap_1: { id: 'kap_1', actionType: 'EXECUTE_TOOL', module: 'revenue', toolName: 'draft_payment_reminder', title: '$12,345 outstanding across 7 invoices' },
+  kap_2: { id: 'kap_2', actionType: 'CREATE_TASK', module: 'crm', toolName: null, title: 'Call Kerry back' },
+};
+
 const prisma = {
   client: {
     membership: {
@@ -63,6 +69,12 @@ const prisma = {
       ),
     },
     cognitionMemory: { findMany: vi.fn(async () => []) },
+    // FU-PROPOSAL-REVENUE-SIGHT (D-238): the underlying KEY action proposals, read by id.
+    keyActionProposal: {
+      findMany: vi.fn(async ({ where }: { where: { businessId: string; id: { in: string[] } } }) =>
+        where.businessId === 'biz_1' ? Object.values(PROPOSAL_ROWS).filter((r) => where.id.in.includes(r.id)) : [],
+      ),
+    },
   },
 };
 
@@ -178,8 +190,10 @@ const TABLE: Array<[Fragment, string[]]> = [
   // A transfer names no task type (it can move any): it needs every module a task can be filed under.
   [be('be_transfer', 'task.transferred', 'Task', { fromType: 'User', toType: 'User', count: 2 }), ['crm', 'projects', 'automations']],
   // Business-wide: a proposal (kept business-wide by the packet's instruction).
-  [be('be_governance', 'GOVERNANCE_DECISION', 'key_action_proposal'), []],
-  [ce('ce_governance', 'GOVERNANCE_DECISION', 'ai'), []],
+  // D-238: a proposal record stays business-wide when its proposal is non-financial (kap_2, a task); one that names
+  // no proposal fails closed for a reader without revenue read (the proposal-sight cases below).
+  [{ ...be('be_governance', 'GOVERNANCE_DECISION', 'key_action_proposal'), entityId: 'kap_2' } as Fragment, []],
+  [{ ...ce('ce_governance', 'GOVERNANCE_DECISION', 'ai'), metadata: { sourceType: 'ai', payload: { subjectId: 'kap_2' } } } as Fragment, []],
   // Fails closed (SEC-W1FPMS-1): a record that names no module needs read on every module an event can name.
   [be('be_insight', 'insight.generated', 'KEY_CORTEX_EVENT'), ALL],
   [be('be_unknown', 'v70c.unheard_of', 'KEY_CORTEX_EVENT'), ALL],
@@ -263,18 +277,24 @@ describe('W1F-PERCEPTION-MODULE-SCOPE: readersOwnPromptMemory projects the busin
     expect(kept.map((f) => f.id)).toEqual(['mem', 'genome', 'temporal', 'exec', 'action']);
   });
 
-  it('a GOVERNANCE_DECISION record stays business-wide even when its subject or source names a module (the packet keeps proposals business-wide)', async () => {
+  it('D-238 reverses this pin: a GOVERNANCE_DECISION record is not exempt because it is a proposal: one naming no classifiable proposal (here an invoice subject, a commerce source) is withheld from readers without revenue read; the owner sees it', async () => {
     const fragments = [be('gov_subject', 'GOVERNANCE_DECISION', 'invoice'), ce('gov_source', 'GOVERNANCE_DECISION', 'commerce')];
     for (const reader of [null, 'blind', 'arrayMap']) {
       const kept = await readersOwnPromptMemory(prisma as any, 'biz_1', reader, fragments as any, 1000);
-      expect(kept.map((f) => f.id), String(reader)).toEqual(['gov_subject', 'gov_source']);
+      expect(kept.map((f) => f.id), String(reader)).toEqual([]);
     }
+    expect((await readersOwnPromptMemory(prisma as any, 'biz_1', 'owner', fragments as any, 1000)).map((f) => f.id)).toEqual(['gov_subject', 'gov_source']);
   });
 
   it('no membership is read when no event names a module', async () => {
     // Review SEC-W1FPMS-1: only a GOVERNANCE_DECISION record is business-wide now; a record that names no module needs
     // read on every module (insight.generated moved to the fail-closed rows above).
-    const fragments = [be('gov', 'GOVERNANCE_DECISION', 'key_action_proposal'), ce('gov_ce', 'GOVERNANCE_DECISION', 'ai'), { id: 'mem', sourceType: 'ai_memory', title: 'fact' }];
+    // D-238: the proposal records are of a non-financial proposal (kap_2), so none of them needs the reader's revenue level.
+    const fragments = [
+      { ...be('gov', 'GOVERNANCE_DECISION', 'key_action_proposal'), entityId: 'kap_2' },
+      { ...ce('gov_ce', 'GOVERNANCE_DECISION', 'ai'), metadata: { sourceType: 'ai', payload: { subjectId: 'kap_2' } } },
+      { id: 'mem', sourceType: 'ai_memory', title: 'fact' },
+    ];
     const kept = await readersOwnPromptMemory(prisma as any, 'biz_1', 'blind', fragments as any, 1000);
     expect(kept.map((f) => f.id)).toEqual(['gov', 'gov_ce', 'mem']);
     expect(prisma.client.membership.findUnique).not.toHaveBeenCalled();
@@ -551,28 +571,29 @@ describe('FU-KEY-MEMORY-MONEY-SIGHT (COR-W1FPMS-1 follow-up): a task record is c
  */
 describe('FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4): a memberless turn sees a proposal\'s action, status and risk level only', () => {
   const TITLE = '$12,345 outstanding across 7 invoices';
-  const ledgerInput = (action: string, after: Record<string, unknown>, metadata: Record<string, unknown>) => ({
+  const ledgerInput = (action: string, after: Record<string, unknown>, metadata: Record<string, unknown>, proposalId = 'kap_1') => ({
     businessId: 'biz_1',
     eventType: 'GOVERNANCE_DECISION',
     subjectType: 'key_action_proposal',
-    subjectId: 'kap_1',
+    subjectId: proposalId,
     actorType: action === 'propose' ? 'ai' : 'human',
     actorId: action === 'propose' ? 'key_ai' : 'owner',
     action,
     source: action === 'propose' ? 'ai' : 'web',
-    approvalId: 'kap_1',
+    approvalId: proposalId,
     metadata,
     after,
   });
   /** The three records one GOVERNANCE_DECISION ledger row lands as, as UnifiedMemoryRetrievalService hands them over. */
-  const recordsOf = (tag: string, action: string, after: Record<string, unknown>, metadata: Record<string, unknown>): Fragment[] => {
-    const input = ledgerInput(action, after, metadata);
+  const recordsOf = (tag: string, action: string, after: Record<string, unknown>, metadata: Record<string, unknown>, proposalId = 'kap_1'): Fragment[] => {
+    const input = ledgerInput(action, after, metadata, proposalId);
     return [
       {
         id: `${tag}_ledger`,
         sourceType: 'business_event',
         title: 'GOVERNANCE_DECISION',
         entityType: 'key_action_proposal',
+        entityId: input.subjectId,
         content: `${input.actorType} ${action} key_action_proposal: ${JSON.stringify(after)}`,
         metadata: { after, metadata, actorType: input.actorType, action },
       },
@@ -598,32 +619,52 @@ describe('FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4): a memberless turn sees a pro
   const REJECT = recordsOf('r', 'reject', { status: 'REJECTED', rejectedBy: 'v71o_owner_id', rejectionReason: 'not now: $9,876 is due first' }, { reason: 'not now: $9,876 is due first' });
   const OUTCOME: Fragment = {
     id: 'g_outcome',
+    entityId: 'kap_1',
     sourceType: 'genome_memory_event',
     title: `Action executed: ${TITLE}`,
     content: 'KEY action EXECUTE_TOOL was executed.',
     metadata: { actionType: 'EXECUTE_TOOL', executionResult: { success: true, amount: 12345 }, genomeRow: { sourceType: 'KEY_ACTION_PROPOSAL', eventType: 'ACTION_EXECUTED', domain: null, section: null } },
   };
   const ALL_RECORDS = [...PROPOSE, ...APPROVE, ...REJECT, OUTCOME];
+  // D-238: the same records of a non-financial proposal (kap_2, a task), which keep D-226 visibility.
+  const NF_TITLE = 'Call Kerry back';
+  const NF_PROPOSE = recordsOf('np', 'propose', { status: 'PENDING', riskLevel: 'MEDIUM' }, { actionType: 'CREATE_TASK', module: 'crm', title: NF_TITLE }, 'kap_2');
+  const NF_APPROVE = recordsOf('na', 'approve', { status: 'APPROVED', approvedBy: 'v71o_owner_id' }, {}, 'kap_2');
+  const NF_REJECT = recordsOf('nr', 'reject', { status: 'REJECTED', rejectedBy: 'v71o_owner_id', rejectionReason: 'not now: $9,876 is due first' }, { reason: 'not now: $9,876 is due first' }, 'kap_2');
+  const NF_OUTCOME: Fragment = {
+    id: 'ng_outcome',
+    entityId: 'kap_2',
+    sourceType: 'genome_memory_event',
+    title: `Action executed: ${NF_TITLE}`,
+    content: 'KEY action CREATE_TASK was executed.',
+    metadata: { actionType: 'CREATE_TASK', module: 'crm', executionResult: { success: true }, genomeRow: { sourceType: 'KEY_ACTION_PROPOSAL', eventType: 'ACTION_EXECUTED', domain: null, section: null } },
+  };
+  const NF_RECORDS = [...NF_PROPOSE, ...NF_APPROVE, ...NF_REJECT, NF_OUTCOME];
   const FIGURES = ['12,345', '12345', 'outstanding', '9,876', 'not now', 'v71o_owner_id', 'draft_payment_reminder'];
 
   // A turn with no member reader reaches readersOwnPromptMemory with reader null: its callers resolve the reader by
   // membership first (promptMemoryReader, the pipeline's episodicMemoryReader), so a SUPER_ADMIN who is no member, a
   // removed member and a contact-only position all arrive as null (the real-DB suite drives each through its route).
   for (const reader of [null] as const) {
-    it('no reader (a memberless turn): every proposal record renders as its action, status and risk level, and nothing else', async () => {
-      const kept = await readersOwnPromptMemory(prisma as any, 'biz_1', reader, ALL_RECORDS as any, 1000);
-      expect(kept.map((f) => f.id)).toEqual(ALL_RECORDS.map((f) => f.id));
+    it('no reader (a memberless turn): every record of a non-financial proposal renders as its action, status and risk level, and nothing else (D-226 under D-238)', async () => {
+      const kept = await readersOwnPromptMemory(prisma as any, 'biz_1', reader, NF_RECORDS as any, 1000);
+      expect(kept.map((f) => f.id)).toEqual(NF_RECORDS.map((f) => f.id));
       const byId = new Map(kept.map((f) => [f.id, f]));
-      for (const tag of ['p_ledger', 'p_bridged', 'p_cognitive']) expect(byId.get(tag)!.content, tag).toBe('proposal propose, status PENDING, risk MEDIUM');
-      for (const tag of ['a_ledger', 'a_bridged', 'a_cognitive']) expect(byId.get(tag)!.content, tag).toBe('proposal approve, status APPROVED');
-      for (const tag of ['r_ledger', 'r_bridged', 'r_cognitive']) expect(byId.get(tag)!.content, tag).toBe('proposal reject, status REJECTED');
-      expect(byId.get('g_outcome')!.title).toBe('ACTION_EXECUTED');
-      expect(byId.get('g_outcome')!.content).toBe('proposal ACTION_EXECUTED');
+      for (const tag of ['np_ledger', 'np_bridged', 'np_cognitive']) expect(byId.get(tag)!.content, tag).toBe('proposal propose, status PENDING, risk MEDIUM');
+      for (const tag of ['na_ledger', 'na_bridged', 'na_cognitive']) expect(byId.get(tag)!.content, tag).toBe('proposal approve, status APPROVED');
+      for (const tag of ['nr_ledger', 'nr_bridged', 'nr_cognitive']) expect(byId.get(tag)!.content, tag).toBe('proposal reject, status REJECTED');
+      expect(byId.get('ng_outcome')!.title).toBe('ACTION_EXECUTED');
+      expect(byId.get('ng_outcome')!.content).toBe('proposal ACTION_EXECUTED');
       for (const fragment of kept) {
-        expect(fragment.title === 'GOVERNANCE_DECISION' || fragment.id === 'g_outcome', fragment.id).toBe(true);
+        expect(fragment.title === 'GOVERNANCE_DECISION' || fragment.id === 'ng_outcome', fragment.id).toBe(true);
         const whole = JSON.stringify(fragment);
-        for (const figure of FIGURES) expect(whole, `${fragment.id}: ${figure}`).not.toContain(figure);
+        for (const figure of [...FIGURES, NF_TITLE]) expect(whole, `${fragment.id}: ${figure}`).not.toContain(figure);
       }
+    });
+
+    it('RED-BEFORE (D-238): no reader (a memberless turn) is handed no record of a financial proposal at all, not its status or risk level either', async () => {
+      const kept = await readersOwnPromptMemory(prisma as any, 'biz_1', reader, ALL_RECORDS as any, 1000);
+      expect(kept.map((f) => f.id)).toEqual([]);
     });
   }
 
@@ -634,17 +675,43 @@ describe('FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4): a memberless turn sees a pro
   });
 
   it('a value that is not one plain word (a status or risk that carries a figure) is not rendered', async () => {
-    const odd = recordsOf('o', 'propose', { status: '$12,345 due', riskLevel: 'HIGH' }, { title: TITLE });
+    const odd = recordsOf('o', 'propose', { status: '$12,345 due', riskLevel: 'HIGH' }, { actionType: 'CREATE_TASK', module: 'crm', title: NF_TITLE }, 'kap_2');
     const kept = await readersOwnPromptMemory(prisma as any, 'biz_1', null, odd as any, 1000);
     expect(kept.map((f) => f.content)).toEqual(Array(3).fill('proposal propose, risk HIGH'));
   });
 
-  for (const reader of ['blind', 'owner', 'staff']) {
-    it(`${reader} (a member): the proposal records render whole, title included (proposals stay business-wide)`, async () => {
+  for (const reader of ['owner', 'staff', 'revenueOnly']) {
+    it(`${reader} (a member who reads revenue): the financial proposal's records render whole, title included`, async () => {
       const kept = await readersOwnPromptMemory(prisma as any, 'biz_1', reader, ALL_RECORDS as any, 1000);
       expect(kept).toEqual(ALL_RECORDS);
       expect(kept.find((f) => f.id === 'p_cognitive')!.content).toContain(TITLE);
       expect(kept.find((f) => f.id === 'g_outcome')!.title).toContain(TITLE);
     });
   }
+
+  for (const reader of ['blind', 'arrayMap', 'expensesOnly']) {
+    it(`RED-BEFORE (D-238): ${reader} (a member without revenue read) is handed no record of the financial proposal, and the non-financial proposal's records whole (D-226: proposals stay business-wide)`, async () => {
+      expect((await readersOwnPromptMemory(prisma as any, 'biz_1', reader, ALL_RECORDS as any, 1000)).map((f) => f.id)).toEqual([]);
+      expect(await readersOwnPromptMemory(prisma as any, 'biz_1', reader, NF_RECORDS as any, 1000)).toEqual(NF_RECORDS);
+    });
+  }
+
+  it('RED-BEFORE (D-238, D-227): a proposal whose classification is missing (no underlying row, nothing in the record) is withheld from a reader without revenue read and from a memberless turn; the owner sees it', async () => {
+    const unknown = [...recordsOf('u', 'approve', { status: 'APPROVED' }, {}, 'kap_404'), {
+      id: 'ug_outcome', entityId: 'kap_404', sourceType: 'genome_memory_event', title: 'Action executed: something', content: 'KEY action EXECUTE_TOOL was executed.',
+      metadata: { actionType: 'EXECUTE_TOOL', genomeRow: { sourceType: 'KEY_ACTION_PROPOSAL', eventType: 'ACTION_EXECUTED', domain: null, section: null } },
+    }];
+    for (const reader of ['blind', null] as const) expect((await readersOwnPromptMemory(prisma as any, 'biz_1', reader, unknown as any, 1000)).map((f) => f.id), String(reader)).toEqual([]);
+    expect((await readersOwnPromptMemory(prisma as any, 'biz_1', 'owner', unknown as any, 1000)).map((f) => f.id)).toEqual(unknown.map((f) => f.id));
+  });
+
+  it('D-238 (isolation): a projection for one reader neither changes the records nor reaches the next reader, and another business\'s proposal row is never read for this business', async () => {
+    const records = [...ALL_RECORDS, ...NF_RECORDS];
+    const before = JSON.stringify(records);
+    await readersOwnPromptMemory(prisma as any, 'biz_1', 'blind', records as any, 1000);
+    await readersOwnPromptMemory(prisma as any, 'biz_1', null, records as any, 1000);
+    expect(JSON.stringify(records)).toBe(before);
+    expect(await readersOwnPromptMemory(prisma as any, 'biz_1', 'owner', records as any, 1000)).toEqual(records);
+    for (const call of (prisma.client.keyActionProposal.findMany as any).mock.calls) expect(call[0].where.businessId).toBe('biz_1');
+  });
 });
