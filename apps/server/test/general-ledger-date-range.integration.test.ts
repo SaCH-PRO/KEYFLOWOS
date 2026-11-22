@@ -33,6 +33,11 @@
  *                       (the end was computed an hour early, 04:00Z, and dropped the day's last hour)
  *   GLD-11  RED-BEFORE  (review N-1) the last day a timestamp can hold: to=9999-12-31 answers 200 with the
  *                       business's lines, it does not fail on an end instant in year 10000
+ *   GLD-12  RED-BEFORE  (review C-2) a day whose next local midnight comes twice: Amman put its clocks back at
+ *                       01:00 on 2019-10-25, so 24 October ends at the FIRST 00:00 (21:00Z), not the second
+ *   GLD-13  RED-BEFORE  (review C-4) the running balance is per account AND currency: the USD line's balance is
+ *                       its own 107, not 107 added to the TTD lines before it (D-13: two currencies are never
+ *                       added into one figure)
  *   GLD-09  KEEP        tenancy and scope hold on the date-only read: another business's owner and a
  *                       revenue-none member are refused 403 and get no line; no answer carries another
  *                       business's line
@@ -69,6 +74,7 @@ const ID = {
   bizNy: `${P}bizNy`, // America/New_York
   bizBad: `${P}bizBad`, // timezone 'Not/AZone'
   bizHav: `${P}bizHav`, // America/Havana
+  bizAmm: `${P}bizAmm`, // Asia/Amman
 };
 
 const D = '2026-03-10';
@@ -237,6 +243,7 @@ beforeAll(async () => {
     [ID.bizNy, ID.owner, 'America/New_York'],
     [ID.bizBad, ID.owner, 'Not/AZone'],
     [ID.bizHav, ID.owner, 'America/Havana'],
+    [ID.bizAmm, ID.owner, 'Asia/Amman'],
   ] as const) {
     await db.business.create({
       data: { id, name: `V66G ${id.slice(P.length)}`, slug: id, ownerId, currency: 'TTD', timezone, accountingBasis: 'CASH' },
@@ -264,6 +271,9 @@ beforeAll(async () => {
   // Havana, 2026-03-07: the clocks go forward at 00:00 on the 8th (00:00 -> 01:00), so the 7th ends 05:00Z.
   await post(ID.bizHav, 'havana-last', '2026-03-08T04:59:59.999Z');
   await post(ID.bizHav, 'havana-next-day', '2026-03-08T05:00:00.000Z');
+  // Amman, 2019-10-24: the clocks go back at 01:00 on the 25th (to 00:00), so the 25th starts at the first 00:00, 21:00Z.
+  await post(ID.bizAmm, 'amman-last', '2019-10-24T20:59:59.999Z');
+  await post(ID.bizAmm, 'amman-next-day', '2019-10-24T21:00:00.000Z');
 }, 120_000);
 
 afterAll(async () => {
@@ -391,6 +401,31 @@ describe('V1-66 SWP-FIN-LEDGER: the General Ledger end date covers its whole day
     expect(res.body.total).toBe(22);
   });
 
+  it('GLD-12: a day whose next local midnight comes twice ends at the first', async () => {
+    const res = await ledger(ID.bizAmm, { to: '2019-10-24' });
+    expect(res.status).toBe(200);
+    expect(labels(res.body)).toEqual(twice({ 'amman-last': '' }));
+  });
+
+  it('GLD-13: the running balance is per account and currency', async () => {
+    const res = await ledger(ID.bizA, { to: '2026-12-31' });
+    expect(res.status).toBe(200);
+    const rows: any[] = res.body.rows;
+    expect(rows).toHaveLength(22);
+    // Recomputed here from the lines as answered, in their order.
+    const running = new Map<string, number>();
+    for (const row of rows) {
+      const key = `${row.accountId}:${row.currency}`;
+      const next = Math.round(((running.get(key) ?? 0) + Number(row.debit) - Number(row.credit)) * 100) / 100;
+      running.set(key, next);
+      expect(Number(row.runningBalance), `${row.description} ${row.accountName}`).toBe(next);
+    }
+    const usd = rows.filter((r) => r.currency === 'USD');
+    expect(usd).toHaveLength(2);
+    // The one USD posting: its balances are its own debit and credit.
+    expect(usd.map((r) => Math.abs(Number(r.runningBalance)))).toEqual([Number(usd[0].debit) + Number(usd[0].credit), Number(usd[1].debit) + Number(usd[1].credit)]);
+  });
+
   it('GLD-09: tenancy and scope hold on the date-only read', async () => {
     // Another business's owner.
     const outsider = await ledger(ID.bizA, { from: D, to: D }, ID.ownerB);
@@ -416,6 +451,6 @@ describe('V1-66 SWP-FIN-LEDGER: the General Ledger end date covers its whole day
     const own = await ledger(ID.bizA, { to: '2026-12-31' });
     expect(own.status).toBe(200);
     expect(own.body.total).toBe(22);
-    for (const row of own.body.rows) expect(String(row.description)).not.toMatch(/kolkata|ny-|bad-|havana/);
+    for (const row of own.body.rows) expect(String(row.description)).not.toMatch(/kolkata|ny-|bad-|havana|amman/);
   });
 });

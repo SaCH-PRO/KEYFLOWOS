@@ -112,7 +112,7 @@ const line = (over: Record<string, unknown>) => ({
 const ROWS = [
   line({ entryId: "le_1", debit: "1250.5", runningBalance: "1250.5" }),
   line({ entryId: "le_2", accountId: "coa_rev", accountName: "Revenue", accountCode: "4000", accountType: "INCOME", credit: "1250.5", runningBalance: "-1250.5" }),
-  line({ entryId: "le_3", currency: "USD", debit: "99", runningBalance: "1349.5", date: "2026-03-10T12:30:00.000Z" }),
+  line({ entryId: "le_3", currency: "USD", debit: "99", runningBalance: "99", date: "2026-03-10T12:30:00.000Z" }),
 ];
 
 function ledgerServer(opts: { total?: number; ledger?: () => Response } = {}) {
@@ -161,7 +161,7 @@ describe("General Ledger page (V1-66 SWP-FIN-LEDGER)", () => {
     expect(within(revenueCredit).getByText("TTD 1,250.50")).toBeInTheDocument();
     expect(within(revenueCredit).getByText("TTD -1,250.50")).toBeInTheDocument();
     // A USD line says USD.
-    expect(within(usdDebit).getByText("USD 99.00")).toBeInTheDocument();
+    expect(within(usdDebit).getAllByText("USD 99.00")).toHaveLength(2);
     // The bare numbers the page printed are gone.
     expect(screen.queryByText("1,250.5")).toBeNull();
     expect(screen.queryByText("99")).toBeNull();
@@ -171,7 +171,11 @@ describe("General Ledger page (V1-66 SWP-FIN-LEDGER)", () => {
     ledgerServer();
     render(<GeneralLedgerPage />);
     await screen.findAllByText("INV-0001");
-    expect(screen.getAllByText("Mar 10, 2026")).toHaveLength(3);
+    // The day is the machine's own (review C-3: Auckland reads these instants as 11 March): the words are pinned,
+    // the day is whichever of the two the machine's zone makes it.
+    const shown = new Date(ROWS[0].date as string).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    expect(shown).toMatch(/^Mar 1[01], 2026$/);
+    expect(screen.getAllByText(shown)).toHaveLength(3);
     expect(document.body.textContent).not.toContain("2026-03-10T");
   });
 
