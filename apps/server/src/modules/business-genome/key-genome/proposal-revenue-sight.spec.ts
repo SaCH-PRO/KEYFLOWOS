@@ -328,3 +328,33 @@ describe('round-9 review repairs (security MAJOR-1, MAJOR-2, minor 2; correctnes
     ['Bill beside a JSON date', { actionType: 'CREATE_TASK', module: 'crm', title: 'Call Bill', payload: { title: 'Call Bill', dueDate: '2026-11-25' } }],
   ])('%s is not', (_l, p) => expect(isFinancialProposal(p as any)).toBe(false));
 });
+
+describe('round-10 review repairs (both reviews: quadratic regressions; security M3, M4; correctness m1, m2)', () => {
+  it('stays linear on every adversarial shape the reviews timed (dotted digit runs, money-word key chains, long words)', () => {
+    const inputs = ['9..'.repeat(33_000), '9.,'.repeat(33_000), 'total_'.repeat(17_000), 'rate_'.repeat(20_000), 'bill_'.repeat(20_000), 'Total_Due_'.repeat(10_000), 'rate ' + 'a'.repeat(100_000), 'spent_'.repeat(17_000)];
+    const t0 = Date.now();
+    for (const summary of inputs) isFinancialProposal({ actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', summary } as any);
+    expect(Date.now() - t0).toBeLessThan(1500);
+  });
+
+  it.each([
+    ['a count word inside the key', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { total_items_value: 900 } }],
+    ['totalItemsDue', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { totalItemsDue: 900 } }],
+    ['rate_records', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { rate_records_value: 150 } }],
+    ['total due equals', { actionType: 'CREATE_TASK', module: 'crm', title: 'total due = 900' }],
+    ['markdown bold', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', summary: '**Total due:** 900' }],
+    ['markdown bold figure', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', summary: 'Total due: **900**' }],
+    ['a newline before the figure', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', summary: 'Total due:\n900' }],
+    ['an em dash', { actionType: 'CREATE_TASK', module: 'crm', title: 'Total — 900' }],
+    ['an arrow', { actionType: 'CREATE_TASK', module: 'crm', title: 'total due => 900' }],
+    ['a spaced JSON key', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { 'Total Due': 900 } }],
+    ['a dashed JSON key', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { 'total-due': 900 } }],
+    ['a doubled underscore', { actionType: 'CREATE_TASK', module: 'crm', title: 'total__due:900' }],
+  ])('%s is financial', (_l, p) => expect(isFinancialProposal(p as any)).toBe(true));
+
+  it.each([
+    ['a rate_limit key', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { rate_limit: 100, rateLimit: 100 } }],
+    ['count and duration totals', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { totalContacts: 5, totalBookings: 3, totalHours: 2, totalDurationMs: 900, timeSpentMinutes: 30, tipsShown: 2 } }],
+    ['a totalCount key', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { items: [], totalCount: 12, total_items: 3 } }],
+  ])('%s is not', (_l, p) => expect(isFinancialProposal(p as any)).toBe(false));
+});
