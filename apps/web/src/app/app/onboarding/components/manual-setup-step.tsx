@@ -199,6 +199,12 @@ async function completeManualSetup(
     const sentAs = actingMemberNow();
     const saved = await saveBusinessMinimalProfile(businessId, body);
     if (saved.error !== null) return saved.error.trim() || "Could not save your business profile. Please try again.";
+    if (actingMemberNow() !== sentAs) {
+      // Answered after someone else signed in to this browser (review OBS4-1): nothing is recorded for them and
+      // setup does not go on in their name.
+      noteBusinessSettings(businessId, saved.data, sentAs);
+      return "Someone else has signed in to this browser since you pressed Finish setup. Sign in again to check your business.";
+    }
     // The nav and the hubs read what the business sells from here on. An answer that is not this business's
     // is not a save anyone can vouch for (review SEC-2).
     if (!noteBusinessSettings(businessId, saved.data, sentAs)) {

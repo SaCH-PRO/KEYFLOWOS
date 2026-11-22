@@ -184,6 +184,17 @@ function entryOf(businessId: string | null): Entry {
 
 const bump = (counter: Map<string, number>, id: string) => counter.set(id, (counter.get(id) ?? 0) + 1);
 
+/**
+ * An answer was recorded for the business: every read of it still out has been overtaken and will record nothing,
+ * so none of them may be joined by a reader that asks from now on (review SEC4-2: it would wait on a read that
+ * tells it nothing, and stay on loading).
+ */
+function answerRecorded(businessId: string): void {
+  bump(answersRecorded, businessId);
+  const suffix = `\n${businessId}`;
+  for (const key of [...inFlight.keys()]) if (key.endsWith(suffix)) inFlight.delete(key);
+}
+
 /** Drops everything read so far and reads again for the hooks still mounted. */
 function dropCache(): void {
   for (const id of new Set([...entries.keys(), ...readsStarted.keys(), ...watched.keys()])) bump(readsStarted, id);
@@ -246,7 +257,12 @@ export function loadBusinessSettings(businessId: string, options: { force?: bool
   if (!held) setEntry(businessId, { ...LOADING, member });
 
   const flight = (async () => {
-    const res = await apiGet<Record<string, unknown>>(`/identity/businesses/${encodeURIComponent(businessId)}`);
+    // Its own request, never one already on the wire (review SEC4-1): lib/api.ts joins identical GETs in flight,
+    // and a read joined to one sent before a write would record the pre-write answer as fresh. A caller that
+    // passes a signal is not joined; this one is never aborted. Readers that ask together are shared above.
+    const res = await apiGet<Record<string, unknown>>(`/identity/businesses/${encodeURIComponent(businessId)}`, {
+      signal: new AbortController().signal,
+    });
 
     if (readsStarted.get(businessId) !== read) return;
     if ((answersRecorded.get(businessId) ?? 0) !== answersAtStart) return;
@@ -298,7 +314,7 @@ export function actingMemberNow(): string {
  */
 export function noteBusinessSettings(businessId: string, answer: unknown, sentAs: string = actingMember()): boolean {
   if (!businessId) return false;
-  bump(answersRecorded, businessId);
+  answerRecorded(businessId);
   const own = isPlainObject(answer) && answer.id === businessId;
   if (sentAs !== actingMember()) {
     // Sent as one member, answered after another took the browser (review SEC2-2): the answer is not theirs to be
@@ -411,9 +427,12 @@ export async function saveAdvancedSettings(businessId: string, write: BusinessAd
     res,
     (held) =>
       (body.advancedCrm === undefined || held.advancedCrm === body.advancedCrm) &&
-      // A depth sent is confirmed only by a depth answered (review SEC3-3), never by the default of a missing one.
-      (body.depth === undefined || (isPlainObject(res.data) && isPlainObject(res.data.depth))) &&
-      Object.entries(body.depth ?? {}).every(([hub, depth]) => held.depth[hub as BusinessHub] === depth),
+      // A depth sent is confirmed only by the answer itself holding that hub at that depth (reviews SEC3-3,
+      // SEC4-3), never by the default a missing or invalid one is read as.
+      Object.entries(body.depth ?? {}).every(([hub, depth]) => {
+        const answered = isPlainObject(res.data) && isPlainObject(res.data.depth) ? res.data.depth : null;
+        return answered !== null && hasOwn(answered, hub) && answered[hub] === depth && held.depth[hub as BusinessHub] === depth;
+      }),
   );
 }
 

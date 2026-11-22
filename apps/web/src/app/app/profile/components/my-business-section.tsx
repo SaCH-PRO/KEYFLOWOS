@@ -241,29 +241,27 @@ function BusinessSetupSettings({
   // The failed view's "Try again" stays mounted, and says it is busy, while the settings are read again (COR2-1).
   const [retrying, setRetrying] = useState(false);
 
-  // Set synchronously, so a double press reads once; and, after a retry, where the keyboard goes on recovery.
+  // Set synchronously, so a double press reads once.
   const retryingRef = useRef(false);
-  const focusOnReadyRef = useRef(false);
   const sellsGroupRef = useRef<HTMLDivElement>(null);
 
   const retry = async () => {
     if (retryingRef.current) return;
     retryingRef.current = true;
     setRetrying(true);
-    focusOnReadyRef.current = true;
     await settings.reload();
     retryingRef.current = false;
     setRetrying(false);
+    // If "Try again" worked, its button is gone and took the keyboard's focus with it: put it on the controls
+    // that took its place (review COR3-2). Only then: focus the member has since put anywhere else is theirs, and
+    // nothing stays armed for a later recovery (review COR4-1).
+    setTimeout(() => {
+      const active = document.activeElement;
+      if (active && active !== document.body) return;
+      const group = sellsGroupRef.current;
+      (group?.querySelector<HTMLInputElement>("input:checked") ?? group?.querySelector<HTMLInputElement>("input"))?.focus();
+    }, 0);
   };
-
-  // "Try again" worked: the failed view (and its focused button) is gone, so the keyboard is put on the controls
-  // that took its place (review COR3-2), not left on the page's body.
-  useEffect(() => {
-    if (settings.status !== "ready" || !focusOnReadyRef.current) return;
-    focusOnReadyRef.current = false;
-    const group = sellsGroupRef.current;
-    (group?.querySelector<HTMLInputElement>("input:checked") ?? group?.querySelector<HTMLInputElement>("input"))?.focus();
-  }, [settings.status]);
 
   const write = async (which: "sells" | "advancedCrm", what: string, done: string, send: () => Promise<ApiAnswer>) => {
     if (settings.status !== "ready") return;
@@ -303,15 +301,36 @@ function BusinessSetupSettings({
     );
   };
 
-  if (settings.status === "failed") {
-    return (
-      <div className="space-y-2 p-1 text-xs" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
-        <p role="status" className="flex items-start gap-1.5">
+  const failed = settings.status === "failed";
+  const loading = settings.status !== "ready";
+  // While a change is being saved the controls are marked busy, not disabled: the one just pressed keeps the
+  // keyboard's focus (review COR-5), and `write` ignores a press until the answer is in.
+  const busy = saving !== null;
+
+  // One live region, on the page from the first render and empty until there is a failure to say: a region that
+  // arrives already filled is not reliably announced (review COR4-3).
+  const loadStatus = (
+    <p
+      role="status"
+      data-testid="business-settings-load-status"
+      className={failed ? "flex items-start gap-1.5 text-xs" : "sr-only"}
+      style={failed ? { color: "hsl(var(--kf-muted-foreground))" } : undefined}
+    >
+      {failed && (
+        <>
           <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" aria-hidden="true" />
           <span>
             Couldn&apos;t load what you sell and the Advanced CRM switch{settings.error ? `: ${settings.error}` : "."}
           </span>
-        </p>
+        </>
+      )}
+    </p>
+  );
+
+  if (failed) {
+    return (
+      <div className="space-y-4 p-1">
+        {loadStatus}
         <Button variant="outline" onClick={() => void retry()} aria-busy={retrying || undefined} className="min-h-[44px]">
           {retrying ? "Trying again..." : "Try again"}
         </Button>
@@ -319,13 +338,9 @@ function BusinessSetupSettings({
     );
   }
 
-  const loading = settings.status !== "ready";
-  // While a change is being saved the controls are marked busy, not disabled: the one just pressed keeps the
-  // keyboard's focus (review COR-5), and `write` ignores a press until the answer is in.
-  const busy = saving !== null;
-
   return (
     <div className="space-y-4 p-1" aria-busy={loading}>
+      {loadStatus}
       <div className="text-xs text-muted-foreground">
         <div id={sellsLabelId} className="flex items-center gap-1.5 mb-1.5 font-medium">
           <LayoutGrid className="h-3 w-3" aria-hidden="true" />
