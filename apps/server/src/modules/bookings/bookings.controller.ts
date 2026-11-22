@@ -32,6 +32,14 @@ import {
 /** Postgres int4's upper bound: Service.duration is an Int column. */
 const INT4_MAX = 2147483647;
 
+/** A UTF-16 surrogate without its pair. */
+const UNPAIRED_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/** Text a Postgres text column refuses: a NUL character, or an unpaired UTF-16 surrogate. */
+function unstorableText(value: string): boolean {
+  return value.includes('\u0000') || UNPAIRED_SURROGATE.test(value);
+}
+
 /**
  * V1-64 (SWP-BOOKING-PAYMENT-GATE side fix): the body of the deprecated POST
  * bookings/businesses/:businessId/services, checked before the catalog is
@@ -69,9 +77,9 @@ function assertServiceCreateBody(body: unknown): asserts body is {
       throw new BadRequestException(`${key} must be a string`);
     }
   }
-  // Review SEC-BPG-2: Postgres text holds no NUL character (it answered 500).
+  // Review SEC-BPG-2 and round 2: Postgres text holds no NUL character and no unpaired UTF-16 surrogate (each answered 500).
   for (const key of ['name', 'description', 'sourceProductId']) {
-    if (typeof b[key] === 'string' && (b[key] as string).includes('\u0000')) {
+    if (typeof b[key] === 'string' && unstorableText(b[key] as string)) {
       throw new BadRequestException(`${key} contains a character that cannot be stored`);
     }
   }
@@ -331,6 +339,9 @@ export class BookingsController {
       locationPlaceId: body.locationPlaceId ? sanitizeString(body.locationPlaceId, 200) : undefined,
       locationLatLng: body.locationLatLng ?? undefined,
       storefrontSlug: body.storefrontSlug ? sanitizeString(body.storefrontSlug, 200) : undefined,
+      // V1-64 review SEC2-BPG-1: the slug exactly as the customer's page sent it, for the payment-method gate only.
+      // sanitizeString strips tokens a real slug may hold ('--'), so the sanitised copy above is not the store's slug.
+      storefrontSlugAsSent: typeof body.storefrontSlug === 'string' ? body.storefrontSlug : null,
       visitorId: body.visitorId ? sanitizeString(body.visitorId, 100) : undefined,
       referralCode: body.referralCode ? sanitizeString(body.referralCode, 100) : undefined,
       orgUnitId: body.orgUnitId ? sanitizeString(body.orgUnitId, 200) : undefined,

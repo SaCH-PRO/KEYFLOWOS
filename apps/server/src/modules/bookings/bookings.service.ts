@@ -1958,7 +1958,10 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
    * Review SEC-BPG-1 / COR-BPG-6 (the packet: the route needs a slug, and no
    * new unauthenticated read by business id): the gateway list is published by
    * slug only, so a provider method is taken only when the body's
-   * storefrontSlug is this business's own slug, compared exactly. By id alone,
+   * storefrontSlug is this business's own slug, compared exactly and as sent
+   * (review SEC2-BPG-1: not the copy sanitizeString rewrote, which strips
+   * tokens a real slug holds, such as '--'; the slug route reads its param
+   * unsanitised too). By id alone,
    * with another store's slug, or for a business with no slug, every provider
    * method is refused, and every refusal of a method is one body (the method's
    * name, nothing of why), so the route tells a caller without the slug nothing
@@ -2029,6 +2032,11 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     orgUnitId?: string | null;
     /** V1-64: the method the customer chose, as sent or normalised; null / undefined is no method. Checked, not stored. */
     paymentMethod?: string | null;
+    /**
+     * V1-64 (review SEC2-BPG-1): the storefront slug exactly as sent, unsanitised, read only by the payment-method
+     * gate; null is "none sent". A caller that leaves it undefined is compared on storefrontSlug.
+     */
+    storefrontSlugAsSent?: string | null;
   }) {
     const business = await this.prisma.client.business.findFirstOrThrow({
       where: { id: input.businessId, deletedAt: null },
@@ -2043,7 +2051,11 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     // or written (no contact, storefront event, booking or invoice), and only
     // for an open store, so a closed store's answer says nothing of its
     // payment settings.
-    this.assertPublicPaymentMethodOffered(business, input.paymentMethod, input.storefrontSlug);
+    this.assertPublicPaymentMethodOffered(
+      business,
+      input.paymentMethod,
+      input.storefrontSlugAsSent !== undefined ? input.storefrontSlugAsSent : input.storefrontSlug,
+    );
 
     const service = await this.prisma.client.service.findFirstOrThrow({
       where: { id: input.serviceId, businessId: input.businessId, deletedAt: null },
