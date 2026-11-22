@@ -430,16 +430,18 @@ describe('FU-TEMPORAL-FLOW-INBOX-SCOPE review repairs: the timeline writes do no
   });
 
   it('SEC N-3: a bookings writer cannot upsert over a KEY Inbox event by its external id, nor read it back', async () => {
-    const externalId = `${P}key-inbox:key_inbox.message_received:thread`;
-    await db.temporalFlowEvent.update({ where: { id: idOf('inboxReceived') }, data: { externalId } });
+    // A source the create DTO accepts (MANUAL), so the case reaches the service whether or not the body is validated:
+    // the KEY Inbox trend event recorded by hand (type key_inbox.*, operations).
+    const externalId = `${P}inbox-trend-ext`;
+    await db.temporalFlowEvent.update({ where: { id: idOf('inboxTypeOnly') }, data: { externalId, summary: SENDER_HANDLE } });
     const res = await as(
-      agent().post(`/temporal-flow/businesses/${ID.biz}`).send({ source: 'key_inbox', type: 'manual.note', title: `${P}overwrite`, externalId }),
+      agent().post(`/temporal-flow/businesses/${ID.biz}`).send({ source: 'MANUAL', type: 'manual.note', title: `${P}overwrite`, externalId }),
       ID.bookingsWriter,
     );
     expect(res.status, JSON.stringify(res.body)).toBe(403);
     expectNoSecret(res.body, 'bookingsWriter upsert');
-    const row = await db.temporalFlowEvent.findUnique({ where: { id: idOf('inboxReceived') }, select: { title: true, summary: true } });
-    expect(row).toEqual({ title: 'key_inbox message received', summary: SENDER_HANDLE });
+    const row = await db.temporalFlowEvent.findUnique({ where: { id: idOf('inboxTypeOnly') }, select: { title: true, type: true, summary: true } });
+    expect(row).toEqual({ title: `Trend ${AI_SUMMARY}`, type: 'key_inbox.trend_detected', summary: SENDER_HANDLE });
   });
 
   it('SEC N-3: a bookings writer still creates and upserts their own business-wide events', async () => {
