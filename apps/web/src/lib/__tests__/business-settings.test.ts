@@ -22,6 +22,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import * as settings from "../business-settings";
+import { apiGet } from "../api";
 import { clearStoredBusinessId, setStoredBusinessId, setStoredToken } from "../workspace";
 import type { BusinessAdvancedSettingsWrite, BusinessSells } from "../business-settings";
 
@@ -722,6 +723,91 @@ describe("review round 3 (SEC3-1/COR3-1, SEC3-2, SEC3-3)", () => {
 
   it("a hub depth write answered without any depth is not confirmed", async () => {
     stubRoutes({ [`PATCH /identity/businesses/${BIZ_A}/advanced-settings`]: { status: 200, body: { id: BIZ_A, sells: "both", advancedCrm: false } } });
+    const res = await lib.saveAdvancedSettings(BIZ_A, { depth: { money: "standard" } });
+    expect((res.error ?? "").trim()).not.toBe("");
+  });
+});
+
+describe("review round 4 (SEC4-1, SEC4-2/COR4-2, SEC4-3): a read after a write is a new request, and no reader is stranded", () => {
+  const wire = (sent: Sent[]) => sent.filter((s) => s.method === "GET").length;
+
+  it("the re-read forced by a write does not join a request sent before the write: the post-write answer wins", async () => {
+    window.localStorage.setItem(BUSINESS_ID_KEY, BIZ_A);
+    const releases: Array<(a: Answer) => void> = [];
+    let reads = 0;
+    const sent = stubRoutes({
+      [`GET /identity/businesses/${BIZ_A}`]: () => {
+        reads += 1;
+        if (reads === 1) return { status: 200, body: business(BIZ_A, { sells: "services" }) };
+        return new Promise<Answer>((resolve) => releases.push(resolve));
+      },
+      // An answer for this business that carries no settings: what it holds must be read again.
+      [`PATCH /identity/businesses/${BIZ_A}/advanced-settings`]: { status: 200, body: { id: BIZ_A } },
+    });
+    const { result } = renderHook(() => lib.useBusinessSettings());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    let reloaded: Promise<unknown> = Promise.resolve();
+    act(() => {
+      reloaded = result.current.reload();
+    });
+    await waitFor(() => expect(wire(sent)).toBe(2));
+    await act(async () => void (await lib.saveAdvancedSettings(BIZ_A, { advancedCrm: true })));
+    // A new request, on the wire, after the write answered.
+    await waitFor(() => expect(wire(sent)).toBe(3));
+    await act(async () => {
+      releases[1]({ status: 200, body: business(BIZ_A, { sells: "services", advancedCrm: true }) });
+      releases[0]({ status: 200, body: business(BIZ_A, { sells: "services", advancedCrm: false }) });
+      await reloaded;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    expect(result.current).toMatchObject({ status: "ready", advancedCrm: true });
+  });
+
+  it("a read never joins another caller's identical request already on the wire", async () => {
+    let release: (a: Answer) => void = () => {};
+    let reads = 0;
+    const sent = stubRoutes({
+      [`GET /identity/businesses/${BIZ_A}`]: () => {
+        reads += 1;
+        if (reads === 1) return new Promise<Answer>((resolve) => (release = resolve));
+        return { status: 200, body: business(BIZ_A, { sells: "products" }) };
+      },
+    });
+    const elsewhere = apiGet(`/identity/businesses/${BIZ_A}`);
+    await waitFor(() => expect(wire(sent)).toBe(1));
+    const { result } = renderHook(() => lib.useBusinessSettings(BIZ_A));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(wire(sent)).toBe(2);
+    expect(result.current.sells).toBe("products");
+    release({ status: 200, body: business(BIZ_A) });
+    await elsewhere;
+  });
+
+  it("a reader that mounts while an overtaken read is still out is not left on loading", async () => {
+    const releases: Array<(a: Answer) => void> = [];
+    stubRoutes({ [`GET /identity/businesses/${BIZ_A}`]: () => new Promise<Answer>((resolve) => releases.push(resolve)) });
+    const first = renderHook(() => lib.useBusinessSettings(BIZ_A));
+    await waitFor(() => expect(releases).toHaveLength(1));
+    first.unmount();
+    // A write's answer for this business that carries no settings, while nobody reads it.
+    act(() => void lib.noteBusinessSettings(BIZ_A, { id: BIZ_A }));
+    const second = renderHook(() => lib.useBusinessSettings(BIZ_A));
+    await waitFor(() => expect(releases).toHaveLength(2));
+    await act(async () => {
+      releases[0]({ status: 200, body: business(BIZ_A, { sells: "services" }) });
+      releases[1]({ status: 200, body: business(BIZ_A, { sells: "products" }) });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    expect(second.result.current).toMatchObject({ status: "ready", sells: "products" });
+  });
+
+  it.each([
+    ["no hub at all", {}],
+    ["another hub only", { sales: "standard" }],
+    ["a value that is not a depth", { money: "bogus" }],
+  ])("a depth write is confirmed only by the answer holding that hub at that depth: %s", async (_name, depth) => {
+    stubRoutes({ [`PATCH /identity/businesses/${BIZ_A}/advanced-settings`]: { status: 200, body: { id: BIZ_A, sells: "both", advancedCrm: false, depth } } });
     const res = await lib.saveAdvancedSettings(BIZ_A, { depth: { money: "standard" } });
     expect((res.error ?? "").trim()).not.toBe("");
   });

@@ -444,3 +444,59 @@ describe("review round 2 (COR2-1, COR2-2): the keyboard is not dropped, and a pr
   });
 });
 
+describe("review round 4 (COR4-1, COR4-3): recovery never takes the keyboard from where the member put it", () => {
+  const nameInput = () => screen.getByPlaceholderText("Your Business Name") as HTMLInputElement;
+
+  it("a failed retry, then a recovery when the tab is looked at again: focus stays in the field being used", async () => {
+    let answer: Answer = { status: 500, body: { statusCode: 500, message: "Internal server error" } };
+    stubRoutes({ [`GET ${PROFILE}`]: () => answer });
+    mount();
+    const retry = await screen.findByRole("button", { name: /try again/i });
+    retry.focus();
+    fireEvent.click(retry);
+    await waitFor(() => expect(retry).not.toHaveAttribute("aria-busy", "true"));
+    await screen.findByRole("button", { name: /^try again$/i });
+
+    nameInput().focus();
+    answer = { status: 200, body: business({ sells: "products" }) };
+    fireEvent(window, new Event("focus"));
+    await ready();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(document.activeElement).toBe(nameInput());
+  });
+
+  it("focus moved elsewhere while a retry is out stays there when it succeeds", async () => {
+    let release: (a: Answer) => void = () => {};
+    let reads = 0;
+    stubRoutes({
+      [`GET ${PROFILE}`]: () => {
+        reads += 1;
+        if (reads === 1) return { status: 500, body: { statusCode: 500, message: "Internal server error" } };
+        return new Promise<Answer>((resolve) => (release = resolve));
+      },
+    });
+    mount();
+    const retry = await screen.findByRole("button", { name: /try again/i });
+    retry.focus();
+    fireEvent.click(retry);
+    await waitFor(() => expect(reads).toBe(2));
+    nameInput().focus();
+    release({ status: 200, body: business({ sells: "products" }) });
+    await ready();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(document.activeElement).toBe(nameInput());
+  });
+
+  it("the failure is said in a region that was already on the page, so it is announced", async () => {
+    let release: (a: Answer) => void = () => {};
+    stubRoutes({ [`GET ${PROFILE}`]: () => new Promise<Answer>((resolve) => (release = resolve)) });
+    mount();
+    const region = await screen.findByTestId("business-settings-load-status");
+    expect(region).toHaveAttribute("role", "status");
+    expect((region.textContent ?? "").trim()).toBe("");
+    release({ status: 500, body: { statusCode: 500, message: "Internal server error" } });
+    await waitFor(() => expect(region).toHaveTextContent(/couldn't load what you sell and the advanced crm switch/i));
+    expect(screen.getByTestId("business-settings-load-status")).toBe(region);
+  });
+});
+

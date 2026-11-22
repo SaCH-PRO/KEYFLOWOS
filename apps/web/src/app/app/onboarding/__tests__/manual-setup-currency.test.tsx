@@ -423,5 +423,38 @@ describe("the form asks what the business sells", () => {
     expect(sent.some((s) => s.method === "POST" && s.path === COMPLETE_PATH)).toBe(false);
     expect(router.replace).not.toHaveBeenCalled();
   });
+
+  it("review OBS4-1: a save answered after someone else signed in here finishes nothing for them", async () => {
+    const token = (sub: string) => `h.${btoa(JSON.stringify({ sub }))}.s`;
+    window.localStorage.setItem("kf_token", token("user_bsw_owner_session"));
+    let release: (a: Answer) => void = () => {};
+    const routes = ownerRoutes();
+    const sent: Sent[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        const method = (init?.method ?? "GET").toUpperCase();
+        const pathname = new URL(url, "http://localhost").pathname;
+        const body = typeof init?.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : null;
+        sent.push({ method, path: pathname, body });
+        const route = routes[`${method} ${pathname}`];
+        const answer =
+          method === "PATCH" ? await new Promise<Answer>((resolve) => (release = resolve)) : typeof route === "function" ? route(body) : route;
+        return new Response(JSON.stringify(answer.body), { status: answer.status, headers: { "content-type": "application/json" } });
+      }),
+    );
+    await mount(sent);
+    fill({ ...VALID, currency: "TTD" });
+    fireEvent.click(choice("Products"));
+    fireEvent.click(finish());
+    await waitFor(() => expect(patches(sent)).toHaveLength(1));
+    window.localStorage.setItem("kf_token", token("user_bsw_someone_else"));
+    release({ status: 200, body: { ...STORED, name: VALID.name, currency: "TTD", timezone: VALID.timezone, sells: "products" } });
+    const alert = await screen.findByRole("alert");
+    expect((alert.textContent ?? "").trim()).not.toBe("");
+    expect(sent.some((s) => s.method === "POST" && s.path === COMPLETE_PATH)).toBe(false);
+    expect(router.replace).not.toHaveBeenCalled();
+  });
 });
 
