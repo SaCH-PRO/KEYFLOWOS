@@ -813,3 +813,46 @@ describe("review round 4 (SEC4-1, SEC4-2/COR4-2, SEC4-3): a read after a write i
   });
 });
 
+describe("review round 5 (SEC5-1): a write whose answer never arrived may have been applied", () => {
+  it.each([
+    ["what you sell", `PATCH /identity/businesses/${BIZ_A}`, () => lib.saveBusinessSells(BIZ_A, "products")],
+    ["the switch", `PATCH /identity/businesses/${BIZ_A}/advanced-settings`, () => lib.saveAdvancedSettings(BIZ_A, { advancedCrm: true })],
+  ] as Array<[string, string, () => Promise<{ error: string | null }>]>)("%s: it is answered as a failure, and the business is read again so what is shown is what it holds", async (_name, route, send) => {
+    window.localStorage.setItem(BUSINESS_ID_KEY, BIZ_A);
+    let held = business(BIZ_A, { sells: "services" });
+    const sent = stubRoutes({
+      [`GET /identity/businesses/${BIZ_A}`]: () => ({ status: 200, body: held }),
+      [route]: () => {
+        // The server applied it; the connection dropped before the answer.
+        held = business(BIZ_A, { sells: "products", advancedCrm: true });
+        throw new TypeError("Failed to fetch");
+      },
+    });
+    const { result } = renderHook(() => lib.useBusinessSettings());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    const readsBefore = sent.filter((s) => s.method === "GET").length;
+
+    let res: { error: string | null } = { error: null };
+    await act(async () => {
+      res = await send();
+    });
+    expect((res.error ?? "").trim()).not.toBe("");
+    await waitFor(() => expect(sent.filter((s) => s.method === "GET").length).toBeGreaterThan(readsBefore));
+    await waitFor(() => expect(result.current).toMatchObject({ status: "ready", sells: "products", advancedCrm: true }));
+  });
+
+  it("a refusal the server did answer (a 403) asks nothing more", async () => {
+    window.localStorage.setItem(BUSINESS_ID_KEY, BIZ_A);
+    const sent = stubRoutes({
+      [`GET /identity/businesses/${BIZ_A}`]: { status: 200, body: business(BIZ_A) },
+      [`PATCH /identity/businesses/${BIZ_A}`]: { status: 403, body: forbidden("Only the business owner can edit the business profile") },
+    });
+    const { result } = renderHook(() => lib.useBusinessSettings());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    const readsBefore = sent.filter((s) => s.method === "GET").length;
+    await act(async () => void (await lib.saveBusinessSells(BIZ_A, "products")));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(sent.filter((s) => s.method === "GET").length).toBe(readsBefore);
+  });
+});
+
