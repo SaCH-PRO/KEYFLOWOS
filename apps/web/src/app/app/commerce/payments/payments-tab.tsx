@@ -271,7 +271,7 @@ export default function PaymentsTab({
       if (actionLoading[invoiceId]) return;
       setActionLoading((prev) => ({ ...prev, [invoiceId]: "paid" }));
       try {
-        const { data, error } = await markInvoicePaid(invoiceId);
+        const { data, error } = await markInvoicePaid(invoiceId, businessId ?? undefined);
         if (!error && data) {
           const current = invoices.find((i) => i.id === invoiceId);
           const settled = current ? await afterMarkPaid(current, data, businessId) : null;
@@ -366,7 +366,7 @@ export default function PaymentsTab({
       toast.info("No eligible invoices to mark as paid");
       return;
     }
-    const results = await Promise.all(ids.map((id) => markInvoicePaid(id)));
+    const results = await Promise.all(ids.map((id) => markInvoicePaid(id, businessId)));
     const succeeded = results.filter((r) => r.data).length;
     if (succeeded > 0) {
       const settled = new Map<string, Invoice>();
