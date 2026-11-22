@@ -103,6 +103,8 @@ const DNS: Record<string, (n: number) => Array<{ address: string; family: number
   'mapped.v99h.test': () => [{ address: '::ffff:169.254.169.254', family: 6 }],
   'ula.v99h.test': () => [{ address: 'fd00:ec2::254', family: 6 }],
   'mixed.v99h.test': () => [{ address: PUBLIC_ADDRESS, family: 4 }, { address: '192.168.1.10', family: 4 }],
+  // The resolver could not answer now (review: correctness 1, security 1): no answer about the name.
+  'blip.v99h.test': () => { throw Object.assign(new Error('getaddrinfo EAI_AGAIN blip.v99h.test'), { code: 'EAI_AGAIN' }); },
   // DNS rebinding: public to the first question, loopback to every one after it.
   'rebind.v99h.test': (n) => [{ address: n === 1 ? PUBLIC_ADDRESS : '127.0.0.1', family: 4 }],
 };
@@ -242,6 +244,8 @@ beforeAll(async () => {
     lookups.push(hostname);
     const name = hostname.toLowerCase().replace(/\.$/, '');
     lookupCount[name] = (lookupCount[name] ?? 0) + 1;
+    // A resolver that never answers (review: correctness 2): settles long after the fetch's 30 s deadline.
+    if (name === 'hang.v99h.test') return new Promise((resolve) => setTimeout(() => resolve([{ address: PUBLIC_ADDRESS, family: 4 }]), 45_000).unref());
     const answer = DNS[name];
     if (!answer) throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${hostname}`), { code: 'ENOTFOUND' });
     return answer(lookupCount[name]);
@@ -400,7 +404,8 @@ describe('FU-CONTRACT-FETCH-OUTBOUND-GUARD (D-246): contract_extract_clauses fet
     // A redirect loop between public hosts: refused once the hop limit is passed, with the same body.
     hostAnswers = { [PUBLIC_HOST]: (_p, n) => redirect(`/loop/${n}`) };
     expectRefused(await runTool({ contractId: ID.contract, url: `https://${PUBLIC_HOST}/contract.pdf` }), 'loop');
-    expect(fetches.length).toBeLessThanOrEqual(6);
+    // MAX_DOCUMENT_REDIRECTS (5) redirects followed, so six requests, then the refusal (review: correctness 3).
+    expect(fetches).toHaveLength(6);
     resetRecords();
 
     // A redirect to another public host (and a relative one) is followed, each hop pinned to its own checked address.
@@ -491,4 +496,31 @@ describe('FU-CONTRACT-FETCH-OUTBOUND-GUARD (D-246): contract_extract_clauses fet
     expect(missing.error).toBeInstanceOf(BadRequestException);
     expect((missing.error as Error).message).toBe('Could not fetch document URL (404)');
   });
+
+  it('CF-07 a resolver that could not answer now (EAI_AGAIN) is no refusal: the plan queue retries it and counts it, as it did a failed fetch, and the answer names no address and no resolver code', async () => {
+    const url = 'https://blip.v99h.test/contract.pdf';
+    const direct = await runTool({ contractId: ID.contract, url });
+    expect(direct.ok).toBe(false);
+    expect(direct.error).not.toBeInstanceOf(HttpException);
+    expect((direct.error as Error).message).not.toBe(REFUSAL);
+    expect((direct.error as Error).message).not.toMatch(/EAI_AGAIN|blip/);
+    expect(fetches).toEqual([]);
+    resetRecords();
+
+    const dispatcher = makeDispatcher();
+    const answered = await dispatcher.dispatch({ businessId: ID.biz, toolName: TOOL, args: { contractId: ID.contract, url }, retryCount: 2 });
+    expect(answered).toMatchObject({ success: false });
+    expect(lookups, 'tried three times').toEqual([url, url, url].map(() => 'blip.v99h.test'));
+    expect(dispatcher.getCircuitStatus(TOOL, ID.biz)).toMatchObject({ open: false, failures: 1 });
+    expect(fetches).toEqual([]);
+  });
+
+  it('CF-08 the 30 s deadline of a document fetch bounds resolving its host too', async () => {
+    const started = Date.now();
+    const outcome = await runTool({ contractId: ID.contract, url: 'https://hang.v99h.test/contract.pdf' });
+    const elapsed = Date.now() - started;
+    expect(outcome.ok).toBe(false);
+    expect(elapsed).toBeLessThan(40_000);
+    expect(fetches).toEqual([]);
+  }, 50_000);
 });
