@@ -1231,7 +1231,12 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
     try {
       const weakSignals = await this.intuition.detectWeakSignals(businessId);
       const highImpactSignals = weakSignals.filter(
-        (s) => (s.potentialImpact === 'high' || s.potentialImpact === 'critical') && !hidden(s.description) && !hidden(s.recommendedInvestigation),
+        // Round 3 (security MINOR-3): judged by its sources too (revenue_data ...), as awareness judges every value.
+        (s) =>
+          (s.potentialImpact === 'high' || s.potentialImpact === 'critical') &&
+          !hidden(s.description) &&
+          !hidden(s.recommendedInvestigation) &&
+          !((s as { sources?: unknown }).sources instanceof Array && ((s as { sources?: unknown[] }).sources ?? []).some((src) => hidden(src))),
       );
       for (const signal of highImpactSignals.slice(0, 3)) {
         goals.push(

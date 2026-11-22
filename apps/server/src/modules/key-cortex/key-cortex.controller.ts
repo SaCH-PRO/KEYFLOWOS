@@ -140,7 +140,9 @@ import { GuardedBusinessId, resolveRequestBusinessId } from '../../core/auth/req
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { membershipApprovalTier } from '../../core/authority/approval-tier';
 import {
+  CANONICAL_MODULES,
   DEFAULT_APPROVAL_TIERS,
+  defaultScopesForRole,
   LEVEL_RANK,
   MAX_APPROVAL_TIER,
   memberScopeMap,
@@ -571,6 +573,21 @@ export const CortexMember = createParamDecorator((_data: unknown, ctx: Execution
  * GET insights/revenue (memberScopeMap; a platform SUPER_ADMIN passes). No
  * authority reads none (fails closed).
  */
+/**
+ * FU-KEY-GENOME-READS-RESIDUAL round 3 (security MINOR-1; SEC-V109b-1, D-130, D-140): whether the viewer has the
+ * business owner's full sight: a platform SUPER_ADMIN, or an OWNER whose scopes read every module the OWNER role reads by
+ * default (as mayReadFullKeyContext). A scoped OWNER (an explicit map narrower than that) does not.
+ */
+export function viewerHasFullOwnerSight(viewer: CortexMemberAuthority | undefined): boolean {
+  if (!viewer) return false;
+  if (viewer.superAdmin) return true;
+  if (viewer.role !== 'OWNER') return false;
+  const ownerDefaults = defaultScopesForRole('OWNER');
+  return CANONICAL_MODULES.every(
+    (module) => rankOf(ownerDefaults[module]) < LEVEL_RANK.read || rankOf(viewer.scopes[module] || 'none') >= LEVEL_RANK.read,
+  );
+}
+
 export function viewerReadsRevenue(viewer: CortexMemberAuthority | undefined): boolean {
   if (!viewer) return false;
   if (viewer.superAdmin) return true;
@@ -4454,7 +4471,7 @@ export class KeyCortexController {
         readsRevenue: viewerReadsRevenue(viewer),
         userId: viewer?.userId,
         // Round 2 (security MAJOR-3): an owner or a platform admin is explained any decision of the business.
-        ownerView: viewer?.superAdmin === true || viewer?.role === 'OWNER',
+        ownerView: viewerHasFullOwnerSight(viewer),
       });
     } catch (err: any) {
       // A decision that does not exist (another business's, or a money decision the reader may not see) is a 404.

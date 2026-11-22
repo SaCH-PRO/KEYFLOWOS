@@ -356,7 +356,8 @@ describe('round-3 review repairs (security MINOR-1, MINOR-3; correctness M1, M2)
   it('RED-BEFORE (security MINOR-1): a scoped OWNER (an explicit map without full owner sight) gets no owner view of other members\' decisions', async () => {
     const { viewerHasFullOwnerSight } = await import('../key-cortex.controller');
     const owner = (scopes: Record<string, string>) => ({ userId: 'o', businessId: 'b', role: 'OWNER', superAdmin: false, scopes, member: true });
-    const full = Object.fromEntries(['crm', 'revenue', 'expenses', 'bookings', 'projects', 'operations', 'content', 'storefront', 'automations', 'settings', 'team', 'ai', 'connect'].map((m) => [m, 'admin']));
+    const { CANONICAL_MODULES } = await import('../../../core/authority/module-vocabulary');
+    const full = Object.fromEntries(CANONICAL_MODULES.map((m) => [m, 'admin']));
     expect(viewerHasFullOwnerSight(owner(full) as any)).toBe(true);
     expect(viewerHasFullOwnerSight(owner({ ...full, revenue: 'none' }) as any)).toBe(false);
     expect(viewerHasFullOwnerSight({ ...owner(full), role: 'ADMIN' } as any)).toBe(false);
