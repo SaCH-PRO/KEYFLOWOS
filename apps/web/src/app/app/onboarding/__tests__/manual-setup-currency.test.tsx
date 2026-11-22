@@ -32,7 +32,7 @@ const BUSINESS_PATH = `/identity/businesses/${BIZ}`;
 const COMPLETE_PATH = `/onboarding-concierge/businesses/${BIZ}/complete`;
 
 type Sent = { method: string; path: string; body: Record<string, unknown> | null };
-type Answer = { status: number; body: unknown };
+type Answer = { status: number; body: unknown; bare?: boolean };
 type Routes = Record<string, Answer | (() => Answer)>;
 
 /** fetch answering by "METHOD /path"; an unlisted route is a 500 so nothing passes by accident. */
@@ -49,7 +49,7 @@ function stubRoutes(routes: Routes): Sent[] {
       const answer = route ? (typeof route === "function" ? route() : route) : { status: 500, body: { message: `no route ${method} ${pathname}` } };
       return new Response(JSON.stringify(answer.body), {
         status: answer.status,
-        statusText: answer.status === 403 ? "Forbidden" : answer.status >= 400 ? "Error" : "OK",
+        statusText: answer.bare ? "" : answer.status === 403 ? "Forbidden" : answer.status >= 400 ? "Error" : "OK",
         headers: { "content-type": "application/json" },
       });
     }),
@@ -321,4 +321,57 @@ describe("the form asks what the business sells", () => {
     expect(router.replace).not.toHaveBeenCalled();
     expect(choice("Products").checked).toBe(true);
   });
+
+  it("review SEC-3: a save refused with no words at all (HTTP/2) is still a refusal: nothing is finished", async () => {
+    const sent = stubRoutes(
+      ownerRoutes(STORED, { [`PATCH ${BUSINESS_PATH}`]: { status: 403, body: { statusCode: 403, message: "" }, bare: true } }),
+    );
+    await mount(sent);
+    fill({ ...VALID, currency: "TTD" });
+    fireEvent.click(choice("Products"));
+    fireEvent.click(finish());
+    const alert = await screen.findByRole("alert");
+    expect((alert.textContent ?? "").trim()).not.toBe("");
+    expect(sent.some((s) => s.method === "POST" && s.path === COMPLETE_PATH)).toBe(false);
+    expect(router.replace).not.toHaveBeenCalled();
+  });
+
+  it("review OBS-7: a prefill answer naming another business is not taken as this business's answer", async () => {
+    const sent = stubRoutes(ownerRoutes({ ...STORED, id: "biz_bsw_someone_else", name: "Someone Else Ltd", sells: "services" }));
+    await mount(sent);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(choice("Both").checked).toBe(true);
+    expect((within(form()).getByLabelText("Business name") as HTMLInputElement).value).toBe("");
+  });
+
+  it("review COR-2: when what the business holds could not be read, no answer is drawn as its own, and none is sent", async () => {
+    const sent = stubRoutes(ownerRoutes(STORED, { [`GET ${BUSINESS_PATH}`]: { status: 500, body: { statusCode: 500, message: "Internal server error" } } }));
+    await mount(sent);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const radios = within(question()).getAllByRole("radio") as HTMLInputElement[];
+    expect(radios.filter((r) => r.checked)).toEqual([]);
+    fill({ ...VALID, currency: "TTD" });
+    fireEvent.click(finish());
+    await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/app/command-center"));
+    expect(patches(sent).every((p) => !("sells" in (p.body ?? {})))).toBe(true);
+  });
+
+  it("review COR-2: pressing the answer already shown records it as the owner's answer", async () => {
+    const sent = stubRoutes(ownerRoutes());
+    await mount(sent);
+    await waitFor(() => expect(choice("Both").checked).toBe(true));
+    fill({ ...VALID, currency: "TTD" });
+    fireEvent.click(choice("Both"));
+    fireEvent.click(finish());
+    await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/app/command-center"));
+    expect(patches(sent)).toHaveLength(1);
+    expect(patches(sent)[0].body).toMatchObject({ sells: "both" });
+  });
+
+  it("review COR-5: each choice is a full-size touch target", async () => {
+    const sent = stubRoutes(ownerRoutes());
+    await mount(sent);
+    for (const radio of within(question()).getAllByRole("radio")) expect(radio.closest("label")?.className).toContain("min-h-[44px]");
+  });
 });
+

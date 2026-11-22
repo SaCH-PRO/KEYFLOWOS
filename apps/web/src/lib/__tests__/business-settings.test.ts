@@ -22,6 +22,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import * as settings from "../business-settings";
+import { clearStoredBusinessId, setStoredBusinessId, setStoredToken } from "../workspace";
 import type { BusinessAdvancedSettingsWrite, BusinessSells } from "../business-settings";
 
 /**
@@ -51,7 +52,7 @@ function serverList(name: string): string[] {
 const SERVER_HUBS = serverList("BUSINESS_HUBS");
 
 type Sent = { method: string; path: string; body: Record<string, unknown> | null };
-type Answer = { status: number; body: unknown };
+type Answer = { status: number; body: unknown; bare?: boolean };
 type Routes = Record<string, Answer | (() => Answer | Promise<Answer>)>;
 
 /** fetch answering by "METHOD /path"; an unlisted route is a 500 so nothing passes by accident. */
@@ -68,7 +69,8 @@ function stubRoutes(routes: Routes): Sent[] {
       const answer = route ? (typeof route === "function" ? await route() : route) : { status: 500, body: { message: `no route ${method} ${pathname}` } };
       return new Response(JSON.stringify(answer.body), {
         status: answer.status,
-        statusText: answer.status === 403 ? "Forbidden" : answer.status === 400 ? "Bad Request" : "OK",
+        // HTTP/2 carries no reason phrase: `bare` answers as a browser sees one there.
+        statusText: answer.bare ? "" : answer.status === 403 ? "Forbidden" : answer.status === 400 ? "Bad Request" : "OK",
         headers: { "content-type": "application/json" },
       });
     }),
@@ -374,3 +376,247 @@ describe("useBusinessSettings()", () => {
     expect(result.current.sells).toBe("products");
   });
 });
+
+/** A session token as the browser stores one: only its subject matters here. */
+const tokenFor = (sub: string) => `h.${btoa(JSON.stringify({ sub }))}.s`;
+
+describe("review SEC-1: what one member read is never shown to the next", () => {
+  it("after a sign-out and another member's sign-in (the app's own helpers, no reload), the next reader starts from nothing", async () => {
+    setStoredToken(tokenFor("user_bsw_one"));
+    setStoredBusinessId(BIZ_A);
+    let answer: Answer = { status: 200, body: business(BIZ_A, { sells: "products", advancedCrm: true }) };
+    stubRoutes({ [`GET /identity/businesses/${BIZ_A}`]: () => answer });
+    const first = renderHook(() => lib.useBusinessSettings());
+    await waitFor(() => expect(first.result.current.status).toBe("ready"));
+    expect(first.result.current).toMatchObject({ sells: "products", advancedCrm: true });
+    first.unmount();
+
+    // Sign-out, then member two signs in to the same business; the API is failing.
+    clearStoredBusinessId();
+    setStoredToken(tokenFor("user_bsw_two"));
+    setStoredBusinessId(BIZ_A);
+    answer = { status: 502, body: { message: "Bad gateway" } };
+
+    const seen: Array<{ status: string; sells: string; advancedCrm: boolean }> = [];
+    const second = renderHook(() => {
+      const state = lib.useBusinessSettings();
+      seen.push({ status: state.status, sells: state.sells, advancedCrm: state.advancedCrm });
+      return state;
+    });
+    await waitFor(() => expect(second.result.current.status).toBe("failed"));
+    // Not on any render: member one's 'products' and Advanced CRM.
+    expect(seen.filter((s) => s.sells !== "both" || s.advancedCrm || s.status === "ready")).toEqual([]);
+  });
+
+  it("the same holds for a reader given the business id, and for a member who changes while a hook stays mounted", async () => {
+    setStoredToken(tokenFor("user_bsw_one"));
+    let answer: Answer = { status: 200, body: business(BIZ_A, { sells: "services", advancedCrm: true }) };
+    stubRoutes({ [`GET /identity/businesses/${BIZ_A}`]: () => answer });
+    const { result, rerender } = renderHook(() => lib.useBusinessSettings(BIZ_A));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    setStoredToken(tokenFor("user_bsw_two"));
+    answer = { status: 403, body: forbidden("No access to this business") };
+    rerender();
+    expect(result.current).toMatchObject({ sells: "both", advancedCrm: false });
+    expect(result.current.status).not.toBe("ready");
+    await waitFor(() => expect(result.current.status).toBe("failed"));
+  });
+
+  it("a read answered after the member changed is not recorded for the new member", async () => {
+    setStoredToken(tokenFor("user_bsw_one"));
+    let release: (a: Answer) => void = () => {};
+    let reads = 0;
+    stubRoutes({
+      [`GET /identity/businesses/${BIZ_A}`]: () => {
+        reads += 1;
+        if (reads === 1) return new Promise<Answer>((resolve) => (release = resolve));
+        return { status: 403, body: forbidden("No access to this business") };
+      },
+    });
+    const first = renderHook(() => lib.useBusinessSettings(BIZ_A));
+    await waitFor(() => expect(reads).toBe(1));
+    first.unmount();
+    setStoredToken(tokenFor("user_bsw_two"));
+    await act(async () => {
+      release({ status: 200, body: business(BIZ_A, { sells: "products", advancedCrm: true }) });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    const second = renderHook(() => lib.useBusinessSettings(BIZ_A));
+    expect(second.result.current).toMatchObject({ sells: "both", advancedCrm: false });
+    await waitFor(() => expect(second.result.current.status).toBe("failed"));
+    expect(second.result.current).toMatchObject({ sells: "both", advancedCrm: false });
+  });
+
+  it("the same member reading again keeps what they read", async () => {
+    setStoredToken(tokenFor("user_bsw_one"));
+    stubRoutes({ [`GET /identity/businesses/${BIZ_A}`]: { status: 200, body: business(BIZ_A, { sells: "products" }) } });
+    const first = renderHook(() => lib.useBusinessSettings(BIZ_A));
+    await waitFor(() => expect(first.result.current.status).toBe("ready"));
+    first.unmount();
+    // A refreshed token for the same member is the same member.
+    setStoredToken(`h.${btoa(JSON.stringify({ sub: "user_bsw_one", exp: 2 }))}.s2`);
+    const second = renderHook(() => lib.useBusinessSettings(BIZ_A));
+    expect(second.result.current).toMatchObject({ status: "ready", sells: "products" });
+  });
+});
+
+describe("review SEC-2: a write whose answer is not this business's is not a success", () => {
+  const doors: Array<[string, string, () => Promise<{ error: string | null }>]> = [
+    ["what you sell", `PATCH /identity/businesses/${BIZ_A}`, () => lib.saveBusinessSells(BIZ_A, "products")],
+    ["the Advanced CRM switch", `PATCH /identity/businesses/${BIZ_A}/advanced-settings`, () => lib.saveAdvancedSettings(BIZ_A, { advancedCrm: true })],
+  ];
+  const strays: Array<[string, unknown]> = [
+    ["another business's", business(BIZ_B, { sells: "products", advancedCrm: true })],
+    ["no body", null],
+    ["a list", [business(BIZ_A, { sells: "products", advancedCrm: true })]],
+  ];
+  for (const [door, route, send] of doors) {
+    for (const [what, body] of strays) {
+      it(`${door}: a 200 carrying ${what} is answered as an error, nothing of it is shown, and the business is read again`, async () => {
+        window.localStorage.setItem(BUSINESS_ID_KEY, BIZ_A);
+        const sent = stubRoutes({
+          [`GET /identity/businesses/${BIZ_A}`]: { status: 200, body: business(BIZ_A, { sells: "services" }) },
+          [route]: { status: 200, body },
+        });
+        const { result } = renderHook(() => lib.useBusinessSettings());
+        await waitFor(() => expect(result.current.status).toBe("ready"));
+        const readsBefore = sent.filter((s) => s.method === "GET").length;
+
+        let res: { error: string | null } = { error: null };
+        await act(async () => {
+          res = await send();
+        });
+        expect(typeof res.error).toBe("string");
+        expect((res.error ?? "").trim()).not.toBe("");
+        await waitFor(() => expect(sent.filter((s) => s.method === "GET").length).toBeGreaterThan(readsBefore));
+        await waitFor(() => expect(result.current.status).toBe("ready"));
+        expect(result.current).toMatchObject({ sells: "services", advancedCrm: false });
+      });
+    }
+  }
+
+  it("noteBusinessSettings says whether the answer was this business's", () => {
+    expect(lib.noteBusinessSettings(BIZ_A, business(BIZ_A, { sells: "products" }))).toBe(true);
+    expect(lib.noteBusinessSettings(BIZ_A, business(BIZ_B, { sells: "products" }))).toBe(false);
+    expect(lib.noteBusinessSettings(BIZ_A, null)).toBe(false);
+  });
+});
+
+describe("review SEC-3: properties relied on, now pinned", () => {
+  it("a read refused with no words at all (HTTP/2, empty message) is failed, with words of its own", async () => {
+    window.localStorage.setItem(BUSINESS_ID_KEY, BIZ_A);
+    stubRoutes({ [`GET /identity/businesses/${BIZ_A}`]: { status: 403, body: { statusCode: 403, message: "" }, bare: true } });
+    const { result } = renderHook(() => lib.useBusinessSettings());
+    await waitFor(() => expect(result.current.status).toBe("failed"));
+    expect((result.current.error ?? "").trim()).not.toBe("");
+    expect(result.current).toMatchObject({ sells: "both", advancedCrm: false });
+  });
+
+  it("a write refused with no words at all is still a refusal: nothing shown changes", async () => {
+    window.localStorage.setItem(BUSINESS_ID_KEY, BIZ_A);
+    stubRoutes({
+      [`GET /identity/businesses/${BIZ_A}`]: { status: 200, body: business(BIZ_A, { sells: "products" }) },
+      [`PATCH /identity/businesses/${BIZ_A}`]: { status: 403, body: { statusCode: 403, message: "" }, bare: true },
+      [`PATCH /identity/businesses/${BIZ_A}/advanced-settings`]: { status: 403, body: { statusCode: 403, message: "" }, bare: true },
+    });
+    const { result } = renderHook(() => lib.useBusinessSettings());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    let sells: { error: string | null } = { error: null };
+    let crm: { error: string | null } = { error: null };
+    await act(async () => {
+      sells = await lib.saveBusinessSells(BIZ_A, "services");
+      crm = await lib.saveAdvancedSettings(BIZ_A, { advancedCrm: true });
+    });
+    expect(sells.error).not.toBeNull();
+    expect(crm.error).not.toBeNull();
+    expect(result.current).toMatchObject({ status: "ready", sells: "products", advancedCrm: false });
+  });
+
+  it("a depth carrying __proto__ or constructor: ignored in an answer, and never sent in a write", async () => {
+    const hostile = JSON.parse('{"__proto__":"advanced","constructor":"advanced","money":"advanced"}');
+    const read = lib.businessSettingsOf({ id: BIZ_A, depth: hostile });
+    expect(read.depth).toEqual({ ...allHubs("standard"), money: "advanced" });
+    expect(Object.keys(read.depth).sort()).toEqual([...SERVER_HUBS].sort());
+    expect(({} as Record<string, unknown>).advanced).toBeUndefined();
+
+    const sent = stubRoutes({});
+    for (const depth of [JSON.parse('{"__proto__":"advanced"}'), JSON.parse('{"constructor":"advanced"}'), hostile]) {
+      const res = await lib.saveAdvancedSettings(BIZ_A, { depth });
+      expect(res.error).not.toBeNull();
+    }
+    expect(sent).toEqual([]);
+  });
+});
+
+describe("review COR-3 / COR-4: one read for many readers, and a long-lived reader does not go stale", () => {
+  const gets = (sent: Sent[]) => sent.filter((s) => s.method === "GET").length;
+
+  it("readers mounted together share one read, and a reader mounted just after asks nothing more", async () => {
+    const sent = stubRoutes({ [`GET /identity/businesses/${BIZ_A}`]: { status: 200, body: business(BIZ_A, { sells: "products" }) } });
+    const nav = renderHook(() => lib.useBusinessSettings(BIZ_A));
+    const hub = renderHook(() => lib.useBusinessSettings(BIZ_A));
+    const page = renderHook(() => lib.useBusinessSettings(BIZ_A));
+    await waitFor(() => expect(page.result.current.status).toBe("ready"));
+    expect(nav.result.current.sells).toBe("products");
+    expect(hub.result.current.sells).toBe("products");
+    expect(gets(sent)).toBe(1);
+
+    const later = renderHook(() => lib.useBusinessSettings(BIZ_A));
+    expect(later.result.current).toMatchObject({ status: "ready", sells: "products" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(gets(sent)).toBe(1);
+  });
+
+  it("reload() always asks again", async () => {
+    const sent = stubRoutes({ [`GET /identity/businesses/${BIZ_A}`]: { status: 200, body: business(BIZ_A) } });
+    const { result } = renderHook(() => lib.useBusinessSettings(BIZ_A));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await act(async () => void (await result.current.reload()));
+    expect(gets(sent)).toBe(2);
+  });
+
+  it("a reader that stays mounted reads again when the tab is looked at after a while (a change made elsewhere shows)", async () => {
+    let answer: Answer = { status: 200, body: business(BIZ_A) };
+    const sent = stubRoutes({ [`GET /identity/businesses/${BIZ_A}`]: () => answer });
+    const { result } = renderHook(() => lib.useBusinessSettings(BIZ_A));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    // Looked at again at once: nothing is asked.
+    act(() => void window.dispatchEvent(new Event("focus")));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(gets(sent)).toBe(1);
+
+    // An admin turned Advanced CRM on from another device; the owner comes back to this tab later.
+    answer = { status: 200, body: business(BIZ_A, { advancedCrm: true }) };
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now + lib.BUSINESS_SETTINGS_FRESH_MS + 1);
+    try {
+      act(() => void window.dispatchEvent(new Event("focus")));
+      await waitFor(() => expect(result.current.advancedCrm).toBe(true));
+      expect(gets(sent)).toBe(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it("a mount after a while reads again; a business nobody reads is not asked for", async () => {
+    const sent = stubRoutes({ [`GET /identity/businesses/${BIZ_A}`]: { status: 200, body: business(BIZ_A) } });
+    const first = renderHook(() => lib.useBusinessSettings(BIZ_A));
+    await waitFor(() => expect(first.result.current.status).toBe("ready"));
+    first.unmount();
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now + lib.BUSINESS_SETTINGS_FRESH_MS + 1);
+    try {
+      act(() => void window.dispatchEvent(new Event("focus")));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(gets(sent)).toBe(1);
+      const second = renderHook(() => lib.useBusinessSettings(BIZ_A));
+      await waitFor(() => expect(gets(sent)).toBe(2));
+      expect(second.result.current.status).toBe("ready");
+    } finally {
+      clock.mockRestore();
+    }
+  });
+});
+

@@ -31,7 +31,7 @@ const PROFILE = `/identity/businesses/${BIZ}`;
 const DOOR = `${PROFILE}/advanced-settings`;
 
 type Sent = { method: string; path: string; body: Record<string, unknown> | null };
-type Answer = { status: number; body: unknown };
+type Answer = { status: number; body: unknown; bare?: boolean };
 type Routes = Record<string, Answer | (() => Answer | Promise<Answer>)>;
 
 function stubRoutes(routes: Routes): Sent[] {
@@ -47,7 +47,7 @@ function stubRoutes(routes: Routes): Sent[] {
       const answer = route ? (typeof route === "function" ? await route() : route) : { status: 500, body: { message: `no route ${method} ${pathname}` } };
       return new Response(JSON.stringify(answer.body), {
         status: answer.status,
-        statusText: answer.status === 403 ? "Forbidden" : answer.status >= 400 ? "Error" : "OK",
+        statusText: answer.bare ? "" : answer.status === 403 ? "Forbidden" : answer.status >= 400 ? "Error" : "OK",
         headers: { "content-type": "application/json" },
       });
     }),
@@ -291,3 +291,60 @@ describe("Save Business Info is as it was", () => {
     expect(Object.keys(writes(sent)[0].body ?? {}).sort()).toEqual(["businessHours", "description", "name", "tagline", "teamSize"]);
   });
 });
+
+describe("review SEC-2 / SEC-3: only a change the server confirmed for this business is said as saved", () => {
+  const cases: Array<[string, string, () => void, Answer]> = [
+    ["what you sell, answered 200 with another business", `PATCH ${PROFILE}`, () => fireEvent.click(sells("Services")), { status: 200, body: { ...business({ sells: "services" }), id: OTHER } }],
+    ["what you sell, answered 200 with no body", `PATCH ${PROFILE}`, () => fireEvent.click(sells("Services")), { status: 200, body: null }],
+    ["what you sell, refused with no words (HTTP/2)", `PATCH ${PROFILE}`, () => fireEvent.click(sells("Services")), { status: 403, body: { statusCode: 403, message: "" }, bare: true }],
+    ["the switch, answered 200 with another business", `PATCH ${DOOR}`, () => fireEvent.click(crmSwitch()), { status: 200, body: { ...business({ advancedCrm: true }), id: OTHER } }],
+    ["the switch, answered 200 with no body", `PATCH ${DOOR}`, () => fireEvent.click(crmSwitch()), { status: 200, body: null }],
+    ["the switch, refused with no words (HTTP/2)", `PATCH ${DOOR}`, () => fireEvent.click(crmSwitch()), { status: 403, body: { statusCode: 403, message: "" }, bare: true }],
+  ];
+  it.each(cases)("%s: said as not saved, and the control stays as the business has it", async (_name, route, press, answer) => {
+    const sent = stubRoutes({ [`GET ${PROFILE}`]: { status: 200, body: business({ sells: "products" }) }, [route]: answer });
+    const { onStatus } = mount();
+    await ready();
+    press();
+    await waitFor(() => expect(writes(sent)).toHaveLength(1));
+    const alert = await screen.findByRole("alert");
+    expect((alert.textContent ?? "").trim()).not.toBe("");
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(successes(onStatus)).toEqual([]);
+    await ready();
+    expect(sells("Products").checked).toBe(true);
+    expect(crmSwitch()).toHaveAttribute("aria-checked", "false");
+  });
+});
+
+describe("review COR-5: the controls keep the keyboard, and two sections do not collide", () => {
+  it("while a change is being saved the control pressed keeps focus (it is not disabled away)", async () => {
+    let release: (a: Answer) => void = () => {};
+    stubRoutes({
+      [`GET ${PROFILE}`]: { status: 200, body: business() },
+      [`PATCH ${PROFILE}`]: () => new Promise<Answer>((resolve) => (release = resolve)),
+    });
+    mount();
+    await ready();
+    sells("Services").focus();
+    fireEvent.click(sells("Services"));
+    await waitFor(() => expect(sellsGroup()).toHaveAttribute("aria-busy", "true"));
+    expect(sells("Services")).not.toBeDisabled();
+    expect(document.activeElement).toBe(sells("Services"));
+    release({ status: 200, body: business({ sells: "services" }) });
+    await waitFor(() => expect(sells("Services").checked).toBe(true));
+    await waitFor(() => expect(sellsGroup()).not.toHaveAttribute("aria-busy", "true"));
+  });
+
+  it("two sections on one page have their own labels and radio groups", async () => {
+    stubRoutes({ [`GET ${PROFILE}`]: { status: 200, body: business({ sells: "products" }) } });
+    mount();
+    mount();
+    await waitFor(() => expect(screen.getAllByRole("switch", { name: /advanced crm/i })).toHaveLength(2));
+    const ids = Array.from(document.querySelectorAll("[id]")).map((el) => el.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    const names = screen.getAllByRole("radiogroup", { name: /what you sell/i }).map((g) => (g.querySelector("input") as HTMLInputElement).name);
+    expect(new Set(names).size).toBe(2);
+  });
+});
+
