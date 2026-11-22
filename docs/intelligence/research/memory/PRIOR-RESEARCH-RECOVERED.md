@@ -337,7 +337,10 @@ evaluation ablations). Tracks 2 and 3 are not covered beyond mention; see `OPEN-
 
 "Clarification from user: the memory programme being designed here is **KEY's memory architecture itself**. KEYFLOWOS
 development is the first high-value proving ground and consumer of that same memory substrate. Do NOT create a separate
-autonomous-development memory architecture that later needs to be merged into KEY."
+autonomous-development memory architecture that later needs to be merged into KEY." The development system acts as "1. a real
+production-scale consumer of KEY memory; 2. a benchmark environment ...; 3. a source of verified experience ...; 4. a
+dogfooding environment for the same Context Genome/RMCC/receptor/consolidation/procedural-learning architecture that KEY
+will use."
 
 ```
 KEY MEMORY / CONTEXT GENOME
