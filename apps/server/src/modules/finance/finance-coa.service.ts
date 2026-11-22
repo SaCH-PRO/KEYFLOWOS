@@ -1,5 +1,9 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException,
+} from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { getCurrentBusinessId } from '../../core/tenant/tenant-context';
 import { ChartOfAccountsSeederService } from './chart-of-accounts-seeder.service';
 
 const ALLOWED_TYPES = new Set(['ASSET', 'LIABILITY', 'EQUITY', 'INCOME', 'COGS', 'EXPENSE']);
@@ -14,10 +18,45 @@ export interface CreateCoaInput {
 
 export type UpdateCoaInput = Partial<Omit<CreateCoaInput, 'type'>> & { isActive?: boolean };
 
+/** Namespace of the per-business advisory lock that serializes account-code writes. */
+const COA_CODE_LOCK_NAMESPACE = 'coa-code:';
+
+/**
+ * An account code as it is stored: text, trimmed; a blank code is no code (null). The body is not
+ * validated before it reaches here, so a code that is not text (a JSON number, an object) is refused
+ * 400 instead of reaching Prisma, where it raised a validation error (a 500).
+ */
+function normalizeCoaCode(raw: unknown): string | null {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== 'string') throw new BadRequestException('Account code must be text');
+  const code = raw.trim();
+  return code === '' ? null : code;
+}
+
+/** The form two codes are compared in: spacing around a code and its letter case do not make another code. */
+function coaCodeKey(code: string | null | undefined): string | null {
+  const trimmed = (code ?? '').trim();
+  return trimmed === '' ? null : trimmed.toLowerCase();
+}
+
 /**
  * FIN5 — CRUD on ChartOfAccount. System rows (`isSystem=true`) are
  * read-only except for `isActive` toggling, which is also blocked for
  * accounts referenced by the system seed (they back the postings engine).
+ *
+ * V1-63 SWP-COA-UNIQUE-CODE (BUG-111; owner ruling D-167: the check stays in code, no unique index): a code
+ * is used by at most one ACTIVE account of a business. create() and update() refuse a write that would make
+ * a second one with 409 COA_CODE_TAKEN and write nothing:
+ *   - a create with a code, an update that changes the code, and an update that brings an archived account
+ *     back are checked against the business's other active accounts, system accounts included (so the
+ *     system chart is seeded first: a custom 6100 on a chart never listed would otherwise be joined by the
+ *     seed's own 6100);
+ *   - codes are compared trimmed and without letter case, and stored trimmed; a blank code is no code;
+ *   - accounts without a code never collide, an archived account frees its code, and an account saved with
+ *     the code it already has is not checked, so rows that shared a code before this rule can still be
+ *     renamed and archived (nothing rewrites them);
+ *   - check and write run in one transaction under a per-business advisory lock: with no unique index, two
+ *     concurrent writers would otherwise both pass the check.
  */
 @Injectable()
 export class FinanceCoaService {
@@ -46,17 +85,23 @@ export class FinanceCoaService {
       });
       if (!parent) throw new BadRequestException('Parent account not found in this business');
     }
-    return this.prisma.client.chartOfAccount.create({
-      data: {
-        businessId,
-        name,
-        type: input.type,
-        subtype: input.subtype ?? null,
-        code: input.code ?? null,
-        parentId: input.parentId ?? null,
-        isSystem: false,
-        isActive: true,
-      },
+    const code = normalizeCoaCode(input.code);
+    const data = {
+      businessId,
+      name,
+      type: input.type,
+      subtype: input.subtype ?? null,
+      code,
+      parentId: input.parentId ?? null,
+      isSystem: false,
+      isActive: true,
+    };
+    if (code === null) return this.prisma.client.chartOfAccount.create({ data });
+    // The system accounts hold codes too (6100 is Marketing): they exist before the code is checked.
+    await this.seeder.ensureDefaults(businessId);
+    return this.withCodeLock(businessId, async (tx, tenant) => {
+      await this.assertCodeFree(tx, tenant, code, null);
+      return tx.chartOfAccount.create({ data });
     });
   }
 
@@ -84,10 +129,80 @@ export class FinanceCoaService {
     const data: Record<string, unknown> = {};
     if (input.name != null) data.name = input.name.trim();
     if (input.subtype !== undefined) data.subtype = input.subtype;
-    if (input.code !== undefined) data.code = input.code;
+    if (input.code !== undefined) data.code = normalizeCoaCode(input.code);
     if (input.parentId !== undefined) data.parentId = input.parentId;
     if (input.isActive != null) data.isActive = input.isActive;
-    return this.prisma.client.chartOfAccount.update({ where: { id }, data });
+
+    // Only a write of the code, or one that brings the account back, can make a second active account on
+    // a code. Anything else writes as before.
+    if (input.code === undefined && input.isActive !== true) {
+      return this.prisma.client.chartOfAccount.update({ where: { id }, data });
+    }
+    await this.seeder.ensureDefaults(businessId);
+    return this.withCodeLock(businessId, async (tx, tenant) => {
+      // Re-read under the lock: the code and the archived flag decide the check, and another writer of this
+      // business's codes may have changed them since the read above.
+      const current = await tx.chartOfAccount.findFirst({
+        where: { id, businessId },
+        select: { code: true, isActive: true, isSystem: true },
+      });
+      if (!current) throw new NotFoundException('Account not found');
+      if (current.isSystem) throw new ForbiddenException('System accounts are read-only');
+      const nextCode = input.code !== undefined ? (data.code as string | null) : current.code;
+      const codeChanges = input.code !== undefined && coaCodeKey(nextCode) !== coaCodeKey(current.code);
+      const comesBack = input.isActive === true && !current.isActive;
+      if (coaCodeKey(nextCode) !== null && (codeChanges || comesBack)) {
+        await this.assertCodeFree(tx, tenant, nextCode as string, id);
+      }
+      return tx.chartOfAccount.update({ where: { id }, data });
+    });
+  }
+
+  /**
+   * Run `fn` in a transaction holding this business's account-code lock, so a check and the write it
+   * allows are one step against every other create() and update() of the business's codes. `tenant` is the
+   * business the transaction's Prisma calls act on: the active tenant when there is one (the `@keyflow/db`
+   * extension rewrites every `where.businessId` and `create.businessId` to it), else the argument. The
+   * raw-SQL check is not rewritten by the extension, so it is handed that same business.
+   */
+  private withCodeLock<T>(
+    businessId: string,
+    fn: (tx: Prisma.TransactionClient, tenant: string) => Promise<T>,
+  ): Promise<T> {
+    const tenant = getCurrentBusinessId() ?? businessId;
+    return this.prisma.client.$transaction(async (rawTx) => {
+      const tx = rawTx as unknown as Prisma.TransactionClient;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${COA_CODE_LOCK_NAMESPACE + tenant}))`;
+      return fn(tx, tenant);
+    });
+  }
+
+  /**
+   * Refuse 409 COA_CODE_TAKEN when another ACTIVE account of the business holds `code` (compared trimmed,
+   * without letter case). Raw SQL on purpose: Prisma's case-insensitive `equals` is an ILIKE, in which a
+   * code's own '_' or '%' would match other codes. The message names the caller's own account only: the
+   * query is bound to the one business.
+   */
+  private async assertCodeFree(
+    tx: Prisma.TransactionClient,
+    tenant: string,
+    code: string,
+    exceptId: string | null,
+  ): Promise<void> {
+    const holders = await tx.$queryRaw<Array<{ name: string }>>`
+      SELECT name FROM chart_of_accounts
+      WHERE business_id = ${tenant}
+        AND is_active = true
+        AND code IS NOT NULL
+        AND lower(btrim(code)) = lower(${code})
+        AND id <> ${exceptId ?? ''}
+      ORDER BY created_at ASC, id ASC
+      LIMIT 1`;
+    if (holders.length === 0) return;
+    throw new ConflictException({
+      code: 'COA_CODE_TAKEN',
+      message: `Account code ${code} is already used by "${holders[0].name}". Choose a different code.`,
+    });
   }
 
   async archive(businessId: string, id: string) {
