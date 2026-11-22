@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "2b2d32861c50a47667b8229d00c1005dbfaabfe0",
-  "main_commit_date": "2026-11-22T19:26:53+00:00",
+  "main_sha": "7bcbf26ea31051cd34fc2d46c0cd63d5e8cede2b",
+  "main_commit_date": "2026-11-22T21:11:50+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -27,13 +27,13 @@
   ]
  },
  "summary": {
-  "packets": 210,
-  "points": 350.5,
+  "packets": 217,
+  "points": 361.5,
   "by_status": {
    "done": {
     "packets": 62,
     "points": 93.5,
-    "pct_by_points": 26.7
+    "pct_by_points": 25.9
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 148,
-    "points": 257,
-    "pct_by_points": 73.3
+    "packets": 155,
+    "points": 268,
+    "pct_by_points": 74.1
    }
   },
   "by_step": {
@@ -80,8 +80,8 @@
    "5": {
     "done": 0,
     "in-progress": 0,
-    "todo": 27,
-    "total": 27
+    "todo": 34,
+    "total": 34
    },
    "6": {
     "done": 1,
@@ -107,7 +107,7 @@
    "prior-status-file+wave-2b-commit": 28,
    "code-commit-subject": 8,
    "compacted-commit": 7,
-   "no-evidence": 11
+   "no-evidence": 18
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -119,7 +119,7 @@
    "FU-KEY-MEMORY-MONEY-SIGHT",
    "FU-WA-ESCAPE-RACE"
   ],
-  "todo_with_dependencies_met": 30
+  "todo_with_dependencies_met": 32
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -192,6 +192,15 @@
    "unblocks": 81
   },
   {
+   "id": "SWP-INV-MONEY-TOTALS",
+   "step": 4,
+   "priority": "P0",
+   "size": "M",
+   "lane": "both",
+   "on_critical_path": false,
+   "unblocks": 51
+  },
+  {
    "id": "W11-KEY-TRANSFER-INTEGER",
    "step": 3,
    "priority": "P2",
@@ -210,22 +219,13 @@
    "unblocks": 49
   },
   {
-   "id": "SWP-INV-MONEY-TOTALS",
-   "step": 4,
-   "priority": "P0",
-   "size": "M",
-   "lane": "both",
-   "on_critical_path": false,
-   "unblocks": 48
-  },
-  {
    "id": "W11-RUNWAY-LEDGER-CASH",
    "step": 5,
    "priority": "P1",
    "size": "M",
    "lane": "server",
    "on_critical_path": false,
-   "unblocks": 26
+   "unblocks": 27
   },
   {
    "id": "W11-GENOME-RECS-DOMAIN",
@@ -318,6 +318,15 @@
    "unblocks": 4
   },
   {
+   "id": "FU-CONTRACT-FETCH-OUTBOUND-GUARD",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
    "id": "FU-KEY-GENOME-READS-RESIDUAL",
    "step": 3,
    "priority": "P0",
@@ -334,15 +343,6 @@
    "lane": "server",
    "on_critical_path": false,
    "unblocks": 1
-  },
-  {
-   "id": "FU-CONTRACT-FETCH-OUTBOUND-GUARD",
-   "step": 3,
-   "priority": "P0",
-   "size": "M",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 0
   },
   {
    "id": "FU-GENOME-SURFACES-REVENUE",
@@ -390,6 +390,15 @@
    "unblocks": 0
   },
   {
+   "id": "FU-SEND-REMINDER-SERVER-GATE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "W1F-ORDER-TRANSITIONS",
    "step": 4,
    "priority": "P1",
@@ -422,6 +431,15 @@
    "priority": "P2",
    "size": "S",
    "lane": "docs",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-CONTACTS-AUDIT-FLAKE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -4096,6 +4114,114 @@
    ],
    "title": "The marketplace order writer records a payment row for a PAID invoice, and rowless PAID invoices are backfilled",
    "deps_met": false
+  },
+  {
+   "id": "FU-PENDING-OWED-SERVER",
+   "step": 5,
+   "priority": "P1",
+   "size": "L",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-INV-MONEY-TOTALS"
+   ],
+   "title": "Every server owed figure counts PENDING invoices (D-256)",
+   "deps_met": false
+  },
+  {
+   "id": "FU-PENDING-OWED-WEB",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-INV-MONEY-TOTALS"
+   ],
+   "title": "Every web owed figure counts PENDING invoices (D-256)",
+   "deps_met": false
+  },
+  {
+   "id": "FU-SEND-REMINDER-SERVER-GATE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "The server refuses an invoice reminder unless the invoice is SENT, OVERDUE or PARTIALLY_PAID",
+   "deps_met": true
+  },
+  {
+   "id": "FU-LIST-CREDIT-AWARE-REMAINING",
+   "step": 5,
+   "priority": "P2",
+   "size": "M",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-INV-MONEY-TOTALS"
+   ],
+   "title": "Invoice list rows serve a credit-aware remaining amount, so web owed figures can count PARTIALLY_CREDITED",
+   "deps_met": false
+  },
+  {
+   "id": "FU-CASH-LABEL-SANITISER",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-CASH-READERS-LEDGER"
+   ],
+   "title": "One code-only currency label sanitiser for every structured other-currency cash list",
+   "deps_met": false
+  },
+  {
+   "id": "FU-DOC-FETCH-BODY-CAP",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-CONTRACT-FETCH-OUTBOUND-GUARD"
+   ],
+   "title": "Contract document fetches cap the body size, decompressed",
+   "deps_met": false
+  },
+  {
+   "id": "FU-CONTACTS-AUDIT-FLAKE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "contacts-audit-actor ST-R3/CR-1 waits for every async team-activity write before counting",
+   "deps_met": true
   }
  ]
 }

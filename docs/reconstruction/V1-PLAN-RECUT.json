@@ -6996,6 +6996,238 @@
    "scope": "SWP-INV-MONEY-TOTALS counts revenue from payment rows and, under D-249, counts a PAID invoice with no payment row at its total on its paid date. The marketplace order writer (commerce-integration.service.ts ~351) still creates PAID invoices with no Payment row, and older storefront checkouts left some. This packet: the writer records one SUCCESSFUL payment row (own business, the invoice's currency and amount, method from the order, idempotent on retry) in the same transaction as the PAID invoice; a script backfills existing rowless PAID invoices with one row each, dry-run by default, printing counts per business, and is run on real data only on owner authority. After both, the D-249 fallback no longer fires for new data.",
    "definition_of_done": "RED: a marketplace order produces a PAID invoice with no payment row; the backfill script does not exist. GREEN: the writer records exactly one payment row per PAID invoice, inside the transaction, idempotent on retry, cross-tenant cases pass; the script's dry-run reports and writes nothing, and its write mode is idempotent and business-scoped (tested on the local database only); revenue figures are unchanged for invoices that already had rows; full server suite green; proof:release0 MET.",
    "fixture_prefix": null
+  },
+  {
+   "id": "FU-PENDING-OWED-SERVER",
+   "title": "Every server owed figure counts PENDING invoices (D-256)",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "H"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "L",
+   "priority": "P1",
+   "depends_on": [
+    "SWP-INV-MONEY-TOTALS"
+   ],
+   "files": [
+    "apps/server/src/modules/finance/finance-overview.service.ts",
+    "apps/server/src/modules/finance/cashflow-forecast.service.ts",
+    "apps/server/src/modules/os/os.service.ts",
+    "apps/server/src/modules/*/revenue-briefing.service.ts",
+    "apps/server/src/modules/business-command-center/business-command-center.service.ts",
+    "apps/server/src/modules/*/accountant-export.service.ts",
+    "apps/server/src/modules/*/revenue-forecast.service.ts",
+    "apps/server/src/modules/*/revenue-intelligence.controller.ts",
+    "apps/server/src/modules/ai/ai.controller.ts",
+    "apps/server/src/modules/*/key-command.service.ts",
+    "apps/server/src/modules/*/business-graph.service.ts",
+    "apps/server/src/modules/commerce/commerce-ai.service.ts",
+    "apps/server/src/modules/*/financial-copilot.service.ts",
+    "apps/server/src/modules/*/revenue-action.service.ts",
+    "apps/server/src/modules/*/slow-payer-detector.service.ts",
+    "apps/server/src/modules/crm/crm-stats.service.ts",
+    "apps/server/src/modules/crm/crm-ai.service.ts",
+    "apps/server/src/modules/crm/crm-revenue.service.ts",
+    "apps/server/src/modules/*/relationship-health.service.ts",
+    "apps/server/src/modules/key-cortex/adapters/commerce-adapter.service.ts",
+    "apps/server/src/modules/flow/flow.service.ts",
+    "apps/server/src/modules/*/gamification.service.ts",
+    "apps/server/src/modules/*/delegation-loop.service.ts",
+    "apps/server/src/modules/*/sales-team.service.ts",
+    "apps/server/src/modules/crm/contact-filters.helper.ts",
+    "apps/server/src/modules/commerce/commerce.controller.ts",
+    "apps/server/test/pending-owed-server.integration.test.ts (new)"
+   ],
+   "decisions": [
+    "D-256",
+    "D-251",
+    "D-13"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "SWP-INV-MONEY-TOTALS put PENDING into the one server open-receivable list (OPEN_RECEIVABLE_STATUSES) read by the stats, the Executive Summary and the aging. Its acceptance reviews (2026-11-22) listed the owed-figure readers outside that write set that still omit PENDING: finance-overview.service.ts:345, cashflow-forecast.service.ts:63, os.service.ts:133, revenue-briefing.service.ts:79, business-command-center.service.ts:60 (OPEN_INVOICE_STATUSES), accountant-export.service.ts:359, revenue-forecast.service.ts:64, revenue-intelligence.controller.ts:85, ai.controller.ts:1694, key-command.service.ts:961, business-graph.service.ts:431, commerce-ai.service.ts:749/798/1069, financial-copilot.service.ts:124/141/403/562, revenue-action.service.ts:908, slow-payer-detector.service.ts:91, crm-stats.service.ts:392-395/817/921/1224, crm-ai.service.ts:434/1083/1761, crm-revenue.service.ts:273 (also counts DRAFT: remove it), relationship-health.service.ts:103-105, key-cortex commerce-adapter.service.ts:269, flow.service.ts:189/404, gamification.service.ts:97, delegation-loop.service.ts:548, sales-team.service.ts:133, contact-filters.helper.ts:145, expenses.service.ts:1029/1110 (check whether these are revenue figures) and commerce.controller.ts:1970 (payment-evidence candidates: functional, offline confirmation of a PENDING invoice never matches). Each owed figure reads the shared list (import it rather than copy a literal); verify each site's premise before changing it (line numbers are from 2026-11-22). Must NOT gain PENDING: reminder lists, SHAREABLE_INVOICE_STATUSES, overdue transitions. Already include PENDING: key-bi-engine, key-cortex-insight, invoice-overdue-watcher. Write set may split into two packets if the diff exceeds the wave gate.",
+   "definition_of_done": "RED: per site class (dashboards, KEY tools, CRM figures, payment evidence) a PENDING invoice is shown missing from the owed figure. GREEN: every listed owed figure counts PENDING through the shared list; DRAFT never counts; cross-tenant and revenue-scope cases pass; a test fails if a reader re-introduces a private literal list; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-PENDING-OWED-WEB",
+   "title": "Every web owed figure counts PENDING invoices (D-256)",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "H"
+   ],
+   "step": 5,
+   "lane": "web",
+   "size": "M",
+   "priority": "P1",
+   "depends_on": [
+    "SWP-INV-MONEY-TOTALS"
+   ],
+   "files": [
+    "apps/web/src/app/app/invoices/page.tsx",
+    "apps/web/src/components/**/invoice-stat-cards.tsx",
+    "apps/web/src/hooks/use-financial-summary.ts",
+    "apps/web/src/hooks/use-billing-stats.ts",
+    "apps/web/src/components/**/commerce-kpi-strip.tsx",
+    "apps/web/src/components/**/commerce-overview-tab.tsx",
+    "apps/web/src/lib/finance/utils.ts",
+    "apps/web/src/lib/commerce-status.ts",
+    "apps/web/src/components/billing/collections-panel.tsx",
+    "apps/web/src/hooks/use-action-queue.ts",
+    "apps/web/src/components/**/invoices-panel.tsx",
+    "apps/web/src/**/__tests__/pending-owed-web.test.tsx (new)"
+   ],
+   "decisions": [
+    "D-256",
+    "D-252"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "The web mirror of D-256 outside SWP-INV-MONEY-TOTALS's write set: invoices/page.tsx:117/164 (\"Unpaid\"; status counts have no PENDING bucket), invoice-stat-cards.tsx:45, use-financial-summary.ts:32, use-billing-stats.ts:31, commerce-kpi-strip.tsx:24, commerce-overview-tab.tsx:158/169 (\"Invoiced\" stage), lib/finance/utils.ts:117 (computeCashPosition), lib/commerce-status.ts:39, billing/collections-panel.tsx:130, hooks/use-action-queue.ts:29, invoices-panel.tsx:350. One shared web constant (OWED_STATUSES from payments-tab.tsx, moved to a lib module) pinned against the server list as CH-33 does. Reminder gates (canRemind, REMINDABLE_STATUSES) are not owed figures and keep PENDING out.",
+   "definition_of_done": "RED: each listed screen omits a PENDING invoice from its owed figure. GREEN: every owed figure counts it through the one shared constant; reminder buttons still never appear for PENDING; web typecheck, unit tests and lint (ratchet 26) clean; phone 375x812 checked for changed screens; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-SEND-REMINDER-SERVER-GATE",
+   "title": "The server refuses an invoice reminder unless the invoice is SENT, OVERDUE or PARTIALLY_PAID",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "D"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [],
+   "files": [
+    "apps/server/src/modules/commerce/commerce.service.ts",
+    "apps/server/test/send-reminder-status-gate.integration.test.ts (new)"
+   ],
+   "decisions": [
+    "D-256",
+    "D-248"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "POST .../invoices/:id/send-reminder (commerce.service.ts ~4805) refuses only PAID and VOID, so a revenue:write caller can remind a DRAFT, PENDING, FAILED or FULLY_CREDITED invoice: the customer is emailed and a public pay link is minted or reused (~4820). The web's canRemind (SENT, OVERDUE, PARTIALLY_PAID) is the only barrier. Found by the SWP-INV-MONEY-TOTALS acceptance review (2026-11-22); pre-existing, not worsened by D-256. The server adopts the web's set, failing closed, before any email or link is made; the refusal is a 409 naming the status class, not the invoice's contents. Check KEY tool and automation callers of the same method (grep) and keep their behaviour for allowed statuses.",
+   "definition_of_done": "RED: a reminder for a DRAFT, PENDING, FAILED and FULLY_CREDITED invoice sends an email and mints a pay link. GREEN: each is refused before any email, link or event; SENT, OVERDUE and PARTIALLY_PAID still send exactly once; cross-tenant ids are not found; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-LIST-CREDIT-AWARE-REMAINING",
+   "title": "Invoice list rows serve a credit-aware remaining amount, so web owed figures can count PARTIALLY_CREDITED",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "H"
+   ],
+   "step": 5,
+   "lane": "both",
+   "size": "M",
+   "priority": "P2",
+   "depends_on": [
+    "SWP-INV-MONEY-TOTALS"
+   ],
+   "files": [
+    "apps/server/src/modules/commerce/commerce.service.ts",
+    "apps/web/src/lib/client.ts",
+    "apps/web/src/components/**/payments-tab.tsx",
+    "apps/server/test/invoice-list-remaining.integration.test.ts (new)"
+   ],
+   "decisions": [
+    "D-256",
+    "D-251"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "Web list rows (Invoice type, apps/web/src/lib/client.ts:421-443) carry no credit data, so web OWED_STATUSES leaves PARTIALLY_CREDITED out (documented gap against the letter of D-256, accepted 2026-11-22). The detail route's remaining (commerce.service.ts:1575-1587) is not credit-aware either. The list and detail routes serve remaining = total - net payments - credit notes, per the server's readInvoiceMoney rule; the web counts PARTIALLY_CREDITED from it and CH-33's exclusion is removed.",
+   "definition_of_done": "RED: a 500 invoice PARTIALLY_CREDITED by 100 shows 0 owed on the web while the server owes 400. GREEN: list and detail serve 400; the web Payments tab, cash-flow card and Sales hero owe 400; CH-33 pins web = server lists exactly; full server suite and web checks green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-CASH-LABEL-SANITISER",
+   "title": "One code-only currency label sanitiser for every structured other-currency cash list",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "H"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [
+    "W11-CASH-READERS-LEDGER"
+   ],
+   "files": [
+    "apps/server/src/modules/finance/cash-position.service.ts",
+    "apps/server/src/modules/finance/safe-to-spend.service.ts",
+    "apps/server/src/modules/finance/finance-overview.service.ts",
+    "apps/server/src/modules/finance/cashflow-forecast.service.ts",
+    "apps/server/test/cash-label-sanitiser.integration.test.ts (new)"
+   ],
+   "decisions": [
+    "D-135"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "otherCurrencyCash on safe-to-spend, the overview and the cash-flow forecast (and the KEY tools calculateSafeToSpend and cashflowForecast) carries the normalized currency label, which can be legacy free text. W11-RUNWAY-LEDGER-CASH added namedCashCurrency (SEC-W11RL-1) for prose. One shared sanitiser: three-letter codes are served, anything else is aggregated as an uncoded amount that is counted and labelled generically, never echoed. Found by the W11-CASH-READERS-LEDGER reviews (2026-11-22).",
+   "definition_of_done": "RED: a business whose bank account currency is free text gets that text in each of the three structured lists. GREEN: no list serves a non-code label; amounts are unchanged; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-DOC-FETCH-BODY-CAP",
+   "title": "Contract document fetches cap the body size, decompressed",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [
+    "FU-CONTRACT-FETCH-OUTBOUND-GUARD"
+   ],
+   "files": [
+    "apps/server/src/modules/contracts/contract-clause.service.ts",
+    "apps/server/test/contract-fetch-body-cap.integration.test.ts (new)"
+   ],
+   "decisions": [
+    "D-246"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "contract-clause.service.ts resolveBytes reads res.arrayBuffer() with no cap, and fetch decompresses gzip/brotli itself, so a small compressed body from a public host can grow to gigabytes within the 30 s deadline (pre-existing; found by the FU-CONTRACT-FETCH-OUTBOUND-GUARD security review 2026-11-22). Reject a Content-Length over the cap before reading, then stream with a running byte count over the decompressed bytes and abort past the cap; the refusal is a final 400 naming the limit, not the host. The cap is a named constant (proposed 25 MB, matching the asset upload limit if one exists; check).",
+   "definition_of_done": "RED: a local listener serving a 1 MB gzip that inflates past the cap is read whole. GREEN: refused before the cap is exceeded, memory bounded, the socket closed; an in-cap document still parses; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-CONTACTS-AUDIT-FLAKE",
+   "title": "contacts-audit-actor ST-R3/CR-1 waits for every async team-activity write before counting",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [],
+   "step": 5,
+   "lane": "server",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [],
+   "files": [
+    "apps/server/test/contacts-audit-actor.integration.test.ts"
+   ],
+   "decisions": [],
+   "r0_impact": "KEEP",
+   "scope": "Under full-suite load (wave 3d at 3e84310b, 2026-11-22) ST-R3/CR-1's traceCounts() saw teamLogs 15 against 13: two late async team-activity writes from earlier cases landed after settle(). It passed 3/3 alone and in the next full run. Make the wait deterministic (await the emitter's pending work, or count only rows created after a per-case marker) without loosening what the case proves: the enrichment refusal writes nothing.",
+   "definition_of_done": "RED (where reproducible): a forced delay on the team-activity listener makes the case fail. GREEN: the case is deterministic with the delay, still fails if the refusal path writes a team log; the file passes 10/10 under full-suite load; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
   }
  ],
  "moot": [
@@ -8129,7 +8361,7 @@
   }
  ],
  "coverage": "Coverage check (recut2/p8_output.py, and review/cov.py re-run on v1-plan-recut.json): PASS. BUG-001..BUG-135 each appear exactly once: 126 on 58 packets, 3 moot, 6 fixed in flight (BUG-001/013/014/015/030 on pkt/SWEEP-P0-SCOPES, BUG-026 on pkt/PR195-JOURNAL-SCOPE). Missing: none; duplicated: none; unknown: none. All 119 v1-plan packets accounted for: 96 carried (kept or shrunk), 18 folded into consolidation packets (moot list + absorbs), 5 moot (SWP-EVENTS-CREATE, SWP-PO-LINES, SWP-PAYROLL-START, W11-CALLS-WEB-LIST, W11-WEB-CALENDAR-OWNER-CONTROLS); unaccounted: none. The moot list now holds only unreachable surfaces: BUG-002, BUG-079, BUG-113. Bugs fixed by removal sit on the packet that removes the surface, so the sweep re-run verifies them: 062 SWP-CONTACT-DETAIL, 066 and 121 SWP-CALENDAR-TRUTH, 072 EXPENSES-HUB-3, 082 SWP-CRM-WEB-POLISH, 093 SWP-INV-FORM-UX, 119 HARNESS-REMOVAL, 094 DEMO-PREVIEW, 057 W11-WEB-INVENTORY-REFUSALS. Other re-homes: 010 -> TODAY-4BLOCK (web half; server half in TODAY-AGGREGATE), 114 -> NAV-A2, 067/123/118/078/108 -> NAV-A3, 047 -> SWP-INV-LIST, 098 -> MOUNT-QUOTES, 068 -> OWNER-ALERTS-WEB, 077 -> BIZ-SETTINGS-WEB, 038 -> FIX-CONTACT-PARAMS, 008 -> DECIMALS-WEB, 069 -> TODAY-4BLOCK, 074/125 -> TODAY-AGGREGATE. Declared departures from the audit's moot list: BUG-011 stays on W11-QUERY-DTO-COERCION and BUG-065 on SWP-SEC-AUDIT-TRUTH (the audit keeps both packets); W11-WEB-CALENDAR-OWNER-CONTROLS is moot although the audit does not list it (Google Calendar is hidden; recorded in S1). Graph checks (recut2/p5_check.py): 0 dependency problems; the graph (depends_on plus lane order) is acyclic; no dependency points to a later step; 0 file collisions, counting every pair of packets that share a file with no dependency path between them across all steps (there are no wave barriers), with fixture-prefixes.json, the REST census doc, BUILD-MAP-001.md, DEPLOY_RUNBOOK.md and apps/server/package.json treated as append-only or disjoint-row files; 0 packets touch a step-0-changed file without depending on S0-LAND-INFLIGHT (S0-SEC-LANE-DEPLOY's runbook record is merged after #208 by design). Step-0 file sets were recomputed on the current local heads (f5d58ef7..71370250: 794 files, b4a30241..b3335bb7: 88, 0c22ea76..6f4935f1: 54); S0-LAND-INFLIGHT recomputes them on the admitted heads. 55 new integration suites in 55 packets each carry a pre-allocated v6<step><letter>_ prefix and list fixture-prefixes.json. Every decision id is valid and each of the 37 is used by at least one packet besides S1-RULINGS-RECORD.",
- "totals": "166 packets: 13 consolidated, 77 kept, 57 new, 19 shrunk. From the 119 v1 packets: 96 carried, 18 folded, 5 moot. Lanes: both 17, docs 1, gate 21, server 77, web 50. Sizes: L 22, M 73, S 71. Priorities: P0 37, P1 74, P2 38, P3 17. Bugs: 126 on packets, 3 moot, 6 fixed in flight = 135. Waves: 9 (steps 0-8) as labels over an explicit dependency graph; R0 register 61 entries (6 AMEND needing owner and ChatGPT authority, 3 conditional). Size-weighted (S=1, M=2, L=3) critical path 66 over 34 packets: S0-LAND-INFLIGHT -> GATE-HARNESS -> GATE-JOURNEYS-A-F -> SWP-LAYERS -> FIX-CONTACT-PARAMS -> MARKETING-REDIRECT-GATE -> FAILURE-KIT -> SWP-PROFILE-TEAMSIZE -> BIZ-SETTINGS-WEB -> NAV-A1 -> MOUNT-QUOTES -> SWP-INV-MATH -> SWP-INV-FORM-UX -> SWP-QUOTE-COMPOSER-CONTACT -> SWP-CONTACT-QUICKADD -> SWP-INV-LIST -> W11-WEB-OWNER-MEMBERSHIP-REFUSAL -> SWP-REMOVED-MEMBER-NOTICE -> SWP-INV-DETAIL -> SWP-INV-REFUND-UI -> CLAIM-LOOP -> READY-TO-SEND -> TODAY-AGGREGATE -> DEMO-PREVIEW -> TODAY-4BLOCK -> HARNESS-REMOVAL -> NAV-B-HIDE -> NAV-B-HIDE-2 -> NAV-B-LINKS -> NAV-B-LINKS-KEY -> SWEEP-RERUN-S7 -> GATE-JOURNEY-RUN -> GATE-STAGING-RUN -> GATE-OWNER-TEST. Longest lanes: 3:server-key 19, 6:store-sale-plans 19, 4:web-sales 18, 5:server-money-today 15, 5:web-screens 13, 5:loops 12. Growth over the draft (145): NAV-A split in three, NAV-B-HIDE and NAV-B-LINKS split in two, NAV-B-LEGACY-SERVER, KEY-TOOL-DOMAIN-HIDE, seven census batches replacing one M packet, MIGRATION-SET split in two, SALES-ORDERS-TAB and six sweep checkpoints. Calendar: the web lane from NAV-A1 through web-sales to CLAIM-LOOP, Today and the hide census is the critical path, as the audit said; at the reconstruction pace the build is about 3-4 weeks and the hold about 6 weeks with rulings, staging, the accountant, the owner test and fix rounds. Added 2026-11-22 (D-245, D-246, D-248): FU-BOOKING-PAGE-PAYMENT-METHOD, FU-CONTRACT-FETCH-OUTBOUND-GUARD, FU-KEY-INVOICE-EMAIL-PAY-LINK. Added 2026-11-22 (D-249): FU-MARKETPLACE-PAID-PAYMENT-ROW.",
+ "totals": "166 packets: 13 consolidated, 77 kept, 57 new, 19 shrunk. From the 119 v1 packets: 96 carried, 18 folded, 5 moot. Lanes: both 17, docs 1, gate 21, server 77, web 50. Sizes: L 22, M 73, S 71. Priorities: P0 37, P1 74, P2 38, P3 17. Bugs: 126 on packets, 3 moot, 6 fixed in flight = 135. Waves: 9 (steps 0-8) as labels over an explicit dependency graph; R0 register 61 entries (6 AMEND needing owner and ChatGPT authority, 3 conditional). Size-weighted (S=1, M=2, L=3) critical path 66 over 34 packets: S0-LAND-INFLIGHT -> GATE-HARNESS -> GATE-JOURNEYS-A-F -> SWP-LAYERS -> FIX-CONTACT-PARAMS -> MARKETING-REDIRECT-GATE -> FAILURE-KIT -> SWP-PROFILE-TEAMSIZE -> BIZ-SETTINGS-WEB -> NAV-A1 -> MOUNT-QUOTES -> SWP-INV-MATH -> SWP-INV-FORM-UX -> SWP-QUOTE-COMPOSER-CONTACT -> SWP-CONTACT-QUICKADD -> SWP-INV-LIST -> W11-WEB-OWNER-MEMBERSHIP-REFUSAL -> SWP-REMOVED-MEMBER-NOTICE -> SWP-INV-DETAIL -> SWP-INV-REFUND-UI -> CLAIM-LOOP -> READY-TO-SEND -> TODAY-AGGREGATE -> DEMO-PREVIEW -> TODAY-4BLOCK -> HARNESS-REMOVAL -> NAV-B-HIDE -> NAV-B-HIDE-2 -> NAV-B-LINKS -> NAV-B-LINKS-KEY -> SWEEP-RERUN-S7 -> GATE-JOURNEY-RUN -> GATE-STAGING-RUN -> GATE-OWNER-TEST. Longest lanes: 3:server-key 19, 6:store-sale-plans 19, 4:web-sales 18, 5:server-money-today 15, 5:web-screens 13, 5:loops 12. Growth over the draft (145): NAV-A split in three, NAV-B-HIDE and NAV-B-LINKS split in two, NAV-B-LEGACY-SERVER, KEY-TOOL-DOMAIN-HIDE, seven census batches replacing one M packet, MIGRATION-SET split in two, SALES-ORDERS-TAB and six sweep checkpoints. Calendar: the web lane from NAV-A1 through web-sales to CLAIM-LOOP, Today and the hide census is the critical path, as the audit said; at the reconstruction pace the build is about 3-4 weeks and the hold about 6 weeks with rulings, staging, the accountant, the owner test and fix rounds. Added 2026-11-22 (D-245, D-246, D-248): FU-BOOKING-PAGE-PAYMENT-METHOD, FU-CONTRACT-FETCH-OUTBOUND-GUARD, FU-KEY-INVOICE-EMAIL-PAY-LINK. Added 2026-11-22 (D-249): FU-MARKETPLACE-PAID-PAYMENT-ROW. Added 2026-11-22 (D-256 and acceptance reviews): FU-PENDING-OWED-SERVER, FU-PENDING-OWED-WEB, FU-SEND-REMINDER-SERVER-GATE, FU-LIST-CREDIT-AWARE-REMAINING, FU-CASH-LABEL-SANITISER, FU-DOC-FETCH-BODY-CAP, FU-CONTACTS-AUDIT-FLAKE.",
  "open_questions": [
   "Authorities for the AMEND entries (owner + ChatGPT), all requested in S1-RULINGS-RECORD: gmail-connect-binding R0-CMF5-I01/R0-CMF6-M01 (needed before SWEEP-P0 is admitted), invoice-create-contract and revenue-auth-001 CC-400 fractional quantity, onboarding-manual-complete demo seed, d11-sibling-writes D11W-04, release0-index explained entries, release0-live 'Customers', and the conditional WOS-C01 re-point.",
   "Production's deployed SHA for sec/v1-hold-1, and whether SWEEP-P0's fix commits cherry-pick onto it cleanly; if not, the owner must choose between an adapted security-only ref and accepting a deploy of main that carries #208 and PR195.",
