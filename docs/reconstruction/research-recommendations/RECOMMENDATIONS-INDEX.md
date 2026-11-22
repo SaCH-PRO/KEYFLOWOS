@@ -143,59 +143,59 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 ## 1. KEY safety and the trust boundary (prompt injection, untrusted content, redaction, model lifecycle)
 
 ### REC-SAFETY-FAIL-POLICY — KEY's input-safety check is an explicit policy: a missing or throwing checker fails closed (tools withheld), every finding class maps to an action, and a PII hit does not short-circuit the injection checks
-- Sources: notes-A QUERY-SAFETY-FAIL-OPEN (MC:469; GC:394-395; GC:620 proof obligation 13); notes-A SAFETY-CHECK-ORDER-AND-PII (MC:470-471); notes-D INPUT-SAFETY-FAIL-POLICY (issue#153 comment 6010007429 2026-10-06 s.16, s.17, L10-GAP-02/03, L10-P02, L10-P07; 6009696796 2026-10-06 NEMO-GAP-01/02; 6009792035 2026-10-06 LG-GAP-02). (MC/GC = docs/intelligence/research/GENAI-RD-MASTER-CONTINUATION.md / GENAI-RD-GLOBAL-CONVERGENCE.md.)
+- Sources: worker-notes/notes-A-genai.md QUERY-SAFETY-FAIL-OPEN (MC:469; GC:394-395; GC:620 proof obligation 13); worker-notes/notes-A-genai.md SAFETY-CHECK-ORDER-AND-PII (MC:470-471); worker-notes/notes-D-github.md INPUT-SAFETY-FAIL-POLICY (issue#153 comment 6010007429 2026-10-06 s.16, s.17, L10-GAP-02/03, L10-P02, L10-P07; 6009696796 2026-10-06 NEMO-GAP-01/02; 6009792035 2026-10-06 LG-GAP-02). (MC/GC = docs/intelligence/research/GENAI-RD-MASTER-CONTINUATION.md / GENAI-RD-GLOBAL-CONVERGENCE.md.)
 - Dedup: the three blocks describe the same function pair (runSafetyCheck + checkSafety): fail-open on absent/throwing checker, and PII early return plus "only high blocks". One change.
-- Status: d — key-cortex-quality.service.ts:59-71 returns {safe:false, severity:'medium'} on the first PII match before the keyword list (:73-96) and script check (:98-104); key-cortex-query-pipeline.service.ts:2272 returns undefined (proceed) with no checker; :2290-2294 swallows a throw; :2280 blocks only high. No plan packet (plan grep "safety"/"checkSafety" = 0). Correction to notes-D: the LLM second opinion (:106-140) does NOT receive a detected card number today, because the PII branch returns first; it would after the ordering fix, so the packet redacts before the classifier call.
-- Packets: RR-KEY-SAFETY-POLICY (P2, M; merges the two MASTER ids RR-KEY-SAFETY-FAIL-CLOSED and RR-KEY-SAFETY-PII-ORDER: same two functions, one review). Priority P2 not P1: the path has no web client; the live chat path question is G1a-Q1.
+- Status: d — key-cortex-quality.service.ts:59-71 returns {safe:false, severity:'medium'} on the first PII match before the keyword list (:73-96) and script check (:98-104); key-cortex-query-pipeline.service.ts:2272 returns undefined (proceed) with no checker; :2290-2294 swallows a throw; :2280 blocks only high. No plan packet (plan grep "safety"/"checkSafety" = 0). Correction to worker-notes/notes-D-github.md: the LLM second opinion (:106-140) does NOT receive a detected card number today, because the PII branch returns first; it would after the ordering fix, so the packet redacts before the classifier call.
+- Packets: RR-KEY-SAFETY-POLICY (P2, M; merges the two MASTER ids RR-KEY-SAFETY-FAIL-CLOSED and RR-KEY-SAFETY-PII-ORDER: same two functions, one review). Priority P2 not P1: the path has no web client; the live chat path question is OQ-6.
 
 ### REC-GUARDRAIL-LIFECYCLE — versioned guardrail policy, detect-then-enforce rollout, classifier cascade
-- Sources: notes-D GUARDRAIL-POLICY-LIFECYCLE (issue#153 comment 6010007429 2026-10-06 s.12-14, s.32, L10-GAP-07/08, SAFE-1, SAFE-4; 6009734842 2026-10-06 GRAI-GAP-01..04; 6009792035 2026-10-06 LG-GAP-01/03/07/08; 6009834485 2026-10-06 LAK-GAP-04/05/06/08).
+- Sources: worker-notes/notes-D-github.md GUARDRAIL-POLICY-LIFECYCLE (issue#153 comment 6010007429 2026-10-06 s.12-14, s.32, L10-GAP-07/08, SAFE-1, SAFE-4; 6009734842 2026-10-06 GRAI-GAP-01..04; 6009792035 2026-10-06 LG-GAP-01/03/07/08; 6009834485 2026-10-06 LAK-GAP-04/05/06/08).
 - Dedup: single source; its first slice is the same table REC-SAFETY-FAIL-POLICY needs, so it is folded into that packet.
 - Status: d — the only detector is key-cortex-quality.service.ts:50-147 (rules + optional LLM SAFE/LOW/MEDIUM/HIGH); `git grep GuardrailPolicy|DetectorRevision` = none; no plan packet.
 - Packets: RR-KEY-SAFETY-POLICY (first slice: INPUT_SAFETY_POLICY_VERSION and per-class detect/enforce mode recorded on every decision). Later slices named in its scope, not packets now: revision persistence, calibration, classifier cascade.
 
 ### REC-UNTRUSTED-CONTENT-FENCE — tool/MCP/document/web/extracted content enters prompts as fenced untrusted data that cannot carry instructions or authority
-- Sources: notes-A INDIRECT-CONTEXT-ADMISSION (GC:391-392, GC:586-592, GC:233-234; MC:472, MC:483; CV:177-180; issue#153 comment 6010007429); notes-B DATA-INSTRUCTION-AUTHORITY-SEPARATION (FIG/GENOME-V0.1-CONVERGENCE.md:133-137; FIG/TRANCHE-DECEPTION-SELF-CORRECTION-001.md:111-113, 126-128, 133-136; FIG/RESEARCH-CONTRIBUTION-ADOPTION-LEDGER.md:101; MS/garrytan-gstack.md:110-115); notes-C UNTRUSTED-CONTENT-ISOLATION (KEY-CONTINUOUS-LEARNING-WORLD-STREAM-RESEARCH-001.md:600-610, :775-797; KEY-CONCURRENCY-...-001.md:573-591); notes-D INDIRECT-CONTEXT-ADMISSION (issue#153 comments 6010007429 s.19, s.20, L10-GAP-05, L10-P03..P05; 6009696796 NEMO-GAP-04/05; 6009834485 LAK-GAP-01/02/03; 6009953713 REB-GAP-01/05; 6009218421 s.17, L8-P10; 6010080039 P0.4 packet G; all 2026-10-06). (CV = GENAI-RD-CONVERGENCE-VALIDATION-AND-PACKET-DERIVATION.md; FIG/MS paths as in notes-B.)
-- Dedup: four workers, one change: untrusted text entering a prompt is marked as data and cannot authorise anything. Authority side is already done (governToolCall + server-issued confirmation, flow-orchestrator.service.ts:3073 / 3320-3345 per notes-B), so the packet is the fence.
-- Status: c — exists: MCP output length cap with an "untrusted" comment (mcp-client-manager.service.ts:77-79); D-27 PENDING money inputs; outbound fetch guards in plan (FU-CONTRACT-FETCH-OUTBOUND-GUARD, FU-DOC-FETCH-BODY-CAP, TOF-WEBSITE-ENRICHMENT). Gap verified: buildAttachmentContext (flow-orchestrator.service.ts:1949-2003) concatenates raw extracted document text into the member's own user message (:2115-2116, :2562). Note: notes-A/D cite tool results re-entering follow-ups (:2475-2487) as a gap; they already go in as role 'tool' messages (structurally separate), so the packet fences only free text from third parties (attachments, MCP output) and leaves internal tool results as they are.
+- Sources: worker-notes/notes-A-genai.md INDIRECT-CONTEXT-ADMISSION (GC:391-392, GC:586-592, GC:233-234; MC:472, MC:483; CV:177-180; issue#153 comment 6010007429); worker-notes/notes-B-books-genome.md DATA-INSTRUCTION-AUTHORITY-SEPARATION (FIG/GENOME-V0.1-CONVERGENCE.md:133-137; FIG/TRANCHE-DECEPTION-SELF-CORRECTION-001.md:111-113, 126-128, 133-136; FIG/RESEARCH-CONTRIBUTION-ADOPTION-LEDGER.md:101; MS/garrytan-gstack.md:110-115); worker-notes/notes-C-neuro-arch.md UNTRUSTED-CONTENT-ISOLATION (KEY-CONTINUOUS-LEARNING-WORLD-STREAM-RESEARCH-001.md:600-610, :775-797; KEY-CONCURRENCY-...-001.md:573-591); worker-notes/notes-D-github.md INDIRECT-CONTEXT-ADMISSION (issue#153 comments 6010007429 s.19, s.20, L10-GAP-05, L10-P03..P05; 6009696796 NEMO-GAP-04/05; 6009834485 LAK-GAP-01/02/03; 6009953713 REB-GAP-01/05; 6009218421 s.17, L8-P10; 6010080039 P0.4 packet G; all 2026-10-06). (CV = GENAI-RD-CONVERGENCE-VALIDATION-AND-PACKET-DERIVATION.md; FIG/MS paths as in worker-notes/notes-B-books-genome.md.)
+- Dedup: four workers, one change: untrusted text entering a prompt is marked as data and cannot authorise anything. Authority side is already done (governToolCall + server-issued confirmation, flow-orchestrator.service.ts:3073 / 3320-3345 per worker-notes/notes-B-books-genome.md), so the packet is the fence.
+- Status: c — exists: MCP output length cap with an "untrusted" comment (mcp-client-manager.service.ts:77-79); D-27 PENDING money inputs; outbound fetch guards in plan (FU-CONTRACT-FETCH-OUTBOUND-GUARD, FU-DOC-FETCH-BODY-CAP, TOF-WEBSITE-ENRICHMENT). Gap verified: buildAttachmentContext (flow-orchestrator.service.ts:1949-2003) concatenates raw extracted document text into the member's own user message (:2115-2116, :2562). Note: worker-notes/notes-A-genai.md/D cite tool results re-entering follow-ups (:2475-2487) as a gap; they already go in as role 'tool' messages (structurally separate), so the packet fences only free text from third parties (attachments, MCP output) and leaves internal tool results as they are.
 - Packets: RR-UNTRUSTED-CONTENT-FENCE (P1, M). Later slices in its scope: semantic-memory section after MEM-SEMANTIC-SIGHT (D-257), KEY-PASTE-BOX text, enrichment, knowledge chunks.
 
 ### REC-STREAM-OUTPUT-BOUNDARY — a stream that ended in error or truncation triggers no effects; output policy before release
-- Sources: notes-A STREAM-ERROR-NO-EFFECTS (GC:394-395; GC:610-611 proof obligations 5-6); notes-D OUTPUT-SAFETY-RELEASE-BOUNDARY (issue#153 comments 6010007429 s.21, s.22, L10-GAP-06, L10-P14/P15; 6008603830 L7-GAP-07, L7-P08; 6009734842 GRAI-GAP-07; 6009792035 LG-GAP-06; 6010080039 P0.5; all 2026-10-06).
+- Sources: worker-notes/notes-A-genai.md STREAM-ERROR-NO-EFFECTS (GC:394-395; GC:610-611 proof obligations 5-6); worker-notes/notes-D-github.md OUTPUT-SAFETY-RELEASE-BOUNDARY (issue#153 comments 6010007429 s.21, s.22, L10-GAP-06, L10-P14/P15; 6008603830 L7-GAP-07, L7-P08; 6009734842 GRAI-GAP-07; 6009792035 LG-GAP-06; 6010080039 P0.5; all 2026-10-06).
 - Dedup: stream half (no effects from a failed stream) from both; output-policy half folded into REC-CONTENT-AWARE-REDACTION per MASTER.
 - Status: c — flow streamChat already returns on an error chunk (flow-orchestrator.service.ts:2840-2843, control). Gaps verified: (1) new finding, not in the notes: ModelGatewayService.streamComplete falls back to the next provider after the failing one has already yielded deltas (model-gateway.service.ts:1123-1137 yield, :1164-1170 catch and continue), so the live member chat can splice two providers' answers and tool-call deltas (accumulator flow-orchestrator.service.ts:2825-2833); (2) cortex streamQuery yields the error and continues (key-cortex-query-pipeline.service.ts:1408-1413) then runs collected tool calls (:1416-1447). No plan packet.
 - Packets: RR-STREAM-ERROR-NO-EFFECTS (P1, S). Truncation (finish reason on the done chunk) named as a later slice: truncated tool arguments fail JSON.parse today, so no effect runs.
 
 ### REC-CONTENT-AWARE-REDACTION — PII/secret detection by content and destination, not only by field name; applied to model output before release
-- Sources: notes-D CONTENT-AWARE-PII-REDACTION (issue#153 comments 6010007429 L10-GAP-10/11, L10-P08/P09, SAFE-3; 6009885416 Presidio; 6009649322 s.25 export classes; all 2026-10-06) + output half of notes-D OUTPUT-SAFETY-RELEASE-BOUNDARY (sources as row 5).
+- Sources: worker-notes/notes-D-github.md CONTENT-AWARE-PII-REDACTION (issue#153 comments 6010007429 L10-GAP-10/11, L10-P08/P09, SAFE-3; 6009885416 Presidio; 6009649322 s.25 export classes; all 2026-10-06) + output half of worker-notes/notes-D-github.md OUTPUT-SAFETY-RELEASE-BOUNDARY (sources as row 5).
 - Dedup: single source plus the folded output half.
 - Status: d — core/security/redaction.ts:13-32 field-name patterns only, deepRedact :47-63; value-based redaction exists only for email addresses in log lines (redactAddresses). No plan packet (plan "redact" hits W11-PROVIDER-OUTAGE-503 and FU-KEY-EVENT-COLUMNS, both unrelated to value detection).
 - Packets: RR-REDACTION-BY-CONTENT (P2, S). Output-release policy for streamed replies is a named later slice (needs a stream-buffering design). Coordinates with G3's RR-BUSINESS-EVENT-REDACT (where redaction is called vs what it catches).
 
 ### REC-PROMPT-CANARY — canary tokens in protected context detect prompt leakage; reviewed attack-signature store
-- Sources: notes-D THREAT-MEMORY-AND-CANARIES (issue#153 comments 6010007429 s.28-30, L10-GAP-09, SAFE-5; 6009953713 REB-GAP-02/03/04/06/07; 2026-10-06).
+- Sources: worker-notes/notes-D-github.md THREAT-MEMORY-AND-CANARIES (issue#153 comments 6010007429 s.28-30, L10-GAP-09, SAFE-5; 6009953713 REB-GAP-02/03/04/06/07; 2026-10-06).
 - Dedup: single source.
 - Status: d — `git grep -i canary apps/server/src`: nothing for this purpose; the only reply check is enforceDoNotSay (flow-orchestrator.service.ts:8203). No plan packet.
 - Packets: RR-KEY-PROMPT-CANARY (P3, S): canary at the end of the system prompt; a tool call carrying it is refused (the exfiltration-by-outbound-tool case), a reply echoing it is recorded. The attack-signature store is a later slice, not a packet (no honest RED without a review design).
 
 ### REC-DURABLE-EFFECT-IDEMPOTENCY — SafetyShell idempotency survives restart and replicas (durable claim, not a process Set)
-- Sources: notes-A SAFETYSHELL-DURABLE-IDEMPOTENCY (GC:388-389, GC:594-600; CV:103-109; MC:484-485); notes-D DURABLE-EFFECT-IDEMPOTENCY (issue#153 comments 6010007429 L10-GAP-13, L10-P19, SAFE-6; 6009696796 NEMO-GAP-09; 6006031473 P-DUR-01; 6010080039 P0.3 packet H; 6007335935 E6, P-RETRY-03; all 2026-10-06).
+- Sources: worker-notes/notes-A-genai.md SAFETYSHELL-DURABLE-IDEMPOTENCY (GC:388-389, GC:594-600; CV:103-109; MC:484-485); worker-notes/notes-D-github.md DURABLE-EFFECT-IDEMPOTENCY (issue#153 comments 6010007429 L10-GAP-13, L10-P19, SAFE-6; 6009696796 NEMO-GAP-09; 6006031473 P-DUR-01; 6010080039 P0.3 packet H; 6007335935 E6, P-RETRY-03; all 2026-10-06).
 - Dedup: same Set, same caller.
 - Status: a (premise false) — the Set exists (safety-shell.service.ts:36) but it is not the effect guard. Its only caller KeyActionExecutorService.execute (key-action-executor.service.ts:31, idempotencyKey = proposal.id) is reached only from KeyActionProposalService.execute (key-action-proposal.service.ts:435) after claimForExecution (:406-408, :536-577), a durable transactional conditional write APPROVED -> EXECUTING (V1-32, M46, landed). Two replicas cannot both execute one proposal; a restart cannot re-run an EXECUTED one. Other KEY effect paths: KeyIdempotencyService insert-claim (V1-19, D-103 lease) and the key-inbox claim (key-inbox.controller.ts:340-378). The Set is redundant defence in depth.
 - Packets: none (no RED that fails on main: the duplicate-execution scenario is already refused by the durable claim). Optional hygiene left to the owner, not drafted: delete the Set or comment it as non-authoritative. Real compensation is row 9 (G2).
 
 ### REC-MODEL-LIFECYCLE — retired models cannot be selected; requested vs resolved model recorded; defaults current
-- Sources: notes-D MODEL-LIFECYCLE-GUARD (issue #153 body, R&D-01A "capability/lifecycle-aware model catalog"; issue#153 comments 6005756178 2026-10-05 Gemini "configured default is shut down"; 6006031473 2026-10-06 P0.1, P0.2, P-MOD-01, invariant 8; 6006549000 2026-10-06 P0.2, P0.6, P-LIFE-01, P-PROV-01). Supporting evidence (not a repo source): Claude Code's bundled claude-api model reference (cached 2026-11-03) lists claude-3-5-sonnet-20241022 retired 2025-10-28 and claude-3-5-haiku-20241022 retired 2026-02-19.
+- Sources: worker-notes/notes-D-github.md MODEL-LIFECYCLE-GUARD (issue #153 body, R&D-01A "capability/lifecycle-aware model catalog"; issue#153 comments 6005756178 2026-10-05 Gemini "configured default is shut down"; 6006031473 2026-10-06 P0.1, P0.2, P-MOD-01, invariant 8; 6006549000 2026-10-06 P0.2, P0.6, P-LIFE-01, P-PROV-01). Supporting evidence (not a repo source): Claude Code's bundled claude-api model reference (cached 2026-11-03) lists claude-3-5-sonnet-20241022 retired 2025-10-28 and claude-3-5-haiku-20241022 retired 2026-02-19.
 - Dedup: single source.
 - Status: d — model-gateway.service.ts:319-325 defaults (anthropic claude-3-5-sonnet-20241022, google gemini-2.0-flash); DEFAULT_ROUTING_TABLE from :386 uses both Claude 3.5 ids on most routes as primary or fallback; key-cortex-provider-selection.service.ts:24-63 repeats them; routing replaceable from DB (:3091-3111) and per request (:1933-1937); no lifecycle data anywhere; 195 model-id literals in non-spec server src. Resolved model and fallbackUsed are already recorded on the cost row (:1015-1041); the requested model is not (covered by fallbackUsed for the skip case). No plan packet.
-- Packets: RR-MODEL-LIFECYCLE-GUARD (P1, S): owner-filled catalog, census, dispatch-time skip of retired ids. Replacement defaults: owner question G1a-Q2.
+- Packets: RR-MODEL-LIFECYCLE-GUARD (P1, S): owner-filled catalog, census, dispatch-time skip of retired ids. Replacement defaults: owner question OQ-3.
 
 ## 2. Model gateway (providers, admission, cost, structured output, tool schemas, run budget)
 
 ### REC-RESOURCE-CATALOG — Ollama and OpenRouter are distinct resources (identity, health, circuit, cost), not one 'opensource' provider
 - Sources: issue#153 comment 6006549000 2026-10-06 (s.C1, C7, C8, Wave 1); 6006534541 2026-10-06; 6006177312 and 6006194487 2026-10-06 (Ollama); 6006480035 2026-10-06 (Vertex)
 - Dedup: single source (D:COGNITIVE-RESOURCE-CATALOG)
-- Status: d — model-gateway.service.ts:2742-2747 and :1740-1745 pick Ollama whenever OLLAMA_BASE_URL is set, else OpenRouter, under one AiProvider 'opensource' (:10); one configured flag (:770-772, :2023-2024), one circuit and one metrics row (ALL_PROVIDERS :317); unknown model cost 0 (:2769). Correction: the route is reachable only through the operator routing table (loadRoutingConfig :3091-3112) or providerOverride+modelOverride (:1933); no default route uses it, and the cortex map naming it has no production caller (see #12). No plan packet (plan grep opensource/ollama/openrouter: 0).
+- Status: d — model-gateway.service.ts:2742-2747 and :1740-1745 pick Ollama whenever OLLAMA_BASE_URL is set, else OpenRouter, under one AiProvider 'opensource' (:10); one configured flag (:770-772, :2023-2024), one circuit and one metrics row (ALL_PROVIDERS :317); unknown model cost 0 (:2769). Correction: the route is reachable only through the operator routing table (loadRoutingConfig :3091-3112) or providerOverride+modelOverride (:1933); no default route uses it, and the cortex map naming it has no production caller (see REC-SCHEDULER-SEAM). No plan packet (plan grep opensource/ollama/openrouter: 0).
 - Packets: RR-OPENSOURCE-PROVIDER-SPLIT (P3, S)
 
 ### REC-SCHEDULER-SEAM — one model-selection seam; static provider maps collapse into it; capabilities gate eligibility
@@ -214,7 +214,7 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 - Sources: issue#153 comment 6006095627 2026-10-06 (s.8 admission control, memory watermarking, continuous batching); 6006109752 2026-10-06 (A paged attention, B continuous batching/queueing, C admission control/congestion control, E2 saturation curve); 6006549000 2026-10-06 (P3.1 RuntimeCapacityEnvelope, P4.1 hard admission); docs/neuro-atlas-code-mapping.md:30; docs/intelligence/KEY-CONCURRENCY-CONNECTIVITY-ADAPTIVE-RECEPTOR-RESEARCH-001.md:513-536, :583 (invariant "Backpressure is mandatory"); docs/intelligence/KEY-CONTINUOUS-LEARNING-WORLD-STREAM-RESEARCH-001.md:786 (invariant 12)
 - Dedup: D:LLM-ADMISSION-CONTROL and C:CORTEX-BUS-BACKPRESSURE share the law (bounded admission, saturation is a signal, never a fault) but are two code changes on two seams, so two packets.
 - Status: c — model calls: AiUsageService.checkRateLimit (ai-usage.service.ts:302-321) is an in-process per-business requests-per-minute Map on AiUsageService paths only; the gateway has none; KEY chat routes carry @CrmRateLimit(120, 60_000) per IP+business (flow.controller.ts:31, :55), which bounds requests, not concurrent model calls, and background callers pass no guard. Bus: publish (key-cortex-event-bus.service.ts:125-188) starts two unawaited, unbounded ledger writes per event (:166-186); the domain bridge forwards matching events without awaiting (event-emitter-flow-bridge.service.ts:141-152), e.g. one contact.created per imported CSV row (crm.service.ts:989). Per-rule trigger cooldowns exist (key-cortex-trigger.service.ts createRule cooldownMinutes/maxDailyFirings), so the gap is the writes, not rule firing. No plan packet (plan grep backpressure/admission-on-AI: 0).
-- Packets: RR-LLM-ADMISSION-CONTROL (P2, M), RR-CORTEX-BUS-BACKPRESSURE (P3, S; bounded writes only, nothing shed; shedding/coalescing needs owner question 2)
+- Packets: RR-LLM-ADMISSION-CONTROL (P2, M), RR-CORTEX-BUS-BACKPRESSURE (P3, S; bounded writes only, nothing shed; shedding/coalescing needs OQ-8)
 
 ### REC-UNKNOWN-COST — unpriced model cost recorded as unknown, never $0; one price table
 - Sources: issue#153 comment 6006031473 2026-10-06 (P0.5, F8, P-COST-01); 6006549000 2026-10-06 (C4, P0.3, P-COST-01/02); 6009291467 2026-10-06 (LS-GAP-04); 6009649322 2026-10-06 (L9-GAP-06, L9-P18)
@@ -226,7 +226,7 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 - Sources: docs/intelligence/research/GENAI-RD-GLOBAL-CONVERGENCE.md:310, :619 (obligation 17); GENAI-RD-MASTER-CONTINUATION.md:242-256; issue#153 body (R&D-01A live repo gap); issue#153 comment 6006031473 2026-10-06 (F7); 6008240990 2026-10-06 (EMB-GAP-03); 6008318382 2026-10-06 (s.4); issue #137 body (CI-BLACKOUT hidden direct calls)
 - Dedup: A:MODEL-CALLS-THROUGH-GATEWAY and D:DIRECT-PROVIDER-BYPASS name the same call sites and the same seam.
 - Status: c — direct SDK use outside the gateway: ai-usage.service.ts:912, :976, :1057 (metered in AiUsageLog with credits); key-cortex-voice.service.ts:228, :241 (metered); key-cortex-document.service.ts:154, :167 with generateEmbedding :980-991 (indexing and question embeddings, NOT metered: no AiUsageLog, no credit); raw URLs in phone-voice/realtime-bridge.service.ts:5 and diagnostics/diagnostics.service.ts:380 (health probe). All honour keyDisabled() and the R0-07a 503 rule. Correction: semantic-memory.service.ts:120 is only a model constant; it embeds through AiUsageService.trackEmbedding (:447). Minor finding: key-cortex-document.service.ts:399 records model: response.provider (provider name in the model field).
-- Packets: RR-DIRECT-PROVIDER-CENSUS (P3, S; census first; the "first move" of document embeddings charges credits, owner question 3)
+- Packets: RR-DIRECT-PROVIDER-CENSUS (P3, S; census first; the "first move" of document embeddings charges credits, OQ-9)
 
 ### REC-ANTHROPIC-TOOL-PARITY — toolChoice 'none' mapped for Anthropic; tool results as native tool_result blocks
 - Sources: issue#153 comment 6008938834 2026-10-06 (s.11, s.12); 6009218421 2026-10-06 (L8-GAP-06)
@@ -280,9 +280,9 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 
 ### REC-REAL-COMPENSATION — compensation really executes and verifies; never report undone work as undone
 - Sources: issue#153 comment 6010007429 2026-10-06 (L10-GAP-14, L10-P20); issue#153 comment 6009696796 2026-10-06 (NEMO-GAP-08); docs/neuro-atlas-code-mapping.md:114, :360-363 (top-10 #7, saga); GC:594-600 and MC:484-485 (via A:SAFETYSHELL-DURABLE-IDEMPOTENCY, compensation half)
-- Dedup: D:REAL-COMPENSATION and C:SAGA-AUTO-COMPENSATION are the same law (undo must really run and the record must not lie); A's compensation half folded in. The idempotency half of A's block is row #8 (G1).
+- Dedup: D:REAL-COMPENSATION and C:SAGA-AUTO-COMPENSATION are the same law (undo must really run and the record must not lie); A's compensation half folded in. The idempotency half of A's block is REC-DURABLE-EFFECT-IDEMPOTENCY (G1).
 - Status: a for sagas, c for SafetyShell. Saga: compensation is recorded before each step (key-cortex/key-cortex-planner.service.ts:613-630 via KeyCortexCompensationService; key-cortex-tool-registry.service.ts:435-450), and a saga with no declared compensation is recorded 'compensation_unavailable', not 'compensated' (key-cortex-saga.service.ts:162-180). SafetyShell: rollback() refuses to report success for a non-empty list (key-autonomy/safety-shell.service.ts:74-125) and its only caller passes no rollback actions (key-action-executor.service.ts:31-37, :77), so nothing reports false undo today. No concrete RED exists: no caller needs SafetyShell rollback.
-- Packets: none (no honest RED; the tripwire is already the honest state). Owner question OQ-G2a-1. Real per-capability undo is carried by RR-UNDO-DURABLE and RR-ACTION-BOUNDARY-NEXT-CAPABILITY.
+- Packets: none (no honest RED; the tripwire is already the honest state). Owner question OQ-12. Real per-capability undo is carried by RR-UNDO-DURABLE and RR-ACTION-BOUNDARY-NEXT-CAPABILITY.
 
 ### REC-EFFECT-CLASS — every capability declares effect class, idempotency, reversibility, version; writes in one model turn run in order, only independent reads in parallel
 - Sources: GC:571-576; MC:402; CV:167-170; BP:41-53 (K5); KEY-COGNITIVE-ARCHAEOLOGY-...-001.md:380-383 (COG-002); KEY-COGNITIVE-IMPLEMENTATION-CROSSWALK-001.md:224; KEY-CONCURRENCY-...-001.md:411-450; kernels/KF-KERNEL-005-CAPABILITY-FABRIC.md:134-147; 12-KERNEL-PROGRAMME.md:666-671; issue#153 comment 6008938834 2026-10-06 (s.7, s.8); issue#153 comment 6009218421 2026-10-06 (s.7, s.8, L8-GAP-04, L8-P07/P08/P09)
@@ -300,7 +300,7 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 - Sources: MC:399; issue#153 comment 6009218421 2026-10-06 (s.11, L8-GAP-01, L8-P11); issue#153 comment 6008878520 2026-10-06 (MCP study)
 - Dedup: A:MCP-TENANT-BINDING and D:MCP-TENANCY are the same file and the same false comment.
 - Status: d — header claims per-business caching (mcp/mcp-client-manager.service.ts:19-25); code has one global Map (:29), ignores _businessId (:52), callTool has no business (:62), one env bearer per server (:118-121); FlowOrchestrator routes any mcp__* name to callTool without a business (ai/flow-orchestrator.service.ts:3957-3960); listing is not advertised (:1826-1842); dormant while MCP_REMOTE_SERVERS is empty (mcp/mcp.types.ts:24-26; .env.example:155 empty). Plan grep MCP: 0.
-- Packets: RR-MCP-TENANT-BOUND (P1, S; becomes P0 if the owner confirms MCP_REMOTE_SERVERS is set in production). Safe either way: unset = no change; set but unbound = every bridged call refused. Owner question OQ-G2a-4.
+- Packets: RR-MCP-TENANT-BOUND (P1, S; becomes P0 if the owner confirms MCP_REMOTE_SERVERS is set in production). Safe either way: unset = no change; set but unbound = every bridged call refused. Owner question OQ-1.
 
 ### REC-CONNECTOR-CONVERGENCE — one connector substrate / connected-account model (ConnectorRegistry vs KeyConnector)
 - Sources: GC:315, GC:411-412; MC:400-401; CV:319-326; issue#153 comment 6009218421 2026-10-06 (s.9, s.10, L8-GAP-02/03, L8-P04/P05/P06/P18); 6009194323 (Composio); 6009207249 (Arcade); 6010080039 (P1.5, packet E)
@@ -312,7 +312,7 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 - Sources: KEY-CONCURRENCY-CONNECTIVITY-ADAPTIVE-RECEPTOR-RESEARCH-001.md:498-513 (items 7, 10), :573-591; architecture-risks.md R63
 - Dedup: single source (C:CONNECTOR-CONFORMANCE-HARNESS).
 - Status: d — no shared harness (per-adapter specs only). New concrete finding this pass: Stripe, PayPal, Klaviyo, Mailchimp and QuickBooks report 'connected' on the platform's own env credential (implementations/stripe.connector.ts:48, 58-59, 91; paypal.connector.ts:42-43; klaviyo.connector.ts:45-51; mailchimp.connector.ts:60-66; quickbooks.connector.ts:51-53) and smokeTestConnector then writes ConnectorStatus 'connected' (core/connectors/connector-registry.service.ts:222-260), against the spirit of D-138.
-- Packets: RR-CONNECTOR-CONFORMANCE (P2, S), gated on OQ-G2a-2 (state wording only; payments behaviour unchanged).
+- Packets: RR-CONNECTOR-CONFORMANCE (P2, S), gated on OQ-13 (state wording only; payments behaviour unchanged).
 
 ### REC-WEBHOOK-INGRESS-ENVELOPE — one verified ingress envelope for webhooks (signature, replay/dedup, tenant from trusted mapping)
 - Sources: issue#153 comment 6009218421 2026-10-06 (s.15, L8-GAP-08, L8-P14/P15)
@@ -323,7 +323,7 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 ### REC-CAPABILITY-PAGING — task-scoped bounded tool selection; a missing allowlist never broadens
 - Sources: issue #153 body (R&D-01A "capability paging"); issue#153 comment 6006031473 2026-10-06 (C4, Wave 4 P4.3/P4.5, P-TOOL-01); 6009218421 (s.6, L8-GAP-05, L8-P02); 6007335935 (E9 "Capability View")
 - Dedup: single source (D:CAPABILITY-PAGING).
-- Status: b — confirmed. The v1 surface reduction and "never broadens" are plan packets KEY-TOOL-ALLOWLIST (allowlist at prompt and dispatch), KEY-TOOL-DOMAIN-HIDE (per-business hidden families) and W11-OWNER-MAP-UNMAPPED-TOOLS (unmapped tools fail closed for an explicit owner map). Today's selection is lexical with MAX_TOOLS = 128 (ai/flow-orchestrator.service.ts:1844). The residual (semantic top-k with recall telemetry) has no honest RED until those land; it is post-v1 research follow-through, not a packet now. The one escape (the IntentParser list) is row #32.
+- Status: b — confirmed. The v1 surface reduction and "never broadens" are plan packets KEY-TOOL-ALLOWLIST (allowlist at prompt and dispatch), KEY-TOOL-DOMAIN-HIDE (per-business hidden families) and W11-OWNER-MAP-UNMAPPED-TOOLS (unmapped tools fail closed for an explicit owner map). Today's selection is lexical with MAX_TOOLS = 128 (ai/flow-orchestrator.service.ts:1844). The residual (semantic top-k with recall telemetry) has no honest RED until those land; it is post-v1 research follow-through, not a packet now. The one escape (the IntentParser list) is REC-NO-DUPLICATE-TOOL-LIST.
 - Packets: none (b: KEY-TOOL-ALLOWLIST, KEY-TOOL-DOMAIN-HIDE, W11-OWNER-MAP-UNMAPPED-TOOLS)
 
 ### REC-NO-DUPLICATE-TOOL-LIST — IntentParser tool vocabulary derived from FLOW_TOOLS so allowlist/hide rulings apply
@@ -352,7 +352,7 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 
 ### REC-SAFE-MODE — partial safe mode (reads + identity + audit stay; risky autonomy off), recorded entry/exit, recovery before resumption
 - Sources: FIG/GENOME-V0.1-CANDIDATE-ROUTING.md:46-50 (C6); FIG/GENOME-V0.1-FOUR-AUDIT-CONVERGENCE.md:30, 65; FIG/GENOME-V0.1-CONVERGENCE.md:123-131; FIG/TRANCHE-COGNITIVE-LIFECYCLE-RESILIENCE-001.md:60-92, 135-136; MS/garrytan-gstack.md:86-91; KEY-CONCURRENCY-CONNECTIVITY-ADAPTIVE-RECEPTOR-RESEARCH-001.md:593-875; KEYFLOWOS-CONTINUOUS-ASSURANCE-...-001.md:1283-1304, 1508-1520; KEY-CONTINUOUS-LEARNING-...-001.md:533-558; issue #130 comment 5985219650 2026-10-04 (ASSURANCE-SAFE-MODE-001)
-- Dedup: B:SAFE-MODE-CONTRACT, C:REGULATORY-PROGRAM-MODES and D:ASSURANCE-SAFE-MODE describe one partial-off state; the two-key half of D is row #88 (G4).
+- Dedup: B:SAFE-MODE-CONTRACT, C:REGULATORY-PROGRAM-MODES and D:ASSURANCE-SAFE-MODE describe one partial-off state; the two-key half of D is REC-TWO-KEY (G4).
 - Status: c — only all-or-nothing switches: KEY_DISABLED (core/config/env.ts:289-306, D-17) and plan KEY-CRONS-FLAGS. No partial mode (git grep SAFE_MODE/safeMode in apps/server/src: none).
 - Packets: RR-KEY-SAFE-MODE (P3, S) — manual operator flag first; health-entered mode and recovery evidence are later slices.
 
@@ -366,11 +366,11 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 - Sources: DOS/FORMAL-PROOF-SELF-REFERENCE-RULE-SYSTEMS.md:41-53, 131-133; TR/STRUCTURE-FUNCTION-STORAGE-TRACE-001.md:217-228; FIG/GENOME-V0.1-REPO-PRESSURE-TEST.md:96-106; FIG/GENOME-V0.1-FOUR-AUDIT-CONVERGENCE.md:64; FIG/ACTIVE-BLOCKERS-AND-ISSUES.md:228-230; TR/INFORMATION-VELOCITY-TRACE-001-DETERMINIZATION.md:225-228
 - Dedup: single source (B:ACTION-BOUNDARY-COVERAGE).
 - Status: c — boundary adopts one capability, BOUNDARY_CAPABILITIES = [HELPDESK_CREATE_TICKET] (key-autonomy/action-boundary/action-envelope.ts:21-27, comment: a second family is separately released work); other Flow writes use the bound confirmation (ai/flow-orchestrator.service.ts:3149, 3274-3405) with no outcome evidence. No plan packet extends adoption.
-- Packets: RR-ACTION-BOUNDARY-NEXT-CAPABILITY (P2, M; commerce_send_invoice recommended, OQ-G2a-3)
+- Packets: RR-ACTION-BOUNDARY-NEXT-CAPABILITY (P2, M; commerce_send_invoice recommended, OQ-14)
 
 ### REC-DURABLE-UNDO — reversibility class per tool; undo state durable (not a 5-minute in-process Map)
 - Sources: FIG/GENOME-V0.1-CANDIDATE-ROUTING.md:71-74 (C10); FIG/GENOME-V0.1-CONVERGENCE.md:93-98; FIG/TRANCHE-INSTITUTIONAL-INTELLIGENCE-001.md:34-36, 70-71; DOS/NORMAN-DESIGN-EVERYDAY-THINGS.md:53-62; DOS/DECISION-ROUTING-KAHNEMAN-ALGORITHMS.md:93-106; TR/ACTION-UNDERSTANDING-TRACE-001.md:131
-- Dedup: single source (B:REVERSIBILITY-CLASS); the class field lives in RR-TOOL-EFFECT-CLASS (row #25).
+- Dedup: single source (B:REVERSIBILITY-CLASS); the class field lives in RR-TOOL-EFFECT-CLASS (REC-EFFECT-CLASS).
 - Status: c — undo exists but in memory: ai/undo.service.ts:69-72 (Map, 5-minute window), :127-129 (setTimeout delete), process-local claim Set (~:73-81); writer action-dispatcher.service.ts:186-197; routes ai/agent.controller.ts ~262-300. No plan packet (plan "undo" hits are unrelated contact/stock undo).
 - Packets: RR-UNDO-DURABLE (P3, M; one new table, no backfill)
 
@@ -395,11 +395,23 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 - Packets: RR-LEARNING-OUTCOME-SEMANTICS (P3, S; after MEM-CENSUS). MEM coordination: CognitionMemory is in MEM-CENSUS's store list; no MEM packet changes userResponse semantics (MEM-CLASS-COLUMNS covers AiMemory/AiMemoryEmbedding/TemporalFlowMemory only); the packet changes no read predicate, projection or member scope (D-130); memory-consolidation.service.ts:238 promotes only accepted rows at confidence >= 0.9, so tool rows (0.85) were never promoted.
 
 ### REC-GOVERNED-LEARNING — learned signals only narrow autonomy, never widen it
-- Sources: A:GOVERNED-LEARNING-NARROWS-ONLY (BG:278-289; GC:242-260, GC:498-499); C:LEARNING-TO-TOOL-SELECTION (docs/neuro-atlas-code-mapping.md:44)
-- Dedup: C's "feed scores into tool selection" is the consumer half; A's law bounds it. Merged.
+- Sources: A:GOVERNED-LEARNING-NARROWS-ONLY (BG:278-289; GC:242-260, GC:498-499)
+- Dedup: single law. The neuro atlas's "feed scores into tool selection" (C:LEARNING-TO-TOOL-SELECTION) is a different change and now has its own row, REC-OUTCOME-WEIGHTED-TOOL-SELECTION (split by the fidelity review).
 - Status: a — confirmed: apps/server/src/modules/key-autonomy/autonomy-orchestrator.service.ts:302-330, where ToolOutcomeScore can only force supervised (<50%) or block (<30%, >=5 uses), never widen. C's gap is real: getToolScoreForBusiness has no caller outside the registry (K/key-cortex-tool-registry.service.ts:808; only internal uses at :878/:882). It stays post-v1: it conflicts with the static v1 allowlist (KEY-TOOL-ALLOWLIST), and learned preference may only re-rank, never change availability. Caveat, handled by the REC-LEARNING-SEMANTICS packet: the score counts execution success, not verified outcome.
 - Packets: none (done on main; the consumer is post-v1 under KEY-TOOL-ALLOWLIST).
 
+
+### REC-OUTCOME-WEIGHTED-TOOL-SELECTION — learned tool outcome scores automatically adjust tool-selection weights
+- Sources: docs/neuro-atlas-code-mapping.md:44 (LTP/LTD: "learning output automatically adjusts tool-selection weights"); worker-notes/notes-C-neuro-arch.md (C:LEARNING-TO-TOOL-SELECTION)
+- Dedup: split out of REC-GOVERNED-LEARNING by the fidelity review (a different change from the narrowing law).
+- Status: d — ToolOutcomeScore is recorded and read per business (apps/server/src/modules/key-cortex/key-cortex-tool-registry.service.ts:677, :808) but getToolScoreForBusiness has no caller outside the registry (:878, :882); nothing weights tool selection by it.
+- Packets: none. The score counts execution success, not outcome (key-cortex-tool-registry.service.ts:802-826), and using it to choose tools would reward what REC-LEARNING-SEMANTICS (RR-LEARNING-OUTCOME-SEMANTICS) is fixing; tool exposure is being reduced by plan packets KEY-TOOL-ALLOWLIST and KEY-TOOL-DOMAIN-HIDE first. Owner question OQ-38.
+
+### REC-EVAL-ONLINE-CALIBRATION — evals get repeated-trial (stochastic) admission semantics, online evaluation rules and monitors, and a production-regression intake with human annotation and calibration
+- Sources: issue#153 comment 6009649322 2026-10-06 (L9-GAP-10, L9-GAP-11, OBS-EVAL-4)
+- Dedup: single source; added by the fidelity review (missing from the first pass). Its versioned-artifact half is REC-EVAL-LINEAGE.
+- Status: d — no repeated-trial, online-monitor or annotation code (`git grep -n -i "repeatedTrial|onlineEval|annotation" 2c4e4bf2 -- apps/server/src/modules/key-cortex` finds nothing relevant); the eval harness itself is not yet honest (REC-EVAL-HONEST).
+- Packets: none now: it needs RR-EVAL-HARNESS-NO-VACUOUS and RR-EVAL-RUN-LINEAGE first, and a production intake needs a privacy gate the source itself requires. Owner question OQ-39 (post-v1 or v1).
 ### REC-EVAL-HONEST — eval suites cannot pass vacuously; NOT_RUN is distinct; the harness runs in CI
 - Sources: A:EVAL-HARNESS-HONEST-SUITES (GC:322-323, GC:408-409, GC:578-584; CV:82-93; MC:432-436; BG:241-256; KNG:606); D:EVAL-HARNESS-NO-FAKE-GREEN (issue #151 body E3/E5; issue#153 comments 6009649322 2026-10-06, 6006031473 2026-10-06, 6008383152 2026-10-06); C:KEY-EVAL-IN-CI (docs/neuro-atlas-code-mapping.md:375-378; KEYFLOWOS-CONTINUOUS-ASSURANCE-...-001.md:796-797, :851)
 - Dedup: same file, same vacuous checks, same proof obligation (negative controls). C's CI half is MEM-EVAL-SUITE's.
@@ -478,7 +490,7 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 - Sources: docs/intelligence/research/GENAI-RD-OTEL-LANGFUSE-PACKET-DERIVATION.md:1-291 (esp. :24-31 deadline 2026-11-16, :58, :159, :197, :224); GENAI-RD-MASTER-CONTINUATION.md:593-630, :698 (GC:399-400, :542-550, :614 obligation 10 per worker A); CV:152-155, :284-297; MC:427-437, :596-630; BP:501-514; PD:131-166 (COG-P07); OT:107-121, :137-144; issue#153 comments 6009369621 (2026-10-06, LF-GAP-01..10), 6009649322 (2026-10-06, s.3-8, s.25-29, L9-GAP-01..05/12/13, L9-P01..P07), 6010080039 (2026-10-06, P1.1), 6010232840 (2026-10-06, packet KF-ASSURANCE-OTEL-LANGFUSE-COMPAT-001), 6010564277 (2026-10-06), 6010442954 (2026-10-06, candidate B), 6009291467 (2026-10-06, LS-GAP-01/02/06/08), 6009595072 (2026-10-06, PHX-GAP-01..08), 6009634232 (2026-10-06, WEAVE-GAP-06); issue #130 body (ASSURANCE-OBS-001); issue #151 body (E4); KEYFLOWOS-CONTINUOUS-ASSURANCE-...-001.md:159-177, :790-791, :845, :1384-1398; architecture/target-architecture.md:117-118
 - Dedup: A:LANGFUSE-OTEL-MIGRATION + A:TELEMETRY-EXPORTER-HEALTH + D:LANGFUSE-OTEL-COMPAT are the same cutover (endpoint, non-fatal visible exporter, metadata-only); A:OCCURRENCE-ATTEMPT-EFFECT-LINEAGE + D:AI-EXECUTION-TRACE-SPINE + C:CORRELATED-OBSERVABILITY are the attempt/correlation half. Split into two packets; the lineage beyond the gateway (queue attempt, claim, effect ids) and OTel SDK adoption are named later slices.
 - Status: d — apps/server/src/modules/ai/langfuse.service.ts:127 POSTs `/api/public/ingestion`; failures warn only (:137-143); userId: input.businessId (:80); random trace id per call (:71); traced only from the cost recorders on success (model-gateway.service.ts:979, :1022), failed candidates only logged (:933-937, :1165-1170); GatewayRequest has no correlationId (model-gateway.service.ts:57-72); no @opentelemetry/openinference in apps or packages; plan grep langfuse|otel|opentelemetry|telemetry: no packet. Privacy default (metadata only, langfuse.service.ts:94-119) is already met. COST-LEDGER-001.md:69 records Release 0 as "off" for Langfuse.
-- Packets: RR-LANGFUSE-INGESTION-CUTOVER (P2, S), RR-AI-TRACE-ATTEMPTS-CORRELATION (P3, S). Both: tests stub fetch, no real provider/Langfuse traffic; exporter failure stays non-fatal. Priority is P2 not P1 because Release 0 declares Langfuse off; it becomes P1 if the owner says keys are set in production (owner question 1).
+- Packets: RR-LANGFUSE-INGESTION-CUTOVER (P2, S), RR-AI-TRACE-ATTEMPTS-CORRELATION (P3, S). Both: tests stub fetch, no real provider/Langfuse traffic; exporter failure stays non-fatal. Priority is P2 not P1 because Release 0 declares Langfuse off; it becomes P1 if the owner says keys are set in production (OQ-2).
 
 ### REC-SLO — SLOs and error budgets for critical services
 - Sources: KEYFLOWOS-CONTINUOUS-ASSURANCE-...-001.md:179-187, :802-803
@@ -519,8 +531,8 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 ### REC-STATE-TRANSITION-COMMANDS — lifecycle status fields change only through transition commands, never generic PATCH
 - Sources: kernels/KF-KERNEL-006-STATE-TRANSITION.md:157-163
 - Dedup: single source
-- Status: b partial / c — covered: orders (W1F-ORDER-TRANSITIONS, W11-ORDER-CANCEL-RELEASE), invoices (PATCH restricted, commerce/dto/update-invoice.dto.ts:4-18, :79-85), procurement (decision statuses refused, procurement.service.ts:188-196), contact mass-assign (FU-DATAQUALITY-MASS-ASSIGN). VERIFIED residuals with no plan packet: change orders (change-order.controller.ts:76-85 status any string + client approvedBy/approvedAt, written unchecked at change-order.service.ts:115-131; web approves by PATCH, apps/web/src/app/app/change-orders/page.tsx:59) and contracts (update-contract.dto.ts:25-27, contracts.service.ts:169-190 any→any; TERMINATED→ACTIVE re-arms ContractRenewalSweep obligations, contract-renewal.sweep.ts:48, :93-96). Twelve Update*Dto classes carry a status field in total (listed in the census packet). Plan grep change.order|ChangeOrder|approvedBy|TERMINATED: only SWP-CENSUS-HIDDEN/NAV-B-HIDE-2 (scope guard / hiding, not transitions).
-- Packets: RR-STATUS-PATCH-CENSUS (P3, S), RR-CHANGE-ORDER-APPROVE-COMMAND (P2, S; forged approver attribution). Contracts registered OPEN pending owner question 3.
+- Status: c (b for the covered domains; reclassified by the fidelity review) — covered: orders (W1F-ORDER-TRANSITIONS, W11-ORDER-CANCEL-RELEASE), invoices (PATCH restricted, commerce/dto/update-invoice.dto.ts:4-18, :79-85), procurement (decision statuses refused, procurement.service.ts:188-196), contact mass-assign (FU-DATAQUALITY-MASS-ASSIGN). VERIFIED residuals with no plan packet: change orders (change-order.controller.ts:76-85 status any string + client approvedBy/approvedAt, written unchecked at change-order.service.ts:115-131; web approves by PATCH, apps/web/src/app/app/change-orders/page.tsx:59) and contracts (update-contract.dto.ts:25-27, contracts.service.ts:169-190 any→any; TERMINATED→ACTIVE re-arms ContractRenewalSweep obligations, contract-renewal.sweep.ts:48, :93-96). Twelve Update*Dto classes carry a status field in total (listed in the census packet). Plan grep change.order|ChangeOrder|approvedBy|TERMINATED: only SWP-CENSUS-HIDDEN/NAV-B-HIDE-2 (scope guard / hiding, not transitions).
+- Packets: RR-STATUS-PATCH-CENSUS (P3, S), RR-CHANGE-ORDER-APPROVE-COMMAND (P2, S; forged approver attribution). Contracts registered OPEN pending OQ-21.
 
 ### REC-ONE-EVENT-SUBSTRATE — one event substrate; audit publish-only / listen-only events
 - Sources: KEY-COGNITIVE-ARCHAEOLOGY-...-001.md:385-388 (COG-003); KEY-COGNITIVE-IMPLEMENTATION-CROSSWALK-001.md:225; architecture/target-architecture.md principle 3; architecture/architecture-risks.md:56 (R9), R58; architecture/migration-plan.md:88
@@ -532,7 +544,7 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 - Sources: kernels/KF-KERNEL-002-HUMAN-AUTHORITY-ORGANIZATION.md:206-214; KF-KERNEL-001-TENANT-GENESIS-IDENTITY.md:179-190; 12-KERNEL-PROGRAMME.md:98, :630, :666-667
 - Dedup: single source
 - Status: c — resolver exists (core/authority/effective-authority.resolver.ts), runs in shadow only (core/auth/module-scope.guard.ts:88-92, :113-144; mismatch is a warn line :131-137); shadow family pinned to AiSettingsController (core/authority/authority-shadow.spec.ts:185-199). Gap: no counted parity evidence; no cutover. Plan grep effective.authority|ShadowEffective: none.
-- Packets: RR-AUTHORITY-SHADOW-PARITY (P2, S): evidence only. The cutover changes who may do what: owner question 4.
+- Packets: RR-AUTHORITY-SHADOW-PARITY (P2, S): evidence only. The cutover changes who may do what: OQ-22.
 
 ### REC-ARCH-FORWARDREF — no new forwardRef cycles; replace existing with events/facades
 - Sources: architecture/architecture-risks.md:48 (R1); architecture/target-architecture.md:90, :139; architecture/migration-plan.md:55
@@ -562,88 +574,124 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 - Sources: architecture/migration-plan.md:25
 - Dedup: single source
 - Status: c — scanners exist, stdlib-only (.agents/skills/codebase-architect/scripts/inventory.py, dependency_scan.py); FU-ARCH-MAP-REFRESH (b) regenerates maps on owner authority; no workflow runs them (grep .github/workflows: none).
-- Packets: RR-ARCH-SCAN-CI (P3, S), report-only, depends on FU-ARCH-MAP-REFRESH. Blocking mode: owner question 5 (a blocking gate collides with CLAUDE.md's "no programme-map refresh without explicit authority").
+- Packets: RR-ARCH-SCAN-CI (P3, S), report-only, depends on FU-ARCH-MAP-REFRESH. Blocking mode: OQ-23 (a blocking gate collides with CLAUDE.md's "no programme-map refresh without explicit authority").
 
 ### REC-THROUGHPUT-METRIC — KEY actions-per-hour metric per business
 - Sources: docs/neuro-atlas-code-mapping.md:163
 - Dedup: single source
 - Status: d — git grep actionsPerHour|metabolic|throughput (as a metric) in apps/server/src: none; KeyActionProposal has executedAt/status to count from (schema.prisma model KeyActionProposal); KeyCortexHomeostasisService VARIABLES (key-cortex-homeostasis.service.ts:79-109) is the natural host.
-- Packets: none (owner question 6). Reasons: (1) no reader or decision uses the number, so no honest RED beyond "the endpoint exists"; (2) the natural host feeds KeyCortexEndocrineService.release (key-cortex-homeostasis.service.ts:175-205), i.e. KEY would modulate its own behaviour from its own throughput, which the human-agency doctrine (learning never grants itself authority) argues against without a ruling; (3) per-type counts of executed money actions are sales-derived (D-234) and would need revenue:read and fail-closed handling.
+- Packets: none (OQ-24). Reasons: (1) no reader or decision uses the number, so no honest RED beyond "the endpoint exists"; (2) the natural host feeds KeyCortexEndocrineService.release (key-cortex-homeostasis.service.ts:175-205), i.e. KEY would modulate its own behaviour from its own throughput, which the human-agency doctrine (learning never grants itself authority) argues against without a ruling; (3) per-type counts of executed money actions are sales-derived (D-234) and would need revenue:read and fail-closed handling.
 
 ## 6. Security, tenancy and privacy register (architecture/architecture-risks.md, security-tenant-privacy-audit.md)
 
 ### REC-BANK-TOKEN-ENCRYPTION — BankConnection.accessToken is encrypted at rest.
-- Sources: architecture/architecture-risks.md:63 (R16); architecture/security-tenant-privacy-audit.md:34, :53; notes-C-neuro-arch.md:292-296 (C:BANK-TOKEN-ENCRYPTION).
+- Sources: architecture/architecture-risks.md:63 (R16); architecture/security-tenant-privacy-audit.md:34, :53; worker-notes/notes-C-neuro-arch.md:292-296 (C:BANK-TOKEN-ENCRYPTION).
 - Dedup: single source (C:BANK-TOKEN-ENCRYPTION).
 - Status: c — ENCRYPTED_FIELDS covers Business, SocialConnection, ChannelConnection, Webhook only (packages/db/src/middleware/token-encryption.ts:91-112); BankConnection.accessToken (packages/db/prisma/schema.prisma:10217) is stored as given (S/modules/finance/bank-connection.service.ts:63-70, :82), stripped only from responses (:28-32). Routes live (S/modules/finance/finance.controller.ts:1647-1694, settings admin since SWEEP-P0-FOLLOWUP). The coverage gate misses it because SECRET_NAME is start-anchored (apps/server/test/token-encryption-coverage.integration.test.ts:44). Liveness: the v1 web never sends a token (apps/web/src/app/app/key-connect/components/banking-section.tsx:56-60; key-connect tiles except Gmail are hidden by NAV-B-HIDE) and no server code reads it back, so P1, not P0, unless production has non-null access_token rows (the packet's dry-run answers this). SWEEP-P0-FOLLOWUP only added the settings-admin gate; FU-DELIVERY-TOKEN-DECRYPT covers nested reads of already-encrypted models.
 - Packets: RR-BANK-TOKEN-ENCRYPT (P1, S).
 
 ### REC-CRYPTO-PROD-GUARD — packages/db token encryption must not use the in-repo dev fallback key in production.
-- Sources: architecture/architecture-risks.md:52 (R5); architecture/security-tenant-privacy-audit.md:84; notes-C-neuro-arch.md:287-290 (C:CRYPTO-FALLBACK-KEY-PROD-GUARD); S/modules/diagnostics/diagnostics.service.ts:243-275 (the held-guard witness); docs/system-map/02-server-core.md:373-374 (chain divergence).
+- Sources: architecture/architecture-risks.md:52 (R5); architecture/security-tenant-privacy-audit.md:84; worker-notes/notes-C-neuro-arch.md:287-290 (C:CRYPTO-FALLBACK-KEY-PROD-GUARD); S/modules/diagnostics/diagnostics.service.ts:243-275 (the held-guard witness); docs/system-map/02-server-core.md:373-374 (chain divergence).
 - Dedup: single source.
 - Status: c — packages/db/src/middleware/token-encryption.ts:50-55 falls back silently; the four other implementations throw in production (S/core/crypto/token-crypto.ts:15-21; S/core/connectors/connector-credentials.service.ts:179; S/modules/supplier/credentials.util.ts:15; packages/api/src/lib/credentials.ts:12). The guard is deliberately held until diagnostics reads pass in production. New finding: the witness only reports which env var is set now (tokenEncryptionKeySource, token-encryption.ts:29-31); it cannot see rows already written under the fallback, nor rows that core/crypto wrote under DRIVE_TOKEN_ENCRYPTION_SECRET, which is in core/crypto's chain (token-crypto.ts:13) and not in packages/db's (token-encryption.ts:15-19). So "pass" alone is not enough evidence. No plan packet.
-- Packets: RR-DB-CRYPTO-KEY-CENSUS (P1, S; read-only, detects and reports), then RR-DB-CRYPTO-PROD-GUARD (P1, XS; held until the owner posts both pieces of evidence: see owner question 1).
+- Packets: RR-DB-CRYPTO-KEY-CENSUS (P1, S; read-only, detects and reports), then RR-DB-CRYPTO-PROD-GUARD (P1, XS; held until the owner posts both pieces of evidence: see OQ-5).
 
 ### REC-SERVICE-WRITE-REDACTION — BusinessEventService.emit, ContactAudit and the AI execution log redact at the service write.
-- Sources: architecture/architecture-risks.md:83 (R36), :84 (R37); architecture/security-tenant-privacy-audit.md:80, :81; notes-C-neuro-arch.md:309-313 (C:SERVICE-WRITE-REDACTION).
-- Dedup: single source. The AI-execution-log half (R37) is a free-text string (S/modules/ai/ai-execution-log.service.ts:44-56 inputSummary), which a field-name policy cannot see. It belongs to G1's RR-REDACTION-BY-CONTENT (MASTER #6) and is not duplicated here.
+- Sources: architecture/architecture-risks.md:83 (R36), :84 (R37); architecture/security-tenant-privacy-audit.md:80, :81; worker-notes/notes-C-neuro-arch.md:309-313 (C:SERVICE-WRITE-REDACTION).
+- Dedup: single source. The AI-execution-log half (R37) is a free-text string (S/modules/ai/ai-execution-log.service.ts:44-56 inputSummary), which a field-name policy cannot see. It belongs to G1's RR-REDACTION-BY-CONTENT (REC-CONTENT-AWARE-REDACTION) and is not duplicated here.
 - Status: c — the interceptor redacts (S/modules/business-events/business-event.interceptor.ts:252-257). emit/emitBatch store before/after/metadata raw (S/modules/business-events/business-event.service.ts:24-48, :65-90), and the failure log prints 500 chars of the raw input (:55-58). ContactAuditService.writeOrThrow stores diffed values raw (S/modules/crm/privacy/contact-audit.service.ts:185-200). No live caller passing a secret-named key was found (grep of emit callers), so P2, not P1. FU-KEY-EVENT-COLUMNS and W11-PROVIDER-OUTAGE-503 redact specific fields only. Ten direct businessEvent.create writers bypass the service (device, flow-runner, key-cortex adapters, procurement, project-revenue listener). They are listed as out of scope and left to a follow-up census.
 - Packets: RR-BUSINESS-EVENT-REDACT (P2, S).
 
 ### REC-ERASURE-COMPLETENESS — contact erasure also scrubs BusinessEvent PII.
-- Sources: architecture/architecture-risks.md:69-72 (R22-R25), :70 (R23), :81 (R34); architecture/security-tenant-privacy-audit.md:37, :60; notes-C-neuro-arch.md:303-307 (C:GDPR-PURGE-COMPLETENESS).
+- Sources: architecture/architecture-risks.md:69-72 (R22-R25), :70 (R23), :81 (R34); architecture/security-tenant-privacy-audit.md:37, :60; worker-notes/notes-C-neuro-arch.md:303-307 (C:GDPR-PURGE-COMPLETENESS).
 - Dedup: single source. R22/R24(rows)/R25/R34 are already done on main (contact-privacy.service.ts:832-856 child rows, :858-880 audit scrub with ip/userAgent null, :88-94 retained basis).
-- Status: c, live — the global interceptor (S/app.module.ts:273) writes every contact create/update with before = request body and after = response, subjectType 'contact' (business-event.interceptor.ts:205-240, :278-298), and only field-name redaction applies, so email, phone and name are stored. The purge (contact-privacy.service.ts:758-930) never touches business_events (git grep businessEvent in S/modules/crm/privacy: 0). D-25 puts the purge in v1. P1 (privacy; not cross-tenant). TOF-CONTACT-AUDIT-* and FU-CONTACT-AUDIT-RESIDUAL cover contact_audit_entries only. Additional finding: ContactMedia rows are deleted but the object at ContactMedia.url (client-supplied mediaUrl, S/modules/crm/crm-import.service.ts:706-713) is not. It is not put in the packet: the URL is client-supplied and objects are not business-prefixed, so deleting by URL could remove another tenant's object (owner question 4).
+- Status: c, live — the global interceptor (S/app.module.ts:273) writes every contact create/update with before = request body and after = response, subjectType 'contact' (business-event.interceptor.ts:205-240, :278-298), and only field-name redaction applies, so email, phone and name are stored. The purge (contact-privacy.service.ts:758-930) never touches business_events (git grep businessEvent in S/modules/crm/privacy: 0). D-25 puts the purge in v1. P1 (privacy; not cross-tenant). TOF-CONTACT-AUDIT-* and FU-CONTACT-AUDIT-RESIDUAL cover contact_audit_entries only. Additional finding: ContactMedia rows are deleted but the object at ContactMedia.url (client-supplied mediaUrl, S/modules/crm/crm-import.service.ts:706-713) is not. It is not put in the packet: the URL is client-supplied and objects are not business-prefixed, so deleting by URL could remove another tenant's object (OQ-27).
 - Packets: RR-ERASURE-BUSINESS-EVENTS (P1, S).
 
 ### REC-ADMIN-SHELL-GATE — /admin pages gated server-side.
-- Sources: architecture/architecture-risks.md:66 (R19); architecture/security-tenant-privacy-audit.md:56; notes-C-neuro-arch.md:298-301 (C:ADMIN-SHELL-SERVER-GATE).
+- Sources: architecture/architecture-risks.md:66 (R19); architecture/security-tenant-privacy-audit.md:56; worker-notes/notes-C-neuro-arch.md:298-301 (C:ADMIN-SHELL-SERVER-GATE).
 - Dedup: single source.
 - Status: c — apps/web/src/middleware.ts:143-145 matches /app/:path* only; apps/web/src/app/admin/layout.tsx is "use client" and gates by isSuperAdmin. The admin APIs are guarded (S/modules/admin-platform/admin-user.controller.ts:14-15 AuthGuard + AdminGuard), so only page structure leaks: P3. OPS-CONSOLE-READONLY (D-237) builds a page in this area but does not gate the shell.
 - Packets: RR-ADMIN-SHELL-SERVER-GATE (P3, XS).
 
 ### REC-ADMIN-TOKEN — admin logout; admin JWT exp in seconds with iss/aud.
-- Sources: architecture/architecture-risks.md:77 (R30), :88 (R41); architecture/security-tenant-privacy-audit.md:73, :85; notes-C-neuro-arch.md:315-318 (C:ADMIN-LOGOUT-AND-TOKEN-CLAIMS).
+- Sources: architecture/architecture-risks.md:77 (R30), :88 (R41); architecture/security-tenant-privacy-audit.md:73, :85; worker-notes/notes-C-neuro-arch.md:315-318 (C:ADMIN-LOGOUT-AND-TOKEN-CLAIMS).
 - Dedup: single source, two halves.
 - Status: c (logout half), live and worse than the notes say. The web has no admin sign-out (git grep -i logout apps/web/src/app/admin: 0), and nothing in apps/web ever removes kf_admin_token (the user sign-out clearStoredBusinessId, apps/web/src/lib/workspace.ts:293-309, removes kf_token/kf_refresh_token/kf_auth_mode only). getAuthHeaders prefers kf_admin_token over the user token on every call (apps/web/src/lib/api.ts:100-106). On a shared browser, the next user to sign in sends the SUPER_ADMIN bearer for up to 24h (apps/web/src/app/admin/login/page.tsx:43-50). The server logout exists (S/modules/admin-auth/admin-auth.controller.ts:56-63). Raised to P1. Claims half: S/core/auth/admin-token.util.ts:42-47, :72 uses millisecond exp consistently on both sides with a comment explaining it, and has no iss/aud. No second issuer signs with ADMIN_JWT_SECRET, so iss/aud would add defence in depth only, and changing exp units invalidates every issued token for no security gain.
 - Packets: RR-ADMIN-LOGOUT (P1, S). Claims half: none (consistent and tested as built; no second issuer exists, so there is no honest RED with impact; can be folded into any later admin-auth packet).
 
 ### REC-HTTPONLY-SESSION — HttpOnly cookie sessions, no refresh tokens in localStorage.
-- Sources: architecture/architecture-risks.md:78 (R31); architecture/security-tenant-privacy-audit.md:75; notes-C-neuro-arch.md:320-323 (C:HTTPONLY-SESSION-COOKIES).
+- Sources: architecture/architecture-risks.md:78 (R31); architecture/security-tenant-privacy-audit.md:75; worker-notes/notes-C-neuro-arch.md:320-323 (C:HTTPONLY-SESSION-COOKIES).
 - Dedup: single source.
-- Status: d — kf_token and kf_refresh_token live in localStorage (apps/web/src/lib/workspace.ts:10-11). The only HttpOnly mention is the comment at apps/web/src/lib/oauth-state.ts:34 ("intentionally not used"). No plan packet. The full move is M+ (a BFF route handler, CSRF, Supabase refresh through the server) and is an architecture decision, so it goes to the owner (question 2).
-- Packets: RR-SESSION-STORAGE-CENSUS (P3, XS; the first safe slice is a ratchet). The move itself: owner question 2.
+- Status: d — kf_token and kf_refresh_token live in localStorage (apps/web/src/lib/workspace.ts:10-11). The only HttpOnly mention is the comment at apps/web/src/lib/oauth-state.ts:34 ("intentionally not used"). No plan packet. The full move is M+ (a BFF route handler, CSRF, Supabase refresh through the server) and is an architecture decision, so it goes to the owner (OQ-25).
+- Packets: RR-SESSION-STORAGE-CENSUS (P3, XS; the first safe slice is a ratchet). The move itself: OQ-25.
 
 ### REC-RETENTION-WORKER — scheduled retention for activity logs, export jobs and notification logs.
-- Sources: architecture/architecture-risks.md:85 (R38); architecture/security-tenant-privacy-audit.md:82; notes-C-neuro-arch.md:325-328 (C:RETENTION-WORKER).
+- Sources: architecture/architecture-risks.md:85 (R38); architecture/security-tenant-privacy-audit.md:82; worker-notes/notes-C-neuro-arch.md:325-328 (C:RETENTION-WORKER).
 - Dedup: single source.
 - Status: c — only RISC retention (S/modules/risc/risc-retention.service.ts) and a manual ActivityService.deleteOldLogs (S/modules/activity/activity.service.ts:161-166, reached only by the KEY activity adapter) exist. New, concrete: expired contact export bundles (full personal data, JSON + ZIP) are never deleted from storage or the database outside a forget purge (S/modules/crm/privacy/contact-privacy.service.ts:262-300 writes, :339 refuses after expiry, deletes only at :839-843/:956). Deleting already-dead links needs no new retention ruling. Activity, notification-log and session periods do need one.
-- Packets: RR-RETENTION-EXPIRED-EXPORTS (P2, S; renamed from the planned RR-RETENTION-ACTIVITY-LOGS because activity-log periods need owner question 3 first).
+- Packets: RR-RETENTION-EXPIRED-EXPORTS (P2, S; renamed from the planned RR-RETENTION-ACTIVITY-LOGS because activity-log periods need OQ-26 first).
 
 ### REC-AUTH-FAIL-FAST — no DI fallback construction; an invalid bearer is marked, not silently anonymous.
-- Sources: architecture/architecture-risks.md:90 (R43), :95 (R48); notes-C-neuro-arch.md:330-333 (C:AUTH-MIDDLEWARE-FAIL-FAST).
+- Sources: architecture/architecture-risks.md:90 (R43), :95 (R48); worker-notes/notes-C-neuro-arch.md:330-333 (C:AUTH-MIDDLEWARE-FAIL-FAST).
 - Dedup: single source, two halves.
 - Status: c, but not live. The fallback (S/core/auth/auth.middleware.ts:508-517) is unreachable while the constructor injects SupabaseAuthService with an explicit @Inject (:502-506). An invalid bearer logs a warning and continues (:581-583). On every AuthGuard route that is already a 401 'Authentication required' (S/core/auth/auth.guard.ts:10). On OptionalAuthGuard routes (identity, community; S/core/auth/optional-auth.guard.ts) anonymous gets nothing a valid user would not. No exposure, and changing the auth middleware or AuthGuard body risks Release 0 identity cases for no user-visible gain.
 - Packets: none (no honest RED with an effect; the one-line dead-code removal can ride the next auth-middleware packet).
 
 ### REC-SOCIAL-OAUTH-STATE — social OAuth state and PKCE in Redis.
-- Sources: architecture/architecture-risks.md:91 (R44); notes-C-neuro-arch.md:335-338 (C:SOCIAL-OAUTH-STATE-STORE).
+- Sources: architecture/architecture-risks.md:91 (R44); worker-notes/notes-C-neuro-arch.md:335-338 (C:SOCIAL-OAUTH-STATE-STORE).
 - Dedup: single source.
 - Status: c, not a security hole and not live in v1. State is in a process Map (S/modules/social/social-connections.service.ts:30, :53-61), but it is random, single-use, expires in 10 minutes and is bound to business and platform at the callback (S/modules/social/social.controller.ts:424-430). PKCE is used for Twitter (:391-394), the only one of these providers that requires it. The gap is availability across replicas and restarts. /app/social is hidden by NAV-B-HIDE-2 (D-152).
 - Packets: none (module hidden in v1; revisit when social returns in V1.x, reusing a Redis-backed state store).
 
 ### REC-CONSENT-UNIQUE — ConsentRecord unique (contact, channel, type) + upsert.
-- Sources: architecture/architecture-risks.md:99 (R52); notes-C-neuro-arch.md:340-343 (C:CONSENT-RECORD-UNIQUE).
+- Sources: architecture/architecture-risks.md:99 (R52); worker-notes/notes-C-neuro-arch.md:340-343 (C:CONSENT-RECORD-UNIQUE).
 - Dedup: single source.
 - Status: d as stated, but the recommendation conflicts with the design. ConsentRecord (packages/db/prisma/schema.prisma ConsentRecord, @@index only) is an append-only ledger: recordConsent always creates (S/modules/communications/consent.service.ts:37-50), and checkConsent reads the latest by createdAt (:58-61). History is the legal evidence of when consent was given or withdrawn, and a unique key plus upsert would overwrite it. Two real but small issues: the latest-wins order has no tie-break (createdAt only), and KeyCortexEthicsService counts any 'granted' row with revokedAt null (S/modules/key-cortex/key-cortex-ethics.service.ts:398-405, :442-449), so a grant later superseded by a 'revoked' row still counts. The writer is omnichannel.controller.ts:236-252 (/communicate is hidden by NAV-B-HIDE-2).
-- Packets: none (owner question 5). No schema change is proposed, so no duplicate census is needed. If the owner nevertheless wants the unique key, a read-only duplicate census comes first and any merge is dry-run only.
+- Packets: none (OQ-28). No schema change is proposed, so no duplicate census is needed. If the owner nevertheless wants the unique key, a read-only duplicate census comes first and any merge is dry-run only.
 
 ### REC-OBJECT-STORAGE-PRIVATE — PutObject sets private ACL + SSE.
-- Sources: architecture/architecture-risks.md:103 (R56); architecture/security-tenant-privacy-audit.md:107; notes-C-neuro-arch.md:345-348 (C:OBJECT-STORAGE-PRIVATE-SSE).
+- Sources: architecture/architecture-risks.md:103 (R56); architecture/security-tenant-privacy-audit.md:107; worker-notes/notes-C-neuro-arch.md:345-348 (C:OBJECT-STORAGE-PRIVATE-SSE).
 - Dedup: single source.
 - Status: d — no ACL/ServerSideEncryption on any PutObjectCommand (S/core/object-storage/objectStorage.ts:286, :309-314; S/modules/crm/privacy/contact-privacy.service.ts:271-285). The provider is configurable (.env.example:129-133). Adding ACL headers blindly can break uploads (AWS buckets with ACLs disabled refuse non-owner ACL headers), and some S3-compatible providers do not implement SSE headers. Whether objects are exposed depends on bucket policy, which the code cannot see. So the first slice is detect and report.
-- Packets: RR-OBJECT-STORAGE-POSTURE-CHECK (P2, S). Upload headers wait for owner question 6.
+- Packets: RR-OBJECT-STORAGE-POSTURE-CHECK (P2, S). Upload headers wait for OQ-29.
 
+
+### REC-OAUTH-PKCE — Google and Microsoft OAuth use PKCE
+- Sources: architecture/architecture-risks.md:73 (R26); architecture/security-tenant-privacy-audit.md
+- Dedup: single source; added by the fidelity review.
+- Status: d — the Google Suite authorize URL and token exchange carry no code_challenge/code_verifier (apps/server/src/core/connectors/google-suite.service.ts:175-185, :212-221); Microsoft likewise (apps/server/src/modules/connect/microsoft-oauth.service.ts:60-69, :104-117); only Twitter uses PKCE (apps/server/src/modules/social/social.controller.ts:392-393). No plan packet (plan grep pkce/code_verifier: 0).
+- Packets: RR-OAUTH-PKCE-GOOGLE-MICROSOFT (P2, S)
+
+### REC-EXPORT-DELETED-CONTACT — a soft-deleted or forget-pending contact cannot be exported
+- Sources: architecture/architecture-risks.md:82 (R35)
+- Dedup: shares a packet with REC-EMAIL-DELETED-CONTACT (same rule, "a deleted contact is not served", at two seams).
+- Status: d — collectBundle reads the contact with no deletedAt condition (apps/server/src/modules/crm/privacy/contact-privacy.service.ts:1005-1009, called from exportContact :244), and requestForget sets deletedAt (:427-431), so a forget-pending contact is exportable. No plan packet.
+- Packets: RR-PRIVACY-DELETED-CONTACT-GATES (P2, S)
+
+### REC-EMAIL-DELETED-CONTACT — transactional email is not sent to a soft-deleted contact
+- Sources: architecture/architecture-risks.md:100 (R53)
+- Dedup: see REC-EXPORT-DELETED-CONTACT.
+- Status: d — the send gate reads only doNotContact (apps/server/src/modules/notifications/transactional-email.service.ts:420-433). No plan packet.
+- Packets: RR-PRIVACY-DELETED-CONTACT-GATES (shared)
+
+### REC-FORGET-CANCEL-SOURCE — cancelling a forget request restores only what the forget deleted
+- Sources: architecture/architecture-risks.md:101 (R54)
+- Dedup: single source.
+- Status: d — requestForget overwrites deletedAt (contact-privacy.service.ts:405-431) and cancelForget clears it unconditionally (:495-506), so a contact deleted normally comes back live after a forget request is cancelled.
+- Packets: RR-FORGET-CANCEL-KEEPS-PRIOR-DELETE (P3, S)
+
+### REC-APPROVAL-EXECUTE-SCOPED-READ — the approval orchestrator's pre-execution snapshot uses a business-scoped read
+- Sources: architecture/architecture-risks.md:97 (R50)
+- Dedup: single source.
+- Status: d — executeApproved reads the proposal with the unscoped getById (apps/server/src/modules/key-cortex/key-cortex-approval-orchestrator.service.ts:202; key-action-proposal.service.ts:161-167) before the scoped execute; it is live (key-action-proposal.controller.ts:117, key-cortex-executor.service.ts:1627).
+- Packets: none. No data leaves: a foreign id makes the scoped execute throw before the snapshot is used, and both paths answer the same NotFound, so there is no observable RED. It is one-line hygiene (use the scoped get(businessId, proposalId)) for whichever packet next edits that orchestrator.
+
+### REC-EXPORT-DOWNLOAD-RATE-LIMIT — the public contact-export download is rate limited
+- Sources: architecture/architecture-risks.md:98 (R51)
+- Dedup: single source.
+- Status: d — the public download handler has no rate-limit guard (apps/server/src/modules/crm/privacy/contact-privacy.controller.ts:124-140).
+- Packets: none. The token is 32 random bytes (contact-privacy.service.ts:264) and the handler refuses short tokens (:131-133), so guessing is infeasible and a limit adds no measurable protection; owner question OQ-40 if wanted as hardening.
 ## 7. Engineering process and tooling
 
 ### REC-CONTEXT-BUNDLE — each development agent gets a deterministic, source-bound context bundle per packet instead of re-reading the plan
@@ -700,17 +748,17 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 - Status: c — existing: lint split out so a ratchet cannot skip security suites (.github/workflows/ci-cd.yml:130-153); mutation controls (scripts/agent-control/proof-mutation.mjs, scripts/agent-control/negative-controls.yaml, scripts/proof-admission/negative-controls.mjs); in-tree shrink-only ledgers (e.g. tenant-model-list.spec.ts:147, :238-262) and the cardinality reader scripts/os/ledger-sizes.mjs:20-41 (runs clean today). Gaps verified: (1) four *.spec.mjs files are run by no workflow, including scripts/agent-memory/tests/lib.spec.mjs (14 passing tests gating nothing); (2) main has no branch protection and no required checks (GET branches/main/protection: 404 "Branch not protected"; the only branch rule is copilot_code_review) while the D-239 merge condition says "every required check finished" (WAVE-RUNBOOK.md:128), and four jobs needs: lint-and-typecheck (:387, :526, :590, :649) so they go grey "skipped" on a type-check failure; (3) nothing compares ledgers across commits (ledger-sizes' only comparer, the OS truth cycle, is HALTED: OS.md:1-30; no workflow runs it); (4) 19 of 27 files declaring shrink-only ledgers are unregistered, including cast-call-integrity.spec.ts:129-131 and the lint ceilings (ci-cd.yml:198-221).
 - Packets: RR-SCRIPT-SPECS-IN-CI (P2, S), RR-CI-REQUIRED-JOBS-AGGREGATE (P2, S), RR-GATE-LEDGER-MONOTONIC (P2, S), RR-GATE-LEDGER-CENSUS (P3, S).
 
-### REC-PROPERTY-TESTS — property and fuzz tests for money, parsers and tenancy
+### REC-PROPERTY-TESTS — generative (property/fuzz/boundary/concurrency) tests for parsers, money, date/time, pagination, idempotency, state machines, authorization predicates, webhook payloads, imports, control-plane YAML, connector descriptors and memory lineage
 - Sources: C:PROPERTY-FUZZ-MUTATION-PROOF: CA:211-239, :787-788; architecture/os/OS.md:61-73 (negative-control rule).
 - Dedup: single source (its mutation half is already a: scripts/proof-admission/negative-controls.mjs and manifests).
-- Status: a for money (the C note's "no property tests" is false: there is no library, but there are seeded property tests): apps/server/src/modules/commerce/money.spec.ts:205-279 (mulberry32, 2000 random documents, expected cents computed independently in integers) and apps/server/src/modules/commerce/balance-arithmetic.spec.ts:101-156 (2000 seeded row sets). For this index I also ran a 200,000-case seeded fuzz of ten further money.ts invariants (cent round trip, sum order independence, sum/subtract inverse, nearest-cent, line amount bound, remaining/overpaid exclusivity and sum, legacy one-cent band, document identity, no negative zero) against money.ts at 2c4e4bf2: no counterexample. Parsers/tenancy: no named defect to make a RED from.
-- Packets: none (no RED on main; money is covered without a new dependency). Dependency note: fast-check would be a new devDependency during the D-175 freeze (S0-DEPENDABOT-FREEZE: no non-security dependency PR merges before GATE-JOURNEY-RUN). The seeded mulberry32 pattern already in money.spec.ts needs no dependency, so no owner question is needed now.
+- Status: c (corrected by the fidelity review: the source CA:211-228 names twelve areas; only money is covered) — money is covered (the C note's "no property tests" is false: there is no library, but there are seeded property tests): apps/server/src/modules/commerce/money.spec.ts:205-279 (mulberry32, 2000 random documents, expected cents computed independently in integers) and apps/server/src/modules/commerce/balance-arithmetic.spec.ts:101-156 (2000 seeded row sets). For this index I also ran a 200,000-case seeded fuzz of ten further money.ts invariants (cent round trip, sum order independence, sum/subtract inverse, nearest-cent, line amount bound, remaining/overpaid exclusivity and sum, legacy one-cent band, document identity, no negative zero) against money.ts at 2c4e4bf2: no counterexample. Parsers/tenancy: no named defect to make a RED from.
+- Packets: none (no RED on main for money; for the other eleven areas no defect was found to write a RED from, and generative tests are a technique each packet uses inside its own proof, as RR-KEY-FAKE-MODEL-TRAJECTORY and RR-STRICT-TOOL-SCHEMAS do). Owner question OQ-37 asks whether to open a first-slice packet (authorization predicates or webhook payload parsing). Dependency note: fast-check would be a new devDependency during the D-175 freeze (S0-DEPENDABOT-FREEZE: no non-security dependency PR merges before GATE-JOURNEY-RUN). The seeded mulberry32 pattern already in money.spec.ts needs no dependency, so no owner question is needed now.
 
 ### REC-TWO-KEY — catastrophic product actions need a second, independent act or approver
 - Sources: C:TWO-KEY-CATASTROPHIC-ACTIONS: CA:1324-1347, :1538-1540. Related, not merged into a packet: D:ASSURANCE-SAFE-MODE, issue #130 comment 5985219650 (2026-10-04) (two-key rules within a safe-mode doctrine).
 - Dedup: single source for the product action; D's safe-mode doctrine is broader and stays out.
 - Status: c — engineering side done (two independent reviews and owner/CI merge: D-222, D-239; production deploy owner-only). Product side: the one irreversible catastrophic action is whole-business GDPR erasure, POST api/admin/businesses/:businessId/gdpr-delete (apps/server/src/modules/admin-platform/admin-business.controller.ts:100-104): one SUPER_ADMIN (admin.guard.ts), one call, immediate, no durable record (gdpr-purge.service.ts:146, :162 log lines only). Bulk contact delete is not catastrophic (soft delete, at most 100, audited, restorable: crm.controller.ts:764-775, crm.service.ts:1925-1986), so the MASTER id RR-TWO-PERSON-BULK-DELETE is renamed to the action that is catastrophic.
-- Packets: RR-ERASE-BUSINESS-TWO-STEP (P2, M), drafted; depends on owner question 1, nothing built before the answer.
+- Packets: RR-ERASE-BUSINESS-TWO-STEP (P2, M), drafted; depends on OQ-30, nothing built before the answer.
 
 ### REC-INDEX-COVERAGE — compare real query paths with tenant/time/status indexes
 - Sources: A:STORAGE-ACCESS-PATH-AUDIT: SFS:285-298, SFS:340-341 (step 8).
@@ -749,7 +797,7 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 ### REC-NATIVE-DAST — DAST boots the real API on ephemeral Postgres/Redis; a 404 is not proof, 5xx/leakage fails
 - Sources: PR #116 (superseded by #114); KEYFLOWOS-CONTINUOUS-ASSURANCE-...-001.md (DAST section)
 - Dedup: single source.
-- Status: a — scripts/security/native-dast.mjs, .github/workflows/native-dast.yml (required gate swap is plan V1-30-SEC-DAST-GATE-SWAP).
+- Status: a — scripts/security/native-dast.mjs, .github/workflows/native-dast.yml (the required-gate swap is build-map queue item V1-30-SEC-DAST-GATE-SWAP, BUILD-MAP-001.md:186, not a V1-PLAN-RECUT packet).
 - Packets: none
 
 ### REC-THREAD-HARVEST — exported chat threads are harvested deterministically into a redacted corpus with dispositions
@@ -805,9 +853,9 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 - Status: a (as reshaped) — docs/reconstruction/V1-PLAN-RECUT.json plus scripts/agent-memory/{bundle,status}.mjs (CLAUDE.md); the research ledger half is plan FU-RESEARCH-CORPUS-YAML.
 - Packets: none (bundle gaps are REC-CONTEXT-BUNDLE)
 
-### REC-SEC-REGISTER-DONE — eleven items of the architecture security register are already mitigated
-- Sources: architecture/architecture-risks.md R17, R18, R20, R27, R28, R29, R32, R33, R39, R42, R45, R46, R47, R49, R55; architecture/security-tenant-privacy-audit.md
-- Status: a — R18: apps/server/src/modules/identity/identity.controller.ts:632; R20: apps/server/src/modules/key-cortex/key-cortex.gateway.ts:461-490; R27/R28: apps/server/src/modules/api-keys/api-keys.controller.ts:5-11; R33: packages/db/src/client.ts:218; R39: apps/server/src/modules/security-audit/security-audit.service.spec.ts:96-119; R42: scripts/configure-risc.ts; R45: apps/server/src/modules/google-drive/google-drive.service.ts:216; R46: apps/server/src/core/guards/public-rate-limit.guard.ts:64-75; R47: apps/web/src/lib/api.ts:82-84, :162; R49: apps/server/src/core/tenant/tenant.interceptor.ts:19-21; R17/R29/R32/R55 marked MITIGATED in the register. Not re-verified: R26, R35, R40, R50, R51, R53, R54 (README, "could not verify").
+### REC-SEC-REGISTER-DONE — sixteen items of the architecture security register are already mitigated
+- Sources: architecture/architecture-risks.md R17, R18, R20, R27, R28, R29, R32, R33, R39, R40, R42, R45, R46, R47, R49, R55; architecture/security-tenant-privacy-audit.md
+- Status: a — R18: apps/server/src/modules/identity/identity.controller.ts:632; R20: apps/server/src/modules/key-cortex/key-cortex.gateway.ts:461-490; R27/R28: apps/server/src/modules/api-keys/api-keys.controller.ts:5-11; R33: packages/db/src/client.ts:218; R39: apps/server/src/modules/security-audit/security-audit.service.spec.ts:96-119; R42: scripts/configure-risc.ts; R45: apps/server/src/modules/google-drive/google-drive.service.ts:216; R46: apps/server/src/core/guards/public-rate-limit.guard.ts:64-75; R47: apps/web/src/lib/api.ts:82-84, :162; R49: apps/server/src/core/tenant/tenant.interceptor.ts:19-21; R17/R29/R32/R55 marked MITIGATED in the register. R40: apps/server/src/core/seed/seed.service.ts:128 (random dev password unless KEYFLOW_DEV_PASSWORD) and the native fallback key is now the explicit "no-key-required" for keyless local endpoints (model-gateway.service.ts:1659, :2675). R26, R35, R50, R51, R53, R54 now have their own rows in section 6 (added by the fidelity review).
 - Packets: none
 
 #### Already planned (status b)
@@ -865,17 +913,17 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 
 ### REC-REPRESENTATION-IDENTITY — every vector carries its representation identity (provider, model, revision, dimensions, index generation)
 - Sources: issue#153 comments 6008318382, 6008240990, 6008343664 (2026-10-06)
-- Status: MEM (flag to the memory track) — deletion propagation and class are planned (W1F-MEMORY-COPIES, FU-MEMORY-COPIES-REWRITE, MEM-TEMPORAL-EMBED-DEDUP, MEM-CLASS-COLUMNS); representation identity itself is absent (model is a constant: semantic-memory.service.ts:120, key-cortex-document.service.ts:121). README owner question OQ-32: add it to the MEM track or not.
+- Status: MEM-deferred (no MEM packet covers it; corrected by the fidelity review) — (flag to the memory track) — deletion propagation and class are planned (W1F-MEMORY-COPIES, FU-MEMORY-COPIES-REWRITE, MEM-TEMPORAL-EMBED-DEDUP, MEM-CLASS-COLUMNS); representation identity itself is absent (model is a constant: semantic-memory.service.ts:120, key-cortex-document.service.ts:121). README owner question OQ-32: add it to the MEM track or not.
 - Packets: none here
 
 ### REC-LEARNING-STREAM — governed world-knowledge ingestion (sources, cursors, ETag polling, shadow first; external content untrusted)
 - Sources: issue #131 body (2026-10-04); KEY-CONTINUOUS-LEARNING-WORLD-STREAM-RESEARCH-001.md:152-262
-- Status: MEM / deferred — KnowledgeIngestionService registered but uncalled (apps/server/src/modules/key-cortex/key-cortex.module.ts:496, :680; listed in core/config/unreachable-provider.spec.ts:56); depends on the context genome, DEFER V1+ (row #148).
+- Status: MEM-deferred (no MEM packet covers it; corrected by the fidelity review) — / deferred — KnowledgeIngestionService registered but uncalled (apps/server/src/modules/key-cortex/key-cortex.module.ts:496, :680; listed in core/config/unreachable-provider.spec.ts:56); depends on the context genome, DEFER V1+ (row #148).
 - Packets: none
 
 ### REC-ADAPTIVE-RECEPTOR — one intake contract (source identity, tenant, provenance hash, trust state, observed/recorded time) writing observations in shadow
 - Sources: issue #125 body (2026-10-04)
-- Status: MEM / deferred — no receptor contract (only metaphor comments, key-cortex-homeostasis.service.ts:26, :257); depends on the context genome (row #148).
+- Status: MEM-deferred (no MEM packet covers it; corrected by the fidelity review) — / deferred — no receptor contract (only metaphor comments, key-cortex-homeostasis.service.ts:26, :257); depends on the context genome (row #148).
 - Packets: none
 
 #### Decided by an owner ruling or a standing law (no packet)
@@ -1017,4 +1065,4 @@ Each line: idea — citation — why no packet. Paths without a prefix are under
 - Kubernetes controllers, Temporal histories, Lamport safety vs liveness — issue#153 comment 6243355172 2026-10-17 — mined semantics for a retired control plane.
 - GENAI-RD-MAP-001 inventory/gap map — 6008214484 2026-10-06 — research-process bookkeeping.
 - Old "consciousness / JARVIS 7 layers / organs" PRs #27, #30, #31, #38, #54, #55, #57 — implementation PRs with neuro-metaphor names, not research; no recommendation extracted.
-
+- Need-to-know response disclosure and a model rollback branch — docs/intelligence/research/fictional-intelligence-genome/TRANCHE-DECEPTION-SELF-CORRECTION-001.md:71, :79 — the tranche grants "No implementation authority"; its concrete law (data is not instruction is not authority) is REC-UNTRUSTED-CONTENT-FENCE (added after the fidelity review).
