@@ -1,7 +1,113 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { D13_CURRENCIES, normalizeCurrency } from '../finance/posting.service';
+import { balanceOfStoredRows, creditAwareBalance } from './invoice-workflow.service';
 import { fromCents, roundMoney, sumMoney, toCents } from './money';
+
+/**
+ * V1-64 (SWP-INV-MONEY-TOTALS; sweep BUG-020, BUG-024): the invoices whose
+ * remaining balance is owed to the business: issued and not settled. A DRAFT
+ * was never sent, PAID / FULLY_CREDITED / VOID owe nothing, FAILED and PENDING
+ * are not live receivables here.
+ */
+export const OPEN_RECEIVABLE_STATUSES: ReadonlySet<string> = new Set(['SENT', 'OVERDUE', 'PARTIALLY_PAID', 'PARTIALLY_CREDITED']);
+
+/** One invoice's money as the totals read it (readInvoiceMoney). */
+export interface InvoiceMoney {
+  id: string;
+  status: string;
+  /** Normalized (trimmed, upper-case); '' when the row holds none. */
+  currency: string;
+  total: number;
+  dueDate: Date | null;
+  paidAt: Date | null;
+  /**
+   * The rows that are money in or out, each with its date: SUCCESSFUL rows
+   * (in) and negative REFUNDED rows (out, D-14). Their amounts add up to the
+   * invoice's net received (CASH_NET_PAYMENT_WHERE, the database form of
+   * balanceOfStoredRows(...).net).
+   */
+  cash: Array<{ amount: number; at: Date }>;
+  /** What is still owed on an open receivable, net of its APPLIED credit notes; 0 on any other invoice. */
+  remaining: number;
+  /** Still owed and past its due date (or flagged OVERDUE). */
+  overdue: boolean;
+}
+
+/**
+ * V1-64 (SWP-INV-MONEY-TOTALS): every live invoice of one business with the
+ * money its own payment rows state, the one read the commerce stats and the
+ * Executive Summary total from, so they state the same figures.
+ *
+ *  - Own-tenant rows only (D-75): Payment sits outside the tenant extension
+ *    and has no FK to Business (M31), so the rows are read through this
+ *    business's invoices and filtered to its businessId; a row carrying
+ *    another businessId is not this invoice's money. Credit notes likewise
+ *    (credit_notes.business_id is not tied to the invoice's, SEC-V44-6).
+ *  - The balance contract (balanceOfStoredRows, D-14): SUCCESSFUL in, refunds
+ *    out, PENDING / FAILED nothing, a row flipped to REFUNDED before V1-29
+ *    read as its payment plus its refund; integer cents; never below zero.
+ *  - `remaining` is credit-aware (creditAwareBalance over the invoice's own
+ *    APPLIED notes, as appliedCreditsOf reads them: a PARTIALLY_CREDITED
+ *    invoice only), and only an open receivable owes anything.
+ *
+ * `businessId` must be the caller's admitted tenant; a missing one reads
+ * nothing (Prisma drops an `undefined` filter, which would read every tenant).
+ */
+export async function readInvoiceMoney(
+  db: PrismaService['client'],
+  businessId: string,
+  now: Date = new Date(),
+): Promise<InvoiceMoney[]> {
+  if (typeof businessId !== 'string' || businessId.length === 0) return [];
+  const [invoices, credits] = await Promise.all([
+    db.invoice.findMany({
+      where: { businessId, deletedAt: null },
+      select: {
+        id: true,
+        total: true,
+        status: true,
+        dueDate: true,
+        paidAt: true,
+        currency: true,
+        payments: { where: { businessId }, select: { amount: true, status: true, createdAt: true } },
+      },
+    }),
+    db.creditNote.groupBy({
+      by: ['invoiceId'],
+      where: { businessId, status: 'APPLIED', invoice: { businessId, deletedAt: null, status: 'PARTIALLY_CREDITED' } },
+      _sum: { amount: true },
+    }),
+  ]);
+  const creditedOf = new Map<string, number>();
+  for (const c of credits) creditedOf.set(c.invoiceId, Number(c._sum.amount ?? 0) || 0);
+
+  return invoices.map((inv) => {
+    const total = Number(inv.total ?? 0) || 0;
+    const open = OPEN_RECEIVABLE_STATUSES.has(inv.status);
+    const balance = creditAwareBalance(
+      balanceOfStoredRows(total, inv.payments, inv.currency),
+      inv.status === 'PARTIALLY_CREDITED' ? creditedOf.get(inv.id) ?? 0 : 0,
+    );
+    const remaining = open ? balance.remaining : 0;
+    const cash: Array<{ amount: number; at: Date }> = [];
+    for (const p of inv.payments) {
+      const amount = Number(p.amount) || 0;
+      if (p.status === 'SUCCESSFUL' || (p.status === 'REFUNDED' && amount < 0)) cash.push({ amount, at: p.createdAt });
+    }
+    return {
+      id: inv.id,
+      status: inv.status,
+      currency: normalizeCurrency(inv.currency),
+      total,
+      dueDate: inv.dueDate,
+      paidAt: inv.paidAt,
+      cash,
+      remaining,
+      overdue: remaining > 0 && (inv.status === 'OVERDUE' || (!!inv.dueDate && new Date(inv.dueDate) < now)),
+    };
+  });
+}
 
 /** One currency's money figures (V1-37): never added to another currency's. */
 export interface CurrencyCommerceStats {
@@ -79,6 +185,18 @@ export class CommerceStatsService {
    * are not money (invoices, quotes, products, conversion, and the per-status
    * counts of the top-level invoiceStatusBreakdown) stay whole-business.
    * Sums are cents-safe (sumMoney, V1-22).
+   *
+   * V1-64 (SWP-INV-MONEY-TOTALS; sweep BUG-020; D-14, D-75): revenue is the
+   * money received net of refunds on the business's own invoices, read from
+   * their own-tenant payment rows (readInvoiceMoney), by the date of each row
+   * for this month and the six-month series; outstanding is the remaining
+   * balance of the open receivables (SENT, OVERDUE, PARTIALLY_PAID,
+   * PARTIALLY_CREDITED) and overdue the part of it past due. It summed the
+   * totals of PAID invoices as revenue and of SENT / OVERDUE invoices as
+   * outstanding, so an invoice of 13,723 with a 400 deposit was neither
+   * (revenue 0, outstanding 0), and a part-paid one counted whole once it
+   * was flagged OVERDUE. The status breakdown, the paid-invoice count, the
+   * average paid invoice and the top products still describe the invoices.
    */
   async getCommerceStats(businessId: string) {
     const cacheKey = `${businessId}:commerceStats`;
@@ -97,25 +215,16 @@ export class CommerceStatsService {
       activeProductCount,
       invoiceCount,
       quoteCount,
-      paidInvoices,
       allInvoices,
       statusGroups,
       quoteStatusGroups,
-      revenueRows,
     ] = await Promise.all([
       this.prisma.client.business.findUnique({ where: { id: businessId }, select: { currency: true } }),
       this.prisma.client.product.count({ where: { businessId, deletedAt: null } }),
       this.prisma.client.product.count({ where: { businessId, deletedAt: null, isActive: true } }),
       this.prisma.client.invoice.count({ where: invoiceWhere }),
       this.prisma.client.quote.count({ where: { businessId, deletedAt: null } }),
-      this.prisma.client.invoice.findMany({
-        where: { ...invoiceWhere, status: 'PAID' },
-        select: { total: true, paidAt: true, currency: true },
-      }),
-      this.prisma.client.invoice.findMany({
-        where: invoiceWhere,
-        select: { total: true, status: true, dueDate: true, currency: true },
-      }),
+      readInvoiceMoney(this.prisma.client, businessId, now),
       this.prisma.client.invoice.groupBy({
         by: ['status', 'currency'],
         where: invoiceWhere,
@@ -127,12 +236,11 @@ export class CommerceStatsService {
         where: { businessId, deletedAt: null },
         _count: { id: true },
       }),
-      this.paidInvoicesSince(businessId, new Date(now.getFullYear(), now.getMonth() - 5, 1)),
     ]);
 
     const businessCurrency = normalizeCurrency(business?.currency) || 'TTD';
     const currencies = new Set<string>([...D13_CURRENCIES, businessCurrency]);
-    for (const row of allInvoices) currencies.add(normalizeCurrency(row.currency));
+    for (const row of allInvoices) currencies.add(row.currency);
     currencies.delete('');
 
     const topProductsByCurrency = new Map<string, Array<{ name: string; revenue: number; count: number }>>();
@@ -144,23 +252,16 @@ export class CommerceStatsService {
 
     const byCurrency: Record<string, CurrencyCommerceStats> = {};
     for (const currency of [...currencies].sort()) {
-      const inCurrency = <T extends { currency: string }>(rows: T[]) => rows.filter((r) => normalizeCurrency(r.currency) === currency);
-      const paid = inCurrency(paidInvoices);
-      const all = inCurrency(allInvoices);
-      const totalRevenue = sumMoney(paid.map((inv) => Number(inv.total ?? 0)));
-      const outstandingAmount = sumMoney(
-        all.filter((inv) => ['SENT', 'OVERDUE'].includes(inv.status)).map((inv) => Number(inv.total ?? 0)),
-      );
-      const overdueAmount = sumMoney(
-        all
-          .filter((inv) => inv.status === 'OVERDUE' || (inv.status === 'SENT' && inv.dueDate && new Date(inv.dueDate) < now))
-          .map((inv) => Number(inv.total ?? 0)),
-      );
-      const monthlyPaid = sumMoney(
-        paid.filter((inv) => inv.paidAt && new Date(inv.paidAt) >= monthStart).map((inv) => Number(inv.total ?? 0)),
-      );
-      // The average to the cent, half away from zero, on integer cents.
-      const averageInvoiceValue = paid.length > 0 ? fromCents(Math.round(toCents(totalRevenue) / paid.length)) : 0;
+      const all = allInvoices.filter((inv) => inv.currency === currency);
+      const paid = all.filter((inv) => inv.status === 'PAID');
+      const cash = all.flatMap((inv) => inv.cash);
+      const totalRevenue = sumMoney(cash.map((row) => row.amount));
+      const outstandingAmount = sumMoney(all.map((inv) => inv.remaining));
+      const overdueAmount = sumMoney(all.filter((inv) => inv.overdue).map((inv) => inv.remaining));
+      const monthlyPaid = sumMoney(cash.filter((row) => new Date(row.at) >= monthStart).map((row) => row.amount));
+      // The average PAID invoice to the cent, half away from zero, on integer cents.
+      const paidTotal = sumMoney(paid.map((inv) => inv.total));
+      const averageInvoiceValue = paid.length > 0 ? fromCents(Math.round(toCents(paidTotal) / paid.length)) : 0;
 
       const invoiceStatusBreakdown: Record<string, { count: number; total: number }> = {};
       for (const g of statusGroups) {
@@ -183,7 +284,7 @@ export class CommerceStatsService {
         invoiceCount: all.length,
         invoiceStatusBreakdown,
         topProducts: topProductsByCurrency.get(currency) ?? [],
-        revenueByMonth: this.buildRevenueByMonth(inCurrency(revenueRows), now),
+        revenueByMonth: this.buildRevenueByMonth(cash, paid, now),
       };
     }
 
@@ -260,28 +361,28 @@ export class CommerceStatsService {
     }));
   }
 
-  /** PAID invoices paid since `since`, with their currency: the revenue-by-month source, in one read. */
-  private paidInvoicesSince(businessId: string, since: Date) {
-    return this.prisma.client.invoice.findMany({
-      where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: since } },
-      select: { total: true, paidAt: true, currency: true },
-    });
-  }
-
-  /** The last six calendar months of one currency's paid revenue, oldest first. */
-  private buildRevenueByMonth(rows: Array<{ total: number | null; paidAt: Date | null }>, now: Date) {
+  /**
+   * The last six calendar months of one currency, oldest first: the money
+   * received net of refunds in each month, by the date of each payment row
+   * (V1-64), and the invoices that became PAID in it.
+   */
+  private buildRevenueByMonth(
+    cash: Array<{ amount: number; at: Date }>,
+    paid: Array<{ paidAt: Date | null }>,
+    now: Date,
+  ) {
     const months: { month: string; revenue: number; invoiceCount: number }[] = [];
 
     for (let i = 5; i >= 0; i--) {
       const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const end = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
       const label = start.toLocaleDateString('en-TT', { year: 'numeric', month: 'short' });
-      const inMonth = rows.filter((r) => r.paidAt && new Date(r.paidAt) >= start && new Date(r.paidAt) < end);
+      const within = (at: Date | null) => !!at && new Date(at) >= start && new Date(at) < end;
 
       months.push({
         month: label,
-        revenue: sumMoney(inMonth.map((r) => Number(r.total ?? 0))),
-        invoiceCount: inMonth.length,
+        revenue: sumMoney(cash.filter((row) => within(row.at)).map((row) => row.amount)),
+        invoiceCount: paid.filter((inv) => within(inv.paidAt)).length,
       });
     }
 

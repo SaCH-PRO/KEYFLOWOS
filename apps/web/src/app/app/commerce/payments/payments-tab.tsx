@@ -22,6 +22,7 @@ import {
   sendInvoiceReminder,
 } from "@/lib/client";
 import { formatCurrency, formatCurrencyCompact } from "@/lib/currency";
+import { invoiceBalanceOfStoredRows, readStoredPaymentRows } from "@keyflow/shared";
 import { getStatusBadge } from "../components/commerce-types";
 import { EmptyState } from "@/components/ui/empty-state";
 import { CashFlowSummary } from "../components/cash-flow-summary";
@@ -84,47 +85,71 @@ export default function PaymentsTab({
 
 
 
+  // V1-64 (SWP-INV-MONEY-TOTALS; sweep BUG-024, BUG-020; D-14, D-75): every
+  // figure is read from the invoice's own payment rows through the shared
+  // balance contract (invoiceBalanceOfStoredRows, the mirror of the server's
+  // balanceOfStoredRows), in integer cents. It read the invoice status alone:
+  // Received was the totals of PAID invoices, so a deposit on an unpaid
+  // invoice was not received; Pending and Overdue were whole totals, so the
+  // deposit was still owed; a DRAFT nobody was sent counted as pending.
+  //  - Received: the money received net of refunds, on any invoice.
+  //  - This Month: the same, by the date of each payment row.
+  //  - Pending / Overdue: what is still owed on an issued, unsettled invoice
+  //    (SENT, PARTIALLY_PAID, OVERDUE), never below zero. A draft is counted
+  //    apart (the card's "drafts unsent").
   const stats = useMemo(() => {
     const now = new Date();
     const thisMonth = now.getMonth();
     const thisYear = now.getFullYear();
+    const cents = (amount: number) => Math.round((Number(amount) || 0) * 100);
 
-    let totalReceived = 0;
-    let receivedThisMonth = 0;
-    let totalPending = 0;
-    let totalOverdue = 0;
+    let receivedCents = 0;
+    let thisMonthCents = 0;
+    let pendingCents = 0;
+    let overdueCents = 0;
     let paidCount = 0;
     let pendingCount = 0;
     let overdueCount = 0;
 
     for (const inv of invoices) {
-      const amount = Number(inv.total ?? 0);
-      if (inv.status === "PAID") {
-        totalReceived += amount;
-        paidCount++;
-        const paidDate = inv.paidAt ? new Date(inv.paidAt) : null;
-        if (paidDate && paidDate.getMonth() === thisMonth && paidDate.getFullYear() === thisYear) {
-          receivedThisMonth += amount;
+      const rows = inv.payments ?? [];
+      const balance = invoiceBalanceOfStoredRows(Number(inv.total ?? 0) || 0, rows, inv.currency);
+      receivedCents += Math.max(0, cents(balance.net));
+      // Money in (SUCCESSFUL) and out (a refund, whatever its sign) this month.
+      for (const row of rows) {
+        const paidOn = row.createdAt ? new Date(row.createdAt) : null;
+        if (!paidOn || paidOn.getMonth() !== thisMonth || paidOn.getFullYear() !== thisYear) continue;
+        for (const part of readStoredPaymentRows([row])) {
+          if (part.status === "SUCCESSFUL") thisMonthCents += cents(part.amount);
+          else if (part.status === "REFUNDED") thisMonthCents -= Math.abs(cents(part.amount));
         }
-      } else if (inv.status === "OVERDUE") {
-        totalOverdue += amount;
-        overdueCount++;
-      } else if (inv.status === "SENT" || inv.status === "PARTIALLY_PAID") {
-        const isOverdue = inv.dueDate && new Date(inv.dueDate) < now;
+      }
+
+      const owedCents = Math.max(0, cents(balance.remaining));
+      if (inv.status === "PAID") {
+        paidCount++;
+      } else if (inv.status === "OVERDUE" || inv.status === "SENT" || inv.status === "PARTIALLY_PAID") {
+        if (owedCents <= 0) continue;
+        const isOverdue = inv.status === "OVERDUE" || (!!inv.dueDate && new Date(inv.dueDate) < now);
         if (isOverdue) {
-          totalOverdue += amount;
+          overdueCents += owedCents;
           overdueCount++;
         } else {
-          totalPending += amount;
+          pendingCents += owedCents;
           pendingCount++;
         }
-      } else if (inv.status === "DRAFT") {
-        totalPending += amount;
-        pendingCount++;
       }
     }
 
-    return { totalReceived, receivedThisMonth, totalPending, totalOverdue, paidCount, pendingCount, overdueCount };
+    return {
+      totalReceived: receivedCents / 100,
+      receivedThisMonth: Math.max(0, thisMonthCents) / 100,
+      totalPending: pendingCents / 100,
+      totalOverdue: overdueCents / 100,
+      paidCount,
+      pendingCount,
+      overdueCount,
+    };
   }, [invoices]);
 
   const filteredInvoices = useMemo(() => {

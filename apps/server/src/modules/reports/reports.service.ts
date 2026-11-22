@@ -2,6 +2,9 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { LedgerReportingService, ReportBasis } from './ledger-reporting.service';
+import { readInvoiceMoney } from '../commerce/commerce-stats.service';
+import { normalizeCurrency } from '../finance/posting.service';
+import { sumMoney } from '../commerce/money';
 
 @Injectable()
 export class ReportsService {
@@ -90,16 +93,24 @@ export class ReportsService {
     }) : [];
     const categoryMap = new Map(categories.map(c => [c.id, c.name]));
 
-    const [outstandingInvoices, overdueInvoices] = await Promise.all([
-      this.prisma.client.invoice.aggregate({
-        where: { businessId, deletedAt: null, status: { in: ['SENT', 'DRAFT'] } },
-        _sum: { total: true },
-        _count: true,
-      }),
-      this.prisma.client.invoice.count({
-        where: { businessId, deletedAt: null, status: { in: ['SENT', 'DRAFT'] }, dueDate: { lt: now } },
-      }),
-    ]);
+    // V1-64 (SWP-INV-MONEY-TOTALS; sweep BUG-020; D-13, D-14, D-75): what is
+    // owed is the remaining balance of the open receivables (SENT, OVERDUE,
+    // PARTIALLY_PAID, PARTIALLY_CREDITED) over their own-tenant payment rows,
+    // the read the commerce stats total from (readInvoiceMoney) and the figure
+    // the A/R aging states. It summed the totals of SENT and DRAFT invoices: a
+    // draft nobody was sent counted as owed, a part-paid invoice did not, and a
+    // deposit never reduced it. The report is labelled in the business
+    // currency, so the figure and its counts are that currency's invoices only
+    // (another currency's are not added to it).
+    const reportCurrency = normalizeCurrency(currency) || 'TTD';
+    const owedInvoices = (await readInvoiceMoney(this.prisma.client, businessId, now)).filter(
+      (inv) => inv.currency === reportCurrency && inv.remaining > 0,
+    );
+    const outstandingInvoices = {
+      total: sumMoney(owedInvoices.map((inv) => inv.remaining)),
+      count: owedInvoices.length,
+    };
+    const overdueInvoices = owedInvoices.filter((inv) => inv.overdue).length;
 
     // FIN4 — Source of truth: derive revenue/expense from the ledger so
     // these figures match the PnL/Balance Sheet endpoints exactly. Falls
@@ -173,8 +184,8 @@ export class ReportsService {
         invoiceCount: paidInvoicesInPeriod._count ?? 0,
         averageInvoice: (paidInvoicesInPeriod._count ?? 0) > 0 ? totalRevenue / (paidInvoicesInPeriod._count ?? 1) : 0,
         byStatus: invoicesByStatus,
-        outstanding: Number(outstandingInvoices._sum.total ?? 0),
-        outstandingCount: outstandingInvoices._count ?? 0,
+        outstanding: outstandingInvoices.total,
+        outstandingCount: outstandingInvoices.count,
         overdueCount: overdueInvoices,
         topClients,
       },
