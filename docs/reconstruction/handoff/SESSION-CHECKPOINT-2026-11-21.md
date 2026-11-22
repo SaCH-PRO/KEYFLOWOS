@@ -23,7 +23,8 @@ This checkpoint continues `docs/reconstruction/V1-HANDOFF-2026-11-20.md`; that f
 | Work | Branch | State |
 |---|---|---|
 | W11-CORTEX-INSIGHT-QUERIES repair (BA-04) | pushed to `wave/v1-wave-3a` (#215) | RED `1d6c1822`, fix `d4fd4118`. Full server and web suites green, R0 MET (see §3). |
-| W11-CORTEX-SESSION-SNAPSHOT-SCOPE (KC-SEC-3, step 3, P0) | `pkt/V1-W11-CORTEX-SESSION-SNAPSHOT-SCOPE` (pushed), stacked on the repair | RED `1c8ce693`, fix `f550c3e9`, review repair `99238115`/`17639719` (pendingInvoices). 199/199 passing, tsc 0. The full server suite is the remaining check. |
+| W11-CORTEX-SESSION-SNAPSHOT-SCOPE (KC-SEC-3, step 3, P0) | `pkt/V1-W11-CORTEX-SESSION-SNAPSHOT-SCOPE` (pushed), stacked on the repair | RED `1c8ce693`, fix `f550c3e9`, review repair `99238115`/`17639719` (pendingInvoices). 199/199 passing, tsc 0. Full server suite at `17639719`: 761/761 files, 13936 passed. |
+| FU-KEY-CHAT-GENOME-MONEY-SIGHT (proposed V1-71 follow-up; security finding 1 of the packet above) | `pkt/V1-FU-KEY-CHAT-GENOME-MONEY-SIGHT` (pushed), stacked on the snapshot packet | RED `cc52c55b` (8 leaks), fix `03bc8ec5`. Both reviews found the same blocking defect: a finance signal filed under another module, e.g. `key_autonomy` with `section: FINANCE`. Its RED is `00999965` (5 cases) and its repair `6b43ea4d`, which carries `section` and `domain`, moves the cache key to v2 and picks suggestions from the reader's genome. 464/464 passing, tsc 0. Full suite pending. |
 | FU-WA-ESCAPE-RACE (new follow-up of COR-WACP-1; the #216 CI failure) | pushed to `wave/v1-wave-3a-phone` (#216) | RED `51605d36` (deterministic), fix `048e5fcf` (`useLayoutEffect`), `3a73999f`, `63119d06`. Reviewed: no blocking or major findings. |
 | Local test environment | `scripts/dev/claude-cloud-env.sh` (on the session branch) | `up` and `verify`. `verify` passes, with a negative control. |
 | Cloud environment `keyflowos` (personal) | Claude environment settings | The setup script is saved; this session runs on it. It is unproven until a fresh session starts. |
@@ -67,14 +68,19 @@ The RETURN is CC-RETURN-V1-SESSION-20261121-001 (#80 comment 7071174439).
 
 1. **Owner:** merge #215, then #216 when CI is green (Claude does not merge).
 2. **W11-CORTEX-SESSION-SNAPSHOT-SCOPE:** run the full server suite and proof:release0 on its head, then join a wave 3b PR once #215 is on main.
-3. **FU-KEY-CHAT-GENOME-MONEY-SIGHT** (proposed; security review finding 1, major, deferred by name):
-   - **The gap:** POST chat `genomeInsights` / `proactiveSuggestions` and the model prompt's genome block (`key-cortex-query-pipeline.service.ts`, `key-cortex-genome-context.service.ts`, `key-cortex-system-prompt.service.ts`) carry finance genome signals and opportunity values to a member without revenue read.
-   - **The fix:** project them with `isFinanceSignal` / `isFinanceRecommendation` (`genome-finance-scope.ts`, D-128) before both the response and the prompt are built.
-   - **When:** next, unless the owner redirects.
-4. **Next eligible packets** (`deps_met` per `V1-STATUS-2026-11-20.json`, counting wave 2b and 3a as done):
+3. **FU-KEY-CHAT-GENOME-MONEY-SIGHT:** built and reviewed (see §2).
+   - Left to do: its full server suite, then proof:release0 on its head.
+   - It joins wave 3b with the snapshot packet.
+4. **FU-KEY-GENOME-READS-RESIDUAL** (proposed): the genome reads that still have no viewer, which the reviews of item 3 recorded:
+   - `key-cortex-interaction.service.ts` explainDecision;
+   - the legacy `reasoning.service` getProactiveSuggestions and its own `genome:context:` cache;
+   - consciousness getActiveGoals;
+   - creativity getGenomeContext.
+   - **Owner questions:** is a finance DNA score a finance signal under D-128? Do SALES rows count as money?
+5. **Next eligible packets** (`deps_met` per `V1-STATUS-2026-11-20.json`, counting wave 2b and 3a as done):
    - step 3: BIZ-SETTINGS-WEB (P0, web), FU-MERGE-CONTACTS-UNIQUE, FU-CONTACT-AUDIT-RESIDUAL (D-207), SWP-COA-UNIQUE-CODE, FU-UNIT-GUARD-CI, FU-OVERLAY-LAYER-TABLE, FU-COMMUNITY-LIKE-OWN-ACTION;
    - step 4: SWP-INV-MONEY-TOTALS (P0), SWP-BOOKING-PAYMENT-GATE, W11-GENOME-RECS-DOMAIN, SWP-CENSUS-KEY-B, SWP-CENSUS-GENOME, W1F-ORDER-TRANSITIONS, W1F-STORE-STRIPE-R0.
-5. **Gate packets with no dependencies:** S0-SEC-LANE-DEPLOY (P0), S0-DEPENDABOT-FREEZE, TOF-STALE-GATES-PKT, SWEEP-RERUN-S2.
+6. **Gate packets with no dependencies:** S0-SEC-LANE-DEPLOY (P0), S0-DEPENDABOT-FREEZE, TOF-STALE-GATES-PKT, SWEEP-RERUN-S2.
 
 ## 7. Operator console (mobile)
 
