@@ -119,8 +119,8 @@ function toolCallName(call: unknown): string {
  * streaming). This is the heavy-lifting counterpart to the thin
  * KeyCortexReasoningService orchestrator.
  */
-/** The per-turn memo of readsRevenue on the query object (never serialized: a symbol key). */
-const READS_REVENUE = Symbol('readsRevenue');
+/** The per-turn memo of readsRevenue, keyed by the turn's query object (nothing is written on the query). */
+const READS_REVENUE = new WeakMap<object, Promise<boolean>>();
 
 @Injectable()
 export class KeyCortexQueryPipelineService {
@@ -327,10 +327,11 @@ export class KeyCortexQueryPipelineService {
       ) {
         try {
           // FU-KEY-CHAT-GENOME-MONEY-SIGHT (D-128, D-100): the genome as this reader may see it.
-          genomeContext = genomeContextForReader(
-            await this.genomeContextService.getGenomeEnrichedContext(query.businessId),
-            await this.readsRevenue(query),
-          );
+          const [loadedGenome, readsRevenue] = await Promise.all([
+            this.genomeContextService.getGenomeEnrichedContext(query.businessId),
+            this.readsRevenue(query),
+          ]);
+          genomeContext = genomeContextForReader(loadedGenome, readsRevenue);
           this.logger.log(
             `[processQuery][${correlationId}] Genome context loaded: ${genomeContext.recommendations.length} recommendations, ${genomeContext.signals.length} signals`,
           );
@@ -954,12 +955,14 @@ export class KeyCortexQueryPipelineService {
           const shouldProactive =
             await this.genomeContextService.shouldSuggestProactiveAction(
               query.businessId,
+              await this.readsRevenue(query),
             );
           if (shouldProactive) {
             proactiveSuggestions = genomeSuggestionsForReader(
               await this.genomeContextService.getProactiveSuggestions(
                 query.businessId,
                 flags.integrationV2Enabled,
+                await this.readsRevenue(query),
               ),
               await this.readsRevenue(query),
             );
@@ -1179,10 +1182,11 @@ export class KeyCortexQueryPipelineService {
         this.genomeBridgeService
       ) {
         try {
-          genomeContext = genomeContextForReader(
-            await this.genomeContextService.getGenomeEnrichedContext(query.businessId),
-            await this.readsRevenue(query),
-          );
+          const [loadedGenome, readsRevenue] = await Promise.all([
+            this.genomeContextService.getGenomeEnrichedContext(query.businessId),
+            this.readsRevenue(query),
+          ]);
+          genomeContext = genomeContextForReader(loadedGenome, readsRevenue);
         } catch {
           // Non-critical
         }
@@ -2003,11 +2007,19 @@ export class KeyCortexQueryPipelineService {
    * scopes). No user or no membership reads none (fails closed). Read once per turn.
    */
   private readsRevenue(query: CortexQuery): Promise<boolean> {
-    const memo = query as CortexQuery & { [READS_REVENUE]?: Promise<boolean> };
-    memo[READS_REVENUE] ??= this.memberAuthority(query.businessId, query.userId)
-      .then((a) => !!a && (a.superAdmin || rankOf(a.scopes.revenue || 'none') >= LEVEL_RANK.read))
-      .catch(() => false);
-    return memo[READS_REVENUE]!;
+    let decided = READS_REVENUE.get(query);
+    if (!decided) {
+      decided = this.memberAuthority(query.businessId, query.userId)
+        .then((a) => !!a && (a.superAdmin || rankOf(a.scopes.revenue || 'none') >= LEVEL_RANK.read))
+        .catch((err: unknown) => {
+          this.logger.warn(
+            `[readsRevenue] the reader's revenue level could not be read; the genome's finance rows are withheld: ${err instanceof Error ? err.message : String(err)}`,
+          );
+          return false;
+        });
+      READS_REVENUE.set(query, decided);
+    }
+    return decided;
   }
 
   /**

@@ -31,11 +31,13 @@ const ID = {
   blind: `${P}blind`, // STAFF, revenue none
   revenue: `${P}revenue`, // STAFF, revenue read
   emptyAdmin: `${P}empty_admin`, // ADMIN, explicit map naming no module (JSON array)
+  superAdmin: `${P}super`, // platform SUPER_ADMIN, no membership
 };
-const READS_REVENUE: Record<string, boolean> = { owner: true, revenue: true, blind: false, emptyAdmin: false };
+const READS_REVENUE: Record<string, boolean> = { owner: true, revenue: true, superAdmin: true, blind: false, emptyAdmin: false };
 
 const FIN = {
   signal: 'v71p runway is 0.8 months',
+  autoSignal: 'v71p 3 pending invoices require attention',
   rec: 'v71p raise prices on retainers',
   sugg: 'v71p chase the overdue invoices',
   opp: 'v71p upsell the maintenance plan',
@@ -46,7 +48,7 @@ const OPS = {
   rec: 'v71p automate the intake form',
   sugg: 'v71p schedule the crew earlier',
 };
-const MONEY_MARKERS = [FIN.signal, FIN.rec, FIN.sugg, FIN.opp, '98,765', '98765'];
+const MONEY_MARKERS = [FIN.signal, FIN.autoSignal, FIN.rec, FIN.sugg, FIN.opp, '98,765', '98765'];
 
 function genome() {
   return {
@@ -60,6 +62,8 @@ function genome() {
     signals: [
       { id: `${P}sig_fin`, type: 'risk', message: FIN.signal, module: 'finance', severity: 'high', createdAt: new Date() },
       { id: `${P}sig_ops`, type: 'risk', message: OPS.signal, module: 'operations', severity: 'high', createdAt: new Date() },
+      // As key-proactive-engine files it: another module, section FINANCE (review BLOCKING-1).
+      { id: `${P}sig_auto_fin`, type: 'risk', message: FIN.autoSignal, module: 'key_autonomy', section: 'FINANCE', domain: 'cashflow', severity: 'high', createdAt: new Date() },
     ],
     opportunities: [{ id: `${P}opp`, title: FIN.opp, estimatedValue: FIN.value, category: 'revenue', confidence: 0.8 }],
     autonomyMap: {},
@@ -178,7 +182,7 @@ beforeAll(async () => {
 
   await cleanup();
   for (const id of Object.values(ID).filter((v) => v !== ID.biz)) {
-    await db.user.create({ data: { id, email: `${id}@${P}test.local`, role: 'USER' } });
+    await db.user.create({ data: { id, email: `${id}@${P}test.local`, role: id === ID.superAdmin ? 'SUPER_ADMIN' : 'USER' } });
   }
   await db.business.create({ data: { id: ID.biz, name: 'V71P Biz', ownerId: ID.owner } });
   for (const [userId, role, permissionScopes] of [
@@ -196,13 +200,13 @@ afterAll(async () => {
 });
 
 describe('FU-KEY-CHAT-GENOME-MONEY-SIGHT (D-128, D-100): a KEY chat turn hands finance genome rows and opportunity values only to members who may read revenue', () => {
-  for (const reader of ['owner', 'revenue', 'blind', 'emptyAdmin'] as const) {
+  for (const reader of ['owner', 'revenue', 'superAdmin', 'blind', 'emptyAdmin'] as const) {
     for (const path of ['processQuery', 'streamQuery'] as const) {
       const kind = READS_REVENUE[reader] ? 'control' : 'RED-BEFORE';
       it(`${kind}: ${reader} (${path}): the prompt ${READS_REVENUE[reader] ? 'keeps' : 'carries no'} finance signal, finance recommendation or opportunity value, and operations rows stay`, async () => {
         const { prompt } = await turn(ID[reader], path);
         for (const ops of [OPS.signal, OPS.rec]) expect(prompt, `${reader} ${path}: ${ops}`).toContain(ops);
-        for (const marker of [FIN.signal, FIN.rec, FIN.opp, '98,765']) {
+        for (const marker of [FIN.signal, FIN.autoSignal, FIN.rec, FIN.opp, '98,765']) {
           if (READS_REVENUE[reader]) expect(prompt, `${reader} ${path}: ${marker}`).toContain(marker);
           else expect(prompt, `${reader} ${path}: ${marker}`).not.toContain(marker);
         }
@@ -212,7 +216,7 @@ describe('FU-KEY-CHAT-GENOME-MONEY-SIGHT (D-128, D-100): a KEY chat turn hands f
         const { output } = await turn(ID[reader], path);
         if (READS_REVENUE[reader]) {
           if (path === 'processQuery') for (const marker of [FIN.signal, FIN.rec, FIN.sugg]) expect(output, `${reader} ${path}: ${marker}`).toContain(marker);
-          else expect(output, `${reader} ${path}: the genome alert`).toContain(FIN.signal);
+          else for (const marker of [FIN.signal, FIN.autoSignal]) expect(output, `${reader} ${path}: the genome alert`).toContain(marker);
         } else {
           for (const marker of MONEY_MARKERS) expect(output, `${reader} ${path}: ${marker}`).not.toContain(marker);
         }

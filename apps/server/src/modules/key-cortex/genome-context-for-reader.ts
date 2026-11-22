@@ -3,8 +3,8 @@
  * reader may see it. KeyCortexGenomeContextService loads the genome per business, with no viewer,
  * and a chat turn hands it to the model prompt, the answer (genomeInsights, proactiveSuggestions)
  * and the stream's genome alert. A reader without revenue read is handed:
- *   - no finance signal (isFinanceSignal on the signal's source module, as the gated genome
- *     signal routes read it);
+ *   - no finance signal (isFinanceSignal on the signal's source module, section and domain, as the
+ *     gated genome signal routes read it);
  *   - no finance recommendation or suggestion (isFinanceRecommendation on its domain/category);
  *   - no opportunity: each carries an estimatedValue in money.
  * Everything else (DNA scores, stage, readiness, the other modules' rows) is unchanged. A revenue
@@ -17,7 +17,7 @@ export function genomeContextForReader(context: GenomeEnrichedContext, readsReve
   if (readsRevenue) return context;
   return {
     ...context,
-    signals: (context.signals ?? []).filter((s) => !isFinanceSignal({ sourceModule: s.module })),
+    signals: (context.signals ?? []).filter((s) => !isFinanceSignal({ sourceModule: s.module, section: s.section, domain: s.domain })),
     recommendations: genomeRecommendationsForReader(context.recommendations ?? [], false),
     opportunities: [],
   };
