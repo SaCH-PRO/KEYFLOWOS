@@ -25,6 +25,7 @@ describe('TemporalAdapterService', () => {
       createMemory: vi.fn(),
       findByEntity: vi.fn(),
       findMany: vi.fn(),
+      findById: vi.fn(),
       searchMemory: vi.fn(),
       deleteMemory: vi.fn(),
       updateMemory: vi.fn(),
@@ -66,15 +67,16 @@ describe('TemporalAdapterService', () => {
     (memory.updateMemory as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'm1' });
     const result = await service.execute(mkCmd('update_memory', { memoryId: 'm1', value: { x: 2 }, importance: 'high' }));
     expect(result.success).toBe(true);
-    expect(memory.updateMemory).toHaveBeenCalledWith('m1', expect.objectContaining({ confidence: 0.9 }));
+    expect(memory.updateMemory).toHaveBeenCalledWith('biz_123', 'm1', expect.objectContaining({ confidence: 0.9 }));
   });
 
   it('tag_memory merges tags', async () => {
-    (memory.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 'm1', sourceEventIds: ['a'], metadata: {} }]);
+    (memory.findById as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'm1', sourceEventIds: ['a'], metadata: {} });
     (memory.updateMemory as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'm1' });
     const result = await service.execute(mkCmd('tag_memory', { memoryId: 'm1', tags: ['b'] }));
     expect(result.success).toBe(true);
-    expect(memory.updateMemory).toHaveBeenCalledWith('m1', expect.objectContaining({ sourceEventIds: ['a', 'b'] }));
+    expect(memory.findById).toHaveBeenCalledWith('biz_123', 'm1');
+    expect(memory.updateMemory).toHaveBeenCalledWith('biz_123', 'm1', expect.objectContaining({ sourceEventIds: ['a', 'b'] }));
   });
 
   it('consolidate_memories stores merged summary', async () => {

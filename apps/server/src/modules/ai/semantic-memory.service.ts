@@ -437,12 +437,6 @@ export class SemanticMemoryService {
     return stored;
   }
 
-  async deleteForSource(sourceType: string, sourceId: string): Promise<void> {
-    await this.prisma.client.$executeRaw(
-      Prisma.sql`DELETE FROM "ai_memory_embeddings" WHERE source_type = ${sourceType} AND source_id = ${sourceId}`,
-    );
-  }
-
   private async generateEmbedding(businessId: string, text: string): Promise<number[]> {
     const embeddings = await this.aiUsage.trackEmbedding(
       businessId,

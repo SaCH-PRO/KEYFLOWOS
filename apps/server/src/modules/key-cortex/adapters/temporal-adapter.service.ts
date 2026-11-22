@@ -62,7 +62,7 @@ export class TemporalAdapterService {
     importance?: string;
   }) {
     const confidence = input.importance === 'high' ? 0.9 : input.importance === 'low' ? 0.3 : undefined;
-    return this.temporal.updateMemory(input.memoryId, {
+    return this.temporal.updateMemory(input.businessId, input.memoryId, {
       content: input.value ? JSON.stringify(input.value) : undefined,
       confidence,
     });
@@ -73,17 +73,18 @@ export class TemporalAdapterService {
     memoryId: string;
     tags: string[];
   }) {
-    const memory = await this.temporal.findMany(input.businessId, { entityId: input.memoryId });
-    const existing = memory[0];
+    // MEM-TEMPORAL-SCOPE: the memory is looked up and updated by the same id, within the caller's business.
+    const existing = await this.temporal.findById(input.businessId, input.memoryId);
     if (!existing) {
       throw new NotFoundException('Memory not found');
     }
     const existingTags = Array.isArray(existing.sourceEventIds) ? existing.sourceEventIds : [];
-    return this.temporal.updateMemory(input.memoryId, {
-      sourceEventIds: Array.from(new Set([...existingTags, ...input.tags])),
+    const tags = Array.from(new Set([...existingTags, ...input.tags]));
+    return this.temporal.updateMemory(input.businessId, input.memoryId, {
+      sourceEventIds: tags,
       metadata: {
         ...(existing.metadata as Record<string, unknown> | undefined),
-        tags: Array.from(new Set([...existingTags, ...input.tags])),
+        tags,
       },
     });
   }

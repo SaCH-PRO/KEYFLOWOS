@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
 import type {
@@ -118,16 +118,28 @@ export class TemporalFlowMemoryService {
     });
   }
 
-  async deleteMemory(businessId: string, memoryId: string): Promise<boolean> {
-    const existing = await this.prisma.client.temporalFlowMemory.findFirst({
-      where: { id: memoryId, businessId },
-    });
-    if (!existing) return false;
-    await this.prisma.client.temporalFlowMemory.delete({ where: { id: memoryId } });
-    return true;
+  /**
+   * MEM-TEMPORAL-SCOPE: one memory of this business by id, or null. A foreign id reads as a missing one.
+   */
+  async findById(businessId: string, memoryId: string): Promise<TemporalFlowMemoryData | null> {
+    return this.prisma.client.temporalFlowMemory.findFirst({ where: { id: memoryId, businessId } });
   }
 
+  async deleteMemory(businessId: string, memoryId: string): Promise<boolean> {
+    // MEM-TEMPORAL-SCOPE: the tenant predicate is in the delete itself, not only in a read before it.
+    const { count } = await this.prisma.client.temporalFlowMemory.deleteMany({
+      where: { id: memoryId, businessId },
+    });
+    return count > 0;
+  }
+
+  /**
+   * MEM-TEMPORAL-SCOPE: updates one memory of this business. The id and the business are both in the
+   * update's own where, so another business's id is refused exactly as a missing id is (NotFoundException
+   * 'Memory not found'), and nothing is written.
+   */
   async updateMemory(
+    businessId: string,
     memoryId: string,
     patch: {
       content?: string;
@@ -136,17 +148,23 @@ export class TemporalFlowMemoryService {
       metadata?: Record<string, unknown>;
     },
   ): Promise<TemporalFlowMemoryData> {
-    const existing = await this.prisma.client.temporalFlowMemory.findUnique({ where: { id: memoryId } });
-    if (!existing) throw new Error('Memory not found');
-    return this.prisma.client.temporalFlowMemory.update({
-      where: { id: memoryId },
-      data: {
-        content: patch.content,
-        confidence: patch.confidence,
-        sourceEventIds: patch.sourceEventIds,
-        metadata: patch.metadata,
-      },
-    });
+    try {
+      return await this.prisma.client.temporalFlowMemory.update({
+        where: { id: memoryId, businessId },
+        data: {
+          content: patch.content,
+          confidence: patch.confidence,
+          sourceEventIds: patch.sourceEventIds,
+          metadata: patch.metadata,
+        },
+      });
+    } catch (err) {
+      // P2025: no row matched the where (missing, or another business's).
+      if ((err as { code?: unknown } | null)?.code === 'P2025') {
+        throw new NotFoundException('Memory not found');
+      }
+      throw err;
+    }
   }
 
   async getStats(businessId: string) {
