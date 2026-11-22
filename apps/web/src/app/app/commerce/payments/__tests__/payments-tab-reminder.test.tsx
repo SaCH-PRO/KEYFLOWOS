@@ -191,8 +191,9 @@ describe("Payments tab: Send Reminder (FOLLOW3-A8, VR-01)", () => {
     const id = `inv_${status.toLowerCase()}`;
     const { setInvoicesSpy, statusOf } = mount([invoice(id, status, dueDate)]);
 
-    // The row itself is on screen (the control is not vacuous) ...
-    expect(screen.getByText(id.toUpperCase())).toBeTruthy();
+    // The row itself is on screen (the control is not vacuous). A past-due PENDING row is owed (owner ruling
+    // D-256), so it is drawn twice: in the Recovery Queue and in the payments list ...
+    expect(screen.getAllByText(id.toUpperCase()).length).toBeGreaterThanOrEqual(1);
     // ... but neither the Recovery Queue nor the payments list offers a reminder for it.
     expect(screen.queryAllByTitle("Send Reminder")).toHaveLength(0);
     expect(sendInvoiceReminder).not.toHaveBeenCalled();

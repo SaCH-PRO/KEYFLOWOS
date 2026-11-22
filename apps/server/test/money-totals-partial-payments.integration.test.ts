@@ -136,6 +136,9 @@
  * PARTIALLY_CREDITED in the business currency, credit-aware. On a book with a
  * PARTIALLY_CREDITED invoice (bizK) or another currency's invoice (bizA after
  * MT-05) the two differ by exactly those invoices (review COR-3, reported).
+ * Since D-251 both read one list, and since D-256 that list includes PENDING
+ * (OPEN_RECEIVABLE_STATUSES: PENDING, SENT, OVERDUE, PARTIALLY_PAID,
+ * PARTIALLY_CREDITED).
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PlanLimitGuard (plan answer stubbed), CommerceController,
@@ -1109,6 +1112,24 @@ describe('V1-64 second pass: owner rulings D-250 and D-251', () => {
     const after = [(await agingOf(ID.bizP)).totalOutstanding, (await reportOf(ID.bizP)).metrics.revenue.outstanding, (await statsOf(ID.bizP)).outstandingAmount];
     expect(after.map((v, i) => cents(v) - cents(before[i])), 'aging, summary, stats: each owes the 40 the rows leave').toEqual([4000, 4000, 4000]);
     expect(new Set(after).size, 'the three still agree').toBe(1);
+
+    // Security review nit 5: another tenant's PENDING invoice is nobody's receivable here.
+    await seedInvoice('b_pending', ID.bizB, ID.contactB, 'PENDING', 77);
+    const foreign = [(await agingOf(ID.bizP)).totalOutstanding, (await reportOf(ID.bizP)).metrics.revenue.outstanding, (await statsOf(ID.bizP)).outstandingAmount];
+    expect(foreign, "bizB's PENDING invoice moves nothing in bizP").toEqual(after);
+    await db.invoice.delete({ where: { id: INV.b_pending } }); // bizB's own figures are pinned absolutely in MT-20
+
+    // Correctness review M3: an ACCRUAL book. An invoice issued through the real routes (the workflow posts its AR
+    // recognition) and left in PENDING (a legacy row; no live writer sets PENDING): the aging reads the ledger's
+    // 100 and stays reconciled, equal to the summary and the stats (the head: dropped from all three).
+    const acc0 = await agingOf(ID.bizCr);
+    const accBefore = [acc0.totalOutstanding, (await reportOf(ID.bizCr)).metrics.revenue.outstanding, (await statsOf(ID.bizCr)).outstandingAmount];
+    await issuedInvoice('cr_pending', ID.bizCr, ID.contactCr, 100);
+    await db.invoice.update({ where: { id: INV.cr_pending }, data: { status: 'PENDING' } });
+    const acc1 = await agingOf(ID.bizCr);
+    const accAfter = [acc1.totalOutstanding, (await reportOf(ID.bizCr)).metrics.revenue.outstanding, (await statsOf(ID.bizCr)).outstandingAmount];
+    expect(accAfter.map((v, i) => cents(v) - cents(accBefore[i])), 'ACCRUAL: aging (ledger), summary, stats each owe 100').toEqual([10000, 10000, 10000]);
+    expect({ reconciled: acc1.ledgerReconciled, delta: acc1.ledgerDelta }).toEqual({ reconciled: acc0.ledgerReconciled, delta: acc0.ledgerDelta });
   });
 
   it('MT-20 (second-pass reviews; P2C-5 RED-BEFORE, P2C-1 and P2S-2 pinned): no phantom cent on a legacy sub-cent total; on ACCRUAL the aging trusts the ledger (ruled, D-255); the ledger mapping is tenant-bound', async () => {

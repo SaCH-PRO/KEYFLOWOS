@@ -580,4 +580,14 @@ describe("V1-64 owner ruling D-256: a PENDING invoice counts as owed everywhere"
     );
     expect((screen.getByText("Outstanding Revenue").parentElement?.textContent ?? "")).toMatch(/Outstanding Revenue\D*400\.00/);
   });
+
+  it("CH-32 RED-BEFORE (review B1): a past-due PENDING invoice is in the Recovery Queue, owing 400, with Mark Paid and no dead Send Reminder (never issued: not remindable)", () => {
+    mount([invoice("pendLate", "PENDING", 500, [payment("pendLate", 100)], { dueDate: PAST_DUE })]);
+    const queue = screen.getByText("Recovery Queue").closest("div.rounded-xl") as HTMLElement;
+    expect(queue, "the Recovery Queue").not.toBeNull();
+    expect(within(queue).getByText("PENDLATE")).toBeTruthy();
+    expect(within(queue).getAllByTitle("Mark Paid")).toHaveLength(1);
+    expect(within(queue).queryAllByTitle("Send Reminder")).toHaveLength(0);
+    expect(screen.queryAllByTitle("Send Reminder")).toHaveLength(0);
+  });
 });
