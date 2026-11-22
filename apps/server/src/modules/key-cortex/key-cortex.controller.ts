@@ -150,7 +150,7 @@ import {
 import { ModuleScopeGuard, RequireModuleScope, type ModuleScopeRequirement } from '../../core/auth/module-scope.guard';
 import { CurrentUser, type AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { KeyCortexApprovalOrchestratorService } from './key-cortex-approval-orchestrator.service';
-import { proposalViewForReader, redactedProposalView } from '../business-genome/key-genome/genome-finance-scope';
+import { isFinancialProposal, proposalViewForReader, redactedProposalView } from '../business-genome/key-genome/genome-finance-scope';
 import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
 import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
 
@@ -2441,7 +2441,9 @@ export class KeyCortexController {
       // bridged from).
       const readsRevenue = viewerReadsRevenue(viewer);
       let view: unknown = proposalViewForReader(proposal, readsRevenue);
-      if (!readsRevenue && view === proposal) {
+      // Asked of the proposal, not of the view: a non-financial proposal whose failure reason was blanked is a new
+      // object, and its provenance is still to be read (review of the Codex fixes, correctness MAJOR-1).
+      if (!readsRevenue && !isFinancialProposal(proposal as never)) {
         // The decision has been applied: a failed read answers the redacted view, not a 503 (round 4, security minor 6).
         const financial = await this.approvalOrchestrator.isFinancial(dto.businessId, proposal).catch(() => true);
         if (financial) view = redactedProposalView(proposal);

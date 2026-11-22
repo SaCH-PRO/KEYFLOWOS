@@ -45,7 +45,10 @@ const MONEY_TERMS = new RegExp(
   [
     'financ', 'revenue', 'sales', 'commerce', 'payment', 'invoice', 'profit', 'billing', 'refund', 'payroll', 'treasury',
     // Compensation is money (Codex P1 on #218: commission rates are real data in conversion/sales-team).
-    'commission', 'compensation', '(?<![a-z])bonus(?:es)?(?![a-z])',
+    // Only the two known false matches are excluded (decommission, overcompensation); every other compound, key or
+    // acronym-prefixed name fails closed (confirmation review m2/m4). Compensate, incentivise and stipend are
+    // compensation too.
+    '(?<!de)commission', '(?<!over)compensat', '(?<![a-z])bonus(?:es)?(?![a-z])', 'incentiv', 'stipend',
     'lifetime', 'acquisition_?cost', 'budget', 'expense', 'conversion', 'forecast', 'churn', 'transaction', 'opportunit',
     'unit_?economics', 'cross_?domain', 'money', 'receivable', 'payable', 'quote', 'quotation', 'reimburs', 'discount',
     // A promo code is money; promote / promotion is not (round-3 correctness minor).
@@ -232,34 +235,151 @@ export type ProposalFields = {
   affectedEntities?: unknown;
 };
 
+/**
+ * A structured value (parameters, a result, evidence) as the text the vocabulary reads.
+ * - Ids name rows, not money: under an id-named key, a value shaped like an id (one token, no worded money in it) is
+ *   dropped and its name kept (an invoiceId names an invoice). Anything else under such a key is read (fourth review
+ *   m3/m4).
+ * - A control character inside a string becomes a space, so JSON's escape of it never stands as a letter before a word
+ *   (third review m1). The escapes JSON still writes (in keys, of lone surrogates, of a nested JSON string) are read
+ *   by `readings`.
+ * Returns null when the value cannot be serialised; every caller treats that as financial (fail closed).
+ */
+const ID_KEY = /(^id$|Ids?$|_ids?$)/;
+/** One token (no whitespace), none of whose all-letter parts is a money word: `tsk_1`, a cuid, a UUID; not `invoice-900-usd`. */
+function idShaped(v: unknown): boolean {
+  if (typeof v !== 'string' || v.length > 128 || /\s/.test(v)) return false;
+  const words = v.split(/[^A-Za-z0-9]+/).filter((part) => /^[A-Za-z]+$/.test(part));
+  return !mentionsMoney(words.join(' '));
+}
+function structuredText(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'string') return v;
+  try {
+    const json = JSON.stringify(v, (k, val) => {
+      if (k && ID_KEY.test(k)) {
+        if (idShaped(val)) return '[id]';
+        if (Array.isArray(val) && val.every(idShaped)) return '[id]';
+      }
+      return typeof val === 'string' ? val.replace(/\p{Cc}+/gu, ' ') : val;
+    });
+    return typeof json === 'string' ? json : null;
+  } catch {
+    return null;
+  }
+}
+/**
+ * Real id shapes are stripped from text: a UUID (hex), a cuid (Prisma cuid(): "c" and 24 lowercase letters and digits,
+ * none of whose letter runs of five or more the proposal vocabulary reads as money), or a hex digest of 32 or more characters (at least 6
+ * digits and 6 letters). Nothing else is stripped: a squashed phrase, a file name, a hyphenated phrase
+ * (overdue-invoices-2026, december-2026-cost-fees-transactions) and a camelCase name are words, and are read.
+ */
+function withoutIdTokens(t: string, keepWordedCuids = true): string {
+  return t
+    .replace(/(?<![A-Za-z0-9])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![A-Za-z0-9])/gi, ' ')
+    .replace(/(?<![A-Za-z0-9-])c(?=[a-z0-9]{0,23}\d)[a-z0-9]{24}(?![A-Za-z0-9-])/g, (run) =>
+      keepWordedCuids && run.split(/\d+/).some((letters) => letters.length >= 5 && proposalMentionsMoney(letters)) ? run : ' ',
+    )
+    .replace(/(?<![A-Za-z0-9-])[0-9a-fA-F]{32,512}(?![A-Za-z0-9-])/g, (run) => {
+      const digits = run.replace(/\D/g, '').length;
+      return digits >= 6 && run.length - digits >= 6 ? ' ' : run;
+    });
+}
+
+/**
+ * The characters of readings one proposal's content (or one single text read on its own) may cost. A plain text is one
+ * reading of its own length; an ordinary long text with a quote, a path, a joiner or a no-break space in it is a few;
+ * text whose readings multiply past it (several kinds of ambiguity in one long text, or across several long fields) runs
+ * out, and then it fails closed before the vocabulary reads it (seventh review; the lengths are recorded under
+ * FU-PROPOSAL-MONEY-TAG).
+ */
+const READING_BUDGET = 300_000;
+type ReadingBudget = { left: number };
+
+/**
+ * The ways a text may be read, or null when it must fail closed. The text states money if ANY reading does, so a
+ * reading is only ever added, never substituted (sixth review): each earlier way of reading stays one of them.
+ * - as written, and with compatibility forms folded (fullwidth digits; a folded symbol can also glue itself to a word,
+ *   which is why the text as written stays);
+ * - an invisible format character kept, as a joiner (in<ZWSP>voice) or as a separator (fee<ZWSP>from);
+ * - a backslash kept as written; as a separator (c:\clients\tax); as the start of an escape that is a space, either
+ *   that escape alone (\n, \t ...) or any backslash run with its letter; or as JSON's own quoting, removed with its
+ *   \uXXXX escapes decoded, its \n-style escapes read as spaces or dropped (a nested JSON string, an escaped
+ *   currency sign).
+ * Every pattern matches one character or a run that always matches, so the cost is linear in what is read, and what
+ * is read is bounded by the budget.
+ */
+function readings(text: string, budget: ReadingBudget): string[] | null {
+  const folded = text.normalize('NFKC');
+  if (folded.length > MAX_CLASSIFIED_CONTENT) return null;
+  const raw = new Set<string>([text]);
+  if (/[\\\p{Cf}]/u.test(text) || folded !== text) {
+    for (const form of new Set([text, folded])) {
+      for (const formatRead of new Set([form, form.replace(/\p{Cf}/gu, ''), form.replace(/\p{Cf}/gu, ' ')])) {
+        raw.add(formatRead);
+        if (!formatRead.includes('\\')) continue;
+        const decoded = formatRead.replace(/\\u([0-9a-fA-F]{4})/g, (_m, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+        raw.add(formatRead.replace(/\\/g, ' '));
+        raw.add(formatRead.replace(/\\[bfnrt]/g, ' '));
+        raw.add(formatRead.replace(/\\+(?:u[0-9a-fA-F]{4}|[bfnrt])?/g, ' '));
+        raw.add(decoded.replace(/\\/g, ''));
+        raw.add(decoded.replace(/\\[bfnrt]/g, ' ').replace(/\\/g, ''));
+      }
+    }
+  }
+  let cost = 0;
+  for (const reading of raw) cost += reading.length;
+  if (cost > budget.left) return null;
+  budget.left -= cost;
+  // A cuid-shaped run kept for a money word in it is read both ways, kept and stripped: kept, it can read as no money
+  // in its place ("...paying attention") and stand between a money word and its figure (eighth review, security MINOR-1).
+  const out = new Set<string>();
+  for (const reading of raw) {
+    out.add(withoutIdTokens(reading));
+    out.add(withoutIdTokens(reading, false));
+  }
+  return [...out];
+}
+
+/**
+ * D-238: whether a text states money by the proposal vocabulary, in any of its readings. Oversized text, and text whose
+ * readings exceed the budget, fail closed before they are read.
+ */
+function textStatesMoney(text: string | null | undefined, budget: ReadingBudget = { left: READING_BUDGET }): boolean {
+  if (typeof text !== 'string' || text === '') return false;
+  if (text.length > MAX_CLASSIFIED_CONTENT) return true;
+  const all = readings(text, budget);
+  return all === null || all.some((reading) => proposalMentionsMoney(reading));
+}
+
+/**
+ * D-238: whether a structured value a proposal or its event carries (an execution result, outcome evidence) states
+ * money, read exactly as the proposal's own content is. A value that cannot be read, or is oversized, fails closed.
+ */
+export function structuredValueStatesMoney(value: unknown, budget?: ReadingBudget): boolean {
+  if (value === null || value === undefined) return false;
+  const text = structuredText(value);
+  return text === null || textStatesMoney(text, budget);
+}
+
+const STRUCTURED_PROPOSAL_FIELDS = ['risks', 'evidence', 'payload', 'inputPayload', 'affectedEntities', 'executionResult'] as const;
+
 /** A proposal's content as text: its string fields and its structured fields (parameters, request type) serialised. */
 function proposalContent(p: ProposalFields): Array<string | null | undefined> {
-  // Ids name rows, not money: an id-named key's value, and an id-like token (letters and digits, 16 or more), are not
-  // read (round-3 security minor: a random id holding "1usd" or "9cad2" is no amount). The provenance a recommendation
-  // id names is read by financialProposalWithProvenance.
-  const idKey = /(^id$|Ids?$|_ids?$)/;
-  const asText = (v: unknown) =>
-    v === null || v === undefined
-      ? null
-      : typeof v === 'string'
-        ? v
-        : // The id's name is kept (an invoiceId names an invoice: round-4 correctness minor 4); only its value is dropped.
-          JSON.stringify(v, (k, val) => (k && idKey.test(k) && (typeof val === 'string' || Array.isArray(val)) ? '[id]' : val));
-  // Only real id shapes are stripped from text: a UUID, or one unbroken run of 16+ letters and digits holding both
-  // (a cuid). A hyphenated phrase (overdue-invoices-2026) is words, and is read.
-  const withoutIdTokens = (t: string | null | undefined) =>
-    typeof t === 'string'
-      ? t
-          .replace(/(?<![A-Za-z0-9])[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}(?![A-Za-z0-9])/gi, ' ')
-          // A cuid (Prisma cuid(): "c" and 24 lowercase letters and digits). A camelCase name (unpaidInvoices2026) is read.
-          .replace(/(?<![A-Za-z0-9-])c(?=[a-z0-9]{0,23}\d)[a-z0-9]{24}(?![A-Za-z0-9-])/g, ' ')
-      : t;
-  return [p.summary, p.description, p.rationale, p.expectedBenefit, asText(p.risks), asText(p.evidence), asText(p.payload), asText(p.inputPayload), asText(p.affectedEntities), asText(p.executionResult), p.rejectionReason].map(withoutIdTokens);
+  // The provenance a recommendation id names is read by financialProposalWithProvenance.
+  const fields = p as unknown as Record<string, unknown>;
+  return [p.summary, p.description, p.rationale, p.expectedBenefit, ...STRUCTURED_PROPOSAL_FIELDS.map((key) => structuredText(fields[key])), p.rejectionReason];
+}
+
+/** Whether a structured field of the proposal holds a value that cannot be serialised: unreadable content fails closed. */
+function hasUnreadableContent(p: ProposalFields): boolean {
+  const fields = p as unknown as Record<string, unknown>;
+  return STRUCTURED_PROPOSAL_FIELDS.some((key) => fields[key] !== null && fields[key] !== undefined && structuredText(fields[key]) === null);
 }
 
 /** D-238: whether a proposal's free text (a failure or rejection reason) states money, by the proposal vocabulary. */
 export function proposalTextStatesMoney(text: string | null | undefined): boolean {
-  return proposalMentionsMoney(text);
+  return textStatesMoney(text);
 }
 
 function proposalMentionsMoney(...values: Array<string | null | undefined>): boolean {
@@ -309,12 +429,15 @@ const MAX_CLASSIFIED_CONTENT = 50_000;
 
 export function isFinancialProposal(proposal: ProposalFields | null | undefined): boolean {
   if (!proposal) return true;
+  if (hasUnreadableContent(proposal)) return true;
   const content = proposalContent(proposal);
   if ([proposal.title, ...content].reduce((n, v) => n + (typeof v === 'string' ? v.length : 0), 0) > MAX_CLASSIFIED_CONTENT) return true;
   const { actionType, module, toolName, title } = proposal;
   // The content is read before any list (review MAJOR-3): an approval request, a listed action or a mapped tool whose
   // text or parameters carry money is financial.
-  if (proposalMentionsMoney(actionType, module, toolName, title, ...content)) return true;
+  // One reading budget for the whole proposal (seventh review, security MINOR-1).
+  const budget: ReadingBudget = { left: READING_BUDGET };
+  if (proposalMentionsMoney(actionType, module, toolName) || [title, ...content].some((text) => textStatesMoney(text, budget))) return true;
   const tool = typeof toolName === 'string' && toolName.trim() ? toolName.trim() : null;
   const authority = tool ? keyOrganToolAuthority(tool) : null;
   if (authority && 'scopes' in authority) return authority.scopes.some((s) => MONEY_SCOPES.has(s.module));
@@ -352,15 +475,30 @@ export function proposalViewForReader<T extends { id: string; status?: unknown; 
  * Codex P1 on #218: a non-financial proposal as a reader without revenue read is served it: whole, except a failure
  * reason that states money, which is blanked.
  */
-export function nonFinancialProposalForReader<T extends { failureReason?: unknown }>(proposal: T): T {
-  return typeof proposal.failureReason === 'string' && proposalMentionsMoney(proposal.failureReason) ? { ...proposal, failureReason: null } : proposal;
+export function nonFinancialProposalForReader<T extends { failureReason?: unknown; outcomeEvidence?: unknown }>(proposal: T): T {
+  // One reading budget for the failure reason, the evidence and its status together.
+  const budget: ReadingBudget = { left: READING_BUDGET };
+  const reasonStates = typeof proposal.failureReason === 'string' && textStatesMoney(proposal.failureReason, budget);
+  // The action boundary writes the same message into outcomeEvidence (review of the Codex fixes, security m1). Evidence
+  // that states money anywhere in it is reduced to its status (confirmation review m6), read as proposal content is.
+  const evidence = proposal.outcomeEvidence;
+  const evidenceStates = structuredValueStatesMoney(evidence, budget);
+  if (!reasonStates && !evidenceStates) return proposal;
+  // The status is kept only when it is a short string that states no money (third review m2).
+  const status = evidence && typeof evidence === 'object' && !Array.isArray(evidence) ? (evidence as Record<string, unknown>).status : undefined;
+  const keepStatus = typeof status === 'string' && status.length <= 40 && !textStatesMoney(status, budget);
+  return {
+    ...proposal,
+    ...(reasonStates ? { failureReason: null } : {}),
+    ...(evidenceStates ? { outcomeEvidence: { ...(keepStatus ? { status } : {}), reason: null } } : {}),
+  };
 }
 
 /** D-238: the redacted view of a financial proposal: its id, its status (D-226) and a failure reason that states no money. */
 export function redactedProposalView(proposal: { id: string; status?: unknown; failureReason?: unknown }): { id: string; status?: unknown; failureReason?: string } {
   // A failure reason that states no money stays: it is the authority's own refusal (D-140, D-119), which the action
   // answers pin (round 13; round 7 had dropped it). One that states money is withheld.
-  const reason = typeof proposal.failureReason === 'string' && proposal.failureReason && !proposalMentionsMoney(proposal.failureReason) ? proposal.failureReason : undefined;
+  const reason = typeof proposal.failureReason === 'string' && proposal.failureReason && !textStatesMoney(proposal.failureReason) ? proposal.failureReason : undefined;
   return reason === undefined ? { id: proposal.id, status: proposal.status } : { id: proposal.id, status: proposal.status, failureReason: reason };
 }
 
