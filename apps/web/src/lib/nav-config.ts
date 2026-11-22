@@ -333,7 +333,8 @@ export const buildSections: NavSection[] = [
       // Operations surfaces need operations (D-40); an older member with no entry is refused (D-179).
       { label: "Operations", href: "/app/operations", icon: Briefcase, module: "operations" },
       { label: "SOPs", href: "/app/operations-flow", icon: BookOpen, module: "operations" },
-      { label: "Change orders", href: "/app/change-orders", icon: FileText },
+      // Each change order carries its project's name, scope, amount and hours (as Time tracking, projects).
+      { label: "Change orders", href: "/app/change-orders", icon: FileText, module: "projects" },
     ],
   },
   {
