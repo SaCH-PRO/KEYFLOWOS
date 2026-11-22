@@ -47,6 +47,13 @@
  *                       carries on from the lines of pages 1 to N-1 in the same range and order, so every line's
  *                       balance is the one the whole range on one page gives it (page 2 started from the lines
  *                       dated before `from`, or from nothing without `from`, and dropped page 1's lines)
+ *                       It also catches a seed keyed by account alone (not currency): the USD posting sits on page
+ *                       3 at 5 a page and the TTD 'afternoon' lines of the same accounts on page 4 (checked: that
+ *                       mutant answers page 4 '-836', not '-729')
+ *   GLD-17  RED-BEFORE  (orchestrator review S-1) a page past the end answers no rows and the range's total, and
+ *                       reads no opening balance (it loaded every line of the range into the server to seed it)
+ *   GLD-18  RED-BEFORE  (orchestrator review S-1) a later page seeds its balance in the database: no read of
+ *                       ledger lines asks for more than the page holds (it loaded (page-1)*pageSize lines)
  *   GLD-09  KEEP        tenancy and scope hold on the date-only read: another business's owner and a
  *                       revenue-none member are refused 403 and get no line; no answer carries another
  *                       business's line
@@ -143,6 +150,27 @@ function attachIdentity(nest: any) {
 
 function ledger(biz: string, query: Record<string, string | number>, as: string = ID.owner) {
   return request(app.getHttpServer()).get(`/finance/businesses/${biz}/general-ledger`).query(query).set(HEADER, as);
+}
+
+/**
+ * Records the ledger-line reads the route makes (PrismaService.client is this same `db`). A plain wrapper:
+ * vi.spyOn on a Prisma delegate answers undefined and deletes the method on restore.
+ */
+function watch() {
+  const delegate = db.ledgerEntry;
+  const findMany = delegate.findMany;
+  const queryRaw = db.$queryRaw;
+  const queryRawUnsafe = db.$queryRawUnsafe;
+  const seen = { findMany: [] as any[], raw: 0, restore: () => {} };
+  delegate.findMany = (...a: any[]) => { seen.findMany.push(a[0]); return findMany.apply(delegate, a); };
+  db.$queryRaw = (...a: any[]) => { seen.raw += 1; return queryRaw.apply(db, a); };
+  db.$queryRawUnsafe = (...a: any[]) => { seen.raw += 1; return queryRawUnsafe.apply(db, a); };
+  seen.restore = () => {
+    delegate.findMany = findMany;
+    db.$queryRaw = queryRaw;
+    db.$queryRawUnsafe = queryRawUnsafe;
+  };
+  return seen;
 }
 
 /** The labels of the postings an answer carries, one per line, sorted. */
@@ -487,6 +515,33 @@ describe('V1-66 SWP-FIN-LEDGER: the General Ledger end date covers its whole day
         }
       }
       expect(seen).toEqual(whole.body.rows.map((r: any) => r.entryId));
+    }
+  });
+
+  it('GLD-17: a page past the end answers no rows, the total, and reads no opening balance', async () => {
+    const reads = watch();
+    try {
+      const res = await ledger(ID.bizA, { to: '2026-12-31', pageSize: 5, page: 1000 });
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ rows: [], total: 22, page: 1000, pageSize: 5 });
+      // The page read only: no line is read, and nothing is summed, to seed a balance no row shows.
+      expect(reads.findMany).toHaveLength(1);
+      expect(reads.raw).toBe(0);
+    } finally {
+      reads.restore();
+    }
+  });
+
+  it('GLD-18: a later page seeds its balance in the database, not by loading the earlier lines', async () => {
+    const reads = watch();
+    try {
+      const res = await ledger(ID.bizA, { to: '2026-12-31', pageSize: 5, page: 4 });
+      expect(res.status).toBe(200);
+      expect(res.body.rows).toHaveLength(5);
+      const takes = reads.findMany.map((a: any) => a?.take);
+      expect(takes.every((t: unknown) => typeof t === 'number' && t <= 5), `ledgerEntry.findMany takes: ${JSON.stringify(takes)}`).toBe(true);
+    } finally {
+      reads.restore();
     }
   });
 
