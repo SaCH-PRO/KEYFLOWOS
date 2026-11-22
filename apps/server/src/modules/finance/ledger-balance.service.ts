@@ -113,9 +113,21 @@ function zoneOffsetMs(timeZone: string, instant: number): number {
  * (review F2: the earlier one cut the day before's last hour).
  */
 function startOfZonedDay(utcMidnight: number, timeZone: string): number {
+  const reads = (instant: number) => instant + zoneOffsetMs(timeZone, instant) === utcMidnight;
   const first = utcMidnight - zoneOffsetMs(timeZone, utcMidnight);
   const second = utcMidnight - zoneOffsetMs(timeZone, first);
-  if (second + zoneOffsetMs(timeZone, second) === utcMidnight) return second;
+  // Where the clocks go back across midnight, 00:00 comes twice: the day
+  // starts at the earlier one (review C-2). That one is found with the offset
+  // in force just before each pass's answer, and a quarter day before it (a
+  // change of several hours: Antarctica/Casey 2010). A candidate counts only
+  // if the zone's clock reads 00:00 of the day at it, so a probe that finds
+  // nothing changes nothing.
+  const earlier = [first, second].flatMap((pass) => [
+    utcMidnight - zoneOffsetMs(timeZone, pass - 1),
+    utcMidnight - zoneOffsetMs(timeZone, pass - DAY_MS / 4),
+  ]);
+  const valid = [first, second, ...earlier].filter(reads);
+  if (valid.length > 0) return Math.min(...valid);
   return Math.max(first, second);
 }
 
@@ -284,8 +296,11 @@ export class LedgerBalanceService {
       },
     });
 
-    // Running balance is scoped per account if accountId is provided; otherwise global net.
+    // Running balance per account AND currency (V1-66 review C-4; D-13, as the
+    // trial balance: two currencies are never added into one figure). Each
+    // row says its currency, so its balance is in that currency.
     const running = new Map<string, Prisma.Decimal>();
+    const runningKey = (e: { accountId: string; currency: string | null }) => `${e.accountId}:${normalizeCurrency(e.currency)}`;
 
     // For page > 1, pre-compute opening balances from prior entries
     if (page > 1) {
@@ -295,18 +310,18 @@ export class LedgerBalanceService {
       priorWhere.date = { lt: cutoff };
       const priorEntries = await this.prisma.client.ledgerEntry.findMany({
         where: priorWhere,
-        select: { accountId: true, debit: true, credit: true },
+        select: { accountId: true, currency: true, debit: true, credit: true },
       });
       for (const e of priorEntries) {
         const net = new D(e.debit.toString()).sub(new D(e.credit.toString()));
-        running.set(e.accountId, (running.get(e.accountId) ?? ZERO).add(net));
+        running.set(runningKey(e), (running.get(runningKey(e)) ?? ZERO).add(net));
       }
     }
 
     const rows: GeneralLedgerRow[] = entries.map((e): GeneralLedgerRow => {
-      const accountRunning = running.get(e.accountId) ?? ZERO;
+      const accountRunning = running.get(runningKey(e)) ?? ZERO;
       const nextBalance = accountRunning.add(new D(e.debit.toString())).sub(new D(e.credit.toString()));
-      running.set(e.accountId, nextBalance);
+      running.set(runningKey(e), nextBalance);
       return {
         entryId: e.id,
         transactionId: e.transactionId,
