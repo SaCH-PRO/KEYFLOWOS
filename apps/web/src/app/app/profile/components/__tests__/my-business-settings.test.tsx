@@ -350,3 +350,68 @@ describe("review COR-5: the controls keep the keyboard, and two sections do not 
   });
 });
 
+describe("review round 2 (COR2-1, COR2-2): the keyboard is not dropped, and a press not taken is said", () => {
+  it("'Try again' stays where it is, focused, while the settings are read again and when they fail again", async () => {
+    let release: (a: Answer) => void = () => {};
+    let reads = 0;
+    stubRoutes({
+      [`GET ${PROFILE}`]: () => {
+        reads += 1;
+        if (reads === 1) return { status: 500, body: { statusCode: 500, message: "Internal server error" } };
+        return new Promise<Answer>((resolve) => (release = resolve));
+      },
+    });
+    mount();
+    const retry = await screen.findByRole("button", { name: /try again/i });
+    retry.focus();
+    fireEvent.click(retry);
+    await waitFor(() => expect(reads).toBe(2));
+    // Being read again: the same button, still focused, and said to be busy.
+    expect(screen.getByRole("button", { name: /try(ing)? again/i })).toBe(retry);
+    expect(document.activeElement).toBe(retry);
+    await waitFor(() => expect(retry).toHaveAttribute("aria-busy", "true"));
+    release({ status: 500, body: { statusCode: 500, message: "Internal server error" } });
+    await waitFor(() => expect(retry).not.toHaveAttribute("aria-busy", "true"));
+    expect(screen.getByRole("button", { name: /try again/i })).toBe(retry);
+    expect(document.activeElement).toBe(retry);
+  });
+
+  it("looking at the tab again while the settings are failed does not swap the failed view away", async () => {
+    let release: (a: Answer) => void = () => {};
+    let reads = 0;
+    stubRoutes({
+      [`GET ${PROFILE}`]: () => {
+        reads += 1;
+        if (reads === 1) return { status: 403, body: forbidden("No access to this business") };
+        return new Promise<Answer>((resolve) => (release = resolve));
+      },
+    });
+    mount();
+    const retry = await screen.findByRole("button", { name: /try again/i });
+    fireEvent(window, new Event("focus"));
+    await waitFor(() => expect(reads).toBe(2));
+    expect(screen.getByRole("button", { name: /try(ing)? again/i })).toBe(retry);
+    expect(screen.getByText(/No access to this business/)).toBeInTheDocument();
+    release({ status: 403, body: forbidden("No access to this business") });
+  });
+
+  it("a press while another change is being saved is not sent, and the member is told so", async () => {
+    let release: (a: Answer) => void = () => {};
+    const sent = stubRoutes({
+      [`GET ${PROFILE}`]: { status: 200, body: business() },
+      [`PATCH ${PROFILE}`]: () => new Promise<Answer>((resolve) => (release = resolve)),
+    });
+    mount();
+    await ready();
+    fireEvent.click(sells("Products"));
+    await waitFor(() => expect(writes(sent)).toHaveLength(1));
+    fireEvent.click(sells("Services"));
+    expect(await screen.findByText(/still saving your last change/i)).toBeInTheDocument();
+    release({ status: 200, body: business({ sells: "products" }) });
+    await waitFor(() => expect(sells("Products").checked).toBe(true));
+    expect(writes(sent)).toHaveLength(1);
+    // Once the save is in, the note is gone and the next press is taken.
+    await waitFor(() => expect(screen.queryByText(/still saving your last change/i)).toBeNull());
+  });
+});
+
