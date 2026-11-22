@@ -44,8 +44,8 @@ describe('recommendations and memory events (D-234)', () => {
   it('customer-sales events, outcome events copied from a SALES row and events with nothing to classify are money; an operations event is not', () => {
     expect(isMoneyMemoryEvent({ sourceType: 'CUSTOMER_SALES_GENOME', eventType: 'CUSTOMER_SALES_SIGNAL_GENERATED', domain: 'SALES', section: 'SALES' })).toBe(true);
     expect(isMoneyMemoryEvent({ sourceType: 'GENOME_RECOMMENDATION', eventType: 'RECOMMENDATION_ACCEPTED', domain: 'SALES' })).toBe(true);
-    // PROVISIONAL (D-234 read against D-226): a proposal outcome with nothing to classify stays a business-wide proposal record.
-    expect(isMoneyMemoryEvent({ sourceType: 'KEY_ACTION_PROPOSAL', eventType: 'ACTION_EXECUTED', domain: null, section: null })).toBe(false);
+    // D-238 (owner ruling 2026-11-22) replaces the provisional exemption: a proposal outcome with nothing to classify fails closed.
+    expect(isMoneyMemoryEvent({ sourceType: 'KEY_ACTION_PROPOSAL', eventType: 'ACTION_EXECUTED', domain: null, section: null })).toBe(true);
     expect(isMoneyMemoryEvent({ sourceType: 'GENOME_EXPERIMENT', eventType: 'EXPERIMENT_STARTED', domain: null, section: null })).toBe(true);
     expect(isMoneyMemoryEvent({ sourceType: 'OPERATIONS_GENOME', eventType: 'OPERATIONS_SNAPSHOT_COMPUTED', domain: 'OPERATIONS', section: 'OPERATIONS' })).toBe(false);
   });
