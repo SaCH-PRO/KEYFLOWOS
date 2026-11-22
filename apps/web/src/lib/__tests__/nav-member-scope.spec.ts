@@ -37,6 +37,8 @@
  *          identical reads in flight).
  *   NMS-16 review round 4: a look while the tab is hidden asks nothing; a slow answer for a business left behind
  *          never stands for the one selected since; a clock stepped back counts the levels stale, not fresh.
+ *   NMS-17 review round 5: another member's failed first read is never kept from the previous member's answer, so
+ *          it is unknown and is asked again on the next look, inside the 30 s.
  *   NMS-09 the desktop menu (Main navigation) shows the hubs as links named by their plain labels, and a products
  *          business's menu names no Schedule (journey A4); a front-desk member's menu offers no Sales, Money, Your
  *          page or Settings hub (J5).
@@ -406,6 +408,35 @@ describe("NAV-A1 review round 1: the levels belong to the member who read them",
       window.dispatchEvent(new Event("focus"));
     });
     await waitFor(() => expect(asked.length).toBe(before + 1));
+  });
+  it("NMS-17 another member's failed first read is unknown and asked again on the next look", async () => {
+    window.localStorage.setItem("kf_token", tokenFor("usr_a"));
+    const answers: Record<string, { status: number; body: unknown }> = {
+      [BIZ]: { status: 200, body: { modules: { crm: "admin", revenue: "admin" } } },
+    };
+    const asked = serveAccess(answers);
+    const { result } = renderHook(() => useMemberModuleLevels());
+    await waitFor(() => expect(result.current).toEqual({ crm: "admin", revenue: "admin" }));
+
+    // Member B signs in here and their first read is refused (403, not retried).
+    answers[BIZ] = { status: 403, body: { statusCode: 403, message: "Unable to verify business access", error: "Forbidden" } };
+    act(() => {
+      window.localStorage.setItem("kf_token", tokenFor("usr_b"));
+      window.dispatchEvent(new StorageEvent("storage", { key: "kf_token" }));
+    });
+    await waitFor(() => expect(bizAsks(asked)).toBe(2));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 200));
+    });
+    expect(result.current).toBeNull();
+
+    // At once (well inside A's 30 s), B looks again: nothing is fresh for B, so it asks.
+    answers[BIZ] = { status: 200, body: { modules: { crm: "read" } } };
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() => expect(result.current).toEqual({ crm: "read" }));
+    expect(bizAsks(asked)).toBe(3);
   });
 });
 
