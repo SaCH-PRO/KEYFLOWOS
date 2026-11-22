@@ -48,9 +48,10 @@ export function withUntrustedContentRule(systemPrompt: string): string {
 }
 
 const SOURCES: ReadonlySet<string> = new Set<UntrustedSource>(['attachment', 'mcp_tool']);
-const BLOCK_OPEN_RE = /<untrusted source="[a-z_]+" id="[0-9a-f]{16}">\n/;
+// Also matched JSON-escaped (\"), as a fenced tool result reads once JSON.stringify puts it in a tool message.
+const BLOCK_OPEN_RE = /<untrusted source=\\?"[a-z_]+\\?" id=\\?"[0-9a-f]{16}\\?">/;
 
-/** True when the text carries a block fenceUntrusted made. */
+/** True when the text carries a block fenceUntrusted made, as is or JSON-escaped. */
 export function containsUntrustedBlock(text: string | null | undefined): boolean {
   return typeof text === 'string' && BLOCK_OPEN_RE.test(text);
 }

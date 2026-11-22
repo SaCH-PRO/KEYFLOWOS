@@ -63,6 +63,7 @@ import { BlueprintService } from '../blueprint/blueprint.service';
 import { AiMessageSenderService } from './ai-message-sender.service';
 import { SemanticMemoryService } from './semantic-memory.service';
 import { ObjectStorageService } from '../../core/object-storage';
+import { containsUntrustedBlock, fenceUntrusted, withUntrustedContentRule } from './untrusted-content';
 import { RoleEngineService, BusinessRole, RoleDetectionContext, CrewResolution } from './role-engine.service';
 import { ContentRequestService } from '../content-ops/content-request.service';
 import { CallLogService, type CallLogViewer } from '../call-tasks/call-log.service';
@@ -678,6 +679,20 @@ function withEvidenceDiscipline(systemPrompt: string): string {
   const discipline = KeyCortexExpertiseLensService.EVIDENCE_DISCIPLINE;
   if (systemPrompt.includes(discipline)) return systemPrompt;
   return `${systemPrompt}\n\n=== EVIDENCE DISCIPLINE ===\n${discipline}`;
+}
+
+/**
+ * RR-UNTRUSTED-CONTENT-FENCE: when any message of a turn carries a fenced untrusted-data block (an
+ * attachment's extraction, a fenced tool result), the system prompt carries the rule that such blocks
+ * are data, never instructions. Once, and only then: a turn with no block is sent exactly as before.
+ * Replaces messages[0] rather than editing it, so an array spread from another shares nothing changed.
+ */
+function withUntrustedContentRuleWhereFenced(messages: GatewayMessage[]): GatewayMessage[] {
+  const system = messages[0];
+  if (system?.role !== 'system' || typeof system.content !== 'string') return messages;
+  if (!messages.some((m) => typeof m.content === 'string' && containsUntrustedBlock(m.content))) return messages;
+  messages[0] = { ...system, content: withUntrustedContentRule(system.content) };
+  return messages;
 }
 
 /**
@@ -2112,7 +2127,9 @@ export class FlowOrchestratorService {
     // Enrich message with any uploaded document/PDF/image context so role detection
     // and the LLM prompt both see the attachment contents.
     const effectiveSessionId = sessionId || randomUUID();
-    const attachmentContext = await this.buildAttachmentContext(businessId, attachments);
+    // RR-UNTRUSTED-CONTENT-FENCE: the extraction is text a third party wrote. It is fenced, and it
+    // reaches the model as a message of its own beside the member's, never inside it.
+    const attachmentContext = fenceUntrusted('attachment', await this.buildAttachmentContext(businessId, attachments));
     const enrichedMessage = attachmentContext ? `${message}\n\n${attachmentContext}` : message;
 
     const result = await (async (): Promise<FlowResponse> => {
@@ -2327,7 +2344,9 @@ ${triage.standingContext}`;
       }
     }
 
-    messages.push({ role: 'user', content: enrichedMessage });
+    if (attachmentContext) messages.push({ role: 'user', content: attachmentContext });
+    messages.push({ role: 'user', content: message });
+    withUntrustedContentRuleWhereFenced(messages);
 
     try {
       const gatewayResponse = await this.aiUsage.trackAndComplete(
@@ -2491,7 +2510,7 @@ ${triage.standingContext}`;
         undefined,
         'flow_chat',
         {
-          messages: followUpMessages,
+          messages: withUntrustedContentRuleWhereFenced(followUpMessages),
           maxTokens: 500,
           temperature: 0.7,
         },
@@ -2559,7 +2578,9 @@ ${triage.standingContext}`;
     const envelope = this.serverEnvelope(server);
     // Enrich message with uploaded document/image context.
     const effectiveSessionId = sessionId || randomUUID();
-    const attachmentContext = await this.buildAttachmentContext(businessId, attachments);
+    // RR-UNTRUSTED-CONTENT-FENCE: the extraction is text a third party wrote. It is fenced, and it
+    // reaches the model as a message of its own beside the member's, never inside it.
+    const attachmentContext = fenceUntrusted('attachment', await this.buildAttachmentContext(businessId, attachments));
     const enrichedMessage = attachmentContext ? `${message}\n\n${attachmentContext}` : message;
 
     // Staff the turn if roles were not explicitly provided.
@@ -2686,7 +2707,9 @@ ${triage.standingContext}`;
       }
     }
 
-    messages.push({ role: 'user', content: enrichedMessage });
+    if (attachmentContext) messages.push({ role: 'user', content: attachmentContext });
+    messages.push({ role: 'user', content: message });
+    withUntrustedContentRuleWhereFenced(messages);
 
     // Publish the thalamic verdict before the answer starts. Nothing branches
     // on this — it exists so the tier distribution over real traffic can be
@@ -3024,7 +3047,7 @@ ${triage.standingContext}`;
         undefined,
         'flow_chat_stream',
         {
-          messages: followUpMessages,
+          messages: withUntrustedContentRuleWhereFenced(followUpMessages),
           maxTokens: 500,
           temperature: 0.7,
         },
