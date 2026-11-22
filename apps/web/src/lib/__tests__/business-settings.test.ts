@@ -856,3 +856,108 @@ describe("review round 5 (SEC5-1): a write whose answer never arrived may have b
   });
 });
 
+describe("review round 6 (SEC6-1/COR6-1, SEC6-2): an outcome nobody knows is never held as fresh", () => {
+  const wire = (sent: Sent[]) => sent.filter((s) => s.method === "GET").length;
+
+  it("lost answer, and the re-read fails too: what was shown stays, but the next look reads again", async () => {
+    window.localStorage.setItem(BUSINESS_ID_KEY, BIZ_A);
+    let held = business(BIZ_A, { sells: "services" });
+    let down = false;
+    const sent = stubRoutes({
+      [`GET /identity/businesses/${BIZ_A}`]: () => {
+        if (down) throw new TypeError("Failed to fetch");
+        return { status: 200, body: held };
+      },
+      [`PATCH /identity/businesses/${BIZ_A}`]: () => {
+        held = business(BIZ_A, { sells: "products" });
+        down = true;
+        throw new TypeError("Failed to fetch");
+      },
+    });
+    const { result } = renderHook(() => lib.useBusinessSettings());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    let res: { error: string | null } = { error: null };
+    await act(async () => {
+      res = await lib.saveBusinessSells(BIZ_A, "products");
+    });
+    expect((res.error ?? "").trim()).not.toBe("");
+    // The forced re-read runs out its retries against the dead connection: wait until the wire has been quiet.
+    await act(async () => {
+      for (let quietSince = Date.now(), seen = wire(sent); Date.now() - quietSince < 2_500; ) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        if (wire(sent) !== seen) {
+          seen = wire(sent);
+          quietSince = Date.now();
+        }
+      }
+    });
+    expect(wire(sent)).toBeGreaterThan(1);
+    expect(result.current).toMatchObject({ status: "ready", sells: "services" });
+
+    // The connection is back, well inside the freshness window of the first read: the tab is looked at.
+    down = false;
+    const readsBefore = wire(sent);
+    act(() => void window.dispatchEvent(new Event("focus")));
+    await waitFor(() => expect(wire(sent)).toBeGreaterThan(readsBefore));
+    await waitFor(() => expect(result.current.sells).toBe("products"));
+  }, 20_000);
+
+  it.each([500, 502, 504])("a %i after the write was applied is an unknown outcome too: the business is read again", async (status) => {
+    window.localStorage.setItem(BUSINESS_ID_KEY, BIZ_A);
+    let held = business(BIZ_A);
+    const sent = stubRoutes({
+      [`GET /identity/businesses/${BIZ_A}`]: () => ({ status: 200, body: held }),
+      [`PATCH /identity/businesses/${BIZ_A}/advanced-settings`]: () => {
+        held = business(BIZ_A, { advancedCrm: true });
+        return { status, body: { statusCode: status, message: "Internal server error" } };
+      },
+    });
+    const { result } = renderHook(() => lib.useBusinessSettings());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    const readsBefore = wire(sent);
+    let res: { error: string | null } = { error: null };
+    await act(async () => {
+      res = await lib.saveAdvancedSettings(BIZ_A, { advancedCrm: true });
+    });
+    expect((res.error ?? "").trim()).not.toBe("");
+    await waitFor(() => expect(wire(sent)).toBeGreaterThan(readsBefore));
+    await waitFor(() => expect(result.current.advancedCrm).toBe(true));
+  });
+
+  it.each([400, 401, 403, 404, 409])("a %i is the server's answer: nothing is asked again", async (status) => {
+    window.localStorage.setItem(BUSINESS_ID_KEY, BIZ_A);
+    const sent = stubRoutes({
+      [`GET /identity/businesses/${BIZ_A}`]: { status: 200, body: business(BIZ_A) },
+      [`PATCH /identity/businesses/${BIZ_A}/advanced-settings`]: { status, body: { statusCode: status, message: "Refused" } },
+    });
+    const { result } = renderHook(() => lib.useBusinessSettings());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    const readsBefore = wire(sent);
+    await act(async () => void (await lib.saveAdvancedSettings(BIZ_A, { advancedCrm: true })));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(wire(sent)).toBe(readsBefore);
+    expect(result.current).toMatchObject({ status: "ready", advancedCrm: false });
+  });
+
+  it("with nobody reading the business, an unknown outcome drops what was held: the next reader starts from a read", async () => {
+    let held = business(BIZ_A, { sells: "services" });
+    const sent = stubRoutes({
+      [`GET /identity/businesses/${BIZ_A}`]: () => ({ status: 200, body: held }),
+      [`PATCH /identity/businesses/${BIZ_A}`]: () => {
+        held = business(BIZ_A, { sells: "products" });
+        throw new TypeError("Failed to fetch");
+      },
+    });
+    const first = renderHook(() => lib.useBusinessSettings(BIZ_A));
+    await waitFor(() => expect(first.result.current.status).toBe("ready"));
+    first.unmount();
+    await lib.saveBusinessSells(BIZ_A, "products");
+    const readsBefore = wire(sent);
+    const second = renderHook(() => lib.useBusinessSettings(BIZ_A));
+    expect(second.result.current.status).toBe("loading");
+    await waitFor(() => expect(second.result.current).toMatchObject({ status: "ready", sells: "products" }));
+    expect(wire(sent)).toBeGreaterThan(readsBefore);
+  });
+});
+
