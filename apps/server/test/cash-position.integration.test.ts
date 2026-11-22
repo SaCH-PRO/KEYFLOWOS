@@ -214,7 +214,15 @@
  *          area's metrics.cashBalance is the cash position (200 after CP-26's
  *          payment, then 100 and 125) with cashCurrency 'TTD'; a
  *          PAYMENT_PROCESSOR balance counts as the cash position counts it;
- *          'Bills due exceed 50% of cash balance' is judged against that figure
+ *          'Bills due exceed 50% of cash balance' is judged against that figure;
+ *          it stands alone (brings M's cash to 200 itself when CP-26 did not run)
+ *   CP-28  (orchestrator review, security MINOR-2) the forecast refusal is
+ *          attributable to revenue read: a member reading every module except
+ *          revenue reads expense-breakdown (expenses read), and is refused the
+ *          forecast (403)
+ *   CP-29  (orchestrator review M2) with a free-text business currency the
+ *          money health metrics and the saved snapshot carry no cashCurrency and
+ *          never echo the text; cashBalance is the cash position's figure
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * the global TenantInterceptor, CommerceService, InvoiceWorkflowService,
@@ -2086,7 +2094,15 @@ describe('W11-CASH-READERS-LEDGER: the cashflow forecast and the money health sc
     expect((await forecastRoute(bizL, ownerL)).body.openingCash).toBe(-4285);
   });
 
-  it('CP-27 (plan CP-23) RED-BEFORE: the money health score reads the cash position (TTD 200 after CP-26, cashCurrency TTD), counts a PAYMENT_PROCESSOR balance as the position does, and judges the bills against it', async () => {
+  it('CP-27 (plan CP-23) RED-BEFORE: the money health score reads the cash position (cashCurrency TTD), counts a PAYMENT_PROCESSOR balance as the position does, and judges the bills against it', async () => {
+    // Orchestrator review M1: this case stands alone. M's TTD cash is 100 from the describe's setup,
+    // or 200 after CP-26's payment; it is brought to 200 here either way, and that start is asserted.
+    const start = (await cashPositionService.getCashPosition(bizM)).cashBalance;
+    expect([100, 200], 'M holds the setup 100, or 200 after CP-26').toContain(start);
+    if (start === 100) await post(bizM, 'm_topup', 100, 'CASH', 'OTHER_INCOME', 'INCOME');
+    expect(await cashPositionService.getCashPosition(bizM)).toMatchObject({ cashBalance: 200, currency: 'TTD', byCurrency: { TTD: 200, USD: 550 } });
+    expect(await snapshotSum(bizM), 'the snapshots still sum to 900').toBe(900);
+
     let health = await moneyHealth(bizM);
     expect(health.metrics).toMatchObject({ cashBalance: 200, cashCurrency: 'TTD', billsDue30: 60 });
     expect(health.reasons, '60 is not more than half of 200').not.toContain('Bills due exceed 50% of cash balance');
@@ -2117,5 +2133,55 @@ describe('W11-CASH-READERS-LEDGER: the cashflow forecast and the money health sc
 
     // Tenancy: L's figure is its own.
     expect((await moneyHealth(bizL)).metrics.cashBalance).toBe(-4285);
+  });
+
+  // Orchestrator review (security MINOR-2): the refusal in CP-26 is by a member with every scope
+  // none, which would pass whichever module gated the route. This member reads every module except
+  // revenue: allowed a non-revenue finance read, refused the forecast, so the refusal is revenue:read.
+  it('CP-28 GET cashflow-forecast is gated by revenue read: a member reading every module but revenue is refused it (403) and allowed expense-breakdown (expenses read)', async () => {
+    const staffMx = `${P}staffMx`;
+    const allButRevenue = Object.fromEntries(Object.keys(ALL_SCOPES_NONE).map((m) => [m, m === 'revenue' ? 'none' : 'read']));
+    expect(Object.values(allButRevenue).filter((v) => v === 'read').length).toBe(Object.keys(ALL_SCOPES_NONE).length - 1);
+    await db.user.create({ data: { id: staffMx, email: `${P}staff_m_x@test.local`, role: 'USER' } });
+    await db.membership.create({ data: { id: `${staffMx}_m`, userId: staffMx, businessId: bizM, role: 'STAFF', permissionScopes: allButRevenue } });
+
+    const allowed = await request(financeApp.getHttpServer()).get(`/finance/businesses/${bizM}/expense-breakdown`).set(HEADER, staffMx);
+    expect(allowed.status, `the member is a member of M with expenses read: ${JSON.stringify(allowed.body).slice(0, 200)}`).toBe(200);
+
+    const refused = await forecastRoute(bizM, staffMx);
+    expect(refused.status, JSON.stringify(refused.body).slice(0, 200)).toBe(403);
+    expect(JSON.stringify(refused.body)).not.toMatch(/openingCash|otherCurrencyCash|550/);
+
+    // Control: the owner reads it.
+    expect((await forecastRoute(bizM, ownerM)).status).toBe(200);
+  });
+
+  // Orchestrator review M2: metrics.cashCurrency is named only when the business currency is a
+  // three-letter code (namedCashCurrency, SEC-W11RL-1); Business.currency is free text.
+  it('CP-29 with a free-text business currency the money health metrics and the saved snapshot carry no cashCurrency and never the text; cashBalance is still the cash position\'s figure', async () => {
+    const svc = new HealthScoreService(financePrisma, cashPositionService);
+    await db.business.update({ where: { id: bizM }, data: { currency: 'pay me now' } });
+    try {
+      // No cash is held under that text: the TTD and USD cash are both held apart (CP-22's reading).
+      const p = await cashPositionService.getCashPosition(bizM);
+      expect(p).toMatchObject({ cashBalance: 0, currency: 'PAY ME NOW' });
+      expect(p.byCurrency.TTD, 'M still holds TTD cash').toBeGreaterThan(0);
+
+      const health = await moneyHealth(bizM, svc);
+      expect(health.metrics.cashBalance, 'the cash position, never the 900 snapshots').toBe(p.cashBalance);
+      expect('cashCurrency' in health.metrics, 'no currency is named').toBe(false);
+      expect(JSON.stringify(health)).not.toMatch(/pay me now/i);
+
+      await svc.saveSnapshot(bizM, health);
+      const [saved] = (await svc.getLatestSnapshots(bizM)).filter((a: any) => a.area === 'money');
+      expect(saved.metrics.cashBalance).toBe(p.cashBalance);
+      expect('cashCurrency' in saved.metrics).toBe(false);
+      expect(JSON.stringify(saved)).not.toMatch(/pay me now/i);
+    } finally {
+      await db.business.update({ where: { id: bizM }, data: { currency: 'TTD' } });
+      await db.businessHealthSnapshot.deleteMany({ where: { businessId: bizM } });
+    }
+    // Back on TTD the currency is named again.
+    expect((await moneyHealth(bizM, svc)).metrics).toMatchObject({ cashCurrency: 'TTD' });
   });
 });
