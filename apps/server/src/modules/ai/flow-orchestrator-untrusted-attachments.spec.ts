@@ -222,7 +222,7 @@ describe('RR-UNTRUSTED-CONTENT-FENCE controls: no authority change, no change wi
         const res = await h.chat([ATTACHMENT]);
         expect(res.requiresConfirmation).toBe(true);
         expect(res.pendingConfirmations).toHaveLength(1);
-        expect(res.pendingConfirmations![0]).toMatchObject({ toolName: 'commerce_send_invoice' });
+        expect(res.pendingConfirmations![0]).toMatchObject({ name: 'commerce_send_invoice', confirmationId: expect.any(String) });
         expectFenced(h.messagesOf(h.trackAndComplete));
       } else {
         const chunks = await h.stream([ATTACHMENT]);
