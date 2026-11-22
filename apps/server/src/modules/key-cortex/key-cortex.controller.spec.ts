@@ -496,3 +496,31 @@ describe('R0-09c-KEY-ACTOR-BINDING — a session id names one of the caller\'s o
     expect(conversation.listSessions).not.toHaveBeenCalled();
   });
 });
+
+describe('FU-PROPOSAL-REVENUE-SIGHT round-3 repair (security B2; D-238): POST cortex/actions/approve over a financial proposal', () => {
+  const MONEY = { id: 'kap_1', status: 'APPROVED', title: '$12,345 outstanding across 7 invoices', summary: 'Outstanding invoices exceed 1.5x your monthly revenue.', actionType: 'EXECUTE_TOOL', module: 'commerce', riskLevel: 'HIGH' };
+  const make = () => {
+    const orchestrator = { approve: vi.fn(async () => ({ ...MONEY })), reject: vi.fn(async () => ({ ...MONEY, status: 'REJECTED' })) };
+    const args: any[] = Array(22).fill({});
+    args[19] = orchestrator; // approvalOrchestrator
+    const ctl = new (KeyCortexController as any)(...args);
+    return { ctl, orchestrator };
+  };
+  const dto = (approved: boolean) => ({ sessionId: 's1', businessId: 'b1', actionId: 'kap_1', approved }) as any;
+  const viewer = (revenue: string) => ({ userId: 'u1', businessId: 'b1', role: 'STAFF', superAdmin: false, scopes: { revenue }, member: true });
+
+  for (const approved of [true, false]) {
+    it(`RED-BEFORE: ${approved ? 'approve' : 'reject'} answers a member without revenue read the redacted view (no title, summary or figure)`, async () => {
+      const { ctl } = make();
+      const res = await ctl.approveAction(dto(approved), { user: { id: 'u1' } }, viewer('none'));
+      expect(JSON.stringify(res)).not.toContain('12,345');
+      expect(JSON.stringify(res)).not.toContain('monthly revenue');
+      expect(res.result).toMatchObject({ id: 'kap_1' });
+    });
+    it(`control: ${approved ? 'approve' : 'reject'} answers a revenue reader the proposal whole`, async () => {
+      const { ctl } = make();
+      const res = await ctl.approveAction(dto(approved), { user: { id: 'u1' } }, viewer('read'));
+      expect(JSON.stringify(res)).toContain('12,345');
+    });
+  }
+});

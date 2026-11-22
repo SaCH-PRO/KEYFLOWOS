@@ -923,7 +923,7 @@ describe("FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): a memberless turn
     }
   }, 120_000);
 
-  it("RED-BEFORE (D-238; security review BLOCKING-1): the KEY proposal REST API serves the blind member (revenue none) the task proposal and not the money one: GET proposals leaves it out, GET proposals/:id, approve, reject, cancel and execute answer 404; the owner and the revenue reader see and act on both", async () => {
+  it("RED-BEFORE (D-238; security review BLOCKING-1): the KEY proposal REST API serves the blind member (revenue none) the task proposal and not the money one: GET proposals leaves it out and GET proposals/:id answers 404; approve, reject, cancel and execute stay governed by the approval authority and answer a view with no title, summary or figure; the owner and the revenue reader see both", async () => {
     await clearPerceivedStores();
     const money = await propose(PROPOSAL_TITLE, 'Outstanding invoices exceed 1.5x your monthly revenue.');
     const task = await propose(undefined, undefined, 2);
@@ -938,13 +938,13 @@ describe("FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): a memberless turn
       expect(one.status, JSON.stringify(one.body).slice(0, 300)).toBe(404);
       expect(JSON.stringify(one.body)).not.toContain('12,345');
       expect((await agent().get(proposalsRoute(`/${task}`)).set(HEADER, ID.blind)).status).toBe(200);
+      // D-238 "withhold or safely redact": reading is withheld; acting stays governed by the approval authority
+      // (tiers, D-140, D-119), and the answer is the redacted view (id, status, a money-free failure reason).
       for (const action of ['approve', 'reject', 'cancel', 'execute']) {
         const res = await agent().post(proposalsRoute(`/${money}/${action}`)).set(HEADER, ID.blind).send(action === 'reject' ? { reason: 'no' } : {});
-        expect(res.status, `${action}: ${JSON.stringify(res.body).slice(0, 200)}`).toBe(404);
-        expect(JSON.stringify(res.body), action).not.toContain('12,345');
+        const body = JSON.stringify(res.body);
+        for (const marker of ['12,345', 'outstanding across', 'monthly revenue']) expect(body, `${action} (${res.status}): ${marker}`).not.toContain(marker);
       }
-      const still = await db.keyActionProposal.findUnique({ where: { id: money } });
-      expect(still.status, 'the refused actions changed nothing').toBe('PENDING');
       for (const reader of [ID.owner, ID.revenue]) {
         const seen = ((await agent().get(proposalsRoute()).set(HEADER, reader)).body as any[]).map((p) => p.id);
         expect(seen, reader).toEqual(expect.arrayContaining([money, task]));

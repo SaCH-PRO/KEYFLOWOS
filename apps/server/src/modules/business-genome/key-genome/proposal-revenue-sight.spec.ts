@@ -3,8 +3,8 @@
  * revenue read only when the underlying proposal is classified non-financial, by its action type, module, tool and
  * title; anything unknown or inadequately classified fails closed.
  */
-import { describe, it, expect } from 'vitest';
-import { isFinancialProposal, isMoneyMemoryEvent } from './genome-finance-scope';
+import { describe, it, expect, vi } from 'vitest';
+import { financialProposalWithProvenance, isFinancialProposal, isMoneyMemoryEvent, proposalViewForReader } from './genome-finance-scope';
 
 describe('isFinancialProposal (D-238)', () => {
   it.each([
@@ -70,5 +70,59 @@ describe('review repairs (security MAJOR-3, correctness MINOR-3)', () => {
     'Buy costume', 'Apricot recipe', 'Cashier training', 'Suspend the old page', 'Data collection form', 'Fix CI pipeline',
   ])('the ordinary title %j does not make a task financial', (title) => {
     expect(isFinancialProposal({ actionType: 'CREATE_TASK', title } as any)).toBe(false);
+  });
+});
+
+describe('round-3 review repairs (security M2, correctness MAJOR-2, minors)', () => {
+  it.each([
+    ['a bare amount in the parameters', { actionType: 'CREATE_TASK', title: 'Do it', payload: { amount: 500 } }],
+    ['a total in the parameters', { actionType: 'CREATE_TASK', title: 'Do it', payload: { total: 1200 } }],
+    ['a balance owed', { actionType: 'CREATE_TASK', title: 'Ask about the balance owed' }],
+    ['a paid figure', { actionType: 'CREATE_TASK', title: 'Confirm Ana paid 4000' }],
+    ['a rate', { actionType: 'CREATE_TASK', title: 'Raise the hourly rate to 150' }],
+    ['an owed figure', { actionType: 'CREATE_TASK', title: 'Chase the 4,000 owed' }],
+    ['a camelCase cost key', { actionType: 'CREATE_TASK', title: 'Plan', payload: { estimatedCost: 10 } }],
+    ['a camelCase price key', { actionType: 'CREATE_TASK', title: 'Plan', payload: { unitPrice: 10 } }],
+    ['a camelCase spend title', { actionType: 'CREATE_TASK', title: 'Review adSpend' }],
+    ['money in the evidence', { actionType: 'CREATE_TASK', title: 'Plan', evidence: [{ note: 'revenue fell 30%' }] }],
+    ['a genome-bridged proposal in the BUSINESS_MODEL domain', { actionType: 'CREATE_TASK', title: 'Plan', payload: { domain: 'BUSINESS_MODEL' } }],
+  ])('%s is financial', (_l, p) => expect(isFinancialProposal(p as any)).toBe(true));
+
+  it.each([
+    ['a blog promotion', { actionType: 'CREATE_TASK', title: 'Promote the blog post' }],
+    ['a staff promotion', { actionType: 'CREATE_TASK', title: 'Plan the staff promotion party' }],
+    ['ids in the parameters', { actionType: 'CREATE_TASK', title: 'Call back', payload: { contactId: '9cad2f1e-1usd-4fee-8cad-0123456789ab', taskId: 'cmwr8rbji00097dkwjitjsgzl' } }],
+  ])('%s is not', (_l, p) => expect(isFinancialProposal(p as any)).toBe(false));
+
+  it('a promo code is still money', () => {
+    expect(isFinancialProposal({ actionType: 'CREATE_TASK', title: 'Create a promo code for spring' } as any)).toBe(true);
+  });
+});
+
+describe('proposalViewForReader (D-238: an action on a proposal the reader may not see answers a safely redacted view)', () => {
+  const money = { id: 'kap_1', status: 'FAILED', title: '$12,345 outstanding', summary: 'x', riskLevel: 'HIGH', failureReason: 'Refused: not mapped', executionResult: { amount: 12345 }, actionType: 'EXECUTE_TOOL', module: 'commerce' };
+  it('a revenue reader gets the proposal whole', () => expect(proposalViewForReader(money, true)).toBe(money));
+  it('a reader without revenue read gets id, status and a failure reason that states no money, and nothing else', () => {
+    expect(proposalViewForReader(money, false)).toEqual({ id: 'kap_1', status: 'FAILED', failureReason: 'Refused: not mapped' });
+    expect(proposalViewForReader({ ...money, failureReason: 'balance $12,345 too low' }, false)).toEqual({ id: 'kap_1', status: 'FAILED' });
+  });
+  it('a non-financial proposal is unchanged for any reader', () => {
+    const task = { id: 'kap_2', status: 'APPROVED', title: 'Call Kerry back', actionType: 'CREATE_TASK', module: 'crm' };
+    expect(proposalViewForReader(task, false)).toBe(task);
+  });
+});
+
+describe('financialProposalWithProvenance (D-238: a proposal bridged from a genome recommendation is classified by it)', () => {
+  const prismaWith = (rec: unknown) => ({ client: { genomeRecommendation: { findFirst: vi.fn(async () => rec) } } }) as any;
+  it('a proposal whose recommendation is financial, or cannot be read, is financial', async () => {
+    const row = { actionType: 'CREATE_TASK', title: 'Plan', payload: { recommendationId: 'rec_1' } };
+    expect(await financialProposalWithProvenance(prismaWith({ domain: 'FINANCIAL', title: 'Raise prices' }), 'biz_1', row)).toBe(true);
+    expect(await financialProposalWithProvenance(prismaWith(null), 'biz_1', row)).toBe(true);
+    expect(await financialProposalWithProvenance(prismaWith({ domain: 'OPERATIONS', title: 'Write the SOPs' }), 'biz_1', row)).toBe(false);
+  });
+  it('the recommendation is read in this business only', async () => {
+    const prisma = prismaWith({ domain: 'OPERATIONS', title: 'SOPs' });
+    await financialProposalWithProvenance(prisma, 'biz_1', { actionType: 'CREATE_TASK', title: 'Plan', payload: { recommendationId: 'rec_1' } });
+    expect(prisma.client.genomeRecommendation.findFirst.mock.calls[0][0].where).toMatchObject({ id: 'rec_1', businessId: 'biz_1' });
   });
 });

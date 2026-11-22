@@ -54,3 +54,17 @@ describe('the timeline of KEY proposals (D-238)', () => {
     expect((await svc.list('biz_1', {})).map((r: any) => r.id)).toEqual(EVENTS.map((e) => e.id));
   });
 });
+
+describe('round-3 repair (security m1): a proposal event whose own payload states money', () => {
+  it('RED-BEFORE: a rejection event of a non-financial proposal whose reason states money is withheld from a reader without revenue read', async () => {
+    const prisma = {
+      client: {
+        temporalFlowEvent: { findMany: vi.fn(async () => [{ id: 'ev_rej', businessId: 'biz_1', entityType: 'key_action_proposal', entityId: 'kap_task', title: 'KEY action rejected', description: null, payload: { reason: 'not now: $9,876 is due first' }, metadata: {} }]) },
+        keyActionProposal: { findMany: vi.fn(async () => [{ id: 'kap_task', actionType: 'CREATE_TASK', module: 'crm', toolName: null, title: 'Call Kerry back' }]) },
+        membership: { findUnique: vi.fn(async () => ({ role: 'STAFF', permissionScopes: { revenue: 'none' } })) },
+      },
+    };
+    const svc = new TemporalFlowService(prisma as any);
+    expect((await (svc as any).list('biz_1', {}, { id: 'blind', role: 'USER' })).map((r: any) => r.id)).toEqual([]);
+  });
+});
