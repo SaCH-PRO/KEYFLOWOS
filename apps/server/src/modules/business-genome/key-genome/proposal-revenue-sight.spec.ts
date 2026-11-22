@@ -706,7 +706,10 @@ describe('seventh review of the #218 repairs: a reading budget, not a length cap
     expect(performance.now() - started, 'view').toBeLessThan(250);
     expect(out.failureReason).toBeNull();
   });
-  it.each(['Chase the 900\\noutstanding', 'Total due\\n900', '0\\routstanding', '\\u000bill\\n40'])('RED-BEFORE (security MINOR-2): an escape read as a space keeps the other backslashes as written, and a decoded text reads its escapes as spaces (%j)', (summary) => {
+  it.each(['Chase the 900\\noutstanding', 'Total due\\n900', '0\\routstanding'])('control (security MINOR-2; already read before the two new readings): %j', (summary) => {
+    expect(isFinancialProposal(task({ summary }))).toBe(true);
+  });
+  it.each(['\\u000bill\\n40', '\\u0074otal due\\n900', 'see \\u0066ee\\n40'])('RED-BEFORE (security MINOR-2): an escape read as a space keeps the other backslashes as written, and a decoded text reads its escapes as spaces (%j)', (summary) => {
     expect(isFinancialProposal(task({ summary }))).toBe(true);
     expect(proposalTextStatesMoney(summary)).toBe(true);
   });
@@ -720,4 +723,34 @@ describe('seventh review of the #218 repairs: a reading budget, not a length cap
     expect(isFinancialProposal(task({ title: 'Ticket cmzcku666tax29xx90fuyj0uu' }))).toBe(false);
     for (const summary of ['see\\ncost 900', 'c:\\clients\\tax\\2026', 'tax\u200Bdue Friday', 'Fees\u1D43: see note']) expect(isFinancialProposal(task({ summary })), summary).toBe(true);
   });
+});
+
+describe('eighth review of the #218 repairs: the budget is shared, and a kept id run is an added reading', () => {
+  const task = (extra: object) => ({ actionType: 'CREATE_TASK', module: 'crm', title: 'Follow up', ...extra });
+  const prose = (n: number) => 'Please call the client back about the garden plan. '.repeat(Math.ceil(n / 51)).slice(0, n);
+  // Nine readings each: a zero-width space and a backslash before ordinary prose.
+  const big = (n: number) => `\u200b\\ ${prose(n)}`.slice(0, n);
+  it('the classifier budget is one for the whole proposal (correctness m2): one such field is read, two together fail closed', () => {
+    expect(isFinancialProposal(task({ summary: big(20_000) }))).toBe(false);
+    expect(isFinancialProposal(task({ description: big(20_000) }))).toBe(false);
+    expect(isFinancialProposal(task({ summary: big(20_000), description: big(20_000) }))).toBe(true);
+  });
+  it('the view budget is one for the failure reason and the evidence together (correctness m2)', () => {
+    const one = { id: 'k', status: 'FAILED', ...task({ failureReason: big(20_000) }) };
+    expect(proposalViewForReader(one, false)).toBe(one);
+    const both = { ...one, outcomeEvidence: { status: 'FAILED', reason: big(20_000) } };
+    const out = proposalViewForReader(both, false) as any;
+    expect(out.outcomeEvidence).toEqual({ status: 'FAILED', reason: null });
+  });
+  it('each call has its own budget (no shared default)', () => {
+    for (let i = 0; i < 12; i++) expect(proposalTextStatesMoney(big(30_000)), String(i)).toBe(false);
+  });
+  it.each(['Total c900000000000000000paying attention 900', 'wire c900000000000000000paying heed 500', 'Total c900000000000000000paying a visit 900'])(
+    'RED-BEFORE (security MINOR-1): a cuid-shaped run that is kept is also read as stripped, so it cannot stand between a money word and its figure (%j)',
+    (text) => {
+      expect(isFinancialProposal(task({ summary: text }))).toBe(true);
+      expect(isFinancialProposal(task({ payload: { note: text } }) as any)).toBe(true);
+      expect(proposalTextStatesMoney(text)).toBe(true);
+    },
+  );
 });
