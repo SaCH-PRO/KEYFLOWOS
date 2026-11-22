@@ -42,9 +42,9 @@ import { MODULE_SCOPE_KEY, ModuleScopeGuard } from '../../core/auth/module-scope
  *   BWS-U04  RED-BEFORE  every write route on FinanceController carries a module scope or is a reviewed
  *                        exemption (with the reason it writes nothing of the ledger)
  *   BWS-U05  RED-BEFORE  the purchase-order advance and PATCH run ModuleScopeGuard with expenses write
- *   BWS-U07  RED-BEFORE  FU-FINANCE-INTEL-DOORS (owner ruling D-258): the finance intelligence doors are no longer
- *                        reviewed exemptions: resolve and dismiss need revenue write, the scan revenue read
- *                        (test/finance-intel-doors.integration.test.ts proves them on a real database)
+ *   BWS-U07  pinned (D-258)  FU-FINANCE-INTEL-DOORS: the finance intelligence doors are no longer reviewed
+ *                        exemptions: resolve and dismiss need revenue write, the scan revenue read. Added with the
+ *                        fix; its RED proof is FID-A01/A02 of test/finance-intel-doors.integration.test.ts (real database)
  */
 
 const REVENUE_WRITE = { module: 'revenue', minLevel: 'write' };
@@ -187,7 +187,8 @@ describe('PR195-BOOKS-DOORS: every door that writes the Books needs a module wri
     ['resolveIntelAction', 'POST intelligence/actions/:id/resolve', REVENUE_WRITE],
     ['dismissIntelAction', 'POST intelligence/actions/:id/dismiss', REVENUE_WRITE],
     ['runIntelScan', 'POST intelligence/scan', REVENUE_READ],
-  ])('BWS-U07 RED-BEFORE: %s (%s) runs ModuleScopeGuard with its D-258 scope (FU-FINANCE-INTEL-DOORS)', (method, route, scope) => {
+    // pinned (D-258): added with the fix; the RED proof is FID-A01/A02 (test/finance-intel-doors.integration.test.ts).
+  ])('BWS-U07 pinned (D-258): %s (%s) runs ModuleScopeGuard with its D-258 scope (FU-FINANCE-INTEL-DOORS)', (method, route, scope) => {
     expect(routeOf(finance[method])).toBe(route);
     expect(scopeOf(finance[method])).toEqual(scope);
     expect(guardsOf(finance[method])).toEqual([ModuleScopeGuard]);
