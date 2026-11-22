@@ -7,7 +7,7 @@ import { UnifiedMemoryRetrievalService } from './unified-memory-retrieval.servic
 import { KeyCortexLearningService } from './key-cortex-learning.service';
 import { GENOME_ROW_METADATA_KEY } from './unified-memory.types';
 import type { MemoryFragment, MemorySourceType } from './unified-memory.types';
-import { isMoneyMemoryEvent } from '../business-genome/key-genome/genome-finance-scope';
+import { isFinancialProposal, isMoneyLabel, isMoneyMemoryEvent, type ProposalFields } from '../business-genome/key-genome/genome-finance-scope';
 import {
   CortexQuery,
   CortexContextSnapshot,
@@ -411,6 +411,9 @@ export function genomeModulesOf(fragment: RecordFragment): CanonicalModule[] {
     eventType: stringOrNull(row.eventType),
     domain: stringOrNull(row.domain),
     section: stringOrNull(row.section),
+    // D-238: a proposal outcome event is classified by the proposal fields its own metadata carries, and its title.
+    metadata: fragment.metadata,
+    title: fragment.title ?? null,
   })
     ? ['revenue']
     : [];
@@ -479,6 +482,94 @@ export function memberlessProposalView<F extends RecordFragment>(fragment: F): F
   if (status) parts.push(`status ${status}`);
   if (riskLevel) parts.push(`risk ${riskLevel}`);
   return { ...fragment, content: parts.join(', '), metadata: { action, status, riskLevel } };
+}
+
+/**
+ * D-238: the ids a proposal record may name its KEY proposal by: its own subject (the ledger row, a genome outcome) and
+ * the ledger input's subject, proposal and approval ids (a bridged or cognitive copy). The first that resolves is used.
+ */
+function proposalIdsOf(fragment: RecordFragment): string[] {
+  const ids: string[] = [];
+  const own = (fragment as { entityId?: unknown }).entityId;
+  if (typeof own === 'string' && own) ids.push(own);
+  const payload = eventPayloadOf(fragment);
+  for (const key of ['subjectId', 'proposalId', 'approvalId'] as const) {
+    const v = payload?.[key];
+    if (typeof v === 'string' && v) ids.push(v);
+  }
+  return [...new Set(ids)];
+}
+
+/** D-238: the proposal fields a record carries itself (the propose record's metadata; a genome outcome's metadata and title). */
+function proposalFieldsOfRecord(fragment: RecordFragment): ProposalFields | null {
+  const str = (v: unknown) => (typeof v === 'string' ? v : null);
+  if (fragment.sourceType === 'genome_memory_event') {
+    const m = isPlainObject(fragment.metadata) ? fragment.metadata : {};
+    return { actionType: str(m.actionType), module: str(m.module), toolName: str(m.toolName), title: fragment.title ?? null };
+  }
+  const payload = eventPayloadOf(fragment);
+  const copied = payload?.eventType === 'GOVERNANCE_DECISION' && isPlainObject(payload.metadata) ? payload.metadata : undefined;
+  const ledger = fragment.sourceType === 'business_event' && isPlainObject(fragment.metadata?.metadata) ? (fragment.metadata!.metadata as Record<string, unknown>) : undefined;
+  const m = (copied ?? ledger) as Record<string, unknown> | undefined;
+  if (!m || (m.actionType === undefined && m.toolName === undefined && m.module === undefined)) return null;
+  return { actionType: str(m.actionType), module: str(m.module), toolName: str(m.toolName), title: str(m.title) };
+}
+
+/** D-238: the free text a proposal record carries itself (a rejection reason, a title, a summary). */
+function recordTextMentionsMoney(fragment: RecordFragment): boolean {
+  const texts: unknown[] = [];
+  const collect = (o: unknown) => {
+    if (!isPlainObject(o)) return;
+    for (const key of ['reason', 'rejectionReason', 'title', 'summary']) texts.push(o[key]);
+  };
+  const payload = eventPayloadOf(fragment);
+  collect(payload);
+  collect(payload?.metadata);
+  collect(payload?.after);
+  collect(fragment.metadata?.metadata);
+  return texts.some((t) => typeof t === 'string' && isMoneyLabel(t));
+}
+
+/**
+ * FU-PROPOSAL-REVENUE-SIGHT (owner ruling D-238; D-226, D-227, D-234): the ids of the proposal records among `fragments`
+ * that a reader without revenue read may not be handed: the records of a financial proposal, judged by the underlying
+ * KeyActionProposal row (its action type, module, tool and title) when it can be read, else by what the record carries;
+ * a proposal that cannot be classified, or a read that fails, is withheld (fail closed). Status and risk level go with
+ * the record, so they are no channel. Only proposals of `businessId` are read.
+ */
+async function financialProposalRecordIds(
+  prisma: PrismaService | undefined,
+  businessId: string,
+  fragments: ReadonlyArray<RecordFragment & { id: string }>,
+  logger: Pick<Logger, 'warn'>,
+  logTag: string,
+): Promise<Set<string>> {
+  const proposals = fragments.filter((f) => isProposalRecord(f));
+  const withheld = new Set<string>();
+  if (proposals.length === 0) return withheld;
+  const ids = [...new Set(proposals.flatMap(proposalIdsOf))];
+  let rows = new Map<string, ProposalFields>();
+  if (ids.length > 0) {
+    try {
+      const found = (await prisma?.client.keyActionProposal.findMany({
+        where: { businessId, id: { in: ids } },
+        select: { id: true, actionType: true, module: true, toolName: true, title: true },
+      })) ?? [];
+      rows = new Map(found.map((r: { id: string } & ProposalFields) => [r.id, r]));
+    } catch (err) {
+      logger.warn(`[${logTag}] the KEY proposals behind the proposal records could not be read; they are withheld: ${err instanceof Error ? err.message : String(err)}`);
+      for (const f of proposals) withheld.add(f.id);
+      return withheld;
+    }
+  }
+  for (const f of proposals) {
+    const row = proposalIdsOf(f).map((id) => rows.get(id)).find((r) => r !== undefined);
+    const fields = row ?? proposalFieldsOfRecord(f);
+    // D-238 ("directly or indirectly"): a record's own text (a rejection reason, a title or summary it carries) that
+    // states money withholds that record even when its proposal is non-financial.
+    if (isFinancialProposal(fields) || recordTextMentionsMoney(f)) withheld.add(f.id);
+  }
+  return withheld;
 }
 
 const cognitionMemoryLogger = new Logger('ReadersOwnCognitionMemory');
@@ -584,8 +675,11 @@ export async function readersOwnPromptMemory<
   moduleSight?: ModuleSight,
 ): Promise<F[]> {
   const withoutKeyRecords = fragments.filter((fragment) => !isPersonalKeyRecord(fragment));
+  // FU-PROPOSAL-REVENUE-SIGHT (D-238): the proposal records of a financial (or unclassifiable) proposal, classified first,
+  // so a turn whose proposals are all non-financial still reads no membership.
+  const financialProposals = await financialProposalRecordIds(prisma, businessId, withoutKeyRecords, logger, logTag);
   // FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-3): a genome money memory event names revenue too (recordModulesOf).
-  const namesAModule = withoutKeyRecords.some((fragment) => recordModulesOf(fragment).length > 0);
+  const namesAModule = financialProposals.size > 0 || withoutKeyRecords.some((fragment) => recordModulesOf(fragment).length > 0);
   // Review SEC-W1FPMS-2 / COR-W1FPMS-2: a staff position's turn hands the sight its position resolved (moduleSight);
   // every other turn's is its reader's membership (readersModuleSight).
   const [sight, own] = await Promise.all([
@@ -596,7 +690,11 @@ export async function readersOwnPromptMemory<
         : Promise.resolve(NO_MODULE_SIGHT),
     readersOwnCognitionMemory(prisma, businessId, reader, withoutKeyRecords, logger, logTag),
   ]);
+  // D-238: a reader without revenue read is handed a proposal record only when its proposal is non-financial (a memberless
+  // turn then sees its action, status and risk level only, D-226).
+  const readsRevenue = sight('revenue');
   return withoutKeyRecords
+    .filter((fragment) => readsRevenue || !financialProposals.has(fragment.id))
     .filter((fragment) => withinModuleSight(fragment, sight))
     .filter((fragment) => fragment.sourceType !== 'cognition_memory' || own.has(fragment.id))
     .slice(0, limit)

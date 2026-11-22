@@ -1,5 +1,6 @@
 import { LEVEL_RANK, memberModuleLevel, rankOf } from '../../../core/authority/module-vocabulary';
 import type { PrismaService } from '../../../core/prisma/prisma.service';
+import { keyOrganToolAuthority } from '../../key-cortex/key-cortex-organ-tool-authority';
 import type { GenomeRecommendationService } from './genome-recommendation.service';
 import type { GenomeSignalService } from './genome-signal.service';
 import type { ListGenomeRecommendationsQuery, ListGenomeSignalsQuery } from './key-genome.types';
@@ -41,9 +42,11 @@ import type { ListGenomeRecommendationsQuery, ListGenomeSignalsQuery } from './k
  * needing revenue write (D-128).
  */
 const MONEY_TERMS =
-  /financ|revenue|sales|cash|commerce|payment|invoice|pric|profit|billing|collection|refund|payroll|treasury|margin|lifetime|acquisition_?cost|cost|budget|spend|expense|conversion|forecast|churn|transaction|opportunit|pipeline|unit_?economics|cross_?domain|money/i;
+  /financ|revenue|sales|cash|commerce|payment|invoice|pric|profit|billing|collection|refund|payroll|treasury|margin|lifetime|acquisition_?cost|cost|budget|spend|expense|conversion|forecast|churn|transaction|opportunit|pipeline|unit_?economics|cross_?domain|money|receivable|payable|quote|quotation/i;
 /** Short money words, matched only as a whole word (letters on neither side), so snake_case values (cac_payback, first_sale) match. */
-const MONEY_WORDS = /(?<![a-z])(cac|ltv|mrr|arr|roi|sale|deal|order)s?(?![a-z])/i;
+const MONEY_WORDS = /(?<![a-z])(cac|ltv|mrr|arr|roi|sale|deal|order|tax|vat|fee)s?(?![a-z])/i;
+/** A money amount in free text ("$12,345", "TTD 500", "£9.99"): a title, summary or reason that states a figure (D-238). */
+const MONEY_AMOUNT = /[$€£¥₹]\s?\d|(?<![a-z])(ttd|usd|eur|gbp|jmd|bbd|xcd|cad)\s?\d/i;
 /** Genome sections whose rows are money by default (D-234: the revenue model and pricing; fail closed). */
 const MONEY_SECTIONS = new Set(['BUSINESS_MODEL']);
 
@@ -57,11 +60,13 @@ export type GenomeRowFields = {
   field?: string | null;
   title?: string | null;
   diagnosis?: string | null;
+  /** A memory event's own metadata (a KEY_ACTION_PROPOSAL outcome carries its proposal's actionType, module, toolName). */
+  metadata?: unknown;
 };
 
 function mentionsMoney(...values: Array<string | null | undefined>): boolean {
   return values.some(
-    (v) => typeof v === 'string' && (MONEY_TERMS.test(v) || MONEY_WORDS.test(v) || MONEY_SECTIONS.has(v.trim().toUpperCase())),
+    (v) => typeof v === 'string' && (MONEY_TERMS.test(v) || MONEY_WORDS.test(v) || MONEY_AMOUNT.test(v) || MONEY_SECTIONS.has(v.trim().toUpperCase())),
   );
 }
 
@@ -97,16 +102,68 @@ export function isFinanceRecommendation(row: GenomeRowFields): boolean {
 
 /** A memory event that carries a money, sales or composite signal, or that has nothing to classify it by: D-128, D-100, D-234. */
 export function isMoneyMemoryEvent(row: GenomeRowFields): boolean {
+  // D-238: a KEY proposal's outcome event is classified by its proposal (the event carries its action type,
+  // module, tool and title); a financial or unclassifiable proposal is money.
+  if (row.sourceType === 'KEY_ACTION_PROPOSAL') return isFinancialProposal(proposalFieldsOfEvent(row));
   return (
     mentionsMoney(row.sourceType, row.domain, row.section, row.eventType) ||
     row.sourceType === 'CROSS_DOMAIN_GENOME' ||
     row.domain === 'CROSS_DOMAIN' ||
-    // A KEY action proposal's outcome event carries no domain; it is a proposal record, which stays business-wide
-    // under D-226 (O3: a memberless turn sees its action, status and risk level only). PROVISIONAL reading of
-    // D-234 against D-226, put to the owner (FU-GENOME-REVENUE-CLASSIFIER): only it is exempt from the
-    // nothing-to-classify rule; any money field still withholds it.
-    (row.sourceType !== 'KEY_ACTION_PROPOSAL' && unclassified(row.domain, row.section))
+    unclassified(row.domain, row.section)
   );
+}
+
+/** The fields a KEY action proposal is classified by (KeyActionProposal: actionType, module, toolName, title). */
+export type ProposalFields = {
+  actionType?: string | null;
+  module?: string | null;
+  toolName?: string | null;
+  title?: string | null;
+};
+
+/**
+ * D-238: the KEY action types that are not financial in themselves. Any other action type is classified by its
+ * module and tool, and an action that cannot be classified fails closed (D-227, D-234). A listed action is still
+ * financial when its module, tool or title carries money or sales meaning ("Chase the $4,000 invoice").
+ */
+const NON_MONEY_PROPOSAL_ACTIONS: ReadonlySet<string> = new Set([
+  'CREATE_TASK', 'COMPLETE_TASK', 'CREATE_EVENT', 'CONFIRM_BOOKING', 'REBOOK', 'OPEN', 'OPEN_GENOME',
+  'OPEN_TEMPORAL_FLOW', 'REVIEW_ASSETS', 'ENABLE_LOOP', 'CREATE_LOOP', 'COMPLETE_SETUP', 'DISMISS', 'ACCEPT', 'REJECT',
+  'REQUEST_APPROVAL',
+]);
+/** D-238: KEY modules whose tools carry no money (CORTEX_MODULE_RULES: crm, bookings, content, projects, operations). */
+const NON_MONEY_PROPOSAL_MODULES: ReadonlySet<string> = new Set([
+  'crm', 'contacts', 'bookings', 'calendar', 'content', 'social', 'communications', 'projects', 'tasks', 'inbox',
+  'key_inbox', 'notifications', 'operations',
+]);
+/** The module scopes whose tools touch money (the KEY organ-tool authority map's revenue and expenses scopes). */
+const MONEY_SCOPES: ReadonlySet<string> = new Set(['revenue', 'expenses']);
+
+/**
+ * D-238 (D-226, D-227, D-234): whether a KEY action proposal reveals restricted financial or sales information, by its
+ * type, provenance and content: money or sales meaning in its action type, module, tool or title; a tool the KEY
+ * organ-tool authority map scopes to revenue or expenses; or no classification at all (fail closed). A proposal is
+ * non-financial only when its action type is listed non-financial, its tool is mapped to no money scope, or its tool
+ * belongs to a listed non-money module, and nothing in it carries money.
+ */
+export function isFinancialProposal(proposal: ProposalFields | null | undefined): boolean {
+  if (!proposal) return true;
+  const { actionType, module, toolName, title } = proposal;
+  if (mentionsMoney(actionType, module, toolName, title)) return true;
+  const tool = typeof toolName === 'string' && toolName.trim() ? toolName.trim() : null;
+  const authority = tool ? keyOrganToolAuthority(tool) : null;
+  if (authority && 'scopes' in authority) return authority.scopes.some((s) => MONEY_SCOPES.has(s.module));
+  if (typeof actionType === 'string' && NON_MONEY_PROPOSAL_ACTIONS.has(actionType.trim().toUpperCase())) return false;
+  const owner = (typeof module === 'string' && module.trim() ? module : tool?.includes('.') ? tool.split('.')[0] : '').trim().toLowerCase();
+  if (owner && NON_MONEY_PROPOSAL_MODULES.has(owner)) return false;
+  return true;
+}
+
+/** A KEY_ACTION_PROPOSAL outcome event's proposal fields: its metadata (OutcomeLearningService) and its title. */
+function proposalFieldsOfEvent(row: GenomeRowFields): ProposalFields {
+  const meta = row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata) ? (row.metadata as Record<string, unknown>) : {};
+  const str = (v: unknown) => (typeof v === 'string' ? v : null);
+  return { actionType: str(meta.actionType), module: str(meta.module), toolName: str(meta.toolName), title: row.title ?? null };
 }
 
 /**
