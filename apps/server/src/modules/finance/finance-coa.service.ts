@@ -22,6 +22,21 @@ export type UpdateCoaInput = Partial<Omit<CreateCoaInput, 'type'>> & { isActive?
 const COA_CODE_LOCK_NAMESPACE = 'coa-code:';
 
 /**
+ * The whitespace trimmed off a code, on both sides of the comparison: the SQL check trims the stored code
+ * with this same set (rows written before this rule were stored verbatim), so the service and the database
+ * agree on what a code is.
+ */
+const COA_CODE_WHITESPACE = ' \t\n\r\f\v';
+
+function trimCoaCode(code: string): string {
+  let start = 0;
+  let end = code.length;
+  while (start < end && COA_CODE_WHITESPACE.includes(code[start])) start++;
+  while (end > start && COA_CODE_WHITESPACE.includes(code[end - 1])) end--;
+  return code.slice(start, end);
+}
+
+/**
  * An account code as it is stored: text, trimmed; a blank code is no code (null). The body is not
  * validated before it reaches here, so a code that is not text (a JSON number, an object) is refused
  * 400 instead of reaching Prisma, where it raised a validation error (a 500).
@@ -29,14 +44,14 @@ const COA_CODE_LOCK_NAMESPACE = 'coa-code:';
 function normalizeCoaCode(raw: unknown): string | null {
   if (raw === null || raw === undefined) return null;
   if (typeof raw !== 'string') throw new BadRequestException('Account code must be text');
-  const code = raw.trim();
+  const code = trimCoaCode(raw);
   return code === '' ? null : code;
 }
 
-/** The form two codes are compared in: spacing around a code and its letter case do not make another code. */
-function coaCodeKey(code: string | null | undefined): string | null {
-  const trimmed = (code ?? '').trim();
-  return trimmed === '' ? null : trimmed.toLowerCase();
+/** A stored code as it is compared: trimmed (a row written before this rule may not be); blank is no code. */
+function storedCoaCode(code: string | null): string | null {
+  const trimmed = trimCoaCode(code ?? '');
+  return trimmed === '' ? null : trimmed;
 }
 
 /**
@@ -51,10 +66,14 @@ function coaCodeKey(code: string | null | undefined): string | null {
  *     back are checked against the business's other active accounts, system accounts included (so the
  *     system chart is seeded first: a custom 6100 on a chart never listed would otherwise be joined by the
  *     seed's own 6100);
- *   - codes are compared trimmed and without letter case, and stored trimmed; a blank code is no code;
+ *   - codes are compared trimmed and without letter case (as Postgres lower() folds it; the database alone
+ *     decides a collision), and stored trimmed; a blank code is no code;
  *   - accounts without a code never collide, an archived account frees its code, and an account saved with
  *     the code it already has is not checked, so rows that shared a code before this rule can still be
  *     renamed and archived (nothing rewrites them);
+ *   - a code that is not text, or an isActive that is not true or false, is refused 400: the body is not
+ *     validated before it reaches here, and a Prisma operator object ({ set: true }) would otherwise be
+ *     written without the check;
  *   - check and write run in one transaction under a per-business advisory lock: with no unique index, two
  *     concurrent writers would otherwise both pass the check.
  */
@@ -131,7 +150,10 @@ export class FinanceCoaService {
     if (input.subtype !== undefined) data.subtype = input.subtype;
     if (input.code !== undefined) data.code = normalizeCoaCode(input.code);
     if (input.parentId !== undefined) data.parentId = input.parentId;
-    if (input.isActive != null) data.isActive = input.isActive;
+    if (input.isActive != null) {
+      if (typeof input.isActive !== 'boolean') throw new BadRequestException('isActive must be true or false');
+      data.isActive = input.isActive;
+    }
 
     // Only a write of the code, or one that brings the account back, can make a second active account on
     // a code. Anything else writes as before.
@@ -148,11 +170,14 @@ export class FinanceCoaService {
       });
       if (!current) throw new NotFoundException('Account not found');
       if (current.isSystem) throw new ForbiddenException('System accounts are read-only');
-      const nextCode = input.code !== undefined ? (data.code as string | null) : current.code;
-      const codeChanges = input.code !== undefined && coaCodeKey(nextCode) !== coaCodeKey(current.code);
+      const currentCode = storedCoaCode(current.code);
+      const nextCode = input.code !== undefined ? (data.code as string | null) : currentCode;
+      // Any difference, letter case included, is a change: only the database decides which codes collide
+      // (the account itself is excepted there, so it may still change the case of its own code).
+      const codeChanges = input.code !== undefined && nextCode !== currentCode;
       const comesBack = input.isActive === true && !current.isActive;
-      if (coaCodeKey(nextCode) !== null && (codeChanges || comesBack)) {
-        await this.assertCodeFree(tx, tenant, nextCode as string, id);
+      if (nextCode !== null && (codeChanges || comesBack)) {
+        await this.assertCodeFree(tx, tenant, nextCode, id);
       }
       return tx.chartOfAccount.update({ where: { id }, data });
     });
@@ -178,8 +203,8 @@ export class FinanceCoaService {
   }
 
   /**
-   * Refuse 409 COA_CODE_TAKEN when another ACTIVE account of the business holds `code` (compared trimmed,
-   * without letter case). Raw SQL on purpose: Prisma's case-insensitive `equals` is an ILIKE, in which a
+   * Refuse 409 COA_CODE_TAKEN when another ACTIVE account of the business holds `code` (already trimmed;
+   * the stored side is trimmed of the same whitespace here, and letter case is folded by the database). Raw SQL on purpose: Prisma's case-insensitive `equals` is an ILIKE, in which a
    * code's own '_' or '%' would match other codes. The message names the caller's own account only: the
    * query is bound to the one business.
    */
@@ -194,7 +219,7 @@ export class FinanceCoaService {
       WHERE business_id = ${tenant}
         AND is_active = true
         AND code IS NOT NULL
-        AND lower(btrim(code)) = lower(${code})
+        AND lower(btrim(code, ${COA_CODE_WHITESPACE})) = lower(${code})
         AND id <> ${exceptId ?? ''}
       ORDER BY created_at ASC, id ASC
       LIMIT 1`;
