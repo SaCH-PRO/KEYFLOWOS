@@ -7,8 +7,9 @@ Sources: `docs/reconstruction/V1-HANDOFF-2026-11-20.md` sections 2 and 5, ruling
 ## 0. Before a packet enters a wave
 
 - The worker's return names branch, head sha, RED and fix shas, suite totals and the R0 line.
-- Both acceptance lenses accept at that exact head (`ACCEPTANCE-REVIEW-BRIEF.md`); later repairs have a confirmation
-  review (`CONFIRMATION-REVIEW-BRIEF.md`). No commits after the last review.
+- Both acceptance lenses accept at that exact head (`ACCEPTANCE-REVIEW-BRIEF.md`). A repair pushed after acceptance
+  is confirmed by both lenses again (`CONFIRMATION-REVIEW-BRIEF.md`, one reviewer per lens). No commits after the
+  last review.
 - Its dependencies are on main or earlier in the same wave.
 
 ## 1. Compact each packet into two commits
@@ -126,15 +127,14 @@ ALL of these hold, checked immediately before the merge:
 4. Merge commit (not squash, not rebase), with the expected head sha pinned.
 
 Not covered, ever: a production deploy, a staging change, bypassing a gate or branch rule, merging a packet branch
-outside a proven wave PR. Review threads that need the owner stay open for the owner. D-239 is in
-`BUILD-MAP-001.md` on main; D-240 and D-241 were ruled on issue #80 on 2026-11-22 and reach `BUILD-MAP-001.md`
-with wave 3c (PR #220): until then read them on #80.
+outside a proven wave PR. Review threads that need the owner stay open for the owner. D-239, D-240 and D-241 are
+rows in `BUILD-MAP-001.md` on main: read the rows themselves before relying on this summary.
 
 ## 6. After every merge (consolidation)
 
 ```bash
 git fetch origin main
-node scripts/agent-memory/status.mjs      # regenerates V1-STATUS.json and V1-STATUS.md
+node scripts/agent-memory/status.mjs      # regenerates V1-STATUS.json and V1-STATUS.md from origin/main
 ```
 
 Then rewrite `ORCHESTRATOR-STATE.md` (remove the merged row from section 3, set the next action for what it

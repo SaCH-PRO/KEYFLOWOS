@@ -16,11 +16,13 @@
    "code-commit-subject": "done: a fix/feat commit on main names the packet id, but not in the compacted form. UNCERTAIN: the commit may be a partial or a repair.",
    "unmerged-branch": "in-progress: only with --with-branches (never in the committed file). origin/pkt/V1-<ID> exists in this clone and no done evidence is on main. UNCERTAIN: depends on which branches this clone has fetched; a stale branch also counts.",
    "prior-status-file(in-progress)": "in-progress: the prior file said so and nothing newer is on main. UNCERTAIN.",
-   "no-evidence": "todo: the packet was added to the plan after the prior status file and no commit or branch names it."
+   "prior-status-file(wave-2b)": "in-progress: the prior file said \"wave-2b\" and no wave 2b commit is on main. UNCERTAIN. Cannot occur on main today.",
+   "no-evidence": "todo: the packet was added to the plan after the prior status file and no fix or feat commit on main names it (docs and test commits may)."
   },
   "limits": [
    "Work on wave PRs, unpushed worktrees and child sessions is invisible here: see ORCHESTRATOR-STATE.md section 3.",
    "The committed file is a function of main alone, so it shows no in-progress work that is only on a branch. For a branch view run: git fetch origin \"+refs/heads/pkt/*:refs/remotes/origin/pkt/*\" && node scripts/agent-memory/status.mjs --with-branches --stdout",
+   "A compacted commit that was later reverted still counts as done: the script reads subjects, not trees.",
    "The plan critical path was computed at the re-cut (validation.critical_path) and does not include packets added later."
   ]
  },

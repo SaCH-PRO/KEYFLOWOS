@@ -16,9 +16,10 @@ export function tryShow(root, ref, path) {
   }
 }
 
-/** Last commit on `ref` that touched `path`, or null. */
-export function lastCommitTouching(root, ref, path) {
-  return git(['log', '-1', '--format=%H', ref, '--', path], root).trim() || null;
+/** The commit on `ref` that added `path`, or null. */
+export function firstCommitAdding(root, ref, path) {
+  const out = git(['log', '--diff-filter=A', '--format=%H', ref, '--', path], root).trim().split('\n').filter(Boolean);
+  return out.at(-1) ?? null;
 }
 
 /** Commits reachable from `ref` but not from `base` (all of history when base is null). */

@@ -220,11 +220,13 @@ export function buildStatus({ plan, prior, commits, branches, mainSha, mainDate,
         'code-commit-subject': 'done: a fix/feat commit on main names the packet id, but not in the compacted form. UNCERTAIN: the commit may be a partial or a repair.',
         'unmerged-branch': 'in-progress: only with --with-branches (never in the committed file). origin/pkt/V1-<ID> exists in this clone and no done evidence is on main. UNCERTAIN: depends on which branches this clone has fetched; a stale branch also counts.',
         'prior-status-file(in-progress)': 'in-progress: the prior file said so and nothing newer is on main. UNCERTAIN.',
-        'no-evidence': 'todo: the packet was added to the plan after the prior status file and no commit or branch names it.',
+        'prior-status-file(wave-2b)': 'in-progress: the prior file said "wave-2b" and no wave 2b commit is on main. UNCERTAIN. Cannot occur on main today.',
+        'no-evidence': 'todo: the packet was added to the plan after the prior status file and no fix or feat commit on main names it (docs and test commits may).',
       },
       limits: [
         'Work on wave PRs, unpushed worktrees and child sessions is invisible here: see ORCHESTRATOR-STATE.md section 3.',
         'The committed file is a function of main alone, so it shows no in-progress work that is only on a branch. For a branch view run: git fetch origin "+refs/heads/pkt/*:refs/remotes/origin/pkt/*" && node scripts/agent-memory/status.mjs --with-branches --stdout',
+        'A compacted commit that was later reverted still counts as done: the script reads subjects, not trees.',
         'The plan critical path was computed at the re-cut (validation.critical_path) and does not include packets added later.',
       ],
     },
@@ -304,14 +306,25 @@ export function parseRulings(markdown) {
       heading = h[1].trim();
       return;
     }
-    const m = raw.match(/^\|\s*(D-\d+)\s*\|(.*)\|\s*$/);
+    // First cell is one id ("D-150") or a combined one ("D-41..D-45, D-47..D-52").
+    const m = raw.match(/^\|\s*(D-\d+(?:\s*(?:\.\.|,)\s*D-\d+)*)\s*\|(.*)\|\s*$/);
     if (!m) return;
     const cells = m[2].split(/(?<!\\)\|/).map((c) => c.trim());
     const text = cells[0] ?? '';
     const slug = text.match(/\(`([a-z0-9-]+)`\)\s*$/)?.[1] ?? null;
-    out.push({ id: m[1], text, effect: cells.slice(1).join(' | '), heading, line: i + 1, slug });
+    for (const id of expandRulingIds(m[1])) out.push({ id, text, effect: cells.slice(1).join(' | '), heading, line: i + 1, slug });
   });
   return out;
+}
+
+/** "D-41..D-43, D-47" -> ["D-41", "D-42", "D-43", "D-47"]. */
+export function expandRulingIds(cell) {
+  const ids = [];
+  for (const part of cell.split(',')) {
+    const [a, b] = part.split('..').map((x) => Number(x.trim().replace('D-', '')));
+    for (let n = a; n <= (b ?? a); n += 1) ids.push(`D-${n}`);
+  }
+  return ids;
 }
 
 /** Resolve a plan "decisions" key (D-nnn, or a slug such as "hubs") to ruling rows. */
@@ -356,7 +369,7 @@ const STOP_CONDITIONS = [
  * and the fields left empty are listed in `departures`.
  * fileExists: (path) => boolean, checked at the snapshot ref.
  */
-export function buildBundle({ plan, packetId, rulings, statusById, fileExists, mainSha, statusSource }) {
+export function buildBundle({ plan, packetId, rulings, statusById, fileExists, mainSha, statusSource, ref = 'origin/main' }) {
   const packet = plan.packets.find((p) => p.id === packetId);
   if (!packet) return null;
   const reasons = [];
@@ -365,6 +378,7 @@ export function buildBundle({ plan, packetId, rulings, statusById, fileExists, m
     if (!rows.length) reasons.push(`ruling "${key}" not found in ${BUILD_MAP_PATH} at ${mainSha.slice(0, 8)}`);
     return { key, rows };
   });
+  if (!rulings.some((r) => r.id === 'D-222')) reasons.push(`standing directive D-222 not found in ${BUILD_MAP_PATH} at ${mainSha.slice(0, 8)}`);
   const write_set = (packet.files ?? []).map((path) => ({ path, exists: Boolean(fileExists(path)) }));
   const dependencies = (packet.depends_on ?? []).map((id) => {
     const status = statusById[id] ?? 'unknown';
@@ -388,6 +402,7 @@ export function buildBundle({ plan, packetId, rulings, statusById, fileExists, m
     snapshot: {
       repository: 'SaCH-PRO/KEYFLOWOS',
       main_sha: mainSha,
+      ref,
       task_head_sha: null,
       packet_id: packetId,
       generated_from: [
@@ -452,6 +467,7 @@ export function buildBundle({ plan, packetId, rulings, statusById, fileExists, m
     dependencies_met: depsMet,
     pointers: BRIEF_POINTERS,
     departures: [
+      'snapshot.main_sha is the sha of the ref that was read (snapshot.ref, an added field): origin/main unless --ref was given.',
       'Added top-level keys the schema does not have: packet, rulings, r0_register, fixture_prefixes, write_set, dependencies, dependencies_met, pointers, departures.',
       'Left empty (no deterministic source for them yet): semantic_context.owners, kernels, execution_paths, hotspots, historical_failure_classes; proof_context.reachability_checks, fastest_falsification; provenance.claims (each ruling carries its own source line under semantic_context.invariants instead).',
       'authority.conflicts and unresolved.contradictions are always empty: the script does not detect conflicts between rulings, it only reports rulings it cannot find.',
@@ -466,12 +482,13 @@ export function renderBundleMd(b) {
   const p = b.packet;
   const L = [];
   L.push(`# Context bundle: ${p.id}`, '');
-  L.push(`Compiled by \`${b.generator.name}\` from main at \`${b.snapshot.main_sha.slice(0, 8)}\`. Derived: the plan and BUILD-MAP outrank it.`);
+  L.push(`Compiled by \`${b.generator.name}\` from \`${b.snapshot.ref}\` at \`${b.snapshot.main_sha.slice(0, 8)}\`. Derived: the plan and BUILD-MAP outrank it.`);
   L.push(`Health: ${b.health.status}${b.health.reasons.length ? ' (' + b.health.reasons.join('; ') + ')' : ''}`, '');
   L.push('## Packet', '');
   L.push(`- Title: ${p.title}`);
   L.push(`- Step ${p.step}, ${p.priority}, size ${p.size}, lane ${p.lane}, kind ${p.kind}; journeys: ${(p.journeys ?? []).join(', ') || 'none'}; bugs: ${(p.bugs ?? []).join(', ') || 'none'}`);
   L.push(`- Branch: \`pkt/V1-${p.id}\` based on origin/main`);
+  if ((p.absorbs ?? []).length) L.push(`- Absorbs: ${p.absorbs.join(', ')}`);
   if (p.fixture_prefix) L.push(`- Fixture prefix: ${JSON.stringify(p.fixture_prefix)}`);
   for (const f of b.fixture_prefixes) L.push(`- Fixture prefix (plan table): \`${f.prefix}\` for ${f.owner}`);
   L.push('', '### Scope', '', p.scope, '', '### Definition of done', '', p.definition_of_done, '');
@@ -502,4 +519,10 @@ export function renderBundleMd(b) {
   L.push('', '## Where this departs from CONTEXT-BUNDLE-SCHEMA.yaml', '');
   for (const d of b.departures) L.push(`- ${d}`);
   return L.join('\n') + '\n';
+}
+
+/** The status document without the fields that change with every commit on main (for --check). */
+export function statusFingerprint(status) {
+  const { main_sha: _sha, main_commit_date: _date, ...generated } = status._generated;
+  return JSON.stringify({ ...status, _generated: generated });
 }

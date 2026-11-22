@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   subjectNamesPacket, subjectType, commitEvidence, wave2bMerged, deriveStatus, transitiveDependents,
   longestRemainingChain, readyList, buildStatus, renderStatusMd, parseRulings, resolveDecision,
-  buildBundle, renderBundleMd,
+  buildBundle, renderBundleMd, expandRulingIds, statusFingerprint,
 } from '../lib.mjs';
 
 const pk = (id, depends_on = [], extra = {}) => ({
@@ -103,11 +103,16 @@ const MAP = [
   '### Owner rulings, 2026-10-31', '',
   '| D-11 | Owner only. | R0-09 implements it |',
   '| D-150 | Seven hubs: adopt. (`hubs`) | NAV-A1 and 12 more |',
+  '| D-222 | Standing directive. | (process) |',
+  '| D-41..D-43, D-47 | Kept as built. | none |',
 ].join('\n');
 
 test('parseRulings and resolveDecision: ids, slugs, repeated ids, headings, lines', () => {
   const r = parseRulings(MAP);
-  assert.equal(r.length, 3);
+  assert.equal(r.length, 8);
+  assert.deepEqual(expandRulingIds('D-41..D-43, D-47'), ['D-41', 'D-42', 'D-43', 'D-47']);
+  assert.equal(resolveDecision('D-42', r)[0].text, 'Kept as built.');
+  assert.equal(resolveDecision('D-44', r).length, 0);
   assert.deepEqual(resolveDecision('D-11', r).map((x) => [x.heading, x.line]), [['(g) Open decisions', 5], ['Owner rulings, 2026-10-31', 8]]);
   const hubs = resolveDecision('hubs', r);
   assert.equal(hubs[0].id, 'D-150');
@@ -144,4 +149,20 @@ test('buildBundle: rulings in full, write set, dependencies, register rows, heal
   assert.equal(ok.health.status, 'VALID');
   assert.equal(ok.dependencies_met, true);
   assert.equal(buildBundle({ ...args, packetId: 'NOPE' }), null);
+  // the standing directive missing from the build map degrades every bundle
+  const noDirective = buildBundle({ ...args, rulings: parseRulings(MAP).filter((x) => x.id !== 'D-222'), plan: { ...plan, packets: [pk('A'), pk('B', ['A'])] } });
+  assert.equal(noDirective.health.status, 'DEGRADED');
+  assert.equal(noDirective.authority.current.freshness, 'UNVERIFIABLE');
+});
+
+test('statusFingerprint ignores the main sha and date, nothing else', () => {
+  const plan = { packets: [pk('A'), pk('B', ['A'])], validation: { critical_path: [] } };
+  const mk = (sha, commits = []) => buildStatus({ plan, prior: null, commits, branches: null, mainSha: sha, mainDate: sha, baseSha: null });
+  assert.equal(statusFingerprint(mk('a'.repeat(40))), statusFingerprint(mk('b'.repeat(40))));
+  assert.notEqual(statusFingerprint(mk('a'.repeat(40))), statusFingerprint(mk('a'.repeat(40), [c('fix: pkt/V1-A (compacted)')])));
+});
+
+test('readyList breaks ties by priority, then id', () => {
+  const packets = [pk('Z', [], { priority: 'P0' }), pk('B', [], { priority: 'P1' }), pk('A', [], { priority: 'P1' })];
+  assert.deepEqual(readyList(packets, { Z: 'todo', A: 'todo', B: 'todo' }, []).map((r) => r.id), ['Z', 'A', 'B']);
 });

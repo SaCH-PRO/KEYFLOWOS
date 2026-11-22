@@ -10,8 +10,10 @@ points at an authoritative source or is derived from one.
 2. `docs/reconstruction/handoff/V1-STATUS.md`: what is done, what is ready (generated).
 3. The one procedure file below that matches what you are about to do.
 
-Then run `git fetch origin main && node scripts/agent-memory/status.mjs --check`. If it says STALE, main has moved
-since the status was generated: regenerate it and expect the state file to be behind too.
+Then run `git fetch origin main && node scripts/agent-memory/status.mjs --check`. It compares packet status, not
+the sha, so it stays "current" across merges that change no packet's status. If it says STALE, packets have landed
+since the status was generated: regenerate it, and expect the state file to be behind too. "Current" says nothing
+about the state file: that is hand-written, carries its own timestamp, and is only as fresh as that.
 
 | Layer | What it is here | Authoritative? |
 |---|---|---|
@@ -26,7 +28,7 @@ Research this is built on: issue #106 (the owner's memory-architecture research)
 `architecture/memory/KEY-MEMORY-CONTEXT-GENOME.md`, `docs/intelligence/research/contracts/CONTEXT-BUNDLE-SCHEMA.yaml`,
 `docs/intelligence/research/dossiers/HERMANS-PROGRAMMERS-BRAIN.md`, `docs/intelligence/AGENT-CONTINUITY.md`.
 Those are research and historical records; none of them authorizes implementation by itself. D-253 does, for this
-folder only. This is a projection of the one memory architecture for one consumer (the coding agents), not a second
+folder, `scripts/agent-memory/` and the state and status files in `docs/reconstruction/handoff/` only. This is a projection of the one memory architecture for one consumer (the coding agents), not a second
 memory engine (#106 comment 5982170811: "One memory architecture, many projections and consumers").
 
 ---
@@ -47,11 +49,11 @@ The context is the scarcest resource an orchestrator has. Rules for keeping it s
   conversation and one row in the state file.
 - **Point, do not retype.** A child session gets a path to a brief and a packet id (`PACKET-WORKER-BRIEF.md`), not
   the brief. A reviewer gets a path, a sha range and the facts, not a restated procedure.
-- **Compile, do not load.** For a packet, read its bundle (`bundle.mjs`), never the whole plan (734 KB) or the whole
-  build map (237 KB).
+- **Compile, do not load.** For a packet, read its bundle (`bundle.mjs`), never the whole plan (about 740 KB) or the
+  whole build map (about 240 KB).
 - **Nothing material lives only in the context.** An owner ruling, a finding, a decision to reorder: write it to
-  issue #80 or a file in the turn it happens. A procedure must be executable "without hidden conversational
-  context" (#106 comment 5994966639).
+  issue #80 or a file in the turn it happens. "No procedure may require hidden conversational context to execute
+  correctly" (#106 comment 5994966639).
 - **When the context is getting long** (AGENT-CONTINUITY, "Chat-length risk protocol"): start no new broad
   investigation, finish the current atomic step, rewrite the state file, record the exact next action, and hand
   over to a fresh session. Do not trade continuity for one more tranche.
@@ -71,10 +73,11 @@ Append-only and authoritative. **Never loaded whole.** Search it:
 git log --oneline origin/main --grep 'pkt/V1-<ID>'            # a packet's commits on main
 git log --oneline origin/main -- <path>                       # what touched a file
 git log origin/main --format='%h %s' --grep 'D-2[0-9][0-9]'   # commits that record rulings
-gh issue view 80 --repo SaCH-PRO/KEYFLOWOS --comments | grep -n 'D-249'   # one ruling on #80
+gh api 'repos/SaCH-PRO/KEYFLOWOS/issues/80/comments?since=2026-11-22T00:00:00Z&per_page=100' --jq '.[] | select(.body | test("D-249")) | {id, body}'   # one ruling on #80
 ```
 
-Where `gh` is not available, use the GitHub issue tools, read the newest page of comments first, and have a
+(`gh issue view 80 --comments`, as `CLAUDE.md` gives it, was refused with HTTP 403 in the cloud sessions on
+2026-11-22; the `gh api` form worked.) Where `gh` is not available, use the GitHub issue tools, read the newest page of comments first, and have a
 subagent do it and return only the comment id and the ruling text. Summaries in the semantic layer must always
 name where the evidence is (a D-nnn, a comment id, a sha, a PR number) so anyone can drill down.
 
@@ -158,7 +161,9 @@ node --test scripts/agent-memory/tests/*.spec.mjs           # the scripts' own t
 ```
 
 Both scripts read `origin/main` through local git (`--ref <ref>` reads another ref, for example a wave branch whose
-rulings are not on main yet). No network, no database. Run `git fetch origin main` first.
+rulings are not on main yet; `status.mjs` then needs `--stdout`, because the committed files come from origin/main
+only). No network, no database. Run `git fetch origin main` first. The tests cover the pure functions in
+`lib.mjs`; they are not wired into `package.json` or CI (CI was out of this packet's scope).
 
 A bundle holds: the packet entry; the full text of each ruling it cites, with the `BUILD-MAP-001.md` line; its
 `r0_register` rows; its write set with which files exist; its dependencies' status; and paths (not contents) of the
