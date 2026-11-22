@@ -90,7 +90,8 @@ export function planPhoneKeyBackfill(rows: readonly ScannedContactRow[]): Planne
     }
 
     const read = contactPhoneRead(r.phone, r.country);
-    if (read.unreadable) {
+    if (read.unreadable && r.phone_normalized === read.phoneNormalized) {
+      // A number that does not read and already holds the key a write stores (its digits): kept.
       return {
         id: r.id,
         businessId: r.business_id,
@@ -101,6 +102,9 @@ export function planPhoneKeyBackfill(rows: readonly ScannedContactRow[]): Planne
         action: 'unreadable',
       };
     }
+    // An unreadable number with a missing or stale key falls through: it is rewritten to the key a write stores (its
+    // digits) and takes part in the merge planning below, or the resolver, which matches it by exact key, cannot see it
+    // (Codex P2 on #216).
 
     const targetKey = read.phoneNormalized;
     const action: PhoneBackfillAction = r.phone_normalized === targetKey ? 'current' : 'rewrite';
