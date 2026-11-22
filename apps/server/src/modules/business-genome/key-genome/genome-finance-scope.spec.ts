@@ -49,6 +49,43 @@ describe('recommendations and memory events (D-234)', () => {
   });
 });
 
+describe('review repairs (MAJOR-2, MINOR-2)', () => {
+  it('MAJOR-2: a recommendation GenomeRecommendationService made from a money signal is money, though its domain is the signal section (risk)', () => {
+    expect(isFinanceRecommendation({
+      domain: 'risk',
+      title: 'Risk Pattern in revenue',
+      diagnosis: 'A Risk Pattern signal was detected in revenue.repeated_invoice_complaints with 90% confidence.',
+    } as any)).toBe(true);
+    expect(isFinanceRecommendation({
+      domain: 'operations',
+      title: 'Operations Pattern in inbox',
+      diagnosis: 'A Operations Pattern signal was detected in inbox with 80% confidence.',
+    } as any)).toBe(false);
+  });
+
+  it.each(['cac_payback', 'ltv_cac', 'sale_closed', 'unit_cost'])('MINOR-2: the snake_case money value %s is money', (domain) => {
+    expect(isFinanceSignal({ sourceModule: 'key-chat', section: 'MARKETING', domain })).toBe(true);
+  });
+});
+
+describe('security review repairs (MAJOR-4, MAJOR-5)', () => {
+  it('MAJOR-4: a marketing signal whose field is the acquisition-cost target, and the REDUCE_CAC recommendation, are money', () => {
+    expect(isFinanceSignal({ sourceModule: 'marketing', section: 'MARKETING_GROWTH', domain: 'marketing_growth', field: 'HIGH_TARGET_CAC' } as any)).toBe(true);
+    expect(isFinanceRecommendation({ domain: 'MARKETING_GROWTH', title: 'Reduce target CAC for Paid social', insight: 'High target CAC can erode unit economics.' } as any)).toBe(true);
+    expect(isFinanceSignal({ sourceModule: 'marketing', section: 'MARKETING_GROWTH', domain: 'marketing_growth', field: 'NO_CONTENT_PLAN' } as any)).toBe(false);
+  });
+
+  it.each(['first_sale', 'customer_ltv', 'target_cac', 'average_cost', 'conversion_rate', 'deal_size', 'order_volume', 'sales_pipeline', 'revenue_forecast', 'mrr', 'churn_rate', 'expense_ratio', 'roi', 'unit_economics', 'CrossDomain'])(
+    'MAJOR-5: the value %s is money',
+    (domain) => expect(isFinanceSignal({ sourceModule: 'key-chat', section: 'CUSTOMER_MARKET', domain })).toBe(true),
+  );
+
+  it('MAJOR-5: a fact KEY extracted from chat under BUSINESS_MODEL (revenue model, pricing) fails closed whatever domain the model chose', () => {
+    expect(isFinanceSignal({ sourceModule: 'key-chat', section: 'BUSINESS_MODEL', domain: 'model' })).toBe(true);
+    expect(isFinanceRecommendation({ domain: 'BUSINESS_MODEL' })).toBe(true);
+  });
+});
+
 describe('DNA scores (D-233: a finance or sales score is finance; unknown keys fail closed)', () => {
   const dna = { execution: 50, strategy: 60, finance: 40, financial: 41, sales: 70, revenue: 71, cost: 72, marketing: 55, operations: 65, send_invoice: 30, founder: 80 };
   it('a reader without revenue read keeps only the listed non-money dimensions', () => {

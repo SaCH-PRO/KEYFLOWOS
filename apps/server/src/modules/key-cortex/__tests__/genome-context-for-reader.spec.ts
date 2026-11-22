@@ -13,7 +13,7 @@
 import { describe, it, expect } from 'vitest';
 import { KeyCortexGenomeBridgeService } from '../key-cortex-genome-bridge.service';
 import { KeyCortexGenomeContextService } from '../key-cortex-genome-context.service';
-import { genomeContextForReader } from '../genome-context-for-reader';
+import { genomeContextForReader, genomeRecommendationsForReader } from '../genome-context-for-reader';
 
 const PROACTIVE_FINANCE_ROW = {
   id: 'sig_autonomy_fin',
@@ -43,6 +43,21 @@ describe('BLOCKING-1: a finance signal filed under another module is a finance s
     } as any;
     expect(genomeContextForReader(ctx, false).signals.map((s: any) => s.id)).toEqual(['sig_ops']);
     expect(genomeContextForReader(ctx, true).signals).toHaveLength(3);
+  });
+
+  it('review MINOR-1: a REVENUE_PATTERN signal filed under a non-money section and domain is withheld, as REST withholds it', () => {
+    const ctx = {
+      dnaScores: {}, genomeStage: 'growth', executiveReadiness: 1, recommendations: [], opportunities: [], autonomyMap: {}, timestamp: new Date(),
+      signals: [bridgeSignal({ ...OPS_ROW, id: 'sig_rev_ops', section: 'operations', domain: 'inbox', signalType: 'REVENUE_PATTERN' })],
+    } as any;
+    expect(genomeContextForReader(ctx, false).signals).toEqual([]);
+  });
+
+  it('security review MINOR-7: a reader without revenue read is not handed the ranking score (it weighs the financial value)', () => {
+    const recs = genomeRecommendationsForReader([{ id: 'r_ops', title: 'SOPs', description: '', impact: 'high', category: 'OPERATIONS', confidence: 0.9, genomeScore: 87.5 }] as any, false);
+    expect(recs).toHaveLength(1);
+    expect(recs[0]).not.toHaveProperty('genomeScore');
+    expect(genomeRecommendationsForReader([{ category: 'OPERATIONS', genomeScore: 87.5 }] as any, true)[0]).toHaveProperty('genomeScore', 87.5);
   });
 
   it('the genome context cache key changed with the signal shape, so a cached context without section is not served', async () => {

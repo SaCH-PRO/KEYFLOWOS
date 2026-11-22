@@ -724,11 +724,13 @@ describe('W11-GENOME-FINANCE-SCOPE review repairs (D-100, SEC-GFS-2, SEC-GFS-3):
     expect((control.body.domainScores as any[]).map((d) => d.domain)).toContain('finance');
   }, 60_000);
 
-  it('[GFS-14] RED-BEFORE (D-100, SEC-GFS-3): a revenue none STAFF member may still record a segment, but POST customer-sales/snapshot/compute, GET customer-sales/snapshot and customer-sales/snapshots answer 403 before the service runs, with no revenue per customer or lifetime value; the revenue read member computes and reads them', async () => {
+  it('[GFS-14] RED-BEFORE (D-100, SEC-GFS-3): POST customer-sales/snapshot/compute, GET customer-sales/snapshot and customer-sales/snapshots answer 403 before the service runs, with no revenue per customer or lifetime value; the revenue read member computes and reads them', async () => {
     await db.genomeFinancialMetric.create({
       data: { id: `${P}m_LIFETIME_VALUE`, businessId: ID.biz, metricType: 'LIFETIME_VALUE', period: PERIOD, value: 777.77, currency: 'TTD', confidence: 0.9, occurredAt: new Date(Date.now() - 86400_000) },
     });
-    const segment = await post('customer-sales/segments', ID.staffNone, { name: `${P}one`, segmentType: 'B2C', estimatedSize: 1 });
+    // FU-GENOME-REVENUE-CLASSIFIER (security review BLOCKING-2, D-234): a segment carries revenue, cost, LTV and CAC
+    // figures, so recording one needs revenue write (GRC-09); the setup records it as the revenue write member.
+    const segment = await post('customer-sales/segments', ID.staffWrite, { name: `${P}one`, segmentType: 'B2C', estimatedSize: 1 });
     expect(segment.status, JSON.stringify(segment.body)).toBe(201);
 
     const before = await countRows('genome_customer_sales_snapshots');
@@ -1043,6 +1045,7 @@ describe('FU-GENOME-REVENUE-CLASSIFIER (D-234, D-128, D-100): sales-derived and 
     sigChat: `${P}sig_chat`, // ConversationGenomeExtractor: key-chat / SALES
     sigUnclassified: `${P}sig_unclassified`, // KeyCortexGenomeBridge.createSignal default: key_cortex / general / general
     recSales: `${P}rec_sales`, // CustomerSalesGenomeService: domain SALES
+    recFromSignal: `${P}rec_from_sig`, // GenomeRecommendationService from a temporal risk/revenue signal: domain = section 'risk'
     memSalesSignal: `${P}mem_cs_sig`, // CUSTOMER_SALES_SIGNAL_GENERATED
     memOutcome: `${P}mem_outcome`, // outcome learning copying a SALES recommendation's domain
   };
@@ -1062,6 +1065,14 @@ describe('FU-GENOME-REVENUE-CLASSIFIER (D-234, D-128, D-100): sales-derived and 
         id: SALES.recSales, businessId: ID.biz, domain: 'SALES', title: 'Concentrate on the top three accounts',
         insight: 'Revenue is concentrated.', diagnosis: 'Concentration risk.', recommendation: 'Concentrate on the top three accounts.',
         expectedGainScore: 70, riskLevel: 'HIGH', status: 'ACTIVE',
+      },
+    });
+    await db.genomeRecommendation.create({
+      data: {
+        id: SALES.recFromSignal, businessId: ID.biz, domain: 'risk', title: 'Risk Pattern in revenue',
+        insight: 'Customers keep complaining about invoice errors.',
+        diagnosis: 'A Risk Pattern signal was detected in revenue.repeated_invoice_complaints with 90% confidence.',
+        recommendation: 'Review the signal evidence.', expectedGainScore: 70, riskLevel: 'HIGH', status: 'ACTIVE',
       },
     });
     for (const [id, sourceType, eventType, domain, summary] of [
@@ -1100,6 +1111,50 @@ describe('FU-GENOME-REVENUE-CLASSIFIER (D-234, D-128, D-100): sales-derived and 
     expect((all.body as any[]).map((r) => r.id)).toContain(ID.recOps);
     expect((await get(`recommendations/${SALES.recSales}`, ID.staffNone)).status).toBe(403);
     expect(((await get('recommendations', ID.staffRead)).body as any[]).map((r) => r.id)).toContain(SALES.recSales);
+  }, 30_000);
+
+  it('[GRC-07] RED-BEFORE (review MAJOR-2): a recommendation made from a money signal (its domain the signal section, risk) is not served to the revenue none STAFF member, and needs revenue write to act on; the revenue read member reads it', async () => {
+    expect(((await get('recommendations', ID.staffNone)).body as any[]).map((r) => r.id)).not.toContain(SALES.recFromSignal);
+    expect((await get(`recommendations/${SALES.recFromSignal}`, ID.staffNone)).status).toBe(403);
+    expect((await post(`recommendations/${SALES.recFromSignal}/accept`, ID.staffRead, {})).status).toBe(403);
+    expect(((await get('recommendations', ID.staffRead)).body as any[]).map((r) => r.id)).toContain(SALES.recFromSignal);
+  }, 30_000);
+
+  it('[GRC-08] RED-BEFORE (security review MAJOR-6; D-233, D-234): GET governance and governance/queue tell the revenue none STAFF member nothing of the withheld rows: no item for a sales signal or recommendation, counts of the rows they are served only, no weak-section, readiness or health entry for the FINANCIAL, SALES or BUSINESS_MODEL sections; the revenue read member gets the full summary', async () => {
+    const res = await get('governance', ID.staffNone);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const text = JSON.stringify(res.body);
+    for (const id of [SALES.sigCustomerSales, SALES.recSales, SALES.recFromSignal, ID.sigFin, ID.recFin]) expect(text, id).not.toContain(id);
+    expect(text).not.toMatch(SALES_TEXT);
+    const servedSignals = ((await get('signals?status=NEW', ID.staffNone)).body as any[]).length;
+    expect(res.body.counts.newSignals, 'counts only what the reader is served').toBe(servedSignals);
+    for (const section of ['FINANCIAL', 'SALES', 'BUSINESS_MODEL']) {
+      expect(text, `weak-section ${section}`).not.toContain(`weak-section-${section}`);
+      expect((res.body.genomeHealth.weakestSections as any[]).map((w) => w.section), section).not.toContain(section);
+    }
+    const queue = await get('governance/queue', ID.staffNone);
+    expect(JSON.stringify(queue.body)).not.toMatch(/weak-section-(FINANCIAL|SALES|BUSINESS_MODEL)/);
+    const control = await get('governance', ID.staffRead);
+    expect(JSON.stringify(control.body)).toContain(SALES.sigCustomerSales);
+    expect(control.body.counts.newSignals).toBeGreaterThan(res.body.counts.newSignals);
+  }, 30_000);
+
+  it('[GRC-09] RED-BEFORE (security review BLOCKING-2, D-234): the customer-sales segments and motions (revenue, cost, LTV, CAC, deal size per segment or motion) need revenue read to list and revenue write to record or delete', async () => {
+    for (const route of ['customer-sales/segments', 'customer-sales/motions']) {
+      const none = await get(route, ID.staffNone);
+      expect(none.status, `${route}: ${JSON.stringify(none.body)}`).toBe(403);
+      expect(none.body, route).toMatchObject({ code: 'FORBIDDEN', message: READ_DENIED });
+      expect((await get(route, ID.staffRead)).status, route).toBe(200);
+    }
+    const bodies: Record<string, Record<string, unknown>> = {
+      'customer-sales/segments': { name: `${P}grc_seg`, segmentType: 'B2C', estimatedSize: 1 },
+      'customer-sales/motions': { name: `${P}grc_motion`, motionType: 'INBOUND' },
+    };
+    for (const [route, body] of Object.entries(bodies)) {
+      const read = await post(route, ID.staffRead, body);
+      expect(read.status, `${route}: ${JSON.stringify(read.body)}`).toBe(403);
+      expect(read.body, route).toMatchObject({ code: 'FORBIDDEN', message: WRITE_DENIED('read') });
+    }
   }, 30_000);
 
   it('[GRC-04] RED-BEFORE (D-234): GET memory serves the revenue none STAFF member no customer-sales signal event and no outcome event copied from a SALES recommendation; the revenue read member reads both', async () => {
