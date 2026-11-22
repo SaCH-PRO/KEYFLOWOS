@@ -174,6 +174,10 @@
  *          summary names USD 550.00 unconverted; a revenue reader reads the
  *          same; a revenue-none member and another tenant's owner get 403; a
  *          non-code label is counted, never echoed
+ *   CP-22  (review SEC-W11RL-1) RED-BEFORE the FIN_CASHFLOW_RISK evidence names
+ *          the business currency only when it is a three-letter code (as its
+ *          body does): on a business whose stored currency is free text,
+ *          evidence.cashCurrency is null and the text is never echoed
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * the global TenantInterceptor, CommerceService, InvoiceWorkflowService,
@@ -1572,6 +1576,9 @@ describe('V1-37c the cash position never adds currencies together (VL-05)', () =
  * 550, the CP-14 figures. The snapshots sum to 900; the ledger across currencies would be 650.
  * TTD expenses of 900 over the last 90 days: 10 a day (10 days of TTD cash), 150 a month over six
  * months (0.7 months). Read from the snapshots neither alarm is raised (90 days; 6 months).
+ *
+ * Like the cases above, these run in file order: the figures asserted on A (1025.05 of ledger cash,
+ * the 6000 expense) are those CP-01..CP-05 and CP-18 left; K's are this describe's own.
  */
 describe('W11-RUNWAY-LEDGER-CASH: every runway alarm reads the ledger cash in the business currency (D-135)', () => {
   const staffRead = `${P}staffKr`; // revenue read, every other module none
@@ -1750,5 +1757,37 @@ describe('W11-RUNWAY-LEDGER-CASH: every runway alarm reads the ledger cash in th
     expect(runway(a.body).map((m: any) => [m.summary, money(m.expectedImpact), m.currency])).toEqual([
       ['Runway is ~1.0 months. Reducing burn or increasing collections is urgent.', 205.01, 'TTD'],
     ]);
+  }, 60_000);
+
+  // Review SEC-W11RL-1: Business.currency is free text (up to 10 characters, written by whoever may
+  // edit the business settings). The body names the business currency only when it is a three-letter
+  // code (cashOnlyLabel); the evidence, persisted and served whole to revenue readers and to the
+  // flow-chat tool finance_list_action_items, echoed the normalized text as cashCurrency.
+  it('CP-22 (review SEC-W11RL-1) RED-BEFORE: FIN_CASHFLOW_RISK evidence names the business currency only when it is a three-letter code; free text stored as the business currency is never echoed', async () => {
+    await db.business.update({ where: { id: ID.bizK }, data: { currency: 'pay me now' } });
+    try {
+      // No cash is held under that text: K's TTD 100 and USD 550 are both held apart.
+      const p = await cashPositionService.getCashPosition(ID.bizK);
+      expect(p).toMatchObject({ cashBalance: 0, currency: 'PAY ME NOW', byCurrency: { TTD: 100, USD: 550 } });
+      mirrored.length = 0;
+      await intel.scan(ID.bizK);
+      const rows = await cashRiskRows(ID.bizK);
+      expect(rows.length).toBe(1);
+      expect(rows[0].body).toBe(
+        'Cash 0.00 against 10.00/day burn (90-day average). Runway is under 30 days. (business-currency cash only). Not counted: TTD 100.00, USD 550.00.',
+      );
+      expect(rows[0].evidence).toEqual({
+        cash: 0, dailyBurn: 10, days: 0, cashCurrency: null,
+        otherCurrencyCash: [{ currency: 'TTD', amount: 100 }, { currency: 'USD', amount: 550 }],
+      });
+      for (const text of [JSON.stringify(rows[0]), JSON.stringify(mirrored), JSON.stringify(await commandRows(ID.bizK))]) {
+        expect(text).not.toMatch(/pay me now/i);
+      }
+    } finally {
+      await db.business.update({ where: { id: ID.bizK }, data: { currency: 'TTD' } });
+    }
+    // Back on TTD the evidence names it again.
+    await intel.scan(ID.bizK);
+    expect((await cashRiskRows(ID.bizK))[0].evidence).toMatchObject({ cash: 100, cashCurrency: 'TTD', otherCurrencyCash: [{ currency: 'USD', amount: 550 }] });
   }, 60_000);
 });
