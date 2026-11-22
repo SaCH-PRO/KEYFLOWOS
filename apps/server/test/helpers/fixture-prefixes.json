@@ -883,6 +883,11 @@
       "packet": "V1-99 (SWEEP-P0-SCOPES round 1 class repair, CLASS B credential writers)"
     },
     {
+      "prefix": "v99r_",
+      "owner": "apps/server/test/key-dispatch-refusal-final.integration.test.ts",
+      "packet": "V1-99 (W11-DISPATCH-REFUSAL-FINAL, D-134)"
+    },
+    {
       "prefix": "v99x_",
       "owner": "apps/server/test/sweep-export-receivers-scope.integration.test.ts",
       "packet": "V1-99 (SWEEP-P0-SCOPES round 2 class repair, CLASS A integration push receivers)"
