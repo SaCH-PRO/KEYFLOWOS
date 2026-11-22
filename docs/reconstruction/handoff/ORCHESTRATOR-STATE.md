@@ -1,6 +1,6 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-22 18:55 UTC by the orchestrator (Claude Code). Rewrite in place on every merge, packet return
+Last written: 2026-11-22 20:30 UTC by the orchestrator (Claude Code). Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -28,7 +28,9 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
   re-verified; merge commit with expectedHeadSha pinned.
 - Parallel sessions (D-241): independent packets are built in child sessions; the orchestrator re-verifies each return
   with its own acceptance review before it enters a wave PR. Hold at most four at once: nine at once hit the
-  account's 5-hour usage limit on 2026-11-22 and stopped every session for two hours.
+  account's 5-hour usage limit on 2026-11-22 and stopped every session for two hours. From 20:00 UTC hold three: the
+  seven-day Fable limit is spent until 2026-11-25 19:00 UTC, so every session runs on Opus (`model:
+  claude-opus-5-5` in create_session), which shares the 5-hour limit with the orchestrator.
 - Owner decisions are asked in batches with a recommendation first. Record each ruling on issue #80 as D-nnn at once.
 - Agent memory layer (D-253, "Both, in parallel"): Track 1 is `docs/development/agent-memory/` and
   `scripts/agent-memory/` (docs and scripts only); Track 2 is a separate research session.
@@ -38,31 +40,35 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 
 ## 2. Rulings not yet on main
 
-D-249 to D-254 are recorded in `BUILD-MAP-001.md` on branch `wave/v1-wave-3d` (this wave). Remove this line when it
-merges. No other ruling is pending a record.
+D-249 to D-254 are recorded in `BUILD-MAP-001.md` on `wave/v1-wave-3d` (PR #221). D-255 and D-256 and seven follow-up
+packets (plan now 217) are recorded on `pkt/V1-RULINGS-3E`, based on wave 3d: it joins wave 3e. Remove each line as it
+merges.
 
 ## 3. Work in flight (what git on main cannot show)
 
 Main is at `79ed2a57` (wave 3c, #220). Child sessions are on the account that started them; for another account the
-branch is the hand-over: fetch it, read its last commits and the RETURN on #80, and continue.
+branch is the hand-over: fetch it, read its last commits and the RETURN on #80, and continue. Lesson of 2026-11-22:
+three workers stopped on the Fable limit before pushing and their work was lost; the brief now says push after every
+commit.
 
 | Work | Branch / PR | State | Next action |
 | --- | --- | --- | --- |
-| Wave 3d: agent memory layer, rulings D-249..D-254, CLAUDE.md/AGENTS.md pointers, W11-INV-SET-MOVEMENT | `wave/v1-wave-3d` (PR to open) | Built; local proof running | Prove (server suite, R0, memory specs), open the PR, merge under D-239 when CI is green |
-| FU-PROPOSAL-REVENUE-SIGHT + Codex fixes | PR #218, `wave/v1-wave-3b-proposal` @ 7e658329 | Final reviews: security ACCEPT, correctness ACCEPT WITH MINORS, fit to merge. Main merged in; local suite 775/775 and R0 MET at 7e658329; CI running | Merge under D-239 when CI is green. The two Codex P1 threads stay open for the owner |
-| FU-KEY-GENOME-READS-RESIDUAL (D-235) | `pkt/V1-FU-KEY-GENOME-READS-RESIDUAL` @ bd95bc84 (pushed) | Suite 775/775 and R0 MET at bd95bc84 | After #218 merges: merge main, add the test "two fields with worded cuid runs are financial" (kills the `budget.left -= rawCost` mutant), re-prove, compact into the next wave |
-| W11-RUNWAY-LEDGER-CASH | `pkt/V1-W11-RUNWAY-LEDGER-CASH` @ e3c4ecc0 | Accepted with minors; repairs C1 and C2 done, reviewed and proven (766/766, R0 MET) | Hold: merges together with W11-CASH-READERS-LEDGER and W11-RUNWAY-BURN-CURRENCY (rollout default, owner question 3) |
-| W11-CASH-READERS-LEDGER | `pkt/V1-W11-CASH-READERS-LEDGER`, child session started 18:44 on the runway branch | Building | Acceptance review on return; then W11-RUNWAY-BURN-CURRENCY |
-| SWP-INV-MONEY-TOTALS | `pkt/V1-SWP-INV-MONEY-TOTALS` @ 5e23fb09, child session resumed 18:44 | Applying D-250 and D-251 | Acceptance review of the delta on return |
-| NAV-A1 (critical path) | `pkt/V1-NAV-A1` (not pushed yet), child session resumed 18:42 | Building | Acceptance review on return |
-| FU-CONTRACT-FETCH-OUTBOUND-GUARD (P0) | `pkt/V1-FU-CONTRACT-FETCH-OUTBOUND-GUARD` (not pushed yet), child session resumed 18:42 | Building | Acceptance review on return |
-| SWP-FIN-LEDGER | `pkt/V1-SWP-FIN-LEDGER` @ 25688bd4 | Stopped mid-work by the usage limit | Resume when a slot frees |
-| SWP-COA-UNIQUE-CODE | `pkt/V1-SWP-COA-UNIQUE-CODE` @ 339a5df7 | Stopped mid-work by the usage limit | Resume when a slot frees |
-| Memory R&D (D-253 Track 2; D-254 adds the packet proposal) | `docs/kf-memory-rnd-001` (nothing pushed yet) | Stopped by the usage limit before pushing | Resume when a slot frees; brief is on #80 (D-253, D-254) |
+| Wave 3d: memory layer, rulings D-249..D-254, W11-INV-SET-MOVEMENT | PR #221, `wave/v1-wave-3d` @ b9fa5faa | Codex's 4 findings fixed; local 768/768 and R0 MET at b9fa5faa | Merge under D-239 when CI is green at b9fa5faa |
+| BRS-12 timestamp flake (blocks #218) | PR #222, `ci/books-read-scope-timestamp` @ c7537c7b | Codex clean; every check green but Windows (running) | Merge under D-240; then merge main into #218 |
+| FU-PROPOSAL-REVENUE-SIGHT + Codex fixes | PR #218, `wave/v1-wave-3b-proposal` @ 7e658329 | Both reviews accept; local 775/775 and R0 MET; CI failed only on BRS-12 | After #222: merge main in, CI, merge under D-239. The two Codex P1 threads stay open for the owner |
+| FU-KEY-GENOME-READS-RESIDUAL (D-235) | `pkt/V1-FU-KEY-GENOME-READS-RESIDUAL` @ bd95bc84 | Suite 775/775 and R0 MET | After #218: merge main, add the test that kills the `budget.left -= rawCost` mutant, re-prove, wave 3e |
+| SWP-INV-MONEY-TOTALS (D-249..D-252, D-255, D-256) | `pkt/V1-SWP-INV-MONEY-TOTALS` @ 2b7f96de | ACCEPTED (both lenses); server 767/767 + R0 MET at 001e344d, web-tests-only since | Wave 3e |
+| W11-RUNWAY-LEDGER-CASH | `pkt/V1-W11-RUNWAY-LEDGER-CASH` @ e3c4ecc0 | Accepted, repairs proven | Wave 3e with W11-CASH-READERS-LEDGER (owner question 3 default) |
+| W11-CASH-READERS-LEDGER | `pkt/V1-W11-CASH-READERS-LEDGER` @ f914fb1d, session_017o9EBhQcuKdMaDYWyT3fU3 | Both lenses accept with minors; worker closing 3 test gaps | Check the delta; wave 3e |
+| FU-CONTRACT-FETCH-OUTBOUND-GUARD (P0) | `pkt/V1-FU-CONTRACT-FETCH-OUTBOUND-GUARD` @ 3f1207ef, session_017o9EBgX5pU73KnK62duV1A | Both lenses accept with minors; worker closing 4 (IPv4-translated ::ffff:0:0/96 in outbound-address.ts, authorized; body cancel; redirect message; fast CF-08) | Check the delta; wave 3e |
+| NAV-A1 (critical path) | `pkt/V1-NAV-A1`, session_017o9EBfkZtn5ec3BPuoARuf (restarted 19:59) | Building | Acceptance review on return |
+| SWP-FIN-LEDGER | `pkt/V1-SWP-FIN-LEDGER` @ 25688bd4, session_017o9EBhDURhxSoPYYpU8c4D (resumed 20:11) | Re-review of final repairs C-1, C-2, then proof | Acceptance review on return |
+| SWP-COA-UNIQUE-CODE | `pkt/V1-SWP-COA-UNIQUE-CODE` @ 339a5df7 | Stopped by the usage limit | Resume on Opus when a slot frees |
+| Memory R&D (D-253 Track 2, D-254) | `docs/kf-memory-rnd-001` (nothing pushed) | Stopped by the usage limit before pushing | Restart on Opus when a slot frees; brief on #80 |
 
-Next to start, in order, when a slot frees: SWP-FIN-LEDGER and SWP-COA-UNIQUE-CODE (resume), memory R&D (resume),
-FU-KEY-INVOICE-EMAIL-PAY-LINK, then the ready list in `V1-STATUS.md` (critical path first). `V1-STATUS.md` cannot see
-this table: check a packet is not already in flight before starting it.
+Next to start, in order, when a slot frees: SWP-COA-UNIQUE-CODE (resume), memory R&D, FU-SEND-REMINDER-SERVER-GATE
+(P1 security), FU-KEY-INVOICE-EMAIL-PAY-LINK, W11-RUNWAY-BURN-CURRENCY, then the ready list in `V1-STATUS.md`
+(critical path first). `V1-STATUS.md` cannot see this table: check a packet is not already in flight.
 
 ## 4. Open questions waiting for the owner (ask together)
 
@@ -81,6 +87,12 @@ Format: `docs/development/agent-memory/OWNER-QUESTION-FORMAT.md`. Safe defaults 
 6. Should the agent-memory tests and `status.mjs --check` run in CI? (Default: not until asked.)
 7. A cash shortfall on the command item ranks like zero cash (runway packet deviation). Should a shortfall rank
    highest? (Default: as built.)
+8. Health (`GET intelligence/.../health` and its snapshots) is served under settings read and now shows live ledger
+   cash; should money-area figures be withheld without revenue read (D-100)? (Default: do not widen Health readers.)
+9. KEY's overdue list now includes never-sent PENDING invoices (D-256); a drafted reminder would say "N days overdue".
+   Keep PENDING there? (Default: yes for figures; the server reminder gate packet keeps sends off PENDING.)
+10. Should the server's own storage host (`S3_PUBLIC_URL`) be exempt from the document-fetch guard when it is private
+    (self-hosted MinIO)? (Default: keep refusing.)
 
 ## 5. How to work here (learned the hard way)
 
@@ -104,5 +116,6 @@ this machine and this week.
 - A reviewer's acceptance is by reading unless it says it ran something; re-run suite and R0 yourself at the wave head.
 - Worktrees are disposable: every branch named in section 3 is pushed to origin. A fresh session recreates what it
   needs with `git worktree add <dir> origin/<branch>`. Nothing in this file depends on one container.
-- The account's usage limit is shared by all sessions: hold four child sessions at most, and keep reviews to the diff.
+- The account's usage limits are shared by all sessions: hold three child sessions at most while on Opus, and keep
+  reviews to the diff.
 - The v1 packet list with status, for the owner: https://claude.ai/artifact/3jRzGxzXvPXtVZeRoJuraK
