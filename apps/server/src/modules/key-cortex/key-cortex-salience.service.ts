@@ -119,6 +119,15 @@ const SIGNAL_MODULES: Readonly<Record<string, readonly CanonicalModule[]>> = {
   'contact.created': ['crm'],
 };
 
+/**
+ * MEM-SALIENCE-SIGHT review SEC-MSS-1: the signal types of each valence and how many concerns an appraisal keeps
+ * (MAX_CONCERNS, cut in scoreSignals BEFORE any reader's filter). A spec holds each list within that cap, so no signal
+ * a reader may not read can push one it may read out of the cached appraisal.
+ */
+export function salienceSignalTypes(): { threat: string[]; opportunity: string[]; maxConcerns: number } {
+  return { threat: Object.keys(THREAT_SIGNALS), opportunity: Object.keys(OPPORTUNITY_SIGNALS), maxConcerns: MAX_CONCERNS };
+}
+
 /** MEM-SALIENCE-SIGHT: the modules a reader needs to be told `signal` (SIGNAL_MODULES; unknown: every module). */
 export function signalModulesOf(signal: string): readonly CanonicalModule[] {
   return Object.prototype.hasOwnProperty.call(SIGNAL_MODULES, signal) ? SIGNAL_MODULES[signal] : EVENT_MODULES;

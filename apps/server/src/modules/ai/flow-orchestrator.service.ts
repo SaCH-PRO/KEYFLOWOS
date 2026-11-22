@@ -2177,9 +2177,10 @@ export class FlowOrchestratorService {
     const onboardingDirective = await this.buildOnboardingDirective(businessId, pageContext);
 
     // ─── THALAMUS ───────────────────────────────────────────────
-    // Grade the message before spending anything on it. Zero model calls,
-    // zero I/O: six regex classifiers plus two in-memory reads. Never throws;
-    // on any failure it returns today's exact parameters.
+    // Grade the message before spending anything on it. Zero model calls: six
+    // regex classifiers plus in-memory reads, after one membership read for the
+    // viewer's module sight (MEM-SALIENCE-SIGHT). Never throws; on any failure
+    // it returns today's exact parameters.
     const triage: TriageVerdict | null = await this.triageForViewer(businessId, message, Boolean(attachments?.length), userId);
 
     // The menu the model is shown, resolved once for this turn.
@@ -2626,9 +2627,10 @@ ${triage.standingContext}`;
     const onboardingDirective = await this.buildOnboardingDirective(businessId, pageContext);
 
     // ─── THALAMUS ───────────────────────────────────────────────
-    // Grade the message before spending anything on it. Zero model calls,
-    // zero I/O: six regex classifiers plus two in-memory reads. Never throws;
-    // on any failure it returns today's exact parameters.
+    // Grade the message before spending anything on it. Zero model calls: six
+    // regex classifiers plus in-memory reads, after one membership read for the
+    // viewer's module sight (MEM-SALIENCE-SIGHT). Never throws; on any failure
+    // it returns today's exact parameters.
     const triage: TriageVerdict | null = await this.triageForViewer(businessId, message, Boolean(attachments?.length), userId);
 
     // The menu the model is shown, resolved once for this turn.
