@@ -8,7 +8,7 @@
  * paid invoices. A reader with every module (an owner on role defaults) sees exactly what was shown before.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { KeyCortexSalienceService } from './key-cortex-salience.service';
+import { KeyCortexSalienceService, salienceSignalTypes } from './key-cortex-salience.service';
 import { KeyCortexEndocrineService } from './key-cortex-endocrine.service';
 import { CognitiveTriageService } from './cognitive-triage.service';
 import { AdaptiveRouterService } from './adaptive-router.service';
@@ -206,5 +206,42 @@ describe('MEM-SALIENCE-SIGHT: no indirect signal in the standing context of a re
     const text = triage.triage(BIZ, 'how is the week going?').standingContext ?? '';
     expect(text).not.toMatch(MONEY_WORDS);
     expect(text).not.toMatch(/booking/);
+  });
+});
+
+describe('MEM-SALIENCE-SIGHT review CR F1: a reader with partial sight is told no more than the unprojected view', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('over six hourly appraisals, a reader who sees every signal group but not every module gets no higher cortisol or effort than the owner', async () => {
+    vi.useFakeTimers();
+    const start = new Date('2026-11-22T00:00:00Z');
+    vi.setSystemTime(start);
+    const events: Ev[] = [
+      ...recent('proactive.invoice_overdue', 12),
+      ...recent('proactive.negative_sentiment', 4),
+      ...recent('proactive.booking_no_show', 3),
+    ];
+    const endocrine = new KeyCortexEndocrineService();
+    const salience = new KeyCortexSalienceService(prismaWith(events) as never, endocrine);
+    for (let h = 0; h < 6; h += 1) {
+      vi.setSystemTime(new Date(start.getTime() + h * HOUR));
+      await salience.appraise(BIZ);
+    }
+    const now = new Date(start.getTime() + 5 * HOUR);
+    const allButTeam = moduleSightOf(EVENT_MODULES.filter((m) => m !== 'team'));
+    const owner = endocrine.read(BIZ, now).find((h) => h.name === 'cortisol')!.level;
+    const partial = endocrine.readFor(BIZ, allButTeam, now).find((h) => h.name === 'cortisol')!.level;
+    expect(partial).toBeLessThanOrEqual(owner + 1e-9);
+    expect(endocrine.effortMultiplier(BIZ, now, allButTeam)).toBeLessThanOrEqual(endocrine.effortMultiplier(BIZ, now) + 1e-9);
+  });
+});
+
+describe('MEM-SALIENCE-SIGHT review SEC-MSS-1: no signal is cut before the reader filter', () => {
+  it('no valence has more signal types than the concerns kept per appraisal', () => {
+    const { threat, opportunity, maxConcerns } = salienceSignalTypes();
+    expect(threat.length).toBeLessThanOrEqual(maxConcerns);
+    expect(opportunity.length).toBeLessThanOrEqual(maxConcerns);
   });
 });
