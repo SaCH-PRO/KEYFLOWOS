@@ -198,7 +198,16 @@ export class KeyCortexEndocrineService {
     void this.persist(businessId);
   }
 
-  /** MEM-SALIENCE-SIGHT: push one strand as release() pushes a level (same clamp, same asymptote, same decay). */
+  /**
+   * MEM-SALIENCE-SIGHT: push strands as release() pushes a level (same clamp, same asymptote, same decay).
+   *
+   * Review CR F1b: each module strand is ONE chain that carries the business-wide evidence too, never two chains
+   * combined at read time (decay is multiplicative on the level, so a split pair decays slower than the joint level
+   * the owner is told). A business-wide dose (no modules) strengthens the business-wide strand and every module strand
+   * already held; a module strand first observed starts from the business-wide strand's current level and reasons.
+   * Every strand thus takes, per observation, no more than the unprojected level takes, and never a dose from another
+   * module group.
+   */
   private strengthenStrand(
     businessId: string,
     signal: EndocrineSignal,
@@ -209,27 +218,33 @@ export class KeyCortexEndocrineService {
     const key = [...modules].sort().join(',');
     const byHormone = this.strands.get(businessId) ?? new Map<HormoneName, Map<string, HormoneStrand>>();
     const byKey = byHormone.get(signal.hormone) ?? new Map<string, HormoneStrand>();
-    const current = byKey.get(key);
     const push = Math.min(Math.max(signal.magnitude, 0), MAX_SINGLE_PUSH);
-    const base = current ? this.levelAt(current, now) : 0;
-    byKey.set(key, {
-      level: base + push * (1 - base),
-      reasons: [...new Set([signal.reason, ...(current?.reasons ?? [])])].slice(0, 5),
-      updatedAt: now,
-      modules: [...modules],
-    });
+    const strengthen = (strandKey: string, strandModules: readonly CanonicalModule[], from: HormoneStrand | undefined) => {
+      const base = from ? this.levelAt(from, now) : 0;
+      byKey.set(strandKey, {
+        level: base + push * (1 - base),
+        reasons: [...new Set([signal.reason, ...(from?.reasons ?? [])])].slice(0, 5),
+        updatedAt: now,
+        modules: [...strandModules],
+      });
+    };
+    if (key === '') {
+      for (const [strandKey, strand] of [...byKey]) strengthen(strandKey, strand.modules, strand);
+      if (!byKey.has('')) strengthen('', [], undefined);
+    } else {
+      strengthen(key, modules, byKey.get(key) ?? byKey.get(''));
+    }
     byHormone.set(signal.hormone, byKey);
     this.strands.set(businessId, byHormone);
   }
 
   /**
    * MEM-SALIENCE-SIGHT (D-234, D-100): the levels as `sight` may be told them. A reader with every module is told the
-   * unprojected levels (read). Any other reader is told, per hormone, a level combined from the business-wide strand
-   * and the STRONGEST module strand it may read (1 - (1 - business-wide) * (1 - strongest)), with only those two
-   * strands' reasons; a hormone with neither above the noise floor is not described. Nothing a reader may not read
-   * enters its level, its reasons or their order. Review CR F1: the strongest, not every visible module strand,
-   * because the unprojected level takes one salience dose per valence per appraisal (the worst concern), and
-   * compounding one per module group told a reader of several groups more than the owner is told.
+   * unprojected levels (read). Any other reader is told, per hormone, the STRONGEST strand whose modules it may all
+   * read (the business-wide strand included; ties by key), with that strand's reasons; a hormone with no such strand
+   * above the noise floor is not described. Nothing a reader may not read enters its level, its reasons or their
+   * order. Review CR F1/F1b: one strand, never a combination, so a reader is told no more than the unprojected level
+   * (each strand takes no more per observation than it does: strengthenStrand).
    */
   readFor(businessId: string, sight: ModuleSight, now: Date = new Date()): HormoneLevel[] {
     if (seesEveryModule(sight)) return this.read(businessId, now);
@@ -238,7 +253,6 @@ export class KeyCortexEndocrineService {
 
     const live: HormoneLevel[] = [];
     for (const [name, byKey] of byHormone) {
-      let businessWide: (HormoneStrand & { key: string }) | null = null;
       let strongest: (HormoneStrand & { key: string }) | null = null;
       for (const [key, strand] of byKey) {
         const level = this.levelAt(strand, now);
@@ -247,21 +261,13 @@ export class KeyCortexEndocrineService {
           continue;
         }
         if (!strand.modules.every((module) => sight(module))) continue;
-        const live = { ...strand, level, key };
-        if (key === '') businessWide = live;
-        else if (!strongest || level > strongest.level || (level === strongest.level && key < strongest.key)) strongest = live;
+        if (!strongest || level > strongest.level || (level === strongest.level && key < strongest.key)) {
+          strongest = { ...strand, level, key };
+        }
       }
       if (byKey.size === 0) byHormone.delete(name);
-      const seen = [businessWide, strongest].filter((s): s is HormoneStrand & { key: string } => s !== null);
-      const level = 1 - seen.reduce((absent, s) => absent * (1 - s.level), 1);
-      if (seen.length === 0 || level < NOISE_FLOOR) continue;
-      seen.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime() || a.key.localeCompare(b.key));
-      live.push({
-        name,
-        level,
-        reasons: [...new Set(seen.flatMap((s) => s.reasons))].slice(0, 5),
-        updatedAt: seen[0].updatedAt,
-      });
+      if (!strongest) continue;
+      live.push({ name, level: strongest.level, reasons: [...strongest.reasons], updatedAt: strongest.updatedAt });
     }
     if (byHormone.size === 0) this.strands.delete(businessId);
     return live.sort((a, b) => b.level - a.level || a.name.localeCompare(b.name));
