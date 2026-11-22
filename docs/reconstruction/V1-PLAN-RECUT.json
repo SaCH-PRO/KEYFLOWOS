@@ -7753,6 +7753,291 @@
    "scope": "docs/intelligence/research/RESEARCH-CORPUS.yaml fails YAML parsing: line 84 col 22 (an unquoted title containing ': ', the Peopleware entry), and after that is quoted, a second error at the fictional-intelligence entry under expansion_protocol (~line 290). Quote or restructure every offending scalar without changing any value's meaning; then add a check that parses every YAML file under docs/intelligence/research/ (and reports file:line on failure) so tools can read the ledger. Run the check in an existing CI job only if one already runs docs or script tests; otherwise record it as a local check and leave CI unchanged.",
    "definition_of_done": "RED: the parse check fails on RESEARCH-CORPUS.yaml at line 84. GREEN: every YAML file under docs/intelligence/research/ parses; a diff of the parsed data before and after (for the entries that parsed before) shows no value changed; the check fails again if an unquoted 'key: value' title is reintroduced.",
    "fixture_prefix": null
+  },
+  {
+   "id": "FU-SITE-ANALYTICS-REVENUE-SCOPE",
+   "title": "Site analytics withholds paid revenue from readers without revenue read",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "H"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "S",
+   "priority": "P0",
+   "depends_on": [],
+   "files": [
+    "apps/server/src/modules/site/site.controller.ts",
+    "apps/server/src/modules/site/site.service.ts",
+    "apps/server/test/site-analytics-revenue-scope.integration.test.ts (new)"
+   ],
+   "decisions": [
+    "D-100",
+    "D-234"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "Found by the NAV-A1 security review (2026-11-22): GET site/businesses/:b/analytics (site.controller.ts ~110) has no module scope and returns revenue.inPeriod computed from PAID invoices (site.service.ts ~298-336); the Your page hub's default Overview tab renders \"Revenue (30d)\". Under D-100 the revenue figure (and any count derived from paid invoices, D-234) is withheld for a reader without revenue read; the rest of the analytics (visits, bookings shown on the store) stays for storefront readers. Check the web Overview tab renders without the figure.",
+   "definition_of_done": "RED: a member with storefront read and revenue none receives revenue.inPeriod. GREEN: withheld (absent, not zero) for that member; owner and revenue readers unchanged; the web tab shows no revenue tile for them; cross-tenant cases pass; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-TEMPORAL-FLOW-INBOX-SCOPE",
+   "title": "The temporal-flow timeline withholds KEY Inbox events from readers without operations read",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "H"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [],
+   "files": [
+    "apps/server/src/modules/temporal-flow/temporal-flow.controller.ts",
+    "apps/server/src/modules/temporal-flow/temporal-flow.service.ts",
+    "apps/server/test/temporal-flow-inbox-scope.integration.test.ts (new)"
+   ],
+   "decisions": [
+    "D-100",
+    "D-179"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "Found by the NAV-A1 security review: the unscoped temporal-flow read behind /app/temporal-flow returns key_inbox events (sender handles, AI summaries), which are operations data. Filter those events (and any other module-owned event types the review lists) by the reader's module levels at read, before ranking or counting.",
+   "definition_of_done": "RED: a bookings-only member sees key_inbox events with handles and summaries. GREEN: they are withheld for that member and still shown to operations readers; counts and pagination do not reveal them; cross-tenant cases pass; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-KEY-ACTION-GENOME-PROJECTION",
+   "title": "KEY action proposals bridged from FINANCIAL genome recommendations go through the revenue projection",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [
+    "FU-PROPOSAL-REVENUE-SIGHT"
+   ],
+   "files": [
+    "apps/server/src/modules/ai/*key-action*.ts",
+    "apps/server/test/key-action-genome-projection.integration.test.ts (new)"
+   ],
+   "decisions": [
+    "D-128",
+    "D-233",
+    "D-238"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "Found by the NAV-A1 security review: unscoped KEY action proposals (/app/key-autonomy) carry the text of bridged FINANCIAL genome recommendations, bypassing the D-233/D-128 projection. Apply the same projection FU-PROPOSAL-REVENUE-SIGHT applies to proposal-family events when serving these proposals to a reader without revenue read.",
+   "definition_of_done": "RED: a revenue-none member reads a proposal whose text names a FINANCIAL recommendation's figures. GREEN: projected (text and figures withheld or replaced per D-233); revenue readers unchanged; cross-tenant cases pass; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-CONVERSION-REPS-REVENUE",
+   "title": "Conversion sales-reps figures need revenue read",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "H"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [],
+   "files": [
+    "apps/server/src/modules/*/conversion*.ts",
+    "apps/server/test/conversion-reps-revenue-scope.integration.test.ts (new)"
+   ],
+   "decisions": [
+    "D-100",
+    "D-234"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "Found by the NAV-A1 security review: the unscoped conversion sales-reps read (Rep performance page) answers paid revenue per rep. Withhold revenue figures and revenue-derived counts without revenue read; keep non-money metrics.",
+   "definition_of_done": "RED: a revenue-none member receives per-rep revenue. GREEN: withheld; revenue readers unchanged; cross-tenant cases pass; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-PRESENCE-REVENUE-SCOPE",
+   "title": "Presence overview revenue and leads contact details are scoped",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "H"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [],
+   "files": [
+    "apps/server/src/modules/*/presence*.ts",
+    "apps/server/test/presence-scope.integration.test.ts (new)"
+   ],
+   "decisions": [
+    "D-100",
+    "D-104"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "Found by the NAV-A1 security review: the unscoped presence overview returns kpis.revenue (paid revenue), and the leads tab returns storefront contacts with email and phone. Withhold kpis.revenue without revenue read; serve lead contact details only to readers with crm read (and the owner), consistent with contact visibility rules.",
+   "definition_of_done": "RED: a member without revenue read gets kpis.revenue; a member without crm read gets lead emails and phones. GREEN: both withheld for them; owner and the right readers unchanged; cross-tenant cases pass; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-CASE-STUDY-REVENUE",
+   "title": "Case-study metrics withhold recent revenue without revenue read",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "H"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [],
+   "files": [
+    "apps/server/src/modules/*/case-stud*.ts",
+    "apps/server/test/case-study-revenue-scope.integration.test.ts (new)"
+   ],
+   "decisions": [
+    "D-100"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "Found by the NAV-A1 security review: the unscoped case-study read returns recentRevenue. Withhold it without revenue read.",
+   "definition_of_done": "RED: a revenue-none member receives recentRevenue. GREEN: withheld; revenue readers unchanged; cross-tenant cases pass; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-PAY-LINK-STATUS-GATE",
+   "title": "Public pay links are minted only for invoices someone owes",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "D"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [
+    "FU-SEND-REMINDER-SERVER-GATE"
+   ],
+   "files": [
+    "apps/server/src/modules/commerce/commerce.service.ts",
+    "apps/server/test/pay-link-status-gate.integration.test.ts (new)"
+   ],
+   "decisions": [
+    "D-256",
+    "D-248"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "Found by the FU-SEND-REMINDER-SERVER-GATE security review: createPaymentLink (commerce.service.ts ~5866) blocks only PAID and VOID, so POST .../payment-link and send-email mint public pay links for DRAFT, PENDING, FAILED and FULLY_CREDITED invoices. Adopt an allow-list of payable statuses consistent with INTENT_PAYABLE_STATUSES / CREDIT_AWARE_SHAREABLE; check every caller (send-email of a DRAFT that moves it to SENT must still work in the order it does today).",
+   "definition_of_done": "RED: a pay link is minted for a DRAFT-not-being-sent, FAILED and FULLY_CREDITED invoice. GREEN: refused before any link is written; payable statuses unchanged; send-email of a draft still sends with a link; cross-tenant cases pass; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-REMINDER-HONESTY",
+   "title": "Reminders record the real recipient, re-check status at send, and the web never claims a send that failed",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "D"
+   ],
+   "step": 5,
+   "lane": "both",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [
+    "FU-SEND-REMINDER-SERVER-GATE"
+   ],
+   "files": [
+    "apps/server/src/modules/commerce/commerce.service.ts",
+    "apps/server/src/modules/commerce/commerce.controller.ts",
+    "apps/web/src/app/app/financial-flow/page.tsx",
+    "apps/web/src/components/**/money-action-cards.tsx",
+    "apps/server/test/reminder-honesty.integration.test.ts (new)"
+   ],
+   "decisions": [
+    "D-256"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "From the FU-SEND-REMINDER-SERVER-GATE reviews: the reminder timeline records the contact's email, not the body's recipientEmail actually used (commerce.controller.ts ~1714); the status is not re-checked at send (TOCTOU with a concurrent payment/void); the financial-flow AR queue (page.tsx ~566) offers Remind for refused statuses; money-action-cards.tsx ~55-58 toasts success when the call failed.",
+   "definition_of_done": "RED: each of the four is shown. GREEN: the timeline names the actual recipient; a status change before send refuses; Remind hidden outside canRemind; failures surface; web unit and server suites green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-LEDGER-ZONED-FROM",
+   "title": "General ledger date-only `from` starts at the business-zone day and dates show in the business zone",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "H"
+   ],
+   "step": 5,
+   "lane": "both",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [
+    "SWP-FIN-LEDGER"
+   ],
+   "files": [
+    "apps/server/src/modules/finance/finance.controller.ts",
+    "apps/server/src/modules/finance/ledger-balance.service.ts",
+    "apps/web/src/app/app/finance/ledger/page.tsx",
+    "apps/server/test/general-ledger-zoned-from.integration.test.ts (new)"
+   ],
+   "decisions": [
+    "D-13"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "From the SWP-FIN-LEDGER reviews: a date-only `from` is 00:00 UTC while `to` is the business-zone day, so adjacent single-day views overlap by ~4 h in Port of Spain; impossible dates like 2026-02-31 are accepted for `from`; the page shows dates in the viewer's zone. Use startOfZonedDay for a date-only `from`, validate it like `to`, and format dates in the business zone. Also cap `page` and validate pageSize/accountId (pre-existing 500s on huge page, repeated accountId, out-of-range timestamps).",
+   "definition_of_done": "RED: from=D&to=D includes D-1 20:00 local lines; from=2026-02-31 is accepted; huge page / repeated accountId answer 500. GREEN: exact business-zone day; 400s for invalid input; dates in business zone; cross-tenant cases pass; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-COA-SEEDER-AND-INPUT",
+   "title": "Chart-of-accounts seeder respects the code rule and update input is validated",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "H"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [
+    "SWP-COA-UNIQUE-CODE"
+   ],
+   "files": [
+    "apps/server/src/modules/finance/chart-of-accounts-seeder.service.ts",
+    "apps/server/src/modules/finance/finance-coa.service.ts",
+    "apps/server/test/coa-seeder-input.integration.test.ts (new)"
+   ],
+   "decisions": [
+    "D-167"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "From the SWP-COA-UNIQUE-CODE reviews: the seeder's upsert takes neither the coa-code lock nor the uniqueness check, so a future SYSTEM_COA code could land beside an active custom account with the same code; update() with a parentId operator object or a non-string name answers 500. Make the seeder skip (and report) a system code held by an active custom account, under the lock; validate update input types (400).",
+   "definition_of_done": "RED: a new system code colliding with a custom account creates a second active holder; an operator-object parentId answers 500. GREEN: no duplicate active code; 400 for bad input; cross-tenant cases pass; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
   }
  ],
  "moot": [
@@ -8886,7 +9171,7 @@
   }
  ],
  "coverage": "Coverage check (recut2/p8_output.py, and review/cov.py re-run on v1-plan-recut.json): PASS. BUG-001..BUG-135 each appear exactly once: 126 on 58 packets, 3 moot, 6 fixed in flight (BUG-001/013/014/015/030 on pkt/SWEEP-P0-SCOPES, BUG-026 on pkt/PR195-JOURNAL-SCOPE). Missing: none; duplicated: none; unknown: none. All 119 v1-plan packets accounted for: 96 carried (kept or shrunk), 18 folded into consolidation packets (moot list + absorbs), 5 moot (SWP-EVENTS-CREATE, SWP-PO-LINES, SWP-PAYROLL-START, W11-CALLS-WEB-LIST, W11-WEB-CALENDAR-OWNER-CONTROLS); unaccounted: none. The moot list now holds only unreachable surfaces: BUG-002, BUG-079, BUG-113. Bugs fixed by removal sit on the packet that removes the surface, so the sweep re-run verifies them: 062 SWP-CONTACT-DETAIL, 066 and 121 SWP-CALENDAR-TRUTH, 072 EXPENSES-HUB-3, 082 SWP-CRM-WEB-POLISH, 093 SWP-INV-FORM-UX, 119 HARNESS-REMOVAL, 094 DEMO-PREVIEW, 057 W11-WEB-INVENTORY-REFUSALS. Other re-homes: 010 -> TODAY-4BLOCK (web half; server half in TODAY-AGGREGATE), 114 -> NAV-A2, 067/123/118/078/108 -> NAV-A3, 047 -> SWP-INV-LIST, 098 -> MOUNT-QUOTES, 068 -> OWNER-ALERTS-WEB, 077 -> BIZ-SETTINGS-WEB, 038 -> FIX-CONTACT-PARAMS, 008 -> DECIMALS-WEB, 069 -> TODAY-4BLOCK, 074/125 -> TODAY-AGGREGATE. Declared departures from the audit's moot list: BUG-011 stays on W11-QUERY-DTO-COERCION and BUG-065 on SWP-SEC-AUDIT-TRUTH (the audit keeps both packets); W11-WEB-CALENDAR-OWNER-CONTROLS is moot although the audit does not list it (Google Calendar is hidden; recorded in S1). Graph checks (recut2/p5_check.py): 0 dependency problems; the graph (depends_on plus lane order) is acyclic; no dependency points to a later step; 0 file collisions, counting every pair of packets that share a file with no dependency path between them across all steps (there are no wave barriers), with fixture-prefixes.json, the REST census doc, BUILD-MAP-001.md, DEPLOY_RUNBOOK.md and apps/server/package.json treated as append-only or disjoint-row files; 0 packets touch a step-0-changed file without depending on S0-LAND-INFLIGHT (S0-SEC-LANE-DEPLOY's runbook record is merged after #208 by design). Step-0 file sets were recomputed on the current local heads (f5d58ef7..71370250: 794 files, b4a30241..b3335bb7: 88, 0c22ea76..6f4935f1: 54); S0-LAND-INFLIGHT recomputes them on the admitted heads. 55 new integration suites in 55 packets each carry a pre-allocated v6<step><letter>_ prefix and list fixture-prefixes.json. Every decision id is valid and each of the 37 is used by at least one packet besides S1-RULINGS-RECORD.",
- "totals": "166 packets: 13 consolidated, 77 kept, 57 new, 19 shrunk. From the 119 v1 packets: 96 carried, 18 folded, 5 moot. Lanes: both 17, docs 1, gate 21, server 77, web 50. Sizes: L 22, M 73, S 71. Priorities: P0 37, P1 74, P2 38, P3 17. Bugs: 126 on packets, 3 moot, 6 fixed in flight = 135. Waves: 9 (steps 0-8) as labels over an explicit dependency graph; R0 register 61 entries (6 AMEND needing owner and ChatGPT authority, 3 conditional). Size-weighted (S=1, M=2, L=3) critical path 66 over 34 packets: S0-LAND-INFLIGHT -> GATE-HARNESS -> GATE-JOURNEYS-A-F -> SWP-LAYERS -> FIX-CONTACT-PARAMS -> MARKETING-REDIRECT-GATE -> FAILURE-KIT -> SWP-PROFILE-TEAMSIZE -> BIZ-SETTINGS-WEB -> NAV-A1 -> MOUNT-QUOTES -> SWP-INV-MATH -> SWP-INV-FORM-UX -> SWP-QUOTE-COMPOSER-CONTACT -> SWP-CONTACT-QUICKADD -> SWP-INV-LIST -> W11-WEB-OWNER-MEMBERSHIP-REFUSAL -> SWP-REMOVED-MEMBER-NOTICE -> SWP-INV-DETAIL -> SWP-INV-REFUND-UI -> CLAIM-LOOP -> READY-TO-SEND -> TODAY-AGGREGATE -> DEMO-PREVIEW -> TODAY-4BLOCK -> HARNESS-REMOVAL -> NAV-B-HIDE -> NAV-B-HIDE-2 -> NAV-B-LINKS -> NAV-B-LINKS-KEY -> SWEEP-RERUN-S7 -> GATE-JOURNEY-RUN -> GATE-STAGING-RUN -> GATE-OWNER-TEST. Longest lanes: 3:server-key 19, 6:store-sale-plans 19, 4:web-sales 18, 5:server-money-today 15, 5:web-screens 13, 5:loops 12. Growth over the draft (145): NAV-A split in three, NAV-B-HIDE and NAV-B-LINKS split in two, NAV-B-LEGACY-SERVER, KEY-TOOL-DOMAIN-HIDE, seven census batches replacing one M packet, MIGRATION-SET split in two, SALES-ORDERS-TAB and six sweep checkpoints. Calendar: the web lane from NAV-A1 through web-sales to CLAIM-LOOP, Today and the hide census is the critical path, as the audit said; at the reconstruction pace the build is about 3-4 weeks and the hold about 6 weeks with rulings, staging, the accountant, the owner test and fix rounds. Added 2026-11-22 (D-245, D-246, D-248): FU-BOOKING-PAGE-PAYMENT-METHOD, FU-CONTRACT-FETCH-OUTBOUND-GUARD, FU-KEY-INVOICE-EMAIL-PAY-LINK. Added 2026-11-22 (D-249): FU-MARKETPLACE-PAID-PAYMENT-ROW. Added 2026-11-22 (D-256 and acceptance reviews): FU-PENDING-OWED-SERVER, FU-PENDING-OWED-WEB, FU-SEND-REMINDER-SERVER-GATE, FU-LIST-CREDIT-AWARE-REMAINING, FU-CASH-LABEL-SANITISER, FU-DOC-FETCH-BODY-CAP, FU-CONTACTS-AUDIT-FLAKE. Added 2026-11-22 (D-257): the 13 MEM-* memory packets; (D-258 to D-260): FU-FINANCE-INTEL-DOORS, FU-HEALTH-MONEY-SCOPE, FU-KEY-OVERDUE-SENT-ONLY. Added 2026-11-22 (D-261): FU-RESEARCH-CORPUS-YAML; the research-index recommendations follow as RR-* packets once re-derived (D-262).",
+ "totals": "166 packets: 13 consolidated, 77 kept, 57 new, 19 shrunk. From the 119 v1 packets: 96 carried, 18 folded, 5 moot. Lanes: both 17, docs 1, gate 21, server 77, web 50. Sizes: L 22, M 73, S 71. Priorities: P0 37, P1 74, P2 38, P3 17. Bugs: 126 on packets, 3 moot, 6 fixed in flight = 135. Waves: 9 (steps 0-8) as labels over an explicit dependency graph; R0 register 61 entries (6 AMEND needing owner and ChatGPT authority, 3 conditional). Size-weighted (S=1, M=2, L=3) critical path 66 over 34 packets: S0-LAND-INFLIGHT -> GATE-HARNESS -> GATE-JOURNEYS-A-F -> SWP-LAYERS -> FIX-CONTACT-PARAMS -> MARKETING-REDIRECT-GATE -> FAILURE-KIT -> SWP-PROFILE-TEAMSIZE -> BIZ-SETTINGS-WEB -> NAV-A1 -> MOUNT-QUOTES -> SWP-INV-MATH -> SWP-INV-FORM-UX -> SWP-QUOTE-COMPOSER-CONTACT -> SWP-CONTACT-QUICKADD -> SWP-INV-LIST -> W11-WEB-OWNER-MEMBERSHIP-REFUSAL -> SWP-REMOVED-MEMBER-NOTICE -> SWP-INV-DETAIL -> SWP-INV-REFUND-UI -> CLAIM-LOOP -> READY-TO-SEND -> TODAY-AGGREGATE -> DEMO-PREVIEW -> TODAY-4BLOCK -> HARNESS-REMOVAL -> NAV-B-HIDE -> NAV-B-HIDE-2 -> NAV-B-LINKS -> NAV-B-LINKS-KEY -> SWEEP-RERUN-S7 -> GATE-JOURNEY-RUN -> GATE-STAGING-RUN -> GATE-OWNER-TEST. Longest lanes: 3:server-key 19, 6:store-sale-plans 19, 4:web-sales 18, 5:server-money-today 15, 5:web-screens 13, 5:loops 12. Growth over the draft (145): NAV-A split in three, NAV-B-HIDE and NAV-B-LINKS split in two, NAV-B-LEGACY-SERVER, KEY-TOOL-DOMAIN-HIDE, seven census batches replacing one M packet, MIGRATION-SET split in two, SALES-ORDERS-TAB and six sweep checkpoints. Calendar: the web lane from NAV-A1 through web-sales to CLAIM-LOOP, Today and the hide census is the critical path, as the audit said; at the reconstruction pace the build is about 3-4 weeks and the hold about 6 weeks with rulings, staging, the accountant, the owner test and fix rounds. Added 2026-11-22 (D-245, D-246, D-248): FU-BOOKING-PAGE-PAYMENT-METHOD, FU-CONTRACT-FETCH-OUTBOUND-GUARD, FU-KEY-INVOICE-EMAIL-PAY-LINK. Added 2026-11-22 (D-249): FU-MARKETPLACE-PAID-PAYMENT-ROW. Added 2026-11-22 (D-256 and acceptance reviews): FU-PENDING-OWED-SERVER, FU-PENDING-OWED-WEB, FU-SEND-REMINDER-SERVER-GATE, FU-LIST-CREDIT-AWARE-REMAINING, FU-CASH-LABEL-SANITISER, FU-DOC-FETCH-BODY-CAP, FU-CONTACTS-AUDIT-FLAKE. Added 2026-11-22 (D-257): the 13 MEM-* memory packets; (D-258 to D-260): FU-FINANCE-INTEL-DOORS, FU-HEALTH-MONEY-SCOPE, FU-KEY-OVERDUE-SENT-ONLY. Added 2026-11-22 (D-261): FU-RESEARCH-CORPUS-YAML; the research-index recommendations follow as RR-* packets once re-derived (D-262). Added 2026-11-22 (acceptance reviews of NAV-A1, FU-SEND-REMINDER-SERVER-GATE, SWP-FIN-LEDGER, SWP-COA-UNIQUE-CODE): FU-SITE-ANALYTICS-REVENUE-SCOPE, FU-TEMPORAL-FLOW-INBOX-SCOPE, FU-KEY-ACTION-GENOME-PROJECTION, FU-CONVERSION-REPS-REVENUE, FU-PRESENCE-REVENUE-SCOPE, FU-CASE-STUDY-REVENUE, FU-PAY-LINK-STATUS-GATE, FU-REMINDER-HONESTY, FU-LEDGER-ZONED-FROM, FU-COA-SEEDER-AND-INPUT.",
  "open_questions": [
   "Authorities for the AMEND entries (owner + ChatGPT), all requested in S1-RULINGS-RECORD: gmail-connect-binding R0-CMF5-I01/R0-CMF6-M01 (needed before SWEEP-P0 is admitted), invoice-create-contract and revenue-auth-001 CC-400 fractional quantity, onboarding-manual-complete demo seed, d11-sibling-writes D11W-04, release0-index explained entries, release0-live 'Customers', and the conditional WOS-C01 re-point.",
   "Production's deployed SHA for sec/v1-hold-1, and whether SWEEP-P0's fix commits cherry-pick onto it cleanly; if not, the owner must choose between an adapted security-only ref and accepting a deploy of main that carries #208 and PR195.",

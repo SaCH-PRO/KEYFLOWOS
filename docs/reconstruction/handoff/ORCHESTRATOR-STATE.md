@@ -40,7 +40,7 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 
 ## 2. Rulings not yet on main
 
-D-255 to D-260, seven follow-up packets, the 13 memory packets and three ruling packets (plan now 233) are recorded on `pkt/V1-RULINGS-3E` (main merged in): it
+D-255 to D-260, seven follow-up packets, the 13 memory packets and three ruling packets (plan now 244) are recorded on `pkt/V1-RULINGS-3E` (main merged in): it
 joins wave 3e. D-249 to D-254 are on main (wave 3d, #221).
 
 ## 3. Work in flight (what git on main cannot show)
@@ -90,6 +90,15 @@ Format: `docs/development/agent-memory/OWNER-QUESTION-FORMAT.md`. Safe defaults 
     (Default: unchanged.)
 10. The memory design's own questions Q1-Q14 (`docs/intelligence/research/memory/OPEN-QUESTIONS-FOR-OWNER.md`), on their
     recommended defaults until ruled (D-257).
+
+11. Should D-258 extend to the mirror doors (RevenueAction FIN_* complete/dismiss, command MONEY items complete/dismiss/
+    bulk, command generate/auto-scan, signals resolve/dismiss) and refuse a non-member SUPER_ADMIN the intelligence scan?
+    (Default: tracked, unchanged.)
+12. Should a PARTIALLY_CREDITED invoice that still owes be remindable (D-260 counts it as sent; the gate refuses it)?
+    (Default: refused.)
+13. release0-live AMEND: contacts page h1 "Customers" (spec ~286, ~475)? (Default: h1 stays "Contacts", menu says
+    "Customers".)
+14. Should the menu fail open (show every hub) when the my-access read fails? (Default: yes; the server is the gate.)
 
 ## 5. How to work here (learned the hard way)
 
