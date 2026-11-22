@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 import {
   UNTRUSTED_CONTENT_RULE,
   UNTRUSTED_MAX_CHARS,
+  containsUntrustedBlock,
   containsUntrustedMarker,
   fenceUntrusted,
   withUntrustedContentRule,
@@ -158,5 +159,17 @@ describe('RR-UNTRUSTED-CONTENT-FENCE withUntrustedContentRule: the system-prompt
     expect(once.startsWith('You are KEY.')).toBe(true);
     expect(once.split(UNTRUSTED_CONTENT_RULE)).toHaveLength(2);
     expect(withUntrustedContentRule(once)).toBe(once);
+  });
+});
+
+describe('RR-UNTRUSTED-CONTENT-FENCE containsUntrustedBlock: which messages carry a block', () => {
+  it('finds a block as fenced and as JSON-escaped in a tool message, and not in plain text or the rule itself', () => {
+    const fenced = fenceUntrusted('mcp_tool', 'result');
+    expect(containsUntrustedBlock(fenced)).toBe(true);
+    expect(containsUntrustedBlock(JSON.stringify(fenced))).toBe(true);
+    expect(containsUntrustedBlock(`member text\n\n${fenced}`)).toBe(true);
+    expect(containsUntrustedBlock('plain text <untrusted>')).toBe(false);
+    expect(containsUntrustedBlock(UNTRUSTED_CONTENT_RULE)).toBe(false);
+    expect(containsUntrustedBlock(null)).toBe(false);
   });
 });

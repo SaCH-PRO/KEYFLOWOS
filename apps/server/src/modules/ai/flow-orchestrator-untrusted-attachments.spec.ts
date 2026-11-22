@@ -21,7 +21,7 @@ import { FlowOrchestratorService } from './flow-orchestrator.service';
 import { KeyActionBoundaryService } from '../key-autonomy/action-boundary/key-action-boundary.service';
 import { KeyCortexExpertiseLensService } from '../key-cortex/key-cortex-expertise-lens.service';
 import { McpClientManagerService } from '../mcp/mcp-client-manager.service';
-import { UNTRUSTED_CONTENT_RULE, UNTRUSTED_MAX_CHARS, containsUntrustedMarker } from './untrusted-content';
+import { UNTRUSTED_CONTENT_RULE, UNTRUSTED_MAX_CHARS, containsUntrustedMarker, fenceUntrusted } from './untrusted-content';
 
 const BIZ = 'biz_rr_fence';
 const OWNER = 'u_rr_fence_owner';
@@ -61,6 +61,8 @@ interface HarnessOptions {
   /** The tool call the scripted model proposes (default: none, it answers in text). */
   toolCall?: { name: string; args: Record<string, unknown> };
   rawText?: string;
+  /** Governance lets the call run, and the tool answers this (default: quick confirmation, nothing runs). */
+  autoResult?: unknown;
 }
 
 function makeHarness(opts: HarnessOptions = {}) {
@@ -77,14 +79,15 @@ function makeHarness(opts: HarnessOptions = {}) {
   });
   const governance = {
     evaluate: vi.fn(async () => ({
-      allowed: true, requiresQuickConfirm: true, requiresFormalApproval: false, requiresAdminApproval: false, tier: 2, reason: 'Tier 2 needs a quick confirmation',
+      allowed: true, requiresQuickConfirm: opts.autoResult === undefined, requiresFormalApproval: false, requiresAdminApproval: false, tier: 2, reason: 'Tier 2 needs a quick confirmation',
     })),
     createApprovalItem: vi.fn(async () => ({ id: 'appr_1' })),
     getToolTier: () => 2,
   };
   const idempotencyRows: Array<Record<string, unknown>> = [];
-  const executeTool = vi.fn(async () => {
-    throw new Error('no tool may execute in these turns');
+  const executeTool = vi.fn(async (_b: string, name: string, _args: unknown, toolCallId?: string) => {
+    if (opts.autoResult === undefined) throw new Error('no tool may execute in these turns');
+    return { toolCallId: toolCallId ?? 'tc_1', name, result: opts.autoResult, changedEntities: [], followOnSuggestions: [], success: true };
   });
   const saveConversationHistory = vi.fn(async (..._a: unknown[]) => undefined);
   const orchestrator = Object.assign(Object.create(FlowOrchestratorService.prototype), {
@@ -230,10 +233,22 @@ describe('RR-UNTRUSTED-CONTENT-FENCE controls: no authority change, no change wi
         expect(pending.length, JSON.stringify(chunks.map((c) => c.type))).toBeGreaterThanOrEqual(1);
         expectFenced(h.messagesOf(h.trackAndStream));
       }
-      expect(h.governance.evaluate).toHaveBeenCalledWith(BIZ, 'commerce_send_invoice', expect.anything(), expect.anything(), undefined);
+      expect(h.governance.evaluate).toHaveBeenCalledWith(BIZ, 'commerce_send_invoice', undefined, ['finance'], undefined);
       expect(h.executeTool).not.toHaveBeenCalled();
     },
   );
+
+  it('chat: a fenced tool result makes the follow-up turn carry the rule once; the first call, with no block, carries none', async () => {
+    const h = makeHarness({ toolCall: { name: 'mcp__docs__search', args: { q: 'x' } }, autoResult: fenceUntrusted('mcp_tool', PLANT) });
+    await h.chat();
+    expect(h.trackAndComplete).toHaveBeenCalledTimes(2);
+    const first = (h.trackAndComplete.mock.calls[0] as unknown[])[3] as { messages: GatewayMessage[] };
+    const followUp = (h.trackAndComplete.mock.calls[1] as unknown[])[3] as { messages: GatewayMessage[] };
+    expect(first.messages[0].content).not.toContain(UNTRUSTED_CONTENT_RULE);
+    expect((followUp.messages[0].content as string).split(UNTRUSTED_CONTENT_RULE)).toHaveLength(2);
+    const tool = followUp.messages.find((m) => m.role === 'tool')!;
+    expect(blocksOf(JSON.parse(tool.content as string))).toHaveLength(1);
+  });
 
   const HISTORY = [
     { role: 'user', content: 'hello', timestamp: new Date() },
