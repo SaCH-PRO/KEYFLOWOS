@@ -5,7 +5,7 @@
  * test/temporal-memory-scope.integration.test.ts; these cases pin the query shapes and the error mapping.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { TemporalFlowMemoryService } from './temporal-flow-memory.service';
 
 function makeService() {
@@ -80,5 +80,55 @@ describe('MEM-TEMPORAL-SCOPE: TemporalFlowMemoryService by-id writes', () => {
     expect(tfm.findFirst).not.toHaveBeenCalled();
     expect(tfm.update).not.toHaveBeenCalled();
     expect(tfm.create).not.toHaveBeenCalled();
+  });
+
+  it('findById reads with the id and the business in its own where', async () => {
+    const { service, tfm } = makeService();
+    tfm.findFirst.mockResolvedValue(null);
+    await service.findById('biz', 'm1');
+    expect(tfm.findFirst).toHaveBeenCalledWith({ where: { id: 'm1', businessId: 'biz' } });
+  });
+
+  it('deleteMemory deletes with the id and the business in its own where', async () => {
+    const { service, tfm } = makeService();
+    expect(await service.deleteMemory('biz', 'm1')).toBe(true);
+    expect(tfm.deleteMany).toHaveBeenCalledWith({ where: { id: 'm1', businessId: 'biz' } });
+    tfm.deleteMany.mockResolvedValue({ count: 0 });
+    expect(await service.deleteMemory('biz', 'm2')).toBe(false);
+  });
+
+  it('createMemory refuses an absent business with BadRequestException', async () => {
+    const { service } = makeService();
+    const err = await service
+      .createMemory({ businessId: undefined, entityType: 'business', entityId: 'k', type: 'insight', content: 'c', sourceModule: 'x' } as any)
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(BadRequestException);
+  });
+
+  it.each([{ not: 'x' }, { in: ['k'] }, ['k'], 42, ''])('createMemory refuses an entity id %o before any query', async (entityId) => {
+    const { service, tfm } = makeService();
+    const err = await service
+      .createMemory({ businessId: 'biz', entityType: 'business', entityId, type: 'insight', content: 'c', sourceModule: 'x' } as any)
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(BadRequestException);
+    expect(tfm.findFirst).not.toHaveBeenCalled();
+    expect(tfm.update).not.toHaveBeenCalled();
+    expect(tfm.create).not.toHaveBeenCalled();
+  });
+
+  it('createMemory still accepts an absent entity id (a business-level memory)', async () => {
+    const { service, tfm } = makeService();
+    tfm.findFirst.mockResolvedValue(null);
+    tfm.create.mockResolvedValue({ id: 'm9', businessId: 'biz', confidence: 0.5 });
+    await service.createMemory({ businessId: 'biz', entityType: 'business', type: 'insight', content: 'c', sourceModule: 'x' } as any);
+    expect(tfm.findFirst).toHaveBeenCalledWith({ where: expect.objectContaining({ businessId: 'biz', entityId: null }) });
+  });
+
+  it.each([{ not: 'x' }, ['k'], 42])('findByEntity with an entity id %o reads nothing', async (entityId) => {
+    const { service } = makeService();
+    const tfm = (service as any).prisma.client.temporalFlowMemory;
+    tfm.findMany = vi.fn().mockResolvedValue([{ id: 'other' }]);
+    expect(await service.findByEntity('biz', 'business', entityId as any)).toEqual([]);
+    expect(tfm.findMany).not.toHaveBeenCalled();
   });
 });

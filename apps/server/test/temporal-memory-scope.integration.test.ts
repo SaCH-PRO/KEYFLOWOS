@@ -69,6 +69,8 @@ async function cleanup() {
 
 async function seedMemories() {
   await db.$executeRawUnsafe(`DELETE FROM temporal_flow_memories WHERE id LIKE ${sqlLikePrefix(P)}`);
+  // Rows store_memory creates get generated ids; they belong to the seeded businesses.
+  await db.$executeRawUnsafe(`DELETE FROM temporal_flow_memories WHERE business_id LIKE ${sqlLikePrefix(P)}`);
   const row = (id: string, businessId: string, entityId: string, content: string, tags: string[]) => ({
     id,
     businessId,
@@ -256,7 +258,7 @@ describe('MEM-TEMPORAL-SCOPE: SemanticMemoryService.deleteForSource', () => {
 
 /** Every seeded row, as stored, so a case can show nothing at all was written or deleted. */
 async function snapshot() {
-  return db.temporalFlowMemory.findMany({ where: { id: { startsWith: P } }, orderBy: { id: 'asc' } });
+  return db.temporalFlowMemory.findMany({ where: { businessId: { in: [ID.bizA, ID.bizB] } }, orderBy: { id: 'asc' } });
 }
 
 describe('MEM-TEMPORAL-SCOPE review repair: a command without a memoryId acts on no memory', () => {
@@ -322,5 +324,51 @@ describe('MEM-TEMPORAL-SCOPE review round 3: an operator object as memoryId neve
     const tag = await connector.execute(cmd(ID.bizA, 'tag_memory', { memoryId, tags: ['t'] }));
     expect(tag).toMatchObject({ success: false, error: 'Memory not found' });
     expect(await snapshot()).toEqual(before);
+  });
+});
+
+describe('MEM-TEMPORAL-SCOPE orchestrator review M1: store_memory and recall_memory take only a string key', () => {
+  const KEY_ERROR = 'Memory key must be a non-empty string';
+
+  it.each([{ not: 'x' }, { in: ['a-key', 'a-key-2'] }, ['a-key'], 42, ''])(
+    'store_memory with key %o is refused before any query and overwrites no memory',
+    async (key) => {
+      const before = await snapshot();
+      const r = await connector.execute(cmd(ID.bizA, 'store_memory', { key, value: { injected: true } }));
+      expect(answer(r)).toEqual({ success: false, data: undefined, error: KEY_ERROR });
+      expect(await snapshot()).toEqual(before);
+    },
+  );
+
+  it.each([{ not: 'x' }, { in: ['a-key'] }, ['a-key'], 42, ''])(
+    'recall_memory with key %o is refused and returns no memory',
+    async (key) => {
+      const r = await connector.execute(cmd(ID.bizA, 'recall_memory', { key }));
+      expect(answer(r)).toEqual({ success: false, data: undefined, error: KEY_ERROR });
+    },
+  );
+
+  it('store_memory and recall_memory with a string key still work', async () => {
+    const stored = await connector.execute(cmd(ID.bizA, 'store_memory', { key: 'v71t-new-key', value: { v: 1 }, tags: ['t1'] }));
+    expect(stored.success).toBe(true);
+    expect(stored.data?.businessId).toBe(ID.bizA);
+    const recalled = await connector.execute(cmd(ID.bizA, 'recall_memory', { key: 'v71t-new-key' }));
+    expect(recalled.success).toBe(true);
+    expect(recalled.data?.id).toBe(stored.data?.id);
+    expect(recalled.data?.content).toBe(JSON.stringify({ v: 1 }));
+    // Rewriting the same key updates that memory, not another.
+    const again = await connector.execute(cmd(ID.bizA, 'store_memory', { key: 'v71t-new-key', value: { v: 2 } }));
+    expect(again.data?.id).toBe(stored.data?.id);
+    expect((await read(ID.memA)).content).toBe('a-content');
+    await expectBUnchanged();
+  });
+
+  it('store_memory keeps only string tags', async () => {
+    const asString = await connector.execute(cmd(ID.bizA, 'store_memory', { key: 'v71t-tags-1', value: { v: 1 }, tags: 'xy' }));
+    expect(asString.success).toBe(true);
+    expect(asString.data?.sourceEventIds).toEqual([]);
+    const mixed = await connector.execute(cmd(ID.bizA, 'store_memory', { key: 'v71t-tags-2', value: { v: 1 }, tags: ['ok', 7, null, { a: 1 }] }));
+    expect(mixed.success).toBe(true);
+    expect(mixed.data?.sourceEventIds).toEqual(['ok']);
   });
 });
