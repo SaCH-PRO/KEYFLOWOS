@@ -202,8 +202,8 @@ const MODULE_TABLE: Record<string, { modules: string[]; cite: string[] }> = {
   "/app/commerce": { modules: ["revenue"], cite: [SRV("commerce/commerce.controller.ts", 706)] },
   "/app/schedule/calendar": { modules: ["bookings"], cite: [SRV("calendar/calendar.controller.ts", 256)] },
   "/app/financial-flow": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 359)] },
-  "/app/store": { modules: ["storefront"], cite: ["unscoped:modules/bookings/bookings.controller.ts:358", "D-150 hub rule: no read route checks storefront; the hub follows the scope (J5)"] },
-  "/app/settings/business": { modules: ["settings"], cite: ["unscoped:modules/identity/identity.controller.ts:858", "D-150 hub rule (J5); its writes need settings"] },
+  "/app/store": { modules: ["storefront"], cite: ["unscoped:modules/bookings/bookings.controller.ts:358", "D-150:storefront hub rule: no read route checks storefront; the hub follows the scope (J5)"] },
+  "/app/settings/business": { modules: ["settings"], cite: ["unscoped:modules/identity/identity.controller.ts:858", "D-150:settings hub rule (J5); its writes need settings"] },
   // Customers
   "/app/crm/deals": { modules: ["crm"], cite: [SRV("crm/crm-deals.controller.ts", 216)] },
   "/app/crm/accounts": { modules: ["crm"], cite: [SRV("crm/crm-accounts.controller.ts", 22)] },
@@ -231,7 +231,7 @@ const MODULE_TABLE: Record<string, { modules: string[]; cite: string[] }> = {
   "/app/retainers": { modules: ["revenue"], cite: ["unscoped:modules/retainers/retainer.controller.ts:151", "hub:money"] },
   "/app/budgeting": { modules: ["expenses"], cite: [SRV("expenses/expenses.controller.ts", 243)] },
   "/app/payroll": { modules: ["operations"], cite: [SRV("payroll/payroll.controller.ts", 22)] },
-  "/app/reports": { modules: ["revenue", "analytics"], cite: [SRV("reports/reports.controller.ts", 56), "D-179"] },
+  "/app/reports": { modules: ["revenue", "analytics"], cite: [SRV("reports/reports.controller.ts", 56), "D-179:analytics"] },
   "/app/finance/settings": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 611)] },
   "/app/finance/reconciliation": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 466)] },
   "/app/finance/tax": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 1101)] },
@@ -246,7 +246,9 @@ const MODULE_TABLE: Record<string, { modules: string[]; cite: string[] }> = {
   "/app/finance/exchange-rates": { modules: ["revenue"], cite: ["unscoped:modules/finance/finance.controller.ts:1698", "hub:money"] },
   "/app/money/books": { modules: ["revenue"], cite: [SRV("commerce/accounting.controller.ts", 61)] },
   // Your page
-  "/app/presence": { modules: ["storefront"], cite: ["unscoped:modules/site/presence/presence.controller.ts:79", "hub:page"] },
+  // Its overview (unscoped) answers kpis.revenue: every PAID invoice in the period plus store orders (security review
+  // round 2), so it needs revenue as well as the hub's storefront.
+  "/app/presence": { modules: ["storefront", "revenue"], cite: ["unscoped:modules/site/presence/presence.controller.ts:79", "data:modules/site/presence/presence-overview.service.ts:254:revenue invoicesRevenue, the PAID invoice totals in kpis.revenue", "hub:page"] },
   "/app/portal": { modules: ["storefront"], cite: ["unscoped:modules/portal/portal.controller.ts:29", "hub:page"] },
   // Settings
   "/app/profile": { modules: ["settings"], cite: ["unscoped:modules/identity/identity.controller.ts:858", "hub:settings"] },
@@ -272,17 +274,17 @@ const MODULE_TABLE: Record<string, { modules: string[]; cite: string[] }> = {
   "/app/work/projects": { modules: ["projects"], cite: [SRV("projects/projects.controller.ts", 43)] },
   // The manual tab's reads are unscoped; D-179 keeps this operations surface (its KEY tab reads ai-approvals,
   // operations) out of a menu without operations (orchestrator acceptance M1).
-  "/app/approvals": { modules: ["operations"], cite: ["unscoped:modules/approvals/approval.controller.ts:67", SRV("ai/ai-approvals.controller.ts", 54), "D-179"] },
+  "/app/approvals": { modules: ["operations"], cite: ["unscoped:modules/approvals/approval.controller.ts:67", SRV("ai/ai-approvals.controller.ts", 54), "D-179:operations"] },
   "/app/performance": { modules: ["operations"], cite: [SRV("staff-performance/staff-performance.controller.ts", 30)] },
   // Its time-entry reads are unscoped; every entry is logged against a project, read through the projects picker.
   "/app/time-tracking": { modules: ["projects"], cite: ["unscoped:modules/time-tracking/time-entry.controller.ts:174", SRV("projects/projects.controller.ts", 43)] },
-  "/app/operations": { modules: ["operations"], cite: ["unscoped:modules/content-ops/content-ops.controller.ts:68", "D-179"] },
-  "/app/operations-flow": { modules: ["operations"], cite: ["unscoped:modules/sop/sop.controller.ts:13", "D-179"] },
+  "/app/operations": { modules: ["operations"], cite: ["unscoped:modules/content-ops/content-ops.controller.ts:68", "D-179:operations"] },
+  "/app/operations-flow": { modules: ["operations"], cite: ["unscoped:modules/sop/sop.controller.ts:13", "D-179:operations"] },
   "/app/change-orders": { modules: [], cite: ["unscoped:modules/change-orders/change-order.controller.ts:111"] },
   // Marketing
   "/app/communicate/campaigns": { modules: [], cite: ["unscoped:modules/email-marketing/email-marketing.controller.ts:18"] },
   "/app/marketing/lists": { modules: ["content"], cite: [SRV("email-marketing/marketing-sync.controller.ts", 53)] },
-  "/app/marketing/case-studies": { modules: [], cite: ["unscoped:modules/site/site.controller.ts:688"] },
+  "/app/marketing/case-studies": { modules: ["revenue"], cite: ["unscoped:modules/site/site.controller.ts:688", "data:modules/site/case-study.service.ts:109:revenue recentRevenue, the PAID order totals of the last 60 days"] },
   "/app/content-ops": { modules: [], cite: ["unscoped:modules/content-ops/content-ops.controller.ts:68"] },
   "/app/social": { modules: [], cite: ["unscoped:modules/social/social.controller.ts:325"] },
   "/app/seo": { modules: [], cite: ["unscoped:modules/seo/seo.controller.ts:71"] },
@@ -358,7 +360,7 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
           const { lines, i } = at(m[1], Number(m[2]));
           if (!/@Get\(/.test(lines[i] ?? "")) bad.push(`${href}: ${cite} is not a @Get`);
           const scoped = [...decorators(lines, i).matchAll(/RequireModuleScope\(\s*'([a-z]+)'/g)].map((x) => x[1]);
-          if (!scoped.some((mod) => row.modules.includes(mod))) bad.push(`${href}: ${cite} scopes ${JSON.stringify(scoped)}`);
+          if (scoped.length === 0 || !scoped.every((mod) => row.modules.includes(mod))) bad.push(`${href}: ${cite} scopes ${JSON.stringify(scoped)}`);
           scoped.forEach((mod) => justified.add(mod));
         } else if ((m = /^unscoped:((?:modules|core)\/[^:]+\.ts):(\d+)$/.exec(cite))) {
           const { lines, i } = at(m[1], Number(m[2]));
@@ -371,12 +373,17 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
         } else if ((m = /^data:((?:modules|core)\/[^:]+\.ts):(\d+):([a-z]+) /.exec(cite))) {
           const { lines, i } = at(m[1], Number(m[2]));
           if (!(lines[i] ?? "").trim()) bad.push(`${href}: ${cite} points at nothing`);
+          if (!row.modules.includes(m[3])) bad.push(`${href}: ${cite} names ${m[3]}, which the row lacks`);
           justified.add(m[3]);
         } else if ((m = /^service-check:((?:modules|core)\/[^:]+\.ts):(\d+)$/.exec(cite))) {
           const { lines, i } = at(m[1], Number(m[2]));
           if (!/@Get\(/.test(lines[i] ?? "")) bad.push(`${href}: ${cite} is not a @Get`);
-        } else if (/^D-\d+/.test(cite) || /\bD-\d+\b/.test(cite)) {
-          row.modules.forEach((mod) => justified.add(mod));
+        } else if ((m = /^D-\d+:([a-z]+)\b/.exec(cite))) {
+          // A ruling justifies only the module it names (security review round 2).
+          if (!row.modules.includes(m[1])) bad.push(`${href}: ${cite} names ${m[1]}, which the row lacks`);
+          justified.add(m[1]);
+        } else if (/\bD-\d+\b/.test(cite) && row.modules.length === 0) {
+          // A ruling for a row that needs no module (Today, D-96).
         } else {
           bad.push(`${href}: unknown citation ${cite}`);
         }
@@ -387,6 +394,13 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
       }
     }
     expect(bad).toEqual([]);
+  });
+
+  it("NMS-18 a member with storefront read and no revenue is not offered Presence (its overview answers paid invoice revenue)", () => {
+    const { hubSections } = menuSectionsFor("both", levels({ storefront: "read" }));
+    const shown = hubSections.flatMap((s) => s.items.map((i) => i.href));
+    expect(shown).not.toContain("/app/presence");
+    expect(shown).toContain("/app/portal");
   });
 
   it("NMS-18 a member with customers read and no revenue is not offered Rep performance (its read answers revenue per rep)", () => {
