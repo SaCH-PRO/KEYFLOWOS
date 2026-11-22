@@ -3486,11 +3486,12 @@ describe('W11-INV-SET-MOVEMENT a direct stock set writes one ADJUSTMENT movement
       return interleave.answers;
     });
     const [[, final]] = (await pairRow(A.productId, A.warehouseId)) as any[];
-    const changes = outcome.added.map((m: any[]) => [m[1], m[2], m[3]]);
+    // Review COR-R2-3: compared sorted by change, not by created_at (the two commit within a millisecond of each other).
+    const changes = outcome.added.map((m: any[]) => [m[1], m[2], m[3]]).sort((a: any[], b: any[]) => a[1] - b[1] || String(a[2]).localeCompare(String(b[2])));
     expect([interleave.firstWaited, outcome.answer]).toEqual([true, ['committed', 'committed']]);
     expect([4, 7], 'the row ends at one of the two sets').toContain(final);
     // At 5c17e7b4: no movement at all.
-    expect(changes, 'two SET movements, in commit order, each from what its transaction read').toEqual(
+    expect(changes, 'two SET movements, each from what its transaction read under the lock').toEqual(
       final === 4
         ? [
             ['SET', -3, SET_MEMBER],
@@ -3650,5 +3651,132 @@ describe('W11-INV-SET-MOVEMENT a direct stock set writes one ADJUSTMENT movement
     const rolledBack = { answer: '500: Error', stockRowsWritten: 0, movementsWritten: 0, movementWritesTried: 1 };
     expect(outcomes).toEqual({ 'existing row 10 to 7': rolledBack, 'new pair holding 7': rolledBack });
     expect(rows).toEqual({ 'existing row 10 to 7': [[ID.biz, IN_STOCK, 0]], 'new pair holding 7': null });
+  });
+
+  it('RC-55 (W11-INV-SET-MOVEMENT review SEC-R2-2; D-139 under the row lock) a set to 3 that waits behind a transaction holding the row while it reserves 5 (a routing in flight) reads the row once that commits: it is refused 400 QUANTITY_BELOW_RESERVED and writes nothing; the row keeps 10 with 5 reserved', async () => {
+    await resetBusinessStock();
+    let letGo!: () => void;
+    const go = new Promise<void>((resolve) => (letGo = resolve));
+    let holding!: () => void;
+    const held = new Promise<void>((resolve) => (holding = resolve));
+    const holder = db.$transaction(
+      async (tx: any) => {
+        await tx.$queryRawUnsafe('SELECT id FROM inventory_stocks WHERE id = $1 FOR UPDATE', ID.stockA);
+        await tx.$executeRawUnsafe('UPDATE inventory_stocks SET reserved = 5 WHERE id = $1', ID.stockA);
+        holding();
+        await go;
+      },
+      { timeout: 20_000, maxWait: 5_000 },
+    );
+    await held;
+    let waited = false;
+    let outcome: any;
+    try {
+      outcome = await movementsAddedBy(async () => {
+        const answer = upsertAnswerWithCode(upsertByRoute(ID.biz, { ...A, quantity: 3 }, SET_MEMBER));
+        waited = await within(5_000, async () => (await waitingSessions()) >= 1);
+        letGo();
+        await holder;
+        return answer;
+      });
+    } finally {
+      letGo();
+      await holder.catch(() => undefined);
+    }
+    expect({ waited, ...outcome, row: await pairCounts(A.productId, A.warehouseId) }).toEqual({
+      waited: true,
+      answer: '400 QUANTITY_BELOW_RESERVED: Inventory quantity cannot be less than the quantity reserved for orders (5)',
+      added: [],
+      row: [[ID.biz, IN_STOCK, 5]],
+    });
+  });
+
+  it("RC-56 (W11-INV-SET-MOVEMENT review SEC-R2-1; D-139) a set to 2 of a pair whose row is created after the set's lock statement ran (it locked nothing) and before its read (a receipt creating the row with 10, committed), while a routing in flight holds that new row reserving 5: the set does not act on the row it read unlocked (10 with 0 reserved). It locks the row and reads it again, waits for the reservation, and is refused 400 QUANTITY_BELOW_RESERVED with nothing written; the row keeps 10 with 5 reserved", async () => {
+    await resetBusinessStock();
+    const newRowId = `${P}stock_rc56`;
+    const real = prismaService.client;
+    const bound = (target: any, prop: PropertyKey) => {
+      const value = Reflect.get(target, prop);
+      return typeof value === 'function' ? value.bind(target) : value;
+    };
+    let letGo!: () => void;
+    const go = new Promise<void>((resolve) => (letGo = resolve));
+    let holder: Promise<unknown> = Promise.resolve();
+    let interposed = 0;
+    /** Between the set's lock statement and its first read: the row is created and committed, then held by a reservation of 5. */
+    const interpose = async () => {
+      if (interposed++ > 0) return;
+      await db.$executeRaw`
+        INSERT INTO inventory_stocks (id, business_id, product_id, warehouse_id, quantity, reserved, currency, updated_at)
+        VALUES (${newRowId}, ${ID.biz}, ${NEW.productId}, ${NEW.warehouseId}, ${IN_STOCK}, 0, 'TTD', now())`;
+      let holding!: () => void;
+      const held = new Promise<void>((resolve) => (holding = resolve));
+      holder = db.$transaction(
+        async (tx: any) => {
+          await tx.$queryRawUnsafe('SELECT id FROM inventory_stocks WHERE id = $1 FOR UPDATE', newRowId);
+          await tx.$executeRawUnsafe('UPDATE inventory_stocks SET reserved = 5 WHERE id = $1', newRowId);
+          holding();
+          await go;
+        },
+        { timeout: 20_000, maxWait: 5_000 },
+      );
+      await held;
+    };
+    prismaService.client = new Proxy(real, {
+      get(target, prop) {
+        if (prop !== '$transaction') return bound(target, prop);
+        return (arg: any, options?: any) =>
+          typeof arg !== 'function'
+            ? target.$transaction(arg, options)
+            : target.$transaction(
+                (tx: any) =>
+                  arg(
+                    new Proxy(tx, {
+                      get(t, p) {
+                        if (p !== 'inventoryStock') return bound(t, p);
+                        const delegate = Reflect.get(t, p);
+                        return new Proxy(delegate, {
+                          get(d, m) {
+                            if (m !== 'findFirst') return bound(d, m);
+                            return async (args: any) => {
+                              await interpose();
+                              return d.findFirst(args);
+                            };
+                          },
+                        });
+                      },
+                    }),
+                  ),
+                options,
+              );
+      },
+    });
+    let waited = false;
+    let outcome: any;
+    let row: unknown;
+    try {
+      outcome = await movementsAddedBy(async () => {
+        const answer = upsertAnswerWithCode(upsertByRoute(ID.biz, { ...NEW, quantity: 2 }, SET_MEMBER));
+        // The set waits behind the reservation: at its second lock (the repair), or, before it, at its update.
+        waited = await within(5_000, async () => interposed > 0 && (await waitingSessions()) >= 1);
+        letGo();
+        await holder;
+        return answer;
+      });
+      row = await pairCounts(NEW.productId, NEW.warehouseId);
+    } finally {
+      prismaService.client = real;
+      letGo();
+      await holder.catch(() => undefined);
+      await removeRows([newRowId]);
+    }
+    // At 629d778b: 'committed' with one SET movement of -8, the row left holding 2 with 5 reserved.
+    expect({ interposed: interposed > 0, waited, ...outcome, row }).toEqual({
+      interposed: true,
+      waited: true,
+      answer: '400 QUANTITY_BELOW_RESERVED: Inventory quantity cannot be less than the quantity reserved for orders (5)',
+      added: [],
+      row: [[ID.biz, IN_STOCK, 5]],
+    });
   });
 });
