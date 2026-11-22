@@ -1,8 +1,8 @@
 # Research recommendations index (D-261, D-262)
 
-Every architectural recommendation re-derived from the repository and its GitHub record, verified against code at **origin/main 2c4e4bf2** and the plan at **pkt/V1-RULINGS-3E f6f6e01e** (`docs/reconstruction/V1-PLAN-RECUT.json`, 234 packets). Method, counts and owner questions: `README.md`. Packets: `RR-PACKETS.json`.
+Every architectural recommendation re-derived from the repository and its GitHub record, verified against code at **origin/main 2c4e4bf2** and the plan at **pkt/V1-RULINGS-3E f6f6e01e** (`docs/reconstruction/V1-PLAN-RECUT.json`, 234 packets). Method, counts and owner questions: `README.md`. Packets: `RR-PACKETS.json`. Worker notes cited as `worker-notes/notes-*.md` are the extraction workers' records (sources, evidence, sketches), committed for traceability; `worker-notes/MASTER.md` is the dedup merge table. RR-OWNER-RULINGS-RECORD is an admission helper (it records owner answers) and belongs to no row.
 
-Status key: **a** done on main (file:line); **b** already a plan packet (id); **c** partly done (gap stated); **d** not done; **MEM** covered by the memory track (D-257, MEM-* packets); **ruled** decided by an owner ruling or the human-agency doctrine; **principle** a law with no concrete change (no packet). Line numbers are at 2c4e4bf2. Source abbreviations used inside blocks (expanded in the README): GC, MC, CV, OT, BR, BS, BG, CD, HL, EM, KNG, SFS, PD, BP, OA, R3, DOS, SYN, TR, FIG, MS, K (= apps/server/src/modules/key-cortex), S (= apps/server/src), CA (= docs/intelligence/KEYFLOWOS-CONTINUOUS-ASSURANCE-SECURITY-SURVEILLANCE-QUALITY-RESEARCH-001.md).
+Status key: **a** done on main (file:line); **b** already a plan packet (id); **c** partly done (gap stated); **d** not done; **MEM** covered by the memory track (D-257, MEM-* packets); **MEM-deferred** memory-track material that no MEM packet covers yet (no packet; owner question); **ruled** decided by an owner ruling or the human-agency doctrine; **principle** a law with no concrete change (no packet). Line numbers are at 2c4e4bf2. Source abbreviations used inside blocks (expanded in the README): GC, MC, CV, OT, BR, BS, BG, CD, HL, EM, KNG, SFS, PD, BP, OA, R3, DOS, SYN, TR, FIG, MS, K (= apps/server/src/modules/key-cortex), S (= apps/server/src), CA (= docs/intelligence/KEYFLOWOS-CONTINUOUS-ASSURANCE-SECURITY-SURVEILLANCE-QUALITY-RESEARCH-001.md).
 
 ## Summary table
 
@@ -12,7 +12,7 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 | REC-GUARDRAIL-LIFECYCLE: versioned guardrail policy, detect-then-enforce rollout, classifier cascade | d | RR-KEY-SAFETY-POLICY (P2) |
 | REC-UNTRUSTED-CONTENT-FENCE: tool/MCP/document/web/extracted content enters prompts as fenced untrusted data that cannot carry instructions or authority | c | RR-UNTRUSTED-CONTENT-FENCE (P1) |
 | REC-STREAM-OUTPUT-BOUNDARY: a stream that ended in error or truncation triggers no effects; output policy before release | c | RR-STREAM-ERROR-NO-EFFECTS (P1) |
-| REC-CONTENT-AWARE-REDACTION: PII/secret detection by content and destination, not only by field name; applied to model output before release | d | RR-REDACTION-BY-CONTENT (P2), RR-BUSINESS-EVENT-REDACT (P2) |
+| REC-CONTENT-AWARE-REDACTION: PII/secret detection by content and destination, not only by field name; applied to model output before release | d | RR-REDACTION-BY-CONTENT (P2) |
 | REC-PROMPT-CANARY: canary tokens in protected context detect prompt leakage; reviewed attack-signature store | d | RR-KEY-PROMPT-CANARY (P3) |
 | REC-DURABLE-EFFECT-IDEMPOTENCY: SafetyShell idempotency survives restart and replicas (durable claim, not a process Set) | a | — |
 | REC-MODEL-LIFECYCLE: retired models cannot be selected; requested vs resolved model recorded; defaults current | d | RR-MODEL-LIFECYCLE-GUARD (P1) |
@@ -28,10 +28,10 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 | REC-EXECUTABLE-CONTRACTS: one executable schema (Zod) per AI output contract deriving type, validator and provider schema | d | RR-AI-CONTRACT-ZOD-FIRST (P3) |
 | REC-NO-MARKDOWN-STATE: stop regex-parsing markdown for machine state; typed result first | d | RR-CORTEX-TYPED-RESULT (P2) |
 | REC-OUTPUT-PROVENANCE: output states strict/repaired/coerced/partial/invalid; contract violation distinct from provider failure | d | RR-STRUCTURED-PARSE-INVALID-STATE (P2) |
-| REC-STRICT-TOOL-SCHEMAS: FLOW_TOOLS compiled to strict provider tool schemas; schema-valid args are not authorization | d | RR-STRICT-TOOL-SCHEMAS (P2) |
-| REC-RUN-BUDGET: typed per-run budget (tool rounds, tokens, cost, wall clock), inheritance, one retry graph; attention as a budget | d | RR-KEY-RUN-BUDGET (P2), RR-TOOL-WRITES-SEQUENTIAL (P1) |
+| REC-STRICT-TOOL-SCHEMAS: FLOW_TOOLS compiled to strict provider tool schemas; schema-valid args are not authorization | d | RR-TOOL-ARGS-MALFORMED-NEVER-RUN (P2), RR-STRICT-TOOL-SCHEMAS (P3) |
+| REC-RUN-BUDGET: typed per-run budget (tool rounds, tokens, cost, wall clock), inheritance, one retry graph; attention as a budget | d | RR-KEY-RUN-BUDGET (P2) |
 | REC-REAL-COMPENSATION: compensation really executes and verifies; never report undone work as undone | a | — |
-| REC-EFFECT-CLASS: every capability declares effect class, idempotency, reversibility, version; writes in one model turn run in order, only independent reads in parallel | c | RR-TOOL-EFFECT-CLASS (P2), RR-TOOL-WRITES-SEQUENTIAL (P1) |
+| REC-EFFECT-CLASS: every capability declares effect class, idempotency, reversibility, version; writes in one model turn run in order, only independent reads in parallel | c | RR-TOOL-EFFECT-CLASS (P1), RR-TOOL-EFFECT-METADATA (P2), RR-TOOL-WRITES-SEQUENTIAL (P1) |
 | REC-DISPATCH-EFFECT-SAFETY: ActionDispatcher: no blind retry of a write after a generic error; atomic durable claim before effect; outcome-unknown blocks a new attempt | c | RR-DISPATCH-NO-BLIND-RETRY (P1), RR-DISPATCH-ATOMIC-CLAIM (P1) |
 | REC-MCP-TENANCY: MCP bridge tenant-bound (per-business config/credential/cache) or provably off in v1 | d | RR-MCP-TENANT-BOUND (P1) |
 | REC-CONNECTOR-CONVERGENCE: one connector substrate / connected-account model (ConnectorRegistry vs KeyConnector) | c | RR-CONNECTOR-STACK-CENSUS (P3) |
@@ -45,11 +45,13 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 | REC-SAFE-MODE: partial safe mode (reads + identity + audit stay; risky autonomy off), recorded entry/exit, recovery before resumption | c | RR-KEY-SAFE-MODE (P3) |
 | REC-ACTION-UNDERSTANDING: one server projection per KEY action (proposed/approval/executed/verified/reversibility), rendered by web; no misleading copy | d | RR-ACTION-UNDERSTANDING-SERVER (P2), RR-ACTION-UNDERSTANDING-WEB (P2) |
 | REC-ACTION-RECEIPT-COVERAGE: more consequential capabilities go through Capability -> Control -> Clearance -> Claim -> OutcomeEvidence | c | RR-ACTION-BOUNDARY-NEXT-CAPABILITY (P2) |
-| REC-DURABLE-UNDO: reversibility class per tool; undo state durable (not a 5-minute in-process Map) | c | RR-UNDO-DURABLE (P3) |
-| REC-ROUTING-RISK-FLOOR: caller-supplied risk context sets effort-tier floors and grants no authority | c | RR-TRIAGE-RISK-FLOOR (P3), RR-ACTION-INTENT-ONE-CLASSIFIER (P2) |
+| REC-DURABLE-UNDO: reversibility class per tool; undo state durable (not a 5-minute in-process Map) | c | RR-MIGRATION-UNDO-TABLE (P3), RR-UNDO-DURABLE (P3) |
+| REC-ROUTING-RISK-FLOOR: caller-supplied risk context sets effort-tier floors and grants no authority | c | RR-TRIAGE-RISK-FLOOR (P3) |
 | REC-NO-SELF-PROMOTION: self-generated tuning stays a candidate until a human admits it | c | RR-SELFTUNE-CANDIDATE-ONLY (P3) |
 | REC-LEARNING-SEMANTICS: tool success is not user acceptance, and acceptance does not calibrate factual confidence | d | RR-LEARNING-OUTCOME-SEMANTICS (P3) |
 | REC-GOVERNED-LEARNING: learned signals only narrow autonomy, never widen it | a | — |
+| REC-OUTCOME-WEIGHTED-TOOL-SELECTION: learned tool outcome scores automatically adjust tool-selection weights | d | — |
+| REC-EVAL-ONLINE-CALIBRATION: evals get repeated-trial (stochastic) admission semantics, online evaluation rules and monitors, and a production-regression intake with human annotat | d | — |
 | REC-EVAL-HONEST: eval suites cannot pass vacuously; NOT_RUN is distinct; the harness runs in CI | c | RR-EVAL-HARNESS-NO-VACUOUS (P2) |
 | REC-COGNITIVE-TEST-DOUBLE: scripted fake model and trajectory assertions for KEY loops | c | RR-KEY-FAKE-MODEL-TRAJECTORY (P2) |
 | REC-EVAL-LINEAGE: versioned eval datasets, evaluators and runs | d | RR-EVAL-RUN-LINEAGE (P3) |
@@ -59,7 +61,7 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 | REC-REFLECTION-PERSIST: reflection hypotheses persist | c | RR-REFLECTION-HONEST (P3) |
 | REC-EMOTION-ENDOCRINE: detected emotion and feedback feed endocrine state | c | — |
 | REC-DOC-VOICE-ORGANS: document and voice as organ adapters emitting cortex events | d | — |
-| REC-CASH-TARGET: owner-set cash-flow target with corrective suggestions, revenue-scoped | c | RR-CASH-TARGET (P3) |
+| REC-CASH-TARGET: owner-set cash-flow target with corrective suggestions, revenue-scoped | c | RR-MIGRATION-CASH-TARGET (P3), RR-CASH-TARGET (P3) |
 | REC-AI-TRACE-SPINE: AI traces move off Langfuse's legacy ingestion to OTLP, failed attempts and fallbacks are traced under one trace with correlation ids, exporter failur | d | RR-LANGFUSE-INGESTION-CUTOVER (P2), RR-AI-TRACE-ATTEMPTS-CORRELATION (P3) |
 | REC-SLO: SLOs and error budgets for critical services | d | RR-SLO-AVAILABILITY-LEDGER (P3) |
 | REC-DEBUG-CAPSULE: serious failures emit a bounded capsule (sha, correlation id, class, replica) | c | RR-ERROR-CAPSULE (P3) |
@@ -67,7 +69,7 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 | REC-INTEGRITY-WATCHER: read-only runtime invariant monitor | c | RR-INTEGRITY-WATCH (P3) |
 | REC-CRON-OCCURRENCE-CLAIM: crons take an occurrence claim so they cannot double-fire | c | RR-CRON-OCCURRENCE-LOCK (P3) |
 | REC-JOB-TENANT-CONTEXT: every background job runs inside runWithTenant(businessId) | c | RR-JOB-TENANT-CONTEXT (P2) |
-| REC-STATE-TRANSITION-COMMANDS: lifecycle status fields change only through transition commands, never generic PATCH | b | RR-STATUS-PATCH-CENSUS (P3), RR-CHANGE-ORDER-APPROVE-COMMAND (P2) |
+| REC-STATE-TRANSITION-COMMANDS: lifecycle status fields change only through transition commands, never generic PATCH | c | RR-STATUS-PATCH-CENSUS (P3), RR-CHANGE-ORDER-APPROVE-COMMAND (P2) |
 | REC-ONE-EVENT-SUBSTRATE: one event substrate; audit publish-only / listen-only events | c | RR-DEAD-EVENT-CENSUS (P3) |
 | REC-EFFECTIVE-AUTHORITY: the effective-authority resolver leaves shadow mode and enforces | c | RR-AUTHORITY-SHADOW-PARITY (P2) |
 | REC-ARCH-FORWARDREF: no new forwardRef cycles; replace existing with events/facades | d | RR-FORWARDREF-RATCHET (P3) |
@@ -88,6 +90,12 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 | REC-SOCIAL-OAUTH-STATE: social OAuth state and PKCE in Redis. | c | — |
 | REC-CONSENT-UNIQUE: ConsentRecord unique (contact, channel, type) + upsert. | d | — |
 | REC-OBJECT-STORAGE-PRIVATE: PutObject sets private ACL + SSE. | d | RR-OBJECT-STORAGE-POSTURE-CHECK (P2) |
+| REC-OAUTH-PKCE: Google and Microsoft OAuth use PKCE | d | RR-OAUTH-PKCE-GOOGLE-MICROSOFT (P2) |
+| REC-EXPORT-DELETED-CONTACT: a soft-deleted or forget-pending contact cannot be exported | d | RR-PRIVACY-DELETED-CONTACT-GATES (P2) |
+| REC-EMAIL-DELETED-CONTACT: transactional email is not sent to a soft-deleted contact | d | RR-PRIVACY-DELETED-CONTACT-GATES (P2) |
+| REC-FORGET-CANCEL-SOURCE: cancelling a forget request restores only what the forget deleted | d | RR-FORGET-CANCEL-KEEPS-PRIOR-DELETE (P3) |
+| REC-APPROVAL-EXECUTE-SCOPED-READ: the approval orchestrator's pre-execution snapshot uses a business-scoped read | d | — |
+| REC-EXPORT-DOWNLOAD-RATE-LIMIT: the public contact-export download is rate limited | d | — |
 | REC-CONTEXT-BUNDLE: each development agent gets a deterministic, source-bound context bundle per packet instead of re-reading the plan | c | RR-BUNDLE-RULING-CONFLICTS (P3) |
 | REC-PROOF-PROFILES: a packet's change class selects its proof profile, and the proof class is declared | c | RR-BUNDLE-PROOF-PROFILE (P3) |
 | REC-HOTSPOTS: an offline, deterministic git-history scanner for hotspots and co-change | d | RR-HOTSPOT-SCANNER (P3) |
@@ -97,7 +105,7 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 | REC-SCOPE-GUARDS: a packet's allowed scope is enforced at edit time by hooks | c | RR-HOOK-PACKET-SCOPE (P3) |
 | REC-GENERATED-INSTRUCTIONS: shared agent instructions generated from one source to stop drift | c | — |
 | REC-ANTI-FAKE-GREEN: skipped or not-run is not passed in CI; shrink-only gate ledgers cannot grow across commits | c | RR-SCRIPT-SPECS-IN-CI (P2), RR-CI-REQUIRED-JOBS-AGGREGATE (P2), RR-GATE-LEDGER-MONOTONIC (P2), RR-GATE-LEDGER-CENSUS (P3) |
-| REC-PROPERTY-TESTS: property and fuzz tests for money, parsers and tenancy | a | — |
+| REC-PROPERTY-TESTS: generative (property/fuzz/boundary/concurrency) tests for parsers, money, date/time, pagination, idempotency, state machines, authorization predicates | c | — |
 | REC-TWO-KEY: catastrophic product actions need a second, independent act or approver | c | RR-ERASE-BUSINESS-TWO-STEP (P2) |
 | REC-INDEX-COVERAGE: compare real query paths with tenant/time/status indexes | d | RR-INDEX-COVERAGE-REPORT (P3) |
 | REC-AUTH-FAIL-CLOSED: an authority/autonomy-check error runs zero parsed commands, never "all parsed commands" | a | — |
@@ -115,7 +123,7 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 | REC-WATCHER-PERSIST: watcher signals are persisted, not dropped | a | — |
 | REC-LIVE-CHAT-MEMORY: unified memory retrieval is wired into the live Flow chat | a | — |
 | REC-PROGRAMME-TWIN: the programme compiles into a portable, machine-readable package another agent can continue from | a | — |
-| REC-SEC-REGISTER-DONE: eleven items of the architecture security register are already mitigated | a | — |
+| REC-SEC-REGISTER-DONE: sixteen items of the architecture security register are already mitigated | a | — |
 | REC-SELF-MODEL: KEY has a read-only operational self-model projected from existing owners, unknown when a source is unavailable | b | — |
 | REC-FINANCE-TOOLS: safe-to-spend, cash-flow forecast and money moves are canonical read capabilities | b | — |
 | REC-OPS-CONSOLE: an owner-only, read-only console with evidence-backed progress (reduced form of the Atlas Mission Control) | b | — |
@@ -125,9 +133,9 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 | REC-HONEST-RETRIEVAL: retrieval and context report "not recorded", "retrieval failed", "policy blocked" distinctly, never [] for an outage | MEM | — |
 | REC-RETRIEVAL-EVAL: retrieval evals measure real precision/recall and tenant/stale leakage with a negative control | MEM | — |
 | REC-CONTEXT-GENOME: memory separates authority from confidence, valid from recorded time, with provenance and supersession (one evidence-grounded world model) | MEM | — |
-| REC-REPRESENTATION-IDENTITY: every vector carries its representation identity (provider, model, revision, dimensions, index generation) | MEM | — |
-| REC-LEARNING-STREAM: governed world-knowledge ingestion (sources, cursors, ETag polling, shadow first; external content untrusted) | MEM | — |
-| REC-ADAPTIVE-RECEPTOR: one intake contract (source identity, tenant, provenance hash, trust state, observed/recorded time) writing observations in shadow | MEM | — |
+| REC-REPRESENTATION-IDENTITY: every vector carries its representation identity (provider, model, revision, dimensions, index generation) | MEM-deferred | — |
+| REC-LEARNING-STREAM: governed world-knowledge ingestion (sources, cursors, ETag polling, shadow first; external content untrusted) | MEM-deferred | — |
+| REC-ADAPTIVE-RECEPTOR: one intake contract (source identity, tenant, provenance hash, trust state, observed/recorded time) writing observations in shadow | MEM-deferred | — |
 | REC-DEEPTHINK-ACT: Deep Think (processConsciously) gets a path to act through the efferent bridge | ruled | — |
 | REC-GENOME-AUTO-APPLY: low-risk DNA evolution proposals auto-apply after reflection | ruled | — |
 | REC-AUTONOMY-FROM-VELOCITY: KEY's autonomy tier follows business velocity (actions/day) | ruled | — |
@@ -268,7 +276,7 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 - Sources: issue#153 comment 6008603830 2026-10-06 (s.12, step 7); 6008938834 2026-10-06 (s.6); 6009218421 2026-10-06 (s.12)
 - Dedup: single source (D:STRICT-TOOL-SCHEMAS)
 - Status: d — getOpenAiToolDefinitions passes parameters through (flow-tool-registry.ts:6132-6141); no strict/additionalProperties; validateToolInput skips undeclared args (flow-orchestrator.service.ts:3598-3600); new findings: Flow JSON.parses tool arguments unguarded (:2411, :2879) and the cortex loop runs a tool with {} when arguments do not parse (key-cortex-tool-loop.service.ts:72-77). Related plan packet W11-KEY-TRANSFER-INTEGER (integer branch in the same validator) is a dependency, not an overlap.
-- Packets: RR-STRICT-TOOL-SCHEMAS (P2, M; raised from P3 for the unparseable-arguments half)
+- Packets: RR-TOOL-ARGS-MALFORMED-NEVER-RUN (P2, S; malformed arguments never run a tool: the cortex loop runs a tool with {} today, key-cortex-tool-loop.service.ts:72-77), RR-STRICT-TOOL-SCHEMAS (P3, M; closed schemas and strict provider mode, after a census of executeToolDirectly callers). Split by the packet-quality review.
 
 ### REC-RUN-BUDGET — typed per-run budget (tool rounds, tokens, cost, wall clock), inheritance, one retry graph; attention as a budget
 - Sources: docs/intelligence/research/RD-03-LAYER-3-BACKWARD-PRESSURE-TEST.md:486-489; RD-03-LAYER-3-IMPLEMENTATION-PROOF-DESIGN.md:131-198 (COG-P06, COG-P09); RD-03-LAYER-3-ORCHESTRATION-CONVERGENCE-AUDIT.md:190-201; RD-03-CURRENT-STATE.yaml:56-57, :76; issue#153 comment 6007335935 2026-10-06 (E5, E7, E8, C Retry Domain + Retry Algebra, F Budget Inheritance, P-RETRY-01/02); 6008603830 2026-10-06 (L7-P09); docs/neuro-atlas-code-mapping.md:268
@@ -288,7 +296,7 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 - Sources: GC:571-576; MC:402; CV:167-170; BP:41-53 (K5); KEY-COGNITIVE-ARCHAEOLOGY-...-001.md:380-383 (COG-002); KEY-COGNITIVE-IMPLEMENTATION-CROSSWALK-001.md:224; KEY-CONCURRENCY-...-001.md:411-450; kernels/KF-KERNEL-005-CAPABILITY-FABRIC.md:134-147; 12-KERNEL-PROGRAMME.md:666-671; issue#153 comment 6008938834 2026-10-06 (s.7, s.8); issue#153 comment 6009218421 2026-10-06 (s.7, s.8, L8-GAP-04, L8-P07/P08/P09)
 - Dedup: A:CAPABILITY-EFFECT-METADATA, C:ONE-CAPABILITY-REGISTRY (metadata half) and D:TOOL-CALL-EFFECT-SEQUENCING all ask for declared effect metadata; D adds the consumer (sequencing). C's "one registry" half is a later slice (named in RR-TOOL-EFFECT-CLASS scope, not a packet now).
 - Status: c/d — FlowTool has family/riskLevel/riskTier/changedEntities/manualEquivalentRoute only (ai/flow-tool-registry.ts:23-43); chat and streamChat run all cleared calls with Promise.all (ai/flow-orchestrator.service.ts:2471-2473, 2993-2995); tier-1 writes, tier-2 at autonomy 4 and approved-tools reach that point without confirmation (ai/ai-oversight.service.ts:277-289). Plan grep effectClass/Promise.all/sequen: no overlap (KEY-TOOL-ALLOWLIST adds module family only).
-- Packets: RR-TOOL-EFFECT-CLASS (P2, M), RR-TOOL-WRITES-SEQUENTIAL (P1, S)
+- Packets: RR-TOOL-EFFECT-CLASS (P1, S; slice 1, effectClass READ/WRITE with strict defaults), RR-TOOL-EFFECT-METADATA (P2, M; idempotency, reversibility, contract version), RR-TOOL-WRITES-SEQUENTIAL (P1, S). Split by the packet-quality review.
 
 ### REC-DISPATCH-EFFECT-SAFETY — ActionDispatcher: no blind retry of a write after a generic error; atomic durable claim before effect; outcome-unknown blocks a new attempt
 - Sources: BP:491-494; PD:168-198 (COG-P08); OA:249; R3:58-59, R3:75; GC:388-389 (G0-03); kernels/KF-KERNEL-011-RECOVERY-RELIABILITY.md:202-216; KF-KERNEL-009-INTEGRATION-EXTERNAL-REALITY.md:503-551; KF-KERNEL-010-FINANCIAL-TRUTH.md:382-421; 12-KERNEL-PROGRAMME.md:670-671; KEYFLOWOS-CONTINUOUS-ASSURANCE-...-001.md:1139-1157
@@ -372,7 +380,7 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 - Sources: FIG/GENOME-V0.1-CANDIDATE-ROUTING.md:71-74 (C10); FIG/GENOME-V0.1-CONVERGENCE.md:93-98; FIG/TRANCHE-INSTITUTIONAL-INTELLIGENCE-001.md:34-36, 70-71; DOS/NORMAN-DESIGN-EVERYDAY-THINGS.md:53-62; DOS/DECISION-ROUTING-KAHNEMAN-ALGORITHMS.md:93-106; TR/ACTION-UNDERSTANDING-TRACE-001.md:131
 - Dedup: single source (B:REVERSIBILITY-CLASS); the class field lives in RR-TOOL-EFFECT-CLASS (REC-EFFECT-CLASS).
 - Status: c — undo exists but in memory: ai/undo.service.ts:69-72 (Map, 5-minute window), :127-129 (setTimeout delete), process-local claim Set (~:73-81); writer action-dispatcher.service.ts:186-197; routes ai/agent.controller.ts ~262-300. No plan packet (plan "undo" hits are unrelated contact/stock undo).
-- Packets: RR-UNDO-DURABLE (P3, M; one new table, no backfill)
+- Packets: RR-MIGRATION-UNDO-TABLE (P3, S; the isolated migration, D-167, owner approval), RR-UNDO-DURABLE (P3, M; no backfill)
 
 ## 4. KEY cognition, learning and evaluation
 
@@ -482,7 +490,7 @@ Status key: **a** done on main (file:line); **b** already a plan packet (id); **
 - Sources: C:CASHFLOW-TARGET-CORRECTIVE (docs/neuro-atlas-code-mapping.md:282)
 - Dedup: single source.
 - Status: c — runway truth is planned (W11-GENOME-RUNWAY, W11-RUNWAY-LEDGER-CASH, W11-CASH-READERS-LEDGER). The only corrective move is hard-coded `runwayMonths < 3` (apps/server/src/modules/finance/money-moves.service.ts:139). `git grep -i cashTarget|cash_target|runwayTarget` finds nothing.
-- Packets: RR-CASH-TARGET (P3, S; step 5; after W11-RUNWAY-LEDGER-CASH). It adds one nullable Business column (schema named). It is read under revenue read and written under revenue write (D-100, D-128, D-205, D-233, D-234), fails closed, is suggestion-only, and leaves the D-205 release0 test file unedited.
+- Packets: RR-MIGRATION-CASH-TARGET (P3, XS; the isolated Business column migration, D-167, owner approval), RR-CASH-TARGET (P3, S; step 5; after W11-RUNWAY-LEDGER-CASH). It adds one nullable Business column (schema named). It is read under revenue read and written under revenue write (D-100, D-128, D-205, D-233, D-234), fails closed, is suggestion-only, and leaves the D-205 release0 test file unedited.
 
 ## 5. Observability, operations and architecture ratchets
 

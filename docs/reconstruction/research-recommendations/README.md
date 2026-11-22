@@ -3,7 +3,7 @@
 Owner rulings D-261 ("every architectural recommendation in the owner's research index joins v1 as a packet, unless it is already done on main or already a plan packet") and D-262 ("rebuild the list from the repo, not from the owner's workbook") are recorded in `docs/reconstruction/BUILD-MAP-001.md` on `pkt/V1-RULINGS-3E`. This directory is the research worker's output. It proposes packets. The orchestrator admits them: nothing here edits `V1-PLAN-RECUT.json` or `BUILD-MAP-001.md`.
 
 - `RECOMMENDATIONS-INDEX.md`: every recommendation with its sources, how duplicates were merged, its verified status, and its packet ids. Appendix A lists the metaphor-only ideas.
-- `RR-PACKETS.json`: 89 proposed packets in the plan's exact JSON shape.
+- `RR-PACKETS.json`: 97 proposed packets in the plan's exact JSON shape. `fixture-prefix-rows.json`: the fixture-prefix table rows for those packets. `worker-notes/`: the extraction notes and merge table that the index cites.
 - This README covers method, counts, what could not be verified, owner questions and review results.
 
 Base: code at **origin/main 2c4e4bf2**; plan at **pkt/V1-RULINGS-3E f6f6e01e** (234 packets).
@@ -19,7 +19,7 @@ Base: code at **origin/main 2c4e4bf2**; plan at **pkt/V1-RULINGS-3E f6f6e01e** (
    - Issue #153: the body and all 94 comments. The ten layer convergences, the global and packet-derivation comments, the context-compiler checkpoint and the stall-loop comment were read in full. Per-subject comments were read through their GAP lines.
    - The research-related issues and PRs: 12 issues and 26 PRs, matched by research, genome, atlas, cognition, intelligence, philosophy, parallel, R&D, neuro and book in the title or labels.
    - Not covered: memory research (branch `docs/kf-memory-rnd-001`, D-257) and issue #80. The 08*/09*/10* finding, contradiction and recommendation registers are the audit backlog, which the build map's coverage ledger already absorbed; they were left out as not research.
-2. **What counts as a recommendation.** A concrete change to code, data, security, AI behaviour or engineering process. A metaphor counts only where its source names such a change. Metaphor-only ideas, research-process notes and "keep what works" decisions go to Appendix A (65 entries).
+2. **What counts as a recommendation.** A concrete change to code, data, security, AI behaviour or engineering process. A metaphor counts only where its source names such a change. Metaphor-only ideas, research-process notes and "keep what works" decisions go to Appendix A (66 entries).
 3. **Deduplication.**
    - About 180 raw items from the four workers were merged into one master list. Two blocks were merged only when they propose the same change at the same code seam.
    - Typical merges: the GenAI corpus, issue #153 and the genome all propose "untrusted content is data, not instruction". The Norman dossier, the Book x GenAI packet KF-KEY-ACTION-UNDERSTANDING-001 and PR #156 all propose action understanding. The vLLM admission-control comment and the neuro atlas's event-bus backpressure became one recommendation with two packets.
@@ -33,155 +33,175 @@ Base: code at **origin/main 2c4e4bf2**; plan at **pkt/V1-RULINGS-3E f6f6e01e** (
    - Each packet is S, XS or M. There are no L packets: big convergences get a first slice, usually a census spec that fails on a new unregistered path.
    - Every definition of done starts with a concrete RED test that fails on main.
    - Every packet cites D-261 and D-262 and every ruling it must respect: D-100/D-128/D-233/D-234/D-238 for money and sales sight, D-226/D-227, D-257, D-208, D-129, D-17, D-22, D-103, D-141 and the human-agency doctrine (`docs/canon/01-CONSTITUTION-AND-EXECUTIVE-DOCTRINE.md:34-42`).
-6. **Validation** (re-run before each push). `RR-PACKETS.json` parses, has 89 ids, none duplicated and none colliding with a plan id. Every `depends_on` names a plan packet or an RR packet. Every packet has the exact 17 keys in plan order, `kind: "new"`, `fixture_prefix: null`, and a definition of done that starts with `RED:`.
+6. **Validation** (re-run before each push). `RR-PACKETS.json` parses, has 97 ids, none duplicated and none colliding with a plan id. Every `depends_on` names a plan packet or an RR packet. Every packet has the exact 17 keys in plan order, `kind: "new"`, `fixture_prefix: null`, and a definition of done that starts with `RED:`.
 
 ## 2. Counts
 
-There are 128 recommendations (index rows), plus 3 principles that name no concrete change (index section 8, no packet).
+There are 136 recommendations (index rows), plus 3 principles that name no concrete change (index section 8, no packet).
 
 | Status | Rows | With an RR packet | Without |
 |---|---|---|---|
-| a, done on main | 20 (one row groups 11 security-register items) | 0 | 20 |
-| b, already a plan packet | 8 | 1 (REC-STATE-TRANSITION-COMMANDS: residual change-order fix) | 7 |
-| MEM, covered by the memory track | 6 | 0 | 6 |
+| a, done on main | 19 (one row groups 16 security-register items) | 0 | 19 |
+| b, already a plan packet | 7 | 0 | 7 |
+| MEM, covered by MEM-* packets (D-257) | 3 | 0 | 3 |
+| MEM-deferred, memory-track material no MEM packet covers | 3 | 0 | 3 |
 | ruled, decided by ruling or doctrine | 5 | 0 | 5 |
-| c, partly done | 49 | 43 | 6 |
-| d, not done | 40 | 35 | 5 |
-| **Total** | **128** | **79** | **49** |
+| c, partly done | 51 | 44 | 7 |
+| d, not done | 48 | 39 | 9 |
+| **Total** | **136** | **83** | **53** |
 
-- **New packets: 89.** By priority: P1 12, P2 34, P3 43, P0 none. By size: XS 8, S 66, M 15.
-- **No P0 is proposed.** Two packets become P0 on an owner answer: RR-MCP-TENANT-BOUND (if MCP servers are configured in production) and RR-BANK-TOKEN-ENCRYPT (if production has non-null bank access tokens). See OQ-1 and OQ-4.
-- **Metaphor-only entries:** 65, in Appendix A of the index.
-- **Comparison with the owner's index.** It counted 60 recommendations; this pass has 128. The two lists are not expected to match line for line (D-262). The difference comes from:
-  - this pass includes the architecture security register (23 rows, 11 of them already done);
+- **New packets: 97.** By priority: P1 14, P2 36, P3 47, P0 none. By size: XS 10, S 72, M 15.
+  - 96 packets belong to an index row.
+  - RR-OWNER-RULINGS-RECORD is an admission helper that records the owner's answers.
+- **No P0 is proposed.** Two packets become P0 on an owner answer: RR-MCP-TENANT-BOUND (OQ-1) and RR-BANK-TOKEN-ENCRYPT (OQ-4).
+- **Metaphor-only entries:** 66, in Appendix A of the index.
+- **Comparison with the owner's index.** It counted 60 recommendations; this pass has 136. The lists are not expected to match line for line (D-262). The difference comes from:
+  - this pass includes the architecture security register (29 rows, one of which groups 16 items already done);
   - it keeps the neuro-atlas "top 10" items as separate rows;
   - it splits the architecture ratchets into five rows;
-  - it lists done and ruled items as rows instead of dropping them.
-  - Restricted to rows that cite the research corpus proper (`docs/intelligence/research/**`, issue #153 or the research issues and PRs) and counting only status c and d, the figure is 54 (computed from the index's Sources lines).
+  - it lists done and ruled items as rows.
+  - Restricted to rows that cite the research corpus proper (`docs/intelligence/research/**`, issue #153 or the research issues and PRs) with status c or d, the first pass counted 54 (from the index's Sources lines). The review added 2 more such rows.
 
-**c and d rows without a packet (11), each with its reason in the index:**
+**Not-done rows without a packet (19).** D-261 asks for a packet unless a recommendation is done or planned. Each of these is therefore an owner question or confirmation in section 6, and each states its reason in the index:
 
 | Row | Reason |
 |---|---|
-| REC-EMOTION-ENDOCRINE | Endocrine state is per business, so one member's mood would change KEY for everyone; rating-as-reward pushes KEY toward telling users what they want to hear. |
-| REC-DOC-VOICE-ORGANS | Nothing consumes the events. Broadcasting document extractions would open a money-sight path before MEM-DOC-EXTRACTION-SIGHT lands. |
-| REC-THROUGHPUT-METRIC | Nothing reads the number, so there is no honest RED. |
-| REC-AUTH-FAIL-FAST | The DI fallback is unreachable, and an invalid token already gets 401 on every guarded route. |
-| REC-SOCIAL-OAUTH-STATE | The state is random, single-use, expires in 10 minutes and is bound to the business; the module is hidden in v1. |
-| REC-CONSENT-UNIQUE | The ledger is append-only by design, and a unique key would destroy legal history. |
-| REC-STRUCTURED-CLAIMS | Its envelope comes from the plan D-141 left unadopted, and reviews are prose, so there is no artifact to test. |
-| REC-RND-LINEAGE | An optional template field has no reader. The disposition half is done by D-261/D-262 and this index. |
-| REC-GENERATED-INSTRUCTIONS | No drift was found. |
-| REC-PROCEDURE-SPEC | A new subsystem with no small first slice. |
-| REC-SKILLS-BENCH | Research-only by its own doc. |
+| REC-EMOTION-ENDOCRINE | Per-business endocrine state would let one member's mood change KEY for everyone; reward-from-rating pushes KEY toward telling users what they want to hear (OQ-18). |
+| REC-DOC-VOICE-ORGANS | No consumer; it would open a money-sight path before MEM-DOC-EXTRACTION-SIGHT (OQ-17). |
+| REC-THROUGHPUT-METRIC | Nothing reads it (OQ-24). |
+| REC-OUTCOME-WEIGHTED-TOOL-SELECTION | It would reward execution success, not outcome (OQ-38). |
+| REC-EVAL-ONLINE-CALIBRATION | It needs the honest harness and lineage first (OQ-39). |
+| REC-AUTH-FAIL-FAST | Unreachable fallback; invalid tokens already get 401. |
+| REC-SOCIAL-OAUTH-STATE | Module hidden in v1; state is single-use and bound. |
+| REC-CONSENT-UNIQUE | Append-only legal ledger (OQ-28). |
+| REC-APPROVAL-EXECUTE-SCOPED-READ | No observable leak; one-line hygiene. |
+| REC-EXPORT-DOWNLOAD-RATE-LIMIT | 256-bit token (OQ-40). |
+| REC-STRUCTURED-CLAIMS | The plan D-141 left unadopted; no live artifact. |
+| REC-RND-LINEAGE | No reader. |
+| REC-GENERATED-INSTRUCTIONS | No drift found. |
+| REC-PROPERTY-TESTS | Money is covered; no RED elsewhere (OQ-37). |
+| REC-REPRESENTATION-IDENTITY | MEM-deferred (OQ-32). |
+| REC-LEARNING-STREAM | MEM-deferred (OQ-41). |
+| REC-ADAPTIVE-RECEPTOR | MEM-deferred (OQ-41). |
+| REC-PROCEDURE-SPEC | New subsystem with no small slice (OQ-35). |
+| REC-SKILLS-BENCH | Research-only by its own doc (OQ-35). |
 
-All 11 are owner questions or confirmations below.
+## 3. Packets by priority
 
-## 3. Packets by priority (one line each)
+Each line is `id (size, step, lane): title`. The full scope, premises with file:line and definition of done are in `RR-PACKETS.json`.
 
-**P1 (12)**
-- RR-UNTRUSTED-CONTENT-FENCE (M): attachment text, tool output and MCP output enter KEY prompts fenced as data that carries no instructions.
-- RR-STREAM-ERROR-NO-EFFECTS (S): a stream that errors mid-answer no longer appends a fallback provider's text, or runs collected tool calls.
-- RR-MODEL-LIFECYCLE-GUARD (S): an owner-filled model catalog. Retired models are never sent a request, and a census spec fails on an uncatalogued model id.
-- RR-TOOL-WRITES-SEQUENTIAL (S): writes in one model turn run in order; only reads stay parallel (today `Promise.all`).
-- RR-DISPATCH-NO-BLIND-RETRY (S): the plan-queue dispatcher stops retrying writes after a generic error; such a write ends OUTCOME_UNKNOWN for a person to check.
-- RR-DISPATCH-ATOMIC-CLAIM (S): the dispatcher takes an atomic, per-business durable claim (KeyIdempotencyService, D-103) before any effect.
-- RR-MCP-TENANT-BOUND (S): bridged MCP calls carry the business, and each server config must list its businesses. Nothing changes when MCP is unset. P0 if it is configured in production.
-- RR-WEBHOOK-INGRESS-CENSUS (S): a census of public webhook routes, plus a tenant fix. `/social/webhook/:businessId` currently ingests a Meta-signed body naming another business's page.
-- RR-BANK-TOKEN-ENCRYPT (S): BankConnection.accessToken is encrypted at rest (it is plaintext today), with a dry-run-first backfill.
-- RR-DB-CRYPTO-KEY-CENSUS (S): a read-only count of values encrypted under the current key, the fallback key, the core chain, plaintext, or undecryptable.
-- RR-DB-CRYPTO-PROD-GUARD (XS): packages/db refuses the dev fallback key in production. It lands only on owner evidence (OQ-5).
-- RR-ERASURE-BUSINESS-EVENTS (S): a contact forget-purge also scrubs the business_events rows that hold the contact's request and response bodies.
-- RR-ADMIN-LOGOUT (S, web): an admin sign-out control. Every sign-out clears the super-admin token, which today outlives the session and is preferred by `getAuthHeaders`.
+**P1 (14)**
+- RR-UNTRUSTED-CONTENT-FENCE (M, step 3, server): Document extractions and MCP tool output enter KEY's prompts inside a fenced untrusted-data block that cannot be closed from inside and carries no authority
+- RR-STREAM-ERROR-NO-EFFECTS (S, step 3, server): A model stream that failed part-way never splices a fallback answer onto it and never runs the tool calls it collected
+- RR-MODEL-LIFECYCLE-GUARD (S, step 3, server): A model lifecycle catalog the owner maintains: every routed model id must be in it, and a model marked retired is never dispatched to
+- RR-TOOL-EFFECT-CLASS (S, step 3, server): Every FLOW_TOOLS entry declares an effect class: READ only when provably read-only, unknown tools never READ (census spec)
+- RR-TOOL-WRITES-SEQUENTIAL (S, step 3, server): Flow chat runs the writes of one model turn one at a time in model order; only reads run in parallel
+- RR-DISPATCH-NO-BLIND-RETRY (S, step 3, server): Plan queue never re-runs a write after a generic error: the step is recorded OUTCOME_UNKNOWN for a person to check
+- RR-DISPATCH-ATOMIC-CLAIM (S, step 3, server): Plan queue takes an atomic durable claim on the idempotency key before running a step (no find-then-execute)
+- RR-MCP-TENANT-BOUND (S, step 3, server): MCP bridge is tenant-bound or off: a bridged call carries the business and runs only for a business the server config names
+- RR-WEBHOOK-INGRESS-CENSUS (S, step 3, server): Inbound webhook census (verification, replay, tenant source) and the per-business social webhook bound to the business's own page
+- RR-BANK-TOKEN-ENCRYPT (S, step 3, server): BankConnection.accessToken is encrypted at rest like every other provider token column, and the secret-column census can no longer miss an *AccessToken column
+- RR-DB-CRYPTO-KEY-CENSUS (S, step 3, server): Read-only census of which key every enc:v1: value was encrypted under, so the production key guard can be landed on evidence
+- RR-DB-CRYPTO-PROD-GUARD (XS, step 3, server): packages/db token encryption refuses the in-repo fallback key in production (lands only on the owner's evidence)
+- RR-ERASURE-BUSINESS-EVENTS (S, step 3, server): The GDPR forget purge also scrubs the person's data from business_events (D-25)
+- RR-ADMIN-LOGOUT (S, step 3, web): Platform admin sign-out exists, and no sign-out leaves the admin bearer behind (it outranks every user token)
 
-**P2 (34)**
-- RR-KEY-SAFETY-POLICY (M): the cortex input-safety check becomes a versioned finding-to-action table. A PII hit no longer skips the injection checks, and a missing or throwing checker withholds tools.
-- RR-REDACTION-BY-CONTENT (S): `deepRedact` also catches card numbers and secret-shaped values, not only by field name.
-- RR-GATEWAY-TYPED-FAILURES (S): 429, cancel and policy errors no longer open the shared provider circuit.
-- RR-LLM-ADMISSION-CONTROL (M): a per-business, Redis-backed limit on model calls in flight, answering 429 `ai_capacity` when reached.
-- RR-UNKNOWN-COST-NOT-ZERO (S): unpriced model cost is recorded as unknown, never $0; one price table.
-- RR-RESPONSE-FORMAT-HONEST (M): `responseFormat` is honoured per provider, or refused when the provider cannot meet it.
-- RR-CORTEX-TYPED-RESULT (S): the parser stops inventing confidence 70 when the answer has no Confidence section.
-- RR-STRUCTURED-PARSE-INVALID-STATE (S): a contract violation is a distinct state. Cost is recorded, and empty output is not success.
-- RR-STRICT-TOOL-SCHEMAS (M): tool arguments are validated strictly. Unparseable arguments are refused, not run as `{}`, and undeclared arguments are rejected.
-- RR-KEY-RUN-BUDGET (S): at most 8 tool calls per model response; calls over the cap get a visible "not run" result.
-- RR-TOOL-EFFECT-CLASS (M): every FLOW_TOOLS entry declares effect class, idempotency, reversibility and version, enforced by a census.
-- RR-CONNECTOR-CONFORMANCE (S): a shared connector harness. A connector working only on the platform env key is not reported as "connected" (OQ-13).
-- RR-INTENT-PARSER-ONE-TOOL-LIST (S): the intent parser uses the chat's per-business tool list, not a hand list that includes hidden families.
-- RR-LEGACY-TOOLS-CLASSIFY (S): a table classifies the 14 legacy KeyToolRegistry tools; aliases route to the canonical tool.
-- RR-LEGACY-FALLBACK-REMOVE (M): remove KeyCommand's legacy fallback and the legacy registry.
-- RR-HEALTH-TIGHTENS-CONTROL (M): degraded health, or a failed health read, only ever tightens the action boundary's control requirement.
-- RR-ACTION-UNDERSTANDING-SERVER (S): a pure projection per proposal (phase, authority, executed, verified from outcome evidence, reversibility), applied after the reader-scope and money-tag projections.
-- RR-ACTION-UNDERSTANDING-WEB (S): the proposal card shows the real reason and "done" versus "done and confirmed". This replaces the misleading copy "blocked by KEY Genome readiness".
-- RR-ACTION-BOUNDARY-NEXT-CAPABILITY (M): `commerce_send_invoice` becomes the action boundary's second governed capability, with a receipt bound to its fingerprint.
-- RR-ACTION-INTENT-ONE-CLASSIFIER (S): the six disagreeing action-verb regexes become one classifier.
-- RR-EVAL-HARNESS-NO-VACUOUS (S): eval checks can no longer pass vacuously. Results are PASS/FAIL/NOT_RUN/INDETERMINATE/ERROR, with negative controls.
-- RR-KEY-FAKE-MODEL-TRAJECTORY (M): a scripted model double plus trajectory assertions (tool, authority, effect) on real-DB Flow cases.
-- RR-LANGFUSE-INGESTION-CUTOVER (S): the trace exporter leaves the legacy ingestion API, its failures become visible, and business id stops being sent as user id (P1 if the Langfuse keys are set: OQ-2).
-- RR-JOB-TENANT-CONTEXT (M): a `runForTenant` helper, a census of background entry points, and a first adoption.
-- RR-CHANGE-ORDER-APPROVE-COMMAND (S): change orders are approved or rejected by commands with compare-and-set and audit. PATCH no longer accepts client-supplied `approvedBy`/`approvedAt`.
-- RR-AUTHORITY-SHADOW-PARITY (S): shadow mismatches are counted, plus a Postgres parity matrix. The cutover itself is not in this packet.
-- RR-RETENTION-EXPIRED-EXPORTS (S): expired or consumed contact export bundles, which hold full personal data, are deleted.
-- RR-OBJECT-STORAGE-POSTURE-CHECK (S): diagnostics reads the bucket's public-access, policy and encryption state, changing nothing.
-- RR-BUSINESS-EVENT-REDACT (S): BusinessEvent emit and the ContactAudit diff redact secret-named fields at the write.
-- RR-SCRIPT-SPECS-IN-CI (S): every script spec runs in CI or is exempt with a reason. Four specs, including agent-memory's, run nowhere today.
-- RR-CI-REQUIRED-JOBS-AGGREGATE (S): a CI verdict job that is red when a gating job failed, was skipped or was cancelled.
-- RR-GATE-LEDGER-MONOTONIC (S): CI compares the shrink-only ledgers between base and head and goes red when one grows. There is no override.
-- RR-ERASE-BUSINESS-TWO-STEP (M): whole-business GDPR erasure becomes request, cooling-off, then confirm, with surviving records. It waits on OQ-30.
+**P2 (36)**
+- RR-OWNER-RULINGS-RECORD (XS, step 3, docs): Record the owner's answers to the research-recommendation owner questions that hold packets (OQ-5, OQ-13, OQ-19, OQ-30) and the two RR migration approvals
+- RR-KEY-SAFETY-POLICY (M, step 3, server): KEY cortex input-safety check becomes an explicit, versioned policy: every rule class is evaluated, each finding class maps to an action, and a missing or throwing checker withholds tools instead of passing the query
+- RR-REDACTION-BY-CONTENT (S, step 3, server): Redaction detects card numbers and secret-shaped tokens by value, not only by field name
+- RR-GATEWAY-TYPED-FAILURES (S, step 3, server): Model gateway classifies provider failures: a rate limit, a caller abort or a bad request does not open the provider circuit
+- RR-LLM-ADMISSION-CONTROL (M, step 3, server): Per-business admission control on model calls: a bounded number in flight per business, shared across replicas, with a typed capacity refusal
+- RR-UNKNOWN-COST-NOT-ZERO (S, step 3, server): One model price table; an unpriced model's cost is marked unpriced, never written as $0
+- RR-RESPONSE-FORMAT-HONEST (M, step 3, server): GatewayRequest.responseFormat is honoured: provider-native JSON mode where supported, prompted fallback otherwise, and the strategy used is recorded
+- RR-CORTEX-TYPED-RESULT (S, step 3, server): KEY cortex stops inventing a 70% confidence when its markdown answer has no Confidence section, and records whether the answer was parsed
+- RR-STRUCTURED-PARSE-INVALID-STATE (S, step 3, server): Gateway contract violations are typed and costed, never a silent provider failure or a silent pass on empty output
+- RR-TOOL-ARGS-MALFORMED-NEVER-RUN (S, step 3, server): KEY tool calls with unparseable arguments never run a tool: that call gets a visible refusal and the rest of the turn proceeds
+- RR-KEY-RUN-BUDGET (S, step 3, server): A typed per-turn run budget for KEY: a cap on tool calls executed per model response, and pinned worst-case model attempts per turn
+- RR-TOOL-EFFECT-METADATA (M, step 3, server): FLOW_TOOLS declare idempotency, reversibility and contract version, and WRITE is refined into INTERNAL_WRITE, EXTERNAL_EFFECT, MONEY or DESTRUCTIVE (census spec)
+- RR-CONNECTOR-CONFORMANCE (S, step 3, server): Connector conformance harness: a platform env key or a stored row is not 'connected'; failed smoke tests write no status; unimplemented sync is never success
+- RR-INTENT-PARSER-ONE-TOOL-LIST (S, step 7, server): IntentParser offers the model the same per-business v1 tool set as chat, derived from FLOW_TOOLS, not a hand-written list
+- RR-LEGACY-TOOLS-CLASSIFY (S, step 3, server): Classify the 14 legacy KeyToolRegistry tools against FLOW_TOOLS in a checked-in equivalence table; route the SAME/ALIAS ones canonically
+- RR-LEGACY-FALLBACK-REMOVE (M, step 3, server): Remove KeyCommand's legacy-registry fallback and KeyToolRegistryService once every legacy tool is canonical or retired
+- RR-HEALTH-TIGHTENS-CONTROL (M, step 3, server): Pure health-to-control step: degraded or unreadable health only tightens a KEY action's control requirement, adopted at the action boundary
+- RR-ACTION-UNDERSTANDING-SERVER (S, step 4, server): Server ActionUnderstanding projection on every KEY proposal: phase, authority, outcome verified only from outcome evidence, reversibility
+- RR-ACTION-UNDERSTANDING-WEB (S, step 5, web): Web renders KEY proposals from the server's ActionUnderstanding: real block reason, 'done' vs 'verified', confirm vs approve
+- RR-ACTION-BOUNDARY-NEXT-CAPABILITY (M, step 4, server): Adopt a second capability (commerce_send_invoice) into the action boundary so it leaves a fingerprint-bound outcome-evidence receipt
+- RR-ACTION-INTENT-ONE-CLASSIFIER (S, step 3, server): One action-intent classifier for KEY: the six divergent action-verb regexes become one exported function, so 'cancel', 'refund', 'pay' and 'remove' open the actions layer on the Cortex path as they do on Flow
+- RR-EVAL-HARNESS-NO-VACUOUS (S, step 3, server): KEY's eval harness cannot pass vacuously: a suite proves it fails on its target defect, NOT_RUN and INDETERMINATE are distinct from PASS, and an empty suite or empty run is not green
+- RR-KEY-FAKE-MODEL-TRAJECTORY (M, step 3, server): A scripted fake model and a trajectory recorder for KEY's Flow turn, so tests assert which tools were offered, what the model proposed, the authority decision and the effect, with no network
+- RR-LANGFUSE-INGESTION-CUTOVER (S, step 3, server): AI trace export leaves Langfuse's legacy /api/public/ingestion for OTLP/HTTP traces; exporter failures are counted and visible; business id is no longer sent as the user id
+- RR-JOB-TENANT-CONTEXT (M, step 4, server): Per-business background work runs inside a tenant context so the Prisma tenant extension scopes it; a census lists every background entry point's tenancy mode
+- RR-CHANGE-ORDER-APPROVE-COMMAND (S, step 4, both): Change orders are approved and rejected through commands that record the real approver; PATCH can no longer set a decision status or a client-chosen approvedBy
+- RR-AUTHORITY-SHADOW-PARITY (S, step 4, server): Evidence for the effective-authority cutover: a base-envelope parity matrix against the legacy guard on Postgres, and shadow mismatches counted, not only warn-logged
+- RR-BUSINESS-EVENT-REDACT (S, step 3, server): BusinessEventService.emit/emitBatch and ContactAuditService redact secret-named fields at the write, as the interceptor already does
+- RR-RETENTION-EXPIRED-EXPORTS (S, step 3, server): Expired or consumed contact export bundles are deleted from storage on the privacy scheduler, not kept forever
+- RR-OBJECT-STORAGE-POSTURE-CHECK (S, step 7, server): Diagnostics reports whether the object-storage bucket is public and whether default encryption is on, before any upload header changes
+- RR-SCRIPT-SPECS-IN-CI (S, step 3, gate): Every scripts/** node:test spec runs in a workflow, or is exempt with a reason (the agent-memory tests run nowhere today)
+- RR-CI-REQUIRED-JOBS-AGGREGATE (S, step 3, gate): One 'CI verdict' job that is red when any gating CI job failed, was skipped or was cancelled
+- RR-GATE-LEDGER-MONOTONIC (S, step 3, gate): CI compares every registered shrink-only ledger and floor ratchet between base and head and goes red when one moves the wrong way
+- RR-ERASE-BUSINESS-TWO-STEP (M, step 3, server): Whole-business GDPR erasure needs a second, deliberate act and leaves a durable record (form set by the owner's answer)
+- RR-OAUTH-PKCE-GOOGLE-MICROSOFT (S, step 4, server): Google Suite and Microsoft OAuth use PKCE (S256), with the verifier derived from the signed state so no new store is needed
+- RR-PRIVACY-DELETED-CONTACT-GATES (S, step 4, server): A soft-deleted or forget-pending contact is neither exported nor emailed
 
-**P3 (43)**
-- KEY safety and gateway:
-  - RR-KEY-PROMPT-CANARY: a per-turn canary marker in the system prompt; a tool call carrying it is refused.
-  - RR-CORTEX-BUS-BACKPRESSURE: bus ledger writes run with a bounded concurrency and drop nothing.
-  - RR-OPENSOURCE-PROVIDER-SPLIT: Ollama and OpenRouter become distinct resources.
-  - RR-MODEL-SELECTION-ONE-SEAM: delete the dead provider-selection service; census of model-id literals.
-  - RR-DIRECT-PROVIDER-CENSUS: census of provider calls outside the gateway; document embeddings are not metered today.
-  - RR-ANTHROPIC-TOOL-PARITY: map tool choice 'none', send native tool_result blocks, keep the assistant's tool calls.
-  - RR-PROMPT-CACHE-PREFIX: Anthropic `cache_control` and cached-token pricing.
-  - RR-AI-CONTRACT-ZOD-FIRST: first contract is `intent_parse`, whose validator and tool schema disagree today.
-- Capabilities:
-  - RR-CONNECTOR-STACK-CENSUS: census of the two connector stacks.
-  - RR-GOAL-WRITER-CENSUS: census of AiGoal and BusinessGoal writers.
-  - RR-KEY-SAFE-MODE: KEY_SAFE_MODE; reads still answer, non-read tools are refused, KEY crons stop.
-  - RR-UNDO-DURABLE: undo state in a table with an atomic claim, replacing the in-process 5-minute Map.
-- Cognition:
-  - RR-TRIAGE-RISK-FLOOR: a risk context can only raise triage's effort tier.
-  - RR-SELFTUNE-CANDIDATE-ONLY: delete the unreachable selfTune, which applies model-chosen changes.
-  - RR-LEARNING-OUTCOME-SEMANTICS: tool success is no longer recorded as user "accepted".
-  - RR-EVAL-RUN-LINEAGE: eval runs record suite version and definition hash.
-  - RR-COG-RUNTIME-ENTRY-CENSUS: census of the runtime entry points.
-  - RR-APPROVAL-MODEL-CENSUS: census of the five approval models.
-  - RR-REFLECTION-HONEST: maintenance stops reporting work it never did; the dream journal is capped.
-  - RR-CASH-TARGET: an owner-set runway target in months, revenue-scoped, suggestions only.
-- Operations:
-  - RR-AI-TRACE-ATTEMPTS-CORRELATION: failed and fallback attempts become spans under one trace.
-  - RR-SLO-AVAILABILITY-LEDGER: SLO document plus a 30-day error-budget figure.
-  - RR-ERROR-CAPSULE: release sha, replica, correlation id and failure class on each error entry.
-  - RR-SECURITY-SIGNAL-COUNTERS: bounded counters on a super-admin route.
-  - RR-INTEGRITY-WATCH: read-only checks for child rows whose business differs from the parent's.
-  - RR-CRON-OCCURRENCE-LOCK: Redis occurrence claim plus a cron census.
-  - RR-STATUS-PATCH-CENSUS: registry of Update DTOs that carry a status field.
-  - RR-DEAD-EVENT-CENSUS: publish-only events.
-- Architecture ratchets:
-  - RR-FORWARDREF-RATCHET.
-  - RR-WEB-CLIENT-RATCHET.
-  - RR-KEY-CORTEX-SIZE-RATCHET.
-  - RR-UNUSED-MODEL-CENSUS.
-  - RR-ARCH-SCAN-CI: report-only.
-- Security:
-  - RR-ADMIN-SHELL-SERVER-GATE: an edge gate on /admin.
-  - RR-SESSION-STORAGE-CENSUS: ratchet on browser-readable credential writes.
-- Process:
-  - RR-GATE-LEDGER-CENSUS: register the 19 unregistered shrink-only ledgers.
-  - RR-BUNDLE-RULING-CONFLICTS: the bundle shows supersedes/widens links between rulings.
-  - RR-BUNDLE-PROOF-PROFILE: research proof profiles attached to the bundle, tagged research-only.
-  - RR-HOTSPOT-SCANNER: churn, fix density and co-change from git.
-  - RR-STATUS-REVIEW-CYCLES: review-repair counts per packet, labelled as a lower bound.
-  - RR-HOOK-PACKET-SCOPE: warns on edits outside the packet's write set; never denies.
-  - RR-INDEX-COVERAGE-REPORT: 4 tenant models lack an index led by businessId.
-  - RR-STATUS-STALL-REPORT: V1-STATUS flags packets that have been ready longer than a budget; informational only.
+**P3 (47)**
+- RR-KEY-PROMPT-CANARY (S, step 3, server): A per-turn canary marker in KEY's system prompt: a tool call whose arguments carry it is refused, and a reply that echoes it is recorded
+- RR-CORTEX-BUS-BACKPRESSURE (S, step 7, server): KEY cortex event bus bounds its in-flight ledger writes and reports saturation instead of starting unbounded concurrent writes
+- RR-OPENSOURCE-PROVIDER-SPLIT (S, step 7, server): Ollama and OpenRouter become two gateway resources with their own identity, health, circuit and cost, not one 'opensource' provider
+- RR-MODEL-SELECTION-ONE-SEAM (S, step 7, server): One model-selection seam: delete the dead cortex provider-selection map and ratchet model ids outside the gateway
+- RR-DIRECT-PROVIDER-CENSUS (S, step 7, server): Census of model-provider calls that bypass the gateway: a shrink-only spec fails on a new direct SDK or provider URL
+- RR-ANTHROPIC-TOOL-PARITY (S, step 7, server): Anthropic path keeps tool semantics: toolChoice 'none' honoured, assistant tool calls sent as tool_use and results as tool_result blocks
+- RR-PROMPT-CACHE-PREFIX (S, step 7, server): Provider prompt caching: Anthropic system prefix marked cacheable, cached input tokens read from usage and priced
+- RR-AI-CONTRACT-ZOD-FIRST (S, step 7, server): First executable AI contract: intent_parse becomes one Zod schema deriving its type, its validator and the parse_intent tool schema
+- RR-STRICT-TOOL-SCHEMAS (M, step 7, server): KEY tool calls: advertised schemas are closed (no undeclared arguments) and strict where the provider supports it, after a census of the callers that send extra keys
+- RR-CONNECTOR-STACK-CENSUS (S, step 3, server): Census ratchet of the two connector stacks (ConnectorRegistry and KeyConnector): every importer is listed with its v1 journey, a new one fails
+- RR-GOAL-WRITER-CENSUS (S, step 3, server): Goal writer census: every writer of AiGoal and BusinessGoal listed with its provenance source; a new writer fails
+- RR-KEY-SAFE-MODE (S, step 3, server): KEY_SAFE_MODE: a partial, operator-set safe mode where KEY reads and answers but runs no write and no autonomous action
+- RR-MIGRATION-UNDO-TABLE (S, step 3, server): Isolated migration: the key_undoable_actions table for durable KEY undo records, proven on a fresh database
+- RR-UNDO-DURABLE (M, step 3, server): KEY undo records are durable (database, business-scoped, atomic claim) instead of a 5-minute in-process Map
+- RR-TRIAGE-RISK-FLOOR (S, step 3, server): Cognitive triage takes an optional risk context that can only raise the effort tier; a money or destructive request gets the deliberate budget on the tool path and never grants authority
+- RR-SELFTUNE-CANDIDATE-ONLY (XS, step 3, server): Remove KEY's unreachable self-tuning path that applies model-chosen changes to AI preferences directly, and pin that no service writes AI preferences or tuning memory from a model response
+- RR-LEARNING-OUTCOME-SEMANTICS (S, step 3, server): A tool's execution result is recorded as execution, not as the user's acceptance, and confidence calibration counts only real user responses
+- RR-EVAL-RUN-LINEAGE (XS, step 3, server): Every eval run records the suite version, a definition hash and the commit it ran on, and a suite whose assertions change without a version bump fails a ratchet
+- RR-COG-RUNTIME-ENTRY-CENSUS (S, step 3, server): Census of every entry that starts a KEY cognitive turn or offers tools to a model, with its runtime, who may reach it and its authority path; a spec fails on an unregistered entry
+- RR-APPROVAL-MODEL-CENSUS (M, step 3, server): Census of every writer of KEY proposals, AI approval items, approval requests and Flow-bound confirmations, with what each approval gates and who may clear it; a spec fails on an unregistered writer
+- RR-REFLECTION-HONEST (S, step 3, server): KEY's reflection maintenance stops reporting work it did not do, and the in-process dream journal is bounded and labelled unpersisted
+- RR-MIGRATION-CASH-TARGET (XS, step 3, server): Isolated migration: Business.cashRunwayTargetMonths (nullable Float), proven on a fresh database
+- RR-CASH-TARGET (S, step 5, server): Owner-set cash runway target: the 'Protect cash runway' money move fires against the business's own target instead of a hard-coded three months, revenue-scoped and suggestion-only
+- RR-AI-TRACE-ATTEMPTS-CORRELATION (S, step 3, server): The model gateway traces every attempt, including the failed and fallen-back ones, under one trace id per gateway call, with the caller's correlation id when it has one
+- RR-SLO-AVAILABILITY-LEDGER (S, step 7, gate): Written availability objectives for the two probed endpoints, and the uptime monitor reports 30-day availability and remaining error budget against them
+- RR-ERROR-CAPSULE (S, step 7, server): Every recorded server failure carries a small reproduction capsule: release sha, replica, last correlation id and failure class
+- RR-SECURITY-SIGNAL-COUNTERS (S, step 4, server): Runtime counters for security signals (bearer verification failures, cross-business refusals, webhook signature failures), visible to the platform super-admin
+- RR-INTEGRITY-WATCH (S, step 7, server): Read-only integrity check for impossible cross-business states between a row and its parent, served on demand to the platform super-admin
+- RR-CRON-OCCURRENCE-LOCK (S, step 7, server): A scheduled job occurrence is claimed once across replicas and restarts; a census fails on any new @Cron that is neither claimed nor registered as idempotent
+- RR-STATUS-PATCH-CENSUS (S, step 3, server): Census of every generic update route that can write a lifecycle status, each registered as transition-checked, decision-refused or free label; a new unregistered one fails
+- RR-DEAD-EVENT-CENSUS (S, step 3, server): The event-wiring ratchet covers the other direction: no new event may be emitted with nothing listening, bridged or registered as intentionally publish-only
+- RR-FORWARDREF-RATCHET (XS, step 3, server): forwardRef ratchet: the count of forwardRef module/provider cycles in server source may fall, never rise, and no new file may introduce one
+- RR-WEB-CLIENT-RATCHET (XS, step 3, web): lib/client.ts ratchet: no new web file may import the monolithic client; the importer list may only shrink
+- RR-KEY-CORTEX-SIZE-RATCHET (XS, step 3, server): key-cortex size ratchet: its source file count and largest-file line counts may fall, never rise
+- RR-UNUSED-MODEL-CENSUS (S, step 3, server): Census of Prisma models no code reads or writes; the list may shrink, and a new model with no reader or writer fails
+- RR-ARCH-SCAN-CI (S, step 7, gate): CI runs the deterministic architecture scanners on each PR and reports the map diff (report-only; blocking needs an owner ruling)
+- RR-ADMIN-SHELL-SERVER-GATE (XS, step 7, web): /admin pages are refused at the edge without an unexpired admin session cookie (the API stays the authority)
+- RR-SESSION-STORAGE-CENSUS (XS, step 7, web): Census of every browser-readable place the web app stores a credential; a spec fails on a new one
+- RR-GATE-LEDGER-CENSUS (S, step 3, gate): Every file that declares a shrink-only ledger or ratchet is registered in ledger-sizes.mjs, or exempt with a reason
+- RR-BUNDLE-RULING-CONFLICTS (S, step 3, docs): The context bundle reports rulings that supersede, refine or widen the rulings a packet cites
+- RR-BUNDLE-PROOF-PROFILE (S, step 3, docs): The context bundle attaches the matching research proof profile (fastest falsification, adversarial cases) by recorded rules, or says none matched
+- RR-HOTSPOT-SCANNER (S, step 3, docs): Offline git-history hotspots (churn, fix density, co-change) computed per packet write set and shown in the bundle
+- RR-STATUS-REVIEW-CYCLES (S, step 3, docs): V1-STATUS counts the review-repair and post-merge fix commits each packet needed, as far as main shows them
+- RR-HOOK-PACKET-SCOPE (M, step 3, gate): Edits outside a packet's write set are flagged at edit time on pkt/V1-* branches, and a scope report lists them for the merge check
+- RR-INDEX-COVERAGE-REPORT (S, step 3, server): Census: every tenant model has an index led by businessId, or is acknowledged in a shrink-only list (first slice of the access-path audit)
+- RR-STATUS-STALL-REPORT (S, step 3, gate): V1-STATUS reports packets that have been ready for longer than a budget without landing (stall signal from main alone)
+- RR-FORGET-CANCEL-KEEPS-PRIOR-DELETE (S, step 4, server): Cancelling a forget request restores only what the forget request deleted
 
-**Shared files.** Many packets edit the same few files: `model-gateway.service.ts` (14 packets), `flow-orchestrator.service.ts` (10), `scripts/agent-memory/lib.mjs` (6), `.github/workflows/ci-cd.yml` (5) and `apps/server/test/helpers/fixture-prefixes.json`. Only real ordering needs are recorded as `depends_on`. When admitting, the orchestrator should give these packets file-order edges or lanes, as it did in the plan's "File-order edges" section, and pre-allocate fixture prefixes in the plan's prefix table.
+**Shared files and fixture prefixes.** Many packets edit the same few files: `model-gateway.service.ts`, `flow-orchestrator.service.ts`, `scripts/agent-memory/lib.mjs`, `.github/workflows/ci-cd.yml` and `apps/server/test/helpers/fixture-prefixes.json`. Only real ordering needs are recorded as `depends_on`. When admitting, the orchestrator should give these packets file-order edges or lanes, as the plan's "File-order edges" section does.
+
+Each of the 27 packets that adds a new `*.integration.test.ts` has a prefix allocated in its scope: `v72a_` to `v72z_`, then `v73a_`. The registry rule at 2c4e4bf2 accepts only `v<NN><a-z>_` tied to a V1-NN number, so this assumes the RR series takes the unused numbers V1-72 and V1-73. Renumbering the series means renumbering the prefixes. The rows for the plan's `fixture_prefix_table` are in `fixture-prefix-rows.json`.
+
+**Owner-gated packets.** These depend on RR-OWNER-RULINGS-RECORD, so status tooling does not show them as ready:
+- RR-ERASE-BUSINESS-TWO-STEP (OQ-30);
+- RR-DB-CRYPTO-PROD-GUARD (OQ-5);
+- RR-CONNECTOR-CONFORMANCE (OQ-13);
+- the two migration packets RR-MIGRATION-UNDO-TABLE and RR-MIGRATION-CASH-TARGET (D-167: owner approval).
 
 ## 4. What could not be verified
 
@@ -200,8 +220,8 @@ All 11 are owner questions or confirmations below.
   - Anthropic `tool_choice: none`, cache minimums, OpenAI strict mode and `response_format` support.
   - Each affected packet says to verify at build time, and to stop with a CONTRADICTION if a fact is wrong.
 - **Line numbers.** Research-doc line numbers and issue #153 comment ids were taken from the extraction workers' reads. Code citations were re-opened by the packet writers; research-doc citations were not all re-opened.
-- **Security register items not re-verified:** R26, R35, R40, R50, R51, R53, R54.
 - **Heuristic counts.** About 38 Prisma models have no direct accessor. 19 shrink-only ledger hits are unregistered. The census packets resolve both.
+- **Fixture-prefix series.** V1-72/V1-73 for the RR prefixes is an assumption (see section 3).
 - **The owner's own index.** Its 378 parallels, 210 V1 work items and 3,941 comments are not visible to this worker. Section 2 explains why the counts differ.
 
 ## 5. Corrections found during verification
@@ -267,14 +287,50 @@ Each question gives options and a recommendation. A packet that depends on an an
 | OQ-34 | Fail-closed CI on new critical/high dependency advisories (D-22 keeps it recorded only) | keep D-22 / re-open | Keep D-22 for v1 |
 | OQ-35 | Procedure specs and the skills-first benchmark | post-v1 research / a v1 packet | Post-v1. There is no small slice and no RED. |
 | OQ-36 | POST eval/run is open to any member and may call a model (cost and abuse surface, found by G2b) | owner-only plus a rate limit / leave | Owner-only. This could be added to RR-EVAL-HARNESS-NO-VACUOUS on admission. |
+| OQ-37 | Generative (property/fuzz) tests beyond money | first-slice packet (authorization predicates or webhook payload parsing) / leave to each packet's own proof | Leave to each packet. No defect to write a RED from. |
+| OQ-38 | Weight tool selection by learned outcome scores (neuro atlas) | post-v1, after RR-LEARNING-OUTCOME-SEMANTICS / never | Post-v1, and only on verified outcomes |
+| OQ-39 | Online eval monitors, repeated-trial admission, production regression intake (issue #153 L9) | post-v1 / v1 after RR-EVAL-RUN-LINEAGE | Post-v1. Production intake needs a privacy gate. |
+| OQ-40 | Rate limit the public contact-export download (R51)? | add as hardening / leave | Leave. The 32-byte token makes guessing infeasible. |
+| OQ-41 | World-knowledge learning stream and adaptive receptor intake | memory-track follow-on post-v1 / v1 packet | Post-v1 with the context genome (BUILD-MAP row #148) |
 
 ## 7. Reviews
 
-Two fresh subagent reviews were run before the report:
+Two fresh subagent reviews ran on the first version (ca4eaa98). Each reviewer was given the files and the requirements, not this worker's conclusions. Every finding below was applied.
 
-1. **Fidelity:** every recommendation traceable, nothing invented, duplicates merged correctly, statuses verified.
-2. **Packet quality:** small, tests-first, premises cited, consistent with rulings, dependencies valid.
+**1. Fidelity: traceability, nothing invented, dedup, statuses.** About 30 rows were checked against their sources, the code and the plan. All the done (a) and planned (b) statuses checked held, as did the code citations opened. Findings and fixes:
+- **Seven security-register items had no row** (R26, R35, R40, R50, R51, R53, R54). Six rows were added:
+  - R26, R35, R53 and R54 got packets RR-OAUTH-PKCE-GOOGLE-MICROSOFT, RR-PRIVACY-DELETED-CONTACT-GATES and RR-FORGET-CANCEL-KEEPS-PRIOR-DELETE;
+  - R40 is done and was added to REC-SEC-REGISTER-DONE;
+  - R50 and R51 got rows without a packet, with reasons.
+- **REC-PROPERTY-TESTS was overstated as done.** The source names twelve areas; it is now status c.
+- **REC-GOVERNED-LEARNING hid a second change.** The neuro-atlas tool-selection weighting is now REC-OUTCOME-WEIGHTED-TOOL-SELECTION (d).
+- **Three "MEM" rows have no MEM packet.** They are now MEM-deferred and counted separately.
+- **REC-STATE-TRANSITION-COMMANDS was miscounted.** It is now status c.
+- **Missing #153 Layer-9 items** were added as REC-EVAL-ONLINE-CALIBRATION.
+- **A Book-genome tranche item was missing** and was added to Appendix A.
+- **README errors** were fixed: the priority split, the register count and a dangling pointer.
+- **Worker-local references were mapped.** Owner-question labels now use the OQ-n numbers, and row numbers became REC ids. The extraction notes cited as sources are committed under `worker-notes/`.
+- **The summary table showed dependencies as packets.** It now lists only the packets each row owns.
 
-Their findings, and what was changed, are recorded below.
+**2. Packet quality: shape, size, tests-first, premises, rulings, dependencies.** All 13 P1 packets and 12 others were deep-checked; most premises held. Mechanical validation passed apart from what is fixed below.
+- **Two dependencies ran against step order.** RR-SECURITY-SIGNAL-COUNTERS moved from step 7 to 4. RR-STRICT-TOOL-SCHEMAS moved to step 7, after RR-ANTHROPIC-TOOL-PARITY.
+- **RR-TOOL-EFFECT-CLASS was a hidden L** (286 tools x 4 fields) gating three P1 packets. It was split:
+  - slice 1, P1 S, effectClass with strict defaults;
+  - RR-TOOL-EFFECT-METADATA, P2 M.
+  - The P1 packets now depend on slice 1 only.
+- **RR-STRICT-TOOL-SCHEMAS was a hidden L.** It was split into RR-TOOL-ARGS-MALFORMED-NEVER-RUN (P2, the real safety defect) and closed schemas (P3).
+- **r0_impact understated Release 0 contact.** RR-MODEL-LIFECYCLE-GUARD is now AMEND, naming the optional-services-fail-visibly routing cases (only if OQ-3 confirms a retirement). Others name their manifests. New cases go in new spec files. 15 more packets note that mutation-control find strings in their files stay byte-identical.
+- **New integration suites had no fixture prefixes.** All 27 now have one (section 3).
+- **Schema changes were bundled into feature packets** (handoff rule 9, D-167). They are split into RR-MIGRATION-UNDO-TABLE and RR-MIGRATION-CASH-TARGET.
+- **RR-KEY-SAFE-MODE missed the Cortex tool loop.** It is now gated there too, with a RED case through cortex chat.
+- **RR-UNDO-DURABLE's write set was incomplete.** It now includes ai.controller.ts, and canUndo becomes async at its callers.
+- **RR-DISPATCH-ATOMIC-CLAIM had a false premise.** KeyIdempotencyService is already exported.
+- **RR-ERASURE-BUSINESS-EVENTS missed events written after the purge.** The interceptor writes outside the purge transaction; it now writes no subject data for a forget-pending or purged contact, with a DoD case.
+- **RR-RETENTION-EXPIRED-EXPORTS deleted export records.** It now keeps them and deletes only the objects, recorded in the audit log. Nulling the required key columns would need a migration, so it was left out.
+- **Owner-gated packets looked ready to the tooling.** They now depend on RR-OWNER-RULINGS-RECORD.
+- **RR-ADMIN-LOGOUT's third change named no file.** It now names the user sign-in token setters.
+- **Priorities checked.** No P1 needs to be P0 today.
 
-(see section 7a, written after the reviews)
+**Left open after the reviews:**
+- RR-BANK-TOKEN-ENCRYPT edits two existing integration suites: the coverage gate's list and the backfill CLI suite. The orchestrator should confirm at admission that this is acceptable or move the cases.
+- The fixture-prefix series number (above).

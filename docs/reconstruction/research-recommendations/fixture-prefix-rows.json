@@ -1,0 +1,137 @@
+[
+ {
+  "prefix": "v72a_",
+  "owner": "apps/server/test/llm-admission.integration.test.ts",
+  "packet": "V1-72 (RR-LLM-ADMISSION-CONTROL)"
+ },
+ {
+  "prefix": "v72b_",
+  "owner": "apps/server/test/key-dispatch-outcome-unknown.integration.test.ts",
+  "packet": "V1-72 (RR-DISPATCH-NO-BLIND-RETRY)"
+ },
+ {
+  "prefix": "v72c_",
+  "owner": "apps/server/test/key-dispatch-claim.integration.test.ts",
+  "packet": "V1-72 (RR-DISPATCH-ATOMIC-CLAIM)"
+ },
+ {
+  "prefix": "v72d_",
+  "owner": "apps/server/test/social-webhook-tenant.integration.test.ts",
+  "packet": "V1-72 (RR-WEBHOOK-INGRESS-CENSUS)"
+ },
+ {
+  "prefix": "v72e_",
+  "owner": "apps/server/test/key-action-boundary-health.integration.test.ts",
+  "packet": "V1-72 (RR-HEALTH-TIGHTENS-CONTROL)"
+ },
+ {
+  "prefix": "v72f_",
+  "owner": "apps/server/test/key-safe-mode.integration.test.ts",
+  "packet": "V1-72 (RR-KEY-SAFE-MODE)"
+ },
+ {
+  "prefix": "v72g_",
+  "owner": "apps/server/test/key-action-understanding.integration.test.ts",
+  "packet": "V1-72 (RR-ACTION-UNDERSTANDING-SERVER)"
+ },
+ {
+  "prefix": "v72h_",
+  "owner": "apps/server/test/key-action-boundary-invoice-send.integration.test.ts",
+  "packet": "V1-72 (RR-ACTION-BOUNDARY-NEXT-CAPABILITY)"
+ },
+ {
+  "prefix": "v72i_",
+  "owner": "apps/server/test/rr-undo-table-migration.integration.test.ts",
+  "packet": "V1-72 (RR-MIGRATION-UNDO-TABLE)"
+ },
+ {
+  "prefix": "v72j_",
+  "owner": "apps/server/test/key-undo-durable.integration.test.ts",
+  "packet": "V1-72 (RR-UNDO-DURABLE)"
+ },
+ {
+  "prefix": "v72k_",
+  "owner": "apps/server/test/key-learning-outcome-semantics.integration.test.ts",
+  "packet": "V1-72 (RR-LEARNING-OUTCOME-SEMANTICS)"
+ },
+ {
+  "prefix": "v72l_",
+  "owner": "apps/server/test/key-flow-trajectory.integration.test.ts",
+  "packet": "V1-72 (RR-KEY-FAKE-MODEL-TRAJECTORY)"
+ },
+ {
+  "prefix": "v72m_",
+  "owner": "apps/server/test/rr-cash-target-migration.integration.test.ts",
+  "packet": "V1-72 (RR-MIGRATION-CASH-TARGET)"
+ },
+ {
+  "prefix": "v72n_",
+  "owner": "apps/server/test/cash-target.integration.test.ts",
+  "packet": "V1-72 (RR-CASH-TARGET)"
+ },
+ {
+  "prefix": "v72o_",
+  "owner": "apps/server/test/integrity-watch.integration.test.ts",
+  "packet": "V1-72 (RR-INTEGRITY-WATCH)"
+ },
+ {
+  "prefix": "v72p_",
+  "owner": "apps/server/test/job-tenant-context.integration.test.ts",
+  "packet": "V1-72 (RR-JOB-TENANT-CONTEXT)"
+ },
+ {
+  "prefix": "v72q_",
+  "owner": "apps/server/test/change-order-decisions.integration.test.ts",
+  "packet": "V1-72 (RR-CHANGE-ORDER-APPROVE-COMMAND)"
+ },
+ {
+  "prefix": "v72r_",
+  "owner": "apps/server/test/authority-shadow-parity.integration.test.ts",
+  "packet": "V1-72 (RR-AUTHORITY-SHADOW-PARITY)"
+ },
+ {
+  "prefix": "v72s_",
+  "owner": "apps/server/test/bank-token-encryption.integration.test.ts",
+  "packet": "V1-72 (RR-BANK-TOKEN-ENCRYPT)"
+ },
+ {
+  "prefix": "v72t_",
+  "owner": "apps/server/test/token-encryption-key-census.integration.test.ts",
+  "packet": "V1-72 (RR-DB-CRYPTO-KEY-CENSUS)"
+ },
+ {
+  "prefix": "v72u_",
+  "owner": "apps/server/test/token-encryption-prod-guard.integration.test.ts",
+  "packet": "V1-72 (RR-DB-CRYPTO-PROD-GUARD)"
+ },
+ {
+  "prefix": "v72v_",
+  "owner": "apps/server/test/business-event-redaction.integration.test.ts",
+  "packet": "V1-72 (RR-BUSINESS-EVENT-REDACT)"
+ },
+ {
+  "prefix": "v72w_",
+  "owner": "apps/server/test/contact-privacy-business-events.integration.test.ts",
+  "packet": "V1-72 (RR-ERASURE-BUSINESS-EVENTS)"
+ },
+ {
+  "prefix": "v72x_",
+  "owner": "apps/server/test/contact-export-retention.integration.test.ts",
+  "packet": "V1-72 (RR-RETENTION-EXPIRED-EXPORTS)"
+ },
+ {
+  "prefix": "v72y_",
+  "owner": "apps/server/test/gdpr-erasure-two-step.integration.test.ts",
+  "packet": "V1-72 (RR-ERASE-BUSINESS-TWO-STEP)"
+ },
+ {
+  "prefix": "v72z_",
+  "owner": "apps/server/test/privacy-deleted-contact.integration.test.ts",
+  "packet": "V1-72 (RR-PRIVACY-DELETED-CONTACT-GATES)"
+ },
+ {
+  "prefix": "v73a_",
+  "owner": "apps/server/test/forget-cancel-prior-delete.integration.test.ts",
+  "packet": "V1-73 (RR-FORGET-CANCEL-KEEPS-PRIOR-DELETE)"
+ }
+]
