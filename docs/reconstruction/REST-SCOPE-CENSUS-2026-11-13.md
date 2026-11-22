@@ -262,6 +262,16 @@ gating them changes the legacy commerce job-role grants, pinned as an owner deci
    (d11-sibling-writes.json) now use non-owners holding those scopes, and D11F-F12 pins a STAFF member on role defaults
    refused (403, nothing written); proof: test/finance-settings-patch.integration.test.ts (v71e_). SEC-V71-2 (the
    identity projections answer the same columns to every member) stays open, outside this packet.**
+   **Closed: FU-IDENTITY-FINANCE-COLUMNS (V1-71, owner rulings D-205, D-221) closes SEC-V71-2. GET
+   /identity/businesses, GET /identity/businesses/:businessId and POST /identity/bootstrap (which can answer a business
+   the caller is only a member of) answer Business.accountantEmail and the four default ledger account ids only to a
+   reader holding revenue read on that business, read as ModuleScopeGuard reads it for GET settings (a SUPER_ADMIN
+   passes), so for every member the identity reads answer those columns exactly when GET settings answers them
+   (IdentityService.withholdBusinessFinanceSettings). Every other column stays for every member (currency and the
+   default tax rate, which the invoice form and the business settings page read; the basis and fiscal year). No web
+   screen took the five from an identity read: the finance settings page and the Reports and Tax accountant boxes read
+   GET settings. Proof: test/identity-finance-columns.integration.test.ts (v71f_) and
+   apps/web/src/app/app/finance/__tests__/identity-finance-columns.test.tsx.**
 
 ## KEY follow-ups and seams
 
@@ -1676,7 +1686,7 @@ Every other route is applied (above).
 | `FinanceController.disposeFixedAsset` | POST | `/finance/businesses/:businessId/fixed-assets/:id/dispose` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.fileTaxLiability` | POST | `/finance/businesses/:businessId/tax-liabilities/:id/file` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.fileTaxLiabilityAlias` | POST | `/finance/businesses/:businessId/tax/liabilities/:id/file` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
-| `FinanceController.getSettings` | GET | `/finance/businesses/:businessId/settings` | applied | `revenue:read` (FU-FINANCE-SETTINGS-SCOPE, V1-71): the finance settings answer the accountant export's saved recipient (Business.accountantEmail), so the read needs the read of the books it receives; it was membership-only (books-read-scope.spec.ts BRS-U05). Not a confinement: GET /identity/businesses and /identity/businesses/:businessId still answer the same columns to every member (review SEC-V71-2, open). FU-FINANCE-SETTINGS-PATCH (D-205): the answer carries the caller's capability hints (mayChangeAccountantEmail, mayChangeBooksSettings, mayChangeTaxRate) |
+| `FinanceController.getSettings` | GET | `/finance/businesses/:businessId/settings` | applied | `revenue:read` (FU-FINANCE-SETTINGS-SCOPE, V1-71): the finance settings answer the accountant export's saved recipient (Business.accountantEmail), so the read needs the read of the books it receives; it was membership-only (books-read-scope.spec.ts BRS-U05). GET /identity/businesses, /identity/businesses/:businessId and POST /identity/bootstrap answer accountantEmail and the default account ids by the same rule (review SEC-V71-2, closed by FU-IDENTITY-FINANCE-COLUMNS, v71f_). FU-FINANCE-SETTINGS-PATCH (D-205): the answer carries the caller's capability hints (mayChangeAccountantEmail, mayChangeBooksSettings, mayChangeTaxRate) |
 | `FinanceController.ignoreBankRow` | POST | `/finance/businesses/:businessId/bank-transactions/:bankTransactionId/ignore` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.importBankCsv` | POST | `/finance/businesses/:businessId/accounts/:accountId/bank-transactions/import` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.manualMatch` | POST | `/finance/businesses/:businessId/bank-transactions/:bankTransactionId/match` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
@@ -1854,7 +1864,7 @@ Every other route is applied (above).
 | `KeyCortexController.flowGenerate` | POST | `/api/v1/cortex/flows/generate` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
 | `KeyCortexController.flowToggle` | POST | `/api/v1/cortex/flows/:id/toggle` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
 | `KeyCortexController.flowUpdate` | PUT | `/api/v1/cortex/flows/:id` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.generateInsights` | POST | `/api/v1/cortex/insights` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
+| `KeyCortexController.generateInsights` | POST | `/api/v1/cortex/insights` | applied | `revenue:read` |
 | `KeyCortexController.listen` | POST | `/api/v1/cortex/voice/listen` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
 | `KeyCortexController.phoneAnalyze` | POST | `/api/v1/cortex/phone/analyze` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
 | `KeyCortexController.phoneCall` | POST | `/api/v1/cortex/phone/call` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |

@@ -573,8 +573,8 @@ export class GoogleDriveService {
       },
     );
     if (!res.ok) {
-      const err = await res.text();
-      throw providerFailure('drive', res.status, err, `Drive share failed: ${res.status} ${err}`);
+      // FU-PROVIDER-ERROR-HYGIENE (D-221): the status, never Drive's body (it reached the client in the 400 and the 503).
+      throw providerFailure('drive', res.status, await readProviderFailureBody(res), `Drive share failed: ${res.status}`);
     }
     return res.json();
   }
