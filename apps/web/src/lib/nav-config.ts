@@ -205,7 +205,9 @@ export const hubNav: HubNavItem[] = [
       { label: "Relationship map", href: "/app/crm/network", icon: Share2 },
       // At-risk contacts, due tasks, next actions, the presence funnel.
       { label: "Customer dashboard", href: "/app/crm/dashboard", icon: LayoutDashboard },
-      { label: "Rep performance", href: "/app/sales-team", icon: Users },
+      // The sales reps' revenue and commissions: its read (GET conversion/.../sales-reps) carries no scope on the server
+      // but answers PAID invoice totals per rep, so it needs revenue as well as customers (review: server follow-up).
+      { label: "Rep performance", href: "/app/sales-team", icon: Users, module: ["crm", "revenue"] },
     ],
   },
   {
