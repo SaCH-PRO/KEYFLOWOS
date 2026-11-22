@@ -24,6 +24,10 @@
  *   SG-03  SENT, OVERDUE and PARTIALLY_PAID still remind exactly once: 201 delivered: true, one
  *          email to the contact with the pay link, one live link, one
  *          invoice.payment_reminder_sent event and one timeline entry; the status is unchanged.
+ *   SG-05  SENT, OVERDUE and PARTIALLY_PAID with a live link: the link is reused as before the gate
+ *          (same id and token in the email), once.
+ *   SG-06  SENT, OVERDUE and PARTIALLY_PAID with a live legacy (cuid) link: rotated in place as
+ *          before the gate (same id, new non-cuid token in the email), once.
  *   SG-04  cross-tenant: tenant A's owner naming tenant B's invoice id under A's business is a
  *          404 for a remindable and for a refused status alike (the status is never disclosed),
  *          and nothing is sent; under B's business it is refused by the business guard.
@@ -321,6 +325,44 @@ describe('send-reminder status gate (FU-SEND-REMINDER-SERVER-GATE)', () => {
     expect(emitted.map((e) => e.name)).toEqual(['invoice.payment_reminder_sent']);
     expect(timeline.map((e) => [e.type, e.data?.invoiceId, e.data?.status])).toEqual([['invoice.payment_reminder_sent', inv, status]]);
     expect((await db.invoice.findUnique({ where: { id: inv } })).status).toBe(status);
+  });
+
+  it.each(ALLOWED)('SG-05 %s with a live link: the reminder reuses that link (same id and token), one email, one event, one timeline entry', async (status) => {
+    const inv = await seedInvoice(ID.bizA, ID.contactA, status);
+    const live = await db.paymentLink.create({ data: { invoiceId: inv, businessId: ID.bizA, token: `${P}live_${status.toLowerCase()}_${seq}` } });
+
+    const res = await remind(ID.bizA, inv);
+
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.delivered).toBe(true);
+    expect((await linksOf(inv)).map((l: any) => [l.id, l.token, l.active, l.expiresAt])).toEqual([[live.id, live.token, true, null]]);
+    expect(res.body.paymentUrl).toContain(`/public/invoice/${live.token}`);
+    expect(sentEmails).toHaveLength(1);
+    expect(sentEmails[0].htmlBody).toContain(`/public/invoice/${live.token}`);
+    expect(emitted.map((e) => e.name)).toEqual(['invoice.payment_reminder_sent']);
+    expect(timeline.map((e) => [e.type, e.data?.invoiceId])).toEqual([['invoice.payment_reminder_sent', inv]]);
+  });
+
+  it.each(ALLOWED)('SG-06 %s with a live legacy (cuid) link: the link is rotated in place (same id, new non-cuid token) and the email carries the new token, once', async (status) => {
+    const inv = await seedInvoice(ID.bizA, ID.contactA, status);
+    const legacy = await db.paymentLink.create({ data: { invoiceId: inv, businessId: ID.bizA } });
+    expect(legacy.token, 'seeded legacy cuid token').toMatch(/^c[a-z0-9]{24}$/);
+
+    const res = await remind(ID.bizA, inv);
+
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const links = await linksOf(inv);
+    expect(links).toHaveLength(1);
+    expect(links[0].id).toBe(legacy.id);
+    expect(links[0].active).toBe(true);
+    expect(links[0].token).not.toBe(legacy.token);
+    expect(links[0].token).not.toMatch(/^c[a-z0-9]{24}$/);
+    expect(res.body.paymentUrl).toContain(`/public/invoice/${links[0].token}`);
+    expect(sentEmails).toHaveLength(1);
+    expect(sentEmails[0].htmlBody).toContain(`/public/invoice/${links[0].token}`);
+    expect(sentEmails[0].htmlBody).not.toContain(legacy.token);
+    expect(emitted.map((e) => e.name)).toEqual(['invoice.payment_reminder_sent']);
+    expect(timeline.map((e) => [e.type, e.data?.invoiceId])).toEqual([['invoice.payment_reminder_sent', inv]]);
   });
 
   it('SG-04 cross-tenant: B\'s invoice ids under A\'s business are 404 whatever their status; under B\'s business the guard refuses; nothing is sent', async () => {
