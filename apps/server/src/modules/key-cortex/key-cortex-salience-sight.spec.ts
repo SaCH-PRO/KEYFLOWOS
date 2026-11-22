@@ -245,3 +245,32 @@ describe('MEM-SALIENCE-SIGHT review SEC-MSS-1: no signal is cut before the reade
     expect(opportunity.length).toBeLessThanOrEqual(maxConcerns);
   });
 });
+
+describe('MEM-SALIENCE-SIGHT review CR F1b: business-wide and module evidence together are no louder for a partial reader', () => {
+  it('interleaved business-wide and booking cortisol: partial level and effort never exceed the owner at any decay gap', () => {
+    const endocrine = new KeyCortexEndocrineService();
+    const start = new Date('2026-11-22T00:00:00Z').getTime();
+    for (let h = 0; h < 6; h += 1) {
+      const at = new Date(start + h * HOUR);
+      endocrine.release(BIZ, [{ hormone: 'cortisol', magnitude: 0.35, reason: 'bulk_delete detected in the audit stream' }], at);
+      endocrine.release(
+        BIZ,
+        [{ hormone: 'cortisol', magnitude: 0.35, reason: '3 booking no-shows in 24h', modules: ['bookings'] }],
+        at,
+        [{ hormone: 'cortisol', magnitude: 0.35, reason: '3 booking no-shows in 24h', modules: ['bookings'] }],
+      );
+    }
+    const allButTeam = moduleSightOf(EVENT_MODULES.filter((m) => m !== 'team'));
+    for (const gap of [0, 1, 3, 10, 20]) {
+      const now = new Date(start + (5 + gap) * HOUR);
+      const owner = endocrine.read(BIZ, now).find((h) => h.name === 'cortisol')?.level ?? 0;
+      const partial = endocrine.readFor(BIZ, allButTeam, now).find((h) => h.name === 'cortisol')?.level ?? 0;
+      expect(partial, `gap ${gap}h`).toBeLessThanOrEqual(owner + 1e-9);
+      expect(endocrine.effortMultiplier(BIZ, now, allButTeam), `gap ${gap}h`).toBeLessThanOrEqual(endocrine.effortMultiplier(BIZ, now) + 1e-9);
+    }
+    // Both kinds of evidence still reach the partial reader.
+    const text = endocrine.describeForPrompt(BIZ, new Date(start + 5 * HOUR), allButTeam) ?? '';
+    expect(text).toMatch(/booking no-shows/);
+    expect(text).toMatch(/bulk_delete/);
+  });
+});
