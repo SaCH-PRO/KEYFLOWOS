@@ -75,6 +75,8 @@ const attempts: Array<{ planStepId?: string }> = [];
 const toolWork: Array<{ businessId: string; taskId: string }> = [];
 /** RF-03: how many of updateTask's next conditional writes lose to a second writer, and on which task. */
 const race = { taskId: '', remaining: 0 };
+/** The orchestrator's own execution-log writes, which executeTool leaves unawaited. */
+const pendingLogWrites: Array<Promise<unknown>> = [];
 
 async function cleanup() {
   for (const sql of [
@@ -170,12 +172,22 @@ beforeAll(async () => {
     return (realUpdateTask as any)(businessId, taskId, ...rest);
   };
 
+  // executeTool does not wait for its own execution-log row (no actor to attribute it to), so the harness
+  // keeps each write and afterAll waits for them before it cleans up and counts what is left.
+  const realFlowLog = new AiExecutionLogService(prisma);
+  const flowExecutionLog = {
+    logToolExecution: (...a: unknown[]) => {
+      const written = (realFlowLog.logToolExecution as any)(...a);
+      pendingLogWrites.push(Promise.resolve(written).catch(() => undefined));
+      return written;
+    },
+  };
   flow = Object.create(FlowOrchestratorService.prototype);
   Object.assign(flow, {
     prisma,
     logger: new Logger('v99r-flow'),
     governance: { getToolTier: () => 1 },
-    executionLog: new AiExecutionLogService(prisma),
+    executionLog: flowExecutionLog,
     businessGraph: { invalidateCache: () => undefined },
     moduleRef: {
       get: (token: unknown) => {
@@ -238,6 +250,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (db) {
+    await Promise.all(pendingLogWrites);
     await cleanup();
     // cleanup() is best-effort per statement, so a failed delete would leave rows silently: none may remain.
     const left = await db.$queryRawUnsafe(
