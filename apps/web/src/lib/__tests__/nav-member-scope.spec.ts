@@ -280,11 +280,13 @@ const MODULE_TABLE: Record<string, { modules: string[]; cite: string[] }> = {
   "/app/time-tracking": { modules: ["projects"], cite: ["unscoped:modules/time-tracking/time-entry.controller.ts:174", SRV("projects/projects.controller.ts", 43)] },
   "/app/operations": { modules: ["operations"], cite: ["unscoped:modules/content-ops/content-ops.controller.ts:68", "D-179:operations"] },
   "/app/operations-flow": { modules: ["operations"], cite: ["unscoped:modules/sop/sop.controller.ts:13", "D-179:operations"] },
-  "/app/change-orders": { modules: [], cite: ["unscoped:modules/change-orders/change-order.controller.ts:111"] },
+  // Its list (unscoped) answers each change order with its project's name, scope, amount and hours: project data, as
+  // for Time tracking (security review round 3).
+  "/app/change-orders": { modules: ["projects"], cite: ["unscoped:modules/change-orders/change-order.controller.ts:111", "data:modules/change-orders/change-order.service.ts:84:projects project, the project's id and name on every row"] },
   // Marketing
   "/app/communicate/campaigns": { modules: [], cite: ["unscoped:modules/email-marketing/email-marketing.controller.ts:18"] },
   "/app/marketing/lists": { modules: ["content"], cite: [SRV("email-marketing/marketing-sync.controller.ts", 53)] },
-  "/app/marketing/case-studies": { modules: ["revenue"], cite: ["unscoped:modules/site/site.controller.ts:688", "data:modules/site/case-study.service.ts:109:revenue recentRevenue, the PAID order totals of the last 60 days"] },
+  "/app/marketing/case-studies": { modules: ["revenue"], cite: ["unscoped:modules/site/site.controller.ts:688", "data:modules/site/case-study.service.ts:155:revenue recentRevenue, stored in metrics and answered by the list read"] },
   "/app/content-ops": { modules: [], cite: ["unscoped:modules/content-ops/content-ops.controller.ts:68"] },
   "/app/social": { modules: [], cite: ["unscoped:modules/social/social.controller.ts:325"] },
   "/app/seo": { modules: [], cite: ["unscoped:modules/seo/seo.controller.ts:71"] },
@@ -348,6 +350,11 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
       let top = at;
       while (top > 0) {
         const prev = lines[top - 1].trim();
+        // A comment line inside a decorator stack is read through (review round 3); code that is not a decorator ends it.
+        if (prev.startsWith("//") || prev.startsWith("*") || prev.startsWith("/*")) {
+          top--;
+          continue;
+        }
         if (prev === "" || prev === "}" || prev.endsWith(";") || prev.endsWith("{") && !prev.startsWith("@")) break;
         top--;
       }
@@ -410,6 +417,11 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
       }
     }
     expect(bad).toEqual([]);
+  });
+
+  it("NMS-18 a member without projects is not offered Change orders (its list answers project data)", () => {
+    const { moreSections } = menuSectionsFor("both", levels({ crm: "read", bookings: "read" }));
+    expect(moreSections.flatMap((s) => s.items.map((i) => i.href))).not.toContain("/app/change-orders");
   });
 
   it("NMS-18 a member with storefront read and no revenue is not offered Presence (its overview answers paid invoice revenue)", () => {
