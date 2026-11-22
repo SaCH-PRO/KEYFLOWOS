@@ -171,3 +171,58 @@ describe('review of the Codex fixes on #218: the timeline', () => {
     for (const call of findMany.mock.calls as any[]) expect(Number.isInteger(call[0].take) && call[0].take > 0, String(call[0].take)).toBe(true);
   });
 });
+
+describe('confirmation review of the #218 repairs: the paged timeline read', () => {
+  const blind = { id: 'blind', role: 'USER' };
+  const ev = (id: string, entityType: string, entityId: string, extra: object = {}) => ({ id, businessId: 'biz_1', entityType, entityId, title: 'Event', description: null, payload: {}, metadata: {}, ...extra });
+  const FIN = { id: 'kap_fin', actionType: 'EXECUTE_TOOL', toolName: 'commerce.create_invoice', title: 'Invoice Acme' };
+  const TASK = { id: 'kap_task', actionType: 'CREATE_TASK', module: 'crm', toolName: null, title: 'Call Kerry back' };
+  const make = (findMany: any, proposals: any[] = [FIN, TASK]) => {
+    const membership = { findUnique: vi.fn(async () => ({ role: 'STAFF', permissionScopes: { revenue: 'none' } })) };
+    const prisma = { client: { temporalFlowEvent: { findMany }, keyActionProposal: { findMany: vi.fn(async ({ where }: any) => proposals.filter((p) => where.id.in.includes(p.id))) }, genomeRecommendation: { findMany: vi.fn(async () => []) }, membership } };
+    return { svc: new TemporalFlowService(prisma as any) as any, membership };
+  };
+
+  it('RED-BEFORE (m3): an event inserted between two pages duplicates no row', async () => {
+    const rows = [ev('f0', 'key_action_proposal', 'kap_fin'), ev('b1', 'booking', 'x'), ev('b2', 'booking', 'x'), ev('f1', 'key_action_proposal', 'kap_fin'), ev('b3', 'booking', 'x'), ev('b4', 'booking', 'x')];
+    let calls = 0;
+    const findMany = vi.fn(async ({ take, skip }: any) => {
+      const data = calls++ === 0 ? rows : [ev('new', 'booking', 'x'), ...rows];
+      return data.slice(skip ?? 0, (skip ?? 0) + take);
+    });
+    const { svc } = make(findMany);
+    const ids = (await svc.list('biz_1', { limit: 3 }, blind)).map((e: any) => e.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual(['b1', 'b2', 'b3']);
+  });
+  it('RED-BEFORE (m1/m2): the reader is resolved once for the whole read, however many pages it takes', async () => {
+    const rows = [...Array.from({ length: 450 }, (_, i) => ev(`f${i}`, 'key_action_proposal', 'kap_fin')), ev('b', 'booking', 'x')];
+    const { svc, membership } = make(vi.fn(async ({ take, skip }: any) => rows.slice(skip ?? 0, (skip ?? 0) + take)));
+    expect((await svc.list('biz_1', { limit: 10 }, blind)).map((e: any) => e.id)).toEqual(['b']);
+    expect(membership.findUnique).toHaveBeenCalledTimes(1);
+  });
+  it('RED-BEFORE (m1): a reader\'s limit is capped at 500 and one read scans at most 5,000 rows', async () => {
+    const findMany = vi.fn(async ({ take }: any) => Array.from({ length: take }, (_, i) => ev(`f${i}_${Math.random()}`, 'key_action_proposal', 'kap_fin')));
+    const { svc } = make(findMany);
+    expect(await svc.list('biz_1', { limit: 10_000 }, blind)).toEqual([]);
+    const takes = (findMany.mock.calls as any[]).map((c) => c[0].take);
+    expect(Math.max(...takes)).toBeLessThanOrEqual(500);
+    expect(takes.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(5_000);
+    const many = Array.from({ length: 800 }, (_, i) => ev(`b${i}`, 'booking', 'x'));
+    const all = make(vi.fn(async ({ take, skip }: any) => many.slice(skip ?? 0, (skip ?? 0) + take)));
+    expect(await all.svc.list('biz_1', { limit: 10_000 }, blind)).toHaveLength(500);
+  });
+  it('RED-BEFORE (m5): an executed event whose payload carries a money result is withheld even when the proposal row holds no result', async () => {
+    const rows = [ev('ev_x', 'key_action_proposal', 'kap_task', { title: 'KEY action executed', payload: { actionType: 'CREATE_TASK', executionResult: { amount: 12345 } } }), ev('ev_ok', 'key_action_proposal', 'kap_task', { payload: { actionType: 'CREATE_TASK', executionResult: { entityType: 'task', entityId: 'tsk_1' } } })];
+    const { svc } = make(vi.fn(async () => rows));
+    expect((await svc.list('biz_1', {}, blind)).map((e: any) => e.id)).toEqual(['ev_ok']);
+  });
+  it('control: a call with no reader argument is one read with the caller\'s own limit and the plain order', async () => {
+    const findMany = vi.fn(async () => []);
+    const { svc } = make(findMany);
+    await svc.list('biz_1', { limit: 2000 });
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect((findMany.mock.calls[0] as any[])[0]).toMatchObject({ orderBy: { occurredAt: 'desc' }, take: 2000 });
+    expect((findMany.mock.calls[0] as any[])[0].skip).toBeUndefined();
+  });
+});

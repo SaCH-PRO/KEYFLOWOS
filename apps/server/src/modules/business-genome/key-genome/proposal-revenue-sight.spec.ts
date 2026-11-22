@@ -451,3 +451,27 @@ describe('review of the Codex fixes on #218: compensation words and the failure 
     expect(proposalViewForReader(money, true)).toBe(money);
   });
 });
+
+describe('confirmation review of the #218 repairs: the compensation words fail closed', () => {
+  const task = (extra: object) => ({ actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', ...extra });
+  it.each([
+    ['an acronym-prefixed key', { payload: { HRCompensation: 'tier B' } }],
+    ['a concatenated key', { payload: { updatecommission: true } }],
+    ['a VIP commission tier', { payload: { VIPCommissionTier: 'gold' } }],
+    ['undercompensated staff', { title: 'Undercompensated staff' }],
+    ['a subcommission', { title: 'Split the subcommission' }],
+    ['incentivise', { title: 'Incentivise staff' }],
+    ['incentivize', { title: 'Incentivize the team' }],
+  ])('RED-BEFORE (m2/m4): %s is financial', (_l, extra) => expect(isFinancialProposal(task(extra) as any)).toBe(true));
+  it.each(['Decommission the old tablet', 'Decommissioning plan', 'Thermal overcompensation check'])('control: "%s" stays non-financial', (title) => expect(isFinancialProposal(task({ title }) as any)).toBe(false));
+  it('RED-BEFORE (m6): outcome evidence that states money anywhere is reduced to its status', () => {
+    const row = { id: 'kap_t', status: 'FAILED', title: 'Open a ticket', actionType: 'CREATE_TASK', module: 'crm', outcomeEvidence: { status: 'FAILED', message: 'the balance owed is 900', detail: { text: 'card declined' } } };
+    const out = proposalViewForReader(row, false) as any;
+    expect(out.outcomeEvidence).toEqual({ status: 'FAILED', reason: null });
+    expect(out.title).toBe('Open a ticket');
+  });
+  it('control: outcome evidence naming only the entity is kept', () => {
+    const row = { id: 'kap_t', status: 'EXECUTED', title: 'Open a ticket', actionType: 'CREATE_TASK', module: 'crm', outcomeEvidence: { status: 'EXECUTED', entityType: 'helpdesk_ticket', entityId: 'tkt_1' } };
+    expect(proposalViewForReader(row, false)).toBe(row);
+  });
+});
