@@ -789,9 +789,34 @@ describe('review of the budget charge: over-budget text fails closed before the 
     expect(proposalViewForReader(row, false)).toEqual({ id: 'k', status: 'FAILED' });
     expect(performance.now() - started).toBeLessThan(120);
   });
-  it('control (MINOR-1): text over the budget on its raw readings is refused even when stripping its ids would bring it under', () => {
-    const idDense = `\n\\qA\u200b\u2122 ${'9cac7457-1fee-4cad-8fee-2cac3cac4fee '.repeat(1_350)}`.slice(0, 49_890);
+  it('text over the budget on its raw readings is refused even when stripping its ids would bring it under (MINOR-1)', () => {
+    // Ends on a whole id (cut mid-id, the fragment alone stated money and the case passed for that reason).
+    const idDense = `\n\\qA\u200b\u2122 ${'9cac7457-1fee-4cad-8fee-2cac3cac4fee '.repeat(1_348)}`.trimEnd();
+    expect(idDense.length).toBeLessThan(50_000);
     expect(proposalTextStatesMoney(idDense)).toBe(true);
     expect(isFinancialProposal(task({ summary: idDense }))).toBe(true);
+  });
+});
+
+describe('review of the budget repair: what one field costs is what its raw readings cost, across fields', () => {
+  const run = 'c9qqqqq9wwwww9xxxxx9kkkkk ';
+  const field = (n: number) => `\n\\qA\u200b\u2122 ${run.repeat(Math.ceil(n / run.length))}`.slice(0, n).replace(/\S*$/, '').trimEnd();
+  const lengths = [8337, 7684, 7083, 6508, 5980, 5500, 5068, 3830];
+  const [title, summary, description, rationale, expectedBenefit, risks, evidence, note] = lengths.map(field);
+  const row = { id: 'k', status: 'PENDING', actionType: 'CREATE_TASK', module: 'crm', title, summary, description, rationale, expectedBenefit, risks, evidence: [{ note: evidence }], payload: { note } };
+  it('RED-BEFORE (MAJOR-1): crafted id-dense text split across eight fields is refused, not read field by field', () => {
+    for (let i = 0; i < 2; i++) isFinancialProposal(row as any);
+    const started = performance.now();
+    expect(isFinancialProposal(row as any)).toBe(true);
+    expect(performance.now() - started, 'classifier').toBeLessThan(150);
+  });
+  it('RED-BEFORE (MAJOR-1): and the view redacts it within the bound', () => {
+    const started = performance.now();
+    expect(proposalViewForReader(row as any, false)).toEqual({ id: 'k', status: 'PENDING' });
+    expect(performance.now() - started, 'view').toBeLessThan(250);
+  });
+  it('control: an ordinary proposal with real ids in several fields is read and stays non-financial', () => {
+    const real = (n: number) => `Booking cmzcku666tax29xx90fuyj0uu moved. ${'Please call the client back. '.repeat(Math.ceil(n / 29))}`.slice(0, n);
+    expect(isFinancialProposal({ actionType: 'CREATE_TASK', module: 'crm', title: 'Follow up', summary: real(9_000), description: real(9_000), rationale: real(9_000), payload: { note: real(9_000) } } as any)).toBe(false);
   });
 });
