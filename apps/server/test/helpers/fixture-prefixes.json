@@ -1131,6 +1131,11 @@
       "prefix": "v64g_",
       "owner": "apps/server/test/public-booking-payment-methods.integration.test.ts",
       "packet": "V1-64 (SWP-BOOKING-PAYMENT-GATE)"
+    },
+    {
+      "prefix": "v86s_",
+      "owner": "apps/server/test/site-analytics-revenue-scope.integration.test.ts",
+      "packet": "FU-SITE-ANALYTICS-REVENUE-SCOPE"
     }
   ],
   "pendingRenames": [],
