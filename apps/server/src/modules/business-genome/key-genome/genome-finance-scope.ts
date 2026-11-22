@@ -327,10 +327,6 @@ function readings(text: string, budget: ReadingBudget): string[] | null {
       }
     }
   }
-  let cost = 0;
-  for (const reading of raw) cost += reading.length;
-  if (cost > budget.left) return null;
-  budget.left -= cost;
   // A cuid-shaped run kept for a money word in it is read both ways, kept and stripped: kept, it can read as no money
   // in its place ("...paying attention") and stand between a money word and its figure (eighth review, security MINOR-1).
   const out = new Set<string>();
@@ -338,6 +334,11 @@ function readings(text: string, budget: ReadingBudget): string[] | null {
     out.add(withoutIdTokens(reading));
     out.add(withoutIdTokens(reading, false));
   }
+  // The budget is charged for everything the vocabulary will read, the stripped forms included (final review MINOR-2).
+  let cost = 0;
+  for (const reading of out) cost += reading.length;
+  if (cost > budget.left) return null;
+  budget.left -= cost;
   return [...out];
 }
 
