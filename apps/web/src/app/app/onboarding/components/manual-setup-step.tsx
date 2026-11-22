@@ -46,9 +46,12 @@ import { getStoredBusinessId } from "@/lib/workspace";
  * browser could not recognise, so the profile is saved and completion asked
  * again.
  *
- * BIZ-SETTINGS-WEB (sweep BUG-077; owner rulings D-150 'hubs', D-218). The
- * currency is TTD or USD, the two v1 sells in: any three letters used to be
- * taken ('ABC' was saved on the business). The form also asks "What do you
+ * BIZ-SETTINGS-WEB (sweep BUG-077; owner rulings D-150 'hubs', D-218, D-242).
+ * The currency is a select of TTD and USD, the two v1 sells in: it was free
+ * text, and any three letters were taken ('ABC' was saved on the business).
+ * Nothing is chosen until the owner chooses, or the business already holds
+ * one of the two; finishing without a choice is refused before anything is
+ * sent. The form also asks "What do you
  * sell?" (services, products or both), the answer that sets the hubs and the
  * phone's bottom bar. An answer the owner gives is saved in the same owner-only
  * PATCH as the profile, under the same ordering rule as above (never before
@@ -75,8 +78,19 @@ const PILLAR_LABELS: Record<string, string> = {
   market: "Market DNA",
 };
 
-/** The currencies a v1 business is set up in (BUG-077): the form takes these and no other. */
+/** The currencies a v1 business is set up in (BUG-077): the form offers these and no other. */
 const SETUP_CURRENCIES = ["TTD", "USD"];
+
+/**
+ * What the currency select shows for a currency held in the form (owner ruling D-242: a real select of TTD and
+ * USD): that currency when it is one of the two, however it is spelled, else nothing chosen. A business can hold
+ * a currency the form does not offer (the server takes any three letters); it is then not chosen for the owner,
+ * and Finish setup refuses until one of the two is.
+ */
+function offeredCurrency(held: string): string {
+  const code = held.trim().toUpperCase();
+  return SETUP_CURRENCIES.includes(code) ? code : "";
+}
 
 const SELLS_LABELS: Record<BusinessSells, string> = {
   services: "Services",
@@ -434,20 +448,19 @@ export function ManualSetupStep({ setup }: { setup: ManualSetup }) {
             <label htmlFor="manual-setup-currency" className="text-xs font-medium">
               Currency
             </label>
-            <input
+            <select
               id="manual-setup-currency"
-              className={`${inputClass} uppercase`}
-              value={profile.currency}
+              className={inputClass}
+              value={offeredCurrency(profile.currency)}
               onChange={(e) => update("currency")(e.target.value)}
-              list="manual-setup-currencies"
-              maxLength={3}
-              placeholder="TTD"
-            />
-            <datalist id="manual-setup-currencies">
+            >
+              <option value="">Select currency</option>
               {SETUP_CURRENCIES.map((code) => (
-                <option key={code} value={code} />
+                <option key={code} value={code}>
+                  {code}
+                </option>
               ))}
-            </datalist>
+            </select>
           </div>
           <div className="space-y-1 sm:col-span-2">
             <label htmlFor="manual-setup-timezone" className="text-xs font-medium">
