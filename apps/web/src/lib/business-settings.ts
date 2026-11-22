@@ -367,13 +367,21 @@ const UNCONFIRMED_ANSWER = "The change was sent, but the business does not show 
  */
 function recorded(businessId: string, sentAs: string, res: WriteAnswer, holds: (settings: BusinessSettings) => boolean): WriteAnswer {
   if (res.error !== null) {
-    // No status: the server's answer never arrived (a dropped connection, a timeout), so the write may have been
-    // applied all the same (review SEC5-1). It is still answered as the failure it is, and what the business holds
-    // is read again rather than left as it was read before. A refusal the server did answer changes nothing.
-    if (res.status === undefined) {
+    // The outcome is unknown when the server's answer never arrived (no status: a dropped connection, a timeout)
+    // or was a 5xx (a gateway that gave up while the server went on, a failure after the write was stored): the
+    // write may have been applied all the same (reviews SEC5-1, SEC6-2). It is still answered as the failure it
+    // is, and what the business holds is read again. What is held meanwhile is no longer taken as current (review
+    // SEC6-1): if that re-read fails too, the next mount or look at the tab reads again. A 4xx is the server's
+    // answer that nothing changed, and changes nothing here.
+    if (res.status === undefined || res.status >= 500) {
       answerRecorded(businessId);
-      if (watched.has(businessId)) void loadBusinessSettings(businessId, { force: true });
-      else if (entries.delete(businessId)) emit();
+      const held = entries.get(businessId);
+      if (!watched.has(businessId)) {
+        if (entries.delete(businessId)) emit();
+      } else {
+        if (held?.status === "ready") entries.set(businessId, { ...held, readAt: 0 });
+        void loadBusinessSettings(businessId, { force: true });
+      }
     }
     return res;
   }
