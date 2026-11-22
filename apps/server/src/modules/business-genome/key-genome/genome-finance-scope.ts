@@ -327,6 +327,11 @@ function readings(text: string, budget: ReadingBudget): string[] | null {
       }
     }
   }
+  // The raw readings are checked against the budget first, before any id pass runs over them: text over the budget
+  // fails closed at once, and stripping ids can never bring refused text back under it (review of the budget charge).
+  let rawCost = 0;
+  for (const reading of raw) rawCost += reading.length;
+  if (rawCost > budget.left) return null;
   // A cuid-shaped run kept for a money word in it is read both ways, kept and stripped: kept, it can read as no money
   // in its place ("...paying attention") and stand between a money word and its figure (eighth review, security MINOR-1).
   const out = new Set<string>();
