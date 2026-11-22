@@ -124,7 +124,6 @@ function ledgerServer(opts: { total?: number; ledger?: () => Response } = {}) {
 
 const ledgerCalls = (calls: Call[]) => calls.filter((c) => c.pathname === LEDGER);
 const lastLedgerCall = (calls: Call[]) => ledgerCalls(calls).at(-1)!;
-const rowOf = (text: string) => screen.getAllByText(text)[0].closest("tr") as HTMLElement;
 
 beforeEach(() => {
   window.history.replaceState({}, "", "/app/finance/ledger");

@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { normalizeCurrency } from './posting.service';
@@ -29,6 +29,8 @@ export interface GeneralLedgerRow {
   accountName: string;
   accountCode: string | null;
   accountType: string;
+  /** V1-66: the line's own currency, normalized (a TTD business's USD line says USD). */
+  currency: string;
   debit: Prisma.Decimal;
   credit: Prisma.Decimal;
   memo: string | null;
@@ -41,6 +43,88 @@ export interface GeneralLedgerRow {
 
 const D = Prisma.Decimal;
 const ZERO = new D(0);
+
+/** A date with no time of day: YYYY-MM-DD. */
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+const DAY_MS = 86_400_000;
+/** The zone of a business whose stored timezone is empty or is no zone (the schema default of Business.timezone). */
+export const DEFAULT_BUSINESS_TIMEZONE = 'America/Port_of_Spain';
+
+/**
+ * V1-66 (SWP-FIN-LEDGER): whether `value` is a date-only string (YYYY-MM-DD)
+ * naming a day that is on the calendar. '2026-02-31' has the shape but is no
+ * day (new Date() reads it as 3 March), so it is not one.
+ */
+export function isDateOnly(value: unknown): value is string {
+  if (typeof value !== 'string' || !DATE_ONLY.test(value)) return false;
+  const utcMidnight = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(utcMidnight.getTime()) && utcMidnight.toISOString().slice(0, 10) === value;
+}
+
+/** Whether `value` has the date-only shape, on the calendar or not. */
+export function looksDateOnly(value: unknown): value is string {
+  return typeof value === 'string' && DATE_ONLY.test(value);
+}
+
+/** `timeZone` when the runtime knows it as a zone, else the default. */
+function knownTimeZone(timeZone: string | null | undefined): string {
+  if (timeZone) {
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone });
+      return timeZone;
+    } catch {
+      /* not a zone */
+    }
+  }
+  return DEFAULT_BUSINESS_TIMEZONE;
+}
+
+/** What the wall clock in `timeZone` reads at `instant`, as if that reading were UTC, minus the instant: the zone's offset then, in ms. */
+function zoneOffsetMs(timeZone: string, instant: number): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    era: 'short',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+  }).formatToParts(new Date(instant));
+  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  const n = (type: string) => Number(part(type));
+  const year = part('era').startsWith('B') ? 1 - n('year') : n('year');
+  const wall = new Date(0);
+  wall.setUTCFullYear(year, n('month') - 1, n('day'));
+  wall.setUTCHours(n('hour'), n('minute'), n('second'), 0);
+  return wall.getTime() - Math.floor(instant / 1000) * 1000;
+}
+
+/**
+ * The instant day `day` (YYYY-MM-DD, on the calendar) starts in `timeZone`.
+ * The offset is read at the answer itself (two passes), so a day that starts
+ * on the other side of a daylight-saving change from midnight UTC is right.
+ */
+function startOfZonedDay(utcMidnight: number, timeZone: string): number {
+  let start = utcMidnight - zoneOffsetMs(timeZone, utcMidnight);
+  start = utcMidnight - zoneOffsetMs(timeZone, start);
+  return start;
+}
+
+/**
+ * V1-66 (SWP-FIN-LEDGER, BUG-029): the first instant AFTER day `day` in
+ * `timeZone`, that is the start of the next day there. A date-only end date
+ * covers the whole day as `date < endOfZonedDay(day)`: a 23-hour or 25-hour
+ * day (daylight saving) is covered as it is. A timeZone that is empty or no
+ * zone reads as DEFAULT_BUSINESS_TIMEZONE. Throws 400 for a `day` that is not
+ * a date-only day on the calendar.
+ */
+export function endOfZonedDay(day: string, timeZone: string | null | undefined): Date {
+  if (!isDateOnly(day)) throw new BadRequestException('Invalid to date');
+  const nextUtcMidnight = new Date(`${day}T00:00:00.000Z`).getTime() + DAY_MS;
+  return new Date(startOfZonedDay(nextUtcMidnight, knownTimeZone(timeZone)));
+}
 
 @Injectable()
 export class LedgerBalanceService {
@@ -134,6 +218,13 @@ export class LedgerBalanceService {
   /**
    * General ledger detail view — chronological ledger rows with running balance.
    * Paginated; default page size 100.
+   *
+   * V1-66 (SWP-FIN-LEDGER, BUG-029): the end of the range is `to` (a
+   * timestamp: lines dated at or before it) or `toDay` (a date-only day,
+   * YYYY-MM-DD: every line of that day in the business's timezone, that is
+   * dated before the next day starts there). A date-only end was read as
+   * midnight UTC with `<=`, which dropped the day after its first instant.
+   * `toDay` wins when both are given. `from` is unchanged (`>=` the instant).
    */
   async getGeneralLedger(
     businessId: string,
@@ -141,6 +232,8 @@ export class LedgerBalanceService {
       accountId?: string;
       from?: Date;
       to?: Date;
+      /** A date-only end day (YYYY-MM-DD), covered whole in the business's timezone. */
+      toDay?: string;
       page?: number;
       pageSize?: number;
     } = {},
@@ -150,10 +243,20 @@ export class LedgerBalanceService {
 
     const where: Prisma.LedgerEntryWhereInput = { businessId };
     if (opts.accountId) where.accountId = opts.accountId;
-    if (opts.from || opts.to) {
-      where.date = {};
-      if (opts.from) where.date.gte = opts.from;
-      if (opts.to) where.date.lte = opts.to;
+    if (opts.from || opts.to || opts.toDay !== undefined) {
+      const date: Prisma.DateTimeFilter = {};
+      if (opts.from) date.gte = opts.from;
+      if (opts.toDay !== undefined) {
+        // Read with businessId only: the day is this business's day.
+        const business = await this.prisma.client.business.findUnique({
+          where: { id: businessId },
+          select: { timezone: true },
+        });
+        date.lt = endOfZonedDay(opts.toDay, business?.timezone);
+      } else if (opts.to) {
+        date.lte = opts.to;
+      }
+      where.date = date;
     }
 
     const total = await this.prisma.client.ledgerEntry.count({ where });
@@ -200,6 +303,7 @@ export class LedgerBalanceService {
         accountName: e.account.name,
         accountCode: e.account.code ?? null,
         accountType: e.account.type,
+        currency: normalizeCurrency(e.currency),
         debit: new D(e.debit.toString()),
         credit: new D(e.credit.toString()),
         memo: e.memo,
