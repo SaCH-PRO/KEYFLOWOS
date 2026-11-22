@@ -207,7 +207,7 @@ describe("NAV-A1: the hubs a member is shown", () => {
 const SRV = (f: string, line: number) => `modules/${f}:${line}`;
 const MODULE_TABLE: Record<string, { modules: string[]; cite: string[] }> = {
   // Hubs
-  "/app/command-center": { modules: [], cite: ["unscoped:modules/business-command-center/business-command-center.controller.ts:25", "every member's home (D-96)"] },
+  "/app/command-center": { modules: [], cite: ["unscoped:modules/business-command-center/business-command-center.controller.ts:25", "D-96 every member's home"] },
   "/app/crm/contacts": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", 493)] },
   "/app/commerce": { modules: ["revenue"], cite: [SRV("commerce/commerce.controller.ts", 706)] },
   "/app/schedule/calendar": { modules: ["bookings"], cite: [SRV("calendar/calendar.controller.ts", 256)] },
@@ -375,7 +375,11 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
         if (!/^\s*@/.test(next) && SIGNATURE.test(next)) break;
         bottom++;
       }
-      return lines.slice(top, bottom + 1).join("\n");
+      // Comment lines set the block's extent only: their text is never read as a scope (closing review).
+      return lines
+        .slice(top, bottom + 1)
+        .filter((line) => !/^\s*(?:\/\/|\/?\*)/.test(line))
+        .join("\n");
     };
     const at = (file: string, line: number) => {
       const lines = fs.readFileSync(path.join(SERVER_SRC, file), "utf8").split("\n");
@@ -413,6 +417,9 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
           const { lines, i } = at(m[1], Number(m[2]));
           if (!(lines[i] ?? "").includes(m[4])) bad.push(`${href}: ${cite}: "${m[4]}" is not on that line`);
           if (!/^pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100/.test(m[6])) bad.push(`${href}: ${cite}: no decision named`);
+        } else if (cite.startsWith("tracked:")) {
+          // A tracked claim that does not parse is never accepted by another branch (closing review).
+          bad.push(`${href}: malformed tracked citation ${cite}`);
         } else if ((m = /^service-check:((?:modules|core)\/[^:]+\.ts):(\d+)$/.exec(cite))) {
           const { lines, i } = at(m[1], Number(m[2]));
           if (!/@Get\(/.test(lines[i] ?? "")) bad.push(`${href}: ${cite} is not a @Get`);
@@ -420,7 +427,7 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
           // A ruling justifies only the module it names (security review round 2).
           if (!row.modules.includes(m[1])) bad.push(`${href}: ${cite} names ${m[1]}, which the row lacks`);
           justified.add(m[1]);
-        } else if (/\bD-\d+\b/.test(cite) && row.modules.length === 0) {
+        } else if (/^D-\d+\b/.test(cite) && row.modules.length === 0) {
           // A ruling beside the unscoped read a row with no module rests on (Today, D-96).
         } else {
           bad.push(`${href}: unknown citation ${cite}`);
