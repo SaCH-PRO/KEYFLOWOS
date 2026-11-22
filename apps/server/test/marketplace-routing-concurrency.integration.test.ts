@@ -157,7 +157,7 @@
  *         Its movementsWritten 0 records today's behaviour (the route writes
  *         no stock movement and names no actor), not a rule: that is the
  *         review's SEC-UPS-2 follow-up, since ruled (D-139) and built by
- *         W11-INV-SET-MOVEMENT (RC-45..RC-52): each set now writes its one
+ *         W11-INV-SET-MOVEMENT (RC-45..RC-57): each set now writes its one
  *         SET movement.
  *   RC-24 (review SEC-UPS-1) two requests creating the same new own pair at
  *         once (a double submit, a retry) both read no row (the pair lock
@@ -1845,7 +1845,7 @@ describe('W10-Z4-ROUTE-FIX routing beside the order and stock writers (real data
     }
     // At fb00af1c the first answered 500 (quantity '7' and reserved '' reached Prisma as text) and the third rewrote the
     // planted row (read by its pair alone) and answered success. movementsWritten was pinned 0 here (no stock movement,
-    // no actor) until the owner ruled the SEC-UPS-2 follow-up (D-139; W11-INV-SET-MOVEMENT, RC-45..RC-52): a set that
+    // no actor) until the owner ruled the SEC-UPS-2 follow-up (D-139; W11-INV-SET-MOVEMENT, RC-45..RC-57): a set that
     // changes the quantity (10 to 7; a new row holding 3) writes its one ADJUSTMENT/SET movement; the refused one none.
     expect(outcomes).toEqual({
       'own existing pair, quantity as the web form sends it': { answer: 'committed', stockRowsWritten: 1, movementsWritten: 1 },
@@ -1917,7 +1917,7 @@ describe('W10-Z4-ROUTE-FIX routing beside the order and stock writers (real data
   });
 
   // The SEC-UPS-2 follow-up (a set wrote no stock movement and named no actor, took a quantity below reserved and let a
-  // member set reserved by hand) was ruled by the owner (D-139) and is live as RC-45..RC-51 (W11-INV-SET-MOVEMENT, the
+  // member set reserved by hand) was ruled by the owner (D-139) and is live as RC-45..RC-57 (W11-INV-SET-MOVEMENT, the
   // describe block at the end of this file).
   it.todo(
     'Z5SEC-2 follow-up (not this packet): an operator census and repair of inventory_stocks rows whose business_id is not the business of their product or warehouse (planted by the old cross-business purchase order receipt); production code refuses around them and never deletes or rewrites them',
@@ -3503,7 +3503,7 @@ describe('W11-INV-SET-MOVEMENT a direct stock set writes one ADJUSTMENT movement
           ],
     );
     expect(changes.reduce((sum: number, c: any[]) => sum + c[1], 0), 'the movements sum to the final change').toBe(final - IN_STOCK);
-  });
+  }, 30_000);
 
   it("RC-51 (W11-INV-SET-MOVEMENT; D-139, W11-STOCK-ROW-RACE's retry) two POST .../inventory sets creating the same new pair at once (3 and 5, each held after reading no row until the other has read too; then 3 twice, a double submit) both commit on one row, and the movements written sum to the row's final quantity: the creator's whole quantity, then the difference the retried set made (none when it set the same quantity)", async () => {
     const outcomes: Record<string, unknown> = {};
@@ -3668,7 +3668,8 @@ describe('W11-INV-SET-MOVEMENT a direct stock set writes one ADJUSTMENT movement
       },
       { timeout: 20_000, maxWait: 5_000 },
     );
-    await held;
+    // Review COR-R3-2: a holder that fails before it holds ends the case with its error, not a hang.
+    await Promise.race([held, holder]);
     let waited = false;
     let outcome: any;
     try {
@@ -3689,7 +3690,7 @@ describe('W11-INV-SET-MOVEMENT a direct stock set writes one ADJUSTMENT movement
       added: [],
       row: [[ID.biz, IN_STOCK, 5]],
     });
-  });
+  }, 30_000);
 
   it("RC-56 (W11-INV-SET-MOVEMENT review SEC-R2-1; D-139) a set to 2 of a pair whose row is created after the set's lock statement ran (it locked nothing) and before its read (a receipt creating the row with 10, committed), while a routing in flight holds that new row reserving 5: the set does not act on the row it read unlocked (10 with 0 reserved). It locks the row and reads it again, waits for the reservation, and is refused 400 QUANTITY_BELOW_RESERVED with nothing written; the row keeps 10 with 5 reserved", async () => {
     await resetBusinessStock();
@@ -3720,7 +3721,7 @@ describe('W11-INV-SET-MOVEMENT a direct stock set writes one ADJUSTMENT movement
         },
         { timeout: 20_000, maxWait: 5_000 },
       );
-      await held;
+      await Promise.race([held, holder]);
     };
     prismaService.client = new Proxy(real, {
       get(target, prop) {
@@ -3778,5 +3779,111 @@ describe('W11-INV-SET-MOVEMENT a direct stock set writes one ADJUSTMENT movement
       added: [],
       row: [[ID.biz, IN_STOCK, 5]],
     });
-  });
+  }, 30_000);
+
+  it("RC-57 (W11-INV-SET-MOVEMENT review SEC-R3-1, COR-R3-4; D-139) a set to 2 whose pair's row appears after its lock statement, is deleted before its second lock statement (which then locks nothing), and is created again (10) before its second read while a routing in flight holds that row reserving 5: the set does not act on the second row it read unlocked either. Its transaction is run again, waits for the reservation, and is refused 400 QUANTITY_BELOW_RESERVED with nothing written; the row keeps 10 with 5 reserved", async () => {
+    await resetBusinessStock();
+    const firstRowId = `${P}stock_rc57_a`;
+    const secondRowId = `${P}stock_rc57_b`;
+    const real = prismaService.client;
+    const bound = (target: any, prop: PropertyKey) => {
+      const value = Reflect.get(target, prop);
+      return typeof value === 'function' ? value.bind(target) : value;
+    };
+    const insertRow = (id: string) => db.$executeRaw`
+      INSERT INTO inventory_stocks (id, business_id, product_id, warehouse_id, quantity, reserved, currency, updated_at)
+      VALUES (${id}, ${ID.biz}, ${NEW.productId}, ${NEW.warehouseId}, ${IN_STOCK}, 0, 'TTD', now())`;
+    let letGo!: () => void;
+    const go = new Promise<void>((resolve) => (letGo = resolve));
+    let holder: Promise<unknown> = Promise.resolve();
+    let lockStatements = 0;
+    let reads = 0;
+    let holderHolds = false;
+    /** Before the set's lock statements: the second one finds the first row deleted (and locks nothing). */
+    const beforeLock = async () => {
+      if (++lockStatements === 2) await removeRows([firstRowId]);
+    };
+    /** Before the set's reads: the first finds a row created after the first lock statement; the second, another one, held reserving 5. */
+    const beforeRead = async () => {
+      reads++;
+      if (reads === 1) await insertRow(firstRowId);
+      if (reads !== 2) return;
+      await insertRow(secondRowId);
+      let holding!: () => void;
+      const held = new Promise<void>((resolve) => (holding = resolve));
+      holder = db.$transaction(
+        async (tx: any) => {
+          await tx.$queryRawUnsafe('SELECT id FROM inventory_stocks WHERE id = $1 FOR UPDATE', secondRowId);
+          await tx.$executeRawUnsafe('UPDATE inventory_stocks SET reserved = 5 WHERE id = $1', secondRowId);
+          holding();
+          await go;
+        },
+        { timeout: 20_000, maxWait: 5_000 },
+      );
+      await Promise.race([held, holder]);
+      holderHolds = true;
+    };
+    prismaService.client = new Proxy(real, {
+      get(target, prop) {
+        if (prop !== '$transaction') return bound(target, prop);
+        return (arg: any, options?: any) =>
+          typeof arg !== 'function'
+            ? target.$transaction(arg, options)
+            : target.$transaction(
+                (tx: any) =>
+                  arg(
+                    new Proxy(tx, {
+                      get(t, p) {
+                        if (p === '$queryRaw') {
+                          return async (...args: any[]) => {
+                            await beforeLock();
+                            return t.$queryRaw(...args);
+                          };
+                        }
+                        if (p !== 'inventoryStock') return bound(t, p);
+                        const delegate = Reflect.get(t, p);
+                        return new Proxy(delegate, {
+                          get(d, m) {
+                            if (m !== 'findFirst') return bound(d, m);
+                            return async (args: any) => {
+                              await beforeRead();
+                              return d.findFirst(args);
+                            };
+                          },
+                        });
+                      },
+                    }),
+                  ),
+                options,
+              );
+      },
+    });
+    let waited = false;
+    let outcome: any;
+    let row: unknown;
+    try {
+      outcome = await movementsAddedBy(async () => {
+        const answer = upsertAnswerWithCode(upsertByRoute(ID.biz, { ...NEW, quantity: 2 }, SET_MEMBER));
+        // The set waits behind the reservation: at its run again's lock (the repair), or, before it, at its update.
+        waited = await within(10_000, async () => holderHolds && (await waitingSessions()) >= 1);
+        letGo();
+        await holder;
+        return answer;
+      });
+      row = await pairCounts(NEW.productId, NEW.warehouseId);
+    } finally {
+      prismaService.client = real;
+      letGo();
+      await holder.catch(() => undefined);
+      await removeRows([firstRowId, secondRowId]);
+    }
+    // At 5548fa3e: 'committed' with one SET movement of -8, the second row left holding 2 with 5 reserved.
+    expect({ secondRowHeld: holderHolds, waited, ...outcome, row }).toEqual({
+      secondRowHeld: true,
+      waited: true,
+      answer: '400 QUANTITY_BELOW_RESERVED: Inventory quantity cannot be less than the quantity reserved for orders (5)',
+      added: [],
+      row: [[ID.biz, IN_STOCK, 5]],
+    });
+  }, 30_000);
 });
