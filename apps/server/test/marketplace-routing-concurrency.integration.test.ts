@@ -793,16 +793,18 @@ async function behindHolder(heldRow: string, first: () => Promise<unknown>, seco
   let firstAnswer: Promise<unknown> = Promise.resolve();
   let secondAnswer: Promise<unknown> = Promise.resolve();
   let firstWaited = false;
+  let bothWaited = false;
   try {
     firstAnswer = answerOf(first());
     firstWaited = await within(5_000, async () => (await waitingSessions()) >= 1);
     secondAnswer = answerOf(second());
-    await within(HOLD_WINDOW_MS, async () => (await waitingSessions()) >= 2);
+    bothWaited = await within(HOLD_WINDOW_MS, async () => (await waitingSessions()) >= 2);
   } finally {
     letGo();
     await holder;
   }
-  return { firstWaited, answers: await Promise.all([firstAnswer, secondAnswer]) };
+  // bothWaited (W11-INV-SET-MOVEMENT acceptance B-2): the second party was waiting too when the holder let go.
+  return { firstWaited, bothWaited, answers: await Promise.all([firstAnswer, secondAnswer]) };
 }
 
 /** A transfer of 2 of product M from S_HI's warehouse to S_LO's (its from row has the higher id). */
@@ -3442,7 +3444,7 @@ describe('W11-INV-SET-MOVEMENT a direct stock set writes one ADJUSTMENT movement
     });
   });
 
-  it("RC-49 (W11-INV-SET-MOVEMENT; D-139 the Excel import keeps its single EXCEL_IMPORT movement) POST .../inventory/import-excel writes exactly one ADJUSTMENT/EXCEL_IMPORT movement per imported row whose quantity changes (an existing row 10 to 6, a new pair holding 3) and no SET movement, none for a row left at its quantity, ignores the sheet's Reserved column, and skips a row whose quantity is below the row's reserved quantity with that row's error, writing nothing for it", async () => {
+  it("RC-49 (W11-INV-SET-MOVEMENT; D-139 the Excel import keeps its single EXCEL_IMPORT movement) POST .../inventory/import-excel writes exactly one ADJUSTMENT/EXCEL_IMPORT movement per imported row whose quantity changes (an existing row 10 to 6, a new pair holding 3) and no SET movement, none for a row left at its quantity, ignores the sheet's Reserved column, and skips a row whose quantity is below the row's reserved quantity with that row's error, naming the row's product (acceptance B-1), writing nothing for it", async () => {
     await resetBusinessStock();
     await setStock(ID.stockMLo, IN_STOCK, 4);
     const buffer = await inventoryWorkbook([
@@ -3460,7 +3462,7 @@ describe('W11-INV-SET-MOVEMENT a direct stock set writes one ADJUSTMENT movement
     };
     // At 5c17e7b4 the fourth row was imported too (2 in stock with 4 reserved, one more EXCEL_IMPORT movement of -8).
     expect(outcome).toEqual({
-      answer: { imported: 3, skipped: 1, errors: ['Inventory quantity cannot be less than the quantity reserved for orders (4)'] },
+      answer: { imported: 3, skipped: 1, errors: ['V18R Two Warehouses: Inventory quantity cannot be less than the quantity reserved for orders (4)'] },
       added: [
         ['ADJUSTMENT', 'EXCEL_IMPORT', -4, null, null, ID.biz, ID.productA, ID.warehouse, 'Excel import: V18R Tracked A (was 10)'],
         ['ADJUSTMENT', 'EXCEL_IMPORT', 3, null, null, ID.biz, ID.productU, ID.warehouse2, 'Excel import: V18R Untracked (new)'],
@@ -3488,7 +3490,8 @@ describe('W11-INV-SET-MOVEMENT a direct stock set writes one ADJUSTMENT movement
     const [[, final]] = (await pairRow(A.productId, A.warehouseId)) as any[];
     // Review COR-R2-3: compared sorted by change, not by created_at (the two commit within a millisecond of each other).
     const changes = outcome.added.map((m: any[]) => [m[1], m[2], m[3]]).sort((a: any[], b: any[]) => a[1] - b[1] || String(a[2]).localeCompare(String(b[2])));
-    expect([interleave.firstWaited, outcome.answer]).toEqual([true, ['committed', 'committed']]);
+    // Acceptance B-2: both sets were waiting behind the holder when it let go (they overlapped; not one after the other).
+    expect([interleave.firstWaited, interleave.bothWaited, outcome.answer]).toEqual([true, true, ['committed', 'committed']]);
     expect([4, 7], 'the row ends at one of the two sets').toContain(final);
     // At 5c17e7b4: no movement at all.
     expect(changes, 'two SET movements, each from what its transaction read under the lock').toEqual(
