@@ -1126,6 +1126,11 @@
       "prefix": "v71p_",
       "owner": "apps/server/test/key-chat-genome-money-sight.integration.test.ts",
       "packet": "V1-71 (FU-KEY-CHAT-GENOME-MONEY-SIGHT)"
+    },
+    {
+      "prefix": "v64g_",
+      "owner": "apps/server/test/public-booking-payment-methods.integration.test.ts",
+      "packet": "V1-64 (SWP-BOOKING-PAYMENT-GATE)"
     }
   ],
   "pendingRenames": [],
