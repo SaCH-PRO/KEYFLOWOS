@@ -9,8 +9,9 @@
  *
  *   CUC-01  RED-BEFORE  a second 6100 (the seeded Marketing account holds it) -> 409 COA_CODE_TAKEN, no row
  *   CUC-02  RED-BEFORE  renaming an account's code to a taken one -> 409, the account keeps its code
- *   CUC-03  CONTROL     another business may use the same codes; its accounts never block this one, and the
- *                       409 names only the caller's own account
+ *   CUC-03  CONTROL     another business may use the same codes; its accounts never block this one
+ *   CUC-03b RED-BEFORE then CONTROL  the 409 names only the caller's own account; a non-member gets the same
+ *                       403 for a taken and a free code
  *   CUC-04  CONTROL     a free code is 201; accounts without a code never collide; an account may be saved
  *                       with its own code again; a code may move to a free one
  *   CUC-05  RED-BEFORE  the same code written with other spacing or letter case is the same code -> 409; a
