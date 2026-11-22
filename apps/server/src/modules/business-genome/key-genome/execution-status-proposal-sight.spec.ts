@@ -35,9 +35,9 @@ describe('execution status of a linked KEY proposal (D-238, round 4)', () => {
   });
 });
 
-describe('round 5 (correctness minor 5): the failure reason follows the redacted view', () => {
-  it('a financial proposal keeps a failure reason that states no money', async () => {
-    const out = await (service({ ...MONEY, failureReason: 'Refused: not mapped' }) as any).getExecutionStatus('biz_1', 'rec_1', { readsRevenue: false });
-    expect(out).toMatchObject({ executionResult: null, failureReason: 'Refused: not mapped' });
+describe('round 6 (security minor 2): a financial linked proposal\'s failure reason is withheld whatever it says', () => {
+  it('RED-BEFORE: a financial proposal\'s failure reason that states no money in words ("Card declined") is withheld', async () => {
+    const out = await (service({ ...MONEY, failureReason: 'Card declined' }) as any).getExecutionStatus('biz_1', 'rec_1', { readsRevenue: false });
+    expect(out).toMatchObject({ executionResult: null, failureReason: null });
   });
 });

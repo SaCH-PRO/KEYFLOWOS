@@ -970,9 +970,11 @@ describe("FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): a memberless turn
         const res = await agent().post(proposalsRoute(`/${targets.approve}/execute`)).set(HEADER, ID.blind).send({});
         const body = JSON.stringify(res.body);
         for (const marker of ['12,345', 'outstanding across', 'monthly revenue']) expect(body, `execute (${res.status}): ${marker}`).not.toContain(marker);
-        // The executor's own refusal (a pending proposal is not executable) answers; the hiding 404 does not.
+        // The executor's own answer (its refusal, or its result) comes back; the hiding 404 does not (round 6: a success
+        // answers only the redacted keys, as approve, reject and cancel do).
         expect((res.body as { message?: string }).message, body.slice(0, 200)).not.toBe('Action proposal not found');
         expect(res.status, body.slice(0, 200)).toBeLessThan(500);
+        if (res.status < 300) for (const key of Object.keys(res.body)) expect(['id', 'status', 'failureReason'], `execute answers ${key}`).toContain(key);
       }
       for (const reader of [ID.owner, ID.revenue]) {
         const seen = ((await agent().get(proposalsRoute()).set(HEADER, reader)).body as any[]).map((p) => p.id);

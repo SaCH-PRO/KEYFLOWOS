@@ -191,3 +191,35 @@ describe('round-5 review repairs (security M1, correctness minors 1, 2, 6)', () 
     ['a cuid in free text', { actionType: 'CREATE_TASK', title: 'Call back', summary: 'contact cmwr8rbji00097dkwjitjsgzl' }],
   ])('%s is not', (_l, p) => expect(isFinancialProposal(p as any)).toBe(false));
 });
+
+describe('round-6 review repairs (security MAJOR-1, MAJOR-2, minors; correctness minors)', () => {
+  it.each([
+    ['a booking total', { actionType: 'CONFIRM_BOOKING', module: 'bookings', title: 'Confirm: booking total 1200' }],
+    ['a booking total in the parameters', { actionType: 'CONFIRM_BOOKING', module: 'bookings', title: 'Confirm the booking', payload: { bookingTotal: 900 } }],
+    ['a booking rate stored as a string', { actionType: 'CONFIRM_BOOKING', module: 'bookings', title: 'Confirm the booking', payload: { bookingRate: '150' } }],
+    ['the booking rate per session', { actionType: 'REBOOK', module: 'bookings', title: 'The booking rate is 150 per session' }],
+    ['a total due', { actionType: 'CREATE_TASK', module: 'crm', title: 'Total due 900 by Friday' }],
+    ['the total was', { actionType: 'CREATE_TASK', module: 'crm', title: 'The total was 1200' }],
+    ['the total came to', { actionType: 'CREATE_TASK', module: 'crm', title: 'The total came to 1200' }],
+    ['rates will rise', { actionType: 'CREATE_TASK', module: 'crm', title: 'Rates will rise 10% in March' }],
+    ['a rate card', { actionType: 'CREATE_TASK', module: 'crm', title: 'Send the rate card to Ana' }],
+    ['bill the client', { actionType: 'CREATE_TASK', module: 'crm', title: 'Bill the client 900' }],
+    ['settle up', { actionType: 'CREATE_TASK', module: 'crm', title: 'Settle up 900 with the supplier' }],
+    ['wire to the vendor', { actionType: 'CREATE_TASK', module: 'crm', title: 'Wire 900 to the vendor' }],
+    ['a loan', { actionType: 'CREATE_TASK', module: 'crm', title: 'Ask about a loan of 5000' }],
+    ['a retainer', { actionType: 'CREATE_TASK', module: 'crm', title: 'Retainer 900 for April' }],
+    ['a tip', { actionType: 'CREATE_TASK', module: 'crm', title: 'Add a tip of 50' }],
+    ['earnings', { actionType: 'CREATE_TASK', module: 'crm', title: 'Earnings 900 this week' }],
+    ['income', { actionType: 'CREATE_TASK', module: 'crm', title: 'Income up 20%' }],
+    ['spent on ads', { actionType: 'CREATE_TASK', module: 'crm', title: 'Spent 900 on ads' }],
+    ['insufficient funds', { actionType: 'CREATE_TASK', module: 'crm', title: 'Insufficient funds on the account' }],
+    ['a declined card', { actionType: 'CREATE_TASK', module: 'crm', title: 'Card declined for Ana' }],
+    ['a 25-letter run starting with c', { actionType: 'CREATE_TASK', title: 'Plan', summary: 'creditcardpaymentsoverdue' }],
+  ])('%s is financial', (_l, p) => expect(isFinancialProposal(p as any)).toBe(true));
+
+  it.each([
+    ['an open rate target', { actionType: 'CREATE_TASK', title: 'Improve open rate by 5%' }],
+    ['a no-show rate', { actionType: 'CREATE_TASK', title: 'No-show rate: 12%', payload: { noShowRate: 0.12 } }],
+    ['a booking reminder', { actionType: 'CONFIRM_BOOKING', module: 'bookings', title: 'Confirm pending booking' }],
+  ])('%s is not', (_l, p) => expect(isFinancialProposal(p as any)).toBe(false));
+});
