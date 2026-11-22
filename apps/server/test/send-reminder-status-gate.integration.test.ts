@@ -248,7 +248,7 @@ beforeAll(async () => {
     [ID.ownerA, ID.bizA, ID.contactA, EMAIL_A, 'A'],
     [ID.ownerB, ID.bizB, ID.contactB, EMAIL_B, 'B'],
   ] as const) {
-    await db.user.create({ data: { id: owner, email: `${owner}@test.local`, role: 'USER' } });
+    await db.user.create({ data: { id: owner, email: `${P}owner_${tag.toLowerCase()}@test.local`, role: 'USER' } });
     await db.business.create({ data: { id: biz, name: `V57R ${tag}`, slug: `${P}${tag.toLowerCase()}`, ownerId: owner, currency: 'TTD' } });
     await db.membership.create({ data: { id: `${P}m_${tag}`, userId: owner, businessId: biz, role: 'OWNER' } });
     await db.contact.create({ data: { id: contact, businessId: biz, firstName: 'V57R', lastName: `Customer ${tag}`, email } });
