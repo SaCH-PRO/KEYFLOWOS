@@ -32,6 +32,11 @@ history (each RED run recorded, every review round) stays.${TRAILER:+
 
 $TRAILER}"
 fi
+if [ ${#REST[@]} -eq 0 ]; then
+  # A tests-only packet (journey and gate packets): its one commit is the RED commit (Codex review of #221).
+  echo "$P: tests=${#TESTS[@]} rest=0 (tests-only packet: one commit)"
+  exit 0
+fi
 git add -A -- "${REST[@]}"
 git commit -q -m "fix($S): pkt/V1-$P (compacted)
 

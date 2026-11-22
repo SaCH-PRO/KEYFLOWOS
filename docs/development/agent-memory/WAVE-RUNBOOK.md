@@ -74,6 +74,10 @@ pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build
 pnpm db:deploy
 ```
 
+`pnpm db:generate` can come back from the turbo cache having generated nothing; the suite then fails across hundreds
+of files with `Cannot find module '.prisma/client/default'`. That is a setup fault, not a result: run
+`npx prisma generate --schema=./prisma/schema.prisma` in `packages/db`, rebuild the three packages, and run again.
+
 Web (when the wave has web changes), in `apps/web`, with `NEXT_PUBLIC_API_BASE_URL` and `NEXT_PUBLIC_SITE_URL` set:
 
 ```bash

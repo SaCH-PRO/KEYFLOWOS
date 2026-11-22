@@ -113,7 +113,8 @@ test('parseRulings and resolveDecision: ids, slugs, repeated ids, headings, line
   assert.deepEqual(expandRulingIds('D-41..D-43, D-47'), ['D-41', 'D-42', 'D-43', 'D-47']);
   assert.equal(resolveDecision('D-42', r)[0].text, 'Kept as built.');
   assert.equal(resolveDecision('D-44', r).length, 0);
-  assert.deepEqual(resolveDecision('D-11', r).map((x) => [x.heading, x.line]), [['(g) Open decisions', 5], ['Owner rulings, 2026-10-31', 8]]);
+  // A ruling supersedes the open-question row for the same id (Codex on #221).
+  assert.deepEqual(resolveDecision('D-11', r).map((x) => [x.heading, x.line]), [['Owner rulings, 2026-10-31', 8]]);
   const hubs = resolveDecision('hubs', r);
   assert.equal(hubs[0].id, 'D-150');
   assert.equal(hubs[0].effect, 'NAV-A1 and 12 more');
@@ -135,7 +136,7 @@ test('buildBundle: rulings in full, write set, dependencies, register rows, heal
   assert.equal(b.dependencies_met, false);
   assert.equal(b.r0_register.length, 1);
   assert.equal(b.fixture_prefixes[0].prefix, 'v99a_');
-  assert.equal(b.semantic_context.invariants.length, 3);
+  assert.equal(b.semantic_context.invariants.length, 2); // hubs + D-11's ruling (its open-question row is superseded)
   assert.equal(b.semantic_context.invariants[0].source, 'docs/reconstruction/BUILD-MAP-001.md:9');
   for (const k of ['schema_version', 'generator', 'snapshot', 'health', 'task', 'authority', 'semantic_context', 'proof_context', 'unresolved', 'provenance', 'excluded']) {
     assert.ok(k in b, `required schema field ${k}`);

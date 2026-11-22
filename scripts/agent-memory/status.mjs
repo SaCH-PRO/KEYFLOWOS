@@ -6,11 +6,12 @@
 //   node scripts/agent-memory/status.mjs --check    exit 1 when the files on disk are stale
 //   node scripts/agent-memory/status.mjs --stdout   print the Markdown, write nothing
 //   --with-branches --stdout                        also mark packets with an unmerged origin/pkt/V1-* branch in-progress
-//   --ref <ref>                                     read another ref instead of origin/main
+//   --ref <ref>                                     read another ref instead of origin/main (in a commit that changes
+//                                                   the plan, use --ref HEAD so the status it carries matches it)
 import { readFileSync, writeFileSync, existsSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { buildStatus, renderStatusMd, statusFingerprint, PLAN_PATH, PRIOR_STATUS_PATH, STATUS_JSON_PATH, STATUS_MD_PATH } from './lib.mjs';
+import { buildStatus, renderStatusMd, statusFilesCurrent, PLAN_PATH, PRIOR_STATUS_PATH, STATUS_JSON_PATH, STATUS_MD_PATH } from './lib.mjs';
 import { repoRoot, revParse, commitDate, show, tryShow, firstCommitAdding, commitsSince, unmergedPacketBranches } from './git.mjs';
 
 export function generate(root, ref, { withBranches = false } = {}) {
@@ -45,7 +46,7 @@ function main() {
   const stdout = args.includes('--stdout');
   const withBranches = args.includes('--with-branches');
   if (withBranches && !stdout) fail('--with-branches needs --stdout: the committed file must be a function of main alone.');
-  if (ref !== 'origin/main' && !stdout) fail('--ref needs --stdout: the committed file is generated from origin/main only.');
+  // A commit that changes the plan generates the status it carries from its own tree: --ref HEAD (Codex review of #221).
   const root = repoRoot();
   const status = generate(root, ref, { withBranches });
   const json = JSON.stringify(status, null, 1) + '\n';
@@ -54,22 +55,15 @@ function main() {
   const jsonFile = join(root, STATUS_JSON_PATH);
   const mdFile = join(root, STATUS_MD_PATH);
   if (args.includes('--check')) {
-    // The file records the main sha it was generated at, and the merge that carries the file moves main,
-    // so compare content, not the sha.
+    const read = (f) => (existsSync(f) ? readFileSync(f, 'utf8') : null);
+    const { current, reason } = statusFilesCurrent({ jsonText: read(jsonFile), mdText: read(mdFile), status, md });
     const now = status._generated.main_sha.slice(0, 8);
-    if (!existsSync(jsonFile)) {
-      console.log(`V1-STATUS is MISSING: run node scripts/agent-memory/status.mjs`);
-      process.exit(1);
-    }
-    const onDisk = JSON.parse(readFileSync(jsonFile, 'utf8'));
-    const at = String(onDisk._generated?.main_sha ?? '').slice(0, 8);
-    const fresh = statusFingerprint(onDisk) === statusFingerprint(status);
     console.log(
-      fresh
-        ? `V1-STATUS content is current for ${ref} (generated at ${at}, ${ref} now ${now}).`
-        : `V1-STATUS is STALE (generated at ${at}, ${ref} now ${now}, and packet status has changed): run node scripts/agent-memory/status.mjs`,
+      current
+        ? `V1-STATUS is current for ${ref} (${now}).`
+        : `V1-STATUS is STALE for ${ref} (${now}): ${reason}. Run node scripts/agent-memory/status.mjs${ref === 'origin/main' ? '' : ` --ref ${ref}`}`,
     );
-    process.exit(fresh ? 0 : 1);
+    process.exit(current ? 0 : 1);
   }
   writeFileSync(jsonFile, json);
   writeFileSync(mdFile, md);
