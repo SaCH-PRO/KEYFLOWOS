@@ -351,3 +351,40 @@ describe('round-2 review repairs (security MAJOR-1..3; correctness MAJOR-1, mino
     expect(text).not.toContain('Raise prices');
   });
 });
+
+describe('round-3 review repairs (security MINOR-1, MINOR-3; correctness M1, M2)', () => {
+  it('RED-BEFORE (security MINOR-1): a scoped OWNER (an explicit map without full owner sight) gets no owner view of other members\' decisions', async () => {
+    const { viewerHasFullOwnerSight } = await import('../key-cortex.controller');
+    const owner = (scopes: Record<string, string>) => ({ userId: 'o', businessId: 'b', role: 'OWNER', superAdmin: false, scopes, member: true });
+    const full = Object.fromEntries(['crm', 'revenue', 'expenses', 'bookings', 'projects', 'operations', 'content', 'storefront', 'automations', 'settings', 'team', 'ai', 'connect'].map((m) => [m, 'admin']));
+    expect(viewerHasFullOwnerSight(owner(full) as any)).toBe(true);
+    expect(viewerHasFullOwnerSight(owner({ ...full, revenue: 'none' }) as any)).toBe(false);
+    expect(viewerHasFullOwnerSight({ ...owner(full), role: 'ADMIN' } as any)).toBe(false);
+    expect(viewerHasFullOwnerSight({ userId: 's', businessId: 'b', role: 'SUPER_ADMIN', superAdmin: true, scopes: {}, member: false } as any)).toBe(true);
+  });
+
+  it('RED-BEFORE (correctness M2): a value-checked awareness kind withholds a row that states money from a reader without revenue read', async () => {
+    const svc = Object.create(KeyCortexAwarenessService.prototype) as any;
+    svc.logger = { warn: vi.fn(), debug: vi.fn() };
+    const rows: Record<string, unknown[]> = {
+      salience_concern: [
+        { key: 'c_money', value: JSON.stringify({ summary: '12 overdue invoices against a normal of 3', signal: 'invoice_overdue' }), confidence: 0.8, createdAt: new Date() },
+        { key: 'c_ops', value: JSON.stringify({ summary: '4 no-shows today against a normal of 1', signal: 'booking.no_show' }), confidence: 0.8, createdAt: new Date() },
+      ],
+      // correctness M1: the production churn shape ("…% churn risk") reads as money, so churn risk is revenue-only in effect.
+      churn_risk: [{ key: 'ch', value: JSON.stringify({ prediction: 'Acme Ltd: 82% churn risk in 30 days', pattern: 'churn_precursor_composite' }), confidence: 0.8, createdAt: new Date() }],
+    };
+    svc.prisma = { client: { keyCortexMemory: { findMany: vi.fn(async ({ where }: any) => rows[where.type] ?? []) } } };
+    const out = await svc.getAwareness('biz_A', { kinds: ['concern', 'churnRisk'], readsRevenue: false });
+    expect(out.items.map((i: any) => i.id)).toEqual(['c_ops']);
+  });
+
+  it('RED-BEFORE (security MINOR-3): getActiveGoals judges a weak signal by its sources too, as awareness does', async () => {
+    const svc = Object.create(KeyCortexConsciousnessService.prototype) as any;
+    svc.activeGoalsCache = new Map();
+    svc.genomeBridge = { getRankedRecommendations: vi.fn(async () => []) };
+    svc.eventService = { getEvents: vi.fn(async () => []) };
+    svc.intuition = { detectWeakSignals: vi.fn(async () => [{ potentialImpact: 'high', description: 'Lead count fell on Mondays', recommendedInvestigation: 'check the Monday funnel', sources: ['revenue_data', 'lead_count'] }]) };
+    expect((await svc.getActiveGoals('biz_A', false)).join('\n')).not.toContain('Lead count');
+  });
+});
