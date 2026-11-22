@@ -772,3 +772,26 @@ describe('final confirmation review of the #218 repairs: the stripped readings a
     expect(isFinancialProposal(task({ summary: 'Total c900000000000000000paying attention 900' }))).toBe(true);
   });
 });
+
+describe('review of the budget charge: over-budget text fails closed before the id pass, as it did', () => {
+  const task = (extra: object) => ({ actionType: 'CREATE_TASK', module: 'crm', title: 'Follow up', ...extra });
+  // 36 raw readings of cuid-shaped runs that hold no money word: over the budget on the raw readings alone.
+  const crafted = `\n\\qA\u200b\u2122 ${'c9qqqqq9wwwww9xxxxx9kkkkk '.repeat(1_920)}`.slice(0, 49_890);
+  it('RED-BEFORE (MAJOR-1): the classifier refuses it without running the id pass over every reading', () => {
+    for (let i = 0; i < 2; i++) isFinancialProposal(task({ summary: crafted }));
+    const started = performance.now();
+    expect(isFinancialProposal(task({ summary: crafted }))).toBe(true);
+    expect(performance.now() - started).toBeLessThan(60);
+  });
+  it('RED-BEFORE (MAJOR-1): the view redacts it, in the reason and the evidence too, within the bound', () => {
+    const row = { id: 'k', status: 'FAILED', ...task({ summary: crafted, failureReason: crafted, outcomeEvidence: { status: 'FAILED', reason: crafted.slice(0, 40_000) } }) };
+    const started = performance.now();
+    expect(proposalViewForReader(row, false)).toEqual({ id: 'k', status: 'FAILED' });
+    expect(performance.now() - started).toBeLessThan(120);
+  });
+  it('control (MINOR-1): text over the budget on its raw readings is refused even when stripping its ids would bring it under', () => {
+    const idDense = `\n\\qA\u200b\u2122 ${'9cac7457-1fee-4cad-8fee-2cac3cac4fee '.repeat(1_350)}`.slice(0, 49_890);
+    expect(proposalTextStatesMoney(idDense)).toBe(true);
+    expect(isFinancialProposal(task({ summary: idDense }))).toBe(true);
+  });
+});
