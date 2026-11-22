@@ -72,8 +72,8 @@ function storedCoaCode(code: string | null): string | null {
  *   - codes are compared trimmed and without letter case (as Postgres lower() folds it; the database alone
  *     decides a collision), and stored trimmed; a blank code is no code;
  *   - accounts without a code never collide, an archived account frees its code, and an account saved with
- *     the code it already has is not checked, so rows that shared a code before this rule can still be
- *     renamed and archived (nothing rewrites them);
+ *     the code it already has is not checked (unless the same request brings it back from the archive), so
+ *     rows that shared a code before this rule can still be renamed and archived (nothing rewrites them);
  *   - a code that is neither text nor null, or an isActive that is neither true, false nor null (null
  *     leaves the flag alone), is refused 400: the body is not validated before it reaches here, and a
  *     Prisma operator object ({ set: true }, { set: '6100' }) would otherwise be written without the check;

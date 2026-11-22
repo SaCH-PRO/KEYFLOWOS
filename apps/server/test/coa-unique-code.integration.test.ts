@@ -17,9 +17,12 @@
  *                       code is stored trimmed, and a blank code is stored as no code
  *   CUC-06  RED-BEFORE  an archived account frees its code (CONTROL), and cannot come back active while
  *                       another active account holds it -> 409
- *   CUC-07  RED-BEFORE  two concurrent creates of one free code: exactly one 201, one 409, one row
+ *   CUC-07  RED-BEFORE  concurrent writers of one free code end with exactly one active account on it:
+ *                       creates (CUC-07), a create and a rename (CUC-07b), two archived accounts coming
+ *                       back, and one coming back against a create (CUC-07c)
  *   CUC-08  RED-BEFORE  a business whose chart was never seeded: a custom 6100 is refused (the seed runs
- *                       first), so the seed never lands a second 6100 beside it
+ *                       first), so the seed never lands a second 6100 beside it; the same through PATCH
+ *                       (CUC-08b: an account made without a code, then given 6100)
  *   CUC-09  RED-BEFORE  a code that is not text (a JSON number or object) -> 400, not a 500, nothing written
  *   CUC-10  CONTROL then RED-BEFORE  accounts that already share a code (rows written before this rule) can
  *                       still be renamed and archived, and nothing is rewritten for them; no third joins them
@@ -31,7 +34,7 @@
  *   CUC-14  RED-BEFORE  under an active tenant that differs from the businessId argument, the check runs on
  *                       the business the write lands in (the active tenant); the other chart is untouched
  *   CUC-15  CONTROL then RED-BEFORE  '_', '%' and a quote in a code are plain characters: 71_0 and 71% do
- *                       not collide with 7160 (the check is an equality, not a LIKE) and a quote is kept as
+ *                       not collide with 7160 (the check is an equality, not a pattern match) and a quote is kept as
  *                       typed; a second account on each of those codes is refused
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard, TenantInterceptor,
@@ -64,6 +67,7 @@ const ID = {
   bizA: `${P}bizA`, // chart seeded in beforeAll
   bizB: `${P}bizB`, // the other business; chart seeded in beforeAll
   bizFresh: `${P}bizFresh`, // ownerA's; chart never seeded before CUC-08
+  bizFresh2: `${P}bizFresh2`, // ownerA's; chart never seeded before CUC-08b
 };
 
 const TAKEN = 'COA_CODE_TAKEN';
@@ -217,7 +221,7 @@ beforeAll(async () => {
   for (const id of [ID.ownerA, ID.ownerB]) {
     await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, name: id, role: 'USER' } });
   }
-  for (const [id, ownerId] of [[ID.bizA, ID.ownerA], [ID.bizB, ID.ownerB], [ID.bizFresh, ID.ownerA]] as const) {
+  for (const [id, ownerId] of [[ID.bizA, ID.ownerA], [ID.bizB, ID.ownerB], [ID.bizFresh, ID.ownerA], [ID.bizFresh2, ID.ownerA]] as const) {
     await db.business.create({ data: { id, name: `V63H ${id}`, slug: id, ownerId, currency: 'TTD' } });
     await db.membership.create({ data: { id: `${P}m_${id.slice(P.length)}`, userId: ownerId, businessId: id, role: 'OWNER' } });
   }
@@ -235,13 +239,14 @@ afterAll(async () => {
 }, 60_000);
 
 describe('fixture sanity (real rows)', () => {
-  it('each seeded business has exactly one account on 6100, the system Marketing account; the fresh one has no chart', async () => {
+  it('each seeded business has exactly one account on 6100, the system Marketing account (another business may use 6100); the fresh ones have no chart', async () => {
     for (const biz of [ID.bizA, ID.bizB]) {
       const rows = await rowsWithCode(biz, '6100');
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({ name: 'Marketing', is_active: true });
     }
     expect(await db.chartOfAccount.count({ where: { businessId: ID.bizFresh } })).toBe(0);
+    expect(await db.chartOfAccount.count({ where: { businessId: ID.bizFresh2 } })).toBe(0);
   });
 });
 
@@ -438,7 +443,7 @@ describe('CUC-07: two writers at once', () => {
 });
 
 describe('CUC-08: a chart that was never seeded', () => {
-  it('CUC-08 RED-BEFORE: the first write seeds the system accounts, so a custom 6100 is refused and the chart ends with one 6100', async () => {
+  it('CUC-08 RED-BEFORE: the first coded write seeds the system accounts, so a custom 6100 is refused and the chart ends with one 6100', async () => {
     expect(await db.chartOfAccount.count({ where: { businessId: ID.bizFresh } })).toBe(0);
     expectTaken(await post(ID.bizFresh, ID.ownerA, { name: 'v63h Early marketing', type: 'EXPENSE', code: '6100' }));
     const listed = await http().get(coaUrl(ID.bizFresh)).set(HEADER, ID.ownerA);
@@ -482,6 +487,11 @@ describe('CUC-10: accounts that already share a code', () => {
     const saved = await patch(ID.bizA, ID.ownerA, ids[0], { name: 'v63h legacy saved', code: '7120', subtype: 'x' });
     expect(saved.status, JSON.stringify(saved.body)).toBe(200);
     expect(saved.body.code).toBe('7120');
+    // Saving the archived flag an active one already has is no return from the archive: not checked.
+    const stillActive = await patch(ID.bizA, ID.ownerA, ids[0], { isActive: true });
+    expect(stillActive.status, JSON.stringify(stillActive.body)).toBe(200);
+    const stillActiveWithCode = await patch(ID.bizA, ID.ownerA, ids[1], { isActive: true, code: '7120' });
+    expect(stillActiveWithCode.status, JSON.stringify(stillActiveWithCode.body)).toBe(200);
     // No third one joins them.
     expectTaken(await post(ID.bizA, ID.ownerA, { name: 'v63h third', type: 'EXPENSE', code: '7120' }));
     // One is archived; it then cannot come back beside the other.
@@ -521,7 +531,7 @@ async function legacyRow(id: string, code: string, active: boolean) {
 
 describe('CUC-12: isActive that is not a boolean', () => {
   it('CUC-12 RED-BEFORE: { set: true }, "true" and 1 are 400 and cannot bring an archived account back beside the holder of its code', async () => {
-    const old = await make(ID.bizA, ID.ownerA, 'v63h Old 7130x', '7135');
+    const old = await make(ID.bizA, ID.ownerA, 'v63h Old 7135', '7135');
     expect((await http().delete(coaUrl(ID.bizA, old)).set(HEADER, ID.ownerA)).status).toBe(200);
     await make(ID.bizA, ID.ownerA, 'v63h New 7135', '7135');
     const before = await chart(ID.bizA);
@@ -603,7 +613,7 @@ describe('CUC-14: an active tenant that differs from the businessId argument', (
 describe('CUC-15: wildcard characters in a code', () => {
   it('CUC-15 CONTROL then RED-BEFORE: _ and % match only themselves, and a quote is stored as typed', async () => {
     await make(ID.bizA, ID.ownerA, 'v63h Holder 7160', '7160');
-    // CONTROL: under a LIKE these would match 7160; they are different codes.
+    // CONTROL: as patterns these would match 7160; they are different codes.
     const under = await make(ID.bizA, ID.ownerA, 'v63h Underscore', '71_0');
     await make(ID.bizA, ID.ownerA, 'v63h Percent', '71%');
     await make(ID.bizA, ID.ownerA, 'v63h Percent only', '%');
@@ -620,5 +630,52 @@ describe('CUC-15: wildcard characters in a code', () => {
     expectTaken(await post(ID.bizA, ID.ownerA, { name: 'v63h Percent 2', type: 'EXPENSE', code: '71%' }));
     expectTaken(await post(ID.bizA, ID.ownerA, { name: 'v63h Quote 2', type: 'EXPENSE', code: "71'6\"0" }));
     expect(await chart(ID.bizA)).toEqual(before);
+  });
+});
+
+describe('CUC-07c: accounts coming back at once', () => {
+  it('CUC-07c RED-BEFORE: two archived accounts on one code brought back concurrently: exactly one comes back', async () => {
+    for (let round = 0; round < 5; round++) {
+      const code = `720${round}`;
+      const ids = [`${P}back${round}a`, `${P}back${round}b`];
+      for (const id of ids) await legacyRow(id, code, false);
+      const results = await Promise.all(ids.map((id) => patch(ID.bizA, ID.ownerA, id, { isActive: true })));
+      expect(results.map((r) => r.status).sort(), JSON.stringify(results.map((r) => r.body))).toEqual([200, 409]);
+      expect(results.find((r) => r.status === 409)!.body.code).toBe(TAKEN);
+      expect((await rowsWithCode(ID.bizA, code)).filter((r) => r.is_active)).toHaveLength(1);
+    }
+  });
+
+  it('CUC-07c RED-BEFORE: an archived account coming back while its code is created: exactly one of the two holds it', async () => {
+    for (let round = 0; round < 5; round++) {
+      const code = `721${round}`;
+      const id = `${P}backVsNew${round}`;
+      await legacyRow(id, code, false);
+      const [back, created] = await Promise.all([
+        patch(ID.bizA, ID.ownerA, id, { isActive: true }),
+        post(ID.bizA, ID.ownerA, { name: `v63h New ${code}`, type: 'EXPENSE', code }),
+      ]);
+      expect(
+        (back.status === 200 && created.status === 409) || (back.status === 409 && created.status === 201),
+        JSON.stringify([back.status, back.body, created.status, created.body]),
+      ).toBe(true);
+      expect((await rowsWithCode(ID.bizA, code)).filter((r) => r.is_active)).toHaveLength(1);
+    }
+  });
+});
+
+describe('CUC-08b: a chart that was never seeded, through PATCH', () => {
+  it('CUC-08b RED-BEFORE: an account made without a code (no seed yet) cannot then take 6100: the PATCH seeds first', async () => {
+    expect(await db.chartOfAccount.count({ where: { businessId: ID.bizFresh2 } })).toBe(0);
+    const id = await make(ID.bizFresh2, ID.ownerA, 'v63h Early, no code');
+    // A create without a code does not seed: the chart holds that one row.
+    expect(await db.chartOfAccount.count({ where: { businessId: ID.bizFresh2 } })).toBe(1);
+    expectTaken(await patch(ID.bizFresh2, ID.ownerA, id, { code: '6100' }));
+    const on6100 = await rowsWithCode(ID.bizFresh2, '6100');
+    expect(on6100).toHaveLength(1);
+    expect(on6100[0].name).toBe('Marketing');
+    const free = await patch(ID.bizFresh2, ID.ownerA, id, { code: '7300' });
+    expect(free.status, JSON.stringify(free.body)).toBe(200);
+    expect(free.body.code).toBe('7300');
   });
 });
