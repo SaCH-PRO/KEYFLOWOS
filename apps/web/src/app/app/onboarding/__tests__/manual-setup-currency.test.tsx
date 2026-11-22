@@ -7,9 +7,11 @@
  * business sells, the one answer that sets the hubs and the phone's bottom bar.
  *
  * Required here, through the real api client (fetch stubbed per route, every request recorded):
- *   - the currency is TTD or USD and nothing else: 'ABC' (RED: accepted and sent), a real code v1 does not
- *     offer ('EUR') and an empty field are refused in plain words before anything is sent; TTD and USD go
- *     through, in any letter case; the form suggests exactly those two;
+ *   - the currency is TTD or USD and nothing else: 'ABC' (RED: accepted and sent) and a real code v1 does not
+ *     offer ('EUR') cannot be chosen, and no choice is refused in plain words before anything is sent. Owner
+ *     ruling D-242 (2026-11-22): the field is a real <select> offering exactly TTD and USD (it was a text input
+ *     that accepted only those two, kept so the Release 0 live spec's fill("TTD") still ran; that one call is
+ *     selectOption("TTD") from the same ruling);
  *   - the form asks 'What do you sell?' with Services, Products and Both (RED: no such question), under the
  *     unchanged 'Set up manually' heading and beside the unchanged 'Finish setup' button;
  *   - the answer is saved through the owner-only profile PATCH, in the same request as the name, currency and
@@ -100,6 +102,10 @@ function fill(values: { name?: string; currency?: string; timezone?: string }) {
 
 const VALID = { name: "Point Fortin Pastries", timezone: "America/Port_of_Spain" };
 
+/** A "What do you sell?" choice, for tests outside that describe block. */
+const choiceOf = (name: string) =>
+  within(within(form()).getByRole("radiogroup", { name: /what do you sell\?/i })).getByRole("radio", { name: new RegExp(`^${name}$`, "i") }) as HTMLInputElement;
+
 beforeEach(() => {
   window.localStorage.clear();
   window.localStorage.setItem("kf_business_id", BIZ);
@@ -112,10 +118,29 @@ afterEach(() => {
 });
 
 describe("BUG-077: the currency is TTD or USD", () => {
-  it.each(["ABC", "EUR", "JMD", "TT", ""])("refuses %j in plain words and sends nothing", async (value) => {
+  // Owner ruling D-242 (2026-11-22): the field is a real <select> offering exactly TTD and USD, not free text.
+  const select = () => currency() as HTMLSelectElement;
+
+  it("is a select offering exactly TTD and USD, with nothing chosen for a business that holds no currency", async () => {
+    const sent = stubRoutes(ownerRoutes());
+    await mount(sent);
+    expect(select().tagName).toBe("SELECT");
+    const options = Array.from(select().options);
+    // One empty choice ("nothing chosen yet") and the two currencies; no other.
+    expect(options.map((o) => o.value)).toEqual(["", "TTD", "USD"]);
+    expect(options.filter((o) => o.value).map((o) => o.text.trim())).toEqual(["TTD", "USD"]);
+    expect(select().value).toBe("");
+    expect(form()).not.toHaveTextContent(/JMD|BBD|XCD|GYD|EUR|GBP|CAD/);
+    // No free-text leftovers: nothing to type into, no suggestion list.
+    expect(select().getAttribute("list")).toBeNull();
+    expect(document.getElementById("manual-setup-currencies")).toBeNull();
+  });
+
+  it.each(["ABC", "EUR", "JMD", "TT"])("%j cannot be chosen: the field stays unchosen, is refused in plain words, and nothing is sent", async (value) => {
     const sent = stubRoutes(ownerRoutes());
     await mount(sent);
     fill({ ...VALID, currency: value });
+    expect(select().value).toBe("");
     fireEvent.click(finish());
 
     const alert = await screen.findByRole("alert");
@@ -126,42 +151,58 @@ describe("BUG-077: the currency is TTD or USD", () => {
     expect(router.replace).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["TTD", "TTD"],
-    ["USD", "USD"],
-    ["usd", "USD"],
-    [" ttd ", "TTD"],
-  ])("takes %j and saves it as %s", async (typed, saved) => {
+  it("finishing with no currency chosen is refused in plain words and sends nothing", async () => {
     const sent = stubRoutes(ownerRoutes());
     await mount(sent);
-    fill({ ...VALID, currency: typed });
-    fireEvent.click(finish());
-
-    await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/app/command-center"));
-    expect(patches(sent)).toHaveLength(1);
-    expect(patches(sent)[0]).toMatchObject({ path: BUSINESS_PATH, body: { name: VALID.name, currency: saved, timezone: VALID.timezone } });
-  });
-
-  it("offers TTD and USD, and no other currency", async () => {
-    const sent = stubRoutes(ownerRoutes());
-    await mount(sent);
-    const field = currency();
-    const offered =
-      field.tagName === "SELECT"
-        ? Array.from((field as HTMLSelectElement).options).map((o) => o.value).filter(Boolean)
-        : Array.from(document.getElementById(field.getAttribute("list") ?? "")?.querySelectorAll("option") ?? []).map((o) => o.getAttribute("value"));
-    expect(offered.sort()).toEqual(["TTD", "USD"]);
-    expect(form()).not.toHaveTextContent(/JMD|BBD|XCD|GYD|EUR|GBP|CAD/);
-  });
-
-  it("a stored currency v1 does not offer is shown, and refused until it is TTD or USD", async () => {
-    const sent = stubRoutes(ownerRoutes({ ...STORED, name: VALID.name, currency: "EUR", timezone: VALID.timezone }));
-    await mount(sent);
-    await waitFor(() => expect((within(form()).getByLabelText("Business name") as HTMLInputElement).value).toBe(VALID.name));
+    fill(VALID);
     fireEvent.click(finish());
     expect(await screen.findByRole("alert")).toHaveTextContent("Currency must be TTD or USD.");
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(writes(sent)).toEqual([]);
+    expect(router.replace).not.toHaveBeenCalled();
+  });
+
+  it.each(["TTD", "USD"])("choosing %s saves it", async (chosen) => {
+    const sent = stubRoutes(ownerRoutes());
+    await mount(sent);
+    fill({ ...VALID, currency: chosen });
+    expect(select().value).toBe(chosen);
+    fireEvent.click(finish());
+
+    await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/app/command-center"));
+    expect(patches(sent)).toHaveLength(1);
+    expect(patches(sent)[0]).toMatchObject({ path: BUSINESS_PATH, body: { name: VALID.name, currency: chosen, timezone: VALID.timezone } });
+  });
+
+  it.each([
+    ["TTD", "TTD"],
+    ["usd", "USD"],
+    [" ttd ", "TTD"],
+  ])("a business that already holds %j shows it chosen, and it is saved as %s", async (held, saved) => {
+    const sent = stubRoutes(ownerRoutes({ ...STORED, name: VALID.name, currency: held, timezone: VALID.timezone }));
+    await mount(sent);
+    await waitFor(() => expect(select().value).toBe(saved));
+    fireEvent.click(choiceOf("Products"));
+    fireEvent.click(finish());
+    await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/app/command-center"));
+    expect(patches(sent)[0].body).toMatchObject({ currency: saved });
+  });
+
+  it("a stored currency v1 does not offer is not offered: nothing is chosen, it is refused until TTD or USD is, and then saved", async () => {
+    const sent = stubRoutes(ownerRoutes({ ...STORED, name: VALID.name, currency: "EUR", timezone: VALID.timezone }));
+    await mount(sent);
+    await waitFor(() => expect((within(form()).getByLabelText("Business name") as HTMLInputElement).value).toBe(VALID.name));
+    expect(select().value).toBe("");
+    expect(Array.from(select().options).map((o) => o.value)).toEqual(["", "TTD", "USD"]);
+    fireEvent.click(finish());
+    expect(await screen.findByRole("alert")).toHaveTextContent("Currency must be TTD or USD.");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(writes(sent)).toEqual([]);
+
+    fill({ currency: "USD" });
+    fireEvent.click(finish());
+    await waitFor(() => expect(router.replace).toHaveBeenCalledWith("/app/command-center"));
+    expect(patches(sent)[0].body).toMatchObject({ currency: "USD" });
   });
 
   it("the server's own 'currency is missing' refusal is said in the same words", async () => {
