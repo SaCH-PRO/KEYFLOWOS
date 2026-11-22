@@ -57,7 +57,7 @@ import { RetryableConflictException } from '../../core/utils/retryable-conflict'
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { AiMemoryService } from './ai-memory.service';
 import { ModelGatewayService, GatewayMessage, StreamChunk } from './model-gateway.service';
-import { DocumentIntelligenceService } from './document-intelligence.service';
+import { DocumentIntelligenceService, DocumentExtractionFailedError } from './document-intelligence.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { AiMessageSenderService } from './ai-message-sender.service';
@@ -214,6 +214,22 @@ export interface FlowToolResult {
  * from the status.
  */
 const TOOL_HTTP_EXCEPTIONS = new WeakMap<FlowToolResult, HttpException>();
+
+/**
+ * W11-DISPATCH-REFUSAL-FINAL reviews SEC-1, COR-1, SEC2-1, COR2-1 (owner ruling D-134). A 400 is the
+ * tool's final answer for the plan queue (answered once, counted toward no circuit), so a service that
+ * answers 400 both for a request it refuses and for something that did not answer (a document's host,
+ * the model that reads it) must not have the second taken as final. Those services mark it as the 400's
+ * cause; for a 400 so marked this answers the 503 the tool's case throws instead, with the service's own
+ * message (so the envelope's error text is what it was) and the 400 as its cause: a failure the plan
+ * queue retries and counts toward that business's circuit, as it did before 400 became final. Null for
+ * anything else.
+ */
+function keyToolOutage(e: unknown): ServiceUnavailableException | null {
+  if (!(e instanceof BadRequestException)) return null;
+  if (!(e.cause instanceof DocumentHostUnavailableError || e.cause instanceof DocumentExtractionFailedError)) return null;
+  return new ServiceUnavailableException(e.message, { cause: e });
+}
 
 export interface PendingConfirmation {
   toolCallId: string;
@@ -7018,11 +7034,14 @@ ${triage.standingContext}`;
       }
       // === CONTRACTS / LEGAL ===
       case 'contract_extract_terms': {
+        // W11-DISPATCH-REFUSAL-FINAL review SEC2-1, COR2-1 (D-134): a model that failed to read the
+        // document is answered by ContractsService as the 400 it gives a document that is no contract.
+        // The failed read, marked as the 400's cause, is handed on as a 503 (keyToolOutage).
         const contract = await this.getContracts().extractTermsFromDocument(businessId, args.contractId, {
           sourceAssetId: args.sourceAssetId,
           sourceDocumentInstanceId: args.sourceDocumentInstanceId,
           sourceDriveFileId: args.sourceDriveFileId,
-        });
+        }).catch((e: unknown) => { throw keyToolOutage(e) ?? e; });
         return { contract };
       }
       case 'contract_list_tags': {
@@ -7036,21 +7055,11 @@ ${triage.standingContext}`;
       case 'contract_extract_clauses': {
         // W11-DISPATCH-REFUSAL-FINAL review SEC-1, COR-1 (D-134): ContractClauseService answers a
         // document host that did not answer (5xx, 408, 429; the URL the call names or the contract's
-        // own asset) as a 400, as it answers a host that refused or a contract with no document. A 400
-        // is final for the plan queue now, so the outage, which the service marks as the 400's cause,
-        // is handed on as a 503 with the service's own message (retried and counted, as it was
-        // before). The service's HTTP routes and the envelope's error text are unchanged.
-        let result;
-        try {
-          result = await this.getContractClauses().extractClauses(businessId, args.contractId, {
-            url: args.url,
-          });
-        } catch (e) {
-          if (e instanceof BadRequestException && e.cause instanceof DocumentHostUnavailableError) {
-            throw new ServiceUnavailableException(e.message, { cause: e });
-          }
-          throw e;
-        }
+        // own asset) as a 400, as it answers a host that refused or a contract with no document. The
+        // outage, marked as the 400's cause, is handed on as a 503 (keyToolOutage).
+        const result = await this.getContractClauses().extractClauses(businessId, args.contractId, {
+          url: args.url,
+        }).catch((e: unknown) => { throw keyToolOutage(e) ?? e; });
         return result;
       }
       // === SUPPORT & COMMS ===

@@ -128,6 +128,28 @@ export interface DocumentExtractionResult {
   }>;
 }
 
+/**
+ * W11-DISPATCH-REFUSAL-FINAL review SEC2-1, COR2-1 (owner ruling D-134): the results extractFromDocument
+ * answered because the read itself failed (the model did not answer, timed out, was rate-limited, or
+ * answered something unreadable), kept beside the result so its shape, and what every caller and route
+ * answers with it, is unchanged. A caller that must tell "could not read" from "read, and it is not
+ * that kind of document" asks documentExtractionFailed.
+ */
+const FAILED_EXTRACTIONS = new WeakSet<object>();
+
+/** True when `result` is extractFromDocument's answer for a read that failed, not a document it classified. */
+export function documentExtractionFailed(result: object): boolean {
+  return FAILED_EXTRACTIONS.has(result);
+}
+
+/** The cause on a 4xx a service answers for a document the model could not read at all (see documentExtractionFailed). */
+export class DocumentExtractionFailedError extends Error {
+  constructor() {
+    super('The document could not be read: the extraction failed');
+    this.name = 'DocumentExtractionFailedError';
+  }
+}
+
 @Injectable()
 export class DocumentIntelligenceService {
   private readonly logger = new Logger(DocumentIntelligenceService.name);
@@ -321,12 +343,16 @@ Respond ONLY with valid JSON in this exact shape:
       return result;
     } catch (err: any) {
       this.logger.error(`Document extraction failed: ${(err as Error).message}`);
-      return {
+      const failed: DocumentExtractionResult = {
         documentType: 'unknown',
         confidence: 0,
         rawText: '',
         suggestedActions: [],
       };
+      // W11-DISPATCH-REFUSAL-FINAL review SEC2-1 (D-134): the answer is what it was; that it stands for
+      // a failed read, not a document read and found unknown, is kept beside it (documentExtractionFailed).
+      FAILED_EXTRACTIONS.add(failed);
+      return failed;
     }
   }
 

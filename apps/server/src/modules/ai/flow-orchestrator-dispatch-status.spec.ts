@@ -441,7 +441,7 @@ describe('FlowOrchestratorService.executeToolDirectly hands the plan queue a ref
     expect(noDocErr).toBeInstanceOf(BadRequestException);
   });
 
-  it('DS-09 W11-DISPATCH-REFUSAL-FINAL review COR-1 (D-134): through the real ContractClauseService, a document host that did not answer stays a failure the plan queue retries and counts on both of its fetches: the URL the call names, and the contract\'s own asset (whose failed fetch the service answers as a 400 \'No source document available\'); the service still throws the 400 its HTTP routes answer, and an asset whose host answered and refused, or a contract with no document, is the final 400', async () => {
+  it('DS-09 W11-DISPATCH-REFUSAL-FINAL review COR-1 (D-134): through the real ContractClauseService, a document host that did not answer stays a failure the plan queue retries and counts on both of its fetches: the URL the call names, and the contract\'s own asset (whose failed fetch the service answers as a 400 \'No source document available\'); the service still throws the 400 it always did, and an asset whose host answered and refused, or a contract with no document, is the final 400', async () => {
     const TOOL = 'contract_extract_clauses';
     const NO_SOURCE = 'No source document available for this contract (upload one or link an asset/document)';
     const ASSET_URL = 'https://assets.example.test/w10ds_asset.pdf';
@@ -491,7 +491,7 @@ describe('FlowOrchestratorService.executeToolDirectly hands the plan queue a ref
         const label = `${source} ${status}`;
         const message = messageFor(status);
 
-        // The service's own answer, as its HTTP routes give it: still the 400 with the message it always had.
+        // The service's own answer: still the 400 with the message and body it always had.
         const direct = await makeRealClauseFlow(() => status).service
           .extractClauses(BIZ_A, 'w10ds_contract', { url: args.url as string | undefined }).then(() => null, (e: unknown) => e);
         expect(direct, label).toBeInstanceOf(BadRequestException);
