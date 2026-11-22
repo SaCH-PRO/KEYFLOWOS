@@ -378,3 +378,27 @@ describe('round-11 review repairs (both reviews: long keys, ellipsis; security M
     ['a rate per hour key', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { rateHour: 150, rate_minute: 2 } }],
   ])('%s is financial', (_l, p) => expect(isFinancialProposal(p as any)).toBe(true));
 });
+
+describe('round-12 review repairs (both reviews: mark runs, figure-free long prose; security M2)', () => {
+  it('stays linear on long runs of dots and commas (both reviews: 4-9 s before)', () => {
+    const inputs = ['.'.repeat(100_000), '9' + '.'.repeat(100_000) + 'x', '.'.repeat(100_000) + '9', '9' + ','.repeat(100_000) + 'x', '$' + '.,'.repeat(50_000)];
+    const t0 = Date.now();
+    for (const summary of inputs) isFinancialProposal({ actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', summary } as any);
+    expect(Date.now() - t0).toBeLessThan(1500);
+  });
+
+  it.each([
+    ['a long money-word sentence with no figure', { actionType: 'CREATE_TASK', module: 'crm', title: 'Transfer the files to the new shared drive for the design team today' }],
+    ['another', { actionType: 'CREATE_TASK', module: 'crm', title: 'Total of the tasks for the team this week is done and reviewed' }],
+    ['Bill and a long agenda', { actionType: 'CREATE_TASK', module: 'crm', title: 'Call Bill about the agenda for the kickoff meeting with the team on monday' }],
+  ])('%s is not', (_l, p) => expect(isFinancialProposal(p as any)).toBe(false));
+
+  it.each([
+    ['digits in a key', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { total_due_2026: 900, total_q4: 900 } }],
+    ['a versioned rate key', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { rate_v2: 150 } }],
+    ['a figure nested in an object', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { total: { value: 900 } } }],
+    ['a figure nested in an array', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { total: [900] } }],
+    ['a nested month map', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { total_due: { jan: 900 } } }],
+    ['an oversized content (fails closed)', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', summary: 'call back '.repeat(6_000) }],
+  ])('%s is financial', (_l, p) => expect(isFinancialProposal(p as any)).toBe(true));
+});
