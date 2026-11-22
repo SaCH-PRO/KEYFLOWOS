@@ -24,9 +24,10 @@
  * validateToolInput over stand-ins for the tool's own work (executeToolAction throws or answers as each
  * case says), the member scope check (none here), the execution log, governance's tier and the business
  * graph cache; the real ActionDispatcherService over that orchestrator, its retries immediate. DS-01b: the
- * real ProjectsService.updateTask over a prisma stand-in whose conditional write loses its race.
+ * real ProjectsService.updateTask over a prisma stand-in whose conditional write loses its race. DS-09: the
+ * real ContractClauseService over a prisma stand-in and a stand-in for fetch (no network).
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
   BadRequestException,
   ConflictException,
@@ -41,6 +42,7 @@ import {
 import { FlowOrchestratorService } from './flow-orchestrator.service';
 import { ActionDispatcherService } from './action-dispatcher.service';
 import { ProjectsService } from '../projects/projects.service';
+import { ContractClauseService } from '../contracts/contract-clause.service';
 import { providerUnavailable } from '../../core/connectors/provider-failure';
 
 /** The class ProjectsService.updateTask throws for a stale write (W11-DISPATCH-REFUSAL-FINAL, D-134). */
@@ -115,6 +117,8 @@ function countAttempts(flow: FlowOrchestratorService) {
   };
   return () => attempts;
 }
+
+afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('FlowOrchestratorService.executeToolDirectly hands the plan queue a refusal\'s status: a 400 or plain 409 is final, a retryable conflict and a provider outage are failures (W10-DISPATCH-STATUS, D-73; review CR-W10DS-1; W11-DISPATCH-REFUSAL-FINAL, D-134)', () => {
   it('DS-01 W11-DISPATCH-REFUSAL-FINAL (D-134; W10-DISPATCH-STATUS review CR-W10DS-1, D-73): the 409 the service marks retryable (ProjectsService.updateTask\'s RetryableConflictException, reached by projects_complete_task and projects_update_task) reaches the dispatcher as a plain Error with the exception, still a ConflictException, as its cause, so the plan queue retries the step and it completes', async () => {
@@ -431,5 +435,101 @@ describe('FlowOrchestratorService.executeToolDirectly hands the plan queue a ref
     (noDoc.flow as unknown as { moduleRef: { get: () => unknown } }).moduleRef = { get: () => ({ extractClauses: async () => { throw new BadRequestException('No document is attached to this contract (503)'); } }) };
     const noDocErr = await thrownByExecuteToolDirectly(noDoc.flow, TOOL, args);
     expect(noDocErr).toBeInstanceOf(BadRequestException);
+  });
+
+  it('DS-09 W11-DISPATCH-REFUSAL-FINAL review COR-1 (D-134): through the real ContractClauseService, a document host that did not answer stays a failure the plan queue retries and counts on both of its fetches: the URL the call names, and the contract\'s own asset (whose failed fetch the service answers as a 400 \'No source document available\'); the service still throws the 400 its HTTP routes answer, and an asset whose host answered and refused, or a contract with no document, is the final 400', async () => {
+    const TOOL = 'contract_extract_clauses';
+    const NO_SOURCE = 'No source document available for this contract (upload one or link an asset/document)';
+    const ASSET_URL = 'https://assets.example.test/w10ds_asset.pdf';
+    const NAMED_URL = 'https://files.example.test/contract.pdf';
+    /** The real tool case over the real ContractClauseService; `hostStatus` answers each fetch. */
+    const makeRealClauseFlow = (hostStatus: (url: string, call: number, businessId: string) => number, contract: Record<string, unknown> = { sourceAssetId: 'w10ds_asset' }) => {
+      let fetches = 0;
+      let current = BIZ_A;
+      vi.stubGlobal('fetch', async (url: string) => {
+        fetches += 1;
+        const status = hostStatus(String(url), fetches, current);
+        return { ok: status >= 200 && status < 300, status, headers: { get: () => 'text/plain' }, arrayBuffer: async () => new TextEncoder().encode('w10ds contract text').buffer };
+      });
+      const prisma = {
+        client: {
+          contract: {
+            findFirst: async ({ where }: { where: { businessId: string } }) => { current = where.businessId; return { id: 'w10ds_contract', title: 'w10ds contract', ...contract }; },
+            update: async () => ({}),
+          },
+          asset: { findFirst: async () => ({ url: ASSET_URL, mimeType: 'text/plain', name: 'w10ds_asset' }) },
+        },
+      };
+      const collaborators = {
+        parse: async () => ({ markdown: 'w10ds contract text' }),
+        trackAndComplete: async () => ({ content: '{"clauses":[{"label":"Parties","present":true}]}' }),
+      };
+      const service = new ContractClauseService(prisma as never, { get: () => collaborators } as never);
+      const flow = Object.create(FlowOrchestratorService.prototype) as FlowOrchestratorService;
+      Object.assign(flow, {
+        logger: quiet,
+        governance: { getToolTier: () => 1 },
+        executionLog: { logToolExecution: async () => 'w10ds_log' },
+        businessGraph: { invalidateCache: () => undefined },
+        memberScopeRefusal: async () => null,
+        attributeExecutionLog: async () => undefined,
+        moduleRef: { get: () => service },
+      });
+      return { flow, service, fetches: () => fetches };
+    };
+
+    const sources: Array<[string, Record<string, unknown>, (status: number) => string]> = [
+      ['named url', { contractId: 'w10ds_contract', url: NAMED_URL }, (status) => `Could not fetch document URL (${status})`],
+      ['contract asset', { contractId: 'w10ds_contract' }, () => NO_SOURCE],
+    ];
+    for (const [source, args, messageFor] of sources) {
+      for (const status of [500, 503, 408, 429]) {
+        const label = `${source} ${status}`;
+        const message = messageFor(status);
+
+        // The service's own answer, as its HTTP routes give it: still the 400 with the message it always had.
+        const direct = await makeRealClauseFlow(() => status).service
+          .extractClauses(BIZ_A, 'w10ds_contract', { url: args.url as string | undefined }).then(() => null, (e: unknown) => e);
+        expect(direct, label).toBeInstanceOf(BadRequestException);
+        expect((direct as HttpException).getResponse(), label).toEqual(new BadRequestException(message).getResponse());
+
+        const err = await thrownByExecuteToolDirectly(makeRealClauseFlow(() => status).flow, TOOL, args);
+        expect(err, label).toBeInstanceOf(ServiceUnavailableException);
+        expect((err as Error).message, label).toBe(message);
+
+        // A passing outage: the retry reads the document.
+        const once = makeRealClauseFlow((_url, call) => (call === 1 ? status : 200));
+        expect(await makeDispatcher(once.flow).dispatcher.dispatch({ businessId: BIZ_A, toolName: TOOL, args, retryCount: 2 }), label).toMatchObject({ success: true, result: { total: 1 } });
+        expect(once.fetches(), label).toBe(2);
+
+        // A lasting one in BIZ_A: tried three times, counted once; BIZ_B reads its document.
+        const down = makeRealClauseFlow((_url, _call, businessId) => (businessId === BIZ_A ? status : 200));
+        const { dispatcher } = makeDispatcher(down.flow);
+        expect(await dispatcher.dispatch({ businessId: BIZ_A, toolName: TOOL, args, retryCount: 2 }), label).toMatchObject({ success: false, error: message });
+        expect(down.fetches(), label).toBe(3);
+        expect(dispatcher.getCircuitStatus(TOOL, BIZ_A), label).toMatchObject({ open: false, failures: 1 });
+        expect(await dispatcher.dispatch({ businessId: BIZ_B, toolName: TOOL, args, retryCount: 2 }), label).toMatchObject({ success: true });
+        expect(dispatcher.getCircuitStatus(TOOL, BIZ_B), label).toEqual(CLOSED);
+      }
+
+      // The host answered and refused: final, answered once, uncounted.
+      for (const status of [404, 403]) {
+        const label = `${source} ${status}`;
+        expect(await thrownByExecuteToolDirectly(makeRealClauseFlow(() => status).flow, TOOL, args), label).toBeInstanceOf(BadRequestException);
+        // (each makeRealClauseFlow replaces the fetch stand-in, so a flow is made right before it is used)
+        const refused = makeRealClauseFlow(() => status);
+        const { dispatcher } = makeDispatcher(refused.flow);
+        expect(await dispatcher.dispatch({ businessId: BIZ_A, toolName: TOOL, args, retryCount: 2 }), label).toMatchObject({ success: false, error: messageFor(status) });
+        expect(refused.fetches(), label).toBe(1);
+        expect(dispatcher.getCircuitStatus(TOOL, BIZ_A), label).toEqual(CLOSED);
+      }
+    }
+
+    // A contract with no document at all: nothing is fetched, and the 400 is final.
+    const none = makeRealClauseFlow(() => 503, { sourceAssetId: null });
+    const { dispatcher } = makeDispatcher(none.flow);
+    expect(await dispatcher.dispatch({ businessId: BIZ_A, toolName: TOOL, args: { contractId: 'w10ds_contract' }, retryCount: 2 })).toMatchObject({ success: false, error: NO_SOURCE });
+    expect(none.fetches()).toBe(0);
+    expect(dispatcher.getCircuitStatus(TOOL, BIZ_A)).toEqual(CLOSED);
   });
 });

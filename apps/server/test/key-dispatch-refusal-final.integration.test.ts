@@ -237,7 +237,19 @@ beforeAll(async () => {
 }, 180_000);
 
 afterAll(async () => {
-  if (db) await cleanup();
+  if (db) {
+    await cleanup();
+    // cleanup() is best-effort per statement, so a failed delete would leave rows silently: none may remain.
+    const left = await db.$queryRawUnsafe(
+      `SELECT (SELECT count(*) FROM businesses WHERE id LIKE ${sqlLikePrefix(P)})::int AS businesses,
+              (SELECT count(*) FROM users WHERE id LIKE ${sqlLikePrefix(P)})::int AS users,
+              (SELECT count(*) FROM project_tasks WHERE business_id LIKE ${sqlLikePrefix(P)})::int AS tasks,
+              (SELECT count(*) FROM ai_plans WHERE business_id LIKE ${sqlLikePrefix(P)})::int AS plans,
+              (SELECT count(*) FROM ai_execution_logs WHERE business_id LIKE ${sqlLikePrefix(P)})::int AS logs,
+              (SELECT count(*) FROM activities WHERE business_id LIKE ${sqlLikePrefix(P)})::int AS activities`,
+    );
+    expect(left).toEqual([{ businesses: 0, users: 0, tasks: 0, plans: 0, logs: 0, activities: 0 }]);
+  }
   const dbMod = await import('@keyflow/db');
   dbMod.setTenantContextProvider({ getCurrentBusinessId: () => undefined });
 });
