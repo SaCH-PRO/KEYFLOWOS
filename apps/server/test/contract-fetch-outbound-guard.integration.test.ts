@@ -520,6 +520,11 @@ describe('FU-CONTRACT-FETCH-OUTBOUND-GUARD (D-246): contract_extract_clauses fet
     const outcome = await runTool({ contractId: ID.contract, url: 'https://hang.v99h.test/contract.pdf' });
     const elapsed = Date.now() - started;
     expect(outcome.ok).toBe(false);
+    // The deadline's own failure (as a stalled fetch failed before the guard): no refusal, so the plan
+    // queue retries and counts it (review round 2, correctness 1).
+    // (executeToolDirectly hands on a failure that is no HttpException as a plain Error with its message.)
+    expect(outcome.error).not.toBeInstanceOf(HttpException);
+    expect((outcome.error as Error).message).toBe('The operation was aborted due to timeout');
     expect(elapsed).toBeLessThan(40_000);
     expect(fetches).toEqual([]);
   }, 50_000);
