@@ -63,7 +63,14 @@ import { BlueprintService } from '../blueprint/blueprint.service';
 import { AiMessageSenderService } from './ai-message-sender.service';
 import { SemanticMemoryService } from './semantic-memory.service';
 import { ObjectStorageService } from '../../core/object-storage';
-import { containsUntrustedBlock, fenceUntrusted, withUntrustedContentRule } from './untrusted-content';
+import {
+  UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS,
+  capUntrusted,
+  containsUntrustedBlock,
+  fenceUntrusted,
+  withUntrustedContentRule,
+  withoutUntrustedBlocks,
+} from './untrusted-content';
 import { RoleEngineService, BusinessRole, RoleDetectionContext, CrewResolution } from './role-engine.service';
 import { ContentRequestService } from '../content-ops/content-request.service';
 import { CallLogService, type CallLogViewer } from '../call-tasks/call-log.service';
@@ -1307,9 +1314,11 @@ export class FlowOrchestratorService {
           voice: 'default',
           mood: 'neutral',
           preferredProvider: 'openai',
+          // RR-UNTRUSTED-CONTENT-FENCE review F1: the cortex prompt carries no untrusted-content rule,
+          // so a fenced block from an earlier turn reaches it as a placeholder, not as its text.
           messages: conversationHistory.slice(-10).map((m) => ({
             role: m.role,
-            content: m.content,
+            content: typeof m.content === 'string' ? withoutUntrustedBlocks(m.content, '[attachment text withheld]') : m.content,
             timestamp: now,
           })),
           createdAt: now,
@@ -2005,7 +2014,8 @@ export class FlowOrchestratorService {
           ? `${result.documentType?.toUpperCase() ?? 'DOCUMENT'}\n${result.rawText}`
           : JSON.stringify(result);
         parts.push(
-          `[Attachment: ${filename} (${att.type}, ${extractionInput.mimeType ?? mimeType})]\n${summary}`,
+          // RR-UNTRUSTED-CONTENT-FENCE review m1: each file has its own cap inside the turn's one block.
+          `[Attachment: ${filename} (${att.type}, ${extractionInput.mimeType ?? mimeType})]\n${capUntrusted(summary, UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS)}`,
         );
       } catch (err: any) {
         parts.push(
