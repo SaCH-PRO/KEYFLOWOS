@@ -27,6 +27,8 @@ export class TemporalFlowMemoryService {
   ) {}
 
   async createMemory(input: CreateTemporalFlowMemoryInput): Promise<TemporalFlowMemoryData> {
+    // MEM-TEMPORAL-SCOPE: without a business the lookup and the rewrite below would have no tenant predicate.
+    if (!isKey(input.businessId)) throw new Error('Temporal memory needs a business');
     const existing = await this.prisma.client.temporalFlowMemory.findFirst({
       where: {
         businessId: input.businessId,
