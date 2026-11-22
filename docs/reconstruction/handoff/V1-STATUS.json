@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "ea0e19299875f901e3b1f4128e3318ee20f97983",
-  "main_commit_date": "2026-11-22T22:20:40+00:00",
+  "main_sha": "37f9c451ec7b18c80b9f5a0716c207a7ba776c3d",
+  "main_commit_date": "2026-11-22T22:39:11+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -27,13 +27,13 @@
   ]
  },
  "summary": {
-  "packets": 234,
-  "points": 385.5,
+  "packets": 244,
+  "points": 395.5,
   "by_status": {
    "done": {
     "packets": 62,
     "points": 93.5,
-    "pct_by_points": 24.3
+    "pct_by_points": 23.6
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 172,
-    "points": 292,
-    "pct_by_points": 75.7
+    "packets": 182,
+    "points": 302,
+    "pct_by_points": 76.4
    }
   },
   "by_step": {
@@ -80,8 +80,8 @@
    "5": {
     "done": 0,
     "in-progress": 0,
-    "todo": 40,
-    "total": 40
+    "todo": 50,
+    "total": 50
    },
    "6": {
     "done": 1,
@@ -107,7 +107,7 @@
    "prior-status-file+wave-2b-commit": 28,
    "code-commit-subject": 8,
    "compacted-commit": 7,
-   "no-evidence": 35
+   "no-evidence": 45
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -119,7 +119,7 @@
    "FU-KEY-MEMORY-MONEY-SIGHT",
    "FU-WA-ESCAPE-RACE"
   ],
-  "todo_with_dependencies_met": 39
+  "todo_with_dependencies_met": 44
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -252,7 +252,16 @@
    "size": "M",
    "lane": "both",
    "on_critical_path": false,
-   "unblocks": 11
+   "unblocks": 12
+  },
+  {
+   "id": "SWP-COA-UNIQUE-CODE",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 10
   },
   {
    "id": "SWEEP-RERUN-S2",
@@ -268,15 +277,6 @@
    "step": 4,
    "priority": "P1",
    "size": "L",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 9
-  },
-  {
-   "id": "SWP-COA-UNIQUE-CODE",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
    "lane": "server",
    "on_critical_path": false,
    "unblocks": 9
@@ -306,7 +306,7 @@
    "size": "M",
    "lane": "server",
    "on_critical_path": false,
-   "unblocks": 5
+   "unblocks": 6
   },
   {
    "id": "MEM-CENSUS",
@@ -354,6 +354,15 @@
    "unblocks": 2
   },
   {
+   "id": "FU-SEND-REMINDER-SERVER-GATE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 2
+  },
+  {
    "id": "FU-CONTRACT-FETCH-OUTBOUND-GUARD",
    "step": 3,
    "priority": "P0",
@@ -390,10 +399,28 @@
    "unblocks": 0
   },
   {
+   "id": "FU-SITE-ANALYTICS-REVENUE-SCOPE",
+   "step": 5,
+   "priority": "P0",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-CONTACT-AUDIT-RESIDUAL",
    "step": 3,
    "priority": "P1",
    "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-CONVERSION-REPS-REVENUE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
    "lane": "server",
    "on_critical_path": false,
    "unblocks": 0
@@ -426,7 +453,16 @@
    "unblocks": 0
   },
   {
-   "id": "FU-SEND-REMINDER-SERVER-GATE",
+   "id": "FU-PRESENCE-REVENUE-SCOPE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-TEMPORAL-FLOW-INBOX-SCOPE",
    "step": 5,
    "priority": "P1",
    "size": "S",
@@ -476,6 +512,15 @@
    "priority": "P2",
    "size": "S",
    "lane": "docs",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-CASE-STUDY-REVENUE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -4549,6 +4594,156 @@
    "depends_on": [],
    "title": "The research ledger RESEARCH-CORPUS.yaml parses, and a test keeps it parsing",
    "deps_met": true
+  },
+  {
+   "id": "FU-SITE-ANALYTICS-REVENUE-SCOPE",
+   "step": 5,
+   "priority": "P0",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Site analytics withholds paid revenue from readers without revenue read",
+   "deps_met": true
+  },
+  {
+   "id": "FU-TEMPORAL-FLOW-INBOX-SCOPE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "The temporal-flow timeline withholds KEY Inbox events from readers without operations read",
+   "deps_met": true
+  },
+  {
+   "id": "FU-KEY-ACTION-GENOME-PROJECTION",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-PROPOSAL-REVENUE-SIGHT"
+   ],
+   "title": "KEY action proposals bridged from FINANCIAL genome recommendations go through the revenue projection",
+   "deps_met": false
+  },
+  {
+   "id": "FU-CONVERSION-REPS-REVENUE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Conversion sales-reps figures need revenue read",
+   "deps_met": true
+  },
+  {
+   "id": "FU-PRESENCE-REVENUE-SCOPE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Presence overview revenue and leads contact details are scoped",
+   "deps_met": true
+  },
+  {
+   "id": "FU-CASE-STUDY-REVENUE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Case-study metrics withhold recent revenue without revenue read",
+   "deps_met": true
+  },
+  {
+   "id": "FU-PAY-LINK-STATUS-GATE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-SEND-REMINDER-SERVER-GATE"
+   ],
+   "title": "Public pay links are minted only for invoices someone owes",
+   "deps_met": false
+  },
+  {
+   "id": "FU-REMINDER-HONESTY",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-SEND-REMINDER-SERVER-GATE"
+   ],
+   "title": "Reminders record the real recipient, re-check status at send, and the web never claims a send that failed",
+   "deps_met": false
+  },
+  {
+   "id": "FU-LEDGER-ZONED-FROM",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-FIN-LEDGER"
+   ],
+   "title": "General ledger date-only `from` starts at the business-zone day and dates show in the business zone",
+   "deps_met": false
+  },
+  {
+   "id": "FU-COA-SEEDER-AND-INPUT",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-COA-UNIQUE-CODE"
+   ],
+   "title": "Chart-of-accounts seeder respects the code rule and update input is validated",
+   "deps_met": false
   }
  ]
 }
