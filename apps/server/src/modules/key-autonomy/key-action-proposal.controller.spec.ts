@@ -23,6 +23,8 @@ describe('KeyActionProposalController', () => {
             // FU-PROPOSAL-REVENUE-SIGHT (D-238): the reader-scoped reads the routes go through.
             listForReader: vi.fn(async () => [{ id: 'prop_1' }]),
             getForReader: vi.fn(async () => ({ id: 'prop_1' })),
+            // D-238 (round 3): what an action answers its actor (here the result as the orchestrator returned it).
+            viewForReader: vi.fn(async (_businessId: string, proposal: unknown) => proposal),
             create: vi.fn(async () => ({ id: 'prop_1', status: 'PENDING' })),
             get: vi.fn(async () => ({ id: 'prop_1' })),
             cancel: vi.fn(async () => ({ id: 'prop_1', status: 'CANCELLED' })),

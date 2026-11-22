@@ -828,31 +828,40 @@ export class AiController {
     role?: string,
   ) {
     // Canonical path: resolve directly from KeyActionProposal.
-    // FU-PROPOSAL-REVENUE-SIGHT (D-238): a financial proposal does not exist for a resolver without revenue read.
+    // FU-PROPOSAL-REVENUE-SIGHT (D-238, round 3): the resolve keeps its own authority (assertCanResolveApproval, the
+    // orchestrator); a resolver without revenue read is answered a financial proposal's redacted view. The proposal is
+    // read as before, so a financial proposal never falls through to the legacy aiApprovalItem path.
     let proposal: any;
     try {
-      proposal = await this.proposals.getForReader(businessId, approvalId, { id: userId, role });
+      proposal = await this.proposals.get(businessId, approvalId);
     } catch {
       proposal = null;
     }
+    const reader = { id: userId, role };
 
     if (proposal) {
       await this.assertCanResolveApproval(businessId, proposal.riskTier ?? 2, userId);
       if (resolution === 'deferred') {
         // Defer by rejecting with a deferral reason; true deferral state is not in the proposal model.
-        return this.approvalOrchestrator.reject({
-          proposalId: approvalId,
+        return this.proposals.viewForReader(
           businessId,
-          userId,
-          reason: 'Deferred by operator',
-        });
+          await this.approvalOrchestrator.reject({
+            proposalId: approvalId,
+            businessId,
+            userId,
+            reason: 'Deferred by operator',
+          }),
+          reader,
+        );
       }
       if (proposal.status !== 'PENDING') {
         throw new BadRequestException(`Proposal ${approvalId} is already resolved (status: ${proposal.status})`);
       }
-      return resolution === 'approved'
-        ? this.approvalOrchestrator.approve({ proposalId: approvalId, businessId, userId, autoExecute: false })
-        : this.approvalOrchestrator.reject({ proposalId: approvalId, businessId, userId });
+      const resolved =
+        resolution === 'approved'
+          ? await this.approvalOrchestrator.approve({ proposalId: approvalId, businessId, userId, autoExecute: false })
+          : await this.approvalOrchestrator.reject({ proposalId: approvalId, businessId, userId });
+      return this.proposals.viewForReader(businessId, resolved, reader);
     }
 
     // Compatibility fallback: legacy aiApprovalItem records are migrated once on resolution.

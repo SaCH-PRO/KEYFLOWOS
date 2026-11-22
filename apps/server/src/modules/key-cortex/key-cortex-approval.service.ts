@@ -1,7 +1,9 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { Inject } from '@nestjs/common';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
 import type { KeyActionProposalData } from '../key-autonomy/key-action-proposal.types';
+import { genomeReaderReadsRevenue } from '../business-genome/key-genome/genome-finance-scope';
+import { PrismaService } from '../../core/prisma/prisma.service';
 
 export interface KeyCortexApprovalRequest {
   id: string;
@@ -14,6 +16,12 @@ export interface KeyCortexApprovalRequest {
   createdAt: Date;
   expiresAt?: Date | null;
   actionDescription: string;
+  /**
+   * D-238 (round 3): whether the proposal is financial (KeyActionProposalService.isFinancial). Set by approveAction and
+   * rejectAction for the gateway, which answers a reader without revenue read a redacted result and never puts a
+   * financial title in the business room; absent means not known, and is treated as financial.
+   */
+  financial?: boolean;
 }
 
 /**
@@ -30,7 +38,26 @@ export class KeyCortexApprovalService {
   constructor(
     @Inject(KeyActionProposalService)
     private readonly proposalService: KeyActionProposalService,
+    @Optional() @Inject(PrismaService) private readonly prisma?: PrismaService,
   ) {}
+
+  /** D-238 (D-100): whether `userId` reads revenue in `businessId` (a missing reader or membership is no). */
+  async readerReadsRevenue(businessId: string, userId: string, role?: string): Promise<boolean> {
+    if (!this.prisma) return false;
+    try {
+      return await genomeReaderReadsRevenue(this.prisma, businessId, { id: userId, role });
+    } catch {
+      return false;
+    }
+  }
+
+  private async financialOf(businessId: string, requestId: string): Promise<boolean> {
+    try {
+      return await this.proposalService.isFinancial(businessId, await this.proposalService.get(businessId, requestId));
+    } catch {
+      return true;
+    }
+  }
 
   async createRequest(params: {
     businessId: string;
@@ -296,7 +323,7 @@ export class KeyCortexApprovalService {
     opts: { businessId: string; approvedBy: string; approvedAt?: Date; reason?: string },
   ): Promise<KeyCortexApprovalRequest> {
     const result = await this.approve(opts.businessId, requestId, opts.approvedBy, opts.reason);
-    return { ...result, actionDescription: result.description || requestId };
+    return { ...result, actionDescription: result.description || requestId, financial: await this.financialOf(opts.businessId, requestId) };
   }
 
   async rejectAction(
@@ -304,7 +331,7 @@ export class KeyCortexApprovalService {
     opts: { businessId: string; rejectedBy: string; rejectedAt?: Date; reason?: string },
   ): Promise<KeyCortexApprovalRequest> {
     const result = await this.reject(opts.businessId, requestId, opts.rejectedBy, opts.reason);
-    return { ...result, actionDescription: result.description || requestId };
+    return { ...result, actionDescription: result.description || requestId, financial: await this.financialOf(opts.businessId, requestId) };
   }
 
   private toApprovalRequest(proposal: KeyActionProposalData): KeyCortexApprovalRequest {

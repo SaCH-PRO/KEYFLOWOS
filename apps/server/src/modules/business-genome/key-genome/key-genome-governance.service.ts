@@ -6,7 +6,7 @@ import { GenomeExperimentService } from './genome-experiment.service';
 import { GenomeModuleReadinessService } from './genome-module-readiness.service';
 import { GenomeScoringService } from './genome-scoring.service';
 import { GenomeDepartmentService } from './genome-department.service';
-import { isFinancialProposal, isFinanceRecommendation, isFinanceSignal, isMoneyLabel, isMoneyMemoryEvent } from './genome-finance-scope';
+import { isFinancialProposal, isFinanceRecommendation, isFinanceSignal, isMoneyLabel, readableMemoryEvents } from './genome-finance-scope';
 import type {
   GenomeExperimentData,
   GenomeRecommendationData,
@@ -112,10 +112,11 @@ export class KeyGenomeGovernanceService {
       const rows = await this.prisma.client.genomeMemoryEvent.findMany({
         where: { businessId, ...where },
         // metadata and title too (review MINOR-2): a KEY proposal's event is classified by its proposal, as GET memory does.
-        select: { sourceType: true, eventType: true, domain: true, section: true, metadata: true, title: true },
+        select: { sourceType: true, eventType: true, domain: true, section: true, metadata: true, title: true, sourceEntityId: true },
         take: 5000,
       });
-      return rows.filter((r) => !isMoneyMemoryEvent(r)).length;
+      // D-238 (round 3, security M3): a KEY proposal's event is judged by its proposal row too.
+      return (await readableMemoryEvents(this.prisma, businessId, rows)).length;
     };
     const [memoryEventsLast7Days, failedOutcomesLast30Days] = await Promise.all([
       countEvents({ createdAt: { gte: sevenDaysAgo } }),

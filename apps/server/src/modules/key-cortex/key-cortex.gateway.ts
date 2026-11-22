@@ -29,7 +29,7 @@ import { Logger, OnModuleDestroy } from '@nestjs/common';
 
 // -- KEY Cortex Services --
 import { KeyCortexReasoningService } from './key-cortex-reasoning.service';
-import { KeyCortexApprovalService } from './key-cortex-approval.service';
+import { KeyCortexApprovalService, type KeyCortexApprovalRequest } from './key-cortex-approval.service';
 import { KeyCortexEventService } from './key-cortex-event.service';
 import { KeyCortexExecutorService } from './key-cortex-executor.service';
 import { KeyCortexWsAuthService, isAllowedWsOrigin } from './key-cortex-ws-auth.service';
@@ -455,6 +455,23 @@ export class KeyCortexGateway
   }
 
   /**
+   * D-238 (round 3): what key:approve / key:reject answers the actor. The decision itself stays governed by the existing
+   * authority; a member without revenue read is answered a financial proposal's id and status only. Not knowing whether it
+   * is financial is treated as financial (fail closed).
+   */
+  private async approvalResultForReader(clientInfo: { businessId: string; userId: string; role?: string }, result: KeyCortexApprovalRequest) {
+    const { financial, ...whole } = result;
+    if (financial === false) return whole;
+    let readsRevenue = false;
+    try {
+      readsRevenue = await this.approvalService.readerReadsRevenue(clientInfo.businessId, clientInfo.userId, clientInfo.role);
+    } catch {
+      readsRevenue = false;
+    }
+    return readsRevenue ? whole : { id: result.id, status: result.status };
+  }
+
+  /**
    * Client approves a pending action.
    * Triggers execution of the gated action via the approval service.
    */
@@ -484,19 +501,21 @@ export class KeyCortexGateway
       });
 
       // Notify all clients in the business that the action was approved
+      // D-238 (round 3): the business room is every member; a financial proposal's title is never pushed to it.
       this.pushActivity(clientInfo.businessId, {
         type: 'approval',
-        description: `Action approved: ${result.actionDescription || data.approvalId}`,
+        description: `Action approved: ${(result.financial === false && result.actionDescription) || data.approvalId}`,
         timestamp: new Date(),
       });
 
       // Execute the approved action
       await this.executorService.executeApprovedAction(clientInfo.businessId, data.approvalId);
+      const view = await this.approvalResultForReader(clientInfo, result);
 
       client.emit('key:approval_result', {
         approvalId: data.approvalId,
         status: 'approved',
-        result,
+        result: view,
       });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
@@ -528,16 +547,18 @@ export class KeyCortexGateway
         reason: data.reason || 'User rejected',
       });
 
+      // D-238 (round 3): the business room is every member; a financial proposal's title is never pushed to it.
+      const view = await this.approvalResultForReader(clientInfo, result);
       this.pushActivity(clientInfo.businessId, {
         type: 'rejection',
-        description: `Action rejected: ${result.actionDescription || data.approvalId}`,
+        description: `Action rejected: ${(result.financial === false && result.actionDescription) || data.approvalId}`,
         timestamp: new Date(),
       });
 
       client.emit('key:approval_result', {
         approvalId: data.approvalId,
         status: 'rejected',
-        result,
+        result: view,
       });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';

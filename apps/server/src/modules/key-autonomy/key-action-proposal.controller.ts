@@ -89,8 +89,8 @@ export class KeyActionProposalController {
     if (!userId) {
       throw new UnauthorizedException('Authenticated user required to approve proposals');
     }
-    await this.proposals.getForReader(businessId, proposalId, this.reader(req));
-    return this.orchestrator.approve({ businessId, proposalId, userId });
+    // D-238 (round 3): the action keeps its own authority; only its answer is redacted for the reader.
+    return this.proposals.viewForReader(businessId, await this.orchestrator.approve({ businessId, proposalId, userId }), this.reader(req));
   }
 
   @Post('proposals/:proposalId/reject')
@@ -104,8 +104,7 @@ export class KeyActionProposalController {
     if (!userId) {
       throw new UnauthorizedException('Authenticated user required to reject proposals');
     }
-    await this.proposals.getForReader(businessId, proposalId, this.reader(req));
-    return this.orchestrator.reject({ businessId, proposalId, userId, reason: body.reason });
+    return this.proposals.viewForReader(businessId, await this.orchestrator.reject({ businessId, proposalId, userId, reason: body.reason }), this.reader(req));
   }
 
   @Post('proposals/:proposalId/cancel')
@@ -114,8 +113,7 @@ export class KeyActionProposalController {
     @Param('proposalId') proposalId: string,
     @Req() req?: { user?: { id?: string; role?: string } },
   ) {
-    await this.proposals.getForReader(businessId, proposalId, this.reader(req));
-    return this.proposals.cancel(businessId, proposalId);
+    return this.proposals.viewForReader(businessId, await this.proposals.cancel(businessId, proposalId), this.reader(req));
   }
 
   @Post('proposals/:proposalId/execute')
@@ -125,11 +123,11 @@ export class KeyActionProposalController {
     @Body() _body: ExecuteKeyActionProposalDto,
     @Req() req: { user?: { id?: string } },
   ) {
-    await this.proposals.getForReader(businessId, proposalId, this.reader(req));
-    return this.orchestrator.executeApproved({
+    const executed = await this.orchestrator.executeApproved({
       businessId,
       proposalId,
       userId: this.userId(req),
     });
+    return this.proposals.viewForReader(businessId, executed, this.reader(req));
   }
 }

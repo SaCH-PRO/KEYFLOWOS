@@ -602,6 +602,13 @@ describe('BusinessCommandCenterService', () => {
     expect(item!.title).toContain('business_name');
     expect(item!.priority).toBe('HIGH');
   });
+
+  it('RED-BEFORE (D-238, round-3 security B1): a snapshot read for a request reader takes its proposals from the reader-scoped read, for the pending and the approved', async () => {
+    mockListForReader.mockClear();
+    await service.snapshot('biz_1', { id: 'u_staff' });
+    const statuses = mockListForReader.mock.calls.map((c: any[]) => [c[0], c[1]?.status, c[2]]);
+    expect(statuses).toEqual(expect.arrayContaining([['biz_1', 'PENDING', { id: 'u_staff' }], ['biz_1', 'APPROVED', { id: 'u_staff' }]]));
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -764,12 +771,5 @@ describe('V1-47-COCKPIT-TRUTH: per-source status, Release 0 result counts, degra
     expect(prisma.client.contact.count).not.toHaveBeenCalled();
     expect(prisma.client.invoice.count).not.toHaveBeenCalled();
     expect(prisma.client.payment.count).not.toHaveBeenCalled();
-  });
-
-  it('RED-BEFORE (D-238, round-3 security B1): a snapshot read for a request reader takes its proposals from the reader-scoped read, for the pending and the approved', async () => {
-    mockListForReader.mockClear();
-    await service.snapshot('biz_1', { id: 'u_staff' });
-    const statuses = mockListForReader.mock.calls.map((c: any[]) => [c[0], c[1]?.status, c[2]]);
-    expect(statuses).toEqual(expect.arrayContaining([['biz_1', 'PENDING', { id: 'u_staff' }], ['biz_1', 'APPROVED', { id: 'u_staff' }]]));
   });
 });

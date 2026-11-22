@@ -26,6 +26,7 @@ import {
   isFinanceSignal,
   isMoneyLabel,
   isMoneyMemoryEvent,
+  readableMemoryEvents,
   listRecommendationsForReader,
   listSignalsForReader,
 } from './genome-finance-scope';
@@ -585,7 +586,8 @@ export class KeyGenomeController {
     // score, overall risk) for a member without revenue read; the limit counts
     // the events that member is served.
     const rows = await this.memoryService.listMemoryEvents(businessId, { ...filters, limit: undefined });
-    return firstN(rows.filter((e) => !isMoneyMemoryEvent(e)), filters.limit);
+    // D-238 (round 3): a KEY proposal's event is judged by its proposal row too.
+    return firstN(await readableMemoryEvents(this.prisma, businessId, rows), filters.limit);
   }
 
   /**
@@ -620,7 +622,7 @@ export class KeyGenomeController {
     // SEC-GFS-4 (D-100): as GET memory. findSimilarMemory serves 25 by default;
     // the readable ones are taken from the latest 1000 (summarizeMemory's window).
     const rows = await this.memoryService.findSimilarMemory(businessId, { ...query, limit: 1000 });
-    return firstN(rows.filter((e) => !isMoneyMemoryEvent(e)), query.limit ?? 25);
+    return firstN(await readableMemoryEvents(this.prisma, businessId, rows), query.limit ?? 25);
   }
 
   @Get('memory/:memoryEventId')
@@ -631,7 +633,7 @@ export class KeyGenomeController {
   ) {
     const event = await this.memoryService.getMemoryEvent(businessId, memoryEventId);
     // SEC-GFS-4 (D-100): a finance or composite memory event needs revenue read.
-    if (isMoneyMemoryEvent(event)) await this.requireRevenue(businessId, req, 'read');
+    if (isMoneyMemoryEvent(event) || (await readableMemoryEvents(this.prisma, businessId, [event])).length === 0) await this.requireRevenue(businessId, req, 'read');
     return event;
   }
 

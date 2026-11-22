@@ -46,18 +46,31 @@ const MONEY_TERMS = new RegExp(
     'financ', 'revenue', 'sales', 'commerce', 'payment', 'invoice', 'profit', 'billing', 'refund', 'payroll', 'treasury',
     'lifetime', 'acquisition_?cost', 'budget', 'expense', 'conversion', 'forecast', 'churn', 'transaction', 'opportunit',
     'unit_?economics', 'cross_?domain', 'money', 'receivable', 'payable', 'quote', 'quotation', 'reimburs', 'discount',
-    'promo', 'coupon', 'deposit', 'payout', 'purchase', 'wallet', 'ledger', 'salar', 'subscription', 'overdue', 'storelink',
+    // A promo code is money; promote / promotion is not (round-3 correctness minor).
+    '(?<![a-z])promo(?!t)', 'coupon', 'deposit', 'payout', 'purchase', 'wallet', 'ledger', 'salar', 'subscription', 'overdue', 'storelink',
     // Letter-bounded (correctness review MINOR-3: apricot, costume, cashier, suspend, data collection are not money).
     '(?<![a-z])pric', '(?<![a-z])cash(?!ier)', '(?<![a-z])costs?(?![a-z])', '(?<![a-z])costing', '(?<![a-z])spend',
     '(?<![a-z])margins?(?![a-z])', '(?<![a-z])collections(?![a-z])', '(?<![a-z])charges?(?![a-z])',
     '(?<![a-z])credits?(?![a-z])', '(?<![a-z])wages?(?![a-z])',
+    // A genome-bridged proposal's payload names the section it came from (round-3 security M2).
+    '(?<![a-z])business_model(?![a-z])',
   ].join('|'),
   'i',
 );
 /** Short money words, matched only as a whole word (letters on neither side), so snake_case values (cac_payback, first_sale) match. */
 const MONEY_WORDS = /(?<![a-z])(cac|ltv|mrr|arr|roi|sale|deal|order|tax|vat|fee)s?(?![a-z])/i;
 /** A money amount in free text ("$12,345", "TTD 500", "£9.99"): a title, summary or reason that states a figure (D-238). */
-const MONEY_AMOUNT = /[$€£¥₹]\s?\d|(?<![a-z])(ttd|usd|eur|gbp|jmd|bbd|xcd|cad)\s?\d|\d\s?(ttd|usd|eur|gbp|jmd|bbd|xcd|cad)(?![a-z])/i;
+const MONEY_AMOUNT = /[$€£¥₹]\s?\d|(?<![a-z0-9])(ttd|usd|eur|gbp|jmd|bbd|xcd|cad)\s?\d|(?<![a-z0-9])\d[\d.,]*\s?(ttd|usd|eur|gbp|jmd|bbd|xcd|cad)(?![a-z0-9])/i;
+/**
+ * Words that make a KEY action proposal's text or parameters financial (round-3 security M2): an amount, a total, a
+ * balance, what is owed or paid, a rate. Read for proposals only: a genome row's domain is classified by the vocabulary
+ * above, where "rate" would take every response or completion rate.
+ */
+const PROPOSAL_MONEY_WORDS = /(?<![a-z])(amounts?|totals?|subtotals?|balances?|owed|owes|owing|paid|unpaid|pays?|rates?)(?![a-z])/i;
+/** camelCase keys and words split at their humps (estimatedCost, unitPrice, adSpend), so the bounded terms see them (correctness MAJOR-2). */
+function splitHumps(v: string): string {
+  return v.replace(/([a-z0-9])([A-Z])/g, '$1_$2');
+}
 /** Genome sections whose rows are money by default (D-234: the revenue model and pricing; fail closed). */
 const MONEY_SECTIONS = new Set(['BUSINESS_MODEL']);
 
@@ -76,9 +89,11 @@ export type GenomeRowFields = {
 };
 
 function mentionsMoney(...values: Array<string | null | undefined>): boolean {
-  return values.some(
-    (v) => typeof v === 'string' && (MONEY_TERMS.test(v) || MONEY_WORDS.test(v) || MONEY_AMOUNT.test(v) || MONEY_SECTIONS.has(v.trim().toUpperCase())),
-  );
+  return values.some((v) => {
+    if (typeof v !== 'string') return false;
+    if (MONEY_SECTIONS.has(v.trim().toUpperCase())) return true;
+    return [v, splitHumps(v)].some((t) => MONEY_TERMS.test(t) || MONEY_WORDS.test(t) || MONEY_AMOUNT.test(t));
+  });
 }
 
 /** Nothing to classify a row by: no value, or only the 'general' placeholder. */
@@ -136,6 +151,8 @@ export type ProposalFields = {
   rationale?: string | null;
   expectedBenefit?: string | null;
   risks?: unknown;
+  /** The evidence the proposal cites (round-3 security M2). */
+  evidence?: unknown;
   payload?: unknown;
   inputPayload?: unknown;
   affectedEntities?: unknown;
@@ -143,8 +160,23 @@ export type ProposalFields = {
 
 /** A proposal's content as text: its string fields and its structured fields (parameters, request type) serialised. */
 function proposalContent(p: ProposalFields): Array<string | null | undefined> {
-  const asText = (v: unknown) => (v === null || v === undefined ? null : typeof v === 'string' ? v : JSON.stringify(v));
-  return [p.summary, p.description, p.rationale, p.expectedBenefit, asText(p.risks), asText(p.payload), asText(p.inputPayload), asText(p.affectedEntities)];
+  // Ids name rows, not money: an id-named key's value, and an id-like token (letters and digits, 16 or more), are not
+  // read (round-3 security minor: a random id holding "1usd" or "9cad2" is no amount). The provenance a recommendation
+  // id names is read by financialProposalWithProvenance.
+  const idKey = /(^id$|Ids?$|_ids?$)/;
+  const asText = (v: unknown) =>
+    v === null || v === undefined
+      ? null
+      : typeof v === 'string'
+        ? v
+        : JSON.stringify(v, (k, val) => (k && idKey.test(k) && (typeof val === 'string' || Array.isArray(val)) ? undefined : val));
+  const withoutIdTokens = (t: string | null | undefined) =>
+    typeof t === 'string' ? t.replace(/(?<![A-Za-z0-9])(?=[A-Za-z0-9-]*\d)(?=[A-Za-z0-9-]*[A-Za-z])[A-Za-z0-9-]{16,}(?![A-Za-z0-9])/g, ' ') : t;
+  return [p.summary, p.description, p.rationale, p.expectedBenefit, asText(p.risks), asText(p.evidence), asText(p.payload), asText(p.inputPayload), asText(p.affectedEntities)].map(withoutIdTokens);
+}
+
+function proposalMentionsMoney(...values: Array<string | null | undefined>): boolean {
+  return mentionsMoney(...values) || values.some((v) => typeof v === 'string' && [v, splitHumps(v)].some((t) => PROPOSAL_MONEY_WORDS.test(t)));
 }
 
 /**
@@ -177,7 +209,7 @@ export function isFinancialProposal(proposal: ProposalFields | null | undefined)
   const { actionType, module, toolName, title } = proposal;
   // The content is read before any list (review MAJOR-3): an approval request, a listed action or a mapped tool whose
   // text or parameters carry money is financial.
-  if (mentionsMoney(actionType, module, toolName, title, ...proposalContent(proposal))) return true;
+  if (proposalMentionsMoney(actionType, module, toolName, title, ...proposalContent(proposal))) return true;
   const tool = typeof toolName === 'string' && toolName.trim() ? toolName.trim() : null;
   const authority = tool ? keyOrganToolAuthority(tool) : null;
   if (authority && 'scopes' in authority) return authority.scopes.some((s) => MONEY_SCOPES.has(s.module));
@@ -185,6 +217,93 @@ export function isFinancialProposal(proposal: ProposalFields | null | undefined)
   const owner = (typeof module === 'string' && module.trim() ? module : tool?.includes('.') ? tool.split('.')[0] : '').trim().toLowerCase();
   if (owner && NON_MONEY_PROPOSAL_MODULES.has(owner)) return false;
   return true;
+}
+
+/**
+ * D-238: a proposal as a reader may be handed it after acting on it (approve, reject, cancel, execute). A revenue reader,
+ * or any reader of a non-financial proposal, gets it whole; a reader without revenue read gets only its id, its status
+ * and a failure reason that states no money. The action itself stays governed by the existing authority (tiers, D-140,
+ * D-119); only what is answered is redacted.
+ */
+export function proposalViewForReader<T extends { id: string; status?: unknown; failureReason?: unknown }>(
+  proposal: T,
+  readsRevenue: boolean,
+): T | { id: string; status?: unknown; failureReason?: string } {
+  if (readsRevenue || !isFinancialProposal(proposal as unknown as ProposalFields)) return proposal;
+  return redactedProposalView(proposal);
+}
+
+/** D-238: the redacted view of a financial proposal: its id, its status and a failure reason that states no money. */
+export function redactedProposalView(proposal: { id: string; status?: unknown; failureReason?: unknown }): { id: string; status?: unknown; failureReason?: string } {
+  const reason = typeof proposal.failureReason === 'string' && proposal.failureReason && !proposalMentionsMoney(proposal.failureReason) ? proposal.failureReason : undefined;
+  return reason === undefined ? { id: proposal.id, status: proposal.status } : { id: proposal.id, status: proposal.status, failureReason: reason };
+}
+
+/** The genome recommendation a bridged proposal was made from (GenomeKeyBridge writes payload.recommendationId). */
+function recommendationIdOf(p: ProposalFields): string | null {
+  for (const source of [p.payload, p.inputPayload]) {
+    if (source && typeof source === 'object' && !Array.isArray(source)) {
+      const id = (source as Record<string, unknown>).recommendationId;
+      if (typeof id === 'string' && id) return id;
+    }
+  }
+  return null;
+}
+
+/**
+ * D-238 provenance (round-3 security M2): a proposal is financial by its own fields (isFinancialProposal) or by the
+ * genome recommendation it was bridged from, read in `businessId` only. A recommendation that cannot be read, or a read
+ * that fails, makes it financial (fail closed).
+ */
+export async function financialProposalWithProvenance(
+  prisma: Pick<PrismaService, 'client'> | undefined,
+  businessId: string,
+  proposal: ProposalFields | null | undefined,
+): Promise<boolean> {
+  if (isFinancialProposal(proposal)) return true;
+  const recId = recommendationIdOf(proposal!);
+  if (!recId) return false;
+  try {
+    const rec = await prisma?.client.genomeRecommendation.findFirst({
+      where: { id: recId, businessId },
+      select: { domain: true, title: true, diagnosis: true },
+    });
+    return !rec || isFinanceRecommendation(rec);
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * D-238 (round 3, security M3): the memory events among `events` a reader without revenue read may be served. A money
+ * memory event (isMoneyMemoryEvent) is withheld; a KEY_ACTION_PROPOSAL event is also judged by its underlying proposal
+ * row (sourceEntityId, read in `businessId` only) with its provenance (financialProposalWithProvenance), and withheld when
+ * the row is financial, cannot be found, or the read fails (fail closed).
+ */
+export async function readableMemoryEvents<T extends GenomeRowFields & { sourceEntityId?: string | null }>(
+  prisma: Pick<PrismaService, 'client'> | undefined,
+  businessId: string,
+  events: T[],
+): Promise<T[]> {
+  const kept = events.filter((e) => !isMoneyMemoryEvent(e));
+  const proposalEvents = kept.filter((e) => e.sourceType === 'KEY_ACTION_PROPOSAL');
+  if (proposalEvents.length === 0) return kept;
+  const ids = [...new Set(proposalEvents.map((e) => e.sourceEntityId).filter((id): id is string => typeof id === 'string' && !!id))];
+  const readable = new Set<string>();
+  try {
+    const rows = ids.length
+      ? ((await prisma?.client.keyActionProposal.findMany({
+          where: { businessId, id: { in: ids } },
+          select: { id: true, actionType: true, module: true, toolName: true, title: true, summary: true, rationale: true, evidence: true, payload: true, inputPayload: true, affectedEntities: true },
+        })) ?? [])
+      : [];
+    for (const row of rows as Array<{ id: string } & ProposalFields>) {
+      if (!(await financialProposalWithProvenance(prisma, businessId, row))) readable.add(row.id);
+    }
+  } catch {
+    return kept.filter((e) => e.sourceType !== 'KEY_ACTION_PROPOSAL');
+  }
+  return kept.filter((e) => e.sourceType !== 'KEY_ACTION_PROPOSAL' || (typeof e.sourceEntityId === 'string' && readable.has(e.sourceEntityId)));
 }
 
 /** A KEY_ACTION_PROPOSAL outcome event's proposal fields: its metadata (OutcomeLearningService) and its title. */
@@ -217,7 +336,8 @@ export function dnaScoresForReader<T extends Record<string, unknown>>(scores: T 
 }
 
 export function firstN<T>(rows: T[], limit: number | undefined): T[] {
-  return limit === undefined ? rows : rows.slice(0, limit);
+  // A limit that is no number (?limit=abc) limits nothing, rather than serving nothing (round-3 correctness minor).
+  return limit === undefined || !Number.isFinite(limit) || limit < 0 ? rows : rows.slice(0, Math.floor(limit));
 }
 
 /** Who reads the genome: the authenticated user ({ id, role } as AuthMiddleware attaches it), or none. */
@@ -231,6 +351,17 @@ export type GenomeReader = { id?: string; role?: string } | undefined;
 export async function genomeReaderRevenueLevel(prisma: PrismaService, businessId: string, reader: GenomeReader): Promise<string> {
   if (reader?.role === 'SUPER_ADMIN') return 'admin';
   if (!reader?.id) return 'none';
+  // D-238 (round 3): a reader passed by id alone (a KEY tool's actor, a socket) is read with its platform role, so a
+  // SUPER_ADMIN is not taken for a non-member.
+  if (reader.role === undefined) {
+    let platformRole: string | undefined;
+    try {
+      platformRole = (await prisma.client.user?.findUnique({ where: { id: reader.id }, select: { role: true } }))?.role;
+    } catch {
+      platformRole = undefined;
+    }
+    if (platformRole === 'SUPER_ADMIN') return 'admin';
+  }
   const membership = await prisma.client.membership.findUnique({
     where: { userId_businessId: { userId: reader.id, businessId } },
     select: { role: true, permissionScopes: true },

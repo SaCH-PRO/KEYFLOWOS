@@ -1,5 +1,5 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
-import { genomeReaderReadsRevenue, isFinancialProposal, isMoneyLabel, type GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
+import { genomeReaderReadsRevenue, financialProposalWithProvenance, isMoneyLabel, type GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
@@ -21,6 +21,19 @@ export interface TemporalFlowListQuery {
   from?: string;
   to?: string;
   limit?: number;
+}
+
+/**
+ * D-238 (round 3, security m1): whether a proposal event's own payload or metadata text (a rejection reason, a title, a
+ * summary) states money, so a non-financial proposal's event that names a figure is not handed on.
+ */
+function eventTextStatesMoney(e: { payload?: unknown; metadata?: unknown }): boolean {
+  const texts: unknown[] = [];
+  for (const o of [e.payload, e.metadata]) {
+    if (!o || typeof o !== 'object' || Array.isArray(o)) continue;
+    for (const key of ['reason', 'rejectionReason', 'failureReason', 'title', 'summary', 'description']) texts.push((o as Record<string, unknown>)[key]);
+  }
+  return texts.some((t) => typeof t === 'string' && isMoneyLabel(t));
 }
 
 @Injectable()
@@ -63,7 +76,7 @@ export class TemporalFlowService {
    * with no `reader` argument (the scheduler, KEY tools applying their own authority) is unchanged; a request with no
    * user passes `null` and reads none.
    */
-  private async forReader<E extends { entityType?: string | null; entityId?: string | null; title?: string | null; description?: string | null }>(
+  private async forReader<E extends { entityType?: string | null; entityId?: string | null; title?: string | null; description?: string | null; payload?: unknown; metadata?: unknown }>(
     businessId: string,
     events: E[],
     reader: GenomeReader | null | undefined,
@@ -78,17 +91,20 @@ export class TemporalFlowService {
       const found = ids.length
         ? await this.prisma.client.keyActionProposal.findMany({
             where: { businessId, id: { in: ids } },
-            select: { id: true, actionType: true, module: true, toolName: true, title: true, summary: true, rationale: true, payload: true, inputPayload: true, affectedEntities: true },
+            select: { id: true, actionType: true, module: true, toolName: true, title: true, summary: true, rationale: true, evidence: true, payload: true, inputPayload: true, affectedEntities: true },
           })
         : [];
       rows = new Map(found.map((r: { id: string }) => [r.id, r as Record<string, unknown>]));
     } catch {
       return events.filter((e) => e.entityType !== 'key_action_proposal');
     }
+    // Financial by the proposal row (its own fields or the recommendation it was bridged from), fail closed.
+    const financial = new Map<string, boolean>();
+    for (const [id, row] of rows) financial.set(id, await financialProposalWithProvenance(this.prisma, businessId, row as never));
     return events.filter((e) => {
       if (e.entityType !== 'key_action_proposal') return true;
-      const row = e.entityId ? rows.get(e.entityId) : undefined;
-      return !!row && !isFinancialProposal(row as never) && !isMoneyLabel(e.title) && !isMoneyLabel(e.description);
+      const known = e.entityId ? financial.get(e.entityId) : undefined;
+      return known === false && !isMoneyLabel(e.title) && !isMoneyLabel(e.description) && !eventTextStatesMoney(e);
     });
   }
 
