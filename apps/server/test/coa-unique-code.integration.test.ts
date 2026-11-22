@@ -21,12 +21,19 @@
  *   CUC-08  RED-BEFORE  a business whose chart was never seeded: a custom 6100 is refused (the seed runs
  *                       first), so the seed never lands a second 6100 beside it
  *   CUC-09  RED-BEFORE  a code that is not text (a JSON number or object) -> 400, not a 500, nothing written
- *   CUC-10  CONTROL     accounts that already share a code (rows written before this rule) can still be
- *                       renamed and archived; nothing is rewritten for them
+ *   CUC-10  CONTROL then RED-BEFORE  accounts that already share a code (rows written before this rule) can
+ *                       still be renamed and archived, and nothing is rewritten for them; no third joins them
  *   CUC-11  RED-BEFORE  the service door KEY's finance_create_coa_account tool calls refuses the same way
+ *   CUC-12  RED-BEFORE  isActive that is not true or false ({ set: true }, "true", 1) -> 400, nothing written:
+ *                       a Prisma operator object cannot bring an archived account back around the check
+ *   CUC-13  RED-BEFORE  rows stored before codes were trimmed ('7140 ', a trailing tab) hold their code like
+ *                       any other: they cannot come back beside its holder, and they block a new one
+ *   CUC-14  RED-BEFORE  under an active tenant that differs from the businessId argument, the check runs on
+ *                       the business the write lands in (the active tenant); the other chart is untouched
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard, TenantInterceptor,
- * FinanceController, FinanceCoaService and ChartOfAccountsSeederService run against DATABASE_URL.
+ * FinanceController, FinanceCoaService and ChartOfAccountsSeederService run against DATABASE_URL, and the
+ * tenant-isolation extension of `@keyflow/db` is wired to the AsyncLocalStorage tenant as main.ts wires it.
  * Stand-ins: identity attachment (a test middleware reads `x-v63h-user`, loads that seeded user row and
  * attaches `{ id, email, role }`, as the Supabase-verifying AuthMiddleware does); FinanceController's
  * collaborators off the chart-of-accounts routes (empty objects, never reached).
@@ -61,6 +68,8 @@ const TAKEN = 'COA_CODE_TAKEN';
 let db: any;
 let app: any;
 let coaService: any;
+let setTenantContextProvider: (p: { getCurrentBusinessId: () => string | undefined }) => void;
+let runWithTenant: <T>(businessId: string, userId: string, fn: () => T) => T;
 
 async function cleanup() {
   for (const sql of [
@@ -129,6 +138,11 @@ function expectTaken(res: { status: number; body: any }) {
 beforeAll(async () => {
   const dbMod = await import('@keyflow/db');
   db = dbMod.db;
+  // As main.ts: the db extension rewrites businessId to the AsyncLocalStorage tenant when there is one.
+  const tenantMod = await import('../src/core/tenant/tenant-context');
+  setTenantContextProvider = dbMod.setTenantContextProvider;
+  runWithTenant = tenantMod.runWithTenant;
+  setTenantContextProvider({ getCurrentBusinessId: tenantMod.getCurrentBusinessId });
 
   const { Test } = await import('@nestjs/testing');
   const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
@@ -211,6 +225,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (app) await app.close();
   if (db) await cleanup();
+  if (setTenantContextProvider) setTenantContextProvider({ getCurrentBusinessId: () => undefined });
 }, 60_000);
 
 describe('fixture sanity (real rows)', () => {
@@ -369,19 +384,16 @@ describe('CUC-06: archived accounts', () => {
     expect((await rowsWithCode(ID.bizA, '7070')).filter((r) => r.is_active)).toHaveLength(1);
   });
 
-  it('CUC-06b RED-BEFORE: an archived account cannot be given a code an active account holds, then reactivated around the rule', async () => {
+  it('CUC-06b RED-BEFORE: an archived account cannot be given a code an active account holds, archived or coming back', async () => {
     await make(ID.bizA, ID.ownerA, 'v63h Holder 7075', '7075');
     const parked = await make(ID.bizA, ID.ownerA, 'v63h Parked', '7076');
     expect((await http().delete(coaUrl(ID.bizA, parked)).set(HEADER, ID.ownerA)).status).toBe(200);
     const before = await chart(ID.bizA);
-    const recode = await patch(ID.bizA, ID.ownerA, parked, { code: '7075' });
-    if (recode.status === 200) {
-      // The service may let an archived row carry any code; then the way back must be refused.
-      expectTaken(await patch(ID.bizA, ID.ownerA, parked, { isActive: true }));
-    } else {
-      expectTaken(recode);
-      expect(await chart(ID.bizA)).toEqual(before);
-    }
+    // The code is refused even while the account stays archived: no row is ever one step from a duplicate.
+    expectTaken(await patch(ID.bizA, ID.ownerA, parked, { code: '7075' }));
+    expectTaken(await patch(ID.bizA, ID.ownerA, parked, { code: '7075', isActive: false }));
+    expectTaken(await patch(ID.bizA, ID.ownerA, parked, { code: '7075', isActive: true }));
+    expect(await chart(ID.bizA)).toEqual(before);
     expect((await rowsWithCode(ID.bizA, '7075')).filter((r) => r.is_active)).toHaveLength(1);
   });
 });
@@ -447,7 +459,7 @@ describe('CUC-09: a code that is not text', () => {
 });
 
 describe('CUC-10: accounts that already share a code', () => {
-  it('CUC-10 CONTROL: two rows written before the rule (raw SQL) keep their code and can still be renamed and archived', async () => {
+  it('CUC-10 CONTROL then RED-BEFORE: two rows written before the rule (raw SQL) keep their code and can still be renamed and archived; no third joins them', async () => {
     const ids = [`${P}legacy1`, `${P}legacy2`];
     for (const id of ids) {
       await db.$executeRawUnsafe(
@@ -487,5 +499,95 @@ describe('CUC-11: the service door (KEY finance_create_coa_account calls Finance
     const { NotFoundException } = await import('@nestjs/common');
     const err3 = await coaService.update(ID.bizB, id, { code: '7999' }).then(() => null, (e: unknown) => e);
     expect(err3).toBeInstanceOf(NotFoundException);
+  });
+});
+
+/** A row as code written before this rule could leave it (raw SQL: stored verbatim, untrimmed). */
+async function legacyRow(id: string, code: string, active: boolean) {
+  await db.$executeRawUnsafe(
+    `INSERT INTO chart_of_accounts (id, business_id, code, name, type, is_system, is_active, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, 'EXPENSE', false, $5, now(), now())`,
+    id, ID.bizA, code, `v63h ${id}`, active,
+  );
+}
+
+describe('CUC-12: isActive that is not a boolean', () => {
+  it('CUC-12 RED-BEFORE: { set: true }, "true" and 1 are 400 and cannot bring an archived account back beside the holder of its code', async () => {
+    const old = await make(ID.bizA, ID.ownerA, 'v63h Old 7130x', '7135');
+    expect((await http().delete(coaUrl(ID.bizA, old)).set(HEADER, ID.ownerA)).status).toBe(200);
+    await make(ID.bizA, ID.ownerA, 'v63h New 7135', '7135');
+    const before = await chart(ID.bizA);
+    for (const isActive of [{ set: true }, 'true', 1, { set: false }, [true]]) {
+      for (const body of [{ isActive }, { isActive, code: '7135' }, { isActive, name: 'v63h renamed by bad flag' }]) {
+        const res = await patch(ID.bizA, ID.ownerA, old, body);
+        expect(res.status, JSON.stringify([body, res.body])).toBe(400);
+      }
+    }
+    expect(await chart(ID.bizA)).toEqual(before);
+    expect((await rowsWithCode(ID.bizA, '7135')).filter((r) => r.is_active)).toHaveLength(1);
+    // CONTROL: real booleans still work, and null leaves the flag alone (as before).
+    const other = await make(ID.bizA, ID.ownerA, 'v63h Flag control', '7136');
+    const off = await patch(ID.bizA, ID.ownerA, other, { isActive: false });
+    expect(off.status, JSON.stringify(off.body)).toBe(200);
+    expect(off.body.isActive).toBe(false);
+    const untouched = await patch(ID.bizA, ID.ownerA, other, { isActive: null, name: 'v63h Flag control 2' });
+    expect(untouched.status, JSON.stringify(untouched.body)).toBe(200);
+    expect(untouched.body.isActive).toBe(false);
+    const on = await patch(ID.bizA, ID.ownerA, other, { isActive: true });
+    expect(on.status, JSON.stringify(on.body)).toBe(200);
+    expect(on.body.isActive).toBe(true);
+  });
+});
+
+describe('CUC-13: codes stored before they were trimmed', () => {
+  it('CUC-13 RED-BEFORE: an archived row stored as \'7140 \' cannot come back beside the active 7140', async () => {
+    await legacyRow(`${P}legacySpace`, '7140 ', false);
+    await make(ID.bizA, ID.ownerA, 'v63h Holder 7140', '7140');
+    const before = await chart(ID.bizA);
+    expectTaken(await patch(ID.bizA, ID.ownerA, `${P}legacySpace`, { isActive: true }));
+    expect(await chart(ID.bizA)).toEqual(before);
+  });
+
+  it('CUC-13b RED-BEFORE: an active row stored with a trailing tab or newline holds its code against a new account and a rename', async () => {
+    await legacyRow(`${P}legacyTab`, '7141\t', true);
+    await legacyRow(`${P}legacyNl`, ' 7142\r\n', true);
+    const mover = await make(ID.bizA, ID.ownerA, 'v63h Mover 7143', '7143');
+    const before = await chart(ID.bizA);
+    expectTaken(await post(ID.bizA, ID.ownerA, { name: 'v63h new 7141', type: 'EXPENSE', code: '7141' }));
+    expectTaken(await post(ID.bizA, ID.ownerA, { name: 'v63h new 7142', type: 'EXPENSE', code: '7142' }));
+    expectTaken(await patch(ID.bizA, ID.ownerA, mover, { code: '7141' }));
+    expect(await chart(ID.bizA)).toEqual(before);
+    // CONTROL: the legacy row saved with its own code (as the form shows it) is not refused, and is stored trimmed.
+    const saved = await patch(ID.bizA, ID.ownerA, `${P}legacyTab`, { code: '7141', name: 'v63h legacy tab saved' });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    expect(saved.body.code).toBe('7141');
+  });
+});
+
+describe('CUC-14: an active tenant that differs from the businessId argument', () => {
+  it('CUC-14 RED-BEFORE: the check runs on the business the write lands in, and the business named by the argument is untouched', async () => {
+    const { ConflictException } = await import('@nestjs/common');
+    await make(ID.bizA, ID.ownerA, 'v63h A holds 7150', '7150');
+    await make(ID.bizB, ID.ownerB, 'v63h B holds 7151', '7151');
+    const beforeA = await chart(ID.bizA);
+    const beforeB = await chart(ID.bizB);
+    // Active tenant A, argument B: the db extension writes into A, so A's codes decide.
+    const refused = await runWithTenant(ID.bizA, ID.ownerA, () =>
+      coaService.create(ID.bizB, { name: 'v63h mismatched', type: 'EXPENSE', code: '7150' }).then(() => null, (e: unknown) => e));
+    expect(refused).toBeInstanceOf(ConflictException);
+    expect(JSON.stringify((refused as any).getResponse())).toContain('A holds 7150');
+    expect(await chart(ID.bizA)).toEqual(beforeA);
+    expect(await chart(ID.bizB)).toEqual(beforeB);
+    // A code only B holds is free in A: the write lands in A and B's chart is byte-identical.
+    const landed = await runWithTenant(ID.bizA, ID.ownerA, () =>
+      coaService.create(ID.bizB, { name: 'v63h mismatched free', type: 'EXPENSE', code: '7151' }));
+    expect(landed.businessId).toBe(ID.bizA);
+    expect(await chart(ID.bizB)).toEqual(beforeB);
+    expect(await rowsWithCode(ID.bizA, '7151')).toHaveLength(1);
+    // An update naming B's business for A's row under tenant A acts on A's row and checks A's codes.
+    const err = await runWithTenant(ID.bizA, ID.ownerA, () =>
+      coaService.update(ID.bizB, landed.id, { code: '7150' }).then(() => null, (e: unknown) => e));
+    expect(err).toBeInstanceOf(ConflictException);
+    expect(await chart(ID.bizB)).toEqual(beforeB);
   });
 });
