@@ -1151,6 +1151,11 @@
       "prefix": "v63h_",
       "owner": "apps/server/test/coa-unique-code.integration.test.ts",
       "packet": "V1-63 (SWP-COA-UNIQUE-CODE)"
+    },
+    {
+      "prefix": "v57r_",
+      "owner": "apps/server/test/send-reminder-status-gate.integration.test.ts",
+      "packet": "V1-57 (FU-SEND-REMINDER-SERVER-GATE)"
     }
   ],
   "pendingRenames": [],
