@@ -28,6 +28,11 @@
  *   GLD-07  RED-BEFORE  a business whose stored timezone is not a zone still answers (the platform default
  *                       zone, America/Port_of_Spain), it does not fail
  *   GLD-08  RED-BEFORE  every line says its own currency (a TTD business's USD line says USD)
+ *   GLD-10  RED-BEFORE  (review F2) a day whose next local midnight does not exist: Havana puts its clocks forward at
+ *                       00:00 on 2026-03-08, so 7 March ends at 05:00Z; the line at 23:59:59.999 local is in
+ *                       (the end was computed an hour early, 04:00Z, and dropped the day's last hour)
+ *   GLD-11  RED-BEFORE  (review N-1) the last day a timestamp can hold: to=9999-12-31 answers 200 with the
+ *                       business's lines, it does not fail on an end instant in year 10000
  *   GLD-09  KEEP        tenancy and scope hold on the date-only read: another business's owner and a
  *                       revenue-none member are refused 403 and get no line; no answer carries another
  *                       business's line
@@ -63,6 +68,7 @@ const ID = {
   bizB: `${P}bizB`, // Asia/Kolkata
   bizNy: `${P}bizNy`, // America/New_York
   bizBad: `${P}bizBad`, // timezone 'Not/AZone'
+  bizHav: `${P}bizHav`, // America/Havana
 };
 
 const D = '2026-03-10';
@@ -230,6 +236,7 @@ beforeAll(async () => {
     [ID.bizB, ID.ownerB, 'Asia/Kolkata'],
     [ID.bizNy, ID.owner, 'America/New_York'],
     [ID.bizBad, ID.owner, 'Not/AZone'],
+    [ID.bizHav, ID.owner, 'America/Havana'],
   ] as const) {
     await db.business.create({
       data: { id, name: `V66G ${id.slice(P.length)}`, slug: id, ownerId, currency: 'TTD', timezone, accountingBasis: 'CASH' },
@@ -254,6 +261,9 @@ beforeAll(async () => {
   await post(ID.bizBad, 'bad-noon', '2026-03-10T12:00:00.000Z');
   await post(ID.bizBad, 'bad-last', '2026-03-11T03:59:59.999Z');
   await post(ID.bizBad, 'bad-next-day', '2026-03-11T04:00:00.000Z');
+  // Havana, 2026-03-07: the clocks go forward at 00:00 on the 8th (00:00 -> 01:00), so the 7th ends 05:00Z.
+  await post(ID.bizHav, 'havana-last', '2026-03-08T04:59:59.999Z');
+  await post(ID.bizHav, 'havana-next-day', '2026-03-08T05:00:00.000Z');
 }, 120_000);
 
 afterAll(async () => {
@@ -367,6 +377,20 @@ describe('V1-66 SWP-FIN-LEDGER: the General Ledger end date covers its whole day
     }
   });
 
+  it('GLD-10: a day whose next local midnight does not exist keeps its last hour', async () => {
+    const res = await ledger(ID.bizHav, { to: '2026-03-07' });
+    expect(res.status).toBe(200);
+    expect(labels(res.body)).toEqual(twice({ 'havana-last': '' }));
+    const next = await ledger(ID.bizHav, { to: '2026-03-08' });
+    expect(labels(next.body)).toEqual(twice({ 'havana-last': '', 'havana-next-day': '' }));
+  });
+
+  it('GLD-11: the last day a timestamp can hold is answered, not failed', async () => {
+    const res = await ledger(ID.bizA, { to: '9999-12-31' });
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(22);
+  });
+
   it('GLD-09: tenancy and scope hold on the date-only read', async () => {
     // Another business's owner.
     const outsider = await ledger(ID.bizA, { from: D, to: D }, ID.ownerB);
@@ -392,6 +416,6 @@ describe('V1-66 SWP-FIN-LEDGER: the General Ledger end date covers its whole day
     const own = await ledger(ID.bizA, { to: '2026-12-31' });
     expect(own.status).toBe(200);
     expect(own.body.total).toBe(22);
-    for (const row of own.body.rows) expect(String(row.description)).not.toMatch(/kolkata|ny-|bad-/);
+    for (const row of own.body.rows) expect(String(row.description)).not.toMatch(/kolkata|ny-|bad-|havana/);
   });
 });

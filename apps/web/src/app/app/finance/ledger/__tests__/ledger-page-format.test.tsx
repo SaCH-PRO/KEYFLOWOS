@@ -91,7 +91,8 @@ const ACCOUNTS = [
 const line = (over: Record<string, unknown>) => ({
   entryId: "le_1",
   transactionId: "tx_1",
-  date: "2026-03-10T15:30:00.000Z",
+  // Midday UTC: 10 March on a machine in any zone from UTC-11 to UTC+11 (review F3).
+  date: "2026-03-10T12:00:00.000Z",
   accountId: "coa_cash",
   accountName: "Cash",
   accountCode: "1000",
@@ -111,7 +112,7 @@ const line = (over: Record<string, unknown>) => ({
 const ROWS = [
   line({ entryId: "le_1", debit: "1250.5", runningBalance: "1250.5" }),
   line({ entryId: "le_2", accountId: "coa_rev", accountName: "Revenue", accountCode: "4000", accountType: "INCOME", credit: "1250.5", runningBalance: "-1250.5" }),
-  line({ entryId: "le_3", currency: "USD", debit: "99", runningBalance: "1349.5", date: "2026-03-10T16:00:00.000Z" }),
+  line({ entryId: "le_3", currency: "USD", debit: "99", runningBalance: "1349.5", date: "2026-03-10T12:30:00.000Z" }),
 ];
 
 function ledgerServer(opts: { total?: number; ledger?: () => Response } = {}) {
