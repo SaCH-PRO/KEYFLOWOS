@@ -375,11 +375,13 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
         if (!/^\s*@/.test(next) && SIGNATURE.test(next)) break;
         bottom++;
       }
-      // Comment lines set the block's extent only: their text is never read as a scope (closing review).
+      // Comments set the block's extent only: their text, a block comment of any shape or a trailing "//", is never
+      // read as a scope (closing reviews).
       return lines
         .slice(top, bottom + 1)
-        .filter((line) => !/^\s*(?:\/\/|\/?\*)/.test(line))
-        .join("\n");
+        .join("\n")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/\/\/.*$/gm, "");
     };
     const at = (file: string, line: number) => {
       const lines = fs.readFileSync(path.join(SERVER_SRC, file), "utf8").split("\n");
