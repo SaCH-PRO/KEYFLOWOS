@@ -51,7 +51,7 @@ Extends Track 1 `MEASUREMENT.md` section 5 (one run, 10 of 10, by a subagent of 
 
 ## 3. Tenancy and role scope (the leak suite)
 
-For every memory read path (the census from MEM-0), three readers on a two-tenant fixture: (a) a member of the other
+For every memory read path (the census from MEM-CENSUS), three readers on a two-tenant fixture: (a) a member of the other
 tenant, (b) a member of the same tenant without revenue read and without the relevant module, (c) a memberless turn
 (contact-only bridge, non-member admin).
 
@@ -59,10 +59,10 @@ tenant, (b) a member of the same tenant without revenue read and without the rel
 |---|---|---|
 | E-TEN | Reader (a) on every path: prompt context, chat answer, API response, stream, cache. | No content, count, rank or existence signal from the other tenant. Includes update and delete by id (the `updateMemory` path). |
 | E-REV-DIRECT | Reader (b): REVENUE-class items (amounts, invoice extractions, finance genome rows, sales-derived signals). | Absent from every output (D-100, D-128, D-234). |
-| E-REV-INDIRECT | Reader (b): derived items from REVENUE sources: summaries of threads that mention invoices, salience counts of overdue invoices, lessons learned from payment failures, rankings, "N more items" lines, cache entries shared with a revenue reader, embedding hits whose source is REVENUE. | Absent (D-233, D-238 "directly or indirectly"). Includes a **differential test**: the output for reader (b) is identical whether the tenant has 0 or 50 REVENUE items (no count or timing channel beyond noise). |
+| E-REV-INDIRECT | Reader (b) (the design's reading of D-100/D-234, owner question Q5): derived items from REVENUE sources: summaries of threads that mention invoices, salience counts of overdue invoices, lessons learned from payment failures, rankings, "N more items" lines, cache entries shared with a revenue reader, embedding hits whose source is REVENUE. | Absent (D-233, D-238 "directly or indirectly"). Includes a **differential test**: the output for reader (b) is identical whether the tenant has 0 or 50 REVENUE items (no count or timing channel beyond noise). |
 | E-MEMBERLESS | Reader (c): proposals. | Action, status and risk only; withheld or redacted when those reveal financial information (D-226, D-238). |
-| E-UNCLASS | Rows with no data class. | Fail closed for readers (b) and (c) (D-227, D-234). |
-| E-MEMBER | Member A's preference and lesson, read by member B of the same tenant. | Not visible to B (D-130); B's same-key preference does not overwrite A's. |
+| E-UNCLASS | Rows with no data class. | Classified at read from structure; those with ambiguous financial provenance fail closed for readers (b) and (c) (D-234; D-227 for event types); ordinary legacy memory stays visible. |
+| E-MEMBER | Member A's cognition rows (lessons, D-130), read by member B of the same tenant. | Not visible to B. (Member-scoped AI memory preferences have no live writer at `5c17e7b4`; the case is added when one exists.) |
 
 Each case is RED on the current base where the characterisation (`PRIOR-RESEARCH-RECOVERED.md` 4.3) predicts a gap, and
 the RED is recorded.
@@ -93,7 +93,7 @@ never tuned against.
 | E-FRESH | An old, frequently used, still-valid fact vs a new irrelevant one; and an old, never-read authoritative DECISION vs recent chatter | both old items rank above the irrelevant ones (activation with per-kind base level vs age decay) |
 | E-INDEX | Index integrity (Alzheimer analogue) | every canonical item reachable through at least one channel; unreachable fraction reported |
 | E-OVER | Over-retrieval (PTSD analogue): one high-salience event (a failed payment) | appears only in tasks it is relevant to; its share of context per task type reported |
-| E-ZERO | A record with confidence 0 | stays 0 and is not ranked as 0.5 (#124 "confidence=0 remains 0") |
+| E-ZERO | A record with confidence 0 | stays 0 in storage (#124) and is not scored like an unscored row (#122 "zero-confidence fallback bug") |
 | E-REBUILD | Delete every derived item (embeddings, summaries, caches) on a fixture tenant and rebuild | every canonical item still present; rebuilt retrieval answers the task suite no worse (Genome doc l.109) |
 | E-CHK | Kill the consolidation job mid-run, restart on two replicas | no duplicated effects; the checkpoint resumes (plan phase 8 exit proof) |
 

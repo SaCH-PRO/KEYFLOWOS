@@ -8,7 +8,7 @@ working under the owner's direction recorded between 2026-09-09 and 2026-11-22, 
 that were not in repository files. The owner's instruction: "There are various types of memory explored in
 psychology and psychology of AI, AI systems and memory systems, things that allow massive optimisation in token
 usage ... I would have rigorously gone through parallels in medicine / CNS / brain / nerves / science" (relayed in the
-Track 2 brief, 2026-11-22).
+Track 2 brief, 2026-11-22; not verified against a primary source: #80 comment 7081880780 recording D-253 paraphrases it).
 
 **Conventions.**
 - Every claim names its source: `#106 c5981828884 (2026-10-04)` means issue #106, comment id 5981828884, posted that
@@ -295,6 +295,15 @@ compression ratio; raw-evidence drill-down success; receptor information gain; a
 detection." "A capability cannot be declared implemented because a service exists or a query returns an array. It must
 prove a live causal path and measurable value."
 
+**Immediate sequencing** (items 3-9, verbatim): "3. Start/continue M0 immediately because it is non-invasive. 4.
+Rebase/reconcile PR #112 after the control-plane head stabilizes; use it as M1 foundation, not as the final architecture. 5.
+Bring proof-integrity work (#114 / related gates) to a level sufficient for persistence migration before M2 cutover. 6.
+Build M2-M4 in SHADOW mode while application features continue. 7. Use PROJECT/PROGRAMME development memory as the first
+serious consumer/proving ground. 8. Only after benchmarked value, progressively activate the same substrate for
+KEY/business cognition. 9. Lifelong human/second-brain projection remains a scale target and later product projection, not
+a blocker for KEYFLOWOS production." The comment also opens: "The same substrate must support BUSINESS,
+PROJECT/PROGRAMME, AGENT, WORKFLOW/TASK, and eventually HUMAN/LIFELONG second-brain projections."
+
 **Completion definition for "memory v1"** (verbatim): "Context Genome is canonical for semantic memory; current legacy
 memory APIs are safely adapted/migrated; provenance/authority/time/lineage are first-class; episodic + associative recall
 works beyond vector search; replay/consolidation forms traceable concepts/schemas; procedures/lessons measurably reduce
@@ -381,7 +390,8 @@ supersede a foundation decision with evidence. Do not reopen broad architecture 
 ### 1.11 c5994706532 (2026-10-05): "Procedural Intelligence extension"
 
 "Recurring ideas, directives, research/development loops, review flows and recurring human-agent work should be distilled
-into versioned, reusable procedures instead of remaining bespoke chat choreography." **Core rule (verbatim):** "learned
+into versioned, reusable procedures instead of remaining bespoke chat choreography." "This extends issue #106 / Context
+Genome. It does not create a separate developer-only memory or automation stack." **Core rule (verbatim):** "learned
 procedure is not permission; repetition is not verification; automation is not authority; ambiguous or high-risk work
 fails closed; every run must remain attributable, inspectable and evidence-producing." Reuse "the existing Context
 Genome PROCEDURE memory kind ...; the governed KEY tool/capability registry; agent-control exact-head
@@ -527,8 +537,8 @@ authoring dates; each file's own date is used.
 The deferred reference plan. Objective: "Converge KEYFLOWOS memory, Business Genome, ingestion, evidence, temporal memory,
 semantic retrieval and the Living System Atlas into one portable, evidence-grounded Context Genome architecture without
 creating a parallel memory system." Phases (the .md says Phase 0-10, the YAML M0-M10; **no per-phase status exists**;
-the plan-wide state is DEFER_V1_PLUS on main, and `IN_V1_PENDING_DESIGN` on `wave/v1-wave-3d` and `pkt/V1-RULINGS-3E`
-under D-254):
+the plan-wide state is DEFER_V1_PLUS on main; on `wave/v1-wave-3d` and `pkt/V1-RULINGS-3E` STATUS.yaml line 3 says
+`state: IN_V1_PENDING_DESIGN` under D-254 while its historical note (l.93) still reads `status: DEFER_V1_PLUS`):
 
 | Phase | Title | Exit proof (verbatim, abridged) |
 |---|---|---|
@@ -626,9 +636,9 @@ Laws (verbatim; the file says "These are research candidates, not accepted archi
 SUCCESS != BUSINESS OUTCOME. 6. MEMORY != FACT. 7. AI INFERENCE != CANONICAL STATE. 8. LEARNED LESSON != VERIFIED RULE. 9.
 DERIVED PROJECTION != SOURCE OF TRUTH. 10. A FACT IS TRUE ONLY AT A DECLARED AUTHORITY BOUNDARY AND TIME." Also "UNIFIED
 RETRIEVAL != UNIFIED AUTHORITY": "MemoryFragment should remain a retrieval projection. It must not silently imply that
-fragments from different sources have equal epistemic authority." Epistemic dimensions: "CONTENT, SOURCE, PROVENANCE,
+fragments from different sources have equal epistemic authority." Epistemic dimensions (names from a bulleted list with definitions): CONTENT, SOURCE, PROVENANCE,
 INTEGRITY, CONFIDENCE, VERIFICATION, AUTHORITY, FRESHNESS, RISK_IF_WRONG, EXECUTION_STATUS, BUSINESS_OUTCOME,
-USER_RESPONSE, MEMORY_RELEVANCE, CANONICAL_STATUS"; "These dimensions should not be compressed into one confidence
+USER_RESPONSE, MEMORY_RELEVANCE, CANONICAL_STATUS; "These dimensions should not be compressed into one confidence
 score."
 
 ### 2.8 `docs/intelligence/research/kernels/STRUCTURE-FUNCTION-STORAGE-OPTIMIZATION-KERNEL-RND.md` (2026-10-06)
@@ -737,7 +747,7 @@ projection of KEY memory, not a separate target architecture." c5982230230 opene
 static proof — PASS" (636 files scanned, 17 components found). **c5982337920 "M0 admission status — correction required":**
 "The static workflow ... is green, but M0 is **not complete/admitted**"; review found the harness could "accept incidental
 symbol mentions instead of actual declarations; count the audit's own manifest as external evidence; let test-only
-callsites satisfy an application-callsite claim; omit real server consumers"; "no component is promoted to LIVE from this
+callsites satisfy an application-callsite claim; omit real server consumers from both scan roots and workflow trigger coverage"; "no component is promoted to LIVE from this
 static slice". **[INFERRED, checked against product code in section 4]:** several of the "known defects" are confirmed at
 `5c17e7b4`: the user-level persistence gap (writer drops userId), the hard 90-day window in unified retrieval, embedding
 recency distortion (semantic hits without `metadata.createdAt` get recency near 1), and the unreachable conflict resolution.
@@ -781,8 +791,9 @@ retrieval; ablation: current retrieval vs associative layer." Exit: "SHADOW resu
 fixtures without scope/authority regressions." Entry gate: "M1 contracts stable". No implementation exists.
 
 The #126 invariant "inaccessible nodes cannot influence accessible aggregates" (with #123's "inaccessible source memory
-cannot leak through a derived aggregate") is the owner's earlier statement of what D-238 later ruled for money
-("directly or indirectly"). The design treats them as one rule (design section 8.2).
+cannot leak through a derived aggregate") anticipates, for all memory, what D-238 later ruled for proposal-family events
+("directly or indirectly") [INFERRED]. D-238 itself is specific to proposals; the design applies the same rule to all
+memory as its own reading of D-100 and D-234 (design section 8.2; owner question Q5).
 
 ### 3.5 PR #127 (M0 static audit; closed, not adopted, D-141)
 
@@ -790,7 +801,8 @@ Opened 2026-10-04, closed 2026-11-13. Three files (`.github/workflows/memory-tru
 `scripts/memory-audit/manifest.json`, `scripts/memory-audit/memory-truth-audit.mjs`), none on main. It reported static
 evidence as `UNKNOWN_PENDING_PROOF`, never LIVE. Copilot review threads found over-escaped regexes, missing scan roots,
 manifest self-matches inflating counts, a bare-symbol fallback hiding missing declarations, and a test-only probe masking a
-missing application callsite; the owner's #122 correction adopted these. BUILD-MAP-001 PRS-M36: "#127's memory auditor
+missing application callsite; the #122 correction comment ("Independent review found ...") lists the same defects
+[INFERRED that it adopted these findings]. BUILD-MAP-001 PRS-M36: "#127's memory auditor
 cannot report DORMANT".
 
 ### 3.6 PR #112 (Context Genome types; closed, not adopted, D-141)
@@ -910,9 +922,10 @@ Read to describe, not to change. Paths under `apps/server/src/modules/`. Line nu
   orchestrator's perception section, the digest (count only), the eval harness.
 - **`key-cortex/unified-memory-writer.service.ts`** (LIVE; the canonical writer seam). Upserts AiMemory; dedup is the
   unique key, so an upsert overwrites. Typed helpers with fixed confidences: preference 1.0, business fact 0.9, lesson
-  0.85, document extraction 1.0. `opts.userId` is accepted but **never persisted** (AiMemory has no userId column)
-  [INFERRED consequence: a member's preference is business-wide and one member's same-key preference overwrites
-  another's]. The `indexSemantic` path has no caller (DORMANT).
+  0.85, document extraction 1.0. `opts.userId` is accepted but **never persisted** (AiMemory has no userId column).
+  The would-be consequence (a member's preference written business-wide, overwritten by another member's) has **no live
+  caller** at `5c17e7b4`: `storePreference` and `KeyCortexConversationService.addMessage` are not called (fidelity
+  review). The `indexSemantic` path has no caller (DORMANT).
 - **`key-cortex/memory-consolidation.service.ts`** (LIVE cron, hourly, gated to each business's local resting hours 20:00
   to 07:00 by the circadian service, once per local day via an in-process map). Order: withdrawMemberPromotions -> decay ->
   resolveConflicts -> promote. Decay: CognitionMemory older than 90 days, `confidence = max(0.1, confidence - 0.1)` per
@@ -974,7 +987,8 @@ Existing packets touching memory: W11-KEY-CHAT-SESSION-BIND, W11-MEMORY-PROMOTE-
 business-wide), W11-FLOW-PERCEPTION-SCOPE (reader's own cognition memory only), W1F-MEMORY-COPIES and
 FU-MEMORY-COPIES-REWRITE (embedding copies die with their source), FU-KEY-MEMORY-MONEY-SIGHT (genome money events and
 memberless proposals in prompts), FU-KEY-CHAT-GENOME-MONEY-SIGHT, FU-KEY-GENOME-READS-RESIDUAL (every remaining genome read
-resolves its reader; P0, not done at `wave/v1-wave-3d`), FU-PROPOSAL-MONEY-TAG, KEY-CRONS-FLAGS. The proposal in
+resolves its reader; P0, not done at `wave/v1-wave-3d`), FU-PROPOSAL-REVENUE-SIGHT (P0; edits the prompt-context file),
+FU-PROPOSAL-MONEY-TAG, FU-KEY-EVENT-COLUMNS, FU-GENOME-REVENUE-CLASSIFIER, FU-GENOME-SURFACES-REVENUE, KEY-CRONS-FLAGS. The proposal in
 `PRODUCT-MEMORY-PACKETS-PROPOSAL.md` builds on these and does not repeat them.
 
 ---
@@ -1002,18 +1016,20 @@ by a subagent scored 10 of 10. Comparison with this design: `KEYFLOW-MEMORY-SYST
 | C2 | Genome l.158: the dedupe hash "includes `receivedAt`" | Correction: falls back to `new Date()` when `receivedAt` is missing, so such items never dedupe | Compatible; the original was incomplete |
 | C3 | Neuro atlas (2026-09-09): unified retrieval "is not wired into the live chat path" | Genome doc (2026-10-05): perception join "proves structured observations reach both live chat paths" | Superseded by time; code at `5c17e7b4` shows the flow orchestrator calls unified retrieval (`ai/flow-orchestrator.service.ts` ~l.1416) |
 | C4 | Neuro atlas: KnowledgeIngestion is "neurogenesis", adds facts | Genome doc: `@keyflow:dormant`, zero callers; `ingestUrl` does not fetch | Open; disposition differs again in C7 |
-| C5 | Neuro atlas: `key-cortex-memory.service.ts` hippocampus, "Strong" | Crosswalk: "DUPLICATED_CONVERGE / legacy risk"; Genome doc: its AiMemory path is "the canonical write path" | Open (a classification question for the M0 audit) |
+| C5 | Neuro atlas: `key-cortex-memory.service.ts` hippocampus, "Strong" | Crosswalk: "DUPLICATED_CONVERGE / legacy risk"; Genome doc l.78 reports that the service "describes `AiMemory` as the canonical write path" (the service's self-description) | Open (a classification question for the M0 audit) |
 | C6 | Neuro atlas: "All cron schedules run in server time" | Genome doc and code: consolidation is gated by business local resting hours | Superseded by code |
 | C7 | Genome doc: KnowledgeIngestion is "a **seed to converge or retire**" | Archaeology §15: "retain but epistemically gate"; plan: PR #134 "HOLD FOR M0/M1" | Open |
 | C8 | Plan .md hard invariants (e.g. "No fake green or unbounded completion percentage") | STATUS.yaml wording ("no fake-green progress", drops the percentage clause) | Wording drift; the .md is the fuller text |
 | C9 | Epistemic trace: the two evidence services are "not automatically duplication" | Crosswalk: `key-cortex-evidence.service.ts` "DUPLICATED_CONVERGE" | Open |
 | C10 | AGENT-CONTINUITY banner: "Historical record ... not live state" | Body: "Status: CANONICAL OPERATING PROTOCOL" | The banner is later; principles still cited by Track 1 |
-| C11 | Genome doc and plan: "ContextPack" (for KEY and agents) | Speed traces and schema: "ContextBundle" (agents only) | Unreconciled naming; the design uses one name (design 6.1) |
-| C12 | Seven status vocabularies (Genome §7, Genome §3.10, GenomeFact, bundle authority/freshness, G165, bundle health, AGENT-CONTINUITY evidence classes) | Genome §7: "Map rather than duplicate existing domain-specific statuses" | Unmapped; design 2.3 proposes the mapping |
-| C-A | #106 c5982170811: "One memory architecture, many projections and consumers"; "Do NOT create a separate autonomous-development memory architecture" | Genome doc l.660: "Do not couple business runtime memory physically to development-control storage, but reuse the semantic laws." | **Not a contradiction on a careful reading** [INFERRED]: one architecture (semantic laws, contracts) with separate physical stores is consistent with both. The design adopts that reading and asks the owner to confirm it (open question Q1). |
+| C11 | Genome doc and plan: "ContextPack" (for KEY and agents) | Speed traces and schema: "ContextBundle" (agents only) | Unreconciled naming; the design uses one name (design section 6 introduction) |
+| C12 | Seven status vocabularies (Genome §7, Genome §3.10, GenomeFact, bundle authority/freshness, G165, bundle health, AGENT-CONTINUITY evidence classes) | Genome §7: "Map rather than duplicate existing domain-specific statuses" | Unmapped; design 2.1 proposes the mapping |
+| C-A | #106 c5982170811: "One memory architecture, many projections and consumers"; "consumer of that same memory substrate"; "a real production-scale consumer of KEY memory"; "KEY-specific cognition must consume the same governed substrate rather than creating a competing opaque memory stack"; "Do NOT create a separate autonomous-development memory architecture"; c5982087092: "The same substrate must support BUSINESS, PROJECT/PROGRAMME, AGENT, WORKFLOW/TASK ..."; c5994706532: "It does not create a separate developer-only memory or automation stack." | Genome doc l.660: "Do not couple business runtime memory physically to development-control storage, but reuse the semantic laws." | **Open.** The #106 wording ("same memory substrate") can be read as one physical substrate; the Genome doc reads as shared laws with separate storage. Track 1 is a separate physical store (files in git). The design proposes the shared-laws reading [PROP] and asks the owner to choose (open question Q1). |
 | C-B | #106 c5982087092: memory work at "20-30%" alongside product, "No memory/meta packet earns application-programme credit" | D-254 (2026-11-22): KEY's memory packets "join the v1 plan" | Later ruling governs for KEY's packets; whether they count toward v1 completion is open question Q6 |
-| C-C | #106 c5982087092: start with M0 truth audit; plan: "No production implementation packet should be released before the first two packets converge" | D-254: product packets join v1 "once the owner approves the Track 2 design" | The proposal keeps the audit first (MEM-0) and lets the scope-safety fixes run in parallel since they close existing D-100/D-238 exposure; open question Q4 |
+| C-C | #106 c5982087092: start with M0 truth audit; plan: "No production implementation packet should be released before the first two packets converge" | D-254: product packets join v1 "once the owner approves the Track 2 design" | The proposal puts the census (MEM-CENSUS) first in its table and lets the scope-safety fixes run in parallel since they close existing D-100/D-234 exposure; open question Q4 |
 | C-E | #126: "Hard filter: scope -> permission -> current validity -> supersession -> authority/verification/risk. Then candidates"; #106 body: filter "before relevance/recency ranking" | Genome doc §12: "candidate identities -> graph expansion -> authoritative claim selection" (authority after expansion) | Tension: the design adopts #126's order (filter first) and #126's "inaccessible nodes cannot influence accessible aggregates" for every expansion step |
 | C-F | #123 and #106 rollout: PR #112 is "the starting implementation branch"; #106 checkpoint: "M0: #122 / PR #127" | BUILD-MAP-001 (D-141): #112 and #127 "CLOSED not adopted" | The later ruling governs; #123 and #122 have no comment recording it. The proposal starts M0 fresh and reuses #112's vocabulary as a reference, not as code |
 | C-G | #106 rollout: "Completion definition for 'memory v1'" | Product plan: the memory architecture was V1+ (DEFER) until D-254 | "Memory v1" in #106 is not the product v1; D-254 brings KEY's memory packets into v1 without saying which part of "memory v1" that covers (open question Q6) |
+| C-H | Genome doc §12 (l.565-575): ranking signals to add include "authority; claim status; evidence coverage" | Design 6.2 [PROP]: authority and verification decide filtering and labelling, not rank | Open; owner question Q14; E-ABL-1 can compare |
+| C-I | #106 c5982087092 sequencing: "Use PROJECT/PROGRAMME development memory as the first serious consumer/proving ground"; "Only after benchmarked value, progressively activate the same substrate for KEY/business cognition"; "Build M2-M4 in SHADOW mode" | D-254 (2026-11-22): KEY's memory is built inside v1, in parallel | The later ruling governs KEY's packets; the design keeps SHADOW-first activation for behaviour-changing packets (design 12) and Q1 decides whether the agents ever move onto the product substrate |
 | C-D | Rollout plan lanes M0-M12 (#106 c5982087092) | Plan phases 0-10 (`KF-MEMORY-CONTEXT-GENOME-PLAN-001.md`) | Two different numberings, both called "M"; M1 means "Canonical Context Genome Foundation" in one and "source claim identity provenance contract" in the other. The design maps both (design section 12). |

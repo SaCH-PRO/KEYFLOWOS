@@ -5,7 +5,8 @@ D-254: KEY's memory packets join v1 once it is approved). Research only; no auth
 
 Inputs: `PRIOR-RESEARCH-RECOVERED.md` (the owner's research; cited below as **R** with a section number),
 `MEMORY-SCIENCE-PARALLELS.md` (**S**), `AI-MEMORY-SYSTEMS-SURVEY.md` (**AI**). Labels: **[OWNER]** a decision the owner
-already made, quoted or cited; **[SCI]**/**[AI]** support from the science or AI survey; **[PROP]** this design's own
+already made, quoted or cited; **[RC]** a research candidate from the owner's programme that is not an owner decision
+(files marked RESEARCH_ONLY, e.g. the G157-G165 genes of the cognitive-lifecycle tranche and the epistemic-trace laws); **[SCI]**/**[AI]** support from the science or AI survey; **[PROP]** this design's own
 proposal, which the owner may reject.
 
 This design does not add a memory architecture. It is the owner's architecture (one memory architecture, Context Genome
@@ -18,7 +19,9 @@ expansion, structural atlas; R 1.10) stays provisional here and is listed in sec
 ## 0. The design in ten lines
 
 1. One memory architecture, many projections: BUSINESS (KEY), PROJECT/PROGRAMME (coding agents), later AGENT/WORKFLOW
-   and USER/LIFELONG. Same laws and contracts; separate physical stores where the consumers differ. [OWNER R 1.9; R 2.1 l.660]
+   and USER/LIFELONG. One governed substrate (R 1.9: "consumer of that same memory substrate"); this design reads it as the same laws,
+   contracts and code paths where practical, with separate physical stores where the consumers differ [PROP reading of
+   OWNER R 1.9 and R 2.1 l.660; owner question Q1]
 2. **Canonical** = authoritative records and the append-only episodic log. **Derived** = everything else (summaries,
    embeddings, schemas, caches, bundles, prompts). Derived items are rebuildable, never authoritative, and carry the
    most restrictive access class of everything they were derived from. [OWNER; PROP for the last clause]
@@ -27,11 +30,12 @@ expansion, structural atlas; R 1.10) stays provisional here and is listed in sec
 4. Writes carry a mandatory envelope (tenant, member scope, data class including revenue class, source, authority class,
    kind, valid time, recorded time). Model-written memory is a proposal. [OWNER R 1.1; PROP for data class]
 5. Retrieval filters before it ranks: scope, permission, data class, validity, supersession; then hybrid candidates;
-   then ranking; then a budget. A filtered-out item cannot influence anything returned, including counts. [OWNER R 3.4, D-238]
+   then ranking; then a budget. A filtered-out item cannot influence anything returned, including counts. [OWNER R 3.2,
+   R 3.4; the general money rule is this design's reading of D-100, D-233 and D-234, of which D-238 is the proposal case]
 6. Consolidation regenerates derived memory from source episodes on schedules and on salience, never summarises a
-   summary repeatedly, records what it lost, and keeps a durable checkpoint. [OWNER R 2.1, R 2.5 G163; SCI S B2, D1]
+   summary repeatedly, records what it lost, and keeps a durable checkpoint. [OWNER R 2.1; RC G163; SCI S B2, D1]
 7. Forgetting removes derived copies and access paths under governance; it never deletes authoritative evidence. Erasure
-   on legal or user request is a separate, recorded deletion. [OWNER R 1.2, R 2.5 G161]
+   on legal or user request is a separate, recorded deletion. [OWNER R 1.2; RC G161]
 8. Procedures are earned by repeated verified success, carry a revaluation check, and never grant permission. [OWNER R 1.11; SCI S D2]
 9. Metamemory is structural: coverage and freshness indexes, honest failure states, and "not recorded" when nothing is
    recorded. [OWNER R 3.8; SCI S D4]
@@ -90,7 +94,8 @@ Rules:
 | Past re-verification date | (unchanged) | STALE | STALE | STALE |
 | Unknown | UNKNOWN | n/a | UNVERIFIABLE | UNAVAILABLE |
 
-Each existing vocabulary stays where it is; the mapping lives in one table in code (MEM-1) so retrieval can compare them.
+Each existing vocabulary stays where it is; the mapping should live in one table in code so retrieval can compare them
+(not yet assigned to a proposed packet; it belongs with the Context Genome contract work, plan phase 1).
 
 ---
 
@@ -106,7 +111,7 @@ correlation id); `validFrom`, `validTo`; `recordedAt`; `derivedFrom` (ids, for d
 A write without a complete envelope fails. `UNCLASSIFIED` is allowed on write and **fails closed on read** for any reader
 without every permission (D-227, D-234).
 
-### 3.2 Salience and prediction-error gate [SCI S C5; OWNER R 1.7 lane M6, R 2.5 G157; PROP formula]
+### 3.2 Salience and prediction-error gate [SCI S C5; OWNER R 1.7 lane M6; RC G157; PROP formula]
 
 Salience decides consolidation priority and review priority, **never confidence**. For an episode `e`:
 
@@ -159,7 +164,7 @@ POLICY or PROCEDURE without promotion by a member with the relevant authority.
 
 ## 4. Canonical versus derived, and forgetting
 
-[OWNER R 1.2 "forgetting should not erase authoritative evidence/audit history"; R 2.1 l.109; R 2.5 G161, G162, G163]
+[OWNER R 1.2 "forgetting should not erase authoritative evidence/audit history"; R 2.1 l.109; RC G161, G162, G163]
 
 - **Canonical** (T2 episodes, T3 claims with their history, T4 procedure versions with run evidence, and the domain
   records they point to) is append-only or versioned. Never rewritten to save space.
@@ -199,7 +204,7 @@ unprocessed episodes stay queued (no silent drop). Backlog size is a health metr
 - A summary is regenerated from its **source episodes**, not from the previous summary, at least every `k_regen` updates
   [PROP; SCI S D1; AI §1]. Between regenerations an incremental update may append to the summary.
 - Every summary records **source coverage** (episode ids and count) and **known loss** (what was omitted: figures, names,
-  dates, exceptions) [OWNER G163].
+  dates, exceptions) [RC G163].
 - Figures, commitments, names, dates and identifiers are not answered from a summary: the compiler fetches them from
   source (verbatim/gist split, S C3).
 - A new summary is diffed against the previous; a fact present before and absent now is flagged for review rather than
@@ -225,7 +230,7 @@ unprocessed episodes stay queued (no silent drop). Backlog size is a health metr
   items along the squashing function, so its offset is fitted with the unit fixed), and `β_kind` is a per-kind base level
   (ACT-R's `β_i`) that keeps authoritative kinds (DECISION, POLICY, CONSTRAINT, accepted FACT) from being buried merely
   because they are rarely read (S C1; ACT-R models commonly use d = 0.5; all constants fitted here, E-ABL-1).
-- **Confidence, authority and verification never decay with time** [OWNER G162 "Old information should not disappear
+- **Confidence, authority and verification never decay with time** [PROP; in the spirit of RC G162 "Old information should not disappear
   merely because it is old"]. Staleness is a separate field set by the re-verification schedule and by domain volatility.
 - Periodic **renormalisation** rescales association weights (which use reinforces) per scope so they do not saturate
   (synaptic homeostasis analogue, S B6). Activation needs none: it is log-scale and already decays.
@@ -277,10 +282,12 @@ influence accessible aggregates"; #123 "inaccessible source memory cannot leak t
 - `sourcePrior`: the existing per-source weights (R 4.2) as a starting prior.
 - **Authority and verification are not added to the rank**: they decide filtering (step 2), labelling (STALE, DISPUTED,
   INFERRED) and tie-breaks. Adding authority to a relevance sum would let a high-authority irrelevant item outrank a
-  relevant one and is the "confidence != authority" confusion in another form. [PROP]
+  relevant one and is the "confidence != authority" confusion in another form. [PROP] **This departs from the Genome
+  doc §12**, which lists "authority; claim status; evidence coverage" among the signals the target Context Compiler should
+  add to ranking (`PRIOR-RESEARCH-RECOVERED.md` C-H); owner question Q14. The ablation E-ABL-1 can test both.
 - Weights `α, β, γ, δ` are fitted by E-ABL-1, starting from the current 0.45/0.35/0.20 as the baseline to beat.
 
-### 6.3 Budget per task [OWNER G157, G158; Hermans "MORE CONTEXT != MORE UNDERSTANDING"; AI §14 context rot]
+### 6.3 Budget per task [RC G157, G158; Hermans "MORE CONTEXT != MORE UNDERSTANDING"; AI §14 context rot]
 
 For task type `τ` the compiler has a token budget `B_τ` split into slots: `B_τ = b_core + b_task + b_mem + b_evid +
 b_reserve`. `b_core` is the stable prefix (6.4); `b_task` the user turn and task state; `b_mem` retrieved memory;
@@ -338,30 +345,36 @@ reader of that key may see. Cross-tenant tests run per path.
 
 ### 8.2 Role and revenue scope (D-100, D-128, D-226, D-227, D-233, D-234, D-238) [OWNER; PROP for the mechanism]
 
-The rulings say: a member without revenue read sees "no money signals at all" (D-100); finance and sales-derived data
-needs `revenue:read`, "Authorization follows the data's provenance and meaning, not only a section name, domain label or
-currency symbol" and ambiguity fails closed (D-234); nothing may be inferable "from a score, grade, ranking, categorical
-indicator or summary" (D-233); restricted information must not reach a reader "directly or indirectly", "alike to event
-memory, prompts, API responses, streams and caches" (D-238). The current code classifies at read time by words in the
+The rulings say: a member without revenue read sees "no money signals at all" (D-100); finance and sales-derived data,
+including "transaction-derived signals", needs `revenue:read`, "Authorization follows the data's provenance and meaning,
+not only a section name, domain label or currency symbol" and ambiguity fails closed (D-234). Two rulings are specific
+cases: D-233 (the finance DNA score must not be inferable "from a score, grade, ranking, categorical indicator or
+summary") and D-238 (proposal-family events must not reveal restricted information "directly or indirectly", "alike to
+event memory, prompts, API responses, streams and caches"). **Applying the indirect-disclosure rule to all memory is this
+design's reading** of D-100 and D-234 informed by those two cases [PROP], not a ruling; owner question Q5 asks for
+confirmation. The current code classifies at read time by words in the
 text (R 4.3; FU-PROPOSAL-MONEY-TAG documents the limits of a vocabulary heuristic). The design:
 
 1. **Classify at write, by provenance** [PROP]: the writer sets `dataClass` and `moduleScope` from what it knows
-   structurally (the tool's authority, the source table, the event type), as FU-PROPOSAL-MONEY-TAG does for proposals.
+   structurally (the tool's authority, the source table, the event type), as FU-PROPOSAL-MONEY-TAG proposes for
+   proposals (that packet is not yet built).
    Text heuristics remain only as a fail-closed backstop.
 2. **Taint propagation** [PROP]: a derived item (summary, embedding, lesson, salience concern, count, ranking, schema)
    carries the **union** of the `moduleScope` and the most restrictive `dataClass` of everything in `derivedFrom`. A
    summary of a thread that mentions one invoice is REVENUE. This is what makes "indirectly" enforceable: a count of
    overdue invoices is derived from REVENUE rows and is REVENUE.
-3. **Unclassified fails closed** (D-227, D-234): legacy rows without a class are visible only to readers with every
-   module permission (in practice, owners and revenue readers) until a classification backfill (dry-run first, on owner
-   authority) assigns them.
+3. **Ambiguous financial provenance fails closed** (D-234; D-227 for unclassified KEY event types): legacy rows without a
+   class are classified at read from their structure (category, source, source type, source events) until a
+   classification backfill (dry-run first, on owner authority) records the class; only rows whose financial provenance is
+   still ambiguous are withheld from readers without revenue read. Ordinary legacy memory (tone, goals, priorities) stays
+   visible.
 4. **Memberless turns** (contact-only bridge, non-member admin) see proposals as action, status and risk only (D-226),
    and not even that where status or risk would reveal financial information (D-238).
 5. **Index entries point, records decide**: a T2 episode that points to an invoice resolves the invoice through the
    invoice read path, so revenue rules already enforced there apply.
 
-Owner question Q5 asks whether counts without amounts (for example "3 overdue invoices") are money signals; the design
-assumes **yes** under D-100 "no money signals at all" and D-238 "indirectly" until ruled.
+Counts without amounts (for example "3 overdue invoices") are transaction-derived signals under D-234 and so need revenue
+read; owner question Q5 asks the owner to confirm this reading.
 
 ### 8.3 Poisoning and prompt injection [OWNER R 1.2 family 6-7, R 1.7 lane M8, R 3.8 Rebuff; SCI S F; AI §14]
 - **Innate screens** (deterministic, on every write of external content): instruction-like patterns, tool-call syntax,
@@ -380,7 +393,7 @@ Every write, promotion, supersession, retraction, erasure, quarantine, pruning r
 T2 with actor and reason. The retrieval trace (6.5) records what reached a prompt. "No fake green": health and coverage
 claims have bounded denominators (R 2.1 §17).
 
-### 8.5 Metamemory [OWNER R 1.2 "meta-memory"; R 2.5 G164, G165; SCI S D4]
+### 8.5 Metamemory [OWNER R 1.2 "meta-memory"; RC G164, G165; SCI S D4]
 T5 maintains, per (tenant, scope, topic or entity): number of current claims, last verification, open contradictions,
 stale count, last consolidation, backlog, and channel health. The compiler uses it to say "no record of X", "the last
 record of X is from date D and is unverified", or "memory partly unavailable". Model self-reported confidence is never
@@ -409,8 +422,9 @@ tokens; prices per token `r_in`, `r_out`, `r_cw` (cache write), `r_cr` (cache re
 2. **Pointer versus inline** (agents): a pointer of `p` tokens standing for a document of `D` tokens read by a sub-agent
    saves `D - p` in the orchestrator's context for every later call in the session; over `n` later calls the
    orchestrator's input saving is `n * (D - p)` tokens (before caching), while total tokens rise by the sub-agent's read
-   `D` plus its overhead. Track 1 measured `D/p` for the worker brief as 2,739 / 284 characters (MEASUREMENT.md); tokens
-   were not measured.
+   `D` plus its overhead. Track 1 measured the orchestrator's side for the worker brief: 2,739 characters inline vs 284 as a pointer
+   (MEASUREMENT.md); the child still reads the 4,632-character brief file, so the saving is in the orchestrator's context
+   only; tokens were not measured.
 3. **Compile versus load**: a bundle of `b` tokens replacing a search through sources of `S` tokens saves `S_read - b`,
    where `S_read` is what an agent actually reads without the bundle (unknown today; Track 1 MEASUREMENT.md section 4
    records how to measure it). Never claim `S - b`.
@@ -439,23 +453,29 @@ projection. This design **agrees** with it on almost everything and does not dup
 | T3 semantic | Plan and rulings (canonical), `ORCHESTRATOR-STATE.md` (checkpoint), `V1-STATUS.*` (derived, generated) with an order of authority | Agrees, including "A contradiction is reported ..., not silently resolved" |
 | T4 procedural | Briefs and runbooks that "restate rulings; the rulings win"; change in the same commit as the ruling | Agrees; this is the revaluation rule (section 7) |
 | Consolidation | Rewrite table per event; state file "rewritten, never appended to"; nothing on #80 or git is deleted | Agrees; it is section 5.3 (regenerate from source) |
-| Retrieval / ContextPack | `bundle.mjs` per packet; `status.mjs --check` for staleness | Agrees. Difference: the bundle has a health (VALID/DEGRADED) but no explicit budget or "not recorded" marker; the research ContextBundle schema (R 2.9) has both |
+| Retrieval / ContextPack | `bundle.mjs` per packet (with `health` and `excluded`); `status.mjs --check` for staleness | Agrees. Difference: no explicit budget or "not recorded" marker |
 | Metamemory | `status.mjs --check` (STALE vs current), uncertain-derivation list | Agrees, partial |
 | Measurement | Characters, not tokens; one resume test | Agrees on honesty; evaluation plan section 2 extends it |
 
 Proposals for the agents (Track 1 owns them; none is a product packet) [PROP]:
 - **A1** A one-line machine-readable header on every #80 RETURN/PROGRESS/ruling comment (`kind=RETURN packet=<id> sha=<sha> rulings=D-nnn`) so a script can index #80 without reading it.
-- **A2** Adopt the ContextBundle schema's health and `excluded` fields in `bundle.mjs` output, and print an explicit "not in plan/rulings" when a packet cites nothing.
+- **A2** Print an explicit "not in plan/rulings" marker in `bundle.mjs` output when a packet cites nothing (the bundle
+  already carries `health` and `excluded`, `scripts/agent-memory/lib.mjs`).
 - **A3** Run the amnesia and confabulation tests (EVALUATION-PLAN E-AMN, E-CONF) at each wave boundary.
 - **A4** Owner ruling on the `CLAUDE.md` read list (Track 1 cannot edit `CLAUDE.md`): replacing the six-file list by the
   three-file resume path would cut the first read from 104,312 to 27,375 characters (Track 1 MEASUREMENT.md section 2).
 
-On the identity invariant (R 1.9, "Do NOT create a separate autonomous-development memory architecture"): Track 1 is
-files in git, KEY's memory is Postgres. This design reads the invariant as **one set of laws and contracts with separate
-physical stores**, which the Genome doc also requires ("Do not couple business runtime memory physically to
+On the identity invariant (R 1.9: "Do NOT create a separate autonomous-development memory architecture"; development is
+"a real production-scale consumer of KEY memory"; "KEY-specific cognition must consume the same governed substrate"; and
+R 1.11: "It does not create a separate developer-only memory or automation stack"): Track 1 is files in git, KEY's memory
+is Postgres. The owner's wording ("same memory substrate") can be read as one physical substrate. This design proposes
+[PROP] reading it as **one set of laws and contracts with separate physical stores**, which the Genome doc also requires ("Do not couple business runtime memory physically to
 development-control storage, but reuse the semantic laws", R 2.1). The shared contracts are: the envelope (3.1), the
 canonical/derived split, the authority order, the ContextPack shape and health, the status mapping (2.1) and the test
-suite (EVALUATION-PLAN). Owner question Q1 asks the owner to confirm this reading.
+suite (EVALUATION-PLAN). Owner question Q1 asks the owner to choose; the owner's rollout sequencing (R 1.7: "Use PROJECT/PROGRAMME development
+memory as the first serious consumer/proving ground"; "Only after benchmarked value, progressively activate the same
+substrate for KEY/business cognition") would, under the one-substrate reading, put the agents on the product substrate
+first, which D-254 (KEY's memory built inside v1) does not follow (R 6 C-I).
 
 ---
 
@@ -466,7 +486,7 @@ mapping to its phases and to the #106 lanes (two numberings, R 6 C-D) is in the 
 
 | Design element | Exists today | Missing | Should change | Plan phase / #106 lane |
 |---|---|---|---|---|
-| Inventory and causal map | Characterisation in R 4 (this work) | Machine-readable store/writer/reader map with proof (the #122 deliverable; #127 closed) | MEM-0 produces it read-only | Phase 0 / M0 |
+| Inventory and causal map | Characterisation in R 4 (this work) | Machine-readable store/writer/reader map with proof (the #122 deliverable; #127 closed) | MEM-CENSUS produces it as a test | Phase 0 / M0 |
 | Envelope, kinds, authority, bitemporal time | Partial: AiMemory has confidence, source, expiresAt; Genome has verification; PR #112 vocabulary not on main | dataClass, moduleScope, memberScope on AiMemory and embeddings; valid/recorded time; supersession | Additive columns; adapter types from #112's vocabulary (without the validFrom defect) | Phase 1 / M1 |
 | T2 episodic index | BusinessEvent, CognitiveEvent, GenomeMemoryEvent, execution and action logs; read as "episodic" by unified retrieval | Pointer-and-keys contract; per-event dataClass | Classify event types at write (D-227 already fails unclassified closed in prompts) | Phase 3-4 / M2 |
 | T3 semantic | AiMemory (key-value, overwrite on upsert), GenomeFact (verification, evidence), CognitionMemory (member lessons) | History on overwrite; userId on member-scoped rows (writer drops it); supersession | AiMemory upsert keeps the previous version (or writes a history row); member preferences stored per member | Phase 1, 4 / M1-M2 |
@@ -474,11 +494,16 @@ mapping to its phases and to the #106 lanes (two numberings, R 6 C-D) is in the 
 | Retrieval facade | `UnifiedMemoryRetrievalService` (LIVE, the one facade) | Filter-first with class; expiresAt filter; channel failure states; trace | Evolve it (the owner: "evolves into the common retrieval boundary rather than being replaced", R 1.1) | Phase 7 / M4 |
 | Prompt projection | `readersOwnPromptMemory` gates cognition, events, genome money | AiMemory, embeddings, temporal memory, logs, salience feed, semantic section ungated (R 4.3) | Every memory path goes through one projection keyed by dataClass | Phase 7 / M1 (scope) |
 | Consolidation | Circadian-gated, decay of old cognition confidence by 0.1 per night, member-safe promotion | Durable checkpoint; regenerate-from-source; loss accounting; salience-triggered runs | Replace time decay of **confidence** with activation decay (5.5) — confidence must not fall with age (G162) | Phase 8 / M6 |
-| Procedural | Cerebellum corrections (7-day TTL), approval learning, `.agents/skills` | Procedure contract, revaluation, promotion ladder in product | Later packet after MEM-0..MEM-4 | Phase 8 / M7 |
+| Procedural | Cerebellum corrections (7-day TTL), approval learning, `.agents/skills` | Procedure contract, revaluation, promotion ladder in product | Later packet after MEM-EVAL-SUITE | Phase 8 / M7 |
 | Salience | Amygdala service, ratio vs baseline, novelty | Prediction errors from recorded predictions; class-aware feed | Feed counts derived from REVENUE events only to revenue readers (8.2) | (M6 input) |
 | Temporal summaries | Temporal-flow memory, sourceEventIds, 6-hourly | Tenant predicate on update; embedding dedup; loss accounting | Fix update scope; dedup | Phase 7 / M2 |
 | Metamemory | Eval harness (weak, R 3.8 Ragas gaps), channel errors collapse to empty | Coverage index, honest failure states | Add channel status to the pack | Phase 7, 10 / M0 benchmarks |
 | Defensive memory | Immune service in-process (volatile) | Quarantine flag, innate screens on stored external content | MEM packet after the scope fixes | — / M8 |
+
+Activation: behaviour-changing memory packets follow the owner's ladder "OFF -> SHADOW -> CANARY -> READ_ENABLED ->
+ADVISORY -> ACTIVE" (R 1.7 lane M12) and #124's `CONTEXT_GENOME_READ/WRITE=OFF|SHADOW|ACTIVE` pattern where a switch can
+be measured before it is made (MEM-CLASS-READ); pure leak fixes ship without a flag, since keeping a leak switchable is
+not a safe default.
 
 What this design does **not** propose for v1: the portable Vault (phase 2), local-first sync (phase 9), Wiki/INDEX
 projections (phase 6), the general entity graph beyond domain foreign keys (phase 5), the receptor fabric (M3), associative
@@ -502,7 +527,7 @@ Disposition vocabulary from R 1.2: RETAINS / EXTENDS / REFINES / CONFLICTS / REJ
 | Regenerate-from-source consolidation, loss accounting | R 2.5 G163; S D1 | RETAINS / EXTENDS | widely observed (AI §1) |
 | Read-triggered re-verification | S B3 | REFINES reconsolidation (inverted) | contested in biology; sound in engineering |
 | Pattern separation via scoped dedup | R 1.7 M4; S C4 | RETAINS | strong (theory); untested for this use (E-SEP) |
-| Spreading activation, lateral inhibition, mycelial reinforcement | R 1.2, R 3.4 #126 | RESEARCH CANDIDATE (after MEM-0..4; ablation vs entity-graph completion) | moderate |
+| Spreading activation, lateral inhibition, mycelial reinforcement | R 1.2, R 3.4 #126 | RESEARCH CANDIDATE (after MEM-EVAL-SUITE; ablation vs entity-graph completion) | moderate |
 | RMCC / ContextCell rank algebra | R 1.3 | RESEARCH CANDIDATE (owner already gated it) | theoretical |
 | Hyperdimensional / Hopfield / tensor networks | R 1.8 track 2, R 1.3 | RESEARCH CANDIDATE | theoretical for this use |
 | Receptor fabric and receptor gaps | R 1.6 | RESEARCH CANDIDATE (v1 out of scope) | — |
@@ -511,6 +536,17 @@ Disposition vocabulary from R 1.2: RETAINS / EXTENDS / REFINES / CONFLICTS / REJ
 | Portable Vault, local-first | R 2.1-2.2 | RETAINS as later phase | — |
 | Model-written core memory (MemGPT self-edit) | AI §4 | REJECTED as authoritative; allowed as proposal | poisoning risk |
 | Third-party memory runtimes (Graphiti, Mem0, Letta) | R 1.1 | REJECTED as dependency (owner rule); patterns absorbed | — |
+| Endocrine/state memory, hysteresis, priming and reset | R 1.2 families 9-10, R 1.7 M8 | RESEARCH CANDIDATE, not v1 (slow tenant state biasing budgets, design 9, is the nearest v1 use) | analogy |
+| Epigenetic expression overlays | R 1.2 family 5 | RETAINS as the projection idea (one canonical store, per-projection views); no separate mechanism in v1 | analogy |
+| Bacterial phase variation, bet-hedging, competing hypothesis populations | R 1.2 family 6, R 1.3 | RESEARCH CANDIDATE, not v1 | analogy |
+| Clonal dominance hazards (haematopoietic) | R 1.2 family 8, R 1.7 M7 "diversity floor" | RESEARCH CANDIDATE; retrieval diversity and the self-reinforcement check (EVALUATION E-POI-3) are the v1 guard | analogy |
+| Stigmergic / swarm memory | R 1.2 family 11 | RETAINS for agents (the repository and #80 are the shared trace, Track 1); product use not v1 | moderate (science) |
+| Ecological / evolutionary and multi-scale memory | R 1.2 families 12-13 | RESEARCH CANDIDATE, not v1 | analogy |
+| Predictive / counterfactual memory (what was predicted, alternatives) | R 1.8 track 3 | RESEARCH CANDIDATE; v1 records predictions only where `predErr` needs them (3.2); Q12 | — |
+| Structural Intelligence Atlas | R 1.4 | RESEARCH CANDIDATE (the owner made it a catalogue, not a runtime) | — |
+| Specialisation / Differentiation Engine | R 1.13 | RESEARCH CANDIDATE, not v1 (an agent-factory question more than a memory one) | analogy |
+| Scale-Recursive Control / nested world models | R 1.14 | RESEARCH CANDIDATE; the zoom-in/zoom-out-with-provenance requirement is RETAINED (derivedFrom, drill-down) | — |
+| Lifelong / second-brain projection | R 1.5, R 1.7 M10 | RETAINS as a later projection, not v1 | — |
 | Glymphatic clearance | S E5 | REJECTED as justification; copy hygiene justified by product defects | contested |
 
 ---
@@ -531,9 +567,9 @@ Disposition vocabulary from R 1.2: RETAINS / EXTENDS / REFINES / CONFLICTS / REJ
 | "Transient working/activation memory remains separate" (R 1.10) | T1 is never persisted as memory |
 | "Sparse/lazy higher-order structure only" (R 1.10) | No higher-order structure in v1 |
 | "Different memory classes have different plasticity" (R 1.10) | Section 4 last bullet |
-| Plan hard invariants 1-10 (R 2.2) | 1 no parallel authority: extends existing seams (section 12); 2 vectors derived; 3 inference not truth; 4 supersession with lineage; 5 domain identity reused; 6 no provider-specific format (representation spec); 7 no second Mission Control; 8 no file grants authority; 9 no fake green; 10 Atlas: not on main, recorded as an open point (Q7) |
+| Plan hard invariants 1-10 (R 2.2) | 1 no parallel authority: extends existing seams (section 12); 2 vectors derived; 3 inference not truth; 4 supersession with lineage; 5 domain identity reused; 6 no provider-specific format (representation spec); 7 no second Mission Control; 8 no file grants authority; 9 no fake green; 10 Atlas: `architecture/atlas/` is on main as a design record that was never materialised (BUILD-MAP #141 "PORTED PARTS"), so the obligation has nowhere live to land (Q7) |
 | #123 "inaccessible source memory cannot leak through a derived aggregate"; #126 "inaccessible nodes cannot influence accessible aggregates" | Filter-first (6.1) plus taint propagation (8.2) |
-| #124 "confidence=0 remains 0"; "old authoritative facts are not discarded solely by age" | Confidence never decays (5.5); relevance fallback must not turn 0 into 0.5 (current `confidence*0.5+0.5`, R 4.2) — flagged for MEM-3 |
+| #124 "confidence=0 remains 0" (a persistence invariant); "old authoritative facts are not discarded solely by age"; #122 "zero-confidence fallback bug" | Confidence never decays with age (5.5, PROP); the retrieval fallback scores confidence 0 like an unscored row (current `confidence ? confidence*0.5+0.5 : 0.5`, R 4.2): MEM-EXPIRED-NOT-SERVED |
 | #153 "context pruning/compaction changes the active working set, never canonical truth" | Section 4, 6 |
-| D-100, D-128, D-226, D-227, D-233, D-234, D-238 | Section 8.2 |
+| D-100, D-128, D-226, D-227, D-233, D-234, D-238 | Section 8.2 (applying "indirectly" to all memory is a reading, Q5) |
 | D-254 small, tests-first, schema named, backfill dry-run on owner authority | `PRODUCT-MEMORY-PACKETS-PROPOSAL.md` |
