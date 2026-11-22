@@ -1,4 +1,5 @@
 import { Inject, Injectable, NotFoundException, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { RetryableConflictException } from '../../core/utils/retryable-conflict';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -370,7 +371,9 @@ export class ProjectsService {
     // did not happen.
     const task = (await this.applyTaskUpdate(businessId, taskId, body, actorId))
       ?? (await this.applyTaskUpdate(businessId, taskId, body, actorId));
-    if (!task) throw new ConflictException('The task changed while it was being updated; try again');
+    // W11-DISPATCH-REFUSAL-FINAL (D-134): still a 409 with this message over HTTP; the class tells KEY's
+    // plan queue that this conflict, unlike any other, is worth asking again.
+    if (!task) throw new RetryableConflictException('The task changed while it was being updated; try again');
     return task;
   }
 
