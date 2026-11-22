@@ -145,7 +145,7 @@ describe('round-4 review repairs (correctness minors 3, 4, 5; security minor 3)'
     ['a response rate', { actionType: 'CREATE_TASK', title: 'Lead response rate is low', evidence: [{ note: 'response rate fell' }] }],
     ['a task count total', { actionType: 'CREATE_TASK', title: '3 tasks in total due today' }],
     ['pay a visit', { actionType: 'CREATE_TASK', title: 'Pay a visit to the site' }],
-    ['a UUID in free text', { actionType: 'CREATE_TASK', title: 'Call back', summary: 'contact 9cad2f1e-1usd-4fee-8cad-0123456789ab' }],
+    ['a UUID in free text', { actionType: 'CREATE_TASK', title: 'Call back', summary: 'contact 9cad2f1e-1cad-4fee-8cad-0123456789ab' }],
   ])('%s is not', (_l, p) => expect(isFinancialProposal(p as any)).toBe(false));
 
   it('the classify select carries every content field the classifier reads', () => {

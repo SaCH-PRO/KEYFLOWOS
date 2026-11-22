@@ -269,34 +269,52 @@ function structuredText(v: unknown): string | null {
   }
 }
 /**
- * Real id shapes are stripped from text: a UUID, a cuid (Prisma cuid(): "c" and 24 lowercase letters and digits), or a
- * hex digest of 32 or more characters (at least 6 digits and 6 letters). Nothing else is stripped: a squashed phrase, a
- * file name, a hyphenated phrase (overdue-invoices-2026) and a camelCase name (unpaidInvoices2026) are words, and are
- * read (fourth review m2).
+ * Real id shapes are stripped from text: a UUID (hex), a cuid (Prisma cuid(): "c" and 24 lowercase letters and digits,
+ * none of whose letter runs of five or more is a money word), or a hex digest of 32 or more characters (at least 6
+ * digits and 6 letters). Nothing else is stripped: a squashed phrase, a file name, a hyphenated phrase
+ * (overdue-invoices-2026, december-2026-cost-fees-transactions) and a camelCase name are words, and are read.
  */
 function withoutIdTokens(t: string): string {
   return t
-    .replace(/(?<![A-Za-z0-9])[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}(?![A-Za-z0-9])/gi, ' ')
-    .replace(/(?<![A-Za-z0-9-])c(?=[a-z0-9]{0,23}\d)[a-z0-9]{24}(?![A-Za-z0-9-])/g, ' ')
+    .replace(/(?<![A-Za-z0-9])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![A-Za-z0-9])/gi, ' ')
+    .replace(/(?<![A-Za-z0-9-])c(?=[a-z0-9]{0,23}\d)[a-z0-9]{24}(?![A-Za-z0-9-])/g, (run) =>
+      run.split(/\d+/).some((letters) => letters.length >= 5 && mentionsMoney(letters)) ? run : ' ',
+    )
     .replace(/(?<![A-Za-z0-9-])[0-9a-fA-F]{32,512}(?![A-Za-z0-9-])/g, (run) => {
       const digits = run.replace(/\D/g, '').length;
       return digits >= 6 && run.length - digits >= 6 ? ' ' : run;
     });
 }
 
+/** Text that can be read more than one way (an invisible character or a backslash in it) is read up to this length; longer fails closed. */
+const MAX_AMBIGUOUS_TEXT = 20_000;
+
 /**
- * The ways a text may be read. Compatibility forms are folded (fullwidth digits and letters). What is ambiguous is read
- * both ways, and the text states money if either reading does (fifth review M2): an invisible format character is a
- * joiner (in<ZWSP>voice) or a separator (fee<ZWSP>from); a backslash is a separator (c:\clients\tax) or the start of an
- * escape whose letter is not text (a JSON "\ncost", a nested JSON string, an escaped lone surrogate). Every pattern
- * here matches one character or a run that always matches, so the cost is linear (fifth review M1).
+ * The ways a text may be read, or null when it must fail closed. The text states money if ANY reading does, so a
+ * reading is only ever added, never substituted (sixth review): each earlier way of reading stays one of them.
+ * - as written, and with compatibility forms folded (fullwidth digits; a folded symbol can also glue itself to a word,
+ *   which is why the text as written stays);
+ * - an invisible format character as a joiner (in<ZWSP>voice) or as a separator (fee<ZWSP>from);
+ * - a backslash kept as written, as a separator (c:\clients\tax), as the start of an escape whose letter is not text
+ *   (a JSON "\ncost"), or as JSON's own quoting, removed with its \uXXXX escapes decoded (a nested JSON string, an
+ *   escaped currency sign).
+ * Every pattern matches one character or a run that always matches, so the cost is linear in the text.
  */
-function readings(text: string): string[] {
+function readings(text: string): string[] | null {
   const folded = text.normalize('NFKC');
-  const out = new Set<string>();
-  for (const formatRead of [folded.replace(/\p{Cf}/gu, ''), folded.replace(/\p{Cf}/gu, ' ')]) {
-    out.add(withoutIdTokens(formatRead.replace(/\\/g, ' ')));
-    out.add(withoutIdTokens(formatRead.replace(/\\+(?:u[0-9a-fA-F]{4}|[bfnrt])?/g, ' ')));
+  if (folded.length > MAX_CLASSIFIED_CONTENT) return null;
+  const out = new Set<string>([withoutIdTokens(text)]);
+  const ambiguous = /[\\\p{Cf}]/u.test(text) || folded !== text;
+  if (!ambiguous) return [...out];
+  if (text.length > MAX_AMBIGUOUS_TEXT) return null;
+  for (const form of new Set([text, folded])) {
+    for (const formatRead of new Set([form, form.replace(/\p{Cf}/gu, ''), form.replace(/\p{Cf}/gu, ' ')])) {
+      out.add(withoutIdTokens(formatRead));
+      if (!formatRead.includes('\\')) continue;
+      out.add(withoutIdTokens(formatRead.replace(/\\/g, ' ')));
+      out.add(withoutIdTokens(formatRead.replace(/\\+(?:u[0-9a-fA-F]{4}|[bfnrt])?/g, ' ')));
+      out.add(withoutIdTokens(formatRead.replace(/\\u([0-9a-fA-F]{4})/g, (_m, hex: string) => String.fromCharCode(parseInt(hex, 16))).replace(/\\/g, '')));
+    }
   }
   return [...out];
 }
@@ -305,7 +323,8 @@ function readings(text: string): string[] {
 function textStatesMoney(text: string | null | undefined): boolean {
   if (typeof text !== 'string' || text === '') return false;
   if (text.length > MAX_CLASSIFIED_CONTENT) return true;
-  return readings(text).some((reading) => proposalMentionsMoney(reading));
+  const all = readings(text);
+  return all === null || all.some((reading) => proposalMentionsMoney(reading));
 }
 
 /**
