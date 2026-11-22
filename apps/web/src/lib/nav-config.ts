@@ -263,7 +263,9 @@ export const hubNav: HubNavItem[] = [
   {
     id: "page", label: "Your page", href: "/app/store", icon: Store, module: "storefront",
     items: [
-      { label: "Presence", href: "/app/presence", icon: Globe },
+      // Its overview (unscoped on the server) answers the business's paid invoice and order revenue, so it needs
+      // revenue as well as the hub's storefront (security review; server follow-up: project kpis.revenue).
+      { label: "Presence", href: "/app/presence", icon: Globe, module: ["storefront", "revenue"] },
       // What a client sees when you share work with them.
       { label: "Client portal", href: "/app/portal", icon: Globe },
     ],
@@ -342,7 +344,8 @@ export const buildSections: NavSection[] = [
       // /app/marketing forwards to the campaigns; all three wear the contentScheduler dormant gate.
       { label: "Campaigns", href: "/app/communicate/campaigns", icon: Mail, dormantFlag: "contentScheduler" },
       { label: "Mailing lists", href: "/app/marketing/lists", icon: Users, dormantFlag: "contentScheduler", module: "content" },
-      { label: "Case studies", href: "/app/marketing/case-studies", icon: FileText, dormantFlag: "contentScheduler" },
+      // Its read (unscoped) answers 60-day paid order revenue, so it needs revenue.
+      { label: "Case studies", href: "/app/marketing/case-studies", icon: FileText, dormantFlag: "contentScheduler", module: "revenue" },
       { label: "Content", href: "/app/content-ops", icon: PenTool },
       { label: "Social", href: "/app/social", icon: Share2 },
       { label: "SEO", href: "/app/seo", icon: Globe, dormantFlag: "webPresencePack" },
