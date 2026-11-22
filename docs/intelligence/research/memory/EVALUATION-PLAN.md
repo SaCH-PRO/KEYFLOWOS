@@ -90,7 +90,9 @@ never tuned against.
 | E-STALE | Superseded facts, expired TTL rows (e.g. cerebellum lessons after 7 days), retracted items | leakage count: must be zero (the current `expiresAt` gap is RED) |
 | E-SEP | Pattern separation: two near-identical episodes for different members or customers | false-merge count: zero |
 | E-COMP | Pattern completion: partial cue (customer first name and month) retrieves the right episode | precision at k |
-| E-FRESH | An old, frequently used, still-valid fact vs a new irrelevant one | the old fact ranks first (activation vs age decay) |
+| E-FRESH | An old, frequently used, still-valid fact vs a new irrelevant one; and an old, never-read authoritative DECISION vs recent chatter | both old items rank above the irrelevant ones (activation with per-kind base level vs age decay) |
+| E-INDEX | Index integrity (Alzheimer analogue) | every canonical item reachable through at least one channel; unreachable fraction reported |
+| E-OVER | Over-retrieval (PTSD analogue): one high-salience event (a failed payment) | appears only in tasks it is relevant to; its share of context per task type reported |
 | E-ZERO | A record with confidence 0 | stays 0 and is not ranked as 0.5 (#124 "confidence=0 remains 0") |
 | E-REBUILD | Delete every derived item (embeddings, summaries, caches) on a fixture tenant and rebuild | every canonical item still present; rebuilt retrieval answers the task suite no worse (Genome doc l.109) |
 | E-CHK | Kill the consolidation job mid-run, restart on two replicas | no duplicated effects; the checkpoint resumes (plan phase 8 exit proof) |

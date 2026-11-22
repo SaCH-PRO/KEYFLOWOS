@@ -25,7 +25,8 @@ runtimes ... Implement the useful patterns natively inside KEYFLOWOS unless late
 - **Hierarchical summary**: summaries of summaries at several granularities (session, day, project).
 - **Recursive summarisation**: summarise chunks, then summarise the summaries (e.g. Wu et al. 2021, OpenAI,
   "Recursively Summarizing Books with Human Feedback"; Wang et al. 2023, "Recursively summarizing enables long-term
-  dialogue memory in large language models" (verify authors)).
+  dialogue memory in large language models", arXiv 2308.15022); RAPTOR (Sarthi et al. 2024, ICLR) builds a tree of
+  recursive cluster summaries and retrieves across levels.
 
 **Established.** Compaction is necessary for long agent runs and works well enough for continuity of the current
 task. **Known failure: summary drift.** Each pass loses detail and can introduce errors that later passes treat as
@@ -53,7 +54,9 @@ provider documentation before computing costs**: they change.
 3. Deterministic ordering and serialisation of anything in the prefix (sorted keys, stable formatting, no timestamps)
    is a cost requirement, not a style preference.
 
-**Formula** (proposal; variables named, no values assumed): for one turn with a cached prefix of `P` tokens and a
+**Formula** (proposal; variables named, no values assumed). Assumptions: a miss is billed at the cache-write price only
+when a cache breakpoint is set (otherwise at `r_in`); providers without a write premium have `r_write = r_in`; partial
+longer-prefix hits and incremental breakpoints in multi-turn use mean part of the suffix may also be written to cache: for one turn with a cached prefix of `P` tokens and a
 variable suffix of `S` tokens, input cost is
 `C = h * P * r_read + (1 - h) * P * r_write + S * r_in`, where `h` is the cache hit rate, `r_read` the cached-read
 price per token, `r_write` the cache-write price per token and `r_in` the ordinary input price. Memory design
@@ -68,13 +71,16 @@ controls `P` (what is stable), `S` (what is retrieved per turn) and `h` (whether
 - **Hybrid**: combine dense and sparse, commonly with reciprocal rank fusion (Cormack, Clarke and Buettcher 2009).
   Hybrid is widely reported to beat either alone on heterogeneous corpora (verify per corpus; it is not universal).
 - **Reranking**: a cross-encoder scores (query, candidate) pairs on a shortlist (e.g. monoBERT, Nogueira and Cho
-  2019; commercial rerankers). Usually the largest single quality gain after hybrid retrieval, at the cost of
-  latency per candidate.
+  2019; commercial rerankers). Practitioners often report it as a large quality gain after hybrid retrieval
+  (practitioner observation; unmeasured here), at the cost of latency per candidate.
 - **Late interaction**: ColBERT (Khattab and Zaharia 2020) keeps token-level embeddings and scores with MaxSim:
   better than single-vector on many tasks, larger index.
 - **Structured filtering first**: filter by tenant, member scope, validity time and kind *before* vector search.
   In pgvector this interacts with approximate indexes (HNSW/IVFFlat): a post-filter can return fewer than k rows;
-  pgvector added iterative index scans to address this (verify the version and setting names).
+  pgvector 0.8.0 added iterative index scans (`hnsw.iterative_scan`, `ivfflat.iterative_scan`) to address this.
+- **Query-side and iterative variants**: HyDE (Gao et al. 2022) embeds a hypothetical answer; Self-RAG (Asai et al. 2023)
+  trains the model to decide when to retrieve and to critique; IRCoT (Trivedi et al. 2023) interleaves retrieval with
+  chain-of-thought for multi-hop questions. Each adds model calls per query.
 - **Contextual retrieval**: prefixing each chunk with document-level context before embedding (Anthropic, 2024
   engineering post "Contextual Retrieval"; verify claims there).
 
@@ -101,7 +107,7 @@ authoritative tiers directly. Model writes are proposals (owner: "ContextProposa
 
 ## 5. Mem0
 
-**What it is.** An open-source memory layer (Mem0; paper by Chhikara et al. 2025, verify) that extracts candidate
+**What it is.** An open-source memory layer (Mem0; paper by Chhikara et al. 2025, arXiv 2504.19413) that extracts candidate
 memories from conversations with an LLM, compares them with existing memories and chooses an operation (add, update,
 delete, no-op); a graph variant stores entities and relations. Reports gains on the LOCOMO long-conversation
 benchmark over several baselines and lower token use than full-context (verify numbers and baselines in the paper).
@@ -112,7 +118,7 @@ write path. **Risk**: UPDATE and DELETE are destructive in the basic design; for
 
 ## 6. Zep / Graphiti: temporal knowledge graphs
 
-**What it is.** Zep (Rasmussen et al. 2025, "Zep: A Temporal Knowledge Graph Architecture for Agent Memory", verify)
+**What it is.** Zep (Rasmussen et al. 2025, "Zep: A Temporal Knowledge Graph Architecture for Agent Memory", arXiv 2501.13956)
 built on Graphiti: an episodic subgraph (raw messages), a semantic entity subgraph (entities and facts extracted
 from episodes) and a community subgraph (clusters). Edges are **bi-temporal**: when a fact was valid in the world
 (`valid_at`, `invalid_at`) and when the system learned or expired it. Contradicted facts are invalidated, not
@@ -146,7 +152,7 @@ for what the product already scores.
 
 ## 8. A-MEM and linked notes (Zettelkasten)
 
-**What it is.** A-MEM (Xu et al. 2025, "A-MEM: Agentic Memory for LLM Agents", verify) writes each memory as a note
+**What it is.** A-MEM (Xu et al. 2025, "A-MEM: Agentic Memory for LLM Agents", NeurIPS 2025) writes each memory as a note
 with keywords, tags and a context description, links it to related existing notes, and can update existing notes'
 attributes when new ones arrive ("memory evolution"). Inspired by the Zettelkasten method (Luhmann).
 
@@ -156,7 +162,8 @@ notes and explicit links; changes to existing notes are versioned.
 
 ## 9. Episodic buffers and scratchpads
 
-- **Scratchpads / chain-of-thought working space** within a turn (Nye et al. 2021 "Show your work").
+- **Scratchpads and chain-of-thought** within a turn (scratchpads: Nye et al. 2021 "Show your work"; chain-of-thought:
+  Wei et al. 2022).
 - **Structured state files**: a single file the agent rewrites to hold task state (progress, decisions, next
   action), outside the conversation. Widely used in coding agents (e.g. `CLAUDE.md`, `AGENTS.md`, `progress.md`,
   todo lists). Anthropic's guidance on long-running agents describes progress files and git history as the memory
@@ -167,15 +174,28 @@ notes and explicit links; changes to existing notes are versioned.
 (episodic, append-only) are this pattern. It is the most robust technique in this survey for coding agents because
 it is inspectable, versioned in git, and survives any model change.
 
+## 9b. Cognitive-architecture framing and prior forgetting models
+
+- **CoALA** (Sumers, Yao, Narasimhan and Griffiths 2023, "Cognitive Architectures for Language Agents", TMLR 2024): the
+  standard mapping of working, episodic, semantic and procedural memory onto LLM agents, with internal and external
+  actions; the bridge between the science file's A3 and this survey.
+- **MemoryBank** (Zhong et al. 2023; AAAI 2024): LLM long-term memory with an Ebbinghaus-style forgetting curve that
+  strengthens on recall; prior art for the design's activation ranking (and an example of recall-strengthening, which the
+  design rejects for confidence).
+- **Reflexion** (Shinn et al. 2023, NeurIPS): verbal lessons from failures stored and reused in later attempts; prior art
+  for the LESSON kind and the cerebellum corrections.
+
 ## 10. Key-value and vector stores; knowledge graphs
 
-- **KV**: exact lookup by key (session id, entity id). Fast, no semantic recall.
+- **KV**: exact lookup by key (session id, entity id). Fast, no semantic recall. (Not the model-side KV cache: its
+  compression, e.g. StreamingLLM attention sinks, Xiao et al. 2023, and H2O, Zhang et al. 2023, is not under KEYFLOWOS's
+  control with API models, apart from prompt caching.)
 - **Vector stores**: pgvector, dedicated vector DBs (Pinecone, Weaviate, Qdrant, Milvus). For KEYFLOWOS, pgvector in
   the same Postgres keeps transactions, tenancy filters and backups together; the owner's convergence note prefers
   "Postgres/pgvector/Redis/raw source systems/background cognition" (#106 comment 5981828884).
 - **Knowledge graphs**: entities and typed relations; GraphRAG (Edge et al. 2024, Microsoft) builds community
   summaries over an extracted graph for global ("what are the themes") questions; HippoRAG (Gutiérrez et al. 2024)
-  uses personalised PageRank over an extracted graph, explicitly inspired by hippocampal indexing (verify). Graph
+  uses personalised PageRank over an extracted graph, explicitly inspired by hippocampal indexing (NeurIPS 2024). Graph
   extraction by LLM is costly and error-prone; benefits are largest for multi-hop and global questions.
 
 **KEYFLOWOS bearing.** The product already *has* a graph: its relational schema (customers, invoices, bookings,
@@ -186,8 +206,8 @@ LLM-extracted graph. LLM-extracted relations are a later, benchmark-gated additi
 
 **What it is.** Voyager (Wang et al. 2023, Minecraft agent) stores successful programs as named, described skills in
 a library, retrieved by embedding of the description and composed into new skills; skills are added only after
-self-verification of success. Related: tool-making (LATM, Cai et al. 2023), Agent Workflow Memory (Wang et al.
-2024, verify).
+self-verification of success. Related: tool-making (LATM, Cai et al. 2023), Agent Workflow Memory (Z. Z. Wang et al.
+2024).
 
 **Established.** Storing *verified code* as procedural memory works well in environments with a clear success check.
 **KEYFLOWOS bearing.** The owner's promotion ladder ("Episode -> candidate pattern -> named protocol -> typed skill
@@ -202,8 +222,8 @@ in context by a short reference and summary; the agent re-reads only what it nee
 tool results is offered by some providers and harnesses (verify current Anthropic "context editing" and memory tool
 features in the docs).
 
-**Established.** One of the largest practical savings in agent sessions because tool output dominates context in
-coding work. Track 1: "Never paste logs. A suite result is one line".
+**Practitioner observation; unmeasured here.** Widely reported as one of the largest practical savings in agent
+sessions, because tool output tends to dominate context in coding work. Track 1: "Never paste logs. A suite result is one line".
 
 ## 13. Sub-agent isolation as a context firewall
 
@@ -214,7 +234,8 @@ the multiple).
 
 **Established.** Effective for context *quality* of the orchestrator; **raises total tokens** (each sub-agent re-reads
 shared material). It is a trade of total cost for orchestrator focus, not a saving. Second benefit: isolation limits
-the blast radius of injected content read by the sub-agent (it can only influence what the sub-agent returns).
+the blast radius of injected content read by the sub-agent, but only if its tools are read-only or restricted (then it
+can only influence what the sub-agent returns); a sub-agent with write or execute tools can act directly.
 
 **KEYFLOWOS bearing.** Track 1's first rule: "Delegate wide reads, take back conclusions."
 
@@ -227,6 +248,7 @@ the blast radius of injected content read by the sub-agent (it can only influenc
 | Stale memories | A memory that was true is served after it stopped being true. | Bi-temporal validity; supersession; re-verification against source; staleness flags in context. | Established engineering practice. |
 | Memory poisoning / indirect prompt injection | Untrusted content (an email, a web page, a document, a tool result) is stored and later retrieved into context where it acts as instructions, or corrupts facts. Greshake et al. (2023, "Not what you've signed up for") on indirect prompt injection; PoisonedRAG (Zou et al. 2024) and AgentPoison (Chen et al. 2024) on poisoning retrieval stores (verify). | Provenance and trust class on every item; never store untrusted text as instructions; render retrieved content as quoted data; quarantine; write gates; separation of model-proposed writes from authoritative ones; output-side checks on actions. | Established that attacks work; no complete defence is known. |
 | Privacy and tenancy leaks | Memory retrieved across tenants or across roles within a tenant; embedding stores missing the tenant filter; shared caches keyed without the reader. | Filter before rank; per-reader cache keys; the same permission check on the memory path as on the source record; tests per path. | The product has had real instances: SEC-W11MC-1/2/3, W1F-MEMORY-COPIES, FU-KEY-MEMORY-MONEY-SIGHT (`V1-PLAN-RECUT.json`). |
+| Embedding-model drift | Changing or upgrading the embedding model makes stored vectors incompatible ("same dimensions != same vector space", #153 Layer 4); mixed generations silently degrade search. | Record the representation (model, revision) per vector; re-embed fully on change; shadow index then cut over (#153 lifecycle). | Established engineering concern. |
 | Unbounded growth | Stores grow without limit; retrieval quality falls (more distractors); cost rises. | Consolidation, dedup, retention classes, pruning of derived items, archival tiers. | Established engineering concern. |
 | Self-reinforcement | Frequently retrieved items are ranked higher and retrieved more ("rich get richer"); model-written reflections cite each other. | Access counts never raise confidence; independent corroboration; diversity in retrieval. | Owner's rule: "repetition != verification"; general IR knowledge. |
 | Confabulation over missing memory | The model fills gaps plausibly. | Retrieval returns explicit "nothing found" markers; prompts require "not recorded"; evaluation with unanswerable questions. | Well documented for LLMs (hallucination literature). |

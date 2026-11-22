@@ -116,12 +116,14 @@ Salience decides consolidation priority and review priority, **never confidence*
   authority change). Configured per event type, reviewable.
 - `predErr` in [0,1]: the normalised difference between what the system predicted (a recorded prediction, a scheduled
   expectation, a baseline rate) and what happened. Zero when no prediction was recorded. The existing salience service's
-  `ratio = recent / baseline` is a prediction-error signal of this kind (R 4.2).
+  `ratio = recent / baseline` is a signal of this kind but is unbounded and asymmetric (drops fall in (0,1), rises above
+  1); it is mapped symmetrically, for example `predErr = min(1, |ln(ratio)| / L)` with a fitted scale `L` (R 4.2).
 - `novelty` in [0,1]: no similar episode for this entity in the window (the existing service uses 0.35 when the
   baseline is zero).
 - `userMarked` in {0,1}: the user asked to remember, or corrected KEY.
 - `tagCapture` in [0,1]: a high-salience episode for the same entity within the window `Δt_tag` raises related
-  low-salience episodes (behavioural tagging, Frey and Morris 1997; S C5).
+  low-salience episodes (behavioural tagging: Moncada and Viola 2007; Ballarini et al. 2009; in humans, retroactive
+  strengthening of related items, Dunsmoor et al. 2015; synaptic basis, Frey and Morris 1997; S C5).
 - Weights `w_*` are **not given values here**: they start from the existing service's constants where those exist and are
   fitted in the evaluation's ablation (E-ABL-2). No percentages are invented.
 
@@ -217,12 +219,16 @@ unprocessed episodes stay queued (no silent drop). Backlog size is a health metr
 
 ### 5.5 Decay and renormalisation
 - **Activation** (a derived ranking signal) decays with time since each access and grows with frequency of use, using
-  ACT-R base-level activation `A(i) = ln( Σ_j (t_now - t_j)^(-d) )` over past accesses `t_j` with decay `d` (S C1; ACT-R
-  models commonly use d = 0.5, to be fitted here).
+  ACT-R base-level activation `A(i) = β_kind + ln( Σ_j max(t_now - t_j, Δt_min)^(-d) )` over presentations `t_j`, where
+  `t_0` is the item's creation (so an item never read still has one presentation), `Δt_min` is a small minimum lag (no
+  division by zero), the time unit is fixed (changing it shifts every `A` by `-d * ln(c)`, which keeps the order but moves
+  items along the squashing function, so its offset is fitted with the unit fixed), and `β_kind` is a per-kind base level
+  (ACT-R's `β_i`) that keeps authoritative kinds (DECISION, POLICY, CONSTRAINT, accepted FACT) from being buried merely
+  because they are rarely read (S C1; ACT-R models commonly use d = 0.5; all constants fitted here, E-ABL-1).
 - **Confidence, authority and verification never decay with time** [OWNER G162 "Old information should not disappear
   merely because it is old"]. Staleness is a separate field set by the re-verification schedule and by domain volatility.
-- Periodic **renormalisation** rescales activation and association weights per scope so they do not saturate
-  (synaptic homeostasis analogue, S B6).
+- Periodic **renormalisation** rescales association weights (which use reinforces) per scope so they do not saturate
+  (synaptic homeostasis analogue, S B6). Activation needs none: it is log-scale and already decays.
 - **Pruning** removes associations and derived items never used in `T_prune` and never cited by a successful outcome,
   bounded per run, with a log of what was pruned (S E4).
 
@@ -265,7 +271,7 @@ influence accessible aggregates"; #123 "inaccessible source memory cannot leak t
 
 - `rel`: fused relevance from step 4, normalised to [0,1].
 - `σ(A(i))`: activation (5.5) squashed to [0,1]. Replaces the current `exp(-age/30d)` recency so that frequently used old
-  facts are not buried by age alone (R 4.2; #122's "hard recency cutoff hiding old authoritative facts", R 3.1).
+  facts, and through `β_kind` rarely read authoritative ones, are not buried by age alone (R 4.2; #122's "hard recency cutoff hiding old authoritative facts", R 3.1).
 - `taskMatch`: whether the item's kind and module fit the task type (a quote task wants pricing preferences, not
   booking history).
 - `sourcePrior`: the existing per-source weights (R 4.2) as a starting prior.
@@ -485,23 +491,23 @@ reference plan, unchanged, as later work; `OPEN-QUESTIONS-FOR-OWNER.md` Q6 asks 
 
 Disposition vocabulary from R 1.2: RETAINS / EXTENDS / REFINES / CONFLICTS / REJECTED / RESEARCH CANDIDATE.
 
-| Mechanism | Source | Disposition in this design | Evidence level (S/AI) |
+| Mechanism | Source | Disposition in this design | Evidence level: of the science (S/AI), and whether tested here |
 |---|---|---|---|
 | Context Genome substrate, scopes, kinds, authority != confidence, bitemporal | R 1.1, R 1.10 | RETAINS | engineering consensus (AI §6) |
 | One architecture, many projections | R 1.9 | RETAINS; reading "shared laws, separate stores" (Q1) | — |
-| Index-not-content episodic tier | S B4 | EXTENDS (R 2.1 "link to domain authority") | strong theory |
+| Index-not-content episodic tier | S B4 | EXTENDS (R 2.1 "link to domain authority") | moderate (theory); untested for this use |
 | Taint propagation of data class | PROP | EXTENDS D-238 to derived memory | standard information-flow control |
-| Salience and prediction-error gate | R 1.7 M6; S C5 | REFINES the existing salience service | strong |
-| Activation (ACT-R) instead of age decay | S C1 | REFINES current `exp(-age/30d)` | strong |
+| Salience and prediction-error gate | R 1.7 M6; S C5 | REFINES the existing salience service | strong (human data); untested for this use until E-ABL-2 |
+| Activation (ACT-R) instead of age decay | S C1 | REFINES current `exp(-age/30d)` | strong (human data); untested for this use until E-ABL-1 |
 | Regenerate-from-source consolidation, loss accounting | R 2.5 G163; S D1 | RETAINS / EXTENDS | widely observed (AI §1) |
 | Read-triggered re-verification | S B3 | REFINES reconsolidation (inverted) | contested in biology; sound in engineering |
-| Pattern separation via scoped dedup | R 1.7 M4; S C4 | RETAINS | strong theory |
+| Pattern separation via scoped dedup | R 1.7 M4; S C4 | RETAINS | strong (theory); untested for this use (E-SEP) |
 | Spreading activation, lateral inhibition, mycelial reinforcement | R 1.2, R 3.4 #126 | RESEARCH CANDIDATE (after MEM-0..4; ablation vs entity-graph completion) | moderate |
 | RMCC / ContextCell rank algebra | R 1.3 | RESEARCH CANDIDATE (owner already gated it) | theoretical |
 | Hyperdimensional / Hopfield / tensor networks | R 1.8 track 2, R 1.3 | RESEARCH CANDIDATE | theoretical for this use |
 | Receptor fabric and receptor gaps | R 1.6 | RESEARCH CANDIDATE (v1 out of scope) | — |
 | Immune-style defensive memory | R 1.2, R 1.7 M8; S F | EXTENDS (innate screens in v1; adaptive later) | analogy; attacks are real (AI §14) |
-| Procedure ladder with revaluation | R 1.11; S D2 | RETAINS / EXTENDS | strong |
+| Procedure ladder with revaluation | R 1.11; S D2 | RETAINS / EXTENDS | strong (human data); untested for this use |
 | Portable Vault, local-first | R 2.1-2.2 | RETAINS as later phase | — |
 | Model-written core memory (MemGPT self-edit) | AI §4 | REJECTED as authoritative; allowed as proposal | poisoning risk |
 | Third-party memory runtimes (Graphiti, Mem0, Letta) | R 1.1 | REJECTED as dependency (owner rule); patterns absorbed | — |
