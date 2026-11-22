@@ -156,7 +156,9 @@
  *         a pair a planted row holds answers 409 (D-137: the operator repairs).
  *         Its movementsWritten 0 records today's behaviour (the route writes
  *         no stock movement and names no actor), not a rule: that is the
- *         review's SEC-UPS-2 follow-up (the it.todo at the end).
+ *         review's SEC-UPS-2 follow-up, since ruled (D-139) and built by
+ *         W11-INV-SET-MOVEMENT (RC-45..RC-52): each set now writes its one
+ *         SET movement.
  *   RC-24 (review SEC-UPS-1) two requests creating the same new own pair at
  *         once (a double submit, a retry) both read no row (the pair lock
  *         locks nothing while no row exists) and both inserted: the loser's
@@ -892,9 +894,12 @@ async function plantRows(rows: Array<[id: string, productId: string, warehouseId
 }
 const removeRows = (ids: string[]) => db.$executeRaw`DELETE FROM inventory_stocks WHERE id = ANY(${ids}::text[])`;
 
-/** POST .../inventory as the route runs it: its handler (MarketplaceController.upsertInventory), with the body as sent. */
-const upsertByRoute = (businessId: string, body: Record<string, unknown>) =>
-  Promise.resolve().then(() => controller.upsertInventory(businessId, body));
+/**
+ * POST .../inventory as the route runs it: its handler (MarketplaceController.upsertInventory), with the body as sent
+ * and the member AuthGuard put on the request (W11-INV-SET-MOVEMENT: the set's movement names them).
+ */
+const upsertByRoute = (businessId: string, body: Record<string, unknown>, memberId: string = ID.owner) =>
+  Promise.resolve().then(() => controller.upsertInventory(businessId, body, { user: { id: memberId } }));
 /** An upsert's answer as the route gives it: 'committed' when it returned a stock row, else as routeAnswer reads it. */
 const upsertAnswer = (work: Promise<unknown>) => routeAnswer(work.then((row: any) => ({ success: typeof row?.id === 'string' })));
 
@@ -1839,12 +1844,12 @@ describe('W10-Z4-ROUTE-FIX routing beside the order and stock writers (real data
       await resetBusinessStock();
     }
     // At fb00af1c the first answered 500 (quantity '7' and reserved '' reached Prisma as text) and the third rewrote the
-    // planted row (read by its pair alone) and answered success. movementsWritten 0 is today's behaviour (POST
-    // .../inventory writes no stock movement and names no actor), pinned so a change shows, not endorsed: the review's
-    // SEC-UPS-2 follow-up (the it.todo below) decides it.
+    // planted row (read by its pair alone) and answered success. movementsWritten was pinned 0 here (no stock movement,
+    // no actor) until the owner ruled the SEC-UPS-2 follow-up (D-139; W11-INV-SET-MOVEMENT, RC-45..RC-52): a set that
+    // changes the quantity (10 to 7; a new row holding 3) writes its one ADJUSTMENT/SET movement; the refused one none.
     expect(outcomes).toEqual({
-      'own existing pair, quantity as the web form sends it': { answer: 'committed', stockRowsWritten: 1, movementsWritten: 0 },
-      'own new pair': { answer: 'committed', stockRowsWritten: 1, movementsWritten: 0 },
+      'own existing pair, quantity as the web form sends it': { answer: 'committed', stockRowsWritten: 1, movementsWritten: 1 },
+      'own new pair': { answer: 'committed', stockRowsWritten: 1, movementsWritten: 1 },
       "B's own pair, held by a planted row of this business": {
         answer: '409: A stock row for this product and warehouse is held by another record; ask an operator to repair it',
         stockRowsWritten: 0,
@@ -1899,9 +1904,11 @@ describe('W10-Z4-ROUTE-FIX routing beside the order and stock writers (real data
     }
     // Before this repair the second insert waited on the unique pair behind the first, then failed on it (P2002), which
     // createStockRowOrConflict answered as a planted row: ['committed', '409: A stock row ... held by another record'].
+    // W11-INV-SET-MOVEMENT (D-139): movementsWritten was 0. The request that creates the row holding 3 writes its one
+    // SET movement; the other (the same 3 again, or no quantity named) changes no quantity and writes none (RC-51).
     expect(outcomes).toEqual({
-      'the same body twice (a double submit, a retry)': { answer: ['committed', 'committed'], stockRowsWritten: 1, movementsWritten: 0 },
-      'two bodies sending different fields': { answer: ['committed', 'committed'], stockRowsWritten: 1, movementsWritten: 0 },
+      'the same body twice (a double submit, a retry)': { answer: ['committed', 'committed'], stockRowsWritten: 1, movementsWritten: 1 },
+      'two bodies sending different fields': { answer: ['committed', 'committed'], stockRowsWritten: 1, movementsWritten: 1 },
     });
     expect(rows, "one row of this business; the later request's fields applied over the earlier's row").toEqual({
       'the same body twice (a double submit, a retry)': [[ID.biz, 3, 0, null, null, 'TTD']],
@@ -1909,9 +1916,9 @@ describe('W10-Z4-ROUTE-FIX routing beside the order and stock writers (real data
     });
   });
 
-  it.todo(
-    "SEC-UPS-2 follow-up (W11-INV-UPSERT-SCOPE review; pre-existing, not this packet; needs an owner ruling): POST .../inventory sets quantity and reserved on the business's own row with no stock movement and no actor (the controller passes no req.user), unlike POST .../inventory/adjust (reasonCode, a note for MANUAL, createdBy); it accepts a quantity below reserved and clears reserved while routes hold reservations. To decide: the movement's type and reason code for a set (importInventoryExcel writes its own EXCEL_IMPORT movement after calling the upsert), whether a member may set reserved by hand, and whether a quantity below reserved is refused",
-  );
+  // The SEC-UPS-2 follow-up (a set wrote no stock movement and named no actor, took a quantity below reserved and let a
+  // member set reserved by hand) was ruled by the owner (D-139) and is live as RC-45..RC-51 (W11-INV-SET-MOVEMENT, the
+  // describe block at the end of this file).
   it.todo(
     'Z5SEC-2 follow-up (not this packet): an operator census and repair of inventory_stocks rows whose business_id is not the business of their product or warehouse (planted by the old cross-business purchase order receipt); production code refuses around them and never deletes or rewrites them',
   );
@@ -2760,7 +2767,9 @@ describe('W11-STOCK-ROW-RACE a stock row created at once by two writers of the s
         receiptMovements: 1,
         ledgerPostings: 1,
         receivedEvents: 1,
-        movementsWritten: 1,
+        // The receipt's one RECEIPT movement, and (W11-INV-SET-MOVEMENT, D-139; was 1) the upsert's SET movement for
+        // the 5 it created the row with.
+        movementsWritten: 2,
       });
     } finally {
       letGo();
@@ -3236,4 +3245,321 @@ describe('W11-ORDER-CANCEL-RELEASE a status edit that cancels an order takes the
       await drain();
     }
   }, 60_000);
+});
+
+/** W11-INV-SET-MOVEMENT: a member of the business other than its owner (an id as AuthGuard sets it; stock_movements.created_by has no foreign key). */
+const SET_MEMBER = `${P}member_set`;
+/** The suite's stock movements a call added, oldest first: [type, reasonCode, quantityChange, createdBy, referenceId, businessId, productId, warehouseId, note]. */
+async function movementsAddedBy(call: () => Promise<unknown>) {
+  const suiteMovements = (): Promise<any[]> =>
+    db.$queryRawUnsafe(
+      `SELECT id, type, reason_code, quantity_change, created_by, reference_id, business_id, product_id, warehouse_id, note FROM stock_movements
+        WHERE business_id LIKE ${sqlLikePrefix(P)} OR product_id LIKE ${sqlLikePrefix(P)} OR warehouse_id LIKE ${sqlLikePrefix(P)}
+        ORDER BY created_at, id`,
+    );
+  const before = new Set((await suiteMovements()).map((m) => m.id));
+  const answer = await call();
+  const added = (await suiteMovements())
+    .filter((m) => !before.has(m.id))
+    .map((m) => [m.type, m.reason_code, m.quantity_change, m.created_by, m.reference_id, m.business_id, m.product_id, m.warehouse_id, m.note]);
+  return { answer, added };
+}
+/** A stock row as stored: [quantity, reserved, reorderAt, costPerUnit], or null when the pair has no row. */
+const pairRow = async (productId: string, warehouseId: string) => {
+  const rows = await db.inventoryStock.findMany({ where: { productId, warehouseId } });
+  return rows.length === 0 ? null : rows.map((r: any) => [r.businessId, r.quantity, r.reserved, r.reorderAt, r.costPerUnit]);
+};
+/** An inventory import workbook in the template's columns (getInventoryExcelTemplate), one row per record. */
+async function inventoryWorkbook(rows: Array<Record<string, unknown>>): Promise<Buffer> {
+  const ExcelJS = (await import('exceljs')).default;
+  const headers = ['SKU', 'Product Name', 'Warehouse', 'Quantity On Hand', 'Reserved', 'Reorder Level', 'Cost Per Unit', 'Currency'];
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Inventory');
+  ws.addRow(headers);
+  for (const row of rows) ws.addRow(headers.map((h) => row[h] ?? null));
+  return Buffer.from((await wb.xlsx.writeBuffer()) as ArrayBuffer);
+}
+/** An upsert's answer with the stable code its refusal carries: '<status> <code>: <message>'. */
+const upsertAnswerWithCode = (work: Promise<unknown>) =>
+  work.then(
+    (row: any) => (typeof row?.id === 'string' ? 'committed' : row),
+    (err: any) =>
+      typeof err?.getStatus === 'function' ? `${err.getStatus()} ${(err.getResponse() as any)?.code}: ${err.message}` : `500: ${err?.code ?? err?.name}`,
+  );
+
+describe('W11-INV-SET-MOVEMENT a direct stock set writes one ADJUSTMENT movement with its actor and protects reserved (D-139; real database)', () => {
+  const A = { productId: ID.productA, warehouseId: ID.warehouse };
+  const NEW = { productId: ID.productU, warehouseId: ID.warehouse2 };
+  const setMovement = (change: number, pair: { productId: string; warehouseId: string }, member = SET_MEMBER) => [
+    'ADJUSTMENT',
+    'SET',
+    change,
+    member,
+    null,
+    ID.biz,
+    pair.productId,
+    pair.warehouseId,
+    null,
+  ];
+  afterEach(async () => {
+    await resetBusinessStock();
+  });
+
+  it('RC-45 (W11-INV-SET-MOVEMENT; D-139) POST .../inventory setting an existing row from 10 to 7, then to 12, writes one ADJUSTMENT movement each (reasonCode SET, the difference -3 then +5, createdBy the acting member, referenceId null, the row\'s business, product and warehouse), in the transaction of the stock write; a set to the stored quantity, and a body naming no quantity (reorderAt and cost only), write none', async () => {
+    await resetBusinessStock();
+    const seeded = await db.inventoryStock.findUnique({ where: { id: ID.stockA } });
+    const outcomes: Record<string, unknown> = {};
+    let row: unknown;
+    try {
+      outcomes['10 to 7'] = await movementsAddedBy(() => upsertAnswer(upsertByRoute(ID.biz, { ...A, quantity: '7' }, SET_MEMBER)));
+      outcomes['7 to 12, by the owner'] = await movementsAddedBy(() => upsertAnswer(upsertByRoute(ID.biz, { ...A, quantity: 12 }, ID.owner)));
+      outcomes['12 to 12'] = await movementsAddedBy(() => upsertAnswer(upsertByRoute(ID.biz, { ...A, quantity: 12 }, SET_MEMBER)));
+      outcomes['no quantity named'] = await movementsAddedBy(() => upsertAnswer(upsertByRoute(ID.biz, { ...A, reorderAt: 2, costPerUnit: 1.5 }, SET_MEMBER)));
+      row = await pairRow(A.productId, A.warehouseId);
+    } finally {
+      await db.inventoryStock.update({ where: { id: ID.stockA }, data: { reorderAt: seeded.reorderAt, costPerUnit: seeded.costPerUnit } });
+    }
+    // At 5c17e7b4 (the base) every one of these committed with no movement, and the controller passed no member.
+    expect(outcomes).toEqual({
+      '10 to 7': { answer: 'committed', added: [setMovement(-3, A)] },
+      '7 to 12, by the owner': { answer: 'committed', added: [setMovement(5, A, ID.owner)] },
+      '12 to 12': { answer: 'committed', added: [] },
+      'no quantity named': { answer: 'committed', added: [] },
+    });
+    expect(row, 'the row holds the last set and the fields sent').toEqual([[ID.biz, 12, 0, 2, 1.5]]);
+  });
+
+  it('RC-46 (W11-INV-SET-MOVEMENT; D-139) POST .../inventory for a pair with no row creates it and writes one ADJUSTMENT/SET movement for its whole quantity naming the member; a new row created with quantity 0, or with no quantity named, writes none', async () => {
+    const outcomes: Record<string, unknown> = {};
+    const rows: Record<string, unknown> = {};
+    for (const [name, body] of [
+      ['new row holding 3', { ...NEW, quantity: 3 }],
+      ['new row holding 0', { ...NEW, quantity: 0 }],
+      ['new row, no quantity named', { ...NEW, reorderAt: 1 }],
+    ] as Array<[string, Record<string, unknown>]>) {
+      await resetBusinessStock();
+      outcomes[name] = await movementsAddedBy(() => upsertAnswer(upsertByRoute(ID.biz, body, SET_MEMBER)));
+      rows[name] = await pairRow(NEW.productId, NEW.warehouseId);
+    }
+    expect(outcomes).toEqual({
+      'new row holding 3': { answer: 'committed', added: [setMovement(3, NEW)] },
+      'new row holding 0': { answer: 'committed', added: [] },
+      'new row, no quantity named': { answer: 'committed', added: [] },
+    });
+    expect(rows).toEqual({
+      'new row holding 3': [[ID.biz, 3, 0, null, null]],
+      'new row holding 0': [[ID.biz, 0, 0, null, null]],
+      'new row, no quantity named': [[ID.biz, 0, 0, 1, null]],
+    });
+  });
+
+  it('RC-47 (W11-INV-SET-MOVEMENT; D-139) POST .../inventory with a quantity below the row\'s reserved quantity (10 in stock, 4 reserved: 3, 0, and 3 as the web form\'s text) is refused with 400 and writes nothing (no stock row change, no movement); a quantity equal to reserved, and one above it, commit with their movement and leave reserved as it was', async () => {
+    const outcomes: Record<string, unknown> = {};
+    const rows: Record<string, unknown> = {};
+    for (const [name, quantity] of [
+      ['3 with 4 reserved', 3],
+      ["'3' with 4 reserved", '3'],
+      ['0 with 4 reserved', 0],
+      ['4 with 4 reserved', 4],
+      ['6 with 4 reserved', 6],
+    ] as Array<[string, unknown]>) {
+      await resetBusinessStock();
+      await setStock(ID.stockA, IN_STOCK, 4);
+      const writes = await answerAndWrites(() => movementsAddedBy(() => upsertAnswerWithCode(upsertByRoute(ID.biz, { ...A, quantity }, SET_MEMBER))));
+      outcomes[name] = { ...(writes.answer as object), stockRowsWritten: writes.stockRowsWritten };
+      rows[name] = await pairRow(A.productId, A.warehouseId);
+    }
+    const refused = {
+      answer: '400 QUANTITY_BELOW_RESERVED: Inventory quantity cannot be less than the quantity reserved for orders (4)',
+      added: [],
+      stockRowsWritten: 0,
+    };
+    // At 5c17e7b4 all five committed: a count below reserved left the row with more reserved than it holds.
+    expect(outcomes).toEqual({
+      '3 with 4 reserved': refused,
+      "'3' with 4 reserved": refused,
+      '0 with 4 reserved': refused,
+      '4 with 4 reserved': { answer: 'committed', added: [setMovement(-6, A)], stockRowsWritten: 1 },
+      '6 with 4 reserved': { answer: 'committed', added: [setMovement(-4, A)], stockRowsWritten: 1 },
+    });
+    expect(rows).toEqual({
+      '3 with 4 reserved': [[ID.biz, IN_STOCK, 4, null, null]],
+      "'3' with 4 reserved": [[ID.biz, IN_STOCK, 4, null, null]],
+      '0 with 4 reserved': [[ID.biz, IN_STOCK, 4, null, null]],
+      '4 with 4 reserved': [[ID.biz, 4, 4, null, null]],
+      '6 with 4 reserved': [[ID.biz, 6, 4, null, null]],
+    });
+  });
+
+  it("RC-48 (W11-INV-SET-MOVEMENT; D-139 reserved is not hand-editable) POST .../inventory with a body naming reserved is refused with 400 RESERVED_NOT_EDITABLE, writing nothing, when it differs from the stored value (0, 5 or '9' on a row with 4 reserved, with or without a quantity; 2 for a pair with no row); naming the stored value (4 or '4'; 0 for a new pair) is accepted and reserved stays what order reservations made it", async () => {
+    const outcomes: Record<string, unknown> = {};
+    const rows: Record<string, unknown> = {};
+    const probes: Array<[string, { productId: string; warehouseId: string }, Record<string, unknown>]> = [
+      ['existing row: reserved 0 (clearing it)', A, { reserved: 0 }],
+      ['existing row: reserved 5 with quantity 8', A, { reserved: 5, quantity: 8 }],
+      ["existing row: reserved '9' with quantity 20", A, { reserved: '9', quantity: 20 }],
+      ['existing row: reserved 4 (the stored value) with quantity 8', A, { reserved: 4, quantity: 8 }],
+      ["existing row: reserved '4' (the stored value) alone", A, { reserved: '4' }],
+      ['new pair: reserved 2 with quantity 5', NEW, { reserved: 2, quantity: 5 }],
+      ['new pair: reserved 0 with quantity 5', NEW, { reserved: 0, quantity: 5 }],
+    ];
+    for (const [name, pair, fields] of probes) {
+      await resetBusinessStock();
+      await setStock(ID.stockA, IN_STOCK, 4);
+      const writes = await answerAndWrites(() => movementsAddedBy(() => upsertAnswerWithCode(upsertByRoute(ID.biz, { ...pair, ...fields }, SET_MEMBER))));
+      outcomes[name] = { ...(writes.answer as object), stockRowsWritten: writes.stockRowsWritten };
+      rows[name] = await pairRow(pair.productId, pair.warehouseId);
+    }
+    const refused = {
+      answer: '400 RESERVED_NOT_EDITABLE: Inventory reserved cannot be set directly; only order reservations change it',
+      added: [],
+      stockRowsWritten: 0,
+    };
+    // At 5c17e7b4 all seven committed, the first clearing the 4 units routes held reserved.
+    expect(outcomes).toEqual({
+      'existing row: reserved 0 (clearing it)': refused,
+      'existing row: reserved 5 with quantity 8': refused,
+      "existing row: reserved '9' with quantity 20": refused,
+      'existing row: reserved 4 (the stored value) with quantity 8': { answer: 'committed', added: [setMovement(-2, A)], stockRowsWritten: 1 },
+      "existing row: reserved '4' (the stored value) alone": { answer: 'committed', added: [], stockRowsWritten: 0 },
+      'new pair: reserved 2 with quantity 5': refused,
+      'new pair: reserved 0 with quantity 5': { answer: 'committed', added: [setMovement(5, NEW)], stockRowsWritten: 1 },
+    });
+    expect(rows).toEqual({
+      'existing row: reserved 0 (clearing it)': [[ID.biz, IN_STOCK, 4, null, null]],
+      'existing row: reserved 5 with quantity 8': [[ID.biz, IN_STOCK, 4, null, null]],
+      "existing row: reserved '9' with quantity 20": [[ID.biz, IN_STOCK, 4, null, null]],
+      'existing row: reserved 4 (the stored value) with quantity 8': [[ID.biz, 8, 4, null, null]],
+      "existing row: reserved '4' (the stored value) alone": [[ID.biz, IN_STOCK, 4, null, null]],
+      'new pair: reserved 2 with quantity 5': null,
+      'new pair: reserved 0 with quantity 5': [[ID.biz, 5, 0, null, null]],
+    });
+  });
+
+  it("RC-49 (W11-INV-SET-MOVEMENT; D-139 the Excel import keeps its single EXCEL_IMPORT movement) POST .../inventory/import-excel writes exactly one ADJUSTMENT/EXCEL_IMPORT movement per imported row whose quantity changes (an existing row 10 to 6, a new pair holding 3) and no SET movement, none for a row left at its quantity, ignores the sheet's Reserved column, and skips a row whose quantity is below the row's reserved quantity with that row's error, writing nothing for it", async () => {
+    await resetBusinessStock();
+    await setStock(ID.stockMLo, IN_STOCK, 4);
+    const buffer = await inventoryWorkbook([
+      { 'Product Name': 'V18R Tracked A', Warehouse: 'V18R Warehouse', 'Quantity On Hand': 6, Reserved: 9 },
+      { 'Product Name': 'V18R Untracked', Warehouse: 'V18R Warehouse 2', 'Quantity On Hand': 3 },
+      { 'Product Name': 'V18R Tracked B', Warehouse: 'V18R Warehouse', 'Quantity On Hand': IN_STOCK },
+      { 'Product Name': 'V18R Two Warehouses', Warehouse: 'V18R Warehouse', 'Quantity On Hand': 2 },
+    ]);
+    const outcome = await movementsAddedBy(() => Promise.resolve().then(() => controller.importInventoryExcel(ID.biz, { buffer })));
+    const rows = {
+      A: await pairRow(ID.productA, ID.warehouse),
+      new: await pairRow(ID.productU, ID.warehouse2),
+      B: await pairRow(ID.productB, ID.warehouse),
+      'M, 4 reserved': await pairRow(ID.productM, ID.warehouse),
+    };
+    // At 5c17e7b4 the fourth row was imported too (2 in stock with 4 reserved, one more EXCEL_IMPORT movement of -8).
+    expect(outcome).toEqual({
+      answer: { imported: 3, skipped: 1, errors: ['Inventory quantity cannot be less than the quantity reserved for orders (4)'] },
+      added: [
+        ['ADJUSTMENT', 'EXCEL_IMPORT', -4, null, null, ID.biz, ID.productA, ID.warehouse, 'Excel import: V18R Tracked A (was 10)'],
+        ['ADJUSTMENT', 'EXCEL_IMPORT', 3, null, null, ID.biz, ID.productU, ID.warehouse2, 'Excel import: V18R Untracked (new)'],
+      ],
+    });
+    expect(rows).toEqual({
+      A: [[ID.biz, 6, 0, null, null]],
+      new: [[ID.biz, 3, 0, null, null]],
+      B: [[ID.biz, IN_STOCK, 0, null, null]],
+      'M, 4 reserved': [[ID.biz, IN_STOCK, 4, null, null]],
+    });
+  });
+
+  it('RC-50 (W11-INV-SET-MOVEMENT; D-139 under the stock lock order) two POST .../inventory sets of one existing row at once (to 7 and to 4, each waiting behind a held lock on the row before it reads it) both commit and write two SET movements, each the difference from the quantity its own transaction read, whose sum equals the final change', async () => {
+    await resetBusinessStock();
+    let interleave: any;
+    const outcome = await movementsAddedBy(async () => {
+      interleave = await behindHolder(
+        ID.stockA,
+        () => upsertAnswer(upsertByRoute(ID.biz, { ...A, quantity: 7 }, SET_MEMBER)),
+        () => upsertAnswer(upsertByRoute(ID.biz, { ...A, quantity: 4 }, ID.owner)),
+      );
+      return interleave.answers;
+    });
+    const [[, final]] = (await pairRow(A.productId, A.warehouseId)) as any[];
+    const changes = outcome.added.map((m: any[]) => [m[1], m[2], m[3]]);
+    expect([interleave.firstWaited, outcome.answer]).toEqual([true, ['committed', 'committed']]);
+    expect([4, 7], 'the row ends at one of the two sets').toContain(final);
+    // At 5c17e7b4: no movement at all.
+    expect(changes, 'two SET movements, in commit order, each from what its transaction read').toEqual(
+      final === 4
+        ? [
+            ['SET', -3, SET_MEMBER],
+            ['SET', -3, ID.owner],
+          ]
+        : [
+            ['SET', -6, ID.owner],
+            ['SET', 3, SET_MEMBER],
+          ],
+    );
+    expect(changes.reduce((sum: number, c: any[]) => sum + c[1], 0), 'the movements sum to the final change').toBe(final - IN_STOCK);
+  });
+
+  it("RC-51 (W11-INV-SET-MOVEMENT; D-139, W11-STOCK-ROW-RACE's retry) two POST .../inventory sets creating the same new pair at once (3 and 5, each held after reading no row until the other has read too; then 3 twice, a double submit) both commit on one row, and the movements written sum to the row's final quantity: the creator's whole quantity, then the difference the retried set made (none when it set the same quantity)", async () => {
+    const outcomes: Record<string, unknown> = {};
+    for (const [name, first, second] of [
+      ['3 and 5', 3, 5],
+      ['3 twice', 3, 3],
+    ] as Array<[string, number, number]>) {
+      await resetBusinessStock();
+      const reads = new Set<number>();
+      let allIn!: () => void;
+      const gathered = new Promise<void>((resolve) => (allIn = resolve));
+      const hook = hookStockWrites(async (no) => {
+        if (reads.has(no)) return;
+        reads.add(no);
+        if (reads.size >= 2) allIn();
+        await Promise.race([gathered, sleep(HOLD_WINDOW_MS)]);
+      }, 'findFirst');
+      let outcome: any;
+      try {
+        outcome = await movementsAddedBy(() =>
+          Promise.all([
+            upsertAnswer(upsertByRoute(ID.biz, { ...NEW, quantity: first }, SET_MEMBER)),
+            upsertAnswer(upsertByRoute(ID.biz, { ...NEW, quantity: second }, SET_MEMBER)),
+          ]),
+        );
+      } finally {
+        hook.restore();
+      }
+      const held = (await pairRow(NEW.productId, NEW.warehouseId)) as any[];
+      const changes: number[] = outcome.added.map((m: any[]) => m[2]);
+      outcomes[name] = {
+        answer: outcome.answer,
+        rows: held.length,
+        allSetByTheMember: outcome.added.every((m: any[]) => m[0] === 'ADJUSTMENT' && m[1] === 'SET' && m[3] === SET_MEMBER && m[4] === null),
+        movements: changes.length,
+        sumEqualsFinalQuantity: changes.reduce((sum, c) => sum + c, 0) === held[0][1],
+        finalIsOneOfTheSets: [first, second].includes(held[0][1]),
+      };
+    }
+    // At 5c17e7b4: no movement at all (movements 0, the sum 0 against a row holding 3 or 5).
+    expect(outcomes).toEqual({
+      '3 and 5': { answer: ['committed', 'committed'], rows: 1, allSetByTheMember: true, movements: 2, sumEqualsFinalQuantity: true, finalIsOneOfTheSets: true },
+      '3 twice': { answer: ['committed', 'committed'], rows: 1, allSetByTheMember: true, movements: 1, sumEqualsFinalQuantity: true, finalIsOneOfTheSets: true },
+    });
+  });
+
+  it("RC-52 (W11-INV-SET-MOVEMENT; D-139 the movement names its actor) a direct set that reaches the service with no acting member (the handler called with no authenticated user, which AuthGuard never lets through) is refused and writes nothing: no stock change is recorded without the member who made it", async () => {
+    await resetBusinessStock();
+    const outcomes: Record<string, unknown> = {};
+    for (const [name, call] of [
+      ['a request with no user', () => controller.upsertInventory(ID.biz, { ...A, quantity: 7 }, {})],
+      ['a user with an empty id', () => controller.upsertInventory(ID.biz, { ...A, quantity: 7 }, { user: { id: '' } })],
+      ['the service called with no member', () => market.upsertInventory(ID.biz, { ...A, quantity: 7 })],
+      ['a body claiming its own actor and import path', () => market.upsertInventory(ID.biz, { ...A, quantity: 7, actorId: ID.owner, createdBy: ID.owner, source: 'EXCEL_IMPORT', skipSetMovement: true })],
+    ] as Array<[string, () => Promise<unknown>]>) {
+      outcomes[name] = await answerAndWrites(() => upsertAnswer(Promise.resolve().then(call)));
+    }
+    const refused = { answer: '401: An inventory set needs the member making it', stockRowsWritten: 0, movementsWritten: 0 };
+    expect(outcomes).toEqual({
+      'a request with no user': refused,
+      'a user with an empty id': refused,
+      'the service called with no member': refused,
+      'a body claiming its own actor and import path': refused,
+    });
+  });
 });
