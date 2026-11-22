@@ -64,6 +64,8 @@ const ID = {
 const TOOL = 'contract_extract_clauses';
 /** The one body every refused document URL is answered with. */
 const REFUSAL = 'The document URL must be a public http or https address';
+/** A redirect chain past the hop limit: final, and true (acceptance review, correctness M2). */
+const TOO_MANY_REDIRECTS = 'The document URL redirected too many times';
 const NO_SOURCE = 'No source document available for this contract (upload one or link an asset/document)';
 const PUBLIC_HOST = 'docs.v99h-public.test';
 const PUBLIC_ADDRESS = '203.0.113.10';
@@ -75,6 +77,9 @@ let db: any;
 let prisma: any;
 let flow: any;
 let PinnedDispatcher: any;
+/** The real ContractClauseService the tool runs (CF-08 shortens its deadline). */
+let clauses: any;
+let ContractClauseServiceCtor: any;
 let makeDispatcher: () => any;
 let realFetch: typeof fetch;
 let server: http.Server;
@@ -101,6 +106,8 @@ const DNS: Record<string, (n: number) => Array<{ address: string; family: number
   'loop.v99h.test': () => [{ address: '127.0.0.1', family: 4 }],
   'v6loop.v99h.test': () => [{ address: '::1', family: 6 }],
   'mapped.v99h.test': () => [{ address: '::ffff:169.254.169.254', family: 6 }],
+  // IPv4-translated 169.254.169.254 (acceptance review, security MINOR-1).
+  'xlat.v99h.test': () => [{ address: '::ffff:0:a9fe:a9fe', family: 6 }],
   'ula.v99h.test': () => [{ address: 'fd00:ec2::254', family: 6 }],
   'mixed.v99h.test': () => [{ address: PUBLIC_ADDRESS, family: 4 }, { address: '192.168.1.10', family: 4 }],
   // The resolver could not answer now (review: correctness 1, security 1): no answer about the name.
@@ -113,6 +120,17 @@ const text = (body: string, status = 200, headers: Record<string, string> = {}) 
   new Response(body, { status, headers: { 'content-type': 'text/plain', ...headers } });
 const redirect = (location: string, status = 302) => new Response(null, { status, headers: { location } });
 const INTERNAL_SECRET = 'v99h internal secret';
+/** Every response body the service cancelled, by label (acceptance review, correctness M1). */
+const cancelled: string[] = [];
+/** A response whose body trickles (never ends on its own) and records being cancelled. */
+const trickling = (label: string, status: number, headers: Record<string, string> = {}) =>
+  new Response(
+    new ReadableStream({
+      start(controller) { controller.enqueue(new TextEncoder().encode('v99h partial ')); },
+      cancel() { cancelled.push(label); },
+    }),
+    { status, headers: { 'content-type': 'text/plain', ...headers } },
+  );
 
 async function cleanup() {
   for (const sql of [
@@ -150,6 +168,7 @@ function resetRecords() {
   for (const k of Object.keys(lookupCount)) delete lookupCount[k];
   hostAnswers = {};
   modelCalls = 0;
+  cancelled.length = 0;
 }
 
 beforeAll(async () => {
@@ -178,7 +197,8 @@ beforeAll(async () => {
       return { content: '{"clauses":[{"label":"Parties","present":true}]}' };
     },
   };
-  const clauses = new ContractClauseService(prisma, {
+  ContractClauseServiceCtor = ContractClauseService;
+  clauses = new ContractClauseService(prisma, {
     get: (token: unknown) => {
       if (token === DocumentParsingService) return parser;
       if (token === AiUsageService) return model;
@@ -245,7 +265,7 @@ beforeAll(async () => {
     const name = hostname.toLowerCase().replace(/\.$/, '');
     lookupCount[name] = (lookupCount[name] ?? 0) + 1;
     // A resolver that never answers (review: correctness 2): settles long after the fetch's 30 s deadline.
-    if (name === 'hang.v99h.test') return new Promise((resolve) => setTimeout(() => resolve([{ address: PUBLIC_ADDRESS, family: 4 }]), 45_000).unref());
+    if (name === 'hang.v99h.test') return new Promise((resolve) => setTimeout(() => resolve([{ address: PUBLIC_ADDRESS, family: 4 }]), 5_000).unref());
     const answer = DNS[name];
     if (!answer) throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${hostname}`), { code: 'ENOTFOUND' });
     return answer(lookupCount[name]);
@@ -403,9 +423,21 @@ describe('FU-CONTRACT-FETCH-OUTBOUND-GUARD (D-246): contract_extract_clauses fet
 
     // A redirect loop between public hosts: refused once the hop limit is passed, with the same body.
     hostAnswers = { [PUBLIC_HOST]: (_p, n) => redirect(`/loop/${n}`) };
-    expectRefused(await runTool({ contractId: ID.contract, url: `https://${PUBLIC_HOST}/contract.pdf` }), 'loop');
+    // Acceptance review correctness M2: its own final 400, which says what happened and names no host.
+    const loop = await runTool({ contractId: ID.contract, url: `https://${PUBLIC_HOST}/contract.pdf` });
+    expect(loop.ok).toBe(false);
+    expect(loop.error).toBeInstanceOf(BadRequestException);
+    expect((loop.error as HttpException).getResponse()).toEqual(new BadRequestException(TOO_MANY_REDIRECTS).getResponse());
+    expect((loop.error as HttpException).cause, 'final: no outage').toBeUndefined();
     // MAX_DOCUMENT_REDIRECTS (5) redirects followed, so six requests, then the refusal (review: correctness 3).
     expect(fetches).toHaveLength(6);
+    resetRecords();
+    hostAnswers = { [PUBLIC_HOST]: (_p, n) => redirect(`/loop/${n}`) };
+    const loopDispatcher = makeDispatcher();
+    expect(await loopDispatcher.dispatch({ businessId: ID.biz, toolName: TOOL, args: { contractId: ID.contract, url: `https://${PUBLIC_HOST}/contract.pdf` }, retryCount: 2 }))
+      .toMatchObject({ success: false, error: TOO_MANY_REDIRECTS });
+    expect(fetches, 'answered once, not retried').toHaveLength(6);
+    expect(loopDispatcher.getCircuitStatus(TOOL, ID.biz)).toEqual(CLOSED);
     resetRecords();
 
     // A redirect to another public host (and a relative one) is followed, each hop pinned to its own checked address.
@@ -515,9 +547,18 @@ describe('FU-CONTRACT-FETCH-OUTBOUND-GUARD (D-246): contract_extract_clauses fet
     expect(fetches).toEqual([]);
   });
 
-  it('CF-08 the 30 s deadline of a document fetch bounds resolving its host too', async () => {
+  it('CF-08 the deadline of a document fetch (30 s in production) bounds resolving its host too', async () => {
+    // Acceptance review correctness M4: the deadline is the service's documentFetchTimeoutMs, 30 s unless a
+    // test shortens it; this case runs it at 300 ms against a lookup that answers after 5 s.
+    expect(new ContractClauseServiceCtor(prisma, { get: () => undefined }).documentFetchTimeoutMs).toBe(30_000);
+    clauses.documentFetchTimeoutMs = 300;
     const started = Date.now();
-    const outcome = await runTool({ contractId: ID.contract, url: 'https://hang.v99h.test/contract.pdf' });
+    let outcome: any;
+    try {
+      outcome = await runTool({ contractId: ID.contract, url: 'https://hang.v99h.test/contract.pdf' });
+    } finally {
+      clauses.documentFetchTimeoutMs = 30_000;
+    }
     const elapsed = Date.now() - started;
     expect(outcome.ok).toBe(false);
     // The deadline's own failure (as a stalled fetch failed before the guard): no refusal, so the plan
@@ -525,7 +566,47 @@ describe('FU-CONTRACT-FETCH-OUTBOUND-GUARD (D-246): contract_extract_clauses fet
     // (executeToolDirectly hands on a failure that is no HttpException as a plain Error with its message.)
     expect(outcome.error).not.toBeInstanceOf(HttpException);
     expect((outcome.error as Error).message).toBe('The operation was aborted due to timeout');
-    expect(elapsed).toBeLessThan(40_000);
+    expect(elapsed).toBeGreaterThanOrEqual(250);
+    expect(elapsed, 'ended by the deadline, not by the lookup').toBeLessThan(3_000);
     expect(fetches).toEqual([]);
-  }, 50_000);
+  });
+
+  it('CF-09 an IPv4-translated address (::ffff:0:a.b.c.d) is refused on the contract path: literal, by name, after a redirect (acceptance review, security MINOR-1)', async () => {
+    for (const url of ['http://[::ffff:0:7f00:1]/contract.pdf', 'http://[::ffff:0:a9fe:a9fe]/latest/meta-data/', 'http://xlat.v99h.test/latest/meta-data/']) {
+      expectRefused(await runTool({ contractId: ID.contract, url }), url);
+      expect(fetches.map((f) => f.url), url).toEqual([]);
+      resetRecords();
+    }
+    hostAnswers = { [PUBLIC_HOST]: () => redirect('http://[::ffff:0:a9fe:a9fe]/latest/meta-data/') };
+    expectRefused(await runTool({ contractId: ID.contract, url: `https://${PUBLIC_HOST}/contract.pdf` }), 'redirect');
+    expect(fetches.map((f) => f.url)).toEqual([`https://${PUBLIC_HOST}/contract.pdf`]);
+  });
+
+  it('CF-10 a body the service does not read is cancelled (a non-ok answer on either fetch, a redirect), and every hop\'s dispatcher is closed, so a host that trickles holds no connection (acceptance review, correctness M1)', async () => {
+    const cases: Array<[string, Record<string, unknown>, number]> = [];
+    for (const status of [500, 503, 404, 403]) {
+      cases.push([`url ${status}`, { contractId: ID.contract, url: `https://${PUBLIC_HOST}/contract.pdf` }, status]);
+      cases.push([`asset ${status}`, { contractId: ID.contractAssetPublic }, status]);
+    }
+    for (const [label, args, status] of cases) {
+      hostAnswers = { [PUBLIC_HOST]: () => trickling(label, status) };
+      const started = Date.now();
+      const outcome = await runTool(args);
+      expect(outcome.ok, label).toBe(false);
+      expect(Date.now() - started, `${label}: settles without waiting on the body`).toBeLessThan(5_000);
+      expect(cancelled, label).toEqual([label]);
+      expect(fetches.map((f) => (f.init?.dispatcher as any)?.closed), label).toEqual([true]);
+      resetRecords();
+    }
+
+    // A redirect's body is cancelled and its hop's dispatcher closed, then the next hop's.
+    hostAnswers = {
+      [PUBLIC_HOST]: () => trickling('redirect', 302, { location: `https://${OTHER_PUBLIC_HOST}/final.pdf` }),
+      [OTHER_PUBLIC_HOST]: () => text('v99h public contract'),
+    };
+    const followed = await runTool({ contractId: ID.contract, url: `https://${PUBLIC_HOST}/contract.pdf` });
+    expect(followed.ok, JSON.stringify((followed as any).error?.message)).toBe(true);
+    expect(cancelled).toEqual(['redirect']);
+    expect(fetches.map((f) => (f.init?.dispatcher as any)?.closed)).toEqual([true, true]);
+  });
 });
