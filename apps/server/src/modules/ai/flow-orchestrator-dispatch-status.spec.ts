@@ -357,4 +357,79 @@ describe('FlowOrchestratorService.executeToolDirectly hands the plan queue a ref
       expect(dispatcher.getCircuitStatus('call_create_task', BIZ_A), failure.message).toMatchObject({ open: false, failures: 1 });
     }
   });
+
+  it('DS-08 W11-DISPATCH-REFUSAL-FINAL review SEC-1 (D-134): contract_extract_clauses fetches a document from a host the call names, and ContractClauseService reports a host that did not answer (5xx, 408, 429) as a 400; through the tool that stays a failure the plan queue retries and counts (a 503 with the same message), while a host that answered and refused (404, 403) is the final 400 it is', async () => {
+    const TOOL = 'contract_extract_clauses';
+    const args = { contractId: 'w10ds_contract', url: 'https://files.example.test/contract.pdf' };
+    /** The real executeToolAction case over a ContractClauseService that answers as the real one does for the host's status. */
+    const makeClauseFlow = (hostStatus: (call: number, businessId: string) => number) => {
+      let calls = 0;
+      const flow = Object.create(FlowOrchestratorService.prototype) as FlowOrchestratorService;
+      Object.assign(flow, {
+        logger: quiet,
+        governance: { getToolTier: () => 1 },
+        executionLog: { logToolExecution: async () => 'w10ds_log' },
+        businessGraph: { invalidateCache: () => undefined },
+        memberScopeRefusal: async () => null,
+        attributeExecutionLog: async () => undefined,
+        moduleRef: {
+          get: () => ({
+            extractClauses: async (businessId: string, contractId: string, opts: { url?: string }) => {
+              calls += 1;
+              expect([contractId, opts.url]).toEqual([args.contractId, args.url]);
+              const status = hostStatus(calls, businessId);
+              if (status !== 200) throw new BadRequestException(`Could not fetch document URL (${status})`);
+              return { clauses: [], source: 'url' };
+            },
+          }),
+        },
+      });
+      return { flow, calls: () => calls };
+    };
+
+    for (const status of [500, 502, 503, 504, 408, 429]) {
+      const message = `Could not fetch document URL (${status})`;
+      const err = await thrownByExecuteToolDirectly(makeClauseFlow(() => status).flow, TOOL, args);
+      expect(err, message).toBeInstanceOf(ServiceUnavailableException);
+      expect((err as Error).message, message).toBe(message);
+      expect(((err as Error).cause as HttpException | undefined)?.getStatus(), message).toBe(HttpStatus.BAD_REQUEST);
+
+      // A passing outage: the retry reads the document.
+      const once = makeClauseFlow((call) => (call === 1 ? status : 200));
+      expect(await makeDispatcher(once.flow).dispatcher.dispatch({ businessId: BIZ_A, toolName: TOOL, args, retryCount: 2 }), message).toMatchObject({ success: true, result: { source: 'url' } });
+      expect(once.calls(), message).toBe(2);
+
+      // A lasting one: tried three times, counted once, toward this business only.
+      const down = makeClauseFlow((_call, businessId) => (businessId === BIZ_A ? status : 200));
+      const { dispatcher } = makeDispatcher(down.flow);
+      expect(await dispatcher.dispatch({ businessId: BIZ_A, toolName: TOOL, args, retryCount: 2 }), message).toMatchObject({ success: false, error: message });
+      expect(down.calls(), message).toBe(3);
+      expect(dispatcher.getCircuitStatus(TOOL, BIZ_A), message).toMatchObject({ open: false, failures: 1 });
+      expect(dispatcher.getCircuitStatus(TOOL, BIZ_B), message).toEqual(CLOSED);
+
+      // The envelope the chat and a plan run over HTTP read carries the message it always had.
+      const envelope = await makeClauseFlow(() => status).flow.executeToolDirect(BIZ_A, TOOL, args, 'w10ds_plan', 'w10ds_step', { surface: 'PLAN_QUEUE', planId: 'w10ds_plan', planStepId: 'w10ds_step' });
+      expect(envelope, message).toMatchObject({ success: false, result: null, error: message, name: TOOL });
+    }
+
+    // The host answered and refused: asking again gets the same answer, so it is final and uncounted.
+    for (const status of [404, 403, 401, 410, 400]) {
+      const message = `Could not fetch document URL (${status})`;
+      const err = await thrownByExecuteToolDirectly(makeClauseFlow(() => status).flow, TOOL, args);
+      expect(err, message).toBeInstanceOf(BadRequestException);
+      expect((err as Error).message, message).toBe(message);
+
+      const refused = makeClauseFlow(() => status);
+      const { dispatcher } = makeDispatcher(refused.flow);
+      expect(await dispatcher.dispatch({ businessId: BIZ_A, toolName: TOOL, args, retryCount: 2 }), message).toMatchObject({ success: false, error: message });
+      expect(refused.calls(), message).toBe(1);
+      expect(dispatcher.getCircuitStatus(TOOL, BIZ_A), message).toEqual(CLOSED);
+    }
+
+    // Another 400 of the service's (no document to read) is not an outage: final.
+    const noDoc = makeClauseFlow(() => 200);
+    (noDoc.flow as unknown as { moduleRef: { get: () => unknown } }).moduleRef = { get: () => ({ extractClauses: async () => { throw new BadRequestException('No document is attached to this contract (503)'); } }) };
+    const noDocErr = await thrownByExecuteToolDirectly(noDoc.flow, TOOL, args);
+    expect(noDocErr).toBeInstanceOf(BadRequestException);
+  });
 });
