@@ -47,6 +47,8 @@ const ZERO = new D(0);
 /** A date with no time of day: YYYY-MM-DD. */
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const DAY_MS = 86_400_000;
+/** The last instant a stored timestamp can hold (the end of year 9999). */
+const MAX_INSTANT_MS = Date.UTC(9999, 11, 31, 23, 59, 59, 999);
 /** The zone of a business whose stored timezone is empty or is no zone (the schema default of Business.timezone). */
 export const DEFAULT_BUSINESS_TIMEZONE = 'America/Port_of_Spain';
 
@@ -102,14 +104,19 @@ function zoneOffsetMs(timeZone: string, instant: number): number {
 }
 
 /**
- * The instant day `day` (YYYY-MM-DD, on the calendar) starts in `timeZone`.
- * The offset is read at the answer itself (two passes), so a day that starts
- * on the other side of a daylight-saving change from midnight UTC is right.
+ * The instant the day whose midnight, read as UTC, is `utcMidnight` starts in
+ * `timeZone`. The offset is read at the answer itself (two passes), so a day
+ * that starts on the other side of a daylight-saving change from midnight UTC
+ * is right. Where the clocks go forward AT local midnight (Havana, Santiago,
+ * the Azores) no instant reads 00:00 that day: the second pass does not check
+ * out, and the day starts at the change itself, the later of the two passes
+ * (review F2: the earlier one cut the day before's last hour).
  */
 function startOfZonedDay(utcMidnight: number, timeZone: string): number {
-  let start = utcMidnight - zoneOffsetMs(timeZone, utcMidnight);
-  start = utcMidnight - zoneOffsetMs(timeZone, start);
-  return start;
+  const first = utcMidnight - zoneOffsetMs(timeZone, utcMidnight);
+  const second = utcMidnight - zoneOffsetMs(timeZone, first);
+  if (second + zoneOffsetMs(timeZone, second) === utcMidnight) return second;
+  return Math.max(first, second);
 }
 
 /**
@@ -252,7 +259,12 @@ export class LedgerBalanceService {
           where: { id: businessId },
           select: { timezone: true },
         });
-        date.lt = endOfZonedDay(opts.toDay, business?.timezone);
+        const end = endOfZonedDay(opts.toDay, business?.timezone);
+        // Review N-1: the end of the last days of year 9999 is an instant in
+        // year 10000, which the database cannot hold: nothing is dated past
+        // the last instant it can, so the range ends there.
+        if (end.getTime() > MAX_INSTANT_MS) date.lte = new Date(MAX_INSTANT_MS);
+        else date.lt = end;
       } else if (opts.to) {
         date.lte = opts.to;
       }
