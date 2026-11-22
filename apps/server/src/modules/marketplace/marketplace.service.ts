@@ -7,7 +7,7 @@ import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { lockStockRowPairsInOrder, STOCK_LOCK_TX_OPTIONS } from '../../core/inventory/stock-lock-order';
-import { createStockRowOrConflict, ownedProductsAndWarehouses, retryOnOwnStockRowRace } from '../../core/inventory/stock-ownership';
+import { createStockRowOrConflict, ownedProductsAndWarehouses, retryOnOwnStockRowRace, StockRowHeldConflict } from '../../core/inventory/stock-ownership';
 import { purchaseOrderLineRefusal, readPurchaseOrderLine } from '../../core/inventory/purchase-order-lines';
 import { StoreOrderService } from '../site/store-order.service';
 import { TransactionalEmailService, NotificationType } from '../notifications/transactional-email.service';
@@ -583,8 +583,12 @@ export class MarketplaceService {
         // not seen by the checks below, nor by the movement's difference. Such a row is locked now and read again
         // (one row, the pair's: no new edge in the stock lock order); a row gone meanwhile reads as none.
         if (existing && !locked.includes(existing.id)) {
-          await lockStockRowPairsInOrder(tx, businessId, [{ productId, warehouseId }]);
+          const lockedNow = await lockStockRowPairsInOrder(tx, businessId, [{ productId, warehouseId }]);
           existing = await tx.inventoryStock.findFirst({ where: { businessId, productId, warehouseId } });
+          // Round-3 review (SEC-R3-1, COR-R3-4): a row read now that this second statement did not lock either
+          // (the first deleted, another created meanwhile) is not acted on: the transaction rolls back (nothing is
+          // written yet) and is run again once, as a lost create is (retryOnOwnStockRowRace).
+          if (existing && !lockedNow.includes(existing.id)) throw new StockRowHeldConflict({ productId, warehouseId });
         }
 
         // D-139: checked against the row as read under its lock (a pair with no row reserves nothing).
