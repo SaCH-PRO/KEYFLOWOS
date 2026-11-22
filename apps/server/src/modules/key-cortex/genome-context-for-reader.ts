@@ -7,17 +7,19 @@
  *     gated genome signal routes read it);
  *   - no finance recommendation or suggestion (isFinanceRecommendation on its domain/category);
  *   - no opportunity: each carries an estimatedValue in money.
- * Everything else (DNA scores, stage, readiness, the other modules' rows) is unchanged. A revenue
+ *   - no finance or sales DNA score (D-233: dnaScoresForReader).
+ * Everything else (stage, readiness, the other modules' rows and scores) is unchanged. A revenue
  * reader gets the genome as loaded. The inputs are never changed (the context may be the cached one).
  */
-import { isFinanceRecommendation, isFinanceSignal } from '../business-genome/key-genome/genome-finance-scope';
+import { dnaScoresForReader, isFinanceRecommendation, isFinanceSignal } from '../business-genome/key-genome/genome-finance-scope';
 import type { GenomeEnrichedContext, GenomeRecommendation } from './key-cortex-reasoning.types';
 
 export function genomeContextForReader(context: GenomeEnrichedContext, readsRevenue: boolean): GenomeEnrichedContext {
   if (readsRevenue) return context;
   return {
     ...context,
-    signals: (context.signals ?? []).filter((s) => !isFinanceSignal({ sourceModule: s.module, section: s.section, domain: s.domain })),
+    dnaScores: dnaScoresForReader(context.dnaScores, false) as Record<string, number>,
+    signals: (context.signals ?? []).filter((s) => !isFinanceSignal({ sourceModule: s.module, section: s.section, domain: s.domain, signalType: s.type })),
     recommendations: genomeRecommendationsForReader(context.recommendations ?? [], false),
     opportunities: [],
   };
@@ -25,11 +27,20 @@ export function genomeContextForReader(context: GenomeEnrichedContext, readsReve
 
 export function genomeRecommendationsForReader<T extends Pick<GenomeRecommendation, 'category'>>(rows: T[], readsRevenue: boolean): T[] {
   if (readsRevenue) return rows;
-  return rows.filter((r) => !isFinanceRecommendation({ domain: r.category }));
+  // The ranking score weighs the financial value (GenomeRecommendationRanker): withheld (security review MINOR-7).
+  return rows
+    .filter((r) => !isFinanceRecommendation({ domain: r.category, title: (r as { title?: string }).title }))
+    .map((r) => {
+      if (!('genomeScore' in r)) return r;
+      const { genomeScore: _withheld, ...rest } = r as T & { genomeScore?: number };
+      return rest as T;
+    });
 }
 
 /** Proactive suggestions carry the recommendation's domain, or the signal's module, as their category. */
 export function genomeSuggestionsForReader<T extends { category?: string | null }>(rows: T[], readsRevenue: boolean): T[] {
   if (readsRevenue) return rows;
-  return rows.filter((s) => !isFinanceRecommendation({ domain: s.category }) && !isFinanceSignal({ sourceModule: s.category }));
+  // A suggestion's category is a recommendation domain or a signal's module (a label only), so it is
+  // judged as a domain; suggestions built from signals already come from the projected signals.
+  return rows.filter((s) => !isFinanceRecommendation({ domain: s.category }));
 }

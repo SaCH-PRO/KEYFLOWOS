@@ -8,6 +8,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
 import { CortexContextSnapshot } from './key-cortex.types';
+import { dnaScoresForReader } from '../business-genome/key-genome/genome-finance-scope';
 
 // ─────────────────────────────────────────────────────────────
 // Configuration
@@ -56,7 +57,9 @@ export function snapshotForViewer<T extends CortexContextSnapshot | null | undef
   // pendingInvoices (the count of unpaid invoices) is a receivables signal (D-100):
   // omitted, not zeroed, so the reader is not told there are none.
   const { pendingInvoices: _withheld, ...rest } = snapshot;
-  return { ...rest, keyMetrics } as unknown as T;
+  // D-233: the finance and sales DNA scores are finance (dnaScoresForReader fails closed on unknown keys).
+  const genomeDna = dnaScoresForReader(snapshot.genomeDna, false) as Record<string, number>;
+  return { ...rest, genomeDna, keyMetrics } as unknown as T;
 }
 
 @Injectable()
