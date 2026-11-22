@@ -26,16 +26,17 @@
  * (@/lib/client) and the toast are stubbed. Rows are shaped as GET
  * .../invoices serves them (own-tenant payment rows on each invoice).
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
-import React from "react";
-import { render, screen, cleanup, within } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import React, { useState } from "react";
+import { render, screen, cleanup, within, fireEvent, waitFor } from "@testing-library/react";
 import type { Invoice, PaymentRecord } from "@/lib/client";
 
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn(), message: vi.fn() }),
 }));
+const markInvoicePaid = vi.fn();
 vi.mock("@/lib/client", () => ({
-  markInvoicePaid: vi.fn(),
+  markInvoicePaid: (...args: unknown[]) => markInvoicePaid(...args),
   updateInvoiceStatus: vi.fn(),
   sendInvoiceReminder: vi.fn(),
 }));
@@ -75,6 +76,27 @@ function mount(invoices: Invoice[]) {
   render(<PaymentsTab invoices={invoices} currency="TTD" businessId="biz_v64" setInvoices={() => {}} />);
 }
 
+/** The tab over a real invoices state, as finance-pipeline.tsx holds it, so what setInvoices does is drawn. */
+function mountLive(invoices: Invoice[]) {
+  function Holder() {
+    const [list, setList] = useState<Invoice[]>(invoices);
+    return <PaymentsTab invoices={list} currency="TTD" businessId="biz_v64" setInvoices={setList} />;
+  }
+  render(<Holder />);
+}
+
+/** The count on the view filter's button for `label` (All / Received / Pending / Overdue). */
+function filterCount(label: string): string {
+  const buttons = screen.getAllByRole("button").filter((b) => b.children.length === 2 && b.children[1].textContent === label);
+  expect(buttons, `the ${label} filter`).toHaveLength(1);
+  return buttons[0].children[0].textContent ?? "";
+}
+
+function openFilter(label: string) {
+  const buttons = screen.getAllByRole("button").filter((b) => b.children.length === 2 && b.children[1].textContent === label);
+  fireEvent.click(buttons[0]);
+}
+
 /** The figure the money strip shows beside `label` ("—" when there is none). */
 function strip(label: "Received" | "This Month" | "Pending" | "Overdue"): string {
   // The strip draws <div><icon/><span>figure</span><span>label</span></div>; the view filter's buttons carry the same words.
@@ -95,6 +117,10 @@ function health(): HTMLElement {
 function expectNoNegativeFigure(card: HTMLElement) {
   expect(card.textContent ?? "").not.toMatch(/[-−–]\s*(TTD\s*)?\d|TTD\s*[-−–]/);
 }
+
+beforeEach(() => {
+  markInvoicePaid.mockReset();
+});
 
 afterEach(() => {
   cleanup();
@@ -193,5 +219,78 @@ describe("V1-64 Collections Health card on its own", () => {
     const card = health();
     expectNoNegativeFigure(card);
     expect(within(card).getByTestId("collections-to-collect").textContent).toBe("TTD 0");
+  });
+});
+
+/**
+ * Review repairs (RED-BEFORE = the packet head 7513180a).
+ */
+describe("V1-64 review repairs: the tab after Mark paid, PAID invoices with no payment row, one definition per label", () => {
+  it("CH-10 RED-BEFORE (COR-1): Mark paid on a part-paid invoice raises Received by what was settled, without a reload (the server answers no payment rows)", async () => {
+    // What PATCH .../paid answers: the invoice, PAID. Mark-paid records the remaining balance as a payment (D-05).
+    markInvoicePaid.mockResolvedValue({ data: { id: "late", status: "PAID", paidAt: NOW }, error: null });
+    mountLive([invoice("late", "PARTIALLY_PAID", 500, [payment("late", 200)], { dueDate: PAST_DUE })]);
+    expect(strip("Received")).toBe("TTD 200");
+    expect(strip("Overdue")).toBe("TTD 300");
+    fireEvent.click(screen.getAllByTitle("Mark Paid")[0]);
+    await waitFor(() => expect(strip("Received")).toBe("TTD 500"));
+    expect(strip("This Month")).toBe("TTD 500");
+    expect(strip("Overdue")).toBe("—");
+    expect(within(health()).getByTestId("collections-to-collect").textContent).toBe("TTD 0");
+    expect(health().textContent).toContain("Collections healthy");
+  });
+
+  it("CH-11 RED-BEFORE (COR-1): when the server answers the payment rows, they are the rows shown (no second count)", async () => {
+    markInvoicePaid.mockResolvedValue({
+      data: { id: "sent", status: "PAID", paidAt: NOW, payments: [payment("sent", 500)] },
+      error: null,
+    });
+    mountLive([invoice("sent", "SENT", 500, [], { dueDate: PAST_DUE })]);
+    expect(strip("Received")).toBe("—");
+    fireEvent.click(screen.getAllByTitle("Mark Paid")[0]);
+    await waitFor(() => expect(strip("Received")).toBe("TTD 500"));
+    expect(strip("Overdue")).toBe("—");
+  });
+
+  it("CH-12 RED-BEFORE (COR-2): a PAID invoice with no payment row still counts its total, on the day it was paid (a marketplace order's INV-ORD invoice)", () => {
+    mount([
+      invoice("ord", "PAID", 250, [], { paidAt: NOW }),
+      invoice("old", "PAID", 60, [], { paidAt: LAST_MONTH }),
+    ]);
+    expect(strip("Received")).toBe("TTD 310");
+    expect(strip("This Month")).toBe("TTD 250");
+    expect(within(health()).getByText("TTD 310 received")).toBeTruthy();
+  });
+
+  it("CH-13 RED-BEFORE (COR-5): one definition per label. A draft is not Pending in the strip, the filter count or the list", () => {
+    mount([
+      invoice("draft", "DRAFT", 999),
+      invoice("dep", "PARTIALLY_PAID", 13723, [payment("dep", 400)]),
+      invoice("late", "PARTIALLY_PAID", 500, [payment("late", 200)], { dueDate: PAST_DUE }),
+      invoice("settled", "SENT", 80, [payment("settled", 80)], { dueDate: PAST_DUE }),
+    ]);
+    expect(strip("Pending")).toBe("TTD 13.3k");
+    expect(filterCount("All")).toBe("4");
+    expect(filterCount("Pending")).toBe("1");
+    expect(filterCount("Overdue")).toBe("1");
+    openFilter("Pending");
+    expect(screen.queryByText("DEP")).not.toBeNull();
+    expect(screen.queryByText("DRAFT")).toBeNull();
+    // The Recovery Queue lists what is overdue and still owed, by what is left: not the settled SENT invoice, and 300 not 500.
+    const queue = screen.getByText("Recovery Queue").closest("div.rounded-xl") as HTMLElement;
+    expect(queue.textContent).toContain("LATE");
+    expect(queue.textContent).not.toContain("SETTLED");
+    expect(queue.textContent).toMatch(/300\.00/);
+    expect(queue.textContent).not.toMatch(/500\.00/);
+  });
+
+  it("CH-14 (COR-7): a month whose refunds outweigh its receipts shows no figure, never a negative (100 received last month, refunded now)", () => {
+    mount([
+      invoice("gone", "SENT", 100, [payment("gone", 100, "SUCCESSFUL", LAST_MONTH), payment("gone", -100, "REFUNDED")]),
+    ]);
+    expect(strip("Received")).toBe("—");
+    expect(strip("This Month")).toBe("—");
+    expect(strip("Pending")).toBe("TTD 100");
+    expectNoNegativeFigure(health());
   });
 });

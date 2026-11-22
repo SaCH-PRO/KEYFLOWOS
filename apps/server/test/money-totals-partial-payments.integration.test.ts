@@ -63,6 +63,34 @@
  *         balanceOfStoredRows(...).net over its invoices' own-tenant rows, and
  *         outstanding the sum of the credit-aware remaining of its open invoices
  *
+ * Review repairs (RED-BEFORE = the packet head 7513180a):
+ *   MT-10 RED-BEFORE (COR-2) a PAID invoice that carries no payment row of its
+ *         own still counts its total as received, on the day it was paid, as
+ *         on the base: the marketplace order writer (CommerceIntegrationService,
+ *         INV-ORD-...) still writes such invoices, and no owner ruling says
+ *         their money stops being revenue. 250 paid now + 60 paid last month
+ *         -> revenue 310, this month 250, last month 60 (the head: 0 / 0 / 0)
+ *   MT-11 RED-BEFORE (COR-8a, COR-6, COR-7) the months go by the date of each
+ *         payment row: 300 received last month and 150 now on an unpaid
+ *         invoice read 300 then 150, each month counting the one invoice money
+ *         came in on (the head counted PAID invoices: 0); 100 received last
+ *         month and refunded now reads +100 then -100, revenue 0: a month's
+ *         figure is the net cash of that month and may be below zero
+ *   MT-12 RED-BEFORE (COR-4) the Executive Summary states what is owed in each
+ *         currency under outstandingByCurrency (TTD 13,323 and USD 150 on the
+ *         TTD business); its headline stays the business currency's
+ *   MT-13 (SEC-2) no business named reads nothing: readInvoiceMoney answers no
+ *         rows and getCommerceStats is refused, for undefined, '' and a filter
+ *         object
+ *
+ * MT-03's equality with the A/R aging holds on books where both read the same
+ * invoices. The aging (ReceivablesService.getAging, outside this packet) reads
+ * SENT / PARTIALLY_PAID / OVERDUE / PENDING, adds every currency and does not
+ * net credit notes; the packet's rule reads SENT / OVERDUE / PARTIALLY_PAID /
+ * PARTIALLY_CREDITED in the business currency, credit-aware. On a book with a
+ * PARTIALLY_CREDITED invoice (bizK) or another currency's invoice (bizA after
+ * MT-05) the two differ by exactly those invoices (review COR-3, reported).
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PlanLimitGuard (plan answer stubbed), CommerceController,
  * CommerceAiController, CommerceService, CommerceStatsService,
@@ -105,6 +133,7 @@ const ID = {
   ownerR: `${P}ownerR`,
   ownerC: `${P}ownerC`,
   ownerK: `${P}ownerK`,
+  ownerM: `${P}ownerM`,
   ownerB: `${P}ownerB`,
   staffNone: `${P}staffNone`,
   staffRead: `${P}staffRead`,
@@ -112,11 +141,13 @@ const ID = {
   bizR: `${P}bizR`, // CASH, TTD: refunds, overdue, paid in full
   bizC: `${P}bizC`, // ACCRUAL, TTD: the ledger-sourced aging
   bizK: `${P}bizK`, // CASH, TTD: seeded credited and odd rows
+  bizM: `${P}bizM`, // CASH, TTD: seeded rows dated in other months; PAID invoices with no payment row
   bizB: `${P}bizB`, // another tenant
   contactA: `${P}contactA`,
   contactR: `${P}contactR`,
   contactC: `${P}contactC`,
   contactK: `${P}contactK`,
+  contactM: `${P}contactM`,
   contactB: `${P}contactB`,
 };
 
@@ -125,6 +156,7 @@ const OWNER_OF: Record<string, string> = {
   [ID.bizR]: ID.ownerR,
   [ID.bizC]: ID.ownerC,
   [ID.bizK]: ID.ownerK,
+  [ID.bizM]: ID.ownerM,
   [ID.bizB]: ID.ownerB,
 };
 
@@ -135,6 +167,8 @@ let reportsApp: any;
 let redis: any;
 let statsSvc: any;
 let coa: any;
+let readInvoiceMoney: any;
+let prismaClient: any;
 let balanceOfStoredRows: any;
 let creditAwareBalance: any;
 
@@ -248,6 +282,12 @@ function numbersIn(value: any, at = '$'): Array<[string, number]> {
 
 const cents = (n: number) => Math.round(n * 100);
 
+/** Noon on the 15th of the month before this one: never this month, always inside the six-month series. */
+const LAST_MONTH = () => {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth() - 1, 15, 12);
+};
+
 /** A seeded invoice row (bizK / bizB: states the routes do not produce on demand). */
 async function seedInvoice(key: string, biz: string, contactId: string, status: string, total: number, over: Record<string, unknown> = {}) {
   const id = `${P}${key}`;
@@ -310,7 +350,9 @@ beforeAll(async () => {
   const { CommerceAiController } = await import('../src/modules/commerce/commerce-ai.controller');
   const { CommerceAiService } = await import('../src/modules/commerce/commerce-ai.service');
   const { CommerceService } = await import('../src/modules/commerce/commerce.service');
-  const { CommerceStatsService } = await import('../src/modules/commerce/commerce-stats.service');
+  const statsMod = await import('../src/modules/commerce/commerce-stats.service');
+  const { CommerceStatsService } = statsMod;
+  readInvoiceMoney = statsMod.readInvoiceMoney;
   const workflowMod = await import('../src/modules/commerce/invoice-workflow.service');
   const { InvoiceWorkflowService } = workflowMod;
   balanceOfStoredRows = workflowMod.balanceOfStoredRows;
@@ -411,6 +453,7 @@ beforeAll(async () => {
   statsSvc = moduleRef.get(CommerceStatsService);
   coa = moduleRef.get(ChartOfAccountsSeederService);
   const prismaService = moduleRef.get(PrismaService);
+  prismaClient = prismaService.client;
 
   /** Identity attachment only. No guard is overridden. */
   const attachIdentity = (target: any) => target.use(async (req: any, _res: any, next: any) => {
@@ -476,6 +519,7 @@ beforeAll(async () => {
     [ID.ownerR, ID.bizR, 'CASH', ID.contactR, 'r'],
     [ID.ownerC, ID.bizC, 'ACCRUAL', ID.contactC, 'c'],
     [ID.ownerK, ID.bizK, 'CASH', ID.contactK, 'k'],
+    [ID.ownerM, ID.bizM, 'CASH', ID.contactM, 'm'],
     [ID.ownerB, ID.bizB, 'CASH', ID.contactB, 'b'],
   ] as const) {
     await db.user.create({ data: { id: user, email: `${P}owner-${tag}@test.local`, role: 'USER' } });
@@ -536,6 +580,21 @@ beforeAll(async () => {
   await seedPayment('k_noise', 'failed', ID.bizK, 90, 'FAILED');
   await seedInvoice('k_legacy', ID.bizK, ID.contactK, 'SENT', 40);
   await seedPayment('k_legacy', 'flipped', ID.bizK, 40, 'REFUNDED');
+
+  // bizM: rows dated in other months, and PAID invoices with no payment row.
+  //  m_rowless_now   250 PAID now, no payment row (as the marketplace order writer leaves INV-ORD-...)
+  //  m_rowless_last  60 PAID on the 15th of last month, no payment row
+  //  m_two           1,000 PARTIALLY_PAID: 300 received last month, 150 now
+  //  m_refund        100 SENT: 100 received last month, refunded now (a negative REFUNDED row, D-14)
+  const lastMonth = LAST_MONTH();
+  await seedInvoice('m_rowless_now', ID.bizM, ID.contactM, 'PAID', 250, { paidAt: new Date() });
+  await seedInvoice('m_rowless_last', ID.bizM, ID.contactM, 'PAID', 60, { paidAt: lastMonth });
+  await seedInvoice('m_two', ID.bizM, ID.contactM, 'PARTIALLY_PAID', 1000);
+  await seedPayment('m_two', 'p300', ID.bizM, 300, 'SUCCESSFUL', { createdAt: lastMonth });
+  await seedPayment('m_two', 'p150', ID.bizM, 150, 'SUCCESSFUL');
+  await seedInvoice('m_refund', ID.bizM, ID.contactM, 'SENT', 100);
+  await seedPayment('m_refund', 'p100', ID.bizM, 100, 'SUCCESSFUL', { createdAt: lastMonth });
+  await seedPayment('m_refund', 'r100', ID.bizM, -100, 'REFUNDED', { reference: `${P}pp_m_refund_p100` });
 }, 240_000);
 
 afterAll(async () => {
@@ -557,7 +616,7 @@ describe('V1-64 commerce stats count a deposit (BUG-020)', () => {
     // The money came in this month: the last of the six months carries it, and the six add up to the revenue.
     const months = s.revenueByMonth as Array<{ month: string; revenue: number }>;
     expect(months).toHaveLength(6);
-    expect(months[5].revenue).toBe(400);
+    expect(months[5]).toMatchObject({ revenue: 400, invoiceCount: 1 }); // one invoice money came in on
     expect(months.reduce((n, m) => n + cents(m.revenue), 0)).toBe(cents(400));
     // What the invoice is, is unchanged: one PARTIALLY_PAID invoice of 13,723 and one draft.
     expect(s.invoiceStatusBreakdown.PARTIALLY_PAID).toEqual({ count: 1, total: 13723 });
@@ -702,5 +761,71 @@ describe('V1-64 contract binding', () => {
       expect(cents(s.totalRevenue), `${biz} revenue`).toBe(net);
       expect(cents(s.outstandingAmount), `${biz} outstanding`).toBe(owed);
     }
+  });
+});
+
+describe('V1-64 review repairs', () => {
+  it('MT-10 RED-BEFORE (COR-2): a PAID invoice with no payment row of its own still counts its total, on the day it was paid (the head: 0)', async () => {
+    const s = await statsOf(ID.bizM);
+    // 250 (rowless, now) + 60 (rowless, last month) + 300 + 150 (m_two) + 100 - 100 (m_refund)
+    expect(s.totalRevenue).toBe(760);
+    expect(s.byCurrency.TTD).toMatchObject({ paidInvoiceCount: 2, averageInvoiceValue: 155 });
+    expect(s.invoiceStatusBreakdown.PAID).toEqual({ count: 2, total: 310 });
+    // A row of another tenant on a rowless PAID invoice changes nothing: it is not this invoice's money (D-75).
+    await seedPayment('m_rowless_now', 'foreign', ID.bizB, 9999, 'SUCCESSFUL');
+    expect((await statsOf(ID.bizM)).totalRevenue).toBe(760);
+    expect(JSON.stringify(await statsOf(ID.bizB))).not.toMatch(/9999/);
+    // Once the invoice carries a payment row of its own, the rows are the money: 250 total with 100 received reads 100.
+    await seedPayment('m_rowless_now', 'own100', ID.bizM, 100, 'SUCCESSFUL');
+    expect((await statsOf(ID.bizM)).totalRevenue).toBe(610);
+    await db.payment.delete({ where: { id: `${P}pay_m_rowless_now_own100` } });
+    expect((await statsOf(ID.bizM)).totalRevenue).toBe(760);
+  });
+
+  it('MT-11 RED-BEFORE (COR-8a, COR-6, COR-7): the months go by each payment row date; a month is its net cash, below zero when a refund outweighs it', async () => {
+    const s = await statsOf(ID.bizM);
+    const months = s.revenueByMonth as Array<{ month: string; revenue: number; invoiceCount: number }>;
+    // last month: 60 (rowless, paid then) + 300 (m_two) + 100 (m_refund) on three invoices
+    expect(months[4]).toMatchObject({ revenue: 460, invoiceCount: 3 });
+    // this month: 250 (rowless, paid now) + 150 (m_two) - 100 (m_refund's refund) on three invoices
+    expect(months[5]).toMatchObject({ revenue: 300, invoiceCount: 3 });
+    expect(s.monthlyPaid).toBe(300);
+    expect(months.reduce((n, m) => n + cents(m.revenue), 0)).toBe(cents(s.totalRevenue));
+    // The unpaid invoice owes what is left of it; the refunded one owes its whole total again.
+    expect(s.outstandingAmount).toBe(650);
+
+    // A month whose refunds outweigh its receipts is stated as it is: net cash out.
+    await db.payment.updateMany({ where: { invoiceId: { in: [INV.m_two, INV.m_rowless_now] }, businessId: ID.bizM }, data: { status: 'FAILED' } });
+    await db.invoice.update({ where: { id: INV.m_rowless_now }, data: { status: 'VOID', paidAt: null } });
+    const net = await statsOf(ID.bizM);
+    expect(net.monthlyPaid).toBe(-100);
+    expect(net.revenueByMonth[5]).toMatchObject({ revenue: -100, invoiceCount: 1 });
+    expect(net.revenueByMonth[4]).toMatchObject({ revenue: 160, invoiceCount: 2 });
+    expect(net.totalRevenue).toBe(60);
+  });
+
+  it('MT-12 RED-BEFORE (COR-4): the Executive Summary states what is owed per currency; the headline stays the business currency', async () => {
+    const r = await reportOf(ID.bizA);
+    expect(r.metrics.currency).toBe('TTD');
+    expect(r.metrics.revenue).toMatchObject({ outstanding: 13323, outstandingCount: 1, overdueCount: 0 });
+    expect(r.metrics.revenue.outstandingByCurrency).toEqual({
+      TTD: { outstanding: 13323, count: 1, overdueCount: 0 },
+      USD: { outstanding: 150, count: 1, overdueCount: 0 },
+    });
+    // A single-currency book states one bucket, equal to the headline.
+    const single = await reportOf(ID.bizR);
+    expect(single.metrics.revenue.outstandingByCurrency).toEqual({ TTD: { outstanding: 340, count: 2, overdueCount: 1 } });
+    // The other tenant's report carries none of it.
+    expect((await reportOf(ID.bizB)).metrics.revenue.outstandingByCurrency).toEqual({ TTD: { outstanding: 70, count: 1, overdueCount: 0 } });
+  });
+
+  it('MT-13 (SEC-2): no business named reads nothing, from any tenant', async () => {
+    for (const missing of [undefined, null, '', { not: '' }, { contains: 'v64e' }] as any[]) {
+      expect(await readInvoiceMoney(prismaClient, missing), JSON.stringify(missing)).toEqual([]);
+      expect(await readInvoiceMoney(prismaClient, missing, new Date(), { openOnly: true }), JSON.stringify(missing)).toEqual([]);
+      await expect(statsSvc.getCommerceStats(missing), JSON.stringify(missing)).rejects.toThrow(/business/i);
+    }
+    // Control: a named business reads its own rows.
+    expect((await readInvoiceMoney(prismaClient, ID.bizB)).map((m: any) => m.id)).toEqual([INV.b_sent]);
   });
 });

@@ -632,18 +632,6 @@ beforeAll(async () => {
         items: { create: [{ description: `V37A ${currency} work`, quantity: 1, unitPrice: total, total }] },
       },
     });
-    // V1-64 (SWP-INV-MONEY-TOTALS): stats revenue is the money received on the
-    // invoice's own payment rows, not the totals of PAID invoices. Fixture only,
-    // no assertion changed: a PAID invoice carries the payment that paid it (one
-    // SUCCESSFUL row of its total, dated its paidAt, as mark-paid writes it).
-    if (status === 'PAID') {
-      await db.payment.create({
-        data: {
-          id: `${id}_pay`, businessId: ID.bizTtd, invoiceId: id, amount: total, currency, status: 'SUCCESSFUL',
-          provider: 'cash', method: 'cash', providerPaymentId: `${id}_pay`, createdAt: paidAt ?? now,
-        },
-      });
-    }
   }
 }, 180_000);
 

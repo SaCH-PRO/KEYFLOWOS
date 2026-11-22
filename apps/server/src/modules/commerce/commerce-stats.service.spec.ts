@@ -20,14 +20,6 @@ import { CommerceStatsService } from './commerce-stats.service';
  *
  * The Prisma stub below answers the reads from an in-memory table and honours
  * their where/by/orderBy/take, so the service is free to shape its queries.
- *
- * V1-64 (SWP-INV-MONEY-TOTALS): revenue is the money received on the invoices'
- * own payment rows, not the totals of PAID invoices. Fixture only, no
- * assertion changed: a PAID invoice here now carries the payment that paid it
- * (one SUCCESSFUL row of its total, dated its paidAt, as mark-paid writes it),
- * and the stub answers the nested `payments` read and the credit-note read.
- * The deposit, refund and own-tenant cases are pinned on a real database in
- * test/money-totals-partial-payments.integration.test.ts.
  */
 
 type Inv = {
@@ -40,7 +32,6 @@ type Inv = {
   dueDate: Date | null;
   deletedAt: Date | null;
   items: Array<{ description: string; total: number }>;
-  payments: Array<{ businessId: string; amount: number; status: string; createdAt: Date }>;
 };
 
 const now = new Date();
@@ -50,7 +41,7 @@ const past = new Date(Date.now() - 10 * 24 * 3600 * 1000);
 const future = new Date(Date.now() + 10 * 24 * 3600 * 1000);
 
 function inv(id: string, currency: string, status: string, total: number, extra: Partial<Inv> = {}): Inv {
-  const row: Inv = {
+  return {
     id,
     businessId: 'biz',
     currency,
@@ -60,14 +51,8 @@ function inv(id: string, currency: string, status: string, total: number, extra:
     dueDate: null,
     deletedAt: null,
     items: [{ description: `${id} item`, total }],
-    payments: [],
     ...extra,
   };
-  // V1-64: a PAID invoice carries the payment that paid it, dated its paidAt.
-  if (status === 'PAID' && !extra.payments) {
-    row.payments = [{ businessId: 'biz', amount: total, status: 'SUCCESSFUL', createdAt: row.paidAt ?? thisMonth }];
-  }
-  return row;
 }
 
 function matches(row: any, where: any): boolean {
@@ -98,13 +83,7 @@ function matches(row: any, where: any): boolean {
 function pick(row: any, select: any) {
   if (!select) return { ...row };
   const out: any = {};
-  for (const k of Object.keys(select)) {
-    if (!select[k]) continue;
-    // V1-64: a nested to-many read ({ where, select }) is answered from the row's own list.
-    if (Array.isArray(row[k]) && typeof select[k] === 'object') {
-      out[k] = row[k].filter((child: any) => matches(child, select[k].where)).map((child: any) => pick(child, select[k].select));
-    } else out[k] = row[k];
-  }
+  for (const k of Object.keys(select)) if (select[k]) out[k] = row[k];
   return out;
 }
 
@@ -151,8 +130,6 @@ function makePrisma(invoices: Inv[], businessCurrency: string) {
     invoiceItem: {
       groupBy: async (args: any) => groupBy(items, args),
     },
-    // V1-64: no credit notes in this book.
-    creditNote: { groupBy: async () => [] },
     $queryRaw: async () => [1],
   };
   return { client } as any;

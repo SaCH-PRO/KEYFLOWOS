@@ -122,8 +122,9 @@ for (const [project, viewport] of Object.entries(JOURNEY_VIEWPORTS)) {
 
       await test.step("Sales: Revenue TTD 400, Owed TTD 13.3k", async () => {
         const text = await mainText(page, "/app/commerce");
-        expect.soft(text, "Sales shows the deposit as revenue").toMatch(/TTD 400\b/);
-        expect.soft(text, "Sales shows what is left as owed").toMatch(/TTD 13\.3k/);
+        // The KPI strip draws each label and then its figure; an invoice row's "TTD 400.00" is not the Revenue figure.
+        expect.soft(text, "Sales shows the deposit as revenue").toMatch(/revenue\s*TTD 400(?![.,\d])/i);
+        expect.soft(text, "Sales shows what is left as owed").toMatch(/owed\s*TTD 13\.3k/i);
       });
 
       await test.step("Sales > Collections: 400 received, 13.3k pending, no negative Collections Health", async () => {
