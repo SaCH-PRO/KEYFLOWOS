@@ -168,27 +168,76 @@ export const LOW_RUNWAY_LISTED_CURRENCY_LIMIT = 5;
  */
 export function lowRunwayDetail(runwayMonths: number, cashCurrency: string, other: OtherCurrencyCash[]): string {
   const runway = `~${runwayMonths.toFixed(1)} months at current burn`;
-  if (other.length === 0) return runway;
+  // CR-W10LR-1: the figures first, so a one-line (truncated) reader still shows them.
+  const note = notCountedCashNote(cashCurrency, other);
+  return note ? `${runway} ${note}` : runway;
+}
+
+/**
+ * SEC-W10LR-1 (D-107), shared by every runway alarm (W11-RUNWAY-LEDGER-CASH, D-135): which
+ * other-currency cash an alarm names. Only cash held under a three-letter code, at most
+ * LOW_RUNWAY_LISTED_CURRENCY_LIMIT of them (D-13's currencies first, then the others in code
+ * order; `listed` is in code order); `unlisted` counts the codes past the limit and `unlabelled`
+ * the amounts held under a label that is not a code. No label that is not a code is returned.
+ */
+function namedOtherCurrencyCash(other: OtherCurrencyCash[]): { listed: OtherCurrencyCash[]; unlisted: number; unlabelled: number } {
   const coded = other.filter((o) => LOW_RUNWAY_CURRENCY_CODE.test(o.currency));
   const named = new Set([
     ...coded.filter((o) => D13_CURRENCIES.includes(o.currency)),
     ...coded.filter((o) => !D13_CURRENCIES.includes(o.currency)),
   ].slice(0, LOW_RUNWAY_LISTED_CURRENCY_LIMIT));
+  return {
+    listed: coded.filter((o) => named.has(o)),
+    unlisted: coded.length - named.size,
+    unlabelled: other.length - coded.length,
+  };
+}
+
+/** The business currency is normalized Business.currency: named only when it is a code too. */
+function cashOnlyLabel(cashCurrency: string): string {
+  return LOW_RUNWAY_CURRENCY_CODE.test(cashCurrency) ? `${cashCurrency} cash` : 'business-currency cash';
+}
+
+/**
+ * W11-RUNWAY-LEDGER-CASH (owner ruling D-135, extending D-107): what a runway alarm computed from
+ * business-currency cash says of the cash held in other currencies, "(TTD cash only). Not counted:
+ * USD 550.00.", under SEC-W10LR-1's rules (namedOtherCurrencyCash); empty when there is none. The
+ * figures are in their own currency, never converted nor added. LOW_RUNWAY (lowRunwayDetail),
+ * FIN_CASHFLOW_RISK and the 'Protect cash runway' money move append it; each is served to revenue
+ * readers, who read that cash on the overview and safe-to-spend too.
+ */
+export function notCountedCashNote(cashCurrency: string, other: OtherCurrencyCash[]): string {
+  if (other.length === 0) return '';
+  const { listed, unlisted, unlabelled } = namedOtherCurrencyCash(other);
   const parts: string[] = [];
-  const listed = coded.filter((o) => named.has(o)).map((o) => `${o.currency} ${o.amount.toFixed(2)}`);
-  if (listed.length > 0) parts.push(listed.join(', '));
-  const unlisted = coded.length - named.size;
+  if (listed.length > 0) parts.push(listed.map((o) => `${o.currency} ${o.amount.toFixed(2)}`).join(', '));
   if (unlisted > 0) parts.push(`${unlisted} more ${unlisted === 1 ? 'currency' : 'currencies'} (not listed)`);
-  const unlabelled = other.length - coded.length;
   if (unlabelled > 0) {
     parts.push(unlabelled === 1
       ? '1 amount held under a label that is not a currency code (label not shown)'
       : `${unlabelled} amounts held under labels that are not currency codes (labels not shown)`);
   }
-  // The business currency is normalized Business.currency: named only when it is a code too.
-  const from = LOW_RUNWAY_CURRENCY_CODE.test(cashCurrency) ? `${cashCurrency} cash` : 'business-currency cash';
-  // CR-W10LR-1: the figures first, so a one-line (truncated) reader still shows them.
-  return `${runway} (${from} only). Not counted: ${parts.join('; ')}.`;
+  return `(${cashOnlyLabel(cashCurrency)} only). Not counted: ${parts.join('; ')}.`;
+}
+
+/**
+ * W11-RUNWAY-LEDGER-CASH (D-135): the other-currency cash a runway alarm names, as data (the
+ * FIN_CASHFLOW_RISK evidence): what notCountedCashNote lists, and how many amounts it only counts
+ * (codes past the limit and labels that are not codes). Never a label that is not a code.
+ */
+export function notCountedCash(other: OtherCurrencyCash[]): { listed: OtherCurrencyCash[]; notListed: number } {
+  const { listed, unlisted, unlabelled } = namedOtherCurrencyCash(other);
+  return { listed: listed.map((o) => ({ currency: o.currency, amount: o.amount })), notListed: unlisted + unlabelled };
+}
+
+/**
+ * W11-RUNWAY-LEDGER-CASH (D-107: "or saying it is withheld from this viewer"): the note for a copy
+ * of a runway alarm served outside revenue read (the command-spine mirror, read under operations
+ * read). It says cash is held in other currencies, never silent, with no figure and no label.
+ */
+export function otherCurrencyCashWithheldNote(cashCurrency: string, other: OtherCurrencyCash[]): string {
+  if (other.length === 0) return '';
+  return `(${cashOnlyLabel(cashCurrency)} only). Cash held in other currencies is not counted (amounts not shown here).`;
 }
 
 /**

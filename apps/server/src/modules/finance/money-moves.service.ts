@@ -1,5 +1,7 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { CashPositionService, otherCurrencyCash } from './cash-position.service';
+import { notCountedCashNote } from './finance-overview.service';
 
 export interface MoneyMoveDto {
   id: string;
@@ -23,9 +25,16 @@ export interface MoneyMoveDto {
 
 @Injectable()
 export class MoneyMovesService {
+  private readonly cashPosition: CashPositionService;
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-  ) {}
+    // W11-RUNWAY-LEDGER-CASH: optional as on FinanceOverviewService, so hand-built instances keep
+    // working; it needs only Prisma.
+    @Optional() @Inject(CashPositionService) cashPosition?: CashPositionService | null,
+  ) {
+    this.cashPosition = cashPosition ?? new CashPositionService(prisma);
+  }
 
   async generate(businessId: string): Promise<MoneyMoveDto[]> {
     const business = await this.prisma.client.business.findUnique({
@@ -125,11 +134,17 @@ export class MoneyMovesService {
     }
 
     // 4. Low cash runway
-    const cashAccounts = await this.prisma.client.financialAccount.findMany({
-      where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
-      select: { currentBalance: true },
-    });
-    const cashBalance = cashAccounts.reduce((s, a) => s + Number(a.currentBalance ?? 0), 0);
+    // W11-RUNWAY-LEDGER-CASH (owner ruling D-135, extending D-107; CP-21): the cash is the ledger
+    // cash position in the business currency (CashPositionService), never the sum of the accounts'
+    // currentBalance, an opening snapshot nothing posts to (CF-41) that was summed across
+    // currencies. Cash held in another currency is never added nor converted (D-13); the summary
+    // names it, unconverted, under the LOW_RUNWAY text's rules (notCountedCashNote: codes only,
+    // bounded, a label never echoed). The move is labelled with the cash position's currency. It is
+    // served to revenue readers (GET money-moves), who read that cash on the overview too. The
+    // burn's currency and window are W11-RUNWAY-BURN-CURRENCY.
+    const position = await this.cashPosition.getCashPosition(businessId);
+    const cashBalance = position.cashBalance;
+    const otherCashNote = notCountedCashNote(position.currency, otherCurrencyCash(position));
     const sixMonthExpenses = await this.prisma.client.expense.aggregate({
       where: { businessId, date: { gte: new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000) } },
       _sum: { amount: true },
@@ -141,9 +156,9 @@ export class MoneyMovesService {
         id: `mm-runway-${businessId}`,
         type: 'CUT_EXPENSE',
         title: 'Protect cash runway',
-        summary: `Runway is ~${runwayMonths.toFixed(1)} months. Reducing burn or increasing collections is urgent.`,
+        summary: `Runway is ~${runwayMonths.toFixed(1)} months. Reducing burn or increasing collections is urgent.${otherCashNote ? ` ${otherCashNote}` : ''}`,
         expectedImpact: cashBalance * 0.2,
-        currency,
+        currency: position.currency,
         confidence: 80,
         riskTier: 2,
         effort: 'MEDIUM',
