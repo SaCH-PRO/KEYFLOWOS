@@ -89,3 +89,65 @@ describe('V1-63 the account-code transaction: explicit limits, and a lock or poo
     expect((await statusOf(h2.service.update(BIZ, ACCOUNT.id, { code: '6106' }))).err).toBe(p2002);
   });
 });
+
+/**
+ * Delta-review closures (both reviews, minor): the cases above never ran the transaction body. These run it
+ * with a transaction client of their own, so a write inside it is visible to the assertion, and they pin that
+ * the P2028 is recognised by its code (as the seeder does, whichever @prisma/client copy raised it), that the
+ * original error is kept as the 503's cause, and that a 403 or 404 thrown inside the transaction passes through.
+ */
+function bodyHarness(opts: {
+  current?: { code: string | null; isActive: boolean; isSystem: boolean } | null;
+  after?: unknown;
+}) {
+  const txCreate = vi.fn(async () => ({ id: 'new' }));
+  const txUpdate = vi.fn(async () => ({ id: ACCOUNT.id }));
+  const tx = {
+    $executeRaw: vi.fn(async () => 1),
+    $queryRaw: vi.fn(async () => []),
+    chartOfAccount: {
+      create: txCreate,
+      update: txUpdate,
+      findFirst: vi.fn(async () => (opts.current === undefined ? ACCOUNT : opts.current)),
+    },
+  };
+  const h = harness(async (fn) => {
+    const out = await (fn as (t: unknown) => Promise<unknown>)(tx);
+    if (opts.after !== undefined) throw opts.after;
+    return out;
+  });
+  return { ...h, txCreate, txUpdate };
+}
+
+describe('V1-63 the account-code transaction body under a timeout (delta-review closures)', () => {
+  it('CUL-05: P2028 after the body ran (the transaction expired before commit) is still 503; the body was reached', async () => {
+    const h = bodyHarness({ after: prismaError('P2028') });
+    const a = await statusOf(h.service.create(BIZ, { name: 'Ads', type: 'EXPENSE', code: '6105' }));
+    const b = await statusOf(h.service.update(BIZ, ACCOUNT.id, { code: '6106' }));
+    expect([a.status, b.status]).toEqual([503, 503]);
+    expect(h.txCreate).toHaveBeenCalledTimes(1);
+    expect(h.txUpdate).toHaveBeenCalledTimes(1);
+    expect(h.create).not.toHaveBeenCalled();
+    expect(h.update).not.toHaveBeenCalled();
+  });
+
+  it('CUL-06: a P2028 recognised by its code alone (another @prisma/client copy) is 503, and the original is the cause', async () => {
+    const foreign = Object.assign(new Error('Transaction already closed'), { code: 'P2028' });
+    const h = harness(async () => { throw foreign; });
+    const { err, status } = await statusOf(h.service.create(BIZ, { name: 'Ads', type: 'EXPENSE', code: '6105' }));
+    expect(status).toBe(503);
+    expect((err as Error).cause).toBe(foreign);
+    const known = prismaError('P2028');
+    const h2 = harness(async () => { throw known; });
+    expect(((await statusOf(h2.service.update(BIZ, ACCOUNT.id, { code: '6106' }))).err as Error).cause).toBe(known);
+  });
+
+  it('CUL-07 control: a 404 or 403 thrown inside the transaction passes through, and nothing is written', async () => {
+    const gone = bodyHarness({ current: null });
+    expect((await statusOf(gone.service.update(BIZ, ACCOUNT.id, { code: '6106' }))).status).toBe(404);
+    const sys = bodyHarness({ current: { code: '6100', isActive: true, isSystem: true } });
+    expect((await statusOf(sys.service.update(BIZ, ACCOUNT.id, { isActive: true }))).status).toBe(403);
+    expect(gone.txUpdate).not.toHaveBeenCalled();
+    expect(sys.txUpdate).not.toHaveBeenCalled();
+  });
+});
