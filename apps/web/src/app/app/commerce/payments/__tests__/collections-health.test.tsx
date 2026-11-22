@@ -530,4 +530,31 @@ describe("V1-64 second pass (D-250): a PAID invoice counts its full total on the
     mount([invoice("over", "PAID", 100, [payment("over", 120)], { paidAt: NOW })]);
     expect(strip("Received")).toBe("TTD 120");
   });
+
+  it("CH-28 RED-BEFORE (review P2C-4): Mark paid on a refunded invoice, the re-read failing: Received is the total (the server recorded what was left)", async () => {
+    // 500 paid, 100 refunded: PARTIALLY_PAID, 100 owed. Mark-paid records the 100 and answers PAID; the re-read fails.
+    markInvoicePaid.mockResolvedValue({ data: { id: "ref", status: "PAID", paidAt: NOW }, error: null });
+    mountLive([invoice("ref", "PARTIALLY_PAID", 500, [payment("ref", 500), payment("ref", -100, "REFUNDED")])]);
+    expect(strip("Received")).toBe("TTD 400");
+    expect(strip("Pending")).toBe("TTD 100");
+    fireEvent.click(screen.getAllByTitle("Mark Paid")[0]);
+    await waitFor(() => expect(strip("Received")).toBe("TTD 500"));
+    expect(strip("Pending")).toBe("—");
+  });
+
+  it("CH-29 RED-BEFORE (review P2C-4): a fully refunded invoice marked paid again, the re-read failing: it is received once more", async () => {
+    markInvoicePaid.mockResolvedValue({ data: { id: "again", status: "PAID", paidAt: NOW }, error: null });
+    mountLive([invoice("again", "SENT", 100, [payment("again", 100), payment("again", -100, "REFUNDED")])]);
+    expect(strip("Received")).toBe("—");
+    fireEvent.click(screen.getAllByTitle("Mark Paid")[0]);
+    await waitFor(() => expect(strip("Received")).toBe("TTD 100"));
+    expect(filterCount("Received")).toBe("1");
+  });
+
+  it("CH-30 RED-BEFORE (review P2C-5): a legacy sub-cent total settled by its row gains nothing (9.405 paid by 9.40: no 'Other' cent)", () => {
+    mount([invoice("legacy", "PAID", 9.405, [payment("legacy", 9.4)], { paidAt: NOW })]);
+    const card = screen.getByText("Payment Methods").closest("div.rounded-xl") as HTMLElement;
+    expect(card.textContent).toContain("cashTTD 91 payment");
+    expect(card.textContent).not.toContain("Other");
+  });
 });

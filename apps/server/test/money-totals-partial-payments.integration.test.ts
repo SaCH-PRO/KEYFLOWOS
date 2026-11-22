@@ -1020,6 +1020,11 @@ describe('V1-64 second pass: owner rulings D-250 and D-251', () => {
     expect({ ledgerArBalance: a.ledgerArBalance, ledgerReconciled: a.ledgerReconciled, ledgerDelta: a.ledgerDelta }).toEqual({ ledgerArBalance: 160, ledgerReconciled: true, ledgerDelta: 0 });
     expect((await reportOf(ID.bizCr)).metrics.revenue).toMatchObject({ outstanding: 160, outstandingCount: 2 });
     expect((await statsOf(ID.bizCr)).outstandingAmount).toBe(160);
+    // The customer balance reads the same per-invoice ledger: the credit is off the credited invoices there too
+    // (review P2C-7; it read 170 and 80).
+    const balance = await request(financeApp.getHttpServer()).get(`/finance/businesses/${ID.bizCr}/customers/${ID.contactCr}/balance`).set(HEADER, ID.ownerCr);
+    expect(balance.status, JSON.stringify(balance.body)).toBe(200);
+    expect(Object.fromEntries(balance.body.invoices.map((i: any) => [i.id, i.outstanding]))).toEqual({ [INV.cr_part]: 120, [INV.cr_full]: 0, [INV.cr_sent]: 40 });
 
     // D-13: a USD invoice on the same book is its own bucket; the TTD figures and the TTD ledger balance do not move.
     await issuedInvoice('cr_usd', ID.bizCr, ID.contactCr, 300, { currency: 'USD' });
@@ -1079,7 +1084,10 @@ describe('V1-64 second pass: owner rulings D-250 and D-251', () => {
     const reader = await aging(ID.bizA, ID.staffRead);
     expect(reader.status, JSON.stringify(reader.body)).toBe(200);
     expect({ ...reader.body, asOf: null }).toEqual({ ...owner, asOf: null });
-    // The foreign 5,000 row on bizA's invoice (MT-06) and the foreign notes move nothing; bizB reads its own 70 alone.
+    // Another tenant's payment row on bizA's invoice moves nothing (seeded here, so the case stands alone on this
+    // point; the foreign notes are MT-08's and MT-16's); bizB reads its own 70 alone.
+    await seedPayment('a_deposit', 'foreign18', ID.bizB, 777, 'SUCCESSFUL');
+    expect((await agingOf(ID.bizA)).byCurrency.TTD.totalOutstanding).toBe(13323);
     expect(owner.byCurrency.TTD.totalOutstanding).toBe(13323);
     const b = await agingOf(ID.bizB);
     expect({ totalOutstanding: b.totalOutstanding, customers: b.customers.map((c: any) => [c.contactId, c.total]) }).toEqual({ totalOutstanding: 70, customers: [[ID.contactB, 70]] });
@@ -1092,5 +1100,54 @@ describe('V1-64 second pass: owner rulings D-250 and D-251', () => {
     const after = [(await agingOf(ID.bizP)).totalOutstanding, (await reportOf(ID.bizP)).metrics.revenue.outstanding, (await statsOf(ID.bizP)).outstandingAmount];
     expect(after).toEqual(before);
     expect(new Set(after).size).toBe(1);
+  });
+
+  it('MT-20 RED-BEFORE (second-pass reviews P2C-5, P2C-1, P2S-2): no phantom cent on a legacy sub-cent total; the ACCRUAL ledger basis, pinned; the ledger mapping is tenant-bound', async () => {
+    // P2C-5: a legacy total that is not a whole cent (8.36 + 12.5% stored as 9.405) settled by the 9.40 the base
+    // recorded: the rows settle it, so nothing is unrecorded (the pass head added 0.01).
+    const before = cents((await statsOf(ID.bizP)).totalRevenue);
+    await seedInvoice('p_subcent', ID.bizP, ID.contactP, 'PAID', 9.405, { paidAt: new Date() });
+    await seedPayment('p_subcent', 'p940', ID.bizP, 9.4, 'SUCCESSFUL');
+    expect(cents((await statsOf(ID.bizP)).totalRevenue) - before).toBe(940);
+
+    // P2C-1 (open for a ruling; the basis is FIN2's, unchanged): on ACCRUAL the AR ledger is the source per
+    // invoice. A payment row that was never posted leaves the ledger owing the whole invoice, while the Executive
+    // Summary and the stats, which read the rows, state what the rows leave. Equality holds where the two agree.
+    const a0 = (await agingOf(ID.bizCr)).totalOutstanding;
+    const r0 = (await reportOf(ID.bizCr)).metrics.revenue.outstanding;
+    await issuedInvoice('cr_drift', ID.bizCr, ID.contactCr, 100);
+    await seedPayment('cr_drift', 'unposted40', ID.bizCr, 40, 'SUCCESSFUL');
+    const drift = await agingOf(ID.bizCr);
+    expect(cents(drift.totalOutstanding) - cents(a0), 'the aging: the ledger still owes the whole 100').toBe(cents(100));
+    expect(cents((await reportOf(ID.bizCr)).metrics.revenue.outstanding) - cents(r0), 'the summary: the rows leave 60').toBe(cents(60));
+    expect(drift.ledgerReconciled).toBe(true);
+
+    // P2S-2: the ledger's credit-note entries reach an invoice only through this business's own note rows.
+    //  (a) a posting in bizCr's ledger sourced by a note that carries bizB's id and names cr_drift: not this
+    //      invoice's credit, so it stays 100 (it would read 75 if the note were mapped).
+    //  (b) a bizCr note naming bizB's invoice: bizB's aging does not move.
+    const ar = await coa.getBySystemKey(ID.bizCr, 'ACCOUNTS_RECEIVABLE');
+    const revenue = await coa.getBySystemKey(ID.bizCr, 'REVENUE');
+    await db.creditNote.create({ data: { id: `${P}cn_adv_foreign`, businessId: ID.bizB, invoiceId: INV.cr_drift, creditNoteNumber: `${P}CN-adv1`, status: 'APPLIED', amount: 25, appliedAt: new Date() } });
+    const now = new Date(Date.now() - 1000);
+    await db.financialTransaction.create({
+      data: {
+        id: `${P}txn_adv`, businessId: ID.bizCr, type: 'REVERSAL', status: 'POSTED', date: now, amount: 25, currency: 'TTD',
+        sourceType: 'CREDIT_NOTE', sourceId: `${P}cn_adv_foreign`, description: 'v64e adversarial',
+        entries: {
+          create: [
+            { id: `${P}le_adv_1`, businessId: ID.bizCr, accountId: ar.id, credit: 25, currency: 'TTD', date: now },
+            { id: `${P}le_adv_2`, businessId: ID.bizCr, accountId: (revenue ?? ar).id, debit: 25, currency: 'TTD', date: now },
+          ],
+        },
+      },
+    });
+    const adv = await agingOf(ID.bizCr);
+    expect(cents(adv.totalOutstanding), 'a foreign-tenant note is no credit on this invoice').toBe(cents(drift.totalOutstanding));
+    await db.creditNote.create({ data: { id: `${P}cn_adv_own`, businessId: ID.bizCr, invoiceId: INV.b_sent, creditNoteNumber: `${P}CN-adv2`, status: 'APPLIED', amount: 30, appliedAt: new Date() } });
+    const b = await agingOf(ID.bizB);
+    expect({ totalOutstanding: b.totalOutstanding, customers: b.customers.map((c: any) => [c.contactId, c.total]) }).toEqual({ totalOutstanding: 70, customers: [[ID.contactB, 70]] });
+    expect((await reportOf(ID.bizB)).metrics.revenue.outstanding).toBe(70);
+    expect(cents((await agingOf(ID.bizCr)).totalOutstanding)).toBe(cents(drift.totalOutstanding));
   });
 });
