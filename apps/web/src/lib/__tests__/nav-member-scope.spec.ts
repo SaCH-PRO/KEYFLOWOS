@@ -188,11 +188,21 @@ describe("NAV-A1: the hubs a member is shown", () => {
 /* ───────────────────────── every entry's module, cited (acceptance M1) ───────────────────────── */
 
 /**
- * The module(s) each nav entry needs, and why. A citation is a server handler (apps/server/src path:line of the
- * @Get its page's main read calls), checked below to carry @RequireModuleScope of that module; "hub:<id>" for an
- * entry whose page's reads carry no module scope, so it takes its hub's (it is shown only inside a hub the member
- * may open); "D-179" for an operations or analytics surface the legacyaccess ruling keeps out of a menu without the
- * entry, even where its page's reads are not scoped. An entry with neither, outside a hub, needs no module.
+ * The module(s) each nav entry needs, and why. Every row is a claim the test below checks; citations (paths under
+ * apps/server/src):
+ *   "<path>:<line>"                    a @Get its page's main read calls, whose decorator block carries
+ *                                      @RequireModuleScope of modules the row names (and no others);
+ *   "unscoped:<path>:<line>"           a @Get its page's main read calls that carries no module scope;
+ *   "hub:<id>"                         the hub that holds the entry, whose module the row then names;
+ *   "data:<path>:<line>:<module> <id>" server code (identifier <id> on that line) showing an unscoped read answers
+ *                                      that module's data; the row must name the module;
+ *   "service-check:<path>:<line>"      a @Get that filters by the member's levels itself;
+ *   "D-<n>:<module> ..."               an owner ruling justifying that module (D-<n> alone: beside the unscoped read
+ *                                      of a row with no module);
+ *   "tracked:<path>:<line>:<module> <id> <FU-packet> ..."  a pre-existing server exposure (an unscoped read answering
+ *                                      that module's data) tracked in a follow-up server packet, with the nav left as
+ *                                      it is by the orchestrator's decision of 2026-11-22 (D-100). It justifies nothing.
+ * Each module a row names must be justified; a row with no module cites the unscoped read it rests on.
  */
 const SRV = (f: string, line: number) => `modules/${f}:${line}`;
 const MODULE_TABLE: Record<string, { modules: string[]; cite: string[] }> = {
@@ -202,7 +212,7 @@ const MODULE_TABLE: Record<string, { modules: string[]; cite: string[] }> = {
   "/app/commerce": { modules: ["revenue"], cite: [SRV("commerce/commerce.controller.ts", 706)] },
   "/app/schedule/calendar": { modules: ["bookings"], cite: [SRV("calendar/calendar.controller.ts", 256)] },
   "/app/financial-flow": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 359)] },
-  "/app/store": { modules: ["storefront"], cite: ["unscoped:modules/bookings/bookings.controller.ts:358", "D-150:storefront hub rule: no read route checks storefront; the hub follows the scope (J5)"] },
+  "/app/store": { modules: ["storefront"], cite: ["unscoped:modules/bookings/bookings.controller.ts:358", "D-150:storefront hub rule: no read route checks storefront; the hub follows the scope (J5)", "tracked:modules/site/site.service.ts:310:revenue revenueInPeriod FU-SITE-ANALYTICS-REVENUE-SCOPE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100"] },
   "/app/settings/business": { modules: ["settings"], cite: ["unscoped:modules/identity/identity.controller.ts:858", "D-150:settings hub rule (J5); its writes need settings"] },
   // Customers
   "/app/crm/deals": { modules: ["crm"], cite: [SRV("crm/crm-deals.controller.ts", 216)] },
@@ -216,14 +226,14 @@ const MODULE_TABLE: Record<string, { modules: string[]; cite: string[] }> = {
   "/app/crm/duplicates": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", 1558)] },
   "/app/crm/network": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", 338)] },
   "/app/crm/dashboard": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", 493)] },
-  "/app/sales-team": { modules: ["crm", "revenue"], cite: ["unscoped:modules/conversion/conversion.controller.ts:67", "data:modules/conversion/sales-team.service.ts:80:revenue revenueAttributed, the PAID invoice totals per rep (security review: the route itself carries no scope)", "hub:customers"] },
+  "/app/sales-team": { modules: ["crm", "revenue"], cite: ["unscoped:modules/conversion/conversion.controller.ts:67", "data:modules/conversion/sales-team.service.ts:80:revenue revenueAttributed, the PAID invoice totals per rep (security review: the route itself carries no scope)", "hub:customers", "tracked:modules/conversion/sales-team.service.ts:80:revenue revenueAttributed FU-CONVERSION-REPS-REVENUE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100"] },
   // Sales
   "/app/commerce/invoices": { modules: ["revenue"], cite: [SRV("commerce/commerce.controller.ts", 706)] },
   "/app/inventory": { modules: ["revenue"], cite: [SRV("commerce/commerce.controller.ts", 300)] },
   "/app/commerce/gateway": { modules: ["revenue"], cite: [SRV("payments/payments-ops.controller.ts", 78)] },
   // Schedule
   "/app/bookings": { modules: ["bookings"], cite: ["unscoped:modules/bookings/bookings.controller.ts:101", "hub:schedule"] },
-  "/app/temporal-flow": { modules: ["bookings"], cite: ["unscoped:modules/temporal-flow/temporal-flow.controller.ts:34", "hub:schedule"] },
+  "/app/temporal-flow": { modules: ["bookings"], cite: ["unscoped:modules/temporal-flow/temporal-flow.controller.ts:34", "hub:schedule", "tracked:modules/temporal-flow/temporal-flow-key-inbox.listener.ts:100:operations Analysis: FU-TEMPORAL-FLOW-INBOX-SCOPE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100"] },
   // Money
   "/app/payments": { modules: ["revenue"], cite: [SRV("payments/payments-ops.controller.ts", 90)] },
   "/app/money/expenses": { modules: ["expenses"], cite: [SRV("expenses/expenses.controller.ts", 20)] },
@@ -248,7 +258,7 @@ const MODULE_TABLE: Record<string, { modules: string[]; cite: string[] }> = {
   // Your page
   // Its overview (unscoped) answers kpis.revenue: every PAID invoice in the period plus store orders (security review
   // round 2), so it needs revenue as well as the hub's storefront.
-  "/app/presence": { modules: ["storefront", "revenue"], cite: ["unscoped:modules/site/presence/presence.controller.ts:79", "data:modules/site/presence/presence-overview.service.ts:254:revenue invoicesRevenue, the PAID invoice totals in kpis.revenue", "hub:page"] },
+  "/app/presence": { modules: ["storefront", "revenue"], cite: ["unscoped:modules/site/presence/presence.controller.ts:79", "data:modules/site/presence/presence-overview.service.ts:254:revenue invoicesRevenue, the PAID invoice totals in kpis.revenue", "hub:page", "tracked:modules/site/presence/presence-overview.service.ts:254:revenue invoicesRevenue FU-PRESENCE-REVENUE-SCOPE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100 (also the leads tab contact email and phone)"] },
   "/app/portal": { modules: ["storefront"], cite: ["unscoped:modules/portal/portal.controller.ts:29", "hub:page"] },
   // Settings
   "/app/profile": { modules: ["settings"], cite: ["unscoped:modules/identity/identity.controller.ts:858", "hub:settings"] },
@@ -266,7 +276,7 @@ const MODULE_TABLE: Record<string, { modules: string[]; cite: string[] }> = {
   "/app/key/chat": { modules: [], cite: ["unscoped:modules/ai/flow.controller.ts:99"] },
   "/app/key-inbox": { modules: ["operations"], cite: [SRV("key-inbox/key-inbox.controller.ts", 125)] },
   "/app/key": { modules: [], cite: ["unscoped:modules/ai/ai.controller.ts:1643"] },
-  "/app/key-autonomy": { modules: [], cite: ["unscoped:modules/key-autonomy/key-action-proposal.controller.ts:36"] },
+  "/app/key-autonomy": { modules: [], cite: ["unscoped:modules/key-autonomy/key-action-proposal.controller.ts:36", "tracked:modules/key-autonomy/genome-recommendation-action-bridge.service.ts:141:revenue rationale FU-KEY-ACTION-GENOME-PROJECTION pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100"] },
   "/app/key-modes": { modules: [], cite: ["unscoped:modules/intelligence/key-executive-mode.controller.ts:14"] },
   "/app/data-inbox": { modules: ["operations"], cite: [SRV("ingestion/data-inbox.controller.ts", 23)] },
   "/app/capture": { modules: [], cite: ["unscoped:modules/device/device.controller.ts:48"] },
@@ -286,7 +296,7 @@ const MODULE_TABLE: Record<string, { modules: string[]; cite: string[] }> = {
   // Marketing
   "/app/communicate/campaigns": { modules: [], cite: ["unscoped:modules/email-marketing/email-marketing.controller.ts:18"] },
   "/app/marketing/lists": { modules: ["content"], cite: [SRV("email-marketing/marketing-sync.controller.ts", 53)] },
-  "/app/marketing/case-studies": { modules: ["revenue"], cite: ["unscoped:modules/site/site.controller.ts:688", "data:modules/site/case-study.service.ts:155:revenue recentRevenue, stored in metrics and answered by the list read"] },
+  "/app/marketing/case-studies": { modules: ["revenue"], cite: ["unscoped:modules/site/site.controller.ts:688", "data:modules/site/case-study.service.ts:155:revenue recentRevenue, stored in metrics and answered by the list read", "tracked:modules/site/case-study.service.ts:155:revenue recentRevenue FU-CASE-STUDY-REVENUE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100"] },
   "/app/content-ops": { modules: [], cite: ["unscoped:modules/content-ops/content-ops.controller.ts:68"] },
   "/app/social": { modules: [], cite: ["unscoped:modules/social/social.controller.ts:325"] },
   "/app/seo": { modules: [], cite: ["unscoped:modules/seo/seo.controller.ts:71"] },
@@ -398,6 +408,11 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
           if (!named || !(lines[i] ?? "").includes(named)) bad.push(`${href}: ${cite}: "${named}" is not on that line`);
           if (!row.modules.includes(m[3])) bad.push(`${href}: ${cite} names ${m[3]}, which the row lacks`);
           justified.add(m[3]);
+        } else if ((m = /^tracked:((?:modules|core)\/[^:]+\.ts):(\d+):([a-z]+) (\S+) (FU-[A-Z0-9-]+) (.+)$/.exec(cite))) {
+          // Recorded, not justifying: the identifier is on the line, and the follow-up packet and decision are named.
+          const { lines, i } = at(m[1], Number(m[2]));
+          if (!(lines[i] ?? "").includes(m[4])) bad.push(`${href}: ${cite}: "${m[4]}" is not on that line`);
+          if (!/^pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100/.test(m[6])) bad.push(`${href}: ${cite}: no decision named`);
         } else if ((m = /^service-check:((?:modules|core)\/[^:]+\.ts):(\d+)$/.exec(cite))) {
           const { lines, i } = at(m[1], Number(m[2]));
           if (!/@Get\(/.test(lines[i] ?? "")) bad.push(`${href}: ${cite} is not a @Get`);
