@@ -102,8 +102,10 @@ describe('round-3 review repairs (security M2, correctness MAJOR-2, minors)', ()
 describe('proposalViewForReader (D-238: an action on a proposal the reader may not see answers a safely redacted view)', () => {
   const money = { id: 'kap_1', status: 'FAILED', title: '$12,345 outstanding', summary: 'x', riskLevel: 'HIGH', failureReason: 'Refused: not mapped', executionResult: { amount: 12345 }, actionType: 'EXECUTE_TOOL', module: 'commerce' };
   it('a revenue reader gets the proposal whole', () => expect(proposalViewForReader(money, true)).toBe(money));
-  it('a reader without revenue read gets id, status and a failure reason that states no money, and nothing else', () => {
-    expect(proposalViewForReader(money, false)).toEqual({ id: 'kap_1', status: 'FAILED', failureReason: 'Refused: not mapped' });
+  it('a reader without revenue read gets id and status only, and nothing else', () => {
+    // Round 7 (security m2, correctness minor 2): a financial proposal's failure reason is withheld whatever it says, as
+    // execution status withholds it; the vocabulary cannot be complete ("Customer was charged twice").
+    expect(proposalViewForReader(money, false)).toEqual({ id: 'kap_1', status: 'FAILED' });
     expect(proposalViewForReader({ ...money, failureReason: 'balance $12,345 too low' }, false)).toEqual({ id: 'kap_1', status: 'FAILED' });
   });
   it('a non-financial proposal is unchanged for any reader', () => {
@@ -222,4 +224,38 @@ describe('round-6 review repairs (security MAJOR-1, MAJOR-2, minors; correctness
     ['a no-show rate', { actionType: 'CREATE_TASK', title: 'No-show rate: 12%', payload: { noShowRate: 0.12 } }],
     ['a booking reminder', { actionType: 'CONFIRM_BOOKING', module: 'bookings', title: 'Confirm pending booking' }],
   ])('%s is not', (_l, p) => expect(isFinancialProposal(p as any)).toBe(false));
+});
+
+describe('round-7 review repairs (correctness MAJOR-1, minor 1; security m1, m3)', () => {
+  it.each([
+    ['a person called Bill next to a date in JSON', { actionType: 'CREATE_TASK', module: 'crm', title: 'Call Bill', payload: { title: 'Call Bill', dueDate: '2026-11-25' } }],
+    ['a contact named Bill with a phone', { actionType: 'CREATE_TASK', module: 'crm', title: 'Follow up', payload: { name: 'Bill', phone: '868-555-0101' } }],
+    ['posting tips with a start time', { actionType: 'CREATE_EVENT', module: 'content', title: 'Share posting tips', payload: { title: 'Share posting tips', startTime: '2026-11-25T09:00:00Z' } }],
+    ['a list count result', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { items: [], totalCount: 12 } }],
+    ['spent hours', { actionType: 'CREATE_TASK', module: 'crm', title: 'Spent 3 hours on outreach' }],
+    ['transfer files', { actionType: 'CREATE_TASK', module: 'crm', title: 'Transfer the 2 files to Ana' }],
+    ['tips for posts', { actionType: 'CREATE_TASK', module: 'content', title: 'Tips for the 3 posts' }],
+    ['settle tickets', { actionType: 'CREATE_TASK', module: 'crm', title: 'Settle the 2 open tickets' }],
+    ['wire up forms', { actionType: 'CREATE_TASK', module: 'crm', title: 'Wire up the 3 forms' }],
+    ['a total of tasks', { actionType: 'CREATE_TASK', module: 'crm', title: 'Total of 4 tasks this week' }],
+    ['meeting Bill at a time', { actionType: 'CREATE_EVENT', module: 'calendar', title: 'Meeting with Bill at 10am' }],
+    ['a time-off approval', { actionType: 'REQUEST_APPROVAL', title: 'Time off Friday', affectedEntities: { requestType: 'time_off' } }],
+    // A KEY approval request with no request type (not the approvals module's shadow) stays as D-226 pins it.
+    ['a KEY approval request with no request type', { actionType: 'REQUEST_APPROVAL', title: 'Call the supplier about the delivery slot' }],
+  ])('%s is not', (_l, p) => expect(isFinancialProposal(p as any)).toBe(false));
+
+  it.each([
+    ['a purchase order approval with a plain title', { actionType: 'REQUEST_APPROVAL', title: 'Office chairs', summary: '6 chairs', affectedEntities: { requestType: 'po' } }],
+    ['a general approval', { actionType: 'REQUEST_APPROVAL', title: 'Sign off', affectedEntities: { requestType: 'general' } }],
+    ['a customer charged a figure', { actionType: 'CREATE_TASK', module: 'crm', title: 'Customer charged 900 twice' }],
+    ['a figure outstanding', { actionType: 'CREATE_TASK', module: 'crm', title: 'Chase the 900 outstanding' }],
+    ['a total due in JSON prose', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { note: 'total due 900' } }],
+  ])('%s is financial', (_l, p) => expect(isFinancialProposal(p as any)).toBe(true));
+
+  it('a failure reason about a rate limit or retries does not make a non-financial proposal\'s reason money', () => {
+    const task = { id: 'kap_t', status: 'FAILED', title: 'Call Kerry back', actionType: 'CREATE_TASK', module: 'crm' };
+    for (const reason of ['Rate limited: retry after 30s', 'Transfer failed after 3 retries', 'Failed: total 0 rows updated']) {
+      expect(proposalViewForReader({ ...task, failureReason: reason }, false)).toMatchObject({ failureReason: reason });
+    }
+  });
 });
