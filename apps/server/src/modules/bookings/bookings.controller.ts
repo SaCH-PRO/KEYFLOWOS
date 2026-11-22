@@ -38,9 +38,11 @@ const INT4_MAX = 2147483647;
  * called. The handler's body is an inline type, so the global ValidationPipe
  * checks nothing, and CatalogService.createService refuses a bad name,
  * duration or price with a plain Error: `durationMins` in place of `duration`
- * (and every other body the service table cannot hold) answered 500. Each is a
+ * (and a missing, mistyped or out-of-range name, duration or price) answered 500. Each is a
  * 400 here, with nothing written. The checks are the catalog's own (a non-blank
- * name, a positive duration, a non-negative price) plus the column types.
+ * name, a positive duration, a non-negative price) plus the column types and
+ * int4's range. A fractional duration is left as it was: accepted, stored as
+ * whole minutes.
  */
 function assertServiceCreateBody(body: unknown): asserts body is {
   name: string;
@@ -65,6 +67,12 @@ function assertServiceCreateBody(body: unknown): asserts body is {
   for (const key of ['description', 'sourceProductId']) {
     if (b[key] !== undefined && b[key] !== null && typeof b[key] !== 'string') {
       throw new BadRequestException(`${key} must be a string`);
+    }
+  }
+  // Review SEC-BPG-2: Postgres text holds no NUL character (it answered 500).
+  for (const key of ['name', 'description', 'sourceProductId']) {
+    if (typeof b[key] === 'string' && (b[key] as string).includes('\u0000')) {
+      throw new BadRequestException(`${key} contains a character that cannot be stored`);
     }
   }
 }
