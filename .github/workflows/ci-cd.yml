@@ -75,6 +75,11 @@ jobs:
         run: pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build
 
       - name: Type check server
+        # The server type-check needs ~4.1 GB of heap on main itself (measured
+        # with --incremental false); the runner's Node default is ~4 GB, so tsc
+        # died mid-build. This raises the ceiling only; no check is skipped.
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: cd apps/server && npx tsc --noEmit
 
       # apps/web/tsconfig.json lists "next" in compilerOptions.types, which is
@@ -407,6 +412,11 @@ jobs:
         run: pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build
 
       - name: Build server (compile to dist/)
+        # The server type-check needs ~4.1 GB of heap on main itself (measured
+        # with --incremental false); the runner's Node default is ~4 GB, so tsc
+        # died mid-build. This raises the ceiling only; no check is skipped.
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: cd apps/server && pnpm run build
 
       # Asserts dist/main.js, not dist/src/main.js. apps/server/tsconfig.json
@@ -765,6 +775,11 @@ jobs:
       # spec can RUN it. Different reasons, and conflating them is how the next
       # person deletes the wrong one.
       - name: Build server
+        # The server type-check needs ~4.1 GB of heap on main itself (measured
+        # with --incremental false); the runner's Node default is ~4 GB, so tsc
+        # died mid-build. This raises the ceiling only; no check is skipped.
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: cd apps/server && pnpm run build
 
       - name: Run server tests
