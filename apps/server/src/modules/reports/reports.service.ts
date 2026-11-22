@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { LedgerReportingService, ReportBasis } from './ledger-reporting.service';
@@ -31,6 +31,12 @@ export class ReportsService {
   }
 
   async generateReport(businessId: string, type: string, startDate?: string, endDate?: string, compare = false) {
+    // Round 3 review S3-4: no business named is refused before any read (Prisma
+    // drops an `undefined` filter and takes an object as one, so the reads
+    // below would not be bound to one tenant).
+    if (typeof businessId !== 'string' || businessId.length === 0) {
+      throw new BadRequestException('A business is required');
+    }
     const now = new Date();
     const start = startDate ? new Date(startDate) : new Date(now.getFullYear(), now.getMonth(), 1);
     const end = endDate ? new Date(endDate) : now;
@@ -97,7 +103,9 @@ export class ReportsService {
     // owed is the remaining balance of the open receivables (SENT, OVERDUE,
     // PARTIALLY_PAID, PARTIALLY_CREDITED) over their own-tenant payment rows,
     // the read the commerce stats total from (readInvoiceMoney) and the figure
-    // the A/R aging states. It summed the totals of SENT and DRAFT invoices: a
+    // the A/R aging states on a book where both read the same invoices (the
+    // aging also reads PENDING, adds every currency and nets no credit note;
+    // review COR-3). It summed the totals of SENT and DRAFT invoices: a
     // draft nobody was sent counted as owed, a part-paid invoice did not, and a
     // deposit never reduced it. The report is labelled in the business
     // currency, so the figure and its counts are that currency's invoices only
@@ -249,7 +257,10 @@ export class ReportsService {
       // Round 2 review C2-9 (D-13): what is owed in another currency is told
       // to the narrative on its own line, never added to the business currency's.
       const otherCurrencyReceivables = Object.entries(outstandingByCurrency)
-        .filter(([code]) => code !== reportCurrency)
+        // Round 3 review S3-1: a 3-letter code only. An invoice currency can be
+        // free text (three writers copy a product's unchecked currency), and
+        // text must not reach the prompt as a currency.
+        .filter(([code]) => code !== reportCurrency && /^[A-Z]{3}$/.test(code))
         .map(([code, owed]) => `${code} ${owed.outstanding.toLocaleString()} (${owed.count} invoices, ${owed.overdueCount} overdue)`)
         .join('; ');
       const otherCurrencyLine = otherCurrencyReceivables
@@ -279,7 +290,7 @@ ${type === 'revenue' ? `Write a Revenue Analysis with: 1) Revenue Performance Su
 ${type === 'expenses' ? `Write an Expense Analysis with: 1) Expense Overview, 2) Category Breakdown Analysis, 3) Vendor Concentration, 4) Cost-to-Revenue Ratio Assessment, 5) Cost Reduction Opportunities.` : ''}
 ${type === 'clients' ? `Write a Client Portfolio Analysis with: 1) Portfolio Overview, 2) Client Segmentation Analysis, 3) Client Engagement Metrics, 4) Client Retention Assessment, 5) Growth Opportunities.` : ''}
 
-Use ${currency} for all monetary values. Be specific with numbers. Keep each section concise but insightful. Format with clear section headers using **bold**.`;
+Use ${currency} for all monetary values${otherCurrencyLine ? `, except the receivables listed in other currencies: state those in their own currency, never converted and never added to a ${currency} figure` : ''}. Be specific with numbers. Keep each section concise but insightful. Format with clear section headers using **bold**.`;
 
       const result = await this.aiUsage.callAi({
         businessId,
