@@ -30,6 +30,8 @@
  *          (no Schedule, no bar slots), so a products business never flashes the 'both' bar.
  *   NMS-13 review round 1 (COR-4, COR-6): aria-current is "page" only on the hub's own page ("true" inside the
  *          hub); the bar's New toggles the New menu.
+ *   NMS-14 review round 2 (R2-COR-1, R2-COR-2): a failed re-read keeps the levels already known for the same member
+ *          and business; looking again within BUSINESS_SETTINGS_FRESH_MS (30 s) of the last answer asks nothing.
  *   NMS-09 the desktop menu (Main navigation) shows the hubs as links named by their plain labels, and a products
  *          business's menu names no Schedule (journey A4); a front-desk member's menu offers no Sales, Money, Your
  *          page or Settings hub (J5).
@@ -263,11 +265,46 @@ describe("NAV-A1 review round 1: the levels belong to the member who read them",
     await waitFor(() => expect(asked.length).toBe(2));
     await waitFor(() => expect(result.current).toEqual({ crm: "read", revenue: "none" }));
 
-    // The owner changed this member's scopes elsewhere: looking at the tab again reads again.
+    // The owner changed this member's scopes elsewhere: looking at the tab again, once the answer is no longer
+    // fresh, reads again.
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now + 31_000);
     act(() => {
       window.dispatchEvent(new Event("focus"));
     });
     await waitFor(() => expect(asked.length).toBe(3));
+  });
+
+  it("NMS-14 a failed re-read keeps the levels known; a look within 30 s asks nothing", async () => {
+    window.localStorage.setItem("kf_token", tokenFor("usr_a"));
+    const answers: Record<string, { status: number; body: unknown }> = {
+      [BIZ]: { status: 200, body: { modules: { crm: "read", revenue: "none" } } },
+    };
+    const asked = serveAccess(answers);
+    const { result } = renderHook(() => useMemberModuleLevels());
+    await waitFor(() => expect(result.current).toEqual({ crm: "read", revenue: "none" }));
+
+    // Looked at again at once: still fresh, nothing asked.
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(asked.length).toBe(1);
+
+    // Later, the re-read fails (a blip): what is known stays.
+    answers[BIZ] = { status: 503, body: { message: "Service Unavailable" } };
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now + 31_000);
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() => expect(asked.length).toBe(2));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(result.current).toEqual({ crm: "read", revenue: "none" });
   });
 });
 
