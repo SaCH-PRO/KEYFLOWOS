@@ -161,12 +161,18 @@ function watch() {
   const findMany = delegate.findMany;
   const queryRaw = db.$queryRaw;
   const queryRawUnsafe = db.$queryRawUnsafe;
-  const seen = { findMany: [] as any[], raw: 0, restore: () => {} };
+  const groupBy = delegate.groupBy;
+  const aggregate = delegate.aggregate;
+  const seen = { findMany: [] as any[], raw: 0, sums: 0, restore: () => {} };
   delegate.findMany = (...a: any[]) => { seen.findMany.push(a[0]); return findMany.apply(delegate, a); };
+  delegate.groupBy = (...a: any[]) => { seen.sums += 1; return groupBy.apply(delegate, a); };
+  delegate.aggregate = (...a: any[]) => { seen.sums += 1; return aggregate.apply(delegate, a); };
   db.$queryRaw = (...a: any[]) => { seen.raw += 1; return queryRaw.apply(db, a); };
   db.$queryRawUnsafe = (...a: any[]) => { seen.raw += 1; return queryRawUnsafe.apply(db, a); };
   seen.restore = () => {
     delegate.findMany = findMany;
+    delegate.groupBy = groupBy;
+    delegate.aggregate = aggregate;
     db.$queryRaw = queryRaw;
     db.$queryRawUnsafe = queryRawUnsafe;
   };
@@ -526,6 +532,7 @@ describe('V1-66 SWP-FIN-LEDGER: the General Ledger end date covers its whole day
       expect(res.body).toMatchObject({ rows: [], total: 22, page: 1000, pageSize: 5 });
       // The page read only: no line is read, and nothing is summed, to seed a balance no row shows.
       expect(reads.findMany).toHaveLength(1);
+      expect(reads.sums).toBe(0);
       expect(reads.raw).toBe(0);
     } finally {
       reads.restore();
@@ -539,6 +546,10 @@ describe('V1-66 SWP-FIN-LEDGER: the General Ledger end date covers its whole day
       expect(res.status).toBe(200);
       expect(res.body.rows).toHaveLength(5);
       const takes = reads.findMany.map((a: any) => a?.take);
+      // The page read only; the opening sums are one grouped read in the database.
+      expect(reads.findMany).toHaveLength(1);
+      expect(reads.sums).toBe(1);
+      expect(reads.raw).toBe(0);
       expect(takes.every((t: unknown) => typeof t === 'number' && t <= 5), `ledgerEntry.findMany takes: ${JSON.stringify(takes)}`).toBe(true);
     } finally {
       reads.restore();
