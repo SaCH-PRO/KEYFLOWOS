@@ -219,10 +219,12 @@
  *   CP-28  (orchestrator review, security MINOR-2) the forecast refusal is
  *          attributable to revenue read: a member reading every module except
  *          revenue reads expense-breakdown (expenses read), and is refused the
- *          forecast (403)
+ *          forecast (403, the guard's 'revenue requires read'); a member whose
+ *          only scope is revenue read reads it (200)
  *   CP-29  (orchestrator review M2) with a free-text business currency the
  *          money health metrics and the saved snapshot carry no cashCurrency and
- *          never echo the text; cashBalance is the cash position's figure
+ *          never echo the text; cashBalance is the cash position's figure (7
+ *          held under that text, never 0 nor the snapshots)
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * the global TenantInterceptor, CommerceService, InvoiceWorkflowService,
@@ -2150,10 +2152,18 @@ describe('W11-CASH-READERS-LEDGER: the cashflow forecast and the money health sc
 
     const refused = await forecastRoute(bizM, staffMx);
     expect(refused.status, JSON.stringify(refused.body).slice(0, 200)).toBe(403);
+    // Delta review: the refusal is ModuleScopeGuard's, naming revenue read.
+    expect(JSON.stringify(refused.body)).toMatch(/revenue requires read/);
     expect(JSON.stringify(refused.body)).not.toMatch(/openingCash|otherCurrencyCash|550/);
 
-    // Control: the owner reads it.
+    // Controls: the owner reads it, and so does a member whose only scope is revenue read.
     expect((await forecastRoute(bizM, ownerM)).status).toBe(200);
+    const staffMr = `${P}staffMr`;
+    await db.user.create({ data: { id: staffMr, email: `${P}staff_m_r@test.local`, role: 'USER' } });
+    await db.membership.create({ data: { id: `${staffMr}_m`, userId: staffMr, businessId: bizM, role: 'STAFF', permissionScopes: { ...ALL_SCOPES_NONE, revenue: 'read' } } });
+    const reader = await forecastRoute(bizM, staffMr);
+    expect(reader.status, JSON.stringify(reader.body).slice(0, 200)).toBe(200);
+    expect(reader.body).toMatchObject({ currency: 'TTD', otherCurrencyCash: [{ currency: 'USD', amount: 550 }] });
   });
 
   // Orchestrator review M2: metrics.cashCurrency is named only when the business currency is a
@@ -2162,24 +2172,29 @@ describe('W11-CASH-READERS-LEDGER: the cashflow forecast and the money health sc
     const svc = new HealthScoreService(financePrisma, cashPositionService);
     await db.business.update({ where: { id: bizM }, data: { currency: 'pay me now' } });
     try {
-      // No cash is held under that text: the TTD and USD cash are both held apart (CP-22's reading).
+      // Delta review: a non-zero figure under that text (a legacy row spelled as the business
+      // currency is), so the cash position's 7 is told apart from a reader that zeroes the figure.
+      // The TTD and USD cash are held apart (CP-22's reading).
+      await legacyPosting(bizM, 'm_freetext_cash', 'pay me now', 7, 'CASH', 'OWNER_EQUITY');
       const p = await cashPositionService.getCashPosition(bizM);
-      expect(p).toMatchObject({ cashBalance: 0, currency: 'PAY ME NOW' });
+      expect(p).toMatchObject({ cashBalance: 7, currency: 'PAY ME NOW' });
       expect(p.byCurrency.TTD, 'M still holds TTD cash').toBeGreaterThan(0);
 
       const health = await moneyHealth(bizM, svc);
-      expect(health.metrics.cashBalance, 'the cash position, never the 900 snapshots').toBe(p.cashBalance);
+      expect(health.metrics.cashBalance, 'the cash position (7), never the 900 snapshots nor 0').toBe(7);
       expect('cashCurrency' in health.metrics, 'no currency is named').toBe(false);
       expect(JSON.stringify(health)).not.toMatch(/pay me now/i);
 
       await svc.saveSnapshot(bizM, health);
       const [saved] = (await svc.getLatestSnapshots(bizM)).filter((a: any) => a.area === 'money');
-      expect(saved.metrics.cashBalance).toBe(p.cashBalance);
+      expect(saved.metrics.cashBalance).toBe(7);
       expect('cashCurrency' in saved.metrics).toBe(false);
       expect(JSON.stringify(saved)).not.toMatch(/pay me now/i);
     } finally {
       await db.business.update({ where: { id: bizM }, data: { currency: 'TTD' } });
       await db.businessHealthSnapshot.deleteMany({ where: { businessId: bizM } });
+      await db.ledgerEntry.deleteMany({ where: { businessId: bizM, transactionId: `${P}m_freetext_cash` } });
+      await db.financialTransaction.deleteMany({ where: { businessId: bizM, id: `${P}m_freetext_cash` } });
     }
     // Back on TTD the currency is named again.
     expect((await moneyHealth(bizM, svc)).metrics).toMatchObject({ cashCurrency: 'TTD' });
