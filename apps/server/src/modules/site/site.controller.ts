@@ -107,13 +107,19 @@ export class SiteController {
     return this.siteService.trackEvent(businessId, body.type, body.itemId);
   }
 
+  // FU-SITE-ANALYTICS-REVENUE-SCOPE (D-100, D-234): every member reads the
+  // storefront analytics; the revenue figure and the invoice counts are
+  // withheld (absent) from a member without revenue read, by the member's level
+  // in the business BusinessGuard admitted (SiteService.getAnalyticsForReader).
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/analytics')
   getAnalytics(
     @Param('businessId') businessId: string,
+    @Req() req: Request,
     @Query('days') days?: string,
   ) {
-    return this.siteService.getAnalytics(businessId, days ? parseInt(days, 10) : undefined);
+    const actor = (req as Request & { user?: { id?: string; role?: string } }).user;
+    return this.siteService.getAnalyticsForReader(businessId, actor, days ? parseInt(days, 10) : undefined);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

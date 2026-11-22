@@ -3,6 +3,8 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { PUBLIC_PRODUCT_SELECT, PUBLIC_SERVICE_SELECT } from '../catalog/catalog.service';
+import { memberModuleLevel, type ModuleLevelActor } from '../../core/auth/member-module-level';
+import { LEVEL_RANK, rankOf } from '../../core/authority/module-vocabulary';
 
 interface StorefrontEvent {
   type: string;
@@ -257,7 +259,33 @@ export class SiteService {
     return { tracked: true };
   }
 
+  /**
+   * FU-SITE-ANALYTICS-REVENUE-SCOPE (owner rulings D-100, D-234): the storefront
+   * analytics as the member asking may see them. `revenue` (the sum of the
+   * period's PAID invoices) and `invoices` (invoice counts: sales volume) are
+   * finance: a member whose revenue level is below read gets the response with
+   * both keys absent (not zero), and neither invoice query runs. The level is
+   * ModuleScopeGuard's reading (memberModuleLevel: the membership in this
+   * business, its explicit scope map, a stored JSON array included, else its
+   * role's defaults; a platform SUPER_ADMIN is admin; no membership is none).
+   * Bookings, catalog counts and storefront events stay for every member.
+   */
+  async getAnalyticsForReader(businessId: string, actor: ModuleLevelActor, days = 30) {
+    const readsRevenue = rankOf(await memberModuleLevel(this.prisma, businessId, actor, 'revenue')) >= LEVEL_RANK.read;
+    return this.analytics(businessId, days, readsRevenue);
+  }
+
+  /**
+   * The full analytics, revenue and invoice counts included. Only for a caller
+   * that has already required revenue read (the KEY organ tool
+   * storelink.get_analytics, which the tool pipeline refuses without it); the
+   * REST route answers getAnalyticsForReader.
+   */
   async getAnalytics(businessId: string, days = 30) {
+    return this.analytics(businessId, days, true);
+  }
+
+  private async analytics(businessId: string, days: number, readsRevenue: boolean) {
     const business = await this.prisma.client.business.findFirst({
       where: { id: businessId, deletedAt: null },
       select: { metaData: true },
@@ -274,11 +302,9 @@ export class SiteService {
       totalBookings,
       bookingsInPeriod,
       bookingsLast7,
-      totalInvoices,
-      invoicesInPeriod,
-      paidInvoices,
       totalProducts,
       totalServices,
+      finance,
     ] = await Promise.all([
       this.prisma.client.booking.count({
         where: { businessId, deletedAt: null },
@@ -289,25 +315,14 @@ export class SiteService {
       this.prisma.client.booking.count({
         where: { businessId, deletedAt: null, createdAt: { gte: since7 } },
       }),
-      this.prisma.client.invoice.count({
-        where: { businessId, deletedAt: null },
-      }),
-      this.prisma.client.invoice.count({
-        where: { businessId, deletedAt: null, createdAt: { gte: since } },
-      }),
-      this.prisma.client.invoice.findMany({
-        where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: since } },
-        select: { total: true },
-      }),
       this.prisma.client.product.count({
         where: { businessId, deletedAt: null },
       }),
       this.prisma.client.service.count({
         where: { businessId, deletedAt: null },
       }),
+      readsRevenue ? this.financeAnalytics(businessId, since) : Promise.resolve(null),
     ]);
-
-    const revenueInPeriod = paidInvoices.reduce((sum, inv) => sum + (inv.total ?? 0), 0);
 
     const meta = (business.metaData as Record<string, any>) ?? {};
     const storefrontEvents: StorefrontEvent[] = meta.storefrontEvents ?? [];
@@ -327,18 +342,37 @@ export class SiteService {
         inPeriod: bookingsInPeriod,
         last7Days: bookingsLast7,
       },
-      invoices: {
-        total: totalInvoices,
-        inPeriod: invoicesInPeriod,
-      },
-      revenue: {
-        inPeriod: revenueInPeriod,
-      },
+      ...(finance ?? {}),
       catalog: {
         products: totalProducts,
         services: totalServices,
       },
       storefrontEvents: eventCounts,
+    };
+  }
+
+  /** The analytics' finance part: invoice counts and the period's PAID revenue (D-100, D-234: revenue read only). */
+  private async financeAnalytics(businessId: string, since: Date) {
+    const [totalInvoices, invoicesInPeriod, paidInvoices] = await Promise.all([
+      this.prisma.client.invoice.count({
+        where: { businessId, deletedAt: null },
+      }),
+      this.prisma.client.invoice.count({
+        where: { businessId, deletedAt: null, createdAt: { gte: since } },
+      }),
+      this.prisma.client.invoice.findMany({
+        where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: since } },
+        select: { total: true },
+      }),
+    ]);
+    return {
+      invoices: {
+        total: totalInvoices,
+        inPeriod: invoicesInPeriod,
+      },
+      revenue: {
+        inPeriod: paidInvoices.reduce((sum, inv) => sum + (inv.total ?? 0), 0),
+      },
     };
   }
 
