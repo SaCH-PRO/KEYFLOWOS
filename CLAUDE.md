@@ -41,7 +41,7 @@ Claude MUST:
 
 No valid directive means no packet mutation.
 
-For v1 packets (those in `docs/reconstruction/V1-PLAN-RECUT.json`), the valid directive is the owner's standing directive `OWNER-DIR-V1-STANDING-001` (issue #80 comment 7051296684, ruling D-222 in `docs/reconstruction/BUILD-MAP-001.md`). It releases steps 3 to 8 as a series under the handoff's section 2 rules, two independent agent reviews per packet, one PR per wave and owner merge. No per-packet ChatGPT DIRECTIVE is required; ChatGPT review is advisory. ACK once per packet series, RETURN per packet, PROGRESS per wave, CONTRADICTION under its clause 5.
+For v1 packets (those in `docs/reconstruction/V1-PLAN-RECUT.json`), the valid directive is the owner's standing directive `OWNER-DIR-V1-STANDING-001` (issue #80 comment 7051296684, ruling D-222 in `docs/reconstruction/BUILD-MAP-001.md`). It releases steps 3 to 8 as a series under the handoff's section 2 rules, two independent agent reviews per packet, one PR per wave, and merge by the owner or, under D-239, by Claude once CI is green at the exact head and both reviews accept (never a production deploy). No per-packet ChatGPT DIRECTIVE is required; ChatGPT review is advisory. ACK once per packet series, RETURN per packet, PROGRESS per wave, CONTRADICTION under its clause 5.
 
 ## During work
 
