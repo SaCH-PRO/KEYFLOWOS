@@ -19,7 +19,7 @@ import {
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
 // The nav's reader of what the business sells (BIZ-SETTINGS-WEB). Not the settings page's hook of the same name
 // (app/app/settings/business/use-business-settings.ts).
-import { actingMemberNow, useBusinessSettings } from "@/lib/business-settings";
+import { BUSINESS_SETTINGS_FRESH_MS, actingMemberNow, useBusinessSettings } from "@/lib/business-settings";
 import { featureFlags as dormantFeatureFlags } from "@/lib/feature-flags";
 import type { AppNotification } from "@/lib/notifications";
 import type { ResolvedFeatureFlag } from "@/lib/nav-config";
@@ -500,12 +500,20 @@ const NO_SELECTION_ON_SERVER = () => null;
  */
 export function useMemberModuleLevels(): ModuleLevels {
   const key = useSyncExternalStore(subscribeToSelection, selectionKey, NO_SELECTION_ON_SERVER);
-  const [answered, setAnswered] = useState<{ key: string; levels: ModuleLevels } | null>(null);
+  const [answered, setAnswered] = useState<{ key: string; levels: ModuleLevels; at: number } | null>(null);
   const [lookedAgain, setLookedAgain] = useState(0);
+  const answeredRef = useRef(answered);
+  useEffect(() => {
+    answeredRef.current = answered;
+  }, [answered]);
 
   useEffect(() => {
     const again = () => {
-      if (document.visibilityState !== "hidden") setLookedAgain((n) => n + 1);
+      if (document.visibilityState === "hidden") return;
+      // Read within the freshness window: nothing to ask (review R2-COR-2), as business-settings does.
+      const last = answeredRef.current;
+      if (last && Date.now() - last.at < BUSINESS_SETTINGS_FRESH_MS) return;
+      setLookedAgain((n) => n + 1);
     };
     window.addEventListener("focus", again);
     document.addEventListener("visibilitychange", again);
@@ -524,7 +532,10 @@ export function useMemberModuleLevels(): ModuleLevels {
       .catch(() => null)
       .then((levels) => {
         // A later read (another look, another member or business) is already on its way: this one is not current.
-        if (!disposed) setAnswered({ key, levels });
+        if (disposed) return;
+        // A failed re-read says nothing new about this member: what is known for the same member and business stays
+        // (review R2-COR-1). Unknown only for a selection never answered.
+        setAnswered((prev) => (levels === null && prev?.key === key && prev.levels !== null ? prev : { key, levels, at: Date.now() }));
       });
     return () => {
       disposed = true;
