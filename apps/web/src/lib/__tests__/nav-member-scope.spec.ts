@@ -380,8 +380,9 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
       return lines
         .slice(top, bottom + 1)
         .join("\n")
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/\/\/.*$/gm, "");
+        // One leftmost pass: string literals are kept whole (a "//" or "/*" inside one is not a comment), and only
+        // real comments are removed (final security review).
+        .replace(/('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`)|\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, (_m, str: string | undefined) => str ?? "");
     };
     const at = (file: string, line: number) => {
       const lines = fs.readFileSync(path.join(SERVER_SRC, file), "utf8").split("\n");
