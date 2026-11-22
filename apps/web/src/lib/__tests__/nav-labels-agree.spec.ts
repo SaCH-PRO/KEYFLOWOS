@@ -17,8 +17,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { NAV_ROUTE_LABELS, getLabel } from '../semantic-routes';
-import { primaryNav, operateSections, mobileBottomNav } from '../nav-config';
-import { MODE_OPERATE_ITEMS } from '../disclosure-mode';
+import { hubNav } from '../nav-config';
 
 const WEB_SRC = path.join(__dirname, '..', '..');
 const read = (rel: string) => fs.readFileSync(path.join(WEB_SRC, rel), 'utf8');
@@ -55,30 +54,52 @@ describe('the D-09 label constant exists and names real routes', () => {
   });
 });
 
+describe('D-151: the home hub is Today and the sales hub is Sales', () => {
+  it('the constant carries the ruled names', () => {
+    expect(NAV_ROUTE_LABELS[COCKPIT]).toBe('Today');
+    expect(NAV_ROUTE_LABELS[COMMERCE]).toBe('Sales');
+  });
+});
+
+/**
+ * NAV-A1: the command centre's own page header ("Business Command Center") is outside NAV-A1's write set; TODAY-4BLOCK
+ * rebuilds Today and its header. Until then the header disagreement is ledgered here, and the ledger cleans itself:
+ * it fails once the header agrees. Shrink-only.
+ */
+const PAGE_TITLE_OUTSIDE_WRITE_SET: Record<string, string> = {
+  'app/app/command-center/page.tsx': 'TODAY-4BLOCK rebuilds Today and its header (D-151); outside NAV-A1',
+};
+
 describe('/app/command-center: nav, breadcrumb and page title agree', () => {
-  it('the rail entry reads the constant', () => {
-    const rail = primaryNav.find((i) => i.href === COCKPIT);
-    expect(rail, 'no rail entry for the cockpit').toBeDefined();
-    expect(rail!.label).toBe(NAV_ROUTE_LABELS[COCKPIT]);
+  it('the Today hub reads the constant', () => {
+    const today = hubNav.find((i) => i.href === COCKPIT);
+    expect(today, 'no hub for the cockpit').toBeDefined();
+    expect(today!.id).toBe('today');
+    expect(today!.label).toBe(NAV_ROUTE_LABELS[COCKPIT]);
   });
 
   it('the breadcrumb (semantic route) reads the constant', () => {
     expect(getLabel('command-center')).toBe(NAV_ROUTE_LABELS[COCKPIT]);
   });
 
-  it('the rail and the breadcrumb say the same thing', () => {
-    // The plain agreement claim, independent of the constant.
-    expect(primaryNav.find((i) => i.href === COCKPIT)?.label).toBe(getLabel('command-center'));
+  it('the hub and the breadcrumb say the same thing', () => {
+    expect(hubNav.find((i) => i.href === COCKPIT)?.label).toBe(getLabel('command-center'));
   });
 
-  it('the page header names the screen with the same label', () => {
-    const titles = workspaceShellTitles('app/app/command-center/page.tsx');
+  it('the page header names the screen with the same label, or is ledgered to the packet that renames it', () => {
+    const file = 'app/app/command-center/page.tsx';
+    const titles = workspaceShellTitles(file);
     expect(titles.length, 'WorkspaceShell title not found — extractor is broken').toBeGreaterThan(0);
-    for (const t of titles) expect(t).toContain(NAV_ROUTE_LABELS[COCKPIT]);
+    const agrees = titles.every((t) => t.includes(NAV_ROUTE_LABELS[COCKPIT]));
+    if (file in PAGE_TITLE_OUTSIDE_WRITE_SET) {
+      expect(agrees, `${file} now agrees — remove its ledger entry`).toBe(false);
+    } else {
+      expect(agrees, titles.join(' | ')).toBe(true);
+    }
   });
 
   it('neither registry hard-codes the label beside the constant', () => {
-    expect(read('lib/nav-config.ts')).toMatch(/id: "cockpit", label: NAV_ROUTE_LABELS\["\/app\/command-center"\]/);
+    expect(read('lib/nav-config.ts')).toMatch(/id: "today", label: NAV_ROUTE_LABELS\["\/app\/command-center"\]/);
     expect(read('lib/semantic-routes.ts')).toMatch(
       /segment: "command-center", label: NAV_ROUTE_LABELS\["\/app\/command-center"\]/,
     );
@@ -193,23 +214,19 @@ describe('/app/command-center: the other nav surfaces agree, or are ledgered', (
     expect(Object.keys(COCKPIT_LABEL_OUTSIDE_WRITE_SET)).toEqual([]);
   });
 
-  it('the mobile bottom bar says "Home" for the cockpit on purpose (review F5)', () => {
-    // Pinned, not derived. The bottom bar is five 9px labels across a phone
-    // (mobile-bottom-nav-v2.tsx), and every slot there is a one-word role —
-    // Home, Flows, AI, Inbox, Me — not a screen title. "Command Center" would
-    // wrap or truncate there whatever D-09 decides, and "Home" names the same
-    // role as the kf:go-home shortcut. A D-09 ruling therefore does not move
-    // it; changing it is a deliberate edit to this test.
-    const home = mobileBottomNav.find((i) => i.href === COCKPIT);
-    expect(home, 'no bottom-bar entry for the cockpit').toBeDefined();
-    expect(home!.label).toBe('Home');
+  it("the bottom bar's first slot is the Today hub, read from the hub (NAV-A1 replaces review F5's \"Home\")", () => {
+    // The bar is Today, two hubs, New and More (D-150); its first slot is the Today hub itself, so
+    // the ruled name reaches it with no copy.
+    const bar = read('components/layout/mobile-bottom-nav-v2.tsx');
+    expect(bar).toMatch(/hubNav\.find\(\(h\) => h\.id === "today"\)/);
+    expect(bar).not.toMatch(/"Home"/);
   });
 });
 
 describe('/app/commerce: nav, breadcrumb and page title agree', () => {
-  const navEntry = () => operateSections.flatMap((s) => s.items).find((i) => i.href === COMMERCE);
+  const navEntry = () => hubNav.find((i) => i.href === COMMERCE);
 
-  it('the Money nav entry carries the constant', () => {
+  it('the Sales hub carries the constant', () => {
     expect(navEntry(), 'no nav entry for /app/commerce').toBeDefined();
     expect(navEntry()!.label).toBe(NAV_ROUTE_LABELS[COMMERCE]);
   });
@@ -221,14 +238,8 @@ describe('/app/commerce: nav, breadcrumb and page title agree', () => {
     );
   });
 
-  it('every disclosure mode shows the commerce entry under the same label', () => {
-    // use-app-layout filters the Operate nav by an exact-label allowlist, so a
-    // D-09 rename of this entry must reach disclosure-mode.ts or the money
-    // screen disappears from the default nav. Since R0-08b that file reads the
-    // constant (pinned in disclosure-mode.spec.ts), so the rename reaches it.
-    for (const mode of ['startup', 'growth', 'enterprise'] as const) {
-      expect(MODE_OPERATE_ITEMS[mode], mode).toContain(NAV_ROUTE_LABELS[COMMERCE]);
-    }
+  it('the Sales hub reads the constant, not a copy', () => {
+    expect(read('lib/nav-config.ts')).toMatch(/id: "sales", label: NAV_ROUTE_LABELS\["\/app\/commerce"\]/);
   });
 
   it('the page header still has a title to agree with', () => {

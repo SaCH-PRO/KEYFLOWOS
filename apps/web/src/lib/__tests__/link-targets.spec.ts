@@ -31,8 +31,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { operateSections } from '../nav-config';
-import { MODE_OPERATE_ITEMS } from '../disclosure-mode';
+import { hubNav, operateSections, buildSections } from '../nav-config';
 
 const WEB_SRC = path.join(__dirname, '..', '..');
 const APP_DIR = path.join(WEB_SRC, 'app');
@@ -473,8 +472,8 @@ describe('the cockpit is linked directly, not through its redirect stub', () => 
     // the stub. A pathname comparison against the stub counts too: once the
     // link goes straight to the cockpit, the drawer must light up on the
     // cockpit's own path, which is where the user now is.
+    // lib/disclosure-mode.ts was in this write set; NAV-A1 removed it (disclosure-mode.spec.ts DM-01).
     const writeSet = [
-      'lib/disclosure-mode.ts',
       'hooks/use-keyboard-shortcuts.ts',
       'components/functional/keyboard-shortcuts-help.tsx',
       'components/layout/mobile-drawer.tsx',
@@ -498,71 +497,64 @@ describe('the cockpit is linked directly, not through its redirect stub', () => 
       /goHome = \(\) => router\.push\("\/app\/command-center"\)/,
     );
   });
+
+  it('NAV-A1: the three stubs answer 307 to /app/command-center from the redirect table', () => {
+    // Before NAV-A1 /app/control-tower answered 308 to /app/keyflow-command, itself a page stub, and
+    // /app/briefing a page stub to that stub: two or three hops to the cockpit.
+    const cfg = fs.readFileSync(path.join(WEB_SRC, '..', 'next.config.ts'), 'utf8');
+    const rules = [...cfg.matchAll(/source:\s*"([^"]+)",\s*destination:\s*"([^"]+)",\s*permanent:\s*(true|false)/g)].map((m) => ({
+      source: m[1],
+      destination: m[2],
+      permanent: m[3] === 'true',
+    }));
+    for (const source of ['/app/keyflow-command', '/app/control-tower', '/app/control-tower/:path*', '/app/briefing']) {
+      const rule = rules.find((r) => r.source === source);
+      expect(rule, `${source} has a redirect rule`).toBeDefined();
+      expect(rule!.destination, source).toBe('/app/command-center');
+      expect(rule!.permanent, `${source} is a 307 (permanent: false)`).toBe(false);
+    }
+  });
 });
 
-describe('the nav has a door to invoices and quotes (CF-20)', () => {
-  // There is no /app/commerce/quotes page; quotes live in the pipeline tab,
-  // which follows ?view, quotes included (finance-pipeline.tsx).
-  const operate = (() => {
-    const src = read('lib/nav-config.ts');
-    return src.slice(src.indexOf('export const operateSections'), src.indexOf('export const buildSections'));
-  })();
-  const money = () => operateSections.find((s) => s.id === 'money')?.items ?? [];
-  const MODES = ['startup', 'growth', 'enterprise'] as const;
-  /** What use-app-layout shows: an exact-label allowlist, enterprise unfiltered. */
-  const shownIn = (mode: (typeof MODES)[number]) =>
-    money().filter((i) => mode === 'enterprise' || MODE_OPERATE_ITEMS[mode].includes(i.label));
+describe('the nav has a door to invoices; the quotes door leaves the Sales menu (CF-20, NAV-A1)', () => {
+  const sales = () => hubNav.find((h) => h.id === 'sales');
+  const everyHref = () => [
+    ...hubNav.map((h) => h.href),
+    ...hubNav.flatMap((h) => h.items.map((i) => i.href)),
+    ...operateSections.flatMap((s) => s.items.map((i) => i.href)),
+    ...buildSections.flatMap((s) => s.items.map((i) => i.href)),
+  ];
 
-  it('the destinations the entries would use exist today', () => {
+  it('the destinations the entries use exist today', () => {
     expect(resolvesToRoute('/app/commerce/invoices')).toBe(true);
-    expect(read('app/app/finance/components/finance-pipeline.tsx')).toMatch(/searchParams\.get\("view"\)/);
+    expect(resolvesToRoute('/app/commerce')).toBe(true);
   });
 
-  it('Invoices opens the existing invoices hub', () => {
-    expect(operate).toMatch(/label: "Invoices", href: "\/app\/commerce\/invoices"/);
-    expect(money().find((i) => i.label === 'Invoices')?.href, 'not in the Money section').toBe(
-      '/app/commerce/invoices',
-    );
+  it('Invoices opens the existing invoices hub, from the Sales hub', () => {
+    expect(read('lib/nav-config.ts')).toMatch(/label: "Invoices", href: "\/app\/commerce\/invoices"/);
+    expect(sales()?.items.find((i) => i.label === 'Invoices')?.href, 'not in the Sales hub').toBe('/app/commerce/invoices');
   });
 
-  it('Quotes opens the existing quotes view of the pipeline', () => {
-    expect(operate).toMatch(/label: "Quotes", href: "\/app\/commerce\?tab=pipeline&view=quotes"/);
-    const quotes = money().find((i) => i.label === 'Quotes');
-    expect(quotes?.href, 'not in the Money section').toBe('/app/commerce?tab=pipeline&view=quotes');
-    expect(quotes?.matchTab).toBe('pipeline');
-  });
-
-  it('every disclosure mode shows both doors, so a new owner (startup, the default) sees them', () => {
-    for (const mode of MODES) {
-      expect(MODE_OPERATE_ITEMS[mode], mode).toEqual(expect.arrayContaining(['Invoices', 'Quotes']));
-      const hrefs = shownIn(mode).map((i) => i.href);
-      expect(hrefs, mode).toContain('/app/commerce/invoices');
-      expect(hrefs, mode).toContain('/app/commerce?tab=pipeline&view=quotes');
-    }
+  it('no nav entry opens the pipeline or its quotes view: MOUNT-QUOTES mounts Quotes as a Sales tab', () => {
+    const doors = everyHref().filter((h) => /[?&](tab=pipeline|view=quotes)\b/.test(h));
+    expect(doors).toEqual([]);
+    expect(read('lib/nav-config.ts')).not.toMatch(/label: "(Quotes|Pipeline)"/);
   });
 
   // The href is only half the door: Next keeps /app/commerce mounted when a nav
   // click changes only its search params, so the page must follow ?tab after
   // mount. That is rendered, not string-matched, in
   // app/app/commerce/__tests__/commerce-tab-follows-url.test.tsx (review F2).
-  it('the commerce page follows ?tab while mounted, so the Quotes door works from another commerce tab', () => {
+  it('the commerce page follows ?tab while mounted', () => {
     const commerce = read('app/app/commerce/page.tsx');
     expect(commerce).toMatch(/const paramTab = searchParams\.get\("tab"\);/);
     expect(commerce).toMatch(/\}, \[paramTab\]\);/);
   });
 
-  // W9-WEB-COMMERCE-NAV (was it.todo, BLOCKED outside the R0-08b write set,
-  // review F2): the rail's active state. use-app-layout.ts refreshed its tab
-  // only when the pathname changed, so a search-param-only click (Sales ->
-  // Quotes on /app/commerce) left the rail lit as it was; and matchTab
-  // "pipeline" lit Quotes for every pipeline view, Invoices included. The real
-  // hook is rendered here (its network and storage edges stubbed), the URL
-  // moves by pushState with the pathname unchanged, as Next does, and the
-  // rail is read through the isSecondaryActive the sidebar and drawer call.
-  // Sales lighting beside Quotes is the existing parent-entry rule (Sales also
-  // lights on /app/commerce/invoices and /app/commerce/gateway), not a defect
-  // of this entry.
-  it('Quotes lights only on the quotes view, and the rail follows a search-param-only click (W9-WEB-COMMERCE-NAV, was it.todo)', async () => {
+  // W9-WEB-COMMERCE-NAV: the rail follows a search-param-only click. The Quotes entry it was written
+  // for has left the menu (NAV-A1); the rule (matchTab with matchView, re-read on every search-param
+  // change) stays for any entry that names a tab and a view, so it is kept proven on one.
+  it('an entry with matchTab and matchView lights only on its view, and the rail follows a search-param-only click (W9-WEB-COMMERCE-NAV)', async () => {
     const { renderHook, act } = await import('@testing-library/react');
     vi.doMock('next/navigation', () => ({
       usePathname: () => window.location.pathname,
@@ -590,51 +582,33 @@ describe('the nav has a door to invoices and quotes (CF-20)', () => {
     }));
     try {
       const { useAppLayout } = await import('@/hooks/use-app-layout');
-      const item = (label: string) => {
-        const found = money().find((i) => i.label === label);
-        if (!found) throw new Error(`${label} is not in the Money section`);
-        return found;
-      };
-      const quotes = item('Quotes');
-      const invoices = item('Invoices');
+      const invoices = sales()?.items.find((i) => i.label === 'Invoices');
+      if (!invoices) throw new Error('Invoices is not in the Sales hub');
+      const viewed = { ...invoices, label: 'A view', href: '/app/commerce?tab=pipeline&view=quotes', matchTab: 'pipeline', matchView: 'quotes' };
 
       window.history.replaceState({}, '', '/app/commerce');
       const { result, rerender, unmount } = renderHook(() => useAppLayout());
-      const lit = () => ({ quotes: result.current.isSecondaryActive(quotes), invoices: result.current.isSecondaryActive(invoices) });
-      /** A nav click that changes only the search params: the page and the shell stay mounted. */
+      const lit = () => ({ view: result.current.isSecondaryActive(viewed), invoices: result.current.isSecondaryActive(invoices) });
       const click = (url: string) => act(() => {
         window.history.pushState({}, '', url);
         rerender();
       });
 
-      // Money > Sales (the Snapshot): Quotes is dark.
-      expect(lit()).toEqual({ quotes: false, invoices: false });
-      // Money > Quotes clicked from there: the rail follows without a pathname change.
+      expect(lit()).toEqual({ view: false, invoices: false });
       click('/app/commerce?tab=pipeline&view=quotes');
-      expect(lit()).toEqual({ quotes: true, invoices: false });
-      // The pipeline's other views are not the quotes view.
+      expect(lit()).toEqual({ view: true, invoices: false });
       click('/app/commerce?tab=pipeline&view=invoices');
-      expect(lit()).toEqual({ quotes: false, invoices: false });
+      expect(lit()).toEqual({ view: false, invoices: false });
       click('/app/commerce?tab=pipeline');
-      expect(lit()).toEqual({ quotes: false, invoices: false });
-      click('/app/commerce?tab=pipeline&view=quotes');
-      expect(lit()).toEqual({ quotes: true, invoices: false });
-      // Back to the Snapshot by a search-param-only click: Quotes goes dark again.
+      expect(lit()).toEqual({ view: false, invoices: false });
       click('/app/commerce');
-      expect(lit()).toEqual({ quotes: false, invoices: false });
+      expect(lit()).toEqual({ view: false, invoices: false });
       unmount();
 
-      // Mounted on a pipeline view other than quotes, Quotes is dark from the start.
-      window.history.replaceState({}, '', '/app/commerce?tab=pipeline&view=invoices');
-      const second = renderHook(() => useAppLayout());
-      expect(second.result.current.isSecondaryActive(quotes)).toBe(false);
-      second.unmount();
-
-      // Invoices keeps its own page: lit there, by pathname.
       window.history.replaceState({}, '', '/app/commerce/invoices');
       const third = renderHook(() => useAppLayout());
       expect(third.result.current.isSecondaryActive(invoices)).toBe(true);
-      expect(third.result.current.isSecondaryActive(quotes)).toBe(false);
+      expect(third.result.current.isSecondaryActive(viewed)).toBe(false);
       third.unmount();
     } finally {
       for (const m of ['next/navigation', '@/lib/navigation-context', '@/lib/theme-context', '@/hooks/use-plan', '@/lib/api', '@/lib/workspace']) vi.doUnmock(m);
