@@ -88,8 +88,43 @@
  *         rows and getCommerceStats is refused, for undefined, '' and a filter
  *         object
  *
- * MT-03's equality with the A/R aging holds on books where both read the same
- * invoices. The aging (ReceivablesService.getAging, outside this packet) reads
+ * Second pass, owner rulings D-249 to D-252 (#80 comment 7081192290).
+ * RED-BEFORE = the head c7531a19.
+ *   MT-10 (D-249 kept; D-250 amends its last step): a PAID invoice with no
+ *         payment row counts its total on its paid date, and still counts its
+ *         FULL total once it carries a payment row for part of it
+ *   MT-15 RED-BEFORE (D-250) a PAID invoice whose rows cover part of its total
+ *         counts its full total: 13,723 PAID with one 400 row received last
+ *         month reads 13,723 (400 last month, the unrecorded 13,323 on the
+ *         paid date; the head: 400). A refund row with no original on a
+ *         rowless PAID 500 reads 400 net (the head: -100). Another tenant's
+ *         row covers nothing. Reopened, such an invoice owes no more than its
+ *         total (the head: 600 on a 500 invoice), in the stats, the Executive
+ *         Summary and the A/R aging
+ *   MT-16 RED-BEFORE (D-251) a credited ACCRUAL book through the real routes:
+ *         200 with 30 paid and a 50 credit note APPLIED (PARTIALLY_CREDITED)
+ *         owes 120; 80 FULLY_CREDITED owes nothing; 40 sent owes 40. The A/R
+ *         aging states 160, the Executive Summary's figure and the stats'
+ *         (the head: 40, the credited invoice absent), reconciled with the
+ *         ledger. Another tenant's APPLIED note on the invoice is not netted.
+ *         A USD invoice on the same book is its own bucket (D-13). The note
+ *         voided, all three read 210
+ *   MT-17 RED-BEFORE (D-251, D-13) a two-currency book: the aging is labelled
+ *         in the business currency and states its receivables only (TTD
+ *         13,323), with USD 150 under byCurrency.USD, each equal to the
+ *         Executive Summary's outstandingByCurrency (the head: 13,473 under
+ *         one label). The seeded credited book reads 250 in both
+ *   MT-18 (D-251 tenancy and scope) the aging is refused to another tenant's
+ *         owner and to a member without revenue read (403, no figure); a
+ *         revenue:read member reads the owner's; another tenant's payment row
+ *         and credit note move nothing
+ *   MT-19 (D-251, reported) a PENDING invoice is in neither figure: the
+ *         summary's open statuses are SENT, OVERDUE, PARTIALLY_PAID and
+ *         PARTIALLY_CREDITED, and the aging adopts them (it read PENDING)
+ *
+ * MT-03's equality with the A/R aging held on books where both read the same
+ * invoices; since D-251 the aging adopts the summary's rule (MT-16, MT-17).
+ * The paragraph below describes the aging before D-251. The aging (ReceivablesService.getAging, outside this packet) reads
  * SENT / PARTIALLY_PAID / OVERDUE / PENDING, adds every currency and does not
  * net credit notes; the packet's rule reads SENT / OVERDUE / PARTIALLY_PAID /
  * PARTIALLY_CREDITED in the business currency, credit-aware. On a book with a
@@ -140,6 +175,8 @@ const ID = {
   ownerC: `${P}ownerC`,
   ownerK: `${P}ownerK`,
   ownerM: `${P}ownerM`,
+  ownerP: `${P}ownerP`,
+  ownerCr: `${P}ownerCr`,
   ownerB: `${P}ownerB`,
   staffNone: `${P}staffNone`,
   staffRead: `${P}staffRead`,
@@ -148,12 +185,16 @@ const ID = {
   bizC: `${P}bizC`, // ACCRUAL, TTD: the ledger-sourced aging
   bizK: `${P}bizK`, // CASH, TTD: seeded credited and odd rows
   bizM: `${P}bizM`, // CASH, TTD: seeded rows dated in other months; PAID invoices with no payment row
+  bizP: `${P}bizP`, // CASH, TTD: D-250, PAID invoices whose rows cover part of the total; a refund with no original
+  bizCr: `${P}bizCr`, // ACCRUAL, TTD: D-251, credit notes applied and voided through the real routes
   bizB: `${P}bizB`, // another tenant
   contactA: `${P}contactA`,
   contactR: `${P}contactR`,
   contactC: `${P}contactC`,
   contactK: `${P}contactK`,
   contactM: `${P}contactM`,
+  contactP: `${P}contactP`,
+  contactCr: `${P}contactCr`,
   contactB: `${P}contactB`,
 };
 
@@ -163,6 +204,8 @@ const OWNER_OF: Record<string, string> = {
   [ID.bizC]: ID.ownerC,
   [ID.bizK]: ID.ownerK,
   [ID.bizM]: ID.ownerM,
+  [ID.bizP]: ID.ownerP,
+  [ID.bizCr]: ID.ownerCr,
   [ID.bizB]: ID.ownerB,
 };
 
@@ -274,6 +317,31 @@ async function reportOf(biz: string) {
   const res = await report(biz);
   expect(res.status, JSON.stringify(res.body)).toBe(200);
   return res.body;
+}
+
+function aging(biz: string, as: string = OWNER_OF[biz]) {
+  return request(financeApp.getHttpServer()).get(`/finance/businesses/${biz}/receivables/aging`).set(HEADER, as);
+}
+
+/** A credit note through the real routes: created DRAFT, then applied. Answers its id. */
+async function creditNote(key: string, biz: string, amount: number, tag: string) {
+  const as = OWNER_OF[biz];
+  const created = await request(financeApp.getHttpServer())
+    .post(`/finance/businesses/${biz}/credit-notes`)
+    .set(HEADER, as)
+    .send({ invoiceId: INV[key], creditNoteNumber: `${P}CN-${tag}`, amount, reason: 'v64e credit' });
+  expect(created.status, `credit note ${tag}: ${JSON.stringify(created.body)}`).toBe(201);
+  const applied = await request(financeApp.getHttpServer()).post(`/finance/businesses/${biz}/credit-notes/${created.body.id}/apply`).set(HEADER, as);
+  expect(applied.status, `apply ${tag}: ${JSON.stringify(applied.body)}`).toBe(201);
+  return created.body.id as string;
+}
+
+/** The USD invoice of MT-05 (250 with 100 received on the TTD business), made once by whichever case needs it first. */
+async function ensureUsdInvoice() {
+  if (INV.a_usd) return;
+  await issuedInvoice('a_usd', ID.bizA, ID.contactA, 250, { currency: 'USD' });
+  const paid = await agent().post(`/commerce/businesses/${ID.bizA}/invoices/${INV.a_usd}/payments`).set(HEADER, ID.ownerA).send({ amount: 100, method: 'cash' });
+  expect(paid.status, JSON.stringify(paid.body)).toBe(201);
 }
 
 async function agingOf(biz: string) {
@@ -484,6 +552,9 @@ beforeAll(async () => {
 
   // The real A/R aging route over the real ReceivablesService.
   const receivables = new ReceivablesService(prismaService, coa);
+  // Second pass (D-251): the real credit-note routes over the real CreditNoteService.
+  const { CreditNoteService } = await import('../src/modules/finance/credit-note.service');
+  const creditNotes = new CreditNoteService(prismaService, moduleRef.get(PostingService), moduleRef.get(InvoiceWorkflowService));
   const financeRef = await Test.createTestingModule({
     controllers: [FinanceController],
     providers: [
@@ -495,7 +566,7 @@ beforeAll(async () => {
       PostingService,
       AccountingPeriodService,
       { provide: ReceivablesService, useValue: receivables },
-      ...financeStubs.map((token) => ({ provide: token, useValue: {} })),
+      ...financeStubs.map((token) => (token === CreditNoteService ? { provide: token, useValue: creditNotes } : { provide: token, useValue: {} })),
     ],
   }).compile();
   financeApp = financeRef.createNestApplication();
@@ -535,6 +606,8 @@ beforeAll(async () => {
     [ID.ownerC, ID.bizC, 'ACCRUAL', ID.contactC, 'c'],
     [ID.ownerK, ID.bizK, 'CASH', ID.contactK, 'k'],
     [ID.ownerM, ID.bizM, 'CASH', ID.contactM, 'm'],
+    [ID.ownerP, ID.bizP, 'CASH', ID.contactP, 'p'],
+    [ID.ownerCr, ID.bizCr, 'ACCRUAL', ID.contactCr, 'cr'],
     [ID.ownerB, ID.bizB, 'CASH', ID.contactB, 'b'],
   ] as const) {
     await db.user.create({ data: { id: user, email: `${P}owner-${tag}@test.local`, role: 'USER' } });
@@ -790,9 +863,10 @@ describe('V1-64 review repairs', () => {
     await seedPayment('m_rowless_now', 'foreign', ID.bizB, 9999, 'SUCCESSFUL');
     expect((await statsOf(ID.bizM)).totalRevenue).toBe(760);
     expect(JSON.stringify(await statsOf(ID.bizB))).not.toMatch(/9999/);
-    // Once the invoice carries a payment row of its own, the rows are the money: 250 total with 100 received reads 100.
+    // D-250 (amends this step; it read 610): a payment row for part of a PAID invoice does not shrink it. 250 PAID
+    // with a 100 row still counts 250: the row's 100 and the unrecorded 150.
     await seedPayment('m_rowless_now', 'own100', ID.bizM, 100, 'SUCCESSFUL');
-    expect((await statsOf(ID.bizM)).totalRevenue).toBe(610);
+    expect((await statsOf(ID.bizM)).totalRevenue).toBe(760);
     await db.payment.delete({ where: { id: `${P}pay_m_rowless_now_own100` } });
     expect((await statsOf(ID.bizM)).totalRevenue).toBe(760);
   });
@@ -821,11 +895,7 @@ describe('V1-64 review repairs', () => {
 
   it('MT-12 RED-BEFORE (COR-4; round 2 C2-9): the Executive Summary states what is owed per currency, in its figures and to its narrative; the headline stays the business currency', async () => {
     // Stands on its own (round 2 C2-8): the USD invoice of MT-05 is made here when that case did not run.
-    if (!INV.a_usd) {
-      await issuedInvoice('a_usd', ID.bizA, ID.contactA, 250, { currency: 'USD' });
-      const paid = await agent().post(`/commerce/businesses/${ID.bizA}/invoices/${INV.a_usd}/payments`).set(HEADER, ID.ownerA).send({ amount: 100, method: 'cash' });
-      expect(paid.status, JSON.stringify(paid.body)).toBe(201);
-    }
+    await ensureUsdInvoice();
     narrativePrompts.length = 0;
     const r = await reportOf(ID.bizA);
     // The narrative is told the other currency's receivable too, never added to the TTD figure.
@@ -889,5 +959,138 @@ describe('V1-64 review repairs', () => {
     expect(s.monthlyPaid).toBe(150);
     expect(s.revenueByMonth[4]).toMatchObject({ revenue: 30, invoiceCount: 1 });
     expect((s.revenueByMonth as Array<{ revenue: number }>).reduce((n, m) => n + cents(m.revenue), 0)).toBe(cents(180));
+  });
+});
+
+describe('V1-64 second pass: owner rulings D-250 and D-251', () => {
+  it('MT-15 RED-BEFORE (D-250): a PAID invoice counts its full total whatever its rows record; a refund with no original nets against it; reopened, it owes no more than its total', async () => {
+    const lastMonth = LAST_MONTH();
+    // 13,723 marked PAID now; one row, 400 received last month. The other 13,323 was never recorded.
+    await seedInvoice('p_part', ID.bizP, ID.contactP, 'PAID', 13723, { paidAt: new Date() });
+    await seedPayment('p_part', 'p400', ID.bizP, 400, 'SUCCESSFUL', { createdAt: lastMonth });
+    // 500 marked PAID now with no row, then 100 refunded: a negative REFUNDED row with no original (acceptance finding C2).
+    await seedInvoice('p_refund', ID.bizP, ID.contactP, 'PAID', 500, { paidAt: new Date() });
+    await seedPayment('p_refund', 'r100', ID.bizP, -100, 'REFUNDED');
+
+    const s = await statsOf(ID.bizP);
+    // 13,723 + (500 - 100)
+    expect(s.totalRevenue).toBe(14123);
+    expect(s.revenueByMonth[4]).toMatchObject({ revenue: 400, invoiceCount: 1 });
+    // this month: the unrecorded 13,323 and 500 on their paid date, less the 100 refund
+    expect(s.revenueByMonth[5]).toMatchObject({ revenue: 13723, invoiceCount: 2 });
+    expect(s.monthlyPaid).toBe(13723);
+    expect(s.outstandingAmount).toBe(0);
+    expect(s.byCurrency.TTD).toMatchObject({ paidInvoiceCount: 2 });
+
+    // D-75: another tenant's row on the invoice records none of its money: the remainder is still unrecorded.
+    await seedPayment('p_part', 'foreign', ID.bizB, 13323, 'SUCCESSFUL');
+    expect((await statsOf(ID.bizP)).totalRevenue).toBe(14123);
+
+    // A PAID invoice whose rows cover its total, or more, gains nothing (no double count).
+    await seedInvoice('p_full', ID.bizP, ID.contactP, 'PAID', 100, { paidAt: new Date() });
+    await seedPayment('p_full', 'p120', ID.bizP, 120, 'SUCCESSFUL');
+    expect((await statsOf(ID.bizP)).totalRevenue).toBe(14243);
+
+    // Reopened (the refund's reconcile returns it to SENT): the rows alone would leave 600 owed on a 500 invoice.
+    await db.invoice.update({ where: { id: INV.p_refund }, data: { status: 'SENT', paidAt: null } });
+    const reopened = await statsOf(ID.bizP);
+    expect(reopened.outstandingAmount).toBe(500);
+    expect((await reportOf(ID.bizP)).metrics.revenue).toMatchObject({ outstanding: 500, outstandingCount: 1 });
+    expect((await agingOf(ID.bizP)).totalOutstanding).toBe(500);
+    for (const [where, n] of numbersIn(reopened.byCurrency.TTD.invoiceStatusBreakdown)) expect(n, where).toBeGreaterThanOrEqual(0);
+  });
+
+  it('MT-16 RED-BEFORE (D-251): a credited ACCRUAL book. The A/R aging states the Executive Summary figure (PARTIALLY_CREDITED in, its credit netted once), reconciled with the ledger', async () => {
+    await issuedInvoice('cr_part', ID.bizCr, ID.contactCr, 200);
+    await pay('cr_part', ID.bizCr, 30);
+    const note = await creditNote('cr_part', ID.bizCr, 50, 'part');
+    await issuedInvoice('cr_full', ID.bizCr, ID.contactCr, 80);
+    await creditNote('cr_full', ID.bizCr, 80, 'full');
+    await issuedInvoice('cr_sent', ID.bizCr, ID.contactCr, 40);
+    expect([await statusOf('cr_part'), await statusOf('cr_full'), await statusOf('cr_sent')]).toEqual(['PARTIALLY_CREDITED', 'FULLY_CREDITED', 'SENT']);
+    // Another tenant's APPLIED note on this invoice is not this invoice's credit (D-75, SEC-V44-6).
+    await db.creditNote.create({ data: { id: `${P}cn_cr_foreign`, businessId: ID.bizB, invoiceId: INV.cr_part, creditNoteNumber: `${P}CN-crf`, status: 'APPLIED', amount: 25, appliedAt: new Date() } });
+
+    // owed: 200 - 50 - 30 = 120, and 40
+    let a = await agingOf(ID.bizCr);
+    expect(a.basis).toBe('ACCRUAL');
+    expect({ currency: a.currency, totalOutstanding: a.totalOutstanding, totalOverdue: a.totalOverdue }).toEqual({ currency: 'TTD', totalOutstanding: 160, totalOverdue: 0 });
+    expect(a.customers.map((c: any) => [c.contactId, c.total])).toEqual([[ID.contactCr, 160]]);
+    expect(a.totals.find((t: any) => t.bucket === 'current')).toMatchObject({ total: 160, invoiceCount: 2 });
+    expect({ ledgerArBalance: a.ledgerArBalance, ledgerReconciled: a.ledgerReconciled, ledgerDelta: a.ledgerDelta }).toEqual({ ledgerArBalance: 160, ledgerReconciled: true, ledgerDelta: 0 });
+    expect((await reportOf(ID.bizCr)).metrics.revenue).toMatchObject({ outstanding: 160, outstandingCount: 2 });
+    expect((await statsOf(ID.bizCr)).outstandingAmount).toBe(160);
+
+    // D-13: a USD invoice on the same book is its own bucket; the TTD figures and the TTD ledger balance do not move.
+    await issuedInvoice('cr_usd', ID.bizCr, ID.contactCr, 300, { currency: 'USD' });
+    const usdPaid = await agent().post(`/commerce/businesses/${ID.bizCr}/invoices/${INV.cr_usd}/payments`).set(HEADER, ID.ownerCr).send({ amount: 100, method: 'cash' });
+    expect(usdPaid.status, JSON.stringify(usdPaid.body)).toBe(201);
+    a = await agingOf(ID.bizCr);
+    expect({ currency: a.currency, totalOutstanding: a.totalOutstanding, ledgerArBalance: a.ledgerArBalance, ledgerReconciled: a.ledgerReconciled }).toEqual({ currency: 'TTD', totalOutstanding: 160, ledgerArBalance: 160, ledgerReconciled: true });
+    expect(Object.keys(a.byCurrency).sort()).toEqual(['TTD', 'USD']);
+    expect(a.byCurrency.USD).toMatchObject({ currency: 'USD', totalOutstanding: 200, ledgerArBalance: 200, ledgerReconciled: true });
+    expect(a.byCurrency.USD.customers.map((c: any) => [c.contactId, c.total])).toEqual([[ID.contactCr, 200]]);
+    expect(a.byCurrency.TTD).toMatchObject({ currency: 'TTD', totalOutstanding: 160 });
+    const byCurrency = (await reportOf(ID.bizCr)).metrics.revenue.outstandingByCurrency;
+    expect(byCurrency).toEqual({ TTD: { outstanding: 160, count: 2, overdueCount: 0 }, USD: { outstanding: 200, count: 1, overdueCount: 0 } });
+    for (const [where, n] of numbersIn(a)) expect([360, 385].includes(n), `${where} = ${n} adds TTD and USD`).toBe(false);
+
+    // The note voided through the real route: the invoice owes its 170 again, in all three.
+    const voided = await request(financeApp.getHttpServer()).post(`/finance/businesses/${ID.bizCr}/credit-notes/${note}/void`).set(HEADER, ID.ownerCr);
+    expect(voided.status, JSON.stringify(voided.body)).toBe(201);
+    expect(await statusOf('cr_part')).toBe('PARTIALLY_PAID');
+    a = await agingOf(ID.bizCr);
+    expect({ totalOutstanding: a.totalOutstanding, ledgerArBalance: a.ledgerArBalance, ledgerReconciled: a.ledgerReconciled }).toEqual({ totalOutstanding: 210, ledgerArBalance: 210, ledgerReconciled: true });
+    expect((await reportOf(ID.bizCr)).metrics.revenue.outstanding).toBe(210);
+    expect((await statsOf(ID.bizCr)).outstandingAmount).toBe(210);
+  });
+
+  it('MT-17 RED-BEFORE (D-251, D-13): a two-currency book and the seeded credited book. The aging states each currency apart, equal to the Executive Summary per currency', async () => {
+    await ensureUsdInvoice();
+    const a = await agingOf(ID.bizA);
+    const r = (await reportOf(ID.bizA)).metrics.revenue;
+    expect({ currency: a.currency, totalOutstanding: a.totalOutstanding, totalOverdue: a.totalOverdue }).toEqual({ currency: 'TTD', totalOutstanding: 13323, totalOverdue: 0 });
+    expect(a.totalOutstanding).toBe(r.outstanding);
+    expect(Object.keys(a.byCurrency).sort()).toEqual(['TTD', 'USD']);
+    expect(a.byCurrency.TTD.totalOutstanding).toBe(13323);
+    expect(a.byCurrency.USD.totalOutstanding).toBe(150);
+    for (const code of ['TTD', 'USD']) expect(a.byCurrency[code].totalOutstanding, code).toBe(r.outstandingByCurrency[code].outstanding);
+    // The customer rows of the labelled currency are that currency's; the USD 150 is in the USD bucket's row.
+    expect(a.customers.map((c: any) => [c.contactId, c.total])).toEqual([[ID.contactA, 13323]]);
+    expect(a.byCurrency.USD.customers.map((c: any) => [c.contactId, c.total])).toEqual([[ID.contactA, 150]]);
+    for (const [where, n] of numbersIn(a)) expect(n === 13473, `${where} = ${n} adds TTD and USD`).toBe(false);
+
+    // The seeded credited book (CASH basis, rows as their writers leave them; MT-08): 120 + 90 + 40 in TTD.
+    const k = await agingOf(ID.bizK);
+    const kr = (await reportOf(ID.bizK)).metrics.revenue;
+    expect(k.byCurrency.TTD.totalOutstanding).toBe(250);
+    expect(k.totalOutstanding).toBe(250);
+    expect(kr.outstanding).toBe(250);
+    expect(k.byCurrency.TTD.customers.map((c: any) => [c.contactId, c.total])).toEqual([[ID.contactK, 250]]);
+  });
+
+  it('MT-18 (D-251, D-57, D-75): the aging is the caller\'s own business\'s, for revenue readers only', async () => {
+    for (const refused of [await aging(ID.bizA, ID.ownerB), await aging(ID.bizA, ID.staffNone), await aging(ID.bizCr, ID.ownerA)]) {
+      expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+      expect(JSON.stringify(refused.body)).not.toMatch(/totalOutstanding|byCurrency|customers|13323|160|210/);
+    }
+    expect((await request(financeApp.getHttpServer()).get(`/finance/businesses/${ID.bizA}/receivables/aging`)).status).toBe(401);
+    const owner = await agingOf(ID.bizA);
+    const reader = await aging(ID.bizA, ID.staffRead);
+    expect(reader.status, JSON.stringify(reader.body)).toBe(200);
+    expect({ ...reader.body, asOf: null }).toEqual({ ...owner, asOf: null });
+    // The foreign 5,000 row on bizA's invoice (MT-06) and the foreign notes move nothing; bizB reads its own 70 alone.
+    expect(owner.byCurrency.TTD.totalOutstanding).toBe(13323);
+    const b = await agingOf(ID.bizB);
+    expect({ totalOutstanding: b.totalOutstanding, customers: b.customers.map((c: any) => [c.contactId, c.total]) }).toEqual({ totalOutstanding: 70, customers: [[ID.contactB, 70]] });
+    expect(JSON.stringify(b)).not.toMatch(/13323|v64e_contactA|v64e_contactCr|v64e_contactK/);
+  });
+
+  it('MT-19 (D-251; reported for a ruling): a PENDING invoice is an open receivable in neither figure', async () => {
+    const before = [(await agingOf(ID.bizP)).totalOutstanding, (await reportOf(ID.bizP)).metrics.revenue.outstanding, (await statsOf(ID.bizP)).outstandingAmount];
+    await seedInvoice('p_pending', ID.bizP, ID.contactP, 'PENDING', 55);
+    const after = [(await agingOf(ID.bizP)).totalOutstanding, (await reportOf(ID.bizP)).metrics.revenue.outstanding, (await statsOf(ID.bizP)).outstandingAmount];
+    expect(after).toEqual(before);
+    expect(new Set(after).size).toBe(1);
   });
 });

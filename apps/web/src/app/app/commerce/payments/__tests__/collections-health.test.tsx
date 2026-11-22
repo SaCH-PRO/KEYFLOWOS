@@ -478,3 +478,56 @@ describe("V1-64 Sales overview hero: a deposit is collected and the rest is outs
     expect(text).toContain("TTD 1.1k collected");
   });
 });
+
+/**
+ * Second pass, owner rulings D-249 and D-250 (#80 comment 7081192290): a PAID
+ * invoice counts its FULL total. What its payment rows do not record counts on
+ * the day it was paid, so marking paid never loses revenue; a refund row nets
+ * against it; and an invoice never owes more than its total. The server half
+ * is MT-15 in money-totals-partial-payments.integration.test.ts.
+ */
+describe("V1-64 second pass (D-250): a PAID invoice counts its full total on the tab and the hero", () => {
+  it("CH-23 RED-BEFORE: 13,723 PAID with one 400 row from last month -> Received TTD 13.7k (400 then, the unrecorded 13,323 on the paid date); it read TTD 400", () => {
+    mount([invoice("part", "PAID", 13723, [payment("part", 400, "SUCCESSFUL", LAST_MONTH)], { paidAt: NOW })]);
+    expect(strip("Received")).toBe("TTD 13.7k");
+    expect(strip("This Month")).toBe("TTD 13.3k");
+    expect(strip("Pending")).toBe("—");
+    const card = screen.getByText("Payment Methods").closest("div.rounded-xl") as HTMLElement;
+    expect(card.textContent).toContain("OtherTTD 13.3k1 payment");
+    expect(card.textContent).toContain("cashTTD 4001 payment");
+  });
+
+  it("CH-24 RED-BEFORE: a refund row with no original on a PAID 500 with no payment row -> Received TTD 400 (it read nothing received)", () => {
+    mount([invoice("ref", "PAID", 500, [payment("ref", -100, "REFUNDED")], { paidAt: NOW })]);
+    expect(strip("Received")).toBe("TTD 400");
+    expect(strip("This Month")).toBe("TTD 400");
+  });
+
+  it("CH-25 RED-BEFORE: reopened, that invoice owes its total and no more (500, where the rows alone leave 600), on the tab and the hero", () => {
+    const reopened = invoice("ref", "SENT", 500, [payment("ref", -100, "REFUNDED")], { paidAt: null });
+    mount([reopened]);
+    expect(strip("Pending")).toBe("TTD 500");
+    expect(within(health()).getByTestId("collections-to-collect").textContent).toBe("TTD 500");
+    cleanup();
+    render(
+      <CommerceOverviewTab businessId="biz_v64" invoices={[reopened]} quotes={[]} recurring={[]} currency="TTD" loading={false} onNavigate={() => {}} onNewItem={() => {}} />,
+    );
+    expect((screen.getByText("Outstanding Revenue").parentElement?.textContent ?? "")).toMatch(/Outstanding Revenue\D*500\.00/);
+  });
+
+  it("CH-26 RED-BEFORE: the hero collects the full total of a part-rowed PAID invoice", () => {
+    render(
+      <CommerceOverviewTab
+        businessId="biz_v64"
+        invoices={[invoice("part", "PAID", 13723, [payment("part", 400, "SUCCESSFUL", LAST_MONTH)], { paidAt: NOW })]}
+        quotes={[]} recurring={[]} currency="TTD" loading={false} onNavigate={() => {}} onNewItem={() => {}}
+      />,
+    );
+    expect(screen.getByText("Outstanding Revenue").parentElement?.textContent ?? "").toContain("TTD 13.7k collected");
+  });
+
+  it("CH-27: rows that cover the total, or more, add nothing (120 on a PAID 100 is 120, once)", () => {
+    mount([invoice("over", "PAID", 100, [payment("over", 120)], { paidAt: NOW })]);
+    expect(strip("Received")).toBe("TTD 120");
+  });
+});
