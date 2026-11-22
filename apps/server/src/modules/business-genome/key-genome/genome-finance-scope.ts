@@ -66,13 +66,23 @@ const MONEY_AMOUNT = /[$€£¥₹]\s?\d|(?<![a-z0-9])(ttd|usd|eur|gbp|jmd|bbd|x
  * balance, what is owed or paid, a rate. Read for proposals only: a genome row's domain is classified by the vocabulary
  * above, where "rate" would take every response or completion rate.
  */
-const PROPOSAL_MONEY_WORDS = /(?<![a-z])(amounts?|subtotals?|balances?|owed|owes|owing|paid|unpaid|dollars?|euros?|cents?|rent)(?![a-z])|(?<![a-z])(pay|pays|paying)(?![a-z])(?!\s+(?:a\s+|close\s+)?(?:visit|attention|heed|respects?|tribute|homage|mind)(?![a-z]))/i;
+const PROPOSAL_MONEY_WORDS =
+  /(?<![a-z])(amounts?|subtotals?|balances?|owed|owes|owing|paid|unpaid|dollars?|euros?|cents?|rent|income|earnings?|funds?|rate\s+cards?)(?![a-z])|(?<![a-z])(pay|pays|paying)(?![a-z])(?!\s+(?:a\s+|close\s+)?(?:visit|attention|heed|respects?|tribute|homage|mind)(?![a-z]))|(?<![a-z])(?:cards?|payments?|transactions?|charges?)\s+(?:was\s+|were\s+|got\s+)?declined|(?<![a-z])declined\s+(?:card|payment|transaction|charge)/i;
 /**
- * "rate" and "total" are money only beside a figure (round-4 correctness minor 3: a response rate, "3 tasks in total"
- * are not): "the hourly rate to 150", "Total: 1,200", a JSON {"total":1200}.
+ * Money beside a figure (rounds 4-6): a word followed within three words by a figure, a quoted figure or a percentage
+ * ("Total due 900", "the total came to 1200", "Rates will rise 10%", "Wire 900 to the vendor", {"bookingTotal":900}).
+ * "rate" alone is not money when it is a named non-money metric (a response, show or completion rate: round-5
+ * correctness minor 2); "total" and the money verbs never are exempted (round-6 security MAJOR-1: a booking total or
+ * rate is the sale amount).
  */
-const PROPOSAL_FIGURE_WORDS =
-  /(?<!(?:response|reply|show|no[\s_-]?show|completion|open|click|attendance|retention|bounce|success|error|booking|fill|occupancy|star|heart|frame|bit|sample|refresh|growth)[\s_]?)(?<![a-z])(rates?|totals?)(?![a-z])["']?\s*(?:[:=]|of|is|are|to|at|by|up|down|for)?\s*["']?\s*[$€£¥₹]?\d/i;
+const NEAR_FIGURE = `(?![a-z])["']?(?:[^a-z0-9\\n]{0,4}(?:[a-z]+[^a-z0-9\\n]{1,4}){0,3})["']?[$€£¥₹]?\\d`;
+const PROPOSAL_FIGURE_WORDS = new RegExp(
+  [
+    `(?<!(?:response|reply|show|no[\\s_-]?show|completion|open|click|attendance|retention|bounce|success|error|occupancy|star|heart|frame|bit|sample|refresh)[\\s_]?)(?<![a-z])rates?${NEAR_FIGURE}`,
+    `(?<![a-z])(?:totals?|bill(?:s|ed|ing)?|settle(?:s|d)?|wire[sd]?|transfer(?:s|red)?|tips?|loans?|retainers?|spent|spend(?:s|ing)?)${NEAR_FIGURE}`,
+  ].join('|'),
+  'i',
+);
 /** camelCase keys and words split at their humps (estimatedCost, unitPrice, adSpend), so the bounded terms see them (correctness MAJOR-2). */
 function splitHumps(v: string): string {
   return v.replace(/([a-z0-9])([A-Z])/g, '$1_$2');
@@ -184,7 +194,7 @@ function proposalContent(p: ProposalFields): Array<string | null | undefined> {
       ? t
           .replace(/(?<![A-Za-z0-9])[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}(?![A-Za-z0-9])/gi, ' ')
           // A cuid (Prisma cuid(): "c" and 24 lowercase letters and digits). A camelCase name (unpaidInvoices2026) is read.
-          .replace(/(?<![A-Za-z0-9-])c[a-z0-9]{24}(?![A-Za-z0-9-])/g, ' ')
+          .replace(/(?<![A-Za-z0-9-])c(?=[a-z0-9]{0,23}\d)[a-z0-9]{24}(?![A-Za-z0-9-])/g, ' ')
       : t;
   return [p.summary, p.description, p.rationale, p.expectedBenefit, asText(p.risks), asText(p.evidence), asText(p.payload), asText(p.inputPayload), asText(p.affectedEntities)].map(withoutIdTokens);
 }

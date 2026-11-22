@@ -500,8 +500,8 @@ export class GenomeRecommendationOutcomeService {
   }
 
   /**
-   * `reader.readsRevenue === false` (D-238, rounds 4-5): a financial linked KEY proposal's execution result is withheld,
-   * and any failure reason that states money (as redactedProposalView); its status stays (D-226). Left out, the internal callers get it whole.
+   * `reader.readsRevenue === false` (D-238, rounds 4-6): a financial linked KEY proposal's execution result and failure
+   * reason are withheld, and a non-financial one's failure reason that states money; its status stays (D-226). Left out, the internal callers get it whole.
    */
   async getExecutionStatus(
     businessId: string,
@@ -545,8 +545,10 @@ export class GenomeRecommendationOutcomeService {
         if (reader && !reader.readsRevenue) {
           const [financial] = await financialProposalsWithProvenance(this.prisma, businessId, [proposal as unknown as ProposalFields]);
           if (financial) executionResult = null;
-          // As the redacted view: a failure reason that states no money is kept (round 5, correctness minor 5).
-          if (failureReason && proposalTextStatesMoney(failureReason)) failureReason = null;
+          // A financial proposal's failure reason is withheld whatever it says ("Card declined", "Exceeds approval
+          // limit"): the vocabulary cannot be complete (round 6, security minor 2); a non-financial proposal's reason is
+          // withheld when it states money.
+          if (failureReason && (financial || proposalTextStatesMoney(failureReason))) failureReason = null;
         }
       }
     } else if (linkedActionType === 'genome_experiment') {
