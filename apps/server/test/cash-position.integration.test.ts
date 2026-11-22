@@ -150,6 +150,46 @@
  *          truncate the text to one line, so the figures follow the runway
  *          directly (CP-18 pins that wording)
  *
+ * W11-RUNWAY-LEDGER-CASH (owner ruling D-135, extending D-107): two more runway
+ * alarms summed FinancialAccount.currentBalance (the opening snapshot) across
+ * every currency:
+ *
+ *   CP-20  RED-BEFORE FinanceIntelligenceService.scan (real Prisma, the finance
+ *          app's CashPositionService; aiUsage, commandService and
+ *          revenueActions.upsertExternal are stand-ins, the last recording)
+ *          writes FIN_CASHFLOW_RISK from the ledger cash in the business
+ *          currency: on K (TTD 100 in the ledger beside USD 550, snapshots
+ *          summing 900) amount and evidence.cash are 100, evidence.cashCurrency
+ *          'TTD', the body and the mirrored revenue action name USD 550.00
+ *          unconverted and never 650 or 900; a label that is not a currency
+ *          code is counted, never echoed, in the body and the evidence; the
+ *          command-spine mirror (served to operations readers, not revenue
+ *          readers) says other-currency cash is held without its figures; one
+ *          row per business however often it is scanned; a business whose
+ *          ledger cash moved away from the snapshot (A) reads the ledger figure;
+ *          no row is written for another tenant
+ *   CP-21  RED-BEFORE the real MoneyMovesService behind the real
+ *          GET money-moves route: 'Protect cash runway' is computed from K's
+ *          TTD 100 (expectedImpact 20, currency 'TTD', id mm-runway-<biz>), its
+ *          summary names USD 550.00 unconverted; a revenue reader reads the
+ *          same; a revenue-none member and another tenant's owner get 403; a
+ *          non-code label is counted, never echoed
+ *   CP-22  (review SEC-W11RL-1) RED-BEFORE the FIN_CASHFLOW_RISK evidence names
+ *          the business currency only when it is a three-letter code (as its
+ *          body does): on a business whose stored currency is free text,
+ *          evidence.cashCurrency is null and the text is never echoed
+ *   CP-23  (acceptance review C1) RED-BEFORE the ledger cash can be negative
+ *          where the snapshot sum could not: the runway shown is never below
+ *          zero (no "~-0 days", no "~-0.0 months") on the alarm and the money
+ *          move, and the amount at risk, the command item's value and score and
+ *          the move's expectedImpact are never negative; the real negative
+ *          balance stays in the body and the evidence (revenue readers)
+ *   CP-24  (acceptance review C2) RED-BEFORE a scan in which the cash read
+ *          throws leaves the open alarm, its revenue action (the real
+ *          RevenueActionService) and its command item open, in that scan and
+ *          after the next good one; a detector that ran and found nothing still
+ *          supersedes its row (the self-heal is unchanged on success)
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * the global TenantInterceptor, CommerceService, InvoiceWorkflowService,
  * RevenuePostingService, PostingService, AccountingPeriodService,
@@ -211,6 +251,9 @@ const ID = {
   bizI: `${P}bizI`,
   ownerJ: `${P}ownerJ`,
   bizJ: `${P}bizJ`,
+  // W11-RUNWAY-LEDGER-CASH: K keeps TTD, holds USD too, and its snapshots differ from its ledger (CP-20, CP-21).
+  ownerK: `${P}ownerK`,
+  bizK: `${P}bizK`,
 };
 
 /** CP-13: every canonical module key (core/authority/module-vocabulary.ts) at none. */
@@ -234,6 +277,7 @@ let posting: any;
 let coaSeeder: any;
 let accounts: any;
 let cashPositionService: any; // the finance app's CashPositionService (V1-37c)
+let financePrisma: any; // the finance app's PrismaService (CP-20 builds FinanceIntelligenceService on it)
 let tillA: any; // A's cash account, opened with 1000
 let paymentA: any; // the 100 manual payment on A's invoice
 
@@ -251,6 +295,8 @@ async function cleanup() {
     `DELETE FROM activities WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM revenue_actions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM command_items WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM finance_action_items WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM expenses WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -270,7 +316,7 @@ async function cleanup() {
   }
   // The fixture businesses' overview cache entries (60s TTL).
   if (redis) {
-    for (const biz of [ID.bizA, ID.bizB, ID.bizC, ID.bizD, ID.bizE, ID.bizF, ID.bizFt, ID.bizG, ID.bizH, ID.bizI, ID.bizJ]) {
+    for (const biz of [ID.bizA, ID.bizB, ID.bizC, ID.bizD, ID.bizE, ID.bizF, ID.bizFt, ID.bizG, ID.bizH, ID.bizI, ID.bizJ, ID.bizK]) {
       await redis.del(overviewKey(biz)).catch(() => undefined);
     }
   }
@@ -659,6 +705,8 @@ beforeAll(async () => {
     import('../src/modules/finance/exchange-rate.service').then((m) => m.ExchangeRateService),
     import('../src/modules/finance/fixed-asset.service').then((m) => m.FixedAssetService),
   ]);
+  // W11-RUNWAY-LEDGER-CASH (CP-21): the money-moves route runs the real MoneyMovesService.
+  const { MoneyMovesService } = await import('../src/modules/finance/money-moves.service');
   const financeRef = await Test.createTestingModule({
     controllers: [FinanceController],
     providers: [
@@ -676,15 +724,17 @@ beforeAll(async () => {
       PostingService,
       AccountingPeriodService,
       ...(cashPositionToken ? [cashPositionToken] : []),
+      MoneyMovesService,
       // The overview's Redis cache, wired as AppModule wires it (V1-34 review
       // V34-SEC-01 / CR-34-02): every overview read below runs the cache path.
       { provide: REDIS_CLIENT, useValue: financeRedis },
       RedisService,
       // FinanceController's other collaborators are off the cash path.
-      ...collaborators.map((token) => ({ provide: token, useValue: {} })),
+      ...collaborators.filter((token) => token !== MoneyMovesService).map((token) => ({ provide: token, useValue: {} })),
     ],
   }).compile();
   cashPositionService = cashPositionToken ? financeRef.get(cashPositionToken) : null;
+  financePrisma = financeRef.get(PrismaService);
   financeApp = financeRef.createNestApplication();
   attachIdentity(financeApp);
   financeApp.useGlobalInterceptors(new TenantInterceptor(financeRef.get(PrismaService)));
@@ -725,6 +775,7 @@ beforeAll(async () => {
     [ID.ownerH, ID.bizH, 'V34A Biz H', `${P}owner_h@test.local`],
     [ID.ownerI, ID.bizI, 'V34A Biz I', `${P}owner_i@test.local`],
     [ID.ownerJ, ID.bizJ, 'V34A Biz J', `${P}owner_j@test.local`],
+    [ID.ownerK, ID.bizK, 'V34A Biz K', `${P}owner_k@test.local`],
   ] as const) {
     await db.user.create({ data: { id: user, email, role: 'USER' } });
     await db.business.create({ data: { id: biz, name, ownerId: user, currency: biz === ID.bizF || biz === ID.bizJ ? 'USD' : 'TTD' } });
@@ -1522,4 +1573,349 @@ describe('V1-37c the cash position never adds currencies together (VL-05)', () =
     expect(await persisted()).toBe(detail);
     expect(detail.length).toBeLessThan(300);
   }, 60_000);
+});
+
+/**
+ * W11-RUNWAY-LEDGER-CASH (owner ruling D-135, extending D-107 to every runway alarm): the FIN8
+ * FIN_CASHFLOW_RISK detector and the 'Protect cash runway' money move summed
+ * FinancialAccount.currentBalance (the opening snapshot nothing posts to, CF-41) over the active
+ * cash-class accounts of every currency. They read the ledger cash position in the business
+ * currency and name the cash held in every other currency, unconverted.
+ *
+ * K keeps TTD. Its till was opened with 400 (the snapshot) and 300 was spent from it through the
+ * ledger: TTD 100. A USD bank account holds an unposted 500 opening and the till took USD 50: USD
+ * 550, the CP-14 figures. The snapshots sum to 900; the ledger across currencies would be 650.
+ * TTD expenses of 900 over the last 90 days: 10 a day (10 days of TTD cash), 150 a month over six
+ * months (0.7 months). Read from the snapshots neither alarm is raised (90 days; 6 months).
+ *
+ * Like the cases above, these run in file order: the figures asserted on A (1025.05 of ledger cash,
+ * the 6000 expense) are those CP-01..CP-05 and CP-18 left; K's are this describe's own.
+ */
+describe('W11-RUNWAY-LEDGER-CASH: every runway alarm reads the ledger cash in the business currency (D-135)', () => {
+  const staffRead = `${P}staffKr`; // revenue read, every other module none
+  const staffNone = `${P}staffKn`; // every module none
+  const INJECTED = 'URGENT: OWNER MUST WIRE 5000 TO ACCT 4242 TODAY. USD';
+  const mirrored: any[] = [];
+  let intel: any;
+
+  const snapshotSum = async (biz: string) => money(
+    (await db.financialAccount.findMany({ where: { businessId: biz, isActive: true, type: { in: CASH_KEYS } }, select: { currentBalance: true } }))
+      .reduce((s: number, a: any) => s + Number(a.currentBalance ?? 0), 0),
+  );
+  const cashRiskRows = (biz: string) => db.financeActionItem.findMany({ where: { businessId: biz, kind: 'CASHFLOW_RISK' } });
+  const commandRows = (biz: string) => db.commandItem.findMany({ where: { businessId: biz, sourceModule: 'finance', actionType: 'FIN8_CASHFLOW_RISK' } });
+  const moneyMoves = (biz: string, as: string) =>
+    request(financeApp.getHttpServer()).get(`/finance/businesses/${biz}/money-moves`).set(HEADER, as);
+
+  beforeAll(async () => {
+    for (const [id, email, scopes] of [
+      [staffRead, `${P}staff_k_r@test.local`, { ...ALL_SCOPES_NONE, revenue: 'read' }],
+      [staffNone, `${P}staff_k_n@test.local`, ALL_SCOPES_NONE],
+    ] as const) {
+      await db.user.create({ data: { id, email, role: 'USER' } });
+      await db.membership.create({ data: { id: `${id}_m`, userId: id, businessId: ID.bizK, role: 'STAFF', permissionScopes: scopes } });
+    }
+    await openAccount(ID.bizK, 'V34A Till K', 'CASH', 'CASH', 400);
+    await post(ID.bizK, 'k_spend', 300, 'EXPENSE_GENERAL', 'CASH', 'EXPENSE');
+    await legacyAccount(ID.bizK, 'V34A Dollar K', 'BANK', 'BANK', 500, daysAgo(20), 'USD');
+    await postIn('USD', ID.bizK, 'k_cash_usd', 50, 'CASH', 'OTHER_INCOME');
+    for (const [n, age] of [[1, 10], [2, 40], [3, 70]] as const) {
+      await db.expense.create({
+        data: { id: `${P}expK${n}`, businessId: ID.bizK, description: `V34A rent K ${n}`, amount: 300, currency: 'TTD', date: daysAgo(age) },
+      });
+    }
+
+    const { FinanceIntelligenceService } = await import('../src/modules/finance/finance-intelligence.service');
+    const revenueActions = {
+      upsertExternal: async (input: any) => { mirrored.push(input); return { actionId: null }; },
+    };
+    // Real Prisma and the finance app's CashPositionService; aiUsage and commandService are off scan's path.
+    intel = new (FinanceIntelligenceService as any)(financePrisma, {}, revenueActions, {}, cashPositionService);
+  }, 60_000);
+
+  it('W11 fixture sanity: K holds TTD 100 beside USD 550 in the cash position while its snapshots sum to 900', async () => {
+    const p = await cashPositionService.getCashPosition(ID.bizK);
+    expect(p).toMatchObject({ cashBalance: 100, currency: 'TTD', basis: 'ledger', byCurrency: { TTD: 100, USD: 550 } });
+    expect(await ledgerCashByCurrency(ID.bizK), 'USD 500 is an unposted opening, bridged').toEqual({ TTD: 100, USD: 50 });
+    expect(await snapshotSum(ID.bizK)).toBe(900);
+  });
+
+  it('CP-20 (D-135) RED-BEFORE: FIN_CASHFLOW_RISK is raised from the ledger cash in the business currency (TTD 100, never the 900 snapshots nor 650), names USD 550.00 unconverted, counts a non-code label without echoing it, and is written once per business and for no other tenant', async () => {
+    const result = await intel.scan(ID.bizK);
+    expect(result.created, JSON.stringify(result)).toBeGreaterThanOrEqual(1);
+
+    const body = 'Cash 100.00 against 10.00/day burn (90-day average). Runway is under 30 days. (TTD cash only). Not counted: USD 550.00.';
+    let rows = await cashRiskRows(ID.bizK);
+    expect(rows.map((r: any) => [r.status, r.severity, r.title, Number(r.amount), r.entityType, r.entityId, r.recommendedAction])).toEqual([
+      ['OPEN', 'CRITICAL', 'Low cash runway — ~10 days', 100, 'business', ID.bizK, '/app/finance/cashflow'],
+    ]);
+    expect(rows[0].body).toBe(body);
+    expect(rows[0].evidence).toEqual({
+      cash: 100, dailyBurn: 10, days: 10, cashCurrency: 'TTD', otherCurrencyCash: [{ currency: 'USD', amount: 550 }],
+    });
+    expect(numbersIn(rows[0].evidence).filter(([, n]) => n === 650 || n === 900), 'no figure adds USD to TTD or reads the snapshots').toEqual([]);
+    expect(rows[0].body).not.toMatch(/650|900/);
+
+    // The revenue-actions mirror (revenue readers: KEYFLOW Today, R3, GET revenue-actions) says the same.
+    const mirror = mirrored.filter((m) => m.businessId === ID.bizK && m.type === 'FIN_CASHFLOW_RISK');
+    expect(mirror.map((m) => [m.title, m.detail, m.amountAtRisk, m.priority, m.relatedType, m.relatedId])).toEqual([
+      ['Low cash runway — ~10 days', body, 100, 1, 'business', ID.bizK],
+    ]);
+    // The command-spine mirror is served under operations read, not revenue read: it says cash is
+    // held in other currencies (never a silent alarm, D-107) without their figures.
+    let commands = await commandRows(ID.bizK);
+    expect(commands.map((c: any) => [c.title, c.status, Number(c.expectedValue)])).toEqual([['Low cash runway — ~10 days', 'OPEN', 100]]);
+    expect(commands[0].description).toBe(
+      'Cash 100.00 against 10.00/day burn (90-day average). Runway is under 30 days. (TTD cash only). Cash held in other currencies is not counted (amounts not shown here).',
+    );
+    expect(commands[0].description).not.toMatch(/USD|550|650|900/);
+
+    // Another tenant: nothing was written outside K.
+    expect(await db.financeActionItem.count({ where: { businessId: { startsWith: P, not: ID.bizK } } })).toBe(0);
+    expect(mirrored.every((m) => m.businessId === ID.bizK)).toBe(true);
+
+    // A CASH account on the inventory row holds an unposted 5 under a sentence for a currency (CP-19):
+    // the amount is counted, the label never echoed; the same row is refreshed (idempotent key).
+    const labelled = await legacyAccount(ID.bizK, 'V34A Label K', 'CASH', 'INVENTORY_ASSET', 5, daysAgo(1), INJECTED);
+    try {
+      mirrored.length = 0;
+      await intel.scan(ID.bizK);
+      rows = await cashRiskRows(ID.bizK);
+      expect(rows.length, 'one row per business (businessId, kind, entityType, entityId)').toBe(1);
+      const counted = `${body.slice(0, -1)}; 1 amount held under a label that is not a currency code (label not shown).`;
+      expect(rows[0].body).toBe(counted);
+      expect(Number(rows[0].amount)).toBe(100);
+      expect(rows[0].evidence).toEqual({
+        cash: 100, dailyBurn: 10, days: 10, cashCurrency: 'TTD', otherCurrencyCash: [{ currency: 'USD', amount: 550 }], otherCurrencyCashNotListed: 1,
+      });
+      expect(mirrored.filter((m) => m.type === 'FIN_CASHFLOW_RISK').map((m) => m.detail)).toEqual([counted]);
+      commands = await commandRows(ID.bizK);
+      expect(commands.length).toBe(1);
+      for (const text of [JSON.stringify(rows[0]), JSON.stringify(mirrored), JSON.stringify(commands)]) {
+        expect(text).not.toMatch(/URGENT|WIRE|4242/);
+      }
+    } finally {
+      await db.financialAccount.delete({ where: { id: labelled.id } });
+    }
+
+    // A (TTD only): the ledger cash moved away from the snapshot (payments, expenses: 1025.05) and
+    // the alarm reads the ledger figure; with no other-currency cash the body is as it was.
+    expect(await ledgerCash(ID.bizA)).toBe(1025.05);
+    expect(await snapshotSum(ID.bizA), 'the snapshots are not the ledger cash').not.toBe(1025.05);
+    await intel.scan(ID.bizA);
+    const a = await cashRiskRows(ID.bizA);
+    expect(a.map((r: any) => [r.severity, r.title, Number(r.amount), r.body])).toEqual([
+      ['WARNING', 'Low cash runway — ~15 days', 1025.05, 'Cash 1025.05 against 66.67/day burn (90-day average). Runway is under 30 days.'],
+    ]);
+    expect(a[0].evidence).toEqual({ cash: 1025.05, dailyBurn: 66.67, days: 15, cashCurrency: 'TTD', otherCurrencyCash: [] });
+    expect((await commandRows(ID.bizA)).map((c: any) => c.description)).toEqual([a[0].body]);
+    expect((await cashRiskRows(ID.bizK)).length, "A's scan wrote nothing on K").toBe(1);
+  }, 120_000);
+
+  it("CP-21 (D-135) RED-BEFORE: GET money-moves (real MoneyMovesService, real guards) computes 'Protect cash runway' from TTD 100 in currency TTD and names USD 550.00 unconverted; a revenue reader reads the same; a revenue-none member and another tenant's owner get 403; a non-code label is counted, never echoed", async () => {
+    const runway = (body: any) => (Array.isArray(body) ? body : []).filter((m: any) => m.title === 'Protect cash runway');
+    const summary = 'Runway is ~0.7 months. Reducing burn or increasing collections is urgent. (TTD cash only). Not counted: USD 550.00.';
+
+    const res = await moneyMoves(ID.bizK, ID.ownerK);
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(200);
+    expect(runway(res.body)).toEqual([
+      expect.objectContaining({
+        id: `mm-runway-${ID.bizK}`,
+        type: 'CUT_EXPENSE',
+        summary,
+        expectedImpact: 20,
+        currency: 'TTD',
+        confidence: 80,
+        riskTier: 2,
+      }),
+    ]);
+    expect(numbersIn(res.body).filter(([, n]) => n === 650 || n === 900 || n === 130 || n === 180), 'no figure adds USD to TTD or reads the snapshots').toEqual([]);
+
+    // A revenue reader is served the same move; who may read it is unchanged (revenue read, a member).
+    const reader = await moneyMoves(ID.bizK, staffRead);
+    expect(reader.status).toBe(200);
+    expect(runway(reader.body).map((m: any) => [m.summary, m.expectedImpact, m.currency])).toEqual([[summary, 20, 'TTD']]);
+    for (const as of [staffNone, ID.ownerA]) {
+      const refused = await moneyMoves(ID.bizK, as);
+      expect(refused.status, as).toBe(403);
+      expect(JSON.stringify(refused.body), as).not.toMatch(/USD|runway|550/i);
+    }
+
+    // A legacy lower-case business currency: the move is labelled with the normalized code.
+    await db.business.update({ where: { id: ID.bizK }, data: { currency: 'ttd' } });
+    try {
+      const legacy = await moneyMoves(ID.bizK, ID.ownerK);
+      expect(runway(legacy.body).map((m: any) => [m.summary, m.expectedImpact, m.currency])).toEqual([[summary, 20, 'TTD']]);
+    } finally {
+      await db.business.update({ where: { id: ID.bizK }, data: { currency: 'TTD' } });
+    }
+
+    // A non-code label (CP-19): counted, never echoed.
+    const labelled = await legacyAccount(ID.bizK, 'V34A Label K2', 'CASH', 'INVENTORY_ASSET', 5, daysAgo(1), INJECTED);
+    try {
+      const withLabel = await moneyMoves(ID.bizK, ID.ownerK);
+      expect(runway(withLabel.body).map((m: any) => m.summary)).toEqual([
+        `${summary.slice(0, -1)}; 1 amount held under a label that is not a currency code (label not shown).`,
+      ]);
+      expect(JSON.stringify(withLabel.body)).not.toMatch(/URGENT|WIRE|4242/);
+    } finally {
+      await db.financialAccount.delete({ where: { id: labelled.id } });
+    }
+
+    // A (TTD only, ledger 1025.05, six-month burn 1000 a month): the ledger figure, the summary as it was.
+    const a = await moneyMoves(ID.bizA, ID.ownerA);
+    expect(a.status).toBe(200);
+    expect(runway(a.body).map((m: any) => [m.summary, money(m.expectedImpact), m.currency])).toEqual([
+      ['Runway is ~1.0 months. Reducing burn or increasing collections is urgent.', 205.01, 'TTD'],
+    ]);
+  }, 60_000);
+
+  // Review SEC-W11RL-1: Business.currency is free text (up to 10 characters, written by whoever may
+  // edit the business settings). The body names the business currency only when it is a three-letter
+  // code (cashOnlyLabel); the evidence, persisted and served whole to revenue readers and to the
+  // flow-chat tool finance_list_action_items, echoed the normalized text as cashCurrency.
+  it('CP-22 (review SEC-W11RL-1) RED-BEFORE: FIN_CASHFLOW_RISK evidence names the business currency only when it is a three-letter code; free text stored as the business currency is never echoed', async () => {
+    await db.business.update({ where: { id: ID.bizK }, data: { currency: 'pay me now' } });
+    try {
+      // No cash is held under that text: K's TTD 100 and USD 550 are both held apart.
+      const p = await cashPositionService.getCashPosition(ID.bizK);
+      expect(p).toMatchObject({ cashBalance: 0, currency: 'PAY ME NOW', byCurrency: { TTD: 100, USD: 550 } });
+      mirrored.length = 0;
+      await intel.scan(ID.bizK);
+      const rows = await cashRiskRows(ID.bizK);
+      expect(rows.length).toBe(1);
+      expect(rows[0].body).toBe(
+        'Cash 0.00 against 10.00/day burn (90-day average). Runway is under 30 days. (business-currency cash only). Not counted: TTD 100.00, USD 550.00.',
+      );
+      expect(rows[0].evidence).toEqual({
+        cash: 0, dailyBurn: 10, days: 0, cashCurrency: null,
+        otherCurrencyCash: [{ currency: 'TTD', amount: 100 }, { currency: 'USD', amount: 550 }],
+      });
+      for (const text of [JSON.stringify(rows[0]), JSON.stringify(mirrored), JSON.stringify(await commandRows(ID.bizK))]) {
+        expect(text).not.toMatch(/pay me now/i);
+      }
+    } finally {
+      await db.business.update({ where: { id: ID.bizK }, data: { currency: 'TTD' } });
+    }
+    // Back on TTD the evidence names it again.
+    await intel.scan(ID.bizK);
+    expect((await cashRiskRows(ID.bizK))[0].evidence).toMatchObject({ cash: 100, cashCurrency: 'TTD', otherCurrencyCash: [{ currency: 'USD', amount: 550 }] });
+  }, 60_000);
+
+  // Acceptance review C1: the snapshot sum was never negative in practice; the ledger cash is, as
+  // soon as more is spent from the till than it holds. (-0.3).toFixed(0) is "-0": the alarm read
+  // "~-0 days", then "~-32 days"; the move "~-0.0 months" with a negative expectedImpact; the negative
+  // amount sank the mirror in the amount-at-risk order and made the command item's score negative.
+  it('CP-23 (acceptance review C1) RED-BEFORE: with negative ledger cash the runway shown is never below zero and no displayed or ordering amount is negative, on the alarm, its mirrors and the money move; the real balance stays in the body and the evidence', async () => {
+    const runway = (body: any) => (Array.isArray(body) ? body : []).filter((m: any) => m.title === 'Protect cash runway');
+    const note = '(TTD cash only). Not counted: USD 550.00.';
+    let spent = 0;
+    try {
+      for (const [kind, spend, cash] of [['k_over_1', 103, -3], ['k_over_2', 317, -320]] as const) {
+        await post(ID.bizK, kind, spend, 'EXPENSE_GENERAL', 'CASH', 'EXPENSE');
+        spent += spend;
+        expect((await cashPositionService.getCashPosition(ID.bizK)).cashBalance).toBe(cash);
+        mirrored.length = 0;
+        await intel.scan(ID.bizK);
+        const rows = await cashRiskRows(ID.bizK);
+        expect(rows.map((r: any) => [r.status, r.severity, r.title, Number(r.amount)]), String(cash)).toEqual([
+          ['OPEN', 'CRITICAL', 'Low cash runway — ~0 days', 0],
+        ]);
+        expect(rows[0].body, 'the real balance is stated').toBe(`Cash ${cash.toFixed(2)} against 10.00/day burn (90-day average). Runway is under 30 days. ${note}`);
+        expect(rows[0].evidence).toEqual({
+          cash, dailyBurn: 10, days: 0, cashCurrency: 'TTD', otherCurrencyCash: [{ currency: 'USD', amount: 550 }],
+        });
+        expect(mirrored.filter((m) => m.type === 'FIN_CASHFLOW_RISK').map((m) => [m.title, m.amountAtRisk, m.priority])).toEqual([
+          ['Low cash runway — ~0 days', 0, 1],
+        ]);
+        const commands = await commandRows(ID.bizK);
+        expect(commands.length).toBe(1);
+        expect(commands[0].title).toBe('Low cash runway — ~0 days');
+        // A zero amount reads as no amount on the command item: no expected value, the default score.
+        expect([commands[0].impactScore, commands[0].expectedValue], 'never a negative score or value').toEqual([50, null]);
+
+        const res = await moneyMoves(ID.bizK, ID.ownerK);
+        expect(res.status).toBe(200);
+        expect(runway(res.body).map((m: any) => [m.id, m.summary, m.expectedImpact, m.currency]), String(cash)).toEqual([
+          [`mm-runway-${ID.bizK}`, `Runway is ~0.0 months. Reducing burn or increasing collections is urgent. ${note}`, 0, 'TTD'],
+        ]);
+        for (const text of [rows[0].title, JSON.stringify(mirrored.map((m) => m.title)), commands[0].title, JSON.stringify(runway(res.body))]) {
+          expect(text).not.toMatch(/~-|-0\b/);
+        }
+      }
+    } finally {
+      // Back to TTD 100, the figure the other cases read (whatever was spent before a failure).
+      if (spent > 0) await post(ID.bizK, 'k_over_back', spent, 'CASH', 'OTHER_INCOME', 'INCOME');
+    }
+    expect((await cashPositionService.getCashPosition(ID.bizK)).cashBalance).toBe(100);
+    await intel.scan(ID.bizK);
+    expect((await cashRiskRows(ID.bizK)).map((r: any) => [r.title, Number(r.amount)])).toEqual([['Low cash runway — ~10 days', 100]]);
+  }, 120_000);
+
+  // Acceptance review C2: scan catches a detector's error and goes on; the self-heal then read the
+  // missing detection as "no longer live", marked the open row SUPERSEDED and its revenue action
+  // COMPLETED, and RevenueActionService never reopens a COMPLETED action: one failed cash read (now
+  // several queries) removed the alarm from the revenue-actions queue and the overview for good.
+  it('CP-24 (acceptance review C2) RED-BEFORE: a scan in which the cash read throws leaves the open alarm, its revenue action and its command item open, then and after the next good scan; a detector that ran and found nothing still supersedes its row', async () => {
+    const { FinanceIntelligenceService } = await import('../src/modules/finance/finance-intelligence.service');
+    const { RevenueActionService } = await import('../src/modules/commerce/revenue-action.service');
+    // The real RevenueActionService on real Prisma (its gateway and aiUsage are off upsertExternal's path).
+    const revenueActions = new (RevenueActionService as any)(financePrisma, eventStub, {}, {});
+    let failNext = false;
+    const flaky = {
+      getCashPosition: async (biz: string) => {
+        if (failNext) { failNext = false; throw new Error('v34a: the cash read failed'); }
+        return cashPositionService.getCashPosition(biz);
+      },
+    };
+    const real = new (FinanceIntelligenceService as any)(financePrisma, {}, revenueActions, {}, flaky);
+    const state = async () => {
+      const [item] = await cashRiskRows(ID.bizK);
+      const action = await db.revenueAction.findFirst({ where: { businessId: ID.bizK, type: 'FIN_CASHFLOW_RISK', relatedType: 'business', relatedId: ID.bizK } });
+      const [command] = await commandRows(ID.bizK);
+      return {
+        item: [item?.status, item?.title, Number(item?.amount), item?.mirroredActionId === action?.id],
+        action: [action?.status, action?.title, Number(action?.amountAtRisk)],
+        command: [command?.status, command?.title],
+      };
+    };
+    const open = {
+      item: ['OPEN', 'Low cash runway — ~10 days', 100, true],
+      action: ['PENDING', 'Low cash runway — ~10 days', 100],
+      command: ['OPEN', 'Low cash runway — ~10 days'],
+    };
+
+    await real.scan(ID.bizK);
+    expect(await state(), 'a good scan: the alarm, its revenue action and its command item are open').toEqual(open);
+
+    // The cash read throws once: nothing about the open alarm changes.
+    failNext = true;
+    const failed = await real.scan(ID.bizK);
+    expect(failNext, 'the cash read was attempted and threw').toBe(false);
+    expect(await state(), 'the failed scan retires nothing').toEqual(open);
+    expect((await db.financeActionItem.findMany({ where: { businessId: ID.bizK, kind: 'CASHFLOW_RISK', status: 'SUPERSEDED' } })).length).toBe(0);
+    expect(failed.superseded, 'no row of the failed kind is superseded').toBe(0);
+
+    // The next good scan: still open, one row each.
+    await real.scan(ID.bizK);
+    expect(await state()).toEqual(open);
+    expect((await cashRiskRows(ID.bizK)).length).toBe(1);
+    expect(await db.revenueAction.count({ where: { businessId: ID.bizK, type: 'FIN_CASHFLOW_RISK' } })).toBe(1);
+
+    // Control: the detector runs and finds nothing (no burn in the last 90 days): the self-heal
+    // supersedes the row and completes its revenue action, as it always has.
+    await db.expense.updateMany({ where: { businessId: ID.bizK }, data: { date: daysAgo(200) } });
+    try {
+      const healed = await real.scan(ID.bizK);
+      expect(healed.superseded).toBeGreaterThanOrEqual(1);
+      const after = await state();
+      expect(after.item[0]).toBe('SUPERSEDED');
+      expect(after.action[0]).toBe('COMPLETED');
+    } finally {
+      // K's burn as the describe set it (10, 40 and 70 days ago).
+      for (const [n, age] of [[1, 10], [2, 40], [3, 70]] as const) {
+        await db.expense.update({ where: { id: `${P}expK${n}` }, data: { date: daysAgo(age) } });
+      }
+    }
+  }, 120_000);
 });
