@@ -35,7 +35,7 @@ export class TemporalFlowMemoryService {
     // MEM-TEMPORAL-SCOPE: without a business the lookup and the rewrite below would have no tenant predicate.
     if (!isKey(input.businessId)) throw new BadRequestException('Temporal memory needs a business');
     // An operator object ({not}, {in}) as the entity id would match, and rewrite, another memory.
-    if (!isEntityId(input.entityId)) throw new BadRequestException('Memory key must be a non-empty string');
+    if (!isEntityId(input.entityId)) throw new BadRequestException('Temporal memory entity id must be a non-empty string');
     const existing = await this.prisma.client.temporalFlowMemory.findFirst({
       where: {
         businessId: input.businessId,
@@ -102,8 +102,9 @@ export class TemporalFlowMemoryService {
     entityType: string,
     entityId?: string,
   ): Promise<TemporalFlowMemoryData[]> {
-    // MEM-TEMPORAL-SCOPE: an entity id that is not a string (an operator object, a list) matches nothing.
-    if (!isEntityId(entityId)) return [];
+    // MEM-TEMPORAL-SCOPE: no business, or an entity id that is not a string (an operator object, a list),
+    // matches nothing.
+    if (!isKey(businessId) || !isEntityId(entityId)) return [];
     return this.prisma.client.temporalFlowMemory.findMany({
       where: {
         businessId,
@@ -116,6 +117,7 @@ export class TemporalFlowMemoryService {
   }
 
   async findMany(businessId: string, query: TemporalFlowMemoryQuery = {}): Promise<TemporalFlowMemoryData[]> {
+    if (!isKey(businessId) || !isEntityId(query.entityId)) return [];
     return this.prisma.client.temporalFlowMemory.findMany({
       where: {
         businessId,

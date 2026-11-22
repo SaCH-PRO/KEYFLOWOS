@@ -16,6 +16,14 @@ function requireKey(key: unknown): string {
   return key;
 }
 
+/** MEM-TEMPORAL-SCOPE: consolidation keys are a list of non-empty strings (never a string spread into characters). */
+function requireKeys(keys: unknown): string[] {
+  if (!Array.isArray(keys) || !keys.every((k) => typeof k === 'string' && k.length > 0)) {
+    throw new BadRequestException('Memory keys must be a list of non-empty strings');
+  }
+  return keys as string[];
+}
+
 /** Only string tags: a string is not spread into characters, a missing list adds none. */
 function stringTags(tags: unknown): string[] {
   return Array.isArray(tags) ? tags.filter((t): t is string => typeof t === 'string') : [];
@@ -110,8 +118,11 @@ export class TemporalAdapterService {
     keys: string[];
     summaryKey: string;
   }) {
+    // Every key, the summary key included, is checked before any read or write.
+    const keys = requireKeys(input.keys);
+    requireKey(input.summaryKey);
     const contents: string[] = [];
-    for (const key of input.keys) {
+    for (const key of keys) {
       const found = await this.recallMemory({ businessId: input.businessId, key });
       if (found && (found as { content?: string }).content) {
         contents.push(String((found as { content: string }).content));
@@ -123,7 +134,7 @@ export class TemporalAdapterService {
     return this.storeMemory({
       businessId: input.businessId,
       key: input.summaryKey,
-      value: { consolidatedFrom: input.keys, count: contents.length, summary: merged },
+      value: { consolidatedFrom: keys, count: contents.length, summary: merged },
       importance: 'medium',
     });
   }
