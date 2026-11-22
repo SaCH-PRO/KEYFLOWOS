@@ -149,7 +149,7 @@ export class MarketplaceController {
   @CrmRateLimit(20, 60_000)
   @RequireModuleScope('storefront', 'write')
   @Post('businesses/:businessId/inventory')
-  upsertInventory(@Param('businessId') businessId: string, @Body() body: any, @Req() req: { user?: { id?: string } }) {
+  upsertInventory(@Param('businessId') businessId: string, @Body() body: any, @Req() req: { user: { id: string } }) {
     // W11-INV-SET-MOVEMENT (D-139): the set's stock movement names the acting member (AuthGuard's req.user), never the body.
     return this.marketplaceService.upsertInventory(businessId, body, req?.user?.id);
   }

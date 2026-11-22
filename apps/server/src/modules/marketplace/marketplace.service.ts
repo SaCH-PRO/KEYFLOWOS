@@ -549,11 +549,12 @@ export class MarketplaceService {
    *     (RESERVED_NOT_EDITABLE) unless it is the stored value (0 for a pair
    *     with no row); only order reservations change it.
    * `actorId` is the authenticated member (MarketplaceController, req.user.id
-   * as AuthGuard set it). A set with no member is refused (401) before
-   * anything is read: no stock change is recorded without who made it. The
-   * body never names the actor or the movement's reason.
+   * as AuthGuard set it), required in the type; the check below is for a
+   * caller that passes none at run time. A set with no member is refused
+   * (401) before anything is read: no stock change is recorded without who
+   * made it. The body never names the actor or the movement's reason.
    */
-  async upsertInventory(businessId: string, data: any, actorId?: string) {
+  async upsertInventory(businessId: string, data: any, actorId: string) {
     if (typeof actorId !== 'string' || actorId.length === 0) {
       throw new UnauthorizedException('An inventory set needs the member making it');
     }
@@ -3048,9 +3049,12 @@ export class MarketplaceService {
     const results = { imported: 0, skipped: 0, errors: [] as string[] };
 
     for (const row of rows) {
+      /** The row as the sheet names it (its SKU, else its product name), for an error raised while it is set. */
+      let rowLabel = '';
       try {
         const sku = String(row['SKU'] || row['sku'] || '').trim();
         const productName = String(row['Product Name'] || row['product_name'] || row['name'] || '').trim();
+        rowLabel = sku || productName;
         const warehouseName = String(row['Warehouse'] || row['warehouse'] || '').trim();
         const qty = parseInt(row['Quantity On Hand'] ?? row['quantity'] ?? row['qty'] ?? 0, 10);
         const reorderLevel = row['Reorder Level'] !== null ? parseInt(row['Reorder Level'] ?? row['reorder_level'] ?? '', 10) : undefined;
@@ -3084,7 +3088,8 @@ export class MarketplaceService {
 
         results.imported++;
       } catch (err: any) {
-        results.errors.push(err.message);
+        // W11-INV-SET-MOVEMENT (acceptance B-1): the error names the row, so a skipped row can be found in a long sheet.
+        results.errors.push(rowLabel ? `${rowLabel}: ${err.message}` : err.message);
         results.skipped++;
       }
     }
