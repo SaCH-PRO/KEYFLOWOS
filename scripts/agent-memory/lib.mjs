@@ -262,7 +262,9 @@ export function renderStatusMd(status, { readyLimit = 25 } = {}) {
   for (const [k, v] of Object.entries(s.by_step)) L.push(`| ${k} | ${v.done} | ${v['in-progress']} | ${v.todo} | ${v.total} |`);
   L.push('', '## How each status was derived', '', '| Derivation | Packets |', '|---|---|');
   for (const [k, v] of Object.entries(s.by_derivation)) L.push(`| ${k} | ${v} |`);
-  L.push('', s.uncertain.length ? `Uncertain (${s.uncertain.length}): ${s.uncertain.join(', ')}.` : 'Uncertain: none.');
+  const unc = status.packets.filter((p) => p.uncertain);
+  L.push('', unc.length ? `Uncertain (${unc.length}): ${unc.map((p) => `${p.id} (counted ${p.status}, ${p.derived_from})`).join(', ')}.` : 'Uncertain: none.');
+  L.push('', 'Certain: compacted-commit and the two prior-status-file rows. Uncertain: code-commit-subject (a fix commit on main names the packet, but not in the "(compacted)" form, so it may be a partial or a repair). no-evidence: added to the plan later, nothing on main names it, counted todo.');
   L.push('', 'Not visible to this file: open wave PRs, unpushed worktrees, child sessions. Those are in `ORCHESTRATOR-STATE.md` section 3.', '');
   const cp = status.critical_path;
   L.push('## Remaining critical path', '');
@@ -272,6 +274,7 @@ export function renderStatusMd(status, { readyLimit = 25 } = {}) {
   L.push(`Longest remaining depends_on chain today (${lc.weight} points):`, '', lc.chain.join(' > ') || '(none)', '');
   L.push(`## Ready to start (${status.ready.length}; todo with every dependency done)`, '');
   L.push('Ranked: critical path first, then unblocks most, then priority.', '');
+  L.push('"Ready" is judged from main alone. A packet here may already be in a wave PR or a child session: check `ORCHESTRATOR-STATE.md` section 3 before starting one.', '');
   L.push('| # | Packet | Step | Pri | Size | Lane | Critical | Unblocks |', '|---|---|---|---|---|---|---|---|');
   status.ready.slice(0, readyLimit).forEach((r, i) => {
     L.push(`| ${i + 1} | ${r.id} | ${r.step} | ${r.priority} | ${r.size} | ${r.lane} | ${r.on_critical_path ? 'yes' : ''} | ${r.unblocks} |`);

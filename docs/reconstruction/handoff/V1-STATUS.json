@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "5c17e7b4bfdb148ebcd867a541806db03b9d5b2c",
-  "main_commit_date": "2026-11-22T07:18:56-04:00",
+  "main_sha": "79ed2a574eb1c1a8f4071279b39c8d1adc4f5c8b",
+  "main_commit_date": "2026-11-22T12:13:14-04:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -25,13 +25,13 @@
   ]
  },
  "summary": {
-  "packets": 206,
-  "points": 342.5,
+  "packets": 209,
+  "points": 348.5,
   "by_status": {
    "done": {
-    "packets": 58,
-    "points": 86.5,
-    "pct_by_points": 25.3
+    "packets": 61,
+    "points": 91.5,
+    "pct_by_points": 26.3
    },
    "in-progress": {
     "packets": 0,
@@ -40,8 +40,8 @@
    },
    "todo": {
     "packets": 148,
-    "points": 256,
-    "pct_by_points": 74.7
+    "points": 257,
+    "pct_by_points": 73.7
    }
   },
   "by_step": {
@@ -64,15 +64,15 @@
     "total": 7
    },
    "3": {
-    "done": 42,
+    "done": 44,
     "in-progress": 0,
     "todo": 26,
-    "total": 68
+    "total": 70
    },
    "4": {
-    "done": 0,
+    "done": 1,
     "in-progress": 0,
-    "todo": 39,
+    "todo": 38,
     "total": 39
    },
    "5": {
@@ -84,8 +84,8 @@
    "6": {
     "done": 0,
     "in-progress": 0,
-    "todo": 30,
-    "total": 30
+    "todo": 31,
+    "total": 31
    },
    "7": {
     "done": 0,
@@ -101,11 +101,11 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 160,
+   "prior-status-file": 157,
    "prior-status-file+wave-2b-commit": 28,
    "code-commit-subject": 8,
-   "compacted-commit": 3,
-   "no-evidence": 7
+   "compacted-commit": 6,
+   "no-evidence": 10
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -117,11 +117,10 @@
    "FU-KEY-MEMORY-MONEY-SIGHT",
    "FU-WA-ESCAPE-RACE"
   ],
-  "todo_with_dependencies_met": 28
+  "todo_with_dependencies_met": 30
  },
  "critical_path": {
   "plan_recorded_remaining": [
-   "BIZ-SETTINGS-WEB",
    "NAV-A1",
    "MOUNT-QUOTES",
    "SWP-INV-MATH",
@@ -150,9 +149,8 @@
   ],
   "plan_recorded_total": 34,
   "longest_remaining_depends_on_chain": {
-   "weight": 52,
+   "weight": 51,
    "chain": [
-    "BIZ-SETTINGS-WEB",
     "NAV-A1",
     "MOUNT-QUOTES",
     "SWP-INV-MATH",
@@ -183,25 +181,25 @@
  },
  "ready": [
   {
-   "id": "BIZ-SETTINGS-WEB",
+   "id": "NAV-A1",
    "step": 3,
    "priority": "P0",
-   "size": "S",
+   "size": "L",
    "lane": "web",
    "on_critical_path": true,
    "unblocks": 81
   },
   {
-   "id": "W11-DISPATCH-REFUSAL-FINAL",
+   "id": "W11-KEY-TRANSFER-INTEGER",
    "step": 3,
    "priority": "P2",
-   "size": "M",
+   "size": "S",
    "lane": "server",
    "on_critical_path": false,
    "unblocks": 51
   },
   {
-   "id": "SWP-BOOKING-PAYMENT-GATE",
+   "id": "SWP-STORE-LISTING-SERVER",
    "step": 4,
    "priority": "P1",
    "size": "M",
@@ -216,7 +214,7 @@
    "size": "M",
    "lane": "both",
    "on_critical_path": false,
-   "unblocks": 46
+   "unblocks": 47
   },
   {
    "id": "W11-RUNWAY-LEDGER-CASH",
@@ -336,6 +334,15 @@
    "unblocks": 1
   },
   {
+   "id": "FU-CONTRACT-FETCH-OUTBOUND-GUARD",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-GENOME-SURFACES-REVENUE",
    "step": 3,
    "priority": "P0",
@@ -355,6 +362,15 @@
   },
   {
    "id": "FU-CORTEX-INSIGHT-CASH-TRUTH",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-KEY-INVOICE-EMAIL-PAY-LINK",
    "step": 3,
    "priority": "P1",
    "size": "M",
@@ -829,16 +845,18 @@
    "priority": "P2",
    "size": "M",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "a3196eee"
+   ],
    "depends_on": [
     "W11-CORTEX-SESSION-SNAPSHOT-SCOPE",
     "W11-FLOW-PERCEPTION-SCOPE"
    ],
    "title": "Plan queue answers a tool's 400 (and non-retryable 409) once, uncounted (DS-05)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "W11-KEY-TRANSFER-INTEGER",
@@ -854,7 +872,7 @@
     "W11-DISPATCH-REFUSAL-FINAL"
    ],
    "title": "KEY's inventory_transfer_stock advertises quantity as a whole number, and the chat validator enforces 'integer' parameters",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "TOF-FINANCE-CANONICAL-TOOLS",
@@ -1242,16 +1260,18 @@
    "priority": "P0",
    "size": "S",
    "lane": "web",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "1fe5f550"
+   ],
    "depends_on": [
     "SWP-PROFILE-TEAMSIZE",
     "BIZ-SETTINGS-SERVER"
    ],
    "title": "Onboarding asks 'services, products or both' and takes only TTD or USD; Settings > Business profile shows what you sell and the Advanced CRM switch",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "NAV-A1",
@@ -1268,7 +1288,7 @@
     "MARKETING-REDIRECT-GATE"
    ],
    "title": "Hub navigation: seven hubs by business type, bottom bar, disclosure modes removed, plain labels, the redirect table, 'Customers' heading",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "WA-HELPER",
@@ -1812,15 +1832,17 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "ad9d5121"
+   ],
    "depends_on": [
     "W11-STORE-OWN-PAYMENT-KEYS"
    ],
    "title": "Public booking refuses a payment method the business cannot take (no 'Payment: PayPal' with nothing paid)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWP-STORE-LISTING-SERVER",
@@ -1836,7 +1858,7 @@
     "SWP-BOOKING-PAYMENT-GATE"
    ],
    "title": "Public store lists only products added to the store; checkout refuses a product not on it",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-STORE-OVERSELL",
@@ -4005,6 +4027,55 @@
    ],
    "title": "KEY proposal writers tag money at creation, so proposal visibility stops depending on wording",
    "deps_met": false
+  },
+  {
+   "id": "FU-BOOKING-PAGE-PAYMENT-METHOD",
+   "step": 6,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-BOOKING-PAYMENT-GATE",
+    "W11-STOREFRONT-PAYPAL-LIST"
+   ],
+   "title": "The booking page sends the chosen payment method and its own slug, and never confirms a payment that has not happened",
+   "deps_met": false
+  },
+  {
+   "id": "FU-CONTRACT-FETCH-OUTBOUND-GUARD",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-DISPATCH-REFUSAL-FINAL"
+   ],
+   "title": "Contract document fetches pass the outbound-address guard (no SSRF through contract_extract_clauses)",
+   "deps_met": true
+  },
+  {
+   "id": "FU-KEY-INVOICE-EMAIL-PAY-LINK",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-DISPATCH-REFUSAL-FINAL"
+   ],
+   "title": "KEY does not email an invoice without its pay button on a transient pay-link conflict, and never sends it twice",
+   "deps_met": true
   }
  ]
 }
