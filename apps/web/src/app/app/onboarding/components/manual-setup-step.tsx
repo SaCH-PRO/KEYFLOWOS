@@ -11,7 +11,14 @@ import {
   type MinimalBusinessProfile,
   type MinimalProfileField,
 } from "@/lib/api/onboarding-concierge";
-import { BUSINESS_SELLS, isBusinessSells, noteBusinessSettings, type BusinessSells } from "@/lib/business-settings";
+import {
+  BUSINESS_SELLS,
+  actingMemberNow,
+  confirmedBusinessSettings,
+  isBusinessSells,
+  noteBusinessSettings,
+  type BusinessSells,
+} from "@/lib/business-settings";
 import { fetchMe } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 
@@ -189,12 +196,17 @@ async function completeManualSetup(
   const save = async (): Promise<string | null> => {
     // One owner-only PATCH: the profile, and the answer when one was given.
     const body: MinimalBusinessProfile & { sells?: BusinessSells } = sells ? { ...profile, sells } : profile;
+    const sentAs = actingMemberNow();
     const saved = await saveBusinessMinimalProfile(businessId, body);
     if (saved.error !== null) return saved.error.trim() || "Could not save your business profile. Please try again.";
     // The nav and the hubs read what the business sells from here on. An answer that is not this business's
     // is not a save anyone can vouch for (review SEC-2).
-    if (!noteBusinessSettings(businessId, saved.data)) {
+    if (!noteBusinessSettings(businessId, saved.data, sentAs)) {
       return "Your business profile was sent, but the answer could not be read. Please try again.";
+    }
+    // An answer given must be the answer the business now holds (review SEC2-1).
+    if (sells && confirmedBusinessSettings(businessId, saved.data)?.sells !== sells) {
+      return "Your business profile was sent, but the business does not show what you sell. Please try again.";
     }
     onSaved();
     return null;

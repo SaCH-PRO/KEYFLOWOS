@@ -270,22 +270,43 @@ export function loadBusinessSettings(businessId: string, options: { force?: bool
 }
 
 /**
+ * The settings an answer confirms for `businessId`: it is this business's and carries them. Null for anything else
+ * (no body, a list, another business's id, an answer without the settings): such an answer confirms nothing.
+ */
+export function confirmedBusinessSettings(businessId: string, answer: unknown): BusinessSettings | null {
+  if (!businessId || !isPlainObject(answer) || answer.id !== businessId) return null;
+  const carries = hasOwn(answer, "sells") && isBusinessSells(answer.sells) && hasOwn(answer, "advancedCrm") && typeof answer.advancedCrm === "boolean";
+  return carries ? businessSettingsOf(answer) : null;
+}
+
+/** Who is acting now, for a caller that sends a write itself and records its answer with noteBusinessSettings. */
+export function actingMemberNow(): string {
+  return actingMember();
+}
+
+/**
  * Records what a write for `businessId` answered (the profile PATCH and the door both answer what GET answers), for
  * every reader, and overtakes any read still in flight. Returns whether the answer was this business's.
  *
  * An answer that is not (no body, a list, another business's id; review SEC-2) records nothing of itself and
  * returns false: what the business now holds is unknown, so it is read again, and the caller must not report the
  * write as saved. One that is this business's but does not carry the settings is not guessed at either: the
- * business is read again.
+ * business is read again. `sentAs` is who sent the write (actingMemberNow() taken before it was sent): an answer that
+ * lands after the member changed is recorded for nobody.
  */
-export function noteBusinessSettings(businessId: string, answer: unknown): boolean {
+export function noteBusinessSettings(businessId: string, answer: unknown, sentAs: string = actingMember()): boolean {
   if (!businessId) return false;
   bump(answersRecorded, businessId);
   const own = isPlainObject(answer) && answer.id === businessId;
-  const carriesSettings =
-    own && hasOwn(answer, "sells") && isBusinessSells(answer.sells) && hasOwn(answer, "advancedCrm") && typeof answer.advancedCrm === "boolean";
-  if (carriesSettings) {
-    setEntry(businessId, { status: "ready", settings: businessSettingsOf(answer), error: null, member: actingMember(), readAt: Date.now() });
+  if (sentAs !== actingMember()) {
+    // Sent as one member, answered after another took the browser (review SEC2-2): the answer is not theirs to be
+    // shown, and whatever the first member was shown is gone with them.
+    if (entries.get(businessId)?.member === sentAs && entries.delete(businessId)) emit();
+    return own;
+  }
+  const settings = confirmedBusinessSettings(businessId, answer);
+  if (settings) {
+    setEntry(businessId, { status: "ready", settings, error: null, member: sentAs, readAt: Date.now() });
     return true;
   }
   if (watched.has(businessId)) {
@@ -314,11 +335,21 @@ const notSent = (error: string): WriteAnswer => ({ data: null, error });
 
 /** A 2xx whose answer is not this business's: not a success anyone can vouch for (review SEC-2). */
 const UNREADABLE_ANSWER = "The change was sent, but the answer could not be read. Check what is shown here before trying again.";
+/** A 2xx for this business that does not hold what was sent (review SEC2-1). */
+const UNCONFIRMED_ANSWER = "The change was sent, but the business does not show it. Check what is shown here before trying again.";
 
-/** The answer of a write as the caller gets it: a 2xx is a success only when it answered for this business. */
-function recorded(businessId: string, res: WriteAnswer): WriteAnswer {
+/**
+ * The answer of a write as the caller gets it. A 2xx is a success only when it answered for this business and holds
+ * what was sent (`holds`); anything less is an error in plain words, and what the business holds is read again.
+ * The answer is recorded for the member who sent the write (`sentAs`), never for one who took the browser since.
+ */
+function recorded(businessId: string, sentAs: string, res: WriteAnswer, holds: (settings: BusinessSettings) => boolean): WriteAnswer {
   if (res.error !== null) return res;
-  return noteBusinessSettings(businessId, res.data) ? res : { data: null, error: UNREADABLE_ANSWER, status: res.status };
+  if (!noteBusinessSettings(businessId, res.data, sentAs)) return { data: null, error: UNREADABLE_ANSWER, status: res.status };
+  const confirmed = confirmedBusinessSettings(businessId, res.data);
+  if (confirmed && holds(confirmed)) return res;
+  // Recorded above when it carried the settings; when it did not, a watched business is already being read again.
+  return { data: null, error: UNCONFIRMED_ANSWER, status: res.status };
 }
 
 /**
@@ -327,7 +358,9 @@ function recorded(businessId: string, res: WriteAnswer): WriteAnswer {
  */
 export async function saveBusinessSells(businessId: string, sells: BusinessSells): Promise<WriteAnswer> {
   if (!isBusinessSells(sells)) return notSent("Choose services, products or both.");
-  return recorded(businessId, await apiPatch<Record<string, unknown>>(`/identity/businesses/${encodeURIComponent(businessId)}`, { sells }));
+  const sentAs = actingMember();
+  const res = await apiPatch<Record<string, unknown>>(`/identity/businesses/${encodeURIComponent(businessId)}`, { sells });
+  return recorded(businessId, sentAs, res, (held) => held.sells === sells);
 }
 
 /** The body the door is sent: advancedCrm and depth as named, nothing else; null when that is not a write. */
@@ -358,7 +391,16 @@ function advancedSettingsBody(write: unknown): BusinessAdvancedSettingsWrite | n
 export async function saveAdvancedSettings(businessId: string, write: BusinessAdvancedSettingsWrite): Promise<WriteAnswer> {
   const body = advancedSettingsBody(write);
   if (!body) return notSent("Choose the Advanced CRM switch or a hub's depth to change.");
-  return recorded(businessId, await apiPatch<Record<string, unknown>>(`/identity/businesses/${encodeURIComponent(businessId)}/advanced-settings`, body));
+  const sentAs = actingMember();
+  const res = await apiPatch<Record<string, unknown>>(`/identity/businesses/${encodeURIComponent(businessId)}/advanced-settings`, body);
+  return recorded(
+    businessId,
+    sentAs,
+    res,
+    (held) =>
+      (body.advancedCrm === undefined || held.advancedCrm === body.advancedCrm) &&
+      Object.entries(body.depth ?? {}).every(([hub, depth]) => held.depth[hub as BusinessHub] === depth),
+  );
 }
 
 /* ─────────────────────────────── the hook ─────────────────────────────── */

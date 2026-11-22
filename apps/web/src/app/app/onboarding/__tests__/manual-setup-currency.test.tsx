@@ -33,7 +33,7 @@ const COMPLETE_PATH = `/onboarding-concierge/businesses/${BIZ}/complete`;
 
 type Sent = { method: string; path: string; body: Record<string, unknown> | null };
 type Answer = { status: number; body: unknown; bare?: boolean };
-type Routes = Record<string, Answer | (() => Answer)>;
+type Routes = Record<string, Answer | ((body: Record<string, unknown> | null) => Answer)>;
 
 /** fetch answering by "METHOD /path"; an unlisted route is a 500 so nothing passes by accident. */
 function stubRoutes(routes: Routes): Sent[] {
@@ -44,9 +44,10 @@ function stubRoutes(routes: Routes): Sent[] {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       const method = (init?.method ?? "GET").toUpperCase();
       const pathname = new URL(url, "http://localhost").pathname;
-      sent.push({ method, path: pathname, body: typeof init?.body === "string" ? JSON.parse(init.body) : null });
+      const body = typeof init?.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : null;
+      sent.push({ method, path: pathname, body });
       const route = routes[`${method} ${pathname}`];
-      const answer = route ? (typeof route === "function" ? route() : route) : { status: 500, body: { message: `no route ${method} ${pathname}` } };
+      const answer = route ? (typeof route === "function" ? route(body) : route) : { status: 500, body: { message: `no route ${method} ${pathname}` } };
       return new Response(JSON.stringify(answer.body), {
         status: answer.status,
         statusText: answer.bare ? "" : answer.status === 403 ? "Forbidden" : answer.status >= 400 ? "Error" : "OK",
@@ -64,7 +65,8 @@ function ownerRoutes(business: Record<string, unknown> = STORED, over: Routes = 
   return {
     [`GET ${BUSINESS_PATH}`]: { status: 200, body: business },
     "GET /identity/me": { status: 200, body: { id: OWNER, email: "owner@example.test", role: "USER" } },
-    [`PATCH ${BUSINESS_PATH}`]: { status: 200, body: { ...business, sells: "both" } },
+    // As the server answers a profile PATCH: the business as it now is, a sells it was sent included.
+    [`PATCH ${BUSINESS_PATH}`]: (body) => ({ status: 200, body: { sells: "both", ...business, ...(body ?? {}) } }),
     [`POST ${COMPLETE_PATH}`]: { status: 201, body: { complete: true } },
     ...over,
   };
