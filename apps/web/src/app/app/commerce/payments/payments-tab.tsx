@@ -70,7 +70,7 @@ function canRemind(status: string | null | undefined): boolean {
  *  - state: "overdue" when something is owed past the due date (or the invoice
  *    is flagged OVERDUE), "pending" when something is owed and not yet due.
  */
-function invoiceMoney(inv: Invoice, now: Date) {
+export function invoiceMoney(inv: Invoice, now: Date) {
   const cents = (amount: number) => Math.round((Number(amount) || 0) * 100);
   const rows = inv.payments ?? [];
   const total = Number(inv.total ?? 0) || 0;

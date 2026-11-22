@@ -442,7 +442,7 @@ describe("V1-64 review repairs: the tab after Mark paid, PAID invoices with no p
 describe("V1-64 Sales overview hero: a deposit is collected and the rest is outstanding (BUG-020, desktop)", () => {
   function hero(invoices: Invoice[]): string {
     render(
-      <CommerceOverviewTab invoices={invoices} quotes={[]} recurring={[]} currency="TTD" loading={false} onNavigate={() => {}} onNewItem={() => {}} />,
+      <CommerceOverviewTab businessId="biz_v64" invoices={invoices} quotes={[]} recurring={[]} currency="TTD" loading={false} onNavigate={() => {}} onNewItem={() => {}} />,
     );
     const label = screen.getByText("Outstanding Revenue");
     return (label.parentElement?.textContent ?? "").replace(/\s+/g, " ");
