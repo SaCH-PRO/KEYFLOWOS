@@ -507,12 +507,18 @@ export function useMemberModuleLevels(): ModuleLevels {
     answeredRef.current = answered;
   }, [answered]);
 
+  // When a look last asked: a return to the tab fires visibilitychange and focus together, and asks once (round 3).
+  const lastAskedRef = useRef(0);
+
   useEffect(() => {
     const again = () => {
       if (document.visibilityState === "hidden") return;
-      // Read within the freshness window: nothing to ask (review R2-COR-2), as business-settings does.
+      // Levels read within the freshness window: nothing to ask (review R2-COR-2). Only an answer with levels is
+      // fresh, as only a ready entry is in business-settings: a failed read is asked again on the next look (round 3).
       const last = answeredRef.current;
-      if (last && Date.now() - last.at < BUSINESS_SETTINGS_FRESH_MS) return;
+      if (last && last.levels !== null && Date.now() - last.at < BUSINESS_SETTINGS_FRESH_MS) return;
+      if (Date.now() - lastAskedRef.current < 1_000) return;
+      lastAskedRef.current = Date.now();
       setLookedAgain((n) => n + 1);
     };
     window.addEventListener("focus", again);
