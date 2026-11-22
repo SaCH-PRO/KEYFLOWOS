@@ -1844,10 +1844,10 @@ Every other route is applied (above).
 | route | verb | path | disposition | reason |
 | --- | --- | --- | --- | --- |
 | `KeyCortexController.approveAction` | POST | `/api/v1/cortex/actions/approve` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.chat` | POST | `/api/v1/cortex/chat` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
+| `KeyCortexController.chat` | POST | `/api/v1/cortex/chat` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs; the contextUsed snapshot carries no money figure without revenue read (W11-CORTEX-SESSION-SNAPSHOT-SCOPE) |
 | `KeyCortexController.consciousChat` | POST | `/api/v1/cortex/conscious/chat` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
 | `KeyCortexController.createMonitor` | POST | `/api/v1/cortex/monitors` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
-| `KeyCortexController.createSession` | POST | `/api/v1/cortex/sessions` | exempt-own | a KEY session for the caller |
+| `KeyCortexController.createSession` | POST | `/api/v1/cortex/sessions` | exempt-own | a KEY session for the caller; its context snapshot carries no money figure without revenue read (W11-CORTEX-SESSION-SNAPSHOT-SCOPE) |
 | `KeyCortexController.deleteSession` | DELETE | `/api/v1/cortex/sessions/:id` | exempt-check | check:requireOwnSession (the caller's own KEY session) |
 | `KeyCortexController.documentAsk` | POST | `/api/v1/cortex/documents/ask` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
 | `KeyCortexController.documentCompare` | POST | `/api/v1/cortex/documents/compare` | open | membership only; follow-up SWEEP-CENSUS: ai write; KEY cortex routes; module tools are held to the member authority map where CortexMemberAuthorityGuard runs |
