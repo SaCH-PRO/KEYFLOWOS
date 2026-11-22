@@ -240,8 +240,9 @@ export type ProposalFields = {
  * - Ids name rows, not money: under an id-named key, a value shaped like an id (one token, no worded money in it) is
  *   dropped and its name kept (an invoiceId names an invoice). Anything else under such a key is read (fourth review
  *   m3/m4).
- * - A control character inside a string becomes a space, and JSON's own escapes (in keys, of lone surrogates, of a
- *   nested JSON string) are spaces too, so no escape letter ever stands before a word (third review m1; fourth m5/m6).
+ * - A control character inside a string becomes a space, so JSON's escape of it never stands as a letter before a word
+ *   (third review m1). The escapes JSON still writes (in keys, of lone surrogates, of a nested JSON string) are read
+ *   by `readings`.
  * Returns null when the value cannot be serialised; every caller treats that as financial (fail closed).
  */
 const ID_KEY = /(^id$|Ids?$|_ids?$)/;
@@ -262,34 +263,49 @@ function structuredText(v: unknown): string | null {
       }
       return typeof val === 'string' ? val.replace(/\p{Cc}+/gu, ' ') : val;
     });
-    return typeof json === 'string' ? json.replace(/\\+(?:u[0-9a-fA-F]{4}|[bfnrt])/g, ' ') : null;
+    return typeof json === 'string' ? json : null;
   } catch {
     return null;
   }
 }
 /**
- * Text as the vocabulary reads it: compatibility forms folded (fullwidth digits and letters), invisible format
- * characters removed (a zero-width space or soft hyphen inside a word), a literal backslash escape read as a space, and
- * real id shapes stripped: a UUID, a cuid (Prisma cuid(): "c" and 24 lowercase letters and digits), or a hex digest of
- * 32 or more characters (at least 6 digits and 6 letters). Nothing else is stripped: a squashed phrase, a file name, a hyphenated phrase
- * (overdue-invoices-2026) and a camelCase name (unpaidInvoices2026) are words, and are read (fourth review m2).
+ * Real id shapes are stripped from text: a UUID, a cuid (Prisma cuid(): "c" and 24 lowercase letters and digits), or a
+ * hex digest of 32 or more characters (at least 6 digits and 6 letters). Nothing else is stripped: a squashed phrase, a
+ * file name, a hyphenated phrase (overdue-invoices-2026) and a camelCase name (unpaidInvoices2026) are words, and are
+ * read (fourth review m2).
  */
-function readableText<T extends string | null | undefined>(t: T): T {
-  return (
-    typeof t === 'string'
-      ? t
-          .normalize('NFKC')
-          .replace(/\p{Cf}+/gu, '')
-          .replace(/\\+[bfnrt]/g, ' ')
-          .replace(/(?<![A-Za-z0-9])[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}(?![A-Za-z0-9])/gi, ' ')
-          .replace(/(?<![A-Za-z0-9-])c(?=[a-z0-9]{0,23}\d)[a-z0-9]{24}(?![A-Za-z0-9-])/g, ' ')
-          // A digest mixes digits and letters throughout: at least 6 of each (a figure glued to a run of letters is read).
-          .replace(/(?<![A-Za-z0-9-])[0-9a-fA-F]{32,512}(?![A-Za-z0-9-])/g, (run) => {
-            const digits = run.replace(/\D/g, '').length;
-            return digits >= 6 && run.length - digits >= 6 ? ' ' : run;
-          })
-      : t
-  ) as T;
+function withoutIdTokens(t: string): string {
+  return t
+    .replace(/(?<![A-Za-z0-9])[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}(?![A-Za-z0-9])/gi, ' ')
+    .replace(/(?<![A-Za-z0-9-])c(?=[a-z0-9]{0,23}\d)[a-z0-9]{24}(?![A-Za-z0-9-])/g, ' ')
+    .replace(/(?<![A-Za-z0-9-])[0-9a-fA-F]{32,512}(?![A-Za-z0-9-])/g, (run) => {
+      const digits = run.replace(/\D/g, '').length;
+      return digits >= 6 && run.length - digits >= 6 ? ' ' : run;
+    });
+}
+
+/**
+ * The ways a text may be read. Compatibility forms are folded (fullwidth digits and letters). What is ambiguous is read
+ * both ways, and the text states money if either reading does (fifth review M2): an invisible format character is a
+ * joiner (in<ZWSP>voice) or a separator (fee<ZWSP>from); a backslash is a separator (c:\clients\tax) or the start of an
+ * escape whose letter is not text (a JSON "\ncost", a nested JSON string, an escaped lone surrogate). Every pattern
+ * here matches one character or a run that always matches, so the cost is linear (fifth review M1).
+ */
+function readings(text: string): string[] {
+  const folded = text.normalize('NFKC');
+  const out = new Set<string>();
+  for (const formatRead of [folded.replace(/\p{Cf}/gu, ''), folded.replace(/\p{Cf}/gu, ' ')]) {
+    out.add(withoutIdTokens(formatRead.replace(/\\/g, ' ')));
+    out.add(withoutIdTokens(formatRead.replace(/\\+(?:u[0-9a-fA-F]{4}|[bfnrt])?/g, ' ')));
+  }
+  return [...out];
+}
+
+/** D-238: whether a text states money by the proposal vocabulary, in any of its readings. Oversized text fails closed, before it is read. */
+function textStatesMoney(text: string | null | undefined): boolean {
+  if (typeof text !== 'string' || text === '') return false;
+  if (text.length > MAX_CLASSIFIED_CONTENT) return true;
+  return readings(text).some((reading) => proposalMentionsMoney(reading));
 }
 
 /**
@@ -299,8 +315,7 @@ function readableText<T extends string | null | undefined>(t: T): T {
 export function structuredValueStatesMoney(value: unknown): boolean {
   if (value === null || value === undefined) return false;
   const text = structuredText(value);
-  if (text === null || text.length > MAX_CLASSIFIED_CONTENT) return true;
-  return proposalMentionsMoney(readableText(text));
+  return text === null || textStatesMoney(text);
 }
 
 const STRUCTURED_PROPOSAL_FIELDS = ['risks', 'evidence', 'payload', 'inputPayload', 'affectedEntities', 'executionResult'] as const;
@@ -309,7 +324,7 @@ const STRUCTURED_PROPOSAL_FIELDS = ['risks', 'evidence', 'payload', 'inputPayloa
 function proposalContent(p: ProposalFields): Array<string | null | undefined> {
   // The provenance a recommendation id names is read by financialProposalWithProvenance.
   const fields = p as unknown as Record<string, unknown>;
-  return [p.summary, p.description, p.rationale, p.expectedBenefit, ...STRUCTURED_PROPOSAL_FIELDS.map((key) => structuredText(fields[key])), p.rejectionReason].map(readableText);
+  return [p.summary, p.description, p.rationale, p.expectedBenefit, ...STRUCTURED_PROPOSAL_FIELDS.map((key) => structuredText(fields[key])), p.rejectionReason];
 }
 
 /** Whether a structured field of the proposal holds a value that cannot be serialised: unreadable content fails closed. */
@@ -320,7 +335,7 @@ function hasUnreadableContent(p: ProposalFields): boolean {
 
 /** D-238: whether a proposal's free text (a failure or rejection reason) states money, by the proposal vocabulary. */
 export function proposalTextStatesMoney(text: string | null | undefined): boolean {
-  return proposalMentionsMoney(text);
+  return textStatesMoney(text);
 }
 
 function proposalMentionsMoney(...values: Array<string | null | undefined>): boolean {
@@ -376,7 +391,7 @@ export function isFinancialProposal(proposal: ProposalFields | null | undefined)
   const { actionType, module, toolName, title } = proposal;
   // The content is read before any list (review MAJOR-3): an approval request, a listed action or a mapped tool whose
   // text or parameters carry money is financial.
-  if (proposalMentionsMoney(actionType, module, toolName, readableText(title), ...content)) return true;
+  if (proposalMentionsMoney(actionType, module, toolName) || [title, ...content].some((text) => textStatesMoney(text))) return true;
   const tool = typeof toolName === 'string' && toolName.trim() ? toolName.trim() : null;
   const authority = tool ? keyOrganToolAuthority(tool) : null;
   if (authority && 'scopes' in authority) return authority.scopes.some((s) => MONEY_SCOPES.has(s.module));
@@ -415,7 +430,7 @@ export function proposalViewForReader<T extends { id: string; status?: unknown; 
  * reason that states money, which is blanked.
  */
 export function nonFinancialProposalForReader<T extends { failureReason?: unknown; outcomeEvidence?: unknown }>(proposal: T): T {
-  const reasonStates = typeof proposal.failureReason === 'string' && proposalMentionsMoney(proposal.failureReason);
+  const reasonStates = typeof proposal.failureReason === 'string' && textStatesMoney(proposal.failureReason);
   // The action boundary writes the same message into outcomeEvidence (review of the Codex fixes, security m1). Evidence
   // that states money anywhere in it is reduced to its status (confirmation review m6), read as proposal content is.
   const evidence = proposal.outcomeEvidence;
@@ -423,7 +438,7 @@ export function nonFinancialProposalForReader<T extends { failureReason?: unknow
   if (!reasonStates && !evidenceStates) return proposal;
   // The status is kept only when it is a short string that states no money (third review m2).
   const status = evidence && typeof evidence === 'object' && !Array.isArray(evidence) ? (evidence as Record<string, unknown>).status : undefined;
-  const keepStatus = typeof status === 'string' && status.length <= 40 && !proposalMentionsMoney(status);
+  const keepStatus = typeof status === 'string' && status.length <= 40 && !textStatesMoney(status);
   return {
     ...proposal,
     ...(reasonStates ? { failureReason: null } : {}),
@@ -435,7 +450,7 @@ export function nonFinancialProposalForReader<T extends { failureReason?: unknow
 export function redactedProposalView(proposal: { id: string; status?: unknown; failureReason?: unknown }): { id: string; status?: unknown; failureReason?: string } {
   // A failure reason that states no money stays: it is the authority's own refusal (D-140, D-119), which the action
   // answers pin (round 13; round 7 had dropped it). One that states money is withheld.
-  const reason = typeof proposal.failureReason === 'string' && proposal.failureReason && !proposalMentionsMoney(proposal.failureReason) ? proposal.failureReason : undefined;
+  const reason = typeof proposal.failureReason === 'string' && proposal.failureReason && !textStatesMoney(proposal.failureReason) ? proposal.failureReason : undefined;
   return reason === undefined ? { id: proposal.id, status: proposal.status } : { id: proposal.id, status: proposal.status, failureReason: reason };
 }
 
