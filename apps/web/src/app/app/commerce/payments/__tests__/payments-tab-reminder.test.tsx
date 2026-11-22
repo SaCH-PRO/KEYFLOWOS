@@ -193,7 +193,7 @@ describe("Payments tab: Send Reminder (FOLLOW3-A8, VR-01)", () => {
 
     // The row itself is on screen (the control is not vacuous). A past-due PENDING row is owed (owner ruling
     // D-256), so it is drawn twice: in the Recovery Queue and in the payments list ...
-    expect(screen.getAllByText(id.toUpperCase()).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(id.toUpperCase())).toHaveLength(status === "PENDING" && dueDate === PAST_DUE ? 2 : 1);
     // ... but neither the Recovery Queue nor the payments list offers a reminder for it.
     expect(screen.queryAllByTitle("Send Reminder")).toHaveLength(0);
     expect(sendInvoiceReminder).not.toHaveBeenCalled();

@@ -27,6 +27,8 @@
  * .../invoices serves them (own-tenant payment rows on each invoice).
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import React, { useState } from "react";
 import { render, screen, cleanup, within, fireEvent, waitFor } from "@testing-library/react";
 import type { Invoice, PaymentRecord } from "@/lib/client";
@@ -46,7 +48,7 @@ vi.mock("@/lib/client", () => ({
 
 vi.mock("../../components/commerce-hub", () => ({ CommerceHub: () => null }));
 
-import PaymentsTab from "../payments-tab";
+import PaymentsTab, { OWED_STATUSES } from "../payments-tab";
 import { CommerceOverviewTab } from "../../components/commerce-overview-tab";
 import { CashFlowSummary } from "../../components/cash-flow-summary";
 
@@ -591,3 +593,18 @@ describe("V1-64 owner ruling D-256: a PENDING invoice counts as owed everywhere"
     expect(screen.queryAllByTitle("Send Reminder")).toHaveLength(0);
   });
 });
+
+describe("V1-64 owner ruling D-256: the web's owed statuses cannot drift from the server's", () => {
+  it("CH-33: OWED_STATUSES is the server's OPEN_RECEIVABLE_STATUSES less PARTIALLY_CREDITED (list rows carry no credit note, so what is left of one cannot be told)", () => {
+    expect([...OWED_STATUSES].sort()).toEqual(["OVERDUE", "PARTIALLY_PAID", "PENDING", "SENT"]);
+    // The server list (apps/server/src/modules/commerce/commerce-stats.service.ts), read as source text: no
+    // import crosses the package boundary.
+    const source = readFileSync(resolve(__dirname, "../../../../../../../server/src/modules/commerce/commerce-stats.service.ts"), "utf8");
+    const match = source.match(/export const OPEN_RECEIVABLE_STATUSES[^=]*=\s*new Set\(\[([^\]]*)\]\)/);
+    expect(match, "the server's OPEN_RECEIVABLE_STATUSES").not.toBeNull();
+    const server = [...match![1].matchAll(/'([A-Z_]+)'/g)].map((m) => m[1]);
+    expect(server.filter((status) => status !== "PARTIALLY_CREDITED").sort()).toEqual([...OWED_STATUSES].sort());
+    expect(server).toContain("PARTIALLY_CREDITED");
+  });
+});
+
