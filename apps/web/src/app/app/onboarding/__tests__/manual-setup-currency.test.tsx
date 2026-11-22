@@ -242,7 +242,7 @@ describe("the form asks what the business sells", () => {
 
     const fresh = stubRoutes(ownerRoutes({ id: BIZ, ownerId: OWNER, name: "" }));
     await mount(fresh);
-    expect(choice("Both").checked).toBe(true);
+    await waitFor(() => expect(choice("Both").checked).toBe(true));
   });
 
   it("a late prefill does not overwrite an answer the owner already gave", async () => {
@@ -340,7 +340,8 @@ describe("the form asks what the business sells", () => {
     const sent = stubRoutes(ownerRoutes({ ...STORED, id: "biz_bsw_someone_else", name: "Someone Else Ltd", sells: "services" }));
     await mount(sent);
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(choice("Both").checked).toBe(true);
+    // Nothing of it is drawn: not its 'services', not its name; and (COR-2) no answer stands in for the unread one.
+    expect((within(question()).getAllByRole("radio") as HTMLInputElement[]).filter((r) => r.checked)).toEqual([]);
     expect((within(form()).getByLabelText("Business name") as HTMLInputElement).value).toBe("");
   });
 

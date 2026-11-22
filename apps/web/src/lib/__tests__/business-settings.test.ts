@@ -395,7 +395,8 @@ describe("review SEC-1: what one member read is never shown to the next", () => 
     clearStoredBusinessId();
     setStoredToken(tokenFor("user_bsw_two"));
     setStoredBusinessId(BIZ_A);
-    answer = { status: 502, body: { message: "Bad gateway" } };
+    // A failure that says nothing about access (not a 502/503/504: the api client retries those for seconds).
+    answer = { status: 500, body: { statusCode: 500, message: "Internal server error" } };
 
     const seen: Array<{ status: string; sells: string; advancedCrm: boolean }> = [];
     const second = renderHook(() => {

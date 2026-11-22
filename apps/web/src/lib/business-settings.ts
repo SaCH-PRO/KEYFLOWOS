@@ -28,8 +28,9 @@
  *
  * The settings are kept per business id, in memory only (never in browser storage: D-150, depth is stored on the
  * business, never in the browser). A reader is only ever given the entry of the business it asked for, an answer
- * naming another business is not taken, and the whole cache is dropped whenever a business is selected (sign-in,
- * signup, a switch), so nothing read as one member is shown to the next.
+ * naming another business is not taken, and every entry belongs to the member that read it (the subject of the
+ * session token; review SEC-1): after a sign-out and another member's sign-in, with or without a reload, the next
+ * reader starts from nothing.
  */
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { apiGet, apiPatch } from "./api";
@@ -109,17 +110,55 @@ interface Entry {
   status: BusinessSettingsStatus;
   settings: BusinessSettings;
   error: string | null;
+  /** Who read it (actingMember): an entry is only ever given back to the member that read it. */
+  member: string;
+  /** When it was read (ms), for "ready" entries. */
+  readAt: number;
 }
 
-const IDLE: Entry = Object.freeze({ status: "idle", settings: DEFAULT_BUSINESS_SETTINGS, error: null });
-const LOADING: Entry = Object.freeze({ status: "loading", settings: DEFAULT_BUSINESS_SETTINGS, error: null });
+const IDLE: Entry = Object.freeze({ status: "idle", settings: DEFAULT_BUSINESS_SETTINGS, error: null, member: "", readAt: 0 });
+const LOADING: Entry = Object.freeze({ status: "loading", settings: DEFAULT_BUSINESS_SETTINGS, error: null, member: "", readAt: 0 });
+
+/**
+ * How long settings just read are taken as current: a reader mounted, or the tab looked at again, within it asks
+ * nothing (review COR-3: the nav and every hub read this). After it, the next mount or look reads again, so a change
+ * made on another device or by another member shows without a reload (review COR-4).
+ */
+export const BUSINESS_SETTINGS_FRESH_MS = 30_000;
+
+/**
+ * Who is acting in this browser now, for telling one member's reads from the next's (review SEC-1): the subject of
+ * the session token the api client sends (the admin token first, as lib/api.ts picks it), which stays the same
+ * across a token refresh. A token with no readable subject stands for itself; no token is "none". This is read, not
+ * verified: it keys an in-memory cache and grants nothing.
+ */
+function actingMember(): string {
+  if (typeof window === "undefined") return "none";
+  let token: string | null = null;
+  try {
+    token = window.localStorage.getItem("kf_admin_token") ?? window.localStorage.getItem("kf_token");
+  } catch {
+    return "none";
+  }
+  if (!token) return "none";
+  try {
+    const payload = token.split(".")[1] ?? "";
+    const claims: unknown = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
+    if (isPlainObject(claims) && typeof claims.sub === "string" && claims.sub) return `sub:${claims.sub}`;
+  } catch {
+    // Not a token with claims: it stands for itself below.
+  }
+  return `token:${token}`;
+}
 
 /** Per business id; a Map, so no id (however it is spelled) reads another's entry or an inherited one. */
 const entries = new Map<string, Entry>();
 /** Per business id: the reads started, and the answers recorded, so a late read never undoes a newer answer. */
 const readsStarted = new Map<string, number>();
 const answersRecorded = new Map<string, number>();
-/** Per business id: how many mounted hooks read it (they are reloaded when the cache is dropped). */
+/** Reads in flight, per member and business id: readers that ask together share one. */
+const inFlight = new Map<string, Promise<void>>();
+/** Per business id: how many mounted hooks read it (they are read again when the cache is dropped or goes stale). */
 const watched = new Map<string, number>();
 const listeners = new Set<() => void>();
 
@@ -132,30 +171,42 @@ function setEntry(businessId: string, entry: Entry): void {
   emit();
 }
 
+/** The entry `member` read for the business, or none: another member's entry is as good as absent. */
+function entryFor(businessId: string, member: string): Entry | undefined {
+  const entry = entries.get(businessId);
+  return entry && entry.member === member ? entry : undefined;
+}
+
 function entryOf(businessId: string | null): Entry {
   if (!businessId) return IDLE;
-  return entries.get(businessId) ?? LOADING;
+  return entryFor(businessId, actingMember()) ?? LOADING;
 }
+
+const bump = (counter: Map<string, number>, id: string) => counter.set(id, (counter.get(id) ?? 0) + 1);
 
 /** Drops everything read so far and reads again for the hooks still mounted. */
 function dropCache(): void {
+  for (const id of new Set([...entries.keys(), ...readsStarted.keys(), ...watched.keys()])) bump(readsStarted, id);
   entries.clear();
-  for (const id of [...readsStarted.keys()]) readsStarted.set(id, (readsStarted.get(id) ?? 0) + 1);
-  for (const id of [...answersRecorded.keys()]) answersRecorded.set(id, (answersRecorded.get(id) ?? 0) + 1);
+  inFlight.clear();
   emit();
+  for (const id of [...watched.keys()]) void loadBusinessSettings(id, { force: true });
+}
+
+/** The tab is looked at again: the businesses being read are read again if what is held has gone stale. */
+function revalidateWatched(): void {
+  if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
   for (const id of [...watched.keys()]) void loadBusinessSettings(id);
 }
 
-let listeningForSelection = false;
-function listenForSelection(): void {
-  if (listeningForSelection || typeof window === "undefined") return;
-  listeningForSelection = true;
-  // A business was selected in this tab (sign-in, signup, a switch): whoever reads next may be someone else.
+if (typeof window !== "undefined") {
+  // A business was selected in this tab (workspace.ts selectBusiness): start again from nothing.
   window.addEventListener(BUSINESS_CHANGED_EVENT, dropCache);
+  window.addEventListener("focus", revalidateWatched);
+  document.addEventListener("visibilitychange", revalidateWatched);
 }
 
 function subscribe(listener: () => void): () => void {
-  listenForSelection();
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
@@ -170,56 +221,87 @@ function isRefusedRead(status: number | undefined): boolean {
 const COULD_NOT_LOAD = "Couldn't load this business's settings.";
 
 /**
- * Reads the business's settings and records them for every reader. Settings already shown stay while they are
- * read again; they are kept through a failure that says nothing about access (a network failure, a 5xx) and
- * dropped on a refusal (401, 403, 404). A read that a newer read, or a write's answer, has overtaken records
- * nothing.
+ * Reads the business's settings, as the member acting now, and records them for every reader. Readers that ask
+ * together share one read, and settings read within BUSINESS_SETTINGS_FRESH_MS are not asked for again unless
+ * `force` is set. Settings already shown stay while they are read again; they are kept through a failure that says
+ * nothing about access (a network failure, a 5xx) and dropped on a refusal (401, 403, 404). A read records nothing
+ * when a newer read or a write's answer has overtaken it, or when the member acting has changed since it was asked.
  */
-export async function loadBusinessSettings(businessId: string): Promise<void> {
-  if (!businessId) return;
-  const read = (readsStarted.get(businessId) ?? 0) + 1;
-  readsStarted.set(businessId, read);
+export function loadBusinessSettings(businessId: string, options: { force?: boolean } = {}): Promise<void> {
+  if (!businessId) return Promise.resolve();
+  const member = actingMember();
+  const held = entryFor(businessId, member);
+  const flightKey = `${member}\n${businessId}`;
+  if (!options.force) {
+    if (held?.status === "ready" && Date.now() - held.readAt < BUSINESS_SETTINGS_FRESH_MS) return Promise.resolve();
+    const flying = inFlight.get(flightKey);
+    if (flying) return flying;
+  }
+
+  bump(readsStarted, businessId);
+  const read = readsStarted.get(businessId);
   const answersAtStart = answersRecorded.get(businessId) ?? 0;
-  if (entries.get(businessId)?.status !== "ready") setEntry(businessId, LOADING);
+  if (held?.status !== "ready") setEntry(businessId, { ...LOADING, member });
 
-  const res = await apiGet<Record<string, unknown>>(`/identity/businesses/${encodeURIComponent(businessId)}`);
+  const flight = (async () => {
+    const res = await apiGet<Record<string, unknown>>(`/identity/businesses/${encodeURIComponent(businessId)}`);
 
-  if (readsStarted.get(businessId) !== read) return;
-  if ((answersRecorded.get(businessId) ?? 0) !== answersAtStart) return;
-  if (res.error !== null && res.error !== undefined) {
-    if (entries.get(businessId)?.status === "ready" && !isRefusedRead(res.status)) return;
-    setEntry(businessId, { status: "failed", settings: DEFAULT_BUSINESS_SETTINGS, error: res.error.trim() || COULD_NOT_LOAD });
-    return;
-  }
-  if (!isPlainObject(res.data) || res.data.id !== businessId) {
-    // Not this business's answer: nothing in it is taken.
-    setEntry(businessId, { status: "failed", settings: DEFAULT_BUSINESS_SETTINGS, error: COULD_NOT_LOAD });
-    return;
-  }
-  setEntry(businessId, { status: "ready", settings: businessSettingsOf(res.data), error: null });
+    if (readsStarted.get(businessId) !== read) return;
+    if ((answersRecorded.get(businessId) ?? 0) !== answersAtStart) return;
+    // Asked as one member, answered after another took the browser: not theirs to be shown.
+    if (actingMember() !== member) return;
+    const failed = (error: string) => setEntry(businessId, { status: "failed", settings: DEFAULT_BUSINESS_SETTINGS, error, member, readAt: 0 });
+    if (res.error !== null && res.error !== undefined) {
+      if (entryFor(businessId, member)?.status === "ready" && !isRefusedRead(res.status)) return;
+      failed(res.error.trim() || COULD_NOT_LOAD);
+      return;
+    }
+    if (!isPlainObject(res.data) || res.data.id !== businessId) {
+      // Not this business's answer: nothing in it is taken.
+      failed(COULD_NOT_LOAD);
+      return;
+    }
+    setEntry(businessId, { status: "ready", settings: businessSettingsOf(res.data), error: null, member, readAt: Date.now() });
+  })().finally(() => {
+    if (inFlight.get(flightKey) === flight) inFlight.delete(flightKey);
+  });
+  inFlight.set(flightKey, flight);
+  return flight;
 }
 
 /**
  * Records what a write for `businessId` answered (the profile PATCH and the door both answer what GET answers), for
- * every reader, and overtakes any read still in flight. An answer naming another business records nothing; one that
- * does not carry the settings is not guessed at: the business is read again.
+ * every reader, and overtakes any read still in flight. Returns whether the answer was this business's.
+ *
+ * An answer that is not (no body, a list, another business's id; review SEC-2) records nothing of itself and
+ * returns false: what the business now holds is unknown, so it is read again, and the caller must not report the
+ * write as saved. One that is this business's but does not carry the settings is not guessed at either: the
+ * business is read again.
  */
-export function noteBusinessSettings(businessId: string, answer: unknown): void {
-  if (!businessId || !isPlainObject(answer) || answer.id !== businessId) return;
-  answersRecorded.set(businessId, (answersRecorded.get(businessId) ?? 0) + 1);
-  const carriesSettings = hasOwn(answer, "sells") && isBusinessSells(answer.sells) && hasOwn(answer, "advancedCrm") && typeof answer.advancedCrm === "boolean";
-  if (!carriesSettings) {
-    void loadBusinessSettings(businessId);
-    return;
+export function noteBusinessSettings(businessId: string, answer: unknown): boolean {
+  if (!businessId) return false;
+  bump(answersRecorded, businessId);
+  const own = isPlainObject(answer) && answer.id === businessId;
+  const carriesSettings =
+    own && hasOwn(answer, "sells") && isBusinessSells(answer.sells) && hasOwn(answer, "advancedCrm") && typeof answer.advancedCrm === "boolean";
+  if (carriesSettings) {
+    setEntry(businessId, { status: "ready", settings: businessSettingsOf(answer), error: null, member: actingMember(), readAt: Date.now() });
+    return true;
   }
-  setEntry(businessId, { status: "ready", settings: businessSettingsOf(answer), error: null });
+  if (watched.has(businessId)) {
+    void loadBusinessSettings(businessId, { force: true });
+  } else if (entries.delete(businessId)) {
+    emit();
+  }
+  return own;
 }
 
-/** Forgets everything read (tests; nothing in the app needs it: a selected business already drops the cache). */
+/** Forgets everything read (tests; nothing in the app needs it). */
 export function resetBusinessSettings(): void {
   entries.clear();
   readsStarted.clear();
   answersRecorded.clear();
+  inFlight.clear();
   watched.clear();
   emit();
 }
@@ -230,15 +312,22 @@ type WriteAnswer = Awaited<ReturnType<typeof apiPatch<Record<string, unknown>>>>
 
 const notSent = (error: string): WriteAnswer => ({ data: null, error });
 
+/** A 2xx whose answer is not this business's: not a success anyone can vouch for (review SEC-2). */
+const UNREADABLE_ANSWER = "The change was sent, but the answer could not be read. Check what is shown here before trying again.";
+
+/** The answer of a write as the caller gets it: a 2xx is a success only when it answered for this business. */
+function recorded(businessId: string, res: WriteAnswer): WriteAnswer {
+  if (res.error !== null) return res;
+  return noteBusinessSettings(businessId, res.data) ? res : { data: null, error: UNREADABLE_ANSWER, status: res.status };
+}
+
 /**
  * What the business sells, through the owner-only profile PATCH (D-11): sells and nothing else. The server refuses
  * anyone but the owner; the answer then carries its words and nothing a reader shows changes.
  */
 export async function saveBusinessSells(businessId: string, sells: BusinessSells): Promise<WriteAnswer> {
   if (!isBusinessSells(sells)) return notSent("Choose services, products or both.");
-  const res = await apiPatch<Record<string, unknown>>(`/identity/businesses/${encodeURIComponent(businessId)}`, { sells });
-  if (res.error === null) noteBusinessSettings(businessId, res.data);
-  return res;
+  return recorded(businessId, await apiPatch<Record<string, unknown>>(`/identity/businesses/${encodeURIComponent(businessId)}`, { sells }));
 }
 
 /** The body the door is sent: advancedCrm and depth as named, nothing else; null when that is not a write. */
@@ -269,9 +358,7 @@ function advancedSettingsBody(write: unknown): BusinessAdvancedSettingsWrite | n
 export async function saveAdvancedSettings(businessId: string, write: BusinessAdvancedSettingsWrite): Promise<WriteAnswer> {
   const body = advancedSettingsBody(write);
   if (!body) return notSent("Choose the Advanced CRM switch or a hub's depth to change.");
-  const res = await apiPatch<Record<string, unknown>>(`/identity/businesses/${encodeURIComponent(businessId)}/advanced-settings`, body);
-  if (res.error === null) noteBusinessSettings(businessId, res.data);
-  return res;
+  return recorded(businessId, await apiPatch<Record<string, unknown>>(`/identity/businesses/${encodeURIComponent(businessId)}/advanced-settings`, body));
 }
 
 /* ─────────────────────────────── the hook ─────────────────────────────── */
@@ -319,6 +406,8 @@ export function useBusinessSettings(forBusinessId?: string | null): BusinessSett
     () => entryOf(businessId),
     () => (businessId ? LOADING : IDLE),
   );
+  // Who is acting, as of this render: when it changes under a mounted reader, the business is read again as them.
+  const member = actingMember();
 
   useEffect(() => {
     if (!businessId) return;
@@ -329,9 +418,9 @@ export function useBusinessSettings(forBusinessId?: string | null): BusinessSett
       if (left > 0) watched.set(businessId, left);
       else watched.delete(businessId);
     };
-  }, [businessId]);
+  }, [businessId, member]);
 
-  const reload = useCallback(() => (businessId ? loadBusinessSettings(businessId) : Promise.resolve()), [businessId]);
+  const reload = useCallback(() => (businessId ? loadBusinessSettings(businessId, { force: true }) : Promise.resolve()), [businessId]);
 
   return useMemo(
     () => ({

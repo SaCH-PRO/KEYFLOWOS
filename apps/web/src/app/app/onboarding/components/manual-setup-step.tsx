@@ -191,9 +191,12 @@ async function completeManualSetup(
     const body: MinimalBusinessProfile & { sells?: BusinessSells } = sells ? { ...profile, sells } : profile;
     const saved = await saveBusinessMinimalProfile(businessId, body);
     if (saved.error !== null) return saved.error.trim() || "Could not save your business profile. Please try again.";
+    // The nav and the hubs read what the business sells from here on. An answer that is not this business's
+    // is not a save anyone can vouch for (review SEC-2).
+    if (!noteBusinessSettings(businessId, saved.data)) {
+      return "Your business profile was sent, but the answer could not be read. Please try again.";
+    }
     onSaved();
-    // The nav and the hubs read what the business sells from here on.
-    noteBusinessSettings(businessId, saved.data);
     return null;
   };
   const answerChanged = sells !== null && sells !== known.storedSells;
@@ -229,8 +232,11 @@ async function completeManualSetup(
 
 export interface ManualSetup {
   profile: MinimalBusinessProfile;
-  /** What the form shows for "What do you sell?": the owner's answer, else what the business holds (both by default). */
-  sells: BusinessSells;
+  /**
+   * What the form shows for "What do you sell?": the owner's answer, else what the business holds (both when it
+   * never answered), else null: what it holds could not be read, and no answer is drawn as its own.
+   */
+  sells: BusinessSells | null;
   setSells: (value: BusinessSells) => void;
   timezones: string[];
   submitting: boolean;
@@ -273,10 +279,12 @@ export function useManualSetup(): ManualSetup {
     if (!businessId) return;
     let cancelled = false;
     void fetchBusinessMinimalProfile(businessId).then(({ data }) => {
-      if (cancelled || !data) return;
+      // Only this business's own answer is taken (review OBS-7).
+      if (cancelled || !data || data.id !== businessId) return;
       ownerIdRef.current = data.ownerId ?? null;
       const held = (data as { sells?: unknown }).sells;
-      storedSellsRef.current = isBusinessSells(held) ? held : null;
+      // The server answers 'both' for a business that never said; an answer without one is read the same.
+      storedSellsRef.current = isBusinessSells(held) ? held : "both";
       setStoredSells(storedSellsRef.current);
       storedRef.current = normalise({
         name: data.name ?? "",
@@ -352,7 +360,7 @@ export function useManualSetup(): ManualSetup {
     router.replace("/app/command-center");
   };
 
-  const sells = sellsAnswer ?? storedSells ?? "both";
+  const sells = sellsAnswer ?? storedSells;
   return { profile, sells, setSells, timezones, submitting, failure, update, finish };
 }
 
@@ -449,13 +457,15 @@ export function ManualSetupStep({ setup }: { setup: ManualSetup }) {
               What do you sell?
             </span>
             {BUSINESS_SELLS.map((value) => (
-              <label key={value} className="flex min-h-[32px] cursor-pointer items-center gap-1.5 text-sm">
+              <label key={value} className="flex min-h-[44px] cursor-pointer items-center gap-1.5 text-sm">
                 <input
                   type="radio"
                   name="manual-setup-sells"
                   value={value}
                   checked={sells === value}
                   onChange={() => setSells(value)}
+                  // Pressing the answer already shown is an answer too (no change event fires for it).
+                  onClick={() => setSells(value)}
                   className="h-4 w-4 accent-[hsl(var(--kf-accent1))]"
                 />
                 {SELLS_LABELS[value]}

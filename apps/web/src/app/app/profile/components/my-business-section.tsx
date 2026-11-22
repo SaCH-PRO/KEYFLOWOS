@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useMemo, useState } from "react";
+import { useEffect, useId, useRef, useMemo, useState } from "react";
 import {
   Building2,
   Clock,
@@ -231,6 +231,10 @@ function BusinessSetupSettings({
   const [saving, setSaving] = useState<"sells" | "advancedCrm" | null>(null);
   // Set synchronously, so two quick presses cannot send two writes.
   const savingRef = useRef(false);
+  // Per instance: two sections on one page keep their own labels and radio group (review COR-5).
+  const uid = useId();
+  const sellsLabelId = `${uid}-sells-label`;
+  const crmLabelId = `${uid}-advanced-crm-label`;
 
   const write = async (which: "sells" | "advancedCrm", what: string, done: string, send: () => Promise<ApiAnswer>) => {
     if (savingRef.current || settings.status !== "ready") return;
@@ -282,24 +286,27 @@ function BusinessSetupSettings({
   }
 
   const loading = settings.status !== "ready";
-  const disabled = loading || saving !== null;
+  // While a change is being saved the controls are marked busy, not disabled: the one just pressed keeps the
+  // keyboard's focus (review COR-5), and `write` ignores a press until the answer is in.
+  const busy = saving !== null;
 
   return (
     <div className="space-y-4 p-1" aria-busy={loading}>
       <div className="text-xs text-muted-foreground">
-        <div id="business-sells-label" className="flex items-center gap-1.5 mb-1.5 font-medium">
+        <div id={sellsLabelId} className="flex items-center gap-1.5 mb-1.5 font-medium">
           <LayoutGrid className="h-3 w-3" aria-hidden="true" />
           What you sell
         </div>
-        <div role="radiogroup" aria-labelledby="business-sells-label" className="flex flex-wrap gap-x-5 gap-y-1">
+        <div role="radiogroup" aria-labelledby={sellsLabelId} aria-busy={busy || undefined} className="flex flex-wrap gap-x-5 gap-y-1">
           {BUSINESS_SELLS.map((value) => (
             <label key={value} className="flex items-center gap-2 text-sm text-foreground cursor-pointer min-h-[44px]">
               <input
                 type="radio"
-                name="business-sells"
+                name={`${uid}-sells`}
                 value={value}
                 checked={!loading && settings.sells === value}
-                disabled={disabled}
+                disabled={loading}
+                aria-disabled={busy || undefined}
                 onChange={() => chooseSells(value)}
                 className="w-4 h-4 accent-[hsl(var(--kf-accent2))]"
               />
@@ -312,7 +319,7 @@ function BusinessSetupSettings({
 
       <div className="text-xs text-muted-foreground">
         <div className="flex items-center justify-between gap-3">
-          <div id="business-advanced-crm-label" className="flex items-center gap-1.5 font-medium">
+          <div id={crmLabelId} className="flex items-center gap-1.5 font-medium">
             <Users className="h-3 w-3" aria-hidden="true" />
             Advanced CRM
           </div>
@@ -320,10 +327,12 @@ function BusinessSetupSettings({
             type="button"
             role="switch"
             aria-checked={!loading && settings.advancedCrm}
-            aria-labelledby="business-advanced-crm-label"
-            disabled={disabled}
+            aria-labelledby={crmLabelId}
+            disabled={loading}
+            aria-disabled={busy || undefined}
+            aria-busy={saving === "advancedCrm" || undefined}
             onClick={toggleCrm}
-            className="relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors disabled:opacity-50 before:absolute before:-inset-y-2.5 before:inset-x-0 before:content-['']"
+            className="relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors disabled:opacity-50 aria-disabled:opacity-70 before:absolute before:-inset-y-2.5 before:inset-x-0 before:content-['']"
             style={{ background: !loading && settings.advancedCrm ? "hsl(var(--kf-accent2))" : "hsl(var(--kf-muted) / 0.5)" }}
           >
             <span
