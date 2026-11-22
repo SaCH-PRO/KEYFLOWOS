@@ -12,16 +12,21 @@ import {
   Lock,
   ChevronRight,
   ChevronDown,
+  Bot,
+  LayoutGrid,
+  User,
 } from "lucide-react";
-import { primaryNav } from "@/lib/nav-config";
+import { hubNav } from "@/lib/nav-config";
 import { NAV_ROUTE_LABELS } from "@/lib/semantic-routes";
-import type { NavItem, NavSection, PrimaryNavItem, DrawerSurface } from "@/lib/nav-config";
+import type { HubNavItem, NavItem, NavSection, DrawerSurface } from "@/lib/nav-config";
 import { navItemsForOperationsAccess, sectionsForOperationsAccess, useOperationsAccess } from "./operations-nav";
 
 interface DesktopSidebarProps {
   drawerSurface: DrawerSurface;
   setDrawerSurface: React.Dispatch<React.SetStateAction<DrawerSurface>>;
-  isPrimaryActive: (item: PrimaryNavItem) => boolean;
+  isPrimaryActive: (hub: HubNavItem) => boolean;
+  /** The hubs this member is shown (NAV-A1); every hub when the shell passes none. */
+  visibleHubs?: HubNavItem[];
   visibleOperateSections: NavSection[];
   visibleBuildSections: NavSection[];
   visibleMoreNav: NavItem[];
@@ -99,9 +104,17 @@ function DrawerSection({
     <div className="mb-3">
       <div className="flex items-center gap-2 px-2 mb-1.5">
         <div className="w-3 h-[2px] rounded-full bg-gradient-to-r from-[hsl(var(--kf-accent2))] to-transparent" />
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-          {section.label}
-        </span>
+        {section.href ? (
+          // A hub's section: its heading opens the hub's own page.
+          <Link
+            href={section.href}
+            className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground focus-ring rounded"
+          >
+            {section.label}
+          </Link>
+        ) : (
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{section.label}</h3>
+        )}
       </div>
       <div className="flex flex-col gap-px">
         {section.items.map((item) => {
@@ -244,6 +257,7 @@ export function DesktopSidebar({
   drawerSurface,
   setDrawerSurface,
   isPrimaryActive,
+  visibleHubs = hubNav,
   visibleOperateSections: operateSectionsIn,
   visibleBuildSections: buildSectionsIn,
   visibleMoreNav: moreNavIn,
@@ -269,7 +283,7 @@ export function DesktopSidebar({
     >
       {/* ─── Primary Rail ─── */}
       <div
-        className="w-14 flex flex-col items-center border-r border-border h-full py-3 gap-1 flex-shrink-0 relative"
+        className="w-16 flex flex-col items-center border-r border-border h-full py-3 gap-0.5 flex-shrink-0 relative overflow-y-auto"
         style={{ background: "hsl(var(--kf-sidebar-bg))" }}
       >
         {/* KEY Home Button. Straight to the cockpit: the keyflow-command
@@ -290,52 +304,67 @@ export function DesktopSidebar({
         {/* Divider with flow accent */}
         <div className="w-8 h-[1px] bg-gradient-to-r from-transparent via-border to-transparent mb-1" />
 
-        {primaryNav.map((item) => {
-          const Icon = item.icon;
-          const isActive = isPrimaryActive(item);
-          const isSurface = !item.href;
-          const surfaceId = item.id as string;
-          const isSurfaceOpen = drawerSurface === surfaceId;
-
-          if (isSurface) {
-            return (
-              <button
-                key={item.label}
-                onClick={() => setDrawerSurface(prev => (prev === surfaceId ? null : surfaceId as DrawerSurface))}
-                className={cn(
-                  "w-11 h-11 min-w-[44px] min-h-[44px] rounded-xl flex items-center justify-center transition-all relative group",
-                  isSurfaceOpen
-                    ? "text-foreground bg-gradient-to-br from-muted/60 to-muted/30 shadow-inner"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
-                )}
-                title={item.label}
-                aria-label={item.label}
-                aria-expanded={isSurfaceOpen}
-              >
-                <RailIndicator active={isSurfaceOpen} />
-                <FlowConnector active={isSurfaceOpen} />
-                <Icon className="w-[18px] h-[18px] transition-transform group-hover:scale-110" />
-              </button>
-            );
-          }
-
+        {/* The hubs (NAV-A1, D-150): plain labels under each icon. */}
+        {visibleHubs.map((hub) => {
+          const Icon = hub.icon;
+          const isActive = isPrimaryActive(hub);
           return (
             <Link
-              key={item.label}
-              href={item.href ?? "#"}
+              key={hub.id}
+              href={hub.href}
               className={cn(
-                "w-10 h-10 rounded-xl flex items-center justify-center transition-all relative group",
-                isActive
-                  ? "text-foreground"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
+                "w-14 min-h-[48px] py-1 rounded-xl flex flex-col items-center justify-center transition-all relative group focus-ring",
+                isActive ? "text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
               )}
-              title={item.label}
-              aria-label={item.label}
+              aria-label={hub.label}
+              aria-current={isActive ? "page" : undefined}
               onClick={() => setDrawerSurface(null)}
             >
               <RailIndicator active={isActive} />
-              <Icon className="w-[18px] h-[18px] transition-transform group-hover:scale-110" />
+              <Icon className="w-[18px] h-[18px] transition-transform group-hover:scale-110" aria-hidden="true" />
+              <span className="mt-0.5 text-[10px] leading-tight font-medium text-center">{hub.label}</span>
             </Link>
+          );
+        })}
+
+        <div className="w-8 h-[1px] bg-gradient-to-r from-transparent via-border to-transparent my-1" />
+
+        <Link
+          href="/app/key/chat"
+          className="w-14 min-h-[44px] py-1 rounded-xl flex flex-col items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/40 transition-all focus-ring"
+          aria-label="KEY"
+          onClick={() => setDrawerSurface(null)}
+        >
+          <Bot className="w-[18px] h-[18px]" aria-hidden="true" />
+          <span className="mt-0.5 text-[10px] leading-tight font-medium">KEY</span>
+        </Link>
+
+        {(
+          [
+            { surface: "operate" as const, label: "More", Icon: LayoutGrid },
+            { surface: "me" as const, label: "Me", Icon: User },
+          ]
+        ).map(({ surface, label, Icon }) => {
+          const open = drawerSurface === surface;
+          return (
+            <button
+              key={surface}
+              type="button"
+              onClick={() => setDrawerSurface((prev) => (prev === surface ? null : surface))}
+              className={cn(
+                "w-14 min-h-[44px] py-1 rounded-xl flex flex-col items-center justify-center transition-all relative group focus-ring",
+                open
+                  ? "text-foreground bg-gradient-to-br from-muted/60 to-muted/30 shadow-inner"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
+              )}
+              aria-label={label}
+              aria-expanded={open}
+            >
+              <RailIndicator active={open} />
+              <FlowConnector active={open} />
+              <Icon className="w-[18px] h-[18px]" aria-hidden="true" />
+              <span className="mt-0.5 text-[10px] leading-tight font-medium">{label}</span>
+            </button>
           );
         })}
 
@@ -395,7 +424,7 @@ export function DesktopSidebar({
               <div className="flex items-center gap-2">
                 <div className="w-1 h-4 rounded-full bg-gradient-to-b from-[hsl(var(--kf-accent2))] to-[hsl(var(--kf-accent1))]" />
                 <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {drawerSurface === "operate" ? "Operate" : "Build"}
+                  {drawerSurface === "operate" ? "More" : "Build"}
                 </h2>
               </div>
               <button
@@ -418,7 +447,8 @@ export function DesktopSidebar({
                 />
               ))}
 
-              {drawerSurface === "build" && (
+              {/* More holds every section: the hubs' screens above, everything else below. */}
+              {(drawerSurface === "operate" || drawerSurface === "build") && (
                 <>
                   {visibleBuildSections.map((section) => (
                     <DrawerSection

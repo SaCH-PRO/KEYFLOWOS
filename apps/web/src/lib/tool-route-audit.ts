@@ -408,6 +408,8 @@ const REDIRECTED_BY_DESIGN: Record<string, string> = {
   '/app/marketing': '/app/communicate/campaigns — same screen, new path',
   '/app/expenses': '/app/money/expenses — same screen, new path',
   '/app/finance': '/app/money — the finance cockpit landing',
+  // NAV-A1: the stub's own page already forwarded here; next.config now answers a 307 instead.
+  '/app/keyflow-command': '/app/command-center — Today, the cockpit the stub always forwarded to',
 };
 
 /**

@@ -69,6 +69,9 @@ function shadowed(): string[] {
  */
 const ACKNOWLEDGED_SHADOWED = [
   '/app/accounting',
+  // NAV-A1: the old cockpit stubs answer a 307 to /app/command-center from next.config; their page files stay
+  // (link-targets.spec.ts: no route is deleted).
+  '/app/briefing',
   '/app/calendar',
   '/app/control-tower',
   '/app/crm',
@@ -78,6 +81,7 @@ const ACKNOWLEDGED_SHADOWED = [
   '/app/finance/expenses',
   '/app/finance/reports',
   '/app/finance/revenue',
+  '/app/keyflow-command',
   '/app/marketing',
   '/app/projects',
 ];

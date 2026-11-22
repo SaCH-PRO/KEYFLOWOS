@@ -107,20 +107,22 @@ const ORPHANED_BY_DESIGN: Record<string, Reason> = {
   "/app/inbox":                          'deliberately-unlinked',
   "/app/inbox/intake":                   'todo-connect',
   "/app/keyflow-command":                'deliberately-unlinked',
-  "/app/marketing":                      'deliberately-unlinked',
-  // NAV-A1: /app/money forwards to /app/financial-flow (it re-exports the finance page, a redirect), so the
-  // Money hub names /app/financial-flow until NAV-A2 makes /app/money a real index.
-  "/app/money":                          'deliberately-unlinked',
   // The expanded finance action list, reached from the "See all" link on the
   // money hub's panel — which truncates to five. Not in nav on purpose: it is
   // the panel's overflow, not a destination of its own.
   "/app/money/actions":                  'detail-route-of:/app/money',
   "/app/money/revenue":                  'deliberately-unlinked',
+  // NAV-A1: /app/notifications and /app/settings/profile forward on mount (to /app/settings/notifications and
+  // /app/profile). /app/settings/conversion was counted only through the /app/settings prefix (a page that forwards
+  // to billing); no menu names it, and NAV-B-HIDE's census decides it (D-152).
+  "/app/notifications":                  'deliberately-unlinked',
   "/app/onboarding":                     'todo-connect',
   "/app/onboarding/business-os":         'deliberately-unlinked',
   "/app/plans/[planId]":                 'todo-connect',
   "/app/projects":                       'deliberately-unlinked',
   "/app/projects/plans/[planId]":        'detail-route-of:/app/work/projects',
+  "/app/settings/conversion":            'todo-connect',
+  "/app/settings/profile":               'deliberately-unlinked',
   "/app/workflows":                      'deliberately-unlinked',
 };
 
@@ -145,6 +147,19 @@ function navHrefs(): string[] {
   return [...new Set([...src.matchAll(/href: "(\/app\/[^"]*)"/g)].map((m) => m[1].split('?')[0]))];
 }
 
+/**
+ * NAV-A1: the Settings screens' own menu (app/app/settings/layout.tsx navItems), shown beside every settings page.
+ * Before NAV-A1 the nav named /app/settings, and the generous prefix rule counted every settings screen through it;
+ * /app/settings only forwards (to /app/settings/billing), so the Settings hub names /app/settings/business, and the
+ * screens are reached through the layout's menu. An explicit edge, read exactly: only when a nav href opens a
+ * settings page.
+ */
+function settingsMenuHrefs(hrefs: string[]): string[] {
+  if (!hrefs.some((h) => h.startsWith('/app/settings/'))) return [];
+  const src = fs.readFileSync(path.join(APP, 'settings', 'layout.tsx'), 'utf8');
+  return [...src.matchAll(/\{ href: "(\/app\/[^"]+)", label:/g)].map((m) => m[1]);
+}
+
 /** Does the nav land you anywhere in this route's subtree? */
 function navReachable(route: string, hrefs: string[]): boolean {
   return hrefs.some(
@@ -157,9 +172,10 @@ function navReachable(route: string, hrefs: string[]): boolean {
 
 describe('every screen has a door, or a written reason it does not', () => {
   const all = routes();
-  const hrefs = navHrefs();
+  const hrefs = [...navHrefs(), ...settingsMenuHrefs(navHrefs())];
 
   it('finds both sides', () => {
+    expect(settingsMenuHrefs(navHrefs()).length, 'the settings menu reader is broken').toBeGreaterThan(10);
     expect(all.length).toBeGreaterThan(150);
     expect(hrefs.length).toBeGreaterThan(30);
   });
