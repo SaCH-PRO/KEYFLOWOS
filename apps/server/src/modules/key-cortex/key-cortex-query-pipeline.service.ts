@@ -1406,12 +1406,14 @@ export class KeyCortexQueryPipelineService {
           }
         }
 
-        if (chunk.error) {
+        // Review SEC-1: an error chunk stops the stream whatever its message
+        // (a provider that threw new Error() yields an empty one).
+        if (chunk.type === 'error' || chunk.error) {
+          streamError = chunk.error || 'The model stream failed';
           yield {
             type: 'error',
-            error: chunk.error,
+            error: streamError,
           };
-          streamError = chunk.error;
           break;
         }
       }
