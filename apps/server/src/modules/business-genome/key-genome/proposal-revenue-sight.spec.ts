@@ -649,7 +649,9 @@ describe('sixth review of the #218 repairs: readings are only ever added', () =>
   ])('RED-BEFORE (m5): %s is read', (_l, extra) => expect(isFinancialProposal(task(extra) as any)).toBe(true));
   it('RED-BEFORE (m2): text that grows past the cap when folded, and long ambiguous text, fail closed quickly', () => {
     const grows = '\uFDFA'.repeat(49_000);
-    const ambiguous = `\u200b\\${'a'.repeat(30_000)}`;
+    // Seventh review (correctness m1): the case is now text built to multiply readings past the budget; a long text with
+    // one joiner and one backslash is ordinary and is read (see the seventh-review cases).
+    const ambiguous = `\u200b\\n\\u0041\uFF19${'a'.repeat(30_000)}`;
     for (const [label, text] of [['grows', grows], ['ambiguous', ambiguous]] as const) {
       const started = performance.now();
       expect(proposalTextStatesMoney(text), label).toBe(true);
