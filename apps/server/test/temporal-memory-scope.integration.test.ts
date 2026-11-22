@@ -264,7 +264,7 @@ describe('MEM-TEMPORAL-SCOPE review repair: a command without a memoryId acts on
     const before = await snapshot();
     expect(before.length).toBe(5);
     const r = await connector.execute(cmd(ID.bizA, 'delete_memory', {}));
-    expect(r.data?.deleted ?? false).toBe(false);
+    expect(r).toMatchObject({ success: true, data: { deleted: false } });
     expect(await snapshot()).toEqual(before);
   });
 
@@ -287,5 +287,27 @@ describe('MEM-TEMPORAL-SCOPE review repair: a command without a memoryId acts on
   it('findById with no id finds nothing (not an arbitrary memory of the business)', async () => {
     expect(await memoryService.findById(ID.bizA, undefined)).toBeNull();
     expect(await memoryService.findById(ID.bizA, '')).toBeNull();
+  });
+});
+
+describe('MEM-TEMPORAL-SCOPE review round 2: no business means no memory, and tags are only strings', () => {
+  it("an absent business reads, changes and deletes nothing (B's memory by id)", async () => {
+    const before = await snapshot();
+    expect(await memoryService.findById(undefined, ID.memB)).toBeNull();
+    expect(await memoryService.deleteMemory(undefined, ID.memB)).toBe(false);
+    await expect(memoryService.updateMemory(undefined, ID.memB, { content: 'x' })).rejects.toThrow('Memory not found');
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it('tag_memory keeps only string tags: a string is not spread into characters, a missing list adds none', async () => {
+    const asString = await connector.execute(cmd(ID.bizA, 'tag_memory', { memoryId: ID.memA, tags: 'xy' }));
+    expect(asString.success).toBe(true);
+    expect((await read(ID.memA)).sourceEventIds).toEqual(['a-tag']);
+    const mixed = await connector.execute(cmd(ID.bizA, 'tag_memory', { memoryId: ID.memA, tags: ['ok', 7, null, { a: 1 }] }));
+    expect(mixed.success).toBe(true);
+    expect((await read(ID.memA)).sourceEventIds).toEqual(['a-tag', 'ok']);
+    const missing = await connector.execute(cmd(ID.bizA, 'tag_memory', { memoryId: ID.memA }));
+    expect(missing.success).toBe(true);
+    expect((await read(ID.memA)).sourceEventIds).toEqual(['a-tag', 'ok']);
   });
 });
