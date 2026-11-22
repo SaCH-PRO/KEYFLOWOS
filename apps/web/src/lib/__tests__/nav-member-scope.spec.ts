@@ -33,7 +33,10 @@
  *   NMS-14 review round 2 (R2-COR-1, R2-COR-2): a failed re-read keeps the levels already known for the same member
  *          and business; looking again within BUSINESS_SETTINGS_FRESH_MS (30 s) of the last answer asks nothing.
  *   NMS-15 review round 3: a first read that failed is retried on the next look (only an answer with levels is
- *          fresh), and a return to the tab (visibilitychange and focus together) asks once.
+ *          fresh); a return to the tab (visibilitychange and focus together) sends one request (lib/api joins
+ *          identical reads in flight).
+ *   NMS-16 review round 4: a look while the tab is hidden asks nothing; a slow answer for a business left behind
+ *          never stands for the one selected since; a clock stepped back counts the levels stale, not fresh.
  *   NMS-09 the desktop menu (Main navigation) shows the hubs as links named by their plain labels, and a products
  *          business's menu names no Schedule (journey A4); a front-desk member's menu offers no Sales, Money, Your
  *          page or Settings hub (J5).
@@ -201,10 +204,12 @@ function serveAccess(answers: Record<string, { status: number; body: unknown }>)
       if (m) {
         const id = decodeURIComponent(m[1]);
         asked.push(id);
-        const a = answers[id] ?? { status: 503, body: { message: "Service Unavailable" } };
+        // 404, not 503: lib/api retries a 503 with a backoff, and a retry landing in a later case would count there
+        // (review round 4).
+        const a = answers[id] ?? { status: 404, body: { message: "Not Found" } };
         return jsonResponse(a.status, a.body);
       }
-      return jsonResponse(503, { message: "Service Unavailable" });
+      return jsonResponse(404, { message: "Not Found" });
     }),
   );
   return asked;
@@ -228,7 +233,7 @@ describe("NAV-A1: the shell reads the member's levels for the selected business"
   it("NMS-07 asks my-access for the selected business, applies only its answer, and follows a switch; a failed read is unknown", async () => {
     const asked = serveAccess({
       [BIZ]: { status: 200, body: { modules: { crm: "read", bookings: "read", revenue: "none" } } },
-      [OTHER]: { status: 503, body: { message: "Service Unavailable" } },
+      [OTHER]: { status: 404, body: { message: "Not Found" } },
     });
     const { result } = renderHook(() => useMemberModuleLevels());
     expect(result.current, "unknown before the answer lands").toBeNull();
@@ -247,6 +252,9 @@ describe("NAV-A1: the shell reads the member's levels for the selected business"
   });
 });
 
+/** Only this business's reads count (review round 4). */
+const bizAsks = (asked: string[]) => asked.filter((id) => id === BIZ).length;
+
 /** A session token naming `sub` (lib/business-settings reads the subject; nothing verifies it here). */
 const tokenFor = (sub: string) => `h.${btoa(JSON.stringify({ sub })).replace(/=+$/, "")}.s`;
 
@@ -256,7 +264,7 @@ describe("NAV-A1 review round 1: the levels belong to the member who read them",
     const asked = serveAccess({ [BIZ]: { status: 200, body: { modules: { crm: "read", revenue: "none" } } } });
     const { result } = renderHook(() => useMemberModuleLevels());
     await waitFor(() => expect(result.current).toEqual({ crm: "read", revenue: "none" }));
-    expect(asked.length).toBe(1);
+    expect(bizAsks(asked)).toBe(1);
 
     // Another member's session in this browser (another tab signed in): the first member's levels are not theirs.
     act(() => {
@@ -264,7 +272,7 @@ describe("NAV-A1 review round 1: the levels belong to the member who read them",
       window.dispatchEvent(new StorageEvent("storage", { key: "kf_token" }));
     });
     expect(result.current, "the previous member's levels never stand for the next").toBeNull();
-    await waitFor(() => expect(asked.length).toBe(2));
+    await waitFor(() => expect(bizAsks(asked)).toBe(2));
     await waitFor(() => expect(result.current).toEqual({ crm: "read", revenue: "none" }));
 
     // The owner changed this member's scopes elsewhere: looking at the tab again, once the answer is no longer
@@ -274,7 +282,7 @@ describe("NAV-A1 review round 1: the levels belong to the member who read them",
     act(() => {
       window.dispatchEvent(new Event("focus"));
     });
-    await waitFor(() => expect(asked.length).toBe(3));
+    await waitFor(() => expect(bizAsks(asked)).toBe(3));
   });
 
   it("NMS-14 a failed re-read keeps the levels known; a look within 30 s asks nothing", async () => {
@@ -293,7 +301,7 @@ describe("NAV-A1 review round 1: the levels belong to the member who read them",
     await act(async () => {
       await new Promise((r) => setTimeout(r, 20));
     });
-    expect(asked.length).toBe(1);
+    expect(bizAsks(asked)).toBe(1);
 
     // Later, the re-read is refused (403, which lib/api does not retry; it is also what a removed member gets): what
     // is known for this member and business stays.
@@ -303,21 +311,21 @@ describe("NAV-A1 review round 1: the levels belong to the member who read them",
     act(() => {
       window.dispatchEvent(new Event("focus"));
     });
-    await waitFor(() => expect(asked.length).toBe(2));
+    await waitFor(() => expect(bizAsks(asked)).toBe(2));
     await act(async () => {
       await new Promise((r) => setTimeout(r, 200));
     });
     expect(result.current).toEqual({ crm: "read", revenue: "none" });
   });
 
-  it("NMS-15 a failed first read is retried on the next look; a return to the tab asks once", async () => {
+  it("NMS-15 a failed first read is retried on the next look; a return to the tab sends one request", async () => {
     window.localStorage.setItem("kf_token", tokenFor("usr_a"));
     const answers: Record<string, { status: number; body: unknown }> = {
       [BIZ]: { status: 403, body: { statusCode: 403, message: "Unable to verify business access", error: "Forbidden" } },
     };
     const asked = serveAccess(answers);
     const { result } = renderHook(() => useMemberModuleLevels());
-    await waitFor(() => expect(asked.length).toBe(1));
+    await waitFor(() => expect(bizAsks(asked)).toBe(1));
     await act(async () => {
       await new Promise((r) => setTimeout(r, 200));
     });
@@ -329,20 +337,75 @@ describe("NAV-A1 review round 1: the levels belong to the member who read them",
       window.dispatchEvent(new Event("focus"));
     });
     await waitFor(() => expect(result.current).toEqual({ crm: "read" }));
-    expect(asked.length).toBe(2);
+    expect(bizAsks(asked)).toBe(2);
 
     // Later, a return to the tab fires visibilitychange and focus together: one ask.
     const now = Date.now();
     vi.spyOn(Date, "now").mockReturnValue(now + 31_000);
     act(() => {
       document.dispatchEvent(new Event("visibilitychange"));
+    });
+    act(() => {
       window.dispatchEvent(new Event("focus"));
     });
-    await waitFor(() => expect(asked.length).toBeGreaterThanOrEqual(3));
+    await waitFor(() => expect(bizAsks(asked)).toBeGreaterThanOrEqual(3));
     await act(async () => {
       await new Promise((r) => setTimeout(r, 50));
     });
-    expect(asked.length).toBe(3);
+    expect(bizAsks(asked)).toBe(3);
+  });
+  it("NMS-16 a hidden tab asks nothing; a slow answer for a business left behind never stands; a clock stepped back is stale", async () => {
+    window.localStorage.setItem("kf_token", tokenFor("usr_a"));
+    let releaseSlow!: () => void;
+    const asked: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        const m = /\/identity\/businesses\/([^/]+)\/my-access$/.exec(new URL(url, "http://localhost").pathname);
+        if (!m) return jsonResponse(404, { message: "Not Found" });
+        const id = decodeURIComponent(m[1]);
+        asked.push(id);
+        if (id === BIZ && asked.filter((x) => x === BIZ).length === 1) {
+          // The first read of BIZ is slow: it lands after the switch to OTHER.
+          await new Promise<void>((r) => (releaseSlow = r));
+          return jsonResponse(200, { modules: { crm: "admin", revenue: "admin" } });
+        }
+        return jsonResponse(200, { modules: id === OTHER ? { crm: "read", revenue: "none" } : { crm: "admin" } });
+      }),
+    );
+    const { result } = renderHook(() => useMemberModuleLevels());
+    await waitFor(() => expect(asked).toContain(BIZ));
+    act(() => {
+      selectBusiness(OTHER);
+    });
+    await waitFor(() => expect(result.current).toEqual({ crm: "read", revenue: "none" }));
+    await act(async () => {
+      releaseSlow();
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(result.current, "the business left behind does not overwrite the one selected").toEqual({ crm: "read", revenue: "none" });
+
+    // A look while the tab is hidden asks nothing, even when the levels are no longer fresh.
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now + 31_000);
+    const before = asked.length;
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(asked.length).toBe(before);
+    visibility.mockRestore();
+
+    // The clock stepped back past the last answer: the levels are stale, so the next look asks.
+    clock.mockReturnValue(now - 120_000);
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() => expect(asked.length).toBe(before + 1));
   });
 });
 
