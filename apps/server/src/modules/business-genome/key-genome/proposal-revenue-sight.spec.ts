@@ -17,6 +17,8 @@ describe('isFinancialProposal (D-238)', () => {
     ['a tool whose KEY authority needs revenue read', { actionType: 'EXECUTE_TOOL', module: 'temporal_flow', toolName: 'temporal_flow.list_events', title: 'List events' }],
     ['a non-financial action whose title carries a figure', { actionType: 'CREATE_TASK', title: 'Chase the $4,000 invoice' }],
     ['a non-financial action whose title names revenue', { actionType: 'CREATE_TASK', title: 'Review revenue drop' }],
+    ['an approval request titled with a money figure (the Pro Auto monitor)', { actionType: 'REQUEST_APPROVAL', title: '$12,345 outstanding across 7 invoices' }],
+    ['a task titled with a currency code amount', { actionType: 'CREATE_TASK', title: 'Pay TTD 500 to the courier' }],
   ])('%s is financial', (_l, p) => expect(isFinancialProposal(p)).toBe(true));
 
   it.each([

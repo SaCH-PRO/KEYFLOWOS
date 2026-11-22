@@ -630,7 +630,9 @@ describe('FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4): a memberless turn sees a pro
   const NF_TITLE = 'Call Kerry back';
   const NF_PROPOSE = recordsOf('np', 'propose', { status: 'PENDING', riskLevel: 'MEDIUM' }, { actionType: 'CREATE_TASK', module: 'crm', title: NF_TITLE }, 'kap_2');
   const NF_APPROVE = recordsOf('na', 'approve', { status: 'APPROVED', approvedBy: 'v71o_owner_id' }, {}, 'kap_2');
-  const NF_REJECT = recordsOf('nr', 'reject', { status: 'REJECTED', rejectedBy: 'v71o_owner_id', rejectionReason: 'not now: $9,876 is due first' }, { reason: 'not now: $9,876 is due first' }, 'kap_2');
+  const NF_REJECT = recordsOf('nr', 'reject', { status: 'REJECTED', rejectedBy: 'v71o_owner_id', rejectionReason: 'not now: after the launch' }, { reason: 'not now: after the launch' }, 'kap_2');
+  // D-238 (directly or indirectly): the same non-financial proposal rejected with a reason that states money.
+  const NF_MONEY_REJECT = recordsOf('nm', 'reject', { status: 'REJECTED', rejectedBy: 'v71o_owner_id', rejectionReason: 'not now: $9,876 is due first' }, { reason: 'not now: $9,876 is due first' }, 'kap_2');
   const NF_OUTCOME: Fragment = {
     id: 'ng_outcome',
     entityId: 'kap_2',
@@ -695,6 +697,13 @@ describe('FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4): a memberless turn sees a pro
       expect(await readersOwnPromptMemory(prisma as any, 'biz_1', reader, NF_RECORDS as any, 1000)).toEqual(NF_RECORDS);
     });
   }
+
+  it('RED-BEFORE (D-238, directly or indirectly): the rejection records of a non-financial proposal whose reason states money are withheld from a reader without revenue read and from a memberless turn; the owner sees them', async () => {
+    for (const reader of ['blind', null] as const) {
+      expect((await readersOwnPromptMemory(prisma as any, 'biz_1', reader, NF_MONEY_REJECT as any, 1000)).map((f) => f.id), String(reader)).toEqual([]);
+    }
+    expect(await readersOwnPromptMemory(prisma as any, 'biz_1', 'owner', NF_MONEY_REJECT as any, 1000)).toEqual(NF_MONEY_REJECT);
+  });
 
   it('RED-BEFORE (D-238, D-227): a proposal whose classification is missing (no underlying row, nothing in the record) is withheld from a reader without revenue read and from a memberless turn; the owner sees it', async () => {
     const unknown = [...recordsOf('u', 'approve', { status: 'APPROVED' }, {}, 'kap_404'), {
