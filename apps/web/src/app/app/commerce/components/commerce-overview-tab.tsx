@@ -19,6 +19,7 @@ import { formatCurrency, formatCurrencyCompact } from "@/lib/currency";
 import { parseDate } from "@/lib/date-safe";
 import { InvoiceStatus, QuoteStatus } from "@/lib/commerce-status";
 import type { Invoice, Quote, RecurringInvoice } from "@/lib/client";
+import { invoiceMoney } from "../payments/payments-tab";
 
 interface CommerceOverviewTabProps {
   businessId: string | null;
@@ -425,12 +426,34 @@ export function CommerceOverviewTab({
   onNavigate,
   onNewItem,
 }: CommerceOverviewTabProps) {
+  // V1-64 (SWP-INV-MONEY-TOTALS; sweep BUG-020): the hero reads each invoice's
+  // money from its own payment rows (invoiceMoney, the Payments tab's reading
+  // and the mirror of the server's stats): outstanding is what is left on the
+  // issued, unsettled invoices, collected the money received net of refunds,
+  // overdue the part of outstanding past its due date. It summed invoice
+  // totals by status (SENT / OVERDUE owed, PAID collected), so an invoice of
+  // 13,723 with a 400 deposit read 0.00 outstanding and 0 collected.
   const stats = useMemo(() => {
-    const outstanding = invoices.filter((i) => i.status === InvoiceStatus.SENT || i.status === InvoiceStatus.OVERDUE).reduce((s, i) => s + (Number(i.total) ?? 0), 0);
-    const collected = invoices.filter((i) => i.status === InvoiceStatus.PAID).reduce((s, i) => s + (Number(i.total) ?? 0), 0);
-    const overdue = invoices.filter((i) => i.status === InvoiceStatus.OVERDUE).reduce((s, i) => s + (Number(i.total) ?? 0), 0);
-    const overdueCount = invoices.filter((i) => i.status === InvoiceStatus.OVERDUE).length;
-    return { outstanding, collected, overdue, overdueCount };
+    const now = new Date();
+    let owedCents = 0;
+    let collectedCents = 0;
+    let overdueCents = 0;
+    let overdueCount = 0;
+    for (const inv of invoices) {
+      const money = invoiceMoney(inv, now);
+      owedCents += money.owedCents;
+      collectedCents += money.netCents;
+      if (money.state === "overdue") {
+        overdueCents += money.owedCents;
+        overdueCount++;
+      }
+    }
+    return {
+      outstanding: owedCents / 100,
+      collected: Math.max(0, collectedCents) / 100,
+      overdue: overdueCents / 100,
+      overdueCount,
+    };
   }, [invoices]);
 
   if (loading) return <OverviewSkeleton />;
