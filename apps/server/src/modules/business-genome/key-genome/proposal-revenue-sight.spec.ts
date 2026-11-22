@@ -708,6 +708,7 @@ describe('seventh review of the #218 repairs: a reading budget, not a length cap
   });
   it.each(['Chase the 900\\noutstanding', 'Total due\\n900', '0\\routstanding'])('control (security MINOR-2; already read before the two new readings): %j', (summary) => {
     expect(isFinancialProposal(task({ summary }))).toBe(true);
+    expect(proposalTextStatesMoney(summary)).toBe(true);
   });
   it.each(['\\u000bill\\n40', '\\u0074otal due\\n900', 'see \\u0066ee\\n40'])('RED-BEFORE (security MINOR-2): an escape read as a space keeps the other backslashes as written, and a decoded text reads its escapes as spaces (%j)', (summary) => {
     expect(isFinancialProposal(task({ summary }))).toBe(true);
@@ -753,4 +754,21 @@ describe('eighth review of the #218 repairs: the budget is shared, and a kept id
       expect(proposalTextStatesMoney(text)).toBe(true);
     },
   );
+});
+
+describe('final confirmation review of the #218 repairs: the stripped readings are charged to the budget', () => {
+  const task = (extra: object) => ({ actionType: 'CREATE_TASK', module: 'crm', title: 'Follow up', ...extra });
+  it('RED-BEFORE (MINOR-2): a kept id run in budget-filling text does not double what is read; it fails closed', () => {
+    // Six raw readings of ~49,000 characters fit the budget; the kept id run would double them to twelve.
+    const text = `C:\\new\\reports c900000000000000000paying attention ${'rate '.repeat(9_780)}`.slice(0, 49_000);
+    for (let i = 0; i < 2; i++) proposalTextStatesMoney(text);
+    const started = performance.now();
+    expect(proposalTextStatesMoney(text)).toBe(true);
+    expect(performance.now() - started).toBeLessThan(40);
+  });
+  it('control: the same text with a real id is read within the budget, and a short text with a kept id run is still read both ways', () => {
+    const real = `C:\\new\\reports cmzcku666tax29xx90fuyj0uu ${'call back '.repeat(4_800)}`.slice(0, 49_000);
+    expect(proposalTextStatesMoney(real)).toBe(false);
+    expect(isFinancialProposal(task({ summary: 'Total c900000000000000000paying attention 900' }))).toBe(true);
+  });
 });
