@@ -42,6 +42,8 @@ import {
 import { FlowOrchestratorService } from './flow-orchestrator.service';
 import { ActionDispatcherService } from './action-dispatcher.service';
 import { ProjectsService } from '../projects/projects.service';
+import { ContractsService } from '../contracts/contracts.service';
+import { DocumentIntelligenceService } from './document-intelligence.service';
 import { ContractClauseService, DocumentHostUnavailableError } from '../contracts/contract-clause.service';
 import { providerUnavailable } from '../../core/connectors/provider-failure';
 
@@ -533,5 +535,96 @@ describe('FlowOrchestratorService.executeToolDirectly hands the plan queue a ref
     expect(await dispatcher.dispatch({ businessId: BIZ_A, toolName: TOOL, args: { contractId: 'w10ds_contract' }, retryCount: 2 })).toMatchObject({ success: false, error: NO_SOURCE });
     expect(none.fetches()).toBe(0);
     expect(dispatcher.getCircuitStatus(TOOL, BIZ_A)).toEqual(CLOSED);
+  });
+
+  it('DS-10 W11-DISPATCH-REFUSAL-FINAL review SEC2-1 (D-134): contract_extract_terms reads the document with the model, and DocumentIntelligenceService answers a model that failed (an outage, a timeout, the AI rate limit, an unreadable answer) as an \'unknown\' document, which ContractsService refuses with a 400; through the real services that stays a failure the plan queue retries and counts, while a document the model read and found to be no contract is the final 400. What the two services answer their other callers is unchanged', async () => {
+    const TOOL = 'contract_extract_terms';
+    const REFUSAL = 'Document does not appear to be a contract or extraction failed';
+    const args = { contractId: 'w10ds_contract', sourceAssetId: 'w10ds_asset' };
+    const CONTRACT_JSON = JSON.stringify({ documentType: 'contract', confidence: 0.9, contractData: { title: 'w10ds contract' }, suggestedActions: [] });
+    const INVOICE_JSON = JSON.stringify({ documentType: 'invoice', confidence: 0.9, invoiceData: { total: 10 }, suggestedActions: [] });
+    /** The real tool case over the real ContractsService and DocumentIntelligenceService; `model` answers each model call or throws. */
+    const makeTermsFlow = (model: (call: number, businessId: string) => string | Error) => {
+      let calls = 0;
+      const prisma = {
+        client: {
+          contract: { findFirst: async () => ({ id: 'w10ds_contract', title: 'w10ds contract' }) },
+          asset: { findFirst: async () => ({ url: null, mimeType: 'text/plain', name: 'w10ds_asset.txt' }) },
+        },
+      };
+      const aiUsage = {
+        trackAndComplete: async (businessId: string) => {
+          calls += 1;
+          const answer = model(calls, businessId);
+          if (answer instanceof Error) throw answer;
+          return { content: answer };
+        },
+      };
+      const docIntel = new DocumentIntelligenceService(
+        prisma as never, { emit: () => true } as never, {} as never, { log: async () => undefined } as never, {} as never, aiUsage as never,
+        { get: () => ({ parse: async () => null }) } as never,
+      );
+      (docIntel as unknown as { logger: unknown }).logger = quiet;
+      const contracts = new ContractsService(prisma as never, docIntel, { emit: () => true } as never);
+      // What is written once the model has read a contract is not this case's subject.
+      (contracts as unknown as { applyExtractionResult: unknown }).applyExtractionResult = async () => undefined;
+      const flow = Object.create(FlowOrchestratorService.prototype) as FlowOrchestratorService;
+      Object.assign(flow, {
+        logger: quiet,
+        governance: { getToolTier: () => 1 },
+        executionLog: { logToolExecution: async () => 'w10ds_log' },
+        businessGraph: { invalidateCache: () => undefined },
+        memberScopeRefusal: async () => null,
+        attributeExecutionLog: async () => undefined,
+        moduleRef: { get: () => contracts },
+      });
+      return { flow, contracts, docIntel, calls: () => calls };
+    };
+
+    const failures = [
+      new Error('Anthropic API error (503)'),
+      new HttpException('AI rate limit reached for this business', HttpStatus.TOO_MANY_REQUESTS),
+      new Error('The operation was aborted due to timeout'),
+    ];
+    for (const failure of failures) {
+      const label = failure.message;
+
+      // What the services answer their other callers is what it was: the 'unknown' document, and the 400.
+      const direct = makeTermsFlow(() => failure);
+      const unknown = await direct.docIntel.extractFromDocument({ businessId: BIZ_A, source: 'asset', mimeType: 'text/plain', filename: 'w10ds_asset.txt' } as never);
+      expect(unknown, label).toEqual({ documentType: 'unknown', confidence: 0, rawText: '', suggestedActions: [] });
+      expect(JSON.parse(JSON.stringify(unknown)), label).toEqual({ documentType: 'unknown', confidence: 0, rawText: '', suggestedActions: [] });
+      const refused = await direct.contracts.extractTermsFromDocument(BIZ_A, 'w10ds_contract', { sourceAssetId: 'w10ds_asset' } as never).then(() => null, (e: unknown) => e);
+      expect(refused, label).toBeInstanceOf(BadRequestException);
+      expect((refused as HttpException).getResponse(), label).toEqual(new BadRequestException(REFUSAL).getResponse());
+
+      const err = await thrownByExecuteToolDirectly(makeTermsFlow(() => failure).flow, TOOL, args);
+      expect(err, label).toBeInstanceOf(ServiceUnavailableException);
+      expect((err as Error).message, label).toBe(REFUSAL);
+
+      // A passing failure: the retry reads the contract.
+      const once = makeTermsFlow((call) => (call === 1 ? failure : CONTRACT_JSON));
+      expect(await makeDispatcher(once.flow).dispatcher.dispatch({ businessId: BIZ_A, toolName: TOOL, args, retryCount: 2 }), label).toMatchObject({ success: true });
+      expect(once.calls(), label).toBe(2);
+
+      // A lasting one in BIZ_A: tried three times, counted once; BIZ_B's contract is read.
+      const down = makeTermsFlow((_call, businessId) => (businessId === BIZ_A ? failure : CONTRACT_JSON));
+      const { dispatcher } = makeDispatcher(down.flow);
+      expect(await dispatcher.dispatch({ businessId: BIZ_A, toolName: TOOL, args, retryCount: 2 }), label).toMatchObject({ success: false, error: REFUSAL });
+      expect(down.calls(), label).toBe(3);
+      expect(dispatcher.getCircuitStatus(TOOL, BIZ_A), label).toMatchObject({ open: false, failures: 1 });
+      expect(await dispatcher.dispatch({ businessId: BIZ_B, toolName: TOOL, args, retryCount: 2 }), label).toMatchObject({ success: true });
+      expect(dispatcher.getCircuitStatus(TOOL, BIZ_B), label).toEqual(CLOSED);
+    }
+
+    // The model read the document and it is no contract: asking again gets the same answer. Final, uncounted.
+    expect(await thrownByExecuteToolDirectly(makeTermsFlow(() => INVOICE_JSON).flow, TOOL, args)).toBeInstanceOf(BadRequestException);
+    const notContract = makeTermsFlow(() => INVOICE_JSON);
+    const { dispatcher, threshold } = makeDispatcher(notContract.flow);
+    for (let i = 1; i <= threshold + 1; i++) {
+      expect(await dispatcher.dispatch({ businessId: BIZ_A, toolName: TOOL, args, retryCount: 2 })).toMatchObject({ success: false, error: REFUSAL });
+      expect(notContract.calls()).toBe(i);
+      expect(dispatcher.getCircuitStatus(TOOL, BIZ_A)).toEqual(CLOSED);
+    }
   });
 });
