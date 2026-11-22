@@ -42,7 +42,7 @@ import {
 import { FlowOrchestratorService } from './flow-orchestrator.service';
 import { ActionDispatcherService } from './action-dispatcher.service';
 import { ProjectsService } from '../projects/projects.service';
-import { ContractClauseService } from '../contracts/contract-clause.service';
+import { ContractClauseService, DocumentHostUnavailableError } from '../contracts/contract-clause.service';
 import { providerUnavailable } from '../../core/connectors/provider-failure';
 
 /** The class ProjectsService.updateTask throws for a stale write (W11-DISPATCH-REFUSAL-FINAL, D-134). */
@@ -382,7 +382,9 @@ describe('FlowOrchestratorService.executeToolDirectly hands the plan queue a ref
               calls += 1;
               expect([contractId, opts.url]).toEqual([args.contractId, args.url]);
               const status = hostStatus(calls, businessId);
-              if (status !== 200) throw new BadRequestException(`Could not fetch document URL (${status})`);
+              // As the real service throws it (DS-09 runs the real one): an outage is marked by the 400's cause.
+              const outage = status >= 500 || status === 408 || status === 429;
+              if (status !== 200) throw new BadRequestException(`Could not fetch document URL (${status})`, outage ? { cause: new DocumentHostUnavailableError(status), description: 'Bad Request' } : undefined);
               return { clauses: [], source: 'url' };
             },
           }),

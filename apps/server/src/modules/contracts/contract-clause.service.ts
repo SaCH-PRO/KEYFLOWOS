@@ -45,6 +45,23 @@ export interface ClauseAnalysisResult {
  * routes through human review (contract stays in `reviewing` flows) — zero-shot
  * clause extraction is advisory, not authoritative.
  */
+/**
+ * W11-DISPATCH-REFUSAL-FINAL review SEC-1, COR-1 (owner ruling D-134): the cause on the 400
+ * extractClauses answers when the host of the contract's document did not answer (5xx, 408, 429).
+ * The HTTP answer is the 400 it always was (a cause is not serialized); KEY's contract_extract_clauses
+ * reads the cause to hand its plan queue a failure worth retrying instead of a final refusal.
+ */
+export class DocumentHostUnavailableError extends Error {
+  constructor(readonly hostStatus: number) {
+    super(`The document host answered ${hostStatus}`);
+    this.name = 'DocumentHostUnavailableError';
+  }
+}
+
+function isDocumentHostOutage(status: number): boolean {
+  return status >= 500 || status === 408 || status === 429;
+}
+
 @Injectable()
 export class ContractClauseService {
   private readonly logger = new Logger(ContractClauseService.name);
@@ -71,9 +88,12 @@ export class ContractClauseService {
     });
     if (!contract) throw new NotFoundException('Contract not found');
 
-    const { buffer, mimeType, filename, source } = await this.resolveBytes(businessId, contract, opts);
+    const { buffer, mimeType, filename, source, hostOutage } = await this.resolveBytes(businessId, contract, opts);
     if (!buffer) {
-      throw new BadRequestException('No source document available for this contract (upload one or link an asset/document)');
+      throw new BadRequestException(
+        'No source document available for this contract (upload one or link an asset/document)',
+        hostOutage ? { cause: new DocumentHostUnavailableError(hostOutage), description: 'Bad Request' } : undefined,
+      );
     }
 
     const parsed = await this.getDocling().parse(buffer, filename, mimeType);
@@ -119,7 +139,7 @@ export class ContractClauseService {
     businessId: string,
     contract: { sourceAssetId?: string | null; sourceDocumentInstanceId?: string | null; sourceDriveFileId?: string | null; title?: string | null },
     opts: { url?: string; base64Content?: string; mimeType?: string; filename?: string },
-  ): Promise<{ buffer: Buffer | null; mimeType: string; filename: string; source: string }> {
+  ): Promise<{ buffer: Buffer | null; mimeType: string; filename: string; source: string; hostOutage?: number }> {
     if (opts.base64Content) {
       return {
         buffer: Buffer.from(opts.base64Content, 'base64'),
@@ -130,7 +150,12 @@ export class ContractClauseService {
     }
     if (opts.url) {
       const res = await fetch(opts.url, { signal: AbortSignal.timeout(30_000) });
-      if (!res.ok) throw new BadRequestException(`Could not fetch document URL (${res.status})`);
+      if (!res.ok) {
+        throw new BadRequestException(
+          `Could not fetch document URL (${res.status})`,
+          isDocumentHostOutage(res.status) ? { cause: new DocumentHostUnavailableError(res.status), description: 'Bad Request' } : undefined,
+        );
+      }
       return {
         buffer: Buffer.from(await res.arrayBuffer()),
         mimeType: res.headers.get('content-type') ?? 'application/pdf',
@@ -150,6 +175,13 @@ export class ContractClauseService {
             filename: asset.name ?? 'asset',
             source: 'asset',
           };
+        }
+        // W11-DISPATCH-REFUSAL-FINAL review COR-1 (D-134): the asset's host did not answer (5xx, 408,
+        // 429). The answer over HTTP is unchanged (extractClauses' 400 'No source document available');
+        // the host's status rides on it as its cause, so KEY's plan queue can tell an outage from a
+        // contract that has no document and retry it (flow-orchestrator's contract_extract_clauses).
+        if (isDocumentHostOutage(res.status)) {
+          return { buffer: null, mimeType: 'application/pdf', filename: 'contract.pdf', source: 'none', hostOutage: res.status };
         }
       }
     }

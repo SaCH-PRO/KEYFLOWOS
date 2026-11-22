@@ -30,7 +30,7 @@ import { BankMatchingService } from '../finance/bank-matching.service';
 import { FinanceCoaService } from '../finance/finance-coa.service';
 import { PostingService } from '../finance/posting.service';
 import { ContractsService } from '../contracts/contracts.service';
-import { ContractClauseService } from '../contracts/contract-clause.service';
+import { ContractClauseService, DocumentHostUnavailableError } from '../contracts/contract-clause.service';
 import { CommunicationsService } from '../communications/communications.service';
 import { KeyInboxService } from '../key-inbox/key-inbox.service';
 import { McpClientManagerService } from '../mcp/mcp-client-manager.service';
@@ -214,9 +214,6 @@ export interface FlowToolResult {
  * from the status.
  */
 const TOOL_HTTP_EXCEPTIONS = new WeakMap<FlowToolResult, HttpException>();
-
-/** ContractClauseService.resolveBytes' message for a document URL whose host did not answer 2xx, and the host's status. */
-const DOCUMENT_HOST_FAILURE = /^Could not fetch document URL \((\d{3})\)$/;
 
 export interface PendingConfirmation {
   toolCallId: string;
@@ -7037,21 +7034,20 @@ ${triage.standingContext}`;
         return { id: tag.id, name: tag.name };
       }
       case 'contract_extract_clauses': {
-        // W11-DISPATCH-REFUSAL-FINAL review SEC-1 (D-134): ContractClauseService reports a document
-        // host that did not answer (5xx, 408, 429) as a 400, in the same words as a host that answered
-        // and refused. A 400 is final for the plan queue now, so the outage is told apart here and
-        // handed on as a 503 with the service's own message (retried and counted, as it was before);
-        // the service and its HTTP routes answer as they did.
+        // W11-DISPATCH-REFUSAL-FINAL review SEC-1, COR-1 (D-134): ContractClauseService answers a
+        // document host that did not answer (5xx, 408, 429; the URL the call names or the contract's
+        // own asset) as a 400, as it answers a host that refused or a contract with no document. A 400
+        // is final for the plan queue now, so the outage, which the service marks as the 400's cause,
+        // is handed on as a 503 with the service's own message (retried and counted, as it was
+        // before). The service's HTTP routes and the envelope's error text are unchanged.
         let result;
         try {
           result = await this.getContractClauses().extractClauses(businessId, args.contractId, {
             url: args.url,
           });
         } catch (e) {
-          const outage = e instanceof BadRequestException ? DOCUMENT_HOST_FAILURE.exec(e.message) : null;
-          const hostStatus = outage ? Number(outage[1]) : 0;
-          if (hostStatus >= 500 || hostStatus === HttpStatus.REQUEST_TIMEOUT || hostStatus === HttpStatus.TOO_MANY_REQUESTS) {
-            throw new ServiceUnavailableException((e as Error).message, { cause: e });
+          if (e instanceof BadRequestException && e.cause instanceof DocumentHostUnavailableError) {
+            throw new ServiceUnavailableException(e.message, { cause: e });
           }
           throw e;
         }
