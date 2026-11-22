@@ -42,6 +42,9 @@ import { MODULE_SCOPE_KEY, ModuleScopeGuard } from '../../core/auth/module-scope
  *   BWS-U04  RED-BEFORE  every write route on FinanceController carries a module scope or is a reviewed
  *                        exemption (with the reason it writes nothing of the ledger)
  *   BWS-U05  RED-BEFORE  the purchase-order advance and PATCH run ModuleScopeGuard with expenses write
+ *   BWS-U07  RED-BEFORE  FU-FINANCE-INTEL-DOORS (owner ruling D-258): the finance intelligence doors are no longer
+ *                        reviewed exemptions: resolve and dismiss need revenue write, the scan revenue read
+ *                        (test/finance-intel-doors.integration.test.ts proves them on a real database)
  */
 
 const REVENUE_WRITE = { module: 'revenue', minLevel: 'write' };
@@ -107,9 +110,6 @@ const EXPENSE_PAYMENTS: ReadonlyArray<readonly [string, string]> = [
  * the reserves, the bank connections and the exchange rates are listed as owner questions.
  */
 const REVIEWED_UNSCOPED: Readonly<Record<string, string>> = {
-  'POST intelligence/scan': 'finance intelligence: recomputes suggested actions, no Books row',
-  'POST intelligence/actions/:id/resolve': 'finance intelligence: marks a suggested action, no Books row',
-  'POST intelligence/actions/:id/dismiss': 'finance intelligence: marks a suggested action, no Books row',
   'POST chart-of-accounts': 'the chart: a row postings may name, posting nothing and fixing no amount (owner question)',
   'PATCH chart-of-accounts/:id': 'the chart: a row postings may name, posting nothing and fixing no amount (owner question)',
   'DELETE chart-of-accounts/:id': 'the chart: archives a row, posting nothing (owner question)',
@@ -180,6 +180,16 @@ describe('PR195-BOOKS-DOORS: every door that writes the Books needs a module wri
   ])('BWS-U06 RED-BEFORE: %s (%s) runs ModuleScopeGuard with revenue read (FU-FINANCE-SETTINGS-SCOPE)', (method, route) => {
     expect(routeOf(finance[method])).toBe(route);
     expect(scopeOf(finance[method])).toEqual(REVENUE_READ);
+    expect(guardsOf(finance[method])).toEqual([ModuleScopeGuard]);
+  });
+
+  it.each([
+    ['resolveIntelAction', 'POST intelligence/actions/:id/resolve', REVENUE_WRITE],
+    ['dismissIntelAction', 'POST intelligence/actions/:id/dismiss', REVENUE_WRITE],
+    ['runIntelScan', 'POST intelligence/scan', REVENUE_READ],
+  ])('BWS-U07 RED-BEFORE: %s (%s) runs ModuleScopeGuard with its D-258 scope (FU-FINANCE-INTEL-DOORS)', (method, route, scope) => {
+    expect(routeOf(finance[method])).toBe(route);
+    expect(scopeOf(finance[method])).toEqual(scope);
     expect(guardsOf(finance[method])).toEqual([ModuleScopeGuard]);
   });
 

@@ -1,6 +1,6 @@
 import {
   BadRequestException,
-  Body, Controller, Delete, ForbiddenException, Get, Header, Inject, NotFoundException, Param, Patch, Post, Query, Req, Res,
+  Body, Controller, Delete, ForbiddenException, Get, Header, HttpException, Inject, NotFoundException, Param, Patch, Post, Query, Req, Res,
   UploadedFile, UseGuards, UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -425,12 +425,23 @@ export class FinanceController {
     return { items };
   }
 
+  // FU-FINANCE-INTEL-DOORS (owner ruling D-258): these doors checked membership only, so a member with no revenue
+  // scope re-ran the money detectors and closed the business's money action items (and the revenue actions and command
+  // items mirrored from them). The scan needs revenue read, as the list and the insight it feeds do; resolve and
+  // dismiss need revenue write. ModuleScopeGuard refuses below that with 403 before the handler, so a refused call
+  // writes nothing; ensureAccess stays (D-46). An item id this business does not hold is 404 (the service throws a
+  // plain Error, which answered 500). The scheduler's scan (FinanceIntelligenceScheduler) runs with no member and is
+  // unchanged. test/finance-intel-doors.integration.test.ts proves it on a real database.
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Post('intelligence/scan')
   async runIntelScan(@Param('businessId') businessId: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
     return this.intel.scan(businessId);
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('intelligence/actions/:id/resolve')
   async resolveIntelAction(
     @Param('businessId') businessId: string,
@@ -439,9 +450,11 @@ export class FinanceController {
     @Req() req: any,
   ) {
     await this.ensureAccess(req.user.id, businessId);
-    return this.intel.resolve(businessId, id, req.user.id, body?.resolution ?? null);
+    return this.intelItemNotFoundAs404(() => this.intel.resolve(businessId, id, req.user.id, body?.resolution ?? null));
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('intelligence/actions/:id/dismiss')
   async dismissIntelAction(
     @Param('businessId') businessId: string,
@@ -449,7 +462,19 @@ export class FinanceController {
     @Req() req: any,
   ) {
     await this.ensureAccess(req.user.id, businessId);
-    return this.intel.dismiss(businessId, id, req.user.id);
+    return this.intelItemNotFoundAs404(() => this.intel.dismiss(businessId, id, req.user.id));
+  }
+
+  /** FinanceIntelligenceService.resolve and dismiss throw a plain Error for an id the business does not hold: a 404. */
+  private async intelItemNotFoundAs404<T>(run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (e) {
+      if (e instanceof Error && !(e instanceof HttpException) && e.message === 'Finance action item not found') {
+        throw new NotFoundException('Finance action item not found');
+      }
+      throw e;
+    }
   }
 
   @UseGuards(ModuleScopeGuard)
