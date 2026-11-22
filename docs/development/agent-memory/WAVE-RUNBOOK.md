@@ -45,8 +45,8 @@ git diff $PKT HEAD -- <the packet's files>   # must print nothing
   no commit on main has a manifest that disagrees with its tree.
 - `apps/server/test/helpers/fixture-prefixes.json`: when two packets both add rows, the result is the union.
 - `.agent-control/*` stays at main's copy in a wave PR: `git checkout origin/main -- .agent-control` before pushing.
-- This procedure was reconstructed from the compacted commits on main (for example `7a3c24aa` and `5a5b04d1`); the
-  orchestrator's own helper (`scratchpad/compact.sh`) is not in the repository.
+- The helper that does this is `scripts/agent-memory/compact.sh <pkt-branch> <PACKET-ID> <scope> [hold-regex]`
+  (run from a clean wave worktree; `hold-regex` names Release 0 evidence edits that must ride the fix commit).
 
 ## 2. Prove the wave head
 
