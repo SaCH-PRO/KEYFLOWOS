@@ -178,6 +178,17 @@
  *          the business currency only when it is a three-letter code (as its
  *          body does): on a business whose stored currency is free text,
  *          evidence.cashCurrency is null and the text is never echoed
+ *   CP-23  (acceptance review C1) RED-BEFORE the ledger cash can be negative
+ *          where the snapshot sum could not: the runway shown is never below
+ *          zero (no "~-0 days", no "~-0.0 months") on the alarm and the money
+ *          move, and the amount at risk, the command item's value and score and
+ *          the move's expectedImpact are never negative; the real negative
+ *          balance stays in the body and the evidence (revenue readers)
+ *   CP-24  (acceptance review C2) RED-BEFORE a scan in which the cash read
+ *          throws leaves the open alarm, its revenue action (the real
+ *          RevenueActionService) and its command item open, in that scan and
+ *          after the next good one; a detector that ran and found nothing still
+ *          supersedes its row (the self-heal is unchanged on success)
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * the global TenantInterceptor, CommerceService, InvoiceWorkflowService,
@@ -1790,4 +1801,114 @@ describe('W11-RUNWAY-LEDGER-CASH: every runway alarm reads the ledger cash in th
     await intel.scan(ID.bizK);
     expect((await cashRiskRows(ID.bizK))[0].evidence).toMatchObject({ cash: 100, cashCurrency: 'TTD', otherCurrencyCash: [{ currency: 'USD', amount: 550 }] });
   }, 60_000);
+
+  // Acceptance review C1: the snapshot sum was never negative in practice; the ledger cash is, as
+  // soon as more is spent from the till than it holds. (-0.3).toFixed(0) is "-0": the alarm read
+  // "~-0 days", then "~-32 days"; the move "~-0.0 months" with a negative expectedImpact; the negative
+  // amount sank the mirror in the amount-at-risk order and made the command item's score negative.
+  it('CP-23 (acceptance review C1) RED-BEFORE: with negative ledger cash the runway shown is never below zero and no displayed or ordering amount is negative, on the alarm, its mirrors and the money move; the real balance stays in the body and the evidence', async () => {
+    const runway = (body: any) => (Array.isArray(body) ? body : []).filter((m: any) => m.title === 'Protect cash runway');
+    const note = '(TTD cash only). Not counted: USD 550.00.';
+    let spent = 0;
+    try {
+      for (const [kind, spend, cash] of [['k_over_1', 103, -3], ['k_over_2', 317, -320]] as const) {
+        await post(ID.bizK, kind, spend, 'EXPENSE_GENERAL', 'CASH', 'EXPENSE');
+        spent += spend;
+        expect((await cashPositionService.getCashPosition(ID.bizK)).cashBalance).toBe(cash);
+        mirrored.length = 0;
+        await intel.scan(ID.bizK);
+        const rows = await cashRiskRows(ID.bizK);
+        expect(rows.map((r: any) => [r.status, r.severity, r.title, Number(r.amount)]), String(cash)).toEqual([
+          ['OPEN', 'CRITICAL', 'Low cash runway — ~0 days', 0],
+        ]);
+        expect(rows[0].body, 'the real balance is stated').toBe(`Cash ${cash.toFixed(2)} against 10.00/day burn (90-day average). Runway is under 30 days. ${note}`);
+        expect(rows[0].evidence).toEqual({
+          cash, dailyBurn: 10, days: 0, cashCurrency: 'TTD', otherCurrencyCash: [{ currency: 'USD', amount: 550 }],
+        });
+        expect(mirrored.filter((m) => m.type === 'FIN_CASHFLOW_RISK').map((m) => [m.title, m.amountAtRisk, m.priority])).toEqual([
+          ['Low cash runway — ~0 days', 0, 1],
+        ]);
+        const commands = await commandRows(ID.bizK);
+        expect(commands.length).toBe(1);
+        expect(commands[0].title).toBe('Low cash runway — ~0 days');
+        expect(commands[0].impactScore, 'never a negative score').toBeGreaterThanOrEqual(0);
+        expect(Number(commands[0].expectedValue ?? 0), 'never a negative value').toBeGreaterThanOrEqual(0);
+
+        const res = await moneyMoves(ID.bizK, ID.ownerK);
+        expect(res.status).toBe(200);
+        expect(runway(res.body).map((m: any) => [m.id, m.summary, m.expectedImpact, m.currency]), String(cash)).toEqual([
+          [`mm-runway-${ID.bizK}`, `Runway is ~0.0 months. Reducing burn or increasing collections is urgent. ${note}`, 0, 'TTD'],
+        ]);
+        for (const text of [rows[0].title, JSON.stringify(mirrored.map((m) => m.title)), commands[0].title, JSON.stringify(runway(res.body))]) {
+          expect(text).not.toMatch(/~-|-0\b/);
+        }
+      }
+    } finally {
+      // Back to TTD 100, the figure the other cases read (whatever was spent before a failure).
+      if (spent > 0) await post(ID.bizK, 'k_over_back', spent, 'CASH', 'OTHER_INCOME', 'INCOME');
+    }
+    expect((await cashPositionService.getCashPosition(ID.bizK)).cashBalance).toBe(100);
+    await intel.scan(ID.bizK);
+    expect((await cashRiskRows(ID.bizK)).map((r: any) => [r.title, Number(r.amount)])).toEqual([['Low cash runway — ~10 days', 100]]);
+  }, 120_000);
+
+  // Acceptance review C2: scan catches a detector's error and goes on; the self-heal then read the
+  // missing detection as "no longer live", marked the open row SUPERSEDED and its revenue action
+  // COMPLETED, and RevenueActionService never reopens a COMPLETED action: one failed cash read (now
+  // several queries) removed the alarm from the revenue-actions queue and the overview for good.
+  it('CP-24 (acceptance review C2) RED-BEFORE: a scan in which the cash read throws leaves the open alarm, its revenue action and its command item open, then and after the next good scan; a detector that ran and found nothing still supersedes its row', async () => {
+    const { FinanceIntelligenceService } = await import('../src/modules/finance/finance-intelligence.service');
+    const { RevenueActionService } = await import('../src/modules/commerce/revenue-action.service');
+    // The real RevenueActionService on real Prisma (its gateway and aiUsage are off upsertExternal's path).
+    const revenueActions = new (RevenueActionService as any)(financePrisma, eventStub, {}, {});
+    let failNext = false;
+    const flaky = {
+      getCashPosition: async (biz: string) => {
+        if (failNext) { failNext = false; throw new Error('v34a: the cash read failed'); }
+        return cashPositionService.getCashPosition(biz);
+      },
+    };
+    const real = new (FinanceIntelligenceService as any)(financePrisma, {}, revenueActions, {}, flaky);
+    const state = async () => {
+      const [item] = await cashRiskRows(ID.bizK);
+      const action = await db.revenueAction.findFirst({ where: { businessId: ID.bizK, type: 'FIN_CASHFLOW_RISK', relatedType: 'business', relatedId: ID.bizK } });
+      const [command] = await commandRows(ID.bizK);
+      return {
+        item: [item?.status, item?.title, Number(item?.amount), item?.mirroredActionId === action?.id],
+        action: [action?.status, action?.title, Number(action?.amountAtRisk)],
+        command: [command?.status, command?.title],
+      };
+    };
+    const open = {
+      item: ['OPEN', 'Low cash runway — ~10 days', 100, true],
+      action: ['PENDING', 'Low cash runway — ~10 days', 100],
+      command: ['OPEN', 'Low cash runway — ~10 days'],
+    };
+
+    await real.scan(ID.bizK);
+    expect(await state(), 'a good scan: the alarm, its revenue action and its command item are open').toEqual(open);
+
+    // The cash read throws once: nothing about the open alarm changes.
+    failNext = true;
+    const failed = await real.scan(ID.bizK);
+    expect(failNext, 'the cash read was attempted and threw').toBe(false);
+    expect(await state(), 'the failed scan retires nothing').toEqual(open);
+    expect((await db.financeActionItem.findMany({ where: { businessId: ID.bizK, kind: 'CASHFLOW_RISK', status: 'SUPERSEDED' } })).length).toBe(0);
+    expect(failed.superseded, 'no row of the failed kind is superseded').toBe(0);
+
+    // The next good scan: still open, one row each.
+    await real.scan(ID.bizK);
+    expect(await state()).toEqual(open);
+    expect((await cashRiskRows(ID.bizK)).length).toBe(1);
+    expect(await db.revenueAction.count({ where: { businessId: ID.bizK, type: 'FIN_CASHFLOW_RISK' } })).toBe(1);
+
+    // Control: the detector runs and finds nothing (no burn in the last 90 days): the self-heal
+    // supersedes the row and completes its revenue action, as it always has.
+    await db.expense.updateMany({ where: { businessId: ID.bizK }, data: { date: daysAgo(200) } });
+    const healed = await real.scan(ID.bizK);
+    expect(healed.superseded).toBeGreaterThanOrEqual(1);
+    const after = await state();
+    expect(after.item[0]).toBe('SUPERSEDED');
+    expect(after.action[0]).toBe('COMPLETED');
+  }, 120_000);
 });
