@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "956c615d4afe481a13fa9e150165555c81f6ca4e",
-  "main_commit_date": "2026-11-22T23:23:03+00:00",
+  "main_sha": "c66981f0f9f629900b0c1f742cee6647a70e72ea",
+  "main_commit_date": "2026-11-22T23:51:15+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -27,13 +27,13 @@
   ]
  },
  "summary": {
-  "packets": 341,
-  "points": 502.5,
+  "packets": 343,
+  "points": 506.5,
   "by_status": {
    "done": {
     "packets": 62,
     "points": 93.5,
-    "pct_by_points": 18.6
+    "pct_by_points": 18.5
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 279,
-    "points": 409,
-    "pct_by_points": 81.4
+    "packets": 281,
+    "points": 413,
+    "pct_by_points": 81.5
    }
   },
   "by_step": {
@@ -68,8 +68,8 @@
    "3": {
     "done": 44,
     "in-progress": 0,
-    "todo": 102,
-    "total": 146
+    "todo": 103,
+    "total": 147
    },
    "4": {
     "done": 1,
@@ -80,8 +80,8 @@
    "5": {
     "done": 0,
     "in-progress": 0,
-    "todo": 52,
-    "total": 52
+    "todo": 53,
+    "total": 53
    },
    "6": {
     "done": 1,
@@ -107,7 +107,7 @@
    "prior-status-file+wave-2b-commit": 28,
    "code-commit-subject": 8,
    "compacted-commit": 7,
-   "no-evidence": 142
+   "no-evidence": 144
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -119,7 +119,7 @@
    "FU-KEY-MEMORY-MONEY-SIGHT",
    "FU-WA-ESCAPE-RACE"
   ],
-  "todo_with_dependencies_met": 93
+  "todo_with_dependencies_met": 94
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -453,6 +453,15 @@
    "unblocks": 1
   },
   {
+   "id": "FU-TEMPORAL-FLOW-INBOX-SCOPE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
    "id": "RR-DB-CRYPTO-KEY-CENSUS",
    "step": 3,
    "priority": "P1",
@@ -633,11 +642,11 @@
    "unblocks": 0
   },
   {
-   "id": "FU-TEMPORAL-FLOW-INBOX-SCOPE",
-   "step": 5,
+   "id": "FU-VITEST-DECORATOR-METADATA",
+   "step": 3,
    "priority": "P1",
-   "size": "S",
-   "lane": "server",
+   "size": "M",
+   "lane": "gate",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -6659,6 +6668,36 @@
     "RR-PRIVACY-DELETED-CONTACT-GATES"
    ],
    "title": "Cancelling a forget request restores only what the forget request deleted",
+   "deps_met": false
+  },
+  {
+   "id": "FU-VITEST-DECORATOR-METADATA",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Server tests run with decorator metadata, so DTO validation is exercised the way production runs it",
+   "deps_met": true
+  },
+  {
+   "id": "FU-TIMELINE-CALLERS-SCOPE",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-TEMPORAL-FLOW-INBOX-SCOPE"
+   ],
+   "title": "Every member-facing reader of the temporal-flow timeline applies the reader's module filter",
    "deps_met": false
   }
  ]
