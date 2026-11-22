@@ -11,6 +11,14 @@ import {
   type MinimalBusinessProfile,
   type MinimalProfileField,
 } from "@/lib/api/onboarding-concierge";
+import {
+  BUSINESS_SELLS,
+  actingMemberNow,
+  confirmedBusinessSettings,
+  isBusinessSells,
+  noteBusinessSettings,
+  type BusinessSells,
+} from "@/lib/business-settings";
 import { fetchMe } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 
@@ -38,6 +46,19 @@ import { getStoredBusinessId } from "@/lib/workspace";
  * browser could not recognise, so the profile is saved and completion asked
  * again.
  *
+ * BIZ-SETTINGS-WEB (sweep BUG-077; owner rulings D-150 'hubs', D-218, D-242).
+ * The currency is a select of TTD and USD, the two v1 sells in: it was free
+ * text, and any three letters were taken ('ABC' was saved on the business).
+ * Nothing is chosen until the owner chooses, or the business already holds
+ * one of the two; finishing without a choice is refused before anything is
+ * sent. The form also asks "What do you
+ * sell?" (services, products or both), the answer that sets the hubs and the
+ * phone's bottom bar. An answer the owner gives is saved in the same owner-only
+ * PATCH as the profile, under the same ordering rule as above (never before
+ * the server has accepted the actor); an owner who does not answer sends no
+ * sells, so what the business holds, or the server's default (both), stands.
+ * Completion does not ask for it.
+ *
  * The form's state lives in useManualSetup, which the page holds above the
  * onboarding shell's per-step container (review CR-R006-2): a step change
  * remounts that container and must not drop what the owner typed.
@@ -47,7 +68,7 @@ const GENOME_EDITOR_HREF = "/app/profile?tab=business-genome";
 
 const FIELD_HELP: Record<MinimalProfileField, string> = {
   name: "Business name is required.",
-  currency: "Currency must be a three-letter code, such as TTD or USD.",
+  currency: "Currency must be TTD or USD.",
   timezone: "Timezone must be a region/city zone, such as America/Port_of_Spain.",
 };
 
@@ -57,7 +78,25 @@ const PILLAR_LABELS: Record<string, string> = {
   market: "Market DNA",
 };
 
-const COMMON_CURRENCIES = ["TTD", "USD", "JMD", "BBD", "XCD", "GYD", "EUR", "GBP", "CAD"];
+/** The currencies a v1 business is set up in (BUG-077): the form offers these and no other. */
+const SETUP_CURRENCIES = ["TTD", "USD"];
+
+/**
+ * What the currency select shows for a currency held in the form (owner ruling D-242: a real select of TTD and
+ * USD): that currency when it is one of the two, however it is spelled, else nothing chosen. A business can hold
+ * a currency the form does not offer (the server takes any three letters); it is then not chosen for the owner,
+ * and Finish setup refuses until one of the two is.
+ */
+function offeredCurrency(held: string): string {
+  const code = held.trim().toUpperCase();
+  return SETUP_CURRENCIES.includes(code) ? code : "";
+}
+
+const SELLS_LABELS: Record<BusinessSells, string> = {
+  services: "Services",
+  products: "Products",
+  both: "Both",
+};
 
 const FIELD_ORDER: MinimalProfileField[] = ["name", "currency", "timezone"];
 
@@ -93,11 +132,14 @@ function isIanaTimezone(value: string): boolean {
   }
 }
 
-/** The same rule the server applies on POST .../complete (R0-32). */
+/**
+ * The rule the server applies on POST .../complete (R0-32), with the currency
+ * narrowed to the two the form offers (the server takes any three letters).
+ */
 function missingProfileFields(profile: MinimalBusinessProfile): MinimalProfileField[] {
   const missing: MinimalProfileField[] = [];
   if (!profile.name) missing.push("name");
-  if (!/^[A-Za-z]{3}$/.test(profile.currency)) missing.push("currency");
+  if (!SETUP_CURRENCIES.includes(profile.currency)) missing.push("currency");
   if (!profile.timezone || !isIanaTimezone(profile.timezone)) missing.push("timezone");
   return missing;
 }
@@ -160,14 +202,36 @@ function completionOutcome(done: CompletionResponse): Failure | null {
 async function completeManualSetup(
   businessId: string,
   profile: MinimalBusinessProfile,
-  known: { stored: MinimalBusinessProfile | null; ownerId: string | null },
+  // What the owner answered to "What do you sell?", or null when they did not.
+  sells: BusinessSells | null,
+  known: { stored: MinimalBusinessProfile | null; storedSells: BusinessSells | null; ownerId: string | null },
   onSaved: () => void,
 ): Promise<Failure | null> {
   const save = async (): Promise<string | null> => {
-    const saved = await saveBusinessMinimalProfile(businessId, profile);
-    if (!saved.error) onSaved();
-    return saved.error;
+    // One owner-only PATCH: the profile, and the answer when one was given.
+    const body: MinimalBusinessProfile & { sells?: BusinessSells } = sells ? { ...profile, sells } : profile;
+    const sentAs = actingMemberNow();
+    const saved = await saveBusinessMinimalProfile(businessId, body);
+    if (saved.error !== null) return saved.error.trim() || "Could not save your business profile. Please try again.";
+    if (actingMemberNow() !== sentAs) {
+      // Answered after someone else signed in to this browser (review OBS4-1): nothing is recorded for them and
+      // setup does not go on in their name.
+      noteBusinessSettings(businessId, saved.data, sentAs);
+      return "Someone else has signed in to this browser since you pressed Finish setup. Sign in again to check your business.";
+    }
+    // The nav and the hubs read what the business sells from here on. An answer that is not this business's
+    // is not a save anyone can vouch for (review SEC-2).
+    if (!noteBusinessSettings(businessId, saved.data, sentAs)) {
+      return "Your business profile was sent, but the answer could not be read. Please try again.";
+    }
+    // An answer given must be the answer the business now holds (review SEC2-1).
+    if (sells && confirmedBusinessSettings(businessId, saved.data)?.sells !== sells) {
+      return "Your business profile was sent, but the business does not show what you sell. Please try again.";
+    }
+    onSaved();
+    return null;
   };
+  const answerChanged = sells !== null && sells !== known.storedSells;
 
   // Read at submit, not at mount: the writes below are made as whoever is
   // signed in to this browser now.
@@ -189,7 +253,7 @@ async function completeManualSetup(
     const saveError = await save();
     if (saveError) return { kind: "message", message: saveError };
     done = await markOnboardingComplete(businessId);
-  } else if (!completionOutcome(done) && !sameProfile(profile, known.stored)) {
+  } else if (!completionOutcome(done) && (!sameProfile(profile, known.stored) || answerChanged)) {
     const saveError = await save();
     if (saveError) {
       return { kind: "message", message: `Setup is finished, but your changes were not saved: ${saveError}` };
@@ -200,6 +264,12 @@ async function completeManualSetup(
 
 export interface ManualSetup {
   profile: MinimalBusinessProfile;
+  /**
+   * What the form shows for "What do you sell?": the owner's answer, else what the business holds (the server
+   * answers both for one that never said), else null: what it holds was not read, and no answer is drawn as its own.
+   */
+  sells: BusinessSells | null;
+  setSells: (value: BusinessSells) => void;
   timezones: string[];
   submitting: boolean;
   failure: Failure | null;
@@ -220,6 +290,11 @@ export function useManualSetup(): ManualSetup {
     currency: "",
     timezone: browserTimezone(),
   }));
+  // The owner's answer to "What do you sell?" (null until they give one), and what the business holds.
+  const [sellsAnswer, setSellsAnswer] = useState<BusinessSells | null>(null);
+  const [storedSells, setStoredSells] = useState<BusinessSells | null>(null);
+  const sellsAnswerRef = useRef<BusinessSells | null>(null);
+  const storedSellsRef = useRef<BusinessSells | null>(null);
   const [timezones] = useState<string[]>(supportedTimezones);
   const [submitting, setSubmitting] = useState(false);
   const [failure, setFailure] = useState<Failure | null>(null);
@@ -236,8 +311,14 @@ export function useManualSetup(): ManualSetup {
     if (!businessId) return;
     let cancelled = false;
     void fetchBusinessMinimalProfile(businessId).then(({ data }) => {
-      if (cancelled || !data) return;
+      // Only this business's own answer is taken (review OBS-7).
+      if (cancelled || !data || data.id !== businessId) return;
       ownerIdRef.current = data.ownerId ?? null;
+      const held = (data as { sells?: unknown }).sells;
+      // The server answers 'both' for a business that never said. An answer that carries none is not read as
+      // one (review SEC3-4): nothing is drawn, and whatever the owner presses is an answer to save.
+      storedSellsRef.current = isBusinessSells(held) ? held : null;
+      setStoredSells(storedSellsRef.current);
       storedRef.current = normalise({
         name: data.name ?? "",
         currency: data.currency ?? "",
@@ -258,6 +339,12 @@ export function useManualSetup(): ManualSetup {
   const update = (field: MinimalProfileField) => (value: string) => {
     editedRef.current = true;
     setProfile((current) => ({ ...current, [field]: value }));
+  };
+
+  const setSells = (value: BusinessSells) => {
+    if (!isBusinessSells(value)) return;
+    sellsAnswerRef.current = value;
+    setSellsAnswer(value);
   };
 
   const finish = async (event: FormEvent<HTMLFormElement>) => {
@@ -282,12 +369,18 @@ export function useManualSetup(): ManualSetup {
     setSubmitting(true);
     setFailure(null);
 
+    const answer = sellsAnswerRef.current;
     const refused = await completeManualSetup(
       businessId,
       clean,
-      { stored: storedRef.current, ownerId: ownerIdRef.current },
+      answer,
+      { stored: storedRef.current, storedSells: storedSellsRef.current, ownerId: ownerIdRef.current },
       () => {
         storedRef.current = clean;
+        if (answer) {
+          storedSellsRef.current = answer;
+          setStoredSells(answer);
+        }
       },
     );
     if (refused) {
@@ -300,11 +393,12 @@ export function useManualSetup(): ManualSetup {
     router.replace("/app/command-center");
   };
 
-  return { profile, timezones, submitting, failure, update, finish };
+  const sells = sellsAnswer ?? storedSells;
+  return { profile, sells, setSells, timezones, submitting, failure, update, finish };
 }
 
 export function ManualSetupStep({ setup }: { setup: ManualSetup }) {
-  const { profile, timezones, submitting, failure, update, finish } = setup;
+  const { profile, sells, setSells, timezones, submitting, failure, update, finish } = setup;
 
   const inputClass =
     "w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/40";
@@ -319,7 +413,7 @@ export function ManualSetupStep({ setup }: { setup: ManualSetup }) {
           Set up manually
         </h2>
         <p className="text-xs text-muted-foreground">
-          No AI needed: your business name, currency and timezone are enough to open your workspace.
+          No AI needed: your business name, currency (TTD or USD) and timezone are enough to open your workspace.
           Chatting with KEY below is optional and can enrich your Business Genome later.
         </p>
       </div>
@@ -354,20 +448,19 @@ export function ManualSetupStep({ setup }: { setup: ManualSetup }) {
             <label htmlFor="manual-setup-currency" className="text-xs font-medium">
               Currency
             </label>
-            <input
+            <select
               id="manual-setup-currency"
-              className={`${inputClass} uppercase`}
-              value={profile.currency}
+              className={inputClass}
+              value={offeredCurrency(profile.currency)}
               onChange={(e) => update("currency")(e.target.value)}
-              list="manual-setup-currencies"
-              maxLength={3}
-              placeholder="TTD"
-            />
-            <datalist id="manual-setup-currencies">
-              {COMMON_CURRENCIES.map((code) => (
-                <option key={code} value={code} />
+            >
+              <option value="">Select currency</option>
+              {SETUP_CURRENCIES.map((code) => (
+                <option key={code} value={code}>
+                  {code}
+                </option>
               ))}
-            </datalist>
+            </select>
           </div>
           <div className="space-y-1 sm:col-span-2">
             <label htmlFor="manual-setup-timezone" className="text-xs font-medium">
@@ -386,6 +479,30 @@ export function ManualSetupStep({ setup }: { setup: ManualSetup }) {
                 <option key={zone} value={zone} />
               ))}
             </datalist>
+          </div>
+          <div
+            role="radiogroup"
+            aria-labelledby="manual-setup-sells-label"
+            className="sm:col-span-3 flex flex-wrap items-center gap-x-4 gap-y-1"
+          >
+            <span id="manual-setup-sells-label" className="text-xs font-medium">
+              What do you sell?
+            </span>
+            {BUSINESS_SELLS.map((value) => (
+              <label key={value} className="flex min-h-[44px] cursor-pointer items-center gap-1.5 text-sm">
+                <input
+                  type="radio"
+                  name="manual-setup-sells"
+                  value={value}
+                  checked={sells === value}
+                  onChange={() => setSells(value)}
+                  // Pressing the answer already shown is an answer too (no change event fires for it).
+                  onClick={() => setSells(value)}
+                  className="h-4 w-4 accent-[hsl(var(--kf-accent1))]"
+                />
+                {SELLS_LABELS[value]}
+              </label>
+            ))}
           </div>
 
           {failure && (
