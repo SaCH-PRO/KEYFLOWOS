@@ -274,3 +274,17 @@ describe('MEM-SALIENCE-SIGHT review CR F1b: business-wide and module evidence to
     expect(text).toMatch(/bulk_delete/);
   });
 });
+
+describe('MEM-SALIENCE-SIGHT review CR F3: a strand residue below the noise floor is not carried into the next dose', () => {
+  it('after the owner level decays out, one fresh dose leaves a partial reader no louder than the owner', () => {
+    const endocrine = new KeyCortexEndocrineService();
+    const t0 = new Date('2026-11-22T00:00:00Z').getTime();
+    endocrine.release(BIZ, [{ hormone: 'cortisol', magnitude: 0.35, reason: 'bulk_delete detected in the audit stream' }], new Date(t0));
+    const later = new Date(t0 + 31 * HOUR);
+    expect(endocrine.read(BIZ, later)).toEqual([]);
+    endocrine.release(BIZ, [{ hormone: 'cortisol', magnitude: 0.35, reason: 'bulk_delete detected in the audit stream' }], later);
+    const owner = endocrine.read(BIZ, later).find((h) => h.name === 'cortisol')!.level;
+    const partial = endocrine.readFor(BIZ, NO_MODULE_SIGHT, later).find((h) => h.name === 'cortisol')!.level;
+    expect(partial).toBeLessThanOrEqual(owner + 1e-9);
+  });
+});
