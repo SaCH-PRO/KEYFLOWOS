@@ -118,9 +118,15 @@
  *         owner and to a member without revenue read (403, no figure); a
  *         revenue:read member reads the owner's; another tenant's payment row
  *         and credit note move nothing
- *   MT-19 (D-251, reported) a PENDING invoice is in neither figure: the
- *         summary's open statuses are SENT, OVERDUE, PARTIALLY_PAID and
- *         PARTIALLY_CREDITED, and the aging adopts them (it read PENDING)
+ *   MT-19 RED-BEFORE (owner ruling D-256) a PENDING invoice counts as owed
+ *         everywhere: 55 with 15 received adds 40 to the A/R aging, the
+ *         Executive Summary and the stats alike (the head: the aging, the
+ *         summary and the stats all dropped it). The open statuses are
+ *         PENDING, SENT, OVERDUE, PARTIALLY_PAID and PARTIALLY_CREDITED
+ *   MT-20 P2C-5 RED-BEFORE; P2C-1 and P2S-2 pinned. On ACCRUAL books the
+ *         aging trusts the ledger (owner ruling D-255): "summary equals
+ *         aging" holds wherever the ledger and the payment rows agree; an
+ *         unposted payment row is a reconciliation finding, not papered over
  *
  * MT-03's equality with the A/R aging held on books where both read the same
  * invoices; since D-251 the aging adopts the summary's rule (MT-16, MT-17).
@@ -1095,15 +1101,17 @@ describe('V1-64 second pass: owner rulings D-250 and D-251', () => {
     expect(JSON.stringify(b)).not.toMatch(/13323|v64e_contactA|v64e_contactCr|v64e_contactK/);
   });
 
-  it('MT-19 (D-251; reported for a ruling): a PENDING invoice is an open receivable in neither figure', async () => {
+  it('MT-19 RED-BEFORE (owner ruling D-256): a PENDING invoice counts as owed everywhere, the aging, the Executive Summary and the stats alike', async () => {
     const before = [(await agingOf(ID.bizP)).totalOutstanding, (await reportOf(ID.bizP)).metrics.revenue.outstanding, (await statsOf(ID.bizP)).outstandingAmount];
+    expect(new Set(before).size, 'the three agree before').toBe(1);
     await seedInvoice('p_pending', ID.bizP, ID.contactP, 'PENDING', 55);
+    await seedPayment('p_pending', 'p15', ID.bizP, 15, 'SUCCESSFUL');
     const after = [(await agingOf(ID.bizP)).totalOutstanding, (await reportOf(ID.bizP)).metrics.revenue.outstanding, (await statsOf(ID.bizP)).outstandingAmount];
-    expect(after).toEqual(before);
-    expect(new Set(after).size).toBe(1);
+    expect(after.map((v, i) => cents(v) - cents(before[i])), 'aging, summary, stats: each owes the 40 the rows leave').toEqual([4000, 4000, 4000]);
+    expect(new Set(after).size, 'the three still agree').toBe(1);
   });
 
-  it('MT-20 RED-BEFORE (second-pass reviews P2C-5, P2C-1, P2S-2): no phantom cent on a legacy sub-cent total; the ACCRUAL ledger basis, pinned; the ledger mapping is tenant-bound', async () => {
+  it('MT-20 (second-pass reviews; P2C-5 RED-BEFORE, P2C-1 and P2S-2 pinned): no phantom cent on a legacy sub-cent total; on ACCRUAL the aging trusts the ledger (ruled, D-255); the ledger mapping is tenant-bound', async () => {
     // P2C-5: a legacy total that is not a whole cent (8.36 + 12.5% stored as 9.405) settled by the 9.40 the base
     // recorded: the rows settle it, so nothing is unrecorded (the pass head added 0.01).
     const before = cents((await statsOf(ID.bizP)).totalRevenue);
@@ -1111,9 +1119,10 @@ describe('V1-64 second pass: owner rulings D-250 and D-251', () => {
     await seedPayment('p_subcent', 'p940', ID.bizP, 9.4, 'SUCCESSFUL');
     expect(cents((await statsOf(ID.bizP)).totalRevenue) - before).toBe(940);
 
-    // P2C-1 (open for a ruling; the basis is FIN2's, unchanged): on ACCRUAL the AR ledger is the source per
-    // invoice. A payment row that was never posted leaves the ledger owing the whole invoice, while the Executive
-    // Summary and the stats, which read the rows, state what the rows leave. Equality holds where the two agree.
+    // P2C-1, ruled (owner ruling D-255): on ACCRUAL books the A/R aging trusts the ledger, the AR source per
+    // invoice (FIN2). A payment row that was never posted leaves the ledger owing the whole invoice, while the
+    // Executive Summary and the stats, which read the rows, state what the rows leave. "Summary equals aging" holds
+    // wherever the ledger and the rows agree; this difference is a reconciliation finding, not papered over.
     const a0 = (await agingOf(ID.bizCr)).totalOutstanding;
     const r0 = (await reportOf(ID.bizCr)).metrics.revenue.outstanding;
     await issuedInvoice('cr_drift', ID.bizCr, ID.contactCr, 100);

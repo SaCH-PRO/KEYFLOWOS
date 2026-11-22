@@ -558,3 +558,26 @@ describe("V1-64 second pass (D-250): a PAID invoice counts its full total on the
     expect(card.textContent).not.toContain("Other");
   });
 });
+
+describe("V1-64 owner ruling D-256: a PENDING invoice counts as owed everywhere", () => {
+  it("CH-31 RED-BEFORE: PENDING 500 with 100 received owes 400 on the tab (strip, filter, card) and the hero; past due it is overdue (the head: nothing owed)", () => {
+    const pending = invoice("pend", "PENDING", 500, [payment("pend", 100)]);
+    mount([pending]);
+    expect(strip("Received")).toBe("TTD 100");
+    expect(strip("Pending")).toBe("TTD 400");
+    expect(filterCount("Pending")).toBe("1");
+    const card = health();
+    expectNoNegativeFigure(card);
+    expect(within(card).getByTestId("collections-to-collect").textContent).toBe("TTD 400");
+    cleanup();
+
+    mount([invoice("pendLate", "PENDING", 500, [payment("pendLate", 100)], { dueDate: PAST_DUE })]);
+    expect(strip("Overdue")).toBe("TTD 400");
+    cleanup();
+
+    render(
+      <CommerceOverviewTab businessId="biz_v64" invoices={[pending]} quotes={[]} recurring={[]} currency="TTD" loading={false} onNavigate={() => {}} onNewItem={() => {}} />,
+    );
+    expect((screen.getByText("Outstanding Revenue").parentElement?.textContent ?? "")).toMatch(/Outstanding Revenue\D*400\.00/);
+  });
+});
