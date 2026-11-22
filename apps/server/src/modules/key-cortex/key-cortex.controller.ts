@@ -150,6 +150,7 @@ import {
 import { ModuleScopeGuard, RequireModuleScope, type ModuleScopeRequirement } from '../../core/auth/module-scope.guard';
 import { CurrentUser, type AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { KeyCortexApprovalOrchestratorService } from './key-cortex-approval-orchestrator.service';
+import { proposalViewForReader, redactedProposalView } from '../business-genome/key-genome/genome-finance-scope';
 import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
 import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
 
@@ -2400,9 +2401,11 @@ export class KeyCortexController {
    */
   @Post('actions/approve')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(CortexMemberAuthorityGuard)
   async approveAction(
     @Body() dto: ApproveActionDto,
     @Req() req: { user?: { id?: string } },
+    @CortexMember() viewer?: CortexMemberAuthority,
   ): Promise<{ result: CortexActionResult }> {
     if (!dto.sessionId) {
       throw new BadRequestException('sessionId is required');
@@ -2433,7 +2436,17 @@ export class KeyCortexController {
             userId,
           });
 
-      return { result: proposal as unknown as CortexActionResult };
+      // FU-PROPOSAL-REVENUE-SIGHT (D-238, round 3): the decision keeps the orchestrator's authority; a member without
+      // revenue read is answered a financial proposal's id and status only (its content, or the recommendation it was
+      // bridged from).
+      const readsRevenue = viewerReadsRevenue(viewer);
+      let view: unknown = proposalViewForReader(proposal, readsRevenue);
+      if (!readsRevenue && view === proposal) {
+        // The decision has been applied: a failed read answers the redacted view, not a 503 (round 4, security minor 6).
+        const financial = await this.approvalOrchestrator.isFinancial(dto.businessId, proposal).catch(() => true);
+        if (financial) view = redactedProposalView(proposal);
+      }
+      return { result: view as unknown as CortexActionResult };
     } catch (err: any) {
       this.logger.error(`Action approval error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to process action approval');

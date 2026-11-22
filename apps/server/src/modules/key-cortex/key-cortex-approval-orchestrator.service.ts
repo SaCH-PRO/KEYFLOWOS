@@ -130,6 +130,11 @@ export class KeyCortexApprovalOrchestratorService {
     return proposal;
   }
 
+  /** D-238: whether a proposal is financial (its own fields or the recommendation it was bridged from). */
+  isFinancial(businessId: string, proposal: KeyActionProposalData): Promise<boolean> {
+    return this.proposalService.isFinancial(businessId, proposal);
+  }
+
   async approve(input: ApproveInput): Promise<KeyActionProposalData> {
     const before = await this.proposalService.get(input.businessId, input.proposalId);
 

@@ -954,6 +954,7 @@ export class KeyCortexQueryPipelineService {
         assistantMessage.content,
         v2Context,
         flags.integrationV2Enabled,
+        contextSnapshot,
       );
 
       let proactiveSuggestions: Suggestion[] = [];

@@ -44,7 +44,7 @@ export class IntelligenceAdapterService {
           return connectorOk(command, start, forecast);
         }
         case 'run_comprehensive_analysis': {
-          const analysis = await this.runComprehensiveAnalysis(command.businessId);
+          const analysis = await this.runComprehensiveAnalysis(command.businessId, command.userId);
           return connectorOk(command, start, analysis);
         }
         default:
@@ -110,11 +110,12 @@ export class IntelligenceAdapterService {
     };
   }
 
-  private async runComprehensiveAnalysis(businessId: string) {
+  private async runComprehensiveAnalysis(businessId: string, actorId?: string) {
     const [brief, dashboard, snapshot] = await Promise.all([
       this.businessIntelligence.generateExecutiveBrief(businessId),
       this.growth.getDashboard(businessId),
-      this.commandCenter.snapshot(businessId),
+      // D-238 (round 3): read for the command's actor; no actor is no reader (a financial proposal is withheld).
+      this.commandCenter.snapshot(businessId, actorId ? { id: actorId } : null),
     ]);
     return { businessId, executiveBrief: brief, growthDashboard: dashboard, commandCenterSnapshot: snapshot };
   }

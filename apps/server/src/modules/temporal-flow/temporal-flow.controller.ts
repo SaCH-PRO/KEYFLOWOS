@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
@@ -32,7 +33,14 @@ export class TemporalFlowController {
   ) {}
 
   @Get()
-  list(@Param('businessId') businessId: string, @Query() query: TemporalFlowQueryDto) {
+  list(
+    @Param('businessId') businessId: string,
+    @Query() query: TemporalFlowQueryDto,
+    @Req() req?: { user?: { id?: string; role?: string } },
+  ) {
+    // FU-PROPOSAL-REVENUE-SIGHT (D-238): the request's reader, so a financial KEY proposal's events are withheld from
+    // a member without revenue read.
+    const reader = req?.user?.id ? { id: req.user.id, role: req.user.role } : null;
     return this.temporal.list(businessId, {
       source: query.source,
       type: query.type,
@@ -42,7 +50,7 @@ export class TemporalFlowController {
       from: query.from,
       to: query.to,
       limit: query.limit ? Number(query.limit) : undefined,
-    });
+    }, reader);
   }
 
   @Get('calendar')
@@ -50,13 +58,14 @@ export class TemporalFlowController {
     @Param('businessId') businessId: string,
     @Query('from') from: string,
     @Query('to') to: string,
+    @Req() req?: { user?: { id?: string; role?: string } },
   ) {
-    return this.temporal.calendarRange(businessId, from, to);
+    return this.temporal.calendarRange(businessId, from, to, req?.user?.id ? { id: req.user.id, role: req.user.role } : null);
   }
 
   @Get('reminders')
-  reminders(@Param('businessId') businessId: string) {
-    return this.temporal.remindersDue(businessId);
+  reminders(@Param('businessId') businessId: string, @Req() req?: { user?: { id?: string; role?: string } }) {
+    return this.temporal.remindersDue(businessId, req?.user?.id ? { id: req.user.id, role: req.user.role } : null);
   }
 
   @Post()

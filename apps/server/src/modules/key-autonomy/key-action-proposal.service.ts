@@ -11,6 +11,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { financialProposalsWithProvenance, financialProposalWithProvenance, genomeReaderReadsRevenue, redactedProposalView, type GenomeReader, type ProposalFields } from '../business-genome/key-genome/genome-finance-scope';
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { KeyActionExecutorService } from './key-action-executor.service';
 import { KeyActionPolicyService } from './key-action-policy.service';
@@ -148,6 +149,48 @@ export class KeyActionProposalService {
       orderBy: { createdAt: 'desc' },
     });
     return rows.map((row) => this.serialize(row));
+  }
+
+  /**
+   * FU-PROPOSAL-REVENUE-SIGHT (owner ruling D-238; security review BLOCKING-1): the proposals a reader is served over
+   * REST (GET actions/proposals, ai/approvals and its history). A reader without revenue read (ModuleScopeGuard's
+   * reading: SUPER_ADMIN passes; no reader or no membership reads none) is served only the non-financial ones, by their
+   * type, module, tool, text and parameters (isFinancialProposal; unknown fails closed). Revenue readers: unchanged.
+   */
+  async listForReader(businessId: string, query: ListKeyActionProposalsQuery, reader: GenomeReader | null): Promise<KeyActionProposalData[]> {
+    const rows = await this.list(businessId, query);
+    if (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined)) return rows;
+    // One query for the recommendations the rows were bridged from (round-4 correctness minor 5).
+    const financial = await financialProposalsWithProvenance(this.prisma, businessId, rows as unknown as ProposalFields[]);
+    return rows.filter((_row, i) => !financial[i]);
+  }
+
+  /** D-238: a financial proposal does not exist for a reader without revenue read: GET proposals/:id answers 404, exactly as an unknown id. */
+  async getForReader(businessId: string, proposalId: string, reader: GenomeReader | null): Promise<KeyActionProposalData> {
+    const proposal = await this.get(businessId, proposalId);
+    if (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined)) return proposal;
+    if (await this.isFinancial(businessId, proposal)) throw new NotFoundException('Action proposal not found');
+    return proposal;
+  }
+
+  /**
+   * D-238 (round 3): what an action on a proposal (approve, reject, cancel, execute, a legacy resolve) answers the actor.
+   * The action stays governed by the existing authority (risk tiers, D-140, D-119); a reader without revenue read is
+   * answered a financial proposal's redacted view (id, status and a failure reason that states no money).
+   */
+  async viewForReader<T extends KeyActionProposalData>(businessId: string, proposal: T, reader: GenomeReader | null): Promise<T | ReturnType<typeof redactedProposalView>> {
+    if (!proposal || typeof proposal !== 'object' || typeof (proposal as { id?: unknown }).id !== 'string') return proposal;
+    // The action has committed: a failed read answers the redacted view (fail closed), never an error for an action that
+    // took effect (round-4 correctness minor 7).
+    const readsRevenue = await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined).catch(() => false);
+    if (readsRevenue) return proposal;
+    const financial = await this.isFinancial(businessId, proposal).catch(() => true);
+    return financial ? redactedProposalView(proposal) : proposal;
+  }
+
+  /** D-238: whether a proposal of `businessId` is financial, by its own fields or the recommendation it was bridged from. */
+  isFinancial(businessId: string, proposal: KeyActionProposalData): Promise<boolean> {
+    return financialProposalWithProvenance(this.prisma, businessId, proposal as unknown as ProposalFields);
   }
 
   async get(businessId: string, proposalId: string): Promise<KeyActionProposalData> {
