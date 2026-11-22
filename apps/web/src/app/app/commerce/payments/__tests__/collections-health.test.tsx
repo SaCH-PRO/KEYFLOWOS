@@ -35,8 +35,10 @@ vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn(), message: vi.fn() }),
 }));
 const markInvoicePaid = vi.fn();
+const getInvoice = vi.fn();
 vi.mock("@/lib/client", () => ({
   markInvoicePaid: (...args: unknown[]) => markInvoicePaid(...args),
+  getInvoice: (...args: unknown[]) => getInvoice(...args),
   updateInvoiceStatus: vi.fn(),
   sendInvoiceReminder: vi.fn(),
 }));
@@ -120,6 +122,9 @@ function expectNoNegativeFigure(card: HTMLElement) {
 
 beforeEach(() => {
   markInvoicePaid.mockReset();
+  getInvoice.mockReset();
+  // Unless a case says otherwise the re-read after Mark paid fails, so the tab falls back to what it knows.
+  getInvoice.mockResolvedValue({ data: null, error: "offline" });
 });
 
 afterEach(() => {
@@ -226,30 +231,87 @@ describe("V1-64 Collections Health card on its own", () => {
  * Review repairs (RED-BEFORE = the packet head 7513180a).
  */
 describe("V1-64 review repairs: the tab after Mark paid, PAID invoices with no payment row, one definition per label", () => {
-  it("CH-10 RED-BEFORE (COR-1): Mark paid on a part-paid invoice raises Received by what was settled, without a reload (the server answers no payment rows)", async () => {
-    // What PATCH .../paid answers: the invoice, PAID. Mark-paid records the remaining balance as a payment (D-05).
+  it("CH-10 (COR-1; round 2 C2-2, S2-1): after Mark paid the tab shows the rows the server holds (re-read through the tenant-bound detail route), not its own guess", async () => {
+    // The tab was loaded before another member recorded 100: the server then records the 200 left, not 300.
     markInvoicePaid.mockResolvedValue({ data: { id: "late", status: "PAID", paidAt: NOW }, error: null });
+    getInvoice.mockResolvedValue({
+      data: { ...invoice("late", "PAID", 500, [payment("late", 200), payment("late", 100), payment("late", 200)], { paidAt: NOW }) },
+      error: null,
+    });
     mountLive([invoice("late", "PARTIALLY_PAID", 500, [payment("late", 200)], { dueDate: PAST_DUE })]);
     expect(strip("Received")).toBe("TTD 200");
     expect(strip("Overdue")).toBe("TTD 300");
     fireEvent.click(screen.getAllByTitle("Mark Paid")[0]);
     await waitFor(() => expect(strip("Received")).toBe("TTD 500"));
-    expect(strip("This Month")).toBe("TTD 500");
+    expect(getInvoice).toHaveBeenCalledWith("biz_v64", "late");
     expect(strip("Overdue")).toBe("—");
     expect(within(health()).getByTestId("collections-to-collect").textContent).toBe("TTD 0");
     expect(health().textContent).toContain("Collections healthy");
   });
 
-  it("CH-11 RED-BEFORE (COR-1): when the server answers the payment rows, they are the rows shown (no second count)", async () => {
-    markInvoicePaid.mockResolvedValue({
-      data: { id: "sent", status: "PAID", paidAt: NOW, payments: [payment("sent", 500)] },
+  it("CH-11 (C2-2a): a credited invoice settled by Mark paid stays PARTIALLY_CREDITED with the money the server recorded; no paid date is invented", async () => {
+    // 200 less a 50 credit note with 30 paid: mark-paid records the 120 left and the invoice stays PARTIALLY_CREDITED, paidAt null.
+    markInvoicePaid.mockResolvedValue({ data: { id: "cred", status: "PARTIALLY_CREDITED", paidAt: null }, error: null });
+    getInvoice.mockResolvedValue({
+      data: { ...invoice("cred", "PARTIALLY_CREDITED", 200, [payment("cred", 30), payment("cred", 120)], { paidAt: null }) },
       error: null,
     });
-    mountLive([invoice("sent", "SENT", 500, [], { dueDate: PAST_DUE })]);
-    expect(strip("Received")).toBe("—");
+    const seen: Invoice[][] = [];
+    function Holder() {
+      const [list, setList] = useState<Invoice[]>([invoice("cred", "PARTIALLY_CREDITED", 200, [payment("cred", 30)], { paidAt: null })]);
+      seen.push(list);
+      return <PaymentsTab invoices={list} currency="TTD" businessId="biz_v64" setInvoices={setList} />;
+    }
+    render(<Holder />);
+    expect(strip("Received")).toBe("TTD 30");
     fireEvent.click(screen.getAllByTitle("Mark Paid")[0]);
-    await waitFor(() => expect(strip("Received")).toBe("TTD 500"));
-    expect(strip("Overdue")).toBe("—");
+    await waitFor(() => expect(strip("Received")).toBe("TTD 150"));
+    const last = seen[seen.length - 1][0];
+    expect(last.status).toBe("PARTIALLY_CREDITED");
+    expect(last.paidAt ?? null).toBeNull();
+  });
+
+  it("CH-11b (C2-2b): when the re-read fails the tab adds what mark-paid records (what was left), for any status it accepts, and invents no paid date unless PAID", async () => {
+    markInvoicePaid.mockImplementation(async (id: string) => ({ data: { id, status: id === "cred" ? "PARTIALLY_CREDITED" : "PAID", paidAt: id === "cred" ? null : NOW }, error: null }));
+    const seen: Invoice[][] = [];
+    function Holder() {
+      const [list, setList] = useState<Invoice[]>([
+        invoice("failed", "FAILED", 500, [payment("failed", 200)]),
+        invoice("cred", "PARTIALLY_CREDITED", 200, [payment("cred", 30)], { paidAt: null }),
+      ]);
+      seen.push(list);
+      return <PaymentsTab invoices={list} currency="TTD" businessId="biz_v64" setInvoices={setList} />;
+    }
+    render(<Holder />);
+    expect(strip("Received")).toBe("TTD 230");
+    // The FAILED invoice: the server records the 300 left and the invoice is PAID.
+    fireEvent.click(screen.getAllByTitle("Mark Paid")[0]);
+    await waitFor(() => expect(strip("Received")).toBe("TTD 530"));
+    // The credited invoice: what the server recorded cannot be told from the list row (credit notes are not on it):
+    // nothing is guessed and no paid date is invented.
+    fireEvent.click(screen.getAllByTitle("Mark Paid")[0]);
+    await waitFor(() => expect(markInvoicePaid).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getInvoice).toHaveBeenCalledTimes(2));
+    const cred = seen[seen.length - 1].find((i) => i.id === "cred")!;
+    expect(cred.paidAt ?? null).toBeNull();
+    expect(strip("Received")).toBe("TTD 530");
+  });
+
+  it("CH-11c (C2-8): bulk Mark Paid takes the same path: each settled invoice is re-read and Received rises", async () => {
+    markInvoicePaid.mockImplementation(async (id: string) => ({ data: { id, status: "PAID", paidAt: NOW }, error: null }));
+    getInvoice.mockImplementation(async (_biz: string, id: string) => ({
+      data: invoice(id, "PAID", id === "one" ? 100 : 250, [payment(id, id === "one" ? 100 : 250)], { paidAt: NOW }),
+      error: null,
+    }));
+    mountLive([invoice("one", "SENT", 100), invoice("two", "SENT", 250)]);
+    expect(strip("Received")).toBe("—");
+    fireEvent.click(screen.getByLabelText("Select payment ONE"));
+    fireEvent.click(screen.getByLabelText("Select payment TWO"));
+    fireEvent.click(screen.getByRole("button", { name: /status/i }));
+    fireEvent.click(screen.getByText("Mark Paid")); // the bulk menu's entry (the row buttons carry it as a title only)
+    await waitFor(() => expect(strip("Received")).toBe("TTD 350"));
+    expect(strip("Pending")).toBe("—");
+    expect(getInvoice).toHaveBeenCalledTimes(2);
   });
 
   it("CH-12 RED-BEFORE (COR-2): a PAID invoice with no payment row still counts its total, on the day it was paid (a marketplace order's INV-ORD invoice)", () => {
@@ -292,5 +354,68 @@ describe("V1-64 review repairs: the tab after Mark paid, PAID invoices with no p
     expect(strip("This Month")).toBe("—");
     expect(strip("Pending")).toBe("TTD 100");
     expectNoNegativeFigure(health());
+  });
+
+  it("CH-15 RED-BEFORE (round 2 C2-1): Received means one thing. The strip, its count, the filter count and the list are the invoices money came in on", () => {
+    mount([
+      invoice("dep", "PARTIALLY_PAID", 13723, [payment("dep", 400)]),
+      invoice("paid", "PAID", 75, [payment("paid", 75)], { paidAt: NOW }),
+      invoice("sent", "SENT", 90),
+    ]);
+    expect(strip("Received")).toBe("TTD 475");
+    // The strip counts the invoices behind its figure: "· 2".
+    const label = screen.getAllByText("Received").filter((el) => el.tagName === "SPAN" && el.parentElement?.tagName === "DIV" && el.previousElementSibling?.tagName === "SPAN")[0];
+    expect(label.nextElementSibling?.textContent).toBe("· 2");
+    expect(filterCount("Received")).toBe("2");
+    openFilter("Received");
+    expect(screen.queryByText("DEP")).not.toBeNull();
+    expect(screen.queryByText("PAID", { selector: "span.truncate" })).not.toBeNull();
+    expect(screen.queryByText("SENT", { selector: "span.truncate" })).toBeNull();
+  });
+
+  it("CH-16 RED-BEFORE (C2-4): Payment Methods are the money rows behind Received, on any invoice; a FAILED or PENDING row is no payment", () => {
+    mount([
+      invoice("dep", "PARTIALLY_PAID", 13723, [payment("dep", 400)]),
+      invoice("retry", "PAID", 100, [payment("retry", 100, "FAILED"), payment("retry", 100)], { paidAt: NOW }),
+      invoice("ord", "PAID", 250, [], { paidAt: NOW }),
+    ]);
+    expect(strip("Received")).toBe("TTD 750");
+    const card = screen.getByText("Payment Methods").closest("div.rounded-xl") as HTMLElement;
+    // cash: the 400 deposit and the 100 that went through (2 payments); Other: the invoice with no payment row.
+    expect(card.textContent).toContain("cashTTD 5002 payments");
+    expect(card.textContent).toContain("OtherTTD 2501 payment");
+  });
+
+  it("CH-17 RED-BEFORE (C2-5): a part-paid row states what is left beside its total, and a settled invoice past its due date is not drawn overdue", () => {
+    mount([
+      invoice("late", "PARTIALLY_PAID", 500, [payment("late", 200)], { dueDate: PAST_DUE }),
+      invoice("settled", "SENT", 80, [payment("settled", 80)], { dueDate: PAST_DUE }),
+    ]);
+    const row = screen.getByLabelText("Select payment LATE").closest("div.rounded-lg") as HTMLElement;
+    expect(row.textContent).toMatch(/500\.00/);
+    expect(row.textContent).toMatch(/300\.00 left/);
+    expect(row.className).toContain("bg-red-500");
+    const settled = screen.getByLabelText("Select payment SETTLED").closest("div.rounded-lg") as HTMLElement;
+    expect(settled.textContent).not.toMatch(/left/);
+    expect(settled.className).not.toContain("bg-red-500");
+  });
+
+  it("CH-18 RED-BEFORE (C2-7): Received is the net of every money row, as the server states it: a refund on one invoice is not hidden by another's receipt", () => {
+    mount([
+      // A refund row with no payment row beside it (its payment was recorded elsewhere): money out.
+      invoice("out", "SENT", 100, [payment("out", -40, "REFUNDED")]),
+      invoice("in", "PARTIALLY_PAID", 500, [payment("in", 100)]),
+    ]);
+    expect(strip("Received")).toBe("TTD 60");
+    expect(strip("This Month")).toBe("TTD 60");
+  });
+
+  it("CH-19 (C2-10): a PAID invoice with no paid date counts in Received and in no month; one whose only rows are PENDING / FAILED counts its total", () => {
+    mount([
+      invoice("undated", "PAID", 70, [], { paidAt: null }),
+      invoice("noise", "PAID", 30, [payment("noise", 30, "PENDING"), payment("noise", 30, "FAILED")], { paidAt: LAST_MONTH }),
+    ]);
+    expect(strip("Received")).toBe("TTD 100");
+    expect(strip("This Month")).toBe("—");
   });
 });
