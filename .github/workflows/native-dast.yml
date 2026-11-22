@@ -123,11 +123,6 @@ jobs:
         run: pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build
 
       - name: Build server
-        # The server type-check needs ~4.1 GB of heap on main itself (measured
-        # with --incremental false); the runner's Node default is ~4 GB, so tsc
-        # died mid-build. This raises the ceiling only; no check is skipped.
-        env:
-          NODE_OPTIONS: --max-old-space-size=6144
         run: cd apps/server && pnpm run build
 
       - name: Apply migrations

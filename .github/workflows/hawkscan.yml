@@ -126,11 +126,6 @@ jobs:
 
       - name: Build workspace packages + server
         if: steps.guard.outputs.run == 'true'
-        # The server type-check needs ~4.1 GB of heap on main itself (measured
-        # with --incremental false); the runner's Node default is ~4 GB, so tsc
-        # died mid-build. This raises the ceiling only; no check is skipped.
-        env:
-          NODE_OPTIONS: --max-old-space-size=6144
         run: |
           pnpm turbo run build --filter=@keyflow/db --filter=@keyflow/shared --filter=@keyflow/api
           cd apps/server && pnpm run build
