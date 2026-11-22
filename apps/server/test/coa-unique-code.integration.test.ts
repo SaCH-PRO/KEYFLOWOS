@@ -28,6 +28,7 @@
  *   CUC-10  CONTROL then RED-BEFORE  accounts that already share a code (rows written before this rule) can
  *                       still be renamed and archived, and nothing is rewritten for them; no third joins them
  *   CUC-11  RED-BEFORE  the service door KEY's finance_create_coa_account tool calls refuses the same way
+ *                       (and, with no active tenant, a code only another business holds is free: CONTROL)
  *   CUC-12  RED-BEFORE  isActive that is not true or false ({ set: true }, "true", 1) -> 400, nothing written:
  *                       a Prisma operator object cannot bring an archived account back around the check
  *   CUC-13  RED-BEFORE  rows stored before codes were trimmed ('7140 ', a trailing tab) hold their code like
@@ -278,6 +279,8 @@ describe('CUC-02: renaming an account to a taken code', () => {
     // The name in the same request is not written either: the refusal is whole.
     expectTaken(await patch(ID.bizA, ID.ownerA, id, { code: '7020', name: 'v63h Uniforms renamed' }));
     expectTaken(await patch(ID.bizA, ID.ownerA, id, { code: '6100' }));
+    // Also when the same request archives the account: it is not moved onto a held code, and stays active.
+    expectTaken(await patch(ID.bizA, ID.ownerA, id, { code: '7020', isActive: false }));
     expect(await chart(ID.bizA)).toEqual(before);
   });
 });
@@ -503,7 +506,7 @@ describe('CUC-10: accounts that already share a code', () => {
 });
 
 describe('CUC-11: the service door (KEY finance_create_coa_account calls FinanceCoaService.create)', () => {
-  it('CUC-11 RED-BEFORE: create and update called directly throw a 409 ConflictException carrying COA_CODE_TAKEN', async () => {
+  it('CUC-11 RED-BEFORE then CONTROL: create and update called directly throw a 409 ConflictException carrying COA_CODE_TAKEN; with no active tenant a code only another business holds is free', async () => {
     const { ConflictException } = await import('@nestjs/common');
     const before = await chart(ID.bizA);
     const err = await coaService.create(ID.bizA, { name: 'v63h via tool', type: 'EXPENSE', code: '6100' }).then(() => null, (e: unknown) => e);
@@ -514,6 +517,12 @@ describe('CUC-11: the service door (KEY finance_create_coa_account calls Finance
     const id = (await coaService.create(ID.bizA, { name: 'v63h via tool ok', type: 'EXPENSE', code: '7130' })).id;
     const err2 = await coaService.update(ID.bizA, id, { code: '6100' }).then(() => null, (e: unknown) => e);
     expect(err2).toBeInstanceOf(ConflictException);
+    // With no active tenant, the argument's business decides: a code only B holds is free in A.
+    await make(ID.bizB, ID.ownerB, 'v63h B holds 7131', '7131');
+    const beforeB = await chart(ID.bizB);
+    const inA = await coaService.create(ID.bizA, { name: 'v63h A takes 7131, no tenant', type: 'EXPENSE', code: '7131' });
+    expect(inA.businessId).toBe(ID.bizA);
+    expect(await chart(ID.bizB)).toEqual(beforeB);
     // An account of another business is not found, whatever code is asked for (unchanged).
     const { NotFoundException } = await import('@nestjs/common');
     const err3 = await coaService.update(ID.bizB, id, { code: '7999' }).then(() => null, (e: unknown) => e);

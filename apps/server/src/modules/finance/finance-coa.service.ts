@@ -190,9 +190,10 @@ export class FinanceCoaService {
    * Run `fn` in a transaction holding this business's account-code lock, so a check and the write it
    * allows are one step against every other write that takes this lock: every create() and update() that
    * can put an active account on a code. (A create without a code, an update that neither carries a code
-   * nor sets isActive true, and archive() do not take it: they can only free a code.) READ COMMITTED is
-   * set on purpose: the check must see what the previous holder of the lock committed, and under a
-   * snapshot isolation level it would read a snapshot taken before that commit. `tenant` is the
+   * nor sets isActive true, and archive() do not take it: none of them can put an active account on a
+   * code.) READ COMMITTED is set on purpose: the check must see what the previous holder of the lock
+   * committed, and under a snapshot isolation level it would read a snapshot taken before that commit.
+   * `tenant` is the
    * business the transaction's Prisma calls act on: the active tenant when there is one (the `@keyflow/db`
    * extension rewrites every `where.businessId` and `create.businessId` to it), else the argument. The
    * raw-SQL check is not rewritten by the extension, so it is handed that same business.
