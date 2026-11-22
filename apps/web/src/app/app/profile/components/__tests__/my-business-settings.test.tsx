@@ -23,9 +23,7 @@ const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), message: vi.
 vi.mock("sonner", () => ({ toast, Toaster: () => null }));
 
 import MyBusinessSection from "../my-business-section";
-import * as settingsModule from "@/lib/business-settings";
-
-const lib = settingsModule as unknown as Record<string, any>;
+import { resetBusinessSettings } from "@/lib/business-settings";
 
 const BIZ = "biz_bsw_profile";
 const OTHER = "biz_bsw_other";
@@ -98,7 +96,7 @@ async function ready() {
 beforeEach(() => {
   window.localStorage.clear();
   window.localStorage.setItem("kf_business_id", BIZ);
-  lib.resetBusinessSettings?.();
+  resetBusinessSettings();
   for (const fn of Object.values(toast)) fn.mockReset();
 });
 

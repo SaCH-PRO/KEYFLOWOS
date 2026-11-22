@@ -21,10 +21,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import * as settingsModule from "../business-settings";
+import * as settings from "../business-settings";
+import type { BusinessAdvancedSettingsWrite, BusinessSells } from "../business-settings";
 
-/** The module's exports by name: a missing export is a failing expectation, not a compile error. */
-const lib = settingsModule as unknown as Record<string, any>;
+/**
+ * The library, with its two doors also callable with what the types forbid: what a caller that got past the types
+ * (a stale build, a cast) would hand them.
+ */
+const lib = {
+  ...settings,
+  saveBusinessSells: (businessId: string, sells: unknown) => settings.saveBusinessSells(businessId, sells as BusinessSells),
+  saveAdvancedSettings: (businessId: string, write: unknown) => settings.saveAdvancedSettings(businessId, write as BusinessAdvancedSettingsWrite),
+};
 
 const BIZ_A = "biz_bsw_a";
 const BIZ_B = "biz_bsw_b";
@@ -78,7 +86,7 @@ const forbidden = (message: string, code?: string) => ({ statusCode: 403, ...(co
 
 beforeEach(() => {
   window.localStorage.clear();
-  lib.resetBusinessSettings?.();
+  lib.resetBusinessSettings();
 });
 
 afterEach(() => {
@@ -318,6 +326,40 @@ describe("useBusinessSettings()", () => {
       await reloaded;
     });
     expect(result.current.sells).toBe("products");
+  });
+
+  it("settings already shown are kept through a reload that fails for no reason of access, and dropped on a refusal", async () => {
+    window.localStorage.setItem(BUSINESS_ID_KEY, BIZ_A);
+    let answer: Answer = { status: 200, body: business(BIZ_A, { sells: "products" }) };
+    stubRoutes({ [`GET /identity/businesses/${BIZ_A}`]: () => answer });
+    const { result } = renderHook(() => lib.useBusinessSettings());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    answer = { status: 502, body: { message: "Bad gateway" } };
+    await act(async () => void (await result.current.reload()));
+    expect(result.current).toMatchObject({ status: "ready", sells: "products" });
+
+    answer = { status: 403, body: forbidden("No access to this business") };
+    await act(async () => void (await result.current.reload()));
+    expect(result.current).toMatchObject({ status: "failed", sells: "both", error: "No access to this business" });
+  });
+
+  it("selecting a business (sign-in, signup, a switch) drops everything read before and reads again", async () => {
+    let answer: Answer = { status: 200, body: business(BIZ_A, { sells: "products", advancedCrm: true }) };
+    const sent = stubRoutes({ [`GET /identity/businesses/${BIZ_A}`]: () => answer });
+    const { result } = renderHook(() => lib.useBusinessSettings(BIZ_A));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    const readsBefore = sent.length;
+
+    // The next member of this browser is refused the business: nothing the last one read is shown.
+    answer = { status: 403, body: forbidden("No access to this business") };
+    act(() => {
+      window.dispatchEvent(new CustomEvent("kf:business-changed", { detail: { businessId: BIZ_A } }));
+    });
+    expect(result.current).toMatchObject({ status: "loading", sells: "both", advancedCrm: false });
+    await waitFor(() => expect(result.current.status).toBe("failed"));
+    expect(result.current).toMatchObject({ sells: "both", advancedCrm: false });
+    expect(sent.length).toBeGreaterThan(readsBefore);
   });
 
   it("what a profile write answered can be recorded for the readers (onboarding's one PATCH)", async () => {

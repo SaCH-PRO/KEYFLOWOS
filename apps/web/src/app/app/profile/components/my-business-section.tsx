@@ -12,6 +12,7 @@ import {
   RefreshCw,
   CheckCircle2,
   ArrowRight,
+  LayoutGrid,
 } from "lucide-react";
 import { Button, Input } from "@keyflow/ui";
 import { apiPatch, apiPost } from "@/lib/api";
@@ -19,6 +20,13 @@ import { answerFromThrown, refusalMessage, useRefusal, type ApiAnswer } from "@/
 import { AccordionSection, AccordionGroup } from "../../store/components/accordion-section";
 import { AiFieldBadge } from "./ai-field-badge";
 import { useProfileSection } from "@/hooks/use-profile-section";
+import {
+  BUSINESS_SELLS,
+  saveAdvancedSettings,
+  saveBusinessSells,
+  useBusinessSettings,
+  type BusinessSells,
+} from "@/lib/business-settings";
 
 /**
  * The team sizes the form offers. Each value is one the profile PATCH takes: it validates teamSize with
@@ -186,6 +194,165 @@ function FieldImpact({ text }: { text: string }) {
       <ArrowRight className="w-2.5 h-2.5 flex-shrink-0" />
       {text}
     </p>
+  );
+}
+
+const SELLS_LABELS: Record<BusinessSells, string> = {
+  services: "Services",
+  products: "Products",
+  both: "Both",
+};
+
+/** What each control does, in the words a refusal is said with. */
+const CHANGE_SELLS_WHAT = "change what you sell";
+const CHANGE_CRM_WHAT = "change the Advanced CRM switch";
+
+/**
+ * BIZ-SETTINGS-WEB (owner rulings D-150 'hubs', D-218 'sellsowner', D-11): what the business sells and the Advanced
+ * CRM switch, as the business holds them (lib/business-settings.ts; the nav and the hubs read the same values).
+ *
+ * Each control saves on its own, through its own door, and is not part of "Save Business Info":
+ *   - what you sell: the owner-only profile PATCH (sells and nothing else);
+ *   - the Advanced CRM switch: the owner-or-admin door (BIZ-SETTINGS-ADMIN-DOOR).
+ * The server decides who may change which; the browser does not guess. A control shows what the business holds and
+ * moves only when the server has answered that it changed, so a refusal (one toast, the same words beside the
+ * control) leaves it as it was and nothing is reported as saved. Settings that could not be loaded are said so, and
+ * the defaults are not drawn in their place.
+ */
+function BusinessSetupSettings({
+  businessId,
+  onStatus,
+}: {
+  businessId: string;
+  onStatus: (status: { type: "success" | "error"; message: string } | null) => void;
+}) {
+  const settings = useBusinessSettings(businessId);
+  const { refused, message: refusal, clear: clearRefusal } = useRefusal();
+  const [saving, setSaving] = useState<"sells" | "advancedCrm" | null>(null);
+  // Set synchronously, so two quick presses cannot send two writes.
+  const savingRef = useRef(false);
+
+  const write = async (which: "sells" | "advancedCrm", what: string, done: string, send: () => Promise<ApiAnswer>) => {
+    if (savingRef.current || settings.status !== "ready") return;
+    savingRef.current = true;
+    setSaving(which);
+    onStatus(null);
+    clearRefusal();
+    let res: ApiAnswer;
+    try {
+      res = await send();
+    } catch (err) {
+      res = answerFromThrown(err);
+    }
+    savingRef.current = false;
+    setSaving(null);
+    if (refused(res, { what })) {
+      onStatus({ type: "error", message: refusalMessage(res, { what }) ?? `Couldn't ${what}.` });
+      return;
+    }
+    onStatus({ type: "success", message: done });
+  };
+
+  const chooseSells = (value: BusinessSells) => {
+    if (value === settings.sells) return;
+    void write("sells", CHANGE_SELLS_WHAT, "What you sell updated", () => saveBusinessSells(businessId, value));
+  };
+
+  const toggleCrm = () => {
+    const next = !settings.advancedCrm;
+    void write("advancedCrm", CHANGE_CRM_WHAT, next ? "Advanced CRM turned on" : "Advanced CRM turned off", () =>
+      saveAdvancedSettings(businessId, { advancedCrm: next }),
+    );
+  };
+
+  if (settings.status === "failed") {
+    return (
+      <div className="space-y-2 p-1 text-xs" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+        <p className="flex items-start gap-1.5">
+          <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" aria-hidden="true" />
+          <span>
+            Couldn&apos;t load what you sell and the Advanced CRM switch{settings.error ? `: ${settings.error}` : "."}
+          </span>
+        </p>
+        <Button variant="outline" onClick={() => void settings.reload()} className="min-h-[44px]">
+          Try again
+        </Button>
+      </div>
+    );
+  }
+
+  const loading = settings.status !== "ready";
+  const disabled = loading || saving !== null;
+
+  return (
+    <div className="space-y-4 p-1" aria-busy={loading}>
+      <div className="text-xs text-muted-foreground">
+        <div id="business-sells-label" className="flex items-center gap-1.5 mb-1.5 font-medium">
+          <LayoutGrid className="h-3 w-3" aria-hidden="true" />
+          What you sell
+        </div>
+        <div role="radiogroup" aria-labelledby="business-sells-label" className="flex flex-wrap gap-x-5 gap-y-1">
+          {BUSINESS_SELLS.map((value) => (
+            <label key={value} className="flex items-center gap-2 text-sm text-foreground cursor-pointer min-h-[44px]">
+              <input
+                type="radio"
+                name="business-sells"
+                value={value}
+                checked={!loading && settings.sells === value}
+                disabled={disabled}
+                onChange={() => chooseSells(value)}
+                className="w-4 h-4 accent-[hsl(var(--kf-accent2))]"
+              />
+              {SELLS_LABELS[value]}
+            </label>
+          ))}
+        </div>
+        <FieldImpact text="Sets the hubs in your menu and the bar at the bottom of your phone. Only the business owner can change it." />
+      </div>
+
+      <div className="text-xs text-muted-foreground">
+        <div className="flex items-center justify-between gap-3">
+          <div id="business-advanced-crm-label" className="flex items-center gap-1.5 font-medium">
+            <Users className="h-3 w-3" aria-hidden="true" />
+            Advanced CRM
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={!loading && settings.advancedCrm}
+            aria-labelledby="business-advanced-crm-label"
+            disabled={disabled}
+            onClick={toggleCrm}
+            className="relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors disabled:opacity-50 before:absolute before:-inset-y-2.5 before:inset-x-0 before:content-['']"
+            style={{ background: !loading && settings.advancedCrm ? "hsl(var(--kf-accent2))" : "hsl(var(--kf-muted) / 0.5)" }}
+          >
+            <span
+              aria-hidden="true"
+              className="inline-block h-5 w-5 rounded-full bg-white shadow transition-transform"
+              style={{ transform: !loading && settings.advancedCrm ? "translateX(22px)" : "translateX(2px)" }}
+            />
+          </button>
+        </div>
+        <FieldImpact text="Adds Deals and Companies to Customers. The owner or an admin can change it." />
+      </div>
+
+      {loading && <p className="text-[10px] text-muted-foreground">Loading these settings...</p>}
+
+      {refusal && (
+        <p
+          role="alert"
+          className="flex items-start gap-1.5 rounded-lg px-3 py-2 text-xs"
+          style={{
+            color: "hsl(var(--kf-error))",
+            background: "hsl(var(--kf-error) / 0.08)",
+            border: "1px solid hsl(var(--kf-error) / 0.3)",
+          }}
+        >
+          <AlertCircle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" aria-hidden="true" />
+          <span>{refusal}</span>
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -465,6 +632,18 @@ export default function MyBusinessSection({
             </div>
           </div>
         </AccordionSection>
+
+        {businessId && (
+          <AccordionSection
+            title="What you sell & Advanced CRM"
+            subtitle="Sets your hubs; saved as soon as you change it"
+            icon={LayoutGrid}
+            accentColor="hsl(var(--kf-accent2))"
+            defaultOpen
+          >
+            <BusinessSetupSettings businessId={businessId} onStatus={onStatus} />
+          </AccordionSection>
+        )}
 
         <AccordionSection
           title="Team & Scale"
