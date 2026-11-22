@@ -196,18 +196,19 @@ describe('KeyCortexGenomeContextService: fail-closed defaults, the DNA cache, th
 });
 
 describe('composite indicators (D-233: no inference via a score, grade or categorical indicator; inventory row 7)', () => {
-  it('RED-BEFORE: genomeContextForReader withholds executive readiness, the genome stage and the money modules of the autonomy map', () => {
+  it('RED-BEFORE: genomeContextForReader recomputes executive readiness from the non-money DNA, withholds the genome stage and the money modules of the autonomy map', () => {
     const out = genomeContextForReader(CTX, false) as any;
-    expect(out.executiveReadiness).toBeUndefined();
+    // D-233 "withheld or recomputed": the mean of the dimensions the reader may see (execution 60, operations 70).
+    expect(out.executiveReadiness).toBe(65);
     expect(out.genomeStage).toBeUndefined();
     expect(out.autonomyMap).toEqual({ operations: false });
     expect(genomeContextForReader(CTX, true)).toBe(CTX);
   });
 
-  it('RED-BEFORE: snapshotForViewer withholds executive readiness and the genome stage for a viewer without revenue read', () => {
+  it('RED-BEFORE: snapshotForViewer recomputes executive readiness from the non-money DNA and withholds the genome stage for a viewer without revenue read', () => {
     const snap = { businessId: 'b', genomeStage: 'growth', executiveReadiness: 30, genomeDna: DNA, keyMetrics: {}, recentTasks: [], recentEvents: [], activeProjects: [], teamMembers: [], unreadMessages: 0 } as any;
     const out = snapshotForViewer(snap, false) as any;
-    expect(out.executiveReadiness).toBeUndefined();
+    expect(out.executiveReadiness).toBe(65);
     expect(out.genomeStage).toBeUndefined();
     expect((snapshotForViewer(snap, true) as any).executiveReadiness).toBe(30);
   });
