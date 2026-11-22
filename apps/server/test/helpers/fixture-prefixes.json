@@ -1134,8 +1134,7 @@
     },
     {
       "prefix": "v86s_",
-      "owner": "apps/server/test/site-analytics-revenue-scope.integration.test.ts",
-      "packet": "FU-SITE-ANALYTICS-REVENUE-SCOPE"
+      "owner": "apps/server/test/site-analytics-revenue-scope.integration.test.ts"
     }
   ],
   "pendingRenames": [],
