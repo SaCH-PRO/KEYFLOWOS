@@ -374,5 +374,17 @@ describe("the form asks what the business sells", () => {
     await mount(sent);
     for (const radio of within(question()).getAllByRole("radio")) expect(radio.closest("label")?.className).toContain("min-h-[44px]");
   });
+
+  it("review SEC2-1: a save answered 200 without the answer the owner gave is not a save: nothing is finished", async () => {
+    const sent = stubRoutes(ownerRoutes(STORED, { [`PATCH ${BUSINESS_PATH}`]: { status: 200, body: { ...STORED, sells: "both" } } }));
+    await mount(sent);
+    fill({ ...VALID, currency: "TTD" });
+    fireEvent.click(choice("Products"));
+    fireEvent.click(finish());
+    const alert = await screen.findByRole("alert");
+    expect((alert.textContent ?? "").trim()).not.toBe("");
+    expect(sent.some((s) => s.method === "POST" && s.path === COMPLETE_PATH)).toBe(false);
+    expect(router.replace).not.toHaveBeenCalled();
+  });
 });
 

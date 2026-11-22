@@ -621,3 +621,71 @@ describe("review COR-3 / COR-4: one read for many readers, and a long-lived read
   });
 });
 
+describe("review round 2 (SEC2-1, SEC2-2): a write is saved only when the server confirmed it, to the member who sent it", () => {
+  const unconfirmed: Array<[string, string, () => Promise<{ error: string | null }>, unknown]> = [
+    ["what you sell, answered without the settings", `PATCH /identity/businesses/${BIZ_A}`, () => lib.saveBusinessSells(BIZ_A, "products"), { id: BIZ_A, name: "x" }],
+    ["what you sell, answered with another value", `PATCH /identity/businesses/${BIZ_A}`, () => lib.saveBusinessSells(BIZ_A, "products"), business(BIZ_A, { sells: "services" })],
+    ["the switch, answered with it unchanged", `PATCH /identity/businesses/${BIZ_A}/advanced-settings`, () => lib.saveAdvancedSettings(BIZ_A, { advancedCrm: true }), business(BIZ_A, { sells: "services", advancedCrm: false })],
+    ["a hub depth, answered with it unchanged", `PATCH /identity/businesses/${BIZ_A}/advanced-settings`, () => lib.saveAdvancedSettings(BIZ_A, { depth: { money: "advanced" } }), business(BIZ_A, { sells: "services" })],
+  ];
+  it.each(unconfirmed)("%s: an error, and what is shown is what the server holds", async (_name, route, send, body) => {
+    window.localStorage.setItem(BUSINESS_ID_KEY, BIZ_A);
+    stubRoutes({
+      [`GET /identity/businesses/${BIZ_A}`]: { status: 200, body: business(BIZ_A, { sells: "services" }) },
+      [route]: { status: 200, body },
+    });
+    const { result } = renderHook(() => lib.useBusinessSettings());
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    let res: { error: string | null } = { error: null };
+    await act(async () => {
+      res = await send();
+    });
+    expect((res.error ?? "").trim()).not.toBe("");
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(result.current).toMatchObject({ sells: "services", advancedCrm: false, depth: allHubs("standard") });
+  });
+
+  it("a confirmed write of every kind is still a success", async () => {
+    stubRoutes({
+      [`PATCH /identity/businesses/${BIZ_A}`]: { status: 200, body: business(BIZ_A, { sells: "products" }) },
+      [`PATCH /identity/businesses/${BIZ_A}/advanced-settings`]: { status: 200, body: business(BIZ_A, { sells: "products", advancedCrm: true, depth: { ...allHubs("standard"), money: "advanced" } }) },
+    });
+    expect((await lib.saveBusinessSells(BIZ_A, "products")).error).toBeNull();
+    expect((await lib.saveAdvancedSettings(BIZ_A, { advancedCrm: true, depth: { money: "advanced" } })).error).toBeNull();
+  });
+
+  it("confirmedBusinessSettings reads what an answer confirms for this business, or nothing", () => {
+    expect(lib.confirmedBusinessSettings(BIZ_A, business(BIZ_A, { sells: "products" }))).toMatchObject({ sells: "products", advancedCrm: false });
+    expect(lib.confirmedBusinessSettings(BIZ_A, business(BIZ_B, { sells: "products" }))).toBeNull();
+    expect(lib.confirmedBusinessSettings(BIZ_A, { id: BIZ_A, name: "x" })).toBeNull();
+    expect(lib.confirmedBusinessSettings(BIZ_A, null)).toBeNull();
+  });
+
+  it.each([
+    ["what you sell", `PATCH /identity/businesses/${BIZ_A}`, () => lib.saveBusinessSells(BIZ_A, "products")],
+    ["the switch", `PATCH /identity/businesses/${BIZ_A}/advanced-settings`, () => lib.saveAdvancedSettings(BIZ_A, { advancedCrm: true })],
+  ] as Array<[string, string, () => Promise<unknown>]>)("%s: an answer that lands after the member changed is not recorded for the new member", async (_name, route, send) => {
+    setStoredToken(tokenFor("user_bsw_one"));
+    let release: (a: Answer) => void = () => {};
+    let gets = 0;
+    stubRoutes({
+      [route]: () => new Promise<Answer>((resolve) => (release = resolve)),
+      [`GET /identity/businesses/${BIZ_A}`]: () => {
+        gets += 1;
+        return { status: 403, body: forbidden("No access to this business") };
+      },
+    });
+    const sending = send();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    setStoredToken(tokenFor("user_bsw_two"));
+    release({ status: 200, body: business(BIZ_A, { sells: "products", advancedCrm: true }) });
+    await sending;
+
+    const second = renderHook(() => lib.useBusinessSettings(BIZ_A));
+    expect(second.result.current).toMatchObject({ sells: "both", advancedCrm: false });
+    expect(second.result.current.status).not.toBe("ready");
+    await waitFor(() => expect(second.result.current.status).toBe("failed"));
+    expect(gets).toBeGreaterThan(0);
+  });
+});
+

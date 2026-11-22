@@ -297,6 +297,8 @@ describe("review SEC-2 / SEC-3: only a change the server confirmed for this busi
     ["what you sell, answered 200 with another business", `PATCH ${PROFILE}`, () => fireEvent.click(sells("Services")), { status: 200, body: { ...business({ sells: "services" }), id: OTHER } }],
     ["what you sell, answered 200 with no body", `PATCH ${PROFILE}`, () => fireEvent.click(sells("Services")), { status: 200, body: null }],
     ["what you sell, refused with no words (HTTP/2)", `PATCH ${PROFILE}`, () => fireEvent.click(sells("Services")), { status: 403, body: { statusCode: 403, message: "" }, bare: true }],
+    ["what you sell, answered 200 with the old answer (SEC2-1)", `PATCH ${PROFILE}`, () => fireEvent.click(sells("Services")), { status: 200, body: business({ sells: "products" }) }],
+    ["the switch, answered 200 with it unchanged (SEC2-1)", `PATCH ${DOOR}`, () => fireEvent.click(crmSwitch()), { status: 200, body: business({ sells: "products", advancedCrm: false }) }],
     ["the switch, answered 200 with another business", `PATCH ${DOOR}`, () => fireEvent.click(crmSwitch()), { status: 200, body: { ...business({ advancedCrm: true }), id: OTHER } }],
     ["the switch, answered 200 with no body", `PATCH ${DOOR}`, () => fireEvent.click(crmSwitch()), { status: 200, body: null }],
     ["the switch, refused with no words (HTTP/2)", `PATCH ${DOOR}`, () => fireEvent.click(crmSwitch()), { status: 403, body: { statusCode: 403, message: "" }, bare: true }],
