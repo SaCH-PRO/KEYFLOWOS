@@ -280,8 +280,10 @@ export class OutlookContactsSyncService {
       const res = await fetch(nextUrl, { headers: { Authorization: `Bearer ${token}` } });
       // W11-PROVIDER-OUTAGE-CONNECT (R-5 part 3; D-73): Graph not answering
       // (5xx, 408, 429) is 503 provider_unavailable (outlook_contacts); every
-      // other 4xx keeps its 400 (Graph has no Google reason to read). The
-      // message is unchanged.
+      // other 4xx keeps its 400 (Graph has no Google reason to read).
+      // FU-PROVIDER-ERROR-HYGIENE (D-221): the message is 'Graph API error
+      // <status>'; it carried the first 200 characters of Graph's body to the
+      // client in the 400 and the 503.
       if (!res.ok) {
         if (res.status === 410) {
           // Delta token expired — clear it and force a full re-sync next call
@@ -293,7 +295,7 @@ export class OutlookContactsSyncService {
           throw providerUnavailable('outlook_contacts', res.status, 'Outlook delta token expired; please retry');
         }
         const body = await res.text().catch(() => '');
-        throw providerFailure('outlook_contacts', res.status, body, `Graph API error ${res.status}: ${body.slice(0, 200)}`);
+        throw providerFailure('outlook_contacts', res.status, body, `Graph API error ${res.status}`);
       }
       const data = (await res.json()) as {
         value?: MsContact[];

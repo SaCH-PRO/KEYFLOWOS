@@ -34,7 +34,19 @@
  * fail (the Graph rows answer the Google table's 503 for a rate-limit 403 and
  * an ABORTED 409, isTransientProviderFailure ignores the service, and
  * providerUnavailable is not exported); POF-20 passes (the open union).
+ *
+ * FU-PROVIDER-ERROR-HYGIENE (D-221, review follow-up C8): providerFailure()
+ * keeps the body out of what it builds (POF-12), but five call sites put the
+ * body in the message they hand it: the Google token refresh
+ * (GoogleTokenHelper), the Microsoft one (MicrosoftTokenHelper), Forms create,
+ * the Graph contacts delta and the Drive share. Since the outage packets those
+ * messages reach the client in a 503 as well as a 400. POF-21 reads every call
+ * site in apps/server/src and refuses a message that names the body it was
+ * given, or any answer text the file read. RED-BEFORE (chain head b00e5f78):
+ * POF-21 fails naming those five sites.
  */
+import { readdirSync, readFileSync } from 'fs';
+import path from 'path';
 import { describe, it, expect } from 'vitest';
 import { BadRequestException, HttpException, ServiceUnavailableException } from '@nestjs/common';
 import { providerFailure, providerUnavailable, isTransientProviderFailure, readProviderFailureBody } from './provider-failure';
@@ -254,5 +266,166 @@ describe('providerFailure: an upstream outage is 503 provider_unavailable, a ref
     expectRefused(providerFailure(service, 403, googleError(403, 'PERMISSION_DENIED', ['insufficientPermissions']), 'm'), 'm');
     expectRefused(providerFailure(service, 404, googleError(404, 'NOT_FOUND'), 'm'), 'm');
     expectRefused(providerFailure(service, 400, JSON.stringify({ error: 'invalid_grant' }), 'm'), 'm');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FU-PROVIDER-ERROR-HYGIENE (D-221): no call site hands providerFailure() or
+// providerUnavailable() a message that carries the provider's answer text.
+// ---------------------------------------------------------------------------
+
+/** apps/server/src */
+const SERVER_SRC = path.resolve(__dirname, '..', '..');
+const DEFINITION = path.join(SERVER_SRC, 'core', 'connectors', 'provider-failure.ts');
+
+function productionSources(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === 'node_modules' || entry.name === '__tests__') continue;
+      out.push(...productionSources(full));
+    } else if (entry.name.endsWith('.ts') && !/\.(spec|test|d)\.ts$/.test(entry.name)) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+/**
+ * The top-level arguments of the call whose `(` is at `open`, as source text:
+ * strings, template literals (and their `${}` expressions), comments and
+ * nested brackets are skipped, so a comma inside any of them splits nothing.
+ */
+function callArguments(src: string, open: number): string[] {
+  const args: string[] = [];
+  const stack: string[] = [];
+  let start = open + 1;
+  for (let i = open; i < src.length; i += 1) {
+    const ch = src[i];
+    const top = stack[stack.length - 1];
+    if (top === '`') {
+      if (ch === '\\') i += 1;
+      else if (ch === '`') stack.pop();
+      else if (ch === '$' && src[i + 1] === '{') { stack.push('${'); i += 1; }
+      continue;
+    }
+    if (top === "'" || top === '"') {
+      if (ch === '\\') i += 1;
+      else if (ch === top) stack.pop();
+      continue;
+    }
+    if (ch === '/' && src[i + 1] === '/') { i = src.indexOf('\n', i); if (i < 0) break; continue; }
+    if (ch === '/' && src[i + 1] === '*') { i = src.indexOf('*/', i) + 1; if (i <= 0) break; continue; }
+    if (ch === "'" || ch === '"' || ch === '`') { stack.push(ch); continue; }
+    if (ch === '(' || ch === '[' || ch === '{') { stack.push(ch); continue; }
+    if (ch === ')' || ch === ']' || ch === '}') {
+      stack.pop();
+      if (stack.length === 0) {
+        args.push(src.slice(start, i).trim());
+        return args;
+      }
+      continue;
+    }
+    if (ch === ',' && stack.length === 1) {
+      args.push(src.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  throw new Error(`unbalanced call at offset ${open}`);
+}
+
+const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * The code of an argument: its text with every string literal and the literal
+ * parts of every template literal dropped (a template's `${}` expressions are
+ * kept), so `Gmail API error ${res.status}` is code `res.status`, not `error`.
+ */
+function codeOf(expr: string): string {
+  let code = '';
+  const stack: string[] = [];
+  for (let i = 0; i < expr.length; i += 1) {
+    const ch = expr[i];
+    const top = stack[stack.length - 1];
+    if (top === '`') {
+      if (ch === '\\') i += 1;
+      else if (ch === '`') stack.pop();
+      else if (ch === '$' && expr[i + 1] === '{') { stack.push('${'); i += 1; code += ' '; }
+      continue;
+    }
+    if (top === "'" || top === '"') {
+      if (ch === '\\') i += 1;
+      else if (ch === top) stack.pop();
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') { stack.push(ch); code += ' '; continue; }
+    if (ch === '{') stack.push('{');
+    if (ch === '}') {
+      const opened = stack.pop();
+      if (opened === '${') { code += ' '; continue; }
+    }
+    code += ch;
+  }
+  return code;
+}
+const names = (expr: string, id: string) => new RegExp(`(^|[^\\w$.])${escapeRe(id)}($|[^\\w$])`).test(codeOf(expr));
+
+interface ProviderCall { file: string; line: number; fn: 'providerFailure' | 'providerUnavailable'; body: string | null; message: string }
+
+/** Every providerFailure / providerUnavailable call in the server's production code. */
+function providerCalls(): { calls: ProviderCall[]; answerTextNames: Map<string, Set<string>> } {
+  const calls: ProviderCall[] = [];
+  const answerTextNames = new Map<string, Set<string>>();
+  for (const file of productionSources(SERVER_SRC)) {
+    if (file === DEFINITION) continue;
+    const src = readFileSync(file, 'utf8');
+    if (!/provider(Failure|Unavailable)\(/.test(src)) continue;
+    const rel = path.relative(SERVER_SRC, file);
+    // The names this file binds to an answer's text: `const body = await res.text()`, `= await readProviderFailureBody(res)`.
+    const bound = new Set<string>();
+    for (const m of src.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*await\s+(?:[\w$.]+\.text\(\)|readProviderFailureBody\()/g)) bound.add(m[1]);
+    answerTextNames.set(rel, bound);
+    for (const m of src.matchAll(/(^|[^\w$.])(providerFailure|providerUnavailable)\(/g)) {
+      const before = src.slice(Math.max(0, m.index! - 20), m.index! + m[1].length);
+      if (/function\s+$/.test(before) || /import\s*\{[^}]*$/.test(src.slice(0, m.index! + m[1].length).split('\n').pop() ?? '')) continue;
+      const open = m.index! + m[0].length - 1;
+      const args = callArguments(src, open);
+      const fn = m[2] as ProviderCall['fn'];
+      const line = src.slice(0, open).split('\n').length;
+      if (fn === 'providerFailure') calls.push({ file: rel, line, fn, body: args[2] ?? null, message: args[3] ?? '' });
+      else calls.push({ file: rel, line, fn, body: null, message: args[2] ?? '' });
+    }
+  }
+  return { calls, answerTextNames };
+}
+
+describe('FU-PROVIDER-ERROR-HYGIENE (D-221): a provider\'s answer text never reaches a providerFailure / providerUnavailable message', () => {
+  it('[POF-21] RED-BEFORE: no call site in apps/server/src puts the body it classifies, or any answer text its file read, in the message', () => {
+    const { calls, answerTextNames } = providerCalls();
+    // The guard reads the real call sites (Gmail, Drive, the connect clients, CRM Google, Calendar): not vacuous.
+    expect(calls.length).toBeGreaterThanOrEqual(60);
+    for (const file of [
+      'modules/connect/google-token.helper.ts',
+      'modules/connect/microsoft-token.helper.ts',
+      'modules/connect/google-forms.service.ts',
+      'modules/connect/outlook-contacts-sync.service.ts',
+      'modules/connect/google-business-profile.service.ts',
+      'modules/google-drive/google-drive.service.ts',
+      'modules/commerce/gmail.service.ts',
+    ]) {
+      expect(calls.some((c) => c.file === file), file).toBe(true);
+    }
+
+    const offenders: string[] = [];
+    for (const call of calls) {
+      const carried = new Set(answerTextNames.get(call.file) ?? []);
+      if (call.body && IDENTIFIER.test(call.body) && call.body !== 'null') carried.add(call.body);
+      const leaks = [...carried].filter((id) => names(call.message, id));
+      if (/\.text\(|\.json\(|readProviderFailureBody\(/.test(codeOf(call.message))) leaks.push('<an answer read in the message>');
+      if (leaks.length > 0) offenders.push(`${call.file}:${call.line} ${call.fn} message ${call.message} carries ${leaks.join(', ')}`);
+    }
+    expect(offenders).toEqual([]);
   });
 });

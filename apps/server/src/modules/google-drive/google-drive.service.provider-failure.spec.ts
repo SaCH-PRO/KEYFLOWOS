@@ -19,6 +19,12 @@
  *
  * RED-BEFORE (int/v1-base at 15ca8599): every outage case fails (each site
  * answered BadRequestException); the refusal and unchanged cases pass.
+ *
+ * FU-PROVIDER-ERROR-HYGIENE (D-221): the share site's message carried the
+ * upstream text ('Drive share failed: <status> <body>'), which since this
+ * packet's 503 reached the client for an outage as well as a refusal. It is
+ * 'Drive share failed: <status>' now, like the other sites. RED-BEFORE (chain
+ * head b00e5f78): the shareFile rows of DPF-01 and DPF-02, and DPF-10.
  */
 import 'reflect-metadata';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -146,8 +152,8 @@ const SITES: Array<{
   { name: 'trashFile', fail: (u, m) => m === 'PATCH' && u.endsWith('/drive/v3/files/f1'), call: (d) => d.trashFile(BIZ, 'f1'), message: (s) => `Drive trash failed: ${s}` },
   { name: 'untrashFile', fail: (u, m) => m === 'PATCH' && u.endsWith('/drive/v3/files/f1'), call: (d) => d.untrashFile(BIZ, 'f1'), message: (s) => `Drive untrash failed: ${s}` },
   { name: 'deleteFile', fail: (_u, m) => m === 'DELETE', call: (d) => d.deleteFile(BIZ, 'f1'), message: (s) => `Drive delete failed: ${s}` },
-  // The share site's message already carried the upstream text before this packet; it is kept as it was.
-  { name: 'shareFile', fail: (u) => u.includes('/permissions'), call: (d) => d.shareFile(BIZ, 'f1', { type: 'anyone', role: 'reader' }), message: (s, b) => `Drive share failed: ${s} ${b}` },
+  // FU-PROVIDER-ERROR-HYGIENE (D-221): the share site's message carried the upstream text; it carries the status only.
+  { name: 'shareFile', fail: (u) => u.includes('/permissions'), call: (d) => d.shareFile(BIZ, 'f1', { type: 'anyone', role: 'reader' }), message: (s) => `Drive share failed: ${s}` },
   { name: 'createDoc', fail: (u, m) => m === 'POST' && u === 'https://www.googleapis.com/drive/v3/files', call: (d) => d.createDoc(BIZ, 'Doc'), message: (s) => `Drive createDoc failed: ${s}` },
   { name: 'createSheet', fail: (u, m) => m === 'POST' && u === 'https://www.googleapis.com/drive/v3/files', call: (d) => d.createSheet(BIZ, 'Sheet'), message: (s) => `Drive createSheet failed: ${s}` },
   { name: 'createFolder', fail: (u, m) => m === 'POST' && u === 'https://www.googleapis.com/drive/v3/files', call: (d) => d.createFolder(BIZ, 'Folder'), message: (s) => `Drive createFolder failed: ${s}` },
@@ -258,6 +264,23 @@ describe('GoogleDriveService — a Drive outage is 503 provider_unavailable, a r
         stubDrive((u) => u.includes('/drive/v3/files?'), status, googleError(status, CANARY, [CANARY]));
         const err = await failureOf(service().drive.listFiles(BIZ, {}));
         expect(err.message).toBe('Failed to list Google Drive files');
+        expect(JSON.stringify(err.getResponse())).not.toContain(CANARY);
+      }
+    });
+  });
+
+  describe('FU-PROVIDER-ERROR-HYGIENE (D-221)', () => {
+    it('[DPF-10] RED-BEFORE: FU-PROVIDER-ERROR-HYGIENE (D-221): the share site no longer carries the upstream body, for an outage (503) or a refusal (403 insufficientPermissions, 400)', async () => {
+      const CANARY = 'dpf-canary-share-body';
+      for (const [status, reason, unavailable] of [
+        [503, 'backendError', true],
+        [403, 'insufficientPermissions', false],
+        [400, 'invalidSharingRequest', false],
+      ] as Array<[number, string, boolean]>) {
+        stubDrive((u) => u.includes('/permissions'), status, googleError(status, CANARY, [reason]));
+        const err = await failureOf(service().drive.shareFile(BIZ, 'f1', { type: 'anyone', role: 'reader' }));
+        if (unavailable) expectUnavailable(err, `Drive share failed: ${status}`, status);
+        else expectRefused(err, `Drive share failed: ${status}`);
         expect(JSON.stringify(err.getResponse())).not.toContain(CANARY);
       }
     });

@@ -30,6 +30,13 @@ const REFRESH_SERVICE: Record<TokenFields['refresh'], ProviderService> = {
  * provider_unavailable naming the connection's service; a refusal
  * (invalid_grant, invalid_client: reconnect) keeps its 400. Either way the
  * message is the existing one and no token is written.
+ *
+ * FU-PROVIDER-ERROR-HYGIENE (D-221): that message is 'Failed to refresh
+ * <label> token'. It carried the token endpoint's body after a colon, which
+ * reached the client in the 400 and the 503, and every copy of the message
+ * (a scheduled Business Profile post's stored error, a connector's last
+ * error). The body is still read, to classify the failure, and kept out of
+ * the message.
  */
 export class GoogleTokenHelper {
   constructor(private readonly prisma: PrismaService) {}
@@ -96,8 +103,8 @@ export class GoogleTokenHelper {
         }),
       });
       if (!res.ok) {
-        const err = await res.text();
-        throw providerFailure(REFRESH_SERVICE[fields.refresh], res.status, err, `Failed to refresh ${label} token: ${err}`);
+        const body = await res.text();
+        throw providerFailure(REFRESH_SERVICE[fields.refresh], res.status, body, `Failed to refresh ${label} token`);
       }
       const tokens = (await res.json()) as { access_token: string; expires_in?: number };
       const newExpiry = new Date(Date.now() + (tokens.expires_in ?? 3600) * 1000);
