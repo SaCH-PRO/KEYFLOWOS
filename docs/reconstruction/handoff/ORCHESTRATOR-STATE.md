@@ -40,7 +40,7 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 
 ## 2. Rulings not yet on main
 
-D-255 and D-256 and seven follow-up packets (plan now 217) are recorded on `pkt/V1-RULINGS-3E` (main merged in): it
+D-255 to D-260, seven follow-up packets, the 13 memory packets and three ruling packets (plan now 244) are recorded on `pkt/V1-RULINGS-3E` (main merged in): it
 joins wave 3e. D-249 to D-254 are on main (wave 3d, #221).
 
 ## 3. Work in flight (what git on main cannot show)
@@ -71,29 +71,34 @@ Next to start, in order, when a slot frees: FU-SEND-REMINDER-SERVER-GATE
 
 Format: `docs/development/agent-memory/OWNER-QUESTION-FORMAT.md`. Safe defaults apply until ruled.
 
-1. Finance doors open to any member (pre-existing): POST intelligence/scan, actions/:id/resolve and /dismiss need only
-   membership. Proposed P0 packet: revenue write for resolve/dismiss, revenue read for scan.
-2. FIN8 command-item mirrors show cash, burn and runway to operations readers; D-100 reads as no money signals without
+1. FIN8 command-item mirrors show cash, burn and runway to operations readers; D-100 reads as no money signals without
    revenue read. Proposed packet: strip figures from the mirrors.
-3. Runway rollout order. Default applied: W11-RUNWAY-LEDGER-CASH merges with W11-CASH-READERS-LEDGER and
+2. Runway rollout order. Default applied: W11-RUNWAY-LEDGER-CASH merges with W11-CASH-READERS-LEDGER and
    W11-RUNWAY-BURN-CURRENCY.
-4. Other status-based money figures on the Sales screen (one small follow-up packet proposed).
-5. `adjustInventory` and the Google Sheets stock apply bypass the D-139 reserved floor and lock (pre-existing; not
+3. Other status-based money figures on the Sales screen (one small follow-up packet proposed).
+4. `adjustInventory` and the Google Sheets stock apply bypass the D-139 reserved floor and lock (pre-existing; not
    cross-tenant). Proposed packet FU-STOCK-ADJUST-AND-SHEETS-FLOOR (P1); the Excel import movement should name its
    uploader (default: yes).
-6. Should the agent-memory tests and `status.mjs --check` run in CI? (Default: not until asked.)
-7. A cash shortfall on the command item ranks like zero cash (runway packet deviation). Should a shortfall rank
+5. Should the agent-memory tests and `status.mjs --check` run in CI? (Default: not until asked.)
+6. A cash shortfall on the command item ranks like zero cash (runway packet deviation). Should a shortfall rank
    highest? (Default: as built.)
-8. Health (`GET intelligence/.../health` and its snapshots) is served under settings read and now shows live ledger
-   cash; should money-area figures be withheld without revenue read (D-100)? (Default: do not widen Health readers.)
-9. KEY's overdue list now includes never-sent PENDING invoices (D-256); a drafted reminder would say "N days overdue".
-   Keep PENDING there? (Default: yes for figures; the server reminder gate packet keeps sends off PENDING.)
-10. Should the server's own storage host (`S3_PUBLIC_URL`) be exempt from the document-fetch guard when it is private
+7. Should the server's own storage host (`S3_PUBLIC_URL`) be exempt from the document-fetch guard when it is private
     (self-hosted MinIO)? (Default: keep refusing.)
-11. Should a filtered general ledger's running balance start from the account's true opening balance instead of zero?
+8. Should a filtered general ledger's running balance start from the account's true opening balance instead of zero?
     (Default: as built, column labelled.)
-12. Should `GET chart-of-accounts` (membership-only; names and codes, seeds defaults on read) require a module scope?
+9. Should `GET chart-of-accounts` (membership-only; names and codes, seeds defaults on read) require a module scope?
     (Default: unchanged.)
+10. The memory design's own questions Q1-Q14 (`docs/intelligence/research/memory/OPEN-QUESTIONS-FOR-OWNER.md`), on their
+    recommended defaults until ruled (D-257).
+
+11. Should D-258 extend to the mirror doors (RevenueAction FIN_* complete/dismiss, command MONEY items complete/dismiss/
+    bulk, command generate/auto-scan, signals resolve/dismiss) and refuse a non-member SUPER_ADMIN the intelligence scan?
+    (Default: tracked, unchanged.)
+12. Should a PARTIALLY_CREDITED invoice that still owes be remindable (D-260 counts it as sent; the gate refuses it)?
+    (Default: refused.)
+13. release0-live AMEND: contacts page h1 "Customers" (spec ~286, ~475)? (Default: h1 stays "Contacts", menu says
+    "Customers".)
+14. Should the menu fail open (show every hub) when the my-access read fails? (Default: yes; the server is the gate.)
 
 ## 5. How to work here (learned the hard way)
 
