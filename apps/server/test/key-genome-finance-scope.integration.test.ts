@@ -1190,3 +1190,33 @@ describe('FU-GENOME-REVENUE-CLASSIFIER (D-234, D-128, D-100): sales-derived and 
     expect(reviewSales.status, JSON.stringify(reviewSales.body)).toBe(403);
   }, 30_000);
 });
+
+describe('FU-PROPOSAL-REVENUE-SIGHT (D-238; D-226, D-227, D-234): a KEY proposal outcome event is served to a member without revenue read only when its proposal is non-financial', () => {
+  const PROP = { fin: `${P}mem_prop_fin`, task: `${P}mem_prop_task`, unknown: `${P}mem_prop_unknown` };
+  beforeAll(async () => {
+    for (const [id, title, metadata] of [
+      [PROP.fin, 'Action executed: Invoice Acme for the March retainer', { actionType: 'CREATE_INVOICE', module: 'commerce', toolName: 'commerce.create_invoice' }],
+      [PROP.task, 'Action executed: Call Kerry back', { actionType: 'CREATE_TASK', module: 'crm', toolName: null }],
+      [PROP.unknown, 'Action executed: KEY action proposal', { actionType: 'EXECUTE_TOOL' }],
+    ] as const) {
+      await db.genomeMemoryEvent.create({
+        data: { id, businessId: ID.biz, sourceType: 'KEY_ACTION_PROPOSAL', sourceEntityId: `${id}_kap`, eventType: 'ACTION_EXECUTED', domain: null, section: null, title, summary: 'KEY action was executed.', outcome: 'SUCCESS', impactScore: 0.75, occurredAt: new Date(), metadata },
+      });
+    }
+  }, 60_000);
+
+  it('[PRS-01] RED-BEFORE (D-238): GET memory serves the revenue none STAFF member the task proposal event only; the invoice proposal and the unclassifiable one are withheld, and GET memory/:id of them answers 403', async () => {
+    const ids = ((await get('memory', ID.staffNone)).body as any[]).map((r) => r.id);
+    expect(ids).toContain(PROP.task);
+    for (const id of [PROP.fin, PROP.unknown]) expect(ids, id).not.toContain(id);
+    for (const id of [PROP.fin, PROP.unknown]) expect((await get(`memory/${id}`, ID.staffNone)).status, id).toBe(403);
+    expect((await get(`memory/${PROP.task}`, ID.staffNone)).status).toBe(200);
+  }, 30_000);
+
+  it('[PRS-02] control (D-238): the revenue read STAFF member and the OWNER are served all three', async () => {
+    for (const reader of [ID.staffRead, ID.owner]) {
+      const ids = ((await get('memory', reader)).body as any[]).map((r) => r.id);
+      for (const id of Object.values(PROP)) expect(ids, `${reader}: ${id}`).toContain(id);
+    }
+  }, 30_000);
+});
