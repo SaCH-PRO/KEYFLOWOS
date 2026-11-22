@@ -343,7 +343,9 @@ function readings(text: string, budget: ReadingBudget): string[] | null {
   let cost = 0;
   for (const reading of out) cost += reading.length;
   if (cost > budget.left) return null;
-  budget.left -= cost;
+  // The larger of the two is deducted: the id pass ran over the raw readings, so a field never costs less than they
+  // do, and id-dense text split across fields runs the budget out as one field would (review of the budget repair).
+  budget.left -= Math.max(rawCost, cost);
   return [...out];
 }
 
