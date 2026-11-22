@@ -166,3 +166,33 @@ test('readyList breaks ties by priority, then id', () => {
   const packets = [pk('Z', [], { priority: 'P0' }), pk('B', [], { priority: 'P1' }), pk('A', [], { priority: 'P1' })];
   assert.deepEqual(readyList(packets, { Z: 'todo', A: 'todo', B: 'todo' }, []).map((r) => r.id), ['Z', 'A', 'B']);
 });
+
+// Codex review of #221 (P1): a D-id that is both an open question and, later, a ruling resolves to the ruling only.
+test('resolveDecision prefers the ruling row over the superseded open-question row', () => {
+  const md = [
+    '## (g) Open decisions for the owner (and ChatGPT where marked)',
+    '| D-11 | **Authority policy.** settings:write for business config? | open |',
+    '| D-12 | Still open? | open |',
+    '### Owner rulings, 2026-10-31',
+    '| D-11 | Editing the business profile is OWNER only. (`ownerprofile`) | R0-09 |',
+  ].join('\n');
+  const rows = parseRulings(md);
+  const d11 = resolveDecision('D-11', rows);
+  assert.equal(d11.length, 1);
+  assert.match(d11[0].text, /OWNER only/);
+  const d12 = resolveDecision('D-12', rows);
+  assert.equal(d12.length, 1, 'an id with only an open-question row keeps it');
+  assert.equal(d12[0].unresolved, true, 'and it is marked unresolved');
+});
+
+// Codex review of #221 (P2): --check compares both generated files.
+test('statusFilesCurrent requires both files and compares the Markdown too', async () => {
+  const { statusFilesCurrent } = await import('../lib.mjs');
+  const status = { summary: { packets: 1 }, packets: [{ id: 'A', status: 'todo' }], _generated: { main_sha: 'a'.repeat(40) } };
+  const md = '# V1 status\n';
+  const json = JSON.stringify(status);
+  assert.equal(statusFilesCurrent({ jsonText: json, mdText: md, status, md }).current, true);
+  assert.equal(statusFilesCurrent({ jsonText: json, mdText: null, status, md }).current, false);
+  assert.equal(statusFilesCurrent({ jsonText: json, mdText: '# edited by hand\n', status, md }).current, false);
+  assert.equal(statusFilesCurrent({ jsonText: null, mdText: md, status, md }).current, false);
+});
