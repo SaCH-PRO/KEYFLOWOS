@@ -399,7 +399,10 @@ function recorded(
     if (!own) return { data: null, error: UNREADABLE_ANSWER, status: res.status };
     return holds(own) ? res : { data: null, error: UNCONFIRMED_ANSWER, status: res.status };
   }
-  if (res.error === null) newestWriteRecorded.set(businessId, Math.max(newestWriteRecorded.get(businessId) ?? 0, sequence));
+  // Only an answer recorded for the member acting raises the mark (review SEC-3).
+  if (res.error === null && sentAs === actingMember()) {
+    newestWriteRecorded.set(businessId, Math.max(newestWriteRecorded.get(businessId) ?? 0, sequence));
+  }
   if (res.error !== null) {
     // The outcome is unknown when the server's answer never arrived (no status: a dropped connection, a timeout)
     // or was a 5xx (a gateway that gave up while the server went on, a failure after the write was stored): the

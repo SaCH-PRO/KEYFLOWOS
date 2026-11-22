@@ -19,7 +19,7 @@ import {
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
 // The nav's reader of what the business sells (BIZ-SETTINGS-WEB). Not the settings page's hook of the same name
 // (app/app/settings/business/use-business-settings.ts).
-import { useBusinessSettings } from "@/lib/business-settings";
+import { actingMemberNow, useBusinessSettings } from "@/lib/business-settings";
 import { featureFlags as dormantFeatureFlags } from "@/lib/feature-flags";
 import type { AppNotification } from "@/lib/notifications";
 import type { ResolvedFeatureFlag } from "@/lib/nav-config";
@@ -170,7 +170,9 @@ export function useAppLayout(): AppLayoutState {
   }, []);
 
   // NAV-A1 (D-150, D-179): the hubs follow what the business sells and what this member may open.
-  const { sells } = useBusinessSettings();
+  const businessSettings = useBusinessSettings();
+  // Not known while loading (review COR-2): no sells-dependent hub shows until it is, so no wrong bar flashes.
+  const sells = businessSettings.status === "loading" ? null : businessSettings.sells;
   const moduleLevels = useMemberModuleLevels();
 
   const visibleHubs = useMemo(() => hubsFor(sells, moduleLevels), [sells, moduleLevels]);
@@ -470,7 +472,8 @@ export function useAppLayout(): AppLayoutState {
 
 /* ───────────────────────── the member's module levels (NAV-A1) ───────────────────────── */
 
-function subscribeToSelectedBusiness(onChange: () => void) {
+/** The selected business and the member acting, as one key: either changing is another answer to wait for. */
+function subscribeToSelection(onChange: () => void) {
   window.addEventListener(BUSINESS_CHANGED_EVENT, onChange);
   window.addEventListener("storage", onChange);
   return () => {
@@ -479,33 +482,54 @@ function subscribeToSelectedBusiness(onChange: () => void) {
   };
 }
 
+const selectionKey = () => {
+  const businessId = getStoredBusinessId();
+  return businessId ? `${actingMemberNow()}\n${businessId}` : null;
+};
+
 const NO_SELECTION_ON_SERVER = () => null;
 
 /**
  * NAV-A1 (D-150, D-179; journey J5): the signed-in member's level on each module of the selected business, as the
  * server reads it (GET identity/businesses/:b/my-access), for the nav to offer only the hubs they may open. Null
  * (unknown) until this business's answer lands, and when the read fails: unknown hides nothing (WOS-R1), and the
- * server still refuses. An answer belongs to the business it was asked for: it is applied only while that business
- * is still the selected one, and a switch (selectBusiness, another tab, refreshWorkspace's correction picked up on
- * the next render) reads the new one.
+ * server still refuses. An answer belongs to the member and the business it was asked for (review SEC-1): it is
+ * applied only while both are still the ones selected, and a switch (selectBusiness, another tab's sign-in or
+ * selection, refreshWorkspace's correction picked up on the next render) reads again. The tab looked at again reads
+ * again too, so an owner's change to this member's scopes reaches their menu without a reload (SEC-2, COR-7).
  */
 export function useMemberModuleLevels(): ModuleLevels {
-  const businessId = useSyncExternalStore(subscribeToSelectedBusiness, getStoredBusinessId, NO_SELECTION_ON_SERVER);
-  const [answered, setAnswered] = useState<{ businessId: string; levels: ModuleLevels } | null>(null);
+  const key = useSyncExternalStore(subscribeToSelection, selectionKey, NO_SELECTION_ON_SERVER);
+  const [answered, setAnswered] = useState<{ key: string; levels: ModuleLevels } | null>(null);
+  const [lookedAgain, setLookedAgain] = useState(0);
 
   useEffect(() => {
-    if (!businessId) return;
+    const again = () => {
+      if (document.visibilityState !== "hidden") setLookedAgain((n) => n + 1);
+    };
+    window.addEventListener("focus", again);
+    document.addEventListener("visibilitychange", again);
+    return () => {
+      window.removeEventListener("focus", again);
+      document.removeEventListener("visibilitychange", again);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!key) return;
+    const businessId = key.slice(key.indexOf("\n") + 1);
     let disposed = false;
     void apiGet(`/identity/businesses/${encodeURIComponent(businessId)}/my-access`)
       .then((res) => (res.error ? null : memberModuleLevelsOf(res.data)))
       .catch(() => null)
       .then((levels) => {
-        if (!disposed) setAnswered({ businessId, levels });
+        // A later read (another look, another member or business) is already on its way: this one is not current.
+        if (!disposed) setAnswered({ key, levels });
       });
     return () => {
       disposed = true;
     };
-  }, [businessId]);
+  }, [key, lookedAgain]);
 
-  return answered !== null && answered.businessId === businessId ? answered.levels : null;
+  return answered !== null && answered.key === key ? answered.levels : null;
 }

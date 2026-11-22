@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -269,6 +270,7 @@ export function DesktopSidebar({
   setKfStoreOpen,
 }: DesktopSidebarProps) {
   const [moreExpanded, setMoreExpanded] = useState(false);
+  const pathname = usePathname() ?? "";
   // W7-WEB-OPS-SCOPE (D-40): no Purchasing entry for a member the server refuses operations; the cockpit stays (D-96).
   const operationsAccess = useOperationsAccess();
   const visibleOperateSections = sectionsForOperationsAccess(operateSectionsIn, operationsAccess);
@@ -317,12 +319,12 @@ export function DesktopSidebar({
                 isActive ? "text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
               )}
               aria-label={hub.label}
-              aria-current={isActive ? "page" : undefined}
+              aria-current={isActive ? (pathname === hub.href ? "page" : "true") : undefined}
               onClick={() => setDrawerSurface(null)}
             >
               <RailIndicator active={isActive} />
               <Icon className="w-[18px] h-[18px] transition-transform group-hover:scale-110" aria-hidden="true" />
-              <span className="mt-0.5 text-[10px] leading-tight font-medium text-center">{hub.label}</span>
+              <span className="mt-0.5 text-[11px] leading-tight font-medium text-center">{hub.label}</span>
             </Link>
           );
         })}
@@ -336,7 +338,7 @@ export function DesktopSidebar({
           onClick={() => setDrawerSurface(null)}
         >
           <Bot className="w-[18px] h-[18px]" aria-hidden="true" />
-          <span className="mt-0.5 text-[10px] leading-tight font-medium">KEY</span>
+          <span className="mt-0.5 text-[11px] leading-tight font-medium">KEY</span>
         </Link>
 
         {(
@@ -363,7 +365,7 @@ export function DesktopSidebar({
               <RailIndicator active={open} />
               <FlowConnector active={open} />
               <Icon className="w-[18px] h-[18px]" aria-hidden="true" />
-              <span className="mt-0.5 text-[10px] leading-tight font-medium">{label}</span>
+              <span className="mt-0.5 text-[11px] leading-tight font-medium">{label}</span>
             </button>
           );
         })}

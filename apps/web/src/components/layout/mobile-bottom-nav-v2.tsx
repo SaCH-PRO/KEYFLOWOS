@@ -116,12 +116,14 @@ export function MobileBottomNavV2({
   const hubLink = (hub: HubNavItem) => {
     const Icon = hub.icon;
     const active = isHubActive(hub, pathname);
+    // "page" on the hub's own page; "true" anywhere else inside the hub (review COR-4).
+    const current = active ? (pathname === hub.href ? "page" : "true") : undefined;
     return (
       <Link
         key={hub.id}
         href={hub.href}
         aria-label={hub.label}
-        aria-current={active ? "page" : undefined}
+        aria-current={current}
         onClick={() => haptic(8)}
         className={cn(SLOT, active ? "text-primary bg-primary/5" : "text-muted-foreground hover:bg-muted")}
       >
@@ -152,7 +154,7 @@ export function MobileBottomNavV2({
             type="button"
             onClick={() => {
               haptic(12);
-              setAddMenuOpen?.(true);
+              setAddMenuOpen?.((open) => !open);
             }}
             aria-label="New"
             aria-haspopup="menu"

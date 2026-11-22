@@ -70,7 +70,7 @@ function MobileSection({
           <Link
             href={section.href}
             onClick={onNavigate}
-            className="text-[12px] font-semibold uppercase tracking-wider text-foreground/80 hover:text-foreground min-h-[32px] flex items-center focus-ring rounded"
+            className="text-[12px] font-semibold uppercase tracking-wider text-foreground/80 hover:text-foreground min-h-[44px] flex items-center focus-ring rounded"
           >
             {section.label}
           </Link>

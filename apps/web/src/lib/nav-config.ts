@@ -424,13 +424,16 @@ export function canOpenModule(levels: ModuleLevels, module: NavModule | undefine
   return level === undefined || level !== "none";
 }
 
-/** The hubs a business that sells `sells` has (D-150): a products business has no Schedule. */
-function hubsForSells(sells: BusinessSells): HubNavItem[] {
-  return sells === "products" ? hubNav.filter((h) => h.id !== "schedule") : hubNav;
+/**
+ * The hubs a business that sells `sells` has (D-150): a products business has no Schedule. `null` is not known yet
+ * (the settings are loading): only the hubs every business has, so a products business never flashes Schedule.
+ */
+function hubsForSells(sells: BusinessSells | null): HubNavItem[] {
+  return sells === "both" || sells === "services" ? hubNav : hubNav.filter((h) => h.id !== "schedule");
 }
 
 /** The hubs a member is shown, in menu order, each holding only the screens they may open. */
-export function hubsFor(sells: BusinessSells, levels: ModuleLevels): HubNavItem[] {
+export function hubsFor(sells: BusinessSells | null, levels: ModuleLevels): HubNavItem[] {
   return hubsForSells(sells)
     .filter((hub) => canOpenModule(levels, hub.module))
     .map((hub) => {
@@ -453,7 +456,9 @@ const BOTTOM_BAR_FALLBACK: BusinessHub[] = ["customers", "schedule", "sales", "m
  * The hubs between Today and New, and New and More, on the phone's bottom bar. A hub the member cannot open gives
  * its slot to the next one they can; never a hub they cannot open, so the bar may hold one hub, or none.
  */
-export function bottomBarFor(sells: BusinessSells, levels: ModuleLevels): HubNavItem[] {
+export function bottomBarFor(sells: BusinessSells | null, levels: ModuleLevels): HubNavItem[] {
+  // Not known yet: no slot, rather than the wrong two.
+  if (sells === null) return [];
   const open = hubsFor(sells, levels);
   const byId = (id: BusinessHub) => open.find((h) => h.id === id);
   const chosen: HubNavItem[] = [];
@@ -483,12 +488,18 @@ function sectionsFor(sections: NavSection[], keep: (item: NavItem) => boolean): 
 }
 
 /** More, as a member sees it: the hub sections they may open, then everything else they may open. */
-export function menuSectionsFor(sells: BusinessSells, levels: ModuleLevels): { hubSections: NavSection[]; moreSections: NavSection[] } {
-  const hubs = new Set(hubsFor(sells, levels).map((h) => h.id as string));
+export function menuSectionsFor(
+  sells: BusinessSells | null,
+  levels: ModuleLevels,
+): { hubSections: NavSection[]; moreSections: NavSection[] } {
+  const forSells = new Set(hubsForSells(sells).map((h) => h.id as string));
+  const openHubs = new Set(hubsFor(sells, levels).map((h) => h.id as string));
+  // A screen with a module of its own (Expenses, Team) is shown to a member who may open it even when they may not
+  // open its hub's page (review COR-1); the section heading then opens nothing.
   const hubSections = sectionsFor(
-    operateSections.filter((s) => hubs.has(s.id)),
+    operateSections.filter((s) => forSells.has(s.id)),
     (item) => canOpenModule(levels, item.module),
-  );
+  ).map((section) => (openHubs.has(section.id) ? section : { ...section, href: undefined }));
   const moreSections = sectionsFor(buildSections, (item) => canOpenModule(levels, item.module));
   return { hubSections, moreSections };
 }
