@@ -169,3 +169,25 @@ describe('round-4 review repairs (correctness minors 3, 4, 5; security minor 3)'
     expect(await financialProposalsWithProvenance(prisma, 'biz_1', rows.slice(1, 2) as any)).toEqual([true]);
   });
 });
+
+describe('round-5 review repairs (security M1, correctness minors 1, 2, 6)', () => {
+  it.each([
+    ['pay with a figure and no currency', { actionType: 'CREATE_TASK', module: 'crm', title: 'Pay the contractor 800' }],
+    ['pay a person', { actionType: 'CREATE_TASK', module: 'crm', title: 'Pay Jane 500 for the shoot' }],
+    ['pay rent', { actionType: 'CREATE_TASK', module: 'crm', title: 'Pay rent Friday' }],
+    ['a rate figure stored as a string', { actionType: 'CREATE_TASK', title: 'Plan', payload: { rate: '150' } }],
+    ['an hourly rate key stored as a string', { actionType: 'CREATE_TASK', title: 'Plan', payload: { hourlyRate: '150' } }],
+    ['a total stored as a string', { actionType: 'CREATE_TASK', title: 'Plan', payload: { total: '1,200' } }],
+    ['rates raised by a percentage', { actionType: 'CREATE_TASK', title: 'Raise rates by 10%' }],
+    ['rates up a percentage', { actionType: 'CREATE_TASK', title: 'Rates up 15% next month' }],
+    ['a camelCase money word in a long identifier', { actionType: 'CREATE_TASK', title: 'Plan', summary: 'see unpaidInvoices2026' }],
+  ])('%s is financial', (_l, p) => expect(isFinancialProposal(p as any)).toBe(true));
+
+  it.each([
+    ['a response rate with a figure', { actionType: 'CREATE_TASK', title: 'Lead response rate: 12%' }],
+    ['a show rate target', { actionType: 'CREATE_TASK', title: 'Improve show rate to 90%' }],
+    ['a completion rate in the parameters', { actionType: 'CREATE_TASK', title: 'Plan', payload: { completionRate: 80, responseRate: 0.4 } }],
+    ['pay attention', { actionType: 'CREATE_TASK', title: 'Pay attention to the onboarding step' }],
+    ['a cuid in free text', { actionType: 'CREATE_TASK', title: 'Call back', summary: 'contact cmwr8rbji00097dkwjitjsgzl' }],
+  ])('%s is not', (_l, p) => expect(isFinancialProposal(p as any)).toBe(false));
+});

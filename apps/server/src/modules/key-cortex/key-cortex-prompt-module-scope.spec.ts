@@ -714,6 +714,15 @@ describe('FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4): a memberless turn sees a pro
     expect((await readersOwnPromptMemory(prisma as any, 'biz_1', 'owner', unknown as any, 1000)).map((f) => f.id)).toEqual(unknown.map((f) => f.id));
   });
 
+  it('RED-BEFORE (round 5, security m2): a proposal record whose own fields read non-financial but whose proposal row is not found is withheld, as memory and the timeline withhold it; the owner sees it', async () => {
+    const gone = [{
+      id: 'gone_outcome', entityId: 'kap_gone', sourceType: 'genome_memory_event', title: 'Action executed: Call back', content: 'KEY action CREATE_TASK was executed.',
+      metadata: { actionType: 'CREATE_TASK', module: 'crm', genomeRow: { sourceType: 'KEY_ACTION_PROPOSAL', eventType: 'ACTION_EXECUTED', domain: null, section: null } },
+    }];
+    for (const reader of ['blind', null] as const) expect((await readersOwnPromptMemory(prisma as any, 'biz_1', reader, gone as any, 1000)).map((f) => f.id), String(reader)).toEqual([]);
+    expect((await readersOwnPromptMemory(prisma as any, 'biz_1', 'owner', gone as any, 1000)).map((f) => f.id)).toEqual(['gone_outcome']);
+  });
+
   it('D-238 (isolation): a projection for one reader neither changes the records nor reaches the next reader, and another business\'s proposal row is never read for this business', async () => {
     const records = [...ALL_RECORDS, ...NF_RECORDS];
     const before = JSON.stringify(records);

@@ -34,3 +34,10 @@ describe('execution status of a linked KEY proposal (D-238, round 4)', () => {
     expect(out).toMatchObject({ executionResult: JSON.stringify({ taskId: 't1' }), failureReason: null });
   });
 });
+
+describe('round 5 (correctness minor 5): the failure reason follows the redacted view', () => {
+  it('a financial proposal keeps a failure reason that states no money', async () => {
+    const out = await (service({ ...MONEY, failureReason: 'Refused: not mapped' }) as any).getExecutionStatus('biz_1', 'rec_1', { readsRevenue: false });
+    expect(out).toMatchObject({ executionResult: null, failureReason: 'Refused: not mapped' });
+  });
+});

@@ -948,6 +948,7 @@ describe("FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): a memberless turn
       for (const [i, action] of (['approve', 'reject', 'cancel'] as const).entries()) {
         targets[action] = await propose(PROPOSAL_TITLE, 'Outstanding invoices exceed 1.5x your monthly revenue.', 3 + i);
       }
+      let succeeded = 0;
       for (const action of ['approve', 'reject', 'cancel'] as const) {
         const target = targets[action];
         const res = await agent().post(proposalsRoute(`/${target}/${action}`)).set(HEADER, ID.blind).send(action === 'reject' ? { reason: 'no' } : {});
@@ -959,10 +960,14 @@ describe("FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): a memberless turn
           expect(res.body.id).toBe(target);
           const row = await db.keyActionProposal.findUnique({ where: { id: target }, select: { status: true } });
           expect(row?.status, action).toBe({ approve: 'APPROVED', reject: 'REJECTED', cancel: 'CANCELLED' }[action]);
+          succeeded += 1;
         }
       }
+      // Round 5 (correctness minor 3): the redacted answer is proven on at least one success, not skipped by refusals.
+      expect(succeeded, 'at least one action the blind member may take succeeds').toBeGreaterThan(0);
       {
-        const res = await agent().post(proposalsRoute(`/${money}/execute`)).set(HEADER, ID.blind).send({});
+        // Execute on the approved target (when the approve succeeded), so a success can answer.
+        const res = await agent().post(proposalsRoute(`/${targets.approve}/execute`)).set(HEADER, ID.blind).send({});
         const body = JSON.stringify(res.body);
         for (const marker of ['12,345', 'outstanding across', 'monthly revenue']) expect(body, `execute (${res.status}): ${marker}`).not.toContain(marker);
         // The executor's own refusal (a pending proposal is not executable) answers; the hiding 404 does not.

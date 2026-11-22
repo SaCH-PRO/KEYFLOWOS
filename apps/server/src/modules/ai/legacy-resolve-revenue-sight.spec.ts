@@ -32,3 +32,12 @@ describe('legacy aiApprovalItem resolve fallback (D-238, round 4)', () => {
     });
   }
 });
+
+describe('round 5 (security m3): only a missing proposal falls through to the legacy path', () => {
+  it('a proposal read that fails for another reason is not hidden by the legacy path', async () => {
+    const c = controller(async (_b, p) => p);
+    c.proposals.get = vi.fn(async () => { throw new Error('db down'); });
+    await expect(c.resolveLegacyApproval('b1', 'item_1', 'approved', 'u1', 'USER')).rejects.toThrow('db down');
+    expect(c.prisma.client.aiApprovalItem.findFirst).not.toHaveBeenCalled();
+  });
+});
