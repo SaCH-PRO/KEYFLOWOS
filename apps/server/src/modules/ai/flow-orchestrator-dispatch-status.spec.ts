@@ -1,23 +1,30 @@
 /**
  * W10-DISPATCH-STATUS (review SEC-W9DC-1, owner ruling D-73; QW-07b in
- * test/key-plan-authority.integration.test.ts) and its review CR-W10DS-1: what reaches the plan queue's
- * dispatcher (ActionDispatcherService) when a KEY tool throws an HttpException.
+ * test/key-plan-authority.integration.test.ts), its review CR-W10DS-1, and W11-DISPATCH-REFUSAL-FINAL
+ * (owner ruling D-134; DS-05, DS-06): what reaches the plan queue's dispatcher (ActionDispatcherService)
+ * when a KEY tool throws an HttpException.
  *
  * FlowOrchestratorService.executeToolDirectly rethrows the tool's HttpException, so the dispatcher answers
  * a refusal once and counts it toward no circuit (isToolRefusal: every 4xx but 408 and 429). Review
- * CR-W10DS-1 (confirmed by running): that also made final two statuses this codebase uses for a failure
- * worth retrying. A 409 is the optimistic-concurrency conflict that tells the caller to try again
- * (ProjectsService.updateTask: 'The task changed while it was being updated; try again', reached by
- * projects_complete_task and projects_update_task), and a 400 is also a provider that did not answer
- * (GmailService.searchMessages: 'Gmail search failed (503)', reached by reconcile_sweep_statements). On the
- * packet base such a step was retried and completed, and five outages opened that business's circuit for
- * the tool; at the packet head it failed on the first attempt and was never counted. A 400 or 409 now
- * reaches the dispatcher as the plain Error it did on the base, the HttpException as its cause.
+ * CR-W10DS-1 kept every 400 and 409 a plain Error (retried, counted), because a 409 was also the
+ * optimistic-concurrency conflict that tells the caller to try again (ProjectsService.updateTask: 'The
+ * task changed while it was being updated; try again', reached by projects_complete_task and
+ * projects_update_task), and a 400 was also a provider that did not answer (GmailService.searchMessages:
+ * 'Gmail search failed (503)', reached by reconcile_sweep_statements). So a member's genuine 400 (an
+ * argument the tool does not take) and a 409 a retry answers the same way were retried, and five of them
+ * held the tool for the whole business (the QW-07b class).
+ *
+ * W11-DISPATCH-REFUSAL-FINAL (D-134): a 400 and a plain 409 are final, as a 404 or 403 is (DS-05). The one
+ * conflict worth retrying says so by its class: ProjectsService.updateTask throws RetryableConflictException
+ * (a ConflictException, the same HTTP answer), which alone reaches the dispatcher as a plain Error with the
+ * exception as its cause (DS-01). A provider outage is a 503 since W11-PROVIDER-OUTAGE-503, retried and
+ * counted as itself (DS-02). A call the tool's own schema refuses (validateToolInput) is a 400 (DS-06).
  *
  * Pure: the real FlowOrchestratorService.executeToolDirectly, executeToolDirect, executeTool and
  * validateToolInput over stand-ins for the tool's own work (executeToolAction throws or answers as each
  * case says), the member scope check (none here), the execution log, governance's tier and the business
- * graph cache; the real ActionDispatcherService over that orchestrator, its retries immediate.
+ * graph cache; the real ActionDispatcherService over that orchestrator, its retries immediate. DS-01b: the
+ * real ProjectsService.updateTask over a prisma stand-in whose conditional write loses its race.
  */
 import { describe, it, expect } from 'vitest';
 import {
@@ -33,6 +40,11 @@ import {
 } from '@nestjs/common';
 import { FlowOrchestratorService } from './flow-orchestrator.service';
 import { ActionDispatcherService } from './action-dispatcher.service';
+import { ProjectsService } from '../projects/projects.service';
+import { providerUnavailable } from '../../core/connectors/provider-failure';
+
+/** The class ProjectsService.updateTask throws for a stale write (W11-DISPATCH-REFUSAL-FINAL, D-134). */
+const retryableConflict = async () => (await import('../../core/utils/retryable-conflict')).RetryableConflictException;
 
 const BIZ_A = 'w10ds_biz_a';
 const BIZ_B = 'w10ds_biz_b';
@@ -93,43 +105,110 @@ const CONFLICT = 'The task changed while it was being updated; try again';
 const GMAIL_OUTAGE = 'Gmail search failed (503)';
 const SWEEP = { toolName: 'reconcile_sweep_statements', args: { source: 'gmail', accountId: 'w10ds_account' } };
 
-describe('FlowOrchestratorService.executeToolDirectly hands the plan queue a refusal\'s status, and a conflict or provider outage as a failure (W10-DISPATCH-STATUS, D-73; review CR-W10DS-1)', () => {
-  it('DS-01 W10-DISPATCH-STATUS review CR-W10DS-1 (D-73): a 409 conflict that tells the caller to try again (ProjectsService.updateTask\'s, reached by projects_complete_task and projects_update_task) reaches the dispatcher as a plain Error with the ConflictException as its cause, so the plan queue retries the step and it completes', async () => {
+/** Counts every call the dispatcher makes to executeToolDirectly (a call validateToolInput refuses never reaches the tool's work). */
+function countAttempts(flow: FlowOrchestratorService) {
+  let attempts = 0;
+  const real = FlowOrchestratorService.prototype.executeToolDirectly;
+  (flow as unknown as { executeToolDirectly: unknown }).executeToolDirectly = (...a: Parameters<typeof real>) => {
+    attempts += 1;
+    return real.apply(flow, a);
+  };
+  return () => attempts;
+}
+
+describe('FlowOrchestratorService.executeToolDirectly hands the plan queue a refusal\'s status: a 400 or plain 409 is final, a retryable conflict and a provider outage are failures (W10-DISPATCH-STATUS, D-73; review CR-W10DS-1; W11-DISPATCH-REFUSAL-FINAL, D-134)', () => {
+  it('DS-01 W11-DISPATCH-REFUSAL-FINAL (D-134; W10-DISPATCH-STATUS review CR-W10DS-1, D-73): the 409 the service marks retryable (ProjectsService.updateTask\'s RetryableConflictException, reached by projects_complete_task and projects_update_task) reaches the dispatcher as a plain Error with the exception, still a ConflictException, as its cause, so the plan queue retries the step and it completes', async () => {
+    const RetryableConflictException = await retryableConflict();
+    // The HTTP answer is ConflictException(message)'s, so every route that lets it through answers as before.
+    const marked = new RetryableConflictException(CONFLICT);
+    expect(marked).toBeInstanceOf(ConflictException);
+    expect(marked.getStatus()).toBe(HttpStatus.CONFLICT);
+    expect(marked.getResponse()).toEqual(new ConflictException(CONFLICT).getResponse());
+    expect(marked.message).toBe(CONFLICT);
+
     for (const toolName of ['projects_complete_task', 'projects_update_task']) {
       const args = { taskId: 'w10ds_task' };
-      const thrown = makeFlow(() => new ConflictException(CONFLICT));
+      const thrown = makeFlow(() => new RetryableConflictException(CONFLICT));
       const err = await thrownByExecuteToolDirectly(thrown.flow, toolName, args);
       expect(err, toolName).toBeInstanceOf(Error);
       expect(err, toolName).not.toBeInstanceOf(HttpException);
       expect((err as Error).message, toolName).toBe(CONFLICT);
+      expect((err as Error).cause, toolName).toBeInstanceOf(RetryableConflictException);
       expect((err as Error).cause, toolName).toBeInstanceOf(ConflictException);
       expect(((err as Error).cause as HttpException).getStatus(), toolName).toBe(HttpStatus.CONFLICT);
 
-      // Fails once, answers on the retry: the step completes (on the packet head it failed after one attempt).
-      const once = makeFlow((call) => (call === 1 ? new ConflictException(CONFLICT) : null), { task: { id: 'w10ds_task' } });
+      // Fails once, answers on the retry: the step completes.
+      const once = makeFlow((call) => (call === 1 ? new RetryableConflictException(CONFLICT) : null), { task: { id: 'w10ds_task' } });
       const { dispatcher } = makeDispatcher(once.flow);
       const ran = await dispatcher.dispatch({ businessId: BIZ_A, toolName, args, retryCount: 2 });
       expect(ran, toolName).toMatchObject({ success: true, result: { task: { id: 'w10ds_task' } } });
       expect(once.calls(), toolName).toBe(2);
       expect(dispatcher.getCircuitStatus(toolName, BIZ_A), toolName).toEqual(CLOSED);
+
+      // A race that never clears is a failure: tried three times and counted once, toward this business only.
+      const lasting = makeFlow((_call, businessId) => (businessId === BIZ_A ? new RetryableConflictException(CONFLICT) : null), { task: { id: 'w10ds_task' } });
+      const held = makeDispatcher(lasting.flow).dispatcher;
+      expect(await held.dispatch({ businessId: BIZ_A, toolName, args, retryCount: 2 }), toolName).toMatchObject({ success: false, error: CONFLICT });
+      expect(lasting.calls(), toolName).toBe(3);
+      expect(held.getCircuitStatus(toolName, BIZ_A), toolName).toMatchObject({ open: false, failures: 1 });
+      expect(held.getCircuitStatus(toolName, BIZ_B), toolName).toEqual(CLOSED);
     }
   });
 
-  it('DS-02 W10-DISPATCH-STATUS review CR-W10DS-1 (D-73): a provider that did not answer, reported as a 400 (GmailService.searchMessages\' \'Gmail search failed (503)\', reached by reconcile_sweep_statements), is retried, and five such sweeps open that business\'s circuit for the tool as they did before W10-DISPATCH-STATUS; another business still sweeps', async () => {
-    const thrown = makeFlow(() => new BadRequestException(GMAIL_OUTAGE));
+  it('DS-01b W11-DISPATCH-REFUSAL-FINAL (D-134): the real ProjectsService.updateTask, when its conditional write loses the race on both of its attempts, throws RetryableConflictException with the message it always had; a task that is not this business\'s stays a plain 404', async () => {
+    const RetryableConflictException = await retryableConflict();
+    const existing = { id: 'w10ds_task', businessId: BIZ_A, status: 'TODO', isCompleted: false, evidenceRequired: false, assigneeId: null };
+    let conditionalWrites = 0;
+    const tx = {
+      projectTask: {
+        updateMany: async () => {
+          conditionalWrites += 1;
+          return { count: 0 }; // another writer changed the status or completion first
+        },
+      },
+    };
+    const prisma = {
+      client: {
+        projectTask: { findFirst: async ({ where }: { where: { businessId: string } }) => (where.businessId === BIZ_A ? existing : null) },
+        $transaction: async (fn: (t: typeof tx) => unknown) => fn(tx),
+      },
+    };
+    const projects = new ProjectsService(prisma as never, { emit: () => true } as never, {} as never, {} as never, {} as never);
+
+    const stale = await projects.updateTask(BIZ_A, 'w10ds_task', { isCompleted: true }).then(() => null, (e: unknown) => e);
+    expect(stale).toBeInstanceOf(RetryableConflictException);
+    expect(stale).toBeInstanceOf(ConflictException);
+    expect((stale as HttpException).getStatus()).toBe(HttpStatus.CONFLICT);
+    expect((stale as Error).message).toBe(CONFLICT);
+    expect(conditionalWrites).toBe(2);
+
+    // Another business's task: the tool's own 404, not a conflict, and nothing is attempted.
+    const foreign = await projects.updateTask(BIZ_B, 'w10ds_task', { isCompleted: true }).then(() => null, (e: unknown) => e);
+    expect(foreign).toBeInstanceOf(NotFoundException);
+    expect(foreign).not.toBeInstanceOf(ConflictException);
+    expect(conditionalWrites).toBe(2);
+  });
+
+  it('DS-02 W11-DISPATCH-REFUSAL-FINAL (after W11-PROVIDER-OUTAGE-503; W10-DISPATCH-STATUS review CR-W10DS-1, D-73): a provider that did not answer is a 503 provider_unavailable (GmailService.searchMessages\' \'Gmail search failed (503)\', reached by reconcile_sweep_statements); it reaches the dispatcher as itself, is retried, and five such sweeps open that business\'s circuit for the tool; another business still sweeps', async () => {
+    const outage = () => providerUnavailable('gmail', 503, GMAIL_OUTAGE);
+    expect(outage()).toBeInstanceOf(ServiceUnavailableException);
+    expect(outage().getResponse()).toMatchObject({ code: 'provider_unavailable', service: 'gmail', message: GMAIL_OUTAGE });
+
+    const failure = outage();
+    const thrown = makeFlow(() => failure);
     const err = await thrownByExecuteToolDirectly(thrown.flow, SWEEP.toolName, SWEEP.args);
-    expect(err).not.toBeInstanceOf(HttpException);
+    expect(err).toBe(failure);
+    expect((err as HttpException).getStatus()).toBe(HttpStatus.SERVICE_UNAVAILABLE);
     expect((err as Error).message).toBe(GMAIL_OUTAGE);
-    expect(((err as Error).cause as HttpException).getStatus()).toBe(HttpStatus.BAD_REQUEST);
 
     // A passing outage: the retry sweeps.
-    const once = makeFlow((call) => (call === 1 ? new BadRequestException(GMAIL_OUTAGE) : null), { imported: 0, filesConsidered: 0 });
+    const once = makeFlow((call) => (call === 1 ? outage() : null), { imported: 0, filesConsidered: 0 });
     const first = makeDispatcher(once.flow).dispatcher;
     expect(await first.dispatch({ businessId: BIZ_A, ...SWEEP, retryCount: 2 })).toMatchObject({ success: true });
     expect(once.calls()).toBe(2);
 
     // A lasting outage in BIZ_A: each sweep tries three times and counts once; the fifth opens BIZ_A's circuit.
-    const down = makeFlow((_call, businessId) => (businessId === BIZ_A ? new BadRequestException(GMAIL_OUTAGE) : null), { imported: 0, filesConsidered: 0 });
+    const down = makeFlow((_call, businessId) => (businessId === BIZ_A ? outage() : null), { imported: 0, filesConsidered: 0 });
     const { dispatcher, threshold } = makeDispatcher(down.flow);
     for (let i = 0; i < threshold; i++) {
       expect(await dispatcher.dispatch({ businessId: BIZ_A, ...SWEEP, retryCount: 2 })).toMatchObject({ success: false, error: GMAIL_OUTAGE });
@@ -189,5 +268,93 @@ describe('FlowOrchestratorService.executeToolDirectly hands the plan queue a ref
     }
   });
 
-  it.todo('DS-05 W10-DISPATCH-STATUS review CR-W10DS-1 (D-73), left open: a member\'s 400 refusal (an argument the tool does not take) or a 409 that asking again cannot resolve, through executeToolDirectly, is answered once and counted toward no circuit as a 404 or 403 is (W9 isToolRefusal); needs the services that report a provider failure as 400 (gmail.service.ts, google-drive.service.ts, connect/*) to answer it as a 5xx, and an owner ruling on which 409s are final, both outside W10-DISPATCH-STATUS\'s write set');
+  it('DS-05 W11-DISPATCH-REFUSAL-FINAL (D-134; W10-DISPATCH-STATUS review CR-W10DS-1, was it.todo): a member\'s 400 refusal (an argument the tool does not take) and a plain 409 that asking again cannot resolve (a duplicate) reach the dispatcher as the tool\'s own HttpException, are answered once, and count toward no circuit as a 404 or 403 does; another business is unaffected', async () => {
+    const cases: Array<[string, Record<string, unknown>, HttpException]> = [
+      ['projects_update_task', { taskId: 'w10ds_task', priority: 'SOONISH' }, new BadRequestException('priority must be one of LOW, NORMAL, HIGH, URGENT')],
+      ['crm_create_contact', { firstName: 'Mal', email: 'mal@example.com' }, new ConflictException('A contact with this email already exists in this business')],
+      // A conflict about the same task that the service did not mark retryable is final too (D-134).
+      ['projects_complete_task', { taskId: 'w10ds_task' }, new ConflictException('This plan has already been approved; a plan is approved once')],
+    ];
+    for (const [toolName, args, refusal] of cases) {
+      const label = `${toolName} ${refusal.getStatus()}`;
+      const thrown = makeFlow(() => refusal);
+      expect(await thrownByExecuteToolDirectly(thrown.flow, toolName, args), label).toBe(refusal);
+
+      // BIZ_A is refused threshold+1 times; BIZ_B's same call answers.
+      const refused = makeFlow((_call, businessId) => (businessId === BIZ_A ? refusal : null));
+      const { dispatcher, threshold } = makeDispatcher(refused.flow);
+      for (let i = 1; i <= threshold + 1; i++) {
+        const ran = await dispatcher.dispatch({ businessId: BIZ_A, toolName, args, retryCount: 2 });
+        expect(ran, label).toMatchObject({ success: false, error: refusal.message });
+        expect(ran.awaitingApproval, label).toBeUndefined();
+        expect(refused.calls(), label).toBe(i); // answered once: not retried
+        expect(dispatcher.getCircuitStatus(toolName, BIZ_A), label).toEqual(CLOSED);
+      }
+      expect(await dispatcher.dispatch({ businessId: BIZ_B, toolName, args, retryCount: 2 }), label).toMatchObject({ success: true, result: { id: 'w10ds_ok' } });
+      expect(refused.calls(), label).toBe(threshold + 2);
+      expect(dispatcher.getCircuitStatus(toolName, BIZ_B), label).toEqual(CLOSED);
+      expect(dispatcher.getCircuitStatus(toolName), label).toEqual(CLOSED);
+    }
+  });
+
+  it('DS-06 W11-DISPATCH-REFUSAL-FINAL (D-134): a call the tool\'s own schema refuses (validateToolInput: a missing required field, a wrong type, a value off its list) reaches the dispatcher as a BadRequestException with the message it always had, before the tool does any work; it is answered once and counted toward no circuit, and the envelope the chat and a plan run over HTTP read keeps its keys and that message', async () => {
+    const cases: Array<[string, Record<string, unknown>, string]> = [
+      ['projects_complete_task', {}, 'Missing required fields for projects_complete_task: taskId'],
+      ['expenses_create', { amount: '', description: null }, 'Missing required fields for expenses_create: amount, description'],
+      ['projects_complete_task', { taskId: 42 }, 'Field "taskId" for projects_complete_task must be a string'],
+      ['expenses_create', { amount: 'a lot', description: 'w10ds lunch' }, 'Field "amount" for expenses_create must be a number'],
+      ['projects_update_task', { taskId: 'w10ds_task', isCompleted: 'maybe' }, 'Field "isCompleted" for projects_update_task must be a boolean'],
+      ['commerce_create_invoice', { items: 'one line' }, 'Field "items" for commerce_create_invoice must be an array'],
+      ['draft_followup_message', { contactId: 'w10ds_contact', channel: 'fax' }, 'Field "channel" for draft_followup_message must be one of: email, whatsapp, sms'],
+    ];
+    for (const [toolName, args, message] of cases) {
+      const thrown = makeFlow(() => null);
+      const err = await thrownByExecuteToolDirectly(thrown.flow, toolName, { ...args });
+      expect(err, message).toBeInstanceOf(BadRequestException);
+      expect((err as HttpException).getStatus(), message).toBe(HttpStatus.BAD_REQUEST);
+      expect((err as Error).message, message).toBe(message);
+      expect(thrown.calls(), message).toBe(0);
+
+      const refused = makeFlow(() => null);
+      const attempts = countAttempts(refused.flow);
+      const { dispatcher, threshold } = makeDispatcher(refused.flow);
+      for (let i = 1; i <= threshold + 1; i++) {
+        expect(await dispatcher.dispatch({ businessId: BIZ_A, toolName, args: { ...args }, retryCount: 2 }), message).toMatchObject({ success: false, error: message });
+        expect(attempts(), message).toBe(i); // answered once: not retried
+        expect(dispatcher.getCircuitStatus(toolName, BIZ_A), message).toEqual(CLOSED);
+      }
+      expect(refused.calls(), message).toBe(0); // the tool's own work never ran
+
+      const { flow } = makeFlow(() => null);
+      const envelope = await flow.executeToolDirect(BIZ_A, toolName, { ...args }, 'w10ds_plan', 'w10ds_step', { surface: 'PLAN_QUEUE', planId: 'w10ds_plan', planStepId: 'w10ds_step' });
+      expect(Object.keys(envelope).sort(), message).toEqual(['changedEntities', 'error', 'family', 'followOnSuggestions', 'name', 'result', 'riskTier', 'success', 'toolCallId']);
+      expect(envelope, message).toMatchObject({ success: false, result: null, error: message, name: toolName });
+    }
+
+    // Control: a call the schema takes (a number and a boolean sent as text are read, as before) runs.
+    const ok = makeFlow(() => null);
+    const { dispatcher } = makeDispatcher(ok.flow);
+    expect(await dispatcher.dispatch({ businessId: BIZ_A, toolName: 'expenses_create', args: { amount: '12.5', description: 'w10ds lunch' }, retryCount: 2 })).toMatchObject({ success: true });
+    expect(await dispatcher.dispatch({ businessId: BIZ_A, toolName: 'projects_update_task', args: { taskId: 'w10ds_task', isCompleted: 'true' }, retryCount: 2 })).toMatchObject({ success: true });
+    expect(ok.calls()).toBe(2);
+  });
+
+  it('DS-07 regression control (W11-DISPATCH-REFUSAL-FINAL; W9 isToolRefusal): a 408 Request Timeout asks the caller to try again, so it reaches the dispatcher as itself and stays a failure, retried and counted; so does an error that is no HttpException', async () => {
+    const args = { contactId: 'w10ds_contact', callerId: 'w10ds_owner' };
+    for (const failure of [new HttpException('Request Timeout', HttpStatus.REQUEST_TIMEOUT), new Error('connect ECONNRESET')]) {
+      const thrown = makeFlow(() => failure);
+      const err = await thrownByExecuteToolDirectly(thrown.flow, 'call_create_task', args);
+      if (failure instanceof HttpException) expect(err).toBe(failure);
+      else {
+        expect(err).not.toBeInstanceOf(HttpException);
+        expect((err as Error).message).toBe(failure.message);
+      }
+
+      const failing = makeFlow(() => failure);
+      const { dispatcher } = makeDispatcher(failing.flow);
+      expect(await dispatcher.dispatch({ businessId: BIZ_A, toolName: 'call_create_task', args, retryCount: 2 }), failure.message).toMatchObject({ success: false, error: failure.message });
+      expect(failing.calls(), failure.message).toBe(3);
+      expect(dispatcher.getCircuitStatus('call_create_task', BIZ_A), failure.message).toMatchObject({ open: false, failures: 1 });
+    }
+  });
 });
