@@ -204,14 +204,17 @@ export class FinanceCoaService {
    * ensureDefaults, an upsert by systemKey), takes neither the lock nor the check. That is safe today because
    * every create() and update() that takes the lock runs ensureDefaults first, so the seed has landed before
    * the check runs and the check counts the system accounts; and the SYSTEM_COA codes are fixed, so the seeder
-   * only ever writes the codes it wrote before. A code added to SYSTEM_COA later could be seeded next to a
-   * custom account that already holds it (a recorded follow-up).
+   * only ever writes the codes it wrote before. Two cases are left (recorded follow-ups): a code added to
+   * SYSTEM_COA later could be seeded next to a custom account that already holds it; and a business that got
+   * a custom coded account before this rule without its chart ever being seeded (create() did not seed first
+   * then) gets the system account seeded beside it on its first seed, as other rows from before this rule
+   * may already share a code.
    * READ COMMITTED is set on purpose: the check must see what the previous holder of the lock
    * committed, and under a snapshot isolation level it would read a snapshot taken before that commit.
    * A transaction that cannot start or expires waiting (P2028) answers 503 with a generic message: the
-   * write did not happen and may be tried again; a 409 from the check and any other error pass through.
-   * `tenant` is the
-   * business the transaction's Prisma calls act on: the active tenant when there is one (the `@keyflow/db`
+   * write did not happen and may be tried again. The P2028 is recognised by its code (as the seeder does,
+   * whichever @prisma/client copy raised it) and kept as the 503's cause; a 409 from the check and any other
+   * error pass through. `tenant` is the business the transaction's Prisma calls act on: the active tenant when there is one (the `@keyflow/db`
    * extension rewrites every `where.businessId` and `create.businessId` to it), else the argument. The
    * raw-SQL check is not rewritten by the extension, so it is handed that same business.
    */
@@ -225,11 +228,11 @@ export class FinanceCoaService {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${COA_CODE_LOCK_NAMESPACE + tenant}))`;
       return fn(tx, tenant);
     }, COA_CODE_TX_OPTIONS).catch((err: unknown) => {
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2028') {
-        throw new ServiceUnavailableException({
-          code: 'COA_CODE_BUSY',
-          message: 'The chart of accounts is busy. Please try again.',
-        });
+      if ((err as { code?: unknown } | null)?.code === 'P2028') {
+        throw new ServiceUnavailableException(
+          { code: 'COA_CODE_BUSY', message: 'The chart of accounts is busy. Please try again.' },
+          { cause: err },
+        );
       }
       throw err;
     });
