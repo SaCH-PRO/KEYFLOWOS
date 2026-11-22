@@ -296,6 +296,35 @@ describe('round-8 review repairs (security BLOCKING-1, MAJOR-1; correctness B1, 
     const t0 = Date.now();
     isFinancialProposal({ actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', summary: digits } as any);
     isFinancialProposal({ actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: JSON.parse(ids) } as any);
-    expect(Date.now() - t0).toBeLessThan(500);
+    // Round 9 (correctness minor 1): a long whitespace run after a figure, too. A generous bound (minor 4): the quadratic
+    // case took seconds.
+    isFinancialProposal({ actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', summary: '9' + ' '.repeat(50_000) } as any);
+    isFinancialProposal({ actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', summary: ('9' + ' '.repeat(20_000)).repeat(5) } as any);
+    expect(Date.now() - t0).toBeLessThan(1500);
   });
+});
+
+describe('round-9 review repairs (security MAJOR-1, MAJOR-2, minor 2; correctness minor 2)', () => {
+  it.each([
+    ['a totalDue key', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { totalDue: 900 } }],
+    ['a totalValue key', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { totalValue: 1200 } }],
+    ['a ratePerHour key', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { ratePerHour: 150 } }],
+    ['a retainerMonthly key', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { retainerMonthly: 900 } }],
+    ['a total_due key', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { total_due: 900 } }],
+    ['a rate_per_hour key', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { rate_per_hour: 150 } }],
+    ['spent_on_ads', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { spent_on_ads: 900 } }],
+    ['total_due in prose', { actionType: 'CREATE_TASK', module: 'crm', title: 'total_due: 900' }],
+    ['a retainer after a date', { actionType: 'CREATE_TASK', module: 'crm', title: 'Retainer from 2026-12-01 is 900' }],
+    ['a rate after a slash date', { actionType: 'CREATE_TASK', module: 'crm', title: 'Rate on 25/11/2026 is 150' }],
+    ['a total after a date', { actionType: 'CREATE_TASK', module: 'crm', title: 'Total for 2026-11-25: 1200' }],
+    ['spent between two dates', { actionType: 'CREATE_TASK', module: 'crm', title: 'Spent 2026-11-01 to 2026-11-30: 4000' }],
+    ['a slash date that runs on into a figure', { actionType: 'CREATE_TASK', module: 'crm', title: 'Rate 1/12/150' }],
+    ['a figure a comma touches, outstanding', { actionType: 'CREATE_TASK', module: 'crm', title: 'Chase them,900 outstanding' }],
+    ['a figure a comma touches, with a currency code', { actionType: 'CREATE_TASK', module: 'crm', title: 'Items:a,900 usd' }],
+  ])('%s is financial', (_l, p) => expect(isFinancialProposal(p as any)).toBe(true));
+
+  it.each([
+    ['a totalCount key', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { items: [], totalCount: 12 } }],
+    ['Bill beside a JSON date', { actionType: 'CREATE_TASK', module: 'crm', title: 'Call Bill', payload: { title: 'Call Bill', dueDate: '2026-11-25' } }],
+  ])('%s is not', (_l, p) => expect(isFinancialProposal(p as any)).toBe(false));
 });
