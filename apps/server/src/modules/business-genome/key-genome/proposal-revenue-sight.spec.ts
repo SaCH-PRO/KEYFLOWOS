@@ -550,11 +550,66 @@ describe('fourth review of the #218 repairs: the structured reader fails closed'
     ['JSON inside a JSON value', { executionResult: { output: JSON.stringify({ note: 'Summary\ncost 900' }) } }],
     ['a lone surrogate before the word', { payload: { note: 'x\uD83Dfee waived' } }],
     ['a zero-width space inside a word', { summary: 'in\u200bvoice 900' }],
-    ['a soft hyphen inside a word', { summary: 'in\u00advoice overdue' }],
+    ['a soft hyphen inside a word', { summary: 'in\u00advoice 900' }],
     ['fullwidth digits', { summary: 'total due \uFF19\uFF10\uFF10' }],
   ])('RED-BEFORE (m5-m7): %s does not hide the money', (_l, extra) => expect(isFinancialProposal(task(extra) as any)).toBe(true));
   it('control: ordinary multi-line notes, paths and addresses stay non-financial', () => {
     for (const note of ['Line one\nLine two', 'C:\\new\\folder\\readme.txt', '12 Main Street\nPort of Spain', 'Call back\tafter 3pm'])
       expect(isFinancialProposal(task({ payload: { note } }) as any), note).toBe(false);
+  });
+});
+
+describe('fifth review of the #218 repairs: ambiguous escapes and invisible characters are read both ways, in linear time', () => {
+  const task = (extra: object) => ({ actionType: 'CREATE_TASK', module: 'crm', title: 'Follow up', ...extra });
+  it.each([
+    ['a figure after a backslash', { summary: 'x\\total due 900' }],
+    ['a lower-case path', { payload: { note: 'c:\\clients\\tax\\2026' } }],
+    ['a UNC path', { payload: { file: '\\\\server\\finance\\budget.xlsx' } }],
+    ['a path in a summary', { summary: 'see d:\\shared\\refunds\\november' }],
+    ['a report path', { summary: 'open c:\\reports\\revenue.xlsx' }],
+    ['a path in a result', { executionResult: { path: 'c:\\acme\\billing\\run.log' } }],
+    ['a path in the title', { title: 'Review c:\\docs\\fees' }],
+  ])('RED-BEFORE (M2a): %s keeps the first letter of its money word', (_l, extra) => expect(isFinancialProposal(task(extra) as any)).toBe(true));
+  it.each(['Collect the fee\u200Bfrom Ana', 'tax\u200Bdue Friday', 'Total\u200B900 owed\u200Bby Ana', 'cost\uFEFFsheet'])('RED-BEFORE (M2b): an invisible character used as the separator does not glue the money word away (%j)', (summary) => {
+    expect(isFinancialProposal(task({ summary }))).toBe(true);
+    expect(isFinancialProposal(task({ payload: { note: summary } }) as any)).toBe(true);
+  });
+  it('control: the escapes and invisible characters fixed in the fourth round stay read', () => {
+    for (const extra of [{ summary: 'see\\ncost 900' }, { payload: { 'x\ncost': 5 } }, { summary: 'in\u200bvoice 900' }, { payload: { note: 'x\uD83Dfee waived' } }]) expect(isFinancialProposal(task(extra) as any), JSON.stringify(extra)).toBe(true);
+  });
+  it('RED-BEFORE (M1): runs of backslashes are read in linear time, in every field and at any length', () => {
+    const cases: Array<[string, () => unknown]> = [
+      ['summary 49k', () => isFinancialProposal(task({ summary: '\\'.repeat(49_000) }))],
+      ['payload 24k', () => isFinancialProposal(task({ payload: { note: '\\'.repeat(24_000) } }) as any)],
+      ['evidence 24k', () => proposalViewForReader({ id: 'k', ...task({ outcomeEvidence: { status: 'FAILED', reason: '\\'.repeat(24_000) } }) }, false)],
+      ['failure reason 100k', () => proposalTextStatesMoney('\\'.repeat(100_000))],
+      ['mixed 49k', () => isFinancialProposal(task({ summary: '\\\\x'.repeat(16_000) }))],
+      ['zero-width 49k', () => isFinancialProposal(task({ summary: '\u200b'.repeat(49_000) }))],
+    ];
+    for (const [label, run] of cases) {
+      const started = performance.now();
+      run();
+      expect(performance.now() - started, label).toBeLessThan(400);
+    }
+  });
+  it('RED-BEFORE (M1): content over the cap fails closed before it is normalised', () => {
+    const started = performance.now();
+    expect(isFinancialProposal(task({ summary: '\\'.repeat(200_000) }))).toBe(true);
+    expect(performance.now() - started).toBeLessThan(400);
+    expect(isFinancialProposal(task({ summary: 'a'.repeat(50_001) }))).toBe(true);
+  });
+  it.each(['total due \uFF19\uFF10\uFF10', 'in\u200bvoice 900'])('RED-BEFORE (m3): a failure reason is read as the content is (%j)', (reason) => {
+    expect(proposalTextStatesMoney(reason)).toBe(true);
+    expect((proposalViewForReader({ id: 'k', status: 'FAILED', ...task({ failureReason: reason }) }, false) as any).failureReason).toBeNull();
+  });
+  it('RED-BEFORE (m3): a failure reason quoting an id is kept, as the same text in the evidence is', () => {
+    const reason = 'Ticket cmzcku666tax29xx90fuyj0uu not found';
+    expect(proposalTextStatesMoney(reason)).toBe(false);
+    const row = { id: 'k', status: 'FAILED', ...task({ failureReason: reason, outcomeEvidence: { status: 'FAILED', reason } }) };
+    expect(proposalViewForReader(row, false)).toBe(row);
+  });
+  it('control: ordinary paths, notes and multilingual text stay non-financial', () => {
+    for (const note of ['C:\\new\\folder\\readme.txt', 'Line one\nLine two', 'Llamar a Jos\u00e9 ma\u00f1ana', '\u0915\u094d\u200d\u0937 call back', '\ud83d\udc68\u200d\ud83d\udc69\u200d\ud83d\udc67 family booking'])
+      expect(isFinancialProposal(task({ payload: { note }, summary: note }) as any), note).toBe(false);
   });
 });
