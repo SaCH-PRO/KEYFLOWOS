@@ -270,9 +270,12 @@ const MODULE_TABLE: Record<string, { modules: string[]; cite: string[] }> = {
   "/app/capture": { modules: [], cite: ["unscoped:modules/device/device.controller.ts:48"] },
   // Work
   "/app/work/projects": { modules: ["projects"], cite: [SRV("projects/projects.controller.ts", 43)] },
-  "/app/approvals": { modules: ["operations"], cite: [SRV("ai/ai-approvals.controller.ts", 54), "D-179"] },
+  // The manual tab's reads are unscoped; D-179 keeps this operations surface (its KEY tab reads ai-approvals,
+  // operations) out of a menu without operations (orchestrator acceptance M1).
+  "/app/approvals": { modules: ["operations"], cite: ["unscoped:modules/approvals/approval.controller.ts:67", SRV("ai/ai-approvals.controller.ts", 54), "D-179"] },
   "/app/performance": { modules: ["operations"], cite: [SRV("staff-performance/staff-performance.controller.ts", 30)] },
-  "/app/time-tracking": { modules: ["projects"], cite: [SRV("projects/projects.controller.ts", 43)] },
+  // Its time-entry reads are unscoped; every entry is logged against a project, read through the projects picker.
+  "/app/time-tracking": { modules: ["projects"], cite: ["unscoped:modules/time-tracking/time-entry.controller.ts:174", SRV("projects/projects.controller.ts", 43)] },
   "/app/operations": { modules: ["operations"], cite: ["unscoped:modules/content-ops/content-ops.controller.ts:68", "D-179"] },
   "/app/operations-flow": { modules: ["operations"], cite: ["unscoped:modules/sop/sop.controller.ts:13", "D-179"] },
   "/app/change-orders": { modules: [], cite: ["unscoped:modules/change-orders/change-order.controller.ts:111"] },
