@@ -20,6 +20,19 @@
  *   - the level is read in the business BusinessGuard admitted: a member who
  *     reads revenue in another business does not carry it here, and a member
  *     of another business is refused (403) and learns nothing.
+ *   - for a revenue reader the response keeps its keys in their old order; for
+ *     a non-reader the invoice queries are not run at all.
+ *
+ * Widened by the orchestrator after the first review round (security M1, M2),
+ * the same rule on two sibling routes of the same controller:
+ *   - GET site/businesses/:b/orders/summary: totalRevenue (PAID orders) is
+ *     withheld, and so are completedOrders and totalOrders (sales volume,
+ *     D-234; totalOrders minus the kept counts would give completedOrders
+ *     back). pendingOrders, confirmedOrders, shippedOrders and cancelledOrders
+ *     (the fulfilment queue) stay for every member;
+ *   - GET site/businesses/:b/conversion-funnel/daily: each row's revenue
+ *     (payment.completed totals) and orders (store_order.created counts) are
+ *     withheld; views, cartAdds, checkouts, bookings and the row's identity stay.
  *
  * WHAT IS REAL: PrismaService, AuthGuard, BusinessGuard, SiteController and
  * SiteService against DATABASE_URL, in two pipelines (TenantInterceptor and
@@ -37,7 +50,7 @@ import 'reflect-metadata';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
@@ -63,8 +76,8 @@ const ID = {
 
 /** The collaborators SiteController holds for its other routes; GET analytics reaches none of them. */
 const OFF_BOUNDARY = new Set([
-  'StoreOrderService', 'PromoCodeService', 'IntakeService', 'QualificationService', 'CustomerReferralService',
-  'CaseStudyService', 'PaymentsService', 'StorefrontConversionService', 'AiUsageService',
+  'PromoCodeService', 'IntakeService', 'QualificationService', 'CustomerReferralService',
+  'CaseStudyService', 'PaymentsService', 'AiUsageService',
   // PublicRateLimitGuard's Redis client (the guard sits on the public routes only, not on this one).
   'Symbol(REDIS_CLIENT)',
 ]);
@@ -73,11 +86,14 @@ type Pipeline = 'production' | 'bare';
 const PIPELINES: Pipeline[] = ['production', 'bare'];
 
 let db: any;
+let SiteServiceClass: any;
 const apps: Partial<Record<Pipeline, any>> = {};
 
 async function cleanup() {
   for (const sql of [
     `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM storefront_conversion_daily WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM bookings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
@@ -94,6 +110,12 @@ function get(pipeline: Pipeline, user: string, businessId: string) {
     .set(HEADER, user)
     .query({ days: '30' });
 }
+
+function getPath(pipeline: Pipeline, user: string, path: string) {
+  return request(apps[pipeline]!.getHttpServer()).get(path).set(HEADER, user);
+}
+
+const has = (o: unknown, k: string) => !!o && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k);
 
 const describeBody = (res: { status: number; body: unknown }) => `${res.status} ${JSON.stringify(res.body)}`;
 
@@ -113,6 +135,9 @@ beforeAll(async () => {
   const { BusinessGuard } = await import('../src/core/auth/business.guard');
   const { SiteController } = await import('../src/modules/site/site.controller');
   const { SiteService } = await import('../src/modules/site/site.service');
+  SiteServiceClass = SiteService;
+  const { StoreOrderService } = await import('../src/modules/site/store-order.service');
+  const { StorefrontConversionService } = await import('../src/modules/site/storefront-conversion.service');
 
   const build = async (pipeline: Pipeline) => {
     const moduleRef = await Test.createTestingModule({
@@ -122,6 +147,13 @@ beforeAll(async () => {
         AuthGuard,
         BusinessGuard,
         SiteService,
+        StorefrontConversionService,
+        // The order reads use PrismaService alone; the write-path collaborators are empty stand-ins.
+        {
+          provide: StoreOrderService,
+          useFactory: (prisma: any) => new (StoreOrderService as any)(prisma, {}, {}, {}, {}, {}, {}, {}, {}, {}),
+          inject: [PrismaService],
+        },
         ...(pipeline === 'production' ? [{ provide: APP_INTERCEPTOR, useClass: TenantInterceptor }] : []),
       ],
     })
@@ -186,6 +218,18 @@ beforeAll(async () => {
   await db.invoice.create({ data: { id: `${P}invA3`, businessId: ID.bizA, contactId: ID.contactA, invoiceNumber: `${P}A-3`, status: 'SENT', total: 999 } });
   // bizB: one PAID invoice of 7000.
   await db.invoice.create({ data: { id: `${P}invB1`, businessId: ID.bizB, contactId: ID.contactB, invoiceNumber: `${P}B-1`, status: 'PAID', total: 7000, paidAt } });
+  // bizA orders: PENDING unpaid 10, CONFIRMED paid 120, SHIPPED paid 30, COMPLETED paid 50, CANCELLED unpaid 5.
+  const orders: Array<[string, string, string, number]> = [
+    ['o1', 'PENDING', 'UNPAID', 10], ['o2', 'CONFIRMED', 'PAID', 120], ['o3', 'SHIPPED', 'PAID', 30],
+    ['o4', 'COMPLETED', 'PAID', 50], ['o5', 'CANCELLED', 'UNPAID', 5],
+  ];
+  for (const [k, status, paymentStatus, total] of orders) {
+    await db.marketplaceOrder.create({ data: { id: `${P}${k}`, businessId: ID.bizA, orderNumber: `${P}ORD-${k}`, customerName: 'V86S Buyer', status, paymentStatus, total, subtotal: total } });
+  }
+  await db.marketplaceOrder.create({ data: { id: `${P}oB`, businessId: ID.bizB, orderNumber: `${P}ORD-B`, customerName: 'V86S Buyer B', status: 'COMPLETED', paymentStatus: 'PAID', total: 9000, subtotal: 9000 } });
+  const day = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() - 1));
+  await db.storefrontConversionDaily.create({ data: { id: `${P}cdA`, businessId: ID.bizA, day, kind: 'overall', refId: '', views: 40, cartAdds: 9, checkouts: 6, orders: 4, bookings: 2, revenue: 321.5 } });
+  await db.storefrontConversionDaily.create({ data: { id: `${P}cdB`, businessId: ID.bizB, day, kind: 'overall', refId: '', views: 7, cartAdds: 1, checkouts: 1, orders: 1, bookings: 0, revenue: 8888 } });
 }, 120_000);
 
 afterAll(async () => {
@@ -246,5 +290,101 @@ describe.each(PIPELINES)('GET site/businesses/:b/analytics, %s pipeline', (pipel
       expect(res.status, describeBody(res)).toBe(403);
       expect(res.body.revenue).toBeUndefined();
     });
+  });
+});
+
+const NON_READERS: Array<[string, string]> = [
+  ['explicit { storefront: read } (revenue missing)', ID.storefrontOnly],
+  ['explicit { revenue: none }', ID.revenueNone],
+  ['permissionScopes stored as a JSON array', ID.arrayScopes],
+  ['revenue read in another business only (dual)', ID.dual],
+];
+const READERS: Array<[string, string]> = [
+  ['OWNER', ID.ownerA],
+  ['STAFF on role defaults (revenue read)', ID.staffDefaults],
+  ['explicit { revenue: read }', ID.revenueReader],
+  ['platform SUPER_ADMIN', ID.superAdmin],
+];
+
+describe.each(PIPELINES)('analytics response shape and queries, %s pipeline (review CR minor 3)', (pipeline) => {
+  it('a revenue reader gets the keys in their old order: period, bookings, invoices, revenue, catalog, storefrontEvents', async () => {
+    const res = await get(pipeline, ID.ownerA, ID.bizA);
+    expect(res.status, describeBody(res)).toBe(200);
+    expect(Object.keys(res.body)).toEqual(['period', 'bookings', 'invoices', 'revenue', 'catalog', 'storefrontEvents']);
+  });
+
+  it('a non-reader gets period, bookings, catalog, storefrontEvents, and no invoice query runs', async () => {
+    // SiteService's invoice queries (counts and the PAID findMany) are one step; a spy on it counts each run.
+    const spy = vi.spyOn(SiteServiceClass.prototype as any, 'financeAnalytics');
+    try {
+      const res = await get(pipeline, ID.storefrontOnly, ID.bizA);
+      expect(res.status, describeBody(res)).toBe(200);
+      expect(Object.keys(res.body)).toEqual(['period', 'bookings', 'catalog', 'storefrontEvents']);
+      expect(spy, 'invoice queries for a non-reader').not.toHaveBeenCalled();
+      // The spy sees the owner's run, so the zero above is not a blind spy.
+      const owner = await get(pipeline, ID.ownerA, ID.bizA);
+      expect(owner.status).toBe(200);
+      expect(spy, 'invoice queries for the owner').toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe.each(PIPELINES)('GET site/businesses/:b/orders/summary, %s pipeline (security M1)', (pipeline) => {
+  const path = (b: string) => `/site/businesses/${b}/orders/summary`;
+
+  it.each(NON_READERS)('%s: totalRevenue, completedOrders and totalOrders absent; the fulfilment queue kept', async (_l, user) => {
+    const res = await getPath(pipeline, user, path(ID.bizA));
+    expect(res.status, describeBody(res)).toBe(200);
+    for (const k of ['totalRevenue', 'completedOrders', 'totalOrders']) expect(has(res.body, k), `${k}: ${describeBody(res)}`).toBe(false);
+    expect(res.body).toEqual({ pendingOrders: 1, confirmedOrders: 1, shippedOrders: 1, cancelledOrders: 1 });
+  });
+
+  it.each(READERS)('%s: unchanged, keys in their old order', async (_l, user) => {
+    const res = await getPath(pipeline, user, path(ID.bizA));
+    expect(res.status, describeBody(res)).toBe(200);
+    expect(Object.keys(res.body)).toEqual(['totalOrders', 'pendingOrders', 'confirmedOrders', 'shippedOrders', 'completedOrders', 'cancelledOrders', 'totalRevenue']);
+    expect(res.body).toEqual({ totalOrders: 5, pendingOrders: 1, confirmedOrders: 1, shippedOrders: 1, completedOrders: 1, cancelledOrders: 1, totalRevenue: 200 });
+  });
+
+  it("cross-tenant: the dual member reads bizB's own summary as its OWNER; bizB's owner is refused bizA", async () => {
+    const dual = await getPath(pipeline, ID.dual, path(ID.bizB));
+    expect(dual.status, describeBody(dual)).toBe(200);
+    expect(dual.body.totalRevenue).toBe(9000);
+    expect(dual.body.totalOrders).toBe(1);
+    const other = await getPath(pipeline, ID.ownerB, path(ID.bizA));
+    expect(other.status, describeBody(other)).toBe(403);
+    expect(has(other.body, 'totalRevenue')).toBe(false);
+  });
+});
+
+describe.each(PIPELINES)('GET site/businesses/:b/conversion-funnel/daily, %s pipeline (security M2)', (pipeline) => {
+  const path = (b: string) => `/site/businesses/${b}/conversion-funnel/daily`;
+
+  it.each(NON_READERS)('%s: each row without revenue and orders; visits and steps kept', async (_l, user) => {
+    const res = await getPath(pipeline, user, path(ID.bizA));
+    expect(res.status, describeBody(res)).toBe(200);
+    expect(res.body).toHaveLength(1);
+    const [row] = res.body;
+    expect(has(row, 'revenue'), describeBody(res)).toBe(false);
+    expect(has(row, 'orders'), describeBody(res)).toBe(false);
+    expect(row).toMatchObject({ id: `${P}cdA`, businessId: ID.bizA, kind: 'overall', views: 40, cartAdds: 9, checkouts: 6, bookings: 2 });
+  });
+
+  it.each(READERS)('%s: rows unchanged, revenue and orders included', async (_l, user) => {
+    const res = await getPath(pipeline, user, path(ID.bizA));
+    expect(res.status, describeBody(res)).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0]).toMatchObject({ id: `${P}cdA`, views: 40, cartAdds: 9, checkouts: 6, orders: 4, bookings: 2, revenue: 321.5 });
+  });
+
+  it("cross-tenant: the dual member reads bizB's own rows as its OWNER; bizB's owner is refused bizA", async () => {
+    const dual = await getPath(pipeline, ID.dual, path(ID.bizB));
+    expect(dual.status, describeBody(dual)).toBe(200);
+    expect(dual.body.map((r: any) => [r.id, r.revenue, r.orders])).toEqual([[`${P}cdB`, 8888, 1]]);
+    const other = await getPath(pipeline, ID.ownerB, path(ID.bizA));
+    expect(other.status, describeBody(other)).toBe(403);
+    expect(JSON.stringify(other.body)).not.toContain('321.5');
   });
 });
