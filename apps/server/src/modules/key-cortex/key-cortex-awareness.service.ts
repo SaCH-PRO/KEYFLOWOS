@@ -97,6 +97,19 @@ export class KeyCortexAwarenessService {
     opts: { kinds?: Array<keyof typeof AWARENESS_TYPES>; sinceDays?: number; readsRevenue?: boolean } = {},
   ): Promise<AwarenessSummary> {
     const readsRevenue = opts.readsRevenue === true;
+    // Round 2 (security MAJOR-1/2, D-234 provenance): ideas, hypotheses and reflections are made from the unprojected
+    // business context and integration rows are the finance module's statement sweep, so a reader without revenue read
+    // is served none of them; the other kinds are judged by their values (not their key names: correctness minor 4).
+    const revenueOnly = new Set<string>(['idea', 'hypothesis', 'reflection', 'integration']);
+    // `valence` is a structural label (threat / opportunity), not content; every other value is read.
+    const valuesOf = (v: unknown): string[] =>
+      typeof v === 'string'
+        ? [v]
+        : Array.isArray(v)
+          ? v.flatMap(valuesOf)
+          : v && typeof v === 'object'
+            ? Object.entries(v).flatMap(([k, x]) => (k === 'valence' ? [] : valuesOf(x)))
+            : [];
     const kinds = opts.kinds?.length
       ? opts.kinds
       : (Object.keys(AWARENESS_TYPES) as Array<keyof typeof AWARENESS_TYPES>);
@@ -112,6 +125,7 @@ export class KeyCortexAwarenessService {
     const items: AwarenessItem[] = [];
 
     for (const kind of kinds) {
+      if (!readsRevenue && revenueOnly.has(kind)) continue;
       let rows: Array<{ key: string; value: string; confidence: number; createdAt: Date }>;
       try {
         rows = await this.prisma.client.keyCortexMemory.findMany({
@@ -137,7 +151,7 @@ export class KeyCortexAwarenessService {
         // One malformed row must not lose the rest of the feed.
         try {
           const parsed = JSON.parse(row.value) as Record<string, unknown>;
-          if (!readsRevenue && (proposalTextStatesMoney(row.value) || isMoneyLabel(row.value))) continue;
+          if (!readsRevenue && valuesOf(parsed).some((t) => proposalTextStatesMoney(t) || isMoneyLabel(t))) continue;
           served += 1;
           items.push({
             id: row.key,

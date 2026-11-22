@@ -819,8 +819,8 @@ Write 3-4 engaging paragraphs as if KEY is speaking directly to the business own
   async explainDecision(
     decisionId: string,
     businessId?: string,
-    // D-235: no reader given is a reader without revenue read (fails closed).
-    reader: { readsRevenue: boolean } = { readsRevenue: false },
+    // D-235: no reader given is a reader without revenue read, with no user and no owner view (fails closed).
+    reader: { readsRevenue: boolean; userId?: string; ownerView?: boolean } = { readsRevenue: false },
   ): Promise<DecisionExplanation> {
     this.logger.debug(`Explaining decision: ${decisionId}`);
     // FU-KEY-GENOME-READS-RESIDUAL (D-235): the decision is read in the business the route names (it was read by id
@@ -831,6 +831,10 @@ Write 3-4 engaging paragraphs as if KEY is speaking directly to the business own
       where: { id: decisionId, businessId },
     });
     if (!decision) throw new NotFoundException('Decision not found');
+    // Round 2 (security MAJOR-3): a decision is one user's KEY turn; it is explained to that user, or to an owner (or a
+    // platform admin), never to another member. The business's patterns (drawn from every user) only to an owner.
+    const ownerView = reader.ownerView === true;
+    if (!ownerView && (!reader.userId || decision.userId !== reader.userId)) throw new NotFoundException('Decision not found');
     const statesMoney = (...texts: unknown[]) => texts.some((t) => typeof t === 'string' && (proposalTextStatesMoney(t) || isMoneyLabel(t)));
     const readsRevenue = reader.readsRevenue === true;
     if (!readsRevenue && statesMoney(decision.query, decision.recommendation, decision.recommendationType, decision.outcome)) {
@@ -858,7 +862,7 @@ Write 3-4 engaging paragraphs as if KEY is speaking directly to the business own
     const patternsAll = await this.redis.getJson<DetectedPattern[]>(
       `evolution:patterns:${decision.businessId}`,
     );
-    const patterns = readsRevenue ? patternsAll : (patternsAll ?? []).filter((p: any) => !statesMoney(p?.description, p?.type));
+    const patterns = !ownerView ? [] : readsRevenue ? patternsAll : (patternsAll ?? []).filter((p: any) => !statesMoney(p?.description, p?.type));
 
     const relevantPatterns =
       patterns?.filter((p: any) =>

@@ -910,8 +910,7 @@ Decision Steps:
 ${eventLog.length > 0 ? eventLog.map((e: any) => `- ${e.step} at ${e.timestamp}`).join('\n') : 'Steps not available in event log'}
 
 ${genomeContext ? `Genome Context at Decision Time:
-- Genome Stage: ${genomeContext.genomeStage}
-- Executive Readiness: ${genomeContext.executiveReadiness}%
+${genomeContext.genomeStage ? `- Genome Stage: ${genomeContext.genomeStage}\n` : ''}- Executive Readiness: ${genomeContext.executiveReadiness}%
 - DNA Scores: ${JSON.stringify(genomeContext.dnaScores)}
 - Active Signals: ${genomeContext.signals.length}
 - Top Recommendation: ${genomeContext.recommendations[0]?.title ?? 'None'}` : 'Genome context not available'}

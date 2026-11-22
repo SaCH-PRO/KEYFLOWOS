@@ -764,7 +764,8 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
           reasoningMode: reasoningResult.bestChain.mode,
           metacognition: selfModel,
           recentInsights: [], // populated by reflection service
-          activeGoals: this.activeGoalsCache.get(session.businessId) ?? [],
+          // D-235: the snapshot cache is business-wide, so it holds the goals of a reader without revenue read.
+          activeGoals: this.activeGoalsCache.get(`${session.businessId}:noRevenue`) ?? [],
           awareness: {
             businessHealth: 75, // placeholder — would come from genome
             userMood: emotionalState.primary,
@@ -1194,7 +1195,8 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
     // ── 1. Genome-derived goals ─────────────────────────────────
     try {
       // getGenomeState does not exist; ranked recommendations are their own API.
-      const genomeState = await this.genomeBridge.getRankedRecommendations(businessId);
+      // Round 2 (correctness minor 2): a reader without revenue read is read with headroom before five are taken.
+      const genomeState = await this.genomeBridge.getRankedRecommendations(businessId, readsRevenue ? undefined : 50);
       if (genomeState) {
         const visible = readsRevenue
           ? genomeState

@@ -34,13 +34,13 @@ function evolution(decision: Record<string, unknown> | null, related: unknown[] 
 describe('GET cortex/evolution/decision: KeyCortexEvolutionService.explainDecision (D-235 inventory row 1)', () => {
   it('RED-BEFORE: the decision is read in the business the route names, and another business\'s decision does not exist', async () => {
     const { svc, findFirst } = evolution({ ...OPS_DECISION, businessId: 'biz_B' });
-    await expect(svc.explainDecision('dec_ops', 'biz_A', { readsRevenue: true })).rejects.toBeInstanceOf(NotFoundException);
+    await expect(svc.explainDecision('dec_ops', 'biz_A', { readsRevenue: true, userId: 'u1' })).rejects.toBeInstanceOf(NotFoundException);
     expect(findFirst.mock.calls[0][0].where).toMatchObject({ id: 'dec_ops', businessId: 'biz_A' });
   });
 
   it('RED-BEFORE: a finance or sales decision does not exist for a reader without revenue read, and nothing is sent to the model', async () => {
     const { svc, prompts } = evolution(FIN_DECISION);
-    await expect(svc.explainDecision('dec_fin', 'biz_A', { readsRevenue: false })).rejects.toBeInstanceOf(NotFoundException);
+    await expect(svc.explainDecision('dec_fin', 'biz_A', { readsRevenue: false, userId: 'u1' })).rejects.toBeInstanceOf(NotFoundException);
     expect(prompts).toEqual([]);
   });
 
@@ -55,7 +55,7 @@ describe('GET cortex/evolution/decision: KeyCortexEvolutionService.explainDecisi
     // one is withheld by the reader projection.
     const patterns = [{ type: 'delivery', description: 'Revenue concentrated in 3 accounts', confidence: 0.9 }, { type: 'delivery', description: 'Deliveries slip on Fridays', confidence: 0.8 }];
     const { svc, prompts } = evolution(OPS_DECISION, related, patterns);
-    const out = await svc.explainDecision('dec_ops', 'biz_A', { readsRevenue: false });
+    const out = await svc.explainDecision('dec_ops', 'biz_A', { readsRevenue: false, userId: 'u1', ownerView: true });
     expect(out.recommendation).toBe('Write the delivery SOPs');
     expect(prompts.join('')).not.toContain('hourly rate');
     expect(prompts.join('')).not.toContain('Revenue concentrated');
@@ -65,7 +65,7 @@ describe('GET cortex/evolution/decision: KeyCortexEvolutionService.explainDecisi
 
   it('control: a revenue reader is explained a finance decision, as before', async () => {
     const { svc } = evolution(FIN_DECISION);
-    const out = await svc.explainDecision('dec_fin', 'biz_A', { readsRevenue: true });
+    const out = await svc.explainDecision('dec_fin', 'biz_A', { readsRevenue: true, userId: 'u1' });
     expect(out.recommendation).toContain('Raise prices');
   });
 });
@@ -267,13 +267,14 @@ describe('creativity and GET cortex/awareness (D-235 inventory row 9)', () => {
       { key: 'i1', value: JSON.stringify({ title: 'Bundle the retainer at $900', description: 'raise revenue' }), confidence: 0.8, createdAt: new Date() },
       { key: 'i2', value: JSON.stringify({ title: 'Run a Friday team huddle', description: 'cut delays' }), confidence: 0.8, createdAt: new Date() },
     ] : [])) } } };
+    // Round 2 (security MAJOR-1): ideas are made from the unprojected business context, so the kind is withheld whole.
     const out = await svc.getAwareness('biz_A', { kinds: ['idea'], readsRevenue: false });
-    expect(out.items.map((i: any) => i.id)).toEqual(['i2']);
-    expect(out.counts.idea).toBe(1);
+    expect(out.items.map((i: any) => i.id)).toEqual([]);
+    expect(out.counts.idea).toBe(0);
     const owner = await svc.getAwareness('biz_A', { kinds: ['idea'], readsRevenue: true });
     expect(owner.items.map((i: any) => i.id)).toEqual(['i1', 'i2']);
     const none = await svc.getAwareness('biz_A', { kinds: ['idea'] });
-    expect(none.items.map((i: any) => i.id), 'no reader fails closed').toEqual(['i2']);
+    expect(none.items.map((i: any) => i.id), 'no reader fails closed').toEqual([]);
   });
 });
 

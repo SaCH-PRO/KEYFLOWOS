@@ -37,7 +37,7 @@ import { KeyCortexInsightService } from './key-cortex-insight.service';
 // uuidv4() with no arguments, so this is a true drop-in.
 import { randomUUID as uuidv4 } from 'node:crypto';
 import { keyCronsDisabled } from '../../core/config/env';
-import { dnaScoresForReader, isFinanceRecommendation, proposalTextStatesMoney } from '../business-genome/key-genome/genome-finance-scope';
+import { dnaScoresForReader, isFinanceRecommendation, isMoneyLabel, proposalTextStatesMoney } from '../business-genome/key-genome/genome-finance-scope';
 
 /* ─────────────────────────── Type Definitions ─────────────────────────── */
 
@@ -1237,9 +1237,15 @@ Return JSON:
       const recs = Array.isArray(genome?.recommendations) ? (genome.recommendations as Array<Record<string, unknown>>) : [];
       const visible: Record<string, unknown> = {
         dnaScores: dnaScoresForReader((genome?.dnaScores ?? {}) as Record<string, unknown>, false),
+        // Recommendations arrive as strings in production (context-v2 getGenomeContext) or as rows; a string is judged by
+        // its text, a row by its domain and text (round 2, correctness minor 3).
         recommendations: recs
-          .filter((r) => !isFinanceRecommendation({ domain: (r.domain ?? r.category ?? null) as string | null, title: (r.title ?? null) as string | null }))
-          .filter((r) => !proposalTextStatesMoney(JSON.stringify(r))),
+          .filter((r: unknown) =>
+            typeof r === 'string'
+              ? !proposalTextStatesMoney(r) && !isMoneyLabel(r)
+              : !isFinanceRecommendation({ domain: ((r as Record<string, unknown>).domain ?? (r as Record<string, unknown>).category ?? null) as string | null, title: ((r as Record<string, unknown>).title ?? null) as string | null }) &&
+                !proposalTextStatesMoney(JSON.stringify(r)),
+          ),
       };
       return Object.entries(visible).map(([k, v]) => `${k}: ${JSON.stringify(v).slice(0, 200)}`);
     } catch {

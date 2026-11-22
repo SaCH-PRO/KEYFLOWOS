@@ -19,9 +19,9 @@ describe('GET cortex/evolution/decision and GET cortex/awareness pass the reader
     const evolution = { explainDecision: vi.fn(async () => ({ explanation: 'x' })) };
     const ctl = controller(evolution, {});
     await ctl.evolutionExplainDecision('biz_A', 'dec_1', viewer('none'));
-    expect(evolution.explainDecision).toHaveBeenCalledWith('dec_1', 'biz_A', { readsRevenue: false });
+    expect(evolution.explainDecision).toHaveBeenCalledWith('dec_1', 'biz_A', { readsRevenue: false, userId: 'u1', ownerView: false });
     await ctl.evolutionExplainDecision('biz_A', 'dec_1', viewer('read'));
-    expect(evolution.explainDecision).toHaveBeenLastCalledWith('dec_1', 'biz_A', { readsRevenue: true });
+    expect(evolution.explainDecision).toHaveBeenLastCalledWith('dec_1', 'biz_A', { readsRevenue: true, userId: 'u1', ownerView: false });
   });
 
   it('RED-BEFORE: a decision that does not exist for the reader answers 404, not 503', async () => {

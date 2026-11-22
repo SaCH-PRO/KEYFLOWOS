@@ -4450,7 +4450,12 @@ export class KeyCortexController {
     }
 
     try {
-      return await this.evolution.explainDecision(decisionId, businessId, { readsRevenue: viewerReadsRevenue(viewer) });
+      return await this.evolution.explainDecision(decisionId, businessId, {
+        readsRevenue: viewerReadsRevenue(viewer),
+        userId: viewer?.userId,
+        // Round 2 (security MAJOR-3): an owner or a platform admin is explained any decision of the business.
+        ownerView: viewer?.superAdmin === true || viewer?.role === 'OWNER',
+      });
     } catch (err: any) {
       // A decision that does not exist (another business's, or a money decision the reader may not see) is a 404.
       if (err instanceof NotFoundException) throw err;
