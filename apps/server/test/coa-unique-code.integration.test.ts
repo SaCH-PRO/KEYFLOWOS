@@ -5,7 +5,7 @@
  * (POST and PATCH finance/businesses/:b/chart-of-accounts, and KEY's finance_create_coa_account tool, which
  * calls the same create) wrote whatever code they were given. The rule: a code is used by at most one
  * ACTIVE account of a business. A write that would make a second one is refused 409 COA_CODE_TAKEN and
- * writes nothing. Owner ruling D-167 (`migrations`): the check stays in the service; no unique index.
+ * writes no account (on a chart never seeded, the system accounts are seeded first: CUC-08). Owner ruling D-167 (`migrations`): the check stays in the service; no unique index.
  *
  *   CUC-01  RED-BEFORE  a second 6100 (the seeded Marketing account holds it) -> 409 COA_CODE_TAKEN, no row
  *   CUC-02  RED-BEFORE  renaming an account's code to a taken one -> 409, the account keeps its code
@@ -392,7 +392,8 @@ describe('CUC-06: archived accounts', () => {
     const parked = await make(ID.bizA, ID.ownerA, 'v63h Parked', '7076');
     expect((await http().delete(coaUrl(ID.bizA, parked)).set(HEADER, ID.ownerA)).status).toBe(200);
     const before = await chart(ID.bizA);
-    // The code is refused even while the account stays archived: no row is ever one step from a duplicate.
+    // The code is refused even while the account stays archived: an account is never moved onto a code an
+    // active account holds (an archived account that already has the code keeps it, as CUC-06 shows).
     expectTaken(await patch(ID.bizA, ID.ownerA, parked, { code: '7075' }));
     expectTaken(await patch(ID.bizA, ID.ownerA, parked, { code: '7075', isActive: false }));
     expectTaken(await patch(ID.bizA, ID.ownerA, parked, { code: '7075', isActive: true }));

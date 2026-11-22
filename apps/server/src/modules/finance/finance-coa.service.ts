@@ -63,10 +63,10 @@ function storedCoaCode(code: string | null): string | null {
  * is used by at most one ACTIVE account of a business. create() and update() refuse a write that would make
  * a second one with 409 COA_CODE_TAKEN and write no account (the system chart may have been seeded first):
  *   - a create with a code, an update that changes the code (also on an account that is, or in the same
- *     request becomes, archived: no row is left one step from a duplicate) and an update that brings an
- *     archived account back are checked against the business's other active accounts, system accounts
- *     included (so the system chart is seeded first: a custom 6100 on a chart never listed would otherwise
- *     be joined by the seed's own 6100);
+ *     request becomes, archived: an account is never moved onto a code an active account holds) and an
+ *     update that brings an archived account back are checked against the business's other active accounts,
+ *     system accounts included (so the system chart is seeded first: a custom 6100 on a chart never listed
+ *     would otherwise be joined by the seed's own 6100);
  *   - codes are compared trimmed and without letter case (as Postgres lower() folds it; the database alone
  *     decides a collision), and stored trimmed; a blank code is no code;
  *   - accounts without a code never collide, an archived account frees its code, and an account saved with
