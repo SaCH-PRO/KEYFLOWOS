@@ -16,7 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import type { Invoice } from "@/lib/client";
+import type { Invoice, PaymentRecord } from "@/lib/client";
 import {
   markInvoicePaid,
   sendInvoiceReminder,
@@ -47,6 +47,73 @@ const REMINDABLE_STATUSES: ReadonlySet<string> = new Set(["SENT", "OVERDUE", "PA
 
 function canRemind(status: string | null | undefined): boolean {
   return !!status && REMINDABLE_STATUSES.has(status);
+}
+
+/**
+ * V1-64 (SWP-INV-MONEY-TOTALS; sweep BUG-024, BUG-020; D-14, D-75): one
+ * invoice's money as this tab states it, read from the invoice's own payment
+ * rows through the shared balance contract (invoiceBalanceOfStoredRows, the
+ * mirror of the server's balanceOfStoredRows), in integer cents. Every figure,
+ * count and list of the tab goes through it, so a label means one thing.
+ *  - cash: the money in (SUCCESSFUL) and out (a refund) with its date. A PAID
+ *    invoice with no payment row of its own states its total on the day it was
+ *    paid, as the server's stats read it (review COR-2).
+ *  - owedCents: what is left on an issued, unsettled invoice (SENT,
+ *    PARTIALLY_PAID, OVERDUE), never below zero; 0 on any other invoice. A
+ *    draft was never sent: it is counted apart ("drafts unsent").
+ *  - state: "overdue" when something is owed past the due date (or the invoice
+ *    is flagged OVERDUE), "pending" when something is owed and not yet due.
+ */
+function invoiceMoney(inv: Invoice, now: Date) {
+  const cents = (amount: number) => Math.round((Number(amount) || 0) * 100);
+  const rows = inv.payments ?? [];
+  const total = Number(inv.total ?? 0) || 0;
+  const balance = invoiceBalanceOfStoredRows(total, rows, inv.currency);
+  const cash: Array<{ cents: number; at: Date | null }> = [];
+  for (const row of rows) {
+    const at = row.createdAt ? new Date(row.createdAt) : null;
+    for (const part of readStoredPaymentRows([row])) {
+      if (part.status === "SUCCESSFUL") cash.push({ cents: cents(part.amount), at });
+      else if (part.status === "REFUNDED") cash.push({ cents: -Math.abs(cents(part.amount)), at });
+    }
+  }
+  const speaksForItself = rows.some((row) => row.status === "SUCCESSFUL" || row.status === "REFUNDED");
+  if (inv.status === "PAID" && !speaksForItself && total > 0) {
+    cash.push({ cents: cents(total), at: inv.paidAt ? new Date(inv.paidAt) : null });
+  }
+  const receivedCents = Math.max(0, cash.reduce((sum, row) => sum + row.cents, 0));
+  const open = inv.status === "SENT" || inv.status === "PARTIALLY_PAID" || inv.status === "OVERDUE";
+  const owedCents = open ? Math.max(0, cents(balance.remaining)) : 0;
+  const pastDue = inv.status === "OVERDUE" || (!!inv.dueDate && new Date(inv.dueDate) < now);
+  const state: "pending" | "overdue" | null = owedCents > 0 ? (pastDue ? "overdue" : "pending") : null;
+  return { cash, receivedCents, owedCents, state };
+}
+
+/**
+ * Review COR-1: an invoice after a successful mark-paid, with the money the
+ * server recorded. PATCH .../paid records the remaining balance as a payment
+ * (D-05) and answers the invoice; when the answer carries the payment rows
+ * they are the rows, otherwise the row it recorded is added here (what was
+ * left, dated now), so Received rises by what was settled without a reload.
+ */
+function asMarkedPaid(inv: Invoice, answered: Partial<Invoice>): Invoice {
+  const status = answered.status ?? "PAID";
+  const paidAt = answered.paidAt ?? inv.paidAt ?? new Date().toISOString();
+  if (Array.isArray(answered.payments)) return { ...inv, status, paidAt, payments: answered.payments };
+  const { owedCents } = invoiceMoney(inv, new Date());
+  if (status !== "PAID" || owedCents <= 0) return { ...inv, status, paidAt };
+  const settled: PaymentRecord = {
+    id: `local-markpaid-${inv.id}`,
+    amount: owedCents / 100,
+    currency: inv.currency,
+    status: "SUCCESSFUL",
+    provider: "manual",
+    providerPaymentId: `local-markpaid-${inv.id}`,
+    createdAt: new Date().toISOString(),
+    businessId: "",
+    invoiceId: inv.id,
+  };
+  return { ...inv, status, paidAt, payments: [...(inv.payments ?? []), settled] };
 }
 
 function getContactName(contact: { firstName?: string | null; lastName?: string | null } | null | undefined): string {
@@ -85,23 +152,19 @@ export default function PaymentsTab({
 
 
 
-  // V1-64 (SWP-INV-MONEY-TOTALS; sweep BUG-024, BUG-020; D-14, D-75): every
-  // figure is read from the invoice's own payment rows through the shared
-  // balance contract (invoiceBalanceOfStoredRows, the mirror of the server's
-  // balanceOfStoredRows), in integer cents. It read the invoice status alone:
-  // Received was the totals of PAID invoices, so a deposit on an unpaid
-  // invoice was not received; Pending and Overdue were whole totals, so the
-  // deposit was still owed; a DRAFT nobody was sent counted as pending.
+  // V1-64 (SWP-INV-MONEY-TOTALS; sweep BUG-024, BUG-020): the strip's figures,
+  // from invoiceMoney above. It read the invoice status alone: Received was the
+  // totals of PAID invoices, so a deposit on an unpaid invoice was not
+  // received; Pending and Overdue were whole totals, so the deposit was still
+  // owed; a DRAFT nobody was sent counted as pending.
   //  - Received: the money received net of refunds, on any invoice.
-  //  - This Month: the same, by the date of each payment row.
-  //  - Pending / Overdue: what is still owed on an issued, unsettled invoice
-  //    (SENT, PARTIALLY_PAID, OVERDUE), never below zero. A draft is counted
-  //    apart (the card's "drafts unsent").
+  //  - This Month: the same, by the date of each payment row; a month whose
+  //    refunds outweigh its receipts shows no figure, never a negative.
+  //  - Pending / Overdue: what is still owed, and how many invoices owe it.
   const stats = useMemo(() => {
     const now = new Date();
     const thisMonth = now.getMonth();
     const thisYear = now.getFullYear();
-    const cents = (amount: number) => Math.round((Number(amount) || 0) * 100);
 
     let receivedCents = 0;
     let thisMonthCents = 0;
@@ -112,32 +175,18 @@ export default function PaymentsTab({
     let overdueCount = 0;
 
     for (const inv of invoices) {
-      const rows = inv.payments ?? [];
-      const balance = invoiceBalanceOfStoredRows(Number(inv.total ?? 0) || 0, rows, inv.currency);
-      receivedCents += Math.max(0, cents(balance.net));
-      // Money in (SUCCESSFUL) and out (a refund, whatever its sign) this month.
-      for (const row of rows) {
-        const paidOn = row.createdAt ? new Date(row.createdAt) : null;
-        if (!paidOn || paidOn.getMonth() !== thisMonth || paidOn.getFullYear() !== thisYear) continue;
-        for (const part of readStoredPaymentRows([row])) {
-          if (part.status === "SUCCESSFUL") thisMonthCents += cents(part.amount);
-          else if (part.status === "REFUNDED") thisMonthCents -= Math.abs(cents(part.amount));
-        }
+      const money = invoiceMoney(inv, now);
+      receivedCents += money.receivedCents;
+      for (const row of money.cash) {
+        if (row.at && row.at.getMonth() === thisMonth && row.at.getFullYear() === thisYear) thisMonthCents += row.cents;
       }
-
-      const owedCents = Math.max(0, cents(balance.remaining));
-      if (inv.status === "PAID") {
-        paidCount++;
-      } else if (inv.status === "OVERDUE" || inv.status === "SENT" || inv.status === "PARTIALLY_PAID") {
-        if (owedCents <= 0) continue;
-        const isOverdue = inv.status === "OVERDUE" || (!!inv.dueDate && new Date(inv.dueDate) < now);
-        if (isOverdue) {
-          overdueCents += owedCents;
-          overdueCount++;
-        } else {
-          pendingCents += owedCents;
-          pendingCount++;
-        }
+      if (inv.status === "PAID") paidCount++;
+      if (money.state === "overdue") {
+        overdueCents += money.owedCents;
+        overdueCount++;
+      } else if (money.state === "pending") {
+        pendingCents += money.owedCents;
+        pendingCount++;
       }
     }
 
@@ -159,21 +208,10 @@ export default function PaymentsTab({
     if (activeView === "received") {
       list = list.filter((inv) => inv.status === "PAID");
     } else if (activeView === "pending") {
-      list = list.filter((inv) => {
-        if (inv.status === "DRAFT") return true;
-        if (inv.status === "SENT" || inv.status === "PARTIALLY_PAID") {
-          return !(inv.dueDate && new Date(inv.dueDate) < now);
-        }
-        return false;
-      });
+      // Review COR-5: the list is the invoices the strip's Pending adds up.
+      list = list.filter((inv) => invoiceMoney(inv, now).state === "pending");
     } else if (activeView === "overdue") {
-      list = list.filter(
-        (inv) =>
-          inv.status === "OVERDUE" ||
-          ((inv.status === "SENT" || inv.status === "PARTIALLY_PAID") &&
-            inv.dueDate &&
-            new Date(inv.dueDate) < now)
-      );
+      list = list.filter((inv) => invoiceMoney(inv, now).state === "overdue");
     }
 
     if (searchQuery.trim()) {
@@ -195,14 +233,9 @@ export default function PaymentsTab({
 
   const overdueQueue = useMemo(() => {
     const now = new Date();
+    // Review COR-5: what is overdue and still owed, the invoices the strip's Overdue adds up.
     return invoices
-      .filter(
-        (inv) =>
-          inv.status === "OVERDUE" ||
-          ((inv.status === "SENT" || inv.status === "PARTIALLY_PAID") &&
-            inv.dueDate &&
-            new Date(inv.dueDate) < now)
-      )
+      .filter((inv) => invoiceMoney(inv, now).state === "overdue")
       .sort((a, b) => getDaysOverdue(b.dueDate) - getDaysOverdue(a.dueDate));
   }, [invoices]);
 
@@ -213,9 +246,7 @@ export default function PaymentsTab({
       try {
         const { data, error } = await markInvoicePaid(invoiceId);
         if (!error && data) {
-          setInvoices((prev) =>
-            prev.map((i) => (i.id === invoiceId ? { ...i, status: data.status ?? "PAID" } : i))
-          );
+          setInvoices((prev) => prev.map((i) => (i.id === invoiceId ? asMarkedPaid(i, data) : i)));
           toast.success("Invoice marked as paid");
         } else {
           toast.error(error ?? "Failed to mark paid");
@@ -310,7 +341,7 @@ export default function PaymentsTab({
       setInvoices((prev) =>
         prev.map((inv) => {
           const match = results.find((r) => r.data?.id === inv.id);
-          return match?.data ? { ...inv, status: match.data.status ?? "PAID" } : inv;
+          return match?.data ? asMarkedPaid(inv, match.data) : inv;
         }),
       );
       toast.success(`${succeeded} invoice(s) marked as paid`);
@@ -344,16 +375,12 @@ export default function PaymentsTab({
 
   const viewCounts = useMemo(() => {
     const now = new Date();
-    const isOverdue = (i: Invoice) =>
-      i.status === "OVERDUE" ||
-      ((i.status === "SENT" || i.status === "PARTIALLY_PAID") && i.dueDate && new Date(i.dueDate) < now);
+    // Review COR-5: the counts of the lists above (invoiceMoney's states).
     return {
       all: invoices.length,
       received: invoices.filter((i) => i.status === "PAID").length,
-      pending: invoices.filter(
-        (i) => (i.status === "DRAFT" || i.status === "SENT" || i.status === "PARTIALLY_PAID") && !isOverdue(i)
-      ).length,
-      overdue: invoices.filter((i) => isOverdue(i)).length,
+      pending: invoices.filter((i) => invoiceMoney(i, now).state === "pending").length,
+      overdue: invoices.filter((i) => invoiceMoney(i, now).state === "overdue").length,
     };
   }, [invoices]);
 
@@ -450,7 +477,7 @@ export default function PaymentsTab({
                           </span>
                         </div>
                         <span className="text-sm font-bold shrink-0">
-                          {formatCurrency(Number(inv.total), currency)}
+                          {formatCurrency(invoiceMoney(inv, new Date()).owedCents / 100, currency)}
                         </span>
                         <div className="flex items-center gap-1 shrink-0">
                           <button

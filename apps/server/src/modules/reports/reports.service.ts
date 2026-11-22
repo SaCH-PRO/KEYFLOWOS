@@ -102,15 +102,25 @@ export class ReportsService {
     // deposit never reduced it. The report is labelled in the business
     // currency, so the figure and its counts are that currency's invoices only
     // (another currency's are not added to it).
+    // Review SEC-1: the open receivables alone are read (no other invoice owes
+    // anything). Review COR-4: what is owed in each currency is stated under
+    // outstandingByCurrency, so another currency's receivable is not lost.
     const reportCurrency = normalizeCurrency(currency) || 'TTD';
-    const owedInvoices = (await readInvoiceMoney(this.prisma.client, businessId, now)).filter(
-      (inv) => inv.currency === reportCurrency && inv.remaining > 0,
+    const owedInvoices = (await readInvoiceMoney(this.prisma.client, businessId, now, { openOnly: true })).filter(
+      (inv) => inv.remaining > 0 && inv.currency !== '',
     );
-    const outstandingInvoices = {
-      total: sumMoney(owedInvoices.map((inv) => inv.remaining)),
-      count: owedInvoices.length,
-    };
-    const overdueInvoices = owedInvoices.filter((inv) => inv.overdue).length;
+    const outstandingByCurrency: Record<string, { outstanding: number; count: number; overdueCount: number }> = {};
+    for (const code of [...new Set(owedInvoices.map((inv) => inv.currency))].sort()) {
+      const owed = owedInvoices.filter((inv) => inv.currency === code);
+      outstandingByCurrency[code] = {
+        outstanding: sumMoney(owed.map((inv) => inv.remaining)),
+        count: owed.length,
+        overdueCount: owed.filter((inv) => inv.overdue).length,
+      };
+    }
+    const home = outstandingByCurrency[reportCurrency] ?? { outstanding: 0, count: 0, overdueCount: 0 };
+    const outstandingInvoices = { total: home.outstanding, count: home.count };
+    const overdueInvoices = home.overdueCount;
 
     // FIN4 — Source of truth: derive revenue/expense from the ledger so
     // these figures match the PnL/Balance Sheet endpoints exactly. Falls
@@ -186,6 +196,7 @@ export class ReportsService {
         byStatus: invoicesByStatus,
         outstanding: outstandingInvoices.total,
         outstandingCount: outstandingInvoices.count,
+        outstandingByCurrency,
         overdueCount: overdueInvoices,
         topClients,
       },
