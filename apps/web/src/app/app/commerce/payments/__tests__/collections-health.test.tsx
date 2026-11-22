@@ -30,6 +30,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import React, { useState } from "react";
 import { render, screen, cleanup, within, fireEvent, waitFor } from "@testing-library/react";
 import type { Invoice, PaymentRecord } from "@/lib/client";
+import { toast } from "sonner";
 
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn(), message: vi.fn() }),
@@ -123,6 +124,7 @@ function expectNoNegativeFigure(card: HTMLElement) {
 beforeEach(() => {
   markInvoicePaid.mockReset();
   getInvoice.mockReset();
+  vi.mocked(toast.success).mockClear();
   // Unless a case says otherwise the re-read after Mark paid fails, so the tab falls back to what it knows.
   getInvoice.mockResolvedValue({ data: null, error: "offline" });
 });
@@ -244,6 +246,8 @@ describe("V1-64 review repairs: the tab after Mark paid, PAID invoices with no p
     fireEvent.click(screen.getAllByTitle("Mark Paid")[0]);
     await waitFor(() => expect(strip("Received")).toBe("TTD 500"));
     expect(getInvoice).toHaveBeenCalledWith("biz_v64", "late");
+    // Round 3 S3-2: the write names the same business as the re-read (the tab's own), not whatever storage holds.
+    expect(markInvoicePaid).toHaveBeenCalledWith("late", "biz_v64");
     expect(strip("Overdue")).toBe("—");
     expect(within(health()).getByTestId("collections-to-collect").textContent).toBe("TTD 0");
     expect(health().textContent).toContain("Collections healthy");
@@ -290,8 +294,10 @@ describe("V1-64 review repairs: the tab after Mark paid, PAID invoices with no p
     // The credited invoice: what the server recorded cannot be told from the list row (credit notes are not on it):
     // nothing is guessed and no paid date is invented.
     fireEvent.click(screen.getAllByTitle("Mark Paid")[0]);
-    await waitFor(() => expect(markInvoicePaid).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(getInvoice).toHaveBeenCalledTimes(2));
+    // Round 3 C3-1: the toast follows the state update, so what is read below is the state after it.
+    await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(2));
+    expect(markInvoicePaid).toHaveBeenCalledTimes(2);
+    expect(getInvoice).toHaveBeenCalledTimes(2);
     const cred = seen[seen.length - 1].find((i) => i.id === "cred")!;
     expect(cred.paidAt ?? null).toBeNull();
     expect(strip("Received")).toBe("TTD 530");
@@ -312,6 +318,8 @@ describe("V1-64 review repairs: the tab after Mark paid, PAID invoices with no p
     await waitFor(() => expect(strip("Received")).toBe("TTD 350"));
     expect(strip("Pending")).toBe("—");
     expect(getInvoice).toHaveBeenCalledTimes(2);
+    expect(markInvoicePaid).toHaveBeenCalledWith("one", "biz_v64");
+    expect(markInvoicePaid).toHaveBeenCalledWith("two", "biz_v64");
   });
 
   it("CH-12 RED-BEFORE (COR-2): a PAID invoice with no payment row still counts its total, on the day it was paid (a marketplace order's INV-ORD invoice)", () => {
