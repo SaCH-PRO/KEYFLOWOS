@@ -6,10 +6,12 @@ import type { TemporalFlowService } from './temporal-flow.service';
 const READER = { id: 'user_1', role: 'USER' };
 const REQ = { user: READER };
 const FILTER = { NOT: { OR: [{ module: 'key_inbox' }] } };
+const MEMORY_FILTER = { sourceModule: { in: [] } };
 
 function makeController() {
   const temporal = {
     readerFilter: vi.fn().mockResolvedValue(FILTER),
+    readerMemoryFilter: vi.fn().mockResolvedValue(MEMORY_FILTER),
     list: vi.fn().mockResolvedValue([{ id: 'tf_1' }]),
     calendarRange: vi.fn().mockResolvedValue([{ id: 'tf_2' }]),
     remindersDue: vi.fn().mockResolvedValue([{ id: 'tf_3' }]),
@@ -94,7 +96,8 @@ describe('TemporalFlowController', () => {
     const { controller, temporal } = makeController();
     const result = await controller.analyze('biz_1', REQ);
     expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', READER);
-    expect(temporal.analyze).toHaveBeenCalledWith('biz_1', FILTER);
+    expect(temporal.readerMemoryFilter).toHaveBeenCalledWith('biz_1', READER);
+    expect(temporal.analyze).toHaveBeenCalledWith('biz_1', FILTER, MEMORY_FILTER);
     expect(result.summary).toBe('Analysis complete.');
   });
 });

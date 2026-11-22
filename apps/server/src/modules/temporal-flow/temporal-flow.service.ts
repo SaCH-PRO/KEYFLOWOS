@@ -1,7 +1,7 @@
 import { ForbiddenException, Injectable, Logger, Inject } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { CANONICAL_MODULES, LEVEL_RANK, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
+import { LEVEL_RANK, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
 import { TemporalFlowMemoryService } from './temporal-flow-memory.service';
 import type {
@@ -32,8 +32,13 @@ export interface TemporalFlowListQuery {
  */
 export type TemporalFlowReader = { id?: string; role?: string } | null | undefined;
 
-/** The modules that own timeline events, and so may withhold them. */
-type OwningModule = (typeof CANONICAL_MODULES)[number];
+/**
+ * FU-TEMPORAL-FLOW-INBOX-SCOPE: the modules that own timeline events. Withholding is computed over these only, so a
+ * reader who reads all four (the owner, an ADMIN or STAFF member on role defaults) sees every event, as before
+ * (orchestrator delta M-1: a module none for every role, such as connect, withholds nothing).
+ */
+const EVENT_OWNERS = ['operations', 'bookings', 'revenue', 'storefront'] as const;
+type EventOwner = (typeof EVENT_OWNERS)[number];
 
 /**
  * FU-TEMPORAL-FLOW-INBOX-SCOPE: how an event names the module that owns it, by its `module`, its `source` and its
@@ -44,51 +49,91 @@ type OwningModule = (typeof CANONICAL_MODULES)[number];
  *   - GoogleCalendarTemporalSyncService: module calendar, source GOOGLE_CALENDAR, type google_calendar.* ->
  *     bookings (CalendarController's event reads: bookings read); booking.* types too;
  *   - money-bearing types (invoice.*, payment.*, ...) and a module that names finance -> revenue (D-100);
- *   - a `module` that is a canonical module's own name (a hand-written or KEY-written event) -> that module;
- *   - BusinessAssetsService (module business-assets), BlueprintService and ConstitutionVersionService (module
- *     business-genome), the KEY action services (module key-autonomy) and KEY's timeline notes (module null): their
- *     owners' reads are membership only, so these stay business-wide.
+ *   - KEY's timeline notes and reminders (KeyCortex temporal_flow.create_event / set_reminder: source key_cortex,
+ *     free text that can carry money) -> revenue, unless their module names another owner or a business-wide module;
+ *   - Shopify events (source SHOPIFY, type shopify.*) -> storefront and revenue (orders are money);
+ *   - business-wide (BUSINESS_WIDE, their owners' own reads being membership only): BusinessAssetsService (module
+ *     business-assets), BlueprintService and ConstitutionVersionService (module business-genome), the KEY action
+ *     services (module key-autonomy), and an event recorded by hand (source MANUAL, the Schedule hub's form);
+ *   - anything else (an unknown module, source or type: WEBHOOK, module connect, an unclassified APP type) fails
+ *     closed (D-63, D-227, D-234): it is withheld from a reader who misses any event-owning module.
+ * A `_` in a pattern is a one-character wildcard to ILIKE: it can only match more events, so withhold more.
  */
-const OWNER_PATTERNS: Partial<Record<OwningModule, { modules: string[]; sources: string[]; typePrefixes: string[] }>> = {
+const OWNER_PATTERNS: Record<EventOwner, { modules: string[]; sources: string[]; typePrefixes: string[] }> = {
   operations: {
-    modules: ['key_inbox', 'key-inbox', 'keyinbox', 'inbox'],
+    modules: ['operations', 'key_inbox', 'key-inbox', 'keyinbox', 'inbox'],
     sources: ['key_inbox', 'whatsapp', 'instagram', 'email', 'gmail', 'meta', 'facebook', 'messenger', 'slack', 'sms', 'telegram', 'tiktok'],
     typePrefixes: ['key_inbox.', 'whatsapp.', 'instagram.', 'email.', 'gmail.', 'meta.', 'facebook.', 'messenger.', 'slack.', 'sms.', 'telegram.', 'tiktok.'],
   },
   bookings: {
-    modules: ['calendar', 'booking'],
+    modules: ['bookings', 'booking', 'calendar'],
     sources: ['google_calendar'],
     typePrefixes: ['google_calendar.', 'calendar.', 'booking.'],
   },
   revenue: {
-    modules: ['finance', 'invoice', 'invoices', 'payment', 'payments', 'billing', 'money'],
-    sources: ['stripe', 'paypal'],
+    modules: ['revenue', 'finance', 'invoice', 'invoices', 'payment', 'payments', 'billing', 'money'],
+    sources: ['stripe', 'paypal', 'wipay', 'shopify'],
     typePrefixes: [
       'invoice.', 'payment.', 'quote.', 'estimate.', 'refund.', 'payout.', 'deposit.', 'subscription.',
-      'credit_note.', 'revenue.', 'finance.', 'money.', 'stripe.', 'paypal.',
+      'credit_note.', 'revenue.', 'finance.', 'money.', 'stripe.', 'paypal.', 'wipay.', 'shopify.', 'order.',
     ],
   },
+  storefront: {
+    modules: ['storefront', 'shop', 'store'],
+    sources: ['shopify'],
+    typePrefixes: ['shopify.', 'storefront.', 'order.'],
+  },
 };
+
+/** Business-wide modules (their owners' reads are membership only) and the hand-recorded source. */
+const BUSINESS_WIDE = { modules: ['business-assets', 'business-genome', 'key-autonomy'], sources: ['manual'] };
+/** KEY's own timeline writes: revenue-owned unless their module names an owner or a business-wide module. */
+const KEY_NOTE_SOURCE = 'key_cortex';
+
+/**
+ * FU-TEMPORAL-FLOW-INBOX-SCOPE delta (item 1): the temporal memories' sourceModule values and the modules a reader
+ * needs to see one (TemporalFlowMemoryService.summarize* write key_inbox). Any other value (the genome bridge's
+ * temporal_flow patterns, built from events of every module) fails closed.
+ */
+const MEMORY_SOURCE_OWNERS: Record<string, readonly EventOwner[]> = { key_inbox: ['operations'] };
 
 const ci = (value: string) => ({ equals: value, mode: 'insensitive' as const });
 const ciPrefix = (value: string) => ({ startsWith: value, mode: 'insensitive' as const });
 
 /**
- * FU-TEMPORAL-FLOW-INBOX-SCOPE: the condition an event of `module` meets. `module` is nullable: each of its terms is
- * bound to a non-null value, so the NOT a reader's filter wraps it in keeps an event whose module is null (SQL's NOT of
- * a NULL comparison would drop it).
+ * `module` is nullable: each of its terms is bound to a non-null value, so a NOT around it keeps an event whose module
+ * is null (SQL's NOT of a NULL comparison would drop it).
  */
-function ownedBy(module: OwningModule): Record<string, unknown> {
-  const p = OWNER_PATTERNS[module];
-  const modules = [module, ...(p?.modules ?? [])];
+const moduleIs = (value: string) => ({ AND: [{ module: { not: null } }, { module: ci(value) }] });
+
+/** An event whose module names an event-owning module or a business-wide one. */
+const KNOWN_MODULE = {
+  OR: [...EVENT_OWNERS.flatMap((o) => OWNER_PATTERNS[o].modules), ...BUSINESS_WIDE.modules].map(moduleIs),
+};
+
+/** FU-TEMPORAL-FLOW-INBOX-SCOPE: the condition an event owned by `owner` meets. */
+function ownedBy(owner: EventOwner): Record<string, unknown> {
+  const p = OWNER_PATTERNS[owner];
   return {
     OR: [
-      ...modules.map((m) => ({ AND: [{ module: { not: null } }, { module: ci(m) }] })),
-      ...(p?.sources ?? []).map((src) => ({ source: ci(src) })),
-      ...(p?.typePrefixes ?? []).map((prefix) => ({ type: ciPrefix(prefix) })),
+      ...p.modules.map(moduleIs),
+      ...p.sources.map((src) => ({ source: ci(src) })),
+      ...p.typePrefixes.map((prefix) => ({ type: ciPrefix(prefix) })),
+      ...(owner === 'revenue' ? [{ AND: [{ source: ci(KEY_NOTE_SOURCE) }, { NOT: KNOWN_MODULE }] }] : []),
     ],
   };
 }
+
+/** FU-TEMPORAL-FLOW-INBOX-SCOPE delta (item 2): an event no rule classifies (fails closed). */
+const UNCLASSIFIED = {
+  AND: [
+    { NOT: { OR: EVENT_OWNERS.map(ownedBy) } },
+    { NOT: { OR: [...BUSINESS_WIDE.modules.map(moduleIs), ...BUSINESS_WIDE.sources.map((src) => ({ source: ci(src) }))] } },
+  ],
+};
+
+/** The events withheld from a reader who misses the `withheld` owners (non-empty). */
+const withheldEvents = (withheld: readonly EventOwner[]) => ({ OR: [...withheld.map(ownedBy), UNCLASSIFIED] });
 
 @Injectable()
 export class TemporalFlowService {
@@ -140,27 +185,99 @@ export class TemporalFlowService {
   }
 
   /**
-   * FU-TEMPORAL-FLOW-INBOX-SCOPE (D-100, D-179): the condition that withholds from `reader` the events of every module
-   * they cannot read, applied in the query itself, before its order and limit, so a page holds as many events as the
+   * FU-TEMPORAL-FLOW-INBOX-SCOPE (D-100, D-179): the condition that withholds from `reader` the events of every
+   * event-owning module (EVENT_OWNERS) they cannot read, and, when they miss any, every unclassified event (fails
+   * closed, delta item 2), applied in the query itself, before its order and limit, so a page holds as many events as the
    * reader may see and no count or page boundary counts a withheld one. The reader's levels are read as
    * ModuleScopeGuard reads them (memberModuleLevel: the membership of this business, its explicit permissionScopes
    * map, a JSON array included, a missing key being none, D-179; else its role's defaults); a platform SUPER_ADMIN
    * passes, as the guard passes them. No reader, or no membership of this business: every owning module is withheld.
-   * undefined: nothing is withheld.
+   * undefined: nothing is withheld (a reader of every event-owning module sees every event, as before: delta M-1).
    */
   async readerFilter(businessId: string, reader: TemporalFlowReader): Promise<Record<string, unknown> | undefined> {
-    if (reader?.role === 'SUPER_ADMIN' && reader.id) return undefined;
+    const withheld = await this.withheldOwners(businessId, reader);
+    return withheld.length ? { NOT: withheldEvents(withheld) } : undefined;
+  }
+
+  /**
+   * FU-TEMPORAL-FLOW-INBOX-SCOPE: the event-owning modules `reader` cannot read in `businessId` (read as readerFilter
+   * says). [] for a reader of all of them and for a platform SUPER_ADMIN.
+   */
+  private async withheldOwners(businessId: string, reader: TemporalFlowReader): Promise<EventOwner[]> {
+    if (reader?.role === 'SUPER_ADMIN' && reader.id) return [];
     const membership = reader?.id
       ? await this.prisma.client.membership.findUnique({
           where: { userId_businessId: { userId: reader.id, businessId } },
           select: { role: true, permissionScopes: true },
         })
       : null;
-    const reads = (module: OwningModule) =>
+    const reads = (module: EventOwner) =>
       !!membership && rankOf(memberModuleLevel(membership, module)) >= LEVEL_RANK.read;
-    const withheld = CANONICAL_MODULES.filter((module) => !reads(module));
+    return EVENT_OWNERS.filter((module) => !reads(module));
+  }
+
+  /**
+   * FU-TEMPORAL-FLOW-INBOX-SCOPE delta (item 1): the condition that withholds from `reader` the temporal memories they
+   * may not see, in the query before its order and limit: a memory whose sourceModule needs a module they cannot read
+   * (MEMORY_SOURCE_OWNERS; an unknown one fails closed), and a memory built from an event withheld from them (its
+   * sourceEventIds name one). undefined: nothing is withheld (a reader of every event-owning module).
+   */
+  async readerMemoryFilter(businessId: string, reader: TemporalFlowReader): Promise<Record<string, unknown> | undefined> {
+    const withheld = await this.withheldOwners(businessId, reader);
     if (!withheld.length) return undefined;
-    return { NOT: { OR: withheld.map(ownedBy) } };
+    const allowed = Object.entries(MEMORY_SOURCE_OWNERS)
+      .filter(([, owners]) => owners.every((o) => !withheld.includes(o)))
+      .map(([sourceModule]) => sourceModule);
+    if (!allowed.length) return { id: { in: [] } };
+    const hidden = await this.prisma.client.temporalFlowEvent.findMany({
+      where: { AND: [{ businessId }, withheldEvents(withheld)] },
+      select: { id: true },
+    });
+    const hiddenIds = hidden.map((e: { id: string }) => e.id);
+    return {
+      AND: [
+        { sourceModule: { in: allowed } },
+        ...(hiddenIds.length ? [{ NOT: { sourceEventIds: { hasSome: hiddenIds } } }] : []),
+      ],
+    };
+  }
+
+  /**
+   * FU-TEMPORAL-FLOW-INBOX-SCOPE delta (item 1): the memories of `businessId` a reader with `memoryFilter`
+   * (readerMemoryFilter) may see, as TemporalFlowMemoryService.findMany reads them. An entity id that is not a string
+   * matches nothing.
+   */
+  async listMemory(
+    businessId: string,
+    query: { entityType?: string; entityId?: string | null; type?: string; limit?: number | string },
+    memoryFilter: Record<string, unknown>,
+  ) {
+    if (query.entityId !== undefined && query.entityId !== null && typeof query.entityId !== 'string') return [];
+    const limit = Number(query.limit);
+    return this.prisma.client.temporalFlowMemory.findMany({
+      where: this.scoped(
+        {
+          businessId,
+          ...(query.entityType ? { entityType: String(query.entityType) } : {}),
+          ...(query.entityId !== undefined ? { entityId: query.entityId ?? null } : {}),
+          ...(query.type ? { type: String(query.type) } : {}),
+        },
+        memoryFilter,
+      ),
+      orderBy: { updatedAt: 'desc' },
+      take: Number.isInteger(limit) && limit > 0 ? limit : 100,
+    });
+  }
+
+  /** FU-TEMPORAL-FLOW-INBOX-SCOPE delta (item 1): of `memoryIds`, the ones of `businessId` `memoryFilter` lets through. */
+  async visibleMemoryIds(businessId: string, memoryIds: string[], memoryFilter: Record<string, unknown>): Promise<Set<string>> {
+    const ids = memoryIds.filter((id): id is string => typeof id === 'string' && id.length > 0);
+    if (!ids.length) return new Set();
+    const rows = await this.prisma.client.temporalFlowMemory.findMany({
+      where: this.scoped({ businessId, id: { in: ids } }, memoryFilter),
+      select: { id: true },
+    });
+    return new Set(rows.map((r: { id: string }) => r.id));
   }
 
   /** FU-TEMPORAL-FLOW-INBOX-SCOPE: `where` with the reader's filter (readerFilter) added, when one is given. */
@@ -249,7 +366,11 @@ export class TemporalFlowService {
     });
   }
 
-  async analyze(businessId: string, readerFilter?: Record<string, unknown>): Promise<TemporalFlowAnalysis> {
+  async analyze(
+    businessId: string,
+    readerFilter?: Record<string, unknown>,
+    memoryFilter?: Record<string, unknown>,
+  ): Promise<TemporalFlowAnalysis> {
     const recent = await this.list(businessId, { limit: 500 }, readerFilter);
 
     const urgentItems: TemporalFlowAnalysis['urgentItems'] = [];
@@ -324,7 +445,7 @@ export class TemporalFlowService {
 
     const genomeProposalCandidates = await this.findGenomeSignals(businessId, recent);
 
-    const memoryInsights = await this.buildMemoryInsights(businessId);
+    const memoryInsights = await this.buildMemoryInsights(businessId, memoryFilter);
 
     const summaryParts = [
       `${recent.length} events analyzed.`,
@@ -347,11 +468,20 @@ export class TemporalFlowService {
     };
   }
 
-  private async buildMemoryInsights(businessId: string): Promise<TemporalFlowMemoryInsight[]> {
+  /**
+   * FU-TEMPORAL-FLOW-INBOX-SCOPE delta (item 1): given a memory filter (readerMemoryFilter), the memories and the
+   * semantic recall carry only memories the reader may see.
+   */
+  private async buildMemoryInsights(
+    businessId: string,
+    memoryFilter?: Record<string, unknown>,
+  ): Promise<TemporalFlowMemoryInsight[]> {
     const insights: NonNullable<TemporalFlowAnalysis['memoryInsights']> = [];
     if (!this.memoryService) return insights;
 
-    const recentMemory = await this.memoryService.findMany(businessId, { limit: 20 });
+    const recentMemory = memoryFilter
+      ? await this.listMemory(businessId, { limit: 20 }, memoryFilter)
+      : await this.memoryService.findMany(businessId, { limit: 20 });
     for (const memory of recentMemory) {
       if (memory.confidence < 0.6) continue;
       if (memory.type === 'summary') {
@@ -372,7 +502,11 @@ export class TemporalFlowService {
           sourceTypes: ['temporal_memory'],
           minSimilarity: 0.72,
         });
+        const visible = memoryFilter
+          ? await this.visibleMemoryIds(businessId, recall.map((hit) => hit.sourceId), memoryFilter)
+          : undefined;
         for (const hit of recall) {
+          if (visible && !visible.has(hit.sourceId)) continue;
           insights.push({
             title: 'Memory recall: follow-up context',
             reason: hit.content,

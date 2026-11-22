@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Inject,
   Param,
@@ -30,6 +31,9 @@ type ReaderRequest = { user?: TemporalFlowReader };
  * modules its reader may read (TemporalFlowService.readerFilter, applied in the query before its order and limit): the
  * KEY Inbox's events need operations read, calendar events bookings read, money events revenue read (D-100). Review
  * repair (SEC N-2, N-3): the writes that name an existing event (resolve, an upsert by external id) do not reach one.
+ * Delta (item 1): the memory reads (memory, memory/search, memory/by-entity, the analysis's memory insights) answer
+ * only memories the reader may see (TemporalFlowService.readerMemoryFilter), and compaction and pattern detection,
+ * which summarise every event of the business, are refused (403) to a reader who misses an event-owning module.
  */
 @HiddenModuleWrites('flow_hubs', 'bookings')
 @Controller('temporal-flow/businesses/:businessId')
@@ -104,14 +108,21 @@ export class TemporalFlowController {
 
   @Post('analyze')
   async analyze(@Param('businessId') businessId: string, @Req() req: ReaderRequest) {
-    return this.temporal.analyze(businessId, await this.temporal.readerFilter(businessId, req.user));
+    return this.temporal.analyze(
+      businessId,
+      await this.temporal.readerFilter(businessId, req.user),
+      await this.temporal.readerMemoryFilter(businessId, req.user),
+    );
   }
 
   @Get('memory')
-  listMemory(
+  async listMemory(
     @Param('businessId') businessId: string,
     @Query() query: TemporalFlowMemoryQueryDto,
+    @Req() req: ReaderRequest,
   ) {
+    const memoryFilter = await this.temporal.readerMemoryFilter(businessId, req.user);
+    if (memoryFilter) return this.temporal.listMemory(businessId, query, memoryFilter);
     return this.memory.findMany(businessId, {
       entityType: query.entityType,
       entityId: query.entityId,
@@ -121,30 +132,54 @@ export class TemporalFlowController {
   }
 
   @Get('memory/search')
-  searchMemory(
+  async searchMemory(
     @Param('businessId') businessId: string,
     @Query('q') q: string,
+    @Req() req: ReaderRequest,
     @Query('limit') limit?: string,
   ) {
-    return this.memory.searchMemory(businessId, q, limit ? Number(limit) : 10);
+    const wanted = limit ? Number(limit) : 10;
+    const memoryFilter = await this.temporal.readerMemoryFilter(businessId, req.user);
+    if (!memoryFilter) return this.memory.searchMemory(businessId, q, wanted);
+    // Hits of withheld memories are dropped before the limit: the search reads a wider window, then keeps the
+    // visible hits up to the limit asked for.
+    const max = Number.isInteger(wanted) && wanted > 0 ? wanted : 10;
+    const hits = await this.memory.searchMemory(businessId, q, Math.min(max * 5, 100));
+    const visible = await this.temporal.visibleMemoryIds(businessId, hits.map((hit) => hit.sourceId), memoryFilter);
+    return hits.filter((hit) => visible.has(hit.sourceId)).slice(0, max);
   }
 
   @Get('memory/by-entity/:entityType/:entityId')
-  memoryByEntity(
+  async memoryByEntity(
     @Param('businessId') businessId: string,
     @Param('entityType') entityType: string,
     @Param('entityId') entityId: string,
+    @Req() req: ReaderRequest,
   ) {
+    const memoryFilter = await this.temporal.readerMemoryFilter(businessId, req.user);
+    if (memoryFilter) return this.temporal.listMemory(businessId, { entityType, entityId }, memoryFilter);
     return this.memory.findByEntity(businessId, entityType, entityId);
   }
 
   @Post('memory/compact')
-  compactMemory(@Param('businessId') businessId: string) {
+  async compactMemory(@Param('businessId') businessId: string, @Req() req: ReaderRequest) {
+    await this.assertReadsEveryOwner(businessId, req);
     return this.memoryQueue.enqueue({ businessId, operation: 'compact' });
   }
 
   @Post('memory/detect-patterns')
-  detectPatterns(@Param('businessId') businessId: string) {
+  async detectPatterns(@Param('businessId') businessId: string, @Req() req: ReaderRequest) {
+    await this.assertReadsEveryOwner(businessId, req);
     return this.memoryQueue.enqueue({ businessId, operation: 'detect_patterns' });
+  }
+
+  /**
+   * FU-TEMPORAL-FLOW-INBOX-SCOPE delta (item 1): compaction and pattern detection summarise every event of the
+   * business into memories; a writer who cannot read every event-owning module is refused them.
+   */
+  private async assertReadsEveryOwner(businessId: string, req: ReaderRequest) {
+    if (await this.temporal.readerFilter(businessId, req.user)) {
+      throw new ForbiddenException('Memory compaction needs read access to every module whose events it summarises');
+    }
   }
 }
