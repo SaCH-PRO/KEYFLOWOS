@@ -714,10 +714,14 @@ describe('D-211: scripts/backfill-phone-keys.ts rewrites the phone keys stored b
     xLocal: `${P}b_xLocal`, // bizBX: '555-0139', key '5550139'          (no rules: kept)
     xPlus: `${P}b_xPlus`, // bizBX: '+1 868 555 0139', key '+18685550139'
     outside: `${P}b_outside`, // bizBO: '868-555-0140', key '8685550140' (outside the run)
+    // Codex P2 on #216: a number that does not read is keyed by its digits on a write, so a missing or stale key is
+    // rewritten to that key (and takes part in the merge planning), or the resolver cannot see the row.
+    shortNull: `${P}b_shortNull`, // '54321', no key                     (does not read) -> '54321'
+    xStale: `${P}b_xStale`, // bizBX: '555-0142', key '+18685550142'      (no rules; stale key) -> '5550142'
   };
   const RUN = [`--business=${ID.bizB}`, `--business=${ID.bizBG}`, `--business=${ID.bizBX}`];
   /** The phone digits of every seeded row: none is ever printed. */
-  const DIGITS = ['8685550131', '5550132', '8685550133', '8685550134', '8685550135', '8685550136', '5550136', '8685550137', '6001234', '5550139'];
+  const DIGITS = ['8685550131', '5550132', '8685550133', '8685550134', '8685550135', '8685550136', '5550136', '8685550137', '6001234', '5550139', '54321', '5550142'];
 
   beforeAll(async () => {
     await seedContact(B.legacy, ID.bizB, 'Legacy', '868-555-0131', '8685550131');
@@ -735,6 +739,8 @@ describe('D-211: scripts/backfill-phone-keys.ts rewrites the phone keys stored b
     await seedContact(B.xLocal, ID.bizBX, 'Atlantean', '555-0139', '5550139');
     await seedContact(B.xPlus, ID.bizBX, 'Traveller', '+1 868 555 0139', '+18685550139');
     await seedContact(B.outside, ID.bizBO, 'Outside', '868-555-0140', '8685550140');
+    await seedContact(B.shortNull, ID.bizB, 'ShortNull', '54321', null);
+    await seedContact(B.xStale, ID.bizBX, 'Stale', '555-0142', '+18685550142');
   });
 
   async function keys(): Promise<Record<string, string | null>> {
@@ -754,12 +760,12 @@ describe('D-211: scripts/backfill-phone-keys.ts rewrites the phone keys stored b
     expect(await main(RUN, { db, log, error }), err.join('\n')).toBe(0);
     const dry = out.join('\n');
     expect(dry).toMatch(/DRY RUN/);
-    expect(dry).toMatch(/contacts_scanned\s+14\b/);
+    expect(dry).toMatch(/contacts_scanned\s+16\b/);
     expect(dry).toMatch(/key_current\s+3\b/);
     expect(dry).toMatch(/unreadable_kept\s+2\b/);
     expect(dry).toMatch(/needs_merge\s+3\b/);
-    expect(dry).toMatch(/would_rewrite\s+6\b/);
-    for (const id of [B.legacy, B.local7, B.nokey, B.empty, B.deleted, B.gyLocal]) expect(dry).toMatch(new RegExp(`${id}\\s+rewrite\\b`));
+    expect(dry).toMatch(/would_rewrite\s+8\b/);
+    for (const id of [B.legacy, B.local7, B.nokey, B.empty, B.deleted, B.gyLocal, B.shortNull, B.xStale]) expect(dry).toMatch(new RegExp(`${id}\\s+rewrite\\b`));
     for (const id of [B.heldA, B.pairC, B.pairD]) expect(dry).toMatch(new RegExp(`${id}\\s+needs_merge\\b`));
     for (const id of [B.short, B.xLocal]) expect(dry).toMatch(new RegExp(`${id}\\s+unreadable\\b`));
     for (const id of [B.e164, B.heldB, B.xPlus, B.outside]) expect(dry).not.toContain(id);
@@ -775,7 +781,7 @@ describe('D-211: scripts/backfill-phone-keys.ts rewrites the phone keys stored b
     const error = (...a: unknown[]) => err.push(a.join(' '));
     expect(await main(['--apply', ...RUN], { db, log, error }), err.join('\n')).toBe(0);
     expect(out.join('\n')).toMatch(/APPLY/);
-    expect(out.join('\n')).toMatch(/rewritten\s+6\b/);
+    expect(out.join('\n')).toMatch(/rewritten\s+8\b/);
     expect(out.join('\n')).toMatch(/needs_merge\s+3\b/);
     expect(await keys()).toEqual({
       [B.legacy]: '+18685550131',
@@ -793,6 +799,8 @@ describe('D-211: scripts/backfill-phone-keys.ts rewrites the phone keys stored b
       [B.xLocal]: '5550139',
       [B.xPlus]: '+18685550139',
       [B.outside]: '8685550140',
+      [B.shortNull]: '54321',
+      [B.xStale]: '5550142',
     });
     // The phone a contact shows is never changed: only its key.
     const phones: Array<{ id: string; phone: string | null }> = await db.$queryRawUnsafe(`SELECT id, phone FROM contacts WHERE id IN ($1, $2, $3)`, B.legacy, B.local7, B.gyLocal);
