@@ -23,6 +23,67 @@ import { CatalogService, PUBLIC_SERVICE_SELECT, PUBLIC_STAFF_SELECT } from '../c
 import { HoneypotGuard, Honeypot } from '../../core/guards/honeypot.guard';
 import { sanitizeRequired, sanitizeString } from '../../core/utils/sanitize';
 import { assertGoogleConnectOwner, type GoogleConnectActor } from '../../core/connectors/google-suite.controller';
+import {
+  STOREFRONT_CHECKOUT_METHODS,
+  normalizeStorefrontMethod,
+  storefrontMethodUnsupported,
+} from '../payments/storefront-checkout-methods';
+
+/** Postgres int4's upper bound: Service.duration is an Int column. */
+const INT4_MAX = 2147483647;
+
+/** A UTF-16 surrogate without its pair. */
+const UNPAIRED_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/** Text a Postgres text column refuses: a NUL character, or an unpaired UTF-16 surrogate. */
+function unstorableText(value: string): boolean {
+  return value.includes('\u0000') || UNPAIRED_SURROGATE.test(value);
+}
+
+/**
+ * V1-64 (SWP-BOOKING-PAYMENT-GATE side fix): the body of the deprecated POST
+ * bookings/businesses/:businessId/services, checked before the catalog is
+ * called. The handler's body is an inline type, so the global ValidationPipe
+ * checks nothing, and CatalogService.createService refuses a bad name,
+ * duration or price with a plain Error: `durationMins` in place of `duration`
+ * (and a missing, mistyped or out-of-range name, duration or price) answered 500. Each is a
+ * 400 here, with nothing written. The checks are the catalog's own (a non-blank
+ * name, a positive duration, a non-negative price) plus the column types and
+ * int4's range. A fractional duration is left as it was: accepted, stored as
+ * whole minutes.
+ */
+function assertServiceCreateBody(body: unknown): asserts body is {
+  name: string;
+  duration: number;
+  price: number;
+  description?: string | null;
+  sourceProductId?: string | null;
+} {
+  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
+    throw new BadRequestException('A service needs a name, a duration and a price');
+  }
+  const b = body as Record<string, unknown>;
+  if (typeof b.name !== 'string' || b.name.trim() === '') {
+    throw new BadRequestException('name is required');
+  }
+  if (typeof b.duration !== 'number' || !Number.isFinite(b.duration) || b.duration <= 0 || b.duration > INT4_MAX) {
+    throw new BadRequestException('duration must be a positive number of minutes');
+  }
+  if (typeof b.price !== 'number' || !Number.isFinite(b.price) || b.price < 0) {
+    throw new BadRequestException('price must be a non-negative number');
+  }
+  for (const key of ['description', 'sourceProductId']) {
+    if (b[key] !== undefined && b[key] !== null && typeof b[key] !== 'string') {
+      throw new BadRequestException(`${key} must be a string`);
+    }
+  }
+  // Review SEC-BPG-2 and round 2: Postgres text holds no NUL character and no unpaired UTF-16 surrogate (each answered 500).
+  for (const key of ['name', 'description', 'sourceProductId']) {
+    if (typeof b[key] === 'string' && unstorableText(b[key] as string)) {
+      throw new BadRequestException(`${key} contains a character that cannot be stored`);
+    }
+  }
+}
 
 @Controller('bookings')
 export class BookingsController {
@@ -232,6 +293,22 @@ export class BookingsController {
     @Param('businessId') businessId: string,
     @Body() body: PublicCreateBookingDto,
   ) {
+    // V1-64 (SWP-BOOKING-PAYMENT-GATE, BUG-037): the payment method the
+    // customer chose, read once, trimmed and upper-cased, as the storefront
+    // checkout reads it (SiteController.publicCheckout). Only no method, CASH,
+    // MANUAL, WIPAY, PAYPAL or STRIPE is taken; anything else, and a method
+    // that is not a string, is refused here before anything is read or
+    // written. Whether THIS business offers the provider is
+    // BookingsService.publicCreateBooking's check, also before the write.
+    const rawMethod: unknown = body?.paymentMethod;
+    if (rawMethod !== undefined && rawMethod !== null && typeof rawMethod !== 'string') {
+      throw new BadRequestException('paymentMethod must be a string');
+    }
+    const paymentMethod = normalizeStorefrontMethod(rawMethod);
+    if (paymentMethod !== null && !STOREFRONT_CHECKOUT_METHODS.includes(paymentMethod)) {
+      throw new BadRequestException(storefrontMethodUnsupported(rawMethod as string));
+    }
+
     const limitCheck = await this.subscriptions.checkLimit(businessId, 'bookings');
     if (!limitCheck.allowed) {
       const limitLabel = limitCheck.limit === -1 ? 'unlimited' : String(limitCheck.limit);
@@ -262,9 +339,13 @@ export class BookingsController {
       locationPlaceId: body.locationPlaceId ? sanitizeString(body.locationPlaceId, 200) : undefined,
       locationLatLng: body.locationLatLng ?? undefined,
       storefrontSlug: body.storefrontSlug ? sanitizeString(body.storefrontSlug, 200) : undefined,
+      // V1-64 review SEC2-BPG-1: the slug exactly as the customer's page sent it, for the payment-method gate only.
+      // sanitizeString strips tokens a real slug may hold ('--'), so the sanitised copy above is not the store's slug.
+      storefrontSlugAsSent: typeof body.storefrontSlug === 'string' ? body.storefrontSlug : null,
       visitorId: body.visitorId ? sanitizeString(body.visitorId, 100) : undefined,
       referralCode: body.referralCode ? sanitizeString(body.referralCode, 100) : undefined,
       orgUnitId: body.orgUnitId ? sanitizeString(body.orgUnitId, 200) : undefined,
+      paymentMethod,
     });
   }
 
@@ -279,13 +360,17 @@ export class BookingsController {
     return this.catalog.listServices(businessId);
   }
 
-  /** @deprecated Use Catalog endpoint. Pass-through to CatalogService.createService. */
+  /**
+   * @deprecated Use Catalog endpoint. Pass-through to CatalogService.createService.
+   * V1-64: a body the catalog cannot store is a 400 (assertServiceCreateBody), not a 500.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/services')
   createService(
     @Param('businessId') businessId: string,
-    @Body() body: { name: string; duration: number; price: number; description?: string; sourceProductId?: string },
+    @Body() body: { name: string; duration: number; price: number; description?: string | null; sourceProductId?: string | null },
   ) {
+    assertServiceCreateBody(body);
     return this.catalog.createService({
       businessId,
       name: body.name,
