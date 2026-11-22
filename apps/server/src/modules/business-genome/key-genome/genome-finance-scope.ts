@@ -44,6 +44,8 @@ import type { ListGenomeRecommendationsQuery, ListGenomeSignalsQuery } from './k
 const MONEY_TERMS = new RegExp(
   [
     'financ', 'revenue', 'sales', 'commerce', 'payment', 'invoice', 'profit', 'billing', 'refund', 'payroll', 'treasury',
+    // Compensation is money (Codex P1 on #218: commission rates are real data in conversion/sales-team).
+    'commission', 'compensation', '(?<![a-z])bonus(?:es)?(?![a-z])',
     'lifetime', 'acquisition_?cost', 'budget', 'expense', 'conversion', 'forecast', 'churn', 'transaction', 'opportunit',
     'unit_?economics', 'cross_?domain', 'money', 'receivable', 'payable', 'quote', 'quotation', 'reimburs', 'discount',
     // A promo code is money; promote / promotion is not (round-3 correctness minor).
@@ -215,6 +217,14 @@ export type ProposalFields = {
   risks?: unknown;
   /** Where the proposal came from (HUMAN_WORKFLOW: the approvals module's shadow; round 8). */
   sourceType?: string | null;
+  /**
+   * The proposal's lifecycle results (Codex P1 on #218): what it executed to and why it was rejected are classified as
+   * its content; a failure reason (mostly the system's own text) is redacted field by field instead
+   * (nonFinancialProposalForReader).
+   */
+  executionResult?: unknown;
+  rejectionReason?: string | null;
+  failureReason?: string | null;
   /** The evidence the proposal cites (round-3 security M2). */
   evidence?: unknown;
   payload?: unknown;
@@ -244,7 +254,7 @@ function proposalContent(p: ProposalFields): Array<string | null | undefined> {
           // A cuid (Prisma cuid(): "c" and 24 lowercase letters and digits). A camelCase name (unpaidInvoices2026) is read.
           .replace(/(?<![A-Za-z0-9-])c(?=[a-z0-9]{0,23}\d)[a-z0-9]{24}(?![A-Za-z0-9-])/g, ' ')
       : t;
-  return [p.summary, p.description, p.rationale, p.expectedBenefit, asText(p.risks), asText(p.evidence), asText(p.payload), asText(p.inputPayload), asText(p.affectedEntities)].map(withoutIdTokens);
+  return [p.summary, p.description, p.rationale, p.expectedBenefit, asText(p.risks), asText(p.evidence), asText(p.payload), asText(p.inputPayload), asText(p.affectedEntities), asText(p.executionResult), p.rejectionReason].map(withoutIdTokens);
 }
 
 /** D-238: whether a proposal's free text (a failure or rejection reason) states money, by the proposal vocabulary. */
@@ -333,8 +343,17 @@ export function proposalViewForReader<T extends { id: string; status?: unknown; 
   proposal: T,
   readsRevenue: boolean,
 ): T | { id: string; status?: unknown; failureReason?: string } {
-  if (readsRevenue || !isFinancialProposal(proposal as unknown as ProposalFields)) return proposal;
+  if (readsRevenue) return proposal;
+  if (!isFinancialProposal(proposal as unknown as ProposalFields)) return nonFinancialProposalForReader(proposal);
   return redactedProposalView(proposal);
+}
+
+/**
+ * Codex P1 on #218: a non-financial proposal as a reader without revenue read is served it: whole, except a failure
+ * reason that states money, which is blanked.
+ */
+export function nonFinancialProposalForReader<T extends { failureReason?: unknown }>(proposal: T): T {
+  return typeof proposal.failureReason === 'string' && proposalMentionsMoney(proposal.failureReason) ? { ...proposal, failureReason: null } : proposal;
 }
 
 /** D-238: the redacted view of a financial proposal: its id, its status (D-226) and a failure reason that states no money. */
@@ -365,6 +384,9 @@ export const PROPOSAL_CLASSIFY_SELECT = {
   payload: true,
   inputPayload: true,
   affectedEntities: true,
+  executionResult: true,
+  rejectionReason: true,
+  failureReason: true,
 } as const;
 
 /**

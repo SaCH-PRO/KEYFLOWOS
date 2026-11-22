@@ -245,10 +245,13 @@ describe('round-7 review repairs (correctness MAJOR-1, minor 1; security m1, m3)
     ['a total due in JSON prose', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', payload: { note: 'total due 900' } }],
   ])('%s is financial', (_l, p) => expect(isFinancialProposal(p as any)).toBe(true));
 
-  it('a failure reason about a rate limit or retries does not make a non-financial proposal\'s reason money', () => {
+  it('a non-financial proposal keeps a failure reason about a rate limit; one the vocabulary reads as money is blanked (Codex P1 on #218; round 8: ambiguous wording fails closed)', () => {
     const task = { id: 'kap_t', status: 'FAILED', title: 'Call Kerry back', actionType: 'CREATE_TASK', module: 'crm' };
-    for (const reason of ['Rate limited: retry after 30s', 'Transfer failed after 3 retries', 'Failed: total 0 rows updated']) {
-      expect(proposalViewForReader({ ...task, failureReason: reason }, false)).toMatchObject({ failureReason: reason });
+    expect(proposalViewForReader({ ...task, failureReason: 'Rate limited: retry after 30s' }, false)).toMatchObject({ failureReason: 'Rate limited: retry after 30s' });
+    for (const reason of ['Transfer failed after 3 retries', 'Failed: total 0 rows updated', 'card declined for $40']) {
+      const out = proposalViewForReader({ ...task, failureReason: reason }, false) as any;
+      expect(out.failureReason, reason).toBeNull();
+      expect(out.title, reason).toBe('Call Kerry back');
     }
   });
 });
@@ -411,7 +414,6 @@ describe('Codex P1s on #218: lifecycle fields and compensation vocabulary', () =
   it.each([
     ['an execution result that carries money', { actionType: 'CREATE_TASK', module: 'crm', title: 'Call back', executionResult: { amount: 12345 } }],
     ['a rejection reason that names a balance', { actionType: 'CREATE_TASK', module: 'crm', title: 'Call back', rejectionReason: 'the balance owed is too high' }],
-    ['a failure reason that states money', { actionType: 'CREATE_TASK', module: 'crm', title: 'Call back', failureReason: 'card declined for $40' }],
     ['a commission', { actionType: 'CREATE_TASK', module: 'crm', title: "Set Ana's commission to 12%" }],
     ['compensation', { actionType: 'CREATE_TASK', module: 'crm', title: 'Review the compensation plan for the team' }],
     ['a bonus', { actionType: 'CREATE_TASK', module: 'crm', title: 'Pay out the Q4 bonus' }],
@@ -419,5 +421,6 @@ describe('Codex P1s on #218: lifecycle fields and compensation vocabulary', () =
 
   it('the classify select reads the lifecycle fields', () => {
     for (const key of ['executionResult', 'rejectionReason', 'failureReason']) expect(PROPOSAL_CLASSIFY_SELECT, key).toHaveProperty(key, true);
+    // failureReason is read so it can be redacted field by field (it is not classified as content).
   });
 });

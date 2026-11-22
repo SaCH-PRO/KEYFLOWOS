@@ -11,7 +11,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { financialProposalsWithProvenance, financialProposalWithProvenance, genomeReaderReadsRevenue, redactedProposalView, type GenomeReader, type ProposalFields } from '../business-genome/key-genome/genome-finance-scope';
+import { financialProposalsWithProvenance, financialProposalWithProvenance, genomeReaderReadsRevenue, nonFinancialProposalForReader, redactedProposalView, type GenomeReader, type ProposalFields } from '../business-genome/key-genome/genome-finance-scope';
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { KeyActionExecutorService } from './key-action-executor.service';
 import { KeyActionPolicyService } from './key-action-policy.service';
@@ -162,7 +162,7 @@ export class KeyActionProposalService {
     if (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined)) return rows;
     // One query for the recommendations the rows were bridged from (round-4 correctness minor 5).
     const financial = await financialProposalsWithProvenance(this.prisma, businessId, rows as unknown as ProposalFields[]);
-    return rows.filter((_row, i) => !financial[i]);
+    return rows.filter((_row, i) => !financial[i]).map((row) => nonFinancialProposalForReader(row));
   }
 
   /** D-238: a financial proposal does not exist for a reader without revenue read: GET proposals/:id answers 404, exactly as an unknown id. */
@@ -170,7 +170,7 @@ export class KeyActionProposalService {
     const proposal = await this.get(businessId, proposalId);
     if (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined)) return proposal;
     if (await this.isFinancial(businessId, proposal)) throw new NotFoundException('Action proposal not found');
-    return proposal;
+    return nonFinancialProposalForReader(proposal);
   }
 
   /**
@@ -185,7 +185,7 @@ export class KeyActionProposalService {
     const readsRevenue = await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined).catch(() => false);
     if (readsRevenue) return proposal;
     const financial = await this.isFinancial(businessId, proposal).catch(() => true);
-    return financial ? redactedProposalView(proposal) : proposal;
+    return financial ? redactedProposalView(proposal) : nonFinancialProposalForReader(proposal);
   }
 
   /** D-238: whether a proposal of `businessId` is financial, by its own fields or the recommendation it was bridged from. */

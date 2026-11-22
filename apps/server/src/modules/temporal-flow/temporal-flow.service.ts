@@ -128,12 +128,15 @@ export class TemporalFlowService {
 
     where.visibility = { not: 'HIDDEN' };
 
+    // Codex P2 on #218: when the rows are filtered for a reader, the limit counts what the reader may see (read with
+    // headroom, filtered, then limited).
+    const limit = query.limit ?? 100;
     const events = await this.prisma.client.temporalFlowEvent.findMany({
       where,
       orderBy: { occurredAt: 'desc' },
-      take: query.limit ?? 100,
+      take: reader === undefined ? limit : Math.min(limit * 5, 1000),
     });
-    return this.forReader(businessId, events, reader);
+    return (await this.forReader(businessId, events, reader)).slice(0, limit);
   }
 
   async calendarRange(businessId: string, from: string, to: string, reader?: GenomeReader | null) {
