@@ -191,6 +191,21 @@ describe('streamQuery: a stream that ended in an error has no effects (RR-STREAM
     expect(chunks.at(-1)).toMatchObject({ type: 'error' });
   });
 
+  it('review SEC-1: an error chunk with an empty message (a provider threw new Error()) still stops the stream before the tool loop', async () => {
+    gateway.streamComplete.mockImplementation(async function* () {
+      yield { type: 'tool_call_delta', toolCall: { index: 0, id: 'call_rr_3', name: 'expenses_list', argumentsDelta: '{}' }, provider: 'openai', model: 'gpt-4o' };
+      yield { type: 'error', error: '', provider: 'openai', model: 'gpt-4o' };
+    });
+
+    const chunks = await run();
+
+    expect(toolLoop.handleToolCalls).not.toHaveBeenCalled();
+    expect(actionDetection.detectActions).not.toHaveBeenCalled();
+    expect(savedAssistantMessages()).toEqual([]);
+    expect(chunks.some((c) => c.type === 'done')).toBe(false);
+    expect(chunks.at(-1)).toMatchObject({ type: 'error', error: expect.stringMatching(/\S/) });
+  });
+
   it('control: a stream that completes still runs its tool call through the tool loop and ends with done', async () => {
     actionDetection.detectActions.mockReturnValue([]);
     gateway.streamComplete.mockImplementation(async function* () {
