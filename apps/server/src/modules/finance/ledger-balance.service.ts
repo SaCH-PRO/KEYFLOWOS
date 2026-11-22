@@ -107,10 +107,10 @@ function zoneOffsetMs(timeZone: string, instant: number): number {
  * The instant the day whose midnight, read as UTC, is `utcMidnight` starts in
  * `timeZone`. The offset is read at the answer itself (two passes), so a day
  * that starts on the other side of a daylight-saving change from midnight UTC
- * is right. Where the clocks go forward AT local midnight (Havana, Santiago,
- * the Azores) no instant reads 00:00 that day: the second pass does not check
- * out, and the day starts at the change itself, the later of the two passes
- * (review F2: the earlier one cut the day before's last hour).
+ * is right. Where the clocks go forward over local midnight (Havana, Santiago,
+ * the Azores) no instant reads 00:00 that day: no pass checks out, and the day
+ * starts at the change itself (review F2: the earlier pass cut the day
+ * before's last hour).
  */
 function startOfZonedDay(utcMidnight: number, timeZone: string): number {
   const reads = (instant: number) => instant + zoneOffsetMs(timeZone, instant) === utcMidnight;
@@ -128,7 +128,20 @@ function startOfZonedDay(utcMidnight: number, timeZone: string): number {
   ]);
   const valid = [first, second, ...earlier].filter(reads);
   if (valid.length > 0) return Math.min(...valid);
-  return Math.max(first, second);
+  // No instant reads 00:00: the clocks jump over it. The day starts at the
+  // jump, the instant between the two passes where the offset changes
+  // (final review C-2: a jump that straddles midnight, Toronto 1919, is not at
+  // either pass). Found by bisection: at most ~27 steps for a day's span.
+  let before = Math.min(first, second);
+  let after = Math.max(first, second);
+  const offsetBefore = zoneOffsetMs(timeZone, before);
+  if (zoneOffsetMs(timeZone, after) === offsetBefore) return after;
+  while (after - before > 1) {
+    const middle = before + Math.floor((after - before) / 2);
+    if (zoneOffsetMs(timeZone, middle) === offsetBefore) before = middle;
+    else after = middle;
+  }
+  return after;
 }
 
 /**
@@ -287,7 +300,9 @@ export class LedgerBalanceService {
 
     const entries = await this.prisma.client.ledgerEntry.findMany({
       where,
-      orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
+      // id last: the lines of one posting share date and createdAt, and a
+      // tie left to Postgres can repeat or drop a line across pages (C-1).
+      orderBy: [{ date: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
       skip: (page - 1) * pageSize,
       take: pageSize,
       include: {
