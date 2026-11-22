@@ -406,3 +406,18 @@ describe('round-12 review repairs (both reviews: mark runs, figure-free long pro
     ['an oversized content (fails closed)', { actionType: 'CREATE_TASK', module: 'crm', title: 'Plan', summary: 'call back '.repeat(6_000) }],
   ])('%s is financial', (_l, p) => expect(isFinancialProposal(p as any)).toBe(true));
 });
+
+describe('Codex P1s on #218: lifecycle fields and compensation vocabulary', () => {
+  it.each([
+    ['an execution result that carries money', { actionType: 'CREATE_TASK', module: 'crm', title: 'Call back', executionResult: { amount: 12345 } }],
+    ['a rejection reason that names a balance', { actionType: 'CREATE_TASK', module: 'crm', title: 'Call back', rejectionReason: 'the balance owed is too high' }],
+    ['a failure reason that states money', { actionType: 'CREATE_TASK', module: 'crm', title: 'Call back', failureReason: 'card declined for $40' }],
+    ['a commission', { actionType: 'CREATE_TASK', module: 'crm', title: "Set Ana's commission to 12%" }],
+    ['compensation', { actionType: 'CREATE_TASK', module: 'crm', title: 'Review the compensation plan for the team' }],
+    ['a bonus', { actionType: 'CREATE_TASK', module: 'crm', title: 'Pay out the Q4 bonus' }],
+  ])('RED-BEFORE: %s is financial', (_l, p) => expect(isFinancialProposal(p as any)).toBe(true));
+
+  it('the classify select reads the lifecycle fields', () => {
+    for (const key of ['executionResult', 'rejectionReason', 'failureReason']) expect(PROPOSAL_CLASSIFY_SELECT, key).toHaveProperty(key, true);
+  });
+});

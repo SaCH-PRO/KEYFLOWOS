@@ -86,3 +86,22 @@ describe('round-4 repair (correctness MAJOR-2): the proposal row is read with ev
     expect((findMany.mock.calls[0] as any[])[0].select).toEqual(PROPOSAL_CLASSIFY_SELECT);
   });
 });
+
+describe('Codex P2 on #218: the timeline limit counts what the reader may see', () => {
+  it('RED-BEFORE: with limit 1, a newest financial proposal event does not hide an older booking event from a reader without revenue read', async () => {
+    const events = [
+      { id: 'ev_fin', businessId: 'biz_1', entityType: 'key_action_proposal', entityId: 'kap_fin', title: 'KEY action proposed', description: null, payload: {}, metadata: {}, occurredAt: new Date('2026-11-22') },
+      { id: 'ev_book', businessId: 'biz_1', entityType: 'booking', entityId: 'b1', title: 'Booking confirmed', description: null, payload: {}, metadata: {}, occurredAt: new Date('2026-11-21') },
+    ];
+    const prisma = {
+      client: {
+        temporalFlowEvent: { findMany: vi.fn(async ({ take }: any) => events.slice(0, take ?? events.length)) },
+        keyActionProposal: { findMany: vi.fn(async () => [{ id: 'kap_fin', actionType: 'EXECUTE_TOOL', toolName: 'commerce.create_invoice', title: 'Invoice Acme' }]) },
+        genomeRecommendation: { findMany: vi.fn(async () => []) },
+        membership: { findUnique: vi.fn(async () => ({ role: 'STAFF', permissionScopes: { revenue: 'none' } })) },
+      },
+    };
+    const svc = new TemporalFlowService(prisma as any);
+    expect((await (svc as any).list('biz_1', { limit: 1 }, { id: 'blind', role: 'USER' })).map((e: any) => e.id)).toEqual(['ev_book']);
+  });
+});
