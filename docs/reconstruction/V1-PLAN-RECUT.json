@@ -770,7 +770,9 @@
     "apps/server/src/modules/key-cortex/key-cortex-context.service.ts",
     "apps/server/test/key-cortex-read-scope.integration.test.ts"
    ],
-   "decisions": [],
+   "decisions": [
+    "D-233"
+   ],
    "scope": "Unchanged from the sweep-fix plan: POST cortex/sessions answers no revenue figure to a member without revenue read (KC-SEC-3). Spec inlined from the wave-11b packet file (scoped at fb00af1c; fixture prefix x01a_): DEFECT (wave 11a seam review KC-SEC-3, pre-existing). POST api/v1/cortex/sessions returns session.contextSnapshot to any member; it is KeyCortexContextService.buildContextSnapshot, whose keyMetrics.totalRevenue sums every PAID invoice, so a member without revenue read gets a revenue figure (against D-100 and D-57). W11-CORTEX-READ-ROUTES-SCOPE gated GET context and the insight routes but not this. Fix: withhold the revenue/finance fields of the snapshot from a member without revenue read (the same projection the gated routes use), or omit the snapshot from the response for them; keep it for the owner and revenue-read members. Also check every other route or WS event that returns a session object with contextSnapshot. UPDATE: PR195 (D-145) added KEY treasury figures (ledger cash, unpaid bills, committed payroll, treasury alert) at revenue read: the snapshot projection withholds them too. Starts after W11-KEY-CHAT-SESSION-BIND (chain B3, same key-cortex.controller.ts). Suite resolved to key-cortex-read-scope.integration.test.ts. Sweep-fix plan detail (inlined): (wave-11b spec inlined in this packet.) UPDATE: PR195 (D-145) added KEY treasury figures (ledger cash, unpaid bills, committed payroll, treasury alert) at revenue read: the snapshot projection withholds them too. Starts after W11-KEY-CHAT-SESSION-BIND (chain B3, same key-cortex.controller.ts). Suite resolved to key-cortex-read-scope.integration.test.ts. The wave-11b prefix x01a_ is superseded: SWEEP-P0 has since registered v99c_/v99f_/v99i_/v99j_/v99k_/v99w_, and x01*_ heads fail the registry's NEW_PREFIX rule (k<NN><a-z>_ or v<NN><a-z>_). A suite this packet extends keeps that suite's own prefix; a new suite takes the prefix allocated above.",
    "definition_of_done": "Tests first with a recorded RED on the step-0 base; real-DB integration proof on Postgres for every server change; web unit tests for every screen change; typecheck and lint ratchet clean; `pnpm --filter server proof:release0` still MET. Done when these tests-first cases go RED then green: RED on the base: a STAFF member with revenue none creating or reading a session gets no totalRevenue or other money figure; OWNER and a revenue-read member get them (control). Proof: RED then green | Green: cortex read-routes suite, key-cortex suites, release0-proof-coverage; journey spec step(s) for K that cover it turn green.",
    "journeys": [
@@ -6563,6 +6565,163 @@
    "scope": "Two minor findings W1F-PERCEPTION-MODULE-SCOPE left open: (SEC-W1FPMS-3) genome money memory events (FINANCE_GENOME, FINANCE_SNAPSHOT_COMPUTED, CROSS_DOMAIN) still reach KEY prompts of readers without revenue read: carry the genome row's sourceType, eventType, domain and section in the retrieved fragment's metadata so the money-memory filter can drop them for such readers; also carry the cognitive payload/actorType so task classification stops parsing rendered text (COR-W1FPMS-1 follow-up). (SEC-W1FPMS-4) GOVERNANCE_DECISION proposals stay business-wide, but for memberless turns (a contact-only bridge position, a non-member SUPER_ADMIN) render only the proposal's action, status and risk level, never its title or figures. Tests first. Fixture prefix v71o_.",
    "definition_of_done": "RED: a STAFF reader without revenue read gets a FINANCE_SNAPSHOT_COMPUTED memory in the KEY prompt; a memberless bridge turn sees a proposal title with a money figure. GREEN: neither appears; revenue readers and the owner still see them; perception suites green.",
    "fixture_prefix": null
+  },
+  {
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "C"
+   ],
+   "step": 3,
+   "lane": "web",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [
+    "FU-WA-CONTACT-PHONE"
+   ],
+   "files": [
+    "apps/web/src/components/whatsapp/whatsapp-document-share.tsx",
+    "apps/web/src/components/whatsapp/__tests__/whatsapp-document-share.test.tsx"
+   ],
+   "decisions": [
+    "D-153",
+    "D-221"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "Found by CI on PR #216 (run 44845430001, twice): COR-WACP-1's window capture Escape listener was registered in a passive effect, so a step mounted from a non-event update (the pay link resolved) missed an Escape until a later scheduler task, and the detail modal under it closed instead. Register it in a layout effect. Tests first with a deterministic RED (share() outside act, MutationObserver-timed raw Escape). Built on wave/v1-wave-3a-phone (#216).",
+   "definition_of_done": "RED: the deterministic case fails on the pre-fix component. GREEN: it passes 3 of 3 runs; invoices-whatsapp-confirm-escape and every whatsapp/invoices/quotes web suite green; web tsc and lint clean.",
+   "fixture_prefix": null,
+   "id": "FU-WA-ESCAPE-RACE",
+   "title": "The WhatsApp confirm step takes Escape from the moment it is on screen"
+  },
+  {
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 3,
+   "lane": "server",
+   "size": "S",
+   "priority": "P0",
+   "depends_on": [
+    "W11-CORTEX-SESSION-SNAPSHOT-SCOPE"
+   ],
+   "files": [
+    "apps/server/src/modules/key-cortex/genome-context-for-reader.ts",
+    "apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts",
+    "apps/server/src/modules/key-cortex/key-cortex-genome-context.service.ts",
+    "apps/server/src/modules/key-cortex/key-cortex-genome-bridge.service.ts",
+    "apps/server/test/key-chat-genome-money-sight.integration.test.ts"
+   ],
+   "decisions": [
+    "D-100",
+    "D-128",
+    "D-233"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "Security review of W11-CORTEX-SESSION-SNAPSHOT-SCOPE, finding 1: processQuery/streamQuery handed the unprojected business genome (finance signals, FINANCIAL recommendations and suggestions, opportunity values) to the prompt, the answer and the streams. Project it per reader (revenue read via the pipeline's memberAuthority); carry signal section/domain from the bridge; cache key v2; suggestions chosen from the projected genome. Built on pkt/V1-FU-KEY-CHAT-GENOME-MONEY-SIGHT. The label-based predicates it uses are replaced by FU-GENOME-REVENUE-CLASSIFIER (D-234); the finance DNA score (D-233) is withheld there.",
+   "definition_of_done": "RED: STAFF revenue none and an empty-map ADMIN get finance genome rows in the prompt and answer on both paths. GREEN: none; owner, revenue-read STAFF and SUPER_ADMIN keep them; full server suite green; proof:release0 MET.",
+   "fixture_prefix": "v71p_",
+   "id": "FU-KEY-CHAT-GENOME-MONEY-SIGHT",
+   "title": "A KEY chat turn hands finance genome rows and opportunity values only to revenue readers"
+  },
+  {
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 3,
+   "lane": "both",
+   "size": "M",
+   "priority": "P0",
+   "depends_on": [
+    "FU-KEY-CHAT-GENOME-MONEY-SIGHT"
+   ],
+   "files": [
+    "apps/server/src/modules/business-genome/key-genome/genome-finance-scope.ts",
+    "its REST and organ-tool consumers",
+    "apps/server/src/modules/key-cortex/genome-context-for-reader.ts",
+    "apps/server/src/modules/key-cortex/key-cortex-context.service.ts (genomeDna)",
+    "web genome surfaces that render finance DNA or sales rows"
+   ],
+   "decisions": [
+    "D-100",
+    "D-128",
+    "D-233",
+    "D-234"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "D-233, D-234: replace the /financ/ label match with a classifier on provenance and meaning: a genome signal, recommendation, opportunity, memory event or DNA key is revenue-sensitive when its writer, source module, source type, section, domain or event type names finance, revenue, sales, commerce, cash, pricing, profit or payments, or when it carries a money value; rows whose provenance cannot be classified fail closed for a reader without revenue read. Withhold the finance and sales DNA scores (genomeDna, dnaScores, dna_* metrics, the prompt's DNA block, genome hub UI) from such readers. Inventory every consumer first (REST genome routes, organ tools, KEY chat, the session snapshot, web). Record any non-financial sales guidance kept, and the module permission that authorizes it. Tests first, cross-role and cross-tenant negatives, cache isolation.",
+   "definition_of_done": "RED: a reader without revenue read gets a finance DNA score in the session snapshot and the chat prompt, and a SALES-domain recommendation and a commerce-sourced signal through the REST genome routes and KEY chat. GREEN: none of them; revenue readers unchanged; an unclassified row is withheld; full server and web suites green; proof:release0 MET.",
+   "fixture_prefix": null,
+   "id": "FU-GENOME-REVENUE-CLASSIFIER",
+   "title": "One provenance-based revenue classifier for every genome reader (finance DNA and sales-derived rows need revenue read)"
+  },
+  {
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 3,
+   "lane": "server",
+   "size": "M",
+   "priority": "P0",
+   "depends_on": [
+    "FU-GENOME-REVENUE-CLASSIFIER"
+   ],
+   "files": [
+    "apps/server/src/modules/key-cortex/key-cortex-interaction.service.ts (explainDecision)",
+    "apps/server/src/modules/key-cortex/key-cortex-reasoning.service.ts (legacy getProactiveSuggestions, its genome:context cache)",
+    "apps/server/src/modules/key-cortex/key-cortex-consciousness.service.ts (getActiveGoals)",
+    "apps/server/src/modules/key-cortex/key-cortex-creativity.service.ts (getGenomeContext)"
+   ],
+   "decisions": [
+    "D-100",
+    "D-128",
+    "D-233",
+    "D-234",
+    "D-235"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "D-235: inventory the genome read paths first (every caller of the genome context, bridge, ranked recommendations, signals and opportunities, and each cache they use), then make each resolve the reader's identity, business, module scope and financial visibility before the data reaches a prompt, stream or answer. Tests first: cross-tenant and cross-role negative cases, cache isolation (a per-business cache never serves one reader's projection to another), indirect inference (counts, rankings, fallbacks). Independent security and correctness reviews.",
+   "definition_of_done": "RED per path for a reader without revenue read (and for another tenant's member). GREEN on every path; revenue readers unchanged; caches hold only unprojected business data or per-reader keys; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null,
+   "id": "FU-KEY-GENOME-READS-RESIDUAL",
+   "title": "Every remaining KEY genome read resolves its reader before it reaches a prompt, stream or answer"
+  },
+  {
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [],
+   "step": 7,
+   "lane": "both",
+   "size": "M",
+   "priority": "P2",
+   "depends_on": [
+    "FU-KEY-GENOME-READS-RESIDUAL"
+   ],
+   "files": [
+    "apps/web/src/app/admin (a console page)",
+    "a server-side read of GitHub and repository control-plane state (no browser credentials)"
+   ],
+   "decisions": [
+    "D-237",
+    "D-172"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "D-237: a bounded, authenticated, owner-only, read-only page in the existing platform admin area (installable PWA already shipped) showing v1 progress from the plan and status files, the latest main commit, open PRs with their CI state, the newest control-room messages, and blockers, each with its source timestamp and an explicit stale or unavailable state. Reads happen server-side; no GitHub, Vercel, Supabase or Claude credential reaches the browser; no execution or approval action; no second control plane (GitHub and #80 stay canonical). Characterize the existing admin auth and Command Center first.",
+   "definition_of_done": "RED: a non-owner and an unauthenticated request are refused; the page shows a fabricated or undated status. GREEN: owner-only, every figure from a real source with its timestamp, stale/unavailable states rendered, no credential in the client bundle (asserted), web and server suites green.",
+   "fixture_prefix": null,
+   "id": "OPS-CONSOLE-READONLY",
+   "title": "The owner's read-only engineering console in the platform admin area"
   }
  ],
  "moot": [
@@ -8099,6 +8258,11 @@
    "prefix": "v71o_",
    "owner": "(new suite chosen by the packet; register it)",
    "packet": "V1-71 (FU-KEY-MEMORY-MONEY-SIGHT)"
+  },
+  {
+   "prefix": "v71p_",
+   "owner": "apps/server/test/key-chat-genome-money-sight.integration.test.ts",
+   "packet": "V1-71 (FU-KEY-CHAT-GENOME-MONEY-SIGHT)"
   }
  ],
  "validation": {
