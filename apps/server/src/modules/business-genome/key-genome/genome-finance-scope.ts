@@ -236,37 +236,58 @@ export type ProposalFields = {
 };
 
 /**
- * A structured value (parameters, a result, evidence) as the text the vocabulary reads. Ids name rows, not money: an
- * id-named key's value is dropped (its name is kept: an invoiceId names an invoice). A control character inside a
- * string becomes a space, so JSON's own escapes (\n, \t) never stand as letters before a word (third review, security
- * m1).
+ * A structured value (parameters, a result, evidence) as the text the vocabulary reads.
+ * - Ids name rows, not money: under an id-named key, a value shaped like an id (one token, no worded money in it) is
+ *   dropped and its name kept (an invoiceId names an invoice). Anything else under such a key is read (fourth review
+ *   m3/m4).
+ * - A control character inside a string becomes a space, and JSON's own escapes (in keys, of lone surrogates, of a
+ *   nested JSON string) are spaces too, so no escape letter ever stands before a word (third review m1; fourth m5/m6).
+ * Returns null when the value cannot be serialised; every caller treats that as financial (fail closed).
  */
 const ID_KEY = /(^id$|Ids?$|_ids?$)/;
+/** One token (no whitespace), none of whose all-letter parts is a money word: `tsk_1`, a cuid, a UUID; not `invoice-900-usd`. */
+function idShaped(v: unknown): boolean {
+  if (typeof v !== 'string' || v.length > 128 || /\s/.test(v)) return false;
+  const words = v.split(/[^A-Za-z0-9]+/).filter((part) => /^[A-Za-z]+$/.test(part));
+  return !mentionsMoney(words.join(' '));
+}
 function structuredText(v: unknown): string | null {
   if (v === null || v === undefined) return null;
   if (typeof v === 'string') return v;
   try {
-    return (
-      JSON.stringify(v, (k, val) =>
-        k && ID_KEY.test(k) && (typeof val === 'string' || Array.isArray(val)) ? '[id]' : typeof val === 'string' ? val.replace(/\p{Cc}+/gu, ' ') : val,
-      ) ?? null
-    );
+    const json = JSON.stringify(v, (k, val) => {
+      if (k && ID_KEY.test(k)) {
+        if (idShaped(val)) return '[id]';
+        if (Array.isArray(val) && val.every(idShaped)) return '[id]';
+      }
+      return typeof val === 'string' ? val.replace(/\p{Cc}+/gu, ' ') : val;
+    });
+    return typeof json === 'string' ? json.replace(/\\+(?:u[0-9a-fA-F]{4}|[bfnrt])/g, ' ') : null;
   } catch {
     return null;
   }
 }
 /**
- * Only real id shapes are stripped from text: a UUID, a cuid (Prisma cuid(): "c" and 24 lowercase letters and digits),
- * or one unbroken run of 32 or more lowercase letters and digits holding a digit (a hash, a fingerprint). A hyphenated
- * phrase (overdue-invoices-2026) and a camelCase name (unpaidInvoices2026) are words, and are read.
+ * Text as the vocabulary reads it: compatibility forms folded (fullwidth digits and letters), invisible format
+ * characters removed (a zero-width space or soft hyphen inside a word), a literal backslash escape read as a space, and
+ * real id shapes stripped: a UUID, a cuid (Prisma cuid(): "c" and 24 lowercase letters and digits), or a hex digest of
+ * 32 or more characters (at least 6 digits and 6 letters). Nothing else is stripped: a squashed phrase, a file name, a hyphenated phrase
+ * (overdue-invoices-2026) and a camelCase name (unpaidInvoices2026) are words, and are read (fourth review m2).
  */
-function withoutIdTokens<T extends string | null | undefined>(t: T): T {
+function readableText<T extends string | null | undefined>(t: T): T {
   return (
     typeof t === 'string'
       ? t
+          .normalize('NFKC')
+          .replace(/\p{Cf}+/gu, '')
+          .replace(/\\+[bfnrt]/g, ' ')
           .replace(/(?<![A-Za-z0-9])[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}(?![A-Za-z0-9])/gi, ' ')
           .replace(/(?<![A-Za-z0-9-])c(?=[a-z0-9]{0,23}\d)[a-z0-9]{24}(?![A-Za-z0-9-])/g, ' ')
-          .replace(/(?<![A-Za-z0-9-])(?=[a-z0-9]{0,31}\d)[a-z0-9]{32,512}(?![A-Za-z0-9-])/g, ' ')
+          // A digest mixes digits and letters throughout: at least 6 of each (a figure glued to a run of letters is read).
+          .replace(/(?<![A-Za-z0-9-])[0-9a-fA-F]{32,512}(?![A-Za-z0-9-])/g, (run) => {
+            const digits = run.replace(/\D/g, '').length;
+            return digits >= 6 && run.length - digits >= 6 ? ' ' : run;
+          })
       : t
   ) as T;
 }
@@ -279,14 +300,22 @@ export function structuredValueStatesMoney(value: unknown): boolean {
   if (value === null || value === undefined) return false;
   const text = structuredText(value);
   if (text === null || text.length > MAX_CLASSIFIED_CONTENT) return true;
-  return proposalMentionsMoney(withoutIdTokens(text));
+  return proposalMentionsMoney(readableText(text));
 }
+
+const STRUCTURED_PROPOSAL_FIELDS = ['risks', 'evidence', 'payload', 'inputPayload', 'affectedEntities', 'executionResult'] as const;
 
 /** A proposal's content as text: its string fields and its structured fields (parameters, request type) serialised. */
 function proposalContent(p: ProposalFields): Array<string | null | undefined> {
   // The provenance a recommendation id names is read by financialProposalWithProvenance.
-  const asText = structuredText;
-  return [p.summary, p.description, p.rationale, p.expectedBenefit, asText(p.risks), asText(p.evidence), asText(p.payload), asText(p.inputPayload), asText(p.affectedEntities), asText(p.executionResult), p.rejectionReason].map(withoutIdTokens);
+  const fields = p as unknown as Record<string, unknown>;
+  return [p.summary, p.description, p.rationale, p.expectedBenefit, ...STRUCTURED_PROPOSAL_FIELDS.map((key) => structuredText(fields[key])), p.rejectionReason].map(readableText);
+}
+
+/** Whether a structured field of the proposal holds a value that cannot be serialised: unreadable content fails closed. */
+function hasUnreadableContent(p: ProposalFields): boolean {
+  const fields = p as unknown as Record<string, unknown>;
+  return STRUCTURED_PROPOSAL_FIELDS.some((key) => fields[key] !== null && fields[key] !== undefined && structuredText(fields[key]) === null);
 }
 
 /** D-238: whether a proposal's free text (a failure or rejection reason) states money, by the proposal vocabulary. */
@@ -341,12 +370,13 @@ const MAX_CLASSIFIED_CONTENT = 50_000;
 
 export function isFinancialProposal(proposal: ProposalFields | null | undefined): boolean {
   if (!proposal) return true;
+  if (hasUnreadableContent(proposal)) return true;
   const content = proposalContent(proposal);
   if ([proposal.title, ...content].reduce((n, v) => n + (typeof v === 'string' ? v.length : 0), 0) > MAX_CLASSIFIED_CONTENT) return true;
   const { actionType, module, toolName, title } = proposal;
   // The content is read before any list (review MAJOR-3): an approval request, a listed action or a mapped tool whose
   // text or parameters carry money is financial.
-  if (proposalMentionsMoney(actionType, module, toolName, title, ...content)) return true;
+  if (proposalMentionsMoney(actionType, module, toolName, readableText(title), ...content)) return true;
   const tool = typeof toolName === 'string' && toolName.trim() ? toolName.trim() : null;
   const authority = tool ? keyOrganToolAuthority(tool) : null;
   if (authority && 'scopes' in authority) return authority.scopes.some((s) => MONEY_SCOPES.has(s.module));
