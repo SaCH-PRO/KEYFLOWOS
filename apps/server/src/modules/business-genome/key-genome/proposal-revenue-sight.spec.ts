@@ -491,8 +491,8 @@ describe('third review of the #218 repairs: structured text is read as the propo
   });
   it('RED-BEFORE (correctness m1): ids and fingerprints in real success evidence are not read as money', () => {
     for (const [fingerprint, entityId, claimKey] of [
-      ['a1b208cac7457d9e00112233445566778899aabbccddeeff0011223344556677', 'cmzcku666tax29xx90fuyj0uu', '0001fee2-9arr-4ltv-8tax-0123456789ab'],
-      ['00FEE11CAC22FEE33CAC44FEE55CAC66FEE77CAC88FEE99CAC00FEE11CAC22FEE3', 'c9fee1tax2arr3ltv4cac5fee', '9cac7457-1fee-4tax-8arr-2ltv3cac4fee'],
+      ['a1b208cac7457d9e00112233445566778899aabbccddeeff0011223344556677', 'cmzcku666tax29xx90fuyj0uu', '0001fee2-9cad-4fee-8cac-0123456789ab'],
+      ['00FEE11CAC22FEE33CAC44FEE55CAC66FEE77CAC88FEE99CAC00FEE11CAC22FEE3', 'c9fee1tax2arr3ltv4cac5fee', '9cac7457-1fee-4cad-8fee-2cac3cac4fee'],
     ]) {
       const row = { ...task, status: 'EXECUTED', outcomeEvidence: { v: 1, status: 'SUCCEEDED', fingerprint, claimKey, entity: { entityType: 'helpdesk_ticket', entityId }, principalChain: [{ userId: entityId }] } };
       expect(proposalViewForReader(row, false), fingerprint).toBe(row);
@@ -540,7 +540,7 @@ describe('fourth review of the #218 repairs: the structured reader fails closed'
     expect((proposalViewForReader(row, false) as any).outcomeEvidence).toEqual({ status: 'FAILED', reason: null });
   });
   it('control (m3/m4): real ids under id-named keys are not read, whatever letters and digits they hold', () => {
-    for (const payload of [{ contactId: 'cmzcku666tax29xx90fuyj0uu' }, { id: 'x1usd9cad2zz' }, { taskIds: ['tsk_1', 'kap_2x9cad'] }, { ownerId: '9cac7457-1fee-4tax-8arr-2ltv3cac4fee' }])
+    for (const payload of [{ contactId: 'cmzcku666tax29xx90fuyj0uu' }, { id: 'x1usd9cad2zz' }, { taskIds: ['tsk_1', 'kap_2x9cad'] }, { ownerId: '9cac7457-1fee-4cad-8fee-2cac3cac4fee' }])
       expect(isFinancialProposal(task({ payload }) as any), JSON.stringify(payload)).toBe(false);
   });
   it.each([
@@ -611,5 +611,69 @@ describe('fifth review of the #218 repairs: ambiguous escapes and invisible char
   it('control: ordinary paths, notes and multilingual text stay non-financial', () => {
     for (const note of ['C:\\new\\folder\\readme.txt', 'Line one\nLine two', 'Llamar a Jos\u00e9 ma\u00f1ana', '\u0915\u094d\u200d\u0937 call back', '\ud83d\udc68\u200d\ud83d\udc69\u200d\ud83d\udc67 family booking'])
       expect(isFinancialProposal(task({ payload: { note }, summary: note }) as any), note).toBe(false);
+  });
+});
+
+describe('sixth review of the #218 repairs: readings are only ever added', () => {
+  const task = (extra: object) => ({ actionType: 'CREATE_TASK', module: 'crm', title: 'Follow up', ...extra });
+  const blind = (extra: object) => proposalViewForReader({ id: 'k', status: 'FAILED', ...task(extra) }, false) as any;
+  it.each(['Net income\u1D43 12,400', 'Fees\u1D43: see note', 'Outstanding BALANCE\u2122 is high', 'VAT\u2116 123456', 'TAX\u2116 99', 'RENT\u33A1', 'Costs\u00AA', 'Tax\u24D8'])(
+    'RED-BEFORE (m1): the text as written is read as well as its folded form (%j)',
+    (text) => {
+      expect(isFinancialProposal(task({ summary: text }))).toBe(true);
+      expect(isFinancialProposal(task({ title: text }))).toBe(true);
+      expect(isFinancialProposal(task({ payload: { note: text } }) as any)).toBe(true);
+    },
+  );
+  it.each(['SALE\u2122 failed', 'VAT\u2116 123456'])('RED-BEFORE (m1): a failure reason as written is read (%j)', (reason) => {
+    expect(proposalTextStatesMoney(reason)).toBe(true);
+    expect(blind({ failureReason: reason }).failureReason).toBeNull();
+  });
+  it.each(['december-2026-cost-fees-transactions', 'commissionpayout2026total', 'see 00000000-0000-0000-0000-usd900000000'])('RED-BEFORE (m3): a phrase shaped like an id is read, in a title and in a failure reason (%j)', (text) => {
+    expect(isFinancialProposal(task({ title: text }))).toBe(true);
+    expect(proposalTextStatesMoney(text)).toBe(true);
+  });
+  it('control (m3): a real cuid and a real UUID are still not read as money, in a title, a failure reason and a parameter', () => {
+    for (const id of ['cmzcku666tax29xx90fuyj0uu', '9cac7457-1fee-4cad-8fee-2cac3cac4fee']) {
+      expect(isFinancialProposal(task({ title: `Ticket ${id}` })), id).toBe(false);
+      expect(proposalTextStatesMoney(`Ticket ${id} not found`), id).toBe(false);
+      expect(isFinancialProposal(task({ payload: { ref: id } }) as any), id).toBe(false);
+    }
+  });
+  it.each(['c:\\pay\\attention', 'c:\\response\\rate 5'])('RED-BEFORE (m4): the text as written, backslashes kept, is one of the readings (%j)', (summary) => expect(isFinancialProposal(task({ summary }))).toBe(true));
+  it.each([
+    ['a figure key in nested JSON', { payload: { body: '{"total":900}' } }],
+    ['a rate in a nested result', { executionResult: { output: JSON.stringify({ rate: 150 }) } }],
+    ['an escaped currency sign', { summary: 'That is \\u20ac50' }],
+    ['an escaped pound sign', { payload: { note: 'That is \\u00a3900' } }],
+  ])('RED-BEFORE (m5): %s is read', (_l, extra) => expect(isFinancialProposal(task(extra) as any)).toBe(true));
+  it('RED-BEFORE (m2): text that grows past the cap when folded, and long ambiguous text, fail closed quickly', () => {
+    const grows = '\uFDFA'.repeat(49_000);
+    const ambiguous = `\u200b\\${'a'.repeat(30_000)}`;
+    for (const [label, text] of [['grows', grows], ['ambiguous', ambiguous]] as const) {
+      const started = performance.now();
+      expect(proposalTextStatesMoney(text), label).toBe(true);
+      expect(isFinancialProposal(task({ summary: text })), label).toBe(true);
+      expect(blind({ failureReason: text, outcomeEvidence: { status: 'FAILED', reason: text } }).failureReason, label).toBeNull();
+      expect(performance.now() - started, label).toBeLessThan(400);
+    }
+  });
+  it('the reader is linear on every field, with invisible characters and backslashes together', () => {
+    const shapes = ['\\'.repeat(19_000), '\u200b\\'.repeat(9_000), `\u200b\\${'x '.repeat(9_000)}`, '\\u00'.repeat(4_000), '\uFF19\\'.repeat(9_000)];
+    for (const shape of shapes) {
+      for (const extra of [{ title: shape }, { summary: shape }, { payload: { note: shape } }, { payload: { [shape.slice(0, 5_000)]: 1 } }, { executionResult: { out: shape } }, { rejectionReason: shape }]) {
+        const started = performance.now();
+        isFinancialProposal(task(extra) as any);
+        expect(performance.now() - started, Object.keys(extra)[0]).toBeLessThan(400);
+      }
+      const started = performance.now();
+      blind({ failureReason: shape, outcomeEvidence: { status: 'FAILED', reason: shape } });
+      expect(performance.now() - started, 'view').toBeLessThan(600);
+    }
+  });
+  it('control: ordinary text with one invisible character or one path stays non-financial, and nothing returned is normalised', () => {
+    for (const note of ['Call\u200bback Tuesday', 'C:\\new\\folder\\readme.txt', '\uFF23\uFF41\uFF4C\uFF4C back', 'Caf\u00e9 visit']) expect(isFinancialProposal(task({ summary: note, payload: { note } }) as any), note).toBe(false);
+    const row = { id: 'k', status: 'FAILED', ...task({ failureReason: 'Rate\u200blimited: retry\\later' }) };
+    expect(proposalViewForReader(row, false)).toBe(row);
   });
 });
