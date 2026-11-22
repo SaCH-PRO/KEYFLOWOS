@@ -226,7 +226,8 @@ export class KeyCortexEndocrineService {
       const base = raw < NOISE_FLOOR ? 0 : raw;
       byKey.set(strandKey, {
         level: base + push * (1 - base),
-        reasons: [...new Set([signal.reason, ...(from?.reasons ?? [])])].slice(0, 5),
+        // Review SEC-MSS-4: nor its reasons, as read() forgets them with the level.
+        reasons: [...new Set([signal.reason, ...(base === 0 ? [] : (from?.reasons ?? []))])].slice(0, 5),
         updatedAt: now,
         modules: [...strandModules],
       });
