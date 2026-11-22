@@ -7,7 +7,7 @@ import { UnifiedMemoryRetrievalService } from './unified-memory-retrieval.servic
 import { KeyCortexLearningService } from './key-cortex-learning.service';
 import { GENOME_ROW_METADATA_KEY } from './unified-memory.types';
 import type { MemoryFragment, MemorySourceType } from './unified-memory.types';
-import { financialProposalsWithProvenance, isFinancialProposal, isMoneyLabel, isMoneyMemoryEvent, PROPOSAL_CLASSIFY_SELECT, type ProposalFields } from '../business-genome/key-genome/genome-finance-scope';
+import { financialProposalsWithProvenance, isFinancialProposal, isMoneyLabel, isMoneyMemoryEvent, PROPOSAL_CLASSIFY_SELECT, proposalTextStatesMoney, type ProposalFields } from '../business-genome/key-genome/genome-finance-scope';
 import {
   CortexQuery,
   CortexContextSnapshot,
@@ -520,14 +520,15 @@ function recordTextMentionsMoney(fragment: RecordFragment): boolean {
   const texts: unknown[] = [];
   const collect = (o: unknown) => {
     if (!isPlainObject(o)) return;
-    for (const key of ['reason', 'rejectionReason', 'title', 'summary']) texts.push(o[key]);
+    for (const key of ['reason', 'rejectionReason', 'failureReason', 'title', 'summary']) texts.push(o[key]);
   };
   const payload = eventPayloadOf(fragment);
   collect(payload);
   collect(payload?.metadata);
   collect(payload?.after);
   collect(fragment.metadata?.metadata);
-  return texts.some((t) => typeof t === 'string' && isMoneyLabel(t));
+  // The proposal vocabulary, as the proposal's own row is read (review of the Codex fixes, security MAJOR-1).
+  return texts.some((t) => typeof t === 'string' && (isMoneyLabel(t) || proposalTextStatesMoney(t)));
 }
 
 /**

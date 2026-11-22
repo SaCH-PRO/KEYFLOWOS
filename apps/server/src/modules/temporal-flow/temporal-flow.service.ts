@@ -1,5 +1,5 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
-import { genomeReaderReadsRevenue, financialProposalsWithProvenance, isMoneyLabel, PROPOSAL_CLASSIFY_SELECT, type GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
+import { genomeReaderReadsRevenue, financialProposalsWithProvenance, isMoneyLabel, PROPOSAL_CLASSIFY_SELECT, proposalTextStatesMoney, type GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
@@ -33,8 +33,13 @@ function eventTextStatesMoney(e: { payload?: unknown; metadata?: unknown }): boo
     if (!o || typeof o !== 'object' || Array.isArray(o)) continue;
     for (const key of ['reason', 'rejectionReason', 'failureReason', 'title', 'summary', 'description']) texts.push((o as Record<string, unknown>)[key]);
   }
-  return texts.some((t) => typeof t === 'string' && isMoneyLabel(t));
+  // The proposal vocabulary, as the proposal's own row is read (review of the Codex fixes, security MAJOR-1: 'card
+  // declined', 'paid late' and 'balance owed' are not money labels).
+  return texts.some((t) => typeof t === 'string' && (isMoneyLabel(t) || proposalTextStatesMoney(t)));
 }
+
+/** The most rows one filtered timeline read scans before it answers what it has. */
+const MAX_READER_SCAN = 10_000;
 
 @Injectable()
 export class TemporalFlowService {
@@ -128,15 +133,31 @@ export class TemporalFlowService {
 
     where.visibility = { not: 'HIDDEN' };
 
-    // Codex P2 on #218: when the rows are filtered for a reader, the limit counts what the reader may see (read with
-    // headroom, filtered, then limited).
     const limit = query.limit ?? 100;
-    const events = await this.prisma.client.temporalFlowEvent.findMany({
-      where,
-      orderBy: { occurredAt: 'desc' },
-      take: reader === undefined ? limit : Math.min(limit * 5, 1000),
-    });
-    return (await this.forReader(businessId, events, reader)).slice(0, limit);
+    if (reader === undefined) {
+      return this.prisma.client.temporalFlowEvent.findMany({ where, orderBy: { occurredAt: 'desc' }, take: limit });
+    }
+    // Codex P2 on #218 and its review: when the rows are filtered for a reader, the limit counts what the reader may
+    // see. The first read is `limit` rows (all a revenue reader, or a page with nothing hidden, needs); while rows were
+    // withheld the read pages on, in a stable order, until the limit is met, the rows end, or MAX_READER_SCAN rows have
+    // been scanned (then the page may be short). A negative limit serves nothing and a fraction is truncated.
+    const want = Math.max(0, Math.trunc(Number(limit)) || 0);
+    if (want === 0) return [];
+    const visible: Awaited<ReturnType<typeof this.prisma.client.temporalFlowEvent.findMany>> = [];
+    let skip = 0;
+    while (visible.length < want && skip < MAX_READER_SCAN) {
+      const take = Math.min(skip === 0 ? want : Math.min(Math.max(want, 100), 1000), Math.max(MAX_READER_SCAN - skip, 1));
+      const page = await this.prisma.client.temporalFlowEvent.findMany({
+        where,
+        orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take,
+      });
+      visible.push(...(await this.forReader(businessId, page, reader)));
+      skip += page.length;
+      if (page.length < take) break;
+    }
+    return visible.slice(0, want);
   }
 
   async calendarRange(businessId: string, from: string, to: string, reader?: GenomeReader | null) {

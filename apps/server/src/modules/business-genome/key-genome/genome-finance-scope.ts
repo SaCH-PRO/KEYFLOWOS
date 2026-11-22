@@ -45,7 +45,9 @@ const MONEY_TERMS = new RegExp(
   [
     'financ', 'revenue', 'sales', 'commerce', 'payment', 'invoice', 'profit', 'billing', 'refund', 'payroll', 'treasury',
     // Compensation is money (Codex P1 on #218: commission rates are real data in conversion/sales-team).
-    'commission', 'compensation', '(?<![a-z])bonus(?:es)?(?![a-z])',
+    // Letter-bounded at the start (review of the Codex fixes: decommission and overcompensation are not money);
+    // compensate, incentive and stipend are compensation too.
+    '(?<![a-z])commission', '(?<![a-z])compensat', '(?<![a-z])bonus(?:es)?(?![a-z])', '(?<![a-z])incentive', '(?<![a-z])stipend',
     'lifetime', 'acquisition_?cost', 'budget', 'expense', 'conversion', 'forecast', 'churn', 'transaction', 'opportunit',
     'unit_?economics', 'cross_?domain', 'money', 'receivable', 'payable', 'quote', 'quotation', 'reimburs', 'discount',
     // A promo code is money; promote / promotion is not (round-3 correctness minor).
@@ -352,8 +354,17 @@ export function proposalViewForReader<T extends { id: string; status?: unknown; 
  * Codex P1 on #218: a non-financial proposal as a reader without revenue read is served it: whole, except a failure
  * reason that states money, which is blanked.
  */
-export function nonFinancialProposalForReader<T extends { failureReason?: unknown }>(proposal: T): T {
-  return typeof proposal.failureReason === 'string' && proposalMentionsMoney(proposal.failureReason) ? { ...proposal, failureReason: null } : proposal;
+export function nonFinancialProposalForReader<T extends { failureReason?: unknown; outcomeEvidence?: unknown }>(proposal: T): T {
+  const states = (v: unknown) => typeof v === 'string' && proposalMentionsMoney(v);
+  // The action boundary writes the same message to outcomeEvidence.reason (review of the Codex fixes, security m1).
+  const evidence = proposal.outcomeEvidence;
+  const evidenceReason = evidence && typeof evidence === 'object' && !Array.isArray(evidence) ? (evidence as Record<string, unknown>).reason : undefined;
+  if (!states(proposal.failureReason) && !states(evidenceReason)) return proposal;
+  return {
+    ...proposal,
+    ...(states(proposal.failureReason) ? { failureReason: null } : {}),
+    ...(states(evidenceReason) ? { outcomeEvidence: { ...(evidence as Record<string, unknown>), reason: null } } : {}),
+  };
 }
 
 /** D-238: the redacted view of a financial proposal: its id, its status (D-226) and a failure reason that states no money. */
