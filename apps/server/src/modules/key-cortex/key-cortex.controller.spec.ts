@@ -524,3 +524,16 @@ describe('FU-PROPOSAL-REVENUE-SIGHT round-3 repair (security B2; D-238): POST co
     });
   }
 });
+
+describe('FU-PROPOSAL-REVENUE-SIGHT round 4 (security minor 6): POST cortex/actions/approve after the decision has been applied', () => {
+  it('RED-BEFORE: a failed provenance read answers the redacted view, not a 503 for a decision that took effect', async () => {
+    const TASK = { id: 'kap_t', status: 'APPROVED', title: 'Plan the next step', actionType: 'CREATE_TASK', module: 'crm', payload: { recommendationId: 'rec_1' } };
+    const orchestrator = { approve: vi.fn(async () => ({ ...TASK })), reject: vi.fn(), isFinancial: vi.fn(async () => { throw new Error('db down'); }) };
+    const args: any[] = Array(22).fill({});
+    args[19] = orchestrator;
+    const ctl = new (KeyCortexController as any)(...args);
+    const viewer = { userId: 'u1', businessId: 'b1', role: 'STAFF', superAdmin: false, scopes: { revenue: 'none' }, member: true };
+    const res = await ctl.approveAction({ sessionId: 's1', businessId: 'b1', actionId: 'kap_t', approved: true }, { user: { id: 'u1' } }, viewer);
+    expect(res.result).toEqual({ id: 'kap_t', status: 'APPROVED' });
+  });
+});

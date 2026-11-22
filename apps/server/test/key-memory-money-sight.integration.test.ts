@@ -940,10 +940,34 @@ describe("FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): a memberless turn
       expect((await agent().get(proposalsRoute(`/${task}`)).set(HEADER, ID.blind)).status).toBe(200);
       // D-238 "withhold or safely redact": reading is withheld; acting stays governed by the approval authority
       // (tiers, D-140, D-119), and the answer is the redacted view (id, status, a money-free failure reason).
-      for (const action of ['approve', 'reject', 'cancel', 'execute']) {
-        const res = await agent().post(proposalsRoute(`/${money}/${action}`)).set(HEADER, ID.blind).send(action === 'reject' ? { reason: 'no' } : {});
+      // Round 4 (correctness minor 1): each action on its own fresh money proposal, so each can answer its success.
+      // A success answers exactly the redacted keys and changed the row; a refusal is the authority's own (403/400),
+      // never a 404 (the proposal is not hidden from the action) and never a 5xx.
+      // Proposed before any action (an action writes its own governance rows, which the helper's count would see).
+      const targets: Record<string, string> = {};
+      for (const [i, action] of (['approve', 'reject', 'cancel'] as const).entries()) {
+        targets[action] = await propose(PROPOSAL_TITLE, 'Outstanding invoices exceed 1.5x your monthly revenue.', 3 + i);
+      }
+      for (const action of ['approve', 'reject', 'cancel'] as const) {
+        const target = targets[action];
+        const res = await agent().post(proposalsRoute(`/${target}/${action}`)).set(HEADER, ID.blind).send(action === 'reject' ? { reason: 'no' } : {});
         const body = JSON.stringify(res.body);
         for (const marker of ['12,345', 'outstanding across', 'monthly revenue']) expect(body, `${action} (${res.status}): ${marker}`).not.toContain(marker);
+        expect([200, 201, 400, 403], `${action}: ${body.slice(0, 200)}`).toContain(res.status);
+        if (res.status < 300) {
+          for (const key of Object.keys(res.body)) expect(['id', 'status', 'failureReason'], `${action} answers ${key}`).toContain(key);
+          expect(res.body.id).toBe(target);
+          const row = await db.keyActionProposal.findUnique({ where: { id: target }, select: { status: true } });
+          expect(row?.status, action).toBe({ approve: 'APPROVED', reject: 'REJECTED', cancel: 'CANCELLED' }[action]);
+        }
+      }
+      {
+        const res = await agent().post(proposalsRoute(`/${money}/execute`)).set(HEADER, ID.blind).send({});
+        const body = JSON.stringify(res.body);
+        for (const marker of ['12,345', 'outstanding across', 'monthly revenue']) expect(body, `execute (${res.status}): ${marker}`).not.toContain(marker);
+        // The executor's own refusal (a pending proposal is not executable) answers; the hiding 404 does not.
+        expect((res.body as { message?: string }).message, body.slice(0, 200)).not.toBe('Action proposal not found');
+        expect(res.status, body.slice(0, 200)).toBeLessThan(500);
       }
       for (const reader of [ID.owner, ID.revenue]) {
         const seen = ((await agent().get(proposalsRoute()).set(HEADER, reader)).body as any[]).map((p) => p.id);

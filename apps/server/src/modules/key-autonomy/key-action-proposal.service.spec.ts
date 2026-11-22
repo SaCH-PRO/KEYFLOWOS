@@ -372,3 +372,14 @@ describe('KeyActionProposalService', () => {
     });
   });
 });
+
+describe('FU-PROPOSAL-REVENUE-SIGHT round 4 (correctness minor 7): viewForReader after an action has committed', () => {
+  it('RED-BEFORE: a failed revenue read answers the redacted view (or the non-financial proposal whole), never an error', async () => {
+    const svc = Object.create(KeyActionProposalService.prototype) as any;
+    svc.prisma = { client: { membership: { findUnique: vi.fn(async () => { throw new Error('db down'); }) }, user: { findUnique: vi.fn(async () => { throw new Error('db down'); }) }, genomeRecommendation: { findMany: vi.fn(async () => []) } } };
+    const money = { id: 'kap_1', status: 'APPROVED', title: '$12,345 outstanding', actionType: 'EXECUTE_TOOL' };
+    await expect(svc.viewForReader('b1', money, { id: 'u1' })).resolves.toEqual({ id: 'kap_1', status: 'APPROVED' });
+    const task = { id: 'kap_2', status: 'APPROVED', title: 'Call Kerry back', actionType: 'CREATE_TASK', module: 'crm' };
+    await expect(svc.viewForReader('b1', task, { id: 'u1' })).resolves.toBe(task);
+  });
+});

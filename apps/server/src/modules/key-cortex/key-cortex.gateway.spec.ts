@@ -1065,3 +1065,26 @@ describe('FU-PROPOSAL-REVENUE-SIGHT round-3 repair (security B2; D-238): key:app
     });
   }
 });
+
+describe('FU-PROPOSAL-REVENUE-SIGHT round-4 (correctness minor 2): a non-financial proposal over key:approve', () => {
+  it('keeps its whole result and its title in the room, for a member without revenue read, and the financial flag is not sent', async () => {
+    const TASK = { id: 'kap_t', status: 'approved', description: 'Call Kerry back', actionDescription: 'Call Kerry back', actionType: 'CREATE_TASK', actionModule: 'crm', financial: false };
+    const approval = { approveAction: vi.fn(async () => ({ ...TASK })), rejectAction: vi.fn(), readerReadsRevenue: vi.fn(async () => false) };
+    const wsAuth = {
+      authenticateSocket: vi.fn().mockResolvedValue({ userId: 'u1', email: null, role: 'USER' }),
+      authenticateToken: vi.fn().mockResolvedValue(null),
+      verifyBusinessMembership: vi.fn().mockResolvedValue(true),
+    };
+    const roomEmits: unknown[] = [];
+    const gateway = new KeyCortexGateway({} as any, approval as any, { emit: vi.fn() } as any, { executeApprovedAction: vi.fn() } as any, wsAuth as any, sessionServiceOver().service);
+    (gateway as any).server = { to: vi.fn(() => ({ emit: (...args: unknown[]) => roomEmits.push(args) })) };
+    const socket = fakeSocket('s10', { authToken: 't', businessId: 'b1' });
+    await gateway.handleConnection(socket);
+    socket.emit.mockClear();
+    await gateway.handleApprove({ approvalId: 'kap_t' }, socket);
+    expect(JSON.stringify(roomEmits)).toContain('Call Kerry back');
+    const result = socket.emit.mock.calls.find((c: any[]) => c[0] === 'key:approval_result')![1] as any;
+    expect(result.result).toMatchObject({ id: 'kap_t', actionDescription: 'Call Kerry back' });
+    expect(result.result).not.toHaveProperty('financial');
+  });
+});

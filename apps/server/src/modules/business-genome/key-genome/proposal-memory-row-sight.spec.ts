@@ -4,7 +4,7 @@
  * own metadata alone. A financial row, or one that cannot be read, withholds the event (fail closed).
  */
 import { describe, it, expect, vi } from 'vitest';
-import { readableMemoryEvents } from './genome-finance-scope';
+import { PROPOSAL_CLASSIFY_SELECT, readableMemoryEvents } from './genome-finance-scope';
 
 const event = (id: string, extra: Record<string, unknown> = {}) => ({
   id,
@@ -50,5 +50,11 @@ describe('readableMemoryEvents (D-238, round-3 security M3)', () => {
   it('a money memory event stays withheld whatever its row', async () => {
     const money = { id: 'm', sourceType: 'FINANCE_GENOME', eventType: 'FINANCE_SNAPSHOT_COMPUTED', domain: 'FINANCIAL', section: 'FINANCIAL', title: 'finance' };
     expect(await readableMemoryEvents(prismaWith([]), 'biz_1', [money])).toEqual([]);
+  });
+
+  it('round 4 (correctness MAJOR-2): the row is read with every field the classifier reads, so money only in its expected benefit withholds it', async () => {
+    const prisma = prismaWith([{ id: 'kap_a', actionType: 'CREATE_TASK', module: 'crm', title: 'Call back', expectedBenefit: 'Recover TTD 40,000 renewal' }]);
+    expect((await readableMemoryEvents(prisma, 'biz_1', [event('a')])).map((e) => e.id)).toEqual([]);
+    expect(prisma.client.keyActionProposal.findMany.mock.calls[0][0].select).toEqual(PROPOSAL_CLASSIFY_SELECT);
   });
 });

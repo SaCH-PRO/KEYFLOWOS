@@ -68,3 +68,21 @@ describe('round-3 repair (security m1): a proposal event whose own payload state
     expect((await (svc as any).list('biz_1', {}, { id: 'blind', role: 'USER' })).map((r: any) => r.id)).toEqual([]);
   });
 });
+
+describe('round-4 repair (correctness MAJOR-2): the proposal row is read with every field the classifier reads', () => {
+  it('RED-BEFORE: a task proposal whose money is only in its expected benefit withholds its events', async () => {
+    const findMany = vi.fn(async () => [{ id: 'kap_task', actionType: 'CREATE_TASK', module: 'crm', toolName: null, title: 'Call Kerry back', expectedBenefit: 'Recover TTD 40,000 renewal' }]);
+    const prisma = {
+      client: {
+        temporalFlowEvent: { findMany: vi.fn(async () => [{ id: 'ev', businessId: 'biz_1', entityType: 'key_action_proposal', entityId: 'kap_task', title: 'KEY action executed', description: null, payload: {}, metadata: {} }]) },
+        keyActionProposal: { findMany },
+        genomeRecommendation: { findMany: vi.fn(async () => []) },
+        membership: { findUnique: vi.fn(async () => ({ role: 'STAFF', permissionScopes: { revenue: 'none' } })) },
+      },
+    };
+    const { PROPOSAL_CLASSIFY_SELECT } = await import('../business-genome/key-genome/genome-finance-scope');
+    const svc = new TemporalFlowService(prisma as any);
+    expect(await (svc as any).list('biz_1', {}, { id: 'blind', role: 'USER' })).toEqual([]);
+    expect((findMany.mock.calls[0] as any[])[0].select).toEqual(PROPOSAL_CLASSIFY_SELECT);
+  });
+});

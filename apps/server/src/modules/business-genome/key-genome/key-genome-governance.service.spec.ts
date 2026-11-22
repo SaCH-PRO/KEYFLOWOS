@@ -383,4 +383,20 @@ describe('FU-PROPOSAL-REVENUE-SIGHT review repairs (security MAJOR-1, MAJOR-2; D
     expect(blind.autonomyBlocks.map((b) => b.sourceId)).toEqual(['kap_task']);
     expect(blind.counts.autonomyBlockedActions).toBe(1);
   });
+
+  it('[PRS-03b] RED-BEFORE (round 4, security minor 2): an autonomy block whose money is only in its affected entities or its bridged recommendation is withheld; the row is read with every classify field', async () => {
+    const { service, prisma } = makeService() as any;
+    prisma.client.genomeMemoryEvent.findMany = vi.fn().mockResolvedValue([]);
+    prisma.client.genomeRecommendation = { findMany: vi.fn().mockResolvedValue([{ id: 'rec_fin', domain: 'FINANCIAL', title: 'Raise prices', diagnosis: '' }]), findFirst: vi.fn() };
+    prisma.client.keyActionProposal.findMany.mockResolvedValue([
+      { id: 'kap_req', title: 'Approve the request', summary: 'From Ana.', riskLevel: 'HIGH', createdAt: new Date(), actionType: 'REQUEST_APPROVAL', module: null, toolName: null, affectedEntities: { requestType: 'expense' } },
+      { id: 'kap_bridged', title: 'Plan the next step', summary: 'From the genome.', riskLevel: 'HIGH', createdAt: new Date(), actionType: 'CREATE_TASK', module: 'crm', toolName: null, payload: { recommendationId: 'rec_fin' } },
+      { id: 'kap_task', title: 'Call the supplier', summary: 'About the delivery slot.', riskLevel: 'HIGH', createdAt: new Date(), actionType: 'CREATE_TASK', module: 'crm', toolName: null },
+    ]);
+    const blind = await service.summary('biz_1', { readsRevenue: false });
+    expect(blind.autonomyBlocks.map((b: any) => b.sourceId)).toEqual(['kap_task']);
+    const { PROPOSAL_CLASSIFY_SELECT } = await import('./genome-finance-scope');
+    const select = prisma.client.keyActionProposal.findMany.mock.calls.at(-1)[0].select;
+    expect(select).toMatchObject(PROPOSAL_CLASSIFY_SELECT);
+  });
 });

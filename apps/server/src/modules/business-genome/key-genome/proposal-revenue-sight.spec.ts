@@ -4,7 +4,7 @@
  * title; anything unknown or inadequately classified fails closed.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { financialProposalWithProvenance, isFinancialProposal, isMoneyMemoryEvent, proposalViewForReader } from './genome-finance-scope';
+import { financialProposalWithProvenance, financialProposalsWithProvenance, isFinancialProposal, isMoneyMemoryEvent, PROPOSAL_CLASSIFY_SELECT, proposalViewForReader } from './genome-finance-scope';
 
 describe('isFinancialProposal (D-238)', () => {
   it.each([
@@ -124,5 +124,48 @@ describe('financialProposalWithProvenance (D-238: a proposal bridged from a geno
     const prisma = prismaWith({ domain: 'OPERATIONS', title: 'SOPs' });
     await financialProposalWithProvenance(prisma, 'biz_1', { actionType: 'CREATE_TASK', title: 'Plan', payload: { recommendationId: 'rec_1' } });
     expect(prisma.client.genomeRecommendation.findFirst.mock.calls[0][0].where).toMatchObject({ id: 'rec_1', businessId: 'biz_1' });
+  });
+});
+
+describe('round-4 review repairs (correctness minors 3, 4, 5; security minor 3)', () => {
+  it.each([
+    ['dollars in words', { actionType: 'CREATE_TASK', module: 'crm', title: 'Remind Jane about the 500 dollars' }],
+    ['euros', { actionType: 'CREATE_TASK', module: 'crm', title: 'She sent 40 euros' }],
+    ['cents', { actionType: 'CREATE_TASK', module: 'crm', title: 'Round off the cents' }],
+    ['a rate with a figure', { actionType: 'CREATE_TASK', title: 'Raise the hourly rate to 150' }],
+    ['a total with a figure', { actionType: 'CREATE_TASK', title: 'Total: 1,200 for the job' }],
+    ['an invoice id key with a neutral title', { actionType: 'CREATE_TASK', title: 'Follow up', payload: { invoiceId: 'cmwr8rbji00097dkwjitjsgzl' } }],
+    ['a hyphenated money phrase', { actionType: 'CREATE_TASK', title: 'Plan', summary: 'see overdue-invoices-2026-report' }],
+    ['a UUID-wrapped currency inside free text is no amount, but money words still are', { actionType: 'CREATE_TASK', title: 'Plan', summary: 'refund 9cad2f1e-1usd-4fee-8cad-0123456789ab' }],
+  ])('%s is financial', (_l, p) => expect(isFinancialProposal(p as any)).toBe(true));
+
+  it.each([
+    ['a response rate', { actionType: 'CREATE_TASK', title: 'Lead response rate is low', evidence: [{ note: 'response rate fell' }] }],
+    ['a task count total', { actionType: 'CREATE_TASK', title: '3 tasks in total due today' }],
+    ['pay a visit', { actionType: 'CREATE_TASK', title: 'Pay a visit to the site' }],
+    ['a UUID in free text', { actionType: 'CREATE_TASK', title: 'Call back', summary: 'contact 9cad2f1e-1usd-4fee-8cad-0123456789ab' }],
+  ])('%s is not', (_l, p) => expect(isFinancialProposal(p as any)).toBe(false));
+
+  it('the classify select carries every content field the classifier reads', () => {
+    for (const key of ['actionType', 'module', 'toolName', 'title', 'summary', 'description', 'rationale', 'expectedBenefit', 'risks', 'evidence', 'payload', 'inputPayload', 'affectedEntities']) {
+      expect(PROPOSAL_CLASSIFY_SELECT, key).toHaveProperty(key, true);
+    }
+  });
+
+  it('financialProposalsWithProvenance reads the recommendations of a list in one query, in this business only', async () => {
+    const findMany = vi.fn(async () => [{ id: 'rec_fin', domain: 'FINANCIAL', title: 'Raise prices', diagnosis: '' }, { id: 'rec_ops', domain: 'OPERATIONS', title: 'SOPs', diagnosis: '' }]);
+    const prisma = { client: { genomeRecommendation: { findMany, findFirst: vi.fn() } } } as any;
+    const rows = [
+      { actionType: 'CREATE_TASK', title: 'A', payload: { recommendationId: 'rec_fin' } },
+      { actionType: 'CREATE_TASK', title: 'B', payload: { recommendationId: 'rec_ops' } },
+      { actionType: 'CREATE_TASK', title: 'C', payload: { recommendationId: 'rec_gone' } },
+      { actionType: 'CREATE_TASK', title: 'D' },
+      { actionType: 'EXECUTE_TOOL', toolName: 'commerce.create_invoice', title: 'E' },
+    ];
+    expect(await financialProposalsWithProvenance(prisma, 'biz_1', rows as any)).toEqual([true, false, true, false, true]);
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(findMany.mock.calls[0][0].where).toMatchObject({ businessId: 'biz_1', id: { in: ['rec_fin', 'rec_ops', 'rec_gone'] } });
+    findMany.mockRejectedValueOnce(new Error('down'));
+    expect(await financialProposalsWithProvenance(prisma, 'biz_1', rows.slice(1, 2) as any)).toEqual([true]);
   });
 });

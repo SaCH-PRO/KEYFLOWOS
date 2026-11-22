@@ -133,6 +133,7 @@ async function cleanup() {
     `DELETE FROM genome_evidence WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM genome_facts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM genome_memory_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM key_action_proposals WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM genome_module_readiness WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM genome_departments WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM genome_finance_snapshots WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -1199,6 +1200,12 @@ describe('FU-PROPOSAL-REVENUE-SIGHT (D-238; D-226, D-227, D-234): a KEY proposal
       [PROP.task, 'Action executed: Call Kerry back', { actionType: 'CREATE_TASK', module: 'crm', toolName: null }],
       [PROP.unknown, 'Action executed: KEY action proposal', { actionType: 'EXECUTE_TOOL' }],
     ] as const) {
+      // D-238 round 3 (security M3): an outcome event is judged by its underlying proposal row, so each event has the
+      // real row OutcomeLearningService copies it from (a missing row is withheld).
+      const m = metadata as { actionType: string; module?: string; toolName?: string | null };
+      await db.keyActionProposal.create({
+        data: { id: `${id}_kap`, businessId: ID.biz, sourceType: 'KEY_CORTEX', actionType: m.actionType, module: m.module ?? null, toolName: m.toolName ?? null, title: title.replace('Action executed: ', ''), riskLevel: 'LOW', status: 'EXECUTED' },
+      });
       await db.genomeMemoryEvent.create({
         data: { id, businessId: ID.biz, sourceType: 'KEY_ACTION_PROPOSAL', sourceEntityId: `${id}_kap`, eventType: 'ACTION_EXECUTED', domain: null, section: null, title, summary: 'KEY action was executed.', outcome: 'SUCCESS', impactScore: 0.75, occurredAt: new Date(), metadata },
       });
