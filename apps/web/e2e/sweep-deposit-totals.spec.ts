@@ -125,6 +125,11 @@ for (const [project, viewport] of Object.entries(JOURNEY_VIEWPORTS)) {
         // The KPI strip draws each label and then its figure; an invoice row's "TTD 400.00" is not the Revenue figure.
         expect.soft(text, "Sales shows the deposit as revenue").toMatch(/revenue\s*TTD 400(?![.,\d])/i);
         expect.soft(text, "Sales shows what is left as owed").toMatch(/owed\s*TTD 13\.3k/i);
+        // The overview's hero, where the screen draws it (found red on a desktop by journey D7: 0.00 and TTD 0 collected).
+        if (/outstanding revenue/i.test(text)) {
+          expect.soft(text, "the hero states what is left").toMatch(/outstanding revenue\D*13,323\.00/i);
+          expect.soft(text, "the hero states the deposit as collected").toMatch(/TTD 400 collected/);
+        }
       });
 
       await test.step("Sales > Collections: 400 received, 13.3k pending, no negative Collections Health", async () => {

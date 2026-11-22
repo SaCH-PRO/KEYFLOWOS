@@ -44,7 +44,10 @@ vi.mock("@/lib/client", () => ({
   sendInvoiceReminder: vi.fn(),
 }));
 
+vi.mock("../../components/commerce-hub", () => ({ CommerceHub: () => null }));
+
 import PaymentsTab from "../payments-tab";
+import { CommerceOverviewTab } from "../../components/commerce-overview-tab";
 import { CashFlowSummary } from "../../components/cash-flow-summary";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -425,5 +428,53 @@ describe("V1-64 review repairs: the tab after Mark paid, PAID invoices with no p
     ]);
     expect(strip("Received")).toBe("TTD 100");
     expect(strip("This Month")).toBe("—");
+  });
+});
+
+/**
+ * The Sales overview's hero (commerce-overview-tab.tsx, outside the packet's
+ * write set; found by running journey D7 live at 30cc9f3e: on a desktop Sales
+ * still read "Outstanding Revenue TTD 0.00 ... TTD 0 collected" for the
+ * deposit book, BUG-020 itself). It summed invoice totals by status (SENT /
+ * OVERDUE owed, PAID collected), so a part-paid invoice was neither. It reads
+ * the same per-invoice money as the Payments tab.
+ */
+describe("V1-64 Sales overview hero: a deposit is collected and the rest is outstanding (BUG-020, desktop)", () => {
+  function hero(invoices: Invoice[]): string {
+    render(
+      <CommerceOverviewTab invoices={invoices} quotes={[]} recurring={[]} currency="TTD" loading={false} onNavigate={() => {}} onNewItem={() => {}} />,
+    );
+    const label = screen.getByText("Outstanding Revenue");
+    return (label.parentElement?.textContent ?? "").replace(/\s+/g, " ");
+  }
+
+  it("CH-20 RED-BEFORE: 13,723 with a 400 deposit -> Outstanding Revenue 13,323.00 and TTD 400 collected (it read 0.00 and TTD 0)", () => {
+    const text = hero([invoice("dep", "PARTIALLY_PAID", 13723, [payment("dep", 400)]), invoice("draft", "DRAFT", 999)]);
+    expect(text).toMatch(/Outstanding Revenue\D*13,323\.00/);
+    expect(text).toContain("TTD 400 collected");
+    expect(text).not.toMatch(/overdue/);
+  });
+
+  it("CH-21 RED-BEFORE: overdue is what is left past the due date, flagged OVERDUE or not; a paid invoice is collected, a refund is not", () => {
+    const text = hero([
+      invoice("late", "PARTIALLY_PAID", 500, [payment("late", 200)], { dueDate: PAST_DUE }),
+      invoice("flag", "OVERDUE", 100, [], { dueDate: PAST_DUE }),
+      invoice("paid", "PAID", 75, [payment("paid", 75)], { paidAt: NOW }),
+      invoice("ref", "PARTIALLY_PAID", 100, [payment("ref", 60), payment("ref", 40), payment("ref", -40, "REFUNDED")]),
+    ]);
+    // owed: 300 + 100 + 40; collected: 200 + 75 + 60; overdue: 300 + 100 on two invoices
+    expect(text).toMatch(/Outstanding Revenue\D*440\.00/);
+    expect(text).toContain("TTD 335 collected");
+    expect(text).toContain("2 overdue — TTD 400");
+  });
+
+  it("CH-22: a book of whole invoices reads as before: SENT owed, PAID collected (with or without a payment row)", () => {
+    const text = hero([
+      invoice("sent", "SENT", 600),
+      invoice("paid", "PAID", 850, [payment("paid", 850)], { paidAt: NOW }),
+      invoice("ord", "PAID", 250, [], { paidAt: NOW }),
+    ]);
+    expect(text).toMatch(/Outstanding Revenue\D*600\.00/);
+    expect(text).toContain("TTD 1.1k collected");
   });
 });
