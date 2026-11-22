@@ -18,6 +18,8 @@ export interface InvoiceMoney {
   status: string;
   /** Normalized (trimmed, upper-case); '' when the row holds none. */
   currency: string;
+  contactId: string | null;
+  invoiceNumber: string | null;
   total: number;
   dueDate: Date | null;
   paidAt: Date | null;
@@ -25,9 +27,10 @@ export interface InvoiceMoney {
    * The rows that are money in or out, each with its date: SUCCESSFUL rows
    * (in) and negative REFUNDED rows (out, D-14). Their amounts add up to the
    * invoice's net received (CASH_NET_PAYMENT_WHERE, the database form of
-   * balanceOfStoredRows(...).net). A PAID invoice that carries no payment row
-   * of its own states its total, dated the day it was paid (see
-   * readInvoiceMoney); `at` is null only when such an invoice has no paidAt.
+   * balanceOfStoredRows(...).net). A PAID invoice also carries what its rows
+   * do not record of its total, dated the day it was paid (D-249, D-250; see
+   * readInvoiceMoney); `at` is null only for that entry on an invoice with no
+   * paidAt.
    */
   cash: Array<{ amount: number; at: Date | null }>;
   /** What is still owed on an open receivable, net of its APPLIED credit notes; 0 on any other invoice. */
@@ -53,15 +56,16 @@ export interface InvoiceMoney {
  *    APPLIED notes, as appliedCreditsOf reads them: a PARTIALLY_CREDITED
  *    invoice only), and only an open receivable owes anything.
  *
- *  - A PAID invoice with no SUCCESSFUL or REFUNDED row of its own keeps the
- *    reading it had before this packet: its total is the money received, on
- *    its paidAt. Such invoices are still written (CommerceIntegrationService
- *    creates INV-ORD-... PAID with no Payment row for a marketplace order
- *    marked paid, and past storefront checkouts left one each), and no owner
- *    ruling says their money stops being revenue (review COR-2; reported as an
- *    open question). As soon as the invoice carries a payment row of its own,
- *    the rows are the money. A row of another tenant is not one (D-75) and
- *    changes nothing either way.
+ *  - A PAID invoice counts its full total (owner rulings D-249, D-250): what
+ *    its own rows do not record as received, all of it for an invoice with no
+ *    payment row (CommerceIntegrationService still writes INV-ORD-... PAID
+ *    with none) or the rest of it for one whose rows cover part, counts on
+ *    its paidAt, so marking paid never loses revenue. Its refund rows still
+ *    come off: a rowless PAID 500 with a -100 refund nets 400. Rows that
+ *    cover the total, or more, add nothing. A row of another tenant records
+ *    none of it (D-75).
+ *  - `remaining` never exceeds the total less the credits (D-250): a refund
+ *    with no original would otherwise leave more owed than was invoiced.
  *
  * `businessId` must be the caller's admitted tenant; a missing or non-string
  * one reads nothing (Prisma drops an `undefined` filter, which would read
@@ -89,6 +93,8 @@ export async function readInvoiceMoney(
       dueDate: true,
       paidAt: true,
       currency: true,
+      contactId: true,
+      invoiceNumber: true,
       payments: { where: { businessId }, select: { amount: true, status: true, createdAt: true } },
     },
   });
@@ -108,23 +114,29 @@ export async function readInvoiceMoney(
     const total = Number(inv.total ?? 0) || 0;
     const rows = inv.payments ?? [];
     const open = OPEN_RECEIVABLE_STATUSES.has(inv.status);
-    const balance = creditAwareBalance(
-      balanceOfStoredRows(total, rows, inv.currency),
-      inv.status === 'PARTIALLY_CREDITED' ? creditedOf.get(inv.id) ?? 0 : 0,
-    );
-    const remaining = open ? balance.remaining : 0;
+    const rowsBalance = balanceOfStoredRows(total, rows, inv.currency);
+    const balance = creditAwareBalance(rowsBalance, inv.status === 'PARTIALLY_CREDITED' ? creditedOf.get(inv.id) ?? 0 : 0);
+    // D-250 (acceptance finding C2): an invoice never owes more than its total
+    // less its credits. A refund row with no original leaves the rows' net
+    // below zero, and the balance contract then reads total - net.
+    const owedCap = Math.max(0, toCents(rowsBalance.total) - toCents(balance.credited));
+    const remaining = open ? fromCents(Math.min(toCents(balance.remaining), owedCap)) : 0;
     const cash: Array<{ amount: number; at: Date | null }> = [];
     for (const p of rows) {
       const amount = Number(p.amount) || 0;
       if (p.status === 'SUCCESSFUL' || (p.status === 'REFUNDED' && amount < 0)) cash.push({ amount, at: p.createdAt });
     }
-    // Review COR-2: a PAID invoice no payment row of its own speaks for.
-    const speaksForItself = rows.some((p) => p.status === 'SUCCESSFUL' || p.status === 'REFUNDED');
-    if (inv.status === 'PAID' && !speaksForItself && total > 0) cash.push({ amount: total, at: inv.paidAt ?? null });
+    // D-249 / D-250: a PAID invoice counts its full total. What its own rows
+    // do not record as received (all of it, or the rest of it) counts on the
+    // day it was paid; refund rows still come off.
+    const unrecordedCents = inv.status === 'PAID' ? toCents(rowsBalance.total) - toCents(rowsBalance.paid) : 0;
+    if (unrecordedCents > 0) cash.push({ amount: fromCents(unrecordedCents), at: inv.paidAt ?? null });
     return {
       id: inv.id,
       status: inv.status,
       currency: normalizeCurrency(inv.currency),
+      contactId: inv.contactId ?? null,
+      invoiceNumber: inv.invoiceNumber ?? null,
       total,
       dueDate: inv.dueDate,
       paidAt: inv.paidAt,
