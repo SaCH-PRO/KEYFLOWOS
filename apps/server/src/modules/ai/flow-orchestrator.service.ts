@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException, ConflictException, ForbiddenException, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException, ConflictException, ForbiddenException, HttpException, HttpStatus, ServiceUnavailableException } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { createHash, randomUUID } from 'crypto';
 import type { Prisma } from '@prisma/client';
@@ -214,6 +214,9 @@ export interface FlowToolResult {
  * from the status.
  */
 const TOOL_HTTP_EXCEPTIONS = new WeakMap<FlowToolResult, HttpException>();
+
+/** ContractClauseService.resolveBytes' message for a document URL whose host did not answer 2xx, and the host's status. */
+const DOCUMENT_HOST_FAILURE = /^Could not fetch document URL \((\d{3})\)$/;
 
 export interface PendingConfirmation {
   toolCallId: string;
@@ -7034,9 +7037,24 @@ ${triage.standingContext}`;
         return { id: tag.id, name: tag.name };
       }
       case 'contract_extract_clauses': {
-        const result = await this.getContractClauses().extractClauses(businessId, args.contractId, {
-          url: args.url,
-        });
+        // W11-DISPATCH-REFUSAL-FINAL review SEC-1 (D-134): ContractClauseService reports a document
+        // host that did not answer (5xx, 408, 429) as a 400, in the same words as a host that answered
+        // and refused. A 400 is final for the plan queue now, so the outage is told apart here and
+        // handed on as a 503 with the service's own message (retried and counted, as it was before);
+        // the service and its HTTP routes answer as they did.
+        let result;
+        try {
+          result = await this.getContractClauses().extractClauses(businessId, args.contractId, {
+            url: args.url,
+          });
+        } catch (e) {
+          const outage = e instanceof BadRequestException ? DOCUMENT_HOST_FAILURE.exec(e.message) : null;
+          const hostStatus = outage ? Number(outage[1]) : 0;
+          if (hostStatus >= 500 || hostStatus === HttpStatus.REQUEST_TIMEOUT || hostStatus === HttpStatus.TOO_MANY_REQUESTS) {
+            throw new ServiceUnavailableException((e as Error).message, { cause: e });
+          }
+          throw e;
+        }
         return result;
       }
       // === SUPPORT & COMMS ===
