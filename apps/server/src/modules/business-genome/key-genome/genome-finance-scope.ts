@@ -274,11 +274,11 @@ function structuredText(v: unknown): string | null {
  * digits and 6 letters). Nothing else is stripped: a squashed phrase, a file name, a hyphenated phrase
  * (overdue-invoices-2026, december-2026-cost-fees-transactions) and a camelCase name are words, and are read.
  */
-function withoutIdTokens(t: string): string {
+function withoutIdTokens(t: string, keepWordedCuids = true): string {
   return t
     .replace(/(?<![A-Za-z0-9])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![A-Za-z0-9])/gi, ' ')
     .replace(/(?<![A-Za-z0-9-])c(?=[a-z0-9]{0,23}\d)[a-z0-9]{24}(?![A-Za-z0-9-])/g, (run) =>
-      run.split(/\d+/).some((letters) => letters.length >= 5 && proposalMentionsMoney(letters)) ? run : ' ',
+      keepWordedCuids && run.split(/\d+/).some((letters) => letters.length >= 5 && proposalMentionsMoney(letters)) ? run : ' ',
     )
     .replace(/(?<![A-Za-z0-9-])[0-9a-fA-F]{32,512}(?![A-Za-z0-9-])/g, (run) => {
       const digits = run.replace(/\D/g, '').length;
@@ -289,7 +289,9 @@ function withoutIdTokens(t: string): string {
 /**
  * The characters of readings one proposal's content (or one single text read on its own) may cost. A plain text is one
  * reading of its own length; an ordinary long text with a quote, a path, a joiner or a no-break space in it is a few;
- * only text built to multiply readings runs out, and then it fails closed without being read (seventh review).
+ * text whose readings multiply past it (several kinds of ambiguity in one long text, or across several long fields) runs
+ * out, and then it fails closed before the vocabulary reads it (seventh review; the lengths are recorded under
+ * FU-PROPOSAL-MONEY-TAG).
  */
 const READING_BUDGET = 300_000;
 type ReadingBudget = { left: number };
@@ -329,7 +331,14 @@ function readings(text: string, budget: ReadingBudget): string[] | null {
   for (const reading of raw) cost += reading.length;
   if (cost > budget.left) return null;
   budget.left -= cost;
-  return [...raw].map(withoutIdTokens);
+  // A cuid-shaped run kept for a money word in it is read both ways, kept and stripped: kept, it can read as no money
+  // in its place ("...paying attention") and stand between a money word and its figure (eighth review, security MINOR-1).
+  const out = new Set<string>();
+  for (const reading of raw) {
+    out.add(withoutIdTokens(reading));
+    out.add(withoutIdTokens(reading, false));
+  }
+  return [...out];
 }
 
 /**
