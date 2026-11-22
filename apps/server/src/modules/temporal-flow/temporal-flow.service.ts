@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, Inject } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CANONICAL_MODULES, LEVEL_RANK, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
@@ -25,8 +25,10 @@ export interface TemporalFlowListQuery {
 
 /**
  * FU-TEMPORAL-FLOW-INBOX-SCOPE (NAV-A1 security review; D-100, D-179): who reads the timeline. The member a request
- * acts for (AuthMiddleware's `req.user`). A read given no reader (an internal caller: the command center, KEY's
- * timeline tools) reads as before; a read given a reader answers only the events of the modules they may read.
+ * acts for (AuthMiddleware's `req.user`). A read given a reader's filter answers only the events of the modules they
+ * may read. A call given none reads as before: TemporalFlowController's routes pass one; the other callers (the
+ * command center snapshot, the executive brief and KEY modes, KEY's timeline tools, the genome evolution's signals)
+ * do not yet, and are the review's follow-ups (FU-TEMPORAL-FLOW-INBOX-SCOPE review N-1), not readers this rule covers.
  */
 export type TemporalFlowReader = { id?: string; role?: string } | null | undefined;
 
@@ -98,8 +100,25 @@ export class TemporalFlowService {
     @Inject(SemanticMemoryService) private readonly semanticMemory?: SemanticMemoryService,
   ) {}
 
-  async emit(input: TemporalFlowEventInput) {
+  /**
+   * FU-TEMPORAL-FLOW-INBOX-SCOPE review repair (SEC N-3): given a writer's filter (readerFilter), an upsert whose
+   * (source, externalId) names an existing event the writer cannot read is refused (403) before anything is written,
+   * so a member cannot overwrite a KEY Inbox event, nor read back the fields the upsert keeps (its sender handle).
+   */
+  async emit(input: TemporalFlowEventInput, writerFilter?: Record<string, unknown>) {
     const data = this.buildCreateData(input);
+
+    if (input.externalId && writerFilter) {
+      const key = { businessId: input.businessId, source: input.source, externalId: input.externalId };
+      const existing = await this.prisma.client.temporalFlowEvent.findFirst({ where: key, select: { id: true } });
+      if (existing) {
+        const visible = await this.prisma.client.temporalFlowEvent.findFirst({
+          where: this.scoped({ id: existing.id, businessId: input.businessId }, writerFilter),
+          select: { id: true },
+        });
+        if (!visible) throw new ForbiddenException('This event belongs to a module you cannot read');
+      }
+    }
 
     if (input.externalId) {
       return this.prisma.client.temporalFlowEvent.upsert({
@@ -216,9 +235,13 @@ export class TemporalFlowService {
     });
   }
 
-  async markResolved(businessId: string, eventId: string) {
+  /**
+   * FU-TEMPORAL-FLOW-INBOX-SCOPE review repair (SEC N-2): given the writer's filter, an event they cannot read is not
+   * resolved and answers { count: 0 }, as an event that does not exist does.
+   */
+  async markResolved(businessId: string, eventId: string, writerFilter?: Record<string, unknown>) {
     return this.prisma.client.temporalFlowEvent.updateMany({
-      where: { id: eventId, businessId },
+      where: this.scoped({ id: eventId, businessId }, writerFilter),
       data: {
         status: 'RESOLVED',
         completedAt: new Date(),

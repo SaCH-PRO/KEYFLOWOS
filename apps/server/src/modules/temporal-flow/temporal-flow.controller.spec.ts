@@ -76,15 +76,16 @@ describe('TemporalFlowController', () => {
       type: 'manual.note',
       title: 'Note',
       occurredAt: '2026-06-10T00:00:00Z',
-    } as any);
-    expect(temporal.emit).toHaveBeenCalled();
+    } as any, REQ);
+    expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', READER);
+    expect(temporal.emit).toHaveBeenCalledWith(expect.objectContaining({ businessId: 'biz_1', title: 'Note' }), FILTER);
     expect(result.id).toBe('tf_4');
   });
 
   it('PATCH /:eventId/resolve marks resolved', async () => {
     const { controller, temporal } = makeController();
-    const result = await controller.resolve('biz_1', 'tf_1');
-    expect(temporal.markResolved).toHaveBeenCalledWith('biz_1', 'tf_1');
+    const result = await controller.resolve('biz_1', 'tf_1', REQ);
+    expect(temporal.markResolved).toHaveBeenCalledWith('biz_1', 'tf_1', FILTER);
     expect(result).toEqual({ count: 1 });
   });
 

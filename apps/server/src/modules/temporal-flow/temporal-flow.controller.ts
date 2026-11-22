@@ -28,7 +28,8 @@ type ReaderRequest = { user?: TemporalFlowReader };
  * FU-TEMPORAL-FLOW-INBOX-SCOPE (NAV-A1 security review; D-100, D-179): every read of the timeline (the list, the
  * calendar, the reminders and the analysis, which answers event titles and counts) answers only the events of the
  * modules its reader may read (TemporalFlowService.readerFilter, applied in the query before its order and limit): the
- * KEY Inbox's events need operations read, calendar events bookings read, money events revenue read (D-100).
+ * KEY Inbox's events need operations read, calendar events bookings read, money events revenue read (D-100). Review
+ * repair (SEC N-2, N-3): the writes that name an existing event (resolve, an upsert by external id) do not reach one.
  */
 @HiddenModuleWrites('flow_hubs', 'bookings')
 @Controller('temporal-flow/businesses/:businessId')
@@ -76,10 +77,12 @@ export class TemporalFlowController {
   }
 
   @Post()
-  create(
+  async create(
     @Param('businessId') businessId: string,
     @Body() body: CreateTemporalFlowEventDto,
+    @Req() req: ReaderRequest,
   ) {
+    const writerFilter = await this.temporal.readerFilter(businessId, req.user);
     return this.temporal.emit({
       ...body,
       businessId,
@@ -87,12 +90,16 @@ export class TemporalFlowController {
       endsAt: body.endsAt ? new Date(body.endsAt) : undefined,
       occurredAt: body.occurredAt ? new Date(body.occurredAt) : undefined,
       reminderAt: body.reminderAt ? new Date(body.reminderAt) : undefined,
-    });
+    }, writerFilter);
   }
 
   @Patch(':eventId/resolve')
-  resolve(@Param('businessId') businessId: string, @Param('eventId') eventId: string) {
-    return this.temporal.markResolved(businessId, eventId);
+  async resolve(
+    @Param('businessId') businessId: string,
+    @Param('eventId') eventId: string,
+    @Req() req: ReaderRequest,
+  ) {
+    return this.temporal.markResolved(businessId, eventId, await this.temporal.readerFilter(businessId, req.user));
   }
 
   @Post('analyze')
