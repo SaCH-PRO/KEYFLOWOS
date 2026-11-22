@@ -193,9 +193,17 @@ function namedOtherCurrencyCash(other: OtherCurrencyCash[]): { listed: OtherCurr
   };
 }
 
-/** The business currency is normalized Business.currency: named only when it is a code too. */
+/**
+ * The business currency is normalized Business.currency, free text too: a runway alarm names it
+ * only when it is a three-letter code (review SEC-W11RL-1: as data as well, null otherwise).
+ */
+export function namedCashCurrency(cashCurrency: string): string | null {
+  return LOW_RUNWAY_CURRENCY_CODE.test(cashCurrency) ? cashCurrency : null;
+}
+
 function cashOnlyLabel(cashCurrency: string): string {
-  return LOW_RUNWAY_CURRENCY_CODE.test(cashCurrency) ? `${cashCurrency} cash` : 'business-currency cash';
+  const code = namedCashCurrency(cashCurrency);
+  return code ? `${code} cash` : 'business-currency cash';
 }
 
 /**

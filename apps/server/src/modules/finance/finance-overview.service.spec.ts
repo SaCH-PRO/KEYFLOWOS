@@ -148,4 +148,10 @@ describe('W11-RUNWAY-LEDGER-CASH (D-135): the other-currency cash note every run
     expect(m.otherCurrencyCashWithheldNote('pay now', [{ currency: 'USD', amount: 550 }]))
       .toBe('(business-currency cash only). Cash held in other currencies is not counted (amounts not shown here).');
   });
+
+  it('namedCashCurrency (review SEC-W11RL-1): the business currency as data is a three-letter code or null', () => {
+    expect(m.namedCashCurrency('TTD')).toBe('TTD');
+    expect(m.namedCashCurrency('USD')).toBe('USD');
+    for (const text of ['PAY ME NOW', 'ttd', 'US', 'USDT', ' USD', '']) expect(m.namedCashCurrency(text), JSON.stringify(text)).toBeNull();
+  });
 });

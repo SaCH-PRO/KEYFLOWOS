@@ -5,7 +5,7 @@ import { AiUsageService } from '../ai/ai-usage.service';
 import { RevenueActionService } from '../commerce/revenue-action.service';
 import { CommandService } from '../command/command.service';
 import { CashPositionService, otherCurrencyCash } from './cash-position.service';
-import { notCountedCash, notCountedCashNote, otherCurrencyCashWithheldNote } from './finance-overview.service';
+import { namedCashCurrency, notCountedCash, notCountedCashNote, otherCurrencyCashWithheldNote } from './finance-overview.service';
 
 /**
  * FIN8 — Finance intelligence detectors. Eight deterministic detectors
@@ -38,7 +38,8 @@ interface Detection {
   /**
    * W11-RUNWAY-LEDGER-CASH (D-107): the text for the command-spine mirror when it differs from
    * `body`. CommandItem rows are served under operations read, not revenue read, so the copy there
-   * says other-currency cash is held without its figures.
+   * says other-currency cash is held without adding its figures. (The copy still carries what it
+   * carried before this packet, the business-currency cash and burn, as every FIN8 mirror does.)
    */
   commandBody?: string;
   entityType?: string;
@@ -272,7 +273,7 @@ export class FinanceIntelligenceService {
    * label never echoed), and the evidence carries the same (cashCurrency, otherCurrencyCash). The
    * body reaches revenue readers (GET intelligence/actions, the revenue-actions mirror, the daily
    * insight); the command-spine copy, read under operations read, says such cash is held without
-   * its figures (commandBody). The burn's own currency is W11-RUNWAY-BURN-CURRENCY.
+   * adding its figures (commandBody; the business-currency figures it already carried stay). The burn's own currency is W11-RUNWAY-BURN-CURRENCY.
    */
   private async detectCashflowRisk(businessId: string, now: Date): Promise<Detection[]> {
     const ninetyAgo = new Date(now.getTime() - 90 * MS_DAY);
@@ -308,7 +309,8 @@ export class FinanceIntelligenceService {
         cash,
         dailyBurn: Math.round(dailyBurn * 100) / 100,
         days: Math.round(days),
-        cashCurrency: position.currency,
+        // Review SEC-W11RL-1: Business.currency is free text; named only when it is a code.
+        cashCurrency: namedCashCurrency(position.currency),
         otherCurrencyCash: named.listed,
         ...(named.notListed > 0 ? { otherCurrencyCashNotListed: named.notListed } : {}),
       },
