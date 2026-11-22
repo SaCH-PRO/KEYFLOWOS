@@ -1,5 +1,5 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
-import { genomeReaderReadsRevenue, financialProposalsWithProvenance, isMoneyLabel, PROPOSAL_CLASSIFY_SELECT, proposalTextStatesMoney, type GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
+import { genomeReaderReadsRevenue, financialProposalsWithProvenance, isMoneyLabel, PROPOSAL_CLASSIFY_SELECT, proposalTextStatesMoney, structuredValueStatesMoney, type GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
@@ -39,14 +39,7 @@ function eventTextStatesMoney(e: { payload?: unknown; metadata?: unknown }): boo
   // The event's own copy of the execution result: the row may not hold it (confirmation review m5).
   for (const o of [e.payload, e.metadata]) {
     const result = o && typeof o === 'object' && !Array.isArray(o) ? (o as Record<string, unknown>).executionResult : undefined;
-    if (result === undefined || result === null) continue;
-    let text: string;
-    try {
-      text = typeof result === 'string' ? result : JSON.stringify(result) ?? '';
-    } catch {
-      return true;
-    }
-    if (text.length > 50_000 || proposalTextStatesMoney(text)) return true;
+    if (structuredValueStatesMoney(result)) return true;
   }
   return false;
 }

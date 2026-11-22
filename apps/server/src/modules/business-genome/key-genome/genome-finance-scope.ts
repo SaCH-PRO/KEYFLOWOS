@@ -235,28 +235,57 @@ export type ProposalFields = {
   affectedEntities?: unknown;
 };
 
-/** A proposal's content as text: its string fields and its structured fields (parameters, request type) serialised. */
-function proposalContent(p: ProposalFields): Array<string | null | undefined> {
-  // Ids name rows, not money: an id-named key's value, and an id-like token (letters and digits, 16 or more), are not
-  // read (round-3 security minor: a random id holding "1usd" or "9cad2" is no amount). The provenance a recommendation
-  // id names is read by financialProposalWithProvenance.
-  const idKey = /(^id$|Ids?$|_ids?$)/;
-  const asText = (v: unknown) =>
-    v === null || v === undefined
-      ? null
-      : typeof v === 'string'
-        ? v
-        : // The id's name is kept (an invoiceId names an invoice: round-4 correctness minor 4); only its value is dropped.
-          JSON.stringify(v, (k, val) => (k && idKey.test(k) && (typeof val === 'string' || Array.isArray(val)) ? '[id]' : val));
-  // Only real id shapes are stripped from text: a UUID, or one unbroken run of 16+ letters and digits holding both
-  // (a cuid). A hyphenated phrase (overdue-invoices-2026) is words, and is read.
-  const withoutIdTokens = (t: string | null | undefined) =>
+/**
+ * A structured value (parameters, a result, evidence) as the text the vocabulary reads. Ids name rows, not money: an
+ * id-named key's value is dropped (its name is kept: an invoiceId names an invoice). A control character inside a
+ * string becomes a space, so JSON's own escapes (\n, \t) never stand as letters before a word (third review, security
+ * m1).
+ */
+const ID_KEY = /(^id$|Ids?$|_ids?$)/;
+function structuredText(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'string') return v;
+  try {
+    return (
+      JSON.stringify(v, (k, val) =>
+        k && ID_KEY.test(k) && (typeof val === 'string' || Array.isArray(val)) ? '[id]' : typeof val === 'string' ? val.replace(/\p{Cc}+/gu, ' ') : val,
+      ) ?? null
+    );
+  } catch {
+    return null;
+  }
+}
+/**
+ * Only real id shapes are stripped from text: a UUID, a cuid (Prisma cuid(): "c" and 24 lowercase letters and digits),
+ * or one unbroken run of 32 or more lowercase letters and digits holding a digit (a hash, a fingerprint). A hyphenated
+ * phrase (overdue-invoices-2026) and a camelCase name (unpaidInvoices2026) are words, and are read.
+ */
+function withoutIdTokens<T extends string | null | undefined>(t: T): T {
+  return (
     typeof t === 'string'
       ? t
           .replace(/(?<![A-Za-z0-9])[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}(?![A-Za-z0-9])/gi, ' ')
-          // A cuid (Prisma cuid(): "c" and 24 lowercase letters and digits). A camelCase name (unpaidInvoices2026) is read.
           .replace(/(?<![A-Za-z0-9-])c(?=[a-z0-9]{0,23}\d)[a-z0-9]{24}(?![A-Za-z0-9-])/g, ' ')
-      : t;
+          .replace(/(?<![A-Za-z0-9-])(?=[a-z0-9]{0,31}\d)[a-z0-9]{32,512}(?![A-Za-z0-9-])/g, ' ')
+      : t
+  ) as T;
+}
+
+/**
+ * D-238: whether a structured value a proposal or its event carries (an execution result, outcome evidence) states
+ * money, read exactly as the proposal's own content is. A value that cannot be read, or is oversized, fails closed.
+ */
+export function structuredValueStatesMoney(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  const text = structuredText(value);
+  if (text === null || text.length > MAX_CLASSIFIED_CONTENT) return true;
+  return proposalMentionsMoney(withoutIdTokens(text));
+}
+
+/** A proposal's content as text: its string fields and its structured fields (parameters, request type) serialised. */
+function proposalContent(p: ProposalFields): Array<string | null | undefined> {
+  // The provenance a recommendation id names is read by financialProposalWithProvenance.
+  const asText = structuredText;
   return [p.summary, p.description, p.rationale, p.expectedBenefit, asText(p.risks), asText(p.evidence), asText(p.payload), asText(p.inputPayload), asText(p.affectedEntities), asText(p.executionResult), p.rejectionReason].map(withoutIdTokens);
 }
 
@@ -358,25 +387,17 @@ export function proposalViewForReader<T extends { id: string; status?: unknown; 
 export function nonFinancialProposalForReader<T extends { failureReason?: unknown; outcomeEvidence?: unknown }>(proposal: T): T {
   const reasonStates = typeof proposal.failureReason === 'string' && proposalMentionsMoney(proposal.failureReason);
   // The action boundary writes the same message into outcomeEvidence (review of the Codex fixes, security m1). Evidence
-  // that states money anywhere in it is reduced to its status (confirmation review m6); oversized evidence fails closed.
+  // that states money anywhere in it is reduced to its status (confirmation review m6), read as proposal content is.
   const evidence = proposal.outcomeEvidence;
-  let evidenceStates = false;
-  if (evidence !== null && evidence !== undefined) {
-    let text: string;
-    try {
-      text = typeof evidence === 'string' ? evidence : JSON.stringify(evidence) ?? '';
-    } catch {
-      text = '';
-      evidenceStates = true;
-    }
-    evidenceStates = evidenceStates || text.length > MAX_CLASSIFIED_CONTENT || proposalMentionsMoney(text);
-  }
+  const evidenceStates = structuredValueStatesMoney(evidence);
   if (!reasonStates && !evidenceStates) return proposal;
+  // The status is kept only when it is a short string that states no money (third review m2).
   const status = evidence && typeof evidence === 'object' && !Array.isArray(evidence) ? (evidence as Record<string, unknown>).status : undefined;
+  const keepStatus = typeof status === 'string' && status.length <= 40 && !proposalMentionsMoney(status);
   return {
     ...proposal,
     ...(reasonStates ? { failureReason: null } : {}),
-    ...(evidenceStates ? { outcomeEvidence: { ...(status === undefined ? {} : { status }), reason: null } } : {}),
+    ...(evidenceStates ? { outcomeEvidence: { ...(keepStatus ? { status } : {}), reason: null } } : {}),
   };
 }
 
