@@ -7,10 +7,16 @@ import { fromCents, roundMoney, sumMoney, toCents } from './money';
 /**
  * V1-64 (SWP-INV-MONEY-TOTALS; sweep BUG-020, BUG-024): the invoices whose
  * remaining balance is owed to the business: issued and not settled. A DRAFT
- * was never sent, PAID / FULLY_CREDITED / VOID owe nothing, FAILED and PENDING
- * are not live receivables here.
+ * was never sent, PAID / FULLY_CREDITED / VOID owe nothing, FAILED is not a
+ * live receivable. A PENDING invoice counts as owed everywhere (owner ruling
+ * D-256; the ledger posts AR recognition for it).
+ *
+ * The one list of open statuses on the server: the commerce stats, the
+ * Executive Summary (ReportsService) and the A/R aging (ReceivablesService)
+ * all read it through readInvoiceMoney, so they cannot drift. The web's
+ * mirror is OWED_STATUSES in apps/web/.../payments/payments-tab.tsx.
  */
-export const OPEN_RECEIVABLE_STATUSES: ReadonlySet<string> = new Set(['SENT', 'OVERDUE', 'PARTIALLY_PAID', 'PARTIALLY_CREDITED']);
+export const OPEN_RECEIVABLE_STATUSES: ReadonlySet<string> = new Set(['PENDING', 'SENT', 'OVERDUE', 'PARTIALLY_PAID', 'PARTIALLY_CREDITED']);
 
 /** One invoice's money as the totals read it (readInvoiceMoney). */
 export interface InvoiceMoney {

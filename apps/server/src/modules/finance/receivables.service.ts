@@ -131,11 +131,14 @@ const EMPTY_TOTALS = (): AgingBucket[] => [
  * books too. On a CASH book the three state one figure. On an ACCRUAL book
  * they state one figure wherever the AR ledger agrees with the payment rows;
  * where it does not (a payment row or an APPLIED note that was never posted),
- * the aging states the ledger's figure and the other two the rows' (review
- * P2C-1: the basis is kept as it was and reported for a ruling):
- *   - the open statuses are SENT, OVERDUE, PARTIALLY_PAID and
- *     PARTIALLY_CREDITED. A credited invoice was left out; a PENDING one was
- *     read and no longer is (the summary's rule; reported for a ruling);
+ * the aging states the ledger's figure and the other two the rows'. Ruled
+ * (owner ruling D-255, review P2C-1): on ACCRUAL books the aging trusts the
+ * ledger; such a difference is a reconciliation finding (ledgerReconciled /
+ * ledgerDelta mark it), not something to paper over:
+ *   - the open statuses are OPEN_RECEIVABLE_STATUSES (commerce-stats.service):
+ *     PENDING, SENT, OVERDUE, PARTIALLY_PAID and PARTIALLY_CREDITED. A
+ *     credited invoice was left out; a PENDING one counts as owed everywhere
+ *     (owner ruling D-256);
  *   - a credited invoice's APPLIED notes are netted once: from the payment
  *     rows' side by creditAwareBalance (CASH, and the ACCRUAL fallback), from
  *     the ledger's side by the note's own AR postings (ACCRUAL, below);

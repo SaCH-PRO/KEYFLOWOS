@@ -100,12 +100,14 @@ export class ReportsService {
     const categoryMap = new Map(categories.map(c => [c.id, c.name]));
 
     // V1-64 (SWP-INV-MONEY-TOTALS; sweep BUG-020; D-13, D-14, D-75): what is
-    // owed is the remaining balance of the open receivables (SENT, OVERDUE,
+    // owed is the remaining balance of the open receivables
+    // (OPEN_RECEIVABLE_STATUSES: PENDING, owner ruling D-256, SENT, OVERDUE,
     // PARTIALLY_PAID, PARTIALLY_CREDITED) over their own-tenant payment rows,
     // the read the commerce stats total from (readInvoiceMoney) and the figure
     // the A/R aging states (D-251: the aging reads the same invoices through
-    // the same read; on an ACCRUAL book it keeps the AR ledger per invoice, so
-    // the two agree wherever the ledger agrees with the rows). It summed the totals of SENT and DRAFT invoices: a
+    // the same read; on an ACCRUAL book it trusts the AR ledger per invoice,
+    // owner ruling D-255, so the two agree wherever the ledger agrees with the
+    // rows, and a difference is a reconciliation finding). It summed the totals of SENT and DRAFT invoices: a
     // draft nobody was sent counted as owed, a part-paid invoice did not, and a
     // deposit never reduced it. The report is labelled in the business
     // currency, so the figure and its counts are that currency's invoices only

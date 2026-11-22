@@ -51,6 +51,15 @@ function canRemind(status: string | null | undefined): boolean {
 }
 
 /**
+ * The invoices whose remaining balance this tab, the Sales overview hero and
+ * the cash-flow summary count as owed (invoiceMoney's owedCents): the web's one
+ * list, mirroring the server's OPEN_RECEIVABLE_STATUSES (commerce-stats.service)
+ * less PARTIALLY_CREDITED, which the list row cannot net (it carries no credit
+ * note). A PENDING invoice counts as owed everywhere (owner ruling D-256).
+ */
+export const OWED_STATUSES: ReadonlySet<string> = new Set(["PENDING", "SENT", "OVERDUE", "PARTIALLY_PAID"]);
+
+/**
  * V1-64 (SWP-INV-MONEY-TOTALS; sweep BUG-024, BUG-020; D-14, D-75): one
  * invoice's money as this tab states it, read from the invoice's own payment
  * rows through the shared balance contract (invoiceBalanceOfStoredRows, the
@@ -64,8 +73,8 @@ function canRemind(status: string | null | undefined): boolean {
  *    invoices the Received figure, its count, its filter and its list mean).
  *  - leftCents: what the rows leave of the total, never below zero and never
  *    more than the total (D-250).
- *  - owedCents: leftCents on an issued, unsettled invoice (SENT,
- *    PARTIALLY_PAID, OVERDUE); 0 on any other invoice. A draft was never sent:
+ *  - owedCents: leftCents on an issued, unsettled invoice (OWED_STATUSES:
+ *    PENDING, SENT, PARTIALLY_PAID, OVERDUE); 0 on any other invoice. A draft was never sent:
  *    it is counted apart ("drafts unsent"). A PARTIALLY_CREDITED invoice is
  *    not counted here: the list row carries no credit note, so what is left
  *    of it cannot be told (the server's stats count it).
@@ -99,8 +108,7 @@ export function invoiceMoney(inv: Invoice, now: Date) {
   const netCents = cash.reduce((sum, row) => sum + row.cents, 0);
   // D-250: never more than the total (a refund with no original leaves the rows' net below zero).
   const leftCents = Math.min(Math.max(0, cents(balance.remaining)), Math.max(0, cents(balance.total)));
-  const open = inv.status === "SENT" || inv.status === "PARTIALLY_PAID" || inv.status === "OVERDUE";
-  const owedCents = open ? leftCents : 0;
+  const owedCents = OWED_STATUSES.has(inv.status) ? leftCents : 0;
   const pastDue = inv.status === "OVERDUE" || (!!inv.dueDate && new Date(inv.dueDate) < now);
   const state: "pending" | "overdue" | null = owedCents > 0 ? (pastDue ? "overdue" : "pending") : null;
   return { cash, netCents, received: netCents > 0, leftCents, owedCents, state };
