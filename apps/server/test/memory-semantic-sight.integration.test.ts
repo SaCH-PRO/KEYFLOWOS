@@ -27,12 +27,12 @@
  * goes through its real route: AgentController and AiFlowController behind their real guards, over the real
  * FlowOrchestratorService.chat / streamChat and the real SemanticMemoryService.
  *
- * Stand-ins: identity attachment (a middleware reads `x-v71t-user`), the embedding provider (a fixed vector per marker:
+ * Stand-ins: identity attachment (a middleware reads `x-v71u-user`), the embedding provider (a fixed vector per marker:
  * every query is e0, a revenue-derived hit is e0 (similarity 1, ranked first), the n-th ordinary hit has similarity
  * 0.95 - 0.01n), the model provider (records the system prompt), and the orchestrator's other context reads.
  * globalThis.fetch is a tap that refuses and records every outbound request: none is made.
  *
- * Fixture prefix v71t_ (MEM-SEMANTIC-SIGHT), cleaned with sqlLikePrefix().
+ * Fixture prefix v71u_ (MEM-SEMANTIC-SIGHT), cleaned with sqlLikePrefix().
  */
 import 'reflect-metadata';
 import path from 'path';
@@ -43,8 +43,8 @@ import { sqlLikePrefix } from './helpers/sql-like.js';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
-const P = 'v71t_';
-const HEADER = 'x-v71t-user';
+const P = 'v71u_';
+const HEADER = 'x-v71u-user';
 
 const ID = {
   owner: `${P}owner`,
@@ -72,11 +72,11 @@ type Reader = 'owner' | 'blind' | 'revenue' | 'revnoexp' | 'root';
 const BLIND_READERS: Reader[] = ['blind', 'root'];
 
 /** Markers the stand-in embedding reads: a query, a revenue-derived source, a source that resolves to nothing. */
-const QUERY = 'V71T-Q how is the business doing';
-const REV = 'v71t-rev';
-const ORPHAN = 'v71t-orphan';
+const QUERY = 'V71U-Q how is the business doing';
+const REV = 'v71u-rev';
+const ORPHAN = 'v71u-orphan';
 const AMOUNT = '4812.37';
-const okMarker = (n: number) => `V71T-OK-${n}`;
+const okMarker = (n: number) => `V71U-OK-${n}`;
 
 const saved = { fetch: globalThis.fetch };
 const outbound: string[] = [];
@@ -96,8 +96,8 @@ const unit = (i: number) => Array.from({ length: DIM }, (_, k) => (k === i ? 1 :
 /** The stand-in embedding: e0 for a query and a revenue-derived or orphan source; cos 0.95 - 0.01n for okMarker(n). */
 function embed(text: string): number[] {
   const t = text.toLowerCase();
-  if (t.includes('v71t-q') || t.includes(REV) || t.includes(ORPHAN)) return unit(0);
-  const ok = /v71t-ok-(\d+)/.exec(t);
+  if (t.includes('v71u-q') || t.includes(REV) || t.includes(ORPHAN)) return unit(0);
+  const ok = /v71u-ok-(\d+)/.exec(t);
   if (ok) {
     const n = Number(ok[1]);
     const cos = 0.95 - 0.01 * n;
@@ -189,7 +189,7 @@ async function seedRevenue(perKind: number) {
   // readers' hits then differ only if a withheld hit changed them).
   await db.aiMemoryEmbedding.deleteMany({ where: { businessId: ID.biz, sourceType: 'memory' } });
   await semantic.backfillFromAiMemory(ID.biz);
-  expect(await db.aiMemoryEmbedding.count({ where: { businessId: ID.biz, content: { contains: 'V71T-OK-0' } } })).toBe(1);
+  expect(await db.aiMemoryEmbedding.count({ where: { businessId: ID.biz, content: { contains: 'V71U-OK-0' } } })).toBe(1);
 
   // Unresolvable sources.
   const orphanEvents = `${P}th_orphan`;
@@ -279,7 +279,7 @@ async function everythingFor(reader: Reader) {
 beforeAll(async () => {
   globalThis.fetch = (async (input: unknown) => {
     outbound.push(String(input));
-    throw new Error('v71t: no outbound traffic in this suite');
+    throw new Error('v71u: no outbound traffic in this suite');
   }) as typeof fetch;
 
   const dbMod = await import('@keyflow/db');
@@ -339,11 +339,11 @@ beforeAll(async () => {
     },
     async trackAndComplete(_businessId: string, _userId: unknown, _task: string, req: GatewayRequest) {
       prompts.push(systemOf(req));
-      return { content: 'v71t: noted.', toolCalls: [], usage };
+      return { content: 'v71u: noted.', toolCalls: [], usage };
     },
     async *trackAndStream(_businessId: string, _userId: unknown, _task: string, req: GatewayRequest) {
       prompts.push(systemOf(req));
-      yield { type: 'content_delta', content: 'v71t: noted.' };
+      yield { type: 'content_delta', content: 'v71u: noted.' };
       yield { type: 'usage', usage };
     },
   };
@@ -354,7 +354,7 @@ beforeAll(async () => {
   const providers = new Map<unknown, unknown>();
   const moduleRef = {
     get(token: any) {
-      if (!providers.has(token)) throw new Error(`v71t: no provider for ${token?.name ?? String(token)}`);
+      if (!providers.has(token)) throw new Error(`v71u: no provider for ${token?.name ?? String(token)}`);
       return providers.get(token);
     },
   };
@@ -371,7 +371,7 @@ beforeAll(async () => {
     executionLog: { logToolExecution: async () => undefined, log: async () => undefined },
     businessGraph: {
       invalidateCache() {},
-      getSnapshot: async () => ({ business: { name: 'V71T Biz' } }),
+      getSnapshot: async () => ({ business: { name: 'V71U Biz' } }),
       buildContextString: () => '',
     },
     memory: { buildContextBlock: async () => ({}), buildPromptSection: () => '' },
@@ -434,7 +434,7 @@ beforeAll(async () => {
   ] as const) {
     await db.user.create({ data: { id, email: `${id}@${P}test.local`, role } });
   }
-  await db.business.create({ data: { id: ID.biz, name: 'V71T Biz', slug: `${P}biz`, ownerId: ID.owner, currency: 'TTD' } });
+  await db.business.create({ data: { id: ID.biz, name: 'V71U Biz', slug: `${P}biz`, ownerId: ID.owner, currency: 'TTD' } });
   for (const [userId, role, extra] of [
     [ID.owner, 'OWNER', { maxApprovalTier: 4 }],
     [ID.blind, 'STAFF', { permissionScopes: BLIND_SCOPES, maxApprovalTier: 0 }],
@@ -455,7 +455,7 @@ afterAll(async () => {
 const lower = (x: unknown) => (typeof x === 'string' ? x : JSON.stringify(x)).toLowerCase();
 
 describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader only as its source allows, filtered before the top-k cut', () => {
-  it('V71T-01 RED: a revenue-derived semantic hit (an invoice amount) reaches the revenue reader and the owner, and neither the blind STAFF member nor the memberless SUPER_ADMIN, on GET .../agent/memory/search and the flow chat (chat and stream)', async () => {
+  it('V71U-01 RED: a revenue-derived semantic hit (an invoice amount) reaches the revenue reader and the owner, and neither the blind STAFF member nor the memberless SUPER_ADMIN, on GET .../agent/memory/search and the flow chat (chat and stream)', async () => {
     await clearMemory();
     try {
       await seedOrdinary();
@@ -483,7 +483,7 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
     }
   }, 240_000);
 
-  it("V71T-02 RED: each source's rule: the revenue reader and the owner get the inbox thread's summary, the payment contact's summary, the extraction's copy and the statement's chunk; the blind member gets the ordinary inbox summaries and the fact's copy; the memberless SUPER_ADMIN the fact's copy only", async () => {
+  it("V71U-02 RED: each source's rule: the revenue reader and the owner get the inbox thread's summary, the payment contact's summary, the extraction's copy and the statement's chunk; the blind member gets the ordinary inbox summaries and the fact's copy; the memberless SUPER_ADMIN the fact's copy only", async () => {
     await clearMemory();
     try {
       await seedOrdinary();
@@ -494,7 +494,7 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
         extraction: hits.some((h) => h.startsWith('document_extraction: ')),
         chunk: hits.some((h) => h.includes('statement 0 chunk')),
         fact: hits.some((h) => h.includes(okMarker(0))),
-        ordinary: hits.filter((h) => /V71T-OK-[1-6]/.test(h)).length,
+        ordinary: hits.filter((h) => /V71U-OK-[1-6]/.test(h)).length,
       });
       const all = { thread: true, contact: true, extraction: true, chunk: true, fact: true, ordinary: 6 };
       expect(kinds(await searchFor('owner', 50)), 'owner').toEqual(all);
@@ -506,7 +506,7 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
     }
   }, 240_000);
 
-  it('V71T-03 RED: differential: the blind STAFF member and the memberless SUPER_ADMIN are handed identical hits (search at 5 and at 50, chat and stream sections) whether the business holds 0 or 20 revenue-derived hits ranked above theirs; and the top 5 stay full', async () => {
+  it('V71U-03 RED: differential: the blind STAFF member and the memberless SUPER_ADMIN are handed identical hits (search at 5 and at 50, chat and stream sections) whether the business holds 0 or 20 revenue-derived hits ranked above theirs; and the top 5 stay full', async () => {
     await clearMemory();
     try {
       await seedOrdinary();
@@ -527,7 +527,7 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
     }
   }, 300_000);
 
-  it('V71T-04 RED: a turn that names no member (the support desk: no user, no position) gets no semantic section at all (D-203: the support desk sees only the conversation in front of it, as its perception block reads nothing): not even the business-wide fact copy', async () => {
+  it('V71U-04 RED: a turn that names no member (the support desk: no user, no position) gets no semantic section at all (D-203: the support desk sees only the conversation in front of it, as its perception block reads nothing): not even the business-wide fact copy', async () => {
     await clearMemory();
     try {
       await seedOrdinary();
@@ -537,7 +537,7 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
       await orchestrator.chat(ID.biz, QUERY, [{ role: 'user', content: QUERY }]);
       expect(flow.prompts).toHaveLength(1);
       expect(flow.prompts[0]).not.toContain('RELEVANT CONTEXT FROM MEMORY');
-      for (const marker of [REV, AMOUNT, ORPHAN, 'v71t-ok-']) expect(lower(flow.prompts[0]), marker).not.toContain(marker);
+      for (const marker of [REV, AMOUNT, ORPHAN, 'v71u-ok-']) expect(lower(flow.prompts[0]), marker).not.toContain(marker);
       // Control: a member's turn over the same memory does carry the section (the fact copy).
       expect(lower(await chatSectionFor('blind'))).toContain(okMarker(0).toLowerCase());
     } finally {
@@ -545,7 +545,7 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
     }
   }, 240_000);
 
-  it('V71T-05 RED: POST .../agent/memory/backfill needs settings admin: the owner and an ADMIN run it; a STAFF member (with or without revenue read) is refused 403 and nothing is copied', async () => {
+  it('V71U-05 RED: POST .../agent/memory/backfill needs settings admin: the owner and an ADMIN run it; a STAFF member (with or without revenue read) is refused 403 and nothing is copied', async () => {
     await clearMemory();
     try {
       await memory.upsert(ID.biz, { category: 'fact', key: `${P}fact`, value: `${okMarker(0)} we open at nine`, source: 'user' });
@@ -565,7 +565,7 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
       await clearMemory();
     }
   }, 120_000);
-  it('V71T-06 (review m1, m3; coverage of the paging): the differential holds across pages: with 120 withheld hits ranked above theirs (more than any first page), the blind and memberless readers are handed exactly what they were with none, and no hit twice', async () => {
+  it('V71U-06 (review m1, m3; coverage of the paging): the differential holds across pages: with 120 withheld hits ranked above theirs (more than any first page), the blind and memberless readers are handed exactly what they were with none, and no hit twice', async () => {
     await clearMemory();
     try {
       await seedOrdinary();
@@ -585,7 +585,7 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
     }
   }, 300_000);
 
-  it('V71T-07 RED (security review 2, correctness m5): a temporal summary rewritten in place keeps its old copy in the semantic store; that copy, made from payment events and no longer what the row holds, reaches no reader; the copy of what the row holds now does', async () => {
+  it('V71U-07 RED (security review 2, correctness m5): a temporal summary rewritten in place keeps its old copy in the semantic store; that copy, made from payment events and no longer what the row holds, reaches no reader; the copy of what the row holds now does', async () => {
     await clearMemory();
     try {
       const pay = [];
@@ -610,7 +610,7 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
     }
   }, 120_000);
 
-  it('V71T-08 RED (security review 3, correctness m5): a channel summary counts more events than it records as its source (summarizeChannel keeps 20 of up to 200): its provenance is incomplete and it needs every module, so payment events outside the 20 recorded do not reach the blind member; the owner keeps it', async () => {
+  it('V71U-08 RED (security review 3, correctness m5): a channel summary counts more events than it records as its source (summarizeChannel keeps 20 of up to 200): its provenance is incomplete and it needs every module, so payment events outside the 20 recorded do not reach the blind member; the owner keeps it', async () => {
     await clearMemory();
     try {
       // The channel's name carries the ranking marker (the stand-in embedding reads it); it names no module.
@@ -632,17 +632,17 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
     }
   }, 120_000);
 
-  it('V71T-09 RED (security review 4, correctness m4): a knowledge-source chunk is an unclassified document: it needs revenue and expenses read (as a document event does), so a member with revenue read and expenses none does not get it; the revenue-and-expenses reader does', async () => {
+  it('V71U-09 RED (security review 4, correctness m4): a knowledge-source chunk is an unclassified document: it needs revenue and expenses read (as a document event does), so a member with revenue read and expenses none does not get it; the revenue-and-expenses reader does', async () => {
     await clearMemory();
     try {
-      await knowledge.ingestText({ businessId: ID.biz, title: `${REV} vendor bills`, sourceType: 'document', content: 'Bill from V71T Supplies' });
+      await knowledge.ingestText({ businessId: ID.biz, title: `${REV} vendor bills`, sourceType: 'document', content: 'Bill from V71U Supplies' });
       expect((await searchFor('revnoexp', 50)).join('\n').toLowerCase()).not.toContain(REV);
       expect((await searchFor('revenue', 50)).join('\n').toLowerCase()).toContain(REV);
     } finally {
       await clearMemory();
     }
   }, 120_000);
-  it('V71T-10 RED (security re-review MAJOR-1; D-234 meaning, D-100): an AiMemory copy whose row states money (a pattern row totalling overdue invoices) reaches only a member with revenue read: not the blind member, not the memberless SUPER_ADMIN, on search or in the flow chat; the owner and the revenue reader get it', async () => {
+  it('V71U-10 RED (security re-review MAJOR-1; D-234 meaning, D-100): an AiMemory copy whose row states money (a pattern row totalling overdue invoices) reaches only a member with revenue read: not the blind member, not the memberless SUPER_ADMIN, on search or in the flow chat; the owner and the revenue reader get it', async () => {
     await clearMemory();
     try {
       await memory.upsert(ID.biz, { category: 'patterns', key: `${P}overdue`, value: `${okMarker(9)} 3 overdue invoices totaling TTD ${AMOUNT}`, source: 'pattern_analysis' });
@@ -657,7 +657,7 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
     }
   }, 120_000);
 
-  it("V71T-11 RED (security re-review MINOR-1): an insight KEY stored (store_memory: entity 'business', source module key_cortex, its key chosen by the model, no source events) has no recorded provenance: it needs every module, so a key that names a module (crm_followups) does not admit the blind member; the owner gets it", async () => {
+  it("V71U-11 RED (security re-review MINOR-1): an insight KEY stored (store_memory: entity 'business', source module key_cortex, its key chosen by the model, no source events) has no recorded provenance: it needs every module, so a key that names a module (crm_followups) does not admit the blind member; the owner gets it", async () => {
     await clearMemory();
     try {
       await temporalMemory.createMemory({
@@ -671,14 +671,14 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
     }
   }, 120_000);
 
-  it('V71T-12 RED (correctness re-review MINOR-1): a source read that fails does not leave the read to page on to lower-ranked hits: the projection raises, and the search answers nothing', async () => {
+  it('V71U-12 RED (correctness re-review MINOR-1): a source read that fails does not leave the read to page on to lower-ranked hits: the projection raises, and the search answers nothing', async () => {
     const { semanticHitsVisibleTo } = await import('../src/modules/ai/semantic-memory-sight');
-    const failing = { client: new Proxy({}, { get: () => ({ findMany: async () => { throw new Error('v71t: read failed'); } }) }) };
+    const failing = { client: new Proxy({}, { get: () => ({ findMany: async () => { throw new Error('v71u: read failed'); } }) }) };
     await expect(
       semanticHitsVisibleTo(failing as any, ID.biz, { reader: ID.owner, sight: () => true }, [{ sourceType: 'temporal_memory', sourceId: 'x', content: 'y' }]),
-    ).rejects.toThrow('v71t: read failed');
+    ).rejects.toThrow('v71u: read failed');
   });
-  it("V71T-13 RED (security review round 3, MINOR-1; D-234 sales volume): a contact summary made from sales events (type sale.completed, module storefront) is sales-derived: it needs revenue read, though its text and module names state no money; the blind member (storefront and crm read) does not get it, the owner does", async () => {
+  it("V71U-13 RED (security review round 3, MINOR-1; D-234 sales volume): a contact summary made from sales events (type sale.completed, module storefront) is sales-derived: it needs revenue read, though its text and module names state no money; the blind member (storefront and crm read) does not get it, the owner does", async () => {
     await clearMemory();
     try {
       const contactId = `${P}ct_sales`;
@@ -698,7 +698,7 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
     }
   }, 120_000);
 
-  it('V71T-14 (correctness review round 3, MINOR-3; coverage): end to end, a projection that raises on a later page leaves the search answering nothing, never that page or the next', async () => {
+  it('V71U-14 (correctness review round 3, MINOR-3; coverage): end to end, a projection that raises on a later page leaves the search answering nothing, never that page or the next', async () => {
     await clearMemory();
     try {
       for (let i = 0; i < 60; i++) {
@@ -710,7 +710,7 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
         visibleTo: async (page: any[]) => {
           pages += 1;
           if (pages === 1) return page.map(() => false);
-          throw new Error('v71t: read failed');
+          throw new Error('v71u: read failed');
         },
       });
       expect(pages, 'a second page was read').toBe(2);

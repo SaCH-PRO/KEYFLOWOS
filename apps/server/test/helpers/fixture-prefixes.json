@@ -1163,7 +1163,7 @@
       "packet": "V1-71 (MEM-DOC-EXTRACTION-SIGHT)"
     },
     {
-      "prefix": "v71t_",
+      "prefix": "v71u_",
       "owner": "apps/server/test/memory-semantic-sight.integration.test.ts",
       "packet": "V1-71 (MEM-SEMANTIC-SIGHT)"
     }
