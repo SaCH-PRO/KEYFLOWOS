@@ -352,6 +352,69 @@ describe('MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (D-257, D-234, D-100): the temporal m
     }
   }, 300_000);
 
+  it('V75R-07 review round 1: KEY delete_memory on a memory the actor may not see answers exactly as a missing and a foreign id and deletes nothing; the owner deletes it', async () => {
+    await clearMemory();
+    try {
+      await seed();
+      const money = await db.temporalFlowMemory.findFirst({ where: { businessId: ID.biz, entityId: MONEY_THREAD } });
+      const foreign = await db.temporalFlowMemory.findFirst({ where: { businessId: ID.other } });
+      const answer = (r: any) => ({ success: r.success, data: r.data, error: r.error });
+      const hidden = answer(await connector.execute(cmd('opsNoRev', 'delete_memory', { memoryId: money.id })));
+      const missing = answer(await connector.execute(cmd('opsNoRev', 'delete_memory', { memoryId: `${P}missing` })));
+      const other = answer(await connector.execute(cmd('opsNoRev', 'delete_memory', { memoryId: foreign.id })));
+      expect(hidden).toEqual({ ...missing, data: missing.data && { ...missing.data, memoryId: money.id } });
+      expect(other).toEqual({ ...missing, data: missing.data && { ...missing.data, memoryId: foreign.id } });
+      expect(await db.temporalFlowMemory.count({ where: { id: { in: [money.id, foreign.id] } } })).toBe(2);
+      const owner = await connector.execute(cmd('owner', 'delete_memory', { memoryId: money.id }));
+      expect(owner.success).toBe(true);
+      expect(await db.temporalFlowMemory.count({ where: { id: money.id } })).toBe(0);
+    } finally {
+      await clearMemory();
+    }
+  }, 300_000);
+
+  it('V75R-08 review round 1: a platform SUPER_ADMIN who is no member keeps the REST routes\' pass-through (as the timeline\'s readerFilter passes them): GET memory, memory/by-entity and memory/search answer them what they answer the owner', async () => {
+    await clearMemory();
+    try {
+      await seed();
+      const ids = (res: any) => {
+        expect(res.status).toBe(200);
+        return res.body.map((r: any) => r.id);
+      };
+      for (const url of ['/memory', `/memory/by-entity/thread/${MONEY_THREAD}`, `/memory/search?q=${encodeURIComponent(QUERY)}`]) {
+        expect(ids(await get('root', url)), url).toEqual(ids(await get('owner', url)));
+      }
+      expect(lower(JSON.stringify((await get('root', '/memory')).body))).toContain(REV);
+    } finally {
+      await clearMemory();
+    }
+  }, 300_000);
+
+  it('V75R-09 review round 1: GET memory pages past withheld memories however many there are: with 1,200 withheld summaries newer than 5 visible ones, a member without revenue read asking for 2,000 gets the 5 (the client caps a findMany at 1,000 rows); the owner\'s answer is the memory service\'s at that cap, with no row twice', async () => {
+    await clearMemory();
+    try {
+      const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000);
+      const row = (i: number, content: string, minutesAgo: number) => ({
+        id: `${P}bulk_${String(i).padStart(5, '0')}`, businessId: ID.biz, entityType: 'thread', entityId: `${P}bulk_th_${i}`, type: 'summary',
+        content, sourceModule: 'key_inbox', sourceEventIds: [], confidence: 0.5, createdAt: at(minutesAgo), updatedAt: at(minutesAgo),
+      });
+      // Withheld from opsNoRev by their own text (an operations summary naming an invoice amount), newest first.
+      const withheld = Array.from({ length: 1_200 }, (_, i) => row(i, `${REV} invoice TTD ${AMOUNT} overdue (${i})`, 10 + i / 100));
+      const visible = Array.from({ length: 5 }, (_, i) => row(5_000 + i, `${okMarker(8)} opening hours ${i}`, 100 + i));
+      await db.temporalFlowMemory.createMany({ data: [...withheld, ...visible] });
+      const res = await get('opsNoRev', '/memory?limit=2000');
+      expect(res.status).toBe(200);
+      expect(res.body.map((r: any) => r.id)).toEqual(visible.map((r) => r.id));
+      const owner = await get('owner', '/memory?limit=5000');
+      expect(owner.status).toBe(200);
+      const ownerIds = owner.body.map((r: any) => r.id);
+      expect(new Set(ownerIds).size).toBe(ownerIds.length);
+      expect(ownerIds).toEqual((await temporalMemory.findMany(ID.biz, { limit: 5_000 })).map((r: any) => r.id));
+    } finally {
+      await clearMemory();
+    }
+  }, 300_000);
+
   it('V75R-02 filtered before the limit: with the money summaries the newest and the most similar, GET memory?limit=3 and memory/search?limit=3 and KEY search_memories (limit 3) hand the member without revenue read three ordinary summaries', async () => {
     await clearMemory();
     try {
