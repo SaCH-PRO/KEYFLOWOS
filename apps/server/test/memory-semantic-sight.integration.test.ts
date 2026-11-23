@@ -678,4 +678,45 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
       semanticHitsVisibleTo(failing as any, ID.biz, { reader: ID.owner, sight: () => true }, [{ sourceType: 'temporal_memory', sourceId: 'x', content: 'y' }]),
     ).rejects.toThrow('v71t: read failed');
   });
+  it("V71T-13 RED (security review round 3, MINOR-1; D-234 sales volume): a contact summary made from sales events (type sale.completed, module storefront) is sales-derived: it needs revenue read, though its text and module names state no money; the blind member (storefront and crm read) does not get it, the owner does", async () => {
+    await clearMemory();
+    try {
+      const contactId = `${P}ct_sales`;
+      const channel = `${okMarker(11)}-store`;
+      for (let k = 0; k < 3; k++) {
+        await temporal.emit({
+          businessId: ID.biz, source: channel, type: 'sale.completed', module: 'storefront', title: 'Completed',
+          contactId, importance: 'CRITICAL', genomeImpactPotential: true,
+        });
+      }
+      await temporalMemory.summarizeContact(ID.biz, contactId);
+      expect(await db.aiMemoryEmbedding.count({ where: { businessId: ID.biz, sourceType: 'temporal_memory' } }), 'premise: embedded').toBe(1);
+      expect((await searchFor('blind', 50)).join('\n')).not.toContain(channel);
+      expect((await searchFor('owner', 50)).join('\n')).toContain(channel);
+    } finally {
+      await clearMemory();
+    }
+  }, 120_000);
+
+  it('V71T-14 (correctness review round 3, MINOR-3; coverage): end to end, a projection that raises on a later page leaves the search answering nothing, never that page or the next', async () => {
+    await clearMemory();
+    try {
+      for (let i = 0; i < 60; i++) {
+        await semantic.store({ businessId: ID.biz, content: `${okMarker(1)} hit ${i}`, sourceType: 'event', sourceId: `${P}ev_${i}` });
+      }
+      let pages = 0;
+      const hits = await semantic.search({
+        businessId: ID.biz, query: QUERY, limit: 5,
+        visibleTo: async (page: any[]) => {
+          pages += 1;
+          if (pages === 1) return page.map(() => false);
+          throw new Error('v71t: read failed');
+        },
+      });
+      expect(pages, 'a second page was read').toBe(2);
+      expect(hits).toEqual([]);
+    } finally {
+      await clearMemory();
+    }
+  }, 120_000);
 });
