@@ -259,6 +259,34 @@ describe('FU-RESEARCH-CORPUS-YAML: review round 1 controls', () => {
   });
 });
 
+describe('FU-RESEARCH-CORPUS-YAML: confirmation round 2 controls', () => {
+  it('pins the frames the mutants left loose: an item under a "- key: value" item, a block scalar whose content would otherwise be findings, a second document', () => {
+    assert.deepEqual(lintYamlText('- a: 1\n  - x\n').map((f) => f.line), [2]);
+    assert.deepEqual(lintYamlText('k: |\n  a: b: c\n  - x\nj: 1\n'), []);
+    assert.deepEqual(lintYamlText('a:\n  - x\n---\n- y\n'), []);
+    assert.equal(parseOutcome({ ran: false, reason: 'r' }, { CI: 'false' }).kind, 'todo');
+    assert.equal(parseOutcome({ ran: false, reason: 'r' }, { CI: '0' }).kind, 'todo');
+  });
+
+  it('a bare block-scalar item ("- |") hides its content lines like a keyed one', () => {
+    assert.deepEqual(lintYamlText('l:\n  - |\n    text: with: colon\n  - z\n'), []);
+    assert.deepEqual(lintYamlText('l:\n  - >-\n    a: b\n  - z\nnext: 1\n'), []);
+  });
+
+  it('a key whose "value" is only a comment, an anchor or a tag is a bare key, so a deeper list under it is not a finding', () => {
+    assert.deepEqual(lintYamlText('a: # c\n  - x\n'), []);
+    assert.deepEqual(lintYamlText('a: &x\n  - y\n'), []);
+    assert.deepEqual(lintYamlText('a: !!seq\n  - y\n'), []);
+    // an anchored or tagged value that IS given stays a value
+    assert.equal(lintYamlText('a: &x 1\n  - y\n').length, 1);
+  });
+
+  it('a plain value that starts with "-" followed by text is still a plain scalar for the first rule', () => {
+    assert.equal(lintYamlText('a:\n  title: -a: b\n').length, 1);
+    assert.deepEqual(lintYamlText('a:\n  title: -a b\n  n: -3\n'), []);
+  });
+});
+
 describe('FU-RESEARCH-CORPUS-YAML: negative controls over fixture text', () => {
   it('the Peopleware shape is a finding at its line, and quoting it clears it', () => {
     const broken = ['sources:', '  - id: BOOK-PEOPLEWARE', '    title: Peopleware: Productive Projects and Teams', '    authors:', '      - Tom DeMarco', ''].join('\n');
