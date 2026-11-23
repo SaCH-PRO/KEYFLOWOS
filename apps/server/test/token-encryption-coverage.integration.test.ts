@@ -94,7 +94,7 @@ const LOOKUP_KEY: Record<string, string> = {
   PaymentLink: 'bearer link, looked up by token on the public payment page',
   ContactExportJob: 'bearer link, looked up by token on the export download',
   // RR-BANK-TOKEN-ENCRYPT: surfaced by the suffix scan. Both are bearer links, looked up by value.
-  Quote: 'bearer link to the customer quote page, quote.findFirst({ where: { viewToken: token } }) in commerce.service.ts',
+  Quote: 'bearer link to the customer quote page, quote.findUnique({ where: { viewToken: token } }) in commerce.service.ts (and findFirst in public-events.ingest.service.ts)',
   SitePageDraft: 'bearer preview link, sitePageDraft.findUnique({ where: { previewToken: token } }) in presence.service.ts',
 };
 

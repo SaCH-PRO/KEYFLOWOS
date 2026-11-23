@@ -29,6 +29,12 @@
  *   V72S-09  no other Prisma door stores or hands back the wrong form: createMany, createManyAndReturn,
  *            updateMany, updateManyAndReturn and the `{ set }` update form store ciphertext; findUniqueOrThrow,
  *            findFirstOrThrow and the AndReturn forms read the plaintext.
+ *   V72S-10  (review repair SEC-V72S-2) an input token that already looks like ciphertext ('enc:v1:...') is
+ *            encrypted like any other value: it is stored as ciphertext and reads back as given, and the
+ *            connection's routes keep answering (they used to store it as given, then fail to decrypt it).
+ *   V72S-11  (review repairs SEC-V72S-1, COR-V72S-1) --apply refuses (exit 2, nothing written) when no key
+ *            variable is set (it would encrypt with the in-repo dev key) and when the @keyflow/db build it
+ *            loads does not encrypt BankConnection.accessToken (a stale build would write the plaintext back).
  *
  * Owner question OQ-4 (does production hold plaintext bank tokens today) is open; nothing here reads production.
  */
@@ -50,6 +56,15 @@ const SERVER_DIR = path.resolve(__dirname, '..');
 const REPO_ROOT = path.resolve(SERVER_DIR, '..', '..');
 const SCRIPT = 'scripts/encrypt-bank-connection-tokens.ts';
 const SCRIPT_TIMEOUT_MS = 120_000;
+
+/**
+ * A local test key (built at run time, never a production key), set before anything in this file encrypts: the
+ * operator script refuses --apply without a key in the environment, and the suite must read what it writes.
+ * Restored in afterAll.
+ */
+const KEY_VAR = 'CONNECTOR_CREDENTIALS_KEY';
+const previousKey = process.env[KEY_VAR];
+process.env[KEY_VAR] = [P, 'local', 'test', 'key'].join('-');
 
 const ID = {
   owner: `${P}owner`,
@@ -127,9 +142,9 @@ function expectNoToken(body: unknown) {
 interface Run { code: number | null; out: string; err: string }
 
 /** The operator's run: tsx with the scripts tsconfig, from apps/server, DATABASE_URL only. */
-function runScript(args: string[]): Promise<Run> {
+function runScript(args: string[], dropKeys = false): Promise<Run> {
   return new Promise((ok, fail) => {
-    const env: NodeJS.ProcessEnv = {
+    const withKeys: NodeJS.ProcessEnv = {
       PATH: [path.join(SERVER_DIR, 'node_modules', '.bin'), path.join(REPO_ROOT, 'node_modules', '.bin'), process.env.PATH ?? ''].join(':'),
       HOME: process.env.HOME ?? '/tmp',
       DATABASE_URL: process.env.DATABASE_URL ?? '',
@@ -137,6 +152,8 @@ function runScript(args: string[]): Promise<Run> {
       ...(process.env.CREDENTIALS_ENCRYPTION_KEY ? { CREDENTIALS_ENCRYPTION_KEY: process.env.CREDENTIALS_ENCRYPTION_KEY } : {}),
       ...(process.env.JWT_SECRET ? { JWT_SECRET: process.env.JWT_SECRET } : {}),
     };
+    const env: NodeJS.ProcessEnv = { ...withKeys };
+    if (dropKeys) for (const k of ['CONNECTOR_CREDENTIALS_KEY', 'CREDENTIALS_ENCRYPTION_KEY', 'JWT_SECRET']) delete env[k];
     const child = spawn('tsx', ['--tsconfig', 'scripts/tsconfig.json', SCRIPT, ...args], {
       cwd: SERVER_DIR,
       env,
@@ -255,6 +272,8 @@ beforeAll(async () => {
 afterAll(async () => {
   if (app) await app.close();
   if (db) await cleanup();
+  if (previousKey === undefined) delete process.env[KEY_VAR];
+  else process.env[KEY_VAR] = previousKey;
 });
 
 describe('BankConnection.accessToken is encrypted at rest (RR-BANK-TOKEN-ENCRYPT, V1-72)', () => {
@@ -517,4 +536,50 @@ describe('BankConnection.accessToken is encrypted at rest (RR-BANK-TOKEN-ENCRYPT
     expect((await db.bankConnection.findUniqueOrThrow({ where: { id: `${P}bulk1` } })).accessToken).toBe(p5);
     expect((await db.bankConnection.findFirstOrThrow({ where: { id: `${P}bulk2` } })).accessToken).toBe(p4);
   });
+  it('[V72S-10] an input token shaped like ciphertext is encrypted, reads back as given, and the routes keep working', async () => {
+    const fa = await account(ID.biz, 'V72S prefixed bank');
+    const shaped = [CIPHER_PREFIX, 'AAAA'].join('');
+    const res = await http().post(url(ID.biz)).set(HEADER, ID.owner).send({ financialAccountId: fa, provider: 'plaid', accessToken: shaped });
+    expect(res.status, said(res)).toBe(201);
+    const id = res.body.id as string;
+    const raw = await stored(id);
+    expect(raw?.startsWith(CIPHER_PREFIX)).toBe(true);
+    expect(raw, 'stored as the ciphertext of the input, not as given').not.toBe(shaped);
+    expect((await db.bankConnection.findFirst({ where: { id } })).accessToken).toBe(shaped);
+    expect((await http().get(url(ID.biz, id)).set(HEADER, ID.owner)).status).toBe(200);
+    expect((await http().get(url(ID.biz)).set(HEADER, ID.owner)).status).toBe(200);
+    const patched = await http().patch(url(ID.biz, id)).set(HEADER, ID.owner).send({ accessToken: shaped });
+    expect(patched.status, said(patched)).toBe(200);
+    expect((await db.bankConnection.findFirst({ where: { id } })).accessToken).toBe(shaped);
+    expect((await http().delete(url(ID.biz, id)).set(HEADER, ID.owner)).status).toBe(200);
+  });
+
+  it('[V72S-11] --apply refuses without a key variable, and with a @keyflow/db build that does not encrypt the column', async () => {
+    const fa = await account(ID.bizScript, 'V72S refuse bank');
+    const plain = token('refuse');
+    const id = await rawRow(ID.bizScript, fa, `${P}s_refuse`, plain);
+
+    const noKey = await runScript(['--apply', `--business=${ID.bizScript}`], true);
+    const noKeyAll = `${noKey.out}\n${noKey.err}`;
+    expect(noKey.code, noKeyAll).toBe(2);
+    expect(noKeyAll).toMatch(/no encryption key variable is set/);
+    expect(noKeyAll).not.toContain(plain);
+    expect(await stored(id), 'nothing written').toBe(plain);
+    // The dry run needs no key.
+    const dryNoKey = await runScript([`--business=${ID.bizScript}`], true);
+    expect(dryNoKey.code, `${dryNoKey.out}\n${dryNoKey.err}`).toBe(0);
+    expect(listedIds(dryNoKey.out)).toContain(id);
+
+    const { main } = await import('../scripts/encrypt-bank-connection-tokens');
+    const lines: string[] = [];
+    const code = await main(['--apply', `--business=${ID.bizScript}`], {
+      db,
+      encryptedFields: { Business: ['gmailAccessToken'] },
+      log: (...a: unknown[]) => lines.push(a.join(' ')),
+      error: (...a: unknown[]) => lines.push(a.join(' ')),
+    });
+    expect(code, lines.join('\n')).toBe(2);
+    expect(lines.join('\n')).toMatch(/does not encrypt BankConnection\.accessToken/);
+    expect(await stored(id), 'nothing written').toBe(plain);
+  }, 3 * SCRIPT_TIMEOUT_MS);
 });
