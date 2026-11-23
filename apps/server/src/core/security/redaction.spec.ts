@@ -410,6 +410,50 @@ describe('redactSensitiveText and deepRedact on string values (RR-REDACTION-BY-C
     });
   });
 
+  describe('review round 3: generic 4-digit masks with a short tail, Unicode separators, adjacency', () => {
+    const withCheckDigit = (base: string) => {
+      for (let d = 0; d <= 9; d += 1) {
+        const candidate = `${base}${d}`;
+        let sum = 0;
+        let double = true;
+        for (let i = candidate.length - 2; i >= 0; i -= 1) {
+          let x = candidate.charCodeAt(i) - 48;
+          if (double) { x *= 2; if (x > 9) x -= 9; }
+          sum += x;
+          double = !double;
+        }
+        if ((sum + d) % 10 === 0) return candidate;
+      }
+      throw new Error('unreachable');
+    };
+
+    it('a card typed under a generic #### mask whose last group has 1 or 2 digits is still a card (4-4-4-1, 4-4-4-2, 4-4-4-4-1, 4-4-4-4-2)', () => {
+      expect(redactSensitiveText('diners 3056 9309 0259 04')).toBe('diners <card>'); // 14 digits
+      expect(redactSensitiveText('visa 4222 2222 2222 2')).toBe('visa <card>'); // 13 digits, starts with 4
+      const maestro18 = withCheckDigit('67596498264384531'); // 18 digits
+      expect(redactSensitiveText(`${maestro18.slice(0, 4)} ${maestro18.slice(4, 8)} ${maestro18.slice(8, 12)} ${maestro18.slice(12, 16)} ${maestro18.slice(16)}`)).toBe('<card>');
+      const seventeen = withCheckDigit('6759649826438453'); // 17 digits
+      expect(redactSensitiveText(`${seventeen.slice(0, 4)} ${seventeen.slice(4, 8)} ${seventeen.slice(8, 12)} ${seventeen.slice(12, 16)} ${seventeen.slice(16)}`)).toBe('<card>');
+      // The short tail is accepted only after groups of exactly four: a 4-3-3-3-1 shape is not a card mask.
+      expect(redactSensitiveText('4111 111 111 111 1')).toBe('4111 111 111 111 1');
+      // Dates and phones still do not join: the round-2 corpus shapes stay untouched.
+      expect(redactSensitiveText('2026-02-04 - 2026-06-12 868 237 7919')).toBe('2026-02-04 - 2026-06-12 868 237 7919');
+      expect(redactSensitiveText('qty 14 4111 1111 1111 1111')).toBe('qty 14 <card>');
+    });
+
+    it('thin space, narrow no-break space and an en dash separate groups too', () => {
+      expect(redactSensitiveText('4111\u20091111\u20091111\u20091111')).toBe('<card>');
+      expect(redactSensitiveText('4111\u202f1111\u202f1111\u202f1111')).toBe('<card>');
+      expect(redactSensitiveText('4111\u20131111\u20131111\u20131111')).toBe('<card>');
+    });
+
+    it('pins: two adjacent cards merge into one marker; a card directly after a plus sign is not covered (E.164 rule)', () => {
+      expect(redactSensitiveText('4111 1111 1111 1111 5500 0000 0000 0004')).toBe('<card>');
+      expect(redactSensitiveText('4111 1111 1111 1111, 5500 0000 0000 0004')).toBe('<card>, <card>');
+      expect(redactSensitiveText('+4111 1111 1111 1111')).toBe('+4111 1111 1111 1111');
+    });
+  });
+
   describe('the value patterns are a named, tested list', () => {
     it('every pattern has a name, a marker of <card> or <secret>, is global, and is exercised above; the list is frozen', () => {
       expect(SENSITIVE_VALUE_PATTERNS.length).toBeGreaterThanOrEqual(5);
