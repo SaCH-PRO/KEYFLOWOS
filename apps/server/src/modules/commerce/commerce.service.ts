@@ -5664,9 +5664,13 @@ export class CommerceService {
    */
   async publicInvoiceUrl(invoiceId: string, businessId: string): Promise<string | null> {
     try {
-      // FU-PAY-LINK-STATUS-GATE: every caller hands this link to the customer
-      // as the invoice goes out, so a DRAFT is admitted (issuing); a status
-      // nobody owes on (PENDING, FAILED, FULLY_CREDITED) is a 409 thrown here.
+      // FU-PAY-LINK-STATUS-GATE: a DRAFT is admitted (issuing) for the callers
+      // that hand this link out as the invoice is issued (send-email, KEY's
+      // commerce_send_invoice, the public booking create). The others (resend
+      // receipt, the automated overdue, due-soon, payment-failed and recovery
+      // emails) reach it as before, so one of them run for a DRAFT still gets
+      // a link, as on main (not narrowed here). A status nobody owes on
+      // (PENDING, FAILED, FULLY_CREDITED) is a 409 thrown here.
       const link = await this.issuePaymentLink(invoiceId, businessId, undefined, true);
       return `${appUrl()}/public/invoice/${link.token}`;
     } catch (err: unknown) {
