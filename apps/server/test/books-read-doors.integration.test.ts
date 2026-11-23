@@ -472,7 +472,9 @@ describe('BRD-06: a chart row names only this business\'s parent (SEC-P195KG-4)'
     const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
     coaSvc = new FinanceCoaService(prismaSvc, new ChartOfAccountsSeederService(prismaSvc));
     child = (await coaSvc.create(ID.biz, { name: 'v98k child', type: 'EXPENSE', code: '6901' })).id;
-    ownParent = (await coaSvc.create(ID.biz, { name: 'v98k parent', type: 'EXPENSE', code: '6900' })).id;
+    // 6902, not 6900: the seeded Other Expenses account holds 6900, and a second account on a code is refused
+    // 409 since SWP-COA-UNIQUE-CODE. The code is no part of what BRD-06 pins (the parent's business).
+    ownParent = (await coaSvc.create(ID.biz, { name: 'v98k parent', type: 'EXPENSE', code: '6902' })).id;
     foreign = (await coaSvc.create(ID.bizB, { name: 'v98k B secret parent', type: 'EXPENSE', code: '9999' })).id;
   });
 

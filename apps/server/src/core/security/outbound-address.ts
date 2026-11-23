@@ -47,6 +47,10 @@ export const NON_PUBLIC_ADDRESSES: BlockList = (() => {
   ];
   const ipv6: Array<[string, number]> = [
     ['::', 96], // unspecified, loopback, IPv4-compatible
+    // FU-CONTRACT-FETCH-OUTBOUND-GUARD acceptance review (security MINOR-1): IPv4-translated (SIIT,
+    // ::ffff:0:a.b.c.d), which BlockList does not check against the IPv4 ranges as it does an
+    // IPv4-mapped address; refused whole, as NAT64 is.
+    ['::ffff:0:0:0', 96],
     ['64:ff9b::', 96], // NAT64: an IPv4 address behind a translator
     ['64:ff9b:1::', 48], // local-use NAT64
     ['100::', 64], // discard
