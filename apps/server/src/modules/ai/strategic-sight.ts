@@ -25,7 +25,9 @@ const MONEY_WORDS = /(?<![a-z])(turnover|takings|top[\s_-]?lines?)(?![a-z])/i;
  * Review round 2 (SR2-1, SR2-3, CR2-3): the text as it reads: NFKC-folded (fullwidth and mathematical letters and
  * digits), soft hyphens and zero-width characters removed, and every script's decimal digits as ASCII digits.
  */
-const INVISIBLE = /[\u00ad\u200b-\u200d\u2060\ufeff]/g;
+// Review round 3 (CR3-1, SR3-1): every default-ignorable code point (bidi marks, joiners, variation selectors, tag
+// characters, the Hangul filler), every combining mark, and the blank braille cell.
+const INVISIBLE = /[\p{Default_Ignorable_Code_Point}\p{Mn}\p{Me}\u2800]/gu;
 function digitValue(ch: string): string {
   let code = ch.codePointAt(0)!;
   let start = code;
@@ -48,7 +50,7 @@ function statesNet(text: string): boolean {
  * (fullwidth digits). A lone digit ('call 2 leads') and a date alone ('2026-11-23') state no figure.
  */
 const FIGURE =
-  /\d[\s,.'\u00a0\u202f]?\d|\d\s*(?:k|m|mm|bn|b|%|x|percent|pct|per[\s-]?cent)(?![a-z])|(?<![a-z])(?:hundred|thousand|million|billion|grand)s?(?![a-z])/i;
+  /\d[\s,.'\u00a0\u202f]?\d|\d\s*(?:k|m|mm|mn|mil|mio|bn|b|%|x|percent|pct|per[\s-]?cent|lakhs?|lacs?|crores?)(?![a-z])|\d\s*[万億亿千]|(?<![a-z])(?:hundred|thousand|million|billion|grand)s?(?![a-z])/i;
 /** Review round 2 (SR2-2): a date, with a clock time at most: nothing after it. */
 const DATE_ALONE = /^\s*\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:?\d{2})?)?\s*$/;
 function statesFigure(text: string): boolean {
@@ -168,9 +170,12 @@ export function sightedStrategic<T>(answer: T, who: SemanticReader): T {
  * rule, and both for net profit ('Margin pressure detected').
  */
 export function strategicItemNeeds(item: unknown): InsightSight[] {
-  const needs = fieldsSightNeeds([item]);
-  if (needs.length === 2 || statesNet(JSON.stringify(item) ?? '')) return [...BOTH];
-  return needs;
+  const json = JSON.stringify(item) ?? '';
+  // Review round 3 (SR3-3): read on its folded text too, as textNeeds reads.
+  const plain = folded(json);
+  const needs = new Set<InsightSight>(fieldsSightNeeds(plain === json ? [item] : [item, plain]));
+  if (needs.size === 2 || statesNet(json) || statesNet(plain)) return [...BOTH];
+  return (['revenue', 'expenses'] as const).filter((sight) => needs.has(sight));
 }
 
 /**
