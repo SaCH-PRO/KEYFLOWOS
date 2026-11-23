@@ -1235,6 +1235,11 @@
       "prefix": "v71y_",
       "owner": "apps/server/test/patterns-routes-sight.integration.test.ts",
       "packet": "V1-71 (FU-PATTERNS-ROUTES-SIGHT)"
+    },
+    {
+      "prefix": "v78c_",
+      "owner": "apps/server/test/cortex-patterns-sight.integration.test.ts",
+      "packet": "V1-78 (FU-CORTEX-PATTERNS-SIGHT)"
     }
   ],
   "pendingRenames": [],
