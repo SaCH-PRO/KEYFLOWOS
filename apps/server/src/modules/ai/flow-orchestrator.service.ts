@@ -2136,7 +2136,7 @@ export class FlowOrchestratorService {
         const mimeType = att.mimeType || 'application/octet-stream';
         let extractionInput: Parameters<DocumentIntelligenceService['extractFromDocument']>[0] = {
           businessId,
-          source: att.url,
+          source: 'chat_attachment',
           url: att.url,
           filename,
           mimeType,
@@ -2156,7 +2156,8 @@ export class FlowOrchestratorService {
             };
           } catch (storageErr: any) {
             this.logger.warn(
-              `Could not read attachment from object storage (${att.objectPath}): ${storageErr?.message ?? 'unknown'}; falling back to URL.`,
+              // FU-OUTBOUND-ATTACHMENT-URL (open item g): the client's path is not echoed into the log.
+              `Could not read an attachment from object storage: ${String(storageErr?.message ?? 'unknown').slice(0, 120)}; falling back to URL.`,
             );
           }
         }
