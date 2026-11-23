@@ -470,6 +470,8 @@ export class UnifiedMemoryRetrievalService {
           ['ai_memory_embedding', 'memory', 'event', 'conversation', 'document'].includes(s as string),
         ) as any,
         minSimilarity: 0.65,
+        // MEM-DOC-EXTRACTION-SIGHT (D-234): nor the copies of document extractions, unless the read asks for them.
+        withoutDocumentExtractionCopies: options.documentExtractions !== true,
       });
 
       return results.map((r) => ({

@@ -1479,7 +1479,7 @@ export class FlowOrchestratorService {
           // 0.5 sits inside the real 0.375–1.0 range, so it drops the stale
           // low-confidence band while keeping anything recent or well-evidenced.
           minRankScore: 0.5,
-          documentExtractions: readsDocumentExtractions(sight),
+          documentExtractions: readsDocumentExtractions(sight, reader),
         });
         return readersOwnPromptMemory(this.prisma, businessId, reader, read, window, this.logger, 'perception', sight);
       };

@@ -2117,7 +2117,7 @@ export class KeyCortexQueryPipelineService {
       query: query.text,
       limit: CHAT_MEMORY_FRAGMENTS + CHAT_MEMORY_HEADROOM,
       ...(reader ? { userId: reader } : { includeEpisodic: false }),
-      documentExtractions: readsDocumentExtractions(sight),
+      documentExtractions: readsDocumentExtractions(sight, reader),
     });
     return readersOwnPromptMemory(this.prisma, query.businessId, reader, fragments, CHAT_MEMORY_FRAGMENTS, this.logger, 'chatMemory', sight);
   }

@@ -445,10 +445,11 @@ export function isDocumentExtractionFragment(fragment: Pick<MemoryFragment, 'sou
 
 /**
  * MEM-DOC-EXTRACTION-SIGHT (D-234): whether a prompt's memory read may take the document extractions
- * (MemoryRetrievalOptions.documentExtractions): only for a reader who may read revenue.
+ * (MemoryRetrievalOptions.documentExtractions): only for a member reader who may read revenue; never a turn with no
+ * member reader (a contact-only position, a SUPER_ADMIN who is no member), whatever its sight.
  */
-export function readsDocumentExtractions(sight: ModuleSight): boolean {
-  return sight('revenue');
+export function readsDocumentExtractions(sight: ModuleSight, reader: string | null): boolean {
+  return reader !== null && sight('revenue');
 }
 
 /**
@@ -738,7 +739,9 @@ export async function readersOwnPromptMemory<
   // D-238: a reader without revenue read is handed a proposal record only when its proposal is non-financial (a memberless
   // turn then sees its action, status and risk level only, D-226).
   const readsRevenue = sight('revenue');
+  // MEM-DOC-EXTRACTION-SIGHT (D-234): a turn with no member reader sees no document extraction, whatever its sight.
   return withoutKeyRecords
+    .filter((fragment) => reader !== null || !isDocumentExtractionFragment(fragment))
     .filter((fragment) => readsRevenue || !financialProposals.has(fragment.id))
     .filter((fragment) => withinModuleSight(fragment, sight))
     .filter((fragment) => fragment.sourceType !== 'cognition_memory' || own.has(fragment.id))
@@ -918,7 +921,7 @@ export class KeyCortexPromptContextService {
           query: currentQuery,
           limit: PROMPT_MEMORY_FRAGMENTS + PROMPT_MEMORY_HEADROOM,
           ...(reader ? { userId: reader } : { includeEpisodic: false }),
-          documentExtractions: readsDocumentExtractions(sight),
+          documentExtractions: readsDocumentExtractions(sight, reader),
         });
         const kept = await readersOwnPromptMemory(
           this.prisma,

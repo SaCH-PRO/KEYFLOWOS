@@ -9,6 +9,7 @@ import {
   copyHoldsRowValue,
   isAiMemorySettingsCategory,
   type DroppedAiMemoryCopy,
+  DOCUMENT_EXTRACTION_CATEGORY,
 } from './semantic-memory.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 
@@ -48,7 +49,7 @@ export type MemorySource = 'user' | 'inferred' | 'approval_signal' | 'pattern_an
  * member reader are not, on any surface (KEY's prompts, GET .../ai/memory, the profile interview). Classifying documents
  * so that non-financial extractions reach more readers is a later packet (design open question Q4c).
  */
-export const DOCUMENT_EXTRACTION_CATEGORY = 'document_extraction';
+export { DOCUMENT_EXTRACTION_CATEGORY };
 
 /** MEM-DOC-EXTRACTION-SIGHT: `entries` without the document extractions (DOCUMENT_EXTRACTION_CATEGORY), in order. */
 export function withoutDocumentExtractions<T extends { category: string }>(entries: readonly T[]): T[] {

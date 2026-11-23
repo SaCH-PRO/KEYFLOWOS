@@ -1011,8 +1011,9 @@ export class AiController {
    * SUPER_ADMIN who is no member, or a membership read that fails: no.
    */
   private async readsDocumentExtractions(businessId: string, req: AuthenticatedRequest | undefined): Promise<boolean> {
-    const sight = await readersModuleSight(this.prisma, businessId, req?.user?.id ?? null, undefined, 'aiMemory');
-    return readsDocumentExtractions(sight);
+    const reader = req?.user?.id ?? null;
+    const sight = await readersModuleSight(this.prisma, businessId, reader, undefined, 'aiMemory');
+    return readsDocumentExtractions(sight, reader);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
