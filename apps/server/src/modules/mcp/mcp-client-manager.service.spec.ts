@@ -29,6 +29,7 @@ const fake = vi.hoisted(() => ({
   failConnect: false,
   failListTools: false,
   connectThrows: null as null | ((url: string) => unknown),
+  callThrows: null as null | (() => unknown),
   tools: [{ name: 'x', description: 'fake tool x', inputSchema: { type: 'object', properties: {} } }],
 }));
 
@@ -60,6 +61,7 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
     }
     async callTool(req: { name: string; arguments: unknown }) {
       fake.calls.push(req);
+      if (fake.callThrows) throw fake.callThrows();
       return { content: [{ type: 'text', text: `fake result for ${req.name}` }] };
     }
     async close() {
@@ -107,6 +109,7 @@ beforeEach(() => {
   fake.failConnect = false;
   fake.failListTools = false;
   fake.connectThrows = null;
+  fake.callThrows = null;
   errorLog = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
   vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
   warnLog = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
@@ -418,5 +421,40 @@ describe('RR-MCP-TENANT-BOUND (D-261, D-262): the MCP bridge serves a business o
     const mcp = new McpClientManagerService();
     expect(mcp.isConfigured()).toBe(false);
     expect(errorLines().some((l) => l.includes('"a_"') && /key/.test(l))).toBe(true);
+  });
+
+  it('MCP-19 a huge error body from a server is logged in linear time and capped: no event-loop stall', async () => {
+    const body = 'a'.repeat(60_000);
+    fake.connectThrows = () => new Error(`Error POSTing to endpoint: ${body}`);
+    setServers([{ ...SERVER, businessIds: [BIZ_A] }]);
+    const mcp = new McpClientManagerService();
+    const started = Date.now();
+    await rejection(callAs(mcp, BIZ_A, 'mcp__s__x'));
+    expect(Date.now() - started).toBeLessThan(1000);
+    const line = String(warnLog.mock.calls.at(-1)?.[0]);
+    expect(line).toMatch(/connect failed/);
+    expect(line.length).toBeLessThan(3000);
+  });
+
+  it('MCP-20 a raw query value quoted bare is redacted, and redacting one fragment never mangles another\'s marker', async () => {
+    fake.connectThrows = () => new Error('token v91a%2Bb%20c/d%3D refused for user red with v91aPass');
+    setServers([{ ...SERVER, url: 'https://red:v91aPass@mcp.v91a.invalid/mcp?token=v91a%2Bb%20c/d%3D', businessIds: [BIZ_A] }]);
+    await rejection(callAs(new McpClientManagerService(), BIZ_A, 'mcp__s__x'));
+    const line = String(warnLog.mock.calls.at(-1)?.[0]);
+    for (const secret of ['v91a%2Bb%20c/d%3D', 'v91aPass', ' red ']) expect(line, `leaks ${secret}`).not.toContain(secret);
+    expect(line).not.toContain('[[');
+    expect(line).not.toMatch(/\]acted/);
+  });
+
+  it('MCP-21 an error a bound server throws from a tool call reaches the caller and the execution log redacted', async () => {
+    fake.callThrows = () => new Error('Error POSTing to endpoint: bad request for https://mcp.v91a.invalid/mcp?token=v91a-query-secret');
+    setServers([{ ...SERVER, url: 'https://mcp.v91a.invalid/mcp?token=v91a-query-secret', businessIds: [BIZ_A] }]);
+    const mcp = new McpClientManagerService();
+    const { flow, logged } = makeFlow(mcp);
+    const err = await rejection(flow.executeToolDirectly(BIZ_A, 'mcp__s__x', {}, { planId: 'v91a_plan', planStepId: 'v91a_step' }, { surface: 'PLAN_QUEUE', planId: 'v91a_plan', planStepId: 'v91a_step' } as never));
+    expect((err as Error).message).toMatch(/bad request/);
+    expect((err as Error).message).not.toContain('v91a-query-secret');
+    await vi.waitFor(() => expect(logged).toHaveLength(1));
+    expect(String(logged[0].output)).not.toContain('v91a-query-secret');
   });
 });
