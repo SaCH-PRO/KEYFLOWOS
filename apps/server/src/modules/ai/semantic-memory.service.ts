@@ -58,6 +58,12 @@ export function copyHoldsRowValue(content: Prisma.Sql): Prisma.Sql {
  */
 export const AI_MEMORY_SETTINGS_CATEGORIES: readonly string[] = ['settings'];
 
+/**
+ * MEM-DOC-EXTRACTION-SIGHT (D-234): the AiMemory category of an uploaded document's extracted data (provenance unknown:
+ * it fails closed for a reader without revenue read). AiMemoryService re-exports it with its rule.
+ */
+export const DOCUMENT_EXTRACTION_CATEGORY = 'document_extraction';
+
 /** Whether an AiMemory category holds configuration, not memory (AI_MEMORY_SETTINGS_CATEGORIES). */
 export function isAiMemorySettingsCategory(category: string): boolean {
   return AI_MEMORY_SETTINGS_CATEGORIES.includes(category);
@@ -335,6 +341,14 @@ export class SemanticMemoryService {
     limit?: number;
     sourceTypes?: string[];
     minSimilarity?: number;
+    /**
+     * MEM-DOC-EXTRACTION-SIGHT (D-234; orchestrator review COR-MDX-1): serve the copies of document extractions too (a
+     * copy whose AiMemory row's category is DOCUMENT_EXTRACTION_CATEGORY, whatever its own metadata says). Only when
+     * true: by default every such copy is left out before the limit, so a search for a reader without revenue read never
+     * takes one and none takes a place in its limit. A caller passes true only for a reader whose sight reads revenue
+     * (readsDocumentExtractions).
+     */
+    includeDocumentExtractionCopies?: boolean;
   }): Promise<SemanticMemory[]> {
     try {
       const embedding = await this.generateEmbedding(params.businessId, params.query);
@@ -369,6 +383,16 @@ export class SemanticMemoryService {
 
       if (params.sourceTypes && params.sourceTypes.length > 0) {
         query = Prisma.sql`${query} AND source_type IN (${Prisma.join(params.sourceTypes)})`;
+      }
+
+      if (params.includeDocumentExtractionCopies !== true) {
+        query = Prisma.sql`${query} AND NOT (
+          e.source_type = ${AI_MEMORY_COPY_SOURCE_TYPE}
+          AND EXISTS (
+            SELECT 1 FROM "ai_memories" dx
+            WHERE dx.id = e.source_id AND dx.business_id = e.business_id AND dx.category = ${DOCUMENT_EXTRACTION_CATEGORY}
+          )
+        )`;
       }
 
       query = Prisma.sql`${query} ORDER BY embedding <=> ${vectorLiteral}::vector LIMIT ${limit}`;

@@ -85,7 +85,8 @@ export class KeyCortexDigestService {
         return null;
       }),
       this.memoryRetrieval
-        .retrieveContext(businessId, { limit: 10, boostRecency: true })
+        // MEM-DOC-EXTRACTION-SIGHT: the digest goes to the business owners, who read revenue: document extractions count.
+        .retrieveContext(businessId, { limit: 10, boostRecency: true, documentExtractions: true })
         .catch((err: unknown) => {
           const msg = err instanceof Error ? err.message : String(err);
           this.logger.warn(`[generateDigest] memory retrieval failed for ${businessId}: ${msg}`);

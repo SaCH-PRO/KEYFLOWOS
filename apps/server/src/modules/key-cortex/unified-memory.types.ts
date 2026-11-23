@@ -92,4 +92,10 @@ export interface MemoryRetrievalOptions {
   boostRecency?: boolean;
   /** Include episodic sources: business events, AI execution logs, cortex action logs (default: true) */
   includeEpisodic?: boolean;
+  /**
+   * MEM-DOC-EXTRACTION-SIGHT (D-234): read the document extractions (AiMemory rows of DOCUMENT_EXTRACTION_CATEGORY) too.
+   * Only when true: they fail closed, so a read for a reader without revenue read never takes them (and they take no
+   * place in its limits). A prompt's read passes the reader's revenue sight (readsDocumentExtractions).
+   */
+  documentExtractions?: boolean;
 }
