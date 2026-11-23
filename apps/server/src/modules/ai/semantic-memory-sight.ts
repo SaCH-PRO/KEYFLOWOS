@@ -169,9 +169,11 @@ export function readsEveryPattern(reader: string | null, sight: ModuleSight): bo
  * (AiMemoryService.buildContextBlock's patternVisible), by the flow chat's rule (MEM-PATTERNS-SIGHT's
  * turnPatternVisibility) for a turn with no staff position: no requester (a plan no member asked for), no pattern at
  * all; otherwise each row by aiMemoryRowVisibleTo for the requester while a member (promptMemoryReader) and their module
- * sight (readersModuleSight); a requester who is no member keeps only the rows that state neither money nor an expense. A
- * sight that cannot be resolved, or a caller built without its database client (a wiring fault, logged), keeps no
- * pattern (fail closed). The intent parser and the planner use it.
+ * sight (readersModuleSight); a requester who is no member keeps only the rows that state neither money nor an expense.
+ * A membership or scope read that fails is caught inside those two helpers (no reader, no module), so it too keeps only
+ * the rows that state neither, as turnPatternVisibility does over the same helpers. A caller built without its database
+ * client (a wiring fault, logged), or any other failure here, keeps no pattern (fail closed). The intent parser and the
+ * planner use it.
  */
 export async function promptPatternVisibility(
   prisma: PrismaService | undefined,
