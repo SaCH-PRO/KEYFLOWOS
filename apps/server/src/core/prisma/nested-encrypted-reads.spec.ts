@@ -845,4 +845,21 @@ describe('nested reads of encrypted columns are decrypted or never used (FU-DELI
     expect.soft(census('async q12(model: string) { return (db as any)[model].update({ where: { id: 1 }, data: {} }); }').opaque).toEqual([`${z}.q12 <dynamic>.update <delegate>`]);
     expect.soft(census('async q13(model: string) { return this[model].findMany({}); }').opaque, 'a receiver on `this` is not a delegate').toEqual([]);
   });
+
+  it('[V72S-N1] RR-BANK-TOKEN-ENCRYPT (V1-72): BankConnection.accessToken is in the field map, and no nested read of it exists', () => {
+    // The census of nested reads of BankConnection, stated: at the packet's base there is none (no include or select
+    // of bankConnections / a BankConnection relation carries accessToken; BankConnectionService reads it top-level
+    // only, where the extension decrypts, and strips it before every response). A new one fails NR-01 here.
+    expect(FIELD_MAP.BankConnection, 'ENCRYPTED_FIELDS.BankConnection').toEqual(['accessToken']);
+    expect(CENSUS.reads.filter((r) => r.model === 'BankConnection').map((r) => r.key)).toEqual([]);
+    // Not vacuous: with the real field map, a nested read of it through either relation is found and judged.
+    const real = (body: string) => scan([injected(body)], FIELD_MAP);
+    expect(keyOf(real('async b1() { return db.financialAccount.findMany({ include: { bankConnections: true } }); }'))).toEqual([
+      'apps/server/src/modules/zz-injected/zz.service.ts#ZzService.b1 financialAccount.findMany bankConnections|BankConnection|accessToken|-',
+    ]);
+    expect(keyOf(real('async b2() { return db.business.findUnique({ where: { id: 1 }, select: { bankConnections: { select: { accessToken: true } } } }); }'))).toEqual([
+      'apps/server/src/modules/zz-injected/zz.service.ts#ZzService.b2 business.findUnique bankConnections|BankConnection|accessToken|-',
+    ]);
+    expect(keyOf(real('async b3() { return db.business.findUnique({ where: { id: 1 }, select: { bankConnections: { select: { id: true, provider: true } } } }); }'))).toEqual([]);
+  });
 });
