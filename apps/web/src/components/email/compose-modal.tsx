@@ -31,6 +31,15 @@ import { getStoredBusinessId } from "@/lib/workspace";
 import { fetchContacts, aiGenerateDraft, aiRewriteContent, aiSuggestSubjects } from "@/lib/client";
 import type { ContactListResponse } from "@/lib/client";
 
+/** What a document's own send route is handed, once per recipient (MOUNT-QUOTES). */
+export interface ComposeSendDraft {
+  to: string;
+  subject: string;
+  htmlBody: string;
+  /** The body as plain text: paragraphs and line breaks kept, tags and entities gone. */
+  text: string;
+}
+
 export interface ComposePrefill {
   to?: string | string[];
   toContacts?: { id?: string; email: string; name?: string }[];
@@ -46,8 +55,36 @@ export interface ComposePrefill {
     dueDate?: string;
     contactName?: string;
     businessName?: string;
+    /** The customer's link to the document (a quote's /quote/<token>), when the caller knows it. */
+    link?: string;
   };
   aiPrompt?: string;
+  /**
+   * MOUNT-QUOTES: the document's own send route. When given, Send goes through
+   * it (one call per recipient) instead of the raw Gmail message route, so the
+   * server builds the email that carries the customer's link and moves the
+   * document's status; the subject is the route's and is fixed here. An
+   * `error` it answers is shown and keeps the composer open.
+   */
+  send?: (draft: ComposeSendDraft) => Promise<{ error?: string | null } | void>;
+}
+
+/**
+ * The body as plain text for a route that takes a message, not html:
+ * paragraphs become blank-line breaks, <br> a line break, tags go, entities
+ * are decoded.
+ */
+export function htmlToText(html: string): string {
+  const withBreaks = html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>\s*/gi, "\n\n")
+    .replace(/<\/(div|li|h[1-6]|tr)>\s*/gi, "\n");
+  const stripped = withBreaks.replace(/<[^>]+>/g, "");
+  const decoded =
+    typeof DOMParser !== "undefined"
+      ? (new DOMParser().parseFromString(stripped, "text/html").documentElement.textContent ?? stripped)
+      : stripped;
+  return decoded.replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 interface ComposeModalProps {
@@ -92,8 +129,9 @@ const TEMPLATES: EmailTemplate[] = [
     icon: Briefcase,
     category: "Sales",
     description: "Quote proposal with next steps",
-    subject: "Your quote {{recordNumber}} from {{businessName}}",
-    body: `<p>Hi {{name}},</p><p>Thank you for considering us. Please find your quote <strong>{{recordNumber}}</strong> attached.</p><p>If everything looks good, you can approve directly via the link in the document. I&apos;m here to answer any questions.</p><p>Best,<br>{{sender}}</p>`,
+    // The subject the server's quote send route uses (MOUNT-QUOTES); {{linkParagraph}} is the customer's link.
+    subject: "Quote #{{recordNumber}} from {{businessName}}",
+    body: `<p>Hi {{name}},</p><p>Thank you for considering us. Here is your quote <strong>{{recordNumber}}</strong> for {{currency}} {{amount}}.</p>{{linkParagraph}}<p>I&apos;m here to answer any questions.</p><p>Best,<br>{{sender}}</p>`,
   },
   {
     key: "thank_you",
@@ -141,6 +179,8 @@ const TONES = [
   { key: "empathetic", label: "Empathetic", desc: "Understanding and supportive" },
 ];
 
+const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
 function applyTemplate(template: EmailTemplate, context?: ComposePrefill["context"]) {
   let subject = template.subject;
   let body = template.body;
@@ -153,6 +193,13 @@ function applyTemplate(template: EmailTemplate, context?: ComposePrefill["contex
     currency: context?.currency || "$",
     dueDate: context?.dueDate || "",
   };
+  // The customer's link, when the caller knows it (a sent quote); else the
+  // send route adds it, and the message says so (MOUNT-QUOTES, BUG-101).
+  const link = context?.link?.trim();
+  const linkParagraph = link
+    ? `<p>You can view and accept it here: <a href="${escapeHtml(link)}">${escapeHtml(link)}</a></p>`
+    : `<p>The link to view and accept it is in this email.</p>`;
+  body = body.replace(/{{linkParagraph}}/g, linkParagraph);
   Object.entries(vars).forEach(([key, value]) => {
     subject = subject.replace(new RegExp(`{{${key}}}`, "g"), value);
     body = body.replace(new RegExp(`{{${key}}}`, "g"), value);
@@ -192,9 +239,10 @@ export function ComposeModal({ open, onClose, prefill, onSent }: ComposeModalPro
         if (c.email && !initialTo.includes(c.email)) initialTo.push(c.email);
       });
     }
-    const initialSubject = prefill?.subject ?? "";
+    let initialSubject = prefill?.subject ?? "";
     let initialBody = prefill?.body ?? "";
-    // Auto-apply template for invoice/quote sends when body is empty
+    // Auto-apply template for invoice/quote sends when body is empty; a caller
+    // that names no subject gets the template's (it names the business).
     if (!initialBody.trim() && prefill?.context?.type) {
       const autoTemplate =
         prefill.context.type === "invoice"
@@ -205,6 +253,7 @@ export function ComposeModal({ open, onClose, prefill, onSent }: ComposeModalPro
       if (autoTemplate) {
         const applied = applyTemplate(autoTemplate, prefill.context);
         initialBody = applied.body;
+        if (!initialSubject.trim()) initialSubject = applied.subject;
       }
     }
     setToEmails(initialTo);
@@ -285,6 +334,22 @@ export function ComposeModal({ open, onClose, prefill, onSent }: ComposeModalPro
 
     setSending(true);
     try {
+      if (prefill?.send) {
+        // The document's own route (MOUNT-QUOTES): it builds the email with the
+        // customer's link and moves the document; a refusal keeps the composer.
+        for (const recipient of toEmails) {
+          const answer = await prefill.send({ to: recipient, subject, htmlBody: body, text: htmlToText(body) });
+          if (answer && answer.error) {
+            toast.error(answer.error);
+            setSending(false);
+            return;
+          }
+        }
+        toast.success(`Email sent to ${toEmails.length} recipient${toEmails.length === 1 ? "" : "s"}`);
+        onSent?.();
+        onClose();
+        return;
+      }
       for (const recipient of toEmails) {
         const path = isReply
           ? `/commerce/businesses/${businessId}/gmail/threads/${prefill!.threadId}/reply`
@@ -550,6 +615,8 @@ export function ComposeModal({ open, onClose, prefill, onSent }: ComposeModalPro
                 type="text"
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
+                disabled={Boolean(prefill?.send)}
+                title={prefill?.send ? "The subject is set by the document being sent" : undefined}
                 placeholder="What's this email about?"
                 className="flex-1 px-3 py-2.5 rounded-xl bg-muted/20 border border-border/40 text-sm focus:outline-none focus:border-[hsl(var(--kf-accent1))]/40 transition-colors"
               />

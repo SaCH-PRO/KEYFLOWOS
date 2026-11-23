@@ -41,6 +41,7 @@ import { DetailLineItems } from "./detail-parts/detail-line-items";
 import { DetailNotes } from "./detail-parts/detail-notes";
 import { DetailViewPrint } from "./detail-parts/detail-view-print";
 import { buildWhatsAppLink, ownBusinessCountry, readSavedWhatsAppNumber, toE164 } from "@/lib/whatsapp";
+import { statusLabel } from "@/lib/status-labels";
 
 export interface BusinessDataForPreview {
   name: string;
@@ -404,7 +405,8 @@ export function BillingDetailModal({
                     <span
                       className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold leading-none ${getStatusBadge(status)}`}
                     >
-                      {status}
+                      {/* MOUNT-QUOTES / FAILURE-KIT (BUG-132): the status in plain words, never the stored code. */}
+                      {statusLabel(status, type === "invoice" ? "invoice" : undefined)}
                     </span>
                   </div>
                   <div className="mt-1">
@@ -751,7 +753,7 @@ export function BillingDetailModal({
                 <span
                   className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold leading-none shrink-0 ${getStatusBadge(status)}`}
                 >
-                  {status}
+                  {statusLabel(status, type === "invoice" ? "invoice" : undefined)}
                 </span>
               </div>
             </div>

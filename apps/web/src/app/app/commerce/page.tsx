@@ -40,9 +40,10 @@ import { useCommerceShell, type UseCommerceShellReturn } from "./hooks/use-comme
 import { useBillingWorkspace } from "./hooks/use-billing-workspace";
 import { useCommerceOverview } from "./hooks/use-commerce-overview";
 import { useActionQueue } from "./hooks/use-action-queue";
-import { FinancePipeline } from "../finance/components/finance-pipeline";
 import { RevenueComposer } from "../finance/components/revenue-composer";
 import RecurringPanel from "./recurring/recurring-panel";
+import QuotesPanel from "./quotes/quotes-panel";
+import PaymentsTab from "./payments/payments-tab";
 import { CommerceOverviewTab } from "./components/commerce-overview-tab";
 import { CommerceKpiStrip } from "./components/commerce-kpi-strip";
 import { TabFrame } from "./components/tab-frame";
@@ -52,15 +53,44 @@ import { CommerceHeaderRight } from "./components/commerce-header-right";
 import { RevenueActionMenu } from "./components/revenue-action-menu";
 import { StandalonePaymentRecorder } from "./components/standalone-payment-recorder";
 
-type RevenueTabKey = "snapshot" | "pipeline" | "recurring";
+// MOUNT-QUOTES (D-150 hubs): the pipeline left Sales. Quotes is quotes-panel.tsx
+// and Collections is the pipeline's collections view on its own tab; the
+// invoices live at /app/commerce/invoices.
+type RevenueTabKey = "snapshot" | "quotes" | "collections" | "recurring";
 
 const REVENUE_TABS: { key: RevenueTabKey; label: string; icon: React.ElementType; tooltip?: string }[] = [
   { key: "snapshot", label: "Snapshot", icon: LayoutDashboard, tooltip: "Cashflow snapshot and key metrics" },
-  { key: "pipeline", label: "Pipeline", icon: TrendingUp, tooltip: "Quotes, invoices, collections, and revenue flow" },
+  { key: "quotes", label: "Quotes", icon: FileText, tooltip: "Draft, send, accept and convert quotes" },
+  { key: "collections", label: "Collections", icon: DollarSign, tooltip: "Payments received, pending and overdue" },
   { key: "recurring", label: "Recurring", icon: Repeat, tooltip: "Subscriptions and scheduled invoices" },
 ];
 
 const VALID_TABS = new Set<RevenueTabKey>(REVENUE_TABS.map((t) => t.key));
+
+/** The invoices list, where every invoice door now lands. */
+const INVOICES_ROUTE = "/app/commerce/invoices";
+
+/**
+ * Where a URL's ?tab (and ?view) lands now that the pipeline is gone, so a
+ * stored or server-emitted link still opens a real screen:
+ *   ?tab=pipeline (no view), ?tab=pipeline&view=quotes, ?tab=quotes -> the Quotes tab
+ *   ?tab=pipeline&view=invoices, ?tab=invoices                      -> /app/commerce/invoices
+ *   ?tab=pipeline&view=collections, ?tab=payments                   -> the Collections tab
+ *   ?tab=products / billing / insights (older still)                -> the Snapshot
+ * Null for a tab this page does not know (left alone, as before).
+ */
+function landingFor(tab: string, view: string | null): RevenueTabKey | "invoices" | null {
+  if (VALID_TABS.has(tab as RevenueTabKey)) return tab as RevenueTabKey;
+  if (tab === "pipeline") {
+    if (view === "invoices") return "invoices";
+    if (view === "collections") return "collections";
+    return "quotes";
+  }
+  if (tab === "invoices") return "invoices";
+  if (tab === "payments") return "collections";
+  if (["products", "billing", "insights"].includes(tab)) return "snapshot";
+  return null;
+}
 
 function CommerceQuickLauncher() {
   const sections: ModuleLauncherSection[] = [
@@ -95,7 +125,7 @@ function CommerceQuickLauncher() {
 }
 
 export default function CommercePage() {
-  const _router = useRouter();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const { getOriginContext } = useNavigationContext();
   const { getReturnLabel, navigateBack } = useReturnNavigation({ skipScrollListener: true });
@@ -134,15 +164,24 @@ export default function CommercePage() {
 
   const handleTabChange = useCallback(
     (key: string) => {
-      const next = (VALID_TABS.has(key as RevenueTabKey) ? key : "snapshot") as RevenueTabKey;
+      // The overview, the action queue and the record drawer still name the
+      // old segments (invoices, payments, pipeline): each lands where its
+      // screen is now.
+      const landing = landingFor(key, null) ?? "snapshot";
+      if (landing === "invoices") {
+        router.push(INVOICES_ROUTE);
+        return;
+      }
+      const next = landing;
       setActiveTab(next);
       overview.handleTabChange(next);
       const url = new URL(window.location.href);
       url.searchParams.set("tab", next);
+      url.searchParams.delete("view");
       window.history.replaceState({}, "", url.toString());
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- narrow to overview.handleTabChange to avoid re-creating the callback on every overview state change
-    [overview.handleTabChange],
+    [overview.handleTabChange, router],
   );
 
   // The tab follows ?tab for as long as the page is mounted, not only on its
@@ -154,37 +193,41 @@ export default function CommercePage() {
   // handleTabChange writes its tab back through replaceState, which Next feeds
   // into useSearchParams, so following the URL there is a no-op.
   const paramTab = searchParams.get("tab");
+  const paramView = searchParams.get("view");
   useEffect(() => {
     if (!paramTab) {
       setActiveTab("snapshot");
       return;
     }
-    if (VALID_TABS.has(paramTab as RevenueTabKey)) {
-      setActiveTab(paramTab as RevenueTabKey);
-    } else if (["products", "billing", "insights"].includes(paramTab)) {
-      setActiveTab("snapshot");
-    } else if (["quotes", "invoices", "payments"].includes(paramTab)) {
-      // Redirect old tabs to pipeline. CR-W9WCN-1 (W9-WEB-COMMERCE-NAV
-      // review): the pipeline follows ?view while mounted and no ?view is its
-      // All view, so the rewrite names the view the legacy tab meant (the
-      // command palette, new-entity menu and contact actions still push
-      // ?tab=quotes / ?tab=invoices). ?tab=payments has no pipeline view.
-      setActiveTab("pipeline");
+    const landing = landingFor(paramTab, paramView);
+    if (!landing) return;
+    if (landing === "invoices") {
+      // MOUNT-QUOTES: the invoices left this page for their own list.
+      router.replace(INVOICES_ROUTE);
+      return;
+    }
+    setActiveTab(landing);
+    if (landing !== paramTab || paramView) {
+      // The legacy door is rewritten to the tab it landed on (the command
+      // palette, the new-entity menu, the contact actions and Money's doors
+      // still push ?tab=pipeline / quotes / invoices / payments).
       const url = new URL(window.location.href);
-      url.searchParams.set("tab", "pipeline");
-      if (paramTab === "quotes" || paramTab === "invoices") {
-        url.searchParams.set("view", paramTab);
-      }
+      url.searchParams.set("tab", landing);
+      url.searchParams.delete("view");
       window.history.replaceState({}, "", url.toString());
     }
-  }, [paramTab]);
+  }, [paramTab, paramView, router]);
 
   useEffect(() => {
     const recordType = searchParams.get("recordType");
     const recordId = searchParams.get("recordId");
     if (recordType && recordId && ["quote", "invoice", "payment", "recurring"].includes(recordType)) {
       setRecordDrawer({ entity: recordType as RecordDetailEntity, id: recordId });
+      return;
     }
+    // Money's activity feed links a quote as ?tab=pipeline&quote=<id> (MOUNT-QUOTES).
+    const quoteId = searchParams.get("quote");
+    if (quoteId) setRecordDrawer({ entity: "quote", id: quoteId });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot mount-time deep-link read
   }, []);
 
@@ -216,8 +259,12 @@ export default function CommercePage() {
   }, [businessId, gmailParam, gmailPendingParam, gmailReasonParam, loadPendingGmail]);
 
   useEffect(() => {
-    if (billing.pendingPrefill?.targetSegment) {
-      if (activeTab !== "pipeline") handleTabChange("pipeline");
+    // A quote prefill (a contact's "Create quote") opens the Quotes tab, where
+    // the panel reads it; an invoice prefill goes to the invoice list's builder.
+    if (billing.pendingPrefill?.targetSegment === "quotes") {
+      if (activeTab !== "quotes") handleTabChange("quotes");
+    } else if (billing.pendingPrefill?.targetSegment === "invoices") {
+      router.push(`${INVOICES_ROUTE}/new`);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to new prefill arrivals
   }, [billing.pendingPrefill]);
@@ -229,7 +276,7 @@ export default function CommercePage() {
         const { contactId, items } = event.data ?? {};
         if (contactId) {
           billing.prefillForContact(contactId, "quotes", items);
-          handleTabChange("pipeline");
+          handleTabChange("quotes");
           toast.success("Opening quote builder for contact...");
         }
       },
@@ -244,11 +291,10 @@ export default function CommercePage() {
         const { contactId, items } = event.data ?? {};
         if (contactId) {
           billing.prefillForContact(contactId, "invoices", items);
-          handleTabChange("pipeline");
           toast.success("Opening invoice builder for contact...");
         }
       },
-      [billing, handleTabChange],
+      [billing],
     ),
   );
 
@@ -263,7 +309,6 @@ export default function CommercePage() {
         icon: Receipt,
         tone: "primary",
         onSelect: () => {
-          handleTabChange("pipeline");
           billing.setTriggerNewInvoice((n: number) => n + 1);
         },
       },
@@ -273,7 +318,7 @@ export default function CommercePage() {
         description: "Draft a proposal for a prospect",
         icon: FileText,
         onSelect: () => {
-          handleTabChange("pipeline");
+          handleTabChange("quotes");
           billing.setTriggerNewQuote((n: number) => n + 1);
         },
       },
@@ -292,7 +337,7 @@ export default function CommercePage() {
         description: "Pick an accepted quote to bill",
         icon: Send,
         onSelect: () => {
-          handleTabChange("pipeline");
+          handleTabChange("quotes");
         },
       },
       {
@@ -314,13 +359,10 @@ export default function CommercePage() {
       setMobileSheetOpen(true);
       return;
     }
-    let target: RevenueTabKey;
-    if (activeTab === "recurring") target = "recurring";
-    else target = "pipeline";
-    if (activeTab !== target) handleTabChange(target);
-    if (target === "recurring") billing.setTriggerNewSchedule((n: number) => n + 1);
+    if (activeTab === "recurring") billing.setTriggerNewSchedule((n: number) => n + 1);
+    else if (activeTab === "quotes") billing.setTriggerNewQuote((n: number) => n + 1);
     else billing.setTriggerNewInvoice((n: number) => n + 1);
-  }, [activeTab, handleTabChange, billing]);
+  }, [activeTab, billing]);
 
   const commerceShortcuts = useMemo<ShortcutGroup[]>(
     () => [
@@ -328,8 +370,9 @@ export default function CommercePage() {
         groupName: "Revenue Navigation",
         shortcuts: [
           { key: "1", description: "Snapshot", action: () => handleTabChange("snapshot") },
-          { key: "2", description: "Pipeline", action: () => handleTabChange("pipeline") },
-          { key: "3", description: "Recurring", action: () => handleTabChange("recurring") },
+          { key: "2", description: "Quotes", action: () => handleTabChange("quotes") },
+          { key: "3", description: "Collections", action: () => handleTabChange("collections") },
+          { key: "4", description: "Recurring", action: () => handleTabChange("recurring") },
         ],
       },
     ],
@@ -379,8 +422,8 @@ export default function CommercePage() {
           <CommerceQuickLauncher />
           <CommerceHeaderRight revenuePulse={overview.revenuePulse} />
           <RevenueActionMenu
-            onNewInvoice={() => { handleTabChange("pipeline"); billing.setTriggerNewInvoice((n: number) => n + 1); }}
-            onNewQuote={() => { handleTabChange("pipeline"); billing.setTriggerNewQuote((n: number) => n + 1); }}
+            onNewInvoice={() => { billing.setTriggerNewInvoice((n: number) => n + 1); }}
+            onNewQuote={() => { handleTabChange("quotes"); billing.setTriggerNewQuote((n: number) => n + 1); }}
             onNewRecurring={() => { handleTabChange("recurring"); billing.setTriggerNewSchedule((n: number) => n + 1); }}
             onRecordPayment={() => setPaymentRecorderOpen(true)}
           />
@@ -426,21 +469,36 @@ export default function CommercePage() {
         </TabFrame>
       )}
 
-      {activeTab === "pipeline" && (
+      {activeTab === "quotes" && (
         <TabFrame loading={shell.loading} error={shell.error}>
-          <FinancePipeline
-            businessId={businessId}
+          <QuotesPanel
             quotes={quotes}
-            invoices={invoices}
-            loading={shell.loading}
-            currency={businessCurrency}
             contacts={shell.contacts}
+            products={shell.products}
+            businessId={businessId}
+            loading={shell.loading}
+            gmailStatus={gmail?.gmailStatus ?? null}
+            setProducts={shell.setProducts}
+            setQuotes={shell.setQuotes}
             setInvoices={shell.setInvoices}
-            onViewRecord={(record) => {
-              if (record.type === "quote") openRecordDrawer("quote", record.id);
-              else if (record.type === "invoice") openRecordDrawer("invoice", record.id);
-            }}
+            currency={businessCurrency}
+            onSwitchToInvoices={() => router.push(INVOICES_ROUTE)}
+            prefillContactId={billing.pendingPrefill?.targetSegment === "quotes" ? billing.pendingPrefill.contactId : undefined}
+            prefillItems={billing.pendingPrefill?.targetSegment === "quotes" ? billing.pendingPrefill.items : undefined}
+            prefillToken={billing.pendingPrefill?.targetSegment === "quotes" ? billing.pendingPrefill._token : undefined}
+            onPrefillApplied={billing.clearPrefill}
+            onViewContact={(contactId) => router.push(`/app/crm/contacts/${encodeURIComponent(contactId)}`)}
+          />
+        </TabFrame>
+      )}
 
+      {activeTab === "collections" && (
+        <TabFrame loading={shell.loading} error={shell.error}>
+          <PaymentsTab
+            invoices={invoices}
+            currency={businessCurrency}
+            businessId={businessId}
+            setInvoices={shell.setInvoices}
           />
         </TabFrame>
       )}
@@ -485,7 +543,8 @@ export default function CommercePage() {
         currency={businessCurrency}
         onClose={closeRecordDrawer}
         onOpenFullEditor={(entity) => {
-          if (entity === "quote" || entity === "invoice" || entity === "payment") handleTabChange("pipeline");
+          if (entity === "quote") handleTabChange("quotes");
+          else if (entity === "invoice" || entity === "payment") handleTabChange("invoices");
           else if (entity === "recurring") handleTabChange("recurring");
           closeRecordDrawer();
         }}

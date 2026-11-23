@@ -92,6 +92,19 @@ function pendingDuplicateKey(keys: Map<string, string>, slot: string): string {
   return key;
 }
 
+/** The bulk action each status means for a quote; a status not here is refused (never a delete). */
+const QUOTE_BULK_ACTIONS: Readonly<Record<string, "send" | "reject" | "delete">> = Object.freeze({
+  SENT: "send",
+  REJECTED: "reject",
+  DELETE: "delete",
+});
+/** The same for an invoice. */
+const INVOICE_BULK_ACTIONS: Readonly<Record<string, "send" | "void" | "delete">> = Object.freeze({
+  SENT: "send",
+  VOID: "void",
+  DELETE: "delete",
+});
+
 export function usePipelineActions({
   businessId,
   invoices,
@@ -419,19 +432,35 @@ export function usePipelineActions({
       const quoteIds = quotes.filter((q) => selectedIds.has(q.id)).map((q) => q.id);
       const invoiceIds = invoices.filter((inv) => selectedIds.has(inv.id)).map((inv) => inv.id);
 
+      // MOUNT-QUOTES, defence in depth (BUG-033): a status with no bulk action
+      // for the record is refused, never turned into a delete. Only the bulk
+      // Delete (status "DELETE", handleBulkDelete) deletes. Status > Void on a
+      // mixed selection used to delete every selected quote.
       if (quoteIds.length > 0) {
-        const action = status === "SENT" ? "send" : status === "REJECTED" ? "reject" : "delete";
-        const { data, error } = await bulkUpdateQuotes(businessId, quoteIds, action as "send" | "reject" | "delete");
-        if (data) {
-          toast.success(`${data.updated} quote(s) updated`);
-          if (action === "delete") setQuotes((prev) => prev.filter((q) => !quoteIds.includes(q.id)));
-          else setQuotes((prev) => prev.map((q) => (quoteIds.includes(q.id) ? { ...q, status: status as Quote["status"] } : q)));
-        } else toast.error(error ?? "Bulk update failed");
+        const action = QUOTE_BULK_ACTIONS[status];
+        if (!action) {
+          toast.error(
+            status === "VOID"
+              ? `${quoteIds.length} selected quote(s) left as they are: a quote cannot be voided, reject it instead.`
+              : `${quoteIds.length} selected quote(s) left as they are: quotes have no "${status}" bulk action.`,
+          );
+        } else {
+          const { data, error } = await bulkUpdateQuotes(businessId, quoteIds, action);
+          if (data) {
+            toast.success(`${data.updated} quote(s) updated`);
+            if (action === "delete") setQuotes((prev) => prev.filter((q) => !quoteIds.includes(q.id)));
+            else setQuotes((prev) => prev.map((q) => (quoteIds.includes(q.id) ? { ...q, status: status as Quote["status"] } : q)));
+          } else toast.error(error ?? "Bulk update failed");
+        }
       }
 
-      if (invoiceIds.length > 0) {
-        const action = status === "SENT" ? "send" : status === "VOID" ? "void" : "delete";
-        const { data, error } = await bulkUpdateInvoices(businessId, invoiceIds, action as "send" | "void" | "delete");
+      const invoiceAction = INVOICE_BULK_ACTIONS[status];
+      if (invoiceIds.length > 0 && !invoiceAction) {
+        toast.error(`${invoiceIds.length} selected invoice(s) left as they are: invoices have no "${status}" bulk action.`);
+      }
+      if (invoiceIds.length > 0 && invoiceAction) {
+        const action = invoiceAction;
+        const { data, error } = await bulkUpdateInvoices(businessId, invoiceIds, action);
         if (data && action === "delete") {
           // W3-B6-WEB-BULK-SKIPPED (D-66, CR-B6-1): only the invoices deleted leave the list.
           const deleted = reportInvoiceBulkDelete(data, invoiceIds, invoices);
