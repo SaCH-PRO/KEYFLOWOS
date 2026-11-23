@@ -45,24 +45,26 @@ joins wave 3e. D-249 to D-254 are on main (wave 3d, #221).
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `040c2a60` (wave 3g, #225, merged 2026-11-23 06:27 UTC). Plan 361 (this branch); see V1-STATUS for done count.
+Main is at `c97f42dd` (wave 3h, #226, merged 2026-11-23 08:05 UTC). Plan 361 + new follow-ups (this branch); see V1-STATUS.
 Workers run on Opus (Fable spent until 2026-11-25 19:00 UTC); hold four. A second Claude account works the RR-* P2/P3
 lane (`docs/development/agent-memory/SECOND-ACCOUNT-SETUP.md`); it claims by pushing `pkt/V1-<ID>` and posts RETURN on
 #80; scan #80 every ~2 h and give each RETURN the two acceptance reviews. Its first claim: RR-SCRIPT-SPECS-IN-CI.
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
-| Wave 3h: PR #226 | `wave/v1-wave-3h` @ 09669d8b (6 packets + MCP x fence integration fix) | Proven: 808/808, R0 MET, web clean | Merge under D-239 when CI green (check-in 07:49) |
-| Wave 3i | `wave/v1-wave-3i` @ 43586168 (stacked on 3h, 33 files): FU-KEY-ACTION-GENOME-PROJECTION, RR-GATEWAY-TYPED-FAILURES, RR-BANK-TOKEN-ENCRYPT @ 457c0d14, MEM-UNIFIED-SEMANTIC-SIGHT, MEM-PATTERNS-SIGHT (both applied as own delta over MEM-SEMANTIC; types.ts keeps both options) | Proof + assembly review running | PR after 3h merges |
-| Wave 3j (next) | FU-KEY-GENOME-READS-RESIDUAL @ 3336ab2a5 (28 files) + next returns (FU-PATTERNS-ROUTES-SIGHT, MEM-TEMPORAL-MEMORY-ROUTES-SIGHT, FU-GENOME-EVOLUTION-SURFACES, FU-ATTACHMENT-OBJECT-TENANCY) | Accepted / building | Build after 3i |
-| FU-ATTACHMENT-OBJECT-TENANCY (P0, security) | session_017o9EBhe1oanHeGuPsPEcQv | Verifying suspected cross-tenant object read via client objectPath | Acceptance review; land ASAP |
-| FU-PATTERNS-ROUTES-SIGHT (P0, new) | session_017o9EBeafoWPQry9ggXEDDK (on MEM-PATTERNS) | Building option A (writer bounds + ai_memories index migration, approved) | Acceptance review |
-| MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (P0) | session_017o9EBea375ryCZG7k6cSZh (on wave 3h) | Building (option B, Q24) | Acceptance review |
-| FU-GENOME-EVOLUTION-SURFACES (P0, new) | session_017o9EBfKdTMK1cKeLRzg5q6 (on KEY-ACTION branch) | Building: evolution-proposals routes, command-center GENOME_PROPOSAL, cortex audit decisions | Acceptance review |
-| FU-VITEST-DECORATOR-METADATA | session_017o9EBevZsyK5zcP7bWPk8g @ 83b6dfc8 | STOPPED on owner Q20 | Owner ruling |
-| Second lane | other account | RR-REDACTION-BY-CONTENT REJECTED (JWT ReDoS) repairing; RR-EVAL-HARNESS-NO-VACUOUS building | Review RETURNs on #80 |
+| Wave 3i: PR #227 | `wave/v1-wave-3i` @ 1d6f71fa (7 pkts: ATTACHMENT-OBJECT-TENANCY, MEM-UNIFIED, MEM-PATTERNS, KEY-ACTION-GENOME, GATEWAY-TYPED-FAILURES, BANK-TOKEN, NAV-CODEX-224) | Proven 820/820, R0 MET, web clean. Codex: 1 finding (architecture map refresh) answered -> owner Q27 | Merge under D-239 when CI green (check-in 09:26) |
+| Wave 3j | `wave/v1-wave-3j` @ a2e9f3f0 (on 3i): RR-REDACTION-BY-CONTENT, FU-KEY-GENOME-READS-RESIDUAL, MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (own delta) | Proven 832/832, R0 MET; assembly CLEAN | PR after 3i merges |
+| Wave 3k | `wave/v1-wave-3k` @ 88268a01 (on 3j, 48 files): FU-PATTERNS-ROUTES-SIGHT (+integration fix 12205636), FU-CORTEX-PATTERNS-SIGHT, FU-GENOME-EVOLUTION-SURFACES; migration 20261123070000 (ai_memories index) | Proven at 3233fc68 (837/837); re-proof at 88268a01 running | PR after 3j |
+| Wave 3l (next) | FU-INSIGHTS-SIGHT @ 28cdbccb (ACCEPTED; stacked on PATTERNS-ROUTES: apply own delta) + next returns | Accepted | Build after 3k |
+| FU-STRATEGIC-ROUTES-SIGHT (P0) | session_017o9EBeafoWPQry9ggXEDDK (on INSIGHTS) | Building | Review |
+| FU-GENOME-DNA-WRITES-AND-INTEGRITY (P0) | session_017o9EBfKdTMK1cKeLRzg5q6 (on GENOME-EVOLUTION) | Building (write-gate design approved) | Review |
+| FU-GENOME-SURFACES-REVENUE (P0, scope +3 routes) | session_017o9EBf78ski7zSK9HWPYHX (on GENOME-EVOLUTION) | Building | Review |
+| FU-OUTBOUND-ATTACHMENT-URL (P1) | session_017o9EBhe1oanHeGuPsPEcQv (on 3i) | Building | Review |
+| FU-AI-APPROVALS-MONEY-SIGHT (P0) | session_017o9EBffRpw8j5YyzyGjCMC (on main) | Building | Review |
+| FU-VITEST-DECORATOR-METADATA | @ 83b6dfc8 | STOPPED on owner Q20 | Owner ruling |
+| Second lane | other account | Reviewing: RR-CI-REQUIRED-JOBS-AGGREGATE 6e690d18, RR-EVAL-HARNESS repair 17d8802e, RR-LANGFUSE-INGESTION-CUTOVER afece460; building RR-OBJECT-STORAGE-POSTURE-CHECK. RR-REDACTION-BY-CONTENT ACCEPTED (in 3j); RR-GATEWAY in 3i | Post verdicts on #80 |
 
-To add to the plan next: FU-GATEWAY-STREAM-ERROR-CLASS, FU-CORTEX-PATTERNS-SIGHT (O-2, after UNIFIED lands), FU-PLANNER-INTENT-PATTERNS-SIGHT (O-3), FU-AI-MEMORY-WRITE-INTEGRITY (O-6), FU-SEMANTIC-HITS-FENCE (semantic hits enter the prompt unfenced), FU-PROVIDER-ERROR-TEXT-REDACT, FU-ATTACHMENT-OBJECT-TENANCY (row). Added to the plan 05:10 UTC: FU-NAV-A1-CODEX-224, FU-CORTEX-EXECUTE-STRUCTURED-DTO, FU-UNIT-MOCK-ISOLATION-2, FU-BARE-400-AUDIT, FU-SETTINGS-MANUAL-STEP-FENCE, FU-WEB-PAYLINK-STATUS-BUTTONS, FU-KEY-SEND-INVOICE-PAID-REFUSE. Still to do: label v86s_ in fixture-prefixes.json; MEM-TEMPORAL-MEMORY-ROUTES-SIGHT must also cover temporal-adapter searchMemories/getRecentMemories. From FU-PAY-LINK-STATUS-GATE review: web hides
+To add to the plan next: FU-CORTEX-PATTERNS-SIGHT, FU-PATTERNS-ROUTES-SIGHT, FU-INSIGHTS-SIGHT, FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-EVOLUTION-SURFACES, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-AI-APPROVALS-MONEY-SIGHT, FU-OUTBOUND-ATTACHMENT-URL, FU-EVAL-HARNESS-TENANT, FU-ARCH-MAP-REFRESH (Q27); FU-GATEWAY-STREAM-ERROR-CLASS, FU-CORTEX-PATTERNS-SIGHT (O-2, after UNIFIED lands), FU-PLANNER-INTENT-PATTERNS-SIGHT (O-3), FU-AI-MEMORY-WRITE-INTEGRITY (O-6), FU-SEMANTIC-HITS-FENCE (semantic hits enter the prompt unfenced), FU-PROVIDER-ERROR-TEXT-REDACT, FU-ATTACHMENT-OBJECT-TENANCY (row). Added to the plan 05:10 UTC: FU-NAV-A1-CODEX-224, FU-CORTEX-EXECUTE-STRUCTURED-DTO, FU-UNIT-MOCK-ISOLATION-2, FU-BARE-400-AUDIT, FU-SETTINGS-MANUAL-STEP-FENCE, FU-WEB-PAYLINK-STATUS-BUTTONS, FU-KEY-SEND-INVOICE-PAID-REFUSE. Still to do: label v86s_ in fixture-prefixes.json; MEM-TEMPORAL-MEMORY-ROUTES-SIGHT must also cover temporal-adapter searchMemories/getRecentMemories. From FU-PAY-LINK-STATUS-GATE review: web hides
 "Copy payment link" / WhatsApp share unless status is payable; KEY commerce_send_invoice refuses PAID up front (today it
 emails then fails the PAID->SENT move); KEY invoice findFirst lacks `deletedAt: null`. Recorded deviation: the
 pay-link packet touched flow-orchestrator.service.ts (+7, D-248) and invoice-send-delivery.spec.ts mock outside its write set.
@@ -144,6 +146,10 @@ Format: `docs/development/agent-memory/OWNER-QUESTION-FORMAT.md`. Safe defaults 
 25. RR-REDACTION-BY-CONTENT: ~9.6% of random 15-digit ids (and 17-digit platform ids) pass Luhn and become <card>,
     now also in KEY tool answers (externalPostId, platformId). Exempt *Id/_id keys from card matching? (Asked the lane
     to exempt them; confirm.) Also: add sk_live_, xoxp-, AIza prefixes?
+26. FU-CORTEX-PATTERNS-SIGHT: KEY goals_create_plan plans as KEY_SYSTEM_ACTOR_ID, so an owner's goal plans lose money
+    patterns (plans are readable business-wide). Plan as the turn's member instead? (Default: keep as built.)
+27. Codex on #227: AGENTS.md asks architecture/ maps to be regenerated after architecture changes; CLAUDE.md forbids a
+    programme-map refresh without authority. Approve one reviewed packet FU-ARCH-MAP-REFRESH for waves 3a-3k? (Default: yes, after 3k lands.)
 
 ## 5. How to work here (learned the hard way)
 
