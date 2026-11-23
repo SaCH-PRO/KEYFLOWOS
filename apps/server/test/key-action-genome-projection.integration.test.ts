@@ -362,7 +362,12 @@ beforeAll(async () => {
       // Round 5 (correctness M3): the orchestrator's own strings (autonomy-orchestrator.service.ts, tool outcome guard).
       payload: {
         actionType: 'CREATE_TASK', executedBy: ID.owner, reason: 'Tool CREATE_TASK success rate is below 30% — blocked',
-        ruleTrace: [{ source: 'ToolOutcomeScore', rule: 'tool-score-CREATE_TASK', result: 'supervised', reason: 'Tool CREATE_TASK success rate is 20% over 5 uses', metadata: { successRate: 0.2, totalUses: 5 } }],
+        ruleTrace: [
+          // Round 9 (security MAJOR-1): the genome gate's entry; its scores average the affected domains' health, the
+          // revenue-quality and finance scores among them (D-233).
+          { source: 'GenomeAutonomyGateService', rule: 'genome-gate', result: 'allow', reason: 'Genome readiness gate passed', metadata: { readinessScore: 83, confidenceScore: 0.7, riskLevel: 'MEDIUM' } },
+          { source: 'ToolOutcomeScore', rule: 'tool-score-CREATE_TASK', result: 'supervised', reason: 'Tool CREATE_TASK success rate is 20% over 5 uses', metadata: { successRate: 0.2, totalUses: 5 } },
+        ],
       },
     },
   });
@@ -424,7 +429,7 @@ beforeAll(async () => {
       importance: 'HIGH', reminderAt: remindAt, startsAt: remindAt,
       payload: {
         actionType: 'CREATE_TASK', executedBy: ID.owner, reason: 'Tool CREATE_TASK success rate is below 30% — blocked',
-        ruleTrace: [{ source: 'AutonomyRule', rule: 'rule-7', result: 'allow', reason: 'Within the configured rule', metadata: { limit: 'TTD 912' } }],
+        ruleTrace: [{ source: 'AutonomyRule', rule: 'rule-7', result: 'allow', reason: 'Within the configured rule', metadata: { limit: 'TTD 912', priority: 'Maria owes TTD 912' } }],
       },
     },
   });
@@ -656,7 +661,17 @@ describe('FU-KEY-ACTION-GENOME-PROJECTION: bridged FINANCIAL proposals and their
 
   it('KAG-12 round 4: the blocked_by_autonomy row of a non-financial proposal is served (its rule trace counts uses, not money)', async () => {
     for (const [name, res] of Object.entries(await timelineReads(ID.staffNone))) {
-      expect(res.body.some((e: any) => e.id === `${P}blocked_row`), name).toBe(true);
+      const row = res.body.find((e: any) => e.id === `${P}blocked_row`);
+      expect(row, name).toBeDefined();
+      // Round 9 (security MAJOR-1): served without any rule-trace metadata (the genome gate's scores among it); the
+      // rules, sources, results and reasons stay.
+      expect(row.payload.ruleTrace.map((t: any) => t.source), name).toEqual(['GenomeAutonomyGateService', 'ToolOutcomeScore']);
+      expect(row.payload.ruleTrace.some((t: any) => 'metadata' in t), name).toBe(false);
+      expect(JSON.stringify(row.payload), name).not.toMatch(/readinessScore|confidenceScore|83/);
+    }
+    for (const [name, res] of Object.entries(await timelineReads(ID.staffRead))) {
+      const row = res.body.find((e: any) => e.id === `${P}blocked_row`);
+      expect(row.payload.ruleTrace[0].metadata, name).toEqual({ readinessScore: 83, confidenceScore: 0.7, riskLevel: 'MEDIUM' });
     }
   });
 
@@ -700,11 +715,12 @@ describe('FU-KEY-ACTION-GENOME-PROJECTION: bridged FINANCIAL proposals and their
     }
   });
 
-  it('KAG-16 round 8: a blocked row whose rule metadata states an amount is withheld; the orchestrator counts alone are not', async () => {
+  it('KAG-16 round 9: a blocked row whose rule metadata states an amount is served with the metadata left out', async () => {
     for (const [name, res] of Object.entries(await timelineReads(ID.staffNone))) {
-      const ids = res.body.map((e: any) => e.id);
-      expect(ids, name).not.toContain(`${P}blocked_meta_row`);
-      expect(ids, name).toContain(`${P}blocked_row`);
+      const row = res.body.find((e: any) => e.id === `${P}blocked_meta_row`);
+      expect(row, name).toBeDefined();
+      expect(row.payload.ruleTrace[0].metadata, name).toBeUndefined();
+      expect(JSON.stringify(row), name).not.toMatch(/TTD 912|owes/);
     }
   });
 
