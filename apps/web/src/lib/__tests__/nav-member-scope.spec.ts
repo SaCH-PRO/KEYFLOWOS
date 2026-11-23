@@ -392,6 +392,30 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
      * inside the class `cls` when one is named. Every class in the file is searched, nested and expression classes
      * included: exactly one match must exist, and it must be in a top-level named class; anything else fails.
      */
+    const VERBS = new Set(["Get", "Post", "Put", "Patch", "Delete", "All", "Head", "Options"]);
+    /** A controller's own path ('' for @Controller()); the class must carry exactly one plain @Controller('<literal>'). */
+    const controllerPath = (cls: ts.ClassDeclaration) => decoratorsOf(cls).map(decoratorCall).find((c) => c?.name === "Controller")?.arg ?? "";
+    /**
+     * Why the class that owns a cited route cannot be read with certainty (closing review round 4): it must carry a
+     * plain @Controller with a literal path, and every class decorator must be a plain name in CLASS_DECORATORS.
+     */
+    const controllerWhy = (cls: ts.ClassDeclaration): string | null => {
+      const calls = decoratorsOf(cls).map((d) => ({ d, call: decoratorCall(d) }));
+      const ctl = calls.filter(({ call }) => call?.name === "Controller");
+      if (ctl.length !== 1) return `${cls.name?.text ?? "class"} is not a plain @Controller`;
+      if (ctl[0].call!.arg === null) return `non-literal controller path ${ctl[0].d.getText()}`;
+      for (const { d, call } of calls) {
+        if (!call || call.qualified || !CLASS_DECORATORS.has(call.name)) return `unlisted class decorator ${d.getText()} on ${cls.name?.text}`;
+      }
+      return null;
+    };
+    /** Whether two route paths can match the same request (a :param matches any one segment; anything else unread). */
+    const overlaps = (a: string, b: string) => {
+      const x = a.split("/").filter(Boolean);
+      const y = b.split("/").filter(Boolean);
+      if ([...x, ...y].some((seg) => /[*?()+]/.test(seg))) return true;
+      return x.length === y.length && x.every((seg, i) => seg === y[i] || seg.startsWith(":") || y[i].startsWith(":"));
+    };
     const ROUTE = /^((?:modules|core)\/[^#]+\.ts)#(?:([A-Za-z0-9_]+) )?GET (.*)$/;
     const findRoute = (file: string, cls: string | undefined, route: string): ts.ClassElement | string => {
       const sf = parse(file);
@@ -414,7 +438,30 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
       const inScope = cls ? hits.filter((h) => h.owner.name?.text === cls) : hits;
       if (inScope.length === 0) return "no such route";
       if (inScope.length > 1) return `ambiguous route (${inScope.length} @Get) — name its controller class`;
-      return inScope[0].member;
+      const cited = inScope[0];
+      const ownerWhy = controllerWhy(cited.owner as ts.ClassDeclaration);
+      if (ownerWhy) return ownerWhy;
+      // Routing (closing review round 4): every route in the file is a literal; no other route can take this path
+      // first: an earlier @Get/@All in the same controller, or any route in another controller of the file.
+      const full = (owner: ts.ClassDeclaration, arg: string) => `${controllerPath(owner)}/${arg}`;
+      const citedPath = full(cited.owner as ts.ClassDeclaration, route);
+      for (const st of sf.statements) {
+        if (!ts.isClassDeclaration(st)) continue;
+        for (const member of st.members) {
+          for (const d of decoratorsOf(member)) {
+            const call = decoratorCall(d);
+            if (!call || !VERBS.has(call.name)) continue;
+            if (call.arg === null) return `non-literal route ${d.getText()} in ${st.name?.text}`;
+            if (member === cited.member || !(call.name === "Get" || call.name === "All")) continue;
+            if (!decoratorsOf(st).some((c) => decoratorCall(c)?.name === "Controller")) continue;
+            if (controllerWhy(st)) return controllerWhy(st)!;
+            if (!overlaps(full(st, call.arg), citedPath)) continue;
+            if (st !== cited.owner) return `route ${d.getText()} in ${st.name?.text} overlaps the cited route`;
+            if (member.pos < cited.member.pos) return `cited route shadowed by an earlier ${d.getText()}`;
+          }
+        }
+      }
+      return cited.member;
     };
     /**
      * Where each name a cited file may use to decorate a cited class or GET handler comes from (closing review rounds
@@ -432,6 +479,8 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
       CrmRateLimit: "modules/crm/guards/rate-limit.guard",
       RequireFeature: "modules/crm/guards/feature-flag.guard",
       HiddenModuleWrites: "core/auth/hidden-module-writes.decorator",
+      forwardRef: NEST,
+      PickType: "@nestjs/mapped-types", OmitType: "@nestjs/mapped-types", PartialType: "@nestjs/mapped-types", IntersectionType: "@nestjs/mapped-types",
     };
     /** The decorators a cited GET handler may carry: every name found on a GET handler in the server today. */
     const KNOWN_DECORATORS = new Set(["Get", "UseGuards", "RequireModuleScope", "RateLimit", "CrmRateLimit", "PublicRateLimit", "ShadowEffectiveAuthority", "Header", "HttpCode", "RequireFeature"]);
@@ -443,6 +492,38 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
     const CLASS_DECORATORS = new Set(["Controller", "UseGuards", "HiddenModuleWrites"]);
     /** What can set the module scope when called: allowed only as a decorator call, never called any other way. */
     const SCOPE_CAPABLE = new Set(["RequireModuleScope", "SetMetadata", "applyDecorators"]);
+    /**
+     * Names that reach metadata, globals or prototypes (closing review round 4): banned anywhere in a cited file
+     * (prototype only as Object.prototype.<method>, which reads).
+     */
+    const BANNED = new Set(["MODULE_SCOPE_KEY", "Reflect", "defineMetadata", "globalThis", "global", "window", "self", "eval", "Function", "Proxy", "setPrototypeOf", "__proto__", "defineProperty", "defineProperties", "prototype"]);
+    /**
+     * The only calls code may make when a cited file loads or its controller is built (the cited files' own today):
+     * forwardRef and the DTO mapped types (pinned in SOURCE), Symbol, and reads of a plain object's own keys.
+     */
+    const LOAD_CALLS = new Set(["forwardRef", "Symbol", "PickType", "OmitType", "PartialType", "IntersectionType"]);
+    const LOAD_OBJECT_CALLS = new Set(["keys", "entries", "values", "freeze"]);
+    /** Globals a cited file may not declare for itself (the allowed load-time calls rely on them). */
+    const GLOBALS = new Set(["Object", "Symbol"]);
+    /**
+     * Why code that runs at load or construction is not plainly declarative: a call other than a decorator's, new of a
+     * plain name, or LOAD_CALLS; a computed member access; an assignment other than this.<name> = ... .
+     */
+    const loadTimeWhy = (node: ts.Node, fail: (reason: string) => void) => {
+      if (ts.isCallExpression(node)) {
+        const callee = node.expression;
+        const objectRead = ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && callee.expression.text === "Object" && LOAD_OBJECT_CALLS.has(callee.name.text);
+        const ok = ts.isDecorator(node.parent) || (ts.isIdentifier(callee) && LOAD_CALLS.has(callee.text)) || objectRead || callee.kind === ts.SyntaxKind.SuperKeyword;
+        if (!ok) fail(`call at load or construction: ${node.getText().slice(0, 80)}`);
+      } else if (ts.isNewExpression(node) && !ts.isIdentifier(node.expression)) fail(`new at load or construction: ${node.getText().slice(0, 80)}`);
+      else if (ts.isTaggedTemplateExpression(node)) fail(`tagged template at load or construction: ${node.getText().slice(0, 80)}`);
+      else if (ts.isElementAccessExpression(node) && !(ts.isStringLiteralLike(node.argumentExpression) || ts.isNumericLiteral(node.argumentExpression))) fail(`computed access at load or construction: ${node.getText().slice(0, 80)}`);
+      else if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
+        const target = node.left;
+        const own = ts.isPropertyAccessExpression(target) && target.expression.kind === ts.SyntaxKind.ThisKeyword;
+        if (!own) fail(`assignment at load or construction: ${node.getText().slice(0, 80)}`);
+      }
+    };
     /** An import's module, as a path under the server src (a package name as written). */
     const resolveImport = (file: string, spec: string) =>
       spec.startsWith(".") ? path.posix.normalize(path.posix.join(path.posix.dirname(file), spec)) : spec;
@@ -452,14 +533,22 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
      * - an import renaming something to or from a known name;
      * - a namespace import, an import-equals, or a require call;
      * - a scope-capable name used other than as a decorator's own callee or its import;
-     * - the scope key, its value, Reflect, or defineMetadata named at all (metadata written outside the decorators).
+     * - a BANNED name, or prototype, constructor or __proto__ reached (metadata, globals or prototype chains);
+     * - code that runs at load or construction that is not plainly declarative (loadTimeWhy).
+     * The class owning the route and the file's routing are read by findRoute (controllerWhy, overlaps). A write made
+     * inside a handler body when it runs, or in a decorator's definition in another file, is not read here: only a
+     * server test reading the controllers' real metadata holds that (proposed follow-up).
      */
     const unreadableFile = (file: string): string | null => {
       const sf = parse(file);
       let why: string | null = null;
       const fail = (reason: string) => (why ??= reason);
-      const visit = (node: ts.Node) => {
+      const visit = (node: ts.Node, load: boolean) => {
         if (why) return;
+        if (load) loadTimeWhy(node, fail);
+        if (ts.isPropertyAccessExpression(node) && node.name.text === "prototype" && !(ts.isIdentifier(node.expression) && node.expression.text === "Object")) fail(`prototype reached: ${node.getText().slice(0, 80)}`);
+        else if (ts.isPropertyAccessExpression(node) && node.name.text === "constructor") fail(`constructor reached: ${node.getText().slice(0, 80)}`);
+        else if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression) && ["prototype", "constructor", "__proto__"].includes(node.argumentExpression.text)) fail(`${node.argumentExpression.text} reached: ${node.getText().slice(0, 80)}`);
         if (ts.isImportSpecifier(node)) {
           const imported = (node.propertyName ?? node.name).text;
           const local = node.name.text;
@@ -472,27 +561,20 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
         else if (ts.isIdentifier(node)) {
           const parent = node.parent;
           const declares = (ts.isVariableDeclaration(parent) || ts.isFunctionDeclaration(parent) || ts.isClassDeclaration(parent) || ts.isBindingElement(parent) || ts.isParameter(parent)) && parent.name === node;
-          if (declares && node.text in SOURCE) fail(`local ${node.text}`);
-          else if (node.text === "MODULE_SCOPE_KEY" || node.text === "Reflect" || node.text === "defineMetadata") fail(`scope metadata written outside a decorator (${node.text})`);
+          if (declares && (node.text in SOURCE || GLOBALS.has(node.text))) fail(`local ${node.text}`);
+          else if (BANNED.has(node.text) && !(node.text === "prototype" && ts.isPropertyAccessExpression(parent))) fail(`scope metadata written outside a decorator (${node.text})`);
           else if (SCOPE_CAPABLE.has(node.text) && !ts.isImportSpecifier(parent)) {
             const asCallee = ts.isCallExpression(parent) && parent.expression === node && ts.isDecorator(parent.parent);
             if (!asCallee) fail(`${node.text} used other than as a decorator: ${parent.getText().slice(0, 80)}`);
           }
         } else if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && node.text === "module_scope") fail("scope metadata key named outside a decorator");
-        ts.forEachChild(node, visit);
+        // Code that runs when the module loads or the controller is built (top level, class bodies and their
+        // initializers, constructors); a method, function or arrow body runs only when called.
+        const body = ts.isFunctionLike(node) && !ts.isConstructorDeclaration(node);
+        ts.forEachChild(node, (child) => visit(child, load && !body));
       };
-      visit(sf);
-      if (why) return why;
-      for (const st of sf.statements) {
-        if (!ts.isClassDeclaration(st)) continue;
-        const ctl = decoratorsOf(st).some((d) => decoratorCall(d)?.name === "Controller");
-        if (!ctl) continue;
-        for (const d of decoratorsOf(st)) {
-          const call = decoratorCall(d);
-          if (!call || call.qualified || !CLASS_DECORATORS.has(call.name)) return `unlisted class decorator ${d.getText()} on ${st.name?.text}`;
-        }
-      }
-      return null;
+      visit(sf, true);
+      return why;
     };
     /**
      * Why a handler's decorators cannot be read with certainty, or null. Anything this check cannot read fails
