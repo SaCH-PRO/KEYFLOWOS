@@ -46,9 +46,17 @@ function eventTextStatesMoney(e: { payload?: unknown; metadata?: unknown }): boo
 }
 
 /**
- * Round 4 (correctness MINOR-2), narrowed in round 5: a lifecycle row's payload with each autonomy rule-trace entry's
- * `metadata` left out (the orchestrator's own counts, e.g. totalUses, read as a figure). Every entry's rule, source,
- * result and reason are still read; a trace that is not a list of objects is read whole.
+ * The rule-trace metadata keys AutonomyOrchestratorService writes as its own counts and scores (tool outcome guard,
+ * genome gate, module policy): read as figures by the money vocabulary, they carry no money.
+ */
+const RULE_TRACE_COUNT_KEYS: ReadonlySet<string> = new Set([
+  'successRate', 'totalUses', 'readinessScore', 'confidenceScore', 'missingFacts', 'priority',
+]);
+
+/**
+ * Round 4 (correctness MINOR-2), narrowed in rounds 5 and 8: a lifecycle row's payload with the orchestrator's own count
+ * and score keys left out of each autonomy rule-trace entry's metadata. Every entry's rule, source, result and reason,
+ * and any other metadata key, are still read; a trace that is not a list of objects is read whole.
  */
 function withoutRuleTrace(payload: unknown): unknown {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !('ruleTrace' in payload)) return payload;
@@ -58,8 +66,10 @@ function withoutRuleTrace(payload: unknown): unknown {
     ...rest,
     ruleTrace: ruleTrace.map((entry) => {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
-      const { metadata: _metadata, ...kept } = entry as Record<string, unknown>;
-      return kept;
+      const { metadata, ...kept } = entry as Record<string, unknown>;
+      if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return metadata === undefined ? kept : { ...kept, metadata };
+      const other = Object.fromEntries(Object.entries(metadata as Record<string, unknown>).filter(([k]) => !RULE_TRACE_COUNT_KEYS.has(k)));
+      return Object.keys(other).length ? { ...kept, metadata: other } : kept;
     }),
   };
 }
