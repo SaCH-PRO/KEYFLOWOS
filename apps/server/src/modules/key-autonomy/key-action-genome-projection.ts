@@ -213,6 +213,12 @@ export async function requireBridgeRevenue(
 export function ruleTraceWithoutMetadata(payload: unknown): unknown {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !('ruleTrace' in payload)) return payload;
   const { ruleTrace, ...rest } = payload as Record<string, unknown>;
+  // Round 3 (security NOTE-7): a trace that is one object (not a list) loses its metadata too.
+  if (ruleTrace && typeof ruleTrace === 'object' && !Array.isArray(ruleTrace)) {
+    if (!('metadata' in ruleTrace)) return payload;
+    const { metadata: _metadata, ...kept } = ruleTrace as Record<string, unknown>;
+    return { ...rest, ruleTrace: kept };
+  }
   if (!Array.isArray(ruleTrace)) return payload;
   if (!ruleTrace.some((entry) => entry && typeof entry === 'object' && !Array.isArray(entry) && 'metadata' in entry)) return payload;
   return {
@@ -232,6 +238,8 @@ export function ruleTraceWithoutMetadata(payload: unknown): unknown {
  */
 const COMPOSITE_SCORE_KEYS: ReadonlySet<string> = new Set([
   'genomeIntegrity', 'executiveReadinessScore', 'genomeDnaScores', 'genomeDnaConfidence', 'readinessBreakdown', 'sourceDnaScores',
+  // Round 3 (security MINOR-3): the genome stage is a grade of the composite and the DNA scores (D-233).
+  'genomeStage',
 ]);
 
 /** Whether a timeline row's payload carries a composite score at its top level. */
@@ -245,6 +253,12 @@ export function withoutCompositeScores(payload: unknown): unknown {
   if (!carriesCompositeScores(payload)) return payload;
   return Object.fromEntries(Object.entries(payload as Record<string, unknown>).filter(([k]) => !COMPOSITE_SCORE_KEYS.has(k)));
 }
+
+/**
+ * Round 3 (security MINOR-2): the cross-domain risk level is the maximum over every domain's risk, finance included
+ * (GenomeCrossDomainService), so a verdict naming it can tell a revenue-none reader that finance is at risk (D-233).
+ */
+const CROSS_DOMAIN_RISK = /cross[\s_-]?domain/i;
 
 /** 403 with ModuleScopeGuard's message when the reader's revenue level is below `minLevel` (SUPER_ADMIN passes). */
 export async function requireRevenueLevel(
@@ -266,11 +280,17 @@ export async function requireRevenueLevel(
  */
 export function autonomyVerdictForReader<V extends { actionKey?: unknown; reason?: unknown; ruleTrace?: unknown; confidence?: unknown }>(
   verdict: V,
+  /**
+   * Round 3 (security MAJOR-1): whether the action key names a money action by its module (a revenue or expenses tool:
+   * the graph-action and KEY organ maps, the books tools); the caller supplies it (key-cortex-audit.controller) so this
+   * module does not load the AI route maps. Without it, the key is judged by its text alone.
+   */
+  actionKeyIsMoney: (actionKey: string) => boolean = () => false,
 ): Omit<V, 'confidence'> | null {
-  if (typeof verdict.actionKey !== 'string' || textStatesMoney(verdict.actionKey)) return null;
-  if (textStatesMoney(verdict.reason)) return null;
+  if (typeof verdict.actionKey !== 'string' || textStatesMoney(verdict.actionKey) || actionKeyIsMoney(verdict.actionKey)) return null;
+  if (textStatesMoney(verdict.reason) || CROSS_DOMAIN_RISK.test(String(verdict.reason ?? ''))) return null;
   const trace = ruleTraceWithoutMetadata({ ruleTrace: verdict.ruleTrace }) as { ruleTrace?: unknown };
-  if (structuredValueStatesMoney(trace.ruleTrace)) return null;
+  if (structuredValueStatesMoney(trace.ruleTrace) || CROSS_DOMAIN_RISK.test(JSON.stringify(trace.ruleTrace ?? null))) return null;
   // Round 2 (security MAJOR-3a): the verdict's confidence is the genome gate's confidence score (min(1, score/100)).
   const { confidence: _confidence, ...rest } = verdict;
   return { ...rest, ruleTrace: trace.ruleTrace };

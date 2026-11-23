@@ -19,6 +19,27 @@ import { ValueLearningService } from './value-learning.service';
 import { ComplianceMapService } from '../key-autonomy/compliance-map.service';
 import { financialProposalsWithProvenance, genomeReaderReadsRevenue, PROPOSAL_CLASSIFY_SELECT } from '../business-genome/key-genome/genome-finance-scope';
 import { autonomyVerdictForReader } from '../key-autonomy/key-action-genome-projection';
+import { graphActionModuleScope } from '../ai/graph-actions.controller';
+import { KEY_BOOKS_REVENUE_TOOLS } from '../ai/plan-step-authority';
+import { keyOrganToolAuthority } from './key-cortex-organ-tool-authority';
+import { isFinancialProposal } from '../business-genome/key-genome/genome-finance-scope';
+
+/**
+ * Round 3 (FU-GENOME-EVOLUTION-SURFACES, security MAJOR-1): whether a verdict's action key names a money action. The
+ * orchestrator records an action type (CREATE_TASK), a dotted KEY organ tool, or (plan-executor) a flow-tool name; a
+ * tool mapped to the revenue or expenses module (KEY organ map, graph-action map, the books tools) is money, a tool
+ * mapped to another module is not, and a key no map names is judged as a proposal's action type is (listed non-money
+ * action types only; anything else fails closed, D-227).
+ */
+function actionKeyIsMoney(actionKey: string): boolean {
+  const key = actionKey.trim();
+  if (KEY_BOOKS_REVENUE_TOOLS.has(key)) return true;
+  const organ = keyOrganToolAuthority(key);
+  if (organ && 'scopes' in organ) return organ.scopes.some((s) => s.module === 'revenue' || s.module === 'expenses');
+  const scope = graphActionModuleScope(key);
+  if (scope) return scope.module === 'revenue' || scope.module === 'expenses';
+  return isFinancialProposal({ actionType: key });
+}
 
 /**
  * Mounted at `/api/v1/cortex` with no `:businessId` path segment, so the tenant
@@ -137,8 +158,9 @@ export class KeyCortexAuditController {
   /**
    * FU-GENOME-EVOLUTION-SURFACES (D-233, D-238): a reader without revenue read (ModuleScopeGuard's reading) is served
    * no verdict on a money action or whose reason or rule trace states money, and the others with their rule-trace
-   * metadata left out (the genome gate's readiness and confidence scores average the finance and revenue-quality
-   * health in). The totals are counts only and are unchanged. Revenue readers: unchanged.
+   * metadata and confidence left out (the genome gate's readiness and confidence scores average the finance and
+   * revenue-quality health in); a verdict about a financial KEY proposal, or on a revenue or expenses tool, is withheld;
+   * the totals count the verdicts served (of the 50 most recent). Revenue readers: unchanged.
    */
   @Get('audit/decisions')
   // Packet item 3, the guard: no module scope is added here. The rule recommended for this route and its sibling audit
@@ -177,10 +199,10 @@ export class KeyCortexAuditController {
       }
       const visible = recent
         .filter((v) => !v.proposalId || financialProposal.get(v.proposalId) === false)
-        .map((verdict) => autonomyVerdictForReader(verdict))
+        .map((verdict) => autonomyVerdictForReader(verdict, actionKeyIsMoney))
         .filter((verdict): verdict is NonNullable<typeof verdict> => verdict !== null);
-      // Round 2 (security MINOR-5): the totals count what the reader is served, so the difference does not count the
-      // withheld verdicts.
+      // Round 2 (security MINOR-5): the totals count what the reader is served (within the 50 most recent verdicts), so
+      // the difference does not count the withheld verdicts.
       return { businessId, total: visible.length, blocked: visible.filter((v) => v.allowed === false).length, recent: visible };
     });
   }

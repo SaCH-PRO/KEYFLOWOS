@@ -529,9 +529,17 @@ export class KeyGenomeController {
    * read; starting, completing or cancelling one needs revenue write (ModuleScopeGuard's message). 404 for an unknown id
    * or one of another business, as before.
    */
-  private async requireExperimentAuthority(businessId: string, experimentId: string, req: GenomeRequest | undefined, minLevel: 'read' | 'write') {
+  private async requireExperimentAuthority(
+    businessId: string,
+    experimentId: string,
+    req: GenomeRequest | undefined,
+    minLevel: 'read' | 'write',
+    /** Round 3 (correctness MINOR-3): the result a completion would write; judged with the experiment (D-128). */
+    result?: unknown,
+  ) {
     const experiment = await this.experimentService.getExperiment(businessId, experimentId);
-    const [financial] = await financialExperimentFlags(this.prisma, businessId, [experiment as any]);
+    const judged = result === undefined ? [experiment as any] : [experiment as any, { ...(experiment as any), result }];
+    const financial = (await financialExperimentFlags(this.prisma, businessId, judged)).some(Boolean);
     const money = financial || [(experiment as any).hypothesis, (experiment as any).action, (experiment as any).successMetric].some((t) => isMoneyLabel(t));
     if (money) await this.requireRevenue(businessId, req, minLevel);
     return experiment;
@@ -571,7 +579,7 @@ export class KeyGenomeController {
     @Body() body?: RecommendationOutcome,
     @Req() req?: GenomeRequest,
   ) {
-    await this.requireExperimentAuthority(businessId, experimentId, req, 'write');
+    await this.requireExperimentAuthority(businessId, experimentId, req, 'write', body ?? undefined);
     return this.experimentService.completeExperiment(businessId, experimentId, body);
   }
 

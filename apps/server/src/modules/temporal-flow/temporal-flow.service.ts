@@ -111,10 +111,14 @@ export class TemporalFlowService {
     return composites ? served.map((e) => this.withoutComposites(e)) : served;
   }
 
-  /** Round 2: a row with its composite scores left out, and its summary and description when they state a figure. */
+  /**
+   * Round 2: a row with its composite scores left out, and its summary and description when they state a score (round
+   * 3, correctness MINOR-2: a percentage, or an integrity, readiness or score figure; the writer's ordinary "Version 2
+   * generated from Business Genome." is kept).
+   */
   private withoutComposites<E extends { payload?: unknown; summary?: string | null; description?: string | null }>(e: E): E {
     if (!carriesCompositeScores(e.payload)) return e;
-    const figure = (t: unknown) => typeof t === 'string' && /\p{Nd}/u.test(t);
+    const figure = (t: unknown) => typeof t === 'string' && /\p{Nd}/u.test(t) && /%|integrity|readiness|score/i.test(t);
     return {
       ...e,
       payload: withoutCompositeScores(e.payload),
