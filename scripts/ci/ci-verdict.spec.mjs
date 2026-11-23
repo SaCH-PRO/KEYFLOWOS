@@ -677,7 +677,10 @@ describe('ci-verdict: negative controls', () => {
       "the verdict script has 4 '${{' expression openers for 3 gating jobs: only needs.<gating job>.result may reach the shell",
     ]);
     const nested = `${verdictScript(FIXTURE_GATING)}\necho '\${{ fromJSON('{"a":{"b":1}}').a.b }}'`;
-    assert.ok(verdictProblems(fixture({ script: nested })).some((p) => /expression openers/.test(p)));
+    // the regex can close on the inner `}}`, so this one is caught as a read, disallowed expression; either way it is red
+    const nestedProblems = verdictProblems(fixture({ script: nested }));
+    assert.equal(nestedProblems.length, 1, nestedProblems.join('\n'));
+    assert.match(nestedProblems[0], /only needs\.<gating job>\.result may reach the shell$/);
   });
 
   it('a gating job with job-level continue-on-error (or one inside its strategy) fails: its failure would reach the verdict as success', () => {
