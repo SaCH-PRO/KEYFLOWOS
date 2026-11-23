@@ -53,6 +53,7 @@ import { GenomeRecommendationRankerService } from './genome-recommendation-ranke
 import { GenomeOpportunityDetectorService } from './genome-opportunity-detector.service';
 import { GenomeAutonomyGateService } from './genome-autonomy-gate.service';
 import { GenomeRecommendationOutcomeService } from './genome-recommendation-outcome.service';
+import { financialExperimentFlags } from '../../key-autonomy/key-action-genome-projection';
 import type {
   CheckGenomeAutonomyGateInput,
   CloseGenomeRecommendationObservationInput,
@@ -514,10 +515,26 @@ export class KeyGenomeController {
       return this.experimentService.listExperiments(businessId, { status, limit: asked });
     }
     const rows = await this.experimentService.listExperiments(businessId, { status, limit: 1000 });
+    // FU-GENOME-EVOLUTION-SURFACES (D-238): also by provenance (bridged from a FINANCIAL recommendation) and by the
+    // proposal text vocabulary, fail closed.
+    const financial = await financialExperimentFlags(this.prisma, businessId, rows as any[]);
     return firstN(
-      rows.filter((e: any) => !isMoneyLabel(e.hypothesis) && !isMoneyLabel(e.action) && !isMoneyLabel(e.successMetric)),
+      rows.filter((e: any, i: number) => !financial[i] && !isMoneyLabel(e.hypothesis) && !isMoneyLabel(e.action) && !isMoneyLabel(e.successMetric)),
       asked,
     );
+  }
+
+  /**
+   * FU-GENOME-EVOLUTION-SURFACES (D-128, D-238): reading a financial experiment (financialExperimentFlags) needs revenue
+   * read; starting, completing or cancelling one needs revenue write (ModuleScopeGuard's message). 404 for an unknown id
+   * or one of another business, as before.
+   */
+  private async requireExperimentAuthority(businessId: string, experimentId: string, req: GenomeRequest | undefined, minLevel: 'read' | 'write') {
+    const experiment = await this.experimentService.getExperiment(businessId, experimentId);
+    const [financial] = await financialExperimentFlags(this.prisma, businessId, [experiment as any]);
+    const money = financial || [(experiment as any).hypothesis, (experiment as any).action, (experiment as any).successMetric].some((t) => isMoneyLabel(t));
+    if (money) await this.requireRevenue(businessId, req, minLevel);
+    return experiment;
   }
 
   @Post('experiments')
@@ -532,15 +549,18 @@ export class KeyGenomeController {
   async getExperiment(
     @Param('businessId') businessId: string,
     @Param('experimentId') experimentId: string,
+    @Req() req?: GenomeRequest,
   ) {
-    return this.experimentService.getExperiment(businessId, experimentId);
+    return this.requireExperimentAuthority(businessId, experimentId, req, 'read');
   }
 
   @Post('experiments/:experimentId/start')
   async startExperiment(
     @Param('businessId') businessId: string,
     @Param('experimentId') experimentId: string,
+    @Req() req?: GenomeRequest,
   ) {
+    await this.requireExperimentAuthority(businessId, experimentId, req, 'write');
     return this.experimentService.startExperiment(businessId, experimentId);
   }
 
@@ -549,7 +569,9 @@ export class KeyGenomeController {
     @Param('businessId') businessId: string,
     @Param('experimentId') experimentId: string,
     @Body() body?: RecommendationOutcome,
+    @Req() req?: GenomeRequest,
   ) {
+    await this.requireExperimentAuthority(businessId, experimentId, req, 'write');
     return this.experimentService.completeExperiment(businessId, experimentId, body);
   }
 
@@ -557,7 +579,9 @@ export class KeyGenomeController {
   async cancelExperiment(
     @Param('businessId') businessId: string,
     @Param('experimentId') experimentId: string,
+    @Req() req?: GenomeRequest,
   ) {
+    await this.requireExperimentAuthority(businessId, experimentId, req, 'write');
     return this.experimentService.cancelExperiment(businessId, experimentId);
   }
 

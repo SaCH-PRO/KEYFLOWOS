@@ -211,7 +211,7 @@ beforeAll(async () => {
     offRoute('GenomeModuleReadinessService') as any, offRoute('GenomeSignalService') as any,
     offRoute('GenomeRecommendationService') as any, offRoute('CommandCenterKeyGenomeBridgeService') as any, prisma,
   ));
-  const experimentsOf = (prisma: any) => once('experiments', () => new GenomeExperimentService(prisma, { recordExperimentCompleted: async () => null } as any));
+  const experimentsOf = (prisma: any) => once('experiments', () => new GenomeExperimentService(prisma, new Proxy({}, { get: (_t, prop) => (prop === 'then' ? undefined : async () => null) }) as any));
   const live = (token: any, make: (prisma: any) => any) => ({ provide: token, inject: [PrismaService], useFactory: make });
 
   // KeyGenomeController's collaborators other than the experiment service and Prisma are off these routes.

@@ -4,6 +4,7 @@ import {
   Post,
   Body,
   ForbiddenException,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -16,6 +17,8 @@ import { SelfAssessmentService } from './self-assessment.service';
 import { DigitalEmployeeAcceptanceService } from './digital-employee-acceptance.service';
 import { ValueLearningService } from './value-learning.service';
 import { ComplianceMapService } from '../key-autonomy/compliance-map.service';
+import { genomeReaderReadsRevenue } from '../business-genome/key-genome/genome-finance-scope';
+import { autonomyVerdictForReader } from '../key-autonomy/key-action-genome-projection';
 
 /**
  * Mounted at `/api/v1/cortex` with no `:businessId` path segment, so the tenant
@@ -131,8 +134,17 @@ export class KeyCortexAuditController {
     };
   }
 
+  /**
+   * FU-GENOME-EVOLUTION-SURFACES (D-233, D-238): a reader without revenue read (ModuleScopeGuard's reading) is served
+   * no verdict on a money action or whose reason or rule trace states money, and the others with their rule-trace
+   * metadata left out (the genome gate's readiness and confidence scores average the finance and revenue-quality
+   * health in). The totals are counts only and are unchanged. Revenue readers: unchanged.
+   */
   @Get('audit/decisions')
-  async auditDecisions(@GuardedBusinessId() guardedBusinessId: string | undefined) {
+  async auditDecisions(
+    @GuardedBusinessId() guardedBusinessId: string | undefined,
+    @Req() req?: { user?: { id?: string; role?: string } },
+  ) {
     return this.inGuardedTenant(guardedBusinessId, async (businessId) => {
       const [recent, total, blocked] = await Promise.all([
         this.prisma.client.autonomyVerdict.findMany({
@@ -144,7 +156,12 @@ export class KeyCortexAuditController {
         this.prisma.client.autonomyVerdict.count({ where: { businessId, allowed: false } }),
       ]);
 
-      return { businessId, total, blocked, recent };
+      const reader = req?.user?.id ? { id: req.user.id, role: req.user.role } : undefined;
+      if (await genomeReaderReadsRevenue(this.prisma, businessId, reader)) return { businessId, total, blocked, recent };
+      const visible = recent
+        .map((verdict) => autonomyVerdictForReader(verdict))
+        .filter((verdict): verdict is NonNullable<typeof verdict> => verdict !== null);
+      return { businessId, total, blocked, recent: visible };
     });
   }
 

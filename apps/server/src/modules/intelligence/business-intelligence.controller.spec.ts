@@ -46,6 +46,7 @@ describe('BusinessIntelligenceController', () => {
     const result = await controller.executiveBrief('biz_1');
 
     expect(result).toEqual(brief);
-    expect(service.generateExecutiveBrief).toHaveBeenCalledWith('biz_1');
+    // FU-GENOME-EVOLUTION-SURFACES: the request's reader is passed (null: this call has no user).
+    expect(service.generateExecutiveBrief).toHaveBeenCalledWith('biz_1', null);
   });
 });

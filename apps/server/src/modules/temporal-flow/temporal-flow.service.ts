@@ -1,6 +1,6 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { genomeReaderReadsRevenue, financialProposalsWithProvenance, isMoneyLabel, PROPOSAL_CLASSIFY_SELECT, proposalTextStatesMoney, structuredValueStatesMoney, type GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
-import { dnaSectionViewForReader, isDnaSectionEvent, isGenomeEvolutionEvent, readableGenomeEvolutionEvents, redactedDnaSectionEvent } from '../key-autonomy/key-action-genome-projection';
+import { dnaSectionViewForReader, isDnaSectionEvent, isGenomeEvolutionEvent, readableGenomeEvolutionEvents, redactedDnaSectionEvent, ruleTraceWithoutMetadata, withoutCompositeScores, carriesCompositeScores } from '../key-autonomy/key-action-genome-projection';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
@@ -43,28 +43,6 @@ function eventTextStatesMoney(e: { payload?: unknown; metadata?: unknown }): boo
     if (structuredValueStatesMoney(result)) return true;
   }
   return false;
-}
-
-/**
- * Round 9 (security MAJOR-1): a lifecycle row's payload with every autonomy rule-trace entry's `metadata` left out. The
- * orchestrator's metadata holds its counts and scores; the genome gate's scores average the affected domains' health,
- * revenue quality and finance among them (D-233), and a rule may record an amount. A reader without revenue read is
- * served the row this way, and the row is classified as served. Each entry's rule, source, result and reason stay; a
- * trace that is not a list is left as it is (and read whole). Returns the payload itself when there is nothing to drop.
- */
-function ruleTraceWithoutMetadata(payload: unknown): unknown {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !('ruleTrace' in payload)) return payload;
-  const { ruleTrace, ...rest } = payload as Record<string, unknown>;
-  if (!Array.isArray(ruleTrace)) return payload;
-  if (!ruleTrace.some((entry) => entry && typeof entry === 'object' && !Array.isArray(entry) && 'metadata' in entry)) return payload;
-  return {
-    ...rest,
-    ruleTrace: ruleTrace.map((entry) => {
-      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
-      const { metadata: _metadata, ...kept } = entry as Record<string, unknown>;
-      return kept;
-    }),
-  };
 }
 
 /** The most rows a reader may ask one timeline read for, and the most rows that read scans before it answers what it has. */
@@ -122,8 +100,12 @@ export class TemporalFlowService {
     const proposals = events.filter((e) => e.entityType === 'key_action_proposal');
     const evolutions = events.filter((e) => isGenomeEvolutionEvent(e));
     const dnaSections = events.filter((e) => isDnaSectionEvent(e));
-    if (proposals.length === 0 && evolutions.length === 0 && dnaSections.length === 0) return events;
+    const composites = events.some((e) => carriesCompositeScores(e.payload));
+    if (proposals.length === 0 && evolutions.length === 0 && dnaSections.length === 0 && !composites) return events;
     if (readsRevenue ?? (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined))) return events;
+    // FU-GENOME-EVOLUTION-SURFACES (D-233): the genome's composite scores (genome.updated, constitution rows) weight the
+    // financial and sales DNA sections; they are left out of every row's payload.
+    if (composites) events = events.map((e) => (carriesCompositeScores(e.payload) ? ({ ...e, payload: withoutCompositeScores(e.payload) } as E) : e));
     // FU-KEY-ACTION-GENOME-PROJECTION (D-233, D-238): a genome-evolution decision row is served only when its proposal
     // is read in this business, is of a non-money DNA section and nothing in it or the row states money (fail closed).
     const evolutionFlags = await readableGenomeEvolutionEvents(this.prisma, businessId, evolutions);

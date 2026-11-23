@@ -22,6 +22,7 @@ import type {
 import type { BlueprintData, DnaSectionKey } from '../blueprint/blueprint.types';
 import type { TemporalFlowAnalysis } from '../temporal-flow/temporal-flow.types';
 import type { GenomeEvolutionProposalData } from '../business-genome/genome-evolution.types';
+import type { GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
 
 const MODE_VALUES = new Set<string>([
   'STRATEGIST',
@@ -53,7 +54,8 @@ export class KeyExecutiveModeService {
     return KEY_EXECUTIVE_MODE_LIST;
   }
 
-  async generateModeBrief(businessId: string, mode: string): Promise<KeyExecutiveModeBrief> {
+  /** `reader` (FU-GENOME-EVOLUTION-SURFACES, D-238): as BusinessIntelligenceService.generateExecutiveBrief's. */
+  async generateModeBrief(businessId: string, mode: string, reader?: GenomeReader | null): Promise<KeyExecutiveModeBrief> {
     if (!MODE_VALUES.has(mode)) {
       throw new BadRequestException(
         `Invalid executive mode. Must be one of: ${Array.from(MODE_VALUES).join(', ')}`,
@@ -63,10 +65,12 @@ export class KeyExecutiveModeService {
     const config = KEY_EXECUTIVE_MODE_CONFIG[keyMode];
 
     const [executiveBrief, blueprint, temporalAnalysis, proposals, assets] = await Promise.all([
-      this.intelligence.generateExecutiveBrief(businessId),
+      this.intelligence.generateExecutiveBrief(businessId, reader),
       this.blueprint.getBlueprint(businessId),
       this.temporal.analyze(businessId),
-      this.genomeEvolution.list(businessId, { status: 'PENDING' }),
+      reader === undefined
+        ? this.genomeEvolution.list(businessId, { status: 'PENDING' })
+        : this.genomeEvolution.listForReader(businessId, { status: 'PENDING' }, reader),
       this.businessAssets.list(businessId),
     ]);
 

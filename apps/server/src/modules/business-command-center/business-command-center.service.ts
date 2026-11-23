@@ -258,18 +258,21 @@ export class BusinessCommandCenterService {
       constitutionStaleness,
       results,
     ] = await Promise.all([
-      this.safeResolve(sources, 'executiveBrief', businessId, () => this.intelligence.generateExecutiveBrief(businessId), { summary: '', topPriorities: [], insights: [], genomeIntegrity: 0, executiveReadinessScore: 0, genomeStage: '', businessId, generatedAt: new Date().toISOString() } as BusinessExecutiveBrief),
+      this.safeResolve(sources, 'executiveBrief', businessId, () => this.intelligence.generateExecutiveBrief(businessId, reader), { summary: '', topPriorities: [], insights: [], genomeIntegrity: 0, executiveReadinessScore: 0, genomeStage: '', businessId, generatedAt: new Date().toISOString() } as BusinessExecutiveBrief),
       this.safeResolve(
         sources,
         'modeBriefs',
         businessId,
-        () => Promise.all(MODES.map((mode) => this.keyModes.generateModeBrief(businessId, mode))),
+        () => Promise.all(MODES.map((mode) => this.keyModes.generateModeBrief(businessId, mode, reader))),
         [] as KeyExecutiveModeBrief[],
       ),
       this.safeResolve(sources, 'pendingApprovals', businessId, () => proposals('PENDING'), []),
       this.safeResolve(sources, 'approvedAwaitingExecution', businessId, () => proposals('APPROVED'), []),
       this.safeResolve(sources, 'temporalAnalysis', businessId, () => this.temporal.analyze(businessId), { summary: '', urgentItems: [], opportunities: [], risks: [], genomeProposalCandidates: [] } as TemporalFlowAnalysis),
-      this.safeResolve(sources, 'genomeProposals', businessId, () => this.genomeEvolution.list(businessId, { status: 'PENDING' }), []),
+      // FU-GENOME-EVOLUTION-SURFACES (D-238): the pending evolution proposals the reader may see (financial ones withheld).
+      this.safeResolve(sources, 'genomeProposals', businessId, () => (reader === undefined
+        ? this.genomeEvolution.list(businessId, { status: 'PENDING' })
+        : this.genomeEvolution.listForReader(businessId, { status: 'PENDING' }, reader)), []),
       this.safeResolve(sources, 'genome', businessId, () => this.blueprint.calculateGenomeIntegrity(businessId), { genomeIntegrity: 0, threePillarMinimumMet: false, genomeDnaScores: {}, genomeDnaConfidence: {}, genomeStage: 'SEED', dnaSections: [], executiveReadinessScore: 0, readinessBreakdown: {} } as unknown as GenomeIntegrityResult),
       this.safeResolve(sources, 'rawAssets', businessId, () => this.assets.list(businessId), [] as BusinessAsset[]),
       this.safeResolve(sources, 'latestConstitution', businessId, () => this.constitution.latest(businessId), null),

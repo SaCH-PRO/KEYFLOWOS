@@ -5,6 +5,11 @@ import type { GenomeEvolutionService } from './genome-evolution.service';
 function makeController() {
   const service = {
     list: vi.fn().mockResolvedValue([{ id: 'prop_1' }]),
+    // FU-GENOME-EVOLUTION-SURFACES: the reader-facing reads (pass-through here; the projection is pinned by
+    // genome-evolution-surfaces.integration.test.ts) and the proposal an action is about (non-financial).
+    listForReader: vi.fn().mockResolvedValue([{ id: 'prop_1' }]),
+    visibleTo: vi.fn(async (_b: string, rows: unknown[]) => rows),
+    get: vi.fn().mockResolvedValue({ id: 'prop_1', section: 'marketing', reason: 'R', proposedPatch: { channels: ['WhatsApp'] }, evidence: [] }),
     create: vi.fn().mockResolvedValue({ id: 'prop_2' }),
     generateFromTemporalFlow: vi.fn().mockResolvedValue([{ id: 'prop_3' }]),
     approve: vi.fn().mockResolvedValue({ proposal: { id: 'prop_1', status: 'APPROVED' }, genome: {} }),
@@ -12,15 +17,17 @@ function makeController() {
     edit: vi.fn().mockResolvedValue({ id: 'prop_1', status: 'EDITED' }),
   } as unknown as GenomeEvolutionService;
 
-  const controller = new GenomeEvolutionController(service);
+  // An owner's membership: revenue read and write, so actions and their answers are as before.
+  const prisma = { client: { membership: { findUnique: vi.fn().mockResolvedValue({ role: 'OWNER', permissionScopes: null }) } } } as any;
+  const controller = new GenomeEvolutionController(service, prisma);
   return { controller, service };
 }
 
 describe('GenomeEvolutionController', () => {
   it('GET /evolution-proposals lists proposals', async () => {
     const { controller, service } = makeController();
-    const result = await controller.list('biz_1', 'PENDING', 'marketing');
-    expect(service.list).toHaveBeenCalledWith('biz_1', { status: 'PENDING', section: 'marketing' });
+    const result = await controller.list('biz_1', 'PENDING', 'marketing', { user: { id: 'user_1' } });
+    expect(service.listForReader).toHaveBeenCalledWith('biz_1', { status: 'PENDING', section: 'marketing' }, { id: 'user_1', role: undefined });
     expect(result).toEqual([{ id: 'prop_1' }]);
   });
 
@@ -44,6 +51,7 @@ describe('GenomeEvolutionController', () => {
     const result = await controller.approve('biz_1', 'prop_1', { user: { id: 'user_1' } } as any);
     expect(service.approve).toHaveBeenCalledWith('biz_1', 'prop_1', 'user_1');
     expect(result.proposal.status).toBe('APPROVED');
+    expect((result as any).genome).toEqual({});
   });
 
   it('POST /evolution-proposals/:id/reject rejects', async () => {
