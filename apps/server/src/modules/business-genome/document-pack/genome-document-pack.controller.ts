@@ -44,13 +44,15 @@ export class GenomeDocumentPackController {
     @Query('format') format: string = 'pdf',
     @Query('version') version: string,
     @Res({ passthrough: false }) res: Response,
+    @Req() req?: { user?: { id?: string; role?: string } },
   ) {
     const exportFormat = this.parseFormat(format);
     const versionNumber = version === undefined || version === '' ? undefined : Number(version);
     if (versionNumber !== undefined && (!Number.isFinite(versionNumber) || versionNumber < 1)) {
       throw new BadRequestException('version must be a positive integer');
     }
-    const result = await this.service.exportConstitution(businessId, versionNumber, exportFormat);
+    // FU-GENOME-SURFACES-REVENUE (D-233): exported for the request's reader.
+    const result = await this.service.exportConstitution(businessId, versionNumber, exportFormat, req?.user?.id ? { id: req.user.id, role: req.user.role } : null);
     this.send(res, result);
   }
 
@@ -59,9 +61,11 @@ export class GenomeDocumentPackController {
     @Param('businessId') businessId: string,
     @Query('format') format: string = 'pdf',
     @Res({ passthrough: false }) res: Response,
+    @Req() req?: { user?: { id?: string; role?: string } },
   ) {
     const exportFormat = this.parseFormat(format);
-    const result = await this.service.exportDnaReport(businessId, exportFormat);
+    // FU-GENOME-SURFACES-REVENUE (D-233): exported for the request's reader.
+    const result = await this.service.exportDnaReport(businessId, exportFormat, req?.user?.id ? { id: req.user.id, role: req.user.role } : null);
     this.send(res, result);
   }
 

@@ -42,9 +42,11 @@ export interface BusinessExecutiveBrief {
   businessId: string;
   generatedAt: string;
   summary: string;
-  genomeIntegrity: number;
-  executiveReadinessScore: number;
-  genomeStage: string;
+  /** null: withheld from a reader without revenue read (FU-GENOME-SURFACES-REVENUE, D-233); named in withheldForRevenue. */
+  genomeIntegrity: number | null;
+  executiveReadinessScore: number | null;
+  genomeStage: string | null;
+  withheldForRevenue?: string[];
   insights: BusinessIntelligenceInsight[];
   topPriorities: BusinessIntelligenceInsight[];
 }

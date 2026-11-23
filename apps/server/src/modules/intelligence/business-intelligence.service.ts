@@ -1,8 +1,10 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { PrismaService } from '../../core/prisma/prisma.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { GenomeEvolutionService } from '../business-genome/genome-evolution.service';
-import type { GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
+import { dnaScoresForReader, type GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
+import { GENOME_COMPOSITES, readsRevenueFor } from '../business-genome/key-genome/genome-composites-for-reader';
 import { BusinessAssetsService } from '../business-assets/business-assets.service';
 import type {
   BusinessExecutiveBrief,
@@ -20,6 +22,9 @@ export class BusinessIntelligenceService {
     @Inject(TemporalFlowService) private readonly temporal: TemporalFlowService,
     @Inject(GenomeEvolutionService) private readonly genomeEvolution: GenomeEvolutionService,
     @Inject(BusinessAssetsService) private readonly businessAssets: BusinessAssetsService,
+    // FU-GENOME-SURFACES-REVENUE (D-233): reads a given reader's revenue level. Optional so every existing construction
+    // keeps working; without it a given reader is served no finance-derived score (fail closed).
+    @Optional() @Inject(PrismaService) private readonly prisma?: PrismaService,
   ) {}
 
   /**
@@ -28,24 +33,30 @@ export class BusinessIntelligenceService {
    * (GenomeEvolutionService.listForReader). Left out, the internal callers are unchanged.
    */
   async generateExecutiveBrief(businessId: string, reader?: GenomeReader | null): Promise<BusinessExecutiveBrief> {
-    const [blueprint, proposals, temporalAnalysis, assets] = await Promise.all([
+    const [blueprint, proposals, temporalAnalysis, assets, readsRevenue] = await Promise.all([
       this.blueprint.getBlueprint(businessId),
       reader === undefined
         ? this.genomeEvolution.list(businessId, { status: 'PENDING' })
         : this.genomeEvolution.listForReader(businessId, { status: 'PENDING' }, reader),
       this.temporal.analyze(businessId),
       this.businessAssets.list(businessId),
+      // FU-GENOME-SURFACES-REVENUE (D-233): the composites and the financial and sales DNA are served to a reader with
+      // revenue read only. No reader given (an internal caller) is unchanged.
+      readsRevenueFor(this.prisma, businessId, reader),
     ]);
 
     const genomeIntegrity = blueprint.genomeIntegrity ?? 0;
     const executiveReadinessScore = blueprint.executiveReadinessScore ?? 0;
     const genomeStage = blueprint.genomeStage ?? 'CONCEPT';
-    const dnaScores = blueprint.genomeDnaScores ?? {};
+    // Withheld, not recomputed: the integrity, readiness and stage weight the financial and sales DNA (D-233).
+    const dnaScores = dnaScoresForReader(blueprint.genomeDnaScores ?? {}, readsRevenue);
 
     const insights: BusinessIntelligenceInsight[] = [];
 
-    insights.push(this.buildReadinessInsight(executiveReadinessScore));
-    insights.push(this.buildIntegrityInsight(genomeIntegrity));
+    if (readsRevenue) {
+      insights.push(this.buildReadinessInsight(executiveReadinessScore));
+      insights.push(this.buildIntegrityInsight(genomeIntegrity));
+    }
 
     for (const [section, score] of Object.entries(dnaScores)) {
       if (typeof score === 'number' && score < 50) {
@@ -178,15 +189,16 @@ export class BusinessIntelligenceService {
       businessId,
       generatedAt: new Date().toISOString(),
       summary: this.buildSummary({
-        readiness: executiveReadinessScore,
-        integrity: genomeIntegrity,
+        readiness: readsRevenue ? executiveReadinessScore : null,
+        integrity: readsRevenue ? genomeIntegrity : null,
         highPriorityCount: insights.filter((i) => i.priority === 'HIGH' || i.priority === 'CRITICAL').length,
         proposalCount: proposals.length,
         riskCount: insights.filter((i) => i.domain === 'RISK' || i.domain === 'ASSETS').length,
       }),
-      genomeIntegrity,
-      executiveReadinessScore,
-      genomeStage,
+      genomeIntegrity: readsRevenue ? genomeIntegrity : null,
+      executiveReadinessScore: readsRevenue ? executiveReadinessScore : null,
+      genomeStage: readsRevenue ? genomeStage : null,
+      ...(readsRevenue ? {} : { withheldForRevenue: [...GENOME_COMPOSITES] }),
       insights: sorted,
       topPriorities,
     };
@@ -265,8 +277,9 @@ export class BusinessIntelligenceService {
   }
 
   private buildSummary(input: {
-    readiness: number;
-    integrity: number;
+    /** null: withheld from the reader (D-233), and not stated. */
+    readiness: number | null;
+    integrity: number | null;
     highPriorityCount: number;
     proposalCount: number;
     riskCount: number;
@@ -281,12 +294,14 @@ export class BusinessIntelligenceService {
     if (input.riskCount > 0) {
       parts.push(`${input.riskCount} operational or asset risk${input.riskCount === 1 ? '' : 's'} detected.`);
     }
-    if (input.readiness < 50) {
+    if (input.readiness !== null && input.readiness < 50) {
       parts.push('Executive Readiness is low; completing the Business Genome is the top priority.');
     }
     if (parts.length === 0) {
       parts.push('Business health is stable. Continue monitoring Temporal Flow and Genome Evolution proposals.');
     }
+    // D-233: the composites are stated only to a reader they are served to (readiness null: withheld).
+    if (input.readiness === null || input.integrity === null) return parts.join(' ');
     return `Executive Readiness ${input.readiness}%, Genome Integrity ${input.integrity}%. ${parts.join(' ')}`;
   }
 

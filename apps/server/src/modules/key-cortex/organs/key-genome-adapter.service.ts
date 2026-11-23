@@ -16,6 +16,12 @@ import {
   listRecommendationsForReader,
   listSignalsForReader,
 } from '../../business-genome/key-genome/genome-finance-scope';
+import {
+  blueprintForReader,
+  genomeIntegrityForReader,
+  isMoneyFact,
+  moduleReadinessForReader,
+} from '../../business-genome/key-genome/genome-composites-for-reader';
 import { GenomeFactService } from '../../business-genome/key-genome/genome-fact.service';
 import { GenomeModuleReadinessService } from '../../business-genome/key-genome/genome-module-readiness.service';
 import { GenomeScoringService } from '../../business-genome/key-genome/genome-scoring.service';
@@ -98,8 +104,9 @@ export class KeyGenomeAdapterService extends KeyOrganAdapter {
         [],
         {},
         async (ctx) => {
+          // FU-GENOME-SURFACES-REVENUE (D-233): as GET blueprint serves it to the acting member.
           const blueprint = await this.blueprint.getBlueprint(ctx.businessId);
-          return { success: true, data: blueprint };
+          return { success: true, data: blueprintForReader(blueprint as unknown as Record<string, unknown>, await this.readerReadsRevenue(ctx)) };
         },
       ),
       this.makeTool(
@@ -110,8 +117,10 @@ export class KeyGenomeAdapterService extends KeyOrganAdapter {
         [],
         {},
         async (ctx) => {
+          // FU-GENOME-SURFACES-REVENUE (D-233): as GET blueprint/.../genome serves it to the acting member (the
+          // composites withheld, no financial or sales DNA section, for one without revenue read).
           const integrity = await this.blueprint.calculateGenomeIntegrity(ctx.businessId);
-          return { success: true, data: integrity };
+          return { success: true, data: genomeIntegrityForReader(integrity, await this.readerReadsRevenue(ctx)) };
         },
       ),
       this.makeTool(
@@ -167,9 +176,13 @@ export class KeyGenomeAdapterService extends KeyOrganAdapter {
           limit: { type: 'number' },
         },
         async (ctx, input) => {
-          const facts = await this.factService.listFacts(ctx.businessId, {
+          const all = await this.factService.listFacts(ctx.businessId, {
             section: input.section as string,
           });
+          // FU-GENOME-SURFACES-REVENUE (D-233, D-234): no fact of a money section or domain (or unclassifiable) for a
+          // member without revenue read; the count is the facts served.
+          const readsRevenue = await this.readerReadsRevenue(ctx);
+          const facts = readsRevenue ? all : all.filter((f) => !isMoneyFact(f));
           return { success: true, data: { facts, count: facts.length } };
         },
       ),
@@ -183,7 +196,15 @@ export class KeyGenomeAdapterService extends KeyOrganAdapter {
           module: { type: 'string' },
         },
         async (ctx, input) => {
-          const readiness = await this.readinessService.getReadiness(ctx.businessId, input.module as any);
+          const whole = await this.readinessService.getReadiness(ctx.businessId, input.module as any);
+          // FU-GENOME-SURFACES-REVENUE (D-233): no finance or commerce module readiness, and no money fact, for a member
+          // without revenue read (a module asked for by name that is withheld answers null, as an unknown module does).
+          const readsRevenue = await this.readerReadsRevenue(ctx);
+          let readiness = whole;
+          if (!readsRevenue && whole) {
+            const served = moduleReadinessForReader(Array.isArray(whole) ? whole : [whole], false);
+            readiness = Array.isArray(whole) ? served : (served[0] ?? null);
+          }
           return { success: true, data: { readiness } };
         },
       ),

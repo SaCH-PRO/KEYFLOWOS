@@ -260,7 +260,7 @@ beforeAll(async () => {
     assetsStandIn as any, constitutionOf(prisma), scoring as any, readinessStore as any, signalStore as any,
     recommendationStore as any, bridgeStandIn as any, prisma,
   ));
-  const documentPackOf = (prisma: any) => once('documentPack', () => new GenomeDocumentPackService(intelligenceOf(prisma), constitutionOf(prisma), blueprintOf(prisma)));
+  const documentPackOf = (prisma: any) => once('documentPack', () => new GenomeDocumentPackService(intelligenceOf(prisma), constitutionOf(prisma), blueprintOf(prisma), prisma));
   const live = (token: any, make: (prisma: any) => any) => ({ provide: token, inject: [PrismaService], useFactory: make });
 
   moduleRef = await Test.createTestingModule({
@@ -477,7 +477,8 @@ describe('FU-GENOME-SURFACES-REVENUE: the genome surfaces serve finance-derived 
       const res = await get(`/intelligence/businesses/${ID.biz}/key-modes/${mode}`, ID.staffNone);
       expect(res.status, mode).toBe(200);
       const text = JSON.stringify(res.body);
-      expect(text, mode).not.toMatch(/-dna-(financial|sales)|Financial DNA|Sales DNA/);
+      // The mode's static default action ("Review Financial DNA") names no score; a finding on the DNA does.
+      expect(text, mode).not.toMatch(/-dna-(financial|sales)|(Financial|Sales) DNA (is|score|section)/);
       expect(text, mode).not.toMatch(/Executive Readiness|Genome Integrity|REVENUE.ENGINE/i);
     }
     const owner = await get(`/intelligence/businesses/${ID.biz}/key-modes/GROWTH_ADVISOR`, ID.owner);

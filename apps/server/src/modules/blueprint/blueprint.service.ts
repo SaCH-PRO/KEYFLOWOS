@@ -13,6 +13,7 @@ import {
 } from '../business-genome/key-genome/key-genome.service';
 import { GenomeModuleReadinessService } from '../business-genome/key-genome/genome-module-readiness.service';
 import { KeyGenomeBackfillService } from '../business-genome/key-genome/key-genome-backfill.service';
+import { dnaSectionsForReader } from '../business-genome/key-genome/genome-composites-for-reader';
 import {
   BlueprintBrand,
   BlueprintComplianceProfile,
@@ -381,8 +382,13 @@ export class BlueprintService {
   /**
    * Return rule-based DNA recommendations for the next highest-value action.
    */
-  async getRecommendations(businessId: string): Promise<GenomeRecommendation[]> {
-    const { dnaSections, threePillarMinimumMet } = await this.calculateGenomeIntegrity(businessId);
+  async getRecommendations(businessId: string, opts: { readsRevenue?: boolean } = {}): Promise<GenomeRecommendation[]> {
+    const genome = await this.calculateGenomeIntegrity(businessId);
+    const { threePillarMinimumMet } = genome;
+    // FU-GENOME-SURFACES-REVENUE (D-233): for a reader without revenue read the weakest section is ranked among the
+    // non-money sections only (a ranking that names the financial or sales DNA as weakest reveals it). Left out, every
+    // section is ranked, as before.
+    const dnaSections = dnaSectionsForReader(genome.dnaSections, opts.readsRevenue !== false);
 
     const recommendations: GenomeRecommendation[] = [];
 

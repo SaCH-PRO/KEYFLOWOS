@@ -6,6 +6,10 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { GenomeGateGuard } from '../../core/auth/genome-gate.guard';
 import type { ConstitutionVersionData } from './constitution-version.types';
+import { PrismaService } from '../../core/prisma/prisma.service';
+
+// FU-GENOME-SURFACES-REVENUE (D-233): the reader is the business owner (reads revenue), so versions are served whole.
+const OWNER = { user: { id: 'user_1', role: 'USER' } };
 
 describe('ConstitutionVersionController', () => {
   async function makeController() {
@@ -34,6 +38,10 @@ describe('ConstitutionVersionController', () => {
             archive: vi.fn().mockResolvedValue({ ...version, status: 'ARCHIVED' }),
           },
         },
+        {
+          provide: PrismaService,
+          useValue: { client: { membership: { findUnique: vi.fn().mockResolvedValue({ role: 'OWNER', permissionScopes: null }) } } },
+        },
       ],
     })
       .overrideGuard(AuthGuard).useValue({ canActivate: vi.fn(() => true) })
@@ -48,7 +56,7 @@ describe('ConstitutionVersionController', () => {
 
   it('returns the latest version', async () => {
     const { controller, service, version } = await makeController();
-    const result = await controller.latest('biz_1');
+    const result = await controller.latest('biz_1', OWNER);
     expect(result).toEqual(version);
     expect(service.latest).toHaveBeenCalledWith('biz_1');
   });
@@ -62,14 +70,14 @@ describe('ConstitutionVersionController', () => {
 
   it('fetches a specific version', async () => {
     const { controller, service, version } = await makeController();
-    const result = await controller.version('biz_1', '3');
+    const result = await controller.version('biz_1', '3', OWNER);
     expect(result).toEqual(version);
     expect(service.getVersion).toHaveBeenCalledWith('biz_1', 3);
   });
 
   it('generates a new version', async () => {
     const { controller, service, version } = await makeController();
-    const result = await controller.generate('biz_1', { changeNotes: 'notes' }, { user: { id: 'user_1' } });
+    const result = await controller.generate('biz_1', { changeNotes: 'notes' }, OWNER);
     expect(result).toEqual(version);
     expect(service.generate).toHaveBeenCalledWith('biz_1', { changeNotes: 'notes' }, 'user_1');
   });

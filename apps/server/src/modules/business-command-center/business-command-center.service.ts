@@ -2,7 +2,14 @@ import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { BusinessIntelligenceService } from '../intelligence/business-intelligence.service';
 import { KeyExecutiveModeService } from '../intelligence/key-executive-mode.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
-import type { GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
+import { listRecommendationsForReader, listSignalsForReader, type GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
+import {
+  GENOME_COMPOSITES,
+  genomeIntegrityForReader,
+  keyGenomeSectionsForReader,
+  moduleReadinessForReader,
+  readsRevenueFor,
+} from '../business-genome/key-genome/genome-composites-for-reader';
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { GenomeEvolutionService } from '../business-genome/genome-evolution.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
@@ -245,6 +252,10 @@ export class BusinessCommandCenterService {
     const proposals = (status: 'PENDING' | 'APPROVED') =>
       reader === undefined ? this.keyAutonomy.list(businessId, { status }) : this.keyAutonomy.listForReader(businessId, { status }, reader);
     const sources: SourceLog = {};
+    // FU-GENOME-SURFACES-REVENUE (D-233, D-234, D-128, D-100): the genome composites, the money sections and readiness,
+    // the cross-domain brief and the finance genome signals and recommendations are served to a reader with revenue
+    // read only. No reader given (an internal caller) is unchanged; no member reads none.
+    const readsRevenue = await readsRevenueFor(this.prisma, businessId, reader);
     const [
       executiveBrief,
       modeBriefs,
@@ -252,7 +263,7 @@ export class BusinessCommandCenterService {
       approvedAwaitingExecution,
       temporalAnalysis,
       genomeProposals,
-      genome,
+      wholeGenome,
       rawAssets,
       latestConstitution,
       constitutionStaleness,
@@ -281,14 +292,25 @@ export class BusinessCommandCenterService {
     ]);
 
     const modeMap = new Map(modeBriefs.map((brief) => [brief.mode, brief]));
+    const genome = genomeIntegrityForReader(wholeGenome, readsRevenue);
 
     // Compute KEY Genome scores and module readiness after the parallel block
     // so readiness uses freshly-scored facts rather than stale DB values.
     const keyGenomeFacts = await this.safeResolve(sources, 'keyGenomeFacts', businessId, () => this.genomeScoring.computeFactScores(businessId), []);
-    const keyGenomeScore = this.safeResolveSync(sources, 'keyGenomeScore', businessId, () => this.genomeScoring.computeBusinessScore(businessId, keyGenomeFacts), { businessId, overall: 0, integrity: 0, readiness: 0, confidence: 0, sections: [], computedAt: new Date().toISOString() } as unknown as KeyGenomeScore);
-    const moduleReadiness = await this.safeResolve(sources, 'moduleReadiness', businessId, () => this.genomeReadiness.computeReadiness(businessId, keyGenomeFacts), []);
-    const keyGenome = this.buildKeyGenome(keyGenomeScore);
-    keyGenome.crossDomain = await this.safeResolve(sources, 'crossDomainBrief', businessId, () => this.keyGenomeBridge.buildCrossDomainBrief(businessId, moduleReadiness), undefined);
+    const wholeKeyGenomeScore = this.safeResolveSync(sources, 'keyGenomeScore', businessId, () => this.genomeScoring.computeBusinessScore(businessId, keyGenomeFacts), { businessId, overall: 0, integrity: 0, readiness: 0, confidence: 0, sections: [], computedAt: new Date().toISOString() } as unknown as KeyGenomeScore);
+    const wholeModuleReadiness = await this.safeResolve(sources, 'moduleReadiness', businessId, () => this.genomeReadiness.computeReadiness(businessId, keyGenomeFacts), []);
+    // The served KEY genome sections and module readiness (no FINANCIAL, SALES, OFFER_PRODUCT section; no finance or
+    // commerce module, no money fact): every count, item and summary below is built from these.
+    const keyGenomeScore = readsRevenue
+      ? wholeKeyGenomeScore
+      : { ...wholeKeyGenomeScore, sections: keyGenomeSectionsForReader(wholeKeyGenomeScore.sections, false) };
+    const moduleReadiness = moduleReadinessForReader(wholeModuleReadiness, readsRevenue);
+    const keyGenome = this.buildKeyGenome(keyGenomeScore, readsRevenue);
+    // The cross-domain brief's overall health averages the finance health score in and its domains include finance
+    // (the REST cross-domain routes need revenue read): neither served nor computed for another reader.
+    if (readsRevenue) {
+      keyGenome.crossDomain = await this.safeResolve(sources, 'crossDomainBrief', businessId, () => this.keyGenomeBridge.buildCrossDomainBrief(businessId, wholeModuleReadiness), undefined);
+    }
 
     const approvalItems = this.mapPendingApprovals(pendingApprovals);
     const approvedItems = this.mapApprovedAwaitingExecution(approvedAwaitingExecution);
@@ -303,8 +325,8 @@ export class BusinessCommandCenterService {
     const weakSectionItems = this.mapWeakSectionItems(keyGenomeScore);
     // These two were the only unguarded reads: a throwing signal or
     // recommendation store rejected the whole snapshot (V1-47).
-    const genomeSignalItems = await this.safeResolve(sources, 'genomeSignals', businessId, () => this.mapGenomeSignalItems(businessId), [] as CommandCenterItem[]);
-    const genomeRecommendationItems = await this.safeResolve(sources, 'genomeRecommendations', businessId, () => this.mapGenomeRecommendationItems(businessId), [] as CommandCenterItem[]);
+    const genomeSignalItems = await this.safeResolve(sources, 'genomeSignals', businessId, () => this.mapGenomeSignalItems(businessId, readsRevenue), [] as CommandCenterItem[]);
+    const genomeRecommendationItems = await this.safeResolve(sources, 'genomeRecommendations', businessId, () => this.mapGenomeRecommendationItems(businessId, readsRevenue), [] as CommandCenterItem[]);
 
     const allItems: CommandCenterItem[] = [
       ...approvalItems,
@@ -335,7 +357,7 @@ export class BusinessCommandCenterService {
       keyGenome,
       moduleReadiness,
     );
-    const pulse = this.buildPulse(health, keyGenome);
+    const pulse = this.buildPulse(health, keyGenome, readsRevenue);
     const briefing = this.buildBriefing(health, ranked, keyGenome);
     const governance = this.buildGovernance(health);
 
@@ -596,7 +618,7 @@ export class BusinessCommandCenterService {
   }
 
   private buildGenome(
-    genome: Awaited<ReturnType<BlueprintService['calculateGenomeIntegrity']>>,
+    genome: ReturnType<typeof genomeIntegrityForReader<GenomeIntegrityResult>>,
     pendingProposals: CommandCenterItem[],
   ): CommandCenterGenome {
     const weakest = (genome.dnaSections ?? [])
@@ -625,6 +647,7 @@ export class BusinessCommandCenterService {
       integrity: genome.genomeIntegrity,
       readiness: genome.executiveReadinessScore,
       stage: genome.genomeStage,
+      ...('withheldForRevenue' in genome && genome.withheldForRevenue ? { withheldForRevenue: genome.withheldForRevenue } : {}),
       pendingProposals,
       weakestSections: weakest,
     };
@@ -667,10 +690,13 @@ export class BusinessCommandCenterService {
     keyGenome: CommandCenterKeyGenome,
     moduleReadiness: ModuleReadinessData[],
   ): CommandCenterHealth {
+    // D-233: the brief carries null composites for a reader without revenue read, and the KEY genome null scores.
+    const withheld = brief.withheldForRevenue || keyGenome.withheldForRevenue;
     return {
       genomeIntegrity: brief.genomeIntegrity,
       executiveReadinessScore: brief.executiveReadinessScore,
       genomeStage: brief.genomeStage,
+      ...(withheld ? { withheldForRevenue: [...GENOME_COMPOSITES, 'keyGenomeOverall', 'keyGenomeReadiness', 'keyGenomeConfidence'] } : {}),
       criticalCount: rankedItems.filter((i) => i.priority === 'CRITICAL').length,
       highPriorityCount: rankedItems.filter((i) => i.priority === 'HIGH').length,
       pendingApprovalCount,
@@ -699,7 +725,12 @@ export class BusinessCommandCenterService {
     const parts: string[] = [briefSummary];
 
     const hasFacts = keyGenome.sections.length > 0;
-    if (hasFacts) {
+    if (hasFacts && keyGenome.overall === null) {
+      // D-233: the KEY genome scores are withheld from this reader; only the counts are stated.
+      if (health.blockedModuleCount > 0) {
+        parts.push(`${health.blockedModuleCount} module(s) are blocked by missing facts.`);
+      }
+    } else if (hasFacts) {
       parts.push(
         `KEY Genome is ${keyGenome.overall}% ready with ${keyGenome.confidence}% confidence.`,
       );
@@ -725,11 +756,23 @@ export class BusinessCommandCenterService {
     return parts.join(' ');
   }
 
-  private buildPulse(health: CommandCenterHealth, keyGenome: CommandCenterKeyGenome) {
+  private buildPulse(health: CommandCenterHealth, keyGenome: CommandCenterKeyGenome, readsRevenue = true) {
     const clamp = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
     const operationsScore = clamp(100 - health.blockedModuleCount * 15 - health.lowReadinessModuleCount * 5);
     const riskScore = clamp(100 - health.criticalCount * 25 - health.highPriorityCount * 10);
     const approvalScore = clamp(health.pendingApprovalCount === 0 ? 95 : 75 - health.pendingApprovalCount * 5);
+    if (!readsRevenue || keyGenome.overall === null || keyGenome.readiness === null) {
+      // D-233: the Genome and Readiness dimensions are the KEY genome's overall and readiness, which average the money
+      // sections in: left out, and the overall score is the average of the dimensions served.
+      return {
+        overallScore: clamp((operationsScore + riskScore + approvalScore) / 3),
+        dimensions: [
+          { label: 'Operations', score: operationsScore, trend: health.blockedModuleCount > 0 ? ('down' as const) : ('flat' as const), color: 'hsl(var(--kf-success))' },
+          { label: 'Risk', score: riskScore, trend: health.criticalCount > 0 ? ('down' as const) : ('flat' as const), color: 'hsl(var(--kf-warning))' },
+          { label: 'Approvals', score: approvalScore, trend: health.pendingApprovalCount > 0 ? ('down' as const) : ('up' as const), color: 'hsl(var(--kf-violet-accent))' },
+        ],
+      } as BusinessPulse;
+    }
     const genomeScore = clamp(keyGenome.overall);
     const readinessScore = clamp(keyGenome.readiness);
 
@@ -764,7 +807,9 @@ export class BusinessCommandCenterService {
 
     const headline = warnings.length > 0
       ? `Attention needed: ${warnings[0]}`
-      : `Business is ${keyGenome.overall}% ready. Here is what to do next.`;
+      : keyGenome.overall === null
+        ? 'Here is what to do next.' // D-233: the readiness is withheld from this reader.
+        : `Business is ${keyGenome.overall}% ready. Here is what to do next.`;
 
     return { headline, bullets, warnings };
   }
@@ -888,7 +933,7 @@ export class BusinessCommandCenterService {
     };
   }
 
-  private buildKeyGenome(score: KeyGenomeScore): CommandCenterKeyGenome {
+  private buildKeyGenome(score: KeyGenomeScore, readsRevenue = true): CommandCenterKeyGenome {
     const weakest = [...score.sections]
       .sort((a, b) => a.score.overall - b.score.overall)
       .slice(0, 5)
@@ -900,6 +945,20 @@ export class BusinessCommandCenterService {
         readiness: Math.round(s.score.operationalReadiness * 100),
       }));
 
+    if (!readsRevenue) {
+      // D-233: the overall, integrity, readiness and confidence average the money sections in (the sections themselves
+      // are already the served ones): withheld.
+      return {
+        overall: null,
+        integrity: null,
+        readiness: null,
+        confidence: null,
+        withheldForRevenue: ['overall', 'integrity', 'readiness', 'confidence', 'crossDomain'],
+        computedAt: score.computedAt,
+        sections: score.sections,
+        weakestSections: weakest,
+      };
+    }
     return {
       overall: Math.round(score.overall * 100),
       integrity: Math.round(score.integrity * 100),
@@ -1002,12 +1061,14 @@ export class BusinessCommandCenterService {
       }));
   }
 
-  private async mapGenomeSignalItems(businessId: string): Promise<CommandCenterItem[]> {
-    const signals = await this.genomeSignal.listSignals(businessId, {
+  private async mapGenomeSignalItems(businessId: string, readsRevenue = true): Promise<CommandCenterItem[]> {
+    // D-128, D-234: no finance or sales signal for a reader without revenue read (the REST signal route's projection);
+    // the limit counts the signals served.
+    const signals = await listSignalsForReader(this.genomeSignal, businessId, {
       status: 'NEW',
       minConfidence: 0.7,
       limit: 5,
-    });
+    }, readsRevenue);
 
     return signals.map((signal) => {
       const criticalTypes = new Set(['FACT_CONFLICT', 'READINESS_BLOCKER']);
@@ -1045,11 +1106,12 @@ export class BusinessCommandCenterService {
     });
   }
 
-  private async mapGenomeRecommendationItems(businessId: string): Promise<CommandCenterItem[]> {
-    const recommendations = await this.genomeRecommendation.listRecommendations(businessId, {
+  private async mapGenomeRecommendationItems(businessId: string, readsRevenue = true): Promise<CommandCenterItem[]> {
+    // D-128, D-234: no finance or sales recommendation for a reader without revenue read, as on REST.
+    const recommendations = await listRecommendationsForReader(this.genomeRecommendation, businessId, {
       status: 'ACTIVE',
       limit: 5,
-    });
+    }, readsRevenue);
 
     return recommendations.map((rec) => {
       const priority: CommandCenterPriority =

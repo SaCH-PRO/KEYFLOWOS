@@ -32,21 +32,36 @@ function makeController() {
     updateDnaSection: vi.fn().mockResolvedValue({ id: 'bp_1', updated: true }),
   } as unknown as BlueprintService;
 
-  const controller = new BlueprintController(blueprint);
+  // FU-GENOME-SURFACES-REVENUE (D-233): the reader is the business owner (reads revenue), so the genome is served whole.
+  const prisma = { client: { membership: { findUnique: vi.fn().mockResolvedValue({ role: 'OWNER', permissionScopes: null }) } } };
+  const controller = new BlueprintController(blueprint, prisma as any);
   return { controller, blueprint };
 }
 
+const OWNER = { user: { id: 'user_owner', role: 'USER' } };
+
 describe('BlueprintController genome endpoints', () => {
+  it('FU-GENOME-SURFACES-REVENUE: with no reader the composites and the money DNA are withheld (fail closed)', async () => {
+    const { controller } = makeController();
+    const result = (await controller.getGenome('biz_1')) as any;
+    expect(result.genomeIntegrity).toBeNull();
+    expect(result.executiveReadinessScore).toBeNull();
+    expect(result.genomeStage).toBeNull();
+    expect(result.genomeDnaScores.financial).toBeUndefined();
+    expect(result.genomeDnaScores.sales).toBeUndefined();
+    expect(result.genomeDnaScores.founder).toBe(60);
+  });
+
   it('GET /genome returns full genome integrity result', async () => {
     const { controller, blueprint } = makeController();
-    const result = await controller.getGenome('biz_1');
+    const result = await controller.getGenome('biz_1', OWNER);
     expect(blueprint.calculateGenomeIntegrity).toHaveBeenCalledWith('biz_1');
     expect(result.genomeIntegrity).toBe(65);
   });
 
   it('GET /genome/integrity returns integrity summary', async () => {
     const { controller, blueprint } = makeController();
-    const result = await controller.getIntegrity('biz_1');
+    const result = await controller.getIntegrity('biz_1', OWNER);
     expect(blueprint.calculateGenomeIntegrity).toHaveBeenCalledWith('biz_1');
     expect(result.threePillarMinimumMet).toBe(true);
     expect(result.genomeDnaScores.founder).toBe(60);
@@ -66,14 +81,14 @@ describe('BlueprintController genome endpoints', () => {
 
   it('GET /genome/recommendations returns genome recommendations', async () => {
     const { controller, blueprint } = makeController();
-    const result = await controller.getGenomeRecommendations('biz_1');
-    expect(blueprint.getRecommendations).toHaveBeenCalledWith('biz_1');
+    const result = await controller.getGenomeRecommendations('biz_1', OWNER);
+    expect(blueprint.getRecommendations).toHaveBeenCalledWith('biz_1', { readsRevenue: true });
     expect(result.recommendations).toHaveLength(1);
   });
 
   it('GET /genome/constitution returns generated constitution', async () => {
     const { controller, blueprint } = makeController();
-    const result = await controller.getConstitution('biz_1');
+    const result = await controller.getConstitution('biz_1', OWNER);
     expect(blueprint.generateConstitution).toHaveBeenCalledWith('biz_1');
     expect(result.version).toBe(1);
   });

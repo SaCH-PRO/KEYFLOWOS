@@ -2,6 +2,9 @@ import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
 import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { KeyCortexGenomeBridgeService } from '../key-cortex-genome-bridge.service';
+import { PrismaService } from '../../../core/prisma/prisma.service';
+import { readsRevenueFor } from '../../business-genome/key-genome/genome-composites-for-reader';
+import { dnaScoresForReader } from '../../business-genome/key-genome/genome-finance-scope';
 
 /**
  * Bridge adapter for the genome module only.  Other Phase-2 modules now have
@@ -17,6 +20,10 @@ export class KeyCortexBridgeAdapterService {
     @Optional()
     @Inject(KeyCortexGenomeBridgeService)
     private readonly genomeBridge?: KeyCortexGenomeBridgeService,
+    // FU-GENOME-SURFACES-REVENUE (D-233): reads the acting member's revenue level; without it, fail closed.
+    @Optional()
+    @Inject(PrismaService)
+    private readonly prisma?: PrismaService,
   ) {}
 
   async execute(command: ConnectorCommand): Promise<ConnectorResult> {
@@ -37,7 +44,7 @@ export class KeyCortexBridgeAdapterService {
   ): Promise<ConnectorResult> {
     switch (command.action) {
       case 'get_dna': {
-        const dna = await this.getGenomeDna(command.businessId, (command.parameters.recalculate as boolean) || false);
+        const dna = await this.getGenomeDna(command.businessId, (command.parameters.recalculate as boolean) || false, command.userId);
         return connectorOk(command, start, dna);
       }
       case 'get_stage': {
@@ -66,10 +73,23 @@ export class KeyCortexBridgeAdapterService {
     }
   }
 
-  private async getGenomeDna(businessId: string, recalculate: boolean): Promise<unknown> {
+  private async getGenomeDna(businessId: string, recalculate: boolean, actorId?: string): Promise<unknown> {
     this.logger.verbose(`getGenomeDna(${businessId}, recalculate=${recalculate})`);
     if (this.genomeBridge) {
       const dna = await this.genomeBridge.getDnaScores(businessId);
+      // FU-GENOME-SURFACES-REVENUE (D-233): for an actor without revenue read (or no actor), no financial or sales DNA
+      // score, and no stage or executive readiness (they weight them).
+      if (!(await readsRevenueFor(this.prisma, businessId, actorId ? { id: actorId } : null))) {
+        return {
+          businessId,
+          scores: dnaScoresForReader(dna.scores, false),
+          confidence: dnaScoresForReader(dna.confidence ?? {}, false),
+          stage: null,
+          executiveReadiness: null,
+          withheldForRevenue: ['stage', 'executiveReadiness', 'financial', 'sales'],
+          recalculate,
+        };
+      }
       return { businessId, ...dna, recalculate };
     }
     // Graceful fallback when genome bridge is not available.

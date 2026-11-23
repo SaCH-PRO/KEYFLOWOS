@@ -1,4 +1,7 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Optional } from '@nestjs/common';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { readsRevenueFor } from '../business-genome/key-genome/genome-composites-for-reader';
+import { dnaScoresForReader } from '../business-genome/key-genome/genome-finance-scope';
 import type { BusinessAsset } from '@prisma/client';
 import { BusinessIntelligenceService } from './business-intelligence.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
@@ -48,6 +51,8 @@ export class KeyExecutiveModeService {
     @Inject(TemporalFlowService) private readonly temporal: TemporalFlowService,
     @Inject(GenomeEvolutionService) private readonly genomeEvolution: GenomeEvolutionService,
     @Inject(BusinessAssetsService) private readonly businessAssets: BusinessAssetsService,
+    // FU-GENOME-SURFACES-REVENUE (D-233): reads a given reader's revenue level; without it, fail closed.
+    @Optional() @Inject(PrismaService) private readonly prisma?: PrismaService,
   ) {}
 
   listModes() {
@@ -64,7 +69,7 @@ export class KeyExecutiveModeService {
     const keyMode = mode as KeyExecutiveMode;
     const config = KEY_EXECUTIVE_MODE_CONFIG[keyMode];
 
-    const [executiveBrief, blueprint, temporalAnalysis, proposals, assets] = await Promise.all([
+    const [executiveBrief, blueprint, temporalAnalysis, proposals, assets, readsRevenue] = await Promise.all([
       this.intelligence.generateExecutiveBrief(businessId, reader),
       this.blueprint.getBlueprint(businessId),
       this.temporal.analyze(businessId),
@@ -72,6 +77,9 @@ export class KeyExecutiveModeService {
         ? this.genomeEvolution.list(businessId, { status: 'PENDING' })
         : this.genomeEvolution.listForReader(businessId, { status: 'PENDING' }, reader),
       this.businessAssets.list(businessId),
+      // FU-GENOME-SURFACES-REVENUE (D-233): the financial and sales DNA are read for a revenue reader only; the brief
+      // above is already read for the same reader (its composites are null for one without revenue read).
+      readsRevenueFor(this.prisma, businessId, reader),
     ]);
 
     // Round 2 (FU-GENOME-EVOLUTION-SURFACES, review MAJOR-1): the genome-update candidates the reader may be shown.
@@ -81,7 +89,7 @@ export class KeyExecutiveModeService {
 
     const findings: KeyModeFinding[] = [
       ...this.fromExecutiveBrief(keyMode, config.focusDomains, executiveBrief),
-      ...this.fromDnaScores(keyMode, config.dnaSections, blueprint),
+      ...this.fromDnaScores(keyMode, config.dnaSections, blueprint, readsRevenue),
       ...this.fromTemporal(keyMode, temporalAnalysis),
       ...this.fromProposals(keyMode, config.dnaSections, proposals),
       ...this.fromAssets(keyMode, assets),
@@ -128,11 +136,14 @@ export class KeyExecutiveModeService {
       });
   }
 
-  private fromDnaScores(mode: KeyExecutiveMode, dnaSections: DnaSectionKey[], blueprint: BlueprintData): KeyModeFinding[] {
-    const scores = (blueprint.genomeDnaScores ?? {}) as Record<DnaSectionKey, number>;
+  private fromDnaScores(mode: KeyExecutiveMode, dnaSections: DnaSectionKey[], blueprint: BlueprintData, readsRevenue = true): KeyModeFinding[] {
+    // D-233: a reader without revenue read is served no financial or sales DNA finding (a withheld score is skipped,
+    // never read as 0).
+    const scores = dnaScoresForReader(blueprint.genomeDnaScores ?? {}, readsRevenue) as Partial<Record<DnaSectionKey, number>>;
     const findings: KeyModeFinding[] = [];
 
     for (const key of dnaSections) {
+      if (!readsRevenue && !(key in scores)) continue;
       const score = scores[key] ?? 0;
       if (score < 50) {
         const label = this.titleCase(key);
@@ -365,7 +376,10 @@ export class KeyExecutiveModeService {
     const weakDna = findings.filter((f) => f.id.includes('-dna-')).length;
 
     const parts: string[] = [];
-    parts.push(`${config.label} sees Executive Readiness ${brief.executiveReadinessScore}% and Genome Integrity ${brief.genomeIntegrity}%.`);
+    // D-233: the composites are stated only when the brief carries them (a revenue reader's).
+    if (brief.executiveReadinessScore !== null && brief.genomeIntegrity !== null) {
+      parts.push(`${config.label} sees Executive Readiness ${brief.executiveReadinessScore}% and Genome Integrity ${brief.genomeIntegrity}%.`);
+    }
 
     if (high > 0) {
       parts.push(`${high} high-priority issue${high === 1 ? '' : 's'} need${high === 1 ? 's' : ''} attention.`);
@@ -398,7 +412,13 @@ export class KeyExecutiveModeService {
     const risks = findings.filter((f) => f.priority === 'HIGH' || f.priority === 'CRITICAL');
 
     if (mode === 'STRATEGIST') {
-      return `The business is at the ${brief.genomeStage.replace(/_/g, ' ')} stage. ${weakDna.length > 0 ? `Strategic clarity is limited by ${weakDna.length} underdeveloped DNA section(s).` : 'Strategic DNA is well-formed.'} ${risks.length > 0 ? `Address ${risks.length} priority risk(s) before major commitments.` : ''}`;
+      const stage = brief.genomeStage === null ? '' : `The business is at the ${brief.genomeStage.replace(/_/g, ' ')} stage. `;
+      return `${stage}${weakDna.length > 0 ? `Strategic clarity is limited by ${weakDna.length} underdeveloped DNA section(s).` : 'Strategic DNA is well-formed.'} ${risks.length > 0 ? `Address ${risks.length} priority risk(s) before major commitments.` : ''}`;
+    }
+
+    if (mode === 'CFO' && brief.withheldForRevenue) {
+      // D-233: no financial DNA was read for this reader, so none is diagnosed.
+      return `Financial scores are shown to members with revenue access. ${risks.length > 0 ? `${risks.length} operational risk(s) require review.` : ''}`.trim();
     }
 
     if (mode === 'CFO') {
@@ -418,6 +438,9 @@ export class KeyExecutiveModeService {
     }
 
     if (mode === 'GROWTH_ADVISOR') {
+      if (brief.executiveReadinessScore === null) {
+        return 'Strengthen core DNA and conversion signals before aggressive growth.';
+      }
       return brief.executiveReadinessScore >= 60
         ? `Executive Readiness is ${brief.executiveReadinessScore}%. The business may be ready to scale if growth DNA and conversion signals are addressed.`
         : `Executive Readiness is ${brief.executiveReadinessScore}%. Strengthen core DNA before aggressive growth.`;
