@@ -5,6 +5,12 @@
  * - Static allowlist via MCP_REMOTE_SERVERS env (JSON). No runtime registry
  *   discovery, no version drift: you pin exactly what can be connected.
  * - Auth tokens are per-server bearer tokens from env vars (not committed).
+ *   One token per server, shared by every business that server is bound to:
+ *   per-business credentials are a later slice (RR-MCP-TENANT-BOUND scope).
+ * - Tenant-bound (RR-MCP-TENANT-BOUND, D-261/D-262): every server names the
+ *   businesses whose data it may serve (`businessIds`). A config without a
+ *   non-empty list of non-empty strings is dropped with an error log, so a
+ *   server that is set but unbound serves no business (fail closed).
  */
 export interface McpServerConfig {
   /** Short key used in tool names: mcp__{key}__{toolName} */
@@ -19,18 +25,86 @@ export interface McpServerConfig {
   readOnlyPrefixes?: string[];
   /** Per-server enable switch (default true). */
   enabled?: boolean;
+  /**
+   * The businesses this server may serve (required, non-empty). A bridged call
+   * or tool listing for any other business is refused before anything connects.
+   */
+  businessIds: string[];
 }
 
-export function loadMcpServerConfigs(): McpServerConfig[] {
+type ConfigLog = (message: string) => void;
+
+/** The longest server url accepted (it also bounds the log redaction's patterns). */
+export const MCP_URL_MAX = 2048;
+
+function isHttpUrl(url: string): boolean {
+  if (url.length > MCP_URL_MAX) return false;
+  try {
+    const { protocol } = new URL(url);
+    return protocol === 'https:' || protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+function validBusinessIds(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length > 0 && value.every((id) => typeof id === 'string' && id.length > 0);
+}
+
+/**
+ * Reads MCP_REMOTE_SERVERS. Unset or empty: no servers, nothing logged. A value
+ * that is not a JSON array serves nothing, with an error log (`log`). An entry
+ * is dropped with an error log when it lacks a string key or url, when its key
+ * is empty, contains "__" or ends in "_", when its url does not parse, is not
+ * http(s) or is longer than MCP_URL_MAX, when an earlier kept entry already uses its key, or when it has no
+ * valid `businessIds`. An `enabled: false` entry with a usable key and url is
+ * skipped without a log. The log names the server's key only, never its url or
+ * token.
+ */
+export function loadMcpServerConfigs(log: ConfigLog = () => undefined): McpServerConfig[] {
   const raw = process.env.MCP_REMOTE_SERVERS;
   if (!raw) return [];
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw) as McpServerConfig[];
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((s) => s && typeof s.key === 'string' && typeof s.url === 'string' && s.enabled !== false);
+    parsed = JSON.parse(raw);
   } catch {
+    log('MCP_REMOTE_SERVERS is not valid JSON; no MCP server is configured');
     return [];
   }
+  if (!Array.isArray(parsed)) {
+    log('MCP_REMOTE_SERVERS is not a JSON array; no MCP server is configured');
+    return [];
+  }
+  const out: McpServerConfig[] = [];
+  const keys = new Set<string>();
+  parsed.forEach((s: unknown, index) => {
+    const c = s as Partial<McpServerConfig> | null;
+    const label = c && typeof c.key === 'string' ? JSON.stringify(c.key) : `#${index}`;
+    if (!c || typeof c !== 'object' || typeof c.key !== 'string' || typeof c.url !== 'string') {
+      log(`MCP_REMOTE_SERVERS entry ${label} dropped: it needs a string key and url`);
+      return;
+    }
+    if (c.key.length === 0 || c.key.includes('__') || c.key.endsWith('_')) {
+      log(`MCP server ${label} dropped: a key must be non-empty, may not contain "__" and may not end in "_"`);
+      return;
+    }
+    if (!isHttpUrl(c.url)) {
+      log(`MCP server ${label} dropped: its url must be an http(s) url of at most ${MCP_URL_MAX} characters`);
+      return;
+    }
+    if (c.enabled === false) return;
+    if (keys.has(c.key)) {
+      log(`MCP server ${label} dropped: another server already uses that key`);
+      return;
+    }
+    if (!validBusinessIds(c.businessIds)) {
+      log(`MCP server ${label} dropped: businessIds must be a non-empty array of business ids; it serves no business until it is bound`);
+      return;
+    }
+    keys.add(c.key);
+    out.push({ ...(c as McpServerConfig), businessIds: [...c.businessIds] });
+  });
+  return out;
 }
 
 export interface BridgedTool {
