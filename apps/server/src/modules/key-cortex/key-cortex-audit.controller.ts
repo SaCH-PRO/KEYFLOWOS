@@ -4,6 +4,7 @@ import {
   Post,
   Body,
   ForbiddenException,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -16,6 +17,43 @@ import { SelfAssessmentService } from './self-assessment.service';
 import { DigitalEmployeeAcceptanceService } from './digital-employee-acceptance.service';
 import { ValueLearningService } from './value-learning.service';
 import { ComplianceMapService } from '../key-autonomy/compliance-map.service';
+import { financialProposalsWithProvenance, genomeReaderReadsRevenue, PROPOSAL_CLASSIFY_SELECT } from '../business-genome/key-genome/genome-finance-scope';
+import { autonomyVerdictForReader } from '../key-autonomy/key-action-genome-projection';
+import { graphActionExtraScopes, graphActionModuleScope } from '../ai/graph-actions.controller';
+import { KEY_PLAN_MODULE_SCOPES, planStepReadsMoneyReport } from './key-cortex-plan-authority';
+import { KEY_BOOKS_REVENUE_TOOLS } from '../ai/plan-step-authority';
+import { keyOrganToolAuthority } from './key-cortex-organ-tool-authority';
+import { isFinancialProposal } from '../business-genome/key-genome/genome-finance-scope';
+
+/**
+ * Round 3 (FU-GENOME-EVOLUTION-SURFACES, security MAJOR-1): whether a verdict's action key names a money action. The
+ * orchestrator records an action type (CREATE_TASK), a dotted KEY organ tool, or (plan-executor) a flow-tool name; a
+ * tool mapped to the revenue or expenses module (KEY organ map, graph-action map, the books tools) is money, a tool
+ * mapped to another module is not, and a key no map names is judged as a proposal's action type is (listed non-money
+ * action types only; anything else fails closed, D-227).
+ */
+function actionKeyIsMoney(actionKey: string): boolean {
+  const key = actionKey.trim();
+  const money = (module: string) => module === 'revenue' || module === 'expenses';
+  // Round 4 (correctness MAJOR-1): KeyActionProposalService and KeyCortexActionsService record key_autonomy.<TYPE> and
+  // key_cortex.<TYPE>: the action type is judged as a proposal's (listed non-money types only).
+  const prefixed = /^(?:key_autonomy|key_cortex)\.(.+)$/i.exec(key);
+  if (prefixed) return isFinancialProposal({ actionType: prefixed[1] });
+  if (KEY_BOOKS_REVENUE_TOOLS.has(key)) return true;
+  const organ = keyOrganToolAuthority(key);
+  if (organ && 'scopes' in organ) return organ.scopes.some((s) => money(s.module));
+  const scope = graphActionModuleScope(key);
+  // Round 4 (correctness MINOR-2): a tool whose extra scopes read or write revenue or expenses is money too.
+  if (scope) return money(scope.module) || graphActionExtraScopes(key).some((s) => money(s.module));
+  // Round 4: the connector executor and query pipeline record <module>.<action>; the module's KEY plan scope decides
+  // (revenue or expenses, or a money report step, is money; another module is not).
+  const dotted = /^([a-z_]+)\.([a-z0-9_]+)$/i.exec(key);
+  if (dotted && Object.prototype.hasOwnProperty.call(KEY_PLAN_MODULE_SCOPES, dotted[1])) {
+    const planScope = KEY_PLAN_MODULE_SCOPES[dotted[1]];
+    return money(planScope) || planStepReadsMoneyReport(dotted[1], dotted[2]);
+  }
+  return isFinancialProposal({ actionType: key });
+}
 
 /**
  * Mounted at `/api/v1/cortex` with no `:businessId` path segment, so the tenant
@@ -131,8 +169,22 @@ export class KeyCortexAuditController {
     };
   }
 
+  /**
+   * FU-GENOME-EVOLUTION-SURFACES (D-233, D-238): a reader without revenue read (ModuleScopeGuard's reading) is served
+   * no verdict on a money action or whose reason or rule trace states money, and the others with their rule-trace
+   * metadata and confidence left out (the genome gate's readiness and confidence scores average the finance and
+   * revenue-quality health in); a verdict about a financial KEY proposal, or on a revenue or expenses tool, is withheld;
+   * the totals count the verdicts served (of the 50 most recent). Revenue readers: unchanged.
+   */
   @Get('audit/decisions')
-  async auditDecisions(@GuardedBusinessId() guardedBusinessId: string | undefined) {
+  // Packet item 3, the guard: no module scope is added here. The rule recommended for this route and its sibling audit
+  // reads is ai read (they are KEY's own records; STAFF defaults to ai none), but adding it removes the compliance
+  // page from every default STAFF member, an access change that belongs to SWP-CENSUS-KEY-B (this controller's census
+  // rows) and the owner. The revenue projection below applies either way: ai read does not imply revenue read.
+  async auditDecisions(
+    @GuardedBusinessId() guardedBusinessId: string | undefined,
+    @Req() req?: { user?: { id?: string; role?: string } },
+  ) {
     return this.inGuardedTenant(guardedBusinessId, async (businessId) => {
       const [recent, total, blocked] = await Promise.all([
         this.prisma.client.autonomyVerdict.findMany({
@@ -144,7 +196,28 @@ export class KeyCortexAuditController {
         this.prisma.client.autonomyVerdict.count({ where: { businessId, allowed: false } }),
       ]);
 
-      return { businessId, total, blocked, recent };
+      const reader = req?.user?.id ? { id: req.user.id, role: req.user.role } : undefined;
+      if (await genomeReaderReadsRevenue(this.prisma, businessId, reader)) return { businessId, total, blocked, recent };
+      // Round 2 (security MAJOR-3b, D-238): a verdict about a KEY proposal is judged by that proposal too (its own fields
+      // or the recommendation it was bridged from, read in this business); a financial or unfound proposal withholds it.
+      const proposalIds = [...new Set(recent.map((v) => v.proposalId).filter((id): id is string => !!id))];
+      let financialProposal: Map<string, boolean>;
+      try {
+        const rows = proposalIds.length
+          ? await this.prisma.client.keyActionProposal.findMany({ where: { businessId, id: { in: proposalIds } }, select: PROPOSAL_CLASSIFY_SELECT })
+          : [];
+        const flags = await financialProposalsWithProvenance(this.prisma, businessId, rows as never);
+        financialProposal = new Map(rows.map((r: { id: string }, i: number) => [r.id, flags[i]]));
+      } catch {
+        financialProposal = new Map();
+      }
+      const visible = recent
+        .filter((v) => !v.proposalId || financialProposal.get(v.proposalId) === false)
+        .map((verdict) => autonomyVerdictForReader(verdict, actionKeyIsMoney))
+        .filter((verdict): verdict is NonNullable<typeof verdict> => verdict !== null);
+      // Round 2 (security MINOR-5): the totals count what the reader is served (within the 50 most recent verdicts), so
+      // the difference does not count the withheld verdicts.
+      return { businessId, total: visible.length, blocked: visible.filter((v) => v.allowed === false).length, recent: visible };
     });
   }
 

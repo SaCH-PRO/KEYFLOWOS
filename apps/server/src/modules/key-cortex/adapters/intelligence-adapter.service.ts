@@ -112,7 +112,8 @@ export class IntelligenceAdapterService {
 
   private async runComprehensiveAnalysis(businessId: string, actorId?: string) {
     const [brief, dashboard, snapshot] = await Promise.all([
-      this.businessIntelligence.generateExecutiveBrief(businessId),
+      // FU-GENOME-EVOLUTION-SURFACES (D-238): the brief is read for the command's actor too.
+      this.businessIntelligence.generateExecutiveBrief(businessId, actorId ? { id: actorId } : null),
       this.growth.getDashboard(businessId),
       // D-238 (round 3): read for the command's actor; no actor is no reader (a financial proposal is withheld).
       this.commandCenter.snapshot(businessId, actorId ? { id: actorId } : null),

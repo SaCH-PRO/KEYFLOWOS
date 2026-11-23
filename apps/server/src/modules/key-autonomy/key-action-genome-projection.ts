@@ -202,3 +202,134 @@ export async function requireBridgeRevenue(
     throw new ForbiddenException(`Insufficient permissions: revenue requires ${minLevel} access (you have ${level})`);
   }
 }
+
+/**
+ * Round 9 (security MAJOR-1): a lifecycle row's payload with every autonomy rule-trace entry's `metadata` left out. The
+ * orchestrator's metadata holds its counts and scores; the genome gate's scores average the affected domains' health,
+ * revenue quality and finance among them (D-233), and a rule may record an amount. A reader without revenue read is
+ * served the row this way, and the row is classified as served. Each entry's rule, source, result and reason stay; a
+ * trace that is not a list is left as it is (and read whole). Returns the payload itself when there is nothing to drop.
+ */
+export function ruleTraceWithoutMetadata(payload: unknown): unknown {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !('ruleTrace' in payload)) return payload;
+  const { ruleTrace, ...rest } = payload as Record<string, unknown>;
+  // Round 3 (security NOTE-7): a trace that is one object (not a list) loses its metadata too.
+  if (ruleTrace && typeof ruleTrace === 'object' && !Array.isArray(ruleTrace)) {
+    if (!('metadata' in ruleTrace)) return payload;
+    const { metadata: _metadata, ...kept } = ruleTrace as Record<string, unknown>;
+    return { ...rest, ruleTrace: kept };
+  }
+  if (!Array.isArray(ruleTrace)) return payload;
+  if (!ruleTrace.some((entry) => entry && typeof entry === 'object' && !Array.isArray(entry) && 'metadata' in entry)) return payload;
+  return {
+    ...rest,
+    ruleTrace: ruleTrace.map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+      const { metadata: _metadata, ...kept } = entry as Record<string, unknown>;
+      return kept;
+    }),
+  };
+}
+
+/**
+ * FU-GENOME-EVOLUTION-SURFACES (D-233): the genome's composite scores. Each weights the financial (20) and sales (10) DNA
+ * sections, so a reader without revenue read could infer their movement from it (BlueprintService genome.updated rows,
+ * ConstitutionVersionService constitution rows).
+ */
+const COMPOSITE_SCORE_KEYS: ReadonlySet<string> = new Set([
+  'genomeIntegrity', 'executiveReadinessScore', 'genomeDnaScores', 'genomeDnaConfidence', 'readinessBreakdown', 'sourceDnaScores',
+  // Round 3 (security MINOR-3): the genome stage is a grade of the composite and the DNA scores (D-233).
+  'genomeStage',
+]);
+
+/** Whether a timeline row's payload carries a composite score at its top level. */
+export function carriesCompositeScores(payload: unknown): boolean {
+  return !!payload && typeof payload === 'object' && !Array.isArray(payload)
+    && Object.keys(payload as Record<string, unknown>).some((k) => COMPOSITE_SCORE_KEYS.has(k));
+}
+
+/** A payload with its composite scores left out (the payload itself when it has none). */
+export function withoutCompositeScores(payload: unknown): unknown {
+  if (!carriesCompositeScores(payload)) return payload;
+  return Object.fromEntries(Object.entries(payload as Record<string, unknown>).filter(([k]) => !COMPOSITE_SCORE_KEYS.has(k)));
+}
+
+/**
+ * Round 3 (security MINOR-2): the cross-domain risk level is the maximum over every domain's risk, finance included
+ * (GenomeCrossDomainService), so a verdict naming it can tell a revenue-none reader that finance is at risk (D-233).
+ */
+const CROSS_DOMAIN_RISK = /cross[\s_-]?domain/i;
+
+/** 403 with ModuleScopeGuard's message when the reader's revenue level is below `minLevel` (SUPER_ADMIN passes). */
+export async function requireRevenueLevel(
+  prisma: PrismaService,
+  businessId: string,
+  reader: GenomeReader,
+  minLevel: 'read' | 'write',
+): Promise<void> {
+  const level = await genomeReaderRevenueLevel(prisma, businessId, reader);
+  if (rankOf(level) < LEVEL_RANK[minLevel]) {
+    throw new ForbiddenException(`Insufficient permissions: revenue requires ${minLevel} access (you have ${level})`);
+  }
+}
+
+/**
+ * FU-GENOME-EVOLUTION-SURFACES (D-238): what a reader without revenue read is served of an autonomy verdict (KEY cortex
+ * audit). A verdict on a money action, or whose reason or rule-trace text states money, is withheld (null); any other is
+ * served with its rule-trace metadata left out (the genome gate's scores average finance in).
+ */
+export function autonomyVerdictForReader<V extends { actionKey?: unknown; reason?: unknown; ruleTrace?: unknown; confidence?: unknown }>(
+  verdict: V,
+  /**
+   * Round 3 (security MAJOR-1): whether the action key names a money action by its module (a revenue or expenses tool:
+   * the graph-action and KEY organ maps, the books tools); the caller supplies it (key-cortex-audit.controller) so this
+   * module does not load the AI route maps. Without it, the key is judged by its text alone.
+   */
+  actionKeyIsMoney: (actionKey: string) => boolean = () => false,
+): Omit<V, 'confidence'> | null {
+  if (typeof verdict.actionKey !== 'string' || textStatesMoney(verdict.actionKey) || actionKeyIsMoney(verdict.actionKey)) return null;
+  if (textStatesMoney(verdict.reason) || CROSS_DOMAIN_RISK.test(String(verdict.reason ?? ''))) return null;
+  const trace = ruleTraceWithoutMetadata({ ruleTrace: verdict.ruleTrace }) as { ruleTrace?: unknown };
+  if (structuredValueStatesMoney(trace.ruleTrace) || CROSS_DOMAIN_RISK.test(JSON.stringify(trace.ruleTrace ?? null))) return null;
+  // Round 2 (security MAJOR-3a): the verdict's confidence is the genome gate's confidence score (min(1, score/100)).
+  const { confidence: _confidence, ...rest } = verdict;
+  return { ...rest, ruleTrace: trace.ruleTrace };
+}
+
+/**
+ * FU-GENOME-EVOLUTION-SURFACES (D-128, D-238): for each experiment of `businessId`, whether it is financial. An experiment
+ * is financial when its hypothesis, action or success metric states money, or when a FINANCIAL genome recommendation of
+ * the same business was bridged to it (GenomeRecommendationActionBridgeService records the experiment as the
+ * recommendation's suggestedExperimentId and copies its text into the hypothesis). One query, in `businessId` only; a
+ * failed read makes every experiment financial (fail closed).
+ */
+export async function financialExperimentFlags(
+  prisma: Pick<PrismaService, 'client'>,
+  businessId: string,
+  experiments: Array<{ id: string; hypothesis?: unknown; action?: unknown; successMetric?: unknown; result?: unknown }>,
+): Promise<boolean[]> {
+  // Round 2 (correctness MAJOR-3): an experiment's own text is financial by a money label, or by the money vocabulary
+  // only beside a figure (the bridge preview's rule: "paid channel" is how the marketing genome writes an ordinary
+  // recommendation, and the experiment bridged from it is served as the recommendation is). Its completion result is
+  // read whole (correctness MINOR-6).
+  const ownText = (t: unknown) => typeof t === 'string' && (isMoneyLabel(t) || (/\p{Nd}/u.test(t) && textStatesMoney(t)));
+  const own = experiments.map((e) => [e.hypothesis, e.action, e.successMetric].some(ownText) || structuredValueStatesMoney(e.result));
+  const ids = experiments.filter((_e, i) => !own[i]).map((e) => e.id);
+  if (ids.length === 0) return own;
+  let bridged: Set<string>;
+  try {
+    const recs = await prisma.client.genomeRecommendation.findMany({
+      where: { businessId, suggestedExperimentId: { in: ids } },
+      select: { suggestedExperimentId: true, domain: true, title: true, diagnosis: true },
+    });
+    bridged = new Set(
+      recs.filter((r: { suggestedExperimentId: string | null } & GenomeRowLike) => isFinanceRecommendation(r)).map((r: { suggestedExperimentId: string | null }) => r.suggestedExperimentId as string),
+    );
+  } catch {
+    return experiments.map(() => true);
+  }
+  return experiments.map((e, i) => own[i] || bridged.has(e.id));
+}
+
+type GenomeRowLike = { domain?: string | null; title?: string | null; diagnosis?: string | null };
+

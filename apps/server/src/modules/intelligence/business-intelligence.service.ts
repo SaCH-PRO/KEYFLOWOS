@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { GenomeEvolutionService } from '../business-genome/genome-evolution.service';
+import type { GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
 import { BusinessAssetsService } from '../business-assets/business-assets.service';
 import type {
   BusinessExecutiveBrief,
@@ -21,10 +22,17 @@ export class BusinessIntelligenceService {
     @Inject(BusinessAssetsService) private readonly businessAssets: BusinessAssetsService,
   ) {}
 
-  async generateExecutiveBrief(businessId: string): Promise<BusinessExecutiveBrief> {
+  /**
+   * `reader` (FU-GENOME-EVOLUTION-SURFACES, D-233/D-238): who the brief is read for. Given (a request's user, or null
+   * for none), the pending genome-evolution proposals it counts and quotes are the ones that reader may see
+   * (GenomeEvolutionService.listForReader). Left out, the internal callers are unchanged.
+   */
+  async generateExecutiveBrief(businessId: string, reader?: GenomeReader | null): Promise<BusinessExecutiveBrief> {
     const [blueprint, proposals, temporalAnalysis, assets] = await Promise.all([
       this.blueprint.getBlueprint(businessId),
-      this.genomeEvolution.list(businessId, { status: 'PENDING' }),
+      reader === undefined
+        ? this.genomeEvolution.list(businessId, { status: 'PENDING' })
+        : this.genomeEvolution.listForReader(businessId, { status: 'PENDING' }, reader),
       this.temporal.analyze(businessId),
       this.businessAssets.list(businessId),
     ]);

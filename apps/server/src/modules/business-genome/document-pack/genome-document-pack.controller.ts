@@ -5,6 +5,7 @@ import {
   Inject,
   Param,
   Query,
+  Req,
   Res,
   UseGuards,
 } from '@nestjs/common';
@@ -28,9 +29,12 @@ export class GenomeDocumentPackController {
     @Param('businessId') businessId: string,
     @Query('format') format: string = 'pdf',
     @Res({ passthrough: false }) res: Response,
+    @Req() req?: { user?: { id?: string; role?: string } },
   ) {
     const exportFormat = this.parseFormat(format);
-    const result = await this.service.exportExecutiveBrief(businessId, exportFormat);
+    // FU-GENOME-EVOLUTION-SURFACES (D-238): the brief is read for the request's reader.
+    const reader = req?.user?.id ? { id: req.user.id, role: req.user.role } : null;
+    const result = await this.service.exportExecutiveBrief(businessId, exportFormat, reader);
     this.send(res, result);
   }
 

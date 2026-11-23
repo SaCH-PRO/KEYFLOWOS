@@ -1,4 +1,5 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import type { GenomeReader } from '../key-genome/genome-finance-scope';
 import { BusinessIntelligenceService } from '../../intelligence/business-intelligence.service';
 import { BlueprintService } from '../../blueprint/blueprint.service';
 import { ConstitutionVersionService } from '../constitution-version.service';
@@ -16,8 +17,9 @@ export class GenomeDocumentPackService {
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,
   ) {}
 
-  async exportExecutiveBrief(businessId: string, format: ExportFormat): Promise<ExportResult> {
-    const brief = await this.intelligence.generateExecutiveBrief(businessId);
+  /** `reader` (FU-GENOME-EVOLUTION-SURFACES, D-238): as BusinessIntelligenceService.generateExecutiveBrief's. */
+  async exportExecutiveBrief(businessId: string, format: ExportFormat, reader?: GenomeReader | null): Promise<ExportResult> {
+    const brief = await this.intelligence.generateExecutiveBrief(businessId, reader);
     const sections = this.mapExecutiveBrief(brief);
     const filename = buildFilename('executive-brief', format);
     return this.render(format, 'Executive Brief', this.meta(brief.generatedAt), sections, filename);

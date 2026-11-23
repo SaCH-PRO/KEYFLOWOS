@@ -10,6 +10,8 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { DNA_SECTION_KEYS, type DnaSectionKey } from '../blueprint/blueprint.types';
+import { genomeReaderReadsRevenue, type GenomeReader } from './key-genome/genome-finance-scope';
+import { isFinancialGenomeEvolution } from '../key-autonomy/key-action-genome-projection';
 import type {
   GenomeEvolutionProposalData,
   GenomeEvolutionProposalInput,
@@ -61,6 +63,47 @@ export class GenomeEvolutionService {
     return rows.map((row) => this.serialize(row));
   }
 
+  /**
+   * FU-GENOME-EVOLUTION-SURFACES (D-233, D-238): the proposals a reader is served (the REST list, the command center, the
+   * executive and mode briefs). A reader without revenue read is served only the non-financial ones
+   * (isFinancialGenomeEvolution: the financial and sales sections, an unknown section, money or a figure in the reason or
+   * patch, money in the evidence). Revenue readers: unchanged.
+   */
+  async listForReader(
+    businessId: string,
+    filters: { status?: string; section?: string },
+    reader: GenomeReader | null,
+  ): Promise<GenomeEvolutionProposalData[]> {
+    const rows = await this.list(businessId, filters);
+    return this.visibleTo(businessId, rows, reader);
+  }
+
+  /** The proposals among `rows` (of `businessId`) a reader may be served. */
+  async visibleTo(businessId: string, rows: GenomeEvolutionProposalData[], reader: GenomeReader | null): Promise<GenomeEvolutionProposalData[]> {
+    if (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined)) return rows;
+    return rows.filter((row) => !isFinancialGenomeEvolution(row));
+  }
+
+  /**
+   * Round 2 (FU-GENOME-EVOLUTION-SURFACES, review MAJOR-1): the Temporal Flow genome-update candidates (findGenomeSignals:
+   * section, reason, evidence) a reader may be shown. A reader without revenue read is shown only the non-financial ones
+   * (the paid-invoice sales candidate is withheld). A call with no reader argument is unchanged.
+   */
+  async candidatesForReader<C extends { section: string; reason: string; evidence?: string[] }>(
+    businessId: string,
+    candidates: C[],
+    reader: GenomeReader | null | undefined,
+  ): Promise<C[]> {
+    if (reader === undefined || candidates.length === 0) return candidates;
+    if (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined)) return candidates;
+    return candidates.filter((c) => !isFinancialGenomeEvolution({ section: c.section, reason: c.reason, evidence: c.evidence }));
+  }
+
+  /** One proposal of `businessId` (404 for an unknown id or one of another business). */
+  async get(businessId: string, proposalId: string): Promise<GenomeEvolutionProposalData> {
+    return this.findOrThrow(businessId, proposalId);
+  }
+
   async create(
     businessId: string,
     input: GenomeEvolutionProposalInput,
@@ -82,9 +125,15 @@ export class GenomeEvolutionService {
     return this.serialize(row);
   }
 
+  /**
+   * `opts.moneySections` (round 2, D-128): false when the member who asked may not write financial genome content
+   * (no revenue write); a candidate that would be a financial proposal (isFinancialGenomeEvolution) is then not made.
+   * Left out (KEY, the scheduler), every candidate is made as before.
+   */
   async generateFromTemporalFlow(
     businessId: string,
     createdBy?: string,
+    opts: { moneySections?: boolean } = {},
   ): Promise<GenomeEvolutionProposalData[]> {
     const candidates = await this.temporal.findGenomeSignals(businessId);
     if (!candidates.length) return [];
@@ -99,10 +148,12 @@ export class GenomeEvolutionService {
     for (const candidate of candidates) {
       if (!isDnaSectionKey(candidate.section)) continue;
       if (pendingSections.has(candidate.section)) continue;
+      const patch = this.buildPatchForSection(candidate.section, candidate.evidence);
+      if (opts.moneySections === false && isFinancialGenomeEvolution({ section: candidate.section, reason: candidate.reason, proposedPatch: patch, evidence: candidate.evidence })) continue;
 
       const proposal = await this.create(businessId, {
         section: candidate.section,
-        proposedPatch: this.buildPatchForSection(candidate.section, candidate.evidence),
+        proposedPatch: patch,
         reason: candidate.reason,
         evidence: candidate.evidence,
         confidence: 0.6,
@@ -120,8 +171,14 @@ export class GenomeEvolutionService {
     businessId: string,
     proposalId: string,
     approvedBy?: string,
+    /**
+     * Round 4 (FU-GENOME-EVOLUTION-SURFACES, security F2): the caller's authority check, run on the row this call read
+     * and acts on (so the patch applied is the one checked), before any write.
+     */
+    beforeWrite?: (proposal: GenomeEvolutionProposalData) => Promise<void>,
   ): Promise<{ proposal: GenomeEvolutionProposalData; genome: Awaited<ReturnType<BlueprintService['calculateGenomeIntegrity']>> }> {
     const proposal = await this.findOrThrow(businessId, proposalId);
+    if (beforeWrite) await beforeWrite(proposal);
 
     if (proposal.status === 'APPROVED') {
       throw new BadRequestException('Proposal is already approved');
@@ -152,8 +209,14 @@ export class GenomeEvolutionService {
     businessId: string,
     proposalId: string,
     rejectedBy?: string,
+    /**
+     * Round 4 (FU-GENOME-EVOLUTION-SURFACES, security F2): the caller's authority check, run on the row this call read
+     * and acts on (so the patch applied is the one checked), before any write.
+     */
+    beforeWrite?: (proposal: GenomeEvolutionProposalData) => Promise<void>,
   ): Promise<GenomeEvolutionProposalData> {
     const proposal = await this.findOrThrow(businessId, proposalId);
+    if (beforeWrite) await beforeWrite(proposal);
 
     if (proposal.status === 'APPROVED') {
       throw new BadRequestException('Cannot reject an approved proposal');
@@ -179,8 +242,14 @@ export class GenomeEvolutionService {
     businessId: string,
     proposalId: string,
     dto: Partial<GenomeEvolutionProposalInput>,
+    /**
+     * Round 4 (FU-GENOME-EVOLUTION-SURFACES, security F2): the caller's authority check, run on the row this call read
+     * and acts on (so the patch applied is the one checked), before any write.
+     */
+    beforeWrite?: (proposal: GenomeEvolutionProposalData) => Promise<void>,
   ): Promise<GenomeEvolutionProposalData> {
     const proposal = await this.findOrThrow(businessId, proposalId);
+    if (beforeWrite) await beforeWrite(proposal);
 
     if (proposal.status === 'APPROVED' || proposal.status === 'REJECTED') {
       throw new BadRequestException('Cannot edit a finalized proposal');

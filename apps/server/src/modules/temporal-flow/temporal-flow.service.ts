@@ -1,6 +1,6 @@
 import { ForbiddenException, Injectable, Logger, Inject } from '@nestjs/common';
 import { genomeReaderReadsRevenue, financialProposalsWithProvenance, isMoneyLabel, PROPOSAL_CLASSIFY_SELECT, proposalTextStatesMoney, structuredValueStatesMoney, type GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
-import { dnaSectionViewForReader, isDnaSectionEvent, isGenomeEvolutionEvent, readableGenomeEvolutionEvents, redactedDnaSectionEvent } from '../key-autonomy/key-action-genome-projection';
+import { dnaSectionViewForReader, isDnaSectionEvent, isGenomeEvolutionEvent, readableGenomeEvolutionEvents, redactedDnaSectionEvent, ruleTraceWithoutMetadata, withoutCompositeScores, carriesCompositeScores } from '../key-autonomy/key-action-genome-projection';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { LEVEL_RANK, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
@@ -61,28 +61,6 @@ function eventTextStatesMoney(e: { payload?: unknown; metadata?: unknown }): boo
     if (structuredValueStatesMoney(result)) return true;
   }
   return false;
-}
-
-/**
- * Round 9 (security MAJOR-1): a lifecycle row's payload with every autonomy rule-trace entry's `metadata` left out. The
- * orchestrator's metadata holds its counts and scores; the genome gate's scores average the affected domains' health,
- * revenue quality and finance among them (D-233), and a rule may record an amount. A reader without revenue read is
- * served the row this way, and the row is classified as served. Each entry's rule, source, result and reason stay; a
- * trace that is not a list is left as it is (and read whole). Returns the payload itself when there is nothing to drop.
- */
-function ruleTraceWithoutMetadata(payload: unknown): unknown {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !('ruleTrace' in payload)) return payload;
-  const { ruleTrace, ...rest } = payload as Record<string, unknown>;
-  if (!Array.isArray(ruleTrace)) return payload;
-  if (!ruleTrace.some((entry) => entry && typeof entry === 'object' && !Array.isArray(entry) && 'metadata' in entry)) return payload;
-  return {
-    ...rest,
-    ruleTrace: ruleTrace.map((entry) => {
-      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
-      const { metadata: _metadata, ...kept } = entry as Record<string, unknown>;
-      return kept;
-    }),
-  };
 }
 
 /** The most rows a reader may ask one timeline read for, and the most rows that read scans before it answers what it has. */
@@ -564,8 +542,41 @@ export class TemporalFlowService {
     const proposals = events.filter((e) => e.entityType === 'key_action_proposal');
     const evolutions = events.filter((e) => isGenomeEvolutionEvent(e));
     const dnaSections = events.filter((e) => isDnaSectionEvent(e));
-    if (proposals.length === 0 && evolutions.length === 0 && dnaSections.length === 0) return events;
+    const composites = events.some((e) => carriesCompositeScores(e.payload));
+    if (proposals.length === 0 && evolutions.length === 0 && dnaSections.length === 0 && !composites) return events;
     if (readsRevenue ?? (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined))) return events;
+    // FU-GENOME-EVOLUTION-SURFACES (D-233): the genome's composite scores (genome.updated, constitution rows) weight the
+    // financial and sales DNA sections; they are left out of every row's payload, as the last step (round 2: the
+    // withhold and redact sets below are keyed by the rows as read), with the row's summary and description when they
+    // state a figure (GenomeIntegrityChangeListener writes "genome integrity changed from 52% to 57%" there).
+    const served = await this.projectGenomeRows(businessId, events, proposals, evolutions, dnaSections);
+    return composites ? served.map((e) => this.withoutComposites(e)) : served;
+  }
+
+  /**
+   * Round 2: a row with its composite scores left out, and its summary and description when they state a score (round
+   * 3, correctness MINOR-2: a percentage, or an integrity, readiness or score figure; the writer's ordinary "Version 2
+   * generated from Business Genome." is kept).
+   */
+  private withoutComposites<E extends { payload?: unknown; summary?: string | null; description?: string | null }>(e: E): E {
+    if (!carriesCompositeScores(e.payload)) return e;
+    const figure = (t: unknown) => typeof t === 'string' && /\p{Nd}/u.test(t) && /%|integrity|readiness|score/i.test(t);
+    return {
+      ...e,
+      payload: withoutCompositeScores(e.payload),
+      ...(figure(e.summary) ? { summary: null } : {}),
+      ...(figure(e.description) ? { description: null } : {}),
+    };
+  }
+
+  /** The genome-evolution, DNA section and KEY proposal projections of forReader (rows as read). */
+  private async projectGenomeRows<E extends { entityType?: string | null; entityId?: string | null; type?: string | null; title?: string | null; summary?: string | null; description?: string | null; payload?: unknown; metadata?: unknown; signals?: unknown }>(
+    businessId: string,
+    events: E[],
+    proposals: E[],
+    evolutions: E[],
+    dnaSections: E[],
+  ): Promise<E[]> {
     // FU-KEY-ACTION-GENOME-PROJECTION (D-233, D-238): a genome-evolution decision row is served only when its proposal
     // is read in this business, is of a non-money DNA section and nothing in it or the row states money (fail closed).
     const evolutionFlags = await readableGenomeEvolutionEvents(this.prisma, businessId, evolutions);
