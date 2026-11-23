@@ -66,8 +66,13 @@ export function SideSheet({
           className={isMobile ? "fixed inset-0 bg-black/50 backdrop-blur-sm z-[var(--kf-z-drawer)] flex items-end" : "fixed inset-0 bg-black/50 backdrop-blur-sm z-[var(--kf-z-drawer)]"}
           onClick={(e) => e.target === e.currentTarget && onClose()}
         >
+          {/* MOUNT-QUOTES: the two branches are keyed. useIsMobile() starts false, so a sheet
+              that mounts when it opens shows the desktop panel for a frame and then the bottom
+              sheet; as the same element in the same slot the node was reused and kept the
+              desktop slide's x in flight (the bottom sheet sat 345px to the right on a phone). */}
           {isMobile ? (
             <motion.div
+              key="sheet-phone"
               initial={{ y: "100%" }}
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
@@ -121,6 +126,7 @@ export function SideSheet({
             </motion.div>
           ) : (
             <motion.div
+              key="sheet-desktop"
               initial={{ x: "100%" }}
               animate={{ x: 0 }}
               exit={{ x: "100%" }}

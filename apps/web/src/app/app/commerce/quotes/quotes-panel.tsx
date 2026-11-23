@@ -1131,7 +1131,10 @@ export default function QuotesPanel({
 
             return (
               // The row is a list item that holds its own checkbox (journey D9 ticks the row it found by its number).
-              <div key={quote.id} role="listitem" aria-label={`Quote ${quote.quoteNumber}`} className="flex items-start gap-1">
+              <div key={quote.id} role="listitem" aria-label={`Quote ${quote.quoteNumber}`} className="group flex items-start gap-1">
+                {/* The row names its number ahead of the card, so a reader (or journey D's rowOf) reaching the
+                    number lands on the row, which holds the checkbox, not on the card inside it. */}
+                <span className="sr-only">{quote.quoteNumber}</span>
                 <label className="min-w-[44px] min-h-[44px] flex items-center justify-center shrink-0 cursor-pointer">
                   <input
                     type="checkbox"
