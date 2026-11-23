@@ -33,7 +33,7 @@
  * session token; review SEC-1): after a sign-out and another member's sign-in, with or without a reload, the next
  * reader starts from nothing.
  */
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { apiGet, apiPatch } from "./api";
 import { BUSINESS_CHANGED_EVENT, getStoredBusinessId } from "./workspace";
 

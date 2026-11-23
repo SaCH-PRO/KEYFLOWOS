@@ -51,25 +51,26 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async (url: string) =>
     String(url).endsWith("/identity/businesses") ? jsonResponse(200, [{ id: BIZ, name: "Products Co" }]) : jsonResponse(404, {}),
   ));
-  vi.spyOn(console, "error").mockImplementation(() => {});
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  vi.restoreAllMocks();
   window.localStorage.clear();
 });
 
 describe("app shell, hydrated: a products-only business never sees Schedule", () => {
   it("not on the hydration render (settings idle), nor after its settings are ready", async () => {
     const { useAppLayout } = await import("@/hooks/use-app-layout");
-    const renders: { hubs: string[]; bar: string[] }[] = [];
+    const settingsStatus = (await import("@/lib/business-settings")).useBusinessSettings;
+    const renders: { status: string; hubs: string[]; bar: string[] }[] = [];
+    const consoleError = vi.spyOn(console, "error");
     const container = document.createElement("div");
     document.body.appendChild(container);
     const { result, unmount } = renderHook(
       () => {
         const layout = useAppLayout();
-        renders.push({ hubs: layout.visibleHubs.map((h) => h.id), bar: layout.bottomBarHubs.map((h) => h.id) });
+        const { status } = settingsStatus();
+        renders.push({ status, hubs: layout.visibleHubs.map((h) => h.id), bar: layout.bottomBarHubs.map((h) => h.id) });
         return layout;
       },
       { hydrate: true, container },
@@ -77,6 +78,11 @@ describe("app shell, hydrated: a products-only business never sees Schedule", ()
     await waitFor(() => expect(result.current.bottomBarHubs.map((h) => h.id)).toEqual(["sales", "customers"]));
 
     expect(renders.length).toBeGreaterThan(1);
+    // The render this pins: the hydration render, where the settings are idle (the stored business not yet read).
+    expect(renders[0].status).toBe("idle");
+    // A real hydration, with nothing mismatched.
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
     expect(renders.filter((r) => r.hubs.includes("schedule") || r.bar.includes("schedule"))).toEqual([]);
     unmount();
   });
