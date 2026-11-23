@@ -557,8 +557,14 @@ describe('MEM-DOC-EXTRACTION-SIGHT (D-234 fail closed, D-257): a document extrac
       expect(await db.aiMemoryEmbedding.count({ where: { businessId: ID.biz, content: { startsWith: 'document_extraction: ' } } })).toBe(200);
       expect(await db.aiMemoryEmbedding.count({ where: { businessId: ID.biz } })).toBe(201);
       for (const reader of BLIND_READERS) expect(await pipelinePromptFor(ID[reader]), reader).toEqual(before[reader]);
-      // Control: the owner's pipeline prompt renders the extractions' copies.
-      expect((await pipelinePromptFor(ID.owner)).match(/\[ai_memory_embedding\] [^\n]*document_extraction/g)?.length ?? 0).toBeGreaterThan(0);
+      // Controls: the copies are served by the semantic store to a read that asks for them (so the blind read's
+      // equality is not for want of copies), it serves none to one that does not, and the owner still gets extractions.
+      const served = async (without: boolean) =>
+        (await semantic.search({ businessId: ID.biz, query: 'what happened lately', limit: 500, minSimilarity: 0.65, withoutDocumentExtractionCopies: without }))
+          .filter((hit: any) => hit.content.startsWith('document_extraction: ')).length;
+      expect(await served(false)).toBe(200);
+      expect(await served(true)).toBe(0);
+      expect(await pipelinePromptFor(ID.owner)).toContain(DOC_KEY);
       expect(outbound, 'no outbound request').toEqual([]);
     } finally {
       await clearExtractions();
