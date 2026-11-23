@@ -22,6 +22,7 @@
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from 'vitest';
 import { posix } from 'node:path';
+import { BadRequestException } from '@nestjs/common';
 import { Readable } from 'node:stream';
 import {
   S3Client,
@@ -156,6 +157,12 @@ describe('FU-ATTACHMENT-OBJECT-TENANCY: upload paths are bound to the issuing bu
     expect(res.objectPath.split('/')).toContain(BIZ_A);
     const signedKey = decodeURIComponent(new URL(res.uploadURL).pathname);
     expect(signedKey).toContain(`/${PRIVATE_DIR}${res.objectPath.slice('/objects'.length)}`);
+  });
+
+  it('a business id that is not one key segment is a 400, never a key (review round 1, 500 -> 400)', async () => {
+    for (const bad of ['a/b', '..', '', ' x', 'x%2Fy']) {
+      await expect(controller().requestUploadUrl(bad, {})).rejects.toBeInstanceOf(BadRequestException);
+    }
   });
 
   it('two businesses never share an upload namespace', async () => {
