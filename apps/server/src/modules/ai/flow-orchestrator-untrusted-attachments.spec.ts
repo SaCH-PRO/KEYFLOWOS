@@ -70,6 +70,10 @@ interface HarnessOptions {
   rawText?: string;
   /** Governance lets the call run, and the tool answers this (default: quick confirmation, nothing runs). */
   autoResult?: unknown;
+  /** What the model answers on the follow-up call after a tool ran (default: nothing). */
+  followUpText?: string;
+  /** Overrides governance's decision for the proposed call. */
+  decision?: Record<string, unknown>;
 }
 
 function makeHarness(opts: HarnessOptions = {}) {
@@ -77,7 +81,13 @@ function makeHarness(opts: HarnessOptions = {}) {
   const modelToolCalls = () =>
     opts.toolCall ? [{ id: 'tc_1', type: 'function', function: { name: opts.toolCall.name, arguments: JSON.stringify(opts.toolCall.args) } }] : [];
   const trackAndComplete = vi.fn(async (..._a: unknown[]) => ({ content: opts.toolCall ? '' : 'It is an invoice.', toolCalls: modelToolCalls(), usage }));
+  let streamCalls = 0;
   const trackAndStream = vi.fn(async function* (..._a: unknown[]) {
+    if (streamCalls++ > 0 && opts.followUpText) {
+      yield { type: 'content_delta', content: opts.followUpText };
+      yield { type: 'usage', usage };
+      return;
+    }
     for (const tc of modelToolCalls()) {
       yield { type: 'tool_call_delta', toolCall: { index: 0, id: tc.id, name: tc.function.name, argumentsDelta: tc.function.arguments } };
     }
@@ -86,7 +96,9 @@ function makeHarness(opts: HarnessOptions = {}) {
   });
   const governance = {
     evaluate: vi.fn(async () => ({
-      allowed: true, requiresQuickConfirm: opts.autoResult === undefined, requiresFormalApproval: false, requiresAdminApproval: false, tier: 2, reason: 'Tier 2 needs a quick confirmation',
+      allowed: true, requiresQuickConfirm: opts.autoResult === undefined,
+      requiresFormalApproval: false, requiresAdminApproval: false, tier: 2, reason: 'Tier 2 needs a quick confirmation',
+      ...opts.decision,
     })),
     createApprovalItem: vi.fn(async () => ({ id: 'appr_1' })),
     getToolTier: () => 2,
@@ -445,6 +457,42 @@ describe('RR-UNTRUSTED-CONTENT-FENCE orchestrator acceptance review: no authorit
     expect(h.executeTool).toHaveBeenCalledTimes(1);
     expect(shownOf(chunks)).toContain(CUT_LINE);
     expect(String((h.finalize.mock.calls[0] as unknown[])[6])).toContain(CUT_LINE);
+  });
+
+  it('round 4 (correctness T1), streamChat: the line leads the follow-up answer written after a tool ran, and is saved with it', async () => {
+    const h = makeHarness({
+      rawText: 'c'.repeat(UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS + 500),
+      toolCall: { name: 'mcp__docs__search', args: { q: 'x' } },
+      autoResult: { ok: true },
+      followUpText: 'Found it.',
+    });
+    const chunks = await h.stream([ATTACHMENT]);
+    expect(h.trackAndStream).toHaveBeenCalledTimes(2);
+    const shown = shownOf(chunks);
+    expect(shown).toContain('Found it.');
+    expect(shown).toContain(CUT_LINE);
+    const saved = String((h.finalize.mock.calls[0] as unknown[])[6]);
+    expect(saved).toContain('Found it.');
+    expect(saved).toContain(CUT_LINE);
+  });
+
+  it.each([
+    ['a refused call', { allowed: false, requiresQuickConfirm: false, reason: 'Blocked by policy' }, "I can't execute that action right now: Blocked by policy"],
+    ['a call needing formal approval', { allowed: true, requiresQuickConfirm: false, requiresFormalApproval: true, tier: 3 }, 'These actions require formal approval'],
+  ])('round 4 (correctness T2), streamChat: after %s the line leads the governance message and is saved with it', async (_l, decision, text) => {
+    const h = makeHarness({
+      rawText: 'c'.repeat(UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS + 500),
+      toolCall: { name: 'commerce_send_invoice', args: { invoiceId: 'inv_1' } },
+      decision,
+    });
+    const chunks = await h.stream([ATTACHMENT]);
+    expect(h.executeTool).not.toHaveBeenCalled();
+    const shown = shownOf(chunks);
+    expect(shown).toContain(text);
+    expect(shown).toContain(CUT_LINE);
+    const saved = String((h.finalize.mock.calls[0] as unknown[])[6]);
+    expect(saved).toContain(text);
+    expect(saved).toContain(CUT_LINE);
   });
 
   it('round 4 (security F2): the line names no uploader text: attachments are named by position, not by file name', async () => {
