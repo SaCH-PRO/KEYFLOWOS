@@ -1200,6 +1200,11 @@
       "prefix": "v73k_",
       "owner": "apps/server/test/key-action-genome-projection.integration.test.ts",
       "packet": "V1-73 (FU-KEY-ACTION-GENOME-PROJECTION)"
+    },
+    {
+      "prefix": "v72s_",
+      "owner": "apps/server/test/bank-token-encryption.integration.test.ts",
+      "packet": "V1-72 (RR-BANK-TOKEN-ENCRYPT)"
     }
   ],
   "pendingRenames": [],
