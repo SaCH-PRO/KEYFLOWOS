@@ -1266,7 +1266,7 @@ export class KeyCortexQueryPipelineService {
           contextSnapshot,
           v2Context,
           genomeContext,
-          genomeContext.recommendations.slice(0, 5),
+          await this.streamPromptRecommendations(query.businessId, genomeContext, await this.readsRevenue(query)),
           false,
         );
       } else if (flags.integrationV2Enabled) {
@@ -2024,6 +2024,31 @@ export class KeyCortexQueryPipelineService {
       MEMBER_AUTHORITY.set(query, authority);
     }
     return authority;
+  }
+
+  /**
+   * FU-KEY-GENOME-READS-RESIDUAL round 6 (D-235; security MINOR-1): the ranked recommendations of the stream's V3 prompt.
+   * A revenue reader is handed the first five of the genome context, as before. Anyone else is read with headroom
+   * (rankedRecommendationsForReader), as processQuery is, so how many of the business's top rows are finance or sales
+   * cannot be read from how many are handed; a failed read hands none (fails closed).
+   */
+  private async streamPromptRecommendations(
+    businessId: string,
+    genomeContext: Pick<GenomeEnrichedContext, 'recommendations'>,
+    readsRevenue: boolean,
+  ): Promise<GenomeRecommendation[]> {
+    if (readsRevenue) return genomeContext.recommendations.slice(0, 5);
+    try {
+      return await rankedRecommendationsForReader(
+        (limit) => this.genomeContextService.getRankedRecommendations(businessId, limit),
+        false,
+      );
+    } catch (err: unknown) {
+      this.logger.warn(
+        `[streamQuery] Ranked recommendations failed; none are handed to the prompt: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return [];
+    }
   }
 
   /**

@@ -77,6 +77,8 @@ export interface AwarenessSummary {
 
 /** Rows to read per kind. Enough for a feed, bounded so a busy tenant cannot. */
 const PER_KIND_LIMIT = 25;
+/** D-235 round 6: the rows of a kind read for a reader without revenue read, of which at most PER_KIND_LIMIT are served. */
+const PER_KIND_HEADROOM = 100;
 
 @Injectable()
 export class KeyCortexAwarenessService {
@@ -136,7 +138,9 @@ export class KeyCortexAwarenessService {
           },
           select: { key: true, value: true, confidence: true, createdAt: true },
           orderBy: { createdAt: 'desc' },
-          take: PER_KIND_LIMIT,
+          // Round 6 (security MINOR-2): a reader without revenue read is read with headroom, so what is served (and
+          // counted) is not what is left of the newest rows.
+          take: readsRevenue ? PER_KIND_LIMIT : PER_KIND_HEADROOM,
         });
       } catch (error: unknown) {
         this.logger.warn(
@@ -148,6 +152,7 @@ export class KeyCortexAwarenessService {
 
       let served = 0;
       for (const row of rows) {
+        if (served >= PER_KIND_LIMIT) break;
         // One malformed row must not lose the rest of the feed.
         try {
           const parsed = JSON.parse(row.value) as Record<string, unknown>;
