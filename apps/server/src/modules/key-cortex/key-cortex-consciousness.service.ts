@@ -92,6 +92,15 @@ import {
   KeyCortexEndocrineService,
   type EndocrineSignal,
 } from './key-cortex-endocrine.service';
+import { EVENT_MODULES } from './key-cortex-prompt-context.service';
+
+/**
+ * MEM-SALIENCE-SIGHT (acceptance review MINOR-1; D-234, fail closed): the modules a reader needs to be told a conscious-
+ * pipeline dose derived from the business's whole context (the weak signals intuition finds over all its data, money
+ * included; the ethics flag and the calibration of an answer built from that context): every module, so only a reader
+ * who sees every module is told it, as it was before. The body malaise (organ health) names none: it is business-wide.
+ */
+const WHOLE_CONTEXT_MODULES = EVENT_MODULES;
 
 /**
  * One completed step of the consciousness pipeline, emitted as it finishes.
@@ -882,6 +891,7 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
         hormone: 'cortisol',
         magnitude: 0.2,
         reason: 'ethical review flagged a recommendation in this session',
+        modules: WHOLE_CONTEXT_MODULES,
       });
     }
 
@@ -895,6 +905,7 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
         reason:
           `calibration reduced confidence by ` +
           `${Math.round(overconfidence * 100)} points on this query`,
+        modules: WHOLE_CONTEXT_MODULES,
       });
     }
 
@@ -905,6 +916,7 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
         hormone: 'cortisol',
         magnitude: Math.min(weakSignalCount * 0.05, 0.25),
         reason: `${weakSignalCount} concurrent weak signals detected`,
+        modules: WHOLE_CONTEXT_MODULES,
       });
     }
 

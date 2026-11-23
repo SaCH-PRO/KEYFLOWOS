@@ -116,6 +116,7 @@ import {
   PROMPT_MEMORY_HEADROOM,
   moduleSightOf,
   promptMemoryReader,
+  readersModuleSight,
   readersOwnPromptMemory,
   type ModuleSight,
 } from '../key-cortex/key-cortex-prompt-context.service';
@@ -2090,6 +2091,25 @@ export class FlowOrchestratorService {
     }
   }
 
+  /**
+   * MEM-SALIENCE-SIGHT (D-234, D-100): the thalamus's verdict for this turn's standing-context viewer (`userId`, as the
+   * business snapshot's viewerId: a turn with no member, a staff position's included, has none). Its standing context
+   * carries the salience counts and endocrine Basis lines that viewer's module scopes allow (readersModuleSight, as
+   * ModuleScopeGuard reads the membership; no viewer or a failed read: no module). The one membership read is skipped
+   * when no triage service is wired.
+   */
+  private async triageForViewer(
+    businessId: string,
+    message: string,
+    hasAttachments: boolean,
+    userId: string | undefined,
+  ): Promise<TriageVerdict | null> {
+    const triage = this.getTriage();
+    if (!triage) return null;
+    const sight = await readersModuleSight(this.prisma, businessId, userId ?? null, this.logger, 'standing');
+    return triage.triage(businessId, message, hasAttachments, sight);
+  }
+
   async chat(
     businessId: string,
     message: string,
@@ -2157,11 +2177,11 @@ export class FlowOrchestratorService {
     const onboardingDirective = await this.buildOnboardingDirective(businessId, pageContext);
 
     // ─── THALAMUS ───────────────────────────────────────────────
-    // Grade the message before spending anything on it. Zero model calls,
-    // zero I/O: six regex classifiers plus two in-memory reads. Never throws;
-    // on any failure it returns today's exact parameters.
-    const triage: TriageVerdict | null =
-      this.getTriage()?.triage(businessId, message, Boolean(attachments?.length)) ?? null;
+    // Grade the message before spending anything on it. Zero model calls: six
+    // regex classifiers plus in-memory reads, after one membership read for the
+    // viewer's module sight (MEM-SALIENCE-SIGHT). Never throws; on any failure
+    // it returns today's exact parameters.
+    const triage: TriageVerdict | null = await this.triageForViewer(businessId, message, Boolean(attachments?.length), userId);
 
     // The menu the model is shown, resolved once for this turn.
     const selectedTools = await this.selectToolsForRequest(
@@ -2607,11 +2627,11 @@ ${triage.standingContext}`;
     const onboardingDirective = await this.buildOnboardingDirective(businessId, pageContext);
 
     // ─── THALAMUS ───────────────────────────────────────────────
-    // Grade the message before spending anything on it. Zero model calls,
-    // zero I/O: six regex classifiers plus two in-memory reads. Never throws;
-    // on any failure it returns today's exact parameters.
-    const triage: TriageVerdict | null =
-      this.getTriage()?.triage(businessId, message, Boolean(attachments?.length)) ?? null;
+    // Grade the message before spending anything on it. Zero model calls: six
+    // regex classifiers plus in-memory reads, after one membership read for the
+    // viewer's module sight (MEM-SALIENCE-SIGHT). Never throws; on any failure
+    // it returns today's exact parameters.
+    const triage: TriageVerdict | null = await this.triageForViewer(businessId, message, Boolean(attachments?.length), userId);
 
     // The menu the model is shown, resolved once for this turn.
     const selectedTools = await this.selectToolsForRequest(
