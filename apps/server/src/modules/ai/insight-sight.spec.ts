@@ -1,6 +1,6 @@
 /** FU-INSIGHTS-SIGHT (security review round 1, OOS-2): dashboardFor keeps named fields only, so a field added later fails closed. */
 import { describe, it, expect } from 'vitest';
-import { dashboardFor, fieldsSightNeeds, insightNeeds } from './insight-sight';
+import { dashboardFor, fieldsSightNeeds, insightNeeds, keepWithinBudget } from './insight-sight';
 
 const blind = { reader: 'u1', sight: (m: string) => m !== 'revenue' && m !== 'expenses' } as any;
 const full = { reader: 'u0', sight: () => true } as any;
@@ -52,5 +52,23 @@ describe('fieldsSightNeeds is bounded (security review round 5, ISS-R5-1)', () =
   });
   it('under the bound, plain text still needs nothing (control)', () => {
     expect(fieldsSightNeeds(['printer jams '.repeat(100)])).toEqual([]);
+  });
+});
+
+describe('keepWithinBudget bounds what one request classifies (security review round 6, ISS-R6-1)', () => {
+  it('classifies items in order until the budget is spent; every later item is withheld unclassified (fail closed)', () => {
+    const items = ['a', 'b', 'c', 'd'];
+    const classified: string[] = [];
+    const kept = keepWithinBudget(items, () => 40, (item) => {
+      classified.push(item);
+      return item !== 'b';
+    }, 100);
+    expect(classified).toEqual(['a', 'b']);
+    expect(kept).toEqual(['a']);
+  });
+  it('an item larger than the whole budget is withheld unclassified; nothing after it is classified', () => {
+    const classified: string[] = [];
+    expect(keepWithinBudget(['huge', 'small'], (i) => (i === 'huge' ? 500 : 1), (i) => { classified.push(i); return true; }, 100)).toEqual([]);
+    expect(classified).toEqual([]);
   });
 });

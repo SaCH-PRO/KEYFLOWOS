@@ -585,4 +585,20 @@ describe('FU-INSIGHTS-SIGHT (D-100, D-234, D-146): monitoring insights, suggesti
       await clearData();
     }
   }, 300_000);
+
+  it('V72Q-16 RED (security review round 6, OOS-R6-1, transitional): a suggestion row stored before the stamp whose expense sits behind a JSON line break is withheld on GET .../ai/memory too', async () => {
+    await clearData();
+    try {
+      const legacy = { id: 'suggestion_stale_leads_legacy', category: 'stale_leads', title: 'V72Q-LEGACY2 follow up', message: 'Follow up.\nrent is due', actions: [], severity: 'warning', createdAt: new Date() };
+      await db.aiMemory.create({
+        data: { businessId: ID.biz, category: 'suggestion', key: `stale_leads_${Date.now()}`, value: JSON.stringify(legacy), source: 'key_ai', expiresAt: new Date(Date.now() + DAY) },
+      });
+      for (const route of ['/ai/memory', '/ai/memory?category=suggestion']) {
+        expect(text(await ok('get', 'revnoexp', route)), route).not.toContain('V72Q-LEGACY2');
+        expect(text(await ok('get', 'revenue', route)), `${route} control`).toContain('V72Q-LEGACY2');
+      }
+    } finally {
+      await clearData();
+    }
+  }, 300_000);
 });
