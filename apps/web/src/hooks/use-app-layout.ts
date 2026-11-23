@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useNavigationContext } from "@/lib/navigation-context";
 import { useThemeColors } from "@/lib/theme-context";
@@ -17,25 +17,25 @@ import {
   BUSINESS_CHANGED_EVENT,
 } from "@/lib/workspace";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
-import {
-  getDisclosureMode,
-  setDisclosureMode as persistDisclosureMode,
-  MODE_OPERATE_ITEMS,
-  MODE_BUILD_ITEMS,
-  type DisclosureMode,
-} from "@/lib/disclosure-mode";
+// The nav's reader of what the business sells (BIZ-SETTINGS-WEB). Not the settings page's hook of the same name
+// (app/app/settings/business/use-business-settings.ts).
+import { BUSINESS_SETTINGS_FRESH_MS, actingMemberNow, useBusinessSettings } from "@/lib/business-settings";
 import { featureFlags as dormantFeatureFlags } from "@/lib/feature-flags";
 import type { AppNotification } from "@/lib/notifications";
 import type { ResolvedFeatureFlag } from "@/lib/nav-config";
 import {
-  operateSections,
-  buildSections,
   moreNav,
   meNav,
   isNavItemActive,
+  isHubActive,
+  hubsFor,
+  bottomBarFor,
+  menuSectionsFor,
+  memberModuleLevelsOf,
+  type HubNavItem,
+  type ModuleLevels,
   type NavItem,
   type NavSection,
-  type PrimaryNavItem,
   type DrawerSurface,
 } from "@/lib/nav-config";
 import type { CopilotModule } from "@/components/key/chat";
@@ -65,16 +65,18 @@ export interface AppLayoutState {
   isFeatureLocked: (item: NavItem) => boolean;
   isItemHiddenByDormantFlag: (item: NavItem) => boolean;
 
-  disclosureMode: DisclosureMode;
-  setDisclosureMode: (mode: DisclosureMode) => void;
-
+  /** The hubs this member is shown, for what the business sells (NAV-A1). */
+  visibleHubs: HubNavItem[];
+  /** The phone's two hub slots between Today, New and More. */
+  bottomBarHubs: HubNavItem[];
+  /** More's hub sections (each hub's screens), then everything else, as this member may open them. */
   visibleOperateSections: NavSection[];
   visibleBuildSections: NavSection[];
   visibleMoreNav: NavItem[];
   meNav: NavItem[];
 
   isSecondaryActive: (item: NavItem) => boolean;
-  isPrimaryActive: (item: PrimaryNavItem) => boolean;
+  isPrimaryActive: (hub: HubNavItem) => boolean;
 
   addMenuOpen: boolean;
   setAddMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
@@ -85,10 +87,6 @@ export interface AppLayoutState {
   userMenuOpen: boolean;
   setUserMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
   userMenuRef: React.RefObject<HTMLDivElement | null>;
-
-  modeMenuOpen: boolean;
-  setModeMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  modeMenuRef: React.RefObject<HTMLDivElement | null>;
 
   kfStoreOpen: boolean;
   setKfStoreOpen: React.Dispatch<React.SetStateAction<boolean>>;
@@ -171,31 +169,23 @@ export function useAppLayout(): AppLayoutState {
     return !dormantFeatureFlags[item.dormantFlag];
   }, []);
 
-  const [disclosureMode, setDisclosureModeState] = useState<DisclosureMode>(getDisclosureMode);
+  // NAV-A1 (D-150, D-179): the hubs follow what the business sells and what this member may open.
+  const businessSettings = useBusinessSettings();
+  // Not known while loading (review COR-2): no sells-dependent hub shows until it is, so no wrong bar flashes.
+  const sells = businessSettings.status === "loading" ? null : businessSettings.sells;
+  const moduleLevels = useMemberModuleLevels();
 
-  const visibleOperateSections = useMemo(
-    () => operateSections.map((section) => ({
-      ...section,
-      items: section.items.filter((i) => {
-        if (isItemHiddenByDormantFlag(i)) return false;
-        if (disclosureMode === "enterprise") return true;
-        return MODE_OPERATE_ITEMS[disclosureMode].includes(i.label);
-      }),
-    })).filter((s) => s.items.length > 0),
-    [isItemHiddenByDormantFlag, disclosureMode],
-  );
+  const visibleHubs = useMemo(() => hubsFor(sells, moduleLevels), [sells, moduleLevels]);
+  const bottomBarHubs = useMemo(() => bottomBarFor(sells, moduleLevels), [sells, moduleLevels]);
 
-  const visibleBuildSections = useMemo(
-    () => buildSections.map((section) => ({
-      ...section,
-      items: section.items.filter((i) => {
-        if (isItemHiddenByDormantFlag(i)) return false;
-        if (disclosureMode === "enterprise") return true;
-        return MODE_BUILD_ITEMS[disclosureMode].includes(i.label);
-      }),
-    })).filter((s) => s.items.length > 0),
-    [isItemHiddenByDormantFlag, disclosureMode],
-  );
+  const { visibleOperateSections, visibleBuildSections } = useMemo(() => {
+    const { hubSections, moreSections } = menuSectionsFor(sells, moduleLevels);
+    const undormant = (sections: NavSection[]) =>
+      sections
+        .map((section) => ({ ...section, items: section.items.filter((i) => !isItemHiddenByDormantFlag(i)) }))
+        .filter((s) => s.items.length > 0);
+    return { visibleOperateSections: undormant(hubSections), visibleBuildSections: undormant(moreSections) };
+  }, [sells, moduleLevels, isItemHiddenByDormantFlag]);
 
   const visibleMoreNav = useMemo(
     () => moreNav.filter((i) => !isItemHiddenByDormantFlag(i)),
@@ -204,16 +194,6 @@ export function useAppLayout(): AppLayoutState {
 
   const { planLimitHit, clearPlanLimit } = usePlanLimitHandler();
   const [kfStoreOpen, setKfStoreOpen] = useState(false);
-  const [modeMenuOpen, setModeMenuOpen] = useState(false);
-  const modeMenuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: CustomEvent<{ mode: DisclosureMode }>) => {
-      setDisclosureModeState(e.detail.mode);
-    };
-    window.addEventListener("kf:disclosure-mode-changed", handler as EventListener);
-    return () => window.removeEventListener("kf:disclosure-mode-changed", handler as EventListener);
-  }, []);
 
   useEffect(() => {
     setMobileDrawerOpen(false);
@@ -225,8 +205,8 @@ export function useAppLayout(): AppLayoutState {
         const labelSegment = isUuid && segments.length > 1 ? segments[segments.length - 2] : last;
         const labelMap: Record<string, string> = {
           app: "KEYFLOW",
-          crm: "Network", pipeline: "Network", people: "Network", network: "Network",
-          commerce: "Money", money: "Money",
+          crm: "Customers", pipeline: "Customers", people: "Customers", network: "Customers",
+          commerce: "Sales", money: "Money",
           bookings: "Schedule", schedule: "Schedule",
           marketing: "Communicate", communicate: "Communicate",
           expenses: "Money",
@@ -234,11 +214,12 @@ export function useAppLayout(): AppLayoutState {
           documents: "Documents",
           automations: "Automate", "build": "Build",
           reports: "Intelligence", intelligence: "Intelligence",
-          store: "Storefront", settings: "System",
+          store: "Your page", settings: "Settings",
           learn: "Learn",
           community: "Community", marketplace: "Marketplace",
-          "control-tower": "Cockpit",
-          "keyflow-command": "Cockpit",
+          "command-center": "Today",
+          "control-tower": "Today",
+          "keyflow-command": "Today",
           structure: "Operations",
           inbox: "Inbox",
           calendar: "Schedule",
@@ -445,19 +426,7 @@ export function useAppLayout(): AppLayoutState {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  const isPrimaryActive = useCallback(
-    (item: PrimaryNavItem) => {
-      if (!item.href) return false;
-      const basePath = item.href.split("?")[0];
-      return pathname === basePath || pathname.startsWith(basePath + "/");
-    },
-    [pathname],
-  );
-
-  const setDisclosureMode = useCallback((mode: DisclosureMode) => {
-    setDisclosureModeState(mode);
-    persistDisclosureMode(mode);
-  }, []);
+  const isPrimaryActive = useCallback((hub: HubNavItem) => isHubActive(hub, pathname), [pathname]);
 
   return {
     pathname,
@@ -478,8 +447,8 @@ export function useAppLayout(): AppLayoutState {
     featureFlags,
     isFeatureLocked,
     isItemHiddenByDormantFlag,
-    disclosureMode,
-    setDisclosureMode,
+    visibleHubs,
+    bottomBarHubs,
     visibleOperateSections,
     visibleBuildSections,
     visibleMoreNav,
@@ -493,13 +462,89 @@ export function useAppLayout(): AppLayoutState {
     userMenuOpen,
     setUserMenuOpen,
     userMenuRef,
-    modeMenuOpen,
-    setModeMenuOpen,
-    modeMenuRef,
     kfStoreOpen,
     setKfStoreOpen,
     planLimitHit,
     clearPlanLimit,
     handleLogout,
   };
+}
+
+/* ───────────────────────── the member's module levels (NAV-A1) ───────────────────────── */
+
+/** The selected business and the member acting, as one key: either changing is another answer to wait for. */
+function subscribeToSelection(onChange: () => void) {
+  window.addEventListener(BUSINESS_CHANGED_EVENT, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(BUSINESS_CHANGED_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+const selectionKey = () => {
+  const businessId = getStoredBusinessId();
+  return businessId ? `${actingMemberNow()}\n${businessId}` : null;
+};
+
+const NO_SELECTION_ON_SERVER = () => null;
+
+/**
+ * NAV-A1 (D-150, D-179; journey J5): the signed-in member's level on each module of the selected business, as the
+ * server reads it (GET identity/businesses/:b/my-access), for the nav to offer only the hubs they may open. Null
+ * (unknown) until this business's answer lands, and when the read fails: unknown hides nothing (WOS-R1), and the
+ * server still refuses. An answer belongs to the member and the business it was asked for (review SEC-1): it is
+ * applied only while both are still the ones selected, and a switch (selectBusiness, another tab's sign-in or
+ * selection, refreshWorkspace's correction picked up on the next render) reads again. The tab looked at again reads
+ * again too, so an owner's change to this member's scopes reaches their menu without a reload (SEC-2, COR-7).
+ */
+export function useMemberModuleLevels(): ModuleLevels {
+  const key = useSyncExternalStore(subscribeToSelection, selectionKey, NO_SELECTION_ON_SERVER);
+  const [answered, setAnswered] = useState<{ key: string; levels: ModuleLevels; at: number } | null>(null);
+  const [lookedAgain, setLookedAgain] = useState(0);
+  const answeredRef = useRef(answered);
+  useEffect(() => {
+    answeredRef.current = answered;
+  }, [answered]);
+
+  useEffect(() => {
+    const again = () => {
+      if (document.visibilityState === "hidden") return;
+      // Levels read within the freshness window: nothing to ask (review R2-COR-2). Only an answer with levels is
+      // fresh, as only a ready entry is in business-settings: a failed read is asked again on the next look (round 3).
+      // A clock stepped back past the answer counts it stale, never fresh for ever (round 4). A return to the tab fires
+      // visibilitychange and focus together; lib/api joins the identical reads in flight into one request.
+      const last = answeredRef.current;
+      const age = last ? Date.now() - last.at : -1;
+      if (last && last.levels !== null && age >= 0 && age < BUSINESS_SETTINGS_FRESH_MS) return;
+      setLookedAgain((n) => n + 1);
+    };
+    window.addEventListener("focus", again);
+    document.addEventListener("visibilitychange", again);
+    return () => {
+      window.removeEventListener("focus", again);
+      document.removeEventListener("visibilitychange", again);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!key) return;
+    const businessId = key.slice(key.indexOf("\n") + 1);
+    let disposed = false;
+    void apiGet(`/identity/businesses/${encodeURIComponent(businessId)}/my-access`)
+      .then((res) => (res.error ? null : memberModuleLevelsOf(res.data)))
+      .catch(() => null)
+      .then((levels) => {
+        // A later read (another look, another member or business) is already on its way: this one is not current.
+        if (disposed) return;
+        // A failed re-read says nothing new about this member: what is known for the same member and business stays
+        // (review R2-COR-1). Unknown only for a selection never answered.
+        setAnswered((prev) => (levels === null && prev?.key === key && prev.levels !== null ? prev : { key, levels, at: Date.now() }));
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [key, lookedAgain]);
+
+  return answered !== null && answered.key === key ? answered.levels : null;
 }

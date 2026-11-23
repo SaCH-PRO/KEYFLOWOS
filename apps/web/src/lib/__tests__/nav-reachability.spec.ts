@@ -79,9 +79,13 @@ type Reason =
  * shows exactly which door opened or closed.
  */
 const ORPHANED_BY_DESIGN: Record<string, Reason> = {
+  // NAV-A1: the 308 redirect sources the nav pointed at; the nav now names their final URLs
+  // (/app/money/books, /app/schedule/calendar, /app/money/expenses, /app/communicate/campaigns,
+  // /app/work/projects). Each still renders a page behind its next.config redirect.
+  "/app/accounting":                     'deliberately-unlinked',
   "/app/blueprint":                      'deliberately-unlinked',
   "/app/briefing":                       'deliberately-unlinked',
-  "/app/communicate/campaigns":          'deliberately-unlinked',
+  "/app/calendar":                       'deliberately-unlinked',
   "/app/continental-ops/delivery-notes": 'todo-connect',
   "/app/continental-ops/goods-receipts": 'todo-connect',
   "/app/continental-ops/receipts":       'todo-connect',
@@ -91,6 +95,8 @@ const ORPHANED_BY_DESIGN: Record<string, Reason> = {
   "/app/document-intelligence":          'deliberately-unlinked',
   "/app/documents":                      'deliberately-unlinked',
   "/app/documents/[instanceId]":         'detail-route-of:/app/documents',
+  "/app/expenses":                       'deliberately-unlinked',
+  "/app/expenses/[id]":                  'detail-route-of:/app/money/expenses',
   "/app/finance/accounts":               'deliberately-unlinked',
   "/app/finance/actions":                'detail-route-of:/app/money',
   "/app/finance/cashflow":               'deliberately-unlinked',
@@ -101,19 +107,22 @@ const ORPHANED_BY_DESIGN: Record<string, Reason> = {
   "/app/inbox":                          'deliberately-unlinked',
   "/app/inbox/intake":                   'todo-connect',
   "/app/keyflow-command":                'deliberately-unlinked',
-  "/app/money":                          'deliberately-unlinked',
   // The expanded finance action list, reached from the "See all" link on the
   // money hub's panel — which truncates to five. Not in nav on purpose: it is
   // the panel's overflow, not a destination of its own.
   "/app/money/actions":                  'detail-route-of:/app/money',
-  "/app/money/books":                    'deliberately-unlinked',
-  "/app/money/expenses":                 'deliberately-unlinked',
   "/app/money/revenue":                  'deliberately-unlinked',
+  // NAV-A1: /app/notifications and /app/settings/profile forward on mount (to /app/settings/notifications and
+  // /app/profile). /app/settings/conversion was counted only through the /app/settings prefix (a page that forwards
+  // to billing); no menu names it, and NAV-B-HIDE's census decides it (D-152).
+  "/app/notifications":                  'deliberately-unlinked',
   "/app/onboarding":                     'todo-connect',
   "/app/onboarding/business-os":         'deliberately-unlinked',
   "/app/plans/[planId]":                 'todo-connect',
-  "/app/schedule/calendar":              'deliberately-unlinked',
-  "/app/work/projects":                  'deliberately-unlinked',
+  "/app/projects":                       'deliberately-unlinked',
+  "/app/projects/plans/[planId]":        'detail-route-of:/app/work/projects',
+  "/app/settings/conversion":            'todo-connect',
+  "/app/settings/profile":               'deliberately-unlinked',
   "/app/workflows":                      'deliberately-unlinked',
 };
 
@@ -138,6 +147,19 @@ function navHrefs(): string[] {
   return [...new Set([...src.matchAll(/href: "(\/app\/[^"]*)"/g)].map((m) => m[1].split('?')[0]))];
 }
 
+/**
+ * NAV-A1: the Settings screens' own menu (app/app/settings/layout.tsx navItems), shown beside every settings page.
+ * Before NAV-A1 the nav named /app/settings, and the generous prefix rule counted every settings screen through it;
+ * /app/settings only forwards (to /app/settings/billing), so the Settings hub names /app/settings/business, and the
+ * screens are reached through the layout's menu. An explicit edge, read exactly: only when a nav href opens a
+ * settings page.
+ */
+function settingsMenuHrefs(hrefs: string[]): string[] {
+  if (!hrefs.some((h) => h.startsWith('/app/settings/'))) return [];
+  const src = fs.readFileSync(path.join(APP, 'settings', 'layout.tsx'), 'utf8');
+  return [...src.matchAll(/\{ href: "(\/app\/[^"]+)", label:/g)].map((m) => m[1]);
+}
+
 /** Does the nav land you anywhere in this route's subtree? */
 function navReachable(route: string, hrefs: string[]): boolean {
   return hrefs.some(
@@ -150,9 +172,10 @@ function navReachable(route: string, hrefs: string[]): boolean {
 
 describe('every screen has a door, or a written reason it does not', () => {
   const all = routes();
-  const hrefs = navHrefs();
+  const hrefs = [...navHrefs(), ...settingsMenuHrefs(navHrefs())];
 
   it('finds both sides', () => {
+    expect(settingsMenuHrefs(navHrefs()).length, 'the settings menu reader is broken').toBeGreaterThan(10);
     expect(all.length).toBeGreaterThan(150);
     expect(hrefs.length).toBeGreaterThan(30);
   });
@@ -207,5 +230,90 @@ describe('every screen has a door, or a written reason it does not', () => {
       'more screens are now unreachable than when this gate was written. Connect one, or ' +
         'delete one, before adding another',
     ).toBeLessThanOrEqual(39);
+  });
+});
+
+/**
+ * NAV-A1 (the redirect table): every nav href is the final URL. A nav entry that names a next.config redirect source
+ * or a page that only redirects puts a door on a forwarding address: an extra hop on every click, and for a 308 a
+ * cached hop the browser keeps. The table itself: new or changed redirects are 307, and no existing 308 is reversed.
+ */
+describe('NAV-A1: every nav href is the final URL, and the redirect table only grows by 307s', () => {
+  const cfg = fs.readFileSync(path.join(WEB_SRC, '..', 'next.config.ts'), 'utf8');
+  const rules = [...cfg.matchAll(/source:\s*"([^"]+)",\s*destination:\s*"([^"]+)",\s*permanent:\s*(true|false)/g)].map((m) => ({
+    source: m[1],
+    destination: m[2],
+    permanent: m[3] === 'true',
+  }));
+  const redirectedBy = (href: string) =>
+    rules.find((r) => r.source === href || (r.source.endsWith('/:path*') && href.startsWith(r.source.slice(0, -7) + '/')));
+
+  it('reads the table', () => {
+    expect(rules.length).toBeGreaterThan(20);
+  });
+
+  it('no nav href is a redirect source', () => {
+    const hops = navHrefs().filter((h) => redirectedBy(h)).map((h) => `${h} -> ${redirectedBy(h)!.destination}`);
+    expect(hops, 'name the destination in the nav instead').toEqual([]);
+  });
+
+  /** The page file a route renders, following one-line re-exports (/app/money re-exports the finance page). */
+  const pageFile = (route: string, hops = 0): string | null => {
+    const page = path.join(APP, ...route.replace(/^\/app\/?/, '').split('/').filter(Boolean), 'page.tsx');
+    if (!fs.existsSync(page)) return null;
+    const reexport = /export \{ default \} from "@\/app\/(app\/[^"]+)\/page"/.exec(fs.readFileSync(page, 'utf8'));
+    return reexport && hops < 3 ? pageFile('/' + reexport[1], hops + 1) : page;
+  };
+
+  it('no nav href opens a page that only redirects (redirect(), or router.replace on mount)', () => {
+    const stubs = navHrefs().filter((h) => {
+      const page = pageFile(h);
+      if (!page) return false;
+      const body = fs.readFileSync(page, 'utf8');
+      return /\b(redirect|router\.replace)\(\s*["'`]\//.test(body) && body.split('\n').length < 25;
+    });
+    expect(stubs).toEqual([]);
+  });
+
+  it('the re-export reader sees /app/money forward (the check is not vacuous)', () => {
+    expect(pageFile('/app/money')).toMatch(/finance[\\/]page\.tsx$/);
+  });
+
+  // The permanent redirects at NAV-A1's base (79ed2a57), except /app/control-tower's pair, which NAV-A1 changed to a
+  // 307 to /app/command-center (it named the /app/keyflow-command stub). Each must stay a 308 to the same place.
+  const PERMANENT_AT_BASE: Record<string, string> = {
+    '/app/finance/revenue': '/app/commerce',
+    '/app/finance/revenue/:path*': '/app/commerce',
+    '/app/finance/expenses': '/app/expenses',
+    '/app/finance/expenses/:path*': '/app/expenses',
+    '/app/finance/reports': '/app/reports',
+    '/app/finance/reports/:path*': '/app/reports',
+    '/app/finance/actions': '/app/money',
+    '/app/finance/actions/:path*': '/app/money',
+    '/app/finance': '/app/financial-flow',
+    '/app/accounting': '/app/money/books',
+    '/app/expenses': '/app/money/expenses',
+    '/app/crm': '/app/people-flow',
+    '/app/projects': '/app/work/projects',
+    '/app/calendar': '/app/schedule/calendar',
+    '/app/marketing': '/app/communicate/campaigns',
+    '/app/connect': '/app/key-connect',
+    '/app/connect/:path*': '/app/key-connect',
+    '/app/build/connect': '/app/key-connect',
+    '/app/build/connect/:path*': '/app/key-connect',
+    '/app/build/system/connections': '/app/key-connect',
+  };
+
+  it('no existing 308 is reversed or moved', () => {
+    for (const [source, destination] of Object.entries(PERMANENT_AT_BASE)) {
+      const rule = rules.find((r) => r.source === source);
+      expect(rule, source).toBeDefined();
+      expect({ destination: rule!.destination, permanent: rule!.permanent }, source).toEqual({ destination, permanent: true });
+    }
+  });
+
+  it('every other redirect is a 307', () => {
+    const permanent = rules.filter((r) => r.permanent && !(r.source in PERMANENT_AT_BASE)).map((r) => r.source);
+    expect(permanent, 'a new or changed redirect is permanent: false (307)').toEqual([]);
   });
 });
