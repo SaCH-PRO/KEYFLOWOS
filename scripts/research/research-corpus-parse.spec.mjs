@@ -37,6 +37,11 @@ export const RESEARCH_DIR = path.join('docs', 'intelligence', 'research');
 export const LEDGER = path.join(RESEARCH_DIR, 'RESEARCH-CORPUS.yaml');
 
 /** Every .yaml/.yml file under docs/intelligence/research/, repo-relative, sorted. */
+/** Decides how the full-parse test reports: declared here for the RED commit, implemented in the fix. */
+export function parseOutcome(_result, _env = process.env) {
+  throw new Error('parseOutcome: not implemented yet (review round 1)');
+}
+
 export function researchYamlFiles(root = ROOT) {
   const out = [];
   const walk = (dir) => {
@@ -167,6 +172,40 @@ describe('FU-RESEARCH-CORPUS-YAML: the research ledger parses and stays parseabl
       return;
     }
     assert.deepEqual(result.problems, [], `\n${result.problems.join('\n')}\n`);
+  });
+});
+
+describe('FU-RESEARCH-CORPUS-YAML: review round 1 controls', () => {
+  it('a missing parser FAILS under CI and is a todo only locally; a parse that ran decides on its problems', () => {
+    assert.deepEqual(parseOutcome({ ran: false, reason: 'no python3' }, { CI: 'true' }), { kind: 'fail', message: 'full YAML parse NOT RUN in CI: no python3' });
+    assert.deepEqual(parseOutcome({ ran: false, reason: 'no python3' }, {}), { kind: 'todo', message: 'full YAML parse not run here: no python3' });
+    assert.deepEqual(parseOutcome({ ran: true, problems: [] }, { CI: 'true' }), { kind: 'pass', message: '' });
+    assert.equal(parseOutcome({ ran: true, problems: ['a.yaml:1:1 bad'] }, {}).kind, 'fail');
+  });
+
+  it('keys that are not identifiers (a space, a digit, quotes) are still mapping entries for the first rule', () => {
+    assert.equal(lintYamlText('a:\n  my key: a: b\n').length, 1);
+    assert.equal(lintYamlText('a:\n  2024: a: b\n').length, 1);
+    assert.equal(lintYamlText('a:\n  "k": a: b\n').length, 1);
+    assert.deepEqual(lintYamlText('a:\n  my key: plain\n  2024: 3\n  "k": v\n'), []);
+  });
+
+  it('a block scalar inside a list item hides only its own content lines, not the sibling keys of the item', () => {
+    const broken = 's:\n  - note: |\n      text: with colon\n    title: Peopleware: Productive\n';
+    const findings = lintYamlText(broken);
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].line, 4);
+    assert.deepEqual(lintYamlText('s:\n  - note: |\n      text: with colon\n    title: "Peopleware: Productive"\n'), []);
+  });
+
+  it('a sequence item is judged against its enclosing mapping: after a bare key whose value was already given deeper, and deeper than a "key: value" entry', () => {
+    assert.equal(lintYamlText('rules:\n  - a\n- id: Y\n').length, 1);
+    assert.equal(lintYamlText('a: 1\n  - x\n').length, 1);
+    // still valid: a list at the key's own indentation, items after items, a sibling key after that list
+    assert.deepEqual(lintYamlText('a:\n  list:\n  - x\n  - y\n  c: 2\n'), []);
+    assert.deepEqual(lintYamlText('rules:\n  - a\n  - b\nnext: 1\n'), []);
+    // and the original fictional-intelligence shape is still a finding
+    assert.equal(lintYamlText('e:\n  k: v\n\n  - id: X\n').length, 1);
   });
 });
 
