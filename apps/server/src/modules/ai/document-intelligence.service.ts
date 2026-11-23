@@ -9,7 +9,9 @@ import { AiUsageService } from './ai-usage.service';
 import { CrmService } from '../crm/crm.service';
 import { CommerceService } from '../commerce/commerce.service';
 import { DocumentParsingService } from '../ingestion/document-parsing.service';
-import { ObjectStorageService } from '../../core/object-storage/objectStorage';
+import { ObjectNotFoundError, ObjectStorageService } from '../../core/object-storage/objectStorage';
+import { isNonPublicAddress } from '../../core/security/outbound-address';
+import { isIP } from 'node:net';
 
 export interface DocumentExtractionRequest {
   businessId: string;
@@ -160,6 +162,27 @@ export interface DocumentExtractionOptions {
   forwardExternalUrl?: boolean;
 }
 
+/**
+ * FU-OUTBOUND-ATTACHMENT-URL review round 1 (S1-2): the external document link contract term extraction may
+ * still forward: http or https, no credentials, no localhost name, and an IP literal only when it is public
+ * (the static part of D-246's checkDocumentUrl; the provider, not this server, fetches it, so no name is
+ * resolved here).
+ */
+function isForwardableExternalUrl(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+  if (url.username || url.password) return false;
+  const hostname = url.hostname.toLowerCase().replace(/^\[(.*)\]$/, '$1').replace(/\.$/, '');
+  if (!hostname || hostname === 'localhost' || hostname.endsWith('.localhost')) return false;
+  if (isIP(hostname) !== 0 && isNonPublicAddress(hostname)) return false;
+  return true;
+}
+
 /** True when `result` is extractFromDocument's answer for a read that failed, not a document it classified. */
 export function documentExtractionFailed(result: object): boolean {
   return FAILED_EXTRACTIONS.has(result);
@@ -213,7 +236,7 @@ export class DocumentIntelligenceService {
   private async resolveRequestSource(
     req: DocumentExtractionRequest,
     opts: DocumentExtractionOptions,
-  ): Promise<DocumentExtractionRequest | null> {
+  ): Promise<DocumentExtractionRequest | null | 'storage_failed'> {
     if (!req.url) return { ...req, url: undefined };
     if (req.base64Content) return { ...req, url: undefined };
     const storage = this.getObjectStorage();
@@ -223,11 +246,14 @@ export class DocumentIntelligenceService {
         const { buffer, contentType } = await storage.getObjectEntityBuffer(objectPath, req.businessId);
         const stored = contentType && contentType !== 'application/octet-stream' ? contentType : undefined;
         return { ...req, url: undefined, base64Content: buffer.toString('base64'), mimeType: stored ?? req.mimeType };
-      } catch {
-        return null;
+      } catch (err) {
+        // Review round 1 (S1-3, C1-1): absent, another business's, or over the read cap: absent. Any other
+        // error (the store is down, timed out, refused our credentials) is a failed read the caller may
+        // retry. Another business's object is refused before the store is asked, so this tells nothing.
+        return err instanceof ObjectNotFoundError ? null : 'storage_failed';
       }
     }
-    return opts.forwardExternalUrl === true ? req : null;
+    return opts.forwardExternalUrl === true && isForwardableExternalUrl(req.url) ? req : null;
   }
 
   async extractFromDocument(
@@ -239,11 +265,18 @@ export class DocumentIntelligenceService {
     // FU-OUTBOUND-ATTACHMENT-URL: no client URL reaches the provider (resolveRequestSource). A source
     // that can not be read for this business answers as an absent file, before any model call; the
     // log names no URL or path.
-    const req = await this.resolveRequestSource(request, opts);
-    if (!req) {
+    const resolved = await this.resolveRequestSource(request, opts);
+    if (resolved === 'storage_failed') {
+      this.logger.warn(`Document source for ${request.source} could not be read from storage now; nothing was sent to the model.`);
+      const failed: DocumentExtractionResult = { documentType: 'unknown', confidence: 0, rawText: '', suggestedActions: [] };
+      FAILED_EXTRACTIONS.add(failed);
+      return failed;
+    }
+    if (!resolved) {
       this.logger.warn(`Document source for ${request.source} could not be read for this business; nothing was sent to the model.`);
       return { documentType: 'unknown', confidence: 0, rawText: '', suggestedActions: [] };
     }
+    const req = resolved;
 
     // Build prompt based on available data
     const hasImage = req.mimeType.startsWith('image/') || req.mimeType === 'application/pdf';
