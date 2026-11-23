@@ -920,10 +920,11 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
          AND (
            "before" IS NOT NULL
            OR "after" IS NOT NULL
-           OR (metadata IS NOT NULL AND (
-             jsonb_typeof(metadata) <> 'object'
-             OR EXISTS (SELECT 1 FROM jsonb_object_keys(metadata) k WHERE NOT (k = ANY(${keptKeys})))
-           ))
+           OR (metadata IS NOT NULL AND CASE
+             WHEN jsonb_typeof(metadata) = 'object'
+               THEN EXISTS (SELECT 1 FROM jsonb_object_keys(metadata) k WHERE NOT (k = ANY(${keptKeys})))
+             ELSE true
+           END)
          )`;
 
     // What stays, and why. aggregate() also counts soft-deleted rows (the

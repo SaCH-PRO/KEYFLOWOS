@@ -55,8 +55,10 @@ export class BusinessEventService {
    * This is the primary method — every mutation should call this.
    */
   async emit(event: CreateBusinessEventInput): Promise<void> {
+    // Scrubbed before anything else, so the failure log below never holds
+    // what the row may not (V1-72 review).
+    const input = await this.withoutForgottenPersonalData(event);
     try {
-      const input = await this.withoutForgottenPersonalData(event);
       await this.prisma.client.businessEvent.create({
         data: {
           businessId: input.businessId,
@@ -87,7 +89,7 @@ export class BusinessEventService {
     } catch (err: any) {
       this.logger.error(
         `Failed to emit business event: ${(err as Error).message}`,
-        { input: JSON.stringify(event).slice(0, 500) },
+        { input: JSON.stringify(input).slice(0, 500) },
       );
       // Never throw — audit failure should not break the business operation
     }
@@ -154,8 +156,10 @@ export class BusinessEventService {
   async emitBatch(inputs: CreateBusinessEventInput[]): Promise<void> {
     if (inputs.length === 0) return;
     try {
+      // The same forgotten-person check as emit (V1-72 review).
+      const scrubbed = await Promise.all(inputs.map((input) => this.withoutForgottenPersonalData(input)));
       await this.prisma.client.$transaction(
-        inputs.map((input) =>
+        scrubbed.map((input) =>
           this.prisma.client.businessEvent.create({
             data: {
               businessId: input.businessId,
