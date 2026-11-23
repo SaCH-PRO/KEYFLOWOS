@@ -71,8 +71,8 @@ export const CENSUS_SPEC = 'scripts/ci/script-specs-in-ci.spec.mjs';
 const PLAIN_NODE_TEST = /^node --test(?: [A-Za-z0-9_./*-]+)+$/;
 /** The only steps that may run before the census step (an earlier step can write GITHUB_ENV or GITHUB_PATH): what runtime-pin.spec.mjs allows before its own step, plus that step. */
 const BEFORE_CENSUS = [
-  { uses: /^actions\/checkout@/, keys: ['name', 'uses', 'with'] },
-  { uses: /^pnpm\/action-setup@/, keys: ['name', 'uses', 'with'] },
+  { uses: /^actions\/checkout@/, keys: ['name', 'uses'] },
+  { uses: /^pnpm\/action-setup@/, keys: ['name', 'uses', 'with'], forbidWith: /^run_install\s*:/, forbidWhy: 'it would run pnpm install before the pin and census checks' },
   { uses: /^actions\/setup-node@/, keys: ['name', 'uses', 'with'] },
   { run: 'node --test scripts/ci/runtime-pin.spec.mjs', keys: ['name', 'run'] },
 ];
@@ -131,7 +131,7 @@ export function jobBlocks(source) {
   return blocks;
 }
 
-/** Shapes GitHub rejects or that a line-based reader could resolve silently: a second `jobs:` line, a repeated job id. */
+/** Shapes GitHub rejects or that a line-based reader could resolve silently: a second `jobs:` line, a repeated job id, a job head this spec cannot read (quoted, anchored). */
 export function structureProblems(source) {
   const problems = [];
   const lines = source.split(/\r?\n/);
@@ -140,9 +140,11 @@ export function structureProblems(source) {
   const jobs = lines.findIndex((line) => JOBS_LINE.test(line));
   const seen = new Map();
   for (const line of lines.slice(jobs + 1)) {
-    if (/^\S/.test(line) && line.trim() !== '' && !/^\s*#/.test(line)) break;
+    if (line.trim() === '' || /^\s*#/.test(line)) continue;
+    if (/^\S/.test(line)) break;
     const head = JOB_HEAD.exec(line);
     if (head) seen.set(head[1], (seen.get(head[1]) ?? 0) + 1);
+    else if (indentOf(line) <= 2) problems.push(`jobs: region line this spec cannot read as a job id: ${line.trim()}`);
   }
   for (const [id, count] of seen) {
     if (count > 1) problems.push(`job id ${id} appears ${count} times`);
@@ -153,11 +155,14 @@ export function structureProblems(source) {
 /**
  * One job's header fields (indent 4) and its steps (indent 6 `- key:`,
  * indent 8 `key:`). A field whose value is a block scalar (`|`, `>`, with
- * an optional chomping sign) collects every following line indented past
- * the key, comments and blank lines included, de-indented by its first
- * content line: that is the text GitHub hands to the shell. Other block
- * values (a list, a mapping) collect their non-comment lines trimmed.
- * Repeated keys and lines in no readable position land in `unparsed`.
+ * an optional chomping sign, unquoted) collects every following line
+ * indented past the key, comments and blank lines included, de-indented by
+ * its first content line and clipped: for `|` that is the text GitHub hands
+ * to the shell (a `>` scalar is not folded here; no check accepts one as a
+ * script). A less-indented line closes the scalar; deeper lines after that
+ * are unreadable. Other block values (a list, a mapping) collect their
+ * non-comment lines trimmed. Repeated keys and lines in no readable
+ * position land in `unparsed`.
  */
 export function readJob(lines) {
   const header = {};
@@ -170,11 +175,11 @@ export function readJob(lines) {
   let scalarBlock = null; // { field, minIndent, contentIndent }
 
   const open = (field, minIndent) => {
-    scalarBlock = BLOCK_SCALAR.test(field.inline) ? { field, minIndent, contentIndent: null } : null;
+    scalarBlock = BLOCK_SCALAR.test(field.raw) ? { field, minIndent, contentIndent: null } : null;
   };
   const newField = (owner, key, raw, where) => {
     if (key in owner) unparsed.push(`duplicate key ${key} in ${where}`);
-    owner[key] = { inline: scalar(raw), block: [] };
+    owner[key] = { inline: scalar(raw), raw: (raw ?? '').replace(/\s+#.*$/, '').trim(), block: [] };
     return owner[key];
   };
 
@@ -200,6 +205,8 @@ export function readJob(lines) {
         continue;
       }
       scalarBlock = null; // a line indented at or before the key ends the scalar
+      stepField = null;
+      headerField = null;
     }
     if (trimmed === '' || trimmed.startsWith('#')) continue;
 
@@ -241,7 +248,7 @@ export function readJob(lines) {
   }
   const value = (f) => {
     if (!f) return undefined;
-    if (BLOCK_SCALAR.test(f.inline)) {
+    if (BLOCK_SCALAR.test(f.raw)) {
       const content = [...f.block];
       while (content.length && content.at(-1) === '') content.pop(); // clip
       return content.join('\n');
@@ -257,7 +264,8 @@ export function readJob(lines) {
       name: value(s.fields.name),
       uses: value(s.fields.uses),
       run: value(s.fields.run),
-      runStyle: s.fields.run?.inline,
+      runStyle: s.fields.run?.raw,
+      with: s.fields.with?.block ?? [],
     })),
   };
 }
@@ -388,7 +396,9 @@ export function verdictProblems(source, nonGating = NON_GATING) {
   }
   const gating = [...blocks.keys()].filter((id) => id !== VERDICT_JOB && !(id in nonGating));
   for (const id of gating) {
-    if ('continue-on-error' in readJob(blocks.get(id)).header) {
+    const job = readJob(blocks.get(id));
+    for (const line of job.unparsed) problems.push(`gating job ${id} line this spec cannot read: ${line}`);
+    if ('continue-on-error' in job.header) {
       problems.push(`gating job ${id} sets job-level continue-on-error: a failed run would reach the verdict as success`);
     }
   }
@@ -474,6 +484,10 @@ export function censusStepProblems(source) {
     }
     const over = s.keys.filter((k) => !allowed.keys.includes(k));
     if (over.length) problems.push(`'${label}' before the census step may not set ${over.join(', ')}`);
+    if (allowed.forbidWith && s.with.some((line) => allowed.forbidWith.test(line))) {
+      const key = allowed.forbidWith.source.replace(/^\^|\\s\*:$/g, '');
+      problems.push(`'${label}' before the census step may not set with.${key} (${allowed.forbidWhy})`);
+    }
   }
   return problems;
 }
