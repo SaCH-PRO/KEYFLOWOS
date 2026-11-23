@@ -339,7 +339,19 @@ export class ObjectStorageService {
   ): Promise<{ objectPath: string; key: string }> {
     const { client, bucket } = getClient();
     const privateDir = this.getPrivateObjectDir();
-    const subdir = trimSlashes(opts.subdir || "uploads");
+    const subdir = trimSlashes(opts.subdir || BUSINESS_UPLOAD_NAMESPACE);
+    // FU-ATTACHMENT-OBJECT-TENANCY review round 3: `uploads/<businessId>/` is
+    // the namespace resolveObjectForBusiness trusts as a client's own upload,
+    // so a server-side write may not land in it, by name or by a dot or empty
+    // segment a normalising store would fold into it. The bare default
+    // (`uploads/<uuid>[_name]`) stays: two segments, refused by the resolver.
+    const subdirSegments = subdir.split("/");
+    if (
+      !subdirSegments.every((seg) => isSafeKeySegment(seg)) ||
+      (subdirSegments[0] === BUSINESS_UPLOAD_NAMESPACE && subdirSegments.length > 1)
+    ) {
+      throw new Error(`uploadBuffer: subdir "${subdir}" is not allowed`);
+    }
     const objectId = randomUUID();
     const safeName = (opts.filename || "")
       .replace(/[^A-Za-z0-9._-]/g, "_")
