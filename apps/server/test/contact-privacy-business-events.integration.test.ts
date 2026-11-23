@@ -55,6 +55,8 @@ const ID = {
   bizA: `${P}bizA`,
   bizB: `${P}bizB`,
   noteEvent: `${P}noteEvent`,
+  dup: `${P}dup`, // a duplicate merged into the subject: the same person
+  dupEvent: `${P}dupEvent`,
   forgedEvent: `${P}forgedEvent`,
 };
 
@@ -68,6 +70,7 @@ const PII = {
 const PII_PATCH = { jobTitle: 'V72W-Countess', secondaryEmail: `${P}ada.alt@test.local` };
 const PII_HELD = { companyName: 'V72W-Engines-Ltd' };
 const NOTE_SECRET = 'V72W note: Ada prefers evenings';
+const DUP_PII = { firstName: 'V72W-Dup-Ada', email: `${P}ada.dup@test.local` };
 const REASON = `V72W-Ada asked to be forgotten by email from ${P}ada@test.local`;
 const SECRETS = [
   ...Object.values(PII),
@@ -76,6 +79,7 @@ const SECRETS = [
   ...Object.values(PII_HELD),
   NOTE_SECRET,
   REASON,
+  ...Object.values(DUP_PII),
 ];
 const BYSTANDER = { firstName: 'V72W-Bystander', email: `${P}bystander@test.local`, phone: '+1 868 555 0173' };
 const CANCELLER = { firstName: 'V72W-Canceller', email: `${P}canceller@test.local`, phone: '+1 868 555 0174' };
@@ -282,9 +286,8 @@ beforeAll(async () => {
 
   await cleanup(); // in case a prior run aborted
 
-  for (const id of [ID.owner, ID.ownerB]) {
-    await db.user.create({ data: { id, email: `${id}@test.local`, role: 'USER' } });
-  }
+  await db.user.create({ data: { id: ID.owner, email: `${P}owner@test.local`, role: 'USER' } });
+  await db.user.create({ data: { id: ID.ownerB, email: `${P}ownerB@test.local`, role: 'USER' } });
   await db.business.create({ data: { id: ID.bizA, name: 'V72W Biz A', ownerId: ID.owner } });
   await db.business.create({ data: { id: ID.bizB, name: 'V72W Biz B', ownerId: ID.ownerB } });
   await db.membership.create({ data: { id: `${P}m_owner`, userId: ID.owner, businessId: ID.bizA, role: 'OWNER' } });
@@ -334,6 +337,17 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
         actorType: 'human', actorId: ID.owner, action: 'create', source: 'web',
         before: { body: NOTE_SECRET }, after: { id: `${P}note1`, contactId: subjectId, body: NOTE_SECRET },
         metadata: { route: '/crm/businesses/:businessId/contacts/:contactId/notes', httpMethod: 'POST', ip: '203.0.113.71' },
+      },
+    });
+
+    // A duplicate already merged into the subject (soft-deleted, merged_into_id
+    // the subject), with an event row of its own.
+    await db.contact.create({ data: { id: ID.dup, businessId: ID.bizA, ...DUP_PII, mergedIntoId: subjectId, deletedAt: new Date() } });
+    await db.businessEvent.create({
+      data: {
+        id: ID.dupEvent, businessId: ID.bizA, eventType: 'contact.update', subjectType: 'contact', subjectId: ID.dup,
+        actorType: 'human', actorId: ID.owner, action: 'update', source: 'web',
+        before: { email: DUP_PII.email }, after: { id: ID.dup, ...DUP_PII }, metadata: { ip: '203.0.113.73' },
       },
     });
 
@@ -423,6 +437,8 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
       expect(row.metadata?.ip, `${row.event_type} ${row.subject_id} ip`).toBeUndefined();
       expect(row.actor_id).toBe(ID.owner);
     }
+    const dup = rows.find((e) => e.id === ID.dupEvent)!;
+    expect(dup).toMatchObject({ before: null, after: null, metadata: {}, event_type: 'contact.update', actor_id: ID.owner });
     const note = rows.find((e) => e.id === ID.noteEvent)!;
     expect(note.metadata).toEqual({ route: '/crm/businesses/:businessId/contacts/:contactId/notes', httpMethod: 'POST' });
   });
@@ -441,9 +457,24 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
       where: { businessId: ID.bizA, contactHash: audit.hashContact(ID.bizA, subjectId), action: 'forget_purged' },
     });
     expect(entry, 'one forget_purged entry').toBeDefined();
-    // The create, the first PATCH and the note row. The forget row and the
-    // held PATCH were written without snapshots, so there was nothing to scrub.
-    expect(entry.after.erased.businessEventsScrubbed).toBe(3);
+    // The create, the first PATCH, the note row and the duplicate's row. The
+    // forget row and the held PATCH were written without snapshots, so there
+    // was nothing to scrub.
+    expect(entry.after.erased.businessEventsScrubbed).toBe(4);
+  });
+
+  it('a write after the purge that names the merged duplicate holds no personal data', async () => {
+    await realEmit({
+      businessId: ID.bizA, eventType: 'contact.update', subjectType: 'contact', subjectId: ID.dup,
+      actorType: 'human', actorId: ID.owner, action: 'update', source: 'web',
+      before: { email: DUP_PII.email }, after: { id: ID.dup, ...DUP_PII },
+      metadata: { route: '/crm/businesses/:businessId/contacts/:contactId', httpMethod: 'PATCH', ip: '203.0.113.74' },
+    });
+    const rows = (await events(ID.bizA)).filter((e) => e.subject_id === ID.dup);
+    expect(rows).toHaveLength(2);
+    const late = rows.find((e) => e.id !== ID.dupEvent)!;
+    expect(late).toMatchObject({ before: null, after: null });
+    expect(late.metadata).toEqual({ route: '/crm/businesses/:businessId/contacts/:contactId', httpMethod: 'PATCH' });
   });
 
   it('a PATCH on the bystander after the purge keeps its snapshot as today', async () => {
