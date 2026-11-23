@@ -5,6 +5,7 @@ import { AiOversightService } from './ai-oversight.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { deleteAiMemoriesWithCopies, upsertAiMemoryDroppingStaleCopies } from './ai-memory.service';
 import { SemanticMemoryService } from './semantic-memory.service';
+import { insightNeeds, SIGHT_WORDS } from './insight-sight';
 
 export interface ChatSuggestion {
   id: string;
@@ -20,9 +21,16 @@ export interface ChatSuggestion {
   severity: 'critical' | 'warning' | 'opportunity' | 'info';
   metric?: string;
   createdAt: Date;
+  /**
+   * FU-INSIGHTS-SIGHT: the words its stored row carries for the sights its insight needs ('revenue', 'suppliers';
+   * SIGHT_WORDS), so the row is withheld by the AiMemory-row rule wherever it is read.
+   */
+  sight?: string[];
 }
 
 const SUGGESTION_COOLDOWN_HOURS = 24;
+/** FU-INSIGHTS-SIGHT: the most pending suggestion rows one filtered read takes. */
+const PENDING_READ_MAX = 500;
 
 @Injectable()
 export class ProactiveSuggestionService {
@@ -57,7 +65,10 @@ export class ProactiveSuggestionService {
       },
       select: { key: true, value: true },
     });
-    const recentCategories = new Set(recentSuggestions.map(s => s.key.split('_')[0]));
+    // FU-INSIGHTS-SIGHT (reviews round 1, ISS-2 / F-2): a key is `<category>_<timestamp>` and a category has
+    // underscores itself ('stale_leads'), so the category is everything before the last underscore; the first word
+    // ('stale') never matched, the cooldown never held, and every refresh stored every suggestion again.
+    const recentCategories = new Set(recentSuggestions.map((s) => s.key.slice(0, s.key.lastIndexOf('_'))));
 
     // Scan for insights
     const insights = await this.monitor.scanInsights(businessId);
@@ -69,7 +80,9 @@ export class ProactiveSuggestionService {
       // Skip if this category was already suggested recently
       if (recentCategories.has(insight.category)) continue;
 
-      const suggestion = this.insightToSuggestion(insight);
+      const made = this.insightToSuggestion(insight);
+      const needs = insight.needs ?? insightNeeds(insight);
+      const suggestion = made && needs.length ? { ...made, sight: needs.map((sight) => SIGHT_WORDS[sight]) } : made;
       if (suggestion) {
         suggestions.push(suggestion);
         // Store in memory so we don't repeat. FU-MEMORY-COPIES-REWRITE: through the write door, so a suggestion
@@ -95,16 +108,24 @@ export class ProactiveSuggestionService {
    * Fetch pending suggestions for the chat interface.
    * Returns suggestions that haven't been dismissed or acted on.
    */
-  async getPendingSuggestions(businessId: string): Promise<ChatSuggestion[]> {
-    const memories = await this.prisma.client.aiMemory.findMany({
+  async getPendingSuggestions(
+    businessId: string,
+    // FU-INSIGHTS-SIGHT: the stored rows the reader may be handed (the caller's aiMemoryRowVisibleTo). Filtered before
+    // the 10 are cut, so a withheld suggestion takes no place (suggestions expire in 24 hours: few rows are pending).
+    rowVisible?: (row: { category: string; key: string; value: string }) => boolean,
+  ): Promise<ChatSuggestion[]> {
+    const pending = await this.prisma.client.aiMemory.findMany({
       where: {
         businessId,
         category: 'suggestion',
         expiresAt: { gte: new Date() },
       },
-      orderBy: { createdAt: 'desc' },
-      take: 10,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      // A reader's rows are filtered before the 10 are cut; the read is bounded (the cooldown keeps a category to one
+      // row a day, so the pending set is small; 500 is far above it).
+      take: rowVisible ? PENDING_READ_MAX : 10,
     });
+    const memories = (rowVisible ? pending.filter((row) => rowVisible(row)) : pending).slice(0, 10);
 
     return memories
       .map(m => {

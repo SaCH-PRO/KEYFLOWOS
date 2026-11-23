@@ -20,6 +20,8 @@ import {
 } from './graph-actions.controller';
 import { AiMemoryService, MemoryCategory, summaryPatternKey } from './ai-memory.service';
 import { aiMemoryRowVisibleTo, type SemanticReader } from './semantic-memory-sight';
+import { dashboardFor, fieldsSightNeeds, insightNeeds, keepWithinBudget, readerHolds } from './insight-sight';
+import { isFinancialProposal } from '../business-genome/key-genome/genome-finance-scope';
 import { readersModuleSight, readsDocumentExtractions } from '../key-cortex/key-cortex-prompt-context.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
 import { ProAutoMonitorService } from './pro-auto-monitor.service';
@@ -122,6 +124,14 @@ function interviewSightOf(documentExtractions: boolean, who: SemanticReader) {
     rowVisible: (row: { category: string; key: string; value: string }) => aiMemoryRowVisibleTo(row, who),
   };
 }
+
+/** FU-INSIGHTS-SIGHT (security review round 1, ISS-1): the most pending approval items the control tower reads to filter. */
+const PENDING_APPROVALS_READ_MAX = 500;
+/**
+ * FU-INSIGHTS-SIGHT (security review round 6, ISS-R6-1): the most characters of approval-item text one control-tower
+ * request classifies for a partial reader; items past it are withheld unclassified and not counted (keepWithinBudget).
+ */
+const APPROVALS_CLASSIFY_BUDGET = 1_000_000;
 
 function assertMemoryCategoryAllowed(category: string): void {
   if (RESERVED_MEMORY_CATEGORIES.has(category)) {
@@ -696,16 +706,28 @@ export class AiController {
     return result;
   }
 
+  /** FU-INSIGHTS-SIGHT (D-100, D-146): the stored suggestions the caller may read (aiMemoryRowVisibleTo). */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/suggestions')
-  async getSuggestions(@Param('businessId') businessId: string) {
-    return this.suggestions.getPendingSuggestions(businessId);
+  async getSuggestions(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    const who = await this.memoryReaderOf(businessId, req);
+    // Security review round 5 (transitional): a row stored before the stamp is read by every reading too
+    // (fieldsSightNeeds), so a word behind a JSON escape in it is read.
+    return this.suggestions.getPendingSuggestions(
+      businessId,
+      (row) => aiMemoryRowVisibleTo(row, who) && readerHolds(who, fieldsSightNeeds([row.key, row.value])),
+    );
   }
 
+  /** FU-INSIGHTS-SIGHT: every suggestion is stored; the caller is answered those they may read, as their stored rows. */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/ai/suggestions/refresh')
-  async refreshSuggestions(@Param('businessId') businessId: string) {
-    const suggestions = await this.suggestions.generateSuggestions(businessId);
+  async refreshSuggestions(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    const who = await this.memoryReaderOf(businessId, req);
+    const generated = await this.suggestions.generateSuggestions(businessId);
+    const suggestions = generated.filter((s) =>
+      aiMemoryRowVisibleTo({ category: 'suggestion', key: `${s.category}_`, value: JSON.stringify(s) }, who),
+    );
     return { suggestions, count: suggestions.length };
   }
 
@@ -1093,7 +1115,16 @@ export class AiController {
     const entries = category
       ? await this.memory.getByCategory(businessId, category as MemoryCategory)
       : await this.memory.getAll(businessId);
-    return { memories: entries.filter((row) => aiMemoryRowVisibleTo(row, who)) };
+    // FU-INSIGHTS-SIGHT (security review round 6, OOS-R6-1, transitional): a suggestion row is read here as on
+    // GET .../ai/suggestions, by every reading (fieldsSightNeeds), so a word behind a JSON escape in a row stored before
+    // the stamp is read.
+    return {
+      memories: entries.filter(
+        (row) =>
+          aiMemoryRowVisibleTo(row, who) &&
+          (row.category !== 'suggestion' || readerHolds(who, fieldsSightNeeds([row.key, row.value]))),
+      ),
+    };
   }
 
   // FU-PATTERNS-ROUTES-SIGHT (orchestrator ruling A, security round 3 F-1): each row a member writes is read by every
@@ -1180,8 +1211,10 @@ export class AiController {
   @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(10, 60_000)
   @Get('businesses/:businessId/ai/strategic/dashboard')
-  async strategicDashboard(@Param('businessId') businessId: string) {
-    return this.strategic.getStrategicDashboard(businessId);
+  async strategicDashboard(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    // FU-INSIGHTS-SIGHT (D-100, D-146): the control tower's dashboard, as the caller may read it (dashboardFor).
+    const who = await this.memoryReaderOf(businessId, req);
+    return dashboardFor(await this.strategic.getStrategicDashboard(businessId), who);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -1241,28 +1274,71 @@ export class AiController {
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/monitoring/insights')
-  async monitoringInsights(@Param('businessId') businessId: string) {
-    const insights = await this.proAutoMonitor.scanInsights(businessId);
+  async monitoringInsights(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    // FU-INSIGHTS-SIGHT (D-100, D-146): the insights whose sights the caller holds (insightNeeds, readerHolds).
+    const who = await this.memoryReaderOf(businessId, req);
+    const insights = (await this.proAutoMonitor.scanInsights(businessId)).filter((i) => readerHolds(who, i.needs ?? insightNeeds(i)));
     return { insights };
   }
 
+  // FU-INSIGHTS-SIGHT (security review round 5, ISS-R5-1): it classifies up to PENDING_APPROVALS_READ_MAX approval items
+  // for a partial reader; CrmRateLimitGuard is on this controller.
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(20, 60_000)
   @Get('businesses/:businessId/ai/control-tower')
-  async controlTower(@Param('businessId') businessId: string) {
-    const [snapshot, dashboard, insightsRes, approvals, totalPendingApprovals] = await Promise.all([
-      this.businessGraph.getSnapshot(businessId),
+  async controlTower(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    // FU-INSIGHTS-SIGHT (D-100, D-146): everything here as the caller may read it: the snapshot projected for them (the
+    // viewer projection KEY and the graph routes use: revenue and expenses sections, client revenue, overdue invoices
+    // and the money health areas only by sight), the dashboard's money fields (dashboardFor) and the insights
+    // (readerHolds). The priorities and risks below are built from those, so a withheld figure reaches none of them.
+    // Correctness review round 1 (F-1): the shared projection, as before (no treasury, pipeline or support section:
+    // those are KEY's standing context's), with revenue and expenses by the caller's sight (role null: a SUPER_ADMIN
+    // who is no member is no member here). Security review round 1 (ISS-1): the pending approvals as the approval list
+    // gates them (operations read), and each only when the caller holds the sights its text needs; the count follows.
+    const who = await this.memoryReaderOf(businessId, req);
+    const readsEverything = readerHolds(who, ['revenue', 'expenses']) && who.sight('operations');
+    const [snapshot, fullDashboard, scanned, pendingItems, totalPending] = await Promise.all([
+      this.businessGraph.getSharedSnapshotForMember(businessId, { id: who.reader, role: null }),
       this.strategic.getStrategicDashboard(businessId),
       this.proAutoMonitor.scanInsights(businessId),
       this.prisma.client.aiApprovalItem.findMany({
         where: { businessId, status: 'pending' },
-        orderBy: { createdAt: 'desc' },
-        take: 20,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: readsEverything ? 20 : PENDING_APPROVALS_READ_MAX,
       }),
-      this.prisma.client.aiApprovalItem.count({
-        where: { businessId, status: 'pending' },
-      }),
+      readsEverything ? this.prisma.client.aiApprovalItem.count({ where: { businessId, status: 'pending' } }) : Promise.resolve(0),
     ]);
-    const insights = insightsRes ?? [];
+    // Security review round 2 (ISS-R2-1): each item is read as the approval proposal it becomes
+    // (migrateAiApprovalItemToProposal), every field of it: without revenue read, an item D-238 classifies financial
+    // (isFinancialProposal: its text, parameters, affected entities, tool and module; fail closed) is withheld; and an
+    // item whose any field states an expense needs expenses read.
+    const approvalShown = (a: (typeof pendingItems)[number]) => {
+      const proposal = {
+        actionType: 'EXECUTE_TOOL', toolName: a.toolName, module: a.module, title: a.title, description: a.description,
+        summary: a.description, rationale: a.rationale, expectedBenefit: a.expectedBenefit, risks: a.risks,
+        inputPayload: a.inputPayload, payload: a.inputPayload, affectedEntities: a.affectedEntities,
+      };
+      if (!readerHolds(who, ['revenue']) && isFinancialProposal(proposal)) return false;
+      return readerHolds(who, fieldsSightNeeds(approvalFields(a)));
+    };
+    const approvalFields = (a: (typeof pendingItems)[number]): unknown[] => [
+      a.title, a.description, a.rationale, a.expectedBenefit, a.risks, a.inputPayload, a.affectedEntities, a.toolName, a.module,
+    ];
+    const shownApprovals = readsEverything
+      ? pendingItems
+      : who.reader !== null && who.sight('operations')
+        ? keepWithinBudget(pendingItems, (a) => (JSON.stringify(approvalFields(a)) ?? '').length, approvalShown, APPROVALS_CLASSIFY_BUDGET)
+        : [];
+    const approvals = shownApprovals.slice(0, 20);
+    const totalPendingApprovals = readsEverything ? totalPending : shownApprovals.length;
+    const dashboard = dashboardFor(fullDashboard, who);
+    // A withheld figure counts as none: it makes no priority and no risk.
+    const overdueInvoices = dashboard.overdueInvoices ?? 0;
+    const overdueAmount = dashboard.overdueAmount ?? 0;
+    const pendingQuotes = dashboard.pendingQuotes ?? 0;
+    const pendingQuoteValue = dashboard.pendingQuoteValue ?? 0;
+    const staleLeads = dashboard.staleLeads ?? 0;
+    const insights = (scanned ?? []).filter((i) => readerHolds(who, i.needs ?? insightNeeds(i)));
     const healthIndicators = snapshot.healthIndicators ?? [];
 
     type PriorityItem = {
@@ -1293,13 +1369,13 @@ export class AiController {
       });
     }
 
-    if (dashboard.overdueInvoices > 0) {
+    if (overdueInvoices > 0) {
       priorities.push({
         id: `overdue-inv-${priorityIdx++}`,
         type: 'action',
         severity: 'critical',
-        title: `Collect ${dashboard.overdueInvoices} overdue invoices`,
-        description: `$${dashboard.overdueAmount.toFixed(0)} TTD at risk`,
+        title: `Collect ${overdueInvoices} overdue invoices`,
+        description: `$${overdueAmount.toFixed(0)} TTD at risk`,
         module: 'revenue',
         urgency: 95,
         actionLabel: 'Review Invoices',
@@ -1307,12 +1383,12 @@ export class AiController {
       });
     }
 
-    if (dashboard.pendingQuotes > 0) {
+    if (pendingQuotes > 0) {
       priorities.push({
         id: `pending-quotes-${priorityIdx++}`,
         type: 'opportunity',
         severity: 'opportunity',
-        title: `${dashboard.pendingQuotes} pending quotes worth $${dashboard.pendingQuoteValue.toFixed(0)}`,
+        title: `${pendingQuotes} pending quotes worth $${pendingQuoteValue.toFixed(0)}`,
         description: 'Follow up to convert to revenue',
         module: 'revenue',
         urgency: 60,
@@ -1321,12 +1397,12 @@ export class AiController {
       });
     }
 
-    if (dashboard.staleLeads > 0) {
+    if (staleLeads > 0) {
       priorities.push({
         id: `stale-leads-${priorityIdx}`,
         type: 'opportunity',
         severity: 'warning',
-        title: `${dashboard.staleLeads} stale leads need attention`,
+        title: `${staleLeads} stale leads need attention`,
         description: 'Leads inactive for 30+ days',
         module: 'crm',
         urgency: 50,
@@ -1375,25 +1451,25 @@ export class AiController {
     const risks: RiskAlert[] = [];
     let riskIdx = 0;
 
-    if (dashboard.overdueInvoices > 0) {
+    if (overdueInvoices > 0) {
       risks.push({
         id: `risk-cashflow-${riskIdx++}`,
         domain: 'cash_flow',
-        severity: dashboard.overdueAmount > 5000 ? 'critical' : 'warning',
-        title: `$${dashboard.overdueAmount.toFixed(0)} TTD in overdue invoices`,
-        description: `${dashboard.overdueInvoices} invoice${dashboard.overdueInvoices > 1 ? 's' : ''} past due — follow up immediately to protect cash flow`,
+        severity: overdueAmount > 5000 ? 'critical' : 'warning',
+        title: `$${overdueAmount.toFixed(0)} TTD in overdue invoices`,
+        description: `${overdueInvoices} invoice${overdueInvoices > 1 ? 's' : ''} past due — follow up immediately to protect cash flow`,
         module: 'revenue',
         actionLabel: 'Review Invoices',
         actionRoute: '/app/commerce?tab=operations',
       });
     }
 
-    if (dashboard.staleLeads > 3) {
+    if (staleLeads > 3) {
       risks.push({
         id: `risk-churn-${riskIdx++}`,
         domain: 'churn',
-        severity: dashboard.staleLeads > 10 ? 'critical' : 'warning',
-        title: `${dashboard.staleLeads} leads going cold`,
+        severity: staleLeads > 10 ? 'critical' : 'warning',
+        title: `${staleLeads} leads going cold`,
         description: 'Leads inactive 30+ days — high churn risk without re-engagement',
         module: 'crm',
         actionLabel: 'View Leads',

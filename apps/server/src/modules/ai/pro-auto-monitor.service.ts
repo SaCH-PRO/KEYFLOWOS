@@ -7,6 +7,7 @@ import { FlowOrchestratorService } from './flow-orchestrator.service';
 import { KeyCortexApprovalOrchestratorService } from '../key-cortex/key-cortex-approval-orchestrator.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
 import { schedulersDisabled } from '../../core/config/env';
+import { insightNeeds, type InsightSight } from './insight-sight';
 
 export type InsightSeverity = 'critical' | 'warning' | 'info' | 'opportunity';
 export type InsightCategory =
@@ -36,6 +37,8 @@ export interface ProAutoInsight {
   timestamp: string;
   escalated?: boolean;
   autoExecuteResult?: { success: boolean; error?: string };
+  /** FU-INSIGHTS-SIGHT (D-100, D-146): the sights a reader needs to be handed this insight (insightNeeds). */
+  needs?: InsightSight[];
 }
 
 const SCAN_INTERVAL_MS = 15 * 60 * 1000;
@@ -163,6 +166,9 @@ export class ProAutoMonitorService implements OnModuleInit, OnModuleDestroy {
     } catch (err: any) {
       this.logger.error(`Monitoring scan failed for ${businessId}: ${(err as Error).message}`);
     }
+
+    // FU-INSIGHTS-SIGHT: each insight's sights, decided here where it is made, before it is cached or handed on.
+    for (const insight of insights) insight.needs = insightNeeds(insight);
 
     insights.sort((a, b) => {
       const order: Record<InsightSeverity, number> = { critical: 0, warning: 1, opportunity: 2, info: 3 };
