@@ -80,6 +80,13 @@ const ID = {
   recOtherBiz: `${P}rec_otherbiz`,
   propFinVerdict: `${P}prop_finv`,
   vProp: `${P}v_prop`,
+  vReconcile: `${P}v_reconcile`,
+  vRetainer: `${P}v_retainer`,
+  vCross: `${P}v_cross`,
+  vObjTrace: `${P}v_objtrace`,
+  superAdmin: `${P}superAdmin`,
+  evoOpsMissing: `${P}evo_walkin`,
+  expComplete: `${P}exp_complete`,
   vFin: `${P}v_fin`,
   vOps: `${P}v_ops`,
   vOpsReason: `${P}v_opsr`,
@@ -297,8 +304,8 @@ beforeAll(async () => {
   await app.init();
 
   await cleanup();
-  for (const id of [ID.owner, ID.staffNone, ID.staffRead, ID.staffMissing, ID.staffNoAi, ID.outsider]) {
-    await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, name: id, role: 'USER' } });
+  for (const id of [ID.owner, ID.staffNone, ID.staffRead, ID.staffMissing, ID.staffNoAi, ID.outsider, ID.superAdmin]) {
+    await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, name: id, role: id === ID.superAdmin ? 'SUPER_ADMIN' : 'USER' } });
   }
   await db.business.create({ data: { id: ID.biz, name: 'V76G Evolution', slug: `${P}biz`, ownerId: ID.owner, currency: 'TTD' } });
   await db.business.create({ data: { id: ID.biz2, name: 'V76G Other', slug: `${P}biz2`, ownerId: ID.outsider, currency: 'TTD' } });
@@ -333,6 +340,8 @@ beforeAll(async () => {
   await evo(ID.evoOpsAct, ID.biz, 'operations', 'Confirm appointments by message', { coreWorkflows: ['confirmation'] });
   await evo(ID.evoOpsOwner, ID.biz, 'operations', 'Track no-shows', { coreWorkflows: ['no-show tracking'] });
   await evo(ID.evoOpsEdit, ID.biz, 'operations', 'Reminder the day before', { coreWorkflows: ['reminders'] });
+  // Round 3 (security MINOR-4): a financial-making edit by a member whose explicit map has no revenue key.
+  await evo(ID.evoOpsMissing, ID.biz, 'operations', 'Walk-in handling', { coreWorkflows: ['walk-ins'] });
   await evo(ID.evoOther, ID.biz2, 'operations', 'Bookings are handled through WhatsApp', { coreWorkflows: ['appointment-booking'] });
 
   // A FINANCIAL recommendation bridged to an experiment (neutral text: financial by provenance), a neutral experiment,
@@ -343,6 +352,8 @@ beforeAll(async () => {
   await exp(ID.expOps, ID.biz, 'Reminders reduce no-shows', 'Send reminders the day before', 'No-show count');
   await exp(ID.expMoney, ID.biz, 'Overtime cost TTD 912 last week', 'Cap overtime', 'Overtime hours');
   await exp(ID.expOther, ID.biz2, 'Reminders reduce no-shows', 'Send reminders the day before', 'No-show count');
+  // Round 3 (correctness MINOR-3): a neutral running experiment a revenue-none member completes.
+  await db.genomeExperiment.create({ data: { id: ID.expComplete, businessId: ID.biz, hypothesis: 'Walk-ins convert to bookings', action: 'Greet walk-ins', successMetric: 'Walk-in bookings', status: 'RUNNING' } });
   // Round 2 (correctness MAJOR-3): bridged from the marketing genome's own non-financial recommendation ("paid channel":
   // money words, no figure); served as the recommendation is.
   await exp(ID.expPaidChannel, ID.biz, 'A single active channel creates fragility.', 'Identify and activate at least one additional owned, earned, or paid channel.', 'Measure whether the recommendation improves the target business outcome.');
@@ -382,6 +393,13 @@ beforeAll(async () => {
       actionType: 'CREATE_TASK', riskLevel: 'LOW', status: 'PENDING', payload: { source: 'KEY_GENOME_RECOMMENDATION', recommendationId: ID.recFin },
     },
   });
+  // Round 3 (security MAJOR-1): verdicts on revenue-module flow tools (plan-executor persists the tool name as the
+  // action key), neutral text; a gate reason naming cross-domain risk (security MINOR-2); an object-shaped trace with
+  // metadata (security NOTE-7).
+  await verdict(ID.vReconcile, 'reconcile_run_auto_match', 'Tool reconcile_run_auto_match success rate is 40% over 10 uses', []);
+  await verdict(ID.vRetainer, 'retainers_create', 'Requires approval', []);
+  await verdict(ID.vCross, 'CREATE_TASK', 'Cross-domain risk is CRITICAL.', [{ source: 'GenomeAutonomyGateService', rule: 'genome-gate', result: 'block', reason: 'Cross-domain risk is CRITICAL.' }]);
+  await verdict(ID.vObjTrace, 'CREATE_TASK', 'Requires approval', { source: 'GenomeAutonomyGateService', metadata: { readinessScore: 7319 } } as any);
   await db.autonomyVerdict.create({
     data: { id: ID.vProp, businessId: ID.biz, actionKey: 'CREATE_TASK', allowed: true, requiresApproval: true, tier: 'supervised', confidence: 0.61, reason: 'Allowed with approval', ruleTrace: [], proposalId: ID.propFinVerdict },
   });
@@ -443,8 +461,8 @@ afterAll(async () => {
   await app?.close();
 });
 
-const BIZ_EVOS = [ID.evoFin, ID.evoSales, ID.evoOpsMoney, ID.evoOps, ID.evoGrowth, ID.evoFinAct, ID.evoFinOwner, ID.evoOpsAct, ID.evoOpsOwner, ID.evoOpsEdit].sort();
-const NON_FIN_EVOS = [ID.evoOps, ID.evoGrowth, ID.evoOpsAct, ID.evoOpsOwner, ID.evoOpsEdit].sort();
+const BIZ_EVOS = [ID.evoFin, ID.evoSales, ID.evoOpsMoney, ID.evoOps, ID.evoGrowth, ID.evoFinAct, ID.evoFinOwner, ID.evoOpsAct, ID.evoOpsOwner, ID.evoOpsEdit, ID.evoOpsMissing].sort();
+const NON_FIN_EVOS = [ID.evoOps, ID.evoGrowth, ID.evoOpsAct, ID.evoOpsOwner, ID.evoOpsEdit, ID.evoOpsMissing].sort();
 
 describe('FU-GENOME-EVOLUTION-SURFACES (D-128, D-233, D-238)', () => {
   it('GES-01 the evolution proposals list serves a revenue-none member only the non-financial proposals', async () => {
@@ -553,25 +571,28 @@ describe('FU-GENOME-EVOLUTION-SURFACES (D-128, D-233, D-238)', () => {
   it('GES-07 audit decisions: money verdicts withheld, the rest served without rule-trace metadata', async () => {
     const res = await get(`/api/v1/cortex/audit/decisions?businessId=${ID.biz}`, ID.staffNone);
     expect(res.status).toBe(200);
-    expect(res.body.recent.map((v: any) => v.id)).toEqual([ID.vOps]);
-    expect(res.body.recent[0].ruleTrace.some((t: any) => 'metadata' in t)).toBe(false);
-    expect(res.body.recent[0].ruleTrace.map((t: any) => t.source)).toEqual(['GenomeAutonomyGateService', 'ToolOutcomeScore']);
-    expect(JSON.stringify(res.body.recent)).not.toMatch(/TTD 912|finance readiness|readinessScore|8317/);
+    // Round 3: the revenue-module tools' verdicts and the cross-domain risk verdict are withheld; the object-shaped trace
+    // is served without its metadata.
+    expect(res.body.recent.map((v: any) => v.id).sort()).toEqual([ID.vObjTrace, ID.vOps].sort());
+    const ops = res.body.recent.find((v: any) => v.id === ID.vOps);
+    expect(ops.ruleTrace.some((t: any) => 'metadata' in t)).toBe(false);
+    expect(ops.ruleTrace.map((t: any) => t.source)).toEqual(['GenomeAutonomyGateService', 'ToolOutcomeScore']);
+    expect(JSON.stringify(res.body.recent)).not.toMatch(/TTD 912|finance readiness|readinessScore|8317|7319|reconcile|retainer|Cross-domain/i);
     // Round 2 (security MAJOR-3a): the verdict's confidence is the genome gate's confidence score.
-    expect(res.body.recent[0].confidence).toBeUndefined();
+    expect(ops.confidence).toBeUndefined();
     // Round 2 (security MINOR-5): the totals count what the reader is served.
-    expect(res.body.total).toBe(1);
-    expect(res.body.blocked).toBe(1);
+    expect(res.body.total).toBe(2);
+    expect(res.body.blocked).toBe(2);
     const owner = await get(`/api/v1/cortex/audit/decisions?businessId=${ID.biz}`, ID.owner);
-    expect(owner.body.recent.map((v: any) => v.id).sort()).toEqual([ID.vFin, ID.vOps, ID.vOpsReason, ID.vProp].sort());
+    expect(owner.body.recent.map((v: any) => v.id).sort()).toEqual([ID.vFin, ID.vOps, ID.vOpsReason, ID.vProp, ID.vReconcile, ID.vRetainer, ID.vCross, ID.vObjTrace].sort());
     expect(owner.body.recent.find((v: any) => v.id === ID.vOps).ruleTrace[0].metadata.readinessScore).toBe(8317);
     expect(owner.body.recent.find((v: any) => v.id === ID.vOps).confidence).toBe(0.7);
-    expect(owner.body.total).toBe(4);
+    expect(owner.body.total).toBe(8);
     // Packet item 3: no module scope is added to this route (an access change for SWP-CENSUS-KEY-B and the owner); a
     // member who reads revenue but not ai is served it whole, as before.
     const noAi = await get(`/api/v1/cortex/audit/decisions?businessId=${ID.biz}`, ID.staffNoAi);
     expect(noAi.status).toBe(200);
-    expect(noAi.body.total).toBe(4);
+    expect(noAi.body.total).toBe(8);
   });
 
   it('GES-08 timeline genome.updated and constitution rows are served without their composite scores', async () => {
@@ -581,8 +602,11 @@ describe('FU-GENOME-EVOLUTION-SURFACES (D-128, D-233, D-238)', () => {
       for (const id of [`${P}genome_updated`, `${P}constitution`]) {
         const row = res.body.find((e: any) => e.id === id);
         expect(row, `${url} ${id}`).toBeDefined();
-        expect(JSON.stringify(row.payload), `${url} ${id}`).not.toMatch(/genomeIntegrity|executiveReadinessScore|57|61/);
+        // Round 3 (security MINOR-3): the genome stage is a grade of the composite too.
+        expect(JSON.stringify(row.payload), `${url} ${id}`).not.toMatch(/genomeIntegrity|executiveReadinessScore|genomeStage|GROWTH|57|61/);
       }
+      // Round 3 (correctness MINOR-2): the writer's ordinary summary (no score in it) is kept.
+      expect(res.body.find((e: any) => e.id === `${P}constitution`).summary, url).toBe('Version 2 generated from Business Genome.');
       const owner = await get(url, ID.owner);
       expect(owner.body.find((e: any) => e.id === `${P}genome_updated`).payload).toEqual({ executiveReadinessScore: 61, genomeIntegrity: 57 });
     }
@@ -591,7 +615,7 @@ describe('FU-GENOME-EVOLUTION-SURFACES (D-128, D-233, D-238)', () => {
   it('GES-09 experiments: bridged from FINANCIAL, or stating money, need revenue read; acting on one needs revenue write', async () => {
     const list = await get(expUrl(), ID.staffNone);
     expect(list.status).toBe(200);
-    expect(list.body.map((e: any) => e.id).sort()).toEqual([ID.expOps, ID.expPaidChannel].sort());
+    expect(list.body.map((e: any) => e.id).sort()).toEqual([ID.expComplete, ID.expOps, ID.expPaidChannel].sort());
     for (const id of [ID.expFin, ID.expMoney, ID.expResult]) {
       const one = await get(`${expUrl()}/${id}`, ID.staffNone);
       expect(one.status, id).toBe(403);
@@ -611,7 +635,7 @@ describe('FU-GENOME-EVOLUTION-SURFACES (D-128, D-233, D-238)', () => {
     expect((await db.genomeExperiment.findUnique({ where: { id: ID.expFin } })).status).toBe('PROPOSED');
     expect((await get(`${expUrl()}/${ID.expFin}`, ID.staffRead)).status).toBe(200);
     const ownerList = await get(expUrl(), ID.owner);
-    expect(ownerList.body.map((e: any) => e.id).sort()).toEqual([ID.expFin, ID.expMoney, ID.expOps, ID.expPaidChannel, ID.expResult].sort());
+    expect(ownerList.body.map((e: any) => e.id).sort()).toEqual([ID.expComplete, ID.expFin, ID.expMoney, ID.expOps, ID.expPaidChannel, ID.expResult].sort());
     const started = await post(`${expUrl()}/${ID.expFin}/start`, ID.owner);
     expect(started.status).toBe(201);
   });
@@ -656,6 +680,29 @@ describe('FU-GENOME-EVOLUTION-SURFACES (D-128, D-233, D-238)', () => {
     }
     expect((await db.genomeEvolutionProposal.count({ where: { businessId: ID.biz, reason: 'Pricing review', createdBy: { in: [ID.staffNone, ID.staffRead] } } }))).toBe(0);
     const ok = await post(evoUrl(), ID.staffNone, { section: 'operations', reason: 'Confirm walk-ins', proposedPatch: { coreWorkflows: ['walk-ins'] } });
+    expect(ok.status).toBe(201);
+  });
+
+  it('GES-13 SUPER_ADMIN and a member whose map has no revenue key, on the write paths', async () => {
+    const res = await patch(`${evoUrl()}/${ID.evoOpsMissing}`, ID.staffMissing, { proposedPatch: { avgTicket: 4500.25 } });
+    expect(res.status).toBe(403);
+    expect(JSON.stringify(res.body)).toContain(WRITE_DENIED('none'));
+    const created = await post(evoUrl(), ID.staffMissing, { section: 'sales', reason: 'Deal review', proposedPatch: {} });
+    expect(created.status).toBe(403);
+    // SUPER_ADMIN (no membership here) reads everything and may act (ModuleScopeGuard's reading).
+    const list = await get(evoUrl(), ID.superAdmin);
+    expect(list.status).toBe(200);
+    expect(list.body.map((p: any) => p.id)).toContain(ID.evoFin);
+    const audit = await get(`/api/v1/cortex/audit/decisions?businessId=${ID.biz}`, ID.superAdmin);
+    expect(audit.body.recent.map((v: any) => v.id)).toContain(ID.vReconcile);
+  });
+
+  it('GES-14 completing an experiment with a result that states money needs revenue write', async () => {
+    const res = await post(`${expUrl()}/${ID.expComplete}/complete`, ID.staffNone, { notes: 'Revenue up TTD 912 from walk-ins' });
+    expect(res.status).toBe(403);
+    expect(JSON.stringify(res.body)).toContain(WRITE_DENIED('none'));
+    expect((await db.genomeExperiment.findUnique({ where: { id: ID.expComplete } })).status).toBe('RUNNING');
+    const ok = await post(`${expUrl()}/${ID.expComplete}/complete`, ID.staffNone, { notes: 'More walk-ins booked' });
     expect(ok.status).toBe(201);
   });
 
