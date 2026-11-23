@@ -417,33 +417,82 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
       return inScope[0].member;
     };
     /**
-     * The decorators a cited GET handler may carry: every name found on a GET handler in the server today. A closed
-     * list, so a scope decorator under another name (an alias, applyDecorators, a wrapper) fails closed (closing
-     * review round 2). Adding a name is a review decision about whether it can set the module scope.
+     * Where each name a cited file may use to decorate a cited class or GET handler comes from (closing review rounds
+     * 2 and 3). Each is a closed list: a decorator under another name, or a known name bound any other way (an alias,
+     * a destructured require, a default import, a local declaration, an import from another module), fails closed.
+     * Adding a name is a review decision about whether it can set the module scope.
      */
+    const NEST = "@nestjs/common";
+    const SCOPE_GUARD = "core/auth/module-scope.guard";
+    const SOURCE: Record<string, string> = {
+      Get: NEST, UseGuards: NEST, Header: NEST, HttpCode: NEST, Controller: NEST, SetMetadata: NEST, applyDecorators: NEST,
+      RequireModuleScope: SCOPE_GUARD, ModuleScopeGuard: SCOPE_GUARD, ShadowEffectiveAuthority: SCOPE_GUARD, MODULE_SCOPE_KEY: SCOPE_GUARD,
+      RateLimit: "core/decorators/rate-limit.decorator",
+      PublicRateLimit: "core/guards/public-rate-limit.guard",
+      CrmRateLimit: "modules/crm/guards/rate-limit.guard",
+      RequireFeature: "modules/crm/guards/feature-flag.guard",
+      HiddenModuleWrites: "core/auth/hidden-module-writes.decorator",
+    };
+    /** The decorators a cited GET handler may carry: every name found on a GET handler in the server today. */
     const KNOWN_DECORATORS = new Set(["Get", "UseGuards", "RequireModuleScope", "RateLimit", "CrmRateLimit", "PublicRateLimit", "ShadowEffectiveAuthority", "Header", "HttpCode", "RequireFeature"]);
-    /** What can set the module scope: renaming any of these on import could hide it under another name. */
-    const SCOPE_CAPABLE = new Set(["RequireModuleScope", "SetMetadata", "applyDecorators", "MODULE_SCOPE_KEY", "ModuleScopeGuard"]);
     /**
-     * Why a cited file cannot be read with certainty, or null: an import renames something that can set the scope or
-     * binds a known decorator name to something else, a namespace import, a local declaration of a known decorator
-     * name, or the file names the scope metadata key, its value, or Reflect metadata writes (scope set outside the
-     * handler's own decorators).
+     * The decorators a cited controller class may carry. HiddenModuleWrites writes the module scope key onto
+     * handlers, but only write verbs (core/auth/hidden-module-writes.decorator.ts, held by the read census); a GET
+     * claim is unaffected while that holds.
+     */
+    const CLASS_DECORATORS = new Set(["Controller", "UseGuards", "HiddenModuleWrites"]);
+    /** What can set the module scope when called: allowed only as a decorator call, never called any other way. */
+    const SCOPE_CAPABLE = new Set(["RequireModuleScope", "SetMetadata", "applyDecorators"]);
+    /** An import's module, as a path under the server src (a package name as written). */
+    const resolveImport = (file: string, spec: string) =>
+      spec.startsWith(".") ? path.posix.normalize(path.posix.join(path.posix.dirname(file), spec)) : spec;
+    /**
+     * Why a cited file cannot be read with certainty, or null:
+     * - a known name bound other than by a plain named import from its own module (SOURCE);
+     * - an import renaming something to or from a known name;
+     * - a namespace import, an import-equals, or a require call;
+     * - a scope-capable name used other than as a decorator's own callee or its import;
+     * - the scope key, its value, Reflect, or defineMetadata named at all (metadata written outside the decorators).
      */
     const unreadableFile = (file: string): string | null => {
       const sf = parse(file);
       let why: string | null = null;
+      const fail = (reason: string) => (why ??= reason);
       const visit = (node: ts.Node) => {
         if (why) return;
-        if (ts.isImportSpecifier(node) && node.propertyName && (SCOPE_CAPABLE.has(node.propertyName.text) || KNOWN_DECORATORS.has(node.name.text))) why = `renamed import ${node.getText()}`;
-        else if (ts.isNamespaceImport(node)) why = `namespace import ${node.getText()}`;
-        else if ((ts.isVariableDeclaration(node) || ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) && node.name && ts.isIdentifier(node.name) && KNOWN_DECORATORS.has(node.name.text)) why = `local ${node.name.text}`;
-        else if (ts.isIdentifier(node) && (node.text === "MODULE_SCOPE_KEY" || node.text === "defineMetadata")) why = `scope metadata written outside a decorator (${node.text})`;
-        else if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && node.text === "module_scope") why = "scope metadata key named outside a decorator";
+        if (ts.isImportSpecifier(node)) {
+          const imported = (node.propertyName ?? node.name).text;
+          const local = node.name.text;
+          const from = resolveImport(file, (node.parent.parent.parent.moduleSpecifier as ts.StringLiteral).text);
+          if (node.propertyName && (imported in SOURCE || local in SOURCE)) fail(`renamed import ${node.getText()}`);
+          else if (local in SOURCE && from !== SOURCE[local]) fail(`${local} imported from ${from}, not ${SOURCE[local]}`);
+        } else if (ts.isNamespaceImport(node) || ts.isImportEqualsDeclaration(node)) fail(`namespace or import-equals ${node.getText()}`);
+        else if (ts.isImportClause(node) && node.name && node.name.text in SOURCE) fail(`default import ${node.name.text}`);
+        else if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "require") fail(`require ${node.getText()}`);
+        else if (ts.isIdentifier(node)) {
+          const parent = node.parent;
+          const declares = (ts.isVariableDeclaration(parent) || ts.isFunctionDeclaration(parent) || ts.isClassDeclaration(parent) || ts.isBindingElement(parent) || ts.isParameter(parent)) && parent.name === node;
+          if (declares && node.text in SOURCE) fail(`local ${node.text}`);
+          else if (node.text === "MODULE_SCOPE_KEY" || node.text === "Reflect" || node.text === "defineMetadata") fail(`scope metadata written outside a decorator (${node.text})`);
+          else if (SCOPE_CAPABLE.has(node.text) && !ts.isImportSpecifier(parent)) {
+            const asCallee = ts.isCallExpression(parent) && parent.expression === node && ts.isDecorator(parent.parent);
+            if (!asCallee) fail(`${node.text} used other than as a decorator: ${parent.getText().slice(0, 80)}`);
+          }
+        } else if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && node.text === "module_scope") fail("scope metadata key named outside a decorator");
         ts.forEachChild(node, visit);
       };
       visit(sf);
-      return why;
+      if (why) return why;
+      for (const st of sf.statements) {
+        if (!ts.isClassDeclaration(st)) continue;
+        const ctl = decoratorsOf(st).some((d) => decoratorCall(d)?.name === "Controller");
+        if (!ctl) continue;
+        for (const d of decoratorsOf(st)) {
+          const call = decoratorCall(d);
+          if (!call || call.qualified || !CLASS_DECORATORS.has(call.name)) return `unlisted class decorator ${d.getText()} on ${st.name?.text}`;
+        }
+      }
+      return null;
     };
     /**
      * Why a handler's decorators cannot be read with certainty, or null. Anything this check cannot read fails
