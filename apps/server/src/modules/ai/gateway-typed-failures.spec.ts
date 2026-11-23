@@ -50,6 +50,11 @@ function createService(): ModelGatewayService {
   process.env.ANTHROPIC_API_KEY = 'test-anthropic-key';
   process.env.XAI_API_KEY = 'test-xai-key';
   process.env.BYOK_ENCRYPTION_SECRET = 'test-encryption-secret-32chars!!';
+  // The candidate set must not depend on the shell: no kimi, google, native, openrouter or ollama key,
+  // so balanced/general dispatches openai then anthropic and nothing else (see the anthropic 429 case).
+  for (const key of ['KIMI_API_KEY', 'GOOGLE_API_KEY', 'GEMINI_API_KEY', 'KEYFLOW_NATIVE_AI_URL', 'NATIVE_AI_BASE_URL', 'OPENROUTER_API_KEY', 'OLLAMA_BASE_URL']) {
+    delete process.env[key];
+  }
   const svc = new ModelGatewayService(mockPrisma as any, mockLLMCostService, new LangfuseService());
   (svc as any).routingTableLoaded = true;
   (svc as any).delay = vi.fn().mockResolvedValue(undefined);
@@ -136,6 +141,7 @@ describe('RR-GATEWAY-TYPED-FAILURES: provider failures are classified before the
       const callAnthropic = vi.fn().mockRejectedValue(new Error('Anthropic API error (429): {"type":"error","error":{"type":"rate_limit_error","message":"Number of request tokens has exceeded your per-minute rate limit"}}'));
       (service as any).callAnthropic = callAnthropic;
       (service as any).callOpenAi = vi.fn().mockResolvedValue(OK);
+      (service as any).callKimi = vi.fn().mockRejectedValue(new Error('callKimi: must not be reached (not configured)'));
 
       const refusal: any = await service.complete(baseRequest({ providerOverride: 'anthropic', modelOverride: 'claude-3-5-sonnet-20241022' })).then(
         () => { throw new Error('expected the dispatch to be refused: every configured candidate was rate limited'); },
