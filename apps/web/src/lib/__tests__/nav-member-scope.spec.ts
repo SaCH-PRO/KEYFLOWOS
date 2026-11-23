@@ -42,13 +42,26 @@
  *   NMS-18 orchestrator acceptance M1 (D-179 fully enforced): a legacy bookkeeper {revenue: write, expenses: write}
  *          with no operations entry sees none of Payroll, Approvals, Performance, Data Inbox, Inbox (KEY), Contracts
  *          or WhatsApp; and every nav entry names the module(s) its page's server reads require, cross-checked row by
- *          row against the controller's @RequireModuleScope (file:line), so an entry added without a row fails.
+ *          row against the cited controller's @RequireModuleScope, so an entry added without a row fails. A claim
+ *          names the controller file and the route (GET + declared path, with its class when ambiguous) or an
+ *          identifier, never a line (beside hub:<id> and D-<n> ruling claims), and the checker reads the file through
+ *          the TypeScript parser: it fails when the route is missing or ambiguous, the handler's scopes are not all
+ *          among the row's modules, a scoped handler has no ModuleScopeGuard in @UseGuards (on it or its controller),
+ *          or a tracked identifier disappears; and it fails closed on anything in a cited file it cannot read with
+ *          certainty (see unreadable, unreadableFile, findRoute, scopeEnforced).
+ *          Documented limits (orchestrator ruling 2026-11-23): NMS-18 does not read (1) code defined in another file
+ *          (an imported decorator's, class's or function's definition, which may run at load) or (2) metadata written
+ *          inside a function or method body when it runs, nor (3) the body of a pinned ModuleScopeGuard subclass
+ *          (SCOPE_GUARD_SUBCLASSES, each a review decision). The server guard is the boundary; FU-NMS-SERVER-METADATA
+ *          (a server spec reading MODULE_SCOPE_KEY and the route table from the compiled controllers for every cited
+ *          route) is the follow-up that holds both.
  *   NMS-09 the desktop menu (Main navigation) shows the hubs as links named by their plain labels, and a products
  *          business's menu names no Schedule (journey A4); a front-desk member's menu offers no Sales, Money, Your
  *          page or Settings hub (J5).
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import fs from "node:fs";
+import ts from "typescript";
 import path from "node:path";
 import { createElement, type ReactNode } from "react";
 import { render, screen, within, cleanup, renderHook, waitFor, fireEvent, act } from "@testing-library/react";
@@ -188,134 +201,138 @@ describe("NAV-A1: the hubs a member is shown", () => {
 /* ───────────────────────── every entry's module, cited (acceptance M1) ───────────────────────── */
 
 /**
- * The module(s) each nav entry needs, and why. Every row is a claim the test below checks; citations (paths under
- * apps/server/src):
- *   "<path>:<line>"                    a @Get its page's main read calls, whose decorator block carries
- *                                      @RequireModuleScope of modules the row names (and no others);
- *   "unscoped:<path>:<line>"           a @Get its page's main read calls that carries no module scope;
+ * The module(s) each nav entry needs, and why. Every row is a claim the test below checks. Claims locate server code
+ * by what it declares, never by line, so other packets moving lines cannot break them (wave 3f). Citations (paths
+ * under apps/server/src):
+ *   "<path>#[<Class> ]GET <route>"     the @Get('<route>') its page's main read calls (inside controller <Class> when the
+ *                                      file has two such routes), whose decorator block carries @RequireModuleScope of
+ *                                      modules the row names (and no others);
+ *   "unscoped:<path>#[<Class> ]GET <route>"   a read its page calls that carries no module scope;
+ *   "service-check:<path>#[<Class> ]GET <route>"   a read that filters or withholds by the member's levels itself;
  *   "hub:<id>"                         the hub that holds the entry, whose module the row then names;
- *   "data:<path>:<line>:<module> <id>" server code (identifier <id> on that line) showing an unscoped read answers
- *                                      that module's data; the row must name the module;
- *   "service-check:<path>:<line>"      a @Get that filters by the member's levels itself;
+ *   "data:<path>:<module> <identifier> ..."   server code (the identifier must be in that file) showing an unscoped
+ *                                      read answers that module's data; the row must name the module;
  *   "D-<n>:<module> ..."               an owner ruling justifying that module (D-<n> alone: beside the unscoped read
  *                                      of a row with no module);
- *   "tracked:<path>:<line>:<module> <id> <FU-packet> ..."  a pre-existing server exposure (an unscoped read answering
- *                                      that module's data) tracked in a follow-up server packet, with the nav left as
- *                                      it is by the orchestrator's decision of 2026-11-22 (D-100). It justifies nothing.
- * Each module a row names must be justified; a row with no module cites the unscoped read it rests on.
+ *   "tracked:<path>:<module> <identifier> <FU-packet> ..."   a pre-existing server exposure tracked in a follow-up
+ *                                      server packet, with the nav left as it is by the orchestrator's decision of
+ *                                      2026-11-22 (D-100). It justifies nothing; the identifier must still be in the file.
+ * A route that is missing or ambiguous fails. Each module a row names must be justified; a row with no module cites
+ * the unscoped read it rests on.
  */
-const SRV = (f: string, line: number) => `modules/${f}:${line}`;
+const SRV = (f: string, route: string) => `modules/${f}#${route}`;
 const MODULE_TABLE: Record<string, { modules: string[]; cite: string[] }> = {
   // Hubs
-  "/app/command-center": { modules: [], cite: ["unscoped:modules/business-command-center/business-command-center.controller.ts:25", "D-96 every member's home"] },
-  "/app/crm/contacts": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", 493)] },
-  "/app/commerce": { modules: ["revenue"], cite: [SRV("commerce/commerce.controller.ts", 706)] },
-  "/app/schedule/calendar": { modules: ["bookings"], cite: [SRV("calendar/calendar.controller.ts", 256)] },
-  "/app/financial-flow": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 359)] },
-  "/app/store": { modules: ["storefront"], cite: ["unscoped:modules/bookings/bookings.controller.ts:358", "D-150:storefront hub rule: no read route checks storefront; the hub follows the scope (J5)", "tracked:modules/site/site.service.ts:310:revenue revenueInPeriod FU-SITE-ANALYTICS-REVENUE-SCOPE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100"] },
-  "/app/settings/business": { modules: ["settings"], cite: ["unscoped:modules/identity/identity.controller.ts:858", "D-150:settings hub rule (J5); its writes need settings"] },
+  "/app/command-center": { modules: [], cite: ["unscoped:modules/business-command-center/business-command-center.controller.ts#GET snapshot", "D-96 every member's home"] },
+  "/app/crm/contacts": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", "GET businesses/:businessId/contacts")] },
+  "/app/commerce": { modules: ["revenue"], cite: [SRV("commerce/commerce.controller.ts", "GET businesses/:businessId/invoices")] },
+  "/app/schedule/calendar": { modules: ["bookings"], cite: [SRV("calendar/calendar.controller.ts", "GET businesses/:businessId/events")] },
+  "/app/financial-flow": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET overview")] },
+  // The store's analytics read withholds revenue below revenue read (FU-SITE-ANALYTICS-REVENUE-SCOPE, in wave 3f).
+  "/app/store": { modules: ["storefront"], cite: ["unscoped:modules/bookings/bookings.controller.ts#GET businesses/:businessId/services", "D-150:storefront hub rule: no read route checks storefront; the hub follows the scope (J5)", "service-check:modules/site/site.controller.ts#GET businesses/:businessId/analytics"] },
+  "/app/settings/business": { modules: ["settings"], cite: ["unscoped:modules/identity/identity.controller.ts#GET businesses/:businessId", "D-150:settings hub rule (J5); its writes need settings"] },
   // Customers
-  "/app/crm/deals": { modules: ["crm"], cite: [SRV("crm/crm-deals.controller.ts", 216)] },
-  "/app/crm/accounts": { modules: ["crm"], cite: [SRV("crm/crm-accounts.controller.ts", 22)] },
-  "/app/people-flow": { modules: ["crm"], cite: ["unscoped:modules/people-flow/people-flow.controller.ts:18", "hub:customers"] },
-  "/app/crm/sequences": { modules: ["crm"], cite: ["unscoped:modules/crm/crm-sequence.controller.ts:33", "hub:customers"] },
-  "/app/helpdesk": { modules: ["crm"], cite: ["unscoped:modules/helpdesk/helpdesk.controller.ts:13", "hub:customers"] },
-  "/app/call-tasks": { modules: ["crm"], cite: [SRV("call-tasks/call-task.controller.ts", 95)] },
-  "/app/crm/intelligence": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", 1108)] },
-  "/app/crm/data-quality": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", 865)] },
-  "/app/crm/duplicates": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", 1558)] },
-  "/app/crm/network": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", 338)] },
-  "/app/crm/dashboard": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", 493)] },
-  "/app/sales-team": { modules: ["crm", "revenue"], cite: ["unscoped:modules/conversion/conversion.controller.ts:67", "data:modules/conversion/sales-team.service.ts:80:revenue revenueAttributed, the PAID invoice totals per rep (security review: the route itself carries no scope)", "hub:customers", "tracked:modules/conversion/sales-team.service.ts:80:revenue revenueAttributed FU-CONVERSION-REPS-REVENUE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100"] },
+  "/app/crm/deals": { modules: ["crm"], cite: [SRV("crm/crm-deals.controller.ts", "GET businesses/:businessId/deals")] },
+  "/app/crm/accounts": { modules: ["crm"], cite: [SRV("crm/crm-accounts.controller.ts", "GET businesses/:businessId/accounts")] },
+  "/app/people-flow": { modules: ["crm"], cite: ["unscoped:modules/people-flow/people-flow.controller.ts#GET overview", "hub:customers"] },
+  "/app/crm/sequences": { modules: ["crm"], cite: ["unscoped:modules/crm/crm-sequence.controller.ts#GET businesses/:businessId/sequences", "hub:customers"] },
+  "/app/helpdesk": { modules: ["crm"], cite: ["unscoped:modules/helpdesk/helpdesk.controller.ts#GET businesses/:businessId/tickets", "hub:customers"] },
+  "/app/call-tasks": { modules: ["crm"], cite: [SRV("call-tasks/call-task.controller.ts", "GET businesses/:businessId/calls")] },
+  "/app/crm/intelligence": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", "GET businesses/:businessId/relationship-health/at-risk")] },
+  "/app/crm/data-quality": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", "GET businesses/:businessId/data-quality/stats")] },
+  "/app/crm/duplicates": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", "GET businesses/:businessId/duplicates")] },
+  "/app/crm/network": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", "GET businesses/:businessId/network")] },
+  "/app/crm/dashboard": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", "GET businesses/:businessId/contacts")] },
+  "/app/sales-team": { modules: ["crm", "revenue"], cite: ["unscoped:modules/conversion/conversion.controller.ts#GET businesses/:businessId/sales-reps", "data:modules/conversion/sales-team.service.ts:revenue revenueAttributed, the PAID invoice totals per rep (security review: the route itself carries no scope)", "hub:customers", "tracked:modules/conversion/sales-team.service.ts:revenue revenueAttributed FU-CONVERSION-REPS-REVENUE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100"] },
   // Sales
-  "/app/commerce/invoices": { modules: ["revenue"], cite: [SRV("commerce/commerce.controller.ts", 706)] },
-  "/app/inventory": { modules: ["revenue"], cite: [SRV("commerce/commerce.controller.ts", 300)] },
-  "/app/commerce/gateway": { modules: ["revenue"], cite: [SRV("payments/payments-ops.controller.ts", 78)] },
+  "/app/commerce/invoices": { modules: ["revenue"], cite: [SRV("commerce/commerce.controller.ts", "GET businesses/:businessId/invoices")] },
+  "/app/inventory": { modules: ["revenue"], cite: [SRV("commerce/commerce.controller.ts", "GET businesses/:businessId/products")] },
+  "/app/commerce/gateway": { modules: ["revenue"], cite: [SRV("payments/payments-ops.controller.ts", "GET gateways")] },
   // Schedule
-  "/app/bookings": { modules: ["bookings"], cite: ["unscoped:modules/bookings/bookings.controller.ts:101", "hub:schedule"] },
-  "/app/temporal-flow": { modules: ["bookings"], cite: ["unscoped:modules/temporal-flow/temporal-flow.controller.ts:34", "hub:schedule", "tracked:modules/temporal-flow/temporal-flow-key-inbox.listener.ts:100:operations Analysis: FU-TEMPORAL-FLOW-INBOX-SCOPE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100"] },
+  "/app/bookings": { modules: ["bookings"], cite: ["unscoped:modules/bookings/bookings.controller.ts#GET businesses/:businessId", "hub:schedule"] },
+  "/app/temporal-flow": { modules: ["bookings"], cite: ["unscoped:modules/temporal-flow/temporal-flow.controller.ts#GET ", "hub:schedule", "tracked:modules/temporal-flow/temporal-flow-key-inbox.listener.ts:operations Analysis: FU-TEMPORAL-FLOW-INBOX-SCOPE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100"] },
   // Money
-  "/app/payments": { modules: ["revenue"], cite: [SRV("payments/payments-ops.controller.ts", 90)] },
-  "/app/money/expenses": { modules: ["expenses"], cite: [SRV("expenses/expenses.controller.ts", 20)] },
-  "/app/procurement": { modules: ["operations"], cite: [SRV("procurement/procurement.controller.ts", 30)] },
-  "/app/retainers": { modules: ["revenue"], cite: ["unscoped:modules/retainers/retainer.controller.ts:151", "hub:money"] },
-  "/app/budgeting": { modules: ["expenses"], cite: [SRV("expenses/expenses.controller.ts", 243)] },
-  "/app/payroll": { modules: ["operations"], cite: [SRV("payroll/payroll.controller.ts", 22)] },
-  "/app/reports": { modules: ["revenue", "analytics"], cite: [SRV("reports/reports.controller.ts", 56), "D-179:analytics"] },
-  "/app/finance/settings": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 611)] },
-  "/app/finance/reconciliation": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 466)] },
-  "/app/finance/tax": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 1101)] },
-  "/app/finance/accounting-periods": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 1575)] },
-  "/app/finance/ledger": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 236)] },
-  "/app/finance/journal": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 191)] },
-  "/app/finance/trial-balance": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 265)] },
-  "/app/finance/recurring-journals": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 756)] },
-  "/app/finance/fixed-assets": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 1742)] },
-  "/app/finance/bank-rules": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 662)] },
-  "/app/finance/credit-notes": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 1493)] },
-  "/app/finance/exchange-rates": { modules: ["revenue"], cite: ["unscoped:modules/finance/finance.controller.ts:1698", "hub:money"] },
-  "/app/money/books": { modules: ["revenue"], cite: [SRV("commerce/accounting.controller.ts", 61)] },
+  "/app/payments": { modules: ["revenue"], cite: [SRV("payments/payments-ops.controller.ts", "GET transactions")] },
+  "/app/money/expenses": { modules: ["expenses"], cite: [SRV("expenses/expenses.controller.ts", "GET businesses/:businessId/expenses")] },
+  "/app/procurement": { modules: ["operations"], cite: [SRV("procurement/procurement.controller.ts", "GET businesses/:businessId")] },
+  "/app/retainers": { modules: ["revenue"], cite: ["unscoped:modules/retainers/retainer.controller.ts#GET businesses/:businessId", "hub:money"] },
+  "/app/budgeting": { modules: ["expenses"], cite: [SRV("expenses/expenses.controller.ts", "GET businesses/:businessId/expense-budgets")] },
+  "/app/payroll": { modules: ["operations"], cite: [SRV("payroll/payroll.controller.ts", "GET rates")] },
+  "/app/reports": { modules: ["revenue", "analytics"], cite: [SRV("reports/reports.controller.ts", "GET businesses/:businessId/reports/generate"), "D-179:analytics"] },
+  "/app/finance/settings": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET settings")] },
+  "/app/finance/reconciliation": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET accounts")] },
+  "/app/finance/tax": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET tax-liabilities")] },
+  "/app/finance/accounting-periods": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET accounting-periods")] },
+  "/app/finance/ledger": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET general-ledger")] },
+  "/app/finance/journal": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET journal-entries")] },
+  "/app/finance/trial-balance": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET trial-balance")] },
+  "/app/finance/recurring-journals": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET recurring-journal-entries")] },
+  "/app/finance/fixed-assets": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET fixed-assets")] },
+  "/app/finance/bank-rules": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET bank-rules")] },
+  "/app/finance/credit-notes": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET credit-notes")] },
+  "/app/finance/exchange-rates": { modules: ["revenue"], cite: ["unscoped:modules/finance/finance.controller.ts#GET exchange-rates", "hub:money"] },
+  "/app/money/books": { modules: ["revenue"], cite: [SRV("commerce/accounting.controller.ts", "GET businesses/:businessId/summary")] },
   // Your page
   // Its overview (unscoped) answers kpis.revenue: every PAID invoice in the period plus store orders (security review
   // round 2), so it needs revenue as well as the hub's storefront.
-  "/app/presence": { modules: ["storefront", "revenue"], cite: ["unscoped:modules/site/presence/presence.controller.ts:79", "data:modules/site/presence/presence-overview.service.ts:254:revenue invoicesRevenue, the PAID invoice totals in kpis.revenue", "hub:page", "tracked:modules/site/presence/presence-overview.service.ts:254:revenue invoicesRevenue FU-PRESENCE-REVENUE-SCOPE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100 (also the leads tab contact email and phone)"] },
-  "/app/portal": { modules: ["storefront"], cite: ["unscoped:modules/portal/portal.controller.ts:29", "hub:page"] },
+  "/app/presence": { modules: ["storefront", "revenue"], cite: ["unscoped:modules/site/presence/presence.controller.ts#GET businesses/:businessId/overview", "data:modules/site/presence/presence-overview.service.ts:revenue invoicesRevenue, the PAID invoice totals in kpis.revenue", "hub:page", "tracked:modules/site/presence/presence-overview.service.ts:revenue invoicesRevenue FU-PRESENCE-REVENUE-SCOPE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100 (also the leads tab contact email and phone)"] },
+  "/app/portal": { modules: ["storefront"], cite: ["unscoped:modules/portal/portal.controller.ts#GET businesses/:businessId/access", "hub:page"] },
   // Settings
-  "/app/profile": { modules: ["settings"], cite: ["unscoped:modules/identity/identity.controller.ts:858", "hub:settings"] },
-  "/app/genome": { modules: ["settings"], cite: ["unscoped:modules/business-genome/key-genome/key-genome.controller.ts:248", "hub:settings"] },
-  "/app/settings/billing": { modules: ["settings"], cite: ["unscoped:modules/subscriptions/subscriptions.controller.ts:36", "hub:settings"] },
-  "/app/settings/team": { modules: ["team"], cite: [SRV("identity/identity.controller.ts", 1255)] },
-  "/app/structure": { modules: ["team"], cite: [SRV("structure/structure.controller.ts", 180)] },
-  "/app/settings/ai": { modules: ["operations"], cite: [SRV("ai/ai-settings.controller.ts", 33)] },
-  "/app/settings/compliance": { modules: ["settings"], cite: ["unscoped:modules/communications/omnichannel.controller.ts:253", "hub:settings"] },
-  "/app/settings/developers": { modules: ["settings"], cite: [SRV("api-keys/api-keys.controller.ts", 25)] },
-  "/app/key-connect": { modules: ["settings"], cite: ["unscoped:core/connectors/connector.controller.ts:156", "hub:settings"] },
-  "/app/templates": { modules: ["settings"], cite: ["unscoped:modules/templates/templates.controller.ts:13", "hub:settings"] },
-  "/app/trash": { modules: ["settings"], cite: ["hub:settings", "service-check:modules/trash/trash.controller.ts:325"] },
+  "/app/profile": { modules: ["settings"], cite: ["unscoped:modules/identity/identity.controller.ts#GET businesses/:businessId", "hub:settings"] },
+  "/app/genome": { modules: ["settings"], cite: ["unscoped:modules/business-genome/key-genome/key-genome.controller.ts#GET recommendations", "hub:settings"] },
+  "/app/settings/billing": { modules: ["settings"], cite: ["unscoped:modules/subscriptions/subscriptions.controller.ts#GET businesses/:businessId/billing-dashboard", "hub:settings"] },
+  "/app/settings/team": { modules: ["team"], cite: [SRV("identity/identity.controller.ts", "GET businesses/:businessId/team/dashboard")] },
+  "/app/structure": { modules: ["team"], cite: [SRV("structure/structure.controller.ts", "GET businesses/:businessId/stats")] },
+  "/app/settings/ai": { modules: ["operations"], cite: [SRV("ai/ai-settings.controller.ts", "GET businesses/:businessId/ai/settings/workload-config")] },
+  "/app/settings/compliance": { modules: ["settings"], cite: ["unscoped:modules/communications/omnichannel.controller.ts#GET consent", "hub:settings"] },
+  "/app/settings/developers": { modules: ["settings"], cite: [SRV("api-keys/api-keys.controller.ts", "GET ")] },
+  "/app/key-connect": { modules: ["settings"], cite: ["unscoped:core/connectors/connector.controller.ts#GET businesses/:businessId/dashboard", "hub:settings"] },
+  "/app/templates": { modules: ["settings"], cite: ["unscoped:modules/templates/templates.controller.ts#GET templates", "hub:settings"] },
+  "/app/trash": { modules: ["settings"], cite: ["hub:settings", "service-check:modules/trash/trash.controller.ts#GET "] },
   // KEY
-  "/app/key/chat": { modules: [], cite: ["unscoped:modules/ai/flow.controller.ts:99"] },
-  "/app/key-inbox": { modules: ["operations"], cite: [SRV("key-inbox/key-inbox.controller.ts", 125)] },
-  "/app/key": { modules: [], cite: ["unscoped:modules/ai/ai.controller.ts:1643"] },
-  "/app/key-autonomy": { modules: [], cite: ["unscoped:modules/key-autonomy/key-action-proposal.controller.ts:36", "tracked:modules/key-autonomy/genome-recommendation-action-bridge.service.ts:141:revenue rationale FU-KEY-ACTION-GENOME-PROJECTION pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100"] },
-  "/app/key-modes": { modules: [], cite: ["unscoped:modules/intelligence/key-executive-mode.controller.ts:14"] },
-  "/app/data-inbox": { modules: ["operations"], cite: [SRV("ingestion/data-inbox.controller.ts", 23)] },
-  "/app/capture": { modules: [], cite: ["unscoped:modules/device/device.controller.ts:48"] },
+  "/app/key/chat": { modules: [], cite: ["unscoped:modules/ai/flow.controller.ts#GET businesses/:businessId/flow/sessions"] },
+  "/app/key-inbox": { modules: ["operations"], cite: [SRV("key-inbox/key-inbox.controller.ts", "GET threads")] },
+  "/app/key": { modules: [], cite: ["unscoped:modules/ai/ai.controller.ts#GET businesses/:businessId/key/commands"] },
+  "/app/key-autonomy": { modules: [], cite: ["unscoped:modules/key-autonomy/key-action-proposal.controller.ts#GET proposals", "tracked:modules/key-autonomy/genome-recommendation-action-bridge.service.ts:revenue rationale FU-KEY-ACTION-GENOME-PROJECTION pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100"] },
+  "/app/key-modes": { modules: [], cite: ["unscoped:modules/intelligence/key-executive-mode.controller.ts#GET "] },
+  "/app/data-inbox": { modules: ["operations"], cite: [SRV("ingestion/data-inbox.controller.ts", "GET items")] },
+  "/app/capture": { modules: [], cite: ["unscoped:modules/device/device.controller.ts#GET captures"] },
   // Work
-  "/app/work/projects": { modules: ["projects"], cite: [SRV("projects/projects.controller.ts", 43)] },
+  "/app/work/projects": { modules: ["projects"], cite: [SRV("projects/projects.controller.ts", "GET businesses/:businessId")] },
   // The manual tab's reads are unscoped; D-179 keeps this operations surface (its KEY tab reads ai-approvals,
   // operations) out of a menu without operations (orchestrator acceptance M1).
-  "/app/approvals": { modules: ["operations"], cite: ["unscoped:modules/approvals/approval.controller.ts:67", SRV("ai/ai-approvals.controller.ts", 54), "D-179:operations"] },
-  "/app/performance": { modules: ["operations"], cite: [SRV("staff-performance/staff-performance.controller.ts", 30)] },
+  "/app/approvals": { modules: ["operations"], cite: ["unscoped:modules/approvals/approval.controller.ts#GET businesses/:businessId/approvals", SRV("ai/ai-approvals.controller.ts", "GET items"), "D-179:operations"] },
+  "/app/performance": { modules: ["operations"], cite: [SRV("staff-performance/staff-performance.controller.ts", "GET team-summary")] },
   // Its time-entry reads are unscoped; every entry is logged against a project, read through the projects picker.
-  "/app/time-tracking": { modules: ["projects"], cite: ["unscoped:modules/time-tracking/time-entry.controller.ts:174", SRV("projects/projects.controller.ts", 43)] },
-  "/app/operations": { modules: ["operations"], cite: ["unscoped:modules/content-ops/content-ops.controller.ts:68", "D-179:operations"] },
-  "/app/operations-flow": { modules: ["operations"], cite: ["unscoped:modules/sop/sop.controller.ts:13", "D-179:operations"] },
+  "/app/time-tracking": { modules: ["projects"], cite: ["unscoped:modules/time-tracking/time-entry.controller.ts#GET businesses/:businessId/running", SRV("projects/projects.controller.ts", "GET businesses/:businessId")] },
+  "/app/operations": { modules: ["operations"], cite: ["unscoped:modules/content-ops/content-ops.controller.ts#GET businesses/:businessId/content-requests", "D-179:operations"] },
+  "/app/operations-flow": { modules: ["operations"], cite: ["unscoped:modules/sop/sop.controller.ts#GET sops", "D-179:operations"] },
   // Its list (unscoped) answers each change order with its project's name, scope, amount and hours: project data, as
   // for Time tracking (security review round 3).
-  "/app/change-orders": { modules: ["projects"], cite: ["unscoped:modules/change-orders/change-order.controller.ts:111", "data:modules/change-orders/change-order.service.ts:84:projects project, the project's id and name on every row"] },
+  "/app/change-orders": { modules: ["projects"], cite: ["unscoped:modules/change-orders/change-order.controller.ts#GET businesses/:businessId", "data:modules/change-orders/change-order.service.ts:projects project, the project's id and name on every row"] },
   // Marketing
-  "/app/communicate/campaigns": { modules: [], cite: ["unscoped:modules/email-marketing/email-marketing.controller.ts:18"] },
-  "/app/marketing/lists": { modules: ["content"], cite: [SRV("email-marketing/marketing-sync.controller.ts", 53)] },
-  "/app/marketing/case-studies": { modules: ["revenue"], cite: ["unscoped:modules/site/site.controller.ts:688", "data:modules/site/case-study.service.ts:155:revenue recentRevenue, stored in metrics and answered by the list read", "tracked:modules/site/case-study.service.ts:155:revenue recentRevenue FU-CASE-STUDY-REVENUE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100"] },
-  "/app/content-ops": { modules: [], cite: ["unscoped:modules/content-ops/content-ops.controller.ts:68"] },
-  "/app/social": { modules: [], cite: ["unscoped:modules/social/social.controller.ts:325"] },
-  "/app/seo": { modules: [], cite: ["unscoped:modules/seo/seo.controller.ts:71"] },
-  "/app/events": { modules: [], cite: ["unscoped:modules/events/events.controller.ts:41"] },
-  "/app/whatsapp": { modules: ["operations"], cite: [SRV("whatsapp/whatsapp.controller.ts", 166)] },
-  "/app/marketing-flow": { modules: [], cite: ["unscoped:modules/marketing/marketing.controller.ts:13"] },
+  "/app/communicate/campaigns": { modules: [], cite: ["unscoped:modules/email-marketing/email-marketing.controller.ts#GET businesses/:businessId/campaigns"] },
+  "/app/marketing/lists": { modules: ["content"], cite: [SRV("email-marketing/marketing-sync.controller.ts", "GET businesses/:businessId/lists")] },
+  "/app/marketing/case-studies": { modules: ["revenue"], cite: ["unscoped:modules/site/site.controller.ts#GET businesses/:businessId/case-studies", "data:modules/site/case-study.service.ts:revenue recentRevenue, stored in metrics and answered by the list read", "tracked:modules/site/case-study.service.ts:revenue recentRevenue FU-CASE-STUDY-REVENUE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100"] },
+  "/app/content-ops": { modules: [], cite: ["unscoped:modules/content-ops/content-ops.controller.ts#GET businesses/:businessId/content-requests"] },
+  "/app/social": { modules: [], cite: ["unscoped:modules/social/social.controller.ts#GET businesses/:businessId/connections"] },
+  "/app/seo": { modules: [], cite: ["unscoped:modules/seo/seo.controller.ts#GET businesses/:businessId/dashboard"] },
+  "/app/events": { modules: [], cite: ["unscoped:modules/events/events.controller.ts#GET businesses/:businessId/events"] },
+  "/app/whatsapp": { modules: ["operations"], cite: [SRV("whatsapp/whatsapp.controller.ts", "GET businesses/:businessId/status")] },
+  "/app/marketing-flow": { modules: [], cite: ["unscoped:modules/marketing/marketing.controller.ts#GET campaigns"] },
   // Legal
-  "/app/evidence": { modules: [], cite: ["unscoped:modules/evidence/evidence.controller.ts:53"] },
-  "/app/contracts": { modules: ["operations"], cite: [SRV("contracts/contracts.controller.ts", 28)] },
-  "/app/legal": { modules: [], cite: ["unscoped:modules/blueprint/blueprint.controller.ts:14"] },
+  "/app/evidence": { modules: [], cite: ["unscoped:modules/evidence/evidence.controller.ts#GET businesses/:businessId/evidence"] },
+  "/app/contracts": { modules: ["operations"], cite: [SRV("contracts/contracts.controller.ts", "GET ")] },
+  "/app/legal": { modules: [], cite: ["unscoped:modules/blueprint/blueprint.controller.ts#GET "] },
   // Strategy
-  "/app/intelligence": { modules: [], cite: ["unscoped:modules/intelligence/business-intelligence.controller.ts:14"] },
-  "/app/goals": { modules: [], cite: ["unscoped:modules/key-cortex/key-cortex-goals.controller.ts:233"] },
-  "/app/market": { modules: [], cite: ["unscoped:modules/business-genesis/business-genesis.controller.ts:99"] },
+  "/app/intelligence": { modules: [], cite: ["unscoped:modules/intelligence/business-intelligence.controller.ts#GET executive-brief"] },
+  "/app/goals": { modules: [], cite: ["unscoped:modules/key-cortex/key-cortex-goals.controller.ts#GET goals"] },
+  "/app/market": { modules: [], cite: ["unscoped:modules/business-genesis/business-genesis.controller.ts#GET market-strategy"] },
   // Automate
-  "/app/flows": { modules: ["automations"], cite: [SRV("flow/flow.controller.ts", 206)] },
-  "/app/automations": { modules: [], cite: ["unscoped:modules/automation/automation.controller.ts:30"] },
-  "/app/key-flows": { modules: [], cite: ["unscoped:modules/flow-signal/flow-signal-role.controller.ts:14"] },
-  "/app/assets": { modules: ["content"], cite: [SRV("assets/asset.controller.ts", 48)] },
+  "/app/flows": { modules: ["automations"], cite: [SRV("flow/flow.controller.ts", "GET businesses/:businessId/flows")] },
+  "/app/automations": { modules: [], cite: ["unscoped:modules/automation/automation.controller.ts#GET businesses/:businessId/playbooks"] },
+  "/app/key-flows": { modules: [], cite: ["unscoped:modules/flow-signal/flow-signal-role.controller.ts#FlowSignalRoleController GET roles"] },
+  "/app/assets": { modules: ["content"], cite: [SRV("assets/asset.controller.ts", "GET businesses/:businessId/assets")] },
 };
 
 describe("NAV-A1 acceptance M1: every nav entry needs what its page's server reads need", () => {
@@ -352,41 +369,412 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
 
   it("NMS-18 every row is a checked claim: each module justified, each citation true", () => {
     /**
-     * The decorator block of the handler whose @Get is at `at` (0-based): from the end of the previous member (a blank
-     * line, a lone "}", a line ending in ";" or a class opening "{") down to the method signature, so multi-line
-     * decorators and comment lines inside the stack are read whole (review round 2).
+     * Server code is read through the TypeScript parser (wave 3f closing reviews: a hand-rolled comment lexer kept
+     * misreading regex literals and template strings). Comments are not in the syntax tree, so a commented-out route,
+     * class, decorator or identifier never counts, and nothing the parser reads as code can be hidden.
      */
-    const decorators = (lines: string[], at: number) => {
-      let top = at;
-      while (top > 0) {
-        const prev = lines[top - 1].trim();
-        // A comment line inside a decorator stack is read through (review round 3); code that is not a decorator ends it.
-        if (prev.startsWith("//") || prev.startsWith("*") || prev.startsWith("/*")) {
-          top--;
-          continue;
-        }
-        if (prev === "" || prev === "}" || prev.endsWith(";") || prev.endsWith("{") && !prev.startsWith("@")) break;
-        top--;
+    const parsed = new Map<string, ts.SourceFile>();
+    const parse = (file: string) => {
+      let sf = parsed.get(file);
+      if (!sf) {
+        sf = ts.createSourceFile(file, fs.readFileSync(path.join(SERVER_SRC, file), "utf8"), ts.ScriptTarget.Latest, true);
+        parsed.set(file, sf);
       }
-      const SIGNATURE = /^\s*(?:(?:public|private|protected)\s+)?(?:async\s+)?\w+\s*\(/;
-      let bottom = at;
-      while (bottom + 1 < lines.length && bottom - at < 40) {
-        const next = lines[bottom + 1];
-        if (!/^\s*@/.test(next) && SIGNATURE.test(next)) break;
-        bottom++;
-      }
-      // Comments set the block's extent only: their text, a block comment of any shape or a trailing "//", is never
-      // read as a scope (closing reviews).
-      return lines
-        .slice(top, bottom + 1)
-        .join("\n")
-        // One leftmost pass: string literals are kept whole (a "//" or "/*" inside one is not a comment), and only
-        // real comments are removed (final security review).
-        .replace(/('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`)|\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, (_m, str: string | undefined) => str ?? "");
+      return sf;
     };
-    const at = (file: string, line: number) => {
-      const lines = fs.readFileSync(path.join(SERVER_SRC, file), "utf8").split("\n");
-      return { lines, i: line - 1 };
+    /**
+     * A decorator as a call: its name (the last part of a qualified callee such as Nest.Get), whether the callee was
+     * qualified, and its first argument when that is a plain string ('' for no argument; null otherwise). Null when
+     * the decorator is not a call of a name at all.
+     */
+    const unparen = (e: ts.Expression): ts.Expression => (ts.isParenthesizedExpression(e) ? unparen(e.expression) : e);
+    const decoratorCall = (d: ts.Decorator): { name: string; qualified: boolean; arg: string | null } | null => {
+      const e = unparen(d.expression);
+      if (!ts.isCallExpression(e)) return null;
+      const callee = unparen(e.expression);
+      const name = ts.isIdentifier(callee) ? callee.text : ts.isPropertyAccessExpression(callee) ? callee.name.text : null;
+      if (name === null) return null;
+      const first = e.arguments[0];
+      const arg = !first ? "" : ts.isStringLiteral(first) || ts.isNoSubstitutionTemplateLiteral(first) ? first.text : null;
+      return { name, qualified: !ts.isIdentifier(callee), arg };
+    };
+    const decoratorsOf = (node: ts.Node) => (ts.canHaveDecorators(node) ? ts.getDecorators(node) ?? [] : []);
+    /**
+     * The route a claim names: the class member decorated @Get('<route>') (an empty route is @Get() or @Get('')),
+     * inside the class `cls` when one is named. Every class in the file is searched, nested and expression classes
+     * included: exactly one match must exist, and it must be in a top-level named class; anything else fails.
+     */
+    /** Names that register a route; each may only be a decorator's own callee (RequestMapping not at all). */
+    const VERBS = new Set(["Get", "Post", "Put", "Patch", "Delete", "All", "Head", "Options"]);
+    /** A controller's own path ('' for @Controller()); the class must carry exactly one plain @Controller('<literal>'). */
+    const controllerPath = (cls: ts.ClassDeclaration) => decoratorsOf(cls).map(decoratorCall).find((c) => c?.name === "Controller")?.arg ?? "";
+    /**
+     * Why the class that owns a cited route cannot be read with certainty (closing review round 4): it must carry a
+     * plain @Controller with a literal path, and every class decorator must be a plain name in CLASS_DECORATORS.
+     */
+    const controllerWhy = (cls: ts.ClassDeclaration): string | null => {
+      const calls = decoratorsOf(cls).map((d) => ({ d, call: decoratorCall(d) }));
+      const ctl = calls.filter(({ call }) => call?.name === "Controller");
+      if (ctl.length !== 1) return `${cls.name?.text ?? "class"} is not a plain @Controller`;
+      if (cls.heritageClauses?.length) return `${cls.name?.text} extends or implements something (inherited metadata is not read)`;
+      if (ctl[0].call!.arg === null) return `non-literal controller path ${ctl[0].d.getText()}`;
+      for (const { d, call } of calls) {
+        if (!call || call.qualified || !CLASS_DECORATORS.has(call.name)) return `unlisted class decorator ${d.getText()} on ${cls.name?.text}`;
+      }
+      return null;
+    };
+    /**
+     * Route segments, compared as Express does (case-insensitively). A segment that can span several segments or none
+     * (a wildcard, optional braces, a group) makes the path unread: it is taken to match anything. Any other segment
+     * that is not plain text (a :param, a param inside a segment) matches any one segment (correctness review round 6).
+     */
+    const segments = (p: string) => p.toLowerCase().split("/").filter(Boolean);
+    const plain = (seg: string) => /^[a-z0-9._~-]+$/.test(seg);
+    const param = (seg: string) => /^:\w+$/.test(seg);
+    /** A segment that may match several segments or none (a wildcard, an optional or a group): the whole path is unread. */
+    const spans = (seg: string) => /[*?+({]/.test(seg);
+    /** A segment that matches any one segment: a :param, or one that is neither plain text nor spans (as :token.gif). */
+    const anyOne = (seg: string) => param(seg) || (!plain(seg) && !spans(seg));
+    const unread = (segs: string[]) => segs.some(spans);
+    /** Whether two route paths can match the same request. */
+    const overlaps = (a: string, b: string) => {
+      const x = segments(a);
+      const y = segments(b);
+      if (unread(x) || unread(y)) return true;
+      return x.length === y.length && x.every((seg, i) => seg === y[i] || anyOne(seg) || anyOne(y[i]));
+    };
+    /**
+     * Whether an earlier route takes the cited route's own requests: it is at least as general, every segment the
+     * same or a segment matching any one segment (anyOne; correctness review round 5: a literal such as items/due declared before items/:id is routine
+     * Nest ordering and takes only requests whose param equals that literal).
+     */
+    const shadows = (earlier: string, cited: string) => {
+      const x = segments(earlier);
+      const y = segments(cited);
+      if (unread(x) || unread(y)) return true;
+      return x.length === y.length && x.every((seg, i) => seg === y[i] || anyOne(seg));
+    };
+    const ROUTE = /^((?:modules|core)\/[^#]+\.ts)#(?:([A-Za-z0-9_]+) )?GET (.*)$/;
+    const findRoute = (file: string, cls: string | undefined, route: string): ts.ClassElement | string => {
+      const sf = parse(file);
+      const hits: { owner: ts.ClassLikeDeclaration; member: ts.ClassElement }[] = [];
+      const visit = (node: ts.Node) => {
+        if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
+          for (const member of node.members) {
+            if (decoratorsOf(member).some((d) => {
+              const call = decoratorCall(d);
+              return call?.name === "Get" && call.arg === route;
+            })) hits.push({ owner: node, member });
+          }
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(sf);
+      const topLevel = (c: ts.ClassLikeDeclaration) => ts.isClassDeclaration(c) && c.parent === sf && !!c.name;
+      if (hits.some((h) => !topLevel(h.owner))) return "route also declared in a nested or expression class: cite by hand";
+      if (cls && !sf.statements.some((st) => ts.isClassDeclaration(st) && st.name?.text === cls)) return `no class ${cls}`;
+      const inScope = cls ? hits.filter((h) => h.owner.name?.text === cls) : hits;
+      if (inScope.length === 0) return "no such route";
+      if (inScope.length > 1) return `ambiguous route (${inScope.length} @Get) — name its controller class`;
+      const cited = inScope[0];
+      const ownerWhy = controllerWhy(cited.owner as ts.ClassDeclaration);
+      if (ownerWhy) return ownerWhy;
+      // Routing (closing review round 4): every route in the file is a literal; no other route can take this path
+      // first: an earlier @Get/@All in the same controller, or any route in another controller of the file.
+      const full = (owner: ts.ClassDeclaration, arg: string) => `${controllerPath(owner)}/${arg}`;
+      const citedPath = full(cited.owner as ts.ClassDeclaration, route);
+      for (const st of sf.statements) {
+        if (!ts.isClassDeclaration(st)) continue;
+        // Security review round 6: every controller in the file is read as the cited one is (so none inherits routes);
+        // a route on a class that is not a controller (a base another class could extend) fails; a route on a member
+        // whose name is not a plain identifier fails (Nest registers integer-like names first, whatever their place).
+        const isController = decoratorsOf(st).some((c) => decoratorCall(c)?.name === "Controller");
+        // Security review round 7: a second member of the same name replaces the first at runtime and takes its
+        // decorators and its place in Nest's route order, so a name may be declared once (overload signatures aside).
+        const names = new Set<string>();
+        for (const member of st.members) {
+          // A constructor parameter property (readonly getStatus: ...) is an instance member too: it is assigned at
+          // construction and replaces a method of that name as Nest's handler (closing security review).
+          if (ts.isConstructorDeclaration(member)) {
+            for (const p of member.parameters) {
+              if (!ts.isParameterPropertyDeclaration(p, member)) continue;
+              const key = nameText(p.name);
+              if (names.has(key)) return `member ${key} declared twice in ${st.name?.text}`;
+              names.add(key);
+            }
+            continue;
+          }
+          if (!member.name || (ts.isMethodDeclaration(member) && !member.body)) continue;
+          const key = `${ts.getCombinedModifierFlags(member as ts.Declaration) & ts.ModifierFlags.Static ? "static " : ""}${nameText(member.name)}`;
+          if (names.has(key)) return `member ${key} declared twice in ${st.name?.text}`;
+          names.add(key);
+        }
+        if (isController && controllerWhy(st)) return controllerWhy(st)!;
+        for (const member of st.members) {
+          for (const d of decoratorsOf(member)) {
+            const call = decoratorCall(d);
+            if (!call || !VERBS.has(call.name)) continue;
+            if (call.arg === null) return `non-literal route ${d.getText()} in ${st.name?.text}`;
+            if (!isController) return `route ${d.getText()} on ${st.name?.text}, which is not a controller`;
+            if (!member.name || !ts.isIdentifier(member.name)) return `route ${d.getText()} on a member not named by a plain identifier`;
+            if (member === cited.member || !(call.name === "Get" || call.name === "All")) continue;
+            if (st !== cited.owner) {
+              if (overlaps(full(st, call.arg), citedPath)) return `route ${d.getText()} in ${st.name?.text} overlaps the cited route`;
+            } else if (member.pos < cited.member.pos && shadows(full(st, call.arg), citedPath)) return `cited route shadowed by an earlier ${d.getText()}`;
+          }
+        }
+      }
+      return cited.member;
+    };
+    /**
+     * Where each name a cited file may use to decorate a cited class or GET handler comes from (closing review rounds
+     * 2 and 3). Each is a closed list: a decorator under another name, or a known name bound any other way (an alias,
+     * a destructured require, a default import, a local declaration, an import from another module), fails closed.
+     * Adding a name is a review decision about whether it can set the module scope.
+     */
+    const NEST = "@nestjs/common";
+    const SCOPE_GUARD = "core/auth/module-scope.guard";
+    const SOURCE: Record<string, string> = {
+      Get: NEST, UseGuards: NEST, Header: NEST, HttpCode: NEST, Controller: NEST, SetMetadata: NEST, applyDecorators: NEST,
+      RequireModuleScope: SCOPE_GUARD, ModuleScopeGuard: SCOPE_GUARD, ShadowEffectiveAuthority: SCOPE_GUARD, MODULE_SCOPE_KEY: SCOPE_GUARD,
+      RateLimit: "core/decorators/rate-limit.decorator",
+      PublicRateLimit: "core/guards/public-rate-limit.guard",
+      CrmRateLimit: "modules/crm/guards/rate-limit.guard",
+      RequireFeature: "modules/crm/guards/feature-flag.guard",
+      HiddenModuleWrites: "core/auth/hidden-module-writes.decorator",
+      forwardRef: NEST,
+      PickType: "@nestjs/mapped-types", OmitType: "@nestjs/mapped-types", PartialType: "@nestjs/mapped-types", IntersectionType: "@nestjs/mapped-types",
+    };
+    /** The decorators a cited GET handler may carry: every name found on a GET handler in the server today. */
+    const KNOWN_DECORATORS = new Set(["Get", "UseGuards", "RequireModuleScope", "RateLimit", "CrmRateLimit", "PublicRateLimit", "ShadowEffectiveAuthority", "Header", "HttpCode", "RequireFeature"]);
+    /**
+     * The decorators a cited controller class may carry. HiddenModuleWrites writes the module scope key onto
+     * handlers, but only write verbs (core/auth/hidden-module-writes.decorator.ts, held by the read census); a GET
+     * claim is unaffected while that holds.
+     */
+    const CLASS_DECORATORS = new Set(["Controller", "UseGuards", "HiddenModuleWrites"]);
+    /** What can set the module scope when called: allowed only as a decorator call, never called any other way. */
+    const SCOPE_CAPABLE = new Set(["RequireModuleScope", "SetMetadata", "applyDecorators"]);
+    /**
+     * Names that reach metadata, globals or prototypes (closing review round 4): banned anywhere in a cited file
+     * (prototype only as Object.prototype.<method>, which reads).
+     */
+    const BANNED = new Set(["MODULE_SCOPE_KEY", "Reflect", "defineMetadata", "globalThis", "global", "window", "self", "eval", "Function", "Proxy", "setPrototypeOf", "__proto__", "defineProperty", "defineProperties", "prototype"]);
+    /**
+     * The only calls code may make when a cited file loads or its controller is built (the cited files' own today):
+     * forwardRef and the DTO mapped types (pinned in SOURCE), Symbol, and reads of a plain object's own keys.
+     */
+    const LOAD_CALLS = new Set(["forwardRef", "Symbol", "PickType", "OmitType", "PartialType", "IntersectionType"]);
+    const LOAD_OBJECT_CALLS = new Set(["keys", "entries", "values", "freeze"]);
+    /** Globals a cited file may not declare for itself (the allowed load-time calls rely on them). */
+    const GLOBALS = new Set(["Object", "Symbol", "Set", "Map", "WeakMap", "WeakSet", "Error"]);
+    /** Globals code may construct at load or construction (beside imported classes such as Logger). */
+    const LOAD_NEW = new Set(["Set", "Map", "WeakMap", "WeakSet", "Error"]);
+    /**
+     * Libraries whose factories may be called at load: DTO validation (a DTO's own decorators are built from them)
+     * and Nest's upload interceptors with multer's storage. None can set handler metadata on its own.
+     */
+    const DTO_LIBS = new Set(["class-validator", "class-transformer", "@nestjs/platform-express", "multer"]);
+    /**
+     * Members a runtime calls on its own (coercion, JSON, await, Nest lifecycle hooks at bootstrap): a body under one
+     * of these names could run at load, so a cited file may declare none (closing review round 5).
+     */
+    const SELF_CALLED = new Set(["toString", "valueOf", "toJSON", "then", "onModuleInit", "onApplicationBootstrap", "onModuleDestroy", "beforeApplicationShutdown", "onApplicationShutdown"]);
+
+    /** A member's name as the runtime sees it ('toString' and toString alike). */
+    const nameText = (name: ts.Node) => (ts.isIdentifier(name) || ts.isStringLiteralLike(name) || ts.isNumericLiteral(name) || ts.isPrivateIdentifier(name) ? name.text : name.getText());
+    /**
+     * Why code that runs at load or construction is not plainly declarative: a call other than a decorator's, new of a
+     * plain name, or LOAD_CALLS; a computed member access; any write (an assignment, ++ or --, delete, or a for-in/of
+     * whose target is not a fresh declaration).
+     */
+    const loadTimeWhy = (node: ts.Node, imported: Map<string, string>, fail: (reason: string) => void) => {
+      if (ts.isCallExpression(node)) {
+        const callee = node.expression;
+        const objectRead = ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && callee.expression.text === "Object" && LOAD_OBJECT_CALLS.has(callee.name.text);
+        const dtoFactory = ts.isIdentifier(callee) && DTO_LIBS.has(imported.get(callee.text) ?? "");
+        const ok = ts.isDecorator(node.parent) || (ts.isIdentifier(callee) && LOAD_CALLS.has(callee.text)) || dtoFactory || objectRead || callee.kind === ts.SyntaxKind.SuperKeyword;
+        if (!ok) fail(`call at load or construction: ${node.getText().slice(0, 80)}`);
+      } else if (ts.isNewExpression(node) && !(ts.isIdentifier(node.expression) && (LOAD_NEW.has(node.expression.text) || imported.has(node.expression.text)))) fail(`new at load or construction: ${node.getText().slice(0, 80)}`);
+      else if (ts.isComputedPropertyName(node)) fail(`computed name at load or construction: ${node.getText().slice(0, 80)}`);
+      else if (ts.isTaggedTemplateExpression(node)) fail(`tagged template at load or construction: ${node.getText().slice(0, 80)}`);
+      else if (ts.isElementAccessExpression(node) && !(ts.isStringLiteralLike(node.argumentExpression) || ts.isNumericLiteral(node.argumentExpression))) fail(`computed access at load or construction: ${node.getText().slice(0, 80)}`);
+      else if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
+        // None at all (security review round 6: this.<handler> = ... in a constructor swaps the handler Nest serves).
+        fail(`assignment at load or construction: ${node.getText().slice(0, 80)}`);
+      } else if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) && (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken)) {
+        // Security review round 7: an imported table (LEVEL_RANK.none++) is as writable as by assignment.
+        fail(`increment or decrement at load or construction: ${node.getText().slice(0, 80)}`);
+      } else if (ts.isDeleteExpression(node)) fail(`delete at load or construction: ${node.getText().slice(0, 80)}`);
+      else if ((ts.isForInStatement(node) || ts.isForOfStatement(node)) && !ts.isVariableDeclarationList(node.initializer)) fail(`for-in/of writing an existing target at load or construction: ${node.getText().slice(0, 80)}`);
+    };
+    /** An import's module, as a path under the server src (a package name as written). */
+    const resolveImport = (file: string, spec: string) =>
+      spec.startsWith(".") ? path.posix.normalize(path.posix.join(path.posix.dirname(file), spec)) : spec;
+    /**
+     * Why a cited file cannot be read with certainty, or null:
+     * - a known name bound other than by a plain named import from its own module (SOURCE);
+     * - an import renaming something to or from a known name;
+     * - a namespace import, an import-equals, or a require call;
+     * - a scope-capable name used other than as a decorator's own callee or its import;
+     * - a BANNED name, or prototype, constructor or __proto__ reached (metadata, globals or prototype chains);
+     * - code that runs at load or construction that is not plainly declarative (loadTimeWhy).
+     * - a getter or setter, a self-called member (toString, then, Nest lifecycle hooks), a decorated class not at the
+     *   top level, a decorator neither imported by name nor a DTO factory, RequestMapping, or a route decorator name
+     *   used other than as a decorator.
+     * So no code this file defines runs at load or construction except what loadTimeWhy reads. The class owning the
+     * route and the file's routing are read by findRoute (controllerWhy, overlaps, shadows).
+     * Not read here, and held only by a server test reading the controllers' real metadata and routes (proposed
+     * follow-up): code in another file (an imported decorator's or class's definition, which may run at load), and
+     * a write made inside a body when it runs.
+     */
+    const unreadableFile = (file: string): string | null => {
+      const sf = parse(file);
+      let why: string | null = null;
+      const fail = (reason: string) => (why ??= reason);
+      /** Names the file binds by a plain named import, and the module each comes from. */
+      const imported = new Map<string, string>();
+      for (const st of sf.statements) {
+        const named = ts.isImportDeclaration(st) ? st.importClause?.namedBindings : undefined;
+        if (named && ts.isNamedImports(named)) for (const el of named.elements) imported.set(el.name.text, resolveImport(file, (st as ts.ImportDeclaration).moduleSpecifier.getText().slice(1, -1)));
+      }
+      /**
+       * Decorators the file declares for itself run when the class is defined, so each is read as load-time code. The
+       * only form accepted is the DTO pattern: const <Name> = (<params>) => <a DTO_LIBS factory>(...).
+       */
+      const localDecorators = new Map<string, ts.ArrowFunction>();
+      for (const st of sf.statements) {
+        if (!ts.isVariableStatement(st)) continue;
+        for (const decl of st.declarationList.declarations) {
+          const init = decl.initializer;
+          if (!ts.isIdentifier(decl.name) || !init || !ts.isArrowFunction(init) || !ts.isCallExpression(init.body)) continue;
+          const factory = init.body.expression;
+          if (ts.isIdentifier(factory) && DTO_LIBS.has(imported.get(factory.text) ?? "")) localDecorators.set(decl.name.text, init);
+        }
+      }
+      const loadFns = new Set<ts.Node>(localDecorators.values());
+      const visit = (node: ts.Node, load: boolean) => {
+        if (why) return;
+        if (load) loadTimeWhy(node, imported, fail);
+        if (ts.isDecorator(node)) {
+          const e = unparen(node.expression);
+          const callee = ts.isCallExpression(e) ? unparen(e.expression) : e;
+          if (!ts.isIdentifier(callee) || !(imported.has(callee.text) || localDecorators.has(callee.text))) fail(`decorator neither imported by name nor a DTO factory: ${node.getText().slice(0, 80)}`);
+        }
+        if (ts.isGetAccessor(node) || ts.isSetAccessor(node)) fail(`accessor ${node.name.getText()} (runs when read)`);
+        else if ((ts.isMethodDeclaration(node) || ts.isPropertyAssignment(node) || ts.isPropertyDeclaration(node) || ts.isShorthandPropertyAssignment(node)) && SELF_CALLED.has(nameText(node.name))) fail(`self-called member ${nameText(node.name)}`);
+        else if ((ts.isClassDeclaration(node) || ts.isClassExpression(node)) && node.parent !== sf && (decoratorsOf(node).length || node.members.some((m) => decoratorsOf(m).length))) fail(`decorated class not at top level: ${node.name?.text ?? "anonymous"}`);
+        else if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "forwardRef" && !(node.arguments.length === 1 && ts.isArrowFunction(node.arguments[0]) && ts.isIdentifier(node.arguments[0].body))) fail(`forwardRef other than () => <Class>: ${node.getText().slice(0, 80)}`);
+        if (ts.isPropertyAccessExpression(node) && node.name.text === "prototype" && !(ts.isIdentifier(node.expression) && node.expression.text === "Object")) fail(`prototype reached: ${node.getText().slice(0, 80)}`);
+        else if (ts.isPropertyAccessExpression(node) && node.name.text === "constructor") fail(`constructor reached: ${node.getText().slice(0, 80)}`);
+        else if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression) && ["prototype", "constructor", "__proto__"].includes(node.argumentExpression.text)) fail(`${node.argumentExpression.text} reached: ${node.getText().slice(0, 80)}`);
+        if (ts.isImportSpecifier(node)) {
+          const importedName = (node.propertyName ?? node.name).text;
+          const local = node.name.text;
+          const from = resolveImport(file, (node.parent.parent.parent.moduleSpecifier as ts.StringLiteral).text);
+          if (node.propertyName && (importedName in SOURCE || local in SOURCE)) fail(`renamed import ${node.getText()}`);
+          else if (local in SOURCE && from !== SOURCE[local]) fail(`${local} imported from ${from}, not ${SOURCE[local]}`);
+        } else if (ts.isNamespaceImport(node) || ts.isImportEqualsDeclaration(node)) fail(`namespace or import-equals ${node.getText()}`);
+        else if (ts.isImportClause(node) && node.name && node.name.text in SOURCE) fail(`default import ${node.name.text}`);
+        else if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "require") fail(`require ${node.getText()}`);
+        else if (ts.isIdentifier(node)) {
+          const parent = node.parent;
+          const declares = (ts.isVariableDeclaration(parent) || ts.isFunctionDeclaration(parent) || ts.isClassDeclaration(parent) || ts.isBindingElement(parent) || ts.isParameter(parent)) && parent.name === node;
+          if (declares && (node.text in SOURCE || GLOBALS.has(node.text))) fail(`local ${node.text}`);
+          else if (BANNED.has(node.text) && !(node.text === "prototype" && ts.isPropertyAccessExpression(parent))) fail(`scope metadata written outside a decorator (${node.text})`);
+          else if (node.text === "RequestMapping") fail("RequestMapping (routes are read by verb decorator only)");
+          else if ((SCOPE_CAPABLE.has(node.text) || VERBS.has(node.text)) && !ts.isImportSpecifier(parent)) {
+            const asCallee = ts.isCallExpression(parent) && parent.expression === node && ts.isDecorator(parent.parent);
+            if (!asCallee) fail(`${node.text} used other than as a decorator: ${parent.getText().slice(0, 80)}`);
+          }
+        } else if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && node.text === "module_scope") fail("scope metadata key named outside a decorator");
+        // Code that runs when the module loads or the controller is built (top level, class bodies and their
+        // initializers, constructors); a method, function or arrow body runs only when called.
+        // A function's decorators, name and parameter decorators are evaluated where it is defined; its body and
+        // parameter defaults only when it is called (correctness review round 5). A DTO factory is load-time throughout.
+        if (ts.isFunctionLike(node) && !ts.isConstructorDeclaration(node) && !loadFns.has(node)) {
+          ts.forEachChild(node, (child) => {
+            if (ts.isParameter(child)) {
+              decoratorsOf(child).forEach((d) => visit(d, load));
+              ts.forEachChild(child, (part) => (ts.isDecorator(part) ? undefined : visit(part, false)));
+            } else visit(child, load && (ts.isDecorator(child) || ts.isComputedPropertyName(child) || child === (node as ts.SignatureDeclaration).name));
+          });
+          return;
+        }
+        ts.forEachChild(node, (child) => visit(child, load));
+      };
+      visit(sf, true);
+      return why;
+    };
+    /**
+     * Why a handler's decorators cannot be read with certainty, or null. Anything this check cannot read fails
+     * closed (closing reviews): a decorator that is not a call of a plain name, a qualified decorator, a name outside
+     * KNOWN_DECORATORS (an aliased or composed scope, a raw SetMetadata), a scope whose module is not a literal, or a
+     * file that can set the scope some other way (unreadableFile).
+     */
+    const unreadable = (member: ts.ClassElement): string | null => {
+      for (const d of decoratorsOf(member)) {
+        const call = decoratorCall(d);
+        const text = d.getText();
+        if (!call) return `unreadable decorator ${text}`;
+        if (call.qualified) return `qualified decorator ${text}`;
+        if (!KNOWN_DECORATORS.has(call.name)) return `unlisted decorator ${text}`;
+        if (call.name === "RequireModuleScope" && call.arg === null) return `non-literal scope ${text}`;
+      }
+      return unreadableFile(member.getSourceFile().fileName);
+    };
+    /** The modules a handler's own @RequireModuleScope decorators name (each a literal, by unreadable()). */
+    const scopesOf = (member: ts.ClassElement) =>
+      decoratorsOf(member)
+        .map(decoratorCall)
+        .filter((c): c is { name: string; qualified: boolean; arg: string } => c?.name === "RequireModuleScope" && c.arg !== null)
+        .map((c) => c.arg);
+    /**
+     * The ModuleScopeGuard subclasses accepted as the scope guard, each pinned to its file and reviewed: its body is
+     * not read (a documented limit), so adding one, or changing one's canActivate, is a review decision.
+     * WhatsAppOperationsScopeGuard lets the business's configuration owners through on purpose.
+     */
+    const SCOPE_GUARD_SUBCLASSES: Record<string, string[]> = {
+      "modules/whatsapp/whatsapp.controller.ts": ["WhatsAppOperationsScopeGuard"],
+    };
+    /**
+     * Whether the scope guard runs on a handler (security review round 7): ModuleScopeGuard is no app-wide guard, so
+     * it must be named in @UseGuards on the handler or its controller, itself or a pinned subclass declared in the
+     * file that extends it directly.
+     */
+    const scopeEnforced = (member: ts.ClassElement) => {
+      const sf = member.getSourceFile();
+      const pinned = SCOPE_GUARD_SUBCLASSES[sf.fileName] ?? [];
+      const subclasses = new Set(
+        sf.statements
+          .filter((st): st is ts.ClassDeclaration => ts.isClassDeclaration(st) && !!st.name && pinned.includes(st.name.text) && !!st.heritageClauses?.some((h) => h.token === ts.SyntaxKind.ExtendsKeyword && h.types.some((t) => t.expression.getText() === "ModuleScopeGuard")))
+          .map((st) => st.name!.text),
+      );
+      const guards = [member, member.parent].flatMap((node) =>
+        decoratorsOf(node).flatMap((d) => {
+          const e = unparen(d.expression);
+          return ts.isCallExpression(e) && ts.isIdentifier(unparen(e.expression)) && (unparen(e.expression) as ts.Identifier).text === "UseGuards" ? e.arguments.filter(ts.isIdentifier).map((a) => a.text) : [];
+        }),
+      );
+      return guards.some((g) => g === "ModuleScopeGuard" || subclasses.has(g));
+    };
+    /** Whether a handler carries any @RequireModuleScope at all. */
+    const anyScope = (member: ts.ClassElement) => decoratorsOf(member).some((d) => decoratorCall(d)?.name === "RequireModuleScope");
+    /**
+     * An identifier the claim names must be in the file's code: an identifier of that name, or (for a title such as
+     * the timeline's "Analysis:") whole-word text in a string or template literal. Comments never count.
+     */
+    const hasIdentifier = (file: string, id: string) => {
+      const word = new RegExp(`(^|[^A-Za-z0-9_$])${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^A-Za-z0-9_$]|$)`);
+      let found = false;
+      const visit = (node: ts.Node) => {
+        if (found) return;
+        if (ts.isIdentifier(node) || ts.isPrivateIdentifier(node)) found = node.text === id;
+        else if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) found = word.test(node.text);
+        if (!found) ts.forEachChild(node, visit);
+      };
+      visit(parse(file));
+      return found;
     };
     const bad: string[] = [];
     for (const [href, row] of Object.entries(MODULE_TABLE)) {
@@ -394,38 +782,45 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
       const justified = new Set<string>();
       for (const cite of row.cite) {
         let m: RegExpExecArray | null;
-        if ((m = /^((?:modules|core)\/[^:]+\.ts):(\d+)$/.exec(cite))) {
-          const { lines, i } = at(m[1], Number(m[2]));
-          if (!/@Get\(/.test(lines[i] ?? "")) bad.push(`${href}: ${cite} is not a @Get`);
-          const scoped = [...decorators(lines, i).matchAll(/RequireModuleScope\(\s*'([a-z]+)'/g)].map((x) => x[1]);
+        if ((m = ROUTE.exec(cite))) {
+          const found = findRoute(m[1], m[2], m[3]);
+          if (typeof found === "string") {
+            bad.push(`${href}: ${cite}: ${found}`);
+            continue;
+          }
+          const why = unreadable(found);
+          if (why) {
+            bad.push(`${href}: ${cite}: ${why}`);
+            continue;
+          }
+          const scoped = scopesOf(found);
           if (scoped.length === 0 || !scoped.every((mod) => row.modules.includes(mod))) bad.push(`${href}: ${cite} scopes ${JSON.stringify(scoped)}`);
+          else if (!scopeEnforced(found)) bad.push(`${href}: ${cite}: no ModuleScopeGuard in @UseGuards on the handler or its controller, so its scope is not enforced`);
           scoped.forEach((mod) => justified.add(mod));
-        } else if ((m = /^unscoped:((?:modules|core)\/[^:]+\.ts):(\d+)$/.exec(cite))) {
-          const { lines, i } = at(m[1], Number(m[2]));
-          if (!/@Get\(/.test(lines[i] ?? "")) bad.push(`${href}: ${cite} is not a @Get`);
-          if (/RequireModuleScope\(/.test(decorators(lines, i))) bad.push(`${href}: ${cite} is scoped`);
+        } else if (cite.startsWith("unscoped:") && (m = ROUTE.exec(cite.slice("unscoped:".length)))) {
+          const found = findRoute(m[1], m[2], m[3]);
+          if (typeof found === "string") bad.push(`${href}: ${cite}: ${found}`);
+          else if (unreadable(found)) bad.push(`${href}: ${cite}: ${unreadable(found)}`);
+          else if (anyScope(found)) bad.push(`${href}: ${cite} is scoped`);
         } else if ((m = /^hub:([a-z]+)$/.exec(cite))) {
           const hub = hubNav.find((h) => h.id === m![1]);
           if (!hub || !hub.items.some((item) => item.href === href)) bad.push(`${href}: not in hub ${m[1]}`);
           else if (hub.module) justified.add(hub.module);
-        } else if ((m = /^data:((?:modules|core)\/[^:]+\.ts):(\d+):([a-z]+) /.exec(cite))) {
-          const { lines, i } = at(m[1], Number(m[2]));
-          // The identifier the citation names first must be on that line, so a moved line fails rather than passes.
-          const named = cite.slice(m[0].length).split(/[\s,]/)[0];
-          if (!named || !(lines[i] ?? "").includes(named)) bad.push(`${href}: ${cite}: "${named}" is not on that line`);
-          if (!row.modules.includes(m[3])) bad.push(`${href}: ${cite} names ${m[3]}, which the row lacks`);
-          justified.add(m[3]);
-        } else if ((m = /^tracked:((?:modules|core)\/[^:]+\.ts):(\d+):([a-z]+) (\S+) (FU-[A-Z0-9-]+) (.+)$/.exec(cite))) {
-          // Recorded, not justifying: the identifier is on the line, and the follow-up packet and decision are named.
-          const { lines, i } = at(m[1], Number(m[2]));
-          if (!(lines[i] ?? "").includes(m[4])) bad.push(`${href}: ${cite}: "${m[4]}" is not on that line`);
-          if (!/^pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100/.test(m[6])) bad.push(`${href}: ${cite}: no decision named`);
+        } else if ((m = /^data:((?:modules|core)\/[^:]+\.ts):([a-z]+) ([A-Za-z_$][\w$]*)[\s,]/.exec(cite))) {
+          // The identifier must still be in the file, so a removed field fails rather than passes.
+          if (!hasIdentifier(m[1], m[3])) bad.push(`${href}: ${cite}: "${m[3]}" is not in ${m[1]}`);
+          if (!row.modules.includes(m[2])) bad.push(`${href}: ${cite} names ${m[2]}, which the row lacks`);
+          justified.add(m[2]);
+        } else if ((m = /^tracked:((?:modules|core)\/[^:]+\.ts):([a-z]+) ([A-Za-z_$][\w$]*:?) (FU-[A-Z0-9-]+) (.+)$/.exec(cite))) {
+          // Recorded, not justifying: the identifier is still in the file, and the follow-up packet and decision are named.
+          if (!hasIdentifier(m[1], m[3])) bad.push(`${href}: ${cite}: "${m[3]}" is not in ${m[1]}`);
+          if (!/^pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100/.test(m[5])) bad.push(`${href}: ${cite}: no decision named`);
         } else if (cite.startsWith("tracked:")) {
           // A tracked claim that does not parse is never accepted by another branch (closing review).
           bad.push(`${href}: malformed tracked citation ${cite}`);
-        } else if ((m = /^service-check:((?:modules|core)\/[^:]+\.ts):(\d+)$/.exec(cite))) {
-          const { lines, i } = at(m[1], Number(m[2]));
-          if (!/@Get\(/.test(lines[i] ?? "")) bad.push(`${href}: ${cite} is not a @Get`);
+        } else if (cite.startsWith("service-check:") && (m = ROUTE.exec(cite.slice("service-check:".length)))) {
+          const found = findRoute(m[1], m[2], m[3]);
+          if (typeof found === "string") bad.push(`${href}: ${cite}: ${found}`);
         } else if ((m = /^D-\d+:([a-z]+)\b/.exec(cite))) {
           // A ruling justifies only the module it names (security review round 2).
           if (!row.modules.includes(m[1])) bad.push(`${href}: ${cite} names ${m[1]}, which the row lacks`);
