@@ -42,10 +42,25 @@ const PATTERN_TEXT_MAX = 300;
 const PATTERN_LABEL_MAX = 120;
 const PATTERN_ENTITIES_MAX = 8;
 
-/** A field's text, control characters (which JSON escapes six-fold) blanked, clipped to `max`. */
+/**
+ * Correctness review round 8 (COR-R7-1): `text` cut to at most `n` characters, never inside a word (a run of letters
+ * and digits): a cut inside one could leave a money or expense word ('feedback' to 'fee', 'rentals' to 'rent') and
+ * withhold the stored row from readers who may read the whole pattern. The cut word is dropped whole.
+ */
+export function cutAtWordBoundary(text: string, n: number): string {
+  if (text.length <= n) return text;
+  const word = /[\p{L}\p{N}]/u;
+  let at = Math.max(0, n);
+  if (at > 0 && word.test(text[at] ?? '') && word.test(text[at - 1])) {
+    while (at > 0 && word.test(text[at - 1])) at--;
+  }
+  return text.slice(0, at);
+}
+
+/** A field's text, control characters (which JSON escapes six-fold) blanked, clipped to `max` on a word boundary. */
 function clip(value: unknown, max: number): string {
   const text = (typeof value === 'string' ? value : String(value ?? '')).replace(/[\u0000-\u001f\u007f]/g, ' ');
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+  return text.length > max ? `${cutAtWordBoundary(text, max - 1)}…` : text;
 }
 
 const SEVERITIES: ReadonlySet<string> = new Set(['critical', 'warning', 'info']);
@@ -111,7 +126,7 @@ export function boundedPattern(pattern: DetectedPattern): DetectedPattern {
     for (const field of texts) {
       const text = bounded[field];
       if (typeof text === 'string' && text.length > 0) {
-        (bounded as unknown as Record<string, string>)[field] = text.slice(0, Math.floor(text.length / 2));
+        (bounded as unknown as Record<string, string>)[field] = cutAtWordBoundary(text, Math.floor(text.length / 2));
         shortened = true;
       }
     }
