@@ -480,7 +480,7 @@ const BOTTOM_BAR_FALLBACK: BusinessHub[] = ["customers", "schedule", "sales", "m
  * its slot to the next one they can; never a hub they cannot open, so the bar may hold one hub, or none.
  */
 export function bottomBarFor(sells: BusinessSells | null, levels: ModuleLevels): HubNavItem[] {
-  // Not known yet: no slot, rather than the wrong two.
+  // Not known (not ready: no business yet, loading, or failed): no slot, rather than the wrong two.
   if (sells === null) return [];
   const open = hubsFor(sells, levels);
   const byId = (id: BusinessHub) => open.find((h) => h.id === id);
