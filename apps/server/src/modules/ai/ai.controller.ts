@@ -1116,6 +1116,8 @@ export class AiController {
       throw new BadRequestException(`At most ${MAX_BULK_MEMORY_ENTRIES} entries a request`);
     }
     for (const e of body.entries) {
+      // Reviews round 5 (R5-1): an entry that is not an object is a 400, not a TypeError's 500.
+      if (!e || typeof e !== 'object' || Array.isArray(e)) throw new BadRequestException('each entry must be an object');
       assertMemoryCategoryAllowed(e.category);
       assertMemoryEntryBounded(e);
     }

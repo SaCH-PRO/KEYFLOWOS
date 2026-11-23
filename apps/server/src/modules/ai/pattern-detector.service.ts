@@ -25,6 +25,42 @@ export interface PatternScanResult {
   entitiesScanned: number;
 }
 
+/**
+ * FU-PATTERNS-ROUTES-SIGHT (security review round 5, F-1): the most characters one stored pattern (its JSON, the
+ * AiMemory row's value) holds, as the memory PUTs bound what a member writes. A support cluster copies member-written
+ * ticket titles into its title and labels, and a model pattern's text is the model's: unbounded, one scan stored rows
+ * of ~400 KB, which every partial reader's GET .../agent/patterns reads and classifies for 30 days.
+ */
+export const MAX_STORED_PATTERN_LENGTH = 2_000;
+const PATTERN_TEXT_MAX = 300;
+const PATTERN_LABEL_MAX = 120;
+const PATTERN_ENTITIES_MAX = 8;
+
+function clip(value: unknown, max: number): string {
+  const text = typeof value === 'string' ? value : String(value ?? '');
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+/** A pattern whose JSON is at most MAX_STORED_PATTERN_LENGTH: its text clipped, its affected entities capped. */
+export function boundedPattern(pattern: DetectedPattern): DetectedPattern {
+  const bounded: DetectedPattern = {
+    ...pattern,
+    id: clip(pattern.id, 80),
+    category: clip(pattern.category, 80),
+    title: clip(pattern.title, PATTERN_TEXT_MAX),
+    description: clip(pattern.description, PATTERN_TEXT_MAX),
+    suggestedAction: clip(pattern.suggestedAction, PATTERN_TEXT_MAX),
+    ...(pattern.suggestedTool !== undefined ? { suggestedTool: clip(pattern.suggestedTool, 80) } : {}),
+    affectedEntities: (pattern.affectedEntities ?? []).slice(0, PATTERN_ENTITIES_MAX).map((e) => ({
+      type: clip(e.type, 40),
+      id: clip(e.id, 60),
+      label: clip(e.label, PATTERN_LABEL_MAX),
+    })),
+  };
+  // The parts above are bounded to well under the limit; a pattern still over it (unforeseen fields) keeps no entities.
+  return JSON.stringify(bounded).length <= MAX_STORED_PATTERN_LENGTH ? bounded : { ...bounded, affectedEntities: [] };
+}
+
 @Injectable()
 export class PatternDetectorService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PatternDetectorService.name);
@@ -95,7 +131,8 @@ export class PatternDetectorService implements OnModuleInit, OnModuleDestroy {
     // Run AI-powered pattern detection for complex clusters
     const aiPatterns = await this.detectAiPatterns(businessId, tickets, bookings, contacts);
 
-    const allPatterns = [...localPatterns, ...aiPatterns];
+    // FU-PATTERNS-ROUTES-SIGHT (security review round 5, F-1): every pattern is stored and answered bounded.
+    const allPatterns = [...localPatterns, ...aiPatterns].map(boundedPattern);
 
     // Store patterns and emit events
     for (const pattern of allPatterns) {
