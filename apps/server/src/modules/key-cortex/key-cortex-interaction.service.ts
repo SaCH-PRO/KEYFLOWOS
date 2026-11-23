@@ -10,7 +10,8 @@ import { InteractionFeedback } from './key-cortex-reasoning.types';
 /**
  * KeyCortexInteractionService
  *
- * Handles decision explanations and learning from user interactions.
+ * Handles learning from user interactions (FU-KEY-GENOME-READS-RESIDUAL deleted its uncalled, unprojected
+ * explainDecision).
  */
 @Injectable()
 export class KeyCortexInteractionService {

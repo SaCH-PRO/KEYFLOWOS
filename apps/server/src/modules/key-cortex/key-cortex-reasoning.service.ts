@@ -81,9 +81,6 @@ import { InteractionFeedback } from './key-cortex-reasoning.types';
 export class KeyCortexReasoningService {
   private readonly logger = new Logger(KeyCortexReasoningService.name);
 
-  /** Genome-enriched context cache TTL in seconds (default: 60 seconds). */
-  private readonly GENOME_CONTEXT_TTL: number;
-
   /** Feature flag: enable integration layer v2 if all required services are available. */
   private readonly integrationV2Enabled: boolean;
 
@@ -166,11 +163,6 @@ export class KeyCortexReasoningService {
     @Inject(KeyCortexLearningService)
     private readonly learningService?: KeyCortexLearningService,
   ) {
-    this.GENOME_CONTEXT_TTL = parseInt(
-      process.env.KEY_CORTEX_GENOME_CONTEXT_TTL_SECONDS ?? '60',
-      10,
-    );
-
     this.integrationV2Enabled = !!(
       this.connectorService &&
       this.commandService &&
@@ -678,7 +670,7 @@ export class KeyCortexReasoningService {
 
 
   // ==========================================================================
-  // 6. v2 PUBLIC API — Direct Command Execution (preserved)
+  // 5. v2 PUBLIC API — Direct Command Execution (preserved)
   // ==========================================================================
 
   /**
@@ -771,7 +763,7 @@ export class KeyCortexReasoningService {
   }
 
   // ==========================================================================
-  // 7. v2 PUBLIC API — Module Query (preserved)
+  // 6. v2 PUBLIC API — Module Query (preserved)
   // ==========================================================================
 
   /**
@@ -826,7 +818,7 @@ export class KeyCortexReasoningService {
   }
 
   // ==========================================================================
-  // 8. v2 PUBLIC API — Get Capabilities (preserved)
+  // 7. v2 PUBLIC API — Get Capabilities (preserved)
   // ==========================================================================
 
   /**
@@ -855,7 +847,7 @@ export class KeyCortexReasoningService {
   }
 
   // ==========================================================================
-  // 9. Gateway-compatible streaming alias (preserved)
+  // 8. Gateway-compatible streaming alias (preserved)
   // ==========================================================================
 
   /**
@@ -1042,39 +1034,7 @@ export class KeyCortexReasoningService {
     ];
   }
 
-  private generateId(): string {
-    return `crtx_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
-  }
-
   private generateCorrelationId(): string {
     return `corr_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-  }
-
-  private impactNumberToLevel(impact: number): 'high' | 'medium' | 'low' {
-    if (impact >= 0.7) return 'high';
-    if (impact >= 0.4) return 'medium';
-    return 'low';
-  }
-
-  private getDefaultSuggestions(
-    context: CortexContextSnapshot,
-  ): string[] {
-    const suggestions: string[] = [
-      'Can you break that down by category?',
-      'Create a task from this analysis',
-      'What are the risks I should watch for?',
-    ];
-
-    if (context.pendingInvoices > 0) {
-      suggestions.push(
-        `Follow up on ${context.pendingInvoices} pending invoices`,
-      );
-    }
-
-    if (context.activeProjects.length > 0) {
-      suggestions.push('Show me project status updates');
-    }
-
-    return suggestions.slice(0, 3);
   }
 }
