@@ -210,8 +210,11 @@ export class AgentController {
           where: {
             businessId,
             category: 'patterns',
-            updatedAt: { gte: since },
-            ...(after ? { OR: [{ updatedAt: { lt: after.updatedAt } }, { updatedAt: after.updatedAt, id: { lt: after.id } }] } : {}),
+            // After the first page, (updatedAt, id) < the last row read, written so Postgres reads it as an index range:
+            // updatedAt <= last bounds the range, and the OR drops the rows of that last instant already read (an OR
+            // alone was a filter: a deep page re-read every newer row).
+            updatedAt: after ? { gte: since, lte: after.updatedAt } : { gte: since },
+            ...(after ? { OR: [{ updatedAt: { lt: after.updatedAt } }, { id: { lt: after.id } }] } : {}),
           },
           orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
           take: PATTERNS_PAGE,
