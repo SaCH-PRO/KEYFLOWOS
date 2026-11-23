@@ -36,8 +36,9 @@
  *   - a `node --test` line inside a YAML or shell comment, or text that only
  *     mentions one (`echo "node --test ..."`, a here-doc body whose line does
  *     not start with `node`): the command word of the simple command must be
- *     `node`. Residual limit of a line-based reader: a here-doc line that does
- *     start with `node --test`, or a run behind `if false; then`, is credited;
+ *     `node`. Residual limit of a line-based reader: a `node --test` line on a
+ *     line of its own inside a here-doc or inside `if false; then ... fi`, or
+ *     after `true ||`, is credited;
  *   - a Node flag with its value in a separate token before `--test`
  *     (`node --import ./setup.mjs --test f`): names nothing, so CI fails
  *     loudly; write `--import=./setup.mjs`;
@@ -130,21 +131,25 @@ export function runCommands(source) {
 const unquote = (t) => t.replace(/^(['"])(.*)\1$/, '$2');
 const normalise = (t) => unquote(t).replace(/^\.\//, '').replace(/\\/g, '/');
 
-/** Leading tokens read past before the command word: `pnpm exec node`, `timeout <n> node`, `time node`. */
+/**
+ * Leading tokens read past before the command word, in any order and nesting:
+ * `pnpm exec node`, `timeout <n> node`, `time node`. Not `nice`: its `-n 10`
+ * form would leave `-n` as the command word, so a nice'd run fails closed.
+ */
 const WRAPPERS = [
   [/^pnpm$/, /^exec$/],
   [/^timeout$/, /^\S+$/],
   [/^time$/],
-  [/^nice$/],
 ];
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 /**
  * The patterns each `node --test` invocation in `shell` names: tokens after
- * `--test` that are not flags, up to the end of the simple command or an
- * inline `#` comment. Line continuations are joined first. `node` must be the
- * command word of its simple command (after env assignments and the wrappers
- * above), so `echo "node --test x"` and a here-doc line are not runs. Node
+ * `--test` that are not flags, up to the end of the simple command. Line
+ * continuations are joined and inline `#` comments dropped first (a comment
+ * may hold a separator). `node` must be the command word of its simple
+ * command (after env assignments and the wrappers above, nested in any
+ * order), so `echo "node --test x"` and a here-doc line are not runs. Node
  * flags before `--test` are read past only in `--flag=value` form: a value
  * in its own token (`--import ./setup.mjs`) makes the line name nothing,
  * which fails closed. Every pattern token is returned, bare directories
@@ -152,14 +157,23 @@ const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
  */
 export function nodeTestPatterns(shell) {
   const joined = shell.replace(/\\\r?\n\s*/g, ' ');
+  // A comment runs from a whitespace-preceded `#` to the end of its physical line, separators included.
+  const uncommented = joined
+    .split(/\r?\n/)
+    .map((line) => line.replace(/(^|\s)#.*$/, '$1'))
+    .join('\n');
   const patterns = [];
-  for (const segment of joined.split(/\r?\n|;|&&|\|\||\|/)) {
+  for (const segment of uncommented.split(/\r?\n|;|&&|\|\||\|/)) {
     let tokens = segment.trim().split(/\s+/).filter(Boolean);
-    const comment = tokens.findIndex((t) => t.startsWith('#'));
-    if (comment >= 0) tokens = tokens.slice(0, comment);
-    while (tokens.length && ENV_ASSIGNMENT.test(tokens[0])) tokens.shift();
-    for (const wrapper of WRAPPERS) {
-      if (wrapper.every((re, k) => re.test(tokens[k] ?? ''))) tokens = tokens.slice(wrapper.length);
+    for (let stripped = true; stripped; ) {
+      stripped = false;
+      while (tokens.length && ENV_ASSIGNMENT.test(tokens[0])) tokens.shift();
+      for (const wrapper of WRAPPERS) {
+        if (wrapper.every((re, k) => re.test(tokens[k] ?? ''))) {
+          tokens = tokens.slice(wrapper.length);
+          stripped = true;
+        }
+      }
     }
     if (tokens[0] !== 'node') continue;
     const test = tokens.indexOf('--test');
