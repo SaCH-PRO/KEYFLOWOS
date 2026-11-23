@@ -96,7 +96,8 @@ const logger = new Logger('ModelPricing');
  * `priced: false`, and the gap is logged once per model.
  */
 export function priceFor(model: string): { input: number; output: number; priced: boolean } {
-  const known = TOKEN_COST_PER_1K[model];
+  // Own keys only: a model named like an Object.prototype member is not a price.
+  const known = Object.hasOwn(TOKEN_COST_PER_1K, model) ? TOKEN_COST_PER_1K[model] : undefined;
   if (known) return { ...known, priced: true };
   if (!unpricedModelsWarned.has(model)) {
     unpricedModelsWarned.add(model);
@@ -110,7 +111,7 @@ export function priceFor(model: string): { input: number; output: number; priced
 
 /** The costStatus a row for `model` carries. */
 export function costStatusFor(model: string): CostStatus {
-  return model in TOKEN_COST_PER_1K ? 'priced' : 'unpriced_estimate';
+  return Object.hasOwn(TOKEN_COST_PER_1K, model) ? 'priced' : 'unpriced_estimate';
 }
 
 @Injectable()
