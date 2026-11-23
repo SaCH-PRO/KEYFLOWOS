@@ -179,7 +179,9 @@ describe('RR-MCP-TENANT-BOUND (D-261, D-262): the MCP bridge serves a business o
     const mcp = new McpClientManagerService();
 
     const out = await callAs(mcp, BIZ_A, 'mcp__s__x', { q: 'v91a' });
-    expect(out).toEqual({ content: [{ type: 'text', text: 'fake result for x' }] });
+    // The output carries the fake's answer. Its shape is not pinned: a later packet may wrap tool output
+    // (RR-UNTRUSTED-CONTENT-FENCE fences it as untrusted content) without changing what reached the server.
+    expect(JSON.stringify(out)).toContain('fake result for x');
     expect(fake.connects).toBe(1);
     expect(fake.transports.map((t) => t.url)).toEqual([SERVER.url]);
     expect(fake.calls).toEqual([{ name: 'x', arguments: { q: 'v91a' } }]);
@@ -447,6 +449,8 @@ describe('RR-MCP-TENANT-BOUND (D-261, D-262): the MCP bridge serves a business o
     setServers([{ ...SERVER, url: 'https://red:v91aPass@mcp.v91a.invalid/mcp?token=v91a%2Bb%20c/d%3D', businessIds: [BIZ_A] }]);
     await rejection(callAs(new McpClientManagerService(), BIZ_A, 'mcp__s__x'));
     const line = String(warnLog.mock.calls.at(-1)?.[0]);
+    // The connect really failed and was logged, so the redaction below is checked against a real line.
+    expect(line).toMatch(/connect failed/);
     for (const secret of ['v91a%2Bb%20c/d%3D', 'v91aPass', ' red ']) expect(line, `leaks ${secret}`).not.toContain(secret);
     expect(line).not.toContain('[[');
     expect(line).not.toMatch(/\]acted/);
@@ -483,6 +487,7 @@ describe('RR-MCP-TENANT-BOUND (D-261, D-262): the MCP bridge serves a business o
     setServers([{ ...SERVER, url, businessIds: [BIZ_A] }]);
     await rejection(callAs(new McpClientManagerService(), BIZ_A, 'mcp__s__x'));
     const line = String(warnLog.mock.calls.at(-1)?.[0]).toLowerCase();
+    expect(line).toMatch(/connect failed/);
     expect(line).not.toContain('v91alongsecret');
     expect(line).not.toContain('v91auser');
   });
