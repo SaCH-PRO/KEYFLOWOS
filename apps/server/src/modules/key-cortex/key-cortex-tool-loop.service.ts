@@ -19,14 +19,16 @@ import { AutonomyLevelService } from '../key-autonomy/autonomy-level.service';
 /**
  * RR-TOOL-ARGS-MALFORMED-NEVER-RUN: the one parse step for a tool call's
  * arguments (the same rule as flow-orchestrator.service.ts parseToolArguments,
- * kept local so this module does not import the Flow orchestrator). An empty
- * string means no arguments ({}); anything that is not a JSON object is refused.
+ * kept local so this module does not import the Flow orchestrator). A missing
+ * or empty string means no arguments ({}); anything else that is not a JSON
+ * object, whitespace alone included, is refused.
  */
 function parseToolArguments(raw: string | null | undefined): { ok: true; args: Record<string, unknown> } | { ok: false } {
-  const text = (raw ?? '').trim();
-  if (text === '') return { ok: true, args: {} };
+  if (raw === undefined || raw === null || raw === '') return { ok: true, args: {} };
+  if (typeof raw !== 'string') return { ok: false };
   try {
-    const parsed: unknown = JSON.parse(text);
+    // JSON.parse tolerates whitespace around a value; whitespace alone is not a value and is refused.
+    const parsed: unknown = JSON.parse(raw);
     if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
       return { ok: true, args: parsed as Record<string, unknown> };
     }
