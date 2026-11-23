@@ -11,6 +11,8 @@ import {
   dimensionToCsv,
 } from '../../reports/report-formatters';
 import { PrismaService } from '../../../core/prisma/prisma.service';
+import { Prisma } from '@prisma/client';
+import { FORGOTTEN_EVENT_METADATA_KEYS, withoutForgottenPersonalData } from '../../business-events/business-event.service';
 
 @Injectable()
 export class AnalyticsAdapterService {
@@ -163,6 +165,20 @@ export class AnalyticsAdapterService {
     properties?: Record<string, unknown>;
     actorId: string;
   }) {
+    // V1-72 review (SEC-3): KEY-supplied properties about a forgotten contact
+    // are not written (the same write-time check as BusinessEventService.emit).
+    // The keys a scrubbed row keeps (route, httpMethod, routeContactId) are
+    // the interceptor's; KEY-supplied ones are dropped, so they can neither
+    // name a contact nor carry free text past the scrub.
+    const properties: Record<string, unknown> = { ...(input.properties ?? {}) };
+    for (const key of FORGOTTEN_EVENT_METADATA_KEYS) delete properties[key];
+    const row = await withoutForgottenPersonalData(this.prisma.client, {
+      businessId: input.businessId,
+      eventType: input.eventName,
+      subjectType: 'contact',
+      subjectId: input.contactId ?? 'unknown',
+      metadata: properties,
+    });
     const event = await this.prisma.client.businessEvent.create({
       data: {
         businessId: input.businessId,
@@ -173,7 +189,7 @@ export class AnalyticsAdapterService {
         actorId: input.actorId,
         action: 'track',
         source: 'key_cortex',
-        metadata: input.properties ?? {},
+        metadata: (row.metadata ?? {}) as Prisma.InputJsonValue,
       },
     });
     return { tracked: true, eventId: event.id, eventName: input.eventName };
