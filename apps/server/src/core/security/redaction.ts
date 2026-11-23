@@ -232,15 +232,20 @@ export const SENSITIVE_VALUE_PATTERNS: readonly Readonly<SensitiveValuePattern>[
     pattern: /(?<![A-Za-z0-9])AKIA[A-Z0-9]{16}(?![A-Za-z0-9])/g,
   }),
   freeze({
-    // sk- (OpenAI, sk-proj-...), sk-ant- (Anthropic), xoxb- (Slack), ghp_ and github_pat_ (GitHub), in any
-    // letter case and also after an underscore (`x_ghp_...`). A real key has, after the prefix and at most
-    // four short dashed segments (proj-, api03-, Slack's two numeric ids), a run of 20 or more key characters
-    // WITHOUT a dash; a product slug such as `sk-classic-fit-cotton-shirt-blue` has none and is left alone.
+    // Provider keys, in any letter case and also after an underscore (`x_ghp_...`). Two shapes:
+    //   - a prefix that is never a product slug (sk-ant- Anthropic, sk-proj- OpenAI project keys, xoxb- Slack,
+    //     ghp_ and github_pat_ GitHub) followed by 20 or more key characters, dashes included: real key bodies
+    //     are base64url-like and may start with or contain a dash;
+    //   - bare sk- (legacy OpenAI), whose body must have, past at most four short dashed segments (an empty
+    //     one allowed), a run of 20 or more key characters WITHOUT a dash: a product slug such as
+    //     `sk-classic-fit-cotton-shirt-blue` has none and is left alone. Residual: a slug with one 20+ letter
+    //     word after sk- is redacted; a bare sk- key with no 20-character dashless run in its first five
+    //     pieces, or with five or more dashed segments before that run, is not covered.
     // The dashed segments are bounded, so the scan stays linear on 'sk-a-a-a-' texts.
     name: 'provider-key-prefix',
     marker: SECRET_MARKER,
     pattern: new RegExp(
-      String.raw`(?<![A-Za-z0-9])(?:sk-ant-|sk-|xoxb-|ghp_|github_pat_)(?:[A-Za-z0-9_]{1,32}-){0,4}[A-Za-z0-9_]{20,}${KEY_CHARS}*`,
+      String.raw`(?<![A-Za-z0-9])(?:(?:sk-ant-|sk-proj-|xoxb-|ghp_|github_pat_)${KEY_CHARS}{20,}|sk-(?:[A-Za-z0-9_]{0,32}-){0,4}[A-Za-z0-9_]{20,}${KEY_CHARS}*)`,
       'gi',
     ),
   }),
@@ -255,8 +260,12 @@ export const SENSITIVE_VALUE_PATTERNS: readonly Readonly<SensitiveValuePattern>[
   }),
 ]);
 
-/** Zero-width characters (space, non-joiner, joiner, word joiner, BOM): invisible, and able to split a card number for a scanner. */
-const ZERO_WIDTH = /\u200b|\u200c|\u200d|\u2060|\ufeff/g; // an alternation, not a class: no-misleading-character-class
+/**
+ * Invisible characters that can split a number or a key for a scanner: zero-width space, non-joiner, joiner
+ * and word joiner, the BOM, the soft hyphen and the left-to-right and right-to-left marks. An alternation,
+ * not a class (no-misleading-character-class). Not stripped: U+2061, U+180E and the other format characters.
+ */
+const INVISIBLE = /\u200b|\u200c|\u200d|\u2060|\ufeff|\u00ad|\u200e|\u200f/g;
 
 export interface RedactSensitiveTextOptions {
   /** Apply the card-number pattern (default true). Off for identifier fields, whose digit runs are ids, not cards. */
@@ -267,12 +276,17 @@ export interface RedactSensitiveTextOptions {
  * Replace every card number and secret-shaped token in free text with its
  * marker, keeping the rest of the text (what an operator or an audit reader
  * needs). The Bearer pattern keeps the scheme word and replaces the token.
- * Zero-width characters are removed before matching so they cannot split a
- * number; when nothing matched, the text is returned exactly as given.
- * Idempotent: a marker matches no pattern.
+ * Invisible characters (INVISIBLE) are removed before matching so they cannot
+ * split a number or a key; when nothing matched, the text is returned exactly
+ * as given. When something matched, every such character in that string leaf
+ * is dropped, not only the ones inside the match: an emoji joiner sequence or
+ * a script that uses the zero-width non-joiner loses them in a leaf that also
+ * held a secret (readable, not a leak). A digit glued to a card number by an
+ * invisible character joins the run and can make it not a card (a 17-digit
+ * unbroken run is left whole). Idempotent: a marker matches no pattern.
  */
 export function redactSensitiveText(text: string, options: RedactSensitiveTextOptions = {}): string {
-  const stripped = text.replace(ZERO_WIDTH, '');
+  const stripped = text.replace(INVISIBLE, '');
   let out = stripped;
   for (const { pattern, marker, rewrite } of SENSITIVE_VALUE_PATTERNS) {
     if (marker === CARD_MARKER && options.cards === false) continue;
@@ -290,7 +304,10 @@ export function redactSensitiveText(text: string, options: RedactSensitiveTextOp
  * `externalPostId`, `contactID`): its digit runs are ids, not cards, so the
  * card pattern is not applied to it (owner question 1 default, RR-REDACTION-
  * BY-CONTENT); secret-shaped tokens in it are still redacted. `bid` and `ids`
- * are not identifier names.
+ * are not identifier names. Limits, by that default: a card number stored
+ * under `cardId`-style key is not card-redacted (field-name redaction has no
+ * card entry either); the exemption is per leaf key, so an array under
+ * `platform_ids` or a nested `{ externalId: { value } }` is still card-checked.
  */
 const IDENTIFIER_KEY = /(?:^|_)id$|I[dD]$/;
 
