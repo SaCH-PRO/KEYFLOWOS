@@ -891,6 +891,25 @@ describe('ci-verdict: negative controls', () => {
     assert.deepEqual(censusStepProblems(pnpmPlain), []);
   });
 
+  it('A1: pnpm setup before the census may carry only `version` under `with`, in block form (quoted, flow and cased run_install spellings are red)', () => {
+    // Confirmation round 3, R1 / MINOR 1: an allowlist, not a denylist.
+    const at = '      - uses: actions/setup-node@v4';
+    const pnpm = (withText) => fixture().replace(at, `      - uses: pnpm/action-setup@v3\n${withText}\n${at}`);
+    for (const withText of [
+      '        with:\n          "run_install": true',
+      '        with: { version: 9, run_install: true }',
+      '        with:\n          Run_Install: true',
+      '        with:\n          version: 9\n          run_install: true',
+      '        with:\n          standalone: true',
+    ]) {
+      const problems = censusStepProblems(pnpm(withText));
+      assert.equal(problems.length, 1, `${withText}\n${problems.join('\n')}`);
+      assert.match(problems[0], /^'pnpm\/action-setup@v3' before the census step may set only `version` under with, found /);
+    }
+    assert.deepEqual(censusStepProblems(pnpm('        with:\n          version: 9')), []);
+    assert.deepEqual(censusStepProblems(pnpm('        with:\n          version: ${{ env.PNPM_VERSION }}')), []);
+  });
+
   it('a verdict job with needs written as block lines passes', () => {
     const block = fixture().replace('    needs: [lint-and-typecheck, build, test]', '    needs:\n      - lint-and-typecheck\n      - build\n      - test');
     assert.deepEqual(verdictProblems(block), []);
