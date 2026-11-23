@@ -52,16 +52,19 @@ lane (`docs/development/agent-memory/SECOND-ACCOUNT-SETUP.md`); it claims by pus
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
-| Wave 3f: NAV-A1 @ e833ec8a, FU-SITE-ANALYTICS-REVENUE-SCOPE @ cb42683f, AGENT-MEMORY-FIXES, rulings | `wave/v1-wave-3f` @ 2d72de46 (45 files) | NMS-18 fixed (AST route/identifier claims); full re-proof running in /home/user/kf-wt-3f | If green: PR (body like #223), CI green, merge under D-239 |
-| Wave 3g (after 3f), all ACCEPTED both lenses: MEM-TEMPORAL-SCOPE @ 69d163b2, FU-FINANCE-INTEL-DOORS @ 122b68bc, MEM-SALIENCE-SIGHT @ b142c8f0, FU-TEMPORAL-FLOW-INBOX-SCOPE @ 34c03a09, RR-UNTRUSTED-CONTENT-FENCE @ 629c7db9, RR-STREAM-ERROR-NO-EFFECTS @ 825cf137, MEM-DOC-EXTRACTION-SIGHT @ 55c8cfff, RR-ERASURE-BUSINESS-EVENTS @ 73357d77, FU-PAY-LINK-STATUS-GATE @ ac43742b, FU-KEY-GENOME-READS-RESIDUAL @ 3336ab2a5, RR-SCRIPT-SPECS-IN-CI @ 412bbd5c (second lane) | `pkt/V1-*` | Accepted | Build after 3f merges; split at 50 files (likely 3g + 3h). Conflicts to expect: key-cortex-consciousness.service.ts imports (MEM-SALIENCE vs GENOME-READS: keep both); fixture-prefixes.json (finish-squash.sh) |
-| MEM-SEMANTIC-SIGHT (P0) | session_017o9EBfbTxe462hkGyBUyNV | Repairs: prefix clash v71t_, expenses gate, q length bound, owner-parity test | Acceptance review on return; unblocks MEM-PATTERNS/UNIFIED/TEMPORAL-MEMORY-ROUTES |
-| FU-VITEST-DECORATOR-METADATA (P1) | session_017o9EBevZsyK5zcP7bWPk8g | Review rounds | Acceptance review |
+| Wave 3f: PR #224 | `wave/v1-wave-3f` @ 2d72de46 | Local proof green (784/784, R0 MET, web clean). CI all green except Windows worker proof (running). Codex: 2 real P2 web findings, replied; fixed in FU-NAV-A1-CODEX-224 | Merge under D-239 when Windows proof is green |
+| Wave 3g | `wave/v1-wave-3g` @ cbb61d04 (stacked on 3f): MEM-TEMPORAL-SCOPE, FU-FINANCE-INTEL-DOORS, MEM-SALIENCE-SIGHT, RR-UNTRUSTED-CONTENT-FENCE, RR-STREAM-ERROR-NO-EFFECTS, FU-PAY-LINK-STATUS-GATE, RR-SCRIPT-SPECS-IN-CI | Proven: 796/797 (only A9-R2 known flake, 3/3 alone), R0 MET; auto-merge review CLEAN | PR after 3f merges |
+| Wave 3h (next) | FU-KEY-GENOME-READS-RESIDUAL @ 3336ab2a5, RR-ERASURE-BUSINESS-EVENTS @ 73357d77, FU-TEMPORAL-FLOW-INBOX-SCOPE @ 320ecb446 (merged main; confirmation review running), FU-NAV-A1-CODEX-224 @ 7b2a7995 (acceptance review running) | Accepted / reviewing | Build after 3g |
+| Wave 3i | MEM-DOC-EXTRACTION-SIGHT @ 55c8cfff + MEM-SEMANTIC-SIGHT @ 09bdc807 (ACCEPTED, minors: expense words, backfill gate Q21, limit<=0 embeds) | Accepted | Build after 3h |
+| FU-VITEST-DECORATOR-METADATA | `pkt/V1-FU-VITEST-DECORATOR-METADATA` @ 83b6dfc8, session_017o9EBevZsyK5zcP7bWPk8g | STOPPED on owner question 20 (R0 REJECTED 37/39) | Owner ruling, then AMEND rows and re-prove |
+| MEM-PATTERNS-SIGHT (P0) | session_017o9EBeafoWPQry9ggXEDDK (on MEM-SEMANTIC branch) | Building | Acceptance review |
+| MEM-UNIFIED-SEMANTIC-SIGHT (P0) | session_017o9EBea375ryCZG7k6cSZh (on MEM-SEMANTIC branch) | Building | Acceptance review |
 | FU-KEY-ACTION-GENOME-PROJECTION (P1) | session_017o9EBfKdTMK1cKeLRzg5q6 | Building | Acceptance review |
 | RR-MCP-TENANT-BOUND (P1) | session_017o9EBdXHPD49Rc4zHwMj4K | Building (OQ-1 open) | Acceptance review |
 | RR-BANK-TOKEN-ENCRYPT (P1) | session_017o9EBdeAPCJoxrnvjWpV8w | Building (OQ-4 open) | Acceptance review |
 | Second lane: RR-GATEWAY-TYPED-FAILURES | other account | Building | Review its RETURN on #80 |
 
-Follow-ups to add to the plan with the next rulings commit (from FU-PAY-LINK-STATUS-GATE review): web hides
+Follow-ups to add to the plan with the next rulings commit: FU-NAV-A1-CODEX-224 (plan row, P1 web); FU-CORTEX-EXECUTE-STRUCTURED-DTO (ExecuteCommandDto requires command though the handler documents module+action; web KeySuggestionCards sends neither); FU-UNIT-MOCK-ISOLATION widened (seeded order-dependent unit failures); audit of bare-400 HTTP negative tests now that DTO validation runs; FU-SETTINGS-MANUAL-STEP-FENCE (manual-setup-step PATCH unsequenced); label v86s_ in fixture-prefixes.json; MEM-TEMPORAL-MEMORY-ROUTES-SIGHT must also cover temporal-adapter searchMemories/getRecentMemories. From FU-PAY-LINK-STATUS-GATE review: web hides
 "Copy payment link" / WhatsApp share unless status is payable; KEY commerce_send_invoice refuses PAID up front (today it
 emails then fails the PAID->SENT move); KEY invoice findFirst lacks `deletedAt: null`. Recorded deviation: the
 pay-link packet touched flow-orchestrator.service.ts (+7, D-248) and invoice-send-delivery.spec.ts mock outside its write set.
@@ -123,6 +126,17 @@ Format: `docs/development/agent-memory/OWNER-QUESTION-FORMAT.md`. Safe defaults 
     members): treat as revenue-owned? (Default: as built.)
 19. Production facts that set two RR priorities: is MCP_REMOTE_SERVERS set in production (RR-MCP-TENANT-BOUND -> P0)?
     Are there BankConnection rows with access tokens (RR-BANK-TOKEN-ENCRYPT -> P0)?
+
+20. **Release 0 ruling needed (blocks FU-VITEST-DECORATOR-METADATA, R0 REJECTED without it).** Turning DTO validation
+    on in vitest broke two bound cases whose premise came from unvalidated tests: (a) crm-contact-duplicate "whitespace-
+    padded email passes the DTO ... 409" (release0-landed.json): production answers 400 at @IsEmail. Default: restate
+    as 400 (service trim still proven by the next case). (b) key-cortex-tenant-binding "SUPER_ADMIN naming no tenant is
+    refused" on GET conscious/stream: still refused, no service called, but the message is the pipe's "Bad Request".
+    Default: widen that route's expected message only. The packet also fixed a real production defect: every POST
+    create-event (and ticket types with a sale window) was 400 (@IsISO8601 after @Type(Date)).
+21. MEM-SEMANTIC-SIGHT gated the semantic backfill to settings:admin (STAFF were allowed before). Ratify? (Default: yes.)
+22. With sells unknown (first settings read failed, nothing cached), a services business loses Schedule until refocus
+    (FU-NAV-A1-CODEX-224). Differs from the "unknown hides nothing" rule for member levels. (Default: accept.)
 
 ## 5. How to work here (learned the hard way)
 
