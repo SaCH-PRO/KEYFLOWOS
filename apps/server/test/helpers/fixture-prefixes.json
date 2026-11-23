@@ -1180,6 +1180,11 @@
       "prefix": "v72w_",
       "owner": "apps/server/test/contact-privacy-business-events.integration.test.ts",
       "packet": "V1-72 (RR-ERASURE-BUSINESS-EVENTS)"
+    },
+    {
+      "prefix": "v71w_",
+      "owner": "apps/server/test/temporal-flow-inbox-scope.integration.test.ts",
+      "packet": "V1-71 (FU-TEMPORAL-FLOW-INBOX-SCOPE)"
     }
   ],
   "pendingRenames": [],
