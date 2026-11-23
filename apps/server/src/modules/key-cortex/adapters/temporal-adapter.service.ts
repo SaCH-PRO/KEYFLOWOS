@@ -85,23 +85,32 @@ export class TemporalAdapterService {
     return (await this.flow.visibleMemories(input.businessId, memories, sight))[0] ?? null;
   }
 
-  /** MEM-TEMPORAL-MEMORY-ROUTES-SIGHT: a memory the actor may not see answers as a missing one (and a foreign one). */
-  private async requireVisible(input: { businessId: string; memoryId: string } & ActorInput) {
-    if (!projected(input)) return;
+  /**
+   * MEM-TEMPORAL-MEMORY-ROUTES-SIGHT: under an actor, the memory as the actor's sight admits it (the row that was
+   * checked), or a NotFoundException exactly as for a missing (or foreign) memory. undefined when the call has no actor.
+   */
+  private async visibleRowFor(input: { businessId: string; memoryId: string } & ActorInput) {
+    if (!projected(input)) return undefined;
     const sight = await this.flow.memorySight(input.businessId, input.actor);
-    if (!(await this.flow.visibleMemoryById(input.businessId, input.memoryId, sight))) {
-      throw new NotFoundException('Memory not found');
-    }
+    const row = await this.flow.visibleMemoryById(input.businessId, input.memoryId, sight);
+    if (!row) throw new NotFoundException('Memory not found');
+    return row;
+  }
+
+  /** Delta A1: a conditional write that matched nothing (the row changed since the check) answers as a missing memory. */
+  private written<T>(row: T | null): T {
+    if (!row) throw new NotFoundException('Memory not found');
+    return row;
   }
 
   async deleteMemory(input: { businessId: string; memoryId: string } & ActorInput) {
-    // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (review round 1): a memory the actor may not see is not deleted, and answers as a
-    // missing (or foreign) one does.
+    // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (review round 1, delta A2): a memory the actor may not see is not deleted, and
+    // answers as a missing (or foreign) one does; nor is one rewritten since the check (the delete is conditional on it).
     if (projected(input)) {
       const sight = await this.flow.memorySight(input.businessId, input.actor);
-      if (!(await this.flow.visibleMemoryById(input.businessId, input.memoryId, sight))) {
-        return { deleted: false, memoryId: input.memoryId };
-      }
+      const row = await this.flow.visibleMemoryById(input.businessId, input.memoryId, sight);
+      const deleted = row ? await this.flow.deleteMemoryIfUnchanged(input.businessId, row) : false;
+      return { deleted, memoryId: input.memoryId };
     }
     const deleted = await this.temporal.deleteMemory(input.businessId, input.memoryId);
     return { deleted, memoryId: input.memoryId };
@@ -113,12 +122,13 @@ export class TemporalAdapterService {
     value?: Record<string, unknown>;
     importance?: string;
   } & ActorInput) {
-    await this.requireVisible(input);
     const confidence = input.importance === 'high' ? 0.9 : input.importance === 'low' ? 0.3 : undefined;
-    return this.temporal.updateMemory(input.businessId, input.memoryId, {
-      content: input.value ? JSON.stringify(input.value) : undefined,
-      confidence,
-    });
+    const patch = { content: input.value ? JSON.stringify(input.value) : undefined, confidence };
+    // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (delta A1): under an actor, written only onto the row that was checked, and the row
+    // handed back is the one written (a row rewritten since the check is neither written nor handed back).
+    const checked = await this.visibleRowFor(input);
+    if (checked) return this.written(await this.flow.updateMemoryIfUnchanged(input.businessId, checked, patch));
+    return this.temporal.updateMemory(input.businessId, input.memoryId, patch);
   }
 
   async tagMemory(input: {
@@ -126,22 +136,26 @@ export class TemporalAdapterService {
     memoryId: string;
     tags: string[];
   } & ActorInput) {
-    await this.requireVisible(input);
     // MEM-TEMPORAL-SCOPE: the memory is looked up and updated by the same id, within the caller's business.
-    const existing = await this.temporal.findById(input.businessId, input.memoryId);
+    // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (delta A1): under an actor, the row the actor's sight admitted is the one tagged,
+    // only while unchanged, and the row handed back is the one written.
+    const checked = await this.visibleRowFor(input);
+    const existing = checked ?? (await this.temporal.findById(input.businessId, input.memoryId));
     if (!existing) {
       throw new NotFoundException('Memory not found');
     }
     const existingTags = Array.isArray(existing.sourceEventIds) ? existing.sourceEventIds : [];
     const added = stringTags(input.tags);
     const tags = Array.from(new Set([...existingTags, ...added]));
-    return this.temporal.updateMemory(input.businessId, input.memoryId, {
+    const patch = {
       sourceEventIds: tags,
       metadata: {
         ...(existing.metadata as Record<string, unknown> | undefined),
         tags,
       },
-    });
+    };
+    if (checked) return this.written(await this.flow.updateMemoryIfUnchanged(input.businessId, checked, patch));
+    return this.temporal.updateMemory(input.businessId, input.memoryId, patch);
   }
 
   async consolidateMemories(input: {

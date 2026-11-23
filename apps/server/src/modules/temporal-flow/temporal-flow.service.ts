@@ -416,6 +416,44 @@ export class TemporalFlowService {
   }
 
   /**
+   * MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (delta A1): writes `data` onto `row` (a memory of `businessId` an actor's sight
+   * admitted, visibleMemoryById) only while the row is still the one that was checked (its updatedAt unchanged), in one
+   * statement that answers the row it wrote. null when the row is gone or was rewritten since the check (a summarizer
+   * may write money text into it): the caller answers as for a missing memory, and nothing is written.
+   */
+  async updateMemoryIfUnchanged(
+    businessId: string,
+    row: { id: string; updatedAt: Date },
+    data: { content?: string; confidence?: number; sourceEventIds?: string[]; metadata?: Record<string, unknown> },
+  ) {
+    try {
+      return await this.prisma.client.temporalFlowMemory.update({
+        where: { id: row.id, businessId, updatedAt: row.updatedAt },
+        data: {
+          content: data.content,
+          confidence: data.confidence,
+          sourceEventIds: data.sourceEventIds,
+          metadata: data.metadata as never,
+        },
+      });
+    } catch (err) {
+      if ((err as { code?: unknown } | null)?.code === 'P2025') return null;
+      throw err;
+    }
+  }
+
+  /**
+   * MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (delta A2): deletes `row` (as updateMemoryIfUnchanged takes it) only while it is
+   * still the one that was checked, in one statement. false when it is gone or was rewritten since the check.
+   */
+  async deleteMemoryIfUnchanged(businessId: string, row: { id: string; updatedAt: Date }): Promise<boolean> {
+    const { count } = await this.prisma.client.temporalFlowMemory.deleteMany({
+      where: { id: row.id, businessId, updatedAt: row.updatedAt },
+    });
+    return count > 0;
+  }
+
+  /**
    * MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (D-257, D-234): the semantic search of `businessId`'s temporal memories for a reader:
    * as TemporalFlowMemoryService.searchMemory searches (temporal_memory copies, similarity 0.7 or more), each hit kept only
    * when MEM-SEMANTIC-SIGHT's reader projection (readerSearchOptions) and readerMemoryFilter both admit it, before the

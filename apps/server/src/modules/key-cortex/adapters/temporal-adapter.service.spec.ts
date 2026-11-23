@@ -18,6 +18,7 @@ const mkCmd = (action: string, parameters: Record<string, unknown> = {}): Connec
 const READER_FILTER = { NOT: { module: 'payments' } };
 const SIGHT = { filter: undefined, who: { reader: 'user_456', sight: () => true } };
 const ACTOR = { id: 'user_456' };
+const CHECKED_AT = new Date('2026-01-01T00:00:00Z');
 
 describe('TemporalAdapterService', () => {
   let service: TemporalAdapterService;
@@ -44,7 +45,10 @@ describe('TemporalAdapterService', () => {
       readerFilter: vi.fn().mockResolvedValue(READER_FILTER),
       memorySight: vi.fn().mockResolvedValue(SIGHT),
       visibleMemories: vi.fn(async (_b: string, rows: unknown[]) => rows),
-      visibleMemoryById: vi.fn(async (_b: string, id: string) => ({ id })),
+      visibleMemoryById: vi.fn(async (_b: string, id: string) => ({ id, updatedAt: CHECKED_AT, sourceEventIds: ['a'], metadata: {} })),
+      // Delta A1/A2: writes under an actor land only on the row that was checked (its updatedAt unchanged).
+      updateMemoryIfUnchanged: vi.fn(async (_b: string, row: { id: string }) => ({ id: row.id })),
+      deleteMemoryIfUnchanged: vi.fn().mockResolvedValue(true),
       searchVisibleMemory: vi.fn(),
       listMemory: vi.fn(),
     } as unknown as TemporalFlowService;
@@ -69,27 +73,45 @@ describe('TemporalAdapterService', () => {
     expect(flow.memorySight).toHaveBeenCalledWith('biz_123', ACTOR);
   });
 
-  it('delete_memory deletes and returns status', async () => {
-    (memory.deleteMemory as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+  it('delete_memory deletes the row the actor\'s sight admitted, only while unchanged (delta A2), and returns status', async () => {
     const result = await service.execute(mkCmd('delete_memory', { memoryId: 'm1' }));
     expect(result.success).toBe(true);
     expect(result.data).toEqual({ deleted: true, memoryId: 'm1' });
+    expect(flow.deleteMemoryIfUnchanged).toHaveBeenCalledWith('biz_123', expect.objectContaining({ id: 'm1', updatedAt: CHECKED_AT }));
+    expect(memory.deleteMemory).not.toHaveBeenCalled();
   });
 
-  it('update_memory updates existing memory', async () => {
-    (memory.updateMemory as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'm1' });
+  it('update_memory updates the row the actor\'s sight admitted, only while unchanged (delta A1)', async () => {
     const result = await service.execute(mkCmd('update_memory', { memoryId: 'm1', value: { x: 2 }, importance: 'high' }));
     expect(result.success).toBe(true);
-    expect(memory.updateMemory).toHaveBeenCalledWith('biz_123', 'm1', expect.objectContaining({ confidence: 0.9 }));
+    expect(result.data).toEqual({ id: 'm1' });
+    expect(flow.updateMemoryIfUnchanged).toHaveBeenCalledWith(
+      'biz_123',
+      expect.objectContaining({ id: 'm1', updatedAt: CHECKED_AT }),
+      expect.objectContaining({ confidence: 0.9, content: JSON.stringify({ x: 2 }) }),
+    );
+    expect(memory.updateMemory).not.toHaveBeenCalled();
   });
 
-  it('tag_memory merges tags', async () => {
-    (memory.findById as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'm1', sourceEventIds: ['a'], metadata: {} });
-    (memory.updateMemory as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'm1' });
+  it('tag_memory merges tags onto the row the actor\'s sight admitted, only while unchanged (delta A1)', async () => {
     const result = await service.execute(mkCmd('tag_memory', { memoryId: 'm1', tags: ['b'] }));
     expect(result.success).toBe(true);
-    expect(memory.findById).toHaveBeenCalledWith('biz_123', 'm1');
-    expect(memory.updateMemory).toHaveBeenCalledWith('biz_123', 'm1', expect.objectContaining({ sourceEventIds: ['a', 'b'] }));
+    expect(flow.visibleMemoryById).toHaveBeenCalledWith('biz_123', 'm1', SIGHT);
+    expect(flow.updateMemoryIfUnchanged).toHaveBeenCalledWith(
+      'biz_123',
+      expect.objectContaining({ id: 'm1', updatedAt: CHECKED_AT }),
+      expect.objectContaining({ sourceEventIds: ['a', 'b'] }),
+    );
+    expect(memory.updateMemory).not.toHaveBeenCalled();
+  });
+
+  it('delta A1: a conditional write that matched nothing (the row changed since the check) answers as a missing memory', async () => {
+    (flow.updateMemoryIfUnchanged as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    // As for a missing memory: the adapter raises NotFoundException('Memory not found') (the connector answers it).
+    await expect(service.execute(mkCmd('tag_memory', { memoryId: 'm1', tags: ['b'] }))).rejects.toThrow('Memory not found');
+    await expect(service.execute(mkCmd('update_memory', { memoryId: 'm1', importance: 'high' }))).rejects.toThrow('Memory not found');
+    (flow.visibleMemoryById as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    await expect(service.execute(mkCmd('tag_memory', { memoryId: 'missing', tags: ['b'] }))).rejects.toThrow('Memory not found');
   });
 
   it('consolidate_memories stores merged summary', async () => {
