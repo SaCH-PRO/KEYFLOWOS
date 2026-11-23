@@ -781,8 +781,8 @@ export class KeyCortexPromptContextService {
   private readonly logger = new Logger(KeyCortexPromptContextService.name);
 
   constructor(
-    // MEM-DOC-EXTRACTION-SIGHT orchestrator review (COR-MDX-2): every dependency named by token, so the service is built
-    // with its PrismaService wherever Nest builds it (a build without type metadata could not resolve it before).
+    // MEM-DOC-EXTRACTION-SIGHT orchestrator review (COR-MDX-2): every dependency named by token, so Nest resolves the
+    // service, PrismaService included, even where no type metadata is emitted (this first one had no token).
     @Inject(KeyCortexContextService)
     private readonly contextService: KeyCortexContextService,
     @Optional()

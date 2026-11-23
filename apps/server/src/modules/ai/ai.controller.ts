@@ -1482,7 +1482,9 @@ export class AiController {
     @Body() body: { confirmedKeys?: string[] },
     @Req() req?: AuthenticatedRequest,
   ) {
-    return this.profileIntelligence.confirmExtractions(businessId, profileMember(req), body.confirmedKeys);
+    const userId = profileMember(req);
+    const documentExtractions = await this.readsDocumentExtractions(businessId, req);
+    return this.profileIntelligence.confirmExtractions(businessId, userId, body.confirmedKeys, { documentExtractions });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

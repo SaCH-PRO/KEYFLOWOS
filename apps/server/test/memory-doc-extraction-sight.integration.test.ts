@@ -371,7 +371,9 @@ beforeAll(async () => {
   const profileUsage = {
     async trackAndComplete(_businessId: string, _userId: unknown, _task: string, req: GatewayRequest) {
       profilePrompts.push(req.messages.map((x) => `[${x.role}] ${String(x.content ?? '')}`).join('\n'));
-      return { content: 'v71s: tell me more.', toolCalls: [], usage };
+      // KEY's reply restates the turn it answers (REPLY-OF: ...), so a reply that leaks is told apart from the turn.
+      const last = [...req.messages].reverse().find((x) => x.role === 'user');
+      return { content: `v71s: tell me more. REPLY-OF: ${String(last?.content ?? '')}`, toolCalls: [], usage };
     },
   };
   const profile = new ProfileIntelligenceService(prisma, memory, new BusinessGraphService(prisma), {} as any, profileUsage as any);
@@ -644,7 +646,9 @@ describe('MEM-DOC-EXTRACTION-SIGHT orchestrator review: the profile interview an
     await profileResetFor(ID.blind);
     const owner = await profileTurn(ID.owner, OWNER_TURN);
     expect(owner.prompt).toContain(OWNER_TURN);
-    // The blind member's next turn, without resetting: their own interview, not the owner's.
+    expect(JSON.stringify(owner.body), "KEY's reply to the owner").toContain(`REPLY-OF: ${OWNER_TURN}`);
+    // The blind member's next turn, without resetting: their own interview, not the owner's (neither the owner's turn
+    // nor KEY's reply to it).
     for (const reader of ['blind', 'revenue', 'admin'] as const) {
       const theirs = await profileTurn(ID[reader], 'v71s: we deliver on weekends', false);
       expect(theirs.prompt, reader).not.toContain(OWNER_TURN);
@@ -653,6 +657,30 @@ describe('MEM-DOC-EXTRACTION-SIGHT orchestrator review: the profile interview an
     // The owner's own interview still carries their earlier turn.
     const ownerAgain = await profileTurn(ID.owner, 'v71s: and we cater', false);
     expect(ownerAgain.prompt).toContain(OWNER_TURN);
+    expect(outbound, 'no outbound request').toEqual([]);
+  }, 120_000);
+
+  it("delta review: a member's interview built while they read revenue is not replayed once their revenue read is gone: its earlier turns and KEY's replies (which may restate the monthly revenue or an extraction) are dropped", async () => {
+    const EARLIER = 'V71S-EARLIER-TURN: what did that invoice total?';
+    const membership = await db.membership.findUnique({ where: { id: m(ID.revenue) } });
+    try {
+      const first = await profileTurn(ID.revenue, EARLIER);
+      expect(first.prompt).toContain('Monthly revenue:');
+      expect(JSON.stringify(first.body)).toContain(`REPLY-OF: ${EARLIER}`);
+      // The owner takes the member's revenue read away; the member's next turn, without a reset.
+      await db.membership.update({ where: { id: m(ID.revenue) }, data: { permissionScopes: { ...REVENUE_SCOPES, revenue: 'none' } } });
+      const after = await profileTurn(ID.revenue, 'v71s: and now?', false);
+      expect(after.prompt).not.toContain(EARLIER);
+      expect(after.prompt).not.toContain('Monthly revenue');
+      expect(JSON.stringify(after.body)).not.toContain(EARLIER);
+      // Widening again starts afresh too, and keeps nothing from the narrowed interview either way.
+      await db.membership.update({ where: { id: m(ID.revenue) }, data: { permissionScopes: membership.permissionScopes } });
+      const again = await profileTurn(ID.revenue, 'v71s: once more', false);
+      expect(again.prompt).not.toContain(EARLIER);
+      expect(again.prompt).toContain('Monthly revenue:');
+    } finally {
+      await db.membership.update({ where: { id: m(ID.revenue) }, data: { permissionScopes: membership.permissionScopes } });
+    }
     expect(outbound, 'no outbound request').toEqual([]);
   }, 120_000);
 

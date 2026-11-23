@@ -374,6 +374,7 @@ async function turnMemorySight(
   businessId: string,
   userId?: string,
   server?: FlowServerContext,
+  logTag = 'perception',
 ): Promise<{ reader: string | null; sight: ModuleSight }> {
   let candidate: string | undefined = userId;
   let positionModules: readonly string[] | undefined;
@@ -389,10 +390,10 @@ async function turnMemorySight(
     candidate = perception?.readerUserId ?? undefined;
     positionModules = perception?.modules ?? [];
   }
-  const reader = await promptMemoryReader(self.prisma, businessId, candidate, self.logger, 'perception');
+  const reader = await promptMemoryReader(self.prisma, businessId, candidate, self.logger, logTag);
   const sight: ModuleSight =
     positionModules === undefined
-      ? await readersModuleSight(self.prisma, businessId, reader, self.logger, 'perception')
+      ? await readersModuleSight(self.prisma, businessId, reader, self.logger, logTag)
       : candidate && reader !== candidate ? NO_MODULE_SIGHT : moduleSightOf(positionModules);
   return { reader, sight };
 }
@@ -2120,7 +2121,7 @@ export class FlowOrchestratorService {
       // MEM-DOC-EXTRACTION-SIGHT (D-234; orchestrator review COR-MDX-1): the copies of document extractions only for a
       // turn whose reader may read revenue (turnMemorySight, as the perception block reads), else none: the search
       // leaves them out before its limit.
-      const { reader, sight } = await turnMemorySight({ prisma: this.prisma, logger: this.logger, getJobRolePolicy: () => this.getJobRolePolicy() }, businessId, userId, server);
+      const { reader, sight } = await turnMemorySight({ prisma: this.prisma, logger: this.logger, getJobRolePolicy: () => this.getJobRolePolicy() }, businessId, userId, server, 'semanticMemory');
       const relevant = await this.semanticMemory.search({
         businessId,
         query,
