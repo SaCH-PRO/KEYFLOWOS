@@ -710,7 +710,24 @@ describe('FU-PATTERNS-ROUTES-SIGHT (D-257, D-100, D-234, D-146): the memory and 
     }
   }, 240_000);
 
-  it("V71Y-19 (security review round 7, F-2): GET .../ai/profile/status reports a topic complete only from rows the caller may read: an owner's money goal completes 'goals' for the owner and not for the revenue-none member", async () => {
+  it('V71Y-20 (correctness review round 8, COR-R7-2): a member with expenses read confirms what their interview proposed: the row is stored', async () => {
+    await clearMemory();
+    try {
+      const extractions = [{ topic: 'goals', category: 'goals', key: 'v71y_expense_reader_goal', value: 'Open a second location', confidence: 0.9 }];
+      profileModel.reply = 'Noted.\n```extract\n' + JSON.stringify(extractions) + '\n```';
+      const chat = await agent().post(`/ai/businesses/${ID.biz}/ai/profile/chat`).set(HEADER, ID.revenue).set('x-forwarded-for', '10.74.14.1').send({ message: 'V71Y my goals' });
+      expect(chat.status, text(chat.body).slice(0, 300)).toBe(201);
+      const confirm = await agent().post(`/ai/businesses/${ID.biz}/ai/profile/confirm`).set(HEADER, ID.revenue).set('x-forwarded-for', '10.74.14.1').send({});
+      expect(confirm.status, text(confirm.body)).toBe(201);
+      expect(confirm.body.saved, text(confirm.body)).toBe(1);
+      expect(await db.aiMemory.count({ where: { businessId: ID.biz, key: 'v71y_expense_reader_goal' } })).toBe(1);
+    } finally {
+      profileModel.reply = 'v71y: tell me more.';
+      await clearMemory();
+    }
+  }, 240_000);
+
+  it("V71Y-19 (security review round 7, F-2): GET .../ai/profile/status reports a topic complete only from rows the caller may read: a money goal completes 'goals' for a member with revenue read and not for the revenue-none member", async () => {
     await clearMemory();
     try {
       await memory.upsert(ID.biz, { category: 'goals', key: 'six_month_target', value: MONEY_GOAL, confidence: 1, source: 'user' });

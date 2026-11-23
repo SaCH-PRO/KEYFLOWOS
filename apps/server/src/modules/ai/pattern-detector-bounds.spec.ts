@@ -7,7 +7,7 @@
  * service are stand-ins.
  */
 import { describe, it, expect } from 'vitest';
-import { PatternDetectorService } from './pattern-detector.service';
+import { PatternDetectorService, cutAtWordBoundary } from './pattern-detector.service';
 import { aiMemoryRowVisibleTo } from './semantic-memory-sight';
 
 const MAX = 2_000;
@@ -141,5 +141,46 @@ describe('PatternDetectorService stores no pattern over 2,000 characters (FU-PAT
     const { detector } = detectorOver(tickets, model);
     const scan = await detector.scanBusiness('biz');
     expect(scan.patterns.map((p: any) => p.severity)).toEqual(['critical', 'warning']);
+  });
+
+  // Correctness review round 8 (COR-R7-1): a cut inside a word could leave a money or expense word ('feedback' to
+  // 'fee', 'rentals' to 'rent', 'costume' to 'cost'), so the stored row was withheld from readers who may read the whole
+  // pattern. Text is cut on a word boundary: the stored row is as visible as the unbounded pattern, never more.
+  const everyReader = [
+    ['full', owner],
+    ['no revenue', noRevenue],
+    ['no expenses', noExpenses],
+    ['neither', { reader: 'u1', sight: (m: string) => m !== 'revenue' && m !== 'expenses' }],
+    ['memberless', { reader: null, sight: () => false }],
+  ] as const;
+  it.each([
+    // The cluster's title is 'Multiple tickets about "<ticket title>"' (24 characters first), clipped to 299 + '…':
+    // these fillers put the cut inside the word ('fee|dback', 'rent|als', 'cost|ume', 'order|ed').
+    ['feedback', `${'y'.repeat(271)} feedback loop`],
+    ['rentals', `${'y'.repeat(270)} rentals loop`],
+    ['costume', `${'y'.repeat(270)} costume party`],
+    ['ordered', `${'y'.repeat(269)} ordered list`],
+  ])('a title cut inside "%s" stores a row exactly as visible as the unbounded pattern, for every reader', async (_word, title) => {
+    const tickets = [0, 1, 2].map((i) => ({ id: `t${i}`, title, status: 'OPEN', priority: 'LOW', orgUnitId: null, createdAt: new Date() }));
+    const { detector, stored } = detectorOver(tickets, '{"patterns": []}');
+    await detector.scanBusiness('biz');
+    const row = stored.find((r) => r.key.startsWith('pattern_support_cluster_'))!;
+    const unbounded = {
+      key: 'pattern_support_cluster',
+      value: JSON.stringify({ category: 'support_cluster', title: `Multiple tickets about "${title.toLowerCase()}"`, description: '3 support tickets in the last 7 days about the same topic.' }),
+    };
+    for (const [name, who] of everyReader) {
+      expect(visibleTo(row, who), `${name}: ${row.value.slice(0, 200)}`).toBe(visibleTo(unbounded, who));
+    }
+  });
+
+  it('the cut both the clip and the halving fit loop use (cutAtWordBoundary) never ends inside a word, and never grows', () => {
+    expect(cutAtWordBoundary('alpha feedback loop', 9)).toBe('alpha ');
+    expect(cutAtWordBoundary('alpha feedback loop', 6)).toBe('alpha ');
+    expect(cutAtWordBoundary('alpha feedback loop', 14)).toBe('alpha feedback');
+    expect(cutAtWordBoundary('rentals', 4)).toBe('');
+    expect(cutAtWordBoundary('TTD 4000', 6)).toBe('TTD ');
+    expect(cutAtWordBoundary('short', 50)).toBe('short');
+    for (const [text, n] of [['a b c d', 3], ['""""""', 3], ['xyz', 0]] as const) expect(cutAtWordBoundary(text, n).length).toBeLessThanOrEqual(n);
   });
 });
