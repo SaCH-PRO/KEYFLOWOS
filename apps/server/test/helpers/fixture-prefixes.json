@@ -1171,6 +1171,11 @@
       "prefix": "v71v_",
       "owner": "apps/server/test/memory-patterns-sight.integration.test.ts",
       "packet": "V1-71 (MEM-PATTERNS-SIGHT)"
+    },
+    {
+      "prefix": "v71y_",
+      "owner": "apps/server/test/patterns-routes-sight.integration.test.ts",
+      "packet": "V1-71 (FU-PATTERNS-ROUTES-SIGHT)"
     }
   ],
   "pendingRenames": [],

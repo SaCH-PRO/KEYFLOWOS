@@ -375,3 +375,42 @@ describe('UnifiedMemoryRetrievalService', () => {
     expect(business.metadata).toMatchObject({ after: { status: 'PENDING', riskLevel: 'LOW' }, metadata: { title: 't' }, actorType: 'ai', action: 'propose' });
   });
 });
+
+describe('UnifiedMemoryRetrievalService: aiMemoryPatterns (MEM-PATTERNS-SIGHT, FU-PATTERNS-ROUTES-SIGHT)', () => {
+  const categoryFilterOf = async (options: Record<string, unknown>) => {
+    const prisma = makePrisma();
+    const service = new UnifiedMemoryRetrievalService(prisma as any, makeSemanticMemory() as any);
+    await service.retrieveContext('biz_1', options);
+    expect(prisma.client.aiMemory.findMany).toHaveBeenCalledTimes(1);
+    return prisma.client.aiMemory.findMany.mock.calls[0][0].where.category as { notIn: string[] };
+  };
+
+  it("aiMemoryPatterns false leaves the 'patterns' rows unread at the query, beside the settings rows and the document extractions", async () => {
+    const without = await categoryFilterOf({ aiMemoryPatterns: false });
+    expect(without.notIn).toContain('patterns');
+    expect(without.notIn).toContain('document_extraction');
+    const settings = (await categoryFilterOf({})).notIn.filter((c) => c !== 'document_extraction');
+    expect(without.notIn).toEqual(expect.arrayContaining(settings));
+    expect(Object.keys(without)).toEqual(['notIn']);
+  });
+
+  it('aiMemoryPatterns absent or true reads the patterns, and the filter is otherwise what it was (document extractions only on request)', async () => {
+    for (const options of [{}, { aiMemoryPatterns: true }]) {
+      expect((await categoryFilterOf(options)).notIn).not.toContain('patterns');
+    }
+    expect(await categoryFilterOf({ aiMemoryPatterns: true })).toEqual(await categoryFilterOf({}));
+    expect((await categoryFilterOf({ documentExtractions: true })).notIn).not.toContain('document_extraction');
+    expect((await categoryFilterOf({ documentExtractions: true, aiMemoryPatterns: false })).notIn).toEqual(
+      expect.arrayContaining(['patterns']),
+    );
+  });
+
+  it('aiMemoryPatterns false does not filter a semantic hit (it governs the structured AiMemory read only)', async () => {
+    const semantic = makeSemanticMemory({
+      search: vi.fn().mockResolvedValue([{ id: 'sem_p', content: 'patterns.peak: Peak activity hour: 9AM', similarity: 0.9, metadata: {} }]),
+    });
+    const service = new UnifiedMemoryRetrievalService(makePrisma() as any, semantic as any);
+    const fragments = await service.retrieveContext('biz_1', { query: 'peak', aiMemoryPatterns: false });
+    expect(fragments.map((f) => f.id)).toContain('sem_p');
+  });
+});
