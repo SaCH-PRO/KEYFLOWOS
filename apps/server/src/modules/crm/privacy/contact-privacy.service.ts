@@ -135,6 +135,20 @@ const PURGE_TX_OPTIONS = { maxWait: 10_000, timeout: 120_000 } as const;
 const STORAGE_CLEANUP_FAILED_ACTION = 'forget_storage_cleanup_failed';
 
 /**
+ * RR-RETENTION-EXPIRED-EXPORTS (V1-72, D-261): the retention sweep of contact
+ * export bundles. An export job whose link expired more than
+ * EXPORT_SWEEP_GRACE_MS ago, or whose downloads are used up, has its two
+ * stored objects deleted on the purge cycle; the row is kept (it records that
+ * an export happened: who, when, which contact) and one
+ * `export_bundle_deleted` audit entry names the job, so the sweep never
+ * selects it again. No schema change: the keys stay on the row.
+ */
+const EXPORT_BUNDLE_DELETED_ACTION = 'export_bundle_deleted';
+const EXPORT_JOB_ENTITY_TYPE = 'contact_export_job';
+const EXPORT_SWEEP_GRACE_MS = 24 * 60 * 60_000;
+const EXPORT_SWEEP_BATCH = 100;
+
+/**
  * A merge operation's repointedCounts reduced to its counts. The stored value
  * also carries `_deletedSnapshots` (whole rows of the duplicate, kept for the
  * undo), which a purge must not leave behind.
@@ -610,8 +624,8 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Run-once helper exposed for ops + tests. */
-  async runPurgeCycle(): Promise<{ purged: number; repaired: number }> {
-    if (this.purgeRunning) return { purged: 0, repaired: 0 };
+  async runPurgeCycle(): Promise<{ purged: number; repaired: number; swept: number }> {
+    if (this.purgeRunning) return { purged: 0, repaired: 0, swept: 0 };
     this.purgeRunning = true;
     try {
       const due = await this.prisma.client.contactForgetRequest.findMany({
@@ -633,10 +647,96 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
         this.logger.log(`[ContactPrivacy] purged ${purged} forgotten contacts`);
       }
       const repaired = await this.repairLegacyPurges();
-      return { purged, repaired };
+      const swept = await this.sweepExportBundles();
+      return { purged, repaired, swept };
     } finally {
       this.purgeRunning = false;
     }
+  }
+
+  /**
+   * RR-RETENTION-EXPIRED-EXPORTS: delete the stored objects of export jobs
+   * that nobody can download any more. Selected: expiresAt more than 24h ago,
+   * or consumed (consumedAt set or downloadCount >= maxDownloads; the same
+   * conditions under which resolveDownload refuses), with no
+   * export_bundle_deleted entry yet; at most EXPORT_SWEEP_BATCH per cycle,
+   * oldest link first. For each job both objects are deleted; when both
+   * deletes succeed one export_bundle_deleted entry is written (the row is
+   * kept, every field unchanged); when any delete fails nothing is written
+   * but a forget_storage_cleanup_failed entry naming the job and the keys,
+   * as deleteExportBundles records, and the job is selected again next cycle.
+   * Each deletion is by the row's own id and businessId; no AI call.
+   */
+  private async sweepExportBundles(): Promise<number> {
+    const cutoff = new Date(Date.now() - EXPORT_SWEEP_GRACE_MS);
+    let jobs: Array<{ id: string; businessId: string; contactId: string; jsonKey: string; zipKey: string }>;
+    try {
+      jobs = await this.prisma.client.$queryRaw`
+        SELECT j.id, j.business_id AS "businessId", j.contact_id AS "contactId",
+               j.json_key AS "jsonKey", j.zip_key AS "zipKey"
+          FROM contact_export_jobs j
+         WHERE (j.expires_at < ${cutoff}
+                OR j.consumed_at IS NOT NULL
+                OR j.download_count >= j.max_downloads)
+           AND NOT EXISTS (
+             SELECT 1 FROM contact_audit_entries a
+              WHERE a.business_id = j.business_id
+                AND a.action = ${EXPORT_BUNDLE_DELETED_ACTION}
+                AND a.entity_type = ${EXPORT_JOB_ENTITY_TYPE}
+                AND a.entity_id = j.id)
+         ORDER BY j.expires_at ASC
+         LIMIT ${EXPORT_SWEEP_BATCH}`;
+    } catch (err: unknown) {
+      this.logger.warn(
+        `[ContactPrivacy] export retention sweep could not list due jobs: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return 0;
+    }
+    let swept = 0;
+    for (const job of jobs) {
+      const keys = [job.jsonKey, job.zipKey];
+      const contactHash = this.audit.hashContact(job.businessId, job.contactId);
+      try {
+        const failed = await this.deleteBundleObjects(keys);
+        if (failed.length > 0) {
+          this.logger.warn(
+            `[ContactPrivacy] export bundle retention failed job=${job.id}: ${failed.length}/${keys.length} object(s) not deleted: ${failed.map((f) => `${f.key} (${f.error})`).join(', ')}`,
+          );
+          await this.recordBundleCleanupFailure({
+            businessId: job.businessId,
+            contactId: job.contactId,
+            contactHash,
+            entityType: EXPORT_JOB_ENTITY_TYPE,
+            entityId: job.id,
+            actorLabel: 'export-retention',
+            failed,
+            reason: 'export bundle expired or consumed, but these objects could not be deleted from storage; the next purge cycle retries them',
+          });
+          continue;
+        }
+        await this.prisma.client.contactAuditEntry.create({
+          data: {
+            businessId: job.businessId,
+            contactId: job.contactId,
+            contactHash,
+            action: EXPORT_BUNDLE_DELETED_ACTION,
+            entityType: EXPORT_JOB_ENTITY_TYPE,
+            entityId: job.id,
+            actor: { type: 'SYSTEM', label: 'export-retention' } as never,
+            after: { jsonKey: job.jsonKey, zipKey: job.zipKey } as never,
+            reason: 'export bundle expired or consumed: its objects were deleted from storage; the job row is kept as the record of the export',
+            changedFields: [],
+          },
+        });
+        swept += 1;
+      } catch (err: unknown) {
+        this.logger.warn(
+          `[ContactPrivacy] export bundle retention failed job=${job.id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    if (swept > 0) this.logger.log(`[ContactPrivacy] deleted the stored bundles of ${swept} expired or consumed export job(s)`);
+    return swept;
   }
 
   /**
@@ -1047,6 +1147,26 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
     keys: string[],
   ): Promise<void> {
     if (keys.length === 0) return;
+    const failed = await this.deleteBundleObjects(keys);
+    if (failed.length === 0) return;
+
+    this.logger.warn(
+      `[ContactPrivacy] export bundle cleanup failed request=${requestId}: ${failed.length}/${keys.length} object(s) not deleted: ${failed.map((f) => `${f.key} (${f.error})`).join(', ')}`,
+    );
+    await this.recordBundleCleanupFailure({
+      businessId,
+      contactId: null,
+      contactHash,
+      entityType: 'contact',
+      entityId: requestId,
+      actorLabel: 'forget-purge',
+      failed,
+      reason: 'GDPR purge committed, but these export bundle objects could not be deleted from storage; delete them by key',
+    });
+  }
+
+  /** Delete the given object keys; returns the keys that could not be deleted, with the error text. */
+  private async deleteBundleObjects(keys: string[]): Promise<Array<{ key: string; error: string }>> {
     const message = (err: unknown) => (err instanceof Error ? err.message : String(err)).slice(0, 200);
     const failed: Array<{ key: string; error: string }> = [];
     try {
@@ -1060,29 +1180,38 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
     } catch (err: unknown) {
       for (const key of keys) failed.push({ key, error: message(err) });
     }
-    if (failed.length === 0) return;
+    return failed;
+  }
 
-    this.logger.warn(
-      `[ContactPrivacy] export bundle cleanup failed request=${requestId}: ${failed.length}/${keys.length} object(s) not deleted: ${failed.map((f) => `${f.key} (${f.error})`).join(', ')}`,
-    );
+  /** The forget_storage_cleanup_failed entry: the keys that stayed in storage, from which the cleanup can be retried. */
+  private async recordBundleCleanupFailure(p: {
+    businessId: string;
+    contactId: string | null;
+    contactHash: string;
+    entityType: string;
+    entityId: string;
+    actorLabel: string;
+    failed: Array<{ key: string; error: string }>;
+    reason: string;
+  }): Promise<void> {
     try {
       await this.prisma.client.contactAuditEntry.create({
         data: {
-          businessId,
-          contactId: null,
-          contactHash,
+          businessId: p.businessId,
+          contactId: p.contactId,
+          contactHash: p.contactHash,
           action: STORAGE_CLEANUP_FAILED_ACTION,
-          entityType: 'contact',
-          entityId: requestId,
-          actor: { type: 'SYSTEM', label: 'forget-purge' } as never,
-          after: { failedKeys: failed.map((f) => f.key), errors: failed.map((f) => f.error) } as never,
-          reason: 'GDPR purge committed, but these export bundle objects could not be deleted from storage; delete them by key',
+          entityType: p.entityType,
+          entityId: p.entityId,
+          actor: { type: 'SYSTEM', label: p.actorLabel } as never,
+          after: { failedKeys: p.failed.map((f) => f.key), errors: p.failed.map((f) => f.error) } as never,
+          reason: p.reason,
           changedFields: [],
         },
       });
     } catch (err: unknown) {
       this.logger.error(
-        `[ContactPrivacy] could not record failed export bundle cleanup request=${requestId}: ${message(err)}`,
+        `[ContactPrivacy] could not record failed export bundle cleanup ${p.entityType}=${p.entityId}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
