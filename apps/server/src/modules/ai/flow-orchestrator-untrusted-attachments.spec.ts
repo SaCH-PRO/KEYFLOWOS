@@ -336,7 +336,8 @@ describe('RR-UNTRUSTED-CONTENT-FENCE controls: no authority change, no change wi
 describe('RR-UNTRUSTED-CONTENT-FENCE: MCP tool output returns fenced', () => {
   function makeMcp(result: unknown) {
     const manager = Object.create(McpClientManagerService.prototype) as McpClientManagerService;
-    const config = { key: 'docs', name: 'Docs', url: 'https://mcp.example.test/mcp' };
+    // RR-MCP-TENANT-BOUND: a server is bound to named businesses and callTool names the business.
+    const config = { key: 'docs', name: 'Docs', url: 'https://mcp.example.test/mcp', businessIds: ['biz_fence'] };
     const callTool = vi.fn(async () => result);
     Object.assign(manager, {
       logger: quiet,
@@ -349,7 +350,7 @@ describe('RR-UNTRUSTED-CONTENT-FENCE: MCP tool output returns fenced', () => {
   it('a small result comes back as one mcp_tool block holding its JSON, the planted marker neutralised', async () => {
     const result = { content: [{ type: 'text', text: PLANT }] };
     const { manager, callTool } = makeMcp(result);
-    const out = await manager.callTool('mcp__docs__search', { q: 'x' });
+    const out = await manager.callTool('biz_fence', 'mcp__docs__search', { q: 'x' });
     expect(callTool).toHaveBeenCalledWith({ name: 'search', arguments: { q: 'x' } });
     expect(typeof out).toBe('string');
     const blocks = blocksOf(out as string);
@@ -361,7 +362,7 @@ describe('RR-UNTRUSTED-CONTENT-FENCE: MCP tool output returns fenced', () => {
 
   it('a large result is capped inside its block', async () => {
     const { manager } = makeMcp({ content: [{ type: 'text', text: 'z'.repeat(UNTRUSTED_MAX_CHARS.mcp_tool * 2) }] });
-    const out = (await manager.callTool('mcp__docs__search', {})) as string;
+    const out = (await manager.callTool('biz_fence', 'mcp__docs__search', {})) as string;
     const blocks = blocksOf(out);
     expect(blocks).toHaveLength(1);
     expect(blocks[0].inner.length).toBeLessThan(UNTRUSTED_MAX_CHARS.mcp_tool + 100);
