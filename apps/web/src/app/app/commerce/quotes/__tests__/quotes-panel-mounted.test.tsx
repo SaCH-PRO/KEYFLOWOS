@@ -261,6 +261,9 @@ function Holder({ initial }: { initial: Quote[] }) {
 }
 const renderPanel = (quotes: Quote[]) => render(<Holder initial={quotes} />);
 
+/** The card of the quote (the row also names its number in a hidden span ahead of the card). */
+const cardOf = (q: Quote) => screen.getAllByText(q.quoteNumber).find((el) => !el.classList.contains("sr-only"))!;
+
 function openMenu(index = 0) {
   const buttons = screen.getAllByLabelText("More actions");
   fireEvent.click(buttons[index]!);
@@ -321,7 +324,7 @@ describe("MOUNT-QUOTES: Sales > Quotes mounts the quotes panel", () => {
     expect(screen.queryByTestId("quote-detail")).toBeNull();
     // The bulk bar is up (its Status menu), and nothing else opened.
     expect(screen.getByRole("button", { name: /^status$/i })).toBeInTheDocument();
-    fireEvent.click(screen.getAllByText(DRAFT.quoteNumber)[0]!);
+    fireEvent.click(cardOf(DRAFT));
     expect(screen.getByTestId("quote-detail")).toBeInTheDocument();
     // Review round 1 (F2c): the row is a list item that holds its own checkbox,
     // so a row found by its number (journey D's rowOf) can be ticked.
@@ -329,6 +332,11 @@ describe("MOUNT-QUOTES: Sales > Quotes mounts the quotes panel", () => {
     expect(rows).toHaveLength(1);
     expect(within(rows[0]!).getByRole("checkbox")).toBe(box);
     expect(within(rows[0]!).getAllByText(DRAFT.quoteNumber).length).toBeGreaterThan(0);
+    // Live run: journey D's rowOf also reaches a row from the first element showing its number, by the
+    // nearest "group" ancestor; that element must then be the row, not the card inside it (which has no
+    // checkbox). So the row is a "group" and names its number first, ahead of the card.
+    expect(rows[0]!.classList.contains("group")).toBe(true);
+    expect(within(rows[0]!).getAllByText(DRAFT.quoteNumber)[0]!.closest(".group")).toBe(rows[0]);
   });
 
   it("QPM-04: the bulk bar's Status menu offers Send All and Reject All only (no Void, nothing that deletes)", () => {
@@ -361,7 +369,7 @@ describe("MOUNT-QUOTES: Sales > Quotes mounts the quotes panel", () => {
   it("QPM-06 RED-BEFORE: the detail is given 'Expires' for its second date", () => {
     installServer();
     renderPanel([SENT]);
-    fireEvent.click(screen.getAllByText(SENT.quoteNumber)[0]!);
+    fireEvent.click(cardOf(SENT));
     expect(screen.getByTestId("quote-detail").getAttribute("data-date-label-2")).toBe("Expires");
   });
 
@@ -402,7 +410,7 @@ describe("MOUNT-QUOTES: Sales > Quotes mounts the quotes panel", () => {
   it("QPM-08 RED-BEFORE: the detail re-reads the quote from the list, so an accept or a refresh is what it shows", () => {
     installServer();
     renderPanel([SENT]);
-    fireEvent.click(screen.getAllByText(SENT.quoteNumber)[0]!);
+    fireEvent.click(cardOf(SENT));
     expect(screen.getByTestId("quote-detail").getAttribute("data-status")).toBe("SENT");
     act(() => {
       holder.setQuotes((prev) => prev.map((q) => (q.id === SENT.id ? { ...q, status: "ACCEPTED", total: 999, notes: "refreshed" } : q)));
@@ -416,7 +424,7 @@ describe("MOUNT-QUOTES: Sales > Quotes mounts the quotes panel", () => {
   it("QPM-09 RED-BEFORE: Duplicate from the detail closes it and opens the builder with the copy", () => {
     installServer();
     renderPanel([ACCEPTED]);
-    fireEvent.click(screen.getAllByText(ACCEPTED.quoteNumber)[0]!);
+    fireEvent.click(cardOf(ACCEPTED));
     fireEvent.click(within(screen.getByTestId("quote-detail")).getByTitle("Duplicate quote"));
     expect(screen.queryByTestId("quote-detail")).toBeNull();
     const builder = screen.getByTestId("quote-builder");
@@ -454,7 +462,7 @@ describe("MOUNT-QUOTES: Sales > Quotes mounts the quotes panel", () => {
   it("QPM-11 RED-BEFORE: the detail's Send Quote on a draft sends by email through the server (which carries the link and moves it to SENT); no bare status flip", async () => {
     const server = installServer();
     renderPanel([DRAFT]);
-    fireEvent.click(screen.getAllByText(DRAFT.quoteNumber)[0]!);
+    fireEvent.click(cardOf(DRAFT));
     fireEvent.click(within(screen.getByTestId("quote-detail")).getByRole("button", { name: /send quote/i }));
     await waitFor(() => expect(composerOpen).toHaveBeenCalledTimes(1));
     expect(server.of((c) => /\/status\/sent$/.test(c.path))).toEqual([]);
@@ -475,7 +483,7 @@ describe("MOUNT-QUOTES: Sales > Quotes mounts the quotes panel", () => {
     installServer();
     for (const [q, offered] of [[DRAFT, true], [SENT, true], [ACCEPTED, false]] as const) {
       renderPanel([q]);
-      fireEvent.click(screen.getAllByText(q.quoteNumber)[0]!);
+      fireEvent.click(cardOf(q));
       const detail = screen.getByTestId("quote-detail");
       expect(within(detail).queryByTitle("Send via email") !== null, q.status).toBe(offered);
       cleanup();
