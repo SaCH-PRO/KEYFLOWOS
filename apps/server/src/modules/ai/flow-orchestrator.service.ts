@@ -356,6 +356,47 @@ export interface FlowPageContext {
  * passes (StaffChatBridgeService does), and only one JobRolePolicyService issued; a
  * jobRoleEnvelope inside pageContext is dropped.
  */
+/**
+ * W1F-PERCEPTION-MODULE-SCOPE (D-202, review SEC-W1FPMS-2 / COR-W1FPMS-2) and MEM-DOC-EXTRACTION-SIGHT (COR-MDX-1): the
+ * member a flow turn's memory reads are read for, and the modules they may see. A member in the app: themselves while
+ * they are a member (promptMemoryReader), by their membership. The staff bridge's turn (no member, the position's
+ * envelope): the reader and modules JobRolePolicyService resolved for the position (perceptionOf, on an envelope it
+ * issued); when the reader it names is not found a member (removed since), no module (fail closed). A turn with
+ * neither (the support desk) and any other turn with no reader: nobody, and no module. Shared by the perception block
+ * and the semantic memory section; `self` is the orchestrator (its client, logger and job-role policy).
+ */
+async function turnMemorySight(
+  self: {
+    prisma: PrismaService;
+    logger: Pick<Logger, 'warn'>;
+    getJobRolePolicy(): Pick<JobRolePolicyService, 'isIssued' | 'perceptionOf'>;
+  },
+  businessId: string,
+  userId?: string,
+  server?: FlowServerContext,
+): Promise<{ reader: string | null; sight: ModuleSight }> {
+  let candidate: string | undefined = userId;
+  let positionModules: readonly string[] | undefined;
+  if (!userId && server) {
+    const perception = (() => {
+      try {
+        const policy = self.getJobRolePolicy();
+        return policy.isIssued(server.jobRoleEnvelope) ? policy.perceptionOf(server.jobRoleEnvelope) : null;
+      } catch {
+        return null;
+      }
+    })();
+    candidate = perception?.readerUserId ?? undefined;
+    positionModules = perception?.modules ?? [];
+  }
+  const reader = await promptMemoryReader(self.prisma, businessId, candidate, self.logger, 'perception');
+  const sight: ModuleSight =
+    positionModules === undefined
+      ? await readersModuleSight(self.prisma, businessId, reader, self.logger, 'perception')
+      : candidate && reader !== candidate ? NO_MODULE_SIGHT : moduleSightOf(positionModules);
+  return { reader, sight };
+}
+
 export interface FlowServerContext {
   /** The staff position's envelope, as JobRolePolicyService.envelopeForPosition issued it. */
   jobRoleEnvelope: JobRoleEnvelope;
@@ -1411,29 +1452,12 @@ export class FlowOrchestratorService {
       // (D-73/D-93), and otherwise what its map grants, where it saw no module-named event at all. It is the reader and
       // nothing else (D-73/D-88): chat() still runs the turn with no principal, no standing-context viewer and no
       // conversation owner, and chatToolAction still reads the holder for call_create_task alone.
-      let candidate: string | undefined = userId;
-      let positionModules: readonly string[] | undefined;
-      if (!userId && server) {
-        const perception = (() => {
-          try {
-            const policy = this.getJobRolePolicy();
-            return policy.isIssued(server.jobRoleEnvelope) ? policy.perceptionOf(server.jobRoleEnvelope) : null;
-          } catch {
-            return null;
-          }
-        })();
-        candidate = perception?.readerUserId ?? undefined;
-        positionModules = perception?.modules ?? [];
-      }
+      // The reader and the modules are resolved by turnMemorySight (MEM-DOC-EXTRACTION-SIGHT: shared with the semantic
+      // memory section).
       const perceive = async () => {
-        const reader = await promptMemoryReader(this.prisma, businessId, candidate, this.logger, 'perception');
-        // A position's turn sees its position's modules; when the reader it names is not found a member (removed since),
-        // none (fail closed). Any other turn sees by its reader's membership. MEM-DOC-EXTRACTION-SIGHT (D-234): read
-        // before the memory, which takes document extractions only for a sight with revenue read.
-        const sight: ModuleSight =
-          positionModules === undefined
-            ? await readersModuleSight(this.prisma, businessId, reader, this.logger, 'perception')
-            : candidate && reader !== candidate ? NO_MODULE_SIGHT : moduleSightOf(positionModules);
+        // MEM-DOC-EXTRACTION-SIGHT (D-234): read before the memory, which takes document extractions only for a sight
+        // with revenue read.
+        const { reader, sight } = await turnMemorySight({ prisma: this.prisma, logger: this.logger, getJobRolePolicy: () => this.getJobRolePolicy() }, businessId, userId, server);
         const read = await memory.retrieveContext(businessId, {
           // `query` is deliberately NOT passed.
           //
@@ -2082,29 +2106,18 @@ export class FlowOrchestratorService {
    */
   //
   // MEM-SEMANTIC-SIGHT (D-234, D-257): the turn's hits only, by each hit's source (semanticHitsVisibleTo), filtered
-  // before the top 5 are cut. The reader and their module sight are the perception block's (buildPerceptionSection):
-  // the caller while a member, by their membership; a staff position's turn, its position's resolved reader and
-  // modules (none when that reader is not found a member); a turn that names no member, nobody and no module.
-  private async buildSemanticMemorySection(businessId: string, query: string, userId?: string, server?: FlowServerContext): Promise<string> {
+  // before the top 5 are cut, for the perception block's reader and sight (turnMemorySight).
+  private async buildSemanticMemorySection(
+    businessId: string,
+    query: string,
+    userId?: string,
+    server?: FlowServerContext,
+  ): Promise<string> {
     try {
-      let candidate: string | undefined = userId;
-      let positionModules: readonly string[] | undefined;
-      if (!userId && server) {
-        let perception: { readerUserId?: string | null; modules?: readonly string[] } | null = null;
-        try {
-          const policy = this.getJobRolePolicy();
-          perception = policy.isIssued(server.jobRoleEnvelope) ? policy.perceptionOf(server.jobRoleEnvelope) : null;
-        } catch {
-          perception = null;
-        }
-        candidate = perception?.readerUserId ?? undefined;
-        positionModules = perception?.modules ?? [];
-      }
-      const reader = await promptMemoryReader(this.prisma, businessId, candidate, this.logger, 'semanticMemory');
-      const sight: ModuleSight =
-        positionModules === undefined
-          ? await readersModuleSight(this.prisma, businessId, reader, this.logger, 'semanticMemory')
-          : candidate && reader !== candidate ? NO_MODULE_SIGHT : moduleSightOf(positionModules);
+      // MEM-DOC-EXTRACTION-SIGHT (D-234; orchestrator review COR-MDX-1): the copies of document extractions only for a
+      // turn whose reader may read revenue (turnMemorySight, as the perception block reads), else none: the search
+      // leaves them out before its limit.
+      const { reader, sight } = await turnMemorySight({ prisma: this.prisma, logger: this.logger, getJobRolePolicy: () => this.getJobRolePolicy() }, businessId, userId, server);
       const relevant = await this.semanticMemory.search({
         businessId,
         query,

@@ -163,9 +163,9 @@ export function readerSearchOptions(
   businessId: string,
   who: SemanticReader,
   logger?: Pick<Logger, 'warn'>,
-): { withoutDocumentExtractionCopies: boolean; visibleTo: (hits: SemanticMemory[]) => Promise<boolean[]> } {
+): { includeDocumentExtractionCopies: boolean; visibleTo: (hits: SemanticMemory[]) => Promise<boolean[]> } {
   return {
-    withoutDocumentExtractionCopies: !readsDocumentExtractions(who.sight, who.reader),
+    includeDocumentExtractionCopies: readsDocumentExtractions(who.sight, who.reader),
     visibleTo: (hits) => semanticHitsVisibleTo(prisma, businessId, who, hits, logger),
   };
 }

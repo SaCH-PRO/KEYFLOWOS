@@ -11,9 +11,9 @@ import { CalendarIntelligenceService } from './calendar-intelligence.service';
 import { DocumentIntelligenceService } from './document-intelligence.service';
 import { SemanticMemoryService } from './semantic-memory.service';
 import { readerSearchOptions } from './semantic-memory-sight';
-import { promptMemoryReader, readersModuleSight } from '../key-cortex/key-cortex-prompt-context.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { createAgentTrigger, updateAgentTrigger } from './agent-trigger.service';
+import { readersModuleSight } from '../key-cortex/key-cortex-prompt-context.service';
 
 interface AuthenticatedRequest extends Request {
   user?: { id: string; email?: string; role?: string };
@@ -345,9 +345,8 @@ export class AgentController {
 
   /**
    * MEM-SEMANTIC-SIGHT (D-234, D-257): the caller's hits only, by each hit's source (semanticHitsVisibleTo): the reader
-   * is the caller while a member of the business (promptMemoryReader; a SUPER_ADMIN who is no member reads as nobody)
-   * with their membership's module sight. Withheld hits are dropped before the limit is cut. The limit is at most
-   * MAX_SEARCH_LIMIT (default 5).
+   * is the caller, with their membership's module sight (readersModuleSight: a SUPER_ADMIN who is no member has none).
+   * Withheld hits are dropped before the limit is cut. The limit is at most MAX_SEARCH_LIMIT (default 5).
    */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/agent/memory/search')
@@ -358,7 +357,11 @@ export class AgentController {
     @Req() req?: AuthenticatedRequest,
   ) {
     if (!query) return { results: [] };
-    const reader = await promptMemoryReader(this.prisma, businessId, req?.user?.id ?? null, undefined, 'memorySearch');
+    // MEM-DOC-EXTRACTION-SIGHT (D-234; orchestrator review COR-MDX-1): the copies of document extractions only for a
+    // member with revenue read (readersModuleSight, the rule KEY's prompts read them by); the search leaves them out
+    // before its limit for anyone else. MEM-SEMANTIC-SIGHT: and every other hit only as its source allows
+    // (readerSearchOptions), filtered before the limit; the limit is at most MAX_SEARCH_LIMIT.
+    const reader = req?.user?.id ?? null;
     const sight = await readersModuleSight(this.prisma, businessId, reader, undefined, 'memorySearch');
     const asked = limit ? parseInt(limit, 10) : 5;
     const results = await this.semanticMemory.search({
