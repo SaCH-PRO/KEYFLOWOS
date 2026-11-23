@@ -390,6 +390,15 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
     };
     const source = (file: string) => fs.readFileSync(path.join(SERVER_SRC, file), "utf8");
     /**
+     * The file with its comments blanked (string literals kept whole, newlines kept so line numbers still line up):
+     * a commented-out route, class or identifier never counts (delta review, wave 3f).
+     */
+    const code = (file: string) =>
+      source(file).replace(
+        /('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`)|\/\*[\s\S]*?\*\/|\/\/[^\n]*/g,
+        (whole, str: string | undefined) => str ?? whole.replace(/[^\n]/g, " "),
+      );
+    /**
      * Locates a route by what it declares, not by line (wave 3f: merged packets moved the lines): the @Get whose
      * argument is exactly `route` (an empty route is @Get()), inside the controller class `cls` when one is named.
      * Exactly one must exist: a missing or an ambiguous route is a failure.
@@ -397,18 +406,20 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
     const ROUTE = /^((?:modules|core)\/[^#]+\.ts)#(?:([A-Za-z0-9_]+) )?GET (.*)$/;
     const findRoute = (file: string, cls: string | undefined, route: string): { lines: string[]; i: number } | string => {
       const lines = source(file).split("\n");
+      const live = code(file).split("\n");
+      const CLASS = /^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+([A-Za-z0-9_]+)\b/;
       let from = 0;
       let to = lines.length;
       if (cls) {
-        from = lines.findIndex((l) => new RegExp(`\\bclass ${cls}\\b`).test(l));
+        from = live.findIndex((l) => CLASS.exec(l)?.[1] === cls);
         if (from < 0) return `no class ${cls}`;
-        const next = lines.findIndex((l, i) => i > from && /^\s*export\s+class\s/.test(l));
+        const next = live.findIndex((l, i) => i > from && CLASS.test(l));
         to = next < 0 ? lines.length : next;
       }
       const q = route.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const get = route === "" ? /@Get\(\s*\)/ : new RegExp(`@Get\\(\\s*(['"\`])${q}\\1\\s*\\)`);
       const hits: number[] = [];
-      for (let i = from; i < to; i++) if (get.test(lines[i])) hits.push(i);
+      for (let i = from; i < to; i++) if (get.test(live[i])) hits.push(i);
       if (hits.length === 0) return "no such route";
       if (hits.length > 1) return `ambiguous route (${hits.length} @Get) — name its controller class`;
       return { lines, i: hits[0] };
@@ -418,7 +429,7 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
       [...decorators(lines, i).matchAll(/RequireModuleScope\(\s*'([a-z]+)'/g)].map((x) => x[1]);
     /** An identifier the claim names must occur in the file as code (a whole word). */
     const hasIdentifier = (file: string, id: string) =>
-      new RegExp(`(^|[^A-Za-z0-9_$])${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^A-Za-z0-9_$]|$)`).test(source(file));
+      new RegExp(`(^|[^A-Za-z0-9_$])${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^A-Za-z0-9_$]|$)`).test(code(file));
     const bad: string[] = [];
     for (const [href, row] of Object.entries(MODULE_TABLE)) {
       if (row.cite.length === 0) bad.push(`${href}: no reason`);
@@ -449,7 +460,7 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
           justified.add(m[2]);
         } else if ((m = /^tracked:((?:modules|core)\/[^:]+\.ts):([a-z]+) ([A-Za-z_$][\w$]*:?) (FU-[A-Z0-9-]+) (.+)$/.exec(cite))) {
           // Recorded, not justifying: the identifier is still in the file, and the follow-up packet and decision are named.
-          if (!source(m[1]).includes(m[3])) bad.push(`${href}: ${cite}: "${m[3]}" is not in ${m[1]}`);
+          if (!hasIdentifier(m[1], m[3])) bad.push(`${href}: ${cite}: "${m[3]}" is not in ${m[1]}`);
           if (!/^pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100/.test(m[5])) bad.push(`${href}: ${cite}: no decision named`);
         } else if (cite.startsWith("tracked:")) {
           // A tracked claim that does not parse is never accepted by another branch (closing review).
