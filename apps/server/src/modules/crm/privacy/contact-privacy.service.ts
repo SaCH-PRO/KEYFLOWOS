@@ -146,6 +146,8 @@ const STORAGE_CLEANUP_FAILED_ACTION = 'forget_storage_cleanup_failed';
 const EXPORT_BUNDLE_DELETED_ACTION = 'export_bundle_deleted';
 const EXPORT_JOB_ENTITY_TYPE = 'contact_export_job';
 const EXPORT_SWEEP_GRACE_MS = 24 * 60 * 60_000;
+/** A consumed job waits this long after its last download: resolveDownload signs a 5-minute URL before it marks the job consumed. */
+const EXPORT_CONSUMED_GRACE_MS = 15 * 60_000;
 const EXPORT_SWEEP_BATCH = 100;
 
 /**
@@ -657,34 +659,55 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
   /**
    * RR-RETENTION-EXPIRED-EXPORTS: delete the stored objects of export jobs
    * that nobody can download any more. Selected: expiresAt more than 24h ago,
-   * or consumed (consumedAt set or downloadCount >= maxDownloads; the same
-   * conditions under which resolveDownload refuses), with no
-   * export_bundle_deleted entry yet; at most EXPORT_SWEEP_BATCH per cycle,
-   * oldest link first. For each job both objects are deleted; when both
-   * deletes succeed one export_bundle_deleted entry is written (the row is
-   * kept, every field unchanged); when any delete fails nothing is written
-   * but a forget_storage_cleanup_failed entry naming the job and the keys,
-   * as deleteExportBundles records, and the job is selected again next cycle.
-   * Each deletion is by the row's own id and businessId; no AI call.
+   * or consumed (consumedAt set or downloadCount >= maxDownloads, the same
+   * conditions under which resolveDownload refuses) for at least 15 minutes
+   * (resolveDownload signs a 5-minute URL before it marks the job consumed),
+   * with no export_bundle_deleted entry yet; at most EXPORT_SWEEP_BATCH per
+   * cycle, jobs with a recorded storage failure after the others, then oldest
+   * link first, so a job storage keeps refusing never starves the batch. For
+   * each job both objects are deleted; when both deletes succeed one
+   * export_bundle_deleted entry is written (the row is kept, every field
+   * unchanged); when any delete fails nothing is written but, once per job, a
+   * forget_storage_cleanup_failed entry naming the job and the keys, as
+   * deleteExportBundles records; later failures only warn, and the job is
+   * selected again every cycle. When storage is not configured at all the
+   * cycle is skipped with one warning and nothing is written. Each deletion
+   * is by the row's own id and businessId; no AI call.
    */
   private async sweepExportBundles(): Promise<number> {
+    try {
+      this.s3();
+    } catch (err: unknown) {
+      this.logger.warn(
+        `[ContactPrivacy] export retention sweep skipped: storage not configured (${err instanceof Error ? err.message : String(err)})`,
+      );
+      return 0;
+    }
     const cutoff = new Date(Date.now() - EXPORT_SWEEP_GRACE_MS);
-    let jobs: Array<{ id: string; businessId: string; contactId: string; jsonKey: string; zipKey: string }>;
+    const consumedCutoff = new Date(Date.now() - EXPORT_CONSUMED_GRACE_MS);
+    let jobs: Array<{ id: string; businessId: string; contactId: string; jsonKey: string; zipKey: string; failedBefore: boolean }>;
     try {
       jobs = await this.prisma.client.$queryRaw`
         SELECT j.id, j.business_id AS "businessId", j.contact_id AS "contactId",
-               j.json_key AS "jsonKey", j.zip_key AS "zipKey"
+               j.json_key AS "jsonKey", j.zip_key AS "zipKey",
+               EXISTS (
+                 SELECT 1 FROM contact_audit_entries f
+                  WHERE f.business_id = j.business_id
+                    AND f.action = ${STORAGE_CLEANUP_FAILED_ACTION}
+                    AND f.entity_type = ${EXPORT_JOB_ENTITY_TYPE}
+                    AND f.entity_id = j.id) AS "failedBefore"
           FROM contact_export_jobs j
          WHERE (j.expires_at < ${cutoff}
-                OR j.consumed_at IS NOT NULL
-                OR j.download_count >= j.max_downloads)
+                OR (j.consumed_at IS NOT NULL AND j.consumed_at < ${consumedCutoff})
+                OR (j.download_count >= j.max_downloads
+                    AND COALESCE(j.last_downloaded_at, j.created_at) < ${consumedCutoff}))
            AND NOT EXISTS (
              SELECT 1 FROM contact_audit_entries a
               WHERE a.business_id = j.business_id
                 AND a.action = ${EXPORT_BUNDLE_DELETED_ACTION}
                 AND a.entity_type = ${EXPORT_JOB_ENTITY_TYPE}
                 AND a.entity_id = j.id)
-         ORDER BY j.expires_at ASC
+         ORDER BY "failedBefore" ASC, j.expires_at ASC
          LIMIT ${EXPORT_SWEEP_BATCH}`;
     } catch (err: unknown) {
       this.logger.warn(
@@ -700,8 +723,9 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
         const failed = await this.deleteBundleObjects(keys);
         if (failed.length > 0) {
           this.logger.warn(
-            `[ContactPrivacy] export bundle retention failed job=${job.id}: ${failed.length}/${keys.length} object(s) not deleted: ${failed.map((f) => `${f.key} (${f.error})`).join(', ')}`,
+            `[ContactPrivacy] export bundle retention failed job=${job.id}: ${failed.length}/${keys.length} object(s) not deleted: ${failed.map((f) => `${f.key} (${f.error})`).join(', ')}${job.failedBefore ? ' (already recorded; retried next cycle)' : ''}`,
           );
+          if (job.failedBefore) continue;
           await this.recordBundleCleanupFailure({
             businessId: job.businessId,
             contactId: job.contactId,
@@ -1211,7 +1235,7 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
       });
     } catch (err: unknown) {
       this.logger.error(
-        `[ContactPrivacy] could not record failed export bundle cleanup ${p.entityType}=${p.entityId}: ${err instanceof Error ? err.message : String(err)}`,
+        `[ContactPrivacy] could not record failed export bundle cleanup ${p.entityType}=${p.entityId}: ${(err instanceof Error ? err.message : String(err)).slice(0, 200)}`,
       );
     }
   }
