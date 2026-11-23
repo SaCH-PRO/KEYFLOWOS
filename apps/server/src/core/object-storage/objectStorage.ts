@@ -361,8 +361,7 @@ export class ObjectStorageService {
   /**
    * Presigned GET URL for an object previously uploaded via uploadBuffer().
    * Default TTL = 1 hour.
-   */
-  /**
+   *
    * Server-trusted paths only (one the server just wrote): no business check.
    * A path from a client goes through resolveObjectForBusiness.
    */
