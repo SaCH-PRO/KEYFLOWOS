@@ -44,13 +44,15 @@
  *          or WhatsApp; and every nav entry names the module(s) its page's server reads require, cross-checked row by
  *          row against the cited controller's @RequireModuleScope, so an entry added without a row fails. A claim
  *          names the controller file and the route (GET + declared path, with its class when ambiguous) or an
- *          identifier, never a line, and the checker reads the file through the TypeScript parser: it fails when the
- *          route is missing or ambiguous, its scope differs from the claim, or a tracked identifier disappears, and it
- *          fails closed on anything in a cited file it cannot read with certainty (see unreadable, unreadableFile,
- *          findRoute).
+ *          identifier, never a line (beside hub:<id> and D-<n> ruling claims), and the checker reads the file through
+ *          the TypeScript parser: it fails when the route is missing or ambiguous, the handler's scopes are not all
+ *          among the row's modules, a scoped handler has no ModuleScopeGuard in @UseGuards (on it or its controller),
+ *          or a tracked identifier disappears; and it fails closed on anything in a cited file it cannot read with
+ *          certainty (see unreadable, unreadableFile, findRoute, scopeEnforced).
  *          Documented limits (orchestrator ruling 2026-11-23): NMS-18 does not read (1) code defined in another file
  *          (an imported decorator's, class's or function's definition, which may run at load) or (2) metadata written
- *          inside a function or method body when it runs. The server guard is the boundary; FU-NMS-SERVER-METADATA
+ *          inside a function or method body when it runs, nor (3) the body of a pinned ModuleScopeGuard subclass
+ *          (SCOPE_GUARD_SUBCLASSES, each a review decision). The server guard is the boundary; FU-NMS-SERVER-METADATA
  *          (a server spec reading MODULE_SCOPE_KEY and the route table from the compiled controllers for every cited
  *          route) is the follow-up that holds both.
  *   NMS-09 the desktop menu (Main navigation) shows the hubs as links named by their plain labels, and a products
@@ -491,7 +493,18 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
         // decorators and its place in Nest's route order, so a name may be declared once (overload signatures aside).
         const names = new Set<string>();
         for (const member of st.members) {
-          if (!member.name || ts.isConstructorDeclaration(member) || (ts.isMethodDeclaration(member) && !member.body)) continue;
+          // A constructor parameter property (readonly getStatus: ...) is an instance member too: it is assigned at
+          // construction and replaces a method of that name as Nest's handler (closing security review).
+          if (ts.isConstructorDeclaration(member)) {
+            for (const p of member.parameters) {
+              if (!ts.isParameterPropertyDeclaration(p, member)) continue;
+              const key = nameText(p.name);
+              if (names.has(key)) return `member ${key} declared twice in ${st.name?.text}`;
+              names.add(key);
+            }
+            continue;
+          }
+          if (!member.name || (ts.isMethodDeclaration(member) && !member.body)) continue;
           const key = `${ts.getCombinedModifierFlags(member as ts.Declaration) & ts.ModifierFlags.Static ? "static " : ""}${nameText(member.name)}`;
           if (names.has(key)) return `member ${key} declared twice in ${st.name?.text}`;
           names.add(key);
@@ -717,14 +730,24 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
         .filter((c): c is { name: string; qualified: boolean; arg: string } => c?.name === "RequireModuleScope" && c.arg !== null)
         .map((c) => c.arg);
     /**
+     * The ModuleScopeGuard subclasses accepted as the scope guard, each pinned to its file and reviewed: its body is
+     * not read (a documented limit), so adding one, or changing one's canActivate, is a review decision.
+     * WhatsAppOperationsScopeGuard lets the business's configuration owners through on purpose.
+     */
+    const SCOPE_GUARD_SUBCLASSES: Record<string, string[]> = {
+      "modules/whatsapp/whatsapp.controller.ts": ["WhatsAppOperationsScopeGuard"],
+    };
+    /**
      * Whether the scope guard runs on a handler (security review round 7): ModuleScopeGuard is no app-wide guard, so
-     * it must be named in @UseGuards on the handler or its controller, itself or a class of the file that extends it.
+     * it must be named in @UseGuards on the handler or its controller, itself or a pinned subclass declared in the
+     * file that extends it directly.
      */
     const scopeEnforced = (member: ts.ClassElement) => {
       const sf = member.getSourceFile();
+      const pinned = SCOPE_GUARD_SUBCLASSES[sf.fileName] ?? [];
       const subclasses = new Set(
         sf.statements
-          .filter((st): st is ts.ClassDeclaration => ts.isClassDeclaration(st) && !!st.name && !!st.heritageClauses?.some((h) => h.token === ts.SyntaxKind.ExtendsKeyword && h.types.some((t) => t.expression.getText() === "ModuleScopeGuard")))
+          .filter((st): st is ts.ClassDeclaration => ts.isClassDeclaration(st) && !!st.name && pinned.includes(st.name.text) && !!st.heritageClauses?.some((h) => h.token === ts.SyntaxKind.ExtendsKeyword && h.types.some((t) => t.expression.getText() === "ModuleScopeGuard")))
           .map((st) => st.name!.text),
       );
       const guards = [member, member.parent].flatMap((node) =>
