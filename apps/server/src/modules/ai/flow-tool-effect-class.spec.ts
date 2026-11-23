@@ -23,6 +23,19 @@
  * No tool's name, family, riskTier or route changes (R0 KEEP:
  * job-role-tool-families.spec.ts stays green unchanged).
  *
+ * Handler census at 9a7b5011 (every read-family tool's `case` in
+ * flow-orchestrator.service.ts followed into the service it delegates to):
+ * 117 read-family tools, 115 without changedEntities, 103 provably read-only
+ * (READ), 12 candidates WRITE: the eight KNOWN_SENDERS above that call a
+ * provider or an external API; deals_list_stages, finance_list_bank_accounts
+ * and finance_list_coa, which seed rows on first read (createMany / upsert);
+ * present_onboarding_card, whose genome integrity computation updates
+ * genome facts; inbox_list_threads and inbox_read_thread, whose organ handler
+ * is a pure read but whose bridged dispatch writes a cortex action log, a
+ * business event and the autonomy daily count (unsure means WRITE). The
+ * aiExecutionLog row executeTool writes for every tool is common
+ * infrastructure, not a per-tool write.
+ *
  * The exports are read through a namespace import so this file loads on main
  * and names what is missing instead of failing to link.
  */
@@ -43,7 +56,16 @@ type Classified = FlowTool & { effectClass?: unknown };
  * they may never be 'READ' (R3). Filled from the handler census the packet
  * records; a tool listed here with effectClass 'READ' is a census failure.
  */
-export const KNOWN_SENDERS: readonly string[] = [];
+export const KNOWN_SENDERS: readonly string[] = [
+  'reports_generate', // ReportsService.generateReport calls the AI provider (reports.service.ts)
+  'inbox_brief', // KeyInboxService.generateBrief: AI completion, writes an insight row and a temporal event
+  'payments_list_transactions', // Stripe API and the FX rate fetch (stripe.connector.ts, currency-rates.service.ts)
+  'payments_search_transactions', // Stripe API and the FX rate fetch
+  'payments_list_links', // Stripe GET /payment_links
+  'social_get_analytics', // fetches Facebook, LinkedIn, Twitter and TikTok APIs
+  'contract_extract_terms', // AI extraction (document-intelligence.service.ts); also declares changedEntities
+  'contract_extract_clauses', // AI extraction (contract-clause.service.ts); also declares changedEntities
+];
 
 /** R1 to R3 over a list of tools, as `name: problem` strings; empty means the census passes. */
 export function effectClassProblems(tools: readonly Classified[], knownSenders: readonly string[] = KNOWN_SENDERS): string[] {
