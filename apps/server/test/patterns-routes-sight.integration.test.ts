@@ -509,4 +509,39 @@ describe('FU-PATTERNS-ROUTES-SIGHT (D-257, D-100, D-234, D-146): the memory and 
       await clearMemory();
     }
   }, 240_000);
+
+  it('V71Y-10 (correctness review TST-R2-1): on Postgres, past the first keyset page: the revenue-none member and the memberless SUPER_ADMIN get identical agent/patterns with 0 or 450 withheld patterns newer than theirs, some sharing a millisecond', async () => {
+    await clearMemory();
+    try {
+      await seedPlain();
+      const before: Record<string, unknown> = {};
+      for (const reader of BLIND) before[reader] = await ok(reader, '/agent/patterns');
+      const base = Date.now() + 1_000;
+      await db.aiMemory.createMany({
+        data: Array.from({ length: 450 }, (_, i) => ({
+          businessId: ID.biz, category: 'patterns', key: `pattern_overdue_invoice_cluster_${P}${i}`,
+          value: JSON.stringify({ category: 'overdue_invoice_cluster', description: `2 overdue invoices totaling ${TOTAL}` }),
+          confidence: 0.85, source: 'pattern_analysis', createdAt: new Date(base + Math.floor(i / 7)),
+        })),
+      });
+      for (const reader of BLIND) expect(await ok(reader, '/agent/patterns'), reader).toEqual(before[reader]);
+      expect(moneyIn(await ok('owner', '/agent/patterns')).length, 'owner control').toBeGreaterThan(0);
+    } finally {
+      await clearMemory();
+    }
+  }, 240_000);
+
+  it('V71Y-11 RED (security review round 2, O-2): POST .../agent/patterns/scan is rate limited (5 a minute per caller address and business): the sixth answers 429', async () => {
+    await clearMemory();
+    try {
+      const statuses: number[] = [];
+      for (let i = 0; i < 6; i++) {
+        const res = await agent().post(`/ai/businesses/${ID.biz}/agent/patterns/scan`).set(HEADER, ID.blind).set('x-forwarded-for', '10.74.9.1');
+        statuses.push(res.status);
+      }
+      expect(statuses).toEqual([201, 201, 201, 201, 201, 429]);
+    } finally {
+      await clearMemory();
+    }
+  }, 240_000);
 });

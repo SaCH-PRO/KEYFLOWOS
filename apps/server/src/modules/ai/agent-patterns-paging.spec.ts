@@ -22,6 +22,7 @@ function table(rows: Row[], onRead?: (call: number) => void) {
     calls.push(args);
     onRead?.(calls.length);
     let out = rows.filter((r) => r.businessId === args.where.businessId && r.category === args.where.category);
+    if (args.where.createdAt?.gte) out = out.filter((r) => r.createdAt >= args.where.createdAt.gte);
     const or = args.where.OR as Array<any> | undefined;
     if (or) {
       out = out.filter((r) =>
@@ -48,7 +49,8 @@ function controllerOver(findMany: (args: any) => Promise<Row[]>, role = 'STAFF',
   return new AgentController({} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, prisma as any);
 }
 
-const at = (n: number) => new Date(Date.UTC(2026, 10, 1) + n * 1000);
+const BASE = Date.now() - 10 * 24 * 60 * 60 * 1000;
+const at = (n: number) => new Date(BASE + n * 1000);
 const plain = (n: number): Row => ({ id: `p${String(n).padStart(6, '0')}`, businessId: 'biz', category: 'patterns', key: `peak_${n}`, value: `Peak activity hour: ${n % 12 || 12}AM`, createdAt: at(n), confidence: 0.8 });
 const money = (n: number): Row => ({
   id: `m${String(n).padStart(6, '0')}`, businessId: 'biz', category: 'patterns', key: `pattern_overdue_invoice_cluster_${n}`,
@@ -82,13 +84,32 @@ describe('GET .../agent/patterns pages by keyset, bounded (FU-PATTERNS-ROUTES-SI
     expect(ids).toEqual(Array.from({ length: 50 }, (_, i) => plain(59 - i).id));
   });
 
-  it('reads at most PATTERNS_SCAN_MAX rows a request, however many withheld patterns are newer (fewer than 50, never more rows read)', async () => {
-    const rows = [plain(0), ...Array.from({ length: 10_000 }, (_, i) => money(1 + i))];
+  // Review round 2 (security F-1): a bound on the rows read counted the withheld rows too, so whether a visible pattern
+  // was answered told a reader how many money patterns were newer (1,999 newer: answered; 2,000: not). The round-1
+  // case here pinned that bound ("at most 2,000 rows read"); it is replaced by the window below, which bounds the read
+  // by time and not by what is withheld.
+  it('no row-count signal: a visible pattern is answered whether 1,999, 2,000 or 5,000 withheld patterns are newer', async () => {
+    for (const newer of [1_999, 2_000, 5_000]) {
+      const rows = [plain(0), ...Array.from({ length: newer }, (_, i) => money(1 + i))];
+      const res = await controllerOver(table(rows).findMany).getDetectedPatterns('biz', req);
+      expect(res.patterns.map((p: any) => p.id), `${newer} newer`).toEqual([plain(0).id]);
+    }
+  });
+
+  it("a reader who may not read every pattern reads the last PATTERNS_WINDOW_DAYS days only: every read carries the window, and an older pattern is not answered to them (the owner's is)", async () => {
+    const old: Row = { ...plain(1), id: 'p_old', createdAt: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000) };
+    const rows = [old, plain(2), ...Array.from({ length: 300 }, (_, i) => money(10 + i))];
     const t = table(rows);
     const res = await controllerOver(t.findMany).getDetectedPatterns('biz', req);
-    const read = t.calls.reduce((n, c) => n + (c.take ?? 0), 0);
-    expect(read, `rows asked for over ${t.calls.length} reads`).toBeLessThanOrEqual(2_000);
-    expect(res.patterns.every((p: any) => !JSON.stringify(p).includes('totaling')), 'nothing withheld is answered').toBe(true);
+    expect(res.patterns.map((p: any) => p.id)).toEqual([plain(2).id]);
+    const floor = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    for (const call of t.calls) {
+      const gte = call.where.createdAt?.gte as Date | undefined;
+      expect(gte, JSON.stringify(call.where)).toBeInstanceOf(Date);
+      expect(Math.abs(gte!.getTime() - floor)).toBeLessThan(60_000);
+    }
+    const owner = await controllerOver(table(rows).findMany, 'OWNER', null).getDetectedPatterns('biz', { user: { id: 'u_owner' } } as any);
+    expect(owner.patterns.map((p: any) => p.id)).toContain('p_old');
   });
 
   it('the owner reads the newest 50 in one page, as before (createdAt desc, id desc)', async () => {
@@ -97,5 +118,8 @@ describe('GET .../agent/patterns pages by keyset, bounded (FU-PATTERNS-ROUTES-SI
     const res = await controllerOver(t.findMany, 'OWNER', null).getDetectedPatterns('biz', { user: { id: 'u_owner' } } as any);
     expect(res.patterns.map((p: any) => p.description)).toEqual(Array.from({ length: 50 }, (_, i) => `2 overdue invoices totaling ${4000 + 499 - i}`));
     expect(t.calls).toHaveLength(1);
+    // Correctness review round 2 (COR-R2-2): the owner's one read is the old one: the newest 50, no window.
+    expect(t.calls[0].take).toBe(50);
+    expect(t.calls[0].where.createdAt).toBeUndefined();
   });
 });
