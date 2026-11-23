@@ -9,6 +9,7 @@
  * value form), and the read's own where clause.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { admitAllSemanticSightForTests } from '../../../test/helpers/semantic-sight.js';
 import { readersModuleSight, readersOwnPromptMemory } from './key-cortex-prompt-context.service';
 import { UnifiedMemoryRetrievalService } from './unified-memory-retrieval.service';
 
@@ -125,7 +126,10 @@ describe('MEM-DOC-EXTRACTION-SIGHT: the memory read takes document extractions o
     const search = vi.fn(async () => []);
     const db = { client: new Proxy({}, { get: () => ({ findMany: vi.fn(async () => []) }) }) };
     const service = new UnifiedMemoryRetrievalService(db as any, { search } as any);
-    await service.retrieveContext('biz_1', { query: 'q', ...(documentExtractions === undefined ? {} : { documentExtractions }) });
+    // MEM-UNIFIED-SEMANTIC-SIGHT: a semantic read needs a reader's sight (none: no search, fail closed); this one's reader
+    // may see the copies, so the read's own documentExtractions flag is what decides.
+    const semanticSight = admitAllSemanticSightForTests(true);
+    await service.retrieveContext('biz_1', { query: 'q', semanticSight, ...(documentExtractions === undefined ? {} : { documentExtractions }) });
     return (search.mock.calls[0] as any)[0];
   };
 

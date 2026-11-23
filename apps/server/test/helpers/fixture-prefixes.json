@@ -1205,6 +1205,11 @@
       "prefix": "v72s_",
       "owner": "apps/server/test/bank-token-encryption.integration.test.ts",
       "packet": "V1-72 (RR-BANK-TOKEN-ENCRYPT)"
+    },
+    {
+      "prefix": "v74u_",
+      "owner": "apps/server/test/memory-unified-semantic-sight.integration.test.ts",
+      "packet": "V1-74 (MEM-UNIFIED-SEMANTIC-SIGHT)"
     }
   ],
   "pendingRenames": [],
