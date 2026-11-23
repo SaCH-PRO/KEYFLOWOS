@@ -72,8 +72,12 @@ const ID = {
 /** Figures only the money columns and rows of this fixture carry. */
 const FIGURES = /4,?500\.25|8,?765\.43|TTD 912|31\.7/;
 /** The money DNA keys and KEY genome sections (D-233, D-234). */
-const MONEY_DNA = ['financial', 'sales'];
-const MONEY_SECTIONS = ['FINANCIAL', 'SALES', 'OFFER_PRODUCT'];
+// Round 2 (security MAJOR-2): the business DNA (BUSINESS_MODEL: the revenue model and pricing) is money under the
+// merged classifier (MONEY_SECTIONS, D-234), so it fails closed with the financial and sales DNA.
+const MONEY_DNA = ['financial', 'sales', 'business'];
+const MONEY_SECTIONS = ['FINANCIAL', 'SALES', 'OFFER_PRODUCT', 'BUSINESS_MODEL'];
+/** The business model's revenue model and core offer (round 2, correctness MAJOR-1). */
+const BUSINESS_MODEL_TEXT = /retainer|Audit|Revenue model|Core offer/;
 const COMPOSITES = ['genomeIntegrity', 'executiveReadinessScore', 'genomeStage'];
 
 let db: any;
@@ -87,6 +91,7 @@ async function cleanup() {
   for (const sql of [
     `DELETE FROM temporal_flow_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM business_constitution_versions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM genome_chat_messages WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM business_genomes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM business_blueprints WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM genome_evolution_proposals WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -180,6 +185,8 @@ beforeAll(async () => {
   const { KeyActionProposalService } = await import('../src/modules/key-autonomy/key-action-proposal.service');
   const { GenomeDocumentPackController } = await import('../src/modules/business-genome/document-pack/genome-document-pack.controller');
   const { GenomeDocumentPackService } = await import('../src/modules/business-genome/document-pack/genome-document-pack.service');
+  const { GenomeChatController } = await import('../src/modules/business-genesis/genome-chat.controller');
+  const { GenomeChatService } = await import('../src/modules/business-genesis/genome-chat.service');
 
   const offRoute = (name: string) => new Proxy({}, {
     get: (_t, prop) => (prop === 'then' || (typeof prop === 'string' && /^(on|before)(Module|Application)/.test(prop))
@@ -196,10 +203,11 @@ beforeAll(async () => {
     businessId: ID.biz, overall: 0.47, integrity: 0.52, readiness: 0.44, confidence: 0.61, computedAt: new Date().toISOString(),
     sections: [
       sectionScore('FINANCIAL', 0.21), sectionScore('SALES', 0.33), sectionScore('OFFER_PRODUCT', 0.25),
-      sectionScore('OPERATIONS_DELIVERY', 0.55), sectionScore('FOUNDER_LEADERSHIP', 0.9),
+      sectionScore('OPERATIONS_DELIVERY', 0.55), sectionScore('FOUNDER_LEADERSHIP', 0.9), sectionScore('BUSINESS_MODEL', 0.6),
     ],
   };
-  const scoring = { computeFactScores: async () => [], computeBusinessScore: () => KEY_SCORE };
+  const scoring = { computeFactScores: async () => [], computeBusinessScore: (..._args: unknown[]): unknown => KEY_SCORE };
+  tools.scoring = scoring;
   const missing = (section: string, domain: string, field: string, reason: string) => ({ section, domain, field, reason, impact: 'BLOCKING' });
   const READINESS = [
     { businessId: ID.biz, module: 'finance', readinessScore: 33, requiredFacts: [], optionalFacts: [], missingFacts: [missing('FINANCIAL', 'finance', 'monthlyTarget', 'Monthly target TTD 912 unknown')], blockedReasons: ['Finance facts missing'], recommendedSetupActions: [], automationAllowed: false, riskLevel: 'HIGH', lastComputedAt: new Date().toISOString() },
@@ -270,7 +278,7 @@ beforeAll(async () => {
   moduleRef = await Test.createTestingModule({
     controllers: [
       BlueprintController, ConstitutionVersionController, BusinessCommandCenterController, BusinessIntelligenceController,
-      KeyExecutiveModeController, GenomeDocumentPackController,
+      KeyExecutiveModeController, GenomeDocumentPackController, GenomeChatController,
     ],
     providers: [
       PrismaService,
@@ -287,8 +295,12 @@ beforeAll(async () => {
       live(ConstitutionVersionService, constitutionOf),
       live(BusinessCommandCenterService, commandCenterOf),
       live(GenomeDocumentPackService, documentPackOf),
+      live(GenomeChatService, (prisma: any) => new GenomeChatService(prisma, blueprintOf(prisma), offRoute('ModelGatewayService') as any)),
     ],
-  }).compile();
+  })
+    // The genome-chat send route's rate limit is off the routes under test (apply-updates carries none).
+    .overrideGuard((await import('../src/core/guards/rate-limit.guard')).RateLimitGuard).useValue({ canActivate: () => true })
+    .compile();
 
   const prisma = moduleRef.get(PrismaService);
   app = moduleRef.createNestApplication();
@@ -337,7 +349,10 @@ beforeAll(async () => {
     operatingModel: { revenueModel: 'retainer', deliveryMode: 'remote', serviceArea: 'TT', teamSize: 3 },
     goals: { northStar: 'clients' },
     constraints: { budgetRange: 'small', timeCommitment: 'full', riskTolerance: 'low' },
-    workflowModel: { primaryWorkflow: 'intake' },
+    workflowModel: { primaryWorkflow: 'intake', retainerCycle: true, quoteDrivenSales: true, ecommerceFulfillment: true, appointmentBooking: true },
+    // Round 2 (security MAJOR-1): inferFromEvents writes revenue-derived figures here (the momentum score is the 30-day
+    // paid revenue / 100, the expense ratio, the quote conversion, the top product categories).
+    intelligence: { topChannels: ['crm'], recentMomentumScore: 77, expenseRatio: 42.5, quoteConversionRate: 33.3, topProductCategories: ['Premium audits'] },
     aiPreferences: { autonomyLevel: 'assist', outreachStyle: 'calm', reportingCadence: 'weekly' },
     founderProfile: { founderName: 'F', background: 'b', skills: ['s'], weeklyAvailabilityHours: 40 },
     customerModel: { idealCustomer: 'smb', segments: ['a'], painPoints: ['p'] },
@@ -416,6 +431,14 @@ describe('FU-GENOME-SURFACES-REVENUE: the genome surfaces serve finance-derived 
       expect(res.body.operatingModel.deliveryMode).toBe('remote');
       expect(res.body.constraints.budgetRange).toBeUndefined();
       expect(JSON.stringify(res.body)).not.toMatch(/retainer|Runway/);
+      // Round 2 (security MAJOR-1): the revenue-derived intelligence figures and workflow flags.
+      for (const field of ['recentMomentumScore', 'expenseRatio', 'quoteConversionRate', 'topProductCategories']) {
+        expect(res.body.intelligence[field], field).toBeUndefined();
+      }
+      expect(res.body.intelligence.topChannels).toEqual(['crm']);
+      for (const flag of ['retainerCycle', 'quoteDrivenSales', 'ecommerceFulfillment']) expect(res.body.workflowModel[flag], flag).toBeUndefined();
+      expect(res.body.workflowModel.appointmentBooking).toBe(true);
+      expect(JSON.stringify(res.body)).not.toMatch(/Premium audits|42\.5|33\.3/);
       expect(res.body.identity.name).toBe('V80R');
       expect(JSON.stringify(res.body)).not.toMatch(FIGURES);
     }
@@ -429,7 +452,11 @@ describe('FU-GENOME-SURFACES-REVENUE: the genome surfaces serve finance-derived 
     expect(integrity.status).toBe(200);
     expectProjectedGenome({ ...integrity.body, dnaSections: [] });
     const pillars = await get(bp('/genome/three-pillar-status'), ID.staffNone);
-    expect(pillars.body).toEqual({ met: true, founder: 100, business: 100, market: 67 });
+    // The business DNA is withheld (round 2); whether the three pillars are met stays (the genome gate reads it).
+    expect(pillars.body.met).toBe(true);
+    expect(pillars.body.founder).toBe(100);
+    expect(pillars.body.market).toBe(67);
+    expect(pillars.body.business ?? null).toBeNull();
   });
 
   it('SR-03 GET genome/recommendations: the weakest section among the served ones', async () => {
@@ -454,6 +481,7 @@ describe('FU-GENOME-SURFACES-REVENUE: the genome surfaces serve finance-derived 
     expect(res.body.sections.executiveSummary).toBeDefined();
     expect(JSON.stringify(res.body)).not.toMatch(FIGURES);
     expect(JSON.stringify(res.body)).not.toMatch(/Pricing model|Average ticket|Monthly revenue target/);
+    expect(JSON.stringify(res.body)).not.toMatch(BUSINESS_MODEL_TEXT);
   });
 
   it('SR-05 constitution versions and staleness: stored composites and money DNA withheld', async () => {
@@ -474,6 +502,7 @@ describe('FU-GENOME-SURFACES-REVENUE: the genome surfaces serve finance-derived 
       for (const key of ['financialStrategy', 'salesStrategy', 'riskRegister']) expect(row.content.sections[key], key).toBeUndefined();
       expect(JSON.stringify(row)).not.toMatch(FIGURES);
       expect(JSON.stringify(row)).not.toMatch(/Pricing model|Genome Integrity|Executive Readiness/);
+      expect(JSON.stringify(row)).not.toMatch(BUSINESS_MODEL_TEXT);
     }
     const staleness = await get(`${base}/staleness`, ID.staffNone);
     expect(staleness.status).toBe(200);
@@ -528,6 +557,7 @@ describe('FU-GENOME-SURFACES-REVENUE: the genome surfaces serve finance-derived 
         expect(text, route).not.toMatch(/Genome Integrity|Executive Readiness|Genome Stage|REVENUE.ENGINE|null%|undefined%/);
         expect(text, route).not.toMatch(/Financial DNA|Sales DNA|Financial Strategy|Sales Strategy|Risk Register|Pricing model/);
         expect(text, route).not.toMatch(FIGURES);
+        expect(text, route).not.toMatch(BUSINESS_MODEL_TEXT);
       }
       rendered.length = 0;
       await get(`${base}/dna/export?format=docx`, ID.owner);
@@ -676,6 +706,44 @@ describe('FU-GENOME-SURFACES-REVENUE: the genome surfaces serve finance-derived 
       const res = await get(`/business-command-center/businesses/${ID.biz}/snapshot`, ID.staffNone);
       expect(res.status).toBe(200);
       for (const field of COMPOSITES) expect(res.body.health[field] ?? null, field).toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+  it('SR-14 setup steps and recommended steps name no money column (round 2, security MINOR-3)', async () => {
+    const money = ['financials', 'projectionProfile', 'salesSystem', 'offerArchitecture'];
+    const steps = await get(bp('/setup-steps'), ID.staffNone);
+    expect(steps.status).toBe(200);
+    for (const step of steps.body.steps) expect(money).not.toContain(step.id);
+    expect(steps.body.steps.map((s: any) => s.id)).toContain('identity');
+    const recs = await get(bp('/recommendations'), ID.staffNone);
+    for (const step of recs.body.steps) expect(money).not.toContain(step.section ?? step.id);
+    const owner = await get(bp('/setup-steps'), ID.owner);
+    expect(owner.body.steps.map((s: any) => s.id)).toEqual(expect.arrayContaining(money));
+  });
+
+  it('SR-15 genome-chat apply-updates answers the genome as GET does; the stored message states no integrity (round 2, correctness MAJOR-2)', async () => {
+    const res = await request(app.getHttpServer()).post(`/genome-chat/businesses/${ID.biz}/apply-updates`).set(HEADER, ID.staffNone)
+      .send({ section: 'operations', data: { coreWorkflows: ['intake'] } });
+    expect(res.status).toBeLessThan(300);
+    expectProjectedGenome(res.body);
+    const rows = await db.genomeChatMessage.findMany({ where: { businessId: ID.biz } });
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) expect(row.content).not.toMatch(/Genome Integrity|\d+%/);
+    const owner = await request(app.getHttpServer()).post(`/genome-chat/businesses/${ID.biz}/apply-updates`).set(HEADER, ID.owner)
+      .send({ section: 'operations', data: { coreWorkflows: ['intake'] } });
+    expectWholeGenome(owner.body);
+  });
+
+  it('SR-16 the command-center summary never calls a withheld KEY genome unpopulated (round 2, correctness MINOR-4)', async () => {
+    const spy = vi.spyOn(tools.scoring, 'computeBusinessScore').mockReturnValue({
+      businessId: ID.biz, overall: 0.2, integrity: 0.2, readiness: 0.2, confidence: 0.2, computedAt: new Date().toISOString(),
+      sections: [{ section: 'FINANCIAL', weight: 1, score: { overall: 0.2, completeness: 0.2, confidence: 0.2, freshness: 0.2, operationalReadiness: 0.2, quality: 0.2 } }],
+    });
+    try {
+      const res = await get(`/business-command-center/businesses/${ID.biz}/snapshot`, ID.staffNone);
+      expect(res.status).toBe(200);
+      expect(res.body.summary).not.toMatch(/not been populated/);
     } finally {
       spy.mockRestore();
     }

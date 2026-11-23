@@ -8,6 +8,7 @@
  *   GWS-02  the command-center genome cards and the KEY genome cards (v1, v2) do the same (no ring segment or grade)
  *   GWS-03  the genome orb shows the withheld state (no integrity number, no stage ladder position, no readiness)
  *   GWS-04  a revenue reader's numbers are rendered as before
+ *   GWS-05  round 2 (both reviews): the DNA sections list shows the withheld integrity as withheld, not "Integrity: %"
  */
 import { describe, it, expect, afterEach } from "vitest";
 import { render, cleanup } from "@testing-library/react";
@@ -17,6 +18,7 @@ import { CommandGenomeCard } from "../components/command-genome-card";
 import { CommandKeyGenomeCard } from "../components/command-key-genome-card";
 import { CommandKeyGenomeCardV2 } from "../components-v2/command-key-genome-card-v2";
 import { GenomeOrb } from "@/components/genome/genome-orb";
+import { DnaSectionsList } from "@/app/app/profile/components/business-genome/dna-sections-list";
 import type { CommandCenterGenome, CommandCenterHealth, CommandCenterKeyGenome } from "@/lib/api/business-command-center";
 import type { GenomeIntegrityResult } from "@/lib/api/business-genome";
 
@@ -86,5 +88,14 @@ describe("FU-GENOME-SURFACES-REVENUE: the withheld genome state", () => {
     expect(text).toMatch(/61%/);
     expect(text).toMatch(/REVENUE ENGINE/);
     expect(text).not.toMatch(/Withheld/);
+  });
+  it("GWS-05 the DNA sections list renders a withheld integrity as withheld", () => {
+    const genome = {
+      genomeIntegrity: null, executiveReadinessScore: null, genomeStage: null, threePillarMinimumMet: true,
+      genomeDnaScores: { founder: 100 }, genomeDnaConfidence: { founder: 100 }, readinessBreakdown: {}, dnaSections: [],
+      withheldForRevenue: ["genomeIntegrity"],
+    } satisfies GenomeIntegrityResult;
+    const { container } = render(<DnaSectionsList genome={genome} onUpdate={() => undefined} />);
+    expectWithheld(container.textContent ?? "");
   });
 });
