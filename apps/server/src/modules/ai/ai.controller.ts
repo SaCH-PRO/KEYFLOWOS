@@ -91,6 +91,25 @@ const ALLOWED_MEMORY_CATEGORIES = new Set<string>([
  * what one request adds to the rows every partial reader's GET .../agent/patterns pages over.
  */
 const MAX_BULK_MEMORY_ENTRIES = 50;
+/**
+ * FU-PATTERNS-ROUTES-SIGHT (security review round 4, F-1): the largest key and value a member's PUT writes. A partial
+ * reader's GET .../agent/patterns reads and classifies every withheld row of its window, so its cost follows the bytes
+ * withheld, not the rows: without a size bound a member's 30 writes a minute of ~100 KB each cost every such read about
+ * a thousand times what as many short rows do. Preferences, goals and the other categories written here are a line of
+ * text (the AI preferences panel derives keys of at most 50 characters); 200 and 2,000 are far above any of them.
+ */
+const MAX_MEMORY_KEY_LENGTH = 200;
+const MAX_MEMORY_VALUE_LENGTH = 2_000;
+
+/** Refuses a key or value a member may not write (missing, not text, or over its bound). */
+function assertMemoryEntryBounded(entry: { key?: unknown; value?: unknown }): void {
+  if (typeof entry?.key !== 'string' || entry.key.length > MAX_MEMORY_KEY_LENGTH) {
+    throw new BadRequestException(`key must be text of at most ${MAX_MEMORY_KEY_LENGTH} characters`);
+  }
+  if (typeof entry.value !== 'string' || entry.value.length > MAX_MEMORY_VALUE_LENGTH) {
+    throw new BadRequestException(`value must be text of at most ${MAX_MEMORY_VALUE_LENGTH} characters`);
+  }
+}
 
 function assertMemoryCategoryAllowed(category: string): void {
   if (RESERVED_MEMORY_CATEGORIES.has(category)) {
@@ -1073,6 +1092,7 @@ export class AiController {
     @Body() body: { category: MemoryCategory; key: string; value: string; confidence?: number },
   ) {
     assertMemoryCategoryAllowed(body.category);
+    assertMemoryEntryBounded(body);
     const entry = await this.memory.upsert(businessId, {
       category: body.category,
       key: body.key,
@@ -1097,6 +1117,7 @@ export class AiController {
     }
     for (const e of body.entries) {
       assertMemoryCategoryAllowed(e.category);
+      assertMemoryEntryBounded(e);
     }
     const results = await this.memory.upsertMany(
       businessId,
