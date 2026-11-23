@@ -7525,8 +7525,9 @@ ${triage.standingContext}`;
         // VOID -> SENT transition. Refused before any mail.
         if (invoice.status === 'VOID') throw new Error('Cannot email a voided invoice');
         // FU-PAY-LINK-STATUS-GATE (D-248): KEY does not email an invoice no pay link may be
-        // issued for. (A link that cannot be produced for another reason, such as every link
-        // revoked or expired, still leaves the email without a button: FU-KEY-INVOICE-EMAIL-PAY-LINK.)
+        // issued for. (When every link is revoked or expired, automatedInvoiceUrl answers null and
+        // the email goes without a button by design, V1-46b SEC-V46B-1/2; a transient conflict is
+        // FU-KEY-INVOICE-EMAIL-PAY-LINK's.)
         // An invoice no pay link may be issued for (PENDING, FAILED, FULLY_CREDITED, any status
         // added later) is refused here, before any mail, link or status change, as the operator's
         // send-email refuses it. A DRAFT is admitted: this send issues it. PAID is left as it was.

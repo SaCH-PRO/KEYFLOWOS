@@ -1160,7 +1160,7 @@
     {
       "prefix": "v57p_",
       "owner": "apps/server/test/pay-link-status-gate.integration.test.ts",
-      "packet": "FU-PAY-LINK-STATUS-GATE"
+      "packet": "V1-57 (FU-PAY-LINK-STATUS-GATE)"
     }
   ],
   "pendingRenames": [],
