@@ -55,13 +55,16 @@ export interface StoreOrderPage {
 }
 
 export interface StoreOrderSummary {
-  totalOrders: number;
+  /** FU-SITE-ANALYTICS-REVENUE-SCOPE (D-100, D-234): absent for a member without revenue read. */
+  totalOrders?: number;
   pendingOrders: number;
   confirmedOrders: number;
   shippedOrders: number;
-  completedOrders: number;
+  /** Absent for a member without revenue read (sales volume, D-234). */
+  completedOrders?: number;
   cancelledOrders: number;
-  totalRevenue: number;
+  /** Sum of PAID orders; absent (not zero) for a member without revenue read (D-100). */
+  totalRevenue?: number;
 }
 
 export interface StoreOrderFilters {
