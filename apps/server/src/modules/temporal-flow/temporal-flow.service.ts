@@ -46,13 +46,22 @@ function eventTextStatesMoney(e: { payload?: unknown; metadata?: unknown }): boo
 }
 
 /**
- * Round 4 (correctness MINOR-2): a lifecycle row's payload without the autonomy rule trace KeyActionProposalService
- * copies into it (the orchestrator's own counts, e.g. totalUses); its reason is still read by eventTextStatesMoney.
+ * Round 4 (correctness MINOR-2), narrowed in round 5: a lifecycle row's payload with each autonomy rule-trace entry's
+ * `metadata` left out (the orchestrator's own counts, e.g. totalUses, read as a figure). Every entry's rule, source,
+ * result and reason are still read; a trace that is not a list of objects is read whole.
  */
 function withoutRuleTrace(payload: unknown): unknown {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !('ruleTrace' in payload)) return payload;
-  const { ruleTrace: _ruleTrace, ...rest } = payload as Record<string, unknown>;
-  return rest;
+  const { ruleTrace, ...rest } = payload as Record<string, unknown>;
+  if (!Array.isArray(ruleTrace)) return payload;
+  return {
+    ...rest,
+    ruleTrace: ruleTrace.map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+      const { metadata: _metadata, ...kept } = entry as Record<string, unknown>;
+      return kept;
+    }),
+  };
 }
 
 /** The most rows a reader may ask one timeline read for, and the most rows that read scans before it answers what it has. */

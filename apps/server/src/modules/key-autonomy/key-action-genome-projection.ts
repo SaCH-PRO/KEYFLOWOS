@@ -72,7 +72,9 @@ function nonMoneySection(section: unknown): boolean {
 export function isFinancialGenomeEvolution(row: GenomeEvolutionFields | null | undefined): boolean {
   if (!row) return true;
   if (!nonMoneySection(row.section)) return true;
-  if (textStatesMoney(row.reason)) return true;
+  // Round 5 (security MAJOR-1): a bare figure in the reason ("Hit 120k this quarter") fails closed as in the patch;
+  // the generator's reasons are words.
+  if (textStatesMoney(row.reason) || patchHoldsFigure(row.reason)) return true;
   if (patchHoldsFigure(row.proposedPatch)) return true;
   return structuredValueStatesMoney(row.proposedPatch) || structuredValueStatesMoney(row.evidence);
 }
@@ -95,7 +97,8 @@ type EvolutionEvent = {
 
 /** The row's own text and data: its title, summary, description, payload (section, patch) and signals. */
 function eventStatesMoney(e: EvolutionEvent): boolean {
-  if ([e.title, e.summary, e.description].some(textStatesMoney)) return true;
+  // The row's summary carries the reason (`${section} proposal <status>: ${reason}`): a bare figure there fails closed too.
+  if ([e.title, e.summary, e.description].some((t) => textStatesMoney(t) || patchHoldsFigure(t))) return true;
   const payload = e.payload && typeof e.payload === 'object' && !Array.isArray(e.payload) ? (e.payload as Record<string, unknown>) : null;
   if (payload && 'section' in payload && !nonMoneySection(payload.section)) return true;
   if (payload && patchHoldsFigure(payload.proposedPatch)) return true;
