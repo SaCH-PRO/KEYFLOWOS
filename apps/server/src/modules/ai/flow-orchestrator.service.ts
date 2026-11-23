@@ -2628,25 +2628,39 @@ ${triage.standingContext}`;
       // its own position, a parsed call's position is filled once it ran.
       const slots: Array<FlowToolResult | null> = [];
       const toolCalls: FlowToolCall[] = [];
+      // Every call the model made, for the turn's result and the saved session:
+      // a refused call appears with no arguments and the refusal as its
+      // description, so the saved calls pair with the saved results (the next
+      // turn's history rebuild gives every tool message a tool_call to answer).
+      const announcedCalls: FlowToolCall[] = [];
+      const refusedCalls: FlowToolCall[] = [];
       for (const tc of assistantMessage.tool_calls) {
+        const tool = getToolByName(tc.function.name);
         const parsed = parseToolArguments(tc.function.arguments);
         if (!parsed.ok) {
           this.logger.warn(`Flow chat: tool call ${tc.function.name} refused, arguments were not valid JSON`);
           slots.push(this.refusedToolResult(tc.id, tc.function.name));
+          const refused: FlowToolCall = { id: tc.id, name: tc.function.name, arguments: {}, riskLevel: tool?.riskLevel ?? 'low', description: toolArgumentsRefusal(tc.function.name) };
+          announcedCalls.push(refused);
+          refusedCalls.push(refused);
           continue;
         }
         slots.push(null);
-        const tool = getToolByName(tc.function.name);
-        toolCalls.push({
+        const call: FlowToolCall = {
           id: tc.id,
           name: tc.function.name,
           arguments: parsed.args,
           riskLevel: tool?.riskLevel ?? 'low',
-        });
+        };
+        toolCalls.push(call);
+        announcedCalls.push(call);
       }
       // The refusals alone, for the branches that stop before execution: nothing
-      // ran on either count, and the member and the saved session still see them.
+      // ran on either count, and the member and the saved session still see them,
+      // each paired with its call; the parsed calls those branches stop are not
+      // saved, as before.
       const refusedOnly = slots.filter((r): r is FlowToolResult => r !== null);
+      const refusedTurn = refusedOnly.length ? { toolCalls: refusedCalls, toolResults: refusedOnly } : {};
 
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
@@ -2674,7 +2688,7 @@ ${triage.standingContext}`;
       if (blocked.length > 0) {
         return {
           reply: `I can't execute that action right now: ${blocked.map(b => b.decision.reason).join('; ')}`,
-          ...(refusedOnly.length ? { toolResults: refusedOnly } : {}),
+          ...refusedTurn,
           usage,
         };
       }
@@ -2700,7 +2714,7 @@ ${triage.standingContext}`;
 
         return {
           reply: `These actions require formal approval and have been added to your approval queue:\n${approvalMessages}`,
-          ...(refusedOnly.length ? { toolResults: refusedOnly } : {}),
+          ...refusedTurn,
           usage,
         };
       }
@@ -2716,7 +2730,7 @@ ${triage.standingContext}`;
 
         return {
           reply: assistantMessage.content || 'I need your quick confirmation before proceeding with this action.',
-          toolCalls,
+          toolCalls: announcedCalls,
           ...(refusedOnly.length ? { toolResults: refusedOnly } : {}),
           pendingConfirmations,
           requiresConfirmation: true,
@@ -2761,7 +2775,7 @@ ${triage.standingContext}`;
 
       return {
         reply: finalReply,
-        toolCalls,
+        toolCalls: announcedCalls,
         toolResults,
         card: onboardingCard,
         usage,
