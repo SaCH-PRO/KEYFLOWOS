@@ -9,6 +9,7 @@ import { AiUsageService } from './ai-usage.service';
 import { CrmService } from '../crm/crm.service';
 import { CommerceService } from '../commerce/commerce.service';
 import { DocumentParsingService } from '../ingestion/document-parsing.service';
+import { ObjectStorageService } from '../../core/object-storage/objectStorage';
 
 export interface DocumentExtractionRequest {
   businessId: string;
@@ -145,6 +146,20 @@ function isFinalRefusal(err: unknown): boolean {
   return status >= 400 && status < 500 && status !== HttpStatus.REQUEST_TIMEOUT && status !== HttpStatus.TOO_MANY_REQUESTS;
 }
 
+/**
+ * FU-OUTBOUND-ATTACHMENT-URL: server-only options of extractFromDocument, never part of the request
+ * (a request body spread into the request can not grant them).
+ */
+export interface DocumentExtractionOptions {
+  /**
+   * Forward a URL that is not ours (an external document link) to the model as it is. Only contract
+   * term extraction passes it: its "Document URL" form and asset links take external documents today
+   * (an owner decision is open on whether they should). A URL of ours is held to the business rule
+   * whatever this says.
+   */
+  forwardExternalUrl?: boolean;
+}
+
 /** True when `result` is extractFromDocument's answer for a read that failed, not a document it classified. */
 export function documentExtractionFailed(result: object): boolean {
   return FAILED_EXTRACTIONS.has(result);
@@ -181,9 +196,54 @@ export class DocumentIntelligenceService {
   private getDocling() {
     return this.moduleRef.get(DocumentParsingService, { strict: false });
   }
+  private objectStorage?: ObjectStorageService;
+  private getObjectStorage(): ObjectStorageService {
+    return (this.objectStorage ??= new ObjectStorageService());
+  }
 
-  async extractFromDocument(req: DocumentExtractionRequest): Promise<DocumentExtractionResult> {
+  /**
+   * FU-OUTBOUND-ATTACHMENT-URL: the request as it may reach the model, or null when its source can
+   * not be read for its business. A client URL never goes to the provider as is:
+   *  - with content already given, the URL is dropped;
+   *  - a URL naming one of our objects is read here, through resolveObjectForBusiness for
+   *    req.businessId, and sent as content; another business's object, an object issued before
+   *    uploads were bound to a business, and an absent object all answer null alike;
+   *  - any other URL answers null, unless the caller passed forwardExternalUrl (contracts only).
+   */
+  private async resolveRequestSource(
+    req: DocumentExtractionRequest,
+    opts: DocumentExtractionOptions,
+  ): Promise<DocumentExtractionRequest | null> {
+    if (!req.url) return { ...req, url: undefined };
+    if (req.base64Content) return { ...req, url: undefined };
+    const storage = this.getObjectStorage();
+    const objectPath = storage.objectPathFromClientUrl(req.url);
+    if (objectPath) {
+      try {
+        const { buffer, contentType } = await storage.getObjectEntityBuffer(objectPath, req.businessId);
+        const stored = contentType && contentType !== 'application/octet-stream' ? contentType : undefined;
+        return { ...req, url: undefined, base64Content: buffer.toString('base64'), mimeType: stored ?? req.mimeType };
+      } catch {
+        return null;
+      }
+    }
+    return opts.forwardExternalUrl === true ? req : null;
+  }
+
+  async extractFromDocument(
+    request: DocumentExtractionRequest,
+    opts: DocumentExtractionOptions = {},
+  ): Promise<DocumentExtractionResult> {
     const startTime = Date.now();
+
+    // FU-OUTBOUND-ATTACHMENT-URL: no client URL reaches the provider (resolveRequestSource). A source
+    // that can not be read for this business answers as an absent file, before any model call; the
+    // log names no URL or path.
+    const req = await this.resolveRequestSource(request, opts);
+    if (!req) {
+      this.logger.warn(`Document source for ${request.source} could not be read for this business; nothing was sent to the model.`);
+      return { documentType: 'unknown', confidence: 0, rawText: '', suggestedActions: [] };
+    }
 
     // Build prompt based on available data
     const hasImage = req.mimeType.startsWith('image/') || req.mimeType === 'application/pdf';

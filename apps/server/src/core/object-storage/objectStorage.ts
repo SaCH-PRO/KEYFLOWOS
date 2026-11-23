@@ -469,6 +469,36 @@ export class ObjectStorageService {
   }
 
   /**
+   * FU-OUTBOUND-ATTACHMENT-URL: the canonical `/objects/...` path a client URL
+   * names when it points at our storage, or null when it does not (an external
+   * URL, or not a URL at all). Recognised: a `/objects/...` path; an http(s)
+   * URL whose path holds `/objects/...` (the web's `${API_BASE}/objects/...`);
+   * a bucket URL under PRIVATE_OBJECT_DIR, signed or not (the query string is
+   * dropped). The host is not trusted for anything: the path is only ever read
+   * through resolveObjectForBusiness, so naming another host gains nothing.
+   */
+  objectPathFromClientUrl(raw: unknown): string | null {
+    if (typeof raw !== "string" || raw.length === 0) return null;
+    if (raw.startsWith("/objects/")) return raw;
+    let url: URL;
+    try {
+      url = new URL(raw);
+    } catch {
+      return null;
+    }
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    const at = url.pathname.indexOf("/objects/");
+    if (at >= 0) return url.pathname.slice(at);
+    try {
+      const path = this.normalizeObjectEntityPath(`${url.origin}${url.pathname}`);
+      return path.startsWith("/objects/") ? path : null;
+    } catch {
+      // Storage not configured: nothing can be ours.
+      return null;
+    }
+  }
+
+  /**
    * Convert a presigned/public S3 URL (or already-canonical `/objects/...`
    * path) into the canonical `/objects/<id>` path used everywhere in the app.
    */
