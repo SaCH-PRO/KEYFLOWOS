@@ -340,6 +340,20 @@ export function eventModulesOf(fragment: RecordFragment): CanonicalModule[] {
   return modules.size ? [...modules] : [...EVENT_MODULES];
 }
 
+/**
+ * MEM-SEMANTIC-SIGHT (D-234, D-257): the modules the names `values` name (an entity type, a source module, an event's
+ * type, source or module column), by the same words and families eventModulesOf reads an event record by. [] when they
+ * name none: the caller decides what an unclassified source needs (a semantic hit's fails closed).
+ */
+export function modulesNamedBy(...values: unknown[]): CanonicalModule[] {
+  const modules = new Set<CanonicalModule>();
+  for (const value of values) {
+    for (const family of familiesOf(value)) for (const module of FAMILY_MODULES.get(family) ?? []) modules.add(module);
+    for (const word of wordsOf(value)) for (const module of WORD_MODULES.get(word) ?? []) modules.add(module);
+  }
+  return [...modules];
+}
+
 /** W1F-PERCEPTION-MODULE-SCOPE: whether a reader may read a module (at least 'read'). */
 export type ModuleSight = (module: CanonicalModule) => boolean;
 /** No member, no module (as KEY's standing context gives a turn with no member no figure, PR195-KEY-GATES). */
