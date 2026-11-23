@@ -2,8 +2,16 @@ import { describe, expect, it, vi } from 'vitest';
 import { TemporalFlowController } from './temporal-flow.controller';
 import type { TemporalFlowService } from './temporal-flow.service';
 
+// FU-TEMPORAL-FLOW-INBOX-SCOPE: each timeline read asks the service for its reader's filter and passes it on.
+const READER = { id: 'user_1', role: 'USER' };
+const REQ = { user: READER };
+const FILTER = { NOT: { OR: [{ module: 'key_inbox' }] } };
+const MEMORY_FILTER = { sourceModule: { in: [] } };
+
 function makeController() {
   const temporal = {
+    readerFilter: vi.fn().mockResolvedValue(FILTER),
+    readerMemoryFilter: vi.fn().mockResolvedValue(MEMORY_FILTER),
     list: vi.fn().mockResolvedValue([{ id: 'tf_1' }]),
     calendarRange: vi.fn().mockResolvedValue([{ id: 'tf_2' }]),
     remindersDue: vi.fn().mockResolvedValue([{ id: 'tf_3' }]),
@@ -32,7 +40,8 @@ describe('TemporalFlowController', () => {
       source: 'APP',
       status: 'RECORDED',
       importance: 'HIGH',
-    } as any);
+    } as any, REQ);
+    expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', READER);
     expect(temporal.list).toHaveBeenCalledWith('biz_1', {
       source: 'APP',
       type: undefined,
@@ -42,22 +51,43 @@ describe('TemporalFlowController', () => {
       from: undefined,
       to: undefined,
       limit: undefined,
-    }, null);
+    }, READER, FILTER);
     expect(result).toEqual([{ id: 'tf_1' }]);
+  });
+
+  it('D-238: a read with no request user passes the reader as null (none), with the fail-closed module filter', async () => {
+    const { controller, temporal } = makeController();
+    await controller.list('biz_1', {} as any);
+    expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', undefined);
+    expect((temporal.list as any).mock.calls[0][2]).toBeNull();
+    expect((temporal.list as any).mock.calls[0][3]).toBe(FILTER);
+    await controller.calendar('biz_1', '2026-06-01', '2026-06-30');
+    expect(temporal.calendarRange).toHaveBeenCalledWith('biz_1', '2026-06-01', '2026-06-30', null, FILTER);
+    await controller.reminders('biz_1');
+    expect(temporal.remindersDue).toHaveBeenCalledWith('biz_1', null, FILTER);
+  });
+
+  it('D-238 with the module filter: an analysis with no request user passes the reader as null and both filters', async () => {
+    const { controller, temporal } = makeController();
+    await controller.analyze('biz_1');
+    expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', undefined);
+    expect(temporal.readerMemoryFilter).toHaveBeenCalledWith('biz_1', undefined);
+    expect(temporal.analyze).toHaveBeenCalledWith('biz_1', FILTER, MEMORY_FILTER, null);
   });
 
   it('GET /calendar returns calendar range', async () => {
     const { controller, temporal } = makeController();
-    const result = await controller.calendar('biz_1', '2026-06-01', '2026-06-30');
-    // D-238: the request's reader (none in this unit call: null).
-    expect(temporal.calendarRange).toHaveBeenCalledWith('biz_1', '2026-06-01', '2026-06-30', null);
+    const result = await controller.calendar('biz_1', '2026-06-01', '2026-06-30', REQ);
+    expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', READER);
+    expect(temporal.calendarRange).toHaveBeenCalledWith('biz_1', '2026-06-01', '2026-06-30', READER, FILTER);
     expect(result).toEqual([{ id: 'tf_2' }]);
   });
 
   it('GET /reminders returns reminders', async () => {
     const { controller, temporal } = makeController();
-    const result = await controller.reminders('biz_1');
-    expect(temporal.remindersDue).toHaveBeenCalledWith('biz_1', null);
+    const result = await controller.reminders('biz_1', REQ);
+    expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', READER);
+    expect(temporal.remindersDue).toHaveBeenCalledWith('biz_1', READER, FILTER);
     expect(result).toEqual([{ id: 'tf_3' }]);
   });
 
@@ -68,22 +98,26 @@ describe('TemporalFlowController', () => {
       type: 'manual.note',
       title: 'Note',
       occurredAt: '2026-06-10T00:00:00Z',
-    } as any);
-    expect(temporal.emit).toHaveBeenCalled();
+    } as any, REQ);
+    expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', READER);
+    expect(temporal.emit).toHaveBeenCalledWith(expect.objectContaining({ businessId: 'biz_1', title: 'Note' }), FILTER);
     expect(result.id).toBe('tf_4');
   });
 
   it('PATCH /:eventId/resolve marks resolved', async () => {
     const { controller, temporal } = makeController();
-    const result = await controller.resolve('biz_1', 'tf_1');
-    expect(temporal.markResolved).toHaveBeenCalledWith('biz_1', 'tf_1');
+    const result = await controller.resolve('biz_1', 'tf_1', REQ);
+    expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', READER);
+    expect(temporal.markResolved).toHaveBeenCalledWith('biz_1', 'tf_1', FILTER);
     expect(result).toEqual({ count: 1 });
   });
 
   it('POST /analyze returns analysis', async () => {
     const { controller, temporal } = makeController();
-    const result = await controller.analyze('biz_1');
-    expect(temporal.analyze).toHaveBeenCalledWith('biz_1');
+    const result = await controller.analyze('biz_1', REQ);
+    expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', READER);
+    expect(temporal.readerMemoryFilter).toHaveBeenCalledWith('biz_1', READER);
+    expect(temporal.analyze).toHaveBeenCalledWith('biz_1', FILTER, MEMORY_FILTER, READER);
     expect(result.summary).toBe('Analysis complete.');
   });
 });
