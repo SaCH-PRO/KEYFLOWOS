@@ -63,6 +63,11 @@ export function withoutDocumentExtractions<T extends { category: string }>(entri
   return entries.filter((entry) => entry.category !== DOCUMENT_EXTRACTION_CATEGORY);
 }
 
+/** The key AiMemoryService.summarizePatterns stores a summary under (its label, snake_cased); shared with its route. */
+export function summaryPatternKey(value: string): string {
+  return value.split(':')[0]?.trim().toLowerCase().replace(/\s+/g, '_') || 'general';
+}
+
 export interface MemoryEntry {
   id: string;
   category: string;
@@ -597,7 +602,7 @@ export class AiMemoryService {
       for (const pattern of patterns) {
         await this.upsert(businessId, {
           category: 'patterns',
-          key: pattern.split(':')[0]?.trim().toLowerCase().replace(/\s+/g, '_') || 'general',
+          key: summaryPatternKey(pattern),
           value: pattern,
           confidence: 0.8,
           source: 'pattern_analysis',

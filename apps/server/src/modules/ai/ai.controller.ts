@@ -18,7 +18,7 @@ import {
   visiblePlans,
   type GraphPlanReadScope,
 } from './graph-actions.controller';
-import { AiMemoryService, MemoryCategory } from './ai-memory.service';
+import { AiMemoryService, MemoryCategory, summaryPatternKey } from './ai-memory.service';
 import { aiMemoryRowVisibleTo, type SemanticReader } from './semantic-memory-sight';
 import { readersModuleSight, readsDocumentExtractions } from '../key-cortex/key-cortex-prompt-context.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
@@ -1117,7 +1117,7 @@ export class AiController {
     const patterns = await this.memory.summarizePatterns(businessId);
     return {
       patterns: patterns.filter((value) =>
-        aiMemoryRowVisibleTo({ category: 'patterns', key: value.split(':')[0]?.trim().toLowerCase().replace(/\s+/g, '_') || 'general', value }, who),
+        aiMemoryRowVisibleTo({ category: 'patterns', key: summaryPatternKey(value), value }, who),
       ),
     };
   }
