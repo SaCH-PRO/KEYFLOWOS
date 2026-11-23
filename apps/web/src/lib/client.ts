@@ -7103,19 +7103,23 @@ export async function summarizeAiPatterns(businessId: string): Promise<ApiResult
 // STRATEGIC INTELLIGENCE & FORECASTING
 // ---
 
+/**
+ * FU-INSIGHTS-SIGHT (D-100, D-146): the server leaves out the revenue figures for a member without revenue read and
+ * the month's expenses without expenses read, so those fields may be absent.
+ */
 export interface StrategicDashboard {
   momentumScore: number;
-  monthlyRevenue: number;
-  outstandingRevenue: number;
-  overdueInvoices: number;
-  overdueAmount: number;
+  monthlyRevenue?: number;
+  outstandingRevenue?: number;
+  overdueInvoices?: number;
+  overdueAmount?: number;
   activeProjects: number;
   overdueTaskCount: number;
   upcomingBookings: number;
   staleLeads: number;
-  pendingQuotes: number;
-  pendingQuoteValue: number;
-  expensesThisMonth: number;
+  pendingQuotes?: number;
+  pendingQuoteValue?: number;
+  expensesThisMonth?: number;
   utilizationRate: number;
 }
 
@@ -7275,9 +7279,11 @@ export interface ControlTowerPriority {
 
 export interface ControlTowerModules {
   contacts: { total: number; byStatus: Record<string, number>; recentCount: number; staleLeadCount: number };
-  revenue: { totalCollected: number; outstandingAmount: number; outstandingCount: number; overdueCount: number; overdueAmount: number; monthlyRevenue: number; averageInvoiceValue: number };
+  /** FU-INSIGHTS-SIGHT: absent for a member without revenue read. */
+  revenue?: { totalCollected: number; outstandingAmount: number; outstandingCount: number; overdueCount: number; overdueAmount: number; monthlyRevenue: number; averageInvoiceValue: number };
   bookings: { upcomingCount: number; completedThisMonth: number; cancelledThisMonth: number; utilizationRate: number };
-  expenses: { totalThisMonth: number; topCategories: Array<{ name: string; amount: number }>; budgetUtilization: number };
+  /** FU-INSIGHTS-SIGHT: absent for a member without expenses read. */
+  expenses?: { totalThisMonth: number; topCategories: Array<{ name: string; amount: number }>; budgetUtilization: number };
   projects: { activeCount: number; overdueTaskCount: number; completionRate: number };
   content: { draftPostCount: number; scheduledPostCount: number; draftCampaignCount: number };
   automations: { activeCount: number; disabledCount: number; totalRuns: number };

@@ -22,12 +22,15 @@ type GrowthInsight = {
 function buildGrowthInsights(dashboard: StrategicDashboard, modules: ControlTowerModules): GrowthInsight[] {
   const insights: GrowthInsight[] = [];
 
-  if (dashboard.pendingQuotes > 0) {
+  // FU-INSIGHTS-SIGHT (D-100): the quote figures are left out for a member without revenue read: no quote insight then.
+  const pendingQuotes = dashboard.pendingQuotes ?? 0;
+  const pendingQuoteValue = dashboard.pendingQuoteValue ?? 0;
+  if (pendingQuotes > 0) {
     insights.push({
       type: "action",
       priority: "high",
-      title: `Convert $${dashboard.pendingQuoteValue.toFixed(0)} in Pending Quotes`,
-      description: `${dashboard.pendingQuotes} quotes are waiting for a response. Follow up to close them.`,
+      title: `Convert $${pendingQuoteValue.toFixed(0)} in Pending Quotes`,
+      description: `${pendingQuotes} quotes are waiting for a response. Follow up to close them.`,
       explanation: "Pending quotes are the fastest path to revenue growth.",
       actionLabel: "View Quotes",
       actionRoute: "/app/commerce?tab=operations",

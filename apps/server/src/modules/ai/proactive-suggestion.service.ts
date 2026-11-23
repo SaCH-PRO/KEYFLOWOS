@@ -29,6 +29,8 @@ export interface ChatSuggestion {
 }
 
 const SUGGESTION_COOLDOWN_HOURS = 24;
+/** FU-INSIGHTS-SIGHT: the most pending suggestion rows one filtered read takes. */
+const PENDING_READ_MAX = 500;
 
 @Injectable()
 export class ProactiveSuggestionService {
@@ -63,7 +65,10 @@ export class ProactiveSuggestionService {
       },
       select: { key: true, value: true },
     });
-    const recentCategories = new Set(recentSuggestions.map(s => s.key.split('_')[0]));
+    // FU-INSIGHTS-SIGHT (reviews round 1, ISS-2 / F-2): a key is `<category>_<timestamp>` and a category has
+    // underscores itself ('stale_leads'), so the category is everything before the last underscore; the first word
+    // ('stale') never matched, the cooldown never held, and every refresh stored every suggestion again.
+    const recentCategories = new Set(recentSuggestions.map((s) => s.key.slice(0, s.key.lastIndexOf('_'))));
 
     // Scan for insights
     const insights = await this.monitor.scanInsights(businessId);
@@ -116,7 +121,9 @@ export class ProactiveSuggestionService {
         expiresAt: { gte: new Date() },
       },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      ...(rowVisible ? {} : { take: 10 }),
+      // A reader's rows are filtered before the 10 are cut; the read is bounded (the cooldown keeps a category to one
+      // row a day, so the pending set is small; 500 is far above it).
+      take: rowVisible ? PENDING_READ_MAX : 10,
     });
     const memories = (rowVisible ? pending.filter((row) => rowVisible(row)) : pending).slice(0, 10);
 

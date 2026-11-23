@@ -66,16 +66,21 @@ export function readerHolds(who: SemanticReader, needs: readonly InsightSight[])
 export const SIGHT_WORDS: Readonly<Record<InsightSight, string>> = { revenue: 'revenue', expenses: 'suppliers' };
 
 /**
- * The strategic dashboard (StrategicIntelligenceService.getStrategicDashboard) as `who` may read it: its revenue
- * figures (the month's revenue, the outstanding and overdue totals and counts, the pending quotes) only at revenue read,
- * the month's expenses only at expenses read; a withheld field is left out, its name included. The rest (momentum,
- * projects, bookings, stale leads, utilisation) as it is.
+ * The strategic dashboard (StrategicIntelligenceService.getStrategicDashboard) as `who` may read it: a reader who holds
+ * revenue and expenses read is handed it whole; anyone else only the fields named here that they may read: its revenue
+ * figures (the month's revenue, the outstanding and overdue totals and counts, the pending quotes) at revenue read, the
+ * month's expenses at expenses read, the rest (momentum, projects, bookings, stale leads, utilisation) to every member.
+ * Security review round 1 (OOS-2): a keep-list, so a field added to the dashboard later is left out until it is named.
  */
+const DASHBOARD_SHARED_FIELDS = ['momentumScore', 'activeProjects', 'overdueTaskCount', 'upcomingBookings', 'staleLeads', 'utilizationRate'] as const;
 const DASHBOARD_REVENUE_FIELDS = ['monthlyRevenue', 'outstandingRevenue', 'overdueInvoices', 'overdueAmount', 'pendingQuotes', 'pendingQuoteValue'] as const;
 const DASHBOARD_EXPENSE_FIELDS = ['expensesThisMonth'] as const;
 export function dashboardFor<D extends Record<string, unknown>>(dashboard: D, who: SemanticReader): Partial<D> {
-  const out: Record<string, unknown> = { ...dashboard };
-  if (!readerHolds(who, ['revenue'])) for (const field of DASHBOARD_REVENUE_FIELDS) delete out[field];
-  if (!readerHolds(who, ['expenses'])) for (const field of DASHBOARD_EXPENSE_FIELDS) delete out[field];
-  return out as Partial<D>;
+  if (readerHolds(who, ['revenue', 'expenses'])) return dashboard;
+  const keep = new Set<string>([
+    ...DASHBOARD_SHARED_FIELDS,
+    ...(readerHolds(who, ['revenue']) ? DASHBOARD_REVENUE_FIELDS : []),
+    ...(readerHolds(who, ['expenses']) ? DASHBOARD_EXPENSE_FIELDS : []),
+  ]);
+  return Object.fromEntries(Object.entries(dashboard).filter(([field]) => keep.has(field))) as Partial<D>;
 }

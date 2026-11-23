@@ -20,7 +20,7 @@ import {
 } from './graph-actions.controller';
 import { AiMemoryService, MemoryCategory, summaryPatternKey } from './ai-memory.service';
 import { aiMemoryRowVisibleTo, type SemanticReader } from './semantic-memory-sight';
-import { dashboardFor, insightNeeds, readerHolds } from './insight-sight';
+import { dashboardFor, insightNeeds, readerHolds, textSightNeeds } from './insight-sight';
 import { readersModuleSight, readsDocumentExtractions } from '../key-cortex/key-cortex-prompt-context.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
 import { ProAutoMonitorService } from './pro-auto-monitor.service';
@@ -123,6 +123,9 @@ function interviewSightOf(documentExtractions: boolean, who: SemanticReader) {
     rowVisible: (row: { category: string; key: string; value: string }) => aiMemoryRowVisibleTo(row, who),
   };
 }
+
+/** FU-INSIGHTS-SIGHT (security review round 1, ISS-1): the most pending approval items the control tower reads to filter. */
+const PENDING_APPROVALS_READ_MAX = 500;
 
 function assertMemoryCategoryAllowed(category: string): void {
   if (RESERVED_MEMORY_CATEGORIES.has(category)) {
@@ -1263,20 +1266,30 @@ export class AiController {
     // viewer projection KEY and the graph routes use: revenue and expenses sections, client revenue, overdue invoices
     // and the money health areas only by sight), the dashboard's money fields (dashboardFor) and the insights
     // (readerHolds). The priorities and risks below are built from those, so a withheld figure reaches none of them.
+    // Correctness review round 1 (F-1): the shared projection, as before (no treasury, pipeline or support section:
+    // those are KEY's standing context's), with revenue and expenses by the caller's sight (role null: a SUPER_ADMIN
+    // who is no member is no member here). Security review round 1 (ISS-1): the pending approvals as the approval list
+    // gates them (operations read), and each only when the caller holds the sights its text needs; the count follows.
     const who = await this.memoryReaderOf(businessId, req);
-    const [snapshot, fullDashboard, scanned, approvals, totalPendingApprovals] = await Promise.all([
-      this.businessGraph.getSnapshot(businessId, false, { viewerId: who.reader }),
+    const readsEverything = readerHolds(who, ['revenue', 'expenses']) && who.sight('operations');
+    const [snapshot, fullDashboard, scanned, pendingItems, totalPending] = await Promise.all([
+      this.businessGraph.getSharedSnapshotForMember(businessId, { id: who.reader, role: null }),
       this.strategic.getStrategicDashboard(businessId),
       this.proAutoMonitor.scanInsights(businessId),
       this.prisma.client.aiApprovalItem.findMany({
         where: { businessId, status: 'pending' },
-        orderBy: { createdAt: 'desc' },
-        take: 20,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: readsEverything ? 20 : PENDING_APPROVALS_READ_MAX,
       }),
-      this.prisma.client.aiApprovalItem.count({
-        where: { businessId, status: 'pending' },
-      }),
+      readsEverything ? this.prisma.client.aiApprovalItem.count({ where: { businessId, status: 'pending' } }) : Promise.resolve(0),
     ]);
+    const shownApprovals = readsEverything
+      ? pendingItems
+      : who.reader !== null && who.sight('operations')
+        ? pendingItems.filter((a) => readerHolds(who, textSightNeeds(JSON.stringify([a.title, a.description, a.rationale, a.inputPayload]))))
+        : [];
+    const approvals = shownApprovals.slice(0, 20);
+    const totalPendingApprovals = readsEverything ? totalPending : shownApprovals.length;
     const dashboard = dashboardFor(fullDashboard, who);
     // A withheld figure counts as none: it makes no priority and no risk.
     const overdueInvoices = dashboard.overdueInvoices ?? 0;

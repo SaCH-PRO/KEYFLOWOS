@@ -28,6 +28,11 @@ type ModuleCard = {
 function buildCards(modules: ControlTowerModules, dashboard: StrategicDashboard): ModuleCard[] {
   const fmt = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
   const fmtD = (n: number) => `$${n >= 1000 ? `${(n / 1000).toFixed(1)}k` : n.toFixed(0)}`;
+  // FU-INSIGHTS-SIGHT (D-100, D-146): the server leaves out the revenue section and figures for a member without revenue
+  // read, and the expenses section without expenses read; those cards are then not shown.
+  const overdueInvoices = dashboard.overdueInvoices ?? 0;
+  const revenue = modules.revenue;
+  const expenses = modules.expenses;
 
   return [
     {
@@ -39,15 +44,16 @@ function buildCards(modules: ControlTowerModules, dashboard: StrategicDashboard)
       secondary: modules.contacts.staleLeadCount > 0 ? `${modules.contacts.staleLeadCount} stale leads` : `${modules.contacts.recentCount} new this week`,
       status: modules.contacts.staleLeadCount > 10 ? "critical" : modules.contacts.staleLeadCount > 0 ? "warn" : "good",
     },
+    ...(revenue ? [
     {
       key: "revenue",
       label: "Revenue",
       icon: CreditCard,
       href: "/app/commerce",
-      primary: `${fmtD(modules.revenue.monthlyRevenue)} this month`,
-      secondary: dashboard.overdueInvoices > 0 ? `${dashboard.overdueInvoices} overdue` : `${fmtD(modules.revenue.outstandingAmount)} outstanding`,
-      status: dashboard.overdueInvoices > 3 ? "critical" : dashboard.overdueInvoices > 0 ? "warn" : "good",
-    },
+      primary: `${fmtD(revenue.monthlyRevenue)} this month`,
+      secondary: overdueInvoices > 0 ? `${overdueInvoices} overdue` : `${fmtD(revenue.outstandingAmount)} outstanding`,
+      status: overdueInvoices > 3 ? "critical" : overdueInvoices > 0 ? "warn" : "good",
+    }] as ModuleCard[] : []),
     {
       key: "calendar",
       label: "Calendar",
@@ -57,15 +63,16 @@ function buildCards(modules: ControlTowerModules, dashboard: StrategicDashboard)
       secondary: `${modules.bookings.utilizationRate.toFixed(0)}% utilization`,
       status: modules.bookings.utilizationRate < 30 ? "warn" : "good",
     },
+    ...(expenses ? [
     {
       key: "expenses",
       label: "Expenses",
       icon: Receipt,
       href: "/app/expenses",
-      primary: `${fmtD(modules.expenses.totalThisMonth)} this month`,
-      secondary: modules.expenses.budgetUtilization > 0 ? `${modules.expenses.budgetUtilization.toFixed(0)}% of budget` : "No budgets set",
-      status: modules.expenses.budgetUtilization > 100 ? "critical" : modules.expenses.budgetUtilization > 90 ? "warn" : "good",
-    },
+      primary: `${fmtD(expenses.totalThisMonth)} this month`,
+      secondary: expenses.budgetUtilization > 0 ? `${expenses.budgetUtilization.toFixed(0)}% of budget` : "No budgets set",
+      status: expenses.budgetUtilization > 100 ? "critical" : expenses.budgetUtilization > 90 ? "warn" : "good",
+    }] as ModuleCard[] : []),
     {
       key: "projects",
       label: "Projects",
