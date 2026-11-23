@@ -25,10 +25,11 @@
  * Residual over-redaction, by design: about one in ten 14 to 19 digit numeric
  * identifiers passes Luhn (every IMEI does) and becomes <card>; a grouped
  * numeric list (several four- or five-digit groups in a row) is redacted
- * about one time in four or five; a card-shaped digit group that completes a
- * valid window with a card is redacted with it; a cut-off PEM block takes the
- * rest of its string leaf. See redactCardWindows for the card rules and what
- * is not covered.
+ * about one time in ten to one in four, rising with the number of groups; a
+ * card-shaped digit group that completes a valid window with a card is
+ * redacted with it; a cut-off PEM block takes the rest of its string leaf.
+ * See redactCardWindows for the card rules, the measured rates and what is
+ * not covered.
  */
 export const SENSITIVE_FIELD_PATTERNS = [
   'password',
@@ -115,16 +116,22 @@ const CARD_MAX_DIGITS = 19;
  * cards merge into one marker. An unbroken group longer than 19 digits is
  * not a card (longer than any scheme) and is left whole.
  *
- * Residual over-redaction, by design and measured on synthetic notes: about
- * one in ten single 14 to 19 digit numeric identifiers passes Luhn (an IMEI
- * always does) and becomes <card>; grouped numeric lists pay the union rule,
- * about one in four runs of four to six four-digit groups and one in five
- * lists of four five-digit ids; a card-shaped neighbour that completes a
- * valid window with a card (about one in eight next to a card) is redacted
- * with it. Not covered, by design: a card broken across lines, or joined by
- * dots, slashes or four or more spaces; a card typed in two-digit pairs or
- * with a short group before the last (4-3-3-3-1); a card written directly
- * after a plus sign (the E.164 rule); and a digit glued to the number.
+ * Residual over-redaction, by design and measured on synthetic notes (the
+ * reviewers' corpora, 3,000 notes per row): about one in ten single 14 to 19
+ * digit numeric identifiers passes Luhn (an IMEI always does) and becomes
+ * <card>; grouped numeric lists pay the union rule, about one in ten for four
+ * four-digit groups, rising by about one in ten per extra group (six groups:
+ * about one in four), and one in five for lists of four five-digit ids; the
+ * short-tail mask rule adds about one in ten more to lists of three or four
+ * four-digit groups followed by a one or two digit token (an IBAN body, a SKU
+ * list and a count); a card-shaped neighbour that completes a valid window
+ * with a card is redacted with it, about one in ten for a 1 or 4 digit
+ * neighbour and one in five for 2 or 3 digits, where two windows can pass.
+ * Not covered, by design: a card broken across lines, or joined by dots,
+ * slashes, underscores, four or more spaces, or any dash or space other than
+ * the ones named above; a card typed in two-digit pairs or with a short
+ * group before the last (4-3-3-3-1); a card written directly after a plus
+ * sign (the E.164 rule); a digit glued to the number; full-width digits.
  */
 const CARD_SEPARATOR = /([ \t\u00a0\u2009\u202f\u2013-]{1,3})/;
 
