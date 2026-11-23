@@ -51,7 +51,7 @@ function blankControls(value: unknown): unknown {
  * (`\n`, `\t`, `\"`, `\\`, `\uXXXX`) read as spaces; its `\uXXXX` escapes decoded; and each with its control
  * characters blanked. A text with no backslash and no control character has one reading: itself.
  */
-function readingsOf(text: string): string[] {
+export function readingsOf(text: string): string[] {
   if (!/[\\\p{Cc}]/u.test(text)) return [text];
   const escapesAsSpaces = text.replace(/\\+(?:u[0-9a-fA-F]{4}|[bfnrt"/])?/g, ' ');
   const decoded = text.replace(/\\u([0-9a-fA-F]{4})/g, (_m, hex: string) => String.fromCharCode(parseInt(hex, 16)));
@@ -66,16 +66,13 @@ function readingsOf(text: string): string[] {
 export const MAX_FIELDS_CLASSIFIED = 50_000;
 
 /**
- * Security review round 3 (ISS-R3-1), reviews round 4 (ISS-R4-1, R3-C1, R3-C2): the sights a list of fields needs, by
- * every reading of each field and of the whole list: a string as written, a structured value as JSON as it is and with
- * its control characters blanked (keys included), and every reading of those (readingsOf), with the list read whole as
- * JSON as it always was. Readings are only ever added: one that misses a word (an escape glued to it, a control
- * character before a figure) never takes the place of one that reads it. Round 5: each distinct text is read once, the
- * read stops once both sights are found, and a list over MAX_FIELDS_CLASSIFIED needs both, unread.
+ * The texts fieldsSightNeeds reads for a list of fields: the list whole as JSON, then each field (a string as written; a
+ * structured value as JSON as it is and with its control characters blanked). Null when the list is over
+ * MAX_FIELDS_CLASSIFIED: it is not read.
  */
-export function fieldsSightNeeds(fields: readonly unknown[]): InsightSight[] {
+function textsOf(fields: readonly unknown[]): string[] | null {
   const whole = JSON.stringify(fields) ?? '';
-  if (whole.length > MAX_FIELDS_CLASSIFIED) return ['revenue', 'expenses'];
+  if (whole.length > MAX_FIELDS_CLASSIFIED) return null;
   const texts: string[] = [whole];
   for (const field of fields) {
     if (field === null || field === undefined) continue;
@@ -85,6 +82,40 @@ export function fieldsSightNeeds(fields: readonly unknown[]): InsightSight[] {
       texts.push(JSON.stringify(field) ?? '', JSON.stringify(blankControls(field)) ?? '');
     }
   }
+  return texts;
+}
+
+/**
+ * FU-INSIGHTS-SIGHT review round 7 (ISS-R7-1): what classifying a list of fields costs, in characters read: the length
+ * of every distinct reading fieldsSightNeeds may run its rules over (an escape-dense text has up to six readings, where
+ * its serialization counts once). A list over MAX_FIELDS_CLASSIFIED costs its serialization only: it is not read.
+ */
+export function classificationCost(fields: readonly unknown[]): number {
+  const texts = textsOf(fields);
+  if (texts === null) return (JSON.stringify(fields) ?? '').length;
+  const seen = new Set<string>();
+  let cost = 0;
+  for (const text of texts) {
+    for (const reading of readingsOf(text)) {
+      if (seen.has(reading)) continue;
+      seen.add(reading);
+      cost += reading.length;
+    }
+  }
+  return cost;
+}
+
+/**
+ * Security review round 3 (ISS-R3-1), reviews round 4 (ISS-R4-1, R3-C1, R3-C2): the sights a list of fields needs, by
+ * every reading of each field and of the whole list: a string as written, a structured value as JSON as it is and with
+ * its control characters blanked (keys included), and every reading of those (readingsOf), with the list read whole as
+ * JSON as it always was. Readings are only ever added: one that misses a word (an escape glued to it, a control
+ * character before a figure) never takes the place of one that reads it. Round 5: each distinct text is read once, the
+ * read stops once both sights are found, and a list over MAX_FIELDS_CLASSIFIED needs both, unread.
+ */
+export function fieldsSightNeeds(fields: readonly unknown[]): InsightSight[] {
+  const texts = textsOf(fields);
+  if (texts === null) return ['revenue', 'expenses'];
   const needs = new Set<InsightSight>();
   const seen = new Set<string>();
   for (const text of texts) {

@@ -20,7 +20,9 @@ import {
 } from './graph-actions.controller';
 import { AiMemoryService, MemoryCategory, summaryPatternKey } from './ai-memory.service';
 import { aiMemoryRowVisibleTo, type SemanticReader } from './semantic-memory-sight';
-import { dashboardFor, fieldsSightNeeds, insightNeeds, keepWithinBudget, readerHolds } from './insight-sight';
+import { classificationCost, dashboardFor, fieldsSightNeeds, insightNeeds, keepWithinBudget, readerHolds } from './insight-sight';
+import { sightedStrategic, strategicItemNeeds, STRATEGIC_ACTION_NEEDS } from './strategic-sight';
+import { memberModuleLevel } from '../../core/authority/module-vocabulary';
 import { isFinancialProposal } from '../business-genome/key-genome/genome-finance-scope';
 import { readersModuleSight, readsDocumentExtractions } from '../key-cortex/key-cortex-prompt-context.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
@@ -128,8 +130,10 @@ function interviewSightOf(documentExtractions: boolean, who: SemanticReader) {
 /** FU-INSIGHTS-SIGHT (security review round 1, ISS-1): the most pending approval items the control tower reads to filter. */
 const PENDING_APPROVALS_READ_MAX = 500;
 /**
- * FU-INSIGHTS-SIGHT (security review round 6, ISS-R6-1): the most characters of approval-item text one control-tower
- * request classifies for a partial reader; items past it are withheld unclassified and not counted (keepWithinBudget).
+ * FU-INSIGHTS-SIGHT (security review round 6, ISS-R6-1; round 7, ISS-R7-1): the most characters one control-tower request
+ * reads classifying approval items for a partial reader, each item charged what its classification reads
+ * (classificationCost: every distinct reading, not its serialization once); items past it are withheld unclassified and
+ * not counted (keepWithinBudget).
  */
 const APPROVALS_CLASSIFY_BUDGET = 1_000_000;
 
@@ -710,10 +714,14 @@ export class AiController {
   async getSuggestions(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
     const who = await this.memoryReaderOf(businessId, req);
     // Security review round 5 (transitional): a row stored before the stamp is read by every reading too
-    // (fieldsSightNeeds), so a word behind a JSON escape in it is read.
+    // (fieldsSightNeeds), so a word behind a JSON escape in it is read. Round 7 (CR-R7-1): a reader holding both sights
+    // is not classified for (every row passes).
+    const readsMoneyAndExpenses = readerHolds(who, ['revenue', 'expenses']);
     return this.suggestions.getPendingSuggestions(
       businessId,
-      (row) => aiMemoryRowVisibleTo(row, who) && readerHolds(who, fieldsSightNeeds([row.key, row.value])),
+      (row) =>
+        aiMemoryRowVisibleTo(row, who) &&
+        (readsMoneyAndExpenses || readerHolds(who, fieldsSightNeeds([row.key, row.value]))),
     );
   }
 
@@ -1116,11 +1124,12 @@ export class AiController {
     // FU-INSIGHTS-SIGHT (security review round 6, OOS-R6-1, transitional): a suggestion row is read here as on
     // GET .../ai/suggestions, by every reading (fieldsSightNeeds), so a word behind a JSON escape in a row stored before
     // the stamp is read.
+    const readsMoneyAndExpenses = readerHolds(who, ['revenue', 'expenses']);
     return {
       memories: entries.filter(
         (row) =>
           aiMemoryRowVisibleTo(row, who) &&
-          (row.category !== 'suggestion' || readerHolds(who, fieldsSightNeeds([row.key, row.value]))),
+          (row.category !== 'suggestion' || readsMoneyAndExpenses || readerHolds(who, fieldsSightNeeds([row.key, row.value]))),
       ),
     };
   }
@@ -1215,59 +1224,111 @@ export class AiController {
     return dashboardFor(await this.strategic.getStrategicDashboard(businessId), who);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  // FU-STRATEGIC-ROUTES-SIGHT (D-100, D-234, D-146): the revenue forecast is money throughout: revenue read
+  // (ModuleScopeGuard, and requireSight for a SUPER_ADMIN who is no member); its expense items as expenses read allows.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('businesses/:businessId/ai/strategic/revenue-forecast')
   async revenueForecast(
     @Param('businessId') businessId: string,
     @Query('days') days?: string,
+    @Req() req?: AuthenticatedRequest,
   ) {
+    const who = await this.strategicReaderOf(businessId, req, ['revenue']);
     const horizon = safeInt(days, 90);
     const clamped = Math.min(Math.max(horizon, 7), 365);
-    return this.strategic.forecastRevenue(businessId, { horizonDays: clamped });
+    return sightedStrategic(await this.strategic.forecastRevenue(businessId, { horizonDays: clamped }), who);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  // FU-STRATEGIC-ROUTES-SIGHT: revenue, expenses and the margin between them: revenue and expenses read.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('businesses/:businessId/ai/strategic/profitability')
-  async profitability(@Param('businessId') businessId: string) {
+  async profitability(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    await this.strategicReaderOf(businessId, req, ['revenue', 'expenses']);
     return this.strategic.analyzeProfitability(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  // FU-STRATEGIC-ROUTES-SIGHT: prices and sales: revenue read; its expense items as expenses read allows.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('businesses/:businessId/ai/strategic/pricing-advisor')
-  async pricingAdvisor(@Param('businessId') businessId: string) {
-    return this.strategic.advisePricing(businessId);
+  async pricingAdvisor(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    const who = await this.strategicReaderOf(businessId, req, ['revenue']);
+    return sightedStrategic(await this.strategic.advisePricing(businessId), who);
   }
 
+  // FU-STRATEGIC-ROUTES-SIGHT: the model's seasonal, opportunity, risk and weekly-plan scans state money beside the
+  // rest: each caller is answered the items they may read (sightedStrategic; the owner's answer unchanged).
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/strategic/seasonal-patterns')
-  async seasonalPatterns(@Param('businessId') businessId: string) {
-    return this.strategic.detectSeasonalPatterns(businessId);
+  async seasonalPatterns(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    const who = await this.memoryReaderOf(businessId, req);
+    return sightedStrategic(await this.strategic.detectSeasonalPatterns(businessId), who);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/strategic/opportunities')
-  async opportunities(@Param('businessId') businessId: string) {
-    return this.strategic.scanOpportunities(businessId);
+  async opportunities(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    const who = await this.memoryReaderOf(businessId, req);
+    return sightedStrategic(await this.strategic.scanOpportunities(businessId), who);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/strategic/risks')
-  async risks(@Param('businessId') businessId: string) {
-    return this.strategic.scanRisks(businessId);
+  async risks(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    const who = await this.memoryReaderOf(businessId, req);
+    return sightedStrategic(await this.strategic.scanRisks(businessId), who);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(5, 60_000)
   @Get('businesses/:businessId/ai/strategic/weekly-plan')
-  async weeklyPlan(@Param('businessId') businessId: string) {
-    return this.strategic.generateWeeklyPlan(businessId);
+  async weeklyPlan(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    const who = await this.memoryReaderOf(businessId, req);
+    return sightedStrategic(await this.strategic.generateWeeklyPlan(businessId), who);
   }
 
+  // FU-STRATEGIC-ROUTES-SIGHT: each action read whole: its type's sights (an unknown type needs both), its text's, and
+  // revenue for an estimated value.
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/strategic/actions')
-  async strategicActions(@Param('businessId') businessId: string) {
+  async strategicActions(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    const who = await this.memoryReaderOf(businessId, req);
     const actions = await this.strategic.getStrategicActions(businessId);
-    return { actions };
+    if (readerHolds(who, ['revenue', 'expenses'])) return { actions };
+    return {
+      actions: actions.filter((a) =>
+        readerHolds(who, [
+          ...(STRATEGIC_ACTION_NEEDS[a.type] ?? ['revenue', 'expenses']),
+          ...(a.estimatedValue !== undefined || a.category === 'revenue' ? (['revenue'] as const) : []),
+          // Its words: priority and category are the service's own labels ('opportunity' is no pipeline figure).
+          ...strategicItemNeeds([a.type, a.title, a.description]),
+        ]),
+      ),
+    };
+  }
+
+  /**
+   * FU-STRATEGIC-ROUTES-SIGHT: the caller as a reader (memoryReaderOf), refused unless they read each of `modules`, in
+   * ModuleScopeGuard's words. ModuleScopeGuard admits a SUPER_ADMIN; one who is no member reads no module here
+   * (readersModuleSight), as on every route of this programme.
+   */
+  private async strategicReaderOf(
+    businessId: string,
+    req: AuthenticatedRequest | undefined,
+    modules: readonly ('revenue' | 'expenses')[],
+  ): Promise<SemanticReader> {
+    const who = await this.memoryReaderOf(businessId, req);
+    const missing = modules.find((module) => !readerHolds(who, [module]));
+    if (missing) {
+      const membership = who.reader
+        ? await this.prisma.client.membership.findUnique({ where: { userId_businessId: { userId: who.reader, businessId } } })
+        : null;
+      const level = membership ? memberModuleLevel(membership, missing) : 'none';
+      throw new ForbiddenException(`Insufficient permissions: ${missing} requires read access (you have ${level})`);
+    }
+    return who;
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -1325,7 +1386,7 @@ export class AiController {
     const shownApprovals = readsEverything
       ? pendingItems
       : who.reader !== null && who.sight('operations')
-        ? keepWithinBudget(pendingItems, (a) => (JSON.stringify(approvalFields(a)) ?? '').length, approvalShown, APPROVALS_CLASSIFY_BUDGET)
+        ? keepWithinBudget(pendingItems, (a) => classificationCost(approvalFields(a)), approvalShown, APPROVALS_CLASSIFY_BUDGET)
         : [];
     const approvals = shownApprovals.slice(0, 20);
     const totalPendingApprovals = readsEverything ? totalPending : shownApprovals.length;
@@ -1571,15 +1632,29 @@ export class AiController {
   async workspaceRecommendations(
     @Param('businessId') businessId: string,
     @Query('module') module: string,
+    @Req() req?: AuthenticatedRequest,
   ) {
     const validModules: readonly string[] = ['crm', 'revenue', 'bookings', 'marketing', 'projects', 'expenses', 'automations'];
     if (!module || !validModules.includes(module)) {
       throw new BadRequestException(`Invalid module. Must be one of: ${validModules.join(', ')}`);
     }
-    return this.workspaceRecs.getRecommendations(
+    // FU-STRATEGIC-ROUTES-SIGHT (D-100, D-146): the revenue and expenses workspaces need their module's read; in any
+    // workspace each recommendation is read whole (strategicItemNeeds: "Top client ... has generated TTD 4,000").
+    const who = await this.strategicReaderOf(
+      businessId,
+      req,
+      module === 'revenue' ? ['revenue'] : module === 'expenses' ? ['expenses'] : [],
+    );
+    const recs = await this.workspaceRecs.getRecommendations(
       businessId,
       module as 'crm' | 'revenue' | 'bookings' | 'marketing' | 'projects' | 'expenses' | 'automations',
     );
+    if (readerHolds(who, ['revenue', 'expenses'])) return recs;
+    // Its words: type and priority are the service's own labels ('opportunity' is no pipeline figure).
+    return recs.filter((rec) => {
+      const { type: _type, priority: _priority, severity: _severity, ...words } = rec;
+      return readerHolds(who, strategicItemNeeds(words));
+    });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
