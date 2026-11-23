@@ -415,6 +415,69 @@ describe('MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (D-257, D-234, D-100): the temporal m
     }
   }, 300_000);
 
+  it('V75R-10 delta A1/A2 (races): a memory rewritten with money text right after the actor\'s visibility check is not handed back by tag_memory or update_memory (they answer as a missing id does) and is not deleted by delete_memory; with no rewrite the same member updates and deletes an ordinary summary', async () => {
+    await clearMemory();
+    const original = temporal.visibleMemoryById;
+    try {
+      await seed();
+      const answer = (r: any) => ({ success: r.success, data: r.data, error: r.error });
+      const ordinary = async (n: number) => db.temporalFlowMemory.findFirst({ where: { businessId: ID.biz, entityId: `${P}th_ok_${n}` } });
+      // The window: the check passes, then a summarizer rewrites the row (its content now names an invoice amount).
+      const rewriteAfterCheck = () => {
+        temporal.visibleMemoryById = async (businessId: string, memoryId: unknown, ms: unknown) => {
+          const row = await original.call(temporal, businessId, memoryId, ms);
+          if (row) {
+            await db.temporalFlowMemory.update({
+              where: { id: row.id },
+              data: { content: `Thread activity: 3 event(s). Latest: ${REV} Invoice INV-9 for TTD ${AMOUNT} is overdue.` },
+            });
+          }
+          return row;
+        };
+      };
+      const restore = () => {
+        temporal.visibleMemoryById = original;
+      };
+
+      // Controls (no rewrite): the member updates and deletes an ordinary summary they may see.
+      const updated = await connector.execute(cmd('opsNoRev', 'update_memory', { memoryId: (await ordinary(1)).id, importance: 'high' }));
+      expect(updated.success, JSON.stringify(updated.error)).toBe(true);
+      expect(updated.data.content).toContain(okMarker(1));
+      const deleted = await connector.execute(cmd('opsNoRev', 'delete_memory', { memoryId: (await ordinary(1)).id }));
+      expect(deleted.data.deleted).toBe(true);
+
+      const missing = (action: string, params: Record<string, unknown>) => connector.execute(cmd('opsNoRev', action, params));
+      // Every race that answers wrongly, so a RED run names each.
+      const wrong: string[] = [];
+      for (const [action, params] of [
+        ['tag_memory', (id: string) => ({ memoryId: id, tags: ['x'] })],
+        ['update_memory', (id: string) => ({ memoryId: id, importance: 'low' })],
+      ] as const) {
+        await seed();
+        const target = await ordinary(2);
+        rewriteAfterCheck();
+        const raced = answer(await connector.execute(cmd('opsNoRev', action, params(target.id))));
+        restore();
+        const none = answer(await missing(action, params(`${P}missing`)));
+        if (JSON.stringify(raced) !== JSON.stringify(none)) wrong.push(`${action}: answers ${JSON.stringify(raced).slice(0, 160)}`);
+        if (JSON.stringify(raced).includes(AMOUNT)) wrong.push(`${action}: hands back the money text`);
+        await clearMemory();
+      }
+
+      await seed();
+      const target = await ordinary(3);
+      rewriteAfterCheck();
+      const raced = answer(await connector.execute(cmd('opsNoRev', 'delete_memory', { memoryId: target.id })));
+      restore();
+      if (raced.data?.deleted !== false) wrong.push(`delete_memory: answers ${JSON.stringify(raced.data)}`);
+      if ((await db.temporalFlowMemory.count({ where: { id: target.id } })) !== 1) wrong.push('delete_memory: the rewritten row was deleted');
+      expect(wrong).toEqual([]);
+    } finally {
+      temporal.visibleMemoryById = original;
+      await clearMemory();
+    }
+  }, 300_000);
+
   it('V75R-02 filtered before the limit: with the money summaries the newest and the most similar, GET memory?limit=3 and memory/search?limit=3 and KEY search_memories (limit 3) hand the member without revenue read three ordinary summaries', async () => {
     await clearMemory();
     try {
