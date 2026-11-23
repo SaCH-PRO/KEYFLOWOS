@@ -122,7 +122,7 @@ import {
   type ModuleSight,
 } from '../key-cortex/key-cortex-prompt-context.service';
 import { KeyCortexConsciousnessService } from '../key-cortex/key-cortex-consciousness.service';
-import { readerSearchOptions } from './semantic-memory-sight';
+import { aiMemoryRowVisibleTo, readerSearchOptions } from './semantic-memory-sight';
 import { ProcurementService } from '../procurement/procurement.service';
 import {
   ActionNotClearedError,
@@ -396,6 +396,31 @@ async function turnMemorySight(
       ? await readersModuleSight(self.prisma, businessId, reader, self.logger, logTag)
       : candidate && reader !== candidate ? NO_MODULE_SIGHT : moduleSightOf(positionModules);
   return { reader, sight };
+}
+
+/**
+ * MEM-PATTERNS-SIGHT (P0; D-257, D-100, D-234, D-203): which AiMemory 'patterns' rows a flow turn's "USER PREFERENCES &
+ * MEMORY" section may carry. PatternDetectorService stores a repeat late payer as "N overdue invoices totaling X"
+ * ("Overdue: <total>"), and the block put every pattern into every turn. A turn that names no member and no position
+ * (the support desk) sees only the conversation in front of it: no pattern at all. Any other turn: each pattern by the
+ * AiMemory-row rule its semantic copy is read by (aiMemoryRowVisibleTo, MEM-SEMANTIC-SIGHT): money only for a member
+ * reader with revenue read, an expense only for one with expenses read, for the reader and modules turnMemorySight
+ * resolves (as the perception block and the semantic section read). A sight that cannot be resolved keeps no pattern.
+ */
+async function turnPatternVisibility(
+  self: Parameters<typeof turnMemorySight>[0],
+  businessId: string,
+  userId?: string,
+  server?: FlowServerContext,
+): Promise<(row: { category: string; key: string; value: string }) => boolean> {
+  if (!userId && !server) return () => false;
+  try {
+    const who = await turnMemorySight(self, businessId, userId, server, 'memoryPatterns');
+    return (row) => aiMemoryRowVisibleTo(row, who);
+  } catch (err: unknown) {
+    self.logger.warn(`[memoryPatterns][${businessId}] reader sight unresolved, no pattern served: ${err instanceof Error ? err.message : String(err)}`);
+    return () => false;
+  }
 }
 
 export interface FlowServerContext {
@@ -2190,7 +2215,9 @@ export class FlowOrchestratorService {
     const businessName = snapshot.business.name || 'your business';
     const contextSnapshot = this.businessGraph.buildContextString(snapshot);
 
-    const memoryCtx = await this.memory.buildContextBlock(businessId);
+    // MEM-PATTERNS-SIGHT (D-100, D-203): the behavioural patterns this turn's reader may read (turnPatternVisibility).
+    const patternVisible = await turnPatternVisibility({ prisma: this.prisma, logger: this.logger, getJobRolePolicy: () => this.getJobRolePolicy() }, businessId, userId, server);
+    const memoryCtx = await this.memory.buildContextBlock(businessId, { patternVisible });
     const memorySection = this.memory.buildPromptSection(memoryCtx);
 
     // Semantic memory search based on last user message (optional enrichment:
@@ -2641,7 +2668,9 @@ ${triage.standingContext}`;
     // viewer projection); a turn with no member, none.
     const snapshot = await this.businessGraph.getSnapshot(businessId, false, { viewerId: userId ?? null });
     const contextSnapshot = this.businessGraph.buildContextString(snapshot);
-    const memoryCtx = await this.memory.buildContextBlock(businessId);
+    // MEM-PATTERNS-SIGHT (D-100, D-203): the behavioural patterns this turn's reader may read (turnPatternVisibility).
+    const patternVisible = await turnPatternVisibility({ prisma: this.prisma, logger: this.logger, getJobRolePolicy: () => this.getJobRolePolicy() }, businessId, userId, server);
+    const memoryCtx = await this.memory.buildContextBlock(businessId, { patternVisible });
     const memorySection = this.memory.buildPromptSection(memoryCtx);
 
     // Semantic memory search based on current message (optional enrichment:
