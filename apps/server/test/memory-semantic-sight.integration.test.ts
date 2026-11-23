@@ -642,4 +642,40 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
       await clearMemory();
     }
   }, 120_000);
+  it('V71T-10 RED (security re-review MAJOR-1; D-234 meaning, D-100): an AiMemory copy whose row states money (a pattern row totalling overdue invoices) reaches only a member with revenue read: not the blind member, not the memberless SUPER_ADMIN, on search or in the flow chat; the owner and the revenue reader get it', async () => {
+    await clearMemory();
+    try {
+      await memory.upsert(ID.biz, { category: 'patterns', key: `${P}overdue`, value: `${okMarker(9)} 3 overdue invoices totaling TTD ${AMOUNT}`, source: 'pattern_analysis' });
+      await semantic.backfillFromAiMemory(ID.biz);
+      for (const reader of ['blind', 'root'] as Reader[]) {
+        expect((await searchFor(reader, 50)).join('\n'), reader).not.toContain(AMOUNT);
+        expect(await chatSectionFor(reader), `${reader} chat`).not.toContain(AMOUNT);
+      }
+      for (const reader of ['owner', 'revenue'] as Reader[]) expect((await searchFor(reader, 50)).join('\n'), reader).toContain(AMOUNT);
+    } finally {
+      await clearMemory();
+    }
+  }, 120_000);
+
+  it("V71T-11 RED (security re-review MINOR-1): an insight KEY stored (store_memory: entity 'business', source module key_cortex, its key chosen by the model, no source events) has no recorded provenance: it needs every module, so a key that names a module (crm_followups) does not admit the blind member; the owner gets it", async () => {
+    await clearMemory();
+    try {
+      await temporalMemory.createMemory({
+        businessId: ID.biz, entityType: 'business', entityId: 'crm_followups', type: 'insight', sourceModule: 'key_cortex',
+        content: `${okMarker(10)} follow up with the Smiths`, sourceEventIds: [], confidence: 0.9,
+      });
+      expect((await searchFor('blind', 50)).join('\n')).not.toContain(okMarker(10));
+      expect((await searchFor('owner', 50)).join('\n')).toContain(okMarker(10));
+    } finally {
+      await clearMemory();
+    }
+  }, 120_000);
+
+  it('V71T-12 RED (correctness re-review MINOR-1): a source read that fails does not leave the read to page on to lower-ranked hits: the projection raises, and the search answers nothing', async () => {
+    const { semanticHitsVisibleTo } = await import('../src/modules/ai/semantic-memory-sight');
+    const failing = { client: new Proxy({}, { get: () => ({ findMany: async () => { throw new Error('v71t: read failed'); } }) }) };
+    await expect(
+      semanticHitsVisibleTo(failing as any, ID.biz, { reader: ID.owner, sight: () => true }, [{ sourceType: 'temporal_memory', sourceId: 'x', content: 'y' }]),
+    ).rejects.toThrow('v71t: read failed');
+  });
 });
