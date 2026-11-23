@@ -1,6 +1,6 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-22 21:15 UTC by the orchestrator (Claude Code). Rewrite in place on every merge, packet return
+Last written: 2026-11-23 01:15 UTC by the orchestrator (Claude Code). Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -40,12 +40,12 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 
 ## 2. Rulings not yet on main
 
-D-255 to D-260, seven follow-up packets, the 13 memory packets and three ruling packets (plan now 244) are recorded on `pkt/V1-RULINGS-3E` (main merged in): it
+D-255 to D-260, seven follow-up packets, the 13 memory packets and three ruling packets (plan now 346) are recorded on `pkt/V1-RULINGS-3E` (main merged in): it
 joins wave 3e. D-249 to D-254 are on main (wave 3d, #221).
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `2c4e4bf2` (wave 3d, #221, merged 21:12 UTC; #222 merged 20:32). Child sessions are on the account that started them; for another account the
+Main is at `b94477a7` (wave 3e, #223, merged 2026-11-23 01:10 UTC; #218 merged 00:04). 70 packets done on main; live state of every packet is on #80 (latest comment) until this table is next rewritten. Child sessions are on the account that started them; for another account the
 branch is the hand-over: fetch it, read its last commits and the RETURN on #80, and continue. Lesson of 2026-11-22:
 three workers stopped on the Fable limit before pushing and their work was lost; the brief now says push after every
 commit.
@@ -99,6 +99,17 @@ Format: `docs/development/agent-memory/OWNER-QUESTION-FORMAT.md`. Safe defaults 
 13. release0-live AMEND: contacts page h1 "Customers" (spec ~286, ~475)? (Default: h1 stays "Contacts", menu says
     "Customers".)
 14. Should the menu fail open (show every hub) when the my-access read fails? (Default: yes; the server is the gate.)
+
+15. The research index's 41 owner questions (`docs/reconstruction/research-recommendations/README.md` section 6 on
+    branch `docs/v1-research-recommendations`): OQ-1 (MCP servers in production) and OQ-4 (bank access tokens in
+    production) decide whether RR-MCP-TENANT-BOUND and RR-BANK-TOKEN-ENCRYPT become P0. (Defaults: as recommended.)
+
+16. Store order lists/detail for members without revenue read: money-stripped rows (default), queue-status rows only,
+    or none? Also: should store analytics routes require storefront read, and are checkout_complete counts and
+    confirmed/shipped order counts "sales volume" under D-234? (Defaults: money-stripped rows; no storefront gate;
+    counts visible.)
+17. Should a failed KEY turn still save the member's question? (Default: no, as built.) Attachment caps 24k per file
+    and 96k per turn, with a visible note to the member when truncated: acceptable? (Default: yes.)
 
 ## 5. How to work here (learned the hard way)
 
