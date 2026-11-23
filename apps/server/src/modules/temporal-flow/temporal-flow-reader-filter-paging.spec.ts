@@ -69,6 +69,12 @@ describe('the module filter is in every timeline query a read makes (D-238 merge
     const { svc, findMany } = service([[]]);
     await svc.list('biz_1', { limit: 5 }, { id: 'owner', role: 'USER' }, FILTER);
     expectEveryQueryScoped(findMany, 1);
+    // The single-read branch, not the loop: one read of exactly the limit, with no skip (every page of the loop,
+    // the first included, carries a skip).
+    expect(findMany).toHaveBeenCalledTimes(1);
+    const [args] = (findMany.mock.calls[0] as any[]);
+    expect(args.take).toBe(5);
+    expect('skip' in args).toBe(false);
   });
 
   it("list for a reader without revenue read: every page of D-238's loop is scoped", async () => {
