@@ -705,3 +705,19 @@ describe('W11-GENOME-FINANCE-SCOPE review repairs (D-128, D-100): finance rows o
     expect((queue as any[]).map((i) => i.id)).toEqual(['recommendation-rec_ops']);
   });
 });
+
+describe('FU-PROPOSAL-REVENUE-SIGHT review repair (security MAJOR-2; D-234)', () => {
+  it('[PRS-04b] RED-BEFORE: GET experiments serves a member without revenue read the operations experiment and not the one made from a money signal; a revenue reader is served both', async () => {
+    const { controller, moduleRef, prisma } = await makeController();
+    (moduleRef.get(GenomeExperimentService) as any).listExperiments.mockResolvedValue([
+      { id: 'exp_money', hypothesis: 'Validating revenue pattern', action: 'Raise prices on retainers.', successMetric: 'Revenue per client' },
+      { id: 'exp_ops', hypothesis: 'Documented SOPs cut delays', action: 'Write the SOPs.', successMetric: 'Delays per week' },
+    ]);
+    prisma.client.membership.findUnique.mockResolvedValueOnce({ role: 'STAFF', permissionScopes: { revenue: 'none' } });
+    const blind = await (controller as any).listExperiments('biz_1', undefined, undefined, { user: { id: 'u_none', role: 'USER' } });
+    expect(blind.map((e: any) => e.id)).toEqual(['exp_ops']);
+    prisma.client.membership.findUnique.mockResolvedValueOnce({ role: 'STAFF', permissionScopes: { revenue: 'read' } });
+    const reader = await (controller as any).listExperiments('biz_1', undefined, undefined, { user: { id: 'u_read', role: 'USER' } });
+    expect(reader.map((e: any) => e.id)).toEqual(['exp_money', 'exp_ops']);
+  });
+});

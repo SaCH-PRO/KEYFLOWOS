@@ -53,6 +53,8 @@ export interface GeneralLedgerRow {
   accountName: string;
   accountCode: string | null;
   accountType: string;
+  /** V1-66: the line's own currency (absent from a server older than V1-66). */
+  currency?: string;
   debit: string;
   credit: string;
   runningBalance: string;
@@ -63,9 +65,10 @@ export interface GeneralLedgerRow {
   sourceId: string | null;
 }
 
-export async function fetchGeneralLedger(businessId: string, params?: { accountId?: string; from?: string; to?: string; page?: number; limit?: number }) {
+// V1-66 (SWP-FIN-LEDGER): the route pages by `pageSize` (it never read `limit`) and answers `pageSize`.
+export async function fetchGeneralLedger(businessId: string, params?: { accountId?: string; from?: string; to?: string; page?: number; pageSize?: number }) {
   const qs = params ? new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][]).toString() : "";
-  return apiGet<{ rows: GeneralLedgerRow[]; total: number; page: number; limit: number }>(`/finance/businesses/${businessId}/general-ledger${qs ? `?${qs}` : ""}`);
+  return apiGet<{ rows: GeneralLedgerRow[]; total: number; page: number; pageSize: number }>(`/finance/businesses/${businessId}/general-ledger${qs ? `?${qs}` : ""}`);
 }
 
 // ---------- Trial Balance ----------

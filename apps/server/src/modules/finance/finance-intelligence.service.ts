@@ -1,9 +1,11 @@
-import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional, forwardRef } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { RevenueActionService } from '../commerce/revenue-action.service';
 import { CommandService } from '../command/command.service';
+import { CashPositionService, otherCurrencyCash } from './cash-position.service';
+import { namedCashCurrency, notCountedCash, notCountedCashNote, otherCurrencyCashWithheldNote } from './finance-overview.service';
 
 /**
  * FIN8 — Finance intelligence detectors. Eight deterministic detectors
@@ -33,6 +35,13 @@ interface Detection {
   severity: FinSeverity;
   title: string;
   body: string;
+  /**
+   * W11-RUNWAY-LEDGER-CASH (D-107): the text for the command-spine mirror when it differs from
+   * `body`. CommandItem rows are served under operations read, not revenue read, so the copy there
+   * says other-currency cash is held without adding its figures. (The copy still carries what it
+   * carried before this packet, the business-currency cash and burn, as every FIN8 mirror does.)
+   */
+  commandBody?: string;
   entityType?: string;
   entityId?: string;
   recommendedAction?: string | null;
@@ -86,6 +95,7 @@ function trinidadMonthStart(now: Date, monthsBack = 0): Date {
 export class FinanceIntelligenceService {
   private readonly logger = new Logger(FinanceIntelligenceService.name);
   private readonly insightCache = new Map<string, InsightCacheEntry>();
+  private readonly cashPosition: CashPositionService;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -94,7 +104,12 @@ export class FinanceIntelligenceService {
     private readonly revenueActions: RevenueActionService,
     @Inject(CommandService)
     private readonly commandService: CommandService,
-  ) {}
+    // W11-RUNWAY-LEDGER-CASH: optional as on FinanceOverviewService, so hand-built instances keep
+    // working; it needs only Prisma.
+    @Optional() @Inject(CashPositionService) cashPosition?: CashPositionService | null,
+  ) {
+    this.cashPosition = cashPosition ?? new CashPositionService(prisma);
+  }
 
   // ------------------------------------------------------------------
   // Public API
@@ -184,21 +199,28 @@ export class FinanceIntelligenceService {
   async scan(businessId: string): Promise<{ created: number; refreshed: number; superseded: number }> {
     const now = new Date();
     const detections: Detection[] = [];
-    for (const fn of [
-      this.detectCashflowRisk.bind(this),
-      this.detectSlowPayer.bind(this),
-      this.detectMarginDecline.bind(this),
-      this.detectOverspending.bind(this),
-      this.detectMissingReceipt.bind(this),
-      this.detectUncategorised.bind(this),
-      this.detectTaxReserveGap.bind(this),
-      this.detectDuplicateExpense.bind(this),
-    ]) {
+    // W11-RUNWAY-LEDGER-CASH (acceptance review C2; CP-24): the kinds whose detector threw in this
+    // scan. A detector that failed found nothing, which is not "no longer live": the self-heal
+    // below leaves that kind's open rows and their mirrors as they are (a superseded row's revenue
+    // action is COMPLETED, and RevenueActionService never reopens one).
+    const failedKinds = new Set<FinDetectorKind>();
+    const detectors: Array<[FinDetectorKind, (businessId: string, now: Date) => Promise<Detection[]>]> = [
+      ['CASHFLOW_RISK', this.detectCashflowRisk.bind(this)],
+      ['SLOW_PAYER', this.detectSlowPayer.bind(this)],
+      ['MARGIN_DECLINE', this.detectMarginDecline.bind(this)],
+      ['OVERSPENDING', this.detectOverspending.bind(this)],
+      ['MISSING_RECEIPT', this.detectMissingReceipt.bind(this)],
+      ['UNCATEGORISED', this.detectUncategorised.bind(this)],
+      ['TAX_RESERVE_GAP', this.detectTaxReserveGap.bind(this)],
+      ['DUPLICATE_EXPENSE', this.detectDuplicateExpense.bind(this)],
+    ];
+    for (const [kind, fn] of detectors) {
       try {
         const found = await fn(businessId, now);
         detections.push(...found);
       } catch (e) {
-        this.logger.warn(`detector failed: ${(e as Error).message}`);
+        failedKinds.add(kind);
+        this.logger.warn(`detector ${kind} failed for ${businessId}: ${(e as Error).message}`);
       }
     }
 
@@ -223,6 +245,8 @@ export class FinanceIntelligenceService {
     for (const row of open) {
       const key = `${row.kind}::${row.entityType ?? ''}::${row.entityId ?? ''}`;
       if (seenKeys.has(key)) continue;
+      // C2: this kind's detector failed in this scan; its rows are not known to be stale.
+      if (failedKinds.has(row.kind as FinDetectorKind)) continue;
       await this.prisma.client.financeActionItem.update({
         where: { id: row.id },
         data: { status: 'SUPERSEDED', resolvedAt: now },
@@ -249,35 +273,65 @@ export class FinanceIntelligenceService {
   /**
    * CASHFLOW_RISK: cash runway < 30 days, computed off the trailing
    * 90-day burn rate.
+   *
+   * W11-RUNWAY-LEDGER-CASH (owner ruling D-135, extending D-107; CP-20): the cash is the ledger
+   * cash position in the business currency (CashPositionService), never the sum of the accounts'
+   * currentBalance, an opening snapshot nothing posts to (CF-41) that was summed across currencies.
+   * Cash held in another currency is never added nor converted (D-13); the body names it,
+   * unconverted, under the LOW_RUNWAY text's rules (notCountedCashNote: codes only, bounded, a
+   * label never echoed), and the evidence carries the same (cashCurrency, otherCurrencyCash). The
+   * body reaches revenue readers (GET intelligence/actions, the revenue-actions mirror, the daily
+   * insight); the command-spine copy, read under operations read, says such cash is held without
+   * adding its figures (commandBody; the business-currency figures it already carried stay). The
+   * burn's own currency is W11-RUNWAY-BURN-CURRENCY.
+   *
+   * Acceptance review C1 (CP-23): the ledger cash can be negative (more spent from the till than it
+   * held), which the snapshot sum was not. The runway shown is never below zero ("~0 days", never
+   * "~-0"), and the amount (the amount at risk the revenue-actions mirror orders by) is zero for a
+   * shortfall, never negative. The command item reads a zero amount as it reads no amount (no
+   * expected value, the default score of 50), as it did for cash of exactly zero. The real balance
+   * stays in the body and in evidence.cash.
    */
   private async detectCashflowRisk(businessId: string, now: Date): Promise<Detection[]> {
     const ninetyAgo = new Date(now.getTime() - 90 * MS_DAY);
-    const [accounts, ninetyExp] = await Promise.all([
-      this.prisma.client.financialAccount.findMany({
-        where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
-        select: { currentBalance: true },
-      }),
+    const [position, ninetyExp] = await Promise.all([
+      this.cashPosition.getCashPosition(businessId),
       this.prisma.client.expense.aggregate({
         where: { businessId, deletedAt: null, date: { gte: ninetyAgo, lt: now } },
         _sum: { amount: true },
       }),
     ]);
-    const cash = accounts.reduce((s, a) => s + Number(a.currentBalance ?? 0), 0);
+    const cash = position.cashBalance;
+    const other = otherCurrencyCash(position);
     const dailyBurn = Number(ninetyExp._sum.amount ?? 0) / 90;
     if (dailyBurn <= 0) return [];
     const days = cash / dailyBurn;
     if (days >= 30) return [];
     const severity: FinSeverity = days < 14 ? 'CRITICAL' : 'WARNING';
+    const shownDays = Math.max(0, days);
+    const base = `Cash ${cash.toFixed(2)} against ${dailyBurn.toFixed(2)}/day burn (90-day average). Runway is under 30 days.`;
+    const note = notCountedCashNote(position.currency, other);
+    const withheld = otherCurrencyCashWithheldNote(position.currency, other);
+    const named = notCountedCash(other);
     return [{
       kind: 'CASHFLOW_RISK',
       severity,
-      title: `Low cash runway — ~${days.toFixed(0)} days`,
-      body: `Cash ${cash.toFixed(2)} against ${dailyBurn.toFixed(2)}/day burn (90-day average). Runway is under 30 days.`,
+      title: `Low cash runway — ~${shownDays.toFixed(0)} days`,
+      body: note ? `${base} ${note}` : base,
+      commandBody: withheld ? `${base} ${withheld}` : base,
       entityType: 'business',
       entityId: businessId,
       recommendedAction: '/app/finance/cashflow',
-      amount: cash,
-      evidence: { cash, dailyBurn: Math.round(dailyBurn * 100) / 100, days: Math.round(days) },
+      amount: Math.max(0, cash),
+      evidence: {
+        cash,
+        dailyBurn: Math.round(dailyBurn * 100) / 100,
+        days: Math.round(shownDays),
+        // Review SEC-W11RL-1: Business.currency is free text; named only when it is a code.
+        cashCurrency: namedCashCurrency(position.currency),
+        otherCurrencyCash: named.listed,
+        ...(named.notListed > 0 ? { otherCurrencyCashNotListed: named.notListed } : {}),
+      },
     }];
   }
 
@@ -746,7 +800,7 @@ export class FinanceIntelligenceService {
         sourceId,
         actionType,
         title: d.title,
-        description: d.body,
+        description: d.commandBody ?? d.body,
         category: 'MONEY',
         priority: d.severity === 'CRITICAL' ? 90 : d.severity === 'WARNING' ? 70 : 40,
         urgency: d.severity === 'CRITICAL' ? 90 : d.severity === 'WARNING' ? 60 : 30,

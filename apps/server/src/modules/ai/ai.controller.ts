@@ -766,10 +766,11 @@ export class AiController {
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/approvals')
-  async getPendingApprovals(@Param('businessId') businessId: string) {
+  async getPendingApprovals(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
     // Phase 0.6: all pending approvals are served from the canonical
     // KeyActionProposal table (legacy AI items, PRO_AUTO insights, etc.).
-    return this.proposals.list(businessId, { status: 'PENDING' });
+    // FU-PROPOSAL-REVENUE-SIGHT (D-238): a reader without revenue read is served the non-financial ones only.
+    return this.proposals.listForReader(businessId, { status: 'PENDING' }, req?.user?.id ? { id: req.user.id, role: req.user.role } : null);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -777,10 +778,11 @@ export class AiController {
   async getApprovalHistory(
     @Param('businessId') businessId: string,
     @Query('limit') limit?: string,
+    @Req() req?: AuthenticatedRequest,
   ) {
     // Phase 0.6: approval history is now read from KeyActionProposal.
     // See getPendingApprovals for the migration note on response shape.
-    const proposals = await this.proposals.list(businessId, { sourceType: 'AI_LEGACY' });
+    const proposals = await this.proposals.listForReader(businessId, { sourceType: 'AI_LEGACY' }, req?.user?.id ? { id: req.user.id, role: req.user.role } : null);
     const history = proposals
       .filter((p) => p.status !== 'PENDING')
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -798,7 +800,7 @@ export class AiController {
   ) {
     const userId = req?.user?.id;
     if (!userId) throw new UnauthorizedException('Authenticated user required to resolve approvals');
-    return this.resolveLegacyApproval(businessId, approvalId, body.resolution, userId);
+    return this.resolveLegacyApproval(businessId, approvalId, body.resolution, userId, req.user?.role);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -811,7 +813,7 @@ export class AiController {
     const userId = req?.user?.id;
     if (!userId) throw new UnauthorizedException('Authenticated user required to resolve approvals');
     const results = await Promise.allSettled(
-      body.approvalIds.map((id) => this.resolveLegacyApproval(businessId, id, body.resolution, userId)),
+      body.approvalIds.map((id) => this.resolveLegacyApproval(businessId, id, body.resolution, userId, req.user?.role)),
     );
     const succeeded = results.filter((r) => r.status === 'fulfilled').length;
     const failed = results.filter((r) => r.status === 'rejected').length;
@@ -823,32 +825,46 @@ export class AiController {
     approvalId: string,
     resolution: 'approved' | 'rejected' | 'deferred',
     userId: string,
+    role?: string,
   ) {
     // Canonical path: resolve directly from KeyActionProposal.
+    // FU-PROPOSAL-REVENUE-SIGHT (D-238, rounds 3-4): the resolve keeps its own authority (assertCanResolveApproval, the
+    // orchestrator); every branch that resolves a proposal (canonical, deferred, the legacy aiApprovalItem migration)
+    // answers a resolver without revenue read a financial proposal's redacted view. The proposal is read as before, so
+    // a financial proposal never falls through to the legacy aiApprovalItem path.
     let proposal: any;
     try {
       proposal = await this.proposals.get(businessId, approvalId);
-    } catch {
+    } catch (err) {
+      // Only a missing proposal falls through to the legacy path (round 5, security m3).
+      if (!(err instanceof NotFoundException)) throw err;
       proposal = null;
     }
+    const reader = { id: userId, role };
 
     if (proposal) {
       await this.assertCanResolveApproval(businessId, proposal.riskTier ?? 2, userId);
       if (resolution === 'deferred') {
         // Defer by rejecting with a deferral reason; true deferral state is not in the proposal model.
-        return this.approvalOrchestrator.reject({
-          proposalId: approvalId,
+        return this.proposals.viewForReader(
           businessId,
-          userId,
-          reason: 'Deferred by operator',
-        });
+          await this.approvalOrchestrator.reject({
+            proposalId: approvalId,
+            businessId,
+            userId,
+            reason: 'Deferred by operator',
+          }),
+          reader,
+        );
       }
       if (proposal.status !== 'PENDING') {
         throw new BadRequestException(`Proposal ${approvalId} is already resolved (status: ${proposal.status})`);
       }
-      return resolution === 'approved'
-        ? this.approvalOrchestrator.approve({ proposalId: approvalId, businessId, userId, autoExecute: false })
-        : this.approvalOrchestrator.reject({ proposalId: approvalId, businessId, userId });
+      const resolved =
+        resolution === 'approved'
+          ? await this.approvalOrchestrator.approve({ proposalId: approvalId, businessId, userId, autoExecute: false })
+          : await this.approvalOrchestrator.reject({ proposalId: approvalId, businessId, userId });
+      return this.proposals.viewForReader(businessId, resolved, reader);
     }
 
     // Compatibility fallback: legacy aiApprovalItem records are migrated once on resolution.
@@ -898,7 +914,8 @@ export class AiController {
       },
     });
 
-    return resolved;
+    // D-238 (round 4, correctness MAJOR-1): the migrated proposal is answered as the resolver may see it.
+    return this.proposals.viewForReader(businessId, resolved, reader);
   }
 
   private async migrateAiApprovalItemToProposal(

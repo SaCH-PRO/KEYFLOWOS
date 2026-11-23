@@ -1,6 +1,6 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-22 21:15 UTC by the orchestrator (Claude Code). Rewrite in place on every merge, packet return
+Last written: 2026-11-23 01:15 UTC by the orchestrator (Claude Code). Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -45,7 +45,7 @@ joins wave 3e. D-249 to D-254 are on main (wave 3d, #221).
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `2c4e4bf2` (wave 3d, #221, merged 21:12 UTC; #222 merged 20:32). Child sessions are on the account that started them; for another account the
+Main is at `b94477a7` (wave 3e, #223, merged 2026-11-23 01:10 UTC; #218 merged 00:04). 70 packets done on main; live state of every packet is on #80 (latest comment) until this table is next rewritten. Child sessions are on the account that started them; for another account the
 branch is the hand-over: fetch it, read its last commits and the RETURN on #80, and continue. Lesson of 2026-11-22:
 three workers stopped on the Fable limit before pushing and their work was lost; the brief now says push after every
 commit.

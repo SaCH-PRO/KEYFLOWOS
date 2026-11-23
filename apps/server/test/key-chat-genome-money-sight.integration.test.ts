@@ -72,6 +72,7 @@ function genome() {
 }
 
 let db: any;
+const suggestionCalls: unknown[][] = [];
 let turn: (userId: string, path: 'processQuery' | 'streamQuery', legacy?: boolean) => Promise<{ prompt: string; output: string }>;
 
 async function cleanup() {
@@ -151,7 +152,8 @@ beforeAll(async () => {
       } as any,
       { handleToolCalls: async () => null } as any,
       { detectActions: () => [] } as any,
-      { generateSuggestions: async () => [] } as any,
+      // Records what the follow-up suggestion prompt is handed (security MAJOR-4 / correctness MAJOR-2).
+      { generateSuggestions: async (...args: unknown[]) => { suggestionCalls.push(args); return []; } } as any,
       genomeContextService as any,
       {
         buildV2SystemPrompt: () => 'V2',
@@ -206,6 +208,26 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (db) await cleanup();
+});
+
+describe('FU-PROPOSAL-REVENUE-SIGHT review repair (security MAJOR-4, correctness MAJOR-2; KC-SEC-3, D-233): the follow-up suggestion prompt is handed the snapshot the reader may see', () => {
+  for (const reader of ['owner', 'blind'] as const) {
+    it(`${READS_REVENUE[reader] ? 'control' : 'RED-BEFORE'}: ${reader} (processQuery, legacy prompt): the suggestion service is handed the turn's snapshot${READS_REVENUE[reader] ? ' whole' : ' without revenue figures, pending-invoice count or finance DNA'}`, async () => {
+      suggestionCalls.length = 0;
+      await turn(ID[reader], 'processQuery', true);
+      expect(suggestionCalls.length, 'one suggestion call').toBe(1);
+      const snapshot = suggestionCalls[0][4] as any;
+      expect(snapshot, 'the turn snapshot is handed on').toBeTruthy();
+      if (READS_REVENUE[reader]) {
+        expect(snapshot.keyMetrics.totalRevenue).toBe(98765);
+        expect(snapshot.pendingInvoices).toBe(7);
+      } else {
+        expect(snapshot.keyMetrics).not.toHaveProperty('totalRevenue');
+        expect(snapshot).not.toHaveProperty('pendingInvoices');
+        expect(snapshot.genomeDna).not.toHaveProperty('finance');
+      }
+    });
+  }
 });
 
 describe('FU-KEY-CHAT-GENOME-MONEY-SIGHT (D-128, D-100): a KEY chat turn hands finance genome rows and opportunity values only to members who may read revenue', () => {

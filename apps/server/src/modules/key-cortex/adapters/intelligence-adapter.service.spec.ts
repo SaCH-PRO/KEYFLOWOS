@@ -91,3 +91,17 @@ describe('IntelligenceAdapterService', () => {
     expect(result.error).toContain('Unknown intelligence action');
   });
 });
+
+describe('FU-PROPOSAL-REVENUE-SIGHT round-3 repair (security B1; D-238): the KEY intelligence tool reads the command center for its actor', () => {
+  it('RED-BEFORE: run_comprehensive_analysis reads the snapshot for the command actor, so a financial proposal is withheld from an actor without revenue read', async () => {
+    const snapshot = vi.fn().mockResolvedValue({ health: {} });
+    const svc = new IntelligenceAdapterService(
+      { generateExecutiveBrief: vi.fn().mockResolvedValue({}) } as any,
+      { getDashboard: vi.fn().mockResolvedValue({}) } as any,
+      { snapshot } as any,
+      {} as any,
+    );
+    await svc.execute({ module: 'intelligence', action: 'run_comprehensive_analysis', parameters: {}, businessId: 'biz_9', userId: 'user_9', source: 'key_cortex', timestamp: new Date(), correlationId: 'c' } as any);
+    expect(snapshot).toHaveBeenCalledWith('biz_9', { id: 'user_9' });
+  });
+});

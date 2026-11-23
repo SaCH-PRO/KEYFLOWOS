@@ -1,5 +1,7 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { CashPositionService } from '../finance/cash-position.service';
+import { namedCashCurrency } from '../finance/finance-overview.service';
 import { balanceOfStoredRows } from '../commerce/invoice-workflow.service';
 import { sumMoney } from '../commerce/money';
 // V1-38b (CR-1): a customer is Contact.status CLIENT, the one vocabulary; a
@@ -14,14 +16,24 @@ export interface HealthAreaResult {
   score: number;
   status: 'HEALTHY' | 'ATTENTION' | 'AT_RISK' | 'CRITICAL';
   reasons: string[];
-  metrics: Record<string, number>;
+  /** Figures; W11-CASH-READERS-LEDGER adds the money area's cashCurrency (a code) beside cashBalance. */
+  metrics: Record<string, number | string>;
 }
 
 @Injectable()
 export class HealthScoreService {
   private readonly logger = new Logger(HealthScoreService.name);
 
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  private readonly cashPosition: CashPositionService;
+
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    // W11-CASH-READERS-LEDGER: optional with a Prisma-only fallback, as on FinanceOverviewService,
+    // so IntelligenceModule needs no FinanceModule import and hand-built instances keep working.
+    @Optional() @Inject(CashPositionService) cashPosition?: CashPositionService | null,
+  ) {
+    this.cashPosition = cashPosition ?? new CashPositionService(prisma);
+  }
 
   async calculateAll(businessId: string): Promise<HealthAreaResult[]> {
     const [money, time, people, sales, storefront, operations, risk] = await Promise.all([
@@ -75,10 +87,10 @@ export class HealthScoreService {
   private async calculateMoneyHealth(businessId: string): Promise<HealthAreaResult> {
     const now = new Date();
     const reasons: string[] = [];
-    const metrics: Record<string, number> = {};
+    const metrics: Record<string, number | string> = {};
 
-    const [cashAccounts, overdueInvoices, upcomingBills, uncategorizedExpenses, taxLiabilities] = await Promise.all([
-      this.prisma.client.financialAccount.findMany({ where: { businessId, isActive: true, type: { in: ['CASH', 'BANK'] } }, select: { currentBalance: true } }),
+    const [position, overdueInvoices, upcomingBills, uncategorizedExpenses, taxLiabilities] = await Promise.all([
+      this.cashPosition.getCashPosition(businessId),
       this.prisma.client.invoice.findMany({
         where: { businessId, status: 'SENT', deletedAt: null, dueDate: { lt: now } },
         // V1-41c: this tenant's own rows (M31), read by the balance contract below.
@@ -89,7 +101,13 @@ export class HealthScoreService {
       this.prisma.client.taxLiability.findMany({ where: { businessId, status: { in: ['OPEN', 'FILED'] } }, select: { amountDue: true, dueDate: true } }),
     ]);
 
-    const cashBalance = cashAccounts.reduce((s, a) => s + Number(a.currentBalance ?? 0), 0);
+    // W11-CASH-READERS-LEDGER (owner ruling D-135; CF-41): the ledger cash position in the business
+    // currency (CashPositionService: CASH, BANK and PAYMENT_PROCESSOR), never the CASH and BANK
+    // accounts' currentBalance, an opening snapshot nothing posts to, summed across currencies.
+    // Cash in another currency is never added (D-13); cashCurrency labels the figure, named only
+    // when the business currency is a three-letter code (review SEC-W11RL-1: Business.currency is
+    // free text, and this area is served under settings read and persisted in its snapshots).
+    const cashBalance = position.cashBalance;
     // V1-41c-MONEY-ROW-COUNTERS: what is left on each overdue invoice is the
     // V1-36 balance contract (balanceOfStoredRows: SUCCESSFUL in, refunds
     // out, integer cents) over the invoice's own-tenant rows. The status-blind
@@ -104,6 +122,8 @@ export class HealthScoreService {
     const taxDueAmount = taxDueSoon.reduce((s, t) => s + Number(t.amountDue ?? 0), 0);
 
     metrics.cashBalance = cashBalance;
+    const cashCurrency = namedCashCurrency(position.currency);
+    if (cashCurrency) metrics.cashCurrency = cashCurrency;
     metrics.overdueReceivables = overdueReceivables;
     metrics.billsDue30 = billsDue30;
     metrics.uncategorizedExpenses = uncategorizedExpenses.length;

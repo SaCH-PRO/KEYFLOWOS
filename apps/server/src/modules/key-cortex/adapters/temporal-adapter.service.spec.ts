@@ -98,7 +98,16 @@ describe('TemporalAdapterService', () => {
     (flow.calendarRange as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 'e1' }]);
     const result = await service.execute(mkCmd('get_timeline', { from: '2026-01-01', to: '2026-01-31' }));
     expect(result.success).toBe(true);
-    expect(flow.calendarRange).toHaveBeenCalledWith('biz_123', '2026-01-01', '2026-01-31');
+    // D-238 (round-3 security M4): the timeline is read for the command's actor, so a financial KEY proposal's events are
+    // withheld from an actor without revenue read.
+    expect(flow.calendarRange).toHaveBeenCalledWith('biz_123', '2026-01-01', '2026-01-31', { id: 'user_456' });
+  });
+
+  it('RED-BEFORE (D-238): get_timeline without a range lists the timeline for the command actor', async () => {
+    (flow.list as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 'e1' }]);
+    const result = await service.execute(mkCmd('get_timeline', {}));
+    expect(result.success).toBe(true);
+    expect(flow.list).toHaveBeenCalledWith('biz_123', expect.anything(), { id: 'user_456' });
   });
 
   it('get_memory_stats returns stats', async () => {

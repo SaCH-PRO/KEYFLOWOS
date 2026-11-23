@@ -1,7 +1,10 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { LedgerReportingService, ReportBasis } from './ledger-reporting.service';
+import { readInvoiceMoney } from '../commerce/commerce-stats.service';
+import { normalizeCurrency } from '../finance/posting.service';
+import { sumMoney } from '../commerce/money';
 
 @Injectable()
 export class ReportsService {
@@ -28,6 +31,12 @@ export class ReportsService {
   }
 
   async generateReport(businessId: string, type: string, startDate?: string, endDate?: string, compare = false) {
+    // Round 3 review S3-4: no business named is refused before any read (Prisma
+    // drops an `undefined` filter and takes an object as one, so the reads
+    // below would not be bound to one tenant).
+    if (typeof businessId !== 'string' || businessId.length === 0) {
+      throw new BadRequestException('A business is required');
+    }
     const now = new Date();
     const start = startDate ? new Date(startDate) : new Date(now.getFullYear(), now.getMonth(), 1);
     const end = endDate ? new Date(endDate) : now;
@@ -90,16 +99,38 @@ export class ReportsService {
     }) : [];
     const categoryMap = new Map(categories.map(c => [c.id, c.name]));
 
-    const [outstandingInvoices, overdueInvoices] = await Promise.all([
-      this.prisma.client.invoice.aggregate({
-        where: { businessId, deletedAt: null, status: { in: ['SENT', 'DRAFT'] } },
-        _sum: { total: true },
-        _count: true,
-      }),
-      this.prisma.client.invoice.count({
-        where: { businessId, deletedAt: null, status: { in: ['SENT', 'DRAFT'] }, dueDate: { lt: now } },
-      }),
-    ]);
+    // V1-64 (SWP-INV-MONEY-TOTALS; sweep BUG-020; D-13, D-14, D-75): what is
+    // owed is the remaining balance of the open receivables
+    // (OPEN_RECEIVABLE_STATUSES: PENDING, owner ruling D-256, SENT, OVERDUE,
+    // PARTIALLY_PAID, PARTIALLY_CREDITED) over their own-tenant payment rows,
+    // the read the commerce stats total from (readInvoiceMoney) and the figure
+    // the A/R aging states (D-251: the aging reads the same invoices through
+    // the same read; on an ACCRUAL book it trusts the AR ledger per invoice,
+    // owner ruling D-255, so the two agree wherever the ledger agrees with the
+    // rows, and a difference is a reconciliation finding). It summed the totals of SENT and DRAFT invoices: a
+    // draft nobody was sent counted as owed, a part-paid invoice did not, and a
+    // deposit never reduced it. The report is labelled in the business
+    // currency, so the figure and its counts are that currency's invoices only
+    // (another currency's are not added to it).
+    // Review SEC-1: the open receivables alone are read (no other invoice owes
+    // anything). Review COR-4: what is owed in each currency is stated under
+    // outstandingByCurrency, so another currency's receivable is not lost.
+    const reportCurrency = normalizeCurrency(currency) || 'TTD';
+    const owedInvoices = (await readInvoiceMoney(this.prisma.client, businessId, now, { openOnly: true })).filter(
+      (inv) => inv.remaining > 0 && inv.currency !== '',
+    );
+    const outstandingByCurrency: Record<string, { outstanding: number; count: number; overdueCount: number }> = {};
+    for (const code of [...new Set(owedInvoices.map((inv) => inv.currency))].sort()) {
+      const owed = owedInvoices.filter((inv) => inv.currency === code);
+      outstandingByCurrency[code] = {
+        outstanding: sumMoney(owed.map((inv) => inv.remaining)),
+        count: owed.length,
+        overdueCount: owed.filter((inv) => inv.overdue).length,
+      };
+    }
+    const home = outstandingByCurrency[reportCurrency] ?? { outstanding: 0, count: 0, overdueCount: 0 };
+    const outstandingInvoices = { total: home.outstanding, count: home.count };
+    const overdueInvoices = home.overdueCount;
 
     // FIN4 — Source of truth: derive revenue/expense from the ledger so
     // these figures match the PnL/Balance Sheet endpoints exactly. Falls
@@ -173,8 +204,9 @@ export class ReportsService {
         invoiceCount: paidInvoicesInPeriod._count ?? 0,
         averageInvoice: (paidInvoicesInPeriod._count ?? 0) > 0 ? totalRevenue / (paidInvoicesInPeriod._count ?? 1) : 0,
         byStatus: invoicesByStatus,
-        outstanding: Number(outstandingInvoices._sum.total ?? 0),
-        outstandingCount: outstandingInvoices._count ?? 0,
+        outstanding: outstandingInvoices.total,
+        outstandingCount: outstandingInvoices.count,
+        outstandingByCurrency,
         overdueCount: overdueInvoices,
         topClients,
       },
@@ -224,6 +256,19 @@ export class ReportsService {
       };
       const reportTitle = reportTypeTitles[type] || 'Executive Summary';
 
+      // Round 2 review C2-9 (D-13): what is owed in another currency is told
+      // to the narrative on its own line, never added to the business currency's.
+      const otherCurrencyReceivables = Object.entries(outstandingByCurrency)
+        // Round 3 review S3-1: a 3-letter code only. An invoice currency can be
+        // free text (three writers copy a product's unchecked currency), and
+        // text must not reach the prompt as a currency.
+        .filter(([code]) => code !== reportCurrency && /^[A-Z]{3}$/.test(code))
+        .map(([code, owed]) => `${code} ${owed.outstanding.toLocaleString()} (${owed.count} invoices, ${owed.overdueCount} overdue)`)
+        .join('; ');
+      const otherCurrencyLine = otherCurrencyReceivables
+        ? `\n- Outstanding Receivables in other currencies: ${otherCurrencyReceivables} (not added to the ${currency} figure)`
+        : '';
+
       const prompt = `You are a professional business analyst preparing a ${reportTitle} report for "${metrics.business.name}". Generate a concise, professional narrative suitable for high-level stakeholder meetings.
 
 BUSINESS DATA (${start.toLocaleDateString()} to ${end.toLocaleDateString()}):
@@ -231,7 +276,7 @@ BUSINESS DATA (${start.toLocaleDateString()} to ${end.toLocaleDateString()}):
 - Revenue Model: ${metrics.business.revenueModel || 'Not specified'}
 - Total Revenue: $${totalRevenue.toLocaleString()} ${currency} from ${metrics.revenue.invoiceCount} paid invoices
 - Average Invoice Value: $${metrics.revenue.averageInvoice.toLocaleString()} ${currency}
-- Outstanding Receivables: $${metrics.revenue.outstanding.toLocaleString()} ${currency} (${metrics.revenue.outstandingCount} invoices, ${metrics.revenue.overdueCount} overdue)
+- Outstanding Receivables: $${metrics.revenue.outstanding.toLocaleString()} ${currency} (${metrics.revenue.outstandingCount} invoices, ${metrics.revenue.overdueCount} overdue)${otherCurrencyLine}
 - Total Expenses: $${totalExpenses.toLocaleString()} ${currency} across ${metrics.expenses.count} entries
 - Top Expense Categories: ${expenseCategoryBreakdown.slice(0, 5).map(c => `${c.category}: $${c.total.toLocaleString()}`).join(', ') || 'None recorded'}
 - Net Profit: $${netProfit.toLocaleString()} ${currency}
@@ -247,7 +292,7 @@ ${type === 'revenue' ? `Write a Revenue Analysis with: 1) Revenue Performance Su
 ${type === 'expenses' ? `Write an Expense Analysis with: 1) Expense Overview, 2) Category Breakdown Analysis, 3) Vendor Concentration, 4) Cost-to-Revenue Ratio Assessment, 5) Cost Reduction Opportunities.` : ''}
 ${type === 'clients' ? `Write a Client Portfolio Analysis with: 1) Portfolio Overview, 2) Client Segmentation Analysis, 3) Client Engagement Metrics, 4) Client Retention Assessment, 5) Growth Opportunities.` : ''}
 
-Use ${currency} for all monetary values. Be specific with numbers. Keep each section concise but insightful. Format with clear section headers using **bold**.`;
+Use ${currency} for all monetary values${otherCurrencyLine ? `, except the receivables listed in other currencies: state those in their own currency, never converted and never added to a ${currency} figure` : ''}. Be specific with numbers. Keep each section concise but insightful. Format with clear section headers using **bold**.`;
 
       const result = await this.aiUsage.callAi({
         businessId,

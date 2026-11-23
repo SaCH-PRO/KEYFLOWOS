@@ -1,4 +1,5 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
+import { genomeReaderReadsRevenue, financialProposalsWithProvenance, isMoneyLabel, PROPOSAL_CLASSIFY_SELECT, proposalTextStatesMoney, structuredValueStatesMoney, type GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
@@ -21,6 +22,31 @@ export interface TemporalFlowListQuery {
   to?: string;
   limit?: number;
 }
+
+/**
+ * D-238 (round 3, security m1): whether a proposal event's own payload or metadata text (a rejection reason, a title, a
+ * summary) states money, so a non-financial proposal's event that names a figure is not handed on.
+ */
+function eventTextStatesMoney(e: { payload?: unknown; metadata?: unknown }): boolean {
+  const texts: unknown[] = [];
+  for (const o of [e.payload, e.metadata]) {
+    if (!o || typeof o !== 'object' || Array.isArray(o)) continue;
+    for (const key of ['reason', 'rejectionReason', 'failureReason', 'title', 'summary', 'description']) texts.push((o as Record<string, unknown>)[key]);
+  }
+  // The proposal vocabulary, as the proposal's own row is read (review of the Codex fixes, security MAJOR-1: 'card
+  // declined', 'paid late' and 'balance owed' are not money labels).
+  if (texts.some((t) => typeof t === 'string' && (isMoneyLabel(t) || proposalTextStatesMoney(t)))) return true;
+  // The event's own copy of the execution result: the row may not hold it (confirmation review m5).
+  for (const o of [e.payload, e.metadata]) {
+    const result = o && typeof o === 'object' && !Array.isArray(o) ? (o as Record<string, unknown>).executionResult : undefined;
+    if (structuredValueStatesMoney(result)) return true;
+  }
+  return false;
+}
+
+/** The most rows a reader may ask one timeline read for, and the most rows that read scans before it answers what it has. */
+const MAX_READER_LIMIT = 500;
+const MAX_READER_SCAN = 5_000;
 
 @Injectable()
 export class TemporalFlowService {
@@ -54,7 +80,50 @@ export class TemporalFlowService {
     });
   }
 
-  async list(businessId: string, query: TemporalFlowListQuery = {}) {
+  /**
+   * FU-PROPOSAL-REVENUE-SIGHT (owner ruling D-238; security review MAJOR-5): KeyActionProposalService writes each KEY
+   * proposal's lifecycle here (entityType key_action_proposal: proposed, executed with its result, approval lapsed with
+   * its reason). For a reader without revenue read, an event of a financial proposal, of a proposal that cannot be read
+   * (fail closed) or whose own title or description states money is left out; every other event is unchanged. A call
+   * with no `reader` argument (the scheduler, KEY tools applying their own authority) is unchanged; a request with no
+   * user passes `null` and reads none.
+   */
+  private async forReader<E extends { entityType?: string | null; entityId?: string | null; title?: string | null; description?: string | null; payload?: unknown; metadata?: unknown }>(
+    businessId: string,
+    events: E[],
+    reader: GenomeReader | null | undefined,
+    /** The reader's revenue read when the caller has already resolved it (the paged list resolves it once). */
+    readsRevenue?: boolean,
+  ): Promise<E[]> {
+    if (reader === undefined) return events;
+    const proposals = events.filter((e) => e.entityType === 'key_action_proposal');
+    if (proposals.length === 0) return events;
+    if (readsRevenue ?? (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined))) return events;
+    const ids = [...new Set(proposals.map((e) => e.entityId).filter((id): id is string => typeof id === 'string' && !!id))];
+    let rows: Map<string, Record<string, unknown>>;
+    try {
+      const found = ids.length
+        ? await this.prisma.client.keyActionProposal.findMany({
+            where: { businessId, id: { in: ids } },
+            select: PROPOSAL_CLASSIFY_SELECT,
+          })
+        : [];
+      rows = new Map(found.map((r: { id: string }) => [r.id, r as Record<string, unknown>]));
+    } catch {
+      return events.filter((e) => e.entityType !== 'key_action_proposal');
+    }
+    // Financial by the proposal row (its own fields or the recommendation it was bridged from), fail closed.
+    const entries = [...rows.entries()];
+    const flags = await financialProposalsWithProvenance(this.prisma, businessId, entries.map(([, row]) => row as never));
+    const financial = new Map<string, boolean>(entries.map(([id], i) => [id, flags[i]]));
+    return events.filter((e) => {
+      if (e.entityType !== 'key_action_proposal') return true;
+      const known = e.entityId ? financial.get(e.entityId) : undefined;
+      return known === false && !isMoneyLabel(e.title) && !isMoneyLabel(e.description) && !eventTextStatesMoney(e);
+    });
+  }
+
+  async list(businessId: string, query: TemporalFlowListQuery = {}, reader?: GenomeReader | null) {
     const where: Record<string, unknown> = { businessId };
 
     if (query.source) where.source = query.source;
@@ -73,18 +142,43 @@ export class TemporalFlowService {
 
     where.visibility = { not: 'HIDDEN' };
 
-    return this.prisma.client.temporalFlowEvent.findMany({
-      where,
-      orderBy: { occurredAt: 'desc' },
-      take: query.limit ?? 100,
-    });
+    const limit = query.limit ?? 100;
+    if (reader === undefined) {
+      return this.prisma.client.temporalFlowEvent.findMany({ where, orderBy: { occurredAt: 'desc' }, take: limit });
+    }
+    // Codex P2 on #218 and its reviews: when the rows are filtered for a reader, the limit counts what the reader may
+    // see. A reader's limit is capped (MAX_READER_LIMIT); a negative limit serves nothing and a fraction is truncated.
+    // The reader's revenue read is resolved once. A revenue reader costs one read of `limit` rows. For any other reader
+    // the first read is `limit` rows; while rows were withheld the read pages on, in a stable order and never serving a
+    // row twice, until the limit is met, the rows end, or MAX_READER_SCAN rows have been scanned (then the page may be
+    // short).
+    const want = Math.min(Math.max(0, Math.trunc(Number(limit)) || 0), MAX_READER_LIMIT);
+    if (want === 0) return [];
+    const orderBy = [{ occurredAt: 'desc' as const }, { id: 'desc' as const }];
+    const readsRevenue = await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined);
+    if (readsRevenue) return this.prisma.client.temporalFlowEvent.findMany({ where, orderBy, take: want });
+    const visible: Awaited<ReturnType<typeof this.prisma.client.temporalFlowEvent.findMany>> = [];
+    const seen = new Set<string>();
+    let skip = 0;
+    while (visible.length < want && skip < MAX_READER_SCAN) {
+      const take = Math.min(skip === 0 ? want : Math.max(want, 100), MAX_READER_SCAN - skip);
+      const page = await this.prisma.client.temporalFlowEvent.findMany({ where, orderBy, skip, take });
+      for (const event of await this.forReader(businessId, page, reader, false)) {
+        if (seen.has(event.id)) continue;
+        seen.add(event.id);
+        visible.push(event);
+      }
+      skip += page.length;
+      if (page.length < take) break;
+    }
+    return visible.slice(0, want);
   }
 
-  async calendarRange(businessId: string, from: string, to: string) {
+  async calendarRange(businessId: string, from: string, to: string, reader?: GenomeReader | null) {
     const fromDate = new Date(from);
     const toDate = new Date(to);
 
-    return this.prisma.client.temporalFlowEvent.findMany({
+    const events = await this.prisma.client.temporalFlowEvent.findMany({
       where: {
         businessId,
         visibility: { not: 'HIDDEN' },
@@ -96,10 +190,11 @@ export class TemporalFlowService {
       },
       orderBy: [{ startsAt: 'asc' }, { occurredAt: 'asc' }],
     });
+    return this.forReader(businessId, events, reader);
   }
 
-  async remindersDue(businessId: string) {
-    return this.prisma.client.temporalFlowEvent.findMany({
+  async remindersDue(businessId: string, reader?: GenomeReader | null) {
+    const events = await this.prisma.client.temporalFlowEvent.findMany({
       where: {
         businessId,
         reminderAt: { lte: new Date() },
@@ -109,6 +204,7 @@ export class TemporalFlowService {
       orderBy: { reminderAt: 'asc' },
       take: 50,
     });
+    return this.forReader(businessId, events, reader);
   }
 
   async markResolved(businessId: string, eventId: string) {

@@ -184,7 +184,9 @@ export class TrustExplanationService {
   ): string {
     switch (actionType) {
       case 'CREATE_INVOICE':
-        return `Without invoicing, ${context.pendingInvoices} pending items remain unbilled. This delays cash flow and may confuse clients about payment expectations.`;
+        return typeof context.pendingInvoices === 'number'
+          ? `Without invoicing, ${context.pendingInvoices} pending items remain unbilled. This delays cash flow and may confuse clients about payment expectations.`
+          : 'Without invoicing, the work stays unbilled. This delays cash flow and may confuse clients about payment expectations.';
       case 'CREATE_TASK':
         return 'Without task creation, the work item is not tracked. It may be forgotten or deprioritized.';
       case 'CREATE_LEAD':

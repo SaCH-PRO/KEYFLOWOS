@@ -47,6 +47,13 @@ git diff $PKT HEAD -- <the packet's files>   # must print nothing
 - `.agent-control/*` stays at main's copy in a wave PR: `git checkout origin/main -- .agent-control` before pushing.
 - The helper that does this is `scripts/agent-memory/compact.sh <pkt-branch> <PACKET-ID> <scope> [hold-regex]`
   (run from a clean wave worktree; `hold-regex` names Release 0 evidence edits that must ride the fix commit).
+- When `compact.sh` stops on a conflict in `fixture-prefixes.json` (two packets appended rows at the same place), run
+  `scripts/agent-memory/finish-squash.sh <pkt-branch> <PACKET-ID> <scope>`: it keeps both sides' rows (checks the
+  JSON and that no prefix repeats), refuses if any other file conflicts, and makes the same two commits.
+- A packet built on another packet's branch (e.g. W11-CASH-READERS-LEDGER on W11-RUNWAY-LEDGER-CASH) conflicts with
+  that packet's compacted commit. Compact the base packet first; then take the dependent packet's own files
+  (`git diff --name-only <its merge of main> <its tip>`) from its tip, after checking main has not changed them since
+  the branch merged it (`git diff <that main> origin/main -- <files>` prints nothing), as one RED and one fix commit.
 
 ## 2. Prove the wave head
 

@@ -96,6 +96,9 @@ const TURN = 'v71o: how are we doing this month?';
 const PROPOSAL_TITLE = '$12,345 outstanding across 7 invoices';
 const PROPOSAL_FIGURES = ['12,345', 'outstanding across'];
 const REJECTION = 'V71O-REASON: $9,876 is due first';
+/** FU-PROPOSAL-REVENUE-SIGHT (D-238): a non-financial proposal (a task) and a rejection reason that states no money. */
+const NF_PROPOSAL_TITLE = 'V71O-TASK: call the supplier back';
+const PLAIN_REJECTION = 'V71O-PLAIN-REASON: after the launch';
 /** The genome's money memory events: their titles, as their writers set them. */
 const GENOME_MONEY = {
   finance: 'Finance snapshot computed',
@@ -788,19 +791,21 @@ describe('FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-3; D-128, D-100): the genome\'s 
 
 describe("FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): a memberless turn sees a proposal's action, status and risk level, never its title or figures; members still see proposals whole", () => {
   /** The owner proposes, as the Pro Auto monitor does, over POST .../actions/proposals: the real orchestrator writes the ledger row. */
-  async function propose(): Promise<string> {
+  // FU-PROPOSAL-REVENUE-SIGHT (D-238): D-226's view is pinned on a non-financial proposal (a task); the Pro Auto monitor's
+  // money proposal is withheld from readers without revenue read (the D-238 cases at the end).
+  async function propose(title = NF_PROPOSAL_TITLE, summary = 'Call the supplier about the delivery slot.', ledgerRows = 1): Promise<string> {
     const res = await agent().post(proposalsRoute()).set(HEADER, ID.owner).send({
       sourceType: 'KEY_CORTEX',
       actionType: 'REQUEST_APPROVAL',
-      title: PROPOSAL_TITLE,
-      summary: 'Outstanding invoices exceed 1.5x your monthly revenue.',
+      title,
+      summary,
     });
     expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
-    expect(res.body).toMatchObject({ title: PROPOSAL_TITLE, status: 'PENDING', riskLevel: 'LOW' });
-    await waitForProposalRows(1);
+    expect(res.body).toMatchObject({ title, status: 'PENDING', riskLevel: 'LOW' });
+    await waitForProposalRows(ledgerRows);
     // Premise: the bridged copies carry the proposal's title (the bus copies the whole ledger input).
-    const cognitive = await db.cognitiveEvent.findFirst({ where: { businessId: ID.biz, eventType: 'GOVERNANCE_DECISION' } });
-    expect(JSON.stringify(cognitive.payload)).toContain(PROPOSAL_TITLE);
+    const cognitive = await db.cognitiveEvent.findMany({ where: { businessId: ID.biz, eventType: 'GOVERNANCE_DECISION' } });
+    expect(JSON.stringify(cognitive.map((c: any) => c.payload))).toContain(title);
     return res.body.id as string;
   }
 
@@ -815,9 +820,9 @@ describe("FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): a memberless turn
           expect(proposalLines(prompt).length, label).toBe(3);
           if (reader === 'admin') {
             expect(proposalBodies(prompt), label).toEqual(Array(3).fill('proposal propose, status PENDING, risk LOW'));
-            for (const figure of PROPOSAL_FIGURES) expect(prompt, `${label}: ${figure}`).not.toContain(figure);
+            expect(prompt, `${label}: title`).not.toContain(NF_PROPOSAL_TITLE);
           } else {
-            expect(prompt, label).toContain(PROPOSAL_TITLE);
+            expect(prompt, label).toContain(NF_PROPOSAL_TITLE);
           }
           expect(prompt, label).toContain(FACT);
         }
@@ -829,10 +834,10 @@ describe("FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): a memberless turn
       ] as const) {
         // A turn with no member reader reads no business_events row here (includeEpisodic false): the cognitive copy.
         expect(proposalBodies(block), label).toEqual(['proposal propose, status PENDING, risk LOW']);
-        for (const figure of PROPOSAL_FIGURES) expect(block, `${label}: ${figure}`).not.toContain(figure);
+        expect(block, `${label}: title`).not.toContain(NF_PROPOSAL_TITLE);
       }
       // Control: the owner's own cortex chat memory carries the title.
-      expect(await promptContextFor(ID.owner)).toContain(PROPOSAL_TITLE);
+      expect(await promptContextFor(ID.owner)).toContain(NF_PROPOSAL_TITLE);
       expect(outbound, 'no outbound request').toEqual([]);
     } finally {
       await clearPerceivedStores();
@@ -846,12 +851,12 @@ describe("FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): a memberless turn
       const contact = await bridgeTurn(PHONE.contact);
       const seen = observed(contact).join(' | ');
       expect(proposalBodies(contact), seen).toEqual(Array(3).fill('proposal propose, status PENDING, risk LOW'));
-      for (const figure of PROPOSAL_FIGURES) expect(contact, `${seen}: ${figure}`).not.toContain(figure);
+      expect(contact, `${seen}: title`).not.toContain(NF_PROPOSAL_TITLE);
       expect(contact).toContain(FACT);
 
       const holder = await bridgeTurn(PHONE.blind);
       expect(proposalLines(holder).length, observed(holder).join(' | ')).toBe(3);
-      expect(holder).toContain(PROPOSAL_TITLE);
+      expect(holder).toContain(NF_PROPOSAL_TITLE);
       expect(outbound, 'no outbound request').toEqual([]);
     } finally {
       await clearPerceivedStores();
@@ -861,7 +866,7 @@ describe("FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): a memberless turn
   it("a rejection (POST .../proposals/:id/reject with a reason that carries a figure) reaches a memberless turn as 'proposal reject, status REJECTED': no reason, no rejecter, no title; the owner sees the reason (control)", async () => {
     await clearPerceivedStores();
     const proposalId = await propose();
-    const res = await agent().post(proposalsRoute(`/${proposalId}/reject`)).set(HEADER, ID.owner).send({ reason: REJECTION });
+    const res = await agent().post(proposalsRoute(`/${proposalId}/reject`)).set(HEADER, ID.owner).send({ reason: PLAIN_REJECTION });
     expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
     await waitForProposalRows(2);
     try {
@@ -878,10 +883,127 @@ describe("FU-KEY-MEMORY-MONEY-SIGHT (SEC-W1FPMS-4; D-73/D-93): a memberless turn
         expect(bodies.length, seen).toBe(count);
         expect(bodies.filter((b) => !allowed.includes(b)), seen).toEqual([]);
         expect(bodies.filter((b) => b === allowed[0]).length, seen).toBeGreaterThanOrEqual(rejects);
-        for (const marker of [...PROPOSAL_FIGURES, '9,876', 'V71O-REASON', ID.owner]) expect(prompt, `${seen}: ${marker}`).not.toContain(marker);
+        for (const marker of [NF_PROPOSAL_TITLE, 'V71O-PLAIN-REASON', ID.owner]) expect(prompt, `${seen}: ${marker}`).not.toContain(marker);
       }
       const owner = await turn(ID.owner, 'chat');
-      expect(owner).toContain('V71O-REASON');
+      expect(owner).toContain('V71O-PLAIN-REASON');
+      expect(outbound, 'no outbound request').toEqual([]);
+    } finally {
+      await clearPerceivedStores();
+    }
+  }, 120_000);
+  it("RED-BEFORE (D-238): the Pro Auto monitor's money proposal reaches no reader without revenue read: no record of it for a SUPER_ADMIN who is no member, a contact-only position or the blind member, not even its status or risk level; the owner, the revenue reader and the role-default STAFF member see it whole", async () => {
+    await clearPerceivedStores();
+    await propose(PROPOSAL_TITLE, 'Outstanding invoices exceed 1.5x your monthly revenue.');
+    try {
+      for (const reader of READERS) {
+        const prompt = await turn(ID[reader], 'chat');
+        const label = `${reader}: ${observed(prompt).join(' | ')}`;
+        if (READS_REVENUE[reader]) {
+          expect(prompt, label).toContain(PROPOSAL_TITLE);
+        } else {
+          expect(proposalLines(prompt), label).toEqual([]);
+          for (const figure of PROPOSAL_FIGURES) expect(prompt, `${label}: ${figure}`).not.toContain(figure);
+        }
+        expect(prompt, label).toContain(FACT);
+      }
+      const contact = await bridgeTurn(PHONE.contact);
+      expect(proposalLines(contact), observed(contact).join(' | ')).toEqual([]);
+      for (const [label, block] of [
+        ['buildMemoryContext', await promptContextFor(ID.admin)],
+        ['processQuery', await pipelinePromptFor(ID.admin, 'processQuery')],
+        ['streamQuery', await pipelinePromptFor(ID.admin, 'streamQuery')],
+      ] as const) {
+        expect(proposalBodies(block), label).toEqual([]);
+      }
+      expect(await promptContextFor(ID.owner)).toContain(PROPOSAL_TITLE);
+      expect(outbound, 'no outbound request').toEqual([]);
+    } finally {
+      await clearPerceivedStores();
+    }
+  }, 120_000);
+
+  it("RED-BEFORE (D-238; security review BLOCKING-1): the KEY proposal REST API serves the blind member (revenue none) the task proposal and not the money one: GET proposals leaves it out and GET proposals/:id answers 404; approve, reject, cancel and execute stay governed by the approval authority and answer a view with no title, summary or figure; the owner and the revenue reader see both", async () => {
+    await clearPerceivedStores();
+    const money = await propose(PROPOSAL_TITLE, 'Outstanding invoices exceed 1.5x your monthly revenue.');
+    const task = await propose(undefined, undefined, 2);
+    try {
+      const list = await agent().get(proposalsRoute()).set(HEADER, ID.blind);
+      expect(list.status, JSON.stringify(list.body).slice(0, 300)).toBe(200);
+      const ids = (list.body as any[]).map((p) => p.id);
+      expect(ids).toContain(task);
+      expect(ids).not.toContain(money);
+      expect(JSON.stringify(list.body)).not.toContain('12,345');
+      const one = await agent().get(proposalsRoute(`/${money}`)).set(HEADER, ID.blind);
+      expect(one.status, JSON.stringify(one.body).slice(0, 300)).toBe(404);
+      expect(JSON.stringify(one.body)).not.toContain('12,345');
+      expect((await agent().get(proposalsRoute(`/${task}`)).set(HEADER, ID.blind)).status).toBe(200);
+      // D-238 "withhold or safely redact": reading is withheld; acting stays governed by the approval authority
+      // (tiers, D-140, D-119), and the answer is the redacted view (id, status, a money-free failure reason).
+      // Round 4 (correctness minor 1): each action on its own fresh money proposal, so each can answer its success.
+      // A success answers exactly the redacted keys and changed the row; a refusal is the authority's own (403/400),
+      // never a 404 (the proposal is not hidden from the action) and never a 5xx.
+      // Proposed before any action (an action writes its own governance rows, which the helper's count would see).
+      const targets: Record<string, string> = {};
+      for (const [i, action] of (['approve', 'reject', 'cancel'] as const).entries()) {
+        targets[action] = await propose(PROPOSAL_TITLE, 'Outstanding invoices exceed 1.5x your monthly revenue.', 3 + i);
+      }
+      let succeeded = 0;
+      for (const action of ['approve', 'reject', 'cancel'] as const) {
+        const target = targets[action];
+        const res = await agent().post(proposalsRoute(`/${target}/${action}`)).set(HEADER, ID.blind).send(action === 'reject' ? { reason: 'no' } : {});
+        const body = JSON.stringify(res.body);
+        for (const marker of ['12,345', 'outstanding across', 'monthly revenue']) expect(body, `${action} (${res.status}): ${marker}`).not.toContain(marker);
+        expect([200, 201, 400, 403], `${action}: ${body.slice(0, 200)}`).toContain(res.status);
+        if (res.status < 300) {
+          for (const key of Object.keys(res.body)) expect(['id', 'status', 'failureReason'], `${action} answers ${key}`).toContain(key);
+          expect(res.body.id).toBe(target);
+          const row = await db.keyActionProposal.findUnique({ where: { id: target }, select: { status: true } });
+          expect(row?.status, action).toBe({ approve: 'APPROVED', reject: 'REJECTED', cancel: 'CANCELLED' }[action]);
+          succeeded += 1;
+        }
+      }
+      // Round 5 (correctness minor 3): the redacted answer is proven on at least one success, not skipped by refusals.
+      expect(succeeded, 'at least one action the blind member may take succeeds').toBeGreaterThan(0);
+      {
+        // Execute on the approved target (when the approve succeeded), so a success can answer.
+        const res = await agent().post(proposalsRoute(`/${targets.approve}/execute`)).set(HEADER, ID.blind).send({});
+        const body = JSON.stringify(res.body);
+        for (const marker of ['12,345', 'outstanding across', 'monthly revenue']) expect(body, `execute (${res.status}): ${marker}`).not.toContain(marker);
+        // The executor's own answer (its refusal, or its result) comes back; the hiding 404 does not (round 6: a success
+        // answers only the redacted keys, as approve, reject and cancel do).
+        expect((res.body as { message?: string }).message, body.slice(0, 200)).not.toBe('Action proposal not found');
+        expect(res.status, body.slice(0, 200)).toBeLessThan(500);
+        if (res.status < 300) for (const key of Object.keys(res.body)) expect(['id', 'status', 'failureReason'], `execute answers ${key}`).toContain(key);
+      }
+      for (const reader of [ID.owner, ID.revenue]) {
+        const seen = ((await agent().get(proposalsRoute()).set(HEADER, reader)).body as any[]).map((p) => p.id);
+        expect(seen, reader).toEqual(expect.arrayContaining([money, task]));
+        expect((await agent().get(proposalsRoute(`/${money}`)).set(HEADER, reader)).status, reader).toBe(200);
+      }
+    } finally {
+      await clearPerceivedStores();
+    }
+  }, 120_000);
+
+  it("RED-BEFORE (D-238, directly or indirectly): a non-financial proposal rejected with a reason that states money: the rejection's records reach no reader without revenue read; its propose records keep D-226; the owner sees the reason", async () => {
+    await clearPerceivedStores();
+    const proposalId = await propose();
+    const res = await agent().post(proposalsRoute(`/${proposalId}/reject`)).set(HEADER, ID.owner).send({ reason: REJECTION });
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
+    await waitForProposalRows(2);
+    try {
+      for (const [label, prompt] of [
+        ['contact-only bridge', await bridgeTurn(PHONE.contact)],
+        ['SUPER_ADMIN flow chat', await turn(ID.admin, 'chat')],
+        ['blind member flow chat', await turn(ID.blind, 'chat')],
+      ] as const) {
+        const seen = `${label}: ${prompt.split('\n').filter((l) => l.includes('GOVERNANCE_DECISION')).join(' | ')}`;
+        expect(proposalBodies(prompt).filter((b) => b.startsWith('proposal reject')), seen).toEqual([]);
+        expect(prompt, seen).not.toMatch(/reject/i);
+        for (const marker of ['9,876', 'V71O-REASON']) expect(prompt, `${seen}: ${marker}`).not.toContain(marker);
+      }
+      expect(await turn(ID.owner, 'chat')).toContain('V71O-REASON');
       expect(outbound, 'no outbound request').toEqual([]);
     } finally {
       await clearPerceivedStores();

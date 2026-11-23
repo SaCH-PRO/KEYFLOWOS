@@ -27,10 +27,13 @@ export class KeyCortexSuggestionService {
     lastMessage: string,
     v2Context?: Record<string, unknown>,
     integrationV2Enabled = false,
+    // FU-PROPOSAL-REVENUE-SIGHT review (security MAJOR-4): the snapshot the turn's reader may see (snapshotForViewer).
+    // A caller that hands none gets the business snapshot, as before.
+    readerSnapshot?: CortexContextSnapshot,
   ): Promise<string[]> {
     try {
       const contextSnapshot =
-        await this.contextService.buildContextSnapshot(businessId);
+        readerSnapshot ?? (await this.contextService.buildContextSnapshot(businessId));
 
       let extraContext = '';
       if (v2Context && integrationV2Enabled) {
@@ -44,7 +47,7 @@ Assistant's last message (excerpt): "${lastMessage.slice(0, 500)}"
 
 Business context:
 - Genome Stage: ${contextSnapshot.genomeStage}
-- Pending invoices: ${contextSnapshot.pendingInvoices}
+${typeof contextSnapshot.pendingInvoices === 'number' ? `- Pending invoices: ${contextSnapshot.pendingInvoices}` : ''}
 - Active projects: ${contextSnapshot.activeProjects.length}
 - Unread messages: ${contextSnapshot.unreadMessages}${extraContext}
 
