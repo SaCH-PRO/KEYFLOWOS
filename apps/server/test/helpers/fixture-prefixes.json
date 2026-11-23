@@ -1171,6 +1171,11 @@
       "prefix": "v80r_",
       "owner": "apps/server/test/genome-surfaces-revenue.integration.test.ts",
       "packet": "V1-80 (FU-GENOME-SURFACES-REVENUE)"
+    },
+    {
+      "prefix": "v80m_",
+      "owner": "apps/server/test/genome-marketing-growth-revenue.integration.test.ts",
+      "packet": "V1-80 (FU-GENOME-SURFACES-REVENUE, marketing-growth)"
     }
   ],
   "pendingRenames": [],
