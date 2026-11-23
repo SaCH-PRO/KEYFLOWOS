@@ -5,6 +5,7 @@ import { Suspense, useEffect, useState } from "react";
 import { bootstrapIdentity } from "@/lib/client";
 import {
   setStoredToken,
+  clearAdminSession,
   setStoredRefreshToken,
   setStoredTokenExpiry,
   setStoredBusinessId,
@@ -130,6 +131,7 @@ function AuthCallbackInner() {
           throw new Error("No access token received");
         }
 
+        clearAdminSession(); // RR-ADMIN-LOGOUT
         setStoredToken(accessToken);
         if (refreshToken) {
           setStoredRefreshToken(refreshToken);

@@ -12,6 +12,16 @@ const REFRESH_TOKEN_KEY = "kf_refresh_token";
 const BUSINESS_CACHE_KEY = "kf_business_cache";
 const USER_CACHE_KEY = "kf_user_cache";
 const ADMIN_USER_CACHE_KEY = "kf_admin_user_cache";
+const ADMIN_TOKEN_KEY = "kf_admin_token";
+const AUTH_MODE_KEY = "kf_auth_mode";
+/**
+ * RR-ADMIN-LOGOUT: the keys an admin login writes (localStorage, mirrored into
+ * non-HttpOnly cookies by admin/login/page.tsx). getAuthHeaders sends the admin
+ * bearer in preference to the user's token on EVERY API call, so these must go
+ * on every sign-out and before every user sign-in: on a shared browser a
+ * surviving kf_admin_token attributed the next person's actions to the admin.
+ */
+export const ADMIN_SESSION_KEYS = [ADMIN_TOKEN_KEY, ADMIN_USER_CACHE_KEY, AUTH_MODE_KEY] as const;
 
 const TOKEN_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 
@@ -290,9 +300,43 @@ export function purgeOnboardingTranscripts() {
   }
 }
 
+/** Remove the admin session from localStorage and the cookies. Never throws. */
+export function clearAdminSession() {
+  if (typeof window === "undefined") return;
+  for (const key of ADMIN_SESSION_KEYS) {
+    window.localStorage.removeItem(key);
+    if (typeof document !== "undefined") {
+      document.cookie = `${key}=; Path=/; Max-Age=0; SameSite=Lax`;
+    }
+  }
+}
+
+/**
+ * RR-ADMIN-LOGOUT: the admin sign-out. Tells the server (POST api/admin/auth/logout
+ * revokes the admin's tokens by cutoff) with the admin bearer, then clears the
+ * session locally whatever the server answered: a sign-out that leaves the
+ * bearer on the device because the network failed is the hazard, not the fix.
+ */
+export async function adminSignOut(): Promise<void> {
+  if (typeof window === "undefined") return;
+  const token = window.localStorage.getItem(ADMIN_TOKEN_KEY);
+  try {
+    await fetch(`${getApiBase()}/api/admin/auth/logout`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+  } catch {
+    // the local clearing below is what matters
+  } finally {
+    clearAdminSession();
+  }
+}
+
 export function clearStoredBusinessId() {
   if (typeof window === "undefined") return;
   purgeOnboardingTranscripts();
+  // RR-ADMIN-LOGOUT: no sign-out leaves the admin bearer behind.
+  clearAdminSession();
   window.localStorage.removeItem(BUSINESS_ID_KEY);
   window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(REFRESH_TOKEN_KEY);

@@ -27,7 +27,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { bootstrapIdentity, identitySignup, identityResendVerification } from "@/lib/client";
-import { setStoredToken, setStoredRefreshToken, setStoredBusinessId } from "@/lib/workspace";
+import { setStoredToken, setStoredRefreshToken, setStoredBusinessId, clearAdminSession } from "@/lib/workspace";
 import {
   generateCodeVerifier,
   generateCodeChallenge,
@@ -180,6 +180,7 @@ export default function AuthSignup() {
       if (data.status === "authenticated") {
         // Auto-confirm path (dev / verification disabled): we received a session,
         // bootstrap the user and route into the app.
+        clearAdminSession(); // RR-ADMIN-LOGOUT
         setStoredToken(data.accessToken);
         if (data.refreshToken) setStoredRefreshToken(data.refreshToken);
         const bootstrap = await bootstrapIdentity({
