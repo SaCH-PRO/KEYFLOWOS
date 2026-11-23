@@ -259,11 +259,96 @@ describe('redactSensitiveText and deepRedact on string values (RR-REDACTION-BY-C
     });
   });
 
+  describe('review round 1: a card next to short digit runs, separator variants, PEM cost and truncation, Bearer prose, 13-digit ids', () => {
+    it('a card followed or preceded by a CVV, an expiry or a quantity is still redacted (the window is found inside the run)', () => {
+      expect(redactSensitiveText('card 4111 1111 1111 1111 123')).toBe('card <card> 123');
+      expect(redactSensitiveText('378282246310005 1234')).toBe('<card> 1234');
+      expect(redactSensitiveText('4111 1111 1111 1111 1')).toBe('<card> 1');
+      expect(redactSensitiveText('4111111111111111 12/26 123')).toBe('<card> 12/26 123');
+      expect(redactSensitiveText('123 4111 1111 1111 1111')).toBe('123 <card>');
+      expect(redactSensitiveText('qty 2 4111111111111111')).toBe('qty 2 <card>');
+      expect(redactSensitiveText('4111111111111111-123')).toBe('<card>-123');
+      expect(redactSensitiveText('4111 1111 1111 1111 1226')).toBe('<card> 1226');
+      expect(redactSensitiveText('2026-11-23 4111 1111 1111 1111')).toBe('2026-11-23 <card>');
+    });
+
+    it('double spaces and a spaced dash between groups are separators; a 20-digit unbroken run is still not a card', () => {
+      expect(redactSensitiveText('4111  1111  1111  1111')).toBe('<card>');
+      expect(redactSensitiveText('4111 - 1111 - 1111 - 1111')).toBe('<card>');
+      expect(redactSensitiveText('41111111111111110000')).toBe('41111111111111110000');
+    });
+
+    it('a 13-digit run is a card only when it starts with 4 (legacy Visa): a Luhn-valid epoch-millisecond id is untouched', () => {
+      expect(redactSensitiveText('4222222222222')).toBe('<card>');
+      // Find a Luhn-valid 13-digit millisecond timestamp near now and assert it stays (one in ten is Luhn-valid).
+      const luhn = (digits: string) => {
+        let sum = 0;
+        let double = false;
+        for (let i = digits.length - 1; i >= 0; i -= 1) {
+          let d = digits.charCodeAt(i) - 48;
+          if (double) { d *= 2; if (d > 9) d -= 9; }
+          sum += d;
+          double = !double;
+        }
+        return sum % 10 === 0;
+      };
+      let ms = 1795406180020;
+      while (!luhn(String(ms))) ms += 1;
+      expect(String(ms)).toHaveLength(13);
+      expect(redactSensitiveText(`invoiceNumber: AI-${ms}`)).toBe(`invoiceNumber: AI-${ms}`);
+    });
+
+    it('an E.164 number is never a card: a + before the digits refuses the candidate', () => {
+      expect(redactSensitiveText('+493012345678907')).toBe('+493012345678907'); // 15 digits, Luhn-valid
+      expect(redactSensitiveText('+1234567890128')).toBe('+1234567890128');
+    });
+
+    it('a truncated PEM block (no END) is redacted to the end of the text, and many BEGIN headers cost linear time', () => {
+      const truncated = ['err: -----BEGIN RSA PRIVATE KEY-----', 'MIIEowIBAAKCAQEA0Z3VS5JJcds3xfn', 'abc'].join('\n');
+      expect(redactSensitiveText(truncated)).toBe('err: <secret>');
+      const header = '-----BEGIN PRIVATE KEY-----\n';
+      const many = header.repeat(Math.ceil(200_000 / header.length));
+      const start = performance.now();
+      const out = redactSensitiveText(many);
+      const elapsed = performance.now() - start;
+      expect(out).toBe('<secret>');
+      expect(elapsed, `200 kB of BEGIN headers took ${elapsed.toFixed(0)} ms`).toBeLessThan(500);
+    });
+
+    it('the PEM block goes first: a key body that holds a card-shaped digit run is one <secret>, not <secret> around a <card>', () => {
+      const body = ['-----BEGIN PRIVATE KEY-----', 'MIIE4111111111111111owIBAAKCAQEA', '-----END PRIVATE KEY-----'].join('\n');
+      expect(redactSensitiveText(body)).toBe('<secret>');
+    });
+
+    it('Bearer: the token must look like a credential (a digit or a dot, dash, slash, plus, equals, tilde or underscore, or 20+ letters); prose after "bearer" stays', () => {
+      expect(redactSensitiveText('the bearer presented a letter')).toBe('the bearer presented a letter');
+      expect(redactSensitiveText('bearer instruments and bearer certificates')).toBe('bearer instruments and bearer certificates');
+      expect(redactSensitiveText('bearer abc.def.ghi')).toBe('bearer <secret>');
+      expect(redactSensitiveText('Bearer ' + 'abcdefghijklmnopqrstuvwxyz')).toBe('Bearer <secret>');
+      expect(redactSensitiveText('Bearer secret1')).toBe('Bearer secret1'); // 7 characters: under the floor
+      expect(redactSensitiveText('Authorization: Bearer: abcdefghijklmnop1')).toBe('Authorization: Bearer: <secret>');
+    });
+
+    it('a JWT with an empty or short signature (alg none) is still a JWT', () => {
+      const unsigned = ['eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0', ''].join('.');
+      expect(redactSensitiveText(`t=${unsigned} end`)).toBe('t=<secret> end');
+      expect(redactSensitiveText(`t=${['eyJhbGciOiJub25lIiwidHlwIjoiSldUIn0', 'eyJzdWIiOiIxMjM0NTY3ODkwIn0', 'abc'].join('.')}`)).toBe('t=<secret>');
+    });
+
+    it('the patterns are read-only objects: a consumer cannot replace one, and calling .test on them is not how they are meant to be used', () => {
+      const card = SENSITIVE_VALUE_PATTERNS.find((e) => e.name.includes('card'))!;
+      expect(() => { (card as { marker: string }).marker = '<x>'; }).toThrow();
+      expect(() => { (SENSITIVE_VALUE_PATTERNS as unknown as unknown[]).push({}); }).toThrow();
+    });
+  });
+
   describe('the value patterns are a named, tested list', () => {
-    it('every pattern has a name, a marker of <card> or <secret>, is global, and is exercised above', () => {
+    it('every pattern has a name, a marker of <card> or <secret>, is global, and is exercised above; the list is frozen', () => {
       expect(SENSITIVE_VALUE_PATTERNS.length).toBeGreaterThanOrEqual(5);
+      expect(Object.isFrozen(SENSITIVE_VALUE_PATTERNS)).toBe(true);
       const names = new Set<string>();
       for (const entry of SENSITIVE_VALUE_PATTERNS) {
+        expect(Object.isFrozen(entry)).toBe(true);
         expect(typeof entry.name).toBe('string');
         expect(names.has(entry.name), `duplicate pattern name ${entry.name}`).toBe(false);
         names.add(entry.name);
