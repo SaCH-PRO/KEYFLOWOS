@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "f907882229f6feedc988d7e461eb2e221925a00a",
-  "main_commit_date": "2026-11-23T01:10:42+00:00",
+  "main_sha": "f759a85a49941df2c1920a737be36eb63217bb41",
+  "main_commit_date": "2026-11-23T01:10:55+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 510.5,
   "by_status": {
    "done": {
-    "packets": 70,
-    "points": 106.5,
-    "pct_by_points": 20.9
+    "packets": 72,
+    "points": 110.5,
+    "pct_by_points": 21.6
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 276,
-    "points": 404,
-    "pct_by_points": 79.1
+    "packets": 274,
+    "points": 400,
+    "pct_by_points": 78.4
    }
   },
   "by_step": {
@@ -66,9 +66,9 @@
     "total": 7
    },
    "3": {
-    "done": 47,
+    "done": 48,
     "in-progress": 0,
-    "todo": 100,
+    "todo": 99,
     "total": 147
    },
    "4": {
@@ -78,9 +78,9 @@
     "total": 52
    },
    "5": {
-    "done": 3,
+    "done": 4,
     "in-progress": 0,
-    "todo": 53,
+    "todo": 52,
     "total": 56
    },
    "6": {
@@ -103,11 +103,11 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 151,
+   "prior-status-file": 150,
    "prior-status-file+wave-2b-commit": 28,
    "code-commit-subject": 9,
-   "compacted-commit": 14,
-   "no-evidence": 144
+   "compacted-commit": 16,
+   "no-evidence": 143
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -120,11 +120,10 @@
    "FU-WA-ESCAPE-RACE",
    "FU-PROPOSAL-REVENUE-SIGHT"
   ],
-  "todo_with_dependencies_met": 105
+  "todo_with_dependencies_met": 109
  },
  "critical_path": {
   "plan_recorded_remaining": [
-   "NAV-A1",
    "MOUNT-QUOTES",
    "SWP-INV-MATH",
    "SWP-INV-FORM-UX",
@@ -152,9 +151,8 @@
   ],
   "plan_recorded_total": 34,
   "longest_remaining_depends_on_chain": {
-   "weight": 51,
+   "weight": 48,
    "chain": [
-    "NAV-A1",
     "MOUNT-QUOTES",
     "SWP-INV-MATH",
     "SWP-INV-FORM-UX",
@@ -184,13 +182,13 @@
  },
  "ready": [
   {
-   "id": "NAV-A1",
-   "step": 3,
+   "id": "MOUNT-QUOTES",
+   "step": 4,
    "priority": "P0",
    "size": "L",
    "lane": "web",
    "on_critical_path": true,
-   "unblocks": 83
+   "unblocks": 55
   },
   {
    "id": "W11-KEY-TRANSFER-INTEGER",
@@ -220,6 +218,24 @@
    "unblocks": 47
   },
   {
+   "id": "NAV-A3",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "on_critical_path": false,
+   "unblocks": 32
+  },
+  {
+   "id": "SWP-KEY-CHAT-WEB",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "web",
+   "on_critical_path": false,
+   "unblocks": 31
+  },
+  {
    "id": "W11-GENOME-RECS-DOMAIN",
    "step": 4,
    "priority": "P1",
@@ -238,6 +254,15 @@
    "unblocks": 25
   },
   {
+   "id": "SWP-CONTACT-DETAIL",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "on_critical_path": false,
+   "unblocks": 21
+  },
+  {
    "id": "W11-SHIP-STOCK-DECREMENT",
    "step": 6,
    "priority": "P1",
@@ -245,6 +270,15 @@
    "lane": "server",
    "on_critical_path": false,
    "unblocks": 21
+  },
+  {
+   "id": "NAV-A2",
+   "step": 4,
+   "priority": "P0",
+   "size": "M",
+   "lane": "web",
+   "on_critical_path": false,
+   "unblocks": 13
   },
   {
    "id": "SWP-CENSUS-OPEN-WRITES",
@@ -434,15 +468,6 @@
    "lane": "server",
    "on_critical_path": false,
    "unblocks": 2
-  },
-  {
-   "id": "FU-SITE-ANALYTICS-REVENUE-SCOPE",
-   "step": 5,
-   "priority": "P0",
-   "size": "S",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 1
   },
   {
    "id": "MEM-TEMPORAL-SCOPE",
@@ -702,6 +727,15 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-STORE-ORDERS-MONEY-SCOPE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "both",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -1959,16 +1993,18 @@
    "priority": "P0",
    "size": "L",
    "lane": "web",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "49f74ae2"
+   ],
    "depends_on": [
     "BIZ-SETTINGS-WEB",
     "MARKETING-REDIRECT-GATE"
    ],
    "title": "Hub navigation: seven hubs by business type, bottom bar, disclosure modes removed, plain labels, the redirect table, 'Customers' heading",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "WA-HELPER",
@@ -2002,7 +2038,7 @@
     "SWP-LAYERS"
    ],
    "title": "KEY chat: Send and Deep think send; the drawer loads its session list once; onboarding opens at the manual form",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-KEY-SHELL-SMOKE",
@@ -2104,7 +2140,7 @@
     "FAILURE-KIT"
    ],
    "title": "Sales > Quotes mounts quotes-panel.tsx: edit a draft, WhatsApp and Copy link, Send carries the link, Convert on accepted quotes keeps notes, bulk bar never deletes",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-INV-MATH",
@@ -2287,7 +2323,7 @@
     "FAILURE-KIT"
    ],
    "title": "Real index pages for Money and Settings, with Settings > Getting paid",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "EXPENSES-HUB-1",
@@ -2368,7 +2404,7 @@
     "NAV-A1"
    ],
    "title": "Breadcrumbs from the route registry, My account, store tab deep links and the Launch Pad storefront tile",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "CATALOG-1",
@@ -2980,7 +3016,7 @@
     "NAV-A1"
    ],
    "title": "Contact pages: labels instead of codes, an honest delete dialog, plain timeline events; side-panel tabs retired",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-CRM-WEB-POLISH",
@@ -5167,13 +5203,15 @@
    "priority": "P0",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "88350ee5"
+   ],
    "depends_on": [],
    "title": "Site analytics withholds paid revenue from readers without revenue read",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-TEMPORAL-FLOW-INBOX-SCOPE",
@@ -6846,7 +6884,7 @@
     "FU-SITE-ANALYTICS-REVENUE-SCOPE"
    ],
    "title": "Store order lists and order detail withhold money fields from readers without revenue read",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-ATTACHMENT-PERSIST-SEPARATE",
