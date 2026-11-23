@@ -40,9 +40,12 @@ function validBusinessIds(value: unknown): value is string[] {
 
 /**
  * Reads MCP_REMOTE_SERVERS. Unset or empty: no servers, nothing logged. A value
- * that is not a JSON array, and any entry without a key, a url or a valid
- * `businessIds`, is dropped with an error log (`log`). The log names the
- * server's key only, never its url or token.
+ * that is not a JSON array serves nothing, with an error log (`log`). An entry
+ * is dropped with an error log when it lacks a string key or url, when its key
+ * is empty or contains "__", when an earlier entry already uses its key, or
+ * when it has no valid `businessIds`. An `enabled: false` entry with a usable
+ * key is skipped without a log. The log names the server's key only, never its
+ * url or token.
  */
 export function loadMcpServerConfigs(log: ConfigLog = () => undefined): McpServerConfig[] {
   const raw = process.env.MCP_REMOTE_SERVERS;

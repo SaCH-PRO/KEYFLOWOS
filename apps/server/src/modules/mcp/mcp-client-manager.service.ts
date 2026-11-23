@@ -11,6 +11,14 @@ const CALL_TIMEOUT_MS = 60_000;
 /** One answer for an unknown server, an unbound one and one bound to other businesses. */
 const NOT_AVAILABLE = 'MCP server not available to this business';
 
+function safeHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return '<invalid url>';
+  }
+}
+
 interface ServerEntry {
   config: McpServerConfig;
   client: Client | null;
@@ -145,7 +153,10 @@ export class McpClientManagerService implements OnModuleDestroy {
       ]);
       return client;
     } catch (err) {
-      this.logger.warn(`MCP connect failed for ${config.name} (${config.url}): ${(err as Error).message}`);
+      // Host only: a url may carry credentials (user:pw@, ?token=), so neither the url nor an error
+      // message that quotes it reaches the log.
+      const message = String((err as Error)?.message ?? err).split(config.url).join('<url>');
+      this.logger.warn(`MCP connect failed for ${config.name} (${safeHost(config.url)}): ${message}`);
       return null;
     }
   }
