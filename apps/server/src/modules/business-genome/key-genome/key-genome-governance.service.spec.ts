@@ -356,3 +356,47 @@ describe('KeyGenomeGovernanceService', () => {
     expect(summary.urgentReviewItems[1].id).toBe('signal-sig_high');
   });
 });
+
+describe('FU-PROPOSAL-REVENUE-SIGHT review repairs (security MAJOR-1, MAJOR-2; D-238, D-234)', () => {
+  it('[PRS-04a] RED-BEFORE (MAJOR-2): for a reader without revenue read the experiment queue and counts leave out an experiment made from a money signal; a revenue reader keeps it', async () => {
+    const { service, experiments, prisma } = makeService() as any;
+    prisma.client.genomeMemoryEvent.findMany = vi.fn().mockResolvedValue([]);
+    experiments.listExperiments.mockResolvedValue([
+      { id: 'exp_money', status: 'PROPOSED', hypothesis: 'Validating revenue pattern: concentration in the top three accounts', action: 'Concentrate on the top three accounts.', successMetric: 'Revenue share' },
+      { id: 'exp_ops', status: 'PROPOSED', hypothesis: 'Documented SOPs cut delivery delays', action: 'Write the SOPs.', successMetric: 'Delays per week' },
+    ] as any);
+    const blind = await service.summary('biz_1', { readsRevenue: false });
+    expect(JSON.stringify(blind)).not.toContain('exp_money');
+    expect(blind.counts.proposedExperiments).toBe(1);
+    const reader = await service.summary('biz_1');
+    expect(JSON.stringify(reader)).toContain('exp_money');
+  });
+
+  it('[PRS-03a] RED-BEFORE (MAJOR-1): for a reader without revenue read an autonomy block of a money proposal (by its action, module and tool, not only its title) is withheld and not counted', async () => {
+    const { service, prisma } = makeService() as any;
+    prisma.client.genomeMemoryEvent.findMany = vi.fn().mockResolvedValue([]);
+    prisma.client.keyActionProposal.findMany.mockResolvedValue([
+      { id: 'kap_money', title: '3 clients overdue', summary: 'Chase them.', riskLevel: 'HIGH', createdAt: new Date(), actionType: 'EXECUTE_TOOL', module: 'monitoring', toolName: 'monitor.flag' },
+      { id: 'kap_task', title: 'Call the supplier', summary: 'About the delivery slot.', riskLevel: 'HIGH', createdAt: new Date(), actionType: 'CREATE_TASK', module: 'crm', toolName: null },
+    ]);
+    const blind = await service.summary('biz_1', { readsRevenue: false });
+    expect(blind.autonomyBlocks.map((b) => b.sourceId)).toEqual(['kap_task']);
+    expect(blind.counts.autonomyBlockedActions).toBe(1);
+  });
+
+  it('[PRS-03b] RED-BEFORE (round 4, security minor 2): an autonomy block whose money is only in its affected entities or its bridged recommendation is withheld; the row is read with every classify field', async () => {
+    const { service, prisma } = makeService() as any;
+    prisma.client.genomeMemoryEvent.findMany = vi.fn().mockResolvedValue([]);
+    prisma.client.genomeRecommendation = { findMany: vi.fn().mockResolvedValue([{ id: 'rec_fin', domain: 'FINANCIAL', title: 'Raise prices', diagnosis: '' }]), findFirst: vi.fn() };
+    prisma.client.keyActionProposal.findMany.mockResolvedValue([
+      { id: 'kap_req', title: 'Approve the request', summary: 'From Ana.', riskLevel: 'HIGH', createdAt: new Date(), actionType: 'REQUEST_APPROVAL', module: null, toolName: null, affectedEntities: { requestType: 'expense' } },
+      { id: 'kap_bridged', title: 'Plan the next step', summary: 'From the genome.', riskLevel: 'HIGH', createdAt: new Date(), actionType: 'CREATE_TASK', module: 'crm', toolName: null, payload: { recommendationId: 'rec_fin' } },
+      { id: 'kap_task', title: 'Call the supplier', summary: 'About the delivery slot.', riskLevel: 'HIGH', createdAt: new Date(), actionType: 'CREATE_TASK', module: 'crm', toolName: null },
+    ]);
+    const blind = await service.summary('biz_1', { readsRevenue: false });
+    expect(blind.autonomyBlocks.map((b: any) => b.sourceId)).toEqual(['kap_task']);
+    const { PROPOSAL_CLASSIFY_SELECT } = await import('./genome-finance-scope');
+    const select = prisma.client.keyActionProposal.findMany.mock.calls.at(-1)[0].select;
+    expect(select).toMatchObject(PROPOSAL_CLASSIFY_SELECT);
+  });
+});

@@ -1133,6 +1133,31 @@
       "packet": "V1-64 (SWP-BOOKING-PAYMENT-GATE)"
     },
     {
+      "prefix": "v64e_",
+      "owner": "apps/server/test/money-totals-partial-payments.integration.test.ts",
+      "packet": "V1-64 (SWP-INV-MONEY-TOTALS)"
+    },
+    {
+      "prefix": "v99h_",
+      "owner": "apps/server/test/contract-fetch-outbound-guard.integration.test.ts",
+      "packet": "V1-99 (FU-CONTRACT-FETCH-OUTBOUND-GUARD, D-246)"
+    },
+    {
+      "prefix": "v66g_",
+      "owner": "apps/server/test/general-ledger-date-range.integration.test.ts",
+      "packet": "V1-66 (SWP-FIN-LEDGER)"
+    },
+    {
+      "prefix": "v63h_",
+      "owner": "apps/server/test/coa-unique-code.integration.test.ts",
+      "packet": "V1-63 (SWP-COA-UNIQUE-CODE)"
+    },
+    {
+      "prefix": "v57r_",
+      "owner": "apps/server/test/send-reminder-status-gate.integration.test.ts",
+      "packet": "V1-57 (FU-SEND-REMINDER-SERVER-GATE)"
+    },
+    {
       "prefix": "v71w_",
       "owner": "apps/server/test/temporal-flow-inbox-scope.integration.test.ts",
       "packet": "V1-71 (FU-TEMPORAL-FLOW-INBOX-SCOPE)"

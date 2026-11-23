@@ -51,15 +51,26 @@ describe('TemporalFlowController', () => {
       from: undefined,
       to: undefined,
       limit: undefined,
-    }, FILTER);
+    }, READER, FILTER);
     expect(result).toEqual([{ id: 'tf_1' }]);
+  });
+
+  it('D-238: a read with no request user passes the reader as null (none), with the fail-closed module filter', async () => {
+    const { controller, temporal } = makeController();
+    await controller.list('biz_1', {} as any);
+    expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', undefined);
+    expect((temporal.list as any).mock.calls[0][2]).toBeNull();
+    await controller.calendar('biz_1', '2026-06-01', '2026-06-30');
+    expect(temporal.calendarRange).toHaveBeenCalledWith('biz_1', '2026-06-01', '2026-06-30', null, FILTER);
+    await controller.reminders('biz_1');
+    expect(temporal.remindersDue).toHaveBeenCalledWith('biz_1', null, FILTER);
   });
 
   it('GET /calendar returns calendar range', async () => {
     const { controller, temporal } = makeController();
     const result = await controller.calendar('biz_1', '2026-06-01', '2026-06-30', REQ);
     expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', READER);
-    expect(temporal.calendarRange).toHaveBeenCalledWith('biz_1', '2026-06-01', '2026-06-30', FILTER);
+    expect(temporal.calendarRange).toHaveBeenCalledWith('biz_1', '2026-06-01', '2026-06-30', READER, FILTER);
     expect(result).toEqual([{ id: 'tf_2' }]);
   });
 
@@ -67,7 +78,7 @@ describe('TemporalFlowController', () => {
     const { controller, temporal } = makeController();
     const result = await controller.reminders('biz_1', REQ);
     expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', READER);
-    expect(temporal.remindersDue).toHaveBeenCalledWith('biz_1', FILTER);
+    expect(temporal.remindersDue).toHaveBeenCalledWith('biz_1', READER, FILTER);
     expect(result).toEqual([{ id: 'tf_3' }]);
   });
 
@@ -97,7 +108,7 @@ describe('TemporalFlowController', () => {
     const result = await controller.analyze('biz_1', REQ);
     expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', READER);
     expect(temporal.readerMemoryFilter).toHaveBeenCalledWith('biz_1', READER);
-    expect(temporal.analyze).toHaveBeenCalledWith('biz_1', FILTER, MEMORY_FILTER);
+    expect(temporal.analyze).toHaveBeenCalledWith('biz_1', FILTER, MEMORY_FILTER, READER);
     expect(result.summary).toBe('Analysis complete.');
   });
 });

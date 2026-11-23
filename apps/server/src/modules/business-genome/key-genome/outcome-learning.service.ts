@@ -353,7 +353,8 @@ export class OutcomeLearningService {
               : `Executed ${actionType} actions completed without a clear success signal.`,
           },
         ],
-        metadata: { actionType, executionResult },
+        // D-238: the proposal's module and tool, so the event can be classified as its proposal is.
+        metadata: { actionType, module: row?.module ?? null, toolName: row?.toolName ?? null, executionResult },
       });
     }
 
@@ -373,7 +374,8 @@ export class OutcomeLearningService {
             lesson: `Failed ${actionType} actions indicate execution risk or readiness gaps.`,
           },
         ],
-        metadata: { actionType, executionResult },
+        // D-238: the proposal's module and tool, so the event can be classified as its proposal is.
+        metadata: { actionType, module: row?.module ?? null, toolName: row?.toolName ?? null, executionResult },
       });
     }
 
@@ -392,7 +394,8 @@ export class OutcomeLearningService {
           lesson: `Blocked ${actionType} actions often point to missing Genome facts or low readiness.`,
         },
       ],
-      metadata: { actionType, executionResult },
+      // D-238: the proposal's module and tool, so the event can be classified as its proposal is.
+        metadata: { actionType, module: row?.module ?? null, toolName: row?.toolName ?? null, executionResult },
     });
   }
 

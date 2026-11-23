@@ -26,6 +26,13 @@ import { HiddenModuleWrites } from '../../core/auth/hidden-module-writes.decorat
 type ReaderRequest = { user?: TemporalFlowReader };
 
 /**
+ * FU-PROPOSAL-REVENUE-SIGHT (D-238): the request's reader, so a financial KEY proposal's events are withheld from a
+ * member without revenue read (TemporalFlowService.forReader). A request with no user reads as null (none).
+ */
+const genomeReaderOf = (req?: ReaderRequest) =>
+  req?.user?.id ? { id: req.user.id, role: req.user.role } : null;
+
+/**
  * FU-TEMPORAL-FLOW-INBOX-SCOPE (NAV-A1 security review; D-100, D-179): every read of the timeline (the list, the
  * calendar, the reminders and the analysis, which answers event titles and counts) answers only the events of the
  * modules its reader may read (TemporalFlowService.readerFilter, applied in the query before its order and limit): the
@@ -50,9 +57,9 @@ export class TemporalFlowController {
   async list(
     @Param('businessId') businessId: string,
     @Query() query: TemporalFlowQueryDto,
-    @Req() req: ReaderRequest,
+    @Req() req?: ReaderRequest,
   ) {
-    const readerFilter = await this.temporal.readerFilter(businessId, req.user);
+    const readerFilter = await this.temporal.readerFilter(businessId, req?.user);
     return this.temporal.list(businessId, {
       source: query.source,
       type: query.type,
@@ -62,7 +69,7 @@ export class TemporalFlowController {
       from: query.from,
       to: query.to,
       limit: query.limit ? Number(query.limit) : undefined,
-    }, readerFilter);
+    }, genomeReaderOf(req), readerFilter);
   }
 
   @Get('calendar')
@@ -70,23 +77,33 @@ export class TemporalFlowController {
     @Param('businessId') businessId: string,
     @Query('from') from: string,
     @Query('to') to: string,
-    @Req() req: ReaderRequest,
+    @Req() req?: ReaderRequest,
   ) {
-    return this.temporal.calendarRange(businessId, from, to, await this.temporal.readerFilter(businessId, req.user));
+    return this.temporal.calendarRange(
+      businessId,
+      from,
+      to,
+      genomeReaderOf(req),
+      await this.temporal.readerFilter(businessId, req?.user),
+    );
   }
 
   @Get('reminders')
-  async reminders(@Param('businessId') businessId: string, @Req() req: ReaderRequest) {
-    return this.temporal.remindersDue(businessId, await this.temporal.readerFilter(businessId, req.user));
+  async reminders(@Param('businessId') businessId: string, @Req() req?: ReaderRequest) {
+    return this.temporal.remindersDue(
+      businessId,
+      genomeReaderOf(req),
+      await this.temporal.readerFilter(businessId, req?.user),
+    );
   }
 
   @Post()
   async create(
     @Param('businessId') businessId: string,
     @Body() body: CreateTemporalFlowEventDto,
-    @Req() req: ReaderRequest,
+    @Req() req?: ReaderRequest,
   ) {
-    const writerFilter = await this.temporal.readerFilter(businessId, req.user);
+    const writerFilter = await this.temporal.readerFilter(businessId, req?.user);
     return this.temporal.emit({
       ...body,
       businessId,
@@ -101,17 +118,18 @@ export class TemporalFlowController {
   async resolve(
     @Param('businessId') businessId: string,
     @Param('eventId') eventId: string,
-    @Req() req: ReaderRequest,
+    @Req() req?: ReaderRequest,
   ) {
-    return this.temporal.markResolved(businessId, eventId, await this.temporal.readerFilter(businessId, req.user));
+    return this.temporal.markResolved(businessId, eventId, await this.temporal.readerFilter(businessId, req?.user));
   }
 
   @Post('analyze')
-  async analyze(@Param('businessId') businessId: string, @Req() req: ReaderRequest) {
+  async analyze(@Param('businessId') businessId: string, @Req() req?: ReaderRequest) {
     return this.temporal.analyze(
       businessId,
-      await this.temporal.readerFilter(businessId, req.user),
-      await this.temporal.readerMemoryFilter(businessId, req.user),
+      await this.temporal.readerFilter(businessId, req?.user),
+      await this.temporal.readerMemoryFilter(businessId, req?.user),
+      genomeReaderOf(req),
     );
   }
 
@@ -119,9 +137,9 @@ export class TemporalFlowController {
   async listMemory(
     @Param('businessId') businessId: string,
     @Query() query: TemporalFlowMemoryQueryDto,
-    @Req() req: ReaderRequest,
+    @Req() req?: ReaderRequest,
   ) {
-    const memoryFilter = await this.temporal.readerMemoryFilter(businessId, req.user);
+    const memoryFilter = await this.temporal.readerMemoryFilter(businessId, req?.user);
     if (memoryFilter) return this.temporal.listMemory(businessId, query, memoryFilter);
     return this.memory.findMany(businessId, {
       entityType: query.entityType,
@@ -135,11 +153,11 @@ export class TemporalFlowController {
   async searchMemory(
     @Param('businessId') businessId: string,
     @Query('q') q: string,
-    @Req() req: ReaderRequest,
+    @Req() req?: ReaderRequest,
     @Query('limit') limit?: string,
   ) {
     const wanted = limit ? Number(limit) : 10;
-    const memoryFilter = await this.temporal.readerMemoryFilter(businessId, req.user);
+    const memoryFilter = await this.temporal.readerMemoryFilter(businessId, req?.user);
     if (!memoryFilter) return this.memory.searchMemory(businessId, q, wanted);
     // Hits of withheld memories are dropped before the limit: the search reads a wider window, then keeps the
     // visible hits up to the limit asked for.
@@ -154,21 +172,21 @@ export class TemporalFlowController {
     @Param('businessId') businessId: string,
     @Param('entityType') entityType: string,
     @Param('entityId') entityId: string,
-    @Req() req: ReaderRequest,
+    @Req() req?: ReaderRequest,
   ) {
-    const memoryFilter = await this.temporal.readerMemoryFilter(businessId, req.user);
+    const memoryFilter = await this.temporal.readerMemoryFilter(businessId, req?.user);
     if (memoryFilter) return this.temporal.listMemory(businessId, { entityType, entityId }, memoryFilter);
     return this.memory.findByEntity(businessId, entityType, entityId);
   }
 
   @Post('memory/compact')
-  async compactMemory(@Param('businessId') businessId: string, @Req() req: ReaderRequest) {
+  async compactMemory(@Param('businessId') businessId: string, @Req() req?: ReaderRequest) {
     await this.assertReadsEveryOwner(businessId, req);
     return this.memoryQueue.enqueue({ businessId, operation: 'compact' });
   }
 
   @Post('memory/detect-patterns')
-  async detectPatterns(@Param('businessId') businessId: string, @Req() req: ReaderRequest) {
+  async detectPatterns(@Param('businessId') businessId: string, @Req() req?: ReaderRequest) {
     await this.assertReadsEveryOwner(businessId, req);
     return this.memoryQueue.enqueue({ businessId, operation: 'detect_patterns' });
   }
@@ -177,8 +195,8 @@ export class TemporalFlowController {
    * FU-TEMPORAL-FLOW-INBOX-SCOPE delta (item 1): compaction and pattern detection summarise every event of the
    * business into memories; a writer who cannot read every event-owning module is refused them.
    */
-  private async assertReadsEveryOwner(businessId: string, req: ReaderRequest) {
-    if (await this.temporal.readerFilter(businessId, req.user)) {
+  private async assertReadsEveryOwner(businessId: string, req?: ReaderRequest) {
+    if (await this.temporal.readerFilter(businessId, req?.user)) {
       throw new ForbiddenException('Memory compaction needs read access to every module whose events it summarises');
     }
   }

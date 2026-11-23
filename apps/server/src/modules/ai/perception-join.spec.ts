@@ -463,7 +463,7 @@ describe("only the reader's own cognition memory, and no KEY tool-call record (W
       { id: 'cog_own', sourceType: 'cognition_memory', title: 'Memory fragment', content: 'Query: OWN typed' },
       { id: 'be_invoice', sourceType: 'business_event', title: 'invoice.overdue', entityType: 'invoice', content: 'INV-014 overdue' },
       // W1F-PERCEPTION-MODULE-SCOPE: a business-wide record that names no module (kept for every reader).
-      { id: 'be_proposal', sourceType: 'business_event', title: 'GOVERNANCE_DECISION', entityType: 'key_action_proposal', content: 'ai propose key_action_proposal: PROPOSAL-PENDING' },
+      { id: 'be_proposal', sourceType: 'business_event', title: 'GOVERNANCE_DECISION', entityType: 'key_action_proposal', content: 'ai propose key_action_proposal: PROPOSAL-PENDING', metadata: { metadata: { actionType: 'CREATE_TASK', module: 'crm', title: 'PROPOSAL-PENDING' } } /* D-238: a non-financial proposal (a task), as its propose ledger row names it */ },
     ];
   });
 
@@ -523,7 +523,7 @@ describe("module scopes (W1F-PERCEPTION-MODULE-SCOPE, review SEC-W11FPS-3; D-71/
       { id: 'be_expense', sourceType: 'business_event', title: 'expense.created', entityType: 'Expense', content: 'expenses PUBLISHED Expense: EXPENSE-7777' },
       { id: 'ce_payment', sourceType: 'cognitive_event', title: 'payment.received', content: 'payment.received: PAYMENT-4321' },
       { id: 'be_contact', sourceType: 'business_event', title: 'contact.created', entityType: 'Contact', content: 'crm PUBLISHED Contact: CONTACT-ADA' },
-      { id: 'be_proposal', sourceType: 'business_event', title: 'GOVERNANCE_DECISION', entityType: 'key_action_proposal', content: 'PROPOSAL-PENDING' },
+      { id: 'be_proposal', sourceType: 'business_event', title: 'GOVERNANCE_DECISION', entityType: 'key_action_proposal', content: 'PROPOSAL-PENDING', metadata: { metadata: { actionType: 'CREATE_TASK', module: 'crm', title: 'PROPOSAL-PENDING' } } /* D-238: a non-financial proposal (a task), as its propose ledger row names it */ },
     ];
   });
 
@@ -545,7 +545,7 @@ describe("the customer support desk perceives only the conversation in front of 
     const memory = new MemoryStub();
     memory.fragments = [
       { id: 'mem', sourceType: 'ai_memory', title: 'fact', content: 'FACT-NINE' },
-      { id: 'be_proposal', sourceType: 'business_event', title: 'GOVERNANCE_DECISION', entityType: 'key_action_proposal', content: 'PROPOSAL-PENDING' },
+      { id: 'be_proposal', sourceType: 'business_event', title: 'GOVERNANCE_DECISION', entityType: 'key_action_proposal', content: 'PROPOSAL-PENDING', metadata: { metadata: { actionType: 'CREATE_TASK', module: 'crm', title: 'PROPOSAL-PENDING' } } /* D-238: a non-financial proposal (a task), as its propose ledger row names it */ },
       { id: 'be_invoice', sourceType: 'business_event', title: 'invoice.overdue', entityType: 'invoice', content: 'INV-014 overdue' },
     ];
     for (const tier of ['standard', 'deliberate']) {
@@ -631,7 +631,7 @@ describe("a staff position's turn sees the modules the policy resolved for the p
       { id: 'ce_project', sourceType: 'cognitive_event', title: 'project.created', content: 'project.created: PROJECT-ROOF' },
       { id: 'be_expense', sourceType: 'business_event', title: 'expense.created', entityType: 'Expense', content: 'expenses PUBLISHED Expense: EXPENSE-7777' },
       { id: 'be_contact', sourceType: 'business_event', title: 'contact.created', entityType: 'Contact', content: 'crm PUBLISHED Contact: CONTACT-ADA' },
-      { id: 'be_proposal', sourceType: 'business_event', title: 'GOVERNANCE_DECISION', entityType: 'key_action_proposal', content: 'PROPOSAL-PENDING' },
+      { id: 'be_proposal', sourceType: 'business_event', title: 'GOVERNANCE_DECISION', entityType: 'key_action_proposal', content: 'PROPOSAL-PENDING', metadata: { metadata: { actionType: 'CREATE_TASK', module: 'crm', title: 'PROPOSAL-PENDING' } } /* D-238: a non-financial proposal (a task), as its propose ledger row names it */ },
     ];
   });
 
@@ -695,7 +695,7 @@ describe("no business-wide record of one person's KEY turn or KEY action, for an
       { id: 'be_proposal', sourceType: 'business_event', title: 'ACTION_EXECUTED', entityType: 'key_action_proposal', content: 'ai execute key_action_proposal: PROPOSAL-EXECUTION-RESULT' },
       { id: 'be_insight', sourceType: 'business_event', title: 'insight.generated', entityType: 'KEY_CORTEX_EVENT', content: 'key_cortex PUBLISHED KEY_CORTEX_EVENT: CASHFLOW-DIP' },
       { id: 'be_invoice', sourceType: 'business_event', title: 'invoice.overdue', entityType: 'invoice', content: 'INV-014 overdue' },
-      { id: 'be_governance', sourceType: 'business_event', title: 'GOVERNANCE_DECISION', entityType: 'key_action_proposal', content: 'ai propose key_action_proposal: PROPOSAL-PENDING' },
+      { id: 'be_governance', sourceType: 'business_event', title: 'GOVERNANCE_DECISION', entityType: 'key_action_proposal', content: 'ai propose key_action_proposal: PROPOSAL-PENDING', metadata: { metadata: { actionType: 'CREATE_TASK', module: 'crm', title: 'PROPOSAL-PENDING' } } /* D-238: a non-financial proposal */ },
     ];
   });
 

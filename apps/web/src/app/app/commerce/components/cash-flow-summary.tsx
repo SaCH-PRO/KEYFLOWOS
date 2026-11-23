@@ -17,18 +17,27 @@ interface CashFlowSummaryProps {
 }
 
 export function CashFlowSummary({
-  totalReceived,
-  totalPending,
-  totalOverdue,
+  totalReceived: receivedGiven,
+  totalPending: pendingGiven,
+  totalOverdue: overdueGiven,
   currency,
   draftCount = 0,
   pendingCount = 0,
   overdueCount = 0,
   avgPaymentDelay = 0,
 }: CashFlowSummaryProps) {
-  const netFlow = useMemo(() => totalReceived - totalPending - totalOverdue, [totalReceived, totalPending, totalOverdue]);
-  const isPositive = netFlow >= 0;
-  const _collectible = totalPending + totalOverdue;
+  // V1-64 (SWP-INV-MONEY-TOTALS; sweep BUG-024): the headline is what is still
+  // to collect (pending + overdue), never a negative figure. It was
+  // received - pending - overdue, so an owner who had just taken a 400 deposit
+  // on an invoice of 13,723 read "TTD -13723". A figure handed in below zero
+  // is shown as zero.
+  const atLeastZero = (n: number) => (Number.isFinite(n) && n > 0 ? n : 0);
+  const totalReceived = atLeastZero(receivedGiven);
+  const totalPending = atLeastZero(pendingGiven);
+  const totalOverdue = atLeastZero(overdueGiven);
+  const toCollect = useMemo(() => totalPending + totalOverdue, [totalPending, totalOverdue]);
+  /** Nothing is waiting to be collected. */
+  const isPositive = toCollect <= 0;
 
   const healthMessage = useMemo(() => {
     if (totalOverdue > 0 && overdueCount > 0) {
@@ -63,13 +72,14 @@ export function CashFlowSummary({
         </span>
         <InfoBadge
           title="Collections Health"
-          body="Shows your collection status: collectible now, overdue exposure, average payment delay, and invoices awaiting action. Positive net = more collected than outstanding."
+          body="Shows your collection status: what is still to collect (pending plus overdue, after deposits and part payments), overdue exposure, average payment delay, and invoices awaiting action."
           side="bottom"
           iconSize={10}
         />
       </div>
       <p className={`text-lg font-bold ${totalOverdue > 0 ? "text-red-400" : isPositive ? "text-emerald-400" : "text-amber-400"}`}>
-        {isPositive ? "+" : ""}{formatCurrencyCompact(netFlow, currency)}
+        <span data-testid="collections-to-collect">{formatCurrencyCompact(toCollect, currency)}</span>
+        <span className="ml-1 text-[10px] font-medium text-muted-foreground/60">to collect</span>
       </p>
       <p className="text-[10px] text-muted-foreground/60 mt-0.5">{healthMessage}</p>
       <div className="flex items-center gap-3 mt-2 text-[10px]">

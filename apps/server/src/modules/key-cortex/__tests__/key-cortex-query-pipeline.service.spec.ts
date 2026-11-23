@@ -466,7 +466,11 @@ describe('W10-CORTEX-CHAT-SCOPE: the chat reads episodic memory as the requestin
         fragment('mf_bridged_ce', 'cognitive_event', 'ACTION_EXECUTED', 'v96r bridged cognitive answer'),
         fragment('mf_proposal', 'business_event', 'ACTION_EXECUTED', 'v96r approved proposal result', 'key_action_proposal'),
         fragment('mf_insight', 'business_event', 'insight.generated', 'v96r a KEY insight about the business', 'KEY_CORTEX_EVENT'),
-        fragment('mf_proposal_pending', 'business_event', 'GOVERNANCE_DECISION', 'v96r a pending KEY proposal', 'key_action_proposal'),
+        // D-238: a non-financial proposal (a task), as the propose ledger row carries it (toolName, module, actionType, title).
+        {
+          ...fragment('mf_proposal_pending', 'business_event', 'GOVERNANCE_DECISION', 'v96r a pending KEY proposal', 'key_action_proposal'),
+          metadata: { metadata: { actionType: 'CREATE_TASK', module: 'crm', toolName: null, title: 'v96r a pending KEY proposal' } },
+        },
       ];
       for (const access of [{ id: 'biz-1' }, null]) {
         mockPromptContextService.buildMessages.mockClear();
