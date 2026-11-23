@@ -52,18 +52,23 @@ lane (`docs/development/agent-memory/SECOND-ACCOUNT-SETUP.md`); it claims by pus
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
-| Wave 3f: NAV-A1, FU-SITE-ANALYTICS-REVENUE-SCOPE, AGENT-MEMORY-FIXES, rulings | `wave/v1-wave-3f` @ 07e6f3eb | Server 784/784, R0 MET, web tsc+lint clean; 1 web unit fails: NAV-A1 NMS-18 line-number citations went stale after wave 3e | NAV-A1 worker making NMS-18 cite by route/identifier on its branch; then re-compact NAV-A1 into 3f, re-prove, open PR, merge under D-239 |
-| Wave 3g (after 3f): MEM-TEMPORAL-SCOPE @ 69d163b2, FU-FINANCE-INTEL-DOORS @ 122b68bc, MEM-SALIENCE-SIGHT @ b142c8f0, FU-TEMPORAL-FLOW-INBOX-SCOPE @ 34c03a09, RR-UNTRUSTED-CONTENT-FENCE @ 629c7db9, RR-STREAM-ERROR-NO-EFFECTS @ 825cf137 | `pkt/V1-*` | All ACCEPTED (both lenses) | Build after 3f merges; ~38 files |
-| NAV-A1 | `pkt/V1-NAV-A1`, session_017o9EBfkZtn5ec3BPuoARuf | Citation fix | Swap into 3f |
-| MEM-DOC-EXTRACTION-SIGHT (P0) | `pkt/V1-MEM-DOC-EXTRACTION-SIGHT` @ 8b79d98c, session_017o9EBex4SFxVszCoCSY2Uk | Correctness REJECT: flow semantic section + agent/memory/search serve extraction copies; plus profile-interview cache keyed by business only (cross-member leak) and its "Monthly revenue" line | Worker: exclude copies by default, key cache by business+user, withhold revenue line; delta review |
-| MEM-SEMANTIC-SIGHT (P0) | `pkt/V1-MEM-SEMANTIC-SIGHT` (on MEM-DOC branch), session_017o9EBfbTxe462hkGyBUyNV | Building | Acceptance review on return |
-| FU-KEY-GENOME-READS-RESIDUAL | session_017o9EBgiXttRc2ENe8Q9pK9 | Merge main + one test | Acceptance review |
-| FU-VITEST-DECORATOR-METADATA (P1) | session_017o9EBevZsyK5zcP7bWPk8g | Building (turns DTO validation on in vitest; triage every red test) | Acceptance review |
-| RR-ERASURE-BUSINESS-EVENTS (P1) | session_017o9EBdBXjnpsSAeyU91LYT | Building | Acceptance review |
+| Wave 3f: NAV-A1 @ e833ec8a, FU-SITE-ANALYTICS-REVENUE-SCOPE @ cb42683f, AGENT-MEMORY-FIXES, rulings | `wave/v1-wave-3f` @ 2d72de46 (45 files) | NMS-18 fixed (AST route/identifier claims); full re-proof running in /home/user/kf-wt-3f | If green: PR (body like #223), CI green, merge under D-239 |
+| Wave 3g (after 3f), all ACCEPTED both lenses: MEM-TEMPORAL-SCOPE @ 69d163b2, FU-FINANCE-INTEL-DOORS @ 122b68bc, MEM-SALIENCE-SIGHT @ b142c8f0, FU-TEMPORAL-FLOW-INBOX-SCOPE @ 34c03a09, RR-UNTRUSTED-CONTENT-FENCE @ 629c7db9, RR-STREAM-ERROR-NO-EFFECTS @ 825cf137, MEM-DOC-EXTRACTION-SIGHT @ 55c8cfff, RR-ERASURE-BUSINESS-EVENTS @ 73357d77, FU-PAY-LINK-STATUS-GATE @ ac43742b, FU-KEY-GENOME-READS-RESIDUAL @ 3336ab2a5, RR-SCRIPT-SPECS-IN-CI @ 412bbd5c (second lane) | `pkt/V1-*` | Accepted | Build after 3f merges; split at 50 files (likely 3g + 3h). Conflicts to expect: key-cortex-consciousness.service.ts imports (MEM-SALIENCE vs GENOME-READS: keep both); fixture-prefixes.json (finish-squash.sh) |
+| MEM-SEMANTIC-SIGHT (P0) | session_017o9EBfbTxe462hkGyBUyNV | Repairs: prefix clash v71t_, expenses gate, q length bound, owner-parity test | Acceptance review on return; unblocks MEM-PATTERNS/UNIFIED/TEMPORAL-MEMORY-ROUTES |
+| FU-VITEST-DECORATOR-METADATA (P1) | session_017o9EBevZsyK5zcP7bWPk8g | Review rounds | Acceptance review |
+| FU-KEY-ACTION-GENOME-PROJECTION (P1) | session_017o9EBfKdTMK1cKeLRzg5q6 | Building | Acceptance review |
+| RR-MCP-TENANT-BOUND (P1) | session_017o9EBdXHPD49Rc4zHwMj4K | Building (OQ-1 open) | Acceptance review |
+| RR-BANK-TOKEN-ENCRYPT (P1) | session_017o9EBdeAPCJoxrnvjWpV8w | Building (OQ-4 open) | Acceptance review |
+| Second lane: RR-GATEWAY-TYPED-FAILURES | other account | Building | Review its RETURN on #80 |
+
+Follow-ups to add to the plan with the next rulings commit (from FU-PAY-LINK-STATUS-GATE review): web hides
+"Copy payment link" / WhatsApp share unless status is payable; KEY commerce_send_invoice refuses PAID up front (today it
+emails then fails the PAID->SENT move); KEY invoice findFirst lacks `deletedAt: null`. Recorded deviation: the
+pay-link packet touched flow-orchestrator.service.ts (+7, D-248) and invoice-send-delivery.spec.ts mock outside its write set.
 
 Next to start, in order, when a slot frees: the P1 follow-ups (FU-UNTRUSTED-INBOUND-FENCE, FU-STORE-ORDERS-MONEY-SCOPE,
-FU-TIMELINE-CALLERS-SCOPE, FU-KEY-ACTION-GENOME-PROJECTION, FU-PAY-LINK-STATUS-GATE), MEM-CENSUS, RR P1 packets
-(RR-MCP-TENANT-BOUND, RR-BANK-TOKEN-ENCRYPT, RR-WEBHOOK-INGRESS-CENSUS, RR-ADMIN-LOGOUT, ...), then the ready list.
+FU-TIMELINE-CALLERS-SCOPE, FU-FLOW-SAVE-EXECUTED-TOOL-TURN, FU-CONTACTID-WRITER-VALIDATION: each after its dependency merges), MEM-CENSUS, RR P1 packets
+(RR-WEBHOOK-INGRESS-CENSUS, RR-ADMIN-LOGOUT, ...), then the ready list.
 Not yet in the plan (add with the next rulings commit): FU-FLOW-SAVE-EXECUTED-TOOL-TURN (P1: a failed flow follow-up
 does not save the tool turn that already ran), finish-reason checks for the six OpenAI-compatible adapters,
 FU-PHONE-VOICE-TAMPER-TEST (1/4096 collision), FU-PROFILE-INTERVIEW (if not closed in MEM-DOC-EXTRACTION-SIGHT).
