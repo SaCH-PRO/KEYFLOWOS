@@ -419,6 +419,8 @@ export function fixture({
   script = verdictScript(needs),
   verdict = true,
   extraJobs = '',
+  testJobKeys = '',
+  beforeCensus = '',
 } = {}) {
   const verdictJob = verdict
     ? [
@@ -447,6 +449,7 @@ export function fixture({
     '      - uses: actions/setup-node@v4',
     '      - name: Check the Node runtime pin',
     '        run: node --test scripts/ci/runtime-pin.spec.mjs',
+    beforeCensus,
     '      - name: Check every script spec runs in CI',
     `        run: node --test ${CENSUS_SPEC} scripts/agent-memory/tests/*.spec.mjs`,
     '  # the debt ratchet',
@@ -465,6 +468,7 @@ export function fixture({
     '    name: Run Tests',
     '    runs-on: ubuntu-latest',
     '    needs: [lint-and-typecheck]',
+    testJobKeys,
     '    steps:',
     '      - run: echo test',
     extraJobs,
@@ -640,6 +644,87 @@ describe('ci-verdict: negative controls', () => {
     assert.ok(verdictProblems(fixture({ stepName: 'Verdict' })).some((p) => /must be named/.test(p)));
     const flowAndBlock = fixture().replace('    needs: [lint-and-typecheck, build, test]', '    needs: [typecheck, build, test]\n      - lint');
     assert.ok(verdictProblems(flowAndBlock).some((p) => /must list its needs/.test(p)), verdictProblems(flowAndBlock).join('\n'));
+  });
+
+  it('a # line inside the run block is script, not a YAML comment: the spec judges the script GitHub runs', () => {
+    // Review round 1, R1. A shell comment line in the step is content and stays.
+    const commented = verdictScript(FIXTURE_GATING).replace('verdict=0', '# every gating job must be success\nverdict=0');
+    assert.deepEqual(verdictProblems(fixture({ script: commented })), []);
+    // H1: lines that look like a comment to a reader that drops `#` lines, but
+    // that bash joins into `x="\n#"; verdict=0; y="\n"`, exit 0 on every result.
+    const fakeGreen = verdictScript(FIXTURE_GATING).replace('exit "$verdict"', 'x="\n#"; verdict=0; y="\n"\nexit "$verdict"');
+    const problems = verdictProblems(fixture({ script: fakeGreen }));
+    assert.ok(problems.some((p) => /with lint-and-typecheck "skipped" and every other job success the verdict step must exit 1, exited 0/.test(p)), problems.join('\n'));
+    // H1b: a note inside the here-document is read as a job line and turns the verdict permanently red.
+    const noted = verdictScript(FIXTURE_GATING).replace('RESULTS\nexit', '# note\nRESULTS\nexit');
+    assert.ok(verdictProblems(fixture({ script: noted })).some((p) => /with every result success the verdict step must exit 0, exited 1/.test(p)));
+  });
+
+  it('the run block must be a literal block scalar (|): a folded (>) or inline script is a different script', () => {
+    // Review round 1, R2. GitHub folds `>` lines with spaces; the spec would otherwise prove the unfolded text.
+    const folded = fixture().replace('        run: |', '        run: >');
+    assert.deepEqual(verdictProblems(folded), ["the verdict step's run must be a literal block scalar (run: |), found '>'"]);
+    const inline = fixture().replace(/        run: \|\n[\s\S]*$/, '        run: exit 0\n');
+    assert.ok(verdictProblems(inline).some((p) => /must be a literal block scalar/.test(p)), verdictProblems(inline).join('\n'));
+  });
+
+  it("every '${{' opener in the script must start an allowed result expression, whatever follows it", () => {
+    // Review round 1, F2: `[^}]*` cannot cross the `}` in `{0}`, so an expression
+    // that formats a PR body into the shell was invisible to the earlier check.
+    const formatted = `${verdictScript(FIXTURE_GATING)}\ncat <<'NOTE'\n\${{ format('Judged PR: {0}', github.event.pull_request.body) }}\nNOTE`;
+    const problems = verdictProblems(fixture({ script: formatted }));
+    assert.deepEqual(problems, [
+      "the verdict script has 4 '${{' expression openers for 3 gating jobs: only needs.<gating job>.result may reach the shell",
+    ]);
+    const nested = `${verdictScript(FIXTURE_GATING)}\necho '\${{ fromJSON('{"a":{"b":1}}').a.b }}'`;
+    assert.ok(verdictProblems(fixture({ script: nested })).some((p) => /expression openers/.test(p)));
+  });
+
+  it('a gating job with job-level continue-on-error (or one inside its strategy) fails: its failure would reach the verdict as success', () => {
+    // Review round 1, F3.
+    assert.deepEqual(verdictProblems(fixture({ testJobKeys: '    continue-on-error: true' })), [
+      'gating job test sets job-level continue-on-error: a failed run would reach the verdict as success',
+    ]);
+    assert.deepEqual(verdictProblems(fixture({ testJobKeys: '    continue-on-error: ${{ github.event_name == \'push\' }}' })), [
+      'gating job test sets job-level continue-on-error: a failed run would reach the verdict as success',
+    ]);
+    const strategy = fixture({ testJobKeys: '    strategy:\n      fail-fast: false\n      matrix:\n        node: [22]\n    continue-on-error: ${{ matrix.node == 22 }}' });
+    assert.ok(verdictProblems(strategy).some((p) => /gating job test sets job-level continue-on-error/.test(p)));
+    assert.deepEqual(verdictProblems(fixture({ testJobKeys: '    timeout-minutes: 30' })), []);
+  });
+
+  it('A1: a step inserted before the census step fails, unless it is checkout, pnpm setup, setup-node or the runtime-pin step', () => {
+    // Review round 1, F4: an earlier run step can write NODE_TEST_CONTEXT to GITHUB_ENV.
+    const envWriter = '      - run: echo NODE_TEST_CONTEXT=child >> "$GITHUB_ENV"';
+    assert.deepEqual(censusStepProblems(fixture({ beforeCensus: envWriter })), [
+      "'echo NODE_TEST_CONTEXT=child >> \"$GITHUB_ENV\"' runs before the census step; only the checkout, pnpm setup, setup-node and runtime-pin steps may (an earlier step can write GITHUB_ENV or GITHUB_PATH)",
+    ]);
+    const action = '      - name: Prepare\n        uses: someone/prepare@v1';
+    assert.ok(censusStepProblems(fixture({ beforeCensus: action })).some((p) => /'Prepare' runs before the census step/.test(p)));
+    const pinWithEnv = fixture().replace(
+      '        run: node --test scripts/ci/runtime-pin.spec.mjs',
+      '        run: node --test scripts/ci/runtime-pin.spec.mjs\n        env:\n          NODE_TEST_CONTEXT: child',
+    );
+    assert.ok(censusStepProblems(pinWithEnv).some((p) => /'Check the Node runtime pin' .*may not set env/.test(p)), censusStepProblems(pinWithEnv).join('\n'));
+    const checkoutWith = fixture().replace('      - uses: actions/checkout@v7', '      - uses: actions/checkout@v7\n        with:\n          fetch-depth: 0');
+    assert.deepEqual(censusStepProblems(checkoutWith), []);
+  });
+
+  it('duplicate keys are reported, not resolved first- or last-wins', () => {
+    // Review round 1, F5. GitHub rejects duplicate mapping keys; the spec must not read past them.
+    const twoJobs = fixture().replace('jobs:\n', 'jobs:\n  ci-verdict:\n    name: decoy\n    runs-on: x\n    steps:\n      - run: exit 0\n');
+    assert.ok(verdictProblems(twoJobs).some((p) => /job id ci-verdict appears 2 times/.test(p)), verdictProblems(twoJobs).join('\n'));
+    const twoRegions = `${fixture()}jobs:\n  ghost:\n    runs-on: x\n`;
+    assert.ok(verdictProblems(twoRegions).some((p) => /2 top-level jobs: lines/.test(p)), verdictProblems(twoRegions).join('\n'));
+    const twoRuns = fixture().replace('        run: |', '        run: exit 0\n        run: |');
+    assert.ok(verdictProblems(twoRuns).some((p) => /duplicate key run/.test(p)), verdictProblems(twoRuns).join('\n'));
+    const twoIfs = fixture().replace('    if: always()', '    if: always()\n    if: false');
+    assert.ok(verdictProblems(twoIfs).some((p) => /duplicate key if/.test(p)), verdictProblems(twoIfs).join('\n'));
+  });
+
+  it('a job head with a trailing comment is read as that job', () => {
+    const commented = fixture().replace(`  ${VERDICT_JOB}:`, `  ${VERDICT_JOB}: # the last word`);
+    assert.deepEqual(verdictProblems(commented), []);
   });
 
   it('a verdict job with needs written as block lines passes', () => {
