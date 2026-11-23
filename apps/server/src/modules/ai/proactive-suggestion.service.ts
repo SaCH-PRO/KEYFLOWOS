@@ -5,6 +5,7 @@ import { AiOversightService } from './ai-oversight.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { deleteAiMemoriesWithCopies, upsertAiMemoryDroppingStaleCopies } from './ai-memory.service';
 import { SemanticMemoryService } from './semantic-memory.service';
+import { insightNeeds, SIGHT_WORDS } from './insight-sight';
 
 export interface ChatSuggestion {
   id: string;
@@ -20,6 +21,11 @@ export interface ChatSuggestion {
   severity: 'critical' | 'warning' | 'opportunity' | 'info';
   metric?: string;
   createdAt: Date;
+  /**
+   * FU-INSIGHTS-SIGHT: the words its stored row carries for the sights its insight needs ('revenue', 'suppliers';
+   * SIGHT_WORDS), so the row is withheld by the AiMemory-row rule wherever it is read.
+   */
+  sight?: string[];
 }
 
 const SUGGESTION_COOLDOWN_HOURS = 24;
@@ -69,7 +75,9 @@ export class ProactiveSuggestionService {
       // Skip if this category was already suggested recently
       if (recentCategories.has(insight.category)) continue;
 
-      const suggestion = this.insightToSuggestion(insight);
+      const made = this.insightToSuggestion(insight);
+      const needs = insight.needs ?? insightNeeds(insight);
+      const suggestion = made && needs.length ? { ...made, sight: needs.map((sight) => SIGHT_WORDS[sight]) } : made;
       if (suggestion) {
         suggestions.push(suggestion);
         // Store in memory so we don't repeat. FU-MEMORY-COPIES-REWRITE: through the write door, so a suggestion
@@ -95,16 +103,22 @@ export class ProactiveSuggestionService {
    * Fetch pending suggestions for the chat interface.
    * Returns suggestions that haven't been dismissed or acted on.
    */
-  async getPendingSuggestions(businessId: string): Promise<ChatSuggestion[]> {
-    const memories = await this.prisma.client.aiMemory.findMany({
+  async getPendingSuggestions(
+    businessId: string,
+    // FU-INSIGHTS-SIGHT: the stored rows the reader may be handed (the caller's aiMemoryRowVisibleTo). Filtered before
+    // the 10 are cut, so a withheld suggestion takes no place (suggestions expire in 24 hours: few rows are pending).
+    rowVisible?: (row: { category: string; key: string; value: string }) => boolean,
+  ): Promise<ChatSuggestion[]> {
+    const pending = await this.prisma.client.aiMemory.findMany({
       where: {
         businessId,
         category: 'suggestion',
         expiresAt: { gte: new Date() },
       },
-      orderBy: { createdAt: 'desc' },
-      take: 10,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      ...(rowVisible ? {} : { take: 10 }),
     });
+    const memories = (rowVisible ? pending.filter((row) => rowVisible(row)) : pending).slice(0, 10);
 
     return memories
       .map(m => {

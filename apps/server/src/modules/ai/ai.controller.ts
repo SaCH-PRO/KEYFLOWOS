@@ -20,6 +20,7 @@ import {
 } from './graph-actions.controller';
 import { AiMemoryService, MemoryCategory, summaryPatternKey } from './ai-memory.service';
 import { aiMemoryRowVisibleTo, type SemanticReader } from './semantic-memory-sight';
+import { dashboardFor, insightNeeds, readerHolds } from './insight-sight';
 import { readersModuleSight, readsDocumentExtractions } from '../key-cortex/key-cortex-prompt-context.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
 import { ProAutoMonitorService } from './pro-auto-monitor.service';
@@ -694,16 +695,23 @@ export class AiController {
     return result;
   }
 
+  /** FU-INSIGHTS-SIGHT (D-100, D-146): the stored suggestions the caller may read (aiMemoryRowVisibleTo). */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/suggestions')
-  async getSuggestions(@Param('businessId') businessId: string) {
-    return this.suggestions.getPendingSuggestions(businessId);
+  async getSuggestions(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    const who = await this.memoryReaderOf(businessId, req);
+    return this.suggestions.getPendingSuggestions(businessId, (row) => aiMemoryRowVisibleTo(row, who));
   }
 
+  /** FU-INSIGHTS-SIGHT: every suggestion is stored; the caller is answered those they may read, as their stored rows. */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/ai/suggestions/refresh')
-  async refreshSuggestions(@Param('businessId') businessId: string) {
-    const suggestions = await this.suggestions.generateSuggestions(businessId);
+  async refreshSuggestions(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    const who = await this.memoryReaderOf(businessId, req);
+    const generated = await this.suggestions.generateSuggestions(businessId);
+    const suggestions = generated.filter((s) =>
+      aiMemoryRowVisibleTo({ category: 'suggestion', key: `${s.category}_`, value: JSON.stringify(s) }, who),
+    );
     return { suggestions, count: suggestions.length };
   }
 
@@ -1178,8 +1186,10 @@ export class AiController {
   @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(10, 60_000)
   @Get('businesses/:businessId/ai/strategic/dashboard')
-  async strategicDashboard(@Param('businessId') businessId: string) {
-    return this.strategic.getStrategicDashboard(businessId);
+  async strategicDashboard(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    // FU-INSIGHTS-SIGHT (D-100, D-146): the control tower's dashboard, as the caller may read it (dashboardFor).
+    const who = await this.memoryReaderOf(businessId, req);
+    return dashboardFor(await this.strategic.getStrategicDashboard(businessId), who);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -1239,16 +1249,23 @@ export class AiController {
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/monitoring/insights')
-  async monitoringInsights(@Param('businessId') businessId: string) {
-    const insights = await this.proAutoMonitor.scanInsights(businessId);
+  async monitoringInsights(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    // FU-INSIGHTS-SIGHT (D-100, D-146): the insights whose sights the caller holds (insightNeeds, readerHolds).
+    const who = await this.memoryReaderOf(businessId, req);
+    const insights = (await this.proAutoMonitor.scanInsights(businessId)).filter((i) => readerHolds(who, i.needs ?? insightNeeds(i)));
     return { insights };
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/control-tower')
-  async controlTower(@Param('businessId') businessId: string) {
-    const [snapshot, dashboard, insightsRes, approvals, totalPendingApprovals] = await Promise.all([
-      this.businessGraph.getSnapshot(businessId),
+  async controlTower(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    // FU-INSIGHTS-SIGHT (D-100, D-146): everything here as the caller may read it: the snapshot projected for them (the
+    // viewer projection KEY and the graph routes use: revenue and expenses sections, client revenue, overdue invoices
+    // and the money health areas only by sight), the dashboard's money fields (dashboardFor) and the insights
+    // (readerHolds). The priorities and risks below are built from those, so a withheld figure reaches none of them.
+    const who = await this.memoryReaderOf(businessId, req);
+    const [snapshot, fullDashboard, scanned, approvals, totalPendingApprovals] = await Promise.all([
+      this.businessGraph.getSnapshot(businessId, false, { viewerId: who.reader }),
       this.strategic.getStrategicDashboard(businessId),
       this.proAutoMonitor.scanInsights(businessId),
       this.prisma.client.aiApprovalItem.findMany({
@@ -1260,7 +1277,14 @@ export class AiController {
         where: { businessId, status: 'pending' },
       }),
     ]);
-    const insights = insightsRes ?? [];
+    const dashboard = dashboardFor(fullDashboard, who);
+    // A withheld figure counts as none: it makes no priority and no risk.
+    const overdueInvoices = dashboard.overdueInvoices ?? 0;
+    const overdueAmount = dashboard.overdueAmount ?? 0;
+    const pendingQuotes = dashboard.pendingQuotes ?? 0;
+    const pendingQuoteValue = dashboard.pendingQuoteValue ?? 0;
+    const staleLeads = dashboard.staleLeads ?? 0;
+    const insights = (scanned ?? []).filter((i) => readerHolds(who, i.needs ?? insightNeeds(i)));
     const healthIndicators = snapshot.healthIndicators ?? [];
 
     type PriorityItem = {
@@ -1291,13 +1315,13 @@ export class AiController {
       });
     }
 
-    if (dashboard.overdueInvoices > 0) {
+    if (overdueInvoices > 0) {
       priorities.push({
         id: `overdue-inv-${priorityIdx++}`,
         type: 'action',
         severity: 'critical',
-        title: `Collect ${dashboard.overdueInvoices} overdue invoices`,
-        description: `$${dashboard.overdueAmount.toFixed(0)} TTD at risk`,
+        title: `Collect ${overdueInvoices} overdue invoices`,
+        description: `$${overdueAmount.toFixed(0)} TTD at risk`,
         module: 'revenue',
         urgency: 95,
         actionLabel: 'Review Invoices',
@@ -1305,12 +1329,12 @@ export class AiController {
       });
     }
 
-    if (dashboard.pendingQuotes > 0) {
+    if (pendingQuotes > 0) {
       priorities.push({
         id: `pending-quotes-${priorityIdx++}`,
         type: 'opportunity',
         severity: 'opportunity',
-        title: `${dashboard.pendingQuotes} pending quotes worth $${dashboard.pendingQuoteValue.toFixed(0)}`,
+        title: `${pendingQuotes} pending quotes worth $${pendingQuoteValue.toFixed(0)}`,
         description: 'Follow up to convert to revenue',
         module: 'revenue',
         urgency: 60,
@@ -1319,12 +1343,12 @@ export class AiController {
       });
     }
 
-    if (dashboard.staleLeads > 0) {
+    if (staleLeads > 0) {
       priorities.push({
         id: `stale-leads-${priorityIdx}`,
         type: 'opportunity',
         severity: 'warning',
-        title: `${dashboard.staleLeads} stale leads need attention`,
+        title: `${staleLeads} stale leads need attention`,
         description: 'Leads inactive for 30+ days',
         module: 'crm',
         urgency: 50,
@@ -1373,25 +1397,25 @@ export class AiController {
     const risks: RiskAlert[] = [];
     let riskIdx = 0;
 
-    if (dashboard.overdueInvoices > 0) {
+    if (overdueInvoices > 0) {
       risks.push({
         id: `risk-cashflow-${riskIdx++}`,
         domain: 'cash_flow',
-        severity: dashboard.overdueAmount > 5000 ? 'critical' : 'warning',
-        title: `$${dashboard.overdueAmount.toFixed(0)} TTD in overdue invoices`,
-        description: `${dashboard.overdueInvoices} invoice${dashboard.overdueInvoices > 1 ? 's' : ''} past due — follow up immediately to protect cash flow`,
+        severity: overdueAmount > 5000 ? 'critical' : 'warning',
+        title: `$${overdueAmount.toFixed(0)} TTD in overdue invoices`,
+        description: `${overdueInvoices} invoice${overdueInvoices > 1 ? 's' : ''} past due — follow up immediately to protect cash flow`,
         module: 'revenue',
         actionLabel: 'Review Invoices',
         actionRoute: '/app/commerce?tab=operations',
       });
     }
 
-    if (dashboard.staleLeads > 3) {
+    if (staleLeads > 3) {
       risks.push({
         id: `risk-churn-${riskIdx++}`,
         domain: 'churn',
-        severity: dashboard.staleLeads > 10 ? 'critical' : 'warning',
-        title: `${dashboard.staleLeads} leads going cold`,
+        severity: staleLeads > 10 ? 'critical' : 'warning',
+        title: `${staleLeads} leads going cold`,
         description: 'Leads inactive 30+ days — high churn risk without re-engagement',
         module: 'crm',
         actionLabel: 'View Leads',
