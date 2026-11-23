@@ -3,6 +3,7 @@ import { UploadsService } from './uploads.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { GuardedBusinessId } from '../../core/auth/request-business-id';
+import { isSafeKeySegment } from '../../core/object-storage/objectStorage';
 
 const ALLOWED_CONTENT_TYPES = new Set([
   'image/jpeg',
@@ -41,7 +42,7 @@ export class UploadsController {
       const sanitized = body.name.replace(/[^a-zA-Z0-9._-]/g, '_');
       body.name = sanitized;
     }
-    if (!businessId) {
+    if (!businessId || !isSafeKeySegment(businessId)) {
       throw new BadRequestException('businessId is required');
     }
     const result = await this.uploads.getUploadUrl(businessId);

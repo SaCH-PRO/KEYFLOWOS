@@ -181,7 +181,7 @@ export const BUSINESS_UPLOAD_NAMESPACE = "uploads";
 const SAFE_KEY_SEGMENT = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,199}$/;
 
 /** One key segment: no slash, no dot or empty segment, no encoding tricks. */
-function isSafeKeySegment(segment: unknown): segment is string {
+export function isSafeKeySegment(segment: unknown): segment is string {
   return (
     typeof segment === "string" &&
     SAFE_KEY_SEGMENT.test(segment) &&
@@ -362,6 +362,10 @@ export class ObjectStorageService {
    * Presigned GET URL for an object previously uploaded via uploadBuffer().
    * Default TTL = 1 hour.
    */
+  /**
+   * Server-trusted paths only (one the server just wrote): no business check.
+   * A path from a client goes through resolveObjectForBusiness.
+   */
   async getReadSignedUrl(
     objectPath: string,
     opts: { expiresIn?: number; downloadFilename?: string } = {},
@@ -388,6 +392,11 @@ export class ObjectStorageService {
     );
   }
 
+  /**
+   * Server-trusted paths only: no business check. A path from a client (a
+   * request body, a chat history, a stored field) goes through
+   * resolveObjectForBusiness.
+   */
   async getObjectEntityFile(objectPath: string): Promise<S3FileRef> {
     if (!objectPath.startsWith("/objects/")) {
       throw new ObjectNotFoundError();
