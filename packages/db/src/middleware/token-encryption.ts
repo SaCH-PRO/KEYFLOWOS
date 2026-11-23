@@ -56,6 +56,11 @@ function getDerivedKey(): Buffer {
 export function encryptToken(plaintext: string | null | undefined): string | null {
   if (!plaintext) return plaintext ?? null;
   if (plaintext.startsWith(PREFIX)) return plaintext;
+  return seal(plaintext);
+}
+
+/** AES-256-GCM with a random IV, in the 'enc:v1:' form. Always encrypts: a prefixed input is sealed like any other. */
+function seal(plaintext: string): string {
   const { createCipheriv, randomBytes } = getCrypto();
   const key = getDerivedKey();
   const iv = randomBytes(16);
@@ -110,6 +115,7 @@ export const ENCRYPTED_FIELDS = Object.freeze({
   SocialConnection: Object.freeze(['token', 'refreshToken'] as const),
   ChannelConnection: Object.freeze(['token', 'refreshToken'] as const),
   Webhook: Object.freeze(['secret'] as const),
+  BankConnection: Object.freeze(['accessToken'] as const),
 });
 
 export type EncryptedModel = keyof typeof ENCRYPTED_FIELDS;
@@ -150,6 +156,35 @@ const CHANNEL_ENCRYPTED_FIELDS = new Set<string>(ENCRYPTED_FIELDS.ChannelConnect
 const WEBHOOK_ENCRYPTED_FIELDS = new Set<string>(ENCRYPTED_FIELDS.Webhook);
 
 /**
+ * Fields on BankConnection that should be encrypted at rest.
+ *
+ * RR-BANK-TOKEN-ENCRYPT (V1-72; rulings D-261, D-262). `accessToken` is a bank
+ * aggregator's access token (plaid, yodlee, salt_edge, open_banking): whoever
+ * holds it can read the business's bank account through the provider.
+ * BankConnectionService.create / update stored it as given, so the column held
+ * plaintext even though the service strips it from every response.
+ *
+ * It is never a lookup key (measured: no `where` on accessToken anywhere), so
+ * AES with a random IV is safe here. A row written before this hook still holds
+ * plaintext; decryptToken passes an unprefixed value through, so those rows read
+ * correctly until apps/server/scripts/encrypt-bank-connection-tokens.ts --apply
+ * rewrites them (owner authority only; dry run by default).
+ *
+ * Every write seals the value, even one already shaped like ciphertext (see
+ * encryptWith). The script writes plaintext only (it skips prefixed rows).
+ *
+ * delete is deliberately not hooked: its result is the row already gone, and
+ * decrypting it would turn the removal of a row that does not decrypt into an
+ * error after the commit (COR-V72S-R4-3). Callers discard the deleted token.
+ *
+ * Unlike the models above, every write and read operation that can carry the
+ * column is hooked (createMany, updateMany and their AndReturn forms, the
+ * OrThrow reads): a bulk write that named the token would otherwise
+ * store plaintext with no error, and an OrThrow read would hand back ciphertext.
+ */
+const BANK_CONNECTION_ENCRYPTED_FIELDS = new Set<string>(ENCRYPTED_FIELDS.BankConnection);
+
+/**
  * WHAT IS DELIBERATELY NOT ENCRYPTED HERE, AND WHY IT IS NOT AN OVERSIGHT
  *
  * PortalAccess.token, PaymentLink.token and ContactExportJob.token are all
@@ -170,11 +205,22 @@ const WEBHOOK_ENCRYPTED_FIELDS = new Set<string>(ENCRYPTED_FIELDS.Webhook);
  * the model to copy when those three are done.
  */
 
-function encryptWith(fields: Set<string>, data: Record<string, unknown>): Record<string, unknown> {
+/**
+ * Encrypts the named fields of a write's data. `always` (BankConnection) seals every non-empty value, even one
+ * already shaped like ciphertext: that model's token comes only from API input, never as a ciphertext copied from
+ * another row, and passing a caller's 'enc:v1:...' through stored a value no read could decrypt (SEC-V72S-2).
+ */
+function encryptWith(fields: Set<string>, data: Record<string, unknown>, always = false): Record<string, unknown> {
+  const enc = (v: string) => (always ? (v ? seal(v) : v) : encryptToken(v));
   const result = { ...data };
   for (const key of Object.keys(result)) {
-    if (fields.has(key) && typeof result[key] === 'string') {
-      result[key] = encryptToken(result[key] as string);
+    if (!fields.has(key)) continue;
+    const value = result[key];
+    if (typeof value === 'string') {
+      result[key] = enc(value);
+    } else if (value && typeof value === 'object' && typeof (value as { set?: unknown }).set === 'string') {
+      // Prisma's `{ set: value }` form of a scalar update writes the same column.
+      result[key] = { ...(value as object), set: enc((value as { set: string }).set) };
     }
   }
   return result;
@@ -196,6 +242,7 @@ const FIELD_SETS: Record<EncryptedModel, Set<string>> = {
   SocialConnection: SOCIAL_ENCRYPTED_FIELDS,
   ChannelConnection: CHANNEL_ENCRYPTED_FIELDS,
   Webhook: WEBHOOK_ENCRYPTED_FIELDS,
+  BankConnection: BANK_CONNECTION_ENCRYPTED_FIELDS,
 };
 
 /**
@@ -405,6 +452,77 @@ export const tokenEncryptionExtension = Prisma.defineExtension({
       async findMany({ args, query }) {
         const results = await query(args);
         return results.map((r) => decryptWith(WEBHOOK_ENCRYPTED_FIELDS, r));
+      },
+    },
+    bankConnection: {
+      async create({ args, query }) {
+        if (args.data) {
+          args = { ...args, data: encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.data as Record<string, unknown>, true) as any };
+        }
+        return decryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, await query(args));
+      },
+      async createMany({ args, query }) {
+        if (args.data) {
+          const data = Array.isArray(args.data)
+            ? args.data.map((d) => encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, d as Record<string, unknown>, true))
+            : encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.data as Record<string, unknown>, true);
+          args = { ...args, data: data as any };
+        }
+        return query(args);
+      },
+      async update({ args, query }) {
+        if (args.data) {
+          args = { ...args, data: encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.data as Record<string, unknown>, true) as any };
+        }
+        return decryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, await query(args));
+      },
+      async updateMany({ args, query }) {
+        if (args.data) {
+          args = { ...args, data: encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.data as Record<string, unknown>, true) as any };
+        }
+        return query(args);
+      },
+      async upsert({ args, query }) {
+        if (args.create) {
+          args = { ...args, create: encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.create as Record<string, unknown>, true) as any };
+        }
+        if (args.update) {
+          args = { ...args, update: encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.update as Record<string, unknown>, true) as any };
+        }
+        return decryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, await query(args));
+      },
+      async findUnique({ args, query }) {
+        return decryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, await query(args));
+      },
+      async findFirst({ args, query }) {
+        return decryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, await query(args));
+      },
+      async findMany({ args, query }) {
+        const results = await query(args);
+        return results.map((r) => decryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, r));
+      },
+      async findUniqueOrThrow({ args, query }) {
+        return decryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, await query(args));
+      },
+      async findFirstOrThrow({ args, query }) {
+        return decryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, await query(args));
+      },
+      async createManyAndReturn({ args, query }) {
+        if (args.data) {
+          const data = Array.isArray(args.data)
+            ? args.data.map((d) => encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, d as Record<string, unknown>, true))
+            : encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.data as Record<string, unknown>, true);
+          args = { ...args, data: data as any };
+        }
+        const results = await query(args);
+        return results.map((r) => decryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, r));
+      },
+      async updateManyAndReturn({ args, query }) {
+        if (args.data) {
+          args = { ...args, data: encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.data as Record<string, unknown>, true) as any };
+        }
+        const results = await query(args);
+        return results.map((r) => decryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, r));
       },
     },
   },
