@@ -50,8 +50,10 @@ const ID = {
   owner: `${P}owner`,
   /** STAFF, explicit scope map: crm and operations read, revenue and expenses 'none'. */
   blind: `${P}blind`,
-  /** STAFF, explicit scope map: revenue read, crm and operations read. */
+  /** STAFF, explicit scope map: revenue and expenses read, crm and operations read. */
   revenue: `${P}revenue`,
+  /** STAFF, explicit scope map: revenue read, expenses 'none' (review m4: an unclassified document is revenue and expenses). */
+  revnoexp: `${P}revnoexp`,
   /** ADMIN by role defaults (settings admin). */
   admin: `${P}admin`,
   /** A platform SUPER_ADMIN with no membership: BusinessGuard admits them; no member reader (memberless). */
@@ -63,9 +65,10 @@ const BLIND_SCOPES = {
   crm: 'read', bookings: 'read', projects: 'read', content: 'read', automations: 'read', storefront: 'read',
   analytics: 'read', operations: 'read', ai: 'read', team: 'read', expenses: 'none', revenue: 'none',
 };
-const REVENUE_SCOPES = { ...BLIND_SCOPES, revenue: 'read' };
+const REVENUE_SCOPES = { ...BLIND_SCOPES, revenue: 'read', expenses: 'read' };
+const REVENUE_NO_EXPENSES_SCOPES = { ...BLIND_SCOPES, revenue: 'read' };
 
-type Reader = 'owner' | 'blind' | 'revenue' | 'root';
+type Reader = 'owner' | 'blind' | 'revenue' | 'revnoexp' | 'root';
 const BLIND_READERS: Reader[] = ['blind', 'root'];
 
 /** Markers the stand-in embedding reads: a query, a revenue-derived source, a source that resolves to nothing. */
@@ -425,6 +428,7 @@ beforeAll(async () => {
     [ID.owner, 'USER'],
     [ID.blind, 'USER'],
     [ID.revenue, 'USER'],
+    [ID.revnoexp, 'USER'],
     [ID.admin, 'USER'],
     [ID.root, 'SUPER_ADMIN'],
   ] as const) {
@@ -435,6 +439,7 @@ beforeAll(async () => {
     [ID.owner, 'OWNER', { maxApprovalTier: 4 }],
     [ID.blind, 'STAFF', { permissionScopes: BLIND_SCOPES, maxApprovalTier: 0 }],
     [ID.revenue, 'STAFF', { permissionScopes: REVENUE_SCOPES, maxApprovalTier: 0 }],
+    [ID.revnoexp, 'STAFF', { permissionScopes: REVENUE_NO_EXPENSES_SCOPES, maxApprovalTier: 0 }],
     [ID.admin, 'ADMIN', { maxApprovalTier: 3 }],
   ] as const) {
     await db.membership.create({ data: { id: m(userId), userId, businessId: ID.biz, role, ...extra } });
@@ -522,7 +527,7 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
     }
   }, 300_000);
 
-  it('V71T-04 RED: a turn that names no member (the support desk: no user, no position) gets no revenue-derived, temporal or unresolvable hit in its semantic section; the business-wide fact copy stays', async () => {
+  it('V71T-04 RED: a turn that names no member (the support desk: no user, no position) gets no semantic section at all (D-203: the support desk sees only the conversation in front of it, as its perception block reads nothing): not even the business-wide fact copy', async () => {
     await clearMemory();
     try {
       await seedOrdinary();
@@ -531,9 +536,10 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
       const orchestrator = http.get((await import('../src/modules/ai/flow-orchestrator.service')).FlowOrchestratorService);
       await orchestrator.chat(ID.biz, QUERY, [{ role: 'user', content: QUERY }]);
       expect(flow.prompts).toHaveLength(1);
-      const section = lower(semanticSection(flow.prompts[0]));
-      expect(section).toContain(okMarker(0).toLowerCase());
-      for (const marker of [REV, AMOUNT, ORPHAN, 'v71t-ok-1']) expect(section, marker).not.toContain(marker);
+      expect(flow.prompts[0]).not.toContain('RELEVANT CONTEXT FROM MEMORY');
+      for (const marker of [REV, AMOUNT, ORPHAN, 'v71t-ok-']) expect(lower(flow.prompts[0]), marker).not.toContain(marker);
+      // Control: a member's turn over the same memory does carry the section (the fact copy).
+      expect(lower(await chatSectionFor('blind'))).toContain(okMarker(0).toLowerCase());
     } finally {
       await clearMemory();
     }
@@ -555,6 +561,83 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
         expect(res.status, `${who}: ${JSON.stringify(res.body).slice(0, 200)}`).toBe(201);
         expect(res.body, who).toEqual({ backfilled: 1 });
       }
+    } finally {
+      await clearMemory();
+    }
+  }, 120_000);
+  it('V71T-06 (review m1, m3; coverage of the paging): the differential holds across pages: with 120 withheld hits ranked above theirs (more than any first page), the blind and memberless readers are handed exactly what they were with none, and no hit twice', async () => {
+    await clearMemory();
+    try {
+      await seedOrdinary();
+      const before: Record<string, unknown> = {};
+      for (const reader of BLIND_READERS) before[reader] = await everythingFor(reader);
+      // 120 copies whose source resolves to nothing (served to nobody), all at similarity 1.
+      for (let i = 0; i < 120; i++) {
+        await semantic.store({ businessId: ID.biz, content: `${ORPHAN} event copy ${i}`, sourceType: 'event', sourceId: `${P}ev_none_${i}` });
+      }
+      for (const reader of BLIND_READERS) expect(await everythingFor(reader), reader).toEqual(before[reader]);
+      const ids = (await semantic.search({
+        businessId: ID.biz, query: QUERY, limit: 50, visibleTo: async (hits: any[]) => hits.map(() => true),
+      })).map((h: any) => h.id);
+      expect(new Set(ids).size, 'no hit twice').toBe(ids.length);
+    } finally {
+      await clearMemory();
+    }
+  }, 300_000);
+
+  it('V71T-07 RED (security review 2, correctness m5): a temporal summary rewritten in place keeps its old copy in the semantic store; that copy, made from payment events and no longer what the row holds, reaches no reader; the copy of what the row holds now does', async () => {
+    await clearMemory();
+    try {
+      const pay = [];
+      for (let k = 0; k < 3; k++) {
+        pay.push((await temporal.emit({ businessId: ID.biz, source: 'gw', type: 'payment.received', module: 'payments', title: 'settled' })).id);
+      }
+      const inbox = [];
+      for (let k = 0; k < 3; k++) {
+        inbox.push((await temporal.emit({ businessId: ID.biz, source: 'key_inbox', type: 'key_inbox.message_received', module: 'key_inbox', title: 'hello' })).id);
+      }
+      const base = { businessId: ID.biz, entityType: 'contact', entityId: `${P}ct_stale`, type: 'summary', sourceModule: 'key_inbox', confidence: 0.9 };
+      await temporalMemory.createMemory({ ...base, content: `${REV} 3 settled this week`, sourceEventIds: pay });
+      await temporalMemory.createMemory({ ...base, content: `${okMarker(7)} quiet this week`, sourceEventIds: inbox });
+      expect(await db.aiMemoryEmbedding.count({ where: { businessId: ID.biz, sourceType: 'temporal_memory' } }), 'premise: both copies stay').toBe(2);
+      for (const reader of ['owner', 'revenue', 'blind'] as Reader[]) {
+        const hits = (await searchFor(reader, 50)).join('\n').toLowerCase();
+        expect(hits, `${reader}: the stale copy`).not.toContain(REV);
+        expect(hits, `${reader}: the current copy`).toContain(okMarker(7).toLowerCase());
+      }
+    } finally {
+      await clearMemory();
+    }
+  }, 120_000);
+
+  it('V71T-08 RED (security review 3, correctness m5): a channel summary counts more events than it records as its source (summarizeChannel keeps 20 of up to 200): its provenance is incomplete and it needs every module, so payment events outside the 20 recorded do not reach the blind member; the owner keeps it', async () => {
+    await clearMemory();
+    try {
+      // The channel's name carries the ranking marker (the stand-in embedding reads it); it names no module.
+      const channel = `${okMarker(8)}-ch`;
+      const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000);
+      for (let k = 0; k < 5; k++) {
+        await temporal.emit({ businessId: ID.biz, source: channel, type: 'payment.received', module: 'payments', title: 'settled', occurredAt: at(600 + k) });
+      }
+      for (let k = 0; k < 20; k++) {
+        await temporal.emit({ businessId: ID.biz, source: channel, type: 'key_inbox.message_received', module: 'key_inbox', title: 'hi', occurredAt: at(k) });
+      }
+      const row = await temporalMemory.summarizeChannel(ID.biz, channel);
+      expect(row.sourceEventIds, 'premise: only the 20 latest are recorded').toHaveLength(20);
+      expect(await db.aiMemoryEmbedding.count({ where: { businessId: ID.biz, sourceType: 'temporal_memory' } }), 'premise: embedded').toBe(1);
+      expect((await searchFor('blind', 50)).join('\n')).not.toContain(channel);
+      expect((await searchFor('owner', 50)).join('\n')).toContain(channel);
+    } finally {
+      await clearMemory();
+    }
+  }, 120_000);
+
+  it('V71T-09 RED (security review 4, correctness m4): a knowledge-source chunk is an unclassified document: it needs revenue and expenses read (as a document event does), so a member with revenue read and expenses none does not get it; the revenue-and-expenses reader does', async () => {
+    await clearMemory();
+    try {
+      await knowledge.ingestText({ businessId: ID.biz, title: `${REV} vendor bills`, sourceType: 'document', content: 'Bill from V71T Supplies' });
+      expect((await searchFor('revnoexp', 50)).join('\n').toLowerCase()).not.toContain(REV);
+      expect((await searchFor('revenue', 50)).join('\n').toLowerCase()).toContain(REV);
     } finally {
       await clearMemory();
     }
