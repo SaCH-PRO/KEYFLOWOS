@@ -102,8 +102,11 @@ describe("RR-ADMIN-LOGOUT: a user sign-in clears the admin session; the admin ar
 
     render(<AdminLayout><div>v1rr-admin-child</div></AdminLayout>);
     expect(await screen.findByText("v1rr-admin-child")).toBeInTheDocument();
+    // review round 1: the layout admitted the admin without routing away
+    expect(nav.router.replace).not.toHaveBeenCalled();
     const signOut = screen.getByRole("button", { name: /sign out/i });
     fireEvent.click(signOut);
+    fireEvent.click(signOut); // a double click posts once
 
     await waitFor(() => expect(nav.router.replace).toHaveBeenCalledWith("/admin/login"));
     const logouts = calls.filter((c) => c.path === "/api/admin/auth/logout");

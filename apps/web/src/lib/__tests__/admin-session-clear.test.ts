@@ -88,6 +88,31 @@ describe("RR-ADMIN-LOGOUT: no sign-out leaves the admin bearer behind", () => {
     await apiGet("/v1rr/probe");
     expect(calls).toHaveLength(1);
     expect(calls[0].authorization).toBeNull();
+    // review round 1: the user bearer is what the next sign-in sends, not a surviving admin bearer
+    window.localStorage.setItem("kf_token", "v1rr_user_token_2");
+    await apiGet("/v1rr/probe-2");
+    expect(calls[1].authorization).toBe("Bearer v1rr_user_token_2");
+  });
+
+  it("ASC-05 (review round 1): adminSignOut clears the local session before the server answers, so a stalled network never keeps the bearer on the device", async () => {
+    expect(typeof adminSignOut, "adminSignOut is exported from @/lib/workspace").toBe("function");
+    seedAdminSession();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const headers = new Headers(init?.headers);
+      calls.push({ url: String(input), method: (init?.method ?? "GET").toUpperCase(), authorization: headers.get("authorization") });
+      await gate; // the server never answers until the test lets it
+      return new Response(JSON.stringify({ ok: true }), { status: 201, headers: { "Content-Type": "application/json" } });
+    });
+    const signingOut = adminSignOut!();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(adminKeysLeft()).toEqual([]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ method: "POST", authorization: "Bearer v1rr_admin_bearer" });
+    release();
+    await expect(signingOut).resolves.toBeUndefined();
   });
 
   it("ASC-02 RED-BEFORE: adminSignOut posts to /api/admin/auth/logout once with the admin bearer and clears the three keys; a 500 and a thrown request still clear", async () => {
