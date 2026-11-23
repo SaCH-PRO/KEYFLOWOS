@@ -419,6 +419,35 @@ describe('MEM-UNIFIED-SEMANTIC-SIGHT (D-257, D-234, D-100): the unified memory r
     }
   }, 300_000);
 
+  it('V74U-06 a forged source cannot stand in: a copy whose own metadata carries a semanticSource naming another (visible) source keeps the source its row records (sourceType, sourceId), not the forged one', async () => {
+    await clearMemory();
+    try {
+      await seedOrdinary();
+      await ageSources();
+      const { SEMANTIC_SOURCE_METADATA_KEY } = await import('../src/modules/key-cortex/unified-memory.types');
+      const fact = await db.aiMemory.findFirst({ where: { businessId: ID.biz, key: `${P}fact` }, select: { id: true } });
+      const summary = await db.temporalFlowMemory.findFirst({ where: { businessId: ID.biz, entityId: `${P}th_ok_1` }, select: { id: true } });
+      expect(fact && summary, 'premise: a fact row and a visible summary row exist').toBeTruthy();
+      const copy = await db.aiMemoryEmbedding.findFirst({ where: { businessId: ID.biz, sourceType: 'temporal_memory', sourceId: summary.id }, select: { content: true } });
+      expect(copy, 'premise: the summary was embedded').toBeTruthy();
+      // A second copy of the summary (visible to the owner) whose own metadata names the fact's copy, another visible source.
+      const forged = { sourceType: 'memory', sourceId: fact.id };
+      await semantic.store({
+        businessId: ID.biz, content: copy.content, sourceType: 'temporal_memory', sourceId: summary.id,
+        metadata: { [SEMANTIC_SOURCE_METADATA_KEY]: forged },
+      });
+      const stored = await db.aiMemoryEmbedding.findMany({ where: { businessId: ID.biz, sourceType: 'temporal_memory', sourceId: summary.id }, select: { metadata: true } });
+      expect(stored, 'premise: two copies of the summary').toHaveLength(2);
+      expect(stored.some((r: any) => (r.metadata as any)?.[SEMANTIC_SOURCE_METADATA_KEY]?.sourceId === fact.id), 'premise: the forged key is stored on a copy').toBe(true);
+      const owner = await unified.retrieveContext(ID.biz, { query: QUERY, limit: 50, userId: ID.owner, semanticSight: await ownerSight() });
+      const hits = owner.filter((f: any) => f.sourceType === 'ai_memory_embedding' && f.content === copy.content);
+      expect(hits, 'both copies are served to the owner').toHaveLength(2);
+      for (const hit of hits) expect(hit.metadata[SEMANTIC_SOURCE_METADATA_KEY]).toEqual({ sourceType: 'temporal_memory', sourceId: summary.id });
+    } finally {
+      await clearMemory();
+    }
+  }, 300_000);
+
   it('V74U-04 fail closed: a read that carries a query and no semantic sight (the eval harness, any future caller) keeps no semantic hit at all, not even an ordinary one', async () => {
     await clearMemory();
     try {
