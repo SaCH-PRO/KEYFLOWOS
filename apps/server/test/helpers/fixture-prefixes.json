@@ -1245,6 +1245,11 @@
       "prefix": "v76g_",
       "owner": "apps/server/test/genome-evolution-surfaces.integration.test.ts",
       "packet": "V1-76 (FU-GENOME-EVOLUTION-SURFACES)"
+    },
+    {
+      "prefix": "v72q_",
+      "owner": "apps/server/test/insights-sight.integration.test.ts",
+      "packet": "V1-72 (FU-INSIGHTS-SIGHT)"
     }
   ],
   "pendingRenames": [],
