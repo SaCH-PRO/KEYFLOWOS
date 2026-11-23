@@ -690,7 +690,7 @@ Genome Stage: ${context.genomeStage}
 Executive Readiness: ${context.executiveReadiness}%
 DNA Scores: ${dnaSummary}
 Active: ${context.recentTasks.length} tasks, ${context.recentEvents.length} events, ${context.activeProjects.length} projects
-Pending: ${context.pendingInvoices} invoices, ${context.unreadMessages} unread messages
+Pending: ${typeof context.pendingInvoices === 'number' ? `${context.pendingInvoices} invoices, ` : ''}${context.unreadMessages} unread messages
 Recent: ${context.recentTasks.slice(0, 5).join('; ') || 'No recent tasks'}
 ========================`;
   }

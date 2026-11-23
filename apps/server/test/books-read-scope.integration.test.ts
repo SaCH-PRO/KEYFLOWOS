@@ -416,6 +416,18 @@ afterAll(async () => {
   if (db) await cleanup();
 }, 60_000);
 
+
+/**
+ * The body as text without the error envelope's volatile fields. Its timestamp ("...T12:12:12.341Z") can contain
+ * "12.34" by chance (the BRS-11/BRS-12 flake), and its correlation id and path are not figures either; every other
+ * field, including any served amount, is kept.
+ */
+function servedFigures(body: unknown): string {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return JSON.stringify(body);
+  const { timestamp: _t, correlationId: _c, path: _p, ...rest } = body as Record<string, unknown>;
+  return JSON.stringify(rest);
+}
+
 describe('FOLLOW3-A6 (BRS-01..06): a revenue:none member reads no revenue or cash figure through the Books reads', () => {
   it('[BRS-00] baseline: no read has run, so the business holds no financial_accounts and no revenue_actions rows', async () => {
     expect(await rowCount('financial_accounts')).toBe(0);
@@ -543,7 +555,7 @@ describe('FOLLOW3-A6 review SEC-A5A6-02 (BRS-09): the routes that serve the gate
       const res = await sibling.call(ID.staffNone);
       expect(res.status, JSON.stringify(res.body)).toBe(403);
       expect(res.body).toMatchObject({ code: 'FORBIDDEN', message: REVENUE_DENIED });
-      expect(JSON.stringify(res.body)).not.toMatch(/345\.67|54\.33|12\.34|"items"|"entries"|could add/);
+      expect(servedFigures(res.body)).not.toMatch(/345\.67|54\.33|12\.34|"items"|"entries"|could add/);
       for (const [name, spy] of Object.entries(SPY)) expect(spy, `${name} never runs for a refused read`).not.toHaveBeenCalled();
     }, 30_000);
   }
@@ -572,7 +584,7 @@ describe('FOLLOW3-A6 review SEC-A5A6-04 (BRS-11): a SUPER_ADMIN with no Membersh
       const res = await get(route, ID.superAdmin);
       expect(res.status, `${route}: ${JSON.stringify(res.body)}`).toBe(403);
       expect(res.body).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
-      expect(JSON.stringify(res.body)).not.toMatch(/345\.67|54\.33|12\.34/);
+      expect(servedFigures(res.body)).not.toMatch(/345\.67|54\.33|12\.34/);
     }
     for (const [name, spy] of Object.entries(SPY)) expect(spy, name).not.toHaveBeenCalled();
   }, 30_000);
@@ -593,7 +605,7 @@ describe('FOLLOW3-A6 review CR-A6-02 / SEC-A5A6-03 (BRS-12): the distinguished o
         const res = await get(route, ID.distOwner);
         expect(res.status, `${route}: ${JSON.stringify(res.body)}`).toBe(403);
         expect(res.body, route).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
-        expect(JSON.stringify(res.body)).not.toMatch(/345\.67|54\.33|12\.34|"items"/);
+        expect(servedFigures(res.body)).not.toMatch(/345\.67|54\.33|12\.34|"items"/);
       }
       for (const [name, spy] of Object.entries(SPY)) expect(spy, name).not.toHaveBeenCalled();
 

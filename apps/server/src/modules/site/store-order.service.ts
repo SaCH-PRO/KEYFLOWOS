@@ -1731,6 +1731,28 @@ export class StoreOrderService {
     return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
   }
 
+  /**
+   * FU-SITE-ANALYTICS-REVENUE-SCOPE (owner rulings D-100, D-234; security
+   * review M1): the order summary as the member asking may see it. Below
+   * revenue read, totalRevenue (the PAID orders' totals) is withheld, and so
+   * are completedOrders and totalOrders (sales volume; totalOrders less the
+   * kept counts would give completedOrders back): the keys are absent and
+   * their queries do not run. The fulfilment queue (pending, confirmed,
+   * shipped, cancelled) stays for every member. `readsRevenue` is the
+   * caller's reading of the member's level (SiteService.readsRevenue).
+   */
+  async getOrderSummaryForReader(businessId: string, readsRevenue: boolean) {
+    if (readsRevenue) return this.getOrderSummary(businessId);
+    const [pendingOrders, confirmedOrders, shippedOrders, cancelledOrders] = await Promise.all([
+      this.prisma.client.marketplaceOrder.count({ where: { businessId, status: 'PENDING' } }),
+      this.prisma.client.marketplaceOrder.count({ where: { businessId, status: 'CONFIRMED' } }),
+      this.prisma.client.marketplaceOrder.count({ where: { businessId, status: 'SHIPPED' } }),
+      this.prisma.client.marketplaceOrder.count({ where: { businessId, status: 'CANCELLED' } }),
+    ]);
+    return { pendingOrders, confirmedOrders, shippedOrders, cancelledOrders };
+  }
+
+  /** The full order summary, money included: for a caller that has required revenue read (getOrderSummaryForReader). */
   async getOrderSummary(businessId: string) {
     const [totalOrders, pendingOrders, confirmedOrders, shippedOrders, completedOrders, cancelledOrders, revenueResult] =
       await Promise.all([

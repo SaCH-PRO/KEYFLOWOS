@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Inject, Param, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard } from '../../core/auth/module-scope.guard';
@@ -23,7 +23,8 @@ export class BusinessCommandCenterController {
   ) {}
 
   @Get('snapshot')
-  snapshot(@Param('businessId') businessId: string) {
-    return this.commandCenter.snapshot(businessId);
+  snapshot(@Param('businessId') businessId: string, @Req() req?: { user?: { id?: string; role?: string } }) {
+    // D-238 (round 3): the KEY proposals in it are the ones the request's user may see.
+    return this.commandCenter.snapshot(businessId, req?.user?.id ? { id: req.user.id, role: req.user.role } : null);
   }
 }

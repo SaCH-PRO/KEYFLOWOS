@@ -27,7 +27,8 @@
  * real ProjectsService.updateTask over a prisma stand-in whose conditional write loses its race. DS-09: the
  * real ContractClauseService over a prisma stand-in and a stand-in for fetch (no network).
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import dns from 'node:dns';
+import { describe, it, expect, vi, afterEach, onTestFinished } from 'vitest';
 import {
   BadRequestException,
   ConflictException,
@@ -448,6 +449,13 @@ describe('FlowOrchestratorService.executeToolDirectly hands the plan queue a ref
     const NO_SOURCE = 'No source document available for this contract (upload one or link an asset/document)';
     const ASSET_URL = 'https://assets.example.test/w10ds_asset.pdf';
     const NAMED_URL = 'https://files.example.test/contract.pdf';
+    // FU-CONTRACT-FETCH-OUTBOUND-GUARD (D-246): the service resolves a document's host before it fetches
+    // (the outbound-address guard); the two stand-in hosts answer a public address, and no DNS query leaves.
+    const lookup = vi.spyOn(dns.promises, 'lookup').mockImplementation((async (hostname: string) => {
+      if (hostname === 'files.example.test' || hostname === 'assets.example.test') return [{ address: '203.0.113.10', family: 4 }];
+      throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${hostname}`), { code: 'ENOTFOUND' });
+    }) as never);
+    onTestFinished(() => lookup.mockRestore());
     /** The real tool case over the real ContractClauseService; `hostStatus` answers each fetch. */
     const makeRealClauseFlow = (hostStatus: (url: string, call: number, businessId: string) => number, contract: Record<string, unknown> = { sourceAssetId: 'w10ds_asset' }) => {
       let fetches = 0;

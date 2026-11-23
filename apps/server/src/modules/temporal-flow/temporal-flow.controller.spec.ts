@@ -42,21 +42,22 @@ describe('TemporalFlowController', () => {
       from: undefined,
       to: undefined,
       limit: undefined,
-    });
+    }, null);
     expect(result).toEqual([{ id: 'tf_1' }]);
   });
 
   it('GET /calendar returns calendar range', async () => {
     const { controller, temporal } = makeController();
     const result = await controller.calendar('biz_1', '2026-06-01', '2026-06-30');
-    expect(temporal.calendarRange).toHaveBeenCalledWith('biz_1', '2026-06-01', '2026-06-30');
+    // D-238: the request's reader (none in this unit call: null).
+    expect(temporal.calendarRange).toHaveBeenCalledWith('biz_1', '2026-06-01', '2026-06-30', null);
     expect(result).toEqual([{ id: 'tf_2' }]);
   });
 
   it('GET /reminders returns reminders', async () => {
     const { controller, temporal } = makeController();
     const result = await controller.reminders('biz_1');
-    expect(temporal.remindersDue).toHaveBeenCalledWith('biz_1');
+    expect(temporal.remindersDue).toHaveBeenCalledWith('biz_1', null);
     expect(result).toEqual([{ id: 'tf_3' }]);
   });
 

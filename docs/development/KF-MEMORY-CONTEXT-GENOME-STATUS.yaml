@@ -1,6 +1,6 @@
 packet_id: KF-MEMORY-CONTEXT-GENOME-PLAN-001
 title: KEY Memory / Context Genome convergence plan
-state: DEFER_V1_PLUS  # was PLANNING (2026-10-05); see historical_note_2026_11_12
+state: IN_V1_PENDING_DESIGN  # was DEFER_V1_PLUS; owner ruling D-254 (2026-11-22): built inside v1, in parallel, once the Track 2 design (D-253, branch docs/kf-memory-rnd-001) is approved
 health: GREEN
 scope_changed: false
 production_touched: false

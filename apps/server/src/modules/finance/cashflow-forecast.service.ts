@@ -1,5 +1,6 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { CashPositionService, otherCurrencyCash, type OtherCurrencyCash } from './cash-position.service';
 
 export interface CashflowSeriesPoint {
   date: string;
@@ -19,9 +20,16 @@ export interface ForecastEvent {
 
 export interface CashflowForecastDto {
   generatedAt: string;
+  /** W11-CASH-READERS-LEDGER (D-135): the cash position's currency, the normalized business currency. */
   currency: string;
   horizonDays: number;
+  /** W11-CASH-READERS-LEDGER (D-135): the ledger cash in `currency` (CashPositionService.cashBalance). */
   openingCash: number;
+  /**
+   * W11-CASH-READERS-LEDGER (D-135, D-13): cash held in other currencies, each in its own currency,
+   * never converted nor added to openingCash or any projection.
+   */
+  otherCurrencyCash: OtherCurrencyCash[];
   projectedClosingCash: number;
   lowestProjectedCash: number;
   dangerDates: Array<{ date: string; projectedCash: number; reason: string }>;
@@ -37,25 +45,31 @@ export interface CashflowForecastDto {
 
 @Injectable()
 export class CashflowForecastService {
+  private readonly cashPosition: CashPositionService;
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-  ) {}
+    // W11-CASH-READERS-LEDGER: optional as on FinanceOverviewService, so hand-built instances keep
+    // working; it needs only Prisma.
+    @Optional() @Inject(CashPositionService) cashPosition?: CashPositionService | null,
+  ) {
+    this.cashPosition = cashPosition ?? new CashPositionService(prisma);
+  }
 
+  /**
+   * W11-CASH-READERS-LEDGER (owner ruling D-135; CF-41, BUG-022): the forecast opens on the ledger
+   * cash position in the business currency (CashPositionService), never the sum of the accounts'
+   * currentBalance, an opening snapshot nothing posts to that was summed across currencies (a
+   * business with ledger cash and no account opened at 0). Cash held in another currency is
+   * reported apart (otherCurrencyCash), never converted nor projected. The events, probabilities,
+   * scenarios and danger-date rule are unchanged.
+   */
   async forecast(businessId: string, horizonDays = 90): Promise<CashflowForecastDto> {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { currency: true },
-    });
-    const currency = business?.currency ?? 'TTD';
-
     const now = new Date();
     const horizonEnd = new Date(now.getTime() + horizonDays * 24 * 60 * 60 * 1000);
 
-    const [cashAccounts, openInvoices, recurringExpenses, taxLiabilities] = await Promise.all([
-      this.prisma.client.financialAccount.findMany({
-        where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
-        select: { currentBalance: true },
-      }),
+    const [position, openInvoices, recurringExpenses, taxLiabilities] = await Promise.all([
+      this.cashPosition.getCashPosition(businessId),
       this.prisma.client.invoice.findMany({
         where: {
           businessId,
@@ -83,7 +97,8 @@ export class CashflowForecastService {
       }),
     ]);
 
-    const openingCash = cashAccounts.reduce((sum, a) => sum + Number(a.currentBalance ?? 0), 0);
+    const openingCash = position.cashBalance;
+    const currency = position.currency;
 
     // Build events
     const inflowEvents: ForecastEvent[] = openInvoices.map((inv) => ({
@@ -171,6 +186,7 @@ export class CashflowForecastService {
       currency,
       horizonDays,
       openingCash,
+      otherCurrencyCash: otherCurrencyCash(position),
       projectedClosingCash: Math.round(cashExp),
       lowestProjectedCash: Math.round(lowest),
       dangerDates: dangerDates.slice(0, 5),

@@ -6,7 +6,7 @@ import { GenomeExperimentService } from './genome-experiment.service';
 import { GenomeModuleReadinessService } from './genome-module-readiness.service';
 import { GenomeScoringService } from './genome-scoring.service';
 import { GenomeDepartmentService } from './genome-department.service';
-import { isFinanceRecommendation, isFinanceSignal, isMoneyLabel, isMoneyMemoryEvent } from './genome-finance-scope';
+import { isFinanceRecommendation, isFinanceSignal, isMoneyLabel, readableMemoryEvents, financialProposalsWithProvenance, PROPOSAL_CLASSIFY_SELECT, type ProposalFields } from './genome-finance-scope';
 import type {
   GenomeExperimentData,
   GenomeRecommendationData,
@@ -17,6 +17,8 @@ import type {
   KeyGenomeScore,
   ModuleReadinessData,
 } from './key-genome.types';
+
+const clamp01 = (v: number) => Math.min(1, Math.max(0, Number.isFinite(v) ? v : 0));
 
 function titleCase(value: string | undefined | null): string {
   return (value ?? '')
@@ -74,13 +76,14 @@ export class KeyGenomeGovernanceService {
     const readsRevenue = opts.readsRevenue !== false;
     const LIMIT = 25;
     const served = <T>(rows: T[], hidden: (row: T) => boolean) => (readsRevenue ? rows : rows.filter((r) => !hidden(r)).slice(0, LIMIT));
-    const listLimit = readsRevenue ? LIMIT : undefined;
+    // Bounded on the projected path too (correctness review MINOR-7): rows are read up to a cap and projected.
+    const listLimit = readsRevenue ? LIMIT : 1000;
     const [
       allNewSignals,
       allAcceptedSignals,
       allActiveRecommendations,
       allAcceptedRecommendations,
-      experiments,
+      experimentsAll,
       allReadiness,
       allDepartments,
     ] = await Promise.all([
@@ -88,7 +91,7 @@ export class KeyGenomeGovernanceService {
       this.signals.listSignals(businessId, { status: 'ACCEPTED', limit: listLimit }),
       this.recommendations.listRecommendations(businessId, { status: 'ACTIVE', limit: listLimit }),
       this.recommendations.listRecommendations(businessId, { status: 'ACCEPTED', limit: listLimit }),
-      this.experiments.listExperiments(businessId, { limit: 25 }),
+      this.experiments.listExperiments(businessId, { limit: readsRevenue ? 25 : 1000 }),
       this.readiness.getReadiness(businessId) as Promise<ModuleReadinessData[]>,
       this.departments.listDepartments(businessId),
     ]);
@@ -97,6 +100,9 @@ export class KeyGenomeGovernanceService {
     const activeRecommendations = served(allActiveRecommendations, (r) => isFinanceRecommendation(r));
     const acceptedRecommendations = served(allAcceptedRecommendations, (r) => isFinanceRecommendation(r));
     const readinessList = readsRevenue ? allReadiness : allReadiness.filter((r) => !isMoneyLabel(r.module));
+    // Security review MAJOR-2: an experiment made from a money signal or recommendation states it in its hypothesis,
+    // action or success metric (GenomeRecommendationService.buildSignalExperimentInput).
+    const servedExperiments = served(experimentsAll, (e) => isMoneyLabel(e.hypothesis) || isMoneyLabel(e.action) || isMoneyLabel(e.successMetric));
     const departments = readsRevenue ? allDepartments : allDepartments.filter((d) => !isMoneyLabel(d.code) && !isMoneyLabel(d.name));
 
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -105,9 +111,12 @@ export class KeyGenomeGovernanceService {
       if (readsRevenue) return this.prisma.client.genomeMemoryEvent.count({ where: { businessId, ...where } });
       const rows = await this.prisma.client.genomeMemoryEvent.findMany({
         where: { businessId, ...where },
-        select: { sourceType: true, eventType: true, domain: true, section: true },
+        // metadata and title too (review MINOR-2): a KEY proposal's event is classified by its proposal, as GET memory does.
+        select: { sourceType: true, eventType: true, domain: true, section: true, metadata: true, title: true, sourceEntityId: true },
+        take: 5000,
       });
-      return rows.filter((r) => !isMoneyMemoryEvent(r)).length;
+      // D-238 (round 3, security M3): a KEY proposal's event is judged by its proposal row too.
+      return (await readableMemoryEvents(this.prisma, businessId, rows)).length;
     };
     const [memoryEventsLast7Days, failedOutcomesLast30Days] = await Promise.all([
       countEvents({ createdAt: { gte: sevenDaysAgo } }),
@@ -131,14 +140,17 @@ export class KeyGenomeGovernanceService {
       ...acceptedRecommendations.map((r) => this.recommendationToGovernanceItem(r)),
     ];
 
-    const experimentItems = experiments.map((e) => this.experimentToGovernanceItem(e));
+    const experimentItems = servedExperiments.map((e) => this.experimentToGovernanceItem(e));
 
     const readinessItems = readinessList
       .filter((r) => !r.automationAllowed || r.readinessScore < 70)
       .map((r) => this.readinessToGovernanceItem(r));
 
+    // Security review MAJOR-1: an autonomy block is a proposal, classified as one (D-238: its type, module, tool and text).
+    // Round 4 (security minor 2): on every classify field, with the recommendation a block was bridged from.
+    const blockFinancial = readsRevenue ? [] : await financialProposalsWithProvenance(this.prisma, businessId, autonomyBlocks);
     const autonomyItems = autonomyBlocks
-      .filter((b) => readsRevenue || (!isMoneyLabel(b.title) && !isMoneyLabel(b.summary)))
+      .filter((_b, i) => readsRevenue || !blockFinancial[i])
       .map((b) => this.autonomyBlockToGovernanceItem(b));
 
     const weakSectionItems = score.sections
@@ -167,8 +179,8 @@ export class KeyGenomeGovernanceService {
         acceptedSignals: acceptedSignals.length,
         activeRecommendations: activeRecommendations.length,
         acceptedRecommendations: acceptedRecommendations.length,
-        runningExperiments: experiments.filter((e) => e.status === 'RUNNING').length,
-        proposedExperiments: experiments.filter((e) => e.status === 'PROPOSED').length,
+        runningExperiments: servedExperiments.filter((e) => e.status === 'RUNNING').length,
+        proposedExperiments: servedExperiments.filter((e) => e.status === 'PROPOSED').length,
         blockedModules: readinessList.filter((r) => !r.automationAllowed).length,
         lowReadinessModules: readinessList.filter((r) => r.readinessScore < 70).length,
         autonomyBlockedActions: autonomyItems.length,
@@ -205,9 +217,10 @@ export class KeyGenomeGovernanceService {
   }
 
   /**
-   * The money and sales sections withheld, and the composite recomputed over the sections that remain, as
-   * GenomeScoringService.computeBusinessScore computes it (weighted overall; averaged integrity, readiness
-   * and confidence), so the composite cannot be used to infer the withheld scores.
+   * The money and sales sections withheld, and the composite recomputed over the sections that remain: the overall
+   * weighted over the remaining sections' own weights (renormalised, so it is not computeBusinessScore's figure over the
+   * total weight), integrity, readiness and confidence averaged, each clamped to [0, 1], so the composite cannot be
+   * used to infer the withheld scores (correctness review MINOR-6).
    */
   private withoutMoneySections(score: KeyGenomeScore): KeyGenomeScore {
     const sections = score.sections.filter((s) => !isMoneyLabel(s.section));
@@ -217,10 +230,10 @@ export class KeyGenomeGovernanceService {
     return {
       ...score,
       sections,
-      overall: weight > 0 ? sections.reduce((sum, s) => sum + s.score.overall * (s.weight ?? 0), 0) / weight : avg((s) => s.score.overall),
-      integrity: avg((s) => s.score.completeness),
-      readiness: avg((s) => s.score.operationalReadiness),
-      confidence: avg((s) => s.score.confidence),
+      overall: clamp01(weight > 0 ? sections.reduce((sum, s) => sum + s.score.overall * (s.weight ?? 0), 0) / weight : avg((s) => s.score.overall)),
+      integrity: clamp01(avg((s) => s.score.completeness)),
+      readiness: clamp01(avg((s) => s.score.operationalReadiness)),
+      confidence: clamp01(avg((s) => s.score.confidence)),
     };
   }
 
@@ -231,20 +244,15 @@ export class KeyGenomeGovernanceService {
 
   private async loadAutonomyBlocks(
     businessId: string,
-  ): Promise<Array<{ id: string; title: string; summary?: string | null; riskLevel: string; createdAt: Date }>> {
+  ): Promise<Array<ProposalFields & { id: string; title: string; summary?: string | null; riskLevel: string; createdAt: Date }>> {
     const rows = await this.prisma.client.keyActionProposal.findMany({
       where: {
         businessId,
         status: 'PENDING',
         requiresApproval: true,
       },
-      select: {
-        id: true,
-        title: true,
-        summary: true,
-        riskLevel: true,
-        createdAt: true,
-      },
+      // Round 4 (security minor 2): every field the classifier reads (PROPOSAL_CLASSIFY_SELECT), as the REST routes judge it.
+      select: { ...PROPOSAL_CLASSIFY_SELECT, riskLevel: true, createdAt: true },
       orderBy: { createdAt: 'desc' },
       take: 25,
     });
