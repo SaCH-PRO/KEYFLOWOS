@@ -33,14 +33,20 @@ export class KeyActionProposalController {
     return req.user?.id;
   }
 
+  /** D-238: the request's reader ({ id, role } as AuthMiddleware attaches it), or null. */
+  private reader(req?: { user?: { id?: string; role?: string } }) {
+    return req?.user?.id ? { id: req.user.id, role: req.user.role } : null;
+  }
+
   @Get('proposals')
   list(
     @Param('businessId') businessId: string,
     @Query('status') status?: string,
     @Query('sourceType') sourceType?: string,
     @Query('actionType') actionType?: string,
+    @Req() req?: { user?: { id?: string; role?: string } },
   ) {
-    return this.proposals.list(businessId, { status, sourceType, actionType });
+    return this.proposals.listForReader(businessId, { status, sourceType, actionType }, this.reader(req));
   }
 
   @Post('proposals')
@@ -68,12 +74,13 @@ export class KeyActionProposalController {
   get(
     @Param('businessId') businessId: string,
     @Param('proposalId') proposalId: string,
+    @Req() req?: { user?: { id?: string; role?: string } },
   ) {
-    return this.proposals.get(businessId, proposalId);
+    return this.proposals.getForReader(businessId, proposalId, this.reader(req));
   }
 
   @Post('proposals/:proposalId/approve')
-  approve(
+  async approve(
     @Param('businessId') businessId: string,
     @Param('proposalId') proposalId: string,
     @Req() req: { user?: { id?: string } },
@@ -82,11 +89,12 @@ export class KeyActionProposalController {
     if (!userId) {
       throw new UnauthorizedException('Authenticated user required to approve proposals');
     }
-    return this.orchestrator.approve({ businessId, proposalId, userId });
+    // D-238 (round 3): the action keeps its own authority; only its answer is redacted for the reader.
+    return this.proposals.viewForReader(businessId, await this.orchestrator.approve({ businessId, proposalId, userId }), this.reader(req));
   }
 
   @Post('proposals/:proposalId/reject')
-  reject(
+  async reject(
     @Param('businessId') businessId: string,
     @Param('proposalId') proposalId: string,
     @Body() body: RejectKeyActionProposalDto,
@@ -96,28 +104,30 @@ export class KeyActionProposalController {
     if (!userId) {
       throw new UnauthorizedException('Authenticated user required to reject proposals');
     }
-    return this.orchestrator.reject({ businessId, proposalId, userId, reason: body.reason });
+    return this.proposals.viewForReader(businessId, await this.orchestrator.reject({ businessId, proposalId, userId, reason: body.reason }), this.reader(req));
   }
 
   @Post('proposals/:proposalId/cancel')
-  cancel(
+  async cancel(
     @Param('businessId') businessId: string,
     @Param('proposalId') proposalId: string,
+    @Req() req?: { user?: { id?: string; role?: string } },
   ) {
-    return this.proposals.cancel(businessId, proposalId);
+    return this.proposals.viewForReader(businessId, await this.proposals.cancel(businessId, proposalId), this.reader(req));
   }
 
   @Post('proposals/:proposalId/execute')
-  execute(
+  async execute(
     @Param('businessId') businessId: string,
     @Param('proposalId') proposalId: string,
     @Body() _body: ExecuteKeyActionProposalDto,
     @Req() req: { user?: { id?: string } },
   ) {
-    return this.orchestrator.executeApproved({
+    const executed = await this.orchestrator.executeApproved({
       businessId,
       proposalId,
       userId: this.userId(req),
     });
+    return this.proposals.viewForReader(businessId, executed, this.reader(req));
   }
 }

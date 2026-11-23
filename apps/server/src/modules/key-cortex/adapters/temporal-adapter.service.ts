@@ -115,11 +115,14 @@ export class TemporalAdapterService {
     return this.temporal.searchMemory(input.businessId, input.query, input.limit ?? 10);
   }
 
-  async getTimeline(input: { businessId: string; from?: string; to?: string; limit?: number }) {
+  async getTimeline(input: { businessId: string; from?: string; to?: string; limit?: number; actorId?: string }) {
+    // D-238 (round 3, security M4): the timeline is read for the command's actor (no actor is no reader), so a financial
+    // KEY proposal's events are withheld from an actor without revenue read.
+    const reader = input.actorId ? { id: input.actorId } : null;
     if (input.from && input.to) {
-      return this.flow.calendarRange(input.businessId, input.from, input.to);
+      return this.flow.calendarRange(input.businessId, input.from, input.to, reader);
     }
-    return this.flow.list(input.businessId, { limit: input.limit ?? 50 });
+    return this.flow.list(input.businessId, { limit: input.limit ?? 50 }, reader);
   }
 
   async getMemoryStats(input: { businessId: string }) {
@@ -197,6 +200,7 @@ export class TemporalAdapterService {
           from: command.parameters.from as string,
           to: command.parameters.to as string,
           limit: (command.parameters.limit as number) || 50,
+          actorId: command.userId,
         });
         return connectorOk(command, start, timeline);
       }

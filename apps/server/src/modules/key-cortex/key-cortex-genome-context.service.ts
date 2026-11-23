@@ -227,10 +227,12 @@ export class KeyCortexGenomeContextService {
         }
       }
 
+      // Codex P2 on #217: filtered for the reader before the top rows are taken, so finance rows ranked first do not push
+      // out a permitted one (a reader without revenue read is read with headroom).
       const rankedRecs = genomeRecommendationsForReader(
-        (await this.genomeBridgeService.getRankedRecommendations(businessId, 5)).map((r: any) => ({ ...r, category: r.domain })),
+        (await this.genomeBridgeService.getRankedRecommendations(businessId, readsRevenue ? 5 : 50)).map((r: any) => ({ ...r, category: r.domain })),
         readsRevenue,
-      );
+      ).slice(0, 5);
 
       const topRecs = rankedRecs
         .filter((r: any) => r.impact >= 0.7 || r.confidence > 0.7)

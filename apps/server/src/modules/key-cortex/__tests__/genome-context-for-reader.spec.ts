@@ -96,3 +96,19 @@ describe('MAJOR-1 / minor 1: proactive suggestions are chosen from the genome th
     expect(await svc.shouldSuggestProactiveAction('biz_1', true)).toBe(true);
   });
 });
+
+describe('Codex P2 on #217: recommendations are filtered for the reader before the top rows are taken', () => {
+  it('RED-BEFORE: five finance recommendations ranked first do not push out a permitted sixth for a reader without revenue read', async () => {
+    const fin = (i: number) => ({ id: `r_fin_${i}`, title: `Raise prices ${i}`, recommendation: 'fin', impact: 0.9, confidence: 0.9, domain: 'FINANCIAL' });
+    const ops = { id: 'r_ops', title: 'Write the SOPs', recommendation: 'ops', impact: 0.9, confidence: 0.9, domain: 'OPERATIONS' };
+    const ranked = [fin(1), fin(2), fin(3), fin(4), fin(5), ops];
+    const redis = { getJson: async () => null, setJson: async () => undefined } as any;
+    const bridge = {
+      getGenomeIntelligence: async () => ({ signals: [], recommendations: [], opportunities: [] }),
+      getRankedRecommendations: async (_b: string, limit?: number) => ranked.slice(0, limit ?? ranked.length),
+    } as any;
+    const svc = new KeyCortexGenomeContextService(redis, bridge);
+    expect((await svc.getProactiveSuggestions('biz_1', false, false)).map((s) => s.id)).toEqual(['r_ops']);
+    expect((await svc.getProactiveSuggestions('biz_1', false, true)).map((s) => s.id)).toEqual(['r_fin_1', 'r_fin_2', 'r_fin_3']);
+  });
+});
