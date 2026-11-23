@@ -20,7 +20,7 @@ import {
 } from './graph-actions.controller';
 import { AiMemoryService, MemoryCategory, summaryPatternKey } from './ai-memory.service';
 import { aiMemoryRowVisibleTo, type SemanticReader } from './semantic-memory-sight';
-import { dashboardFor, insightNeeds, readerHolds, textSightNeeds } from './insight-sight';
+import { dashboardFor, fieldsSightNeeds, insightNeeds, readerHolds } from './insight-sight';
 import { isFinancialProposal } from '../business-genome/key-genome/genome-finance-scope';
 import { readersModuleSight, readsDocumentExtractions } from '../key-cortex/key-cortex-prompt-context.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
@@ -1295,9 +1295,9 @@ export class AiController {
         inputPayload: a.inputPayload, payload: a.inputPayload, affectedEntities: a.affectedEntities,
       };
       if (!readerHolds(who, ['revenue']) && isFinancialProposal(proposal)) return false;
-      return readerHolds(who, textSightNeeds(JSON.stringify([
+      return readerHolds(who, fieldsSightNeeds([
         a.title, a.description, a.rationale, a.expectedBenefit, a.risks, a.inputPayload, a.affectedEntities, a.toolName, a.module,
-      ])));
+      ]));
     };
     const shownApprovals = readsEverything
       ? pendingItems

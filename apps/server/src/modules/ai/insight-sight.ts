@@ -37,6 +37,25 @@ export function textSightNeeds(text: string): InsightSight[] {
   ];
 }
 
+/**
+ * Security review round 3 (ISS-R3-1): the sights a list of fields needs, each field read as written: a string as it is,
+ * a structured value as JSON with its strings' control characters blanked first. Reading JSON.stringify of the whole list
+ * turned a line break, tab or carriage return into an escape letter glued to the next word ('\\nrent', '\\tpayroll'),
+ * and the word-bounded expense rule missed it.
+ */
+export function fieldsSightNeeds(fields: readonly unknown[]): InsightSight[] {
+  const needs = new Set<InsightSight>();
+  for (const field of fields) {
+    if (field === null || field === undefined) continue;
+    const text =
+      typeof field === 'string'
+        ? field
+        : JSON.stringify(field, (_key, value) => (typeof value === 'string' ? value.replace(/\p{Cc}/gu, ' ') : value)) ?? '';
+    for (const sight of textSightNeeds(text)) needs.add(sight);
+  }
+  return (['revenue', 'expenses'] as const).filter((sight) => needs.has(sight));
+}
+
 /** An insight's needs: its category's (both when the category is unknown) and its text's. */
 export function insightNeeds(insight: {
   category: string;
@@ -47,9 +66,7 @@ export function insightNeeds(insight: {
   suggestedTool?: string;
 }): InsightSight[] {
   const byCategory = CATEGORY_NEEDS[insight.category] ?? (['revenue', 'expenses'] as const);
-  const byText = textSightNeeds(
-    JSON.stringify([insight.title, insight.description, insight.metric, insight.suggestedAction, insight.suggestedTool]),
-  );
+  const byText = fieldsSightNeeds([insight.title, insight.description, insight.metric, insight.suggestedAction, insight.suggestedTool]);
   return (['revenue', 'expenses'] as const).filter((sight) => byCategory.includes(sight) || byText.includes(sight));
 }
 
