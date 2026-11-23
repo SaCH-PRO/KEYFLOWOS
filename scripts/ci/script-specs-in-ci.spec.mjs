@@ -27,13 +27,20 @@
  * What does not count as running a spec (each is a recorded CI trap, see the
  * comments at ci-cd.yml "Verify launch health contract" and "Security scanner
  * contracts"):
- *   - a bare directory (`node --test scripts/x/`): runs zero specs on Node 20
- *     and only the directory's own files on 22;
+ *   - a bare directory (`node --test scripts/x/`): runs zero specs and passes
+ *     on Node 20, and fails to start on Node 22 (ci-cd.yml, security step);
  *   - a `<dir>/*.spec.mjs` glob for a file in a subdirectory of <dir>: the
  *     shell expands one level (this is how compile-context.spec.mjs under
  *     research/tests/ escaped `scripts/agent-control/tests/*.spec.mjs`);
  *   - a `**` glob: bash without globstar reads `**` as `*`;
- *   - a `node --test` line inside a YAML or shell comment;
+ *   - a `node --test` line inside a YAML or shell comment, or text that only
+ *     mentions one (`echo "node --test ..."`, a here-doc body whose line does
+ *     not start with `node`): the command word of the simple command must be
+ *     `node`. Residual limit of a line-based reader: a here-doc line that does
+ *     start with `node --test`, or a run behind `if false; then`, is credited;
+ *   - a Node flag with its value in a separate token before `--test`
+ *     (`node --import ./setup.mjs --test f`): names nothing, so CI fails
+ *     loudly; write `--import=./setup.mjs`;
  *   - an indirection through a package.json script: the workflow line itself
  *     must name the file, so a reader can see what CI runs.
  *
@@ -110,10 +117,12 @@ export function runCommands(source) {
     }
     const keyIndent = m[1].length;
     const block = [];
-    for (let j = i + 1; j < lines.length && (lines[j].trim() === '' || indentOf(lines[j]) > keyIndent); j += 1) {
+    let j = i + 1;
+    for (; j < lines.length && (lines[j].trim() === '' || indentOf(lines[j]) > keyIndent); j += 1) {
       block.push(lines[j]);
     }
     out.push({ line: i + 1, text: block.join('\n') });
+    i = j - 1; // the block's lines are shell text, read once: a `run:` inside a here-doc is not a second step
   }
   return out;
 }
@@ -121,22 +130,40 @@ export function runCommands(source) {
 const unquote = (t) => t.replace(/^(['"])(.*)\1$/, '$2');
 const normalise = (t) => unquote(t).replace(/^\.\//, '').replace(/\\/g, '/');
 
+/** Leading tokens read past before the command word: `pnpm exec node`, `timeout <n> node`, `time node`. */
+const WRAPPERS = [
+  [/^pnpm$/, /^exec$/],
+  [/^timeout$/, /^\S+$/],
+  [/^time$/],
+  [/^nice$/],
+];
+const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
 /**
  * The patterns each `node --test` invocation in `shell` names: tokens after
- * `--test` that are not flags, up to the end of the simple command. Line
- * continuations are joined first. Every token is returned, bare directories
+ * `--test` that are not flags, up to the end of the simple command or an
+ * inline `#` comment. Line continuations are joined first. `node` must be the
+ * command word of its simple command (after env assignments and the wrappers
+ * above), so `echo "node --test x"` and a here-doc line are not runs. Node
+ * flags before `--test` are read past only in `--flag=value` form: a value
+ * in its own token (`--import ./setup.mjs`) makes the line name nothing,
+ * which fails closed. Every pattern token is returned, bare directories
  * included, so the caller decides what counts.
  */
 export function nodeTestPatterns(shell) {
   const joined = shell.replace(/\\\r?\n\s*/g, ' ');
   const patterns = [];
   for (const segment of joined.split(/\r?\n|;|&&|\|\||\|/)) {
-    const tokens = segment.trim().split(/\s+/).filter(Boolean);
-    const at = tokens.findIndex((t, k) => t === 'node' && tokens.slice(k + 1).includes('--test'));
-    if (at < 0) continue;
-    const test = tokens.indexOf('--test', at + 1);
-    // Node flags before --test (--import, --experimental-*) are read past; only --test's own arguments follow.
-    if (tokens.slice(at + 1, test).some((t) => !t.startsWith('-'))) continue;
+    let tokens = segment.trim().split(/\s+/).filter(Boolean);
+    const comment = tokens.findIndex((t) => t.startsWith('#'));
+    if (comment >= 0) tokens = tokens.slice(0, comment);
+    while (tokens.length && ENV_ASSIGNMENT.test(tokens[0])) tokens.shift();
+    for (const wrapper of WRAPPERS) {
+      if (wrapper.every((re, k) => re.test(tokens[k] ?? ''))) tokens = tokens.slice(wrapper.length);
+    }
+    if (tokens[0] !== 'node') continue;
+    const test = tokens.indexOf('--test');
+    if (test < 0 || tokens.slice(1, test).some((t) => !t.startsWith('-'))) continue;
     for (const t of tokens.slice(test + 1)) if (!t.startsWith('-')) patterns.push(normalise(t));
   }
   return patterns;
