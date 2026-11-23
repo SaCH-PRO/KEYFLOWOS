@@ -9,7 +9,7 @@
  * value form), and the read's own where clause.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { readersOwnPromptMemory } from './key-cortex-prompt-context.service';
+import { readersModuleSight, readersOwnPromptMemory } from './key-cortex-prompt-context.service';
 import { UnifiedMemoryRetrievalService } from './unified-memory-retrieval.service';
 
 const MEMBERSHIPS: Record<string, { role: string; permissionScopes: unknown }> = {
@@ -129,10 +129,10 @@ describe('MEM-DOC-EXTRACTION-SIGHT: the memory read takes document extractions o
     return (search.mock.calls[0] as any)[0];
   };
 
-  it('the semantic search is told to leave out the copies of document extractions by default and when false, and not when true', async () => {
-    expect((await searchParams()).withoutDocumentExtractionCopies).toBe(true);
-    expect((await searchParams(false)).withoutDocumentExtractionCopies).toBe(true);
-    expect((await searchParams(true)).withoutDocumentExtractionCopies).toBe(false);
+  it('the semantic search includes the copies of document extractions only when the read asks for extractions (COR-MDX-1: exclusion is the search default)', async () => {
+    expect((await searchParams()).includeDocumentExtractionCopies).not.toBe(true);
+    expect((await searchParams(false)).includeDocumentExtractionCopies).not.toBe(true);
+    expect((await searchParams(true)).includeDocumentExtractionCopies).toBe(true);
   });
 });
 
@@ -148,5 +148,15 @@ describe("MEM-DOC-EXTRACTION-SIGHT: the owners' digest keeps the extractions (re
     );
     await service.generateDailyDigest('biz_1');
     expect(retrieveContext).toHaveBeenCalledWith('biz_1', expect.objectContaining({ documentExtractions: true }));
+  });
+});
+
+describe('MEM-DOC-EXTRACTION-SIGHT (COR-MDX-2): no database client is no sight, and says so', () => {
+  it('readersModuleSight with no client answers no module and warns loudly for a reader', async () => {
+    const logger = { warn: vi.fn() };
+    const sight = await readersModuleSight(undefined, 'biz_1', 'owner', logger);
+    expect(sight('revenue')).toBe(false);
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(String(logger.warn.mock.calls[0][0])).toMatch(/no database client/i);
   });
 });

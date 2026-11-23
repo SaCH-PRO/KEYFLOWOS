@@ -88,7 +88,6 @@ let flow: { prompts: string[]; warnings: string[] };
 let profilePrompts: string[];
 let promptContextFor: (userId: string | undefined) => Promise<string>;
 let pipelinePromptFor: (userId: string | undefined) => Promise<string>;
-let profileReset: () => void;
 let semantic: any;
 
 async function cleanup() {
@@ -138,19 +137,61 @@ async function extractInvoices(count = 1): Promise<string[]> {
   return ids;
 }
 
-/** One turn of `userId` over POST .../flow/chat: the system prompt the model was handed, and the response body. */
+/**
+ * One turn of `userId` over POST .../flow/chat or .../flow/chat/stream: the system prompt the model was handed, and the
+ * response (the chat's body; the stream's events). The turn is in the history too, as the app sends it: the chat path's
+ * semantic memory section searches on the history's last user message, the stream's on the message.
+ */
 let ip = 0;
-async function turn(userId: string): Promise<{ prompt: string; body: unknown }> {
+async function turn(userId: string, path: 'chat' | 'stream' = 'chat'): Promise<{ prompt: string; body: unknown }> {
   flow.prompts.length = 0;
   ip += 1;
-  const res = await request(http.getHttpServer())
-    .post(`/ai/businesses/${ID.biz}/flow/chat`)
+  const req = request(http.getHttpServer())
+    .post(`/ai/businesses/${ID.biz}/flow/chat${path === 'stream' ? '/stream' : ''}`)
     .set(HEADER, userId)
     .set('x-forwarded-for', `10.74.4.${ip % 250}`)
-    .send({ message: TURN });
-  expect(res.status, JSON.stringify(res.body).slice(0, 400)).toBe(201);
-  expect(flow.prompts, `one model call for ${userId}`).toHaveLength(1);
-  return { prompt: flow.prompts[0], body: res.body };
+    .send({ message: TURN, history: [{ role: 'user', content: TURN }] });
+  let body: unknown;
+  if (path === 'chat') {
+    const res = await req;
+    expect(res.status, JSON.stringify(res.body).slice(0, 400)).toBe(201);
+    body = res.body;
+  } else {
+    const res = await req.buffer(true).parse((r: any, cb: any) => {
+      let text = '';
+      r.setEncoding('utf8');
+      r.on('data', (c: string) => {
+        text += c;
+      });
+      r.on('end', () => cb(null, text));
+    });
+    const events = String(res.body)
+      .split('\n')
+      .filter((l) => l.startsWith('data: ') && l !== 'data: [DONE]')
+      .map((l) => JSON.parse(l.slice('data: '.length)));
+    expect(events.filter((e: any) => e.type === 'error'), String(res.body).slice(0, 400)).toEqual([]);
+    // A new chat session's id is random on every turn: compared as present, not by value.
+    body = events.map((e: any) => (typeof e.sessionId === 'string' ? { ...e, sessionId: '<new session>' } : e));
+  }
+  expect(flow.prompts, `one model call for ${userId} (${path})`).toHaveLength(1);
+  return { prompt: flow.prompts[0], body };
+}
+
+/** GET .../agent/memory/search for `userId`: every hit the semantic store answers (limit 500). */
+async function memorySearchFor(userId: string): Promise<unknown> {
+  const res = await request(http.getHttpServer())
+    .get(`/ai/businesses/${ID.biz}/agent/memory/search`)
+    .query({ q: 'what happened lately', limit: '500' })
+    .set(HEADER, userId);
+  expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(200);
+  // Ties at similarity 1 come back in no set order: compared as a sorted set of contents.
+  return ((res.body?.results ?? []) as Array<{ content: string }>).map((r) => r.content).sort();
+}
+
+/** POST .../ai/profile/reset as `userId`. */
+async function profileResetFor(userId: string) {
+  const res = await agent().post(aiRoute('profile/reset')).set(HEADER, userId).send({});
+  expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
 }
 
 const agent = () => request(http.getHttpServer());
@@ -162,30 +203,38 @@ async function getJson(userId: string, route: string): Promise<unknown> {
   return res.body;
 }
 
-/** The profile interview's prompt for `userId` (POST .../ai/profile/chat; a fresh interview each time). */
-async function profilePromptFor(userId: string): Promise<string> {
-  profileReset();
+/**
+ * One profile interview turn of `userId` (POST .../ai/profile/chat): every message the model was handed (the system
+ * prompt and the interview's history), and the response. `fresh` resets the caller's interview first.
+ */
+async function profileTurn(userId: string, message: string, fresh = true): Promise<{ prompt: string; body: unknown }> {
+  if (fresh) await profileResetFor(userId);
   profilePrompts.length = 0;
   ip += 1;
   const res = await agent()
     .post(aiRoute('profile/chat'))
     .set(HEADER, userId)
     .set('x-forwarded-for', `10.74.5.${ip % 250}`)
-    .send({ message: 'v71s: we sell lunches' });
+    .send({ message });
   expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
   expect(profilePrompts, `one model call for ${userId}`).toHaveLength(1);
-  return profilePrompts[0];
+  return { prompt: profilePrompts[0], body: res.body };
 }
+const profilePromptFor = async (userId: string) => (await profileTurn(userId, 'v71s: we sell lunches')).prompt;
 
 /** Everything a reader is handed on every surface this packet covers. */
 async function everythingFor(reader: Reader) {
   const id = ID[reader];
   const flowTurn = await turn(id);
+  const streamTurn = await turn(id, 'stream');
   return {
     // The flow prompt states the hour (currentDateForPrompt): a run that crosses one must not read as a difference.
     flowPrompt: flowTurn.prompt.replace(/\d{4}-\d{2}-\d{2}T\d{2}:00Z/g, '<hour>'),
     // A new chat session's id is random on every turn: compared as present, not by value.
     flowBody: { ...(flowTurn.body as Record<string, unknown>), sessionId: typeof (flowTurn.body as any)?.sessionId === 'string' ? '<new session>' : undefined },
+    flowStreamPrompt: streamTurn.prompt.replace(/\d{4}-\d{2}-\d{2}T\d{2}:00Z/g, '<hour>'),
+    flowStreamEvents: streamTurn.body,
+    memorySearch: await memorySearchFor(id),
     buildMemoryContext: await promptContextFor(id),
     pipeline: await pipelinePromptFor(id),
     memory: await getJson(id, 'memory'),
@@ -218,6 +267,8 @@ beforeAll(async () => {
   const { TenantInterceptor } = await import('../src/core/tenant/tenant.interceptor');
   const { AiFlowController } = await import('../src/modules/ai/flow.controller');
   const { AiController } = await import('../src/modules/ai/ai.controller');
+  const { AgentController } = await import('../src/modules/ai/agent.controller');
+  const { BusinessGraphService } = await import('../src/modules/ai/business-graph.service');
   const { AiMemoryService } = await import('../src/modules/ai/ai-memory.service');
   const { ProfileIntelligenceService } = await import('../src/modules/ai/profile-intelligence.service');
   const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
@@ -267,6 +318,10 @@ beforeAll(async () => {
       prompts.push(systemOf(req));
       return { content: 'v71s: noted.', toolCalls: [], usage };
     },
+    async *trackAndStream(_businessId: string, _userId: unknown, _task: string, req: GatewayRequest) {
+      prompts.push(systemOf(req));
+      yield { type: 'content_delta', content: 'v71s: noted.' };
+    },
   };
   const recorder = { emit() { return true; }, async recordEvent() { return undefined; }, async create() { return undefined; } };
   const roleEngine = new RoleEngineService(prisma, {} as any, recorder as any);
@@ -296,7 +351,8 @@ beforeAll(async () => {
       buildContextString: () => '',
     },
     memory: { buildContextBlock: async () => ({}), buildPromptSection: () => '' },
-    semanticMemory: { search: async () => [] },
+    // The flow chat's "RELEVANT CONTEXT FROM MEMORY" section reads the real semantic store.
+    semanticMemory: semantic,
     genomeFacts: { listTopFacts: async () => [] },
     buildAttachmentContext: async () => '',
     buildBlueprintSection: async () => '',
@@ -308,23 +364,17 @@ beforeAll(async () => {
   });
   flow = { prompts, warnings };
 
-  // The profile interview: the real ProfileIntelligenceService over the real memory service; the business graph has no
-  // snapshot (its figures are another packet's), and the model records its prompt.
+  // The profile interview: the real ProfileIntelligenceService over the real memory service and the real
+  // BusinessGraphService (its snapshot of this business, projected for the viewer it is handed); the model records
+  // every message it is handed (the system prompt and the interview's history).
   profilePrompts = [];
   const profileUsage = {
     async trackAndComplete(_businessId: string, _userId: unknown, _task: string, req: GatewayRequest) {
-      profilePrompts.push(systemOf(req));
+      profilePrompts.push(req.messages.map((x) => `[${x.role}] ${String(x.content ?? '')}`).join('\n'));
       return { content: 'v71s: tell me more.', toolCalls: [], usage };
     },
   };
-  const profile = new ProfileIntelligenceService(
-    prisma,
-    memory,
-    { getSnapshot: async () => { throw new Error('v71s: no snapshot'); } } as any,
-    {} as any,
-    profileUsage as any,
-  );
-  profileReset = () => profile.resetSession(ID.biz);
+  const profile = new ProfileIntelligenceService(prisma, memory, new BusinessGraphService(prisma), {} as any, profileUsage as any);
 
   const OFF_ROUTE = new Set([
     // AiController's collaborators no case calls.
@@ -336,9 +386,12 @@ beforeAll(async () => {
     'CapacityInsightService', 'TaskRebalancerService', 'KeyAgentConfigService', 'UndoService',
     'ProactiveSuggestionService', 'WorkflowTemplateService', 'KeyActionProposalService',
     'KeyCortexApprovalOrchestratorService',
+    // AgentController's.
+    'AgentStateMachineService', 'AgentBusService', 'PatternDetectorService', 'CalendarIntelligenceService',
+    'DocumentIntelligenceService',
   ]);
   const testing = await Test.createTestingModule({
-    controllers: [AiFlowController, AiController],
+    controllers: [AiFlowController, AiController, AgentController],
     providers: [
       { provide: PrismaService, useValue: prisma },
       AuthGuard,
@@ -350,6 +403,7 @@ beforeAll(async () => {
       { provide: FlowOrchestratorService, useValue: orchestrator },
       { provide: AiMemoryService, useValue: memory },
       { provide: ProfileIntelligenceService, useValue: profile },
+      { provide: SemanticMemoryService, useValue: semantic },
     ],
   })
     .useMocker((token: any) => (OFF_ROUTE.has(typeof token === 'function' ? token.name : String(token)) ? {} : undefined))
@@ -491,14 +545,17 @@ describe('MEM-DOC-EXTRACTION-SIGHT (D-234 fail closed, D-257): a document extrac
     }
   });
 
-  it("an extracted invoice's total and number reach the KEY prompts (flow chat, buildMemoryContext, the pipeline), GET .../ai/memory (whole and by category), GET .../ai/profile/status and the profile interview's prompt of the owner and the revenue reader, and none of them for the blind STAFF member or a SUPER_ADMIN who is no member", async () => {
+  it("an extracted invoice's total and number (and its semantic copy) reach the KEY prompts (flow chat and its stream, buildMemoryContext, the pipeline), GET .../agent/memory/search, GET .../ai/memory (whole and by category), GET .../ai/profile/status and the profile interview's prompt of the owner and the revenue reader, and none of them for the blind STAFF member or a SUPER_ADMIN who is no member", async () => {
     await clearExtractions();
     try {
       await extractInvoices(1);
+      // Every row copied into the semantic store (POST .../agent/memory/backfill): the fact's copy and the extraction's.
+      await semantic.backfillFromAiMemory(ID.biz);
       for (const reader of READERS) {
         const seen = await everythingFor(reader);
         for (const [surface, value] of Object.entries(seen)) {
-          if (surface === 'flowBody') continue;
+          // The responses carry the model's fixed answer only (compared whole in the differentials).
+          if (surface === 'flowBody' || surface === 'flowStreamEvents') continue;
           const text = typeof value === 'string' ? value : JSON.stringify(value);
           const label = `${reader} ${surface}: ${text.slice(0, 300)}`;
           if (surface === 'memoryContext') {
@@ -509,7 +566,7 @@ describe('MEM-DOC-EXTRACTION-SIGHT (D-234 fail closed, D-257): a document extrac
           if (READS_REVENUE[reader]) {
             expect(text, label).toContain(DOC_KEY);
             // The routes and the profile interview hand over the whole row, figures included.
-            if (!['flowPrompt', 'buildMemoryContext', 'pipeline'].includes(surface)) expect(text, label).toContain(INVOICE_TOTAL);
+            if (!['flowPrompt', 'flowStreamPrompt', 'buildMemoryContext', 'pipeline'].includes(surface)) expect(text, label).toContain(INVOICE_TOTAL);
           }
           else for (const marker of EXTRACTION_MARKERS) expect(text, `${label}: ${marker}`).not.toContain(marker);
           // Control: the business-wide fact still renders for every reader wherever memory rows render.
@@ -543,31 +600,102 @@ describe('MEM-DOC-EXTRACTION-SIGHT (D-234 fail closed, D-257): a document extrac
     }
   }, 240_000);
 
-  it("differential, semantic copies (review finding): once every row is copied into the semantic store (POST .../agent/memory/backfill), the blind STAFF member's and the memberless SUPER_ADMIN's pipeline prompt is identical whether or not 200 extractions and their copies exist: the copies take no place in the semantic read's limit, and the fact's copy still renders", async () => {
+  it("differential, semantic copies (review findings, COR-MDX-1): once every row is copied into the semantic store (POST .../agent/memory/backfill), every prompt and response of the blind STAFF member and the memberless SUPER_ADMIN (the flow chat's semantic memory section, chat and stream, GET .../agent/memory/search, the pipeline, ...) is identical whether or not 200 extractions and their copies exist; the fact's copy still renders", async () => {
     await clearExtractions();
     await semantic.backfillFromAiMemory(ID.biz);
-    const before: Record<string, string> = {};
-    for (const reader of BLIND_READERS) before[reader] = await pipelinePromptFor(ID[reader]);
+    const before: Record<string, Record<string, unknown>> = {};
+    for (const reader of BLIND_READERS) before[reader] = await everythingFor(reader);
     try {
-      expect(before.blind, 'the fact\'s copy renders').toContain('[ai_memory_embedding]');
+      expect(before.blind.pipeline, 'the fact\'s copy renders').toContain('[ai_memory_embedding]');
+      expect(before.blind.flowPrompt, 'the semantic section renders the fact\'s copy').toContain('RELEVANT CONTEXT FROM MEMORY');
+      expect(before.blind.memorySearch, 'the search answers the fact\'s copy').toEqual([expect.stringContaining(FACT)]);
       await extractInvoices(200);
       // The backfill copies every row again, the fact too: its copy is dropped first, so the fact keeps exactly one.
       await db.aiMemoryEmbedding.deleteMany({ where: { businessId: ID.biz } });
       await semantic.backfillFromAiMemory(ID.biz);
       expect(await db.aiMemoryEmbedding.count({ where: { businessId: ID.biz, content: { startsWith: 'document_extraction: ' } } })).toBe(200);
       expect(await db.aiMemoryEmbedding.count({ where: { businessId: ID.biz } })).toBe(201);
-      for (const reader of BLIND_READERS) expect(await pipelinePromptFor(ID[reader]), reader).toEqual(before[reader]);
-      // Controls: the copies are served by the semantic store to a read that asks for them (so the blind read's
-      // equality is not for want of copies), it serves none to one that does not, and the owner still gets extractions.
-      const served = async (without: boolean) =>
-        (await semantic.search({ businessId: ID.biz, query: 'what happened lately', limit: 500, minSimilarity: 0.65, withoutDocumentExtractionCopies: without }))
+      for (const reader of BLIND_READERS) {
+        const after = await everythingFor(reader);
+        expect(Object.keys(after).sort(), reader).toEqual(Object.keys(before[reader]).sort());
+        for (const [surface, value] of Object.entries(after)) expect(value, `${reader} ${surface}`).toEqual(before[reader][surface]);
+      }
+      // Controls: the semantic store serves the copies to a search that includes them (so the blind reads' equality
+      // is not for want of copies) and none by default; the owner's search answers them, and the owner's prompts
+      // still carry the extractions.
+      const served = async (include?: boolean) =>
+        (await semantic.search({ businessId: ID.biz, query: 'what happened lately', limit: 500, minSimilarity: 0.65, ...(include === undefined ? {} : { includeDocumentExtractionCopies: include }) }))
           .filter((hit: any) => hit.content.startsWith('document_extraction: ')).length;
-      expect(await served(false)).toBe(200);
-      expect(await served(true)).toBe(0);
+      expect(await served(true)).toBe(200);
+      expect(await served(false)).toBe(0);
+      expect(await served()).toBe(0);
+      expect(((await memorySearchFor(ID.owner)) as string[]).filter((c) => c.startsWith('document_extraction: '))).toHaveLength(200);
       expect(await pipelinePromptFor(ID.owner)).toContain(DOC_KEY);
       expect(outbound, 'no outbound request').toEqual([]);
     } finally {
       await clearExtractions();
     }
-  }, 300_000);
+  }, 600_000);
+});
+
+describe('MEM-DOC-EXTRACTION-SIGHT orchestrator review: the profile interview and the real wiring', () => {
+  it("the profile interview is each member's own (D-130): a STAFF member's interview never carries the owner's messages or KEY's replies to them, in its prompt or its response", async () => {
+    const OWNER_TURN = 'V71S-OWNER-TURN: our margin is 41 percent';
+    await profileResetFor(ID.blind);
+    const owner = await profileTurn(ID.owner, OWNER_TURN);
+    expect(owner.prompt).toContain(OWNER_TURN);
+    // The blind member's next turn, without resetting: their own interview, not the owner's.
+    for (const reader of ['blind', 'revenue', 'admin'] as const) {
+      const theirs = await profileTurn(ID[reader], 'v71s: we deliver on weekends', false);
+      expect(theirs.prompt, reader).not.toContain(OWNER_TURN);
+      expect(JSON.stringify(theirs.body), reader).not.toContain(OWNER_TURN);
+    }
+    // The owner's own interview still carries their earlier turn.
+    const ownerAgain = await profileTurn(ID.owner, 'v71s: and we cater', false);
+    expect(ownerAgain.prompt).toContain(OWNER_TURN);
+    expect(outbound, 'no outbound request').toEqual([]);
+  }, 120_000);
+
+  it("the profile interview's prompt states the business's monthly revenue only to a reader with revenue read (D-100): the owner and the revenue reader, never the blind STAFF member nor a SUPER_ADMIN who is no member", async () => {
+    for (const reader of READERS) {
+      const prompt = await profilePromptFor(ID[reader]);
+      expect(prompt, reader).toContain('Business name: V71S Biz');
+      if (READS_REVENUE[reader]) expect(prompt, reader).toContain('Monthly revenue:');
+      else expect(prompt, reader).not.toContain('Monthly revenue');
+    }
+    expect(outbound, 'no outbound request').toEqual([]);
+  }, 120_000);
+
+  it('real wiring (COR-MDX-2): KeyCortexPromptContextService as Nest builds it from its providers gets the PrismaService, so the owner and the revenue reader still see the extractions and the blind member does not', async () => {
+    const { Test } = await import('@nestjs/testing');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { KeyCortexPromptContextService } = await import('../src/modules/key-cortex/key-cortex-prompt-context.service');
+    const { KeyCortexContextService } = await import('../src/modules/key-cortex/key-cortex-context.service');
+    const { KeyCortexLearningService } = await import('../src/modules/key-cortex/key-cortex-learning.service');
+    const { UnifiedMemoryRetrievalService } = await import('../src/modules/key-cortex/unified-memory-retrieval.service');
+    const mod = await Test.createTestingModule({
+      providers: [
+        KeyCortexPromptContextService,
+        { provide: KeyCortexContextService, useValue: {} },
+        { provide: UnifiedMemoryRetrievalService, useValue: new UnifiedMemoryRetrievalService(prisma, semantic) },
+        { provide: KeyCortexLearningService, useValue: new KeyCortexLearningService(prisma) },
+        { provide: PrismaService, useValue: prisma },
+      ],
+    }).compile();
+    const service = mod.get(KeyCortexPromptContextService);
+    await clearExtractions();
+    try {
+      await extractInvoices(1);
+      for (const reader of READERS) {
+        const session = { id: `${P}sess_wired`, businessId: ID.biz, userId: ID[reader], messages: [] } as any;
+        const block = (await service.buildMemoryContext(ID.biz, session, ID[reader])).aiMemory ?? '';
+        expect(block, reader).toContain(FACT);
+        if (READS_REVENUE[reader]) expect(block, reader).toContain(DOC_KEY);
+        else expect(block, reader).not.toContain(DOC_KEY);
+      }
+    } finally {
+      await clearExtractions();
+      await mod.close();
+    }
+  }, 120_000);
 });

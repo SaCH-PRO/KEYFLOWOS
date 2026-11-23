@@ -80,3 +80,42 @@ describe('MEM-DOC-EXTRACTION-SIGHT: the perception read asks for document extrac
     expect(await flagFor(undefined, positionTurn({ readerUserId: 'removed', modules: ['revenue'] }))).toBe(false);
   });
 });
+
+/** The include flag the flow chat's semantic memory section searches with, for one turn (COR-MDX-1). */
+async function semanticIncludeFor(userId: string | undefined, server?: ReturnType<typeof positionTurn>): Promise<unknown> {
+  const search = vi.fn(async () => []);
+  const impl = (FlowOrchestratorService.prototype as any).buildSemanticMemorySection;
+  const instance = {
+    logger: { warn: vi.fn() },
+    prisma,
+    semanticMemory: { search },
+    getJobRolePolicy: () => ({
+      isIssued: (envelope: unknown) => ISSUED.has(envelope),
+      perceptionOf: (envelope: unknown) => ISSUED.get(envelope) ?? null,
+    }),
+  };
+  // The turn's reader and sight, as the perception block resolves them.
+  Object.setPrototypeOf(instance, FlowOrchestratorService.prototype);
+  await impl.call(instance, 'biz_1', 'how are we doing', userId, server);
+  expect(search).toHaveBeenCalledTimes(1);
+  return (search.mock.calls[0] as any)[0].includeDocumentExtractionCopies;
+}
+
+describe('MEM-DOC-EXTRACTION-SIGHT (COR-MDX-1): the flow chat semantic section includes copies of extractions only with revenue sight', () => {
+  it.each([
+    ['the owner', 'owner', true],
+    ['a STAFF member on role defaults', 'staff', true],
+    ['a STAFF member whose revenue scope is none', 'blind', false],
+    ['a caller who is no member', 'stranger', false],
+  ] as const)('%s', async (_label, userId, expected) => {
+    expect((await semanticIncludeFor(userId)) === true).toBe(expected);
+  });
+
+  it('a staff position with revenue: included; without, a contact-only position, a removed reader, and the support desk (no member, no position): never', async () => {
+    expect(await semanticIncludeFor(undefined, positionTurn({ readerUserId: 'staff', modules: ['revenue'] }))).toBe(true);
+    expect((await semanticIncludeFor(undefined, positionTurn({ readerUserId: 'staff', modules: ['crm'] }))) === true).toBe(false);
+    expect((await semanticIncludeFor(undefined, positionTurn({ readerUserId: null, modules: ['revenue'] }))) === true).toBe(false);
+    expect((await semanticIncludeFor(undefined, positionTurn({ readerUserId: 'removed', modules: ['revenue'] }))) === true).toBe(false);
+    expect((await semanticIncludeFor(undefined, undefined)) === true).toBe(false);
+  });
+});
