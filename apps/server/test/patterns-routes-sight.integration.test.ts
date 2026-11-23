@@ -598,4 +598,28 @@ describe('FU-PATTERNS-ROUTES-SIGHT (D-257, D-100, D-234, D-146): the memory and 
     const defs = rows.map((r) => r.indexdef.replace(/\s+/g, ' '));
     expect(defs.some((d) => /\(business_id, category, updated_at DESC, id DESC\)/.test(d)), defs.join('\n')).toBe(true);
   });
+
+  it('V71Y-15 RED (security review round 4, F-1): the memory writers bound what a row holds, not only how many: PUT .../ai/memory and each entry of PUT .../ai/memory/bulk refuse a key over 200 or a value over 2,000 characters (400, nothing written); at the bounds they write', async () => {
+    await clearMemory();
+    try {
+      const put = (body: unknown, ip: string) => agent().put(`/ai/businesses/${ID.biz}/ai/memory`).set(HEADER, ID.blind).set('x-forwarded-for', ip).send(body);
+      const bulk = (entries: unknown[], ip: string) => agent().put(`/ai/businesses/${ID.biz}/ai/memory/bulk`).set(HEADER, ID.blind).set('x-forwarded-for', ip).send({ entries });
+      const big = `overdue invoice ${'x'.repeat(2_000)}`;
+      const refused = [
+        await put({ category: 'patterns', key: 'v71y_big_value', value: big }, '10.74.11.1'),
+        await put({ category: 'patterns', key: `v71y_${'k'.repeat(200)}`, value: 'Most active day: Monday' }, '10.74.11.2'),
+        await bulk([{ category: 'patterns', key: 'v71y_ok', value: 'Most active day: Monday' }, { category: 'patterns', key: 'v71y_big_bulk', value: big }], '10.74.11.3'),
+        await bulk([{ category: 'patterns', key: `v71y_${'k'.repeat(200)}`, value: 'Most active day: Monday' }], '10.74.11.4'),
+      ];
+      expect(refused.map((r) => r.status), text(refused.map((r) => r.body))).toEqual([400, 400, 400, 400]);
+      expect(await db.aiMemory.count({ where: { businessId: ID.biz } }), 'nothing written').toBe(0);
+      const atBound = [
+        await put({ category: 'patterns', key: 'v'.repeat(200), value: 'y'.repeat(2_000) }, '10.74.11.5'),
+        await bulk([{ category: 'patterns', key: 'w'.repeat(200), value: 'z'.repeat(2_000) }], '10.74.11.6'),
+      ];
+      expect(atBound.map((r) => r.status), text(atBound.map((r) => r.body).map((b) => JSON.stringify(b).slice(0, 200)))).toEqual([200, 200]);
+    } finally {
+      await clearMemory();
+    }
+  }, 240_000);
 });

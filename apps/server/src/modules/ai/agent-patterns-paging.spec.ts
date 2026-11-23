@@ -33,6 +33,9 @@ function table(rows: Row[], onRead?: (call: number) => void) {
     const holds = (r: Row, k: string, c: any): boolean => {
       const v = n(valueOf(r, k));
       if (c instanceof Date || typeof c !== 'object' || c === null) return v === n(c);
+      // Correctness review round 4 (FUPRS-R4-3): an operator this table does not model fails the spec, never passes.
+      const unknown = Object.keys(c).filter((op) => !['gte', 'lte', 'lt'].includes(op));
+      if (unknown.length) throw new Error(`in-memory table: unmodelled operator(s) ${unknown.join(', ')} on ${k}`);
       return (c.gte === undefined || v >= n(c.gte)) && (c.lte === undefined || v <= n(c.lte)) && (c.lt === undefined || v < n(c.lt));
     };
     const matches = (r: Row, w: Record<string, any>): boolean =>
@@ -65,7 +68,7 @@ const money = (n: number): Row => ({
 const req = { user: { id: 'u_blind' } } as any;
 
 describe('GET .../agent/patterns pages by keyset, bounded (FU-PATTERNS-ROUTES-SIGHT round 1)', () => {
-  it('reads no page by offset: every page after the first starts below the last row read (createdAt, id)', async () => {
+  it('reads no page by offset: every page after the first starts below the last row read (updatedAt, id)', async () => {
     const rows = [...Array.from({ length: 30 }, (_, i) => plain(i)), ...Array.from({ length: 400 }, (_, i) => money(100 + i))];
     const t = table(rows);
     const res = await controllerOver(t.findMany).getDetectedPatterns('biz', req);
