@@ -337,8 +337,76 @@ describe('redactSensitiveText and deepRedact on string values (RR-REDACTION-BY-C
 
     it('the patterns are read-only objects: a consumer cannot replace one, and calling .test on them is not how they are meant to be used', () => {
       const card = SENSITIVE_VALUE_PATTERNS.find((e) => e.name.includes('card'))!;
+      // Checked before any write is attempted, so a failing run cannot mutate the policy for later cases.
+      expect(Object.isFrozen(card)).toBe(true);
+      expect(Object.isFrozen(SENSITIVE_VALUE_PATTERNS)).toBe(true);
       expect(() => { (card as { marker: string }).marker = '<x>'; }).toThrow();
       expect(() => { (SENSITIVE_VALUE_PATTERNS as unknown as unknown[]).push({}); }).toThrow();
+    });
+  });
+
+  describe('review round 2: every Luhn-valid window in a run is redacted, Bearer prose before a period, longest-first', () => {
+    it('a digit group before a card never leaves the card\'s tail visible: the union of valid windows is redacted', () => {
+      expect(redactSensitiveText('tel 1000000006 4111 1111 1111 1111')).toBe('tel <card>');
+      expect(redactSensitiveText('order 10000000 4111 1111 1111 1111')).toBe('order <card>');
+      expect(redactSensitiveText('868 200 0000 4111 1111 1111 1111')).toMatch(/^868 200 (?:0000 )?<card>$/);
+      expect(redactSensitiveText('868 348 1676 3782 822463 10005')).toMatch(/^868 348 (?:1676 )?<card>$/);
+      expect(redactSensitiveText('2026-11-29 4111 1111 1111 1111')).toBe('2026-11-29 <card>');
+      expect(redactSensitiveText('2026-11-26 4111 1111 1111 1111')).toBe('2026-11-26 <card>');
+      expect(redactSensitiveText('2026-01-01 5555 5555 5555 4444')).toBe('2026-01-01 <card>');
+    });
+
+    it('a window is card-shaped: in a multi-group window every group has 3+ digits and the first 4+, so dates and phones do not join it', () => {
+      expect(redactSensitiveText('qty 14 4111 1111 1111 1111')).toBe('qty 14 <card>');
+      expect(redactSensitiveText('ref 42 4111 1111 1111 1111 and 5500 0000 0000 0004 x')).toBe('ref 42 <card> and <card> x');
+      // Date ranges and phones next to each other, no card: untouched, every one of them.
+      const notes = [
+        '2026-02-04 - 2026-06-12 868 237 7919',
+        '2026-05-13 - 2026-09-17 868 348 1676',
+        '2026-11-23 09:30 call 868 555 0123 or 868 555 9876',
+        'INV-2026-000123 paid 4500.00 on 2026-11-23 by 868 555 0123',
+        'orders 10001 10002 10003 10004',
+        'total 1 250 000 00 TTD',
+      ];
+      for (const note of notes) expect(redactSensitiveText(note), note).toBe(note);
+      // Amex 4-6-5 and 19-digit 4-4-4-4-3 shapes are still cards.
+      expect(redactSensitiveText('3782 822463 10005')).toBe('<card>');
+      expect(redactSensitiveText('6011 0009 9013 9000 007')).toBe('<card>');
+    });
+
+    it('property: for every date of 2026 before a card, and every 3-3-4 phone before a card, the card is gone whole and the lead stays', () => {
+      const cards = ['4111 1111 1111 1111', '5555 5555 5555 4444', '3782 822463 10005', '6011 0009 9013 9424', '4000 0566 5566 5556'];
+      for (let month = 1; month <= 12; month += 1) {
+        for (let day = 1; day <= 28; day += 1) {
+          const date = `2026-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+          for (const card of cards) expect(redactSensitiveText(`${date} ${card}`), `${date} ${card}`).toBe(`${date} <card>`);
+        }
+      }
+      for (let n = 0; n < 300; n += 1) {
+        const phone = `868 ${String(200 + n).padStart(3, '0')} ${String((n * 37) % 10000).padStart(4, '0')}`;
+        for (const card of cards) {
+          const out = redactSensitiveText(`${phone} ${card}`);
+          expect(out.endsWith('<card>'), `${phone} ${card} -> ${out}`).toBe(true);
+          expect(out.includes(card.slice(0, 9)), `${phone} ${card} -> ${out}`).toBe(false);
+          expect(out.startsWith('868 '), `${phone} ${card} -> ${out}`).toBe(true);
+        }
+      }
+    });
+
+    it('tab and no-break space are separators too; a line break, a dot or a slash is not (documented as not covered)', () => {
+      expect(redactSensitiveText('4111\t1111\t1111\t1111')).toBe('<card>');
+      expect(redactSensitiveText('4111\u00a01111\u00a01111\u00a01111')).toBe('<card>');
+      expect(redactSensitiveText('4111.1111.1111.1111')).toBe('4111.1111.1111.1111');
+    });
+
+    it('a 19-digit window whose 16-digit prefix is also Luhn-valid is redacted whole (longest first)', () => {
+      expect(redactSensitiveText('4111 1111 1111 1111 003')).toBe('<card>');
+    });
+
+    it('a word after "bearer" that ends a sentence is prose: a lone trailing period is not a credential signal', () => {
+      expect(redactSensitiveText('the bearer payment. x')).toBe('the bearer payment. x');
+      expect(redactSensitiveText('bearer certificates. Also')).toBe('bearer certificates. Also');
+      expect(redactSensitiveText('Bearer abc.def.ghi.')).toBe('Bearer <secret>.');
     });
   });
 
