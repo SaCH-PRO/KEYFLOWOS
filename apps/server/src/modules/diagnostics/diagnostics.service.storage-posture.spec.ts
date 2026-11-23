@@ -52,7 +52,7 @@ vi.mock('@aws-sdk/client-s3', () => {
   };
 });
 
-import { DiagnosticsService } from './diagnostics.service';
+import { DiagnosticsService, classifyPostureError } from './diagnostics.service';
 
 /** An SDK-shaped service error: `name` is the S3 error code, `$metadata.httpStatusCode` the HTTP status. */
 function s3Error(name: string, httpStatusCode: number, message = name) {
@@ -235,6 +235,70 @@ describe('DiagnosticsService.checkObjectStorage: bucket posture (RR-OBJECT-STORA
     expect(result.status).toBe('warn');
     expect(result.message).toMatch(/not configured/);
     expect(sent).toEqual([]);
+  });
+
+  it('review round 1: a policy status that does not say IsPublic: false is not known to be private; it is a WARN, never a pass', async () => {
+    for (const body of [{}, { PolicyStatus: {} }, { PolicyStatus: { IsPublic: 'true' } }, { PolicyStatus: { IsPublic: 1 } }, undefined]) {
+      hardened();
+      handlers.GetBucketPolicyStatusCommand = () => body;
+      const result = await service().checkObjectStorage();
+      expect(result.status, JSON.stringify(body)).toBe('warn');
+      expect(result.detail, JSON.stringify(body)).toMatch(/GetBucketPolicyStatus: policy status not reported/i);
+    }
+  });
+
+  it('review round 1: an encryption rule without a default algorithm is not "encryption on"', async () => {
+    hardened();
+    handlers.GetBucketEncryptionCommand = () => ({ ServerSideEncryptionConfiguration: { Rules: [{ BucketKeyEnabled: true }] } });
+    const result = await service().checkObjectStorage();
+    expect(result.status).toBe('warn');
+    expect(result.detail).toMatch(/GetBucketEncryption: rule present but no default algorithm/i);
+  });
+
+  it('review round 1: public-access-block flags must be exactly true; strings are reported as off', async () => {
+    hardened();
+    handlers.GetPublicAccessBlockCommand = () => ({
+      PublicAccessBlockConfiguration: { BlockPublicAcls: 'true', IgnorePublicAcls: 'true', BlockPublicPolicy: 'true', RestrictPublicBuckets: 'true' },
+    });
+    const result = await service().checkObjectStorage();
+    expect(result.status).toBe('warn');
+    expect(result.detail).toMatch(/BlockPublicAcls, IgnorePublicAcls, BlockPublicPolicy, RestrictPublicBuckets off/);
+  });
+
+  it('review round 1: the access-denied hint names the real IAM action for each call', async () => {
+    const cases: Array<[string, string]> = [
+      ['GetPublicAccessBlockCommand', 's3:GetBucketPublicAccessBlock'],
+      ['GetBucketPolicyStatusCommand', 's3:GetBucketPolicyStatus'],
+      ['GetBucketEncryptionCommand', 's3:GetEncryptionConfiguration'],
+    ];
+    for (const [call, action] of cases) {
+      hardened();
+      handlers[call] = () => {
+        throw s3Error('AccessDenied', 403, 'Access Denied');
+      };
+      const result = await service().checkObjectStorage();
+      expect(result.status, call).toBe('warn');
+      expect(result.detail, call).toContain(action);
+      expect(result.detail, call).not.toMatch(new RegExp(`s3:${call.replace(/Command$/, '')}\\b`));
+    }
+  });
+
+  it('review round 1: expired or invalid credentials (400-class token codes) are "denied", not "not implemented"; an unknown 4xx is worded as rejected, possibly not implemented', () => {
+    for (const code of ['ExpiredToken', 'InvalidToken', 'TokenRefreshRequired', 'InvalidAccessKeyId', 'SignatureDoesNotMatch']) {
+      expect(classifyPostureError(s3Error(code, 400)).kind, code).toBe('denied');
+    }
+    expect(classifyPostureError(s3Error('NoSuchBucket', 404)).kind).toBe('error');
+    expect(classifyPostureError(s3Error('MethodNotAllowed', 405))).toMatchObject({ kind: 'not-implemented', code: 'MethodNotAllowed' });
+    expect(classifyPostureError(s3Error('NotImplemented', 501))).toMatchObject({ kind: 'not-implemented' });
+  });
+
+  it('review round 1: an unknown 4xx names the code and status in the detail, so the operator can tell a stub from a lacking provider', async () => {
+    hardened();
+    handlers.GetBucketPolicyStatusCommand = () => {
+      throw s3Error('MethodNotAllowed', 405);
+    };
+    const result = await service().checkObjectStorage();
+    expect(result.detail).toMatch(/GetBucketPolicyStatus: rejected \(MethodNotAllowed, HTTP 405\)[^;]*not implemented/i);
   });
 
   it('every posture call names the configured bucket and nothing else leaves the check (no object key, no body)', async () => {
