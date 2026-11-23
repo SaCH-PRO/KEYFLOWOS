@@ -422,6 +422,17 @@ describe('script-specs-in-ci: negative controls', () => {
     assert.deepEqual(nodeTestPatterns('echo "a # b"; node --test scripts/x/a.spec.mjs'), []);
   });
 
+  it('time is the shell keyword only as the first word of the pipeline; elsewhere it is the command word', () => {
+    assert.deepEqual(nodeTestPatterns('time time node --test scripts/x/a.spec.mjs'), ['scripts/x/a.spec.mjs']);
+    assert.deepEqual(nodeTestPatterns('time timeout 5 node --test scripts/x/a.spec.mjs'), ['scripts/x/a.spec.mjs']);
+    // After an assignment or another wrapper, `time` is an external program (or absent): an assignment after it
+    // would be exec'd as a program, and node never starts. Nothing after such a `time` is credited.
+    assert.deepEqual(nodeTestPatterns('CI=1 time CI=2 node --test scripts/x/a.spec.mjs'), []);
+    assert.deepEqual(nodeTestPatterns('timeout 5 time CI=1 node --test scripts/x/a.spec.mjs'), []);
+    assert.deepEqual(nodeTestPatterns('CI=1 time node --test scripts/x/a.spec.mjs'), []);
+    assert.deepEqual(nodeTestPatterns('timeout 5 time node --test scripts/x/a.spec.mjs'), []);
+  });
+
   it('a stale EXEMPT path fails, and so does a needless or unexplained one', () => {
     const wf = { 'x.yml': 'jobs:\n  j:\n    steps:\n      - run: node --test scripts/x/a.spec.mjs\n' };
     const stale = census(['scripts/x/a.spec.mjs'], wf, { 'scripts/gone/z.spec.mjs': 'was removed' }).problems;
