@@ -267,6 +267,8 @@ describe('RR-RETENTION-EXPIRED-EXPORTS: the purge cycle sweeps expired and consu
   it('a job the storage keeps refusing is retried every cycle but recorded once; the cycle that succeeds sweeps it and records it', async () => {
     await makeDue();
     try {
+      // makeDue stamps expires_at from the clock, so the row is compared with its shape of this instant
+      const dueNow = await snapshot();
       const secondCycle = await cycleWith(new Set(keysOf(ID.jFail)));
       expect(secondCycle).toEqual([]);
       expect(await failedEntries(ID.jFail)).toHaveLength(1);
@@ -276,7 +278,7 @@ describe('RR-RETENTION-EXPIRED-EXPORTS: the purge cycle sweeps expired and consu
       expect([...thirdCycle].sort()).toEqual([...keysOf(ID.jFail)].sort());
       expect(await deletedEntries(ID.jFail)).toHaveLength(1);
       expect(await failedEntries(ID.jFail)).toHaveLength(1);
-      expect(await db.contactExportJob.findUnique({ where: { id: ID.jFail } })).toEqual(dueBefore[ID.jFail]);
+      expect(await db.contactExportJob.findUnique({ where: { id: ID.jFail } })).toEqual(dueNow[ID.jFail]);
     } finally {
       await makeLive();
     }
