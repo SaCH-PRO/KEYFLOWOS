@@ -71,7 +71,7 @@ describe('BlueprintController genome endpoints', () => {
 
   it('GET /genome/three-pillar-status returns pillar scores', async () => {
     const { controller, blueprint } = makeController();
-    const result = await controller.getThreePillarStatus('biz_1');
+    const result = await controller.getThreePillarStatus('biz_1', OWNER);
     expect(blueprint.calculateGenomeIntegrity).toHaveBeenCalledWith('biz_1');
     expect(result.met).toBe(true);
     expect(result.founder).toBe(60);

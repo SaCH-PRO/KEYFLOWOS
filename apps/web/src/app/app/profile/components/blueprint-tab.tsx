@@ -7,6 +7,7 @@ import { apiGet } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { BlueprintOnboardingChat, BlueprintOnboardingCTA } from "./blueprint-onboarding-chat";
 import type { BlueprintData, BlueprintSectionKey } from "@/lib/blueprint-types";
+import { WITHHELD_LABEL } from "@/lib/genome-withheld";
 
 const fadeUp = {
   hidden: { opacity: 0, y: 12 },
@@ -179,6 +180,8 @@ export function BlueprintTab() {
     );
   }
 
+  // FU-GENOME-SURFACES-REVENUE (D-233): null when withheld from the member; shown as withheld, with no ring fill.
+  const completenessWithheld = blueprint != null && blueprint.completeness === null;
   const completeness = blueprint?.completeness ?? 0;
   const confidenceScores = blueprint?.confidenceScores ?? {};
 
@@ -204,7 +207,7 @@ export function BlueprintTab() {
           </div>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <span className="text-2xl font-bold">{completeness}%</span>
+              <span className="text-2xl font-bold">{completenessWithheld ? WITHHELD_LABEL : `${completeness}%`}</span>
               <p className="text-xs text-muted-foreground">complete</p>
             </div>
             <div

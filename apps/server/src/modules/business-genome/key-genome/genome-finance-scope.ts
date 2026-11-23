@@ -49,7 +49,8 @@ const MONEY_TERMS = new RegExp(
     // acronym-prefixed name fails closed (confirmation review m2/m4). Compensate, incentivise and stipend are
     // compensation too.
     '(?<!de)commission', '(?<!over)compensat', '(?<![a-z])bonus(?:es)?(?![a-z])', 'incentiv', 'stipend',
-    'lifetime', 'acquisition_?cost', 'budget', 'expense', 'conversion', 'forecast', 'churn', 'transaction', 'opportunit',
+    // FU-GENOME-SURFACES-REVENUE round 2: "acquisition cost" in prose too (a recommendation title), not only acquisition_cost.
+    'lifetime', 'acquisition[_ ]?cost', 'budget', 'expense', 'conversion', 'forecast', 'churn', 'transaction', 'opportunit',
     'unit_?economics', 'cross_?domain', 'money', 'receivable', 'payable', 'quote', 'quotation', 'reimburs', 'discount',
     // A promo code is money; promote / promotion is not (round-3 correctness minor).
     '(?<![a-z])promo(?!t)', 'coupon', 'deposit', 'payout', 'purchase', 'wallet', 'ledger', 'salar', 'subscription', 'overdue', 'storelink',
@@ -651,8 +652,12 @@ function proposalFieldsOfEvent(row: GenomeRowFields): ProposalFields {
  * own score (the ruling's separable non-financial guidance); its acquisition-cost targets are withheld
  * with the marketing-growth figures, not through this score.
  */
+// FU-GENOME-SURFACES-REVENUE round 2 (security MAJOR-2; D-234): 'business' is left off. The business DNA is the
+// BUSINESS_MODEL section (DNA_TO_KEY_GENOME_SECTION), which MONEY_SECTIONS above classifies as money (the revenue model
+// and pricing), so a business score is withheld with the money rows it is computed from (fail closed on the conflicting
+// classification; owner question raised in the packet RETURN).
 const NON_MONEY_DNA_KEYS: ReadonlySet<string> = new Set([
-  'execution', 'strategy', 'operations', 'marketing', 'founder', 'vision', 'business', 'market', 'legal',
+  'execution', 'strategy', 'operations', 'marketing', 'founder', 'vision', 'market', 'legal',
   'growth', 'technology', 'risk', 'customer_success', 'product', 'talent',
 ]);
 

@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown, Edit3, Dna } from "lucide-react";
 import { Drawer } from "@keyflow/ui";
 import type { GenomeIntegrityResult, DnaSectionKey } from "@/lib/api/business-genome";
+import { pctOrWithheld } from "@/lib/genome-withheld";
 import { DnaSectionDrawer } from "./dna-section-drawer";
 
 interface DnaSectionsListProps {
@@ -30,7 +31,7 @@ export function DnaSectionsList({ genome, onUpdate }: DnaSectionsListProps) {
           <p className="text-xs text-muted-foreground">Edit each section to strengthen your Business Genome.</p>
         </div>
         <div className="text-xs font-medium text-muted-foreground">
-          Integrity: <span className="font-semibold text-foreground">{genome.genomeIntegrity}%</span>
+          Integrity: <span className="font-semibold text-foreground">{pctOrWithheld(genome.genomeIntegrity)}</span>
         </div>
       </div>
 

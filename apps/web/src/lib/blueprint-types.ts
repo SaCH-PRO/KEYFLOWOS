@@ -429,7 +429,8 @@ export interface BlueprintData {
   executionRoadmap?: BlueprintExecutionRoadmap;
   documentProfile?: BlueprintDocumentProfile;
   confidenceScores: BlueprintConfidenceScores;
-  completeness: number;
+  /** null: withheld from a member without revenue read (FU-GENOME-SURFACES-REVENUE: it averages the financials fill in). */
+  completeness: number | null;
   readinessScore?: number;
   lastAnalyzedAt?: string;
   updatedAt: string;

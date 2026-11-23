@@ -102,12 +102,26 @@ export const MONEY_BLUEPRINT_COLUMNS = ['financials', 'projectionProfile', 'sale
  * offer architecture), the annual revenue estimate, the financial risks, the revenue model and the budget range.
  */
 const MONEY_BLUEPRINT_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  // Round 2 (security MAJOR-1): BlueprintService.inferFromEvents writes revenue-derived figures here (the momentum score
+  // is the 30-day paid revenue / 100, the expense ratio, the quote conversion, the top product categories by sales) and
+  // workflow flags read from invoices, quotes and orders.
+  intelligence: ['recentMomentumScore', 'expenseRatio', 'quoteConversionRate', 'topProductCategories'],
+  workflowModel: ['retainerCycle', 'quoteDrivenSales', 'ecommerceFulfillment'],
   taxProfile: ['estimatedAnnualRevenue'],
   riskProfile: ['financialRisks'],
   operatingModel: ['revenueModel'],
   constraints: ['budgetRange'],
 };
 const MONEY_WHOLE_COLUMNS: readonly string[] = [...MONEY_BLUEPRINT_COLUMNS, 'offerArchitecture'];
+
+/**
+ * Setup steps as a reader may see them (round 2, security MINOR-3): a step's done flag is the fill of its blueprint
+ * column, so the steps of the money columns are left out for a reader without revenue read.
+ */
+export function setupStepsForReader<S extends { id?: string; section?: string }>(steps: S[], readsRevenue: boolean): S[] {
+  if (readsRevenue) return steps;
+  return steps.filter((s) => !MONEY_WHOLE_COLUMNS.includes(String(s.section ?? s.id)));
+}
 
 /**
  * A blueprint (BlueprintService.getBlueprint, or a write's answer) as a reader may see it: the composites, the money DNA,
@@ -245,4 +259,47 @@ export function stalenessForReader(staleness: ConstitutionStaleness, readsRevenu
     currentGenomeStage: null,
     constitutionGenomeStage: null,
   } as unknown as ConstitutionStaleness;
+}
+
+/**
+ * Round 2 (plan write set: marketing-growth CAC figures; D-234, D-100). A growth channel's monthly budget, target
+ * acquisition cost and target conversion rate are money: null for a reader without revenue read, named in
+ * withheldForRevenue.
+ */
+const MONEY_CHANNEL_FIELDS = ['monthlyBudget', 'targetCac', 'targetConversionRate'] as const;
+
+export function growthChannelForReader<C extends Record<string, unknown> | null | undefined>(channel: C, readsRevenue: boolean): C {
+  if (readsRevenue || !channel || typeof channel !== 'object') return channel;
+  const out: Record<string, unknown> = { ...channel };
+  for (const field of MONEY_CHANNEL_FIELDS) out[field] = null;
+  out.withheldForRevenue = [...MONEY_CHANNEL_FIELDS];
+  return out as C;
+}
+
+/**
+ * The marketing-growth snapshot fields computed from the channels' budgets, CAC targets and conversion targets: the
+ * blended CAC, the lead volume (budget / CAC), the funnel conversion, the diversification score and the overall risk
+ * (which read the budget-weighted channel mix and the CAC risk), and each channel's budget share.
+ */
+const MONEY_SNAPSHOT_FIELDS = ['blendedCac', 'leadVolumeEstimate', 'funnelConversionEstimate', 'channelDiversificationScore', 'overallRisk'] as const;
+/** The warning and recommendation types computed from content and channel counts only (an allow-list: fails closed). */
+const NON_MONEY_MARKETING_TYPES: ReadonlySet<string> = new Set([
+  'NO_CONTENT_STRATEGY', 'CREATE_CONTENT_STRATEGY', 'MISSING_CONTENT_PILLARS', 'ADD_CONTENT_PILLARS',
+  'MISSING_CONTENT_CADENCE', 'SET_CONTENT_CADENCE', 'ADD_CHANNELS',
+]);
+
+export function marketingSnapshotForReader<S extends Record<string, unknown> | null | undefined>(snapshot: S, readsRevenue: boolean): S {
+  if (readsRevenue || !snapshot || typeof snapshot !== 'object') return snapshot;
+  const out: Record<string, unknown> = { ...snapshot };
+  for (const field of MONEY_SNAPSHOT_FIELDS) out[field] = null;
+  const served = (rows: unknown) =>
+    (Array.isArray(rows) ? rows : []).filter((r) => r && typeof r === 'object' && NON_MONEY_MARKETING_TYPES.has(String((r as { type?: unknown }).type)));
+  out.warnings = served(snapshot.warnings);
+  out.recommendations = served(snapshot.recommendations);
+  out.channelMix = (Array.isArray(snapshot.channelMix) ? snapshot.channelMix : []).map((item) =>
+    item && typeof item === 'object' ? { ...(item as Record<string, unknown>), sharePercent: null } : item,
+  );
+  out.missingInputs = (Array.isArray(snapshot.missingInputs) ? snapshot.missingInputs : []).filter((i) => typeof i === 'string' && !isMoneyLabel(i));
+  out.withheldForRevenue = [...MONEY_SNAPSHOT_FIELDS, 'channelMix.sharePercent'];
+  return out as S;
 }

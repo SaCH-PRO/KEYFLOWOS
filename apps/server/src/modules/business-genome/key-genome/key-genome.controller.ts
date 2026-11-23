@@ -30,6 +30,7 @@ import {
   listRecommendationsForReader,
   listSignalsForReader,
 } from './genome-finance-scope';
+import { growthChannelForReader, marketingSnapshotForReader } from './genome-composites-for-reader';
 import { GenomeSignalService } from './genome-signal.service';
 import { GenomeRecommendationService } from './genome-recommendation.service';
 import { GenomeExperimentService } from './genome-experiment.service';
@@ -1119,21 +1120,28 @@ export class KeyGenomeController {
     @Query('channelType') channelType?: string,
     @Query('minConfidence') minConfidence?: string,
     @Query('limit') limit?: string,
+    @Req() req?: GenomeRequest,
   ) {
-    return this.growthChannels.findMany(businessId, {
+    const rows = await this.growthChannels.findMany(businessId, {
       status,
       channelType,
       minConfidence: minConfidence !== undefined ? Number(minConfidence) : undefined,
       limit: limit !== undefined ? Number(limit) : undefined,
     });
+    // FU-GENOME-SURFACES-REVENUE round 2 (D-234, D-100): a channel's budget, target CAC and conversion target are
+    // money: withheld from a member without revenue read.
+    const readsRevenue = await this.readsRevenue(businessId, req);
+    return rows.map((row) => growthChannelForReader(row as unknown as Record<string, unknown>, readsRevenue));
   }
 
   @Post('marketing-growth/channels')
   async createGrowthChannel(
     @Param('businessId') businessId: string,
     @Body() body: CreateGenomeGrowthChannelInput,
+    @Req() req?: GenomeRequest,
   ) {
-    return this.growthChannels.create(businessId, body);
+    const created = await this.growthChannels.create(businessId, body);
+    return growthChannelForReader(created as unknown as Record<string, unknown>, await this.readsRevenue(businessId, req));
   }
 
   @Patch('marketing-growth/channels/:channelId')
@@ -1141,8 +1149,10 @@ export class KeyGenomeController {
     @Param('businessId') businessId: string,
     @Param('channelId') channelId: string,
     @Body() body: UpdateGenomeGrowthChannelInput,
+    @Req() req?: GenomeRequest,
   ) {
-    return this.growthChannels.update(businessId, channelId, body);
+    const updated = await this.growthChannels.update(businessId, channelId, body);
+    return growthChannelForReader(updated as unknown as Record<string, unknown>, await this.readsRevenue(businessId, req));
   }
 
   @Delete('marketing-growth/channels/:channelId')
@@ -1188,17 +1198,22 @@ export class KeyGenomeController {
     return this.contentStrategies.delete(businessId, strategyId);
   }
 
+  // FU-GENOME-SURFACES-REVENUE round 2 (D-234, D-100): the snapshot's CAC, lead volume, conversion, budget shares and
+  // the risk read from them are withheld from a member without revenue read (marketingSnapshotForReader).
   @Get('marketing-growth/snapshot')
-  async getMarketingGrowthSnapshot(@Param('businessId') businessId: string) {
-    return this.marketingGenome.getLatestMarketingGrowthSnapshot(businessId);
+  async getMarketingGrowthSnapshot(@Param('businessId') businessId: string, @Req() req?: GenomeRequest) {
+    const snapshot = await this.marketingGenome.getLatestMarketingGrowthSnapshot(businessId);
+    return marketingSnapshotForReader(snapshot as unknown as Record<string, unknown> | null, await this.readsRevenue(businessId, req));
   }
 
   @Post('marketing-growth/snapshot/compute')
   async computeMarketingGrowthSnapshot(
     @Param('businessId') businessId: string,
     @Query('period') period?: string,
+    @Req() req?: GenomeRequest,
   ) {
-    return this.marketingGenome.computeMarketingGrowthSnapshot(businessId, period);
+    const snapshot = await this.marketingGenome.computeMarketingGrowthSnapshot(businessId, period);
+    return marketingSnapshotForReader(snapshot as unknown as Record<string, unknown>, await this.readsRevenue(businessId, req));
   }
 
   @Get('marketing-growth/snapshots')
@@ -1207,22 +1222,29 @@ export class KeyGenomeController {
     @Query('period') period?: string,
     @Query('riskLevel') riskLevel?: string,
     @Query('limit') limit?: string,
+    @Req() req?: GenomeRequest,
   ) {
-    return this.marketingGenome.listMarketingGrowthSnapshots(businessId, {
+    const readsRevenue = await this.readsRevenue(businessId, req);
+    const rows = await this.marketingGenome.listMarketingGrowthSnapshots(businessId, {
       period,
-      riskLevel,
+      // The overall risk is withheld, so it is no filter either for a member without revenue read.
+      riskLevel: readsRevenue ? riskLevel : undefined,
       limit: limit !== undefined ? Number(limit) : undefined,
     });
+    return rows.map((row) => marketingSnapshotForReader(row as unknown as Record<string, unknown>, readsRevenue));
   }
 
   @Post('marketing-growth/signals/generate')
-  async generateMarketingGrowthSignals(@Param('businessId') businessId: string) {
-    return this.marketingGenome.generateMarketingGrowthSignals(businessId);
+  async generateMarketingGrowthSignals(@Param('businessId') businessId: string, @Req() req?: GenomeRequest) {
+    const rows = await this.marketingGenome.generateMarketingGrowthSignals(businessId);
+    // D-234: the generated money (CAC, budget, conversion) signals are answered to a revenue reader only.
+    return (await this.readsRevenue(businessId, req)) ? rows : rows.filter((r) => !isFinanceSignal(r));
   }
 
   @Post('marketing-growth/recommendations/generate')
-  async generateMarketingGrowthRecommendations(@Param('businessId') businessId: string) {
-    return this.marketingGenome.generateMarketingGrowthRecommendations(businessId);
+  async generateMarketingGrowthRecommendations(@Param('businessId') businessId: string, @Req() req?: GenomeRequest) {
+    const rows = await this.marketingGenome.generateMarketingGrowthRecommendations(businessId);
+    return (await this.readsRevenue(businessId, req)) ? rows : rows.filter((r) => !isFinanceRecommendation(r));
   }
 
   // ---------------------------------------------------------------------------

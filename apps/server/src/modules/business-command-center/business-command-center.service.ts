@@ -728,7 +728,8 @@ export class BusinessCommandCenterService {
     const parts: string[] = [briefSummary];
 
     const hasFacts = keyGenome.sections.length > 0;
-    if (hasFacts && keyGenome.overall === null) {
+    // A withheld KEY genome (round 2, correctness MINOR-4) is never called unpopulated: its sections may all be money.
+    if (keyGenome.overall === null) {
       // D-233: the KEY genome scores are withheld from this reader; only the counts are stated.
       if (health.blockedModuleCount > 0) {
         parts.push(`${health.blockedModuleCount} module(s) are blocked by missing facts.`);

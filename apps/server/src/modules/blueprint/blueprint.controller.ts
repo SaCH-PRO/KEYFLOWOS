@@ -7,7 +7,9 @@ import {
   blueprintForReader,
   constitutionContentForReader,
   genomeIntegrityForReader,
+  isServedDnaKey,
   readsRevenueFor,
+  setupStepsForReader,
 } from '../business-genome/key-genome/genome-composites-for-reader';
 import { BlueprintReaderInterceptor } from './blueprint-reader.interceptor';
 import { BlueprintService } from './blueprint.service';
@@ -66,15 +68,16 @@ export class BlueprintController {
   }
 
   @Get('recommendations')
-  async recommendations(@Param('businessId') businessId: string) {
+  async recommendations(@Param('businessId') businessId: string, @Req() req?: ReaderRequest) {
+    // FU-GENOME-SURFACES-REVENUE round 2 (D-233): no step of a money column (its done flag is the column's fill).
     const steps = await this.blueprint.getRecommendedSetupSteps(businessId);
-    return { steps };
+    return { steps: setupStepsForReader(steps, await this.readsRevenue(businessId, req)) };
   }
 
   @Get('setup-steps')
-  async setupSteps(@Param('businessId') businessId: string) {
+  async setupSteps(@Param('businessId') businessId: string, @Req() req?: ReaderRequest) {
     const steps = await this.blueprint.getSetupSteps(businessId);
-    return { steps };
+    return { steps: setupStepsForReader(steps, await this.readsRevenue(businessId, req)) };
   }
 
   // --- Business Genome endpoints ------------------------------------------------
@@ -101,13 +104,18 @@ export class BlueprintController {
   }
 
   @Get('genome/three-pillar-status')
-  async getThreePillarStatus(@Param('businessId') businessId: string) {
+  async getThreePillarStatus(@Param('businessId') businessId: string, @Req() req?: ReaderRequest) {
     const result = await this.blueprint.calculateGenomeIntegrity(businessId);
+    // FU-GENOME-SURFACES-REVENUE round 2 (D-234): a pillar whose DNA is money (business: the revenue model and pricing)
+    // is null for a reader without revenue read; whether the minimum is met stays (the genome gate reads it).
+    const readsRevenue = await this.readsRevenue(businessId, req);
+    const pillar = (key: 'founder' | 'business' | 'market') =>
+      readsRevenue || isServedDnaKey(key) ? result.genomeDnaScores[key] : null;
     return {
       met: result.threePillarMinimumMet,
-      founder: result.genomeDnaScores.founder,
-      business: result.genomeDnaScores.business,
-      market: result.genomeDnaScores.market,
+      founder: pillar('founder'),
+      business: pillar('business'),
+      market: pillar('market'),
     };
   }
 

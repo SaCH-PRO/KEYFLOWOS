@@ -478,7 +478,10 @@ describe('FU-GENOME-SURFACES-REVENUE: the genome surfaces serve finance-derived 
     for (const section of Object.values(res.body.sections) as any[]) {
       for (const dna of section.sourceDna) expect(MONEY_DNA).not.toContain(dna);
     }
-    expect(res.body.sections.executiveSummary).toBeDefined();
+    // The sections drawn only from served DNA stay (the executive summary reads the business DNA, withheld from round 2).
+    expect(res.body.sections.legalFramework).toBeDefined();
+    expect(res.body.sections.operationsStrategy).toBeDefined();
+    expect(res.body.sections.executiveSummary).toBeUndefined();
     expect(JSON.stringify(res.body)).not.toMatch(FIGURES);
     expect(JSON.stringify(res.body)).not.toMatch(/Pricing model|Average ticket|Monthly revenue target/);
     expect(JSON.stringify(res.body)).not.toMatch(BUSINESS_MODEL_TEXT);

@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Inject,
+  Optional,
   Param,
   Post,
   Query,
@@ -15,12 +16,18 @@ import { GenomeGateGuard } from '../../core/auth/genome-gate.guard';
 import { RateLimitGuard } from '../../core/guards/rate-limit.guard';
 import { RateLimit } from '../../core/decorators/rate-limit.decorator';
 import { GenomeChatService } from './genome-chat.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { genomeIntegrityForReader, readsRevenueFor } from '../business-genome/key-genome/genome-composites-for-reader';
 import { SendMessageDto, ApplyUpdatesDto } from './dto';
 
 @Controller('genome-chat/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
 export class GenomeChatController {
-  constructor(@Inject(GenomeChatService) private readonly chat: GenomeChatService) {}
+  constructor(
+    @Inject(GenomeChatService) private readonly chat: GenomeChatService,
+    // FU-GENOME-SURFACES-REVENUE round 2 (D-233): reads the member's revenue level; without it, fail closed.
+    @Optional() @Inject(PrismaService) private readonly prisma?: PrismaService,
+  ) {}
 
   @Get('messages')
   async getMessages(
@@ -51,13 +58,16 @@ export class GenomeChatController {
   async applyUpdates(
     @Param('businessId') businessId: string,
     @Body() body: ApplyUpdatesDto,
-    @Req() req: Request & { user?: { id?: string } },
+    @Req() req: Request & { user?: { id?: string; role?: string } },
   ) {
     const userId = req.user?.id ?? 'unknown';
-    return this.chat.applyUpdates(businessId, userId, body.section, body.data, {
+    const genome = await this.chat.applyUpdates(businessId, userId, body.section, body.data, {
       messageId: body.messageId,
       confidence: body.confidence,
       source: body.source,
     });
+    // FU-GENOME-SURFACES-REVENUE round 2 (D-233): answered as GET blueprint/.../genome serves it to the member.
+    const reader = req.user?.id ? { id: req.user.id, role: req.user.role } : null;
+    return genomeIntegrityForReader(genome, await readsRevenueFor(this.prisma, businessId, reader));
   }
 }

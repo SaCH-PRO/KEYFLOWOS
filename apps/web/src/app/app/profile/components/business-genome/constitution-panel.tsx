@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ScrollText, Loader2, AlertCircle, RefreshCw, History, ChevronDown, ChevronUp, Archive, AlertTriangle, FileText } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
-import { pctOrWithheld, stageOrWithheld } from "@/lib/genome-withheld";
+import { isServedScore, pctOrWithheld, stageOrWithheld } from "@/lib/genome-withheld";
 import {
   getLatestConstitutionVersion,
   getConstitutionVersions,
@@ -178,7 +178,7 @@ export function ConstitutionPanel({ genome }: ConstitutionPanelProps) {
                   Genome Integrity{" "}
                   <span
                     className="font-semibold"
-                    style={{ color: strengthVariant(version.sourceGenomeIntegrity ?? genome.genomeIntegrity ?? 0).color }}
+                    style={isServedScore(version.sourceGenomeIntegrity ?? genome.genomeIntegrity) ? { color: strengthVariant((version.sourceGenomeIntegrity ?? genome.genomeIntegrity) as number).color } : undefined}
                   >
                     {/* FU-GENOME-SURFACES-REVENUE (D-233): null when withheld from the member. */}
                     {pctOrWithheld(version.sourceGenomeIntegrity ?? genome.genomeIntegrity)}

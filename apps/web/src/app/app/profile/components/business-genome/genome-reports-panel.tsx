@@ -95,7 +95,7 @@ export function GenomeReportsPanel({ genome, onOpenConstitution, onOpenDnaSectio
                 )}
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Genome Integrity</span>
-                  <span className="font-medium">{constitution?.genomeIntegrity ?? genome.genomeIntegrity}%</span>
+                  <span className="font-medium">{pctOrWithheld(constitution?.genomeIntegrity ?? genome.genomeIntegrity)}</span>
                 </div>
               </div>
             )}

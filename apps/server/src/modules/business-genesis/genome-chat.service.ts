@@ -134,7 +134,9 @@ export class GenomeChatService {
     await this.persistMessage(
       businessId,
       'system',
-      `Updated ${section} DNA: ${populatedFields}. Genome Integrity is now ${genome.genomeIntegrity}%.`,
+      // FU-GENOME-SURFACES-REVENUE round 2 (D-233): the chat history is served business-wide, so the stored message states
+      // no composite (the integrity weights the financial and sales DNA); the caller is answered its own projection.
+      `Updated ${section} DNA: ${populatedFields}.`,
       { appliedSection: section, appliedData: data },
     );
 
