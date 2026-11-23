@@ -151,6 +151,13 @@ async function copiedBy(page: Page, click: () => Promise<void>): Promise<string>
   return page.evaluate(() => (window as unknown as { __kfCopied: string[] }).__kfCopied.at(-1) ?? "");
 }
 
+/** Waits until a sheet has finished sliding in (its transform settles), so its buttons hold still. */
+async function settled(sheet: Locator): Promise<void> {
+  await expect
+    .poll(() => sheet.evaluate((el) => getComputedStyle(el).transform), { message: "the sheet finished sliding in", timeout: 10_000 })
+    .toMatch(/^(none|matrix\(1, 0, 0, 1, 0, 0\))$/);
+}
+
 async function openQuotes(page: Page, door = "/app/commerce?tab=pipeline&view=quotes"): Promise<void> {
   await page.goto(door);
   await settle(page, 1_000);
@@ -184,7 +191,9 @@ for (const [project, viewport] of Object.entries(JOURNEY_VIEWPORTS)) {
         await edit!.click();
         const sheet = page.getByRole("dialog", { name: /edit quote/i });
         await expect(sheet).toBeVisible();
+        await settled(sheet);
         await sheet.getByPlaceholder(/notes/i).fill("Deposit 40% to confirm");
+        await settled(sheet);
         const saved = page.waitForResponse((r) => r.request().method() === "PATCH" && new URL(r.url()).pathname.endsWith(`/quotes/${draft.id}`));
         await sheet.getByRole("button", { name: /^(update|save)/i }).click();
         expect((await saved).status()).toBe(200);
