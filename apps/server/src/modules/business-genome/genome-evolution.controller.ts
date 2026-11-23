@@ -102,8 +102,8 @@ export class GenomeEvolutionController {
     @Param('id') proposalId: string,
     @Req() req: EvolutionRequest,
   ) {
-    await this.requireActingAuthority(businessId, req, await this.service.get(businessId, proposalId));
-    const result = await this.service.approve(businessId, proposalId, this.userId(req));
+    // Round 4 (security F2): checked on the row the approval reads and applies.
+    const result = await this.service.approve(businessId, proposalId, this.userId(req), (row) => this.requireActingAuthority(businessId, req, row));
     // D-233: the genome integrity result carries the finance and sales DNA scores and the composites that weight them.
     if (await genomeReaderReadsRevenue(this.prisma, businessId, this.reader(req) ?? undefined).catch(() => false)) return result;
     return { proposal: result.proposal };
@@ -115,8 +115,7 @@ export class GenomeEvolutionController {
     @Param('id') proposalId: string,
     @Req() req: EvolutionRequest,
   ) {
-    await this.requireActingAuthority(businessId, req, await this.service.get(businessId, proposalId));
-    return this.service.reject(businessId, proposalId, this.userId(req));
+    return this.service.reject(businessId, proposalId, this.userId(req), (row) => this.requireActingAuthority(businessId, req, row));
   }
 
   @Patch('evolution-proposals/:id')
@@ -126,15 +125,16 @@ export class GenomeEvolutionController {
     @Body() body: UpdateGenomeEvolutionProposalDto,
     @Req() req?: EvolutionRequest,
   ) {
-    const existing = await this.service.get(businessId, proposalId);
-    // The proposal as the edit would leave it (an edit changes reason, patch, evidence and confidence, not the section).
-    const edited: GenomeEvolutionFields = {
-      section: existing.section,
-      reason: body.reason !== undefined ? body.reason : existing.reason,
-      proposedPatch: body.proposedPatch !== undefined ? body.proposedPatch : existing.proposedPatch,
-      evidence: body.evidence !== undefined ? body.evidence : existing.evidence,
-    };
-    await this.requireActingAuthority(businessId, req, existing, edited);
-    return this.service.edit(businessId, proposalId, body);
+    // The proposal as the edit would leave it (an edit changes reason, patch, evidence and confidence, not the section),
+    // judged with the row the edit reads (round 4, security F2).
+    return this.service.edit(businessId, proposalId, body, (existing) => {
+      const edited: GenomeEvolutionFields = {
+        section: existing.section,
+        reason: body.reason !== undefined ? body.reason : existing.reason,
+        proposedPatch: body.proposedPatch !== undefined ? body.proposedPatch : existing.proposedPatch,
+        evidence: body.evidence !== undefined ? body.evidence : existing.evidence,
+      };
+      return this.requireActingAuthority(businessId, req, existing, edited);
+    });
   }
 }

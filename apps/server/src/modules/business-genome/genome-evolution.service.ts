@@ -171,8 +171,14 @@ export class GenomeEvolutionService {
     businessId: string,
     proposalId: string,
     approvedBy?: string,
+    /**
+     * Round 4 (FU-GENOME-EVOLUTION-SURFACES, security F2): the caller's authority check, run on the row this call read
+     * and acts on (so the patch applied is the one checked), before any write.
+     */
+    beforeWrite?: (proposal: GenomeEvolutionProposalData) => Promise<void>,
   ): Promise<{ proposal: GenomeEvolutionProposalData; genome: Awaited<ReturnType<BlueprintService['calculateGenomeIntegrity']>> }> {
     const proposal = await this.findOrThrow(businessId, proposalId);
+    if (beforeWrite) await beforeWrite(proposal);
 
     if (proposal.status === 'APPROVED') {
       throw new BadRequestException('Proposal is already approved');
@@ -203,8 +209,14 @@ export class GenomeEvolutionService {
     businessId: string,
     proposalId: string,
     rejectedBy?: string,
+    /**
+     * Round 4 (FU-GENOME-EVOLUTION-SURFACES, security F2): the caller's authority check, run on the row this call read
+     * and acts on (so the patch applied is the one checked), before any write.
+     */
+    beforeWrite?: (proposal: GenomeEvolutionProposalData) => Promise<void>,
   ): Promise<GenomeEvolutionProposalData> {
     const proposal = await this.findOrThrow(businessId, proposalId);
+    if (beforeWrite) await beforeWrite(proposal);
 
     if (proposal.status === 'APPROVED') {
       throw new BadRequestException('Cannot reject an approved proposal');
@@ -230,8 +242,14 @@ export class GenomeEvolutionService {
     businessId: string,
     proposalId: string,
     dto: Partial<GenomeEvolutionProposalInput>,
+    /**
+     * Round 4 (FU-GENOME-EVOLUTION-SURFACES, security F2): the caller's authority check, run on the row this call read
+     * and acts on (so the patch applied is the one checked), before any write.
+     */
+    beforeWrite?: (proposal: GenomeEvolutionProposalData) => Promise<void>,
   ): Promise<GenomeEvolutionProposalData> {
     const proposal = await this.findOrThrow(businessId, proposalId);
+    if (beforeWrite) await beforeWrite(proposal);
 
     if (proposal.status === 'APPROVED' || proposal.status === 'REJECTED') {
       throw new BadRequestException('Cannot edit a finalized proposal');

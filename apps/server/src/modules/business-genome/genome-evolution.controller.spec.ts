@@ -50,7 +50,7 @@ describe('GenomeEvolutionController', () => {
   it('POST /evolution-proposals/:id/approve approves', async () => {
     const { controller, service } = makeController();
     const result = await controller.approve('biz_1', 'prop_1', { user: { id: 'user_1' } } as any);
-    expect(service.approve).toHaveBeenCalledWith('biz_1', 'prop_1', 'user_1');
+    expect(service.approve).toHaveBeenCalledWith('biz_1', 'prop_1', 'user_1', expect.any(Function));
     expect(result.proposal.status).toBe('APPROVED');
     expect((result as any).genome).toEqual({});
   });
@@ -58,7 +58,7 @@ describe('GenomeEvolutionController', () => {
   it('POST /evolution-proposals/:id/reject rejects', async () => {
     const { controller, service } = makeController();
     const result = await controller.reject('biz_1', 'prop_1', { user: { id: 'user_1' } } as any);
-    expect(service.reject).toHaveBeenCalledWith('biz_1', 'prop_1', 'user_1');
+    expect(service.reject).toHaveBeenCalledWith('biz_1', 'prop_1', 'user_1', expect.any(Function));
     expect(result.status).toBe('REJECTED');
   });
 
@@ -66,7 +66,7 @@ describe('GenomeEvolutionController', () => {
     const { controller, service } = makeController();
     const body = { reason: 'Updated' } as any;
     const result = await controller.edit('biz_1', 'prop_1', body);
-    expect(service.edit).toHaveBeenCalledWith('biz_1', 'prop_1', body);
+    expect(service.edit).toHaveBeenCalledWith('biz_1', 'prop_1', body, expect.any(Function));
     expect(result.status).toBe('EDITED');
   });
 });

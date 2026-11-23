@@ -19,7 +19,8 @@ import { ValueLearningService } from './value-learning.service';
 import { ComplianceMapService } from '../key-autonomy/compliance-map.service';
 import { financialProposalsWithProvenance, genomeReaderReadsRevenue, PROPOSAL_CLASSIFY_SELECT } from '../business-genome/key-genome/genome-finance-scope';
 import { autonomyVerdictForReader } from '../key-autonomy/key-action-genome-projection';
-import { graphActionModuleScope } from '../ai/graph-actions.controller';
+import { graphActionExtraScopes, graphActionModuleScope } from '../ai/graph-actions.controller';
+import { KEY_PLAN_MODULE_SCOPES, planStepReadsMoneyReport } from './key-cortex-plan-authority';
 import { KEY_BOOKS_REVENUE_TOOLS } from '../ai/plan-step-authority';
 import { keyOrganToolAuthority } from './key-cortex-organ-tool-authority';
 import { isFinancialProposal } from '../business-genome/key-genome/genome-finance-scope';
@@ -33,11 +34,24 @@ import { isFinancialProposal } from '../business-genome/key-genome/genome-financ
  */
 function actionKeyIsMoney(actionKey: string): boolean {
   const key = actionKey.trim();
+  const money = (module: string) => module === 'revenue' || module === 'expenses';
+  // Round 4 (correctness MAJOR-1): KeyActionProposalService and KeyCortexActionsService record key_autonomy.<TYPE> and
+  // key_cortex.<TYPE>: the action type is judged as a proposal's (listed non-money types only).
+  const prefixed = /^(?:key_autonomy|key_cortex)\.(.+)$/i.exec(key);
+  if (prefixed) return isFinancialProposal({ actionType: prefixed[1] });
   if (KEY_BOOKS_REVENUE_TOOLS.has(key)) return true;
   const organ = keyOrganToolAuthority(key);
-  if (organ && 'scopes' in organ) return organ.scopes.some((s) => s.module === 'revenue' || s.module === 'expenses');
+  if (organ && 'scopes' in organ) return organ.scopes.some((s) => money(s.module));
   const scope = graphActionModuleScope(key);
-  if (scope) return scope.module === 'revenue' || scope.module === 'expenses';
+  // Round 4 (correctness MINOR-2): a tool whose extra scopes read or write revenue or expenses is money too.
+  if (scope) return money(scope.module) || graphActionExtraScopes(key).some((s) => money(s.module));
+  // Round 4: the connector executor and query pipeline record <module>.<action>; the module's KEY plan scope decides
+  // (revenue or expenses, or a money report step, is money; another module is not).
+  const dotted = /^([a-z_]+)\.([a-z0-9_]+)$/i.exec(key);
+  if (dotted && Object.prototype.hasOwnProperty.call(KEY_PLAN_MODULE_SCOPES, dotted[1])) {
+    const planScope = KEY_PLAN_MODULE_SCOPES[dotted[1]];
+    return money(planScope) || planStepReadsMoneyReport(dotted[1], dotted[2]);
+  }
   return isFinancialProposal({ actionType: key });
 }
 
