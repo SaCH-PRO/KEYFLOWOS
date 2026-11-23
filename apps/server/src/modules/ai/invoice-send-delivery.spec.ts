@@ -37,6 +37,9 @@ function makeOrchestrator(deliveryStatus: 'SENT' | 'QUEUED' | 'FAILED') {
         invoice: {
           findFirst: vi.fn(async () => ({
             id: 'inv_1',
+            // FU-PAY-LINK-STATUS-GATE: a stored invoice always has a status, and KEY's send now
+            // refuses one no pay link may be issued for; a DRAFT is what this send issues.
+            status: 'DRAFT',
             invoiceNumber: 'INV-001',
             total: 500,
             currency: 'TTD',
