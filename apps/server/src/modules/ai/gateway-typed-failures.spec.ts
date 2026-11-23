@@ -137,13 +137,20 @@ describe('RR-GATEWAY-TYPED-FAILURES: provider failures are classified before the
       (service as any).callAnthropic = callAnthropic;
       (service as any).callOpenAi = vi.fn().mockResolvedValue(OK);
 
-      await service.complete(baseRequest({ providerOverride: 'anthropic', modelOverride: 'claude-3-5-sonnet-20241022' })).catch(() => undefined);
+      const refusal: any = await service.complete(baseRequest({ providerOverride: 'anthropic', modelOverride: 'claude-3-5-sonnet-20241022' })).then(
+        () => { throw new Error('expected the dispatch to be refused: every configured candidate was rate limited'); },
+        (e: unknown) => e,
+      );
 
-      // The override makes anthropic primary; its strategy may name more anthropic candidates, and a
-      // rate-limited dispatch still moves to the next one, each retried twice: so a multiple of 3 calls,
-      // at least 3, and the circuit never opens however many 429s arrived.
-      expect(callAnthropic.mock.calls.length).toBeGreaterThanOrEqual(3);
-      expect(callAnthropic.mock.calls.length % 3).toBe(0);
+      // The override makes anthropic primary and keeps balanced/general's fallbacks, whose first entry is
+      // anthropic too (candidates are not deduplicated): two anthropic candidates, each retried twice, so
+      // exactly six calls. On main the second candidate was skipped because the first three 429s had
+      // already opened the circuit. The rejection is the provider's own last error, as for any configured
+      // provider that fails (R0-07: not reported as not-configured), not the structured 503.
+      expect(callAnthropic).toHaveBeenCalledTimes(6);
+      expect(refusal).toBeInstanceOf(Error);
+      expect(typeof refusal.getStatus).not.toBe('function');
+      expect(refusal.message).toMatch(/^Anthropic API error \(429\)/);
       const anthropic = circuit(service, 'anthropic');
       expect(anthropic.openUntil).toBeNull();
       expect(anthropic.failures).toBe(0);
@@ -183,6 +190,31 @@ describe('RR-GATEWAY-TYPED-FAILURES: provider failures are classified before the
       expect(health(service, 'openai')).toMatchObject({ circuitOpen: true, available: false, lastFailureClass: 'server' });
     });
 
+    it('402 Payment Required counts as quota_exhausted and is not retried (OpenRouter and other OpenAI-compatible providers signal no credits that way)', async () => {
+      const { callOpenAi } = stubProviders(service, () => new OpenAI.APIError(402, { message: 'Insufficient credits', type: 'payment_required', code: null }, 'Insufficient credits', undefined));
+
+      const result = await service.complete(baseRequest());
+
+      expect(callOpenAi).toHaveBeenCalledTimes(1);
+      expect(result.provider).toBe('anthropic');
+      expect(circuit(service, 'openai').failures).toBe(1);
+      expect(health(service, 'openai')).toMatchObject({ lastFailureClass: 'quota_exhausted' });
+    });
+
+    it('a 429 is quota_exhausted only on a documented code or type, never on the words of the message', async () => {
+      const { classifyProviderFailure } = await import('./provider-failure-class');
+      // Google's ordinary per-minute throttle says "quota"; it is a rate limit.
+      expect(classifyProviderFailure(new OpenAI.RateLimitError(429, { message: 'Resource has been exhausted (e.g. check quota).', type: null, code: null }, 'Resource has been exhausted (e.g. check quota).', undefined))).toBe('rate_limited');
+      expect(classifyProviderFailure(new OpenAI.RateLimitError(429, { message: 'You exceeded your current quota, please check your plan and billing details.', type: null, code: null }, 'quota', undefined))).toBe('rate_limited');
+      // OpenAI: code insufficient_quota (type alone also carries it); Moonshot: type exceeded_current_quota_error.
+      expect(classifyProviderFailure(new OpenAI.RateLimitError(429, { message: 'x', type: 'insufficient_quota', code: null }, 'x', undefined))).toBe('quota_exhausted');
+      expect(classifyProviderFailure(new OpenAI.RateLimitError(429, { message: 'Your account is not enough balance', type: 'exceeded_current_quota_error', code: null }, 'x', undefined))).toBe('quota_exhausted');
+      // A plain Error with no status: only the documented token in its text says quota.
+      expect(classifyProviderFailure(new Error('429 insufficient_quota'))).toBe('quota_exhausted');
+      expect(classifyProviderFailure(new Error('HTTP 402 Payment Required'))).toBe('quota_exhausted');
+      expect(classifyProviderFailure(new Error('429 Resource has been exhausted (e.g. check quota).'))).toBe('rate_limited');
+    });
+
     it('insufficient_quota (429 with code insufficient_quota) counts and is not retried: the credential cannot serve', async () => {
       const { callOpenAi } = stubProviders(service, quotaExhausted);
 
@@ -211,7 +243,9 @@ describe('RR-GATEWAY-TYPED-FAILURES: provider failures are classified before the
       const byok = [...(service as any).byokCircuitBreakers.values()] as Array<{ failures: number }>;
       expect(byok).toHaveLength(1);
       expect(byok[0].failures).toBe(1);
-      expect(health(service, 'openai')).toMatchObject({ circuitOpen: false, lastFailureClass: 'auth' });
+      // Provider health is read by every business of the platform: a business's own key failing says
+      // nothing about the platform credential, so lastFailureClass stays as it was (null here).
+      expect(health(service, 'openai')).toMatchObject({ circuitOpen: false, lastFailureClass: null });
     });
   });
 
@@ -318,6 +352,7 @@ describe('RR-GATEWAY-TYPED-FAILURES: provider failures are classified before the
         [new OpenAI.PermissionDeniedError(403, { message: 'forbidden' }, 'forbidden', undefined), 'auth'],
         [callerAbort(), 'caller_aborted'],
         [new OpenAI.APIConnectionTimeoutError(), 'timeout'],
+        [Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError', code: 23 }), 'timeout'],
         [new OpenAI.APIConnectionError({ message: 'Connection error.' }), 'network'],
         [new ProviderHttpError('anthropic', 429, 'Anthropic API error (429): x'), 'rate_limited'],
         [new ProviderHttpError('anthropic', 529, 'Anthropic API error (529): overloaded'), 'server'],
