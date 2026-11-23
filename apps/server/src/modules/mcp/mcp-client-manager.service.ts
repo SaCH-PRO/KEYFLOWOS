@@ -19,64 +19,77 @@ function safeHost(url: string): string {
   }
 }
 
-/**
- * An error message fit for the log. A url may carry credentials (user:pw@,
- * ?token=) and errors quote it, so, in order:
- * 1. the server's url, as configured or in the normalized form fetch quotes,
- *    and whatever url text follows it, becomes `<url host>`;
- * 2. any other url becomes `<url host>` (its user, path and query go);
- * 3. the url's user, password and query values of 3 or more characters, raw,
- *    decoded, percent- and form-encoded, are removed wherever they still
- *    appear, in any letter case, in one pass. Shorter values are left: they
- *    would erase ordinary words.
- * Every step is linear in the message, and the result is capped at
- * LOG_SAFE_MAX characters, so a huge error body cannot stall the event loop.
- * A thrown value that cannot be printed is logged as `<unprintable error>`.
- */
 const LOG_SAFE_MAX = 1000;
 
-function logSafe(err: unknown, configUrl: string): string {
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * An error message fit for the log. A url may carry credentials (user:pw@,
+ * ?token=), a server may echo its bearer token, and errors quote both, so, in
+ * order:
+ * 1. the server's url, as configured or in the normalized form fetch quotes,
+ *    in any letter case, and whatever url text follows it, becomes `<url host>`;
+ * 2. any other url becomes `<url host>` (its user, path and query go);
+ * 3. the bearer token, and the url's user, password, query string and the
+ *    values of its `name=value` pairs, raw, decoded, percent- and
+ *    form-encoded, of 3 or more characters, are removed wherever they still
+ *    appear, in any letter case, in one pass. Shorter values are left: they
+ *    would erase ordinary words.
+ * Every step is linear in the message (urls are at most MCP_URL_MAX
+ * characters, so the patterns stay small), and the result is capped at
+ * LOG_SAFE_MAX characters, so a huge error body cannot stall the event loop.
+ * A thrown value that cannot be printed is logged as `<unprintable error>`;
+ * should redaction itself fail, the message is not logged at all.
+ */
+function logSafe(err: unknown, config: Pick<McpServerConfig, 'url' | 'tokenEnvVar'>): string {
   let message: string;
   try {
     message = String((err as Error)?.message ?? err);
   } catch {
     return '<unprintable error>';
   }
-  const host = safeHost(configUrl);
-  const wholes = [configUrl];
-  const fragments: string[] = [];
   try {
-    const u = new URL(configUrl);
-    wholes.push(u.href);
-    fragments.push(u.username, u.password, u.search.slice(1));
-    for (const pair of u.search.slice(1).split('&')) fragments.push(pair.slice(pair.indexOf('=') + 1));
-    for (const part of [u.username, u.password]) {
-      try {
-        fragments.push(decodeURIComponent(part));
-      } catch {
-        // not decodable: the encoded form is already listed
+    const configUrl = config.url;
+    const host = safeHost(configUrl);
+    const wholes = [configUrl];
+    const fragments: string[] = [];
+    const token = config.tokenEnvVar ? process.env[config.tokenEnvVar] : undefined;
+    if (token) fragments.push(token);
+    try {
+      const u = new URL(configUrl);
+      wholes.push(u.href);
+      fragments.push(u.username, u.password, u.search.slice(1));
+      for (const pair of u.search.slice(1).split('&')) {
+        if (pair.includes('=')) fragments.push(pair.slice(pair.indexOf('=') + 1));
       }
+      for (const part of [u.username, u.password]) {
+        try {
+          fragments.push(decodeURIComponent(part));
+        } catch {
+          // not decodable: the encoded form is already listed
+        }
+      }
+      for (const value of u.searchParams.values()) {
+        fragments.push(value, encodeURIComponent(value), new URLSearchParams({ v: value }).toString().slice(2));
+      }
+    } catch {
+      // an unparsable url never connects; its raw form is already listed
     }
-    for (const value of u.searchParams.values()) {
-      fragments.push(value, encodeURIComponent(value), new URLSearchParams({ v: value }).toString().slice(2));
-    }
+    const MARK = '\u0000mcp-url\u0000';
+    const wholePattern = [...new Set(wholes.filter(Boolean))].sort((a, b) => b.length - a.length).map(escapeRegExp);
+    message = message.replace(new RegExp(wholePattern.join('|'), 'gi'), MARK);
+    message = message.split(MARK).map((piece, index) => (index === 0 ? piece : piece.replace(/^[^\s'"<>]*/, ''))).join(`<url ${host}>`);
+    // The lookbehind makes a scheme start only where a letter run starts, so a long run of letters is
+    // scanned once, not once per position.
+    message = message.replace(/(?<![a-z0-9+.-])[a-z][a-z0-9+.-]*:\/\/[^\s'"<>]+/gi, (url) => `<url ${safeHost(url)}>`);
+    const escaped = [...new Set(fragments)].filter((f) => f.length >= 3).sort((a, b) => b.length - a.length).map(escapeRegExp);
+    if (escaped.length) message = message.replace(new RegExp(escaped.join('|'), 'gi'), '[redacted]');
+    return message.length > LOG_SAFE_MAX ? `${message.slice(0, LOG_SAFE_MAX)}…(truncated)` : message;
   } catch {
-    // an unparsable url never connects; its raw form is already listed
+    return '<error not loggable>';
   }
-  const MARK = '\u0000mcp-url\u0000';
-  for (const whole of wholes.filter(Boolean).sort((a, b) => b.length - a.length)) {
-    message = message.split(whole).join(MARK);
-  }
-  message = message.split(MARK).map((piece, index) => (index === 0 ? piece : piece.replace(/^[^\s'"<>]*/, ''))).join(`<url ${host}>`);
-  // The lookbehind makes a scheme start only where a letter run starts, so a long run of letters is
-  // scanned once, not once per position.
-  message = message.replace(/(?<![a-z0-9+.-])[a-z][a-z0-9+.-]*:\/\/[^\s'"<>]+/gi, (url) => `<url ${safeHost(url)}>`);
-  const escaped = [...new Set(fragments)]
-    .filter((f) => f.length >= 3)
-    .sort((a, b) => b.length - a.length)
-    .map((f) => f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  if (escaped.length) message = message.replace(new RegExp(escaped.join('|'), 'gi'), '[redacted]');
-  return message.length > LOG_SAFE_MAX ? `${message.slice(0, LOG_SAFE_MAX)}…(truncated)` : message;
 }
 
 interface ServerEntry {
@@ -162,7 +175,7 @@ export class McpClientManagerService implements OnModuleDestroy {
       // The error goes to the caller and the execution log: the same redaction as the warnings.
       // No `cause`: the caught error is the unredacted one this replaces.
       // eslint-disable-next-line preserve-caught-error
-      throw new Error(logSafe(err, config.url));
+      throw new Error(logSafe(err, config));
     }
 
     // Tool output is untrusted content: cap it before it reaches prompts.
@@ -198,7 +211,7 @@ export class McpClientManagerService implements OnModuleDestroy {
       entry.toolsLoadedAt = Date.now();
       this.logger.log(`MCP server ${config.name}: ${entry.tools.length} tool(s) bridged`);
     } catch (err) {
-      this.logger.warn(`MCP listTools failed for server ${JSON.stringify(config.key)}: ${logSafe(err, config.url)}`);
+      this.logger.warn(`MCP listTools failed for server ${JSON.stringify(config.key)}: ${logSafe(err, config)}`);
     }
     return entry;
   }
@@ -222,7 +235,7 @@ export class McpClientManagerService implements OnModuleDestroy {
       return client;
     } catch (err) {
       // Key and host only: a url may carry credentials (user:pw@, ?token=), and the error quotes it.
-      this.logger.warn(`MCP connect failed for server ${JSON.stringify(config.key)} (${safeHost(config.url)}): ${logSafe(err, config.url)}`);
+      this.logger.warn(`MCP connect failed for server ${JSON.stringify(config.key)} (${safeHost(config.url)}): ${logSafe(err, config)}`);
       return null;
     }
   }

@@ -34,7 +34,11 @@ export interface McpServerConfig {
 
 type ConfigLog = (message: string) => void;
 
+/** The longest server url accepted (it also bounds the log redaction's patterns). */
+export const MCP_URL_MAX = 2048;
+
 function isHttpUrl(url: string): boolean {
+  if (url.length > MCP_URL_MAX) return false;
   try {
     const { protocol } = new URL(url);
     return protocol === 'https:' || protocol === 'http:';
@@ -51,8 +55,8 @@ function validBusinessIds(value: unknown): value is string[] {
  * Reads MCP_REMOTE_SERVERS. Unset or empty: no servers, nothing logged. A value
  * that is not a JSON array serves nothing, with an error log (`log`). An entry
  * is dropped with an error log when it lacks a string key or url, when its key
- * is empty, contains "__" or ends in "_", when its url does not parse or is not
- * http(s), when an earlier kept entry already uses its key, or when it has no
+ * is empty, contains "__" or ends in "_", when its url does not parse, is not
+ * http(s) or is longer than MCP_URL_MAX, when an earlier kept entry already uses its key, or when it has no
  * valid `businessIds`. An `enabled: false` entry with a usable key and url is
  * skipped without a log. The log names the server's key only, never its url or
  * token.
@@ -85,7 +89,7 @@ export function loadMcpServerConfigs(log: ConfigLog = () => undefined): McpServe
       return;
     }
     if (!isHttpUrl(c.url)) {
-      log(`MCP server ${label} dropped: its url must be an http(s) url`);
+      log(`MCP server ${label} dropped: its url must be an http(s) url of at most ${MCP_URL_MAX} characters`);
       return;
     }
     if (c.enabled === false) return;
