@@ -27,6 +27,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -217,7 +218,8 @@ describe('FU-RESEARCH-CORPUS-YAML: negative controls over fixture text', () => {
   });
 
   it('the full parse reports a problem with file:line:column for a scratch file that does not parse, when a parser is available', () => {
-    const dir = fs.mkdtempSync(path.join(ROOT, 'node_modules', '.cache-research-yaml-'));
+    // the OS temp dir: node_modules does not exist in CI before install, nor in a fresh worktree
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'research-yaml-'));
     try {
       fs.mkdirSync(path.join(dir, RESEARCH_DIR), { recursive: true });
       fs.writeFileSync(path.join(dir, LEDGER), 'sources:\n  - id: X\n    title: Peopleware: Productive\n');
