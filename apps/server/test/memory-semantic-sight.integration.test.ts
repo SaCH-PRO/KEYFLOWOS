@@ -79,6 +79,8 @@ const AMOUNT = '4812.37';
 const okMarker = (n: number) => `V71U-OK-${n}`;
 
 const saved = { fetch: globalThis.fetch };
+/** Every text the stand-in embedding provider was handed. */
+const embedCalls: string[] = [];
 const outbound: string[] = [];
 
 let db: any;
@@ -318,7 +320,10 @@ beforeAll(async () => {
 
   prisma = new PrismaService();
   semantic = new SemanticMemoryService(prisma, new EventEmitter2(), {
-    trackEmbedding: async (_b: string, _u: unknown, _o: string, texts: string[]) => texts.map(embed),
+    trackEmbedding: async (_b: string, _u: unknown, _o: string, texts: string[]) => {
+      embedCalls.push(...texts);
+      return texts.map(embed);
+    },
   } as any);
   memory = new AiMemoryService(prisma, {} as any, { getBlueprint: async () => null } as any, semantic);
   temporalMemory = new TemporalFlowMemoryService(prisma, semantic);
@@ -719,4 +724,42 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
       await clearMemory();
     }
   }, 120_000);
+  it('V71U-15 RED (orchestrator acceptance, security MINOR-2; D-146): an AiMemory row stating an expense needs expenses read: a member with revenue read and expenses none is not handed "expense: rent TTD 4,000"; the revenue-and-expenses reader is', async () => {
+    await clearMemory();
+    try {
+      await memory.upsert(ID.biz, { category: 'business_fact', key: `${P}rent`, value: `${okMarker(12)} expense: rent TTD 4,000`, source: 'user' });
+      await semantic.backfillFromAiMemory(ID.biz);
+      expect((await searchFor('revnoexp', 50)).join('\n')).not.toContain('rent TTD 4,000');
+      expect((await searchFor('revenue', 50)).join('\n')).toContain('rent TTD 4,000');
+      expect((await searchFor('owner', 50)).join('\n')).toContain('rent TTD 4,000');
+    } finally {
+      await clearMemory();
+    }
+  }, 120_000);
+
+  it('V71U-16 RED (orchestrator acceptance, security MINOR-3): GET .../agent/memory/search refuses a query over 500 characters with 400, before any embedding; 500 characters are served', async () => {
+    const calls = embedCalls.length;
+    const long = await agent().get(`/ai/businesses/${ID.biz}/agent/memory/search`).query({ q: 'x'.repeat(501) }).set(HEADER, ID.owner);
+    expect(long.status, JSON.stringify(long.body).slice(0, 200)).toBe(400);
+    expect(embedCalls.length, 'no embedding for a refused query').toBe(calls);
+    const ok = await agent().get(`/ai/businesses/${ID.biz}/agent/memory/search`).query({ q: 'x'.repeat(500) }).set(HEADER, ID.owner);
+    expect(ok.status).toBe(200);
+  });
+
+  it('V71U-17 (orchestrator acceptance, correctness m-1; owner parity): for live sources the owner and a reader of every module are handed exactly the hits, in the same order and number, that the unprojected read serves; only the copies whose source is gone or stale (here: a deleted summary and an event copy with no source) are now withheld, for everyone', async () => {
+    await clearMemory();
+    try {
+      await seedOrdinary();
+      await seedRevenue(2);
+      const unprojected = (await semantic.search({ businessId: ID.biz, query: QUERY, limit: 50, includeDocumentExtractionCopies: true }))
+        .map((h: any) => String(h.content));
+      const live = unprojected.filter((c) => !c.toLowerCase().includes(ORPHAN));
+      expect(unprojected.length - live.length, 'premise: the two unresolvable copies are in the unprojected read').toBe(2);
+      expect(await searchFor('owner', 50)).toEqual(live);
+      expect(await searchFor('revenue', 50)).toEqual(live);
+      expect(await searchFor('owner', 5)).toEqual(live.slice(0, 5));
+    } finally {
+      await clearMemory();
+    }
+  }, 240_000);
 });
