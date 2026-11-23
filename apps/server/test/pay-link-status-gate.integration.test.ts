@@ -1,7 +1,7 @@
 /**
  * FU-PAY-LINK-STATUS-GATE (P1 security; D-256, D-248) — a public pay link is
- * minted (or a live one handed out again) only for an invoice the customer
- * owes (REAL database, REAL CommerceController + CommerceService, REAL guards).
+ * minted (or a live one handed out again) only for an invoice in a status the
+ * token pay page takes money for (REAL database, REAL CommerceController + CommerceService, REAL guards).
  *
  * Before: CommerceService.createPaymentLink refused only PAID and VOID, so
  * POST /commerce/businesses/:b/invoices/:id/payment-link minted a public pay
@@ -31,7 +31,7 @@
  *   PL-07  send-email of the payable statuses is unchanged: one email carrying the one live link.
  *   PL-09  KEY's commerce_send_invoice (flow-orchestrator) refuses PENDING, FAILED, FULLY_CREDITED
  *          and an unknown stored value before any email, link row or status change, as send-email
- *          does (D-248: KEY never emails the invoice without its pay button); a DRAFT and the
+ *          does (D-248: KEY does not email an invoice no pay link may be issued for); a DRAFT and the
  *          payable statuses still go out with the pay link.
  *   PL-08  cross-tenant: B's invoice ids under A's business answer POST payment-link with the
  *          same 404 whatever their status, and send-email with the same 403 it gave before; under

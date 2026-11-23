@@ -5649,7 +5649,9 @@ export class CommerceService {
    * invoice's live pay link, minted when it has none (createPaymentLink). A
    * PAID or VOID invoice cannot get a new link, so the most recent one it was
    * given is handed out again (findAnyPaymentLink), or null when it never had
-   * one. Any other refusal (unknown invoice, another tenant's) is thrown.
+   * one. Any other refusal (unknown invoice, another tenant's, and since
+   * FU-PAY-LINK-STATUS-GATE the 409 for a status no pay link may be issued
+   * for: assertPayLinkStatus) is thrown.
    *
    * V1-46b-TOKEN-PAY-COMPLETE (CR-01; D-07: token links only): the single
    * place a customer-facing invoice URL is built. The operator's invoice
@@ -5669,8 +5671,9 @@ export class CommerceService {
       // commerce_send_invoice, the public booking create). The others (resend
       // receipt, the automated overdue, due-soon, payment-failed and recovery
       // emails) reach it as before, so one of them run for a DRAFT still gets
-      // a link, as on main (not narrowed here). A status nobody owes on
-      // (PENDING, FAILED, FULLY_CREDITED) is a 409 thrown here.
+      // a link, as on main (not narrowed here). Any status the token pay page
+      // does not take money for (PENDING, FAILED, FULLY_CREDITED) is a 409
+      // thrown here.
       const link = await this.issuePaymentLink(invoiceId, businessId, undefined, true);
       return `${appUrl()}/public/invoice/${link.token}`;
     } catch (err: unknown) {
@@ -5743,8 +5746,9 @@ export class CommerceService {
       select: { status: true },
     });
     const mintable = !!invoice && invoice.status !== 'PAID' && invoice.status !== 'VOID';
-    // FU-PAY-LINK-STATUS-GATE: an invoice no one owes on (PENDING, FAILED,
-    // FULLY_CREDITED, any status added later) is refused before a link row is
+    // FU-PAY-LINK-STATUS-GATE: an invoice in a status the token pay page does
+    // not take money for (PENDING, FAILED, FULLY_CREDITED, any status added
+    // later) is refused before a link row is
     // read, written or rotated and before the message is sent. A DRAFT is
     // admitted: this send issues it (the controller then moves it to SENT).
     if (mintable) CommerceService.assertPayLinkStatus(invoice.status, true);
@@ -5876,8 +5880,10 @@ export class CommerceService {
   /**
    * FU-PAY-LINK-STATUS-GATE (D-256, D-248): a pay link is minted, or a live one
    * handed out again (and rotated or given a new expiry), only for an invoice
-   * the customer owes: INTENT_PAYABLE_STATUSES, the statuses the token pay page
-   * shows and takes money for. `issuing` also admits a DRAFT, for the callers
+   * in INTENT_PAYABLE_STATUSES, the statuses the token pay page shows and takes
+   * money for. This is the share list, not the owed set: D-256 counts PENDING
+   * as owed in every owed figure, and keeps share lists apart, so a PENDING
+   * invoice gets no link here (the pay page would not open it either). `issuing` also admits a DRAFT, for the callers
    * that hand the link to the customer as the invoice is issued
    * (publicInvoiceUrl: the operator's send-email, which then moves it to SENT,
    * KEY's commerce_send_invoice, the public booking create). POST
