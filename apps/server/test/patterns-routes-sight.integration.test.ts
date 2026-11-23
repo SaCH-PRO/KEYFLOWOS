@@ -622,4 +622,17 @@ describe('FU-PATTERNS-ROUTES-SIGHT (D-257, D-100, D-234, D-146): the memory and 
       await clearMemory();
     }
   }, 240_000);
+
+  it('V71Y-16 RED (reviews round 5, R5-1/N-1): a bulk entry that is not an object is refused 400, not 500, and nothing is written', async () => {
+    await clearMemory();
+    try {
+      for (const [i, entries] of [[null], ['text'], [{ category: 'patterns', key: 'v71y_ok', value: 'Most active day: Monday' }, null]].entries()) {
+        const res = await agent().put(`/ai/businesses/${ID.biz}/ai/memory/bulk`).set(HEADER, ID.blind).set('x-forwarded-for', `10.74.12.${i + 1}`).send({ entries });
+        expect(res.status, `${JSON.stringify(entries)}: ${text(res.body)}`).toBe(400);
+      }
+      expect(await db.aiMemory.count({ where: { businessId: ID.biz } })).toBe(0);
+    } finally {
+      await clearMemory();
+    }
+  }, 240_000);
 });
