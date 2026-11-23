@@ -566,7 +566,7 @@ describe('W1F-MEMORY-COPIES: every AiMemory deletion removes its semantic copies
       );
       // A document chunk (KnowledgeIngestionService's copy of a knowledge source), not a copy of an AiMemory row. Its
       // knowledge source exists (MEM-SEMANTIC-SIGHT: a chunk whose source is not found in the business is served to
-      // nobody, and one that is only to a member with revenue read, which a STAFF member has by role default).
+      // nobody, and one that is only to a member with revenue and expenses read, which a STAFF member has by role default).
       await db.knowledgeSource.create({ data: { id: `${P}knowledge_1`, businessId: ID.biz, title: 'price list', sourceType: 'text', content: '', status: 'processed' } });
       await db.$executeRawUnsafe(
         `INSERT INTO ai_memory_embeddings (id, business_id, content, source_type, source_id, embedding, metadata, created_at)

@@ -20,6 +20,9 @@ export interface SemanticReader {
   sight: ModuleSight;
 }
 
+/** How many source-event ids one read takes (well under Postgres's bind-parameter limit). */
+const EVENT_READ_CHUNK = 5_000;
+
 /** The ai_memory_embeddings source types a hit can resolve to; any other has no source to resolve and fails closed. */
 export const TEMPORAL_MEMORY_SOURCE_TYPE = 'temporal_memory';
 export const KNOWLEDGE_CHUNK_SOURCE_TYPE = 'document';
@@ -74,6 +77,9 @@ interface SourceEvent {
 export function temporalMemoryModulesOf(row: TemporalRow, events: ReadonlyMap<string, SourceEvent>, copyContent?: string): CanonicalModule[] {
   const modules = new Set<CanonicalModule>(modulesNamedBy(row.entityType, row.sourceModule, row.entityId));
   const add = (list: readonly CanonicalModule[]) => list.forEach((module) => modules.add(module));
+  // Re-review: what KEY stored itself (TemporalAdapterService.storeMemory: entity 'business', source module key_cortex,
+  // a key the model chose, its tags as sourceEventIds) has no recorded provenance: every module.
+  if (row.entityType === 'business' || row.sourceModule === 'key_cortex') add(EVENT_MODULES);
   const meta = row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata) ? (row.metadata as Record<string, unknown>) : {};
   const counted = meta.eventCount;
   if (counted !== undefined && counted !== null && !(typeof counted === 'number' && counted <= (row.sourceEventIds ?? []).length)) add(EVENT_MODULES);
@@ -94,9 +100,10 @@ export function temporalMemoryModulesOf(row: TemporalRow, events: ReadonlyMap<st
 /**
  * MEM-SEMANTIC-SIGHT: for each hit, whether `who` may be handed it, by its source's own rule (sourceType, sourceId,
  * always within `businessId`):
- * - an AiMemory copy ('memory') as its row: a document extraction (DOCUMENT_EXTRACTION_CATEGORY) only to a member reader
- *   with revenue read (readsDocumentExtractions, MEM-DOC-EXTRACTION-SIGHT); any other row as readersOwnPromptMemory
- *   serves AiMemory rows (business-wide);
+ * - an AiMemory copy ('memory') as its row: a document extraction (DOCUMENT_EXTRACTION_CATEGORY), and (re-review, D-234
+ *   "authorization follows the data's meaning", D-100) a row whose category, key or value states money, or whose copy
+ *   does (a pattern totalling overdue invoices, a revenue goal), only to a member reader with revenue read
+ *   (readsDocumentExtractions); any other row business-wide, as readersOwnPromptMemory serves AiMemory rows;
  * - a temporal-memory summary ('temporal_memory') when the copy holds what the row holds now (its writer's form,
  *   `<entityType>:<type> — <content>`; a row is rewritten in place and keeps its old copies, whose provenance the row no
  *   longer records: review) and the reader may read every module temporalMemoryModulesOf names;
@@ -104,7 +111,7 @@ export function temporalMemoryModulesOf(row: TemporalRow, events: ReadonlyMap<st
  *   a menu alike), so only a member reader with revenue and expenses read, as an unclassified document event needs
  *   (MONEY_DOCUMENT_WORDS; D-234 fail closed);
  * - any other source type, or a source not found in the business: nobody (an unresolvable source fails closed).
- * A read that fails withholds every hit of the page (fail closed).
+ * A read that fails raises (re-review): the search then answers nothing, rather than paging on to lower-ranked hits.
  */
 export async function semanticHitsVisibleTo(
   prisma: PrismaService,
@@ -121,7 +128,7 @@ export async function semanticHitsVisibleTo(
 
     const [memoryRows, temporalRows, knowledgeRows] = await Promise.all([
       memoryIds.length
-        ? prisma.client.aiMemory.findMany({ where: { businessId, id: { in: memoryIds } }, select: { id: true, category: true } })
+        ? prisma.client.aiMemory.findMany({ where: { businessId, id: { in: memoryIds } }, select: { id: true, category: true, key: true, value: true } })
         : [],
       temporalIds.length
         ? prisma.client.temporalFlowMemory.findMany({
@@ -134,14 +141,18 @@ export async function semanticHitsVisibleTo(
         : [],
     ]);
     const eventIds = [...new Set((temporalRows as TemporalRow[]).flatMap((row) => row.sourceEventIds ?? []))];
-    const eventRows: SourceEvent[] = eventIds.length
-      ? await prisma.client.temporalFlowEvent.findMany({
-          where: { businessId, id: { in: eventIds } },
+    // Re-review: read in chunks (a page of summaries can name many thousands of source events).
+    const eventRows: SourceEvent[] = [];
+    for (let at = 0; at < eventIds.length; at += EVENT_READ_CHUNK) {
+      eventRows.push(
+        ...(await prisma.client.temporalFlowEvent.findMany({
+          where: { businessId, id: { in: eventIds.slice(at, at + EVENT_READ_CHUNK) } },
           select: { id: true, type: true, source: true, module: true, entityType: true, title: true, summary: true, description: true },
-        })
-      : [];
+        })),
+      );
+    }
 
-    const categories = new Map((memoryRows as Array<{ id: string; category: string }>).map((row) => [row.id, row.category]));
+    const memoryRowsById = new Map((memoryRows as Array<{ id: string; category: string; key: string; value: string }>).map((row) => [row.id, row]));
     const temporal = new Map((temporalRows as TemporalRow[]).map((row) => [row.id, row]));
     const knowledge = new Set((knowledgeRows as Array<{ id: string }>).map((row) => row.id));
     const events = new Map(eventRows.map((event) => [event.id, event]));
@@ -150,9 +161,15 @@ export async function semanticHitsVisibleTo(
     return hits.map((hit) => {
       switch (hit.sourceType) {
         case AI_MEMORY_COPY_SOURCE_TYPE: {
-          const category = categories.get(hit.sourceId);
-          if (category === undefined) return false;
-          return category !== DOCUMENT_EXTRACTION_CATEGORY || memberWithRevenue;
+          const row = memoryRowsById.get(hit.sourceId);
+          if (row === undefined) return false;
+          const money =
+            row.category === DOCUMENT_EXTRACTION_CATEGORY ||
+            isMoneyLabel(row.category) ||
+            isMoneyLabel(row.key) ||
+            textIsMoney(row.value) ||
+            textIsMoney(hit.content);
+          return !money || memberWithRevenue;
         }
         case TEMPORAL_MEMORY_SOURCE_TYPE: {
           const row = temporal.get(hit.sourceId);
@@ -167,7 +184,7 @@ export async function semanticHitsVisibleTo(
     });
   } catch (err: unknown) {
     logger?.warn(`[semanticSight][${businessId}] source read failed, no semantic hit served: ${err instanceof Error ? err.message : String(err)}`);
-    return hits.map(() => false);
+    throw err;
   }
 }
 

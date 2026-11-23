@@ -362,7 +362,8 @@ export class SemanticMemoryService {
      * whether each hit of a page, in rank order, may be handed to the reader. When given, the limit counts only the hits
      * it keeps: the read pages on, in a stable order (similarity, then id), past every hit it withholds, until the limit
      * is met, the matches end or MAX_SEMANTIC_SCAN rows have been read. A withheld hit takes no place and changes nothing
-     * returned. Without it the read is as before (one page of `limit`).
+     * returned. Without it the read is as before (one page of `limit`). When it raises, the search answers as for any
+     * other failure (nothing), never the hits of later pages.
      */
     visibleTo?: (hits: SemanticMemory[]) => Promise<boolean[]>;
   }): Promise<SemanticMemory[]> {
