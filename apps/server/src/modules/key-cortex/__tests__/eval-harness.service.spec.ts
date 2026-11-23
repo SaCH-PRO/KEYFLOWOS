@@ -38,10 +38,17 @@ const mockUnifiedMemory = {
   ],
 };
 
+// A correct planner: "send invoice to customer" ends in an invoice send. (Before
+// RR-EVAL-HARNESS-NO-VACUOUS this stub returned one unrelated step and the
+// planning suite passed anyway; that stub is now the RED control below.)
 const mockPlanEngine = {
   generatePlan: async () => ({
-    goal: { objective: 'test' },
-    steps: [{ order: 1, action: 'step1' }],
+    goal: { objective: 'send invoice to customer' },
+    steps: [
+      { order: 1, action: 'list_contacts', module: 'crm' },
+      { order: 2, action: 'create_invoice', module: 'commerce' },
+      { order: 3, action: 'send_invoice', module: 'commerce' },
+    ],
     confidence: 0.8,
   }),
 };
