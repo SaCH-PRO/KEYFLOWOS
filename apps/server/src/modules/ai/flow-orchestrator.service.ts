@@ -7524,6 +7524,11 @@ ${triage.standingContext}`;
         // send-email) refuses a VOID one; KEY emailed the pay link and only then failed the
         // VOID -> SENT transition. Refused before any mail.
         if (invoice.status === 'VOID') throw new Error('Cannot email a voided invoice');
+        // FU-PAY-LINK-STATUS-GATE (D-248): KEY never emails the invoice without its pay button.
+        // An invoice no pay link may be issued for (PENDING, FAILED, FULLY_CREDITED, any status
+        // added later) is refused here, before any mail, link or status change, as the operator's
+        // send-email refuses it. A DRAFT is admitted: this send issues it. PAID is left as it was.
+        if (invoice.status !== 'PAID') CommerceService.assertPayLinkStatus(invoice.status, true);
         if (!invoice.contact?.email) throw new Error('Contact has no email address');
         // ACTUALLY SEND IT.
         //

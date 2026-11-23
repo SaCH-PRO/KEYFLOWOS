@@ -6072,12 +6072,13 @@ export class CommerceService {
    * sendWithPublicInvoiceUrl). A link may be issued for the statuses above, and,
    * when `issuing` (the invoice is handed to the customer as it is issued), a
    * DRAFT. PAID and VOID are refused by the callers before this, with their
-   * own text.
+   * own text. Public for KEY's commerce_send_invoice (flow-orchestrator),
+   * which refuses through it before its email, as send-email does (D-248).
    */
-  private static assertPayLinkStatus(status: string, issuing: boolean): void {
+  static assertPayLinkStatus(status: string, issuing: boolean): void {
     if (CommerceService.INTENT_PAYABLE_STATUSES.has(status) || (issuing && status === 'DRAFT')) return;
     throw new ConflictException(
-      `A pay link can only be issued for a SENT, OVERDUE, PARTIALLY_PAID or PARTIALLY_CREDITED invoice; this invoice is ${status}`,
+      `A pay link can only be issued for an invoice in ${[...CommerceService.INTENT_PAYABLE_STATUSES].join(', ')}; this invoice is ${status}`,
     );
   }
 
