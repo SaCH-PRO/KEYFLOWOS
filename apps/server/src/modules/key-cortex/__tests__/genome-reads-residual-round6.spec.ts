@@ -80,3 +80,20 @@ describe('GET cortex/awareness reads with headroom for a reader without revenue 
     expect(out.items[0].id).toBe('c_0');
   });
 });
+
+describe('streamQuery: the opening thought counts nothing for a reader without revenue read (round 7, security MINOR-1)', () => {
+  const svc = Object.create(KeyCortexQueryPipelineService.prototype) as any;
+  // The reader's projection of the business's top ten recommendations and newest twenty signals.
+  const projected = { signals: [{ id: 's1' }, { id: 's2' }], recommendations: [ops(1), ops(2), ops(3)] };
+
+  it('RED-BEFORE: a reader without revenue read is not told how many signals and recommendations survived the projection', () => {
+    const thought: string = svc.genomeStreamThought(undefined, projected, false);
+    expect(thought).not.toMatch(/\d/);
+    expect(thought).toContain('genome-aware context');
+    expect(thought).not.toContain('undefined');
+  });
+
+  it('control: a revenue reader is told the counts and the stage, as before', () => {
+    expect(svc.genomeStreamThought('growth', projected, true)).toBe('Analyzing genome-aware context for growth stage business — 2 active signals, 3 recommendations available...');
+  });
+});
