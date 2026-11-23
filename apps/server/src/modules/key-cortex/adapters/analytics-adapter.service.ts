@@ -12,7 +12,7 @@ import {
 } from '../../reports/report-formatters';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { Prisma } from '@prisma/client';
-import { withoutForgottenPersonalData } from '../../business-events/business-event.service';
+import { FORGOTTEN_EVENT_METADATA_KEYS, withoutForgottenPersonalData } from '../../business-events/business-event.service';
 
 @Injectable()
 export class AnalyticsAdapterService {
@@ -167,10 +167,11 @@ export class AnalyticsAdapterService {
   }) {
     // V1-72 review (SEC-3): KEY-supplied properties about a forgotten contact
     // are not written (the same write-time check as BusinessEventService.emit).
-    // routeContactId names a contact only when the interceptor records it from
-    // the route; a KEY-supplied one is dropped.
+    // The keys a scrubbed row keeps (route, httpMethod, routeContactId) are
+    // the interceptor's; KEY-supplied ones are dropped, so they can neither
+    // name a contact nor carry free text past the scrub.
     const properties: Record<string, unknown> = { ...(input.properties ?? {}) };
-    delete properties.routeContactId;
+    for (const key of FORGOTTEN_EVENT_METADATA_KEYS) delete properties[key];
     const row = await withoutForgottenPersonalData(this.prisma.client, {
       businessId: input.businessId,
       eventType: input.eventName,

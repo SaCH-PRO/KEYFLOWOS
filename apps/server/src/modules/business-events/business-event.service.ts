@@ -24,10 +24,36 @@ export const FORGOTTEN_EVENT_METADATA_KEYS = ['route', 'httpMethod', 'routeConta
  */
 export const CONTACT_REFERENCE_KEYS = ['contactId', 'fromContactId', 'toContactId', 'targetContactId'] as const;
 
+/**
+ * CRM routes whose subject is not the contact (a note, a task) but whose
+ * response is the row read from the database, so its contactId is the
+ * server's (V1-72 delta review). Any route under contacts/:contactId counts
+ * too (CONTACT_ROUTE_PREFIX): its rows written before routeContactId was
+ * recorded are reached this way. Keyed on metadata.route, the route pattern
+ * the interceptor records from req.route.path.
+ */
+export const CONTACT_CHILD_ROUTES = [
+  '/crm/businesses/:businessId/notes/:noteId',
+  '/crm/businesses/:businessId/tasks/:taskId',
+  '/crm/businesses/:businessId/tasks/:taskId/complete',
+  '/crm/businesses/:businessId/tasks/:taskId/reopen',
+] as const;
+export const CONTACT_ROUTE_PREFIX = '/crm/businesses/:businessId/contacts/:contactId';
+
+/** The source the KEY cortex event bus writes its audit rows with. */
+export const KEY_BUS_SOURCE = 'key_cortex_event_bus';
+
+function isContactChildRoute(route: unknown): boolean {
+  if (typeof route !== 'string') return false;
+  return (CONTACT_CHILD_ROUTES as readonly string[]).includes(route) ||
+    route === CONTACT_ROUTE_PREFIX || route.startsWith(`${CONTACT_ROUTE_PREFIX}/`);
+}
+
 /** The shape the write-time check reads and rewrites; every business_events writer's input has it. */
 export interface ForgettableEvent {
   businessId: string;
   eventType?: string;
+  source?: string;
   subjectType: string;
   subjectId: string;
   before?: unknown;
@@ -50,23 +76,39 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
  * stores the raw request body there, before any DTO whitelisting, so a key a
  * caller planted in it would let them strip an unrelated event's snapshots.
  */
-export function contactIdsOfEvent(input: Pick<ForgettableEvent, 'subjectType' | 'subjectId' | 'before' | 'after' | 'metadata'>): string[] {
+export function contactIdsOfEvent(input: Pick<ForgettableEvent, 'subjectType' | 'subjectId' | 'before' | 'after' | 'metadata' | 'source'>): string[] {
   const ids = new Set<string>();
   // Any casing: the KEY cortex event bus writes the bridge's entityType ('Contact').
   const contactSubject = typeof input.subjectType === 'string' && input.subjectType.toLowerCase() === 'contact';
   if (contactSubject && input.subjectId && input.subjectId !== 'unknown') ids.add(input.subjectId);
-  // The after snapshot only on a contact subject (option B, delta review): some
-  // writers (time-cost, revenue attribution) store a caller-chosen contactId
-  // unchecked and echo it, so on any other subject it could strip the row.
-  const after = contactSubject ? asRecord(input.after) : undefined;
+  const metadata = asRecord(input.metadata);
+  // The after snapshot only on a contact subject or a contact-child route
+  // (option B, delta review): some writers (time-cost, revenue attribution)
+  // store a caller-chosen contactId unchecked and echo it, so on any other
+  // event it could strip the row.
+  const after = contactSubject || isContactChildRoute(metadata?.route) ? asRecord(input.after) : undefined;
   if (after) {
     for (const key of CONTACT_REFERENCE_KEYS) {
       const id = after[key];
       if (typeof id === 'string' && id.length > 0) ids.add(id);
     }
   }
-  const routeContactId = asRecord(input.metadata)?.routeContactId;
+  const routeContactId = metadata?.routeContactId;
   if (typeof routeContactId === 'string' && routeContactId.length > 0) ids.add(routeContactId);
+  // The KEY cortex bus copy of a business event (the flow bridge republishes
+  // every BusinessEventService event): its after is the whole original event,
+  // read by this same rule (so never the original's before).
+  if (input.source === KEY_BUS_SOURCE) {
+    const copied = asRecord(input.after);
+    if (copied && typeof copied.subjectType === 'string' && typeof copied.subjectId === 'string') {
+      for (const id of contactIdsOfEvent({
+        subjectType: copied.subjectType,
+        subjectId: copied.subjectId,
+        after: copied.after,
+        metadata: copied.metadata,
+      })) ids.add(id);
+    }
+  }
   return [...ids];
 }
 

@@ -29,7 +29,13 @@ import { contactWhereBase } from '../crm.helpers';
 import { resolveCrmAccess, visibilityClause } from '../crm-permissions.helper';
 import { safeInterval } from '../../../core/scheduling/safe-interval';
 import { schedulersDisabled } from '../../../core/config/env';
-import { CONTACT_REFERENCE_KEYS, FORGOTTEN_EVENT_METADATA_KEYS } from '../../business-events/business-event.service';
+import {
+  CONTACT_CHILD_ROUTES,
+  CONTACT_REFERENCE_KEYS,
+  CONTACT_ROUTE_PREFIX,
+  FORGOTTEN_EVENT_METADATA_KEYS,
+  KEY_BUS_SOURCE,
+} from '../../business-events/business-event.service';
 
 const DEFAULT_PURGE_INTERVAL_MS = 30 * 60_000;
 const DEFAULT_GRACE_DAYS = 7;
@@ -102,12 +108,20 @@ const PURGE_NOT_SWEPT =
   'Records of other modules that reference the contact id and are not counted under erased or retained ' +
   '(for example messaging, campaigns, deals and journeys) are not swept by this purge. Business events are ' +
   'swept when their subject is the contact, their route named it (routeContactId), or, for a contact ' +
-  'subject, the server response snapshot names it at the top level (contactId, fromContactId, toContactId, ' +
-  'targetContactId). Events of the retained records (invoices, quotes, bookings) and other non-contact ' +
+  'subject or a CRM note, task or contact-child route, the server response snapshot names it at the top level ' +
+  '(contactId, fromContactId, toContactId, targetContactId); so are the KEY cortex bus copies of such events. ' +
+  'Events of the retained records (invoices, quotes, bookings) and other non-contact ' +
   'subjects are kept under the retained basis even when they carry its contactId, and events whose ' +
   'snapshot names the person only inside a nested structure ' +
   '(for example duplicate-check and import requests), or only in the request body (never read: a caller ' +
-  'could plant a contact id there), are not reached and not swept.';
+  'could plant a contact id there), are not reached and not swept; nor are rows written before routeContactId ' +
+  'was recorded whose only pointer to the person was the route (outside the contact-child routes), nor the ' +
+  'copies the KEY cortex bus keeps in cognitive_events.';
+
+/** SQL: the route expression is a contact-child route (CONTACT_CHILD_ROUTES or under CONTACT_ROUTE_PREFIX). */
+function childRoute(route: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`(${route} = ANY(${[...CONTACT_CHILD_ROUTES]}::text[]) OR ${route} = ${CONTACT_ROUTE_PREFIX} OR ${route} LIKE ${`${CONTACT_ROUTE_PREFIX}/%`})`;
+}
 
 /**
  * V1-72 review round 2: the purge transaction scrubs the business's event log,
@@ -931,9 +945,17 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
        WHERE business_id = ${businessId}
          AND (
            (lower(subject_type) = 'contact' AND subject_id = ANY(${ids}))
-           OR (lower(subject_type) = 'contact'
+           OR ((lower(subject_type) = 'contact' OR ${childRoute(Prisma.sql`metadata ->> 'route'`)})
                AND EXISTS (SELECT 1 FROM unnest(${refKeys}::text[]) k WHERE "after" ->> k = ANY(${ids})))
            OR metadata ->> 'routeContactId' = ANY(${ids})
+           -- The KEY cortex bus copy of a business event: the same rule over
+           -- the event it copies (its after), never that event's before.
+           OR (source = ${KEY_BUS_SOURCE} AND jsonb_typeof("after") = 'object' AND (
+                (lower("after" ->> 'subjectType') = 'contact' AND "after" ->> 'subjectId' = ANY(${ids}))
+                OR ((lower("after" ->> 'subjectType') = 'contact' OR ${childRoute(Prisma.sql`"after" -> 'metadata' ->> 'route'`)})
+                    AND EXISTS (SELECT 1 FROM unnest(${refKeys}::text[]) k WHERE "after" -> 'after' ->> k = ANY(${ids})))
+                OR "after" -> 'metadata' ->> 'routeContactId' = ANY(${ids})
+              ))
          )
          AND (
            "before" IS NOT NULL

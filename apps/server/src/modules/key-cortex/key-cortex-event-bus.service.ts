@@ -14,7 +14,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { withoutForgottenPersonalData } from '../business-events/business-event.service';
+import { KEY_BUS_SOURCE, withoutForgottenPersonalData } from '../business-events/business-event.service';
 import { Optional } from '@nestjs/common';
 import { CognitiveEventBusService } from './cognitive-event-bus.service';
 
@@ -235,6 +235,7 @@ export class KeyCortexEventBusService {
         subjectType: event.metadata?.entityType ?? 'KEY_CORTEX_EVENT',
         subjectId: event.metadata?.entityId ?? event.id,
         after: event.payload as unknown,
+        source: KEY_BUS_SOURCE,
       });
       await (this.prisma.client as any).businessEvent.create({
         data: {
