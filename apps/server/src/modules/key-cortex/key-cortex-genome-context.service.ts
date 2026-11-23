@@ -42,7 +42,7 @@ export class KeyCortexGenomeContextService {
     businessId: string,
   ): Promise<GenomeEnrichedContext> {
     // v2 (FU-KEY-CHAT-GENOME-MONEY-SIGHT): signals carry section and domain; a v1 entry lacks them.
-    // v3 (FU-KEY-GENOME-READS-RESIDUAL round 8): the entry carries the signal pool; a v2 entry lacks it.
+    // v3 (FU-KEY-GENOME-READS-RESIDUAL rounds 8, 9): the entry carries the signal and ranked pools; a v2 entry lacks them.
     const cacheKey = `genome:context:v3:${businessId}`;
     const cached = await this.redis.getJson<GenomeEnrichedContext>(cacheKey);
     if (cached) {
@@ -63,6 +63,15 @@ export class KeyCortexGenomeContextService {
     const genomeIntelligence =
       await (this.genomeBridgeService as any).getGenomeIntelligence(businessId);
 
+    const toRecommendation = (rec: any) => ({
+      id: rec.id ?? this.generateId(),
+      title: rec.title ?? 'Untitled recommendation',
+      description: rec.description ?? '',
+      impact: rec.impact ?? 'medium',
+      category: rec.category ?? 'general',
+      confidence: rec.confidence ?? 0.5,
+      genomeScore: rec.genomeScore ?? 0,
+    });
     const toSignal = (sig: any) => ({
       id: sig.id ?? this.generateId(),
       type: sig.type ?? 'info',
@@ -77,17 +86,8 @@ export class KeyCortexGenomeContextService {
       dnaScores: genomeIntelligence.dnaScores ?? {},
       genomeStage: genomeIntelligence.genomeStage ?? 'unknown',
       executiveReadiness: genomeIntelligence.executiveReadiness ?? 0,
-      recommendations: (genomeIntelligence.recommendations ?? []).map(
-        (rec: any) => ({
-          id: rec.id ?? this.generateId(),
-          title: rec.title ?? 'Untitled recommendation',
-          description: rec.description ?? '',
-          impact: rec.impact ?? 'medium',
-          category: rec.category ?? 'general',
-          confidence: rec.confidence ?? 0.5,
-          genomeScore: rec.genomeScore ?? 0,
-        }),
-      ),
+      recommendations: (genomeIntelligence.recommendations ?? []).map(toRecommendation),
+      recommendationPool: (genomeIntelligence.recommendationPool ?? genomeIntelligence.recommendations ?? []).map(toRecommendation),
       signals: (genomeIntelligence.signals ?? []).map(toSignal),
       signalPool: (genomeIntelligence.signalPool ?? genomeIntelligence.signals ?? []).map(toSignal),
       opportunities: (genomeIntelligence.opportunities ?? []).map(

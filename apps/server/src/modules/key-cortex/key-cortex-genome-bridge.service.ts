@@ -1,5 +1,5 @@
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
-import { GENOME_SIGNAL_POOL, GENOME_SIGNALS_SERVED } from './genome-context-for-reader';
+import { GENOME_RECOMMENDATION_POOL, GENOME_RECOMMENDATIONS_SERVED, GENOME_SIGNAL_POOL, GENOME_SIGNALS_SERVED } from './genome-context-for-reader';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCortexEventService, actionResultOf, type KeyActionResult, type KeyCortexClaim } from './key-cortex-event.service';
 import { KeyCortexEvidenceService } from './key-cortex-evidence.service';
@@ -38,6 +38,8 @@ export interface GenomeIntelligence {
    * GENOME_SIGNALS_SERVED. Unprojected business data, read only to project the signals for a reader without revenue read.
    */
   signalPool?: Array<Record<string, unknown>>;
+  /** D-235 round 9: the top-ranked recommendations, of which `recommendations` are the first GENOME_RECOMMENDATIONS_SERVED. */
+  recommendationPool?: Array<Record<string, unknown>>;
   crossDomainInsights: Record<string, unknown> | null;
   opportunities: Array<Record<string, unknown>>;
   generatedAt: string;
@@ -150,7 +152,7 @@ export class KeyCortexGenomeBridgeService {
     // what is left of the newest twenty; the signals are its first twenty, as before.
     const [signalPool, ranked, opportunities, crossDomain, moduleReadiness] = await Promise.all([
       this.loadSignals(businessId, { limit: GENOME_SIGNAL_POOL }),
-      this.loadRankedRecommendations(businessId, 10),
+      this.loadRankedRecommendations(businessId, GENOME_RECOMMENDATION_POOL),
       this.loadOpportunities(businessId, 5),
       this.loadCrossDomainSnapshot(businessId),
       this.loadModuleReadiness(businessId),
@@ -165,7 +167,10 @@ export class KeyCortexGenomeBridgeService {
       executiveReadiness: readiness,
       stage,
       readiness: moduleReadiness,
-      recommendations: ranked.map((r) => this.toBridgeRecommendation(r)),
+      // Round 9 (D-235): ranked once as a pool; the recommendations are its first ten, as before (the ranker sorts, then
+      // takes the limit, so they are the same rows a limit of ten gives).
+      recommendations: ranked.slice(0, GENOME_RECOMMENDATIONS_SERVED).map((r) => this.toBridgeRecommendation(r)),
+      recommendationPool: ranked.map((r) => this.toBridgeRecommendation(r)),
       signals: signalPool.slice(0, GENOME_SIGNALS_SERVED).map((s) => this.toBridgeSignal(s)),
       signalPool: signalPool.map((s) => this.toBridgeSignal(s)),
       crossDomainInsights: crossDomain,

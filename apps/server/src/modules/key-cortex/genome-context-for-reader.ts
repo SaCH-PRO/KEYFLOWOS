@@ -18,6 +18,10 @@ import type { GenomeEnrichedContext, GenomeRecommendation } from './key-cortex-r
 export const GENOME_SIGNALS_SERVED = 20;
 /** D-235 round 8: the newest NEW signals read once, from which a reader without revenue read is projected. */
 export const GENOME_SIGNAL_POOL = 100;
+/** The ranked recommendations a genome context serves (the business's top ten). */
+export const GENOME_RECOMMENDATIONS_SERVED = 10;
+/** D-235 round 9: the ranked recommendations read once, from which a reader without revenue read is projected. */
+export const GENOME_RECOMMENDATION_POOL = 50;
 
 /**
  * FU-KEY-GENOME-READS-RESIDUAL (D-235, D-233 "no inference via a score, grade or categorical indicator"): executive
@@ -41,7 +45,7 @@ export function genomeContextForReader(context: GenomeEnrichedContext, readsReve
   const dnaScores = dnaScoresForReader(context.dnaScores, false) as Record<string, number>;
   // D-235: the genome stage is a categorical indicator of the whole genome, money dimensions included: withheld.
   // Round 8: the signal pool is read to project the signals and is never handed on.
-  const { genomeStage: _stage, signalPool, ...rest } = context;
+  const { genomeStage: _stage, signalPool, recommendationPool, ...rest } = context;
   return {
     ...rest,
     executiveReadiness: readinessFromVisibleDna(dnaScores),
@@ -52,7 +56,9 @@ export function genomeContextForReader(context: GenomeEnrichedContext, readsReve
     signals: (signalPool ?? context.signals ?? [])
       .filter((s) => !isFinanceSignal({ sourceModule: s.module, section: s.section, domain: s.domain, signalType: s.type }))
       .slice(0, GENOME_SIGNALS_SERVED),
-    recommendations: genomeRecommendationsForReader(context.recommendations ?? [], false),
+    // Round 9 (correctness MINOR-1): projected from the ranked pool the cached context carries, then limited, so the
+    // headroom costs no ranking per turn.
+    recommendations: genomeRecommendationsForReader(recommendationPool ?? context.recommendations ?? [], false).slice(0, GENOME_RECOMMENDATIONS_SERVED),
     opportunities: [],
   };
 }

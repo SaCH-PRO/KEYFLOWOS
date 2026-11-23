@@ -18,6 +18,11 @@ export interface GenomeEnrichedContext {
    * signals for a reader without revenue read, and never handed on by that projection.
    */
   signalPool?: GenomeSignal[];
+  /**
+   * D-235 round 9: the business's top-ranked recommendations, of which `recommendations` are the first ten. Unprojected;
+   * read only to project the recommendations for a reader without revenue read, and never handed on by that projection.
+   */
+  recommendationPool?: GenomeRecommendation[];
   opportunities: GenomeOpportunity[];
   autonomyMap: Record<string, boolean>;
   timestamp: Date;
