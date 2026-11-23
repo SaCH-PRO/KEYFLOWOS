@@ -5,14 +5,23 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { LEVEL_RANK, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
 import { TemporalFlowMemoryService } from './temporal-flow-memory.service';
-import {
-  readerSearchOptions,
-  semanticHitsVisibleTo,
-  temporalCopyOf,
-  TEMPORAL_MEMORY_SOURCE_TYPE,
-  type SemanticReader,
-} from '../ai/semantic-memory-sight';
-import { readersModuleSight } from '../key-cortex/key-cortex-prompt-context.service';
+import type { SemanticReader } from '../ai/semantic-memory-sight';
+
+/**
+ * MEM-TEMPORAL-MEMORY-ROUTES-SIGHT: MEM-SEMANTIC-SIGHT's helpers, loaded on first use. They import KEY's prompt stack,
+ * which reaches services that inject this one (BlueprintService): imported at load time, the cycle leaves an injected
+ * constructor type undefined and the server does not start (app-module-boots).
+ */
+const sightHelpers = async () => {
+  const [sight, promptContext] = await Promise.all([
+    import('../ai/semantic-memory-sight'),
+    import('../key-cortex/key-cortex-prompt-context.service'),
+  ]);
+  return { ...sight, readersModuleSight: promptContext.readersModuleSight };
+};
+
+/** MEM-SEMANTIC-SIGHT's source type of a temporal-memory copy (semantic-memory-sight.ts TEMPORAL_MEMORY_SOURCE_TYPE). */
+const TEMPORAL_MEMORY_SOURCE_TYPE = 'temporal_memory';
 import type {
   TemporalFlowAnalysis,
   TemporalFlowEventInput,
@@ -363,6 +372,7 @@ export class TemporalFlowService {
     const filter = await this.readerMemoryFilter(businessId, reader);
     if (reader?.role === 'SUPER_ADMIN' && reader.id) return { filter, who: { reader: reader.id, sight: () => true } };
     const id = reader?.id ?? null;
+    const { readersModuleSight } = await sightHelpers();
     const sight = await readersModuleSight(this.prisma, businessId, id, this.logger, 'temporalMemory');
     return { filter, who: { reader: id, sight } };
   }
@@ -382,6 +392,7 @@ export class TemporalFlowService {
     const passed = ms.filter ? await this.visibleMemoryIds(businessId, rows.map((row) => row.id), ms.filter) : undefined;
     const candidates = passed ? rows.filter((row) => passed.has(row.id)) : rows;
     if (!candidates.length) return candidates;
+    const { semanticHitsVisibleTo, temporalCopyOf } = await sightHelpers();
     const keep = await semanticHitsVisibleTo(
       this.prisma,
       businessId,
@@ -419,6 +430,7 @@ export class TemporalFlowService {
   ) {
     if (!this.semanticMemory || typeof query !== 'string' || !query.trim()) return [];
     const max = Number.isInteger(limit) && limit > 0 ? limit : 10;
+    const { readerSearchOptions } = await sightHelpers();
     const reader = readerSearchOptions(this.prisma, businessId, ms.who, this.logger);
     return this.semanticMemory.search({
       businessId,
