@@ -46,6 +46,11 @@ describe('isFinancialGenomeEvolution', () => {
     }
   });
 
+  it('round 6 (correctness MINOR-1): a figure in non-ASCII digits counts as a figure', () => {
+    expect(isFinancialGenomeEvolution({ ...opsRow, section: 'growth', reason: 'Hit １２０k this quarter' })).toBe(true);
+    expect(isFinancialGenomeEvolution({ ...opsRow, section: 'growth', proposedPatch: { ninetyDayGoals: ['Takings ９８００ a week'] } })).toBe(true);
+  });
+
   it('round 4: serves the rows the genome-evolution generator writes (its evidence counts events)', () => {
     for (const [section, proposedPatch, reason] of [
       ['marketing', { channels: ['WhatsApp'] }, 'WhatsApp appears to be a meaningful acquisition source.'],
@@ -111,6 +116,11 @@ describe('requireBridgeRevenue', () => {
   it('throws when the recommendation read fails (fail closed)', async () => {
     const prisma = { client: { genomeRecommendation: { findFirst: vi.fn(async () => { throw new Error('db down'); }) } } } as any;
     await expect(requireBridgeRevenue(prisma, BIZ, 'rec_1', reader, 'read')).rejects.toThrow('db down');
+  });
+
+  it('round 6: refuses a recommendation whose text states money in non-ASCII digits', async () => {
+    const fw = { client: { genomeRecommendation: { findFirst: vi.fn(async () => ({ domain: 'OPERATIONS', title: 'Reduce overtime', diagnosis: 'Shifts run long.', insight: 'Overtime cost TTD ９１２ last week.', recommendation: 'Cap overtime.', expectedGain: null })) }, membership: { findUnique: vi.fn(async () => null) } } } as any;
+    await expect(requireBridgeRevenue(fw, BIZ, 'rec_fw', reader, 'read')).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('leaves an unknown recommendation to the bridge service, and a non-financial one ungated', async () => {

@@ -351,6 +351,30 @@ beforeAll(async () => {
     },
   });
 
+  // Round 6 (security P-1): approving an evolution proposal writes the DNA section through BlueprintService.updateDnaSection,
+  // which emits genome.section_updated (entityType dna_section) with the patch; rows in that writer's shape.
+  for (const [section, data] of [
+    ['financial', { avgTicket: 4500.25, pricingModel: 'retainer' }],
+    ['sales', { salesChannels: ['direct-invoice'] }],
+    ['operations', { coreWorkflows: ['appointment-booking'] }],
+  ] as const) {
+    await db.temporalFlowEvent.create({
+      data: {
+        id: `${P}dna_${section}`, businessId: ID.biz, source: 'KEY', type: 'genome.section_updated', module: 'business-genome',
+        entityType: 'dna_section', entityId: section, title: `${section} DNA updated`, summary: `${section} DNA was updated`,
+        importance: 'NORMAL', genomeImpactPotential: true, payload: { section, data }, reminderAt: remindAt, startsAt: remindAt,
+      },
+    });
+  }
+  // Round 6 (correctness MINOR-2): a row naming the non-financial proposal whose own title states money (POST
+  // temporal-flow takes any entityType).
+  await db.temporalFlowEvent.create({
+    data: {
+      id: `${P}titled_row`, businessId: ID.biz, source: 'APP', type: 'note', entityType: 'key_action_proposal', entityId: ID.propOps,
+      title: 'Maria owes 900 for the last visit', importance: 'NORMAL', reminderAt: remindAt, startsAt: remindAt, payload: {},
+    },
+  });
+
   // Genome evolution proposals; their decision rows are written by the real GenomeEvolutionService below.
   const evo = (id: string, businessId: string, section: string, reason: string, proposedPatch: Record<string, unknown>) =>
     db.genomeEvolutionProposal.create({ data: { id, businessId, section, reason, proposedPatch, status: 'PENDING', confidence: 0.6 } });
@@ -577,6 +601,19 @@ describe('FU-KEY-ACTION-GENOME-PROJECTION: bridged FINANCIAL proposals and their
       expect(res.body.some((e: any) => e.id === `${P}blocked_rule_row`), name).toBe(false);
       expect(res.body.some((e: any) => e.entityId === ID.evoGrowth), name).toBe(false);
       expect(JSON.stringify(res.body), name).not.toMatch(/120k/);
+    }
+  });
+
+  it('KAG-14 round 6: DNA section rows of the financial and sales sections, and a proposal row whose title states money, are withheld', async () => {
+    for (const [name, res] of Object.entries(await timelineReads(ID.staffNone))) {
+      const ids = res.body.map((e: any) => e.id);
+      expect(ids, name).toContain(`${P}dna_operations`);
+      for (const hidden of [`${P}dna_financial`, `${P}dna_sales`, `${P}titled_row`]) expect(ids, name).not.toContain(hidden);
+      expect(JSON.stringify(res.body), name).not.toMatch(/owes 900/);
+    }
+    for (const [name, res] of Object.entries(await timelineReads(ID.owner))) {
+      const ids = res.body.map((e: any) => e.id);
+      for (const shown of [`${P}dna_financial`, `${P}dna_sales`, `${P}dna_operations`, `${P}titled_row`]) expect(ids, name).toContain(shown);
     }
   });
 
