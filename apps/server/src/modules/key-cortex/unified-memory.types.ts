@@ -139,7 +139,7 @@ export interface MemoryRetrievalOptions {
    * Default true. A prompt's read for a reader who may not read every pattern (one stating money or an expense) passes
    * false: a pattern is classified by its text, so none is read, and a withheld pattern takes no place in its limits.
    * It governs the structured AiMemory read only: a semantic copy of a pattern (ai_memory_embeddings, read when `query`
-   * is given) is not touched by it; the semantic search's own rule (readerSearchOptions) governs those.
+   * is given) is not touched by it; the semantic search's own rule (`semanticSight`, built by readerSearchOptions) governs those.
    */
   aiMemoryPatterns?: boolean;
 }

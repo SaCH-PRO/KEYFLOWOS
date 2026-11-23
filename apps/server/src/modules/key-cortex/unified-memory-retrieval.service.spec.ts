@@ -416,7 +416,9 @@ describe('UnifiedMemoryRetrievalService: aiMemoryPatterns (MEM-PATTERNS-SIGHT, F
       search: vi.fn().mockResolvedValue([{ id: 'sem_p', content: 'patterns.peak: Peak activity hour: 9AM', similarity: 0.9, metadata: {} }]),
     });
     const service = new UnifiedMemoryRetrievalService(makePrisma() as any, semantic as any);
-    const fragments = await service.retrieveContext('biz_1', { query: 'peak', aiMemoryPatterns: false });
+    // MEM-UNIFIED-SEMANTIC-SIGHT: a query with no sight keeps no semantic hit, so the case reads with an admit-all sight
+    // to isolate what it pins (aiMemoryPatterns does not touch the semantic search).
+    const fragments = await service.retrieveContext('biz_1', { query: 'peak', aiMemoryPatterns: false, semanticSight: admitAllSemanticSightForTests(false) });
     expect(fragments.map((f) => f.id)).toContain('sem_p');
   });
 });
