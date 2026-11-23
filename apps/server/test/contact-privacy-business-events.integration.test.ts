@@ -437,7 +437,9 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
       },
     });
     const svc = new ContactPrivacyServiceCtor({ client: failing } as any, audit);
-    await svc.runPurgeCycle();
+    // This request only (purgeOne, not the global cycle), so no other suite's
+    // due request is purged here and no other suite's cycle can race this one.
+    await expect((svc as any).purgeOne(forgetRequestId, ID.bizA, subjectId)).rejects.toThrow('v72w: business-event scrub refused');
 
     const [contact] = await db.$queryRawUnsafe(`SELECT email, first_name FROM contacts WHERE id = $1`, subjectId);
     expect(contact).toEqual({ email: PII.email, first_name: PII.firstName });
@@ -458,7 +460,7 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
         return (fn: any, opts?: any) => { txOptions.push(opts); return target.$transaction(fn, opts); };
       },
     });
-    await new ContactPrivacyServiceCtor({ client: recording } as any, audit).runPurgeCycle();
+    expect(await (new ContactPrivacyServiceCtor({ client: recording } as any, audit) as any).purgeOne(forgetRequestId, ID.bizA, subjectId)).toBe(true);
     expect((await db.contactForgetRequest.findUnique({ where: { id: forgetRequestId } }))?.status).toBe('purged');
     // The scrub reads the business's whole event log: the purge transaction
     // may not run under Prisma's 5 s interactive default.
@@ -507,6 +509,9 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
     // the duplicate's row. The forget row and the held PATCH were written
     // without snapshots, so there was nothing to scrub.
     expect(entry.after.erased.businessEventsScrubbed).toBe(6);
+    // Honest scope: rows that name the person only inside a nested structure
+    // (a duplicate check, an import) are not reached by id.
+    expect(entry.after.notSwept).toMatch(/nested/);
   });
 
   it('a write after the purge that names the merged duplicate holds no personal data', async () => {
