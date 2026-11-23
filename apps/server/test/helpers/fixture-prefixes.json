@@ -1160,6 +1160,11 @@
     {
       "prefix": "v86s_",
       "owner": "apps/server/test/site-analytics-revenue-scope.integration.test.ts"
+    },
+    {
+      "prefix": "v71t_",
+      "owner": "apps/server/test/temporal-memory-scope.integration.test.ts",
+      "packet": "V1-71 (MEM-TEMPORAL-SCOPE)"
     }
   ],
   "pendingRenames": [],
