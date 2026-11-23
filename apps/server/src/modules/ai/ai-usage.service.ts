@@ -4,6 +4,7 @@ import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { AI_CREDIT_COSTS, AI_OVERAGE_RATE_TTD, AI_OVERAGE_RATE_USD, isBillableAiFeature } from '../subscriptions/plans';
 import { OutputCategory, ResolvedTemplate, injectQualityDirectives, validateAiOutput, buildQualityDirectiveSuffix } from './ai-quality';
 import { OutputTemplateService } from './output-template.service';
+import { costStatusFor, type CostStatus } from './llm-cost.service';
 import { ModelGatewayService, TaskCategory, GatewayMessage, BudgetStatus, AiProvider, GatewayRequest, GatewayResponse, StreamChunk, AiUnavailableCode, keyDisabledRefusal } from './model-gateway.service';
 import OpenAI from 'openai';
 import { safeInterval } from '../../core/scheduling/safe-interval';
@@ -399,6 +400,7 @@ export class AiUsageService {
         completionTokens: response.usage.completionTokens,
         totalTokens: response.usage.totalTokens,
         estimatedCost: response.usage.estimatedCost,
+        costStatus: response.usage.costStatus ?? costStatusFor(response.model),
         latencyMs: response.latencyMs,
         fallbackUsed: response.fallbackUsed,
         fallbackProvider: response.fallbackProvider,
@@ -456,6 +458,8 @@ export class AiUsageService {
             maxTokens,
             temperature,
             outputCategory,
+            // RR-UNKNOWN-COST-NOT-ZERO: how estimatedCost was priced; 'unpriced_estimate' when the model has no price.
+            costStatus: result.costStatus,
           },
         },
         businessId,
@@ -788,6 +792,7 @@ export class AiUsageService {
             maxTokens: request.maxTokens,
             temperature: request.temperature,
             toolCount: request.tools?.length,
+            costStatus: response.usage.costStatus ?? costStatusFor(response.model),
           },
         },
         businessId,
@@ -826,7 +831,7 @@ export class AiUsageService {
     const taskCategory = this.resolveTaskCategory(feature, request.taskCategory);
     const startTime = Date.now();
 
-    let lastUsage: { promptTokens: number; completionTokens: number; totalTokens: number; estimatedCost: number } | undefined;
+    let lastUsage: { promptTokens: number; completionTokens: number; totalTokens: number; estimatedCost: number; costStatus?: CostStatus } | undefined;
     let provider: string | undefined;
     let model: string | undefined;
     let fallbackUsed = false;
@@ -879,6 +884,7 @@ export class AiUsageService {
             maxTokens: request.maxTokens,
             temperature: request.temperature,
             streamed: true,
+            costStatus: lastUsage?.costStatus ?? costStatusFor(model || 'gpt-4o'),
           },
         },
         businessId,
