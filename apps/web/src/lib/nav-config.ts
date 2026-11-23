@@ -447,8 +447,9 @@ export function entryModules(item: NavItem, hub?: { module?: NavModule }): NavMo
 }
 
 /**
- * The hubs a business that sells `sells` has (D-150): a products business has no Schedule. `null` is not known yet
- * (the settings are loading): only the hubs every business has, so a products business never flashes Schedule.
+ * The hubs a business that sells `sells` has (D-150): a products business has no Schedule. `null` is not known (the
+ * settings are not ready: no business yet, loading, or failed): only the hubs every business has, so a products
+ * business never sees Schedule.
  */
 function hubsForSells(sells: BusinessSells | null): HubNavItem[] {
   return sells === "both" || sells === "services" ? hubNav : hubNav.filter((h) => h.id !== "schedule");

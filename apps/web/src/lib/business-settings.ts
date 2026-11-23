@@ -14,8 +14,9 @@
  * at its default (both, off, every hub standard). businessSettingsOf reads an answer by the same rule, so a value
  * this file does not know is never passed on to the nav. useBusinessSettings() is the hook the nav and the hubs
  * read: it says whether the settings are loading, ready or failed, and holds the defaults until they are ready.
- * These settings choose what the app shows; they grant nothing (every route is still guarded on the server), so a
- * failed read falling back to "every hub" hides nothing and opens nothing.
+ * These settings choose what the app shows; they grant nothing (every route is still guarded on the server). Until
+ * they are ready the nav takes what the business sells as unknown (FU-NAV-A1-CODEX-224): it shows only the hubs every
+ * business has, so a failed read never shows a hub the business does not have.
  *
  * WRITE, two doors, as the server has them:
  *   - saveBusinessSells: what the business sells, through the owner-only profile PATCH
@@ -415,10 +416,9 @@ function recorded(
       // It also fences every older write's answer (FU-NAV-A1-CODEX-224): this write may have been applied after
       // theirs, so an older answer landing from now on is a snapshot from before it. It is taken as the stale-answer
       // check above takes an answer older than one recorded: nothing of it is recorded, and the business is read
-      // again. Raised only for the member acting, as the mark is (review SEC-3).
-      if (sentAs === actingMember()) {
-        newestWriteRecorded.set(businessId, Math.max(newestWriteRecorded.get(businessId) ?? 0, sequence));
-      }
+      // again. Raised whoever is acting now (review round 1): the write may have been applied whoever sent it, and
+      // the fence records nothing for anyone, it only discards an older answer (SEC-3 governs recording an answer).
+      newestWriteRecorded.set(businessId, Math.max(newestWriteRecorded.get(businessId) ?? 0, sequence));
       answerRecorded(businessId);
       const held = entries.get(businessId);
       if (!watched.has(businessId)) {
@@ -515,21 +515,29 @@ export interface BusinessSettingsState extends BusinessSettings {
   reload: () => Promise<void>;
 }
 
-/** The business this browser is using, followed across a switch in this tab or another. */
+function subscribeToStoredBusiness(onChange: () => void): () => void {
+  window.addEventListener(BUSINESS_CHANGED_EVENT, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(BUSINESS_CHANGED_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+const noStoredBusinessOnServer = () => null;
+
+/**
+ * The business this browser is using, followed across a switch in this tab or another, and read again on every
+ * render (FU-NAV-A1-CODEX-224 review round 1): a business stored without an announcement (refreshWorkspace's
+ * membership resolution, a first business bootstrapped) is picked up on the next render, so the nav does not stay
+ * on "not known" until a remount. Null on the server and while hydrating.
+ */
 function useStoredBusinessId(enabled: boolean): string | null {
-  // Null on the server and on the first client render alike; the stored id is read once mounted.
-  const [businessId, setBusinessId] = useState<string | null>(null);
-  useEffect(() => {
-    if (!enabled) return;
-    const read = () => setBusinessId(getStoredBusinessId());
-    read();
-    window.addEventListener(BUSINESS_CHANGED_EVENT, read);
-    window.addEventListener("storage", read);
-    return () => {
-      window.removeEventListener(BUSINESS_CHANGED_EVENT, read);
-      window.removeEventListener("storage", read);
-    };
-  }, [enabled]);
+  const businessId = useSyncExternalStore(
+    subscribeToStoredBusiness,
+    () => (enabled ? getStoredBusinessId() : null),
+    noStoredBusinessOnServer,
+  );
   return enabled ? businessId : null;
 }
 
