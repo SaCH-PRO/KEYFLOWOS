@@ -14,42 +14,130 @@ import {
  * HTTP method say what happened; everything else in metadata (the caller's ip,
  * and free-form values other writers put there, such as a captured name) goes.
  */
-export const FORGOTTEN_EVENT_METADATA_KEYS = ['route', 'httpMethod'] as const;
+export const FORGOTTEN_EVENT_METADATA_KEYS = ['route', 'httpMethod', 'routeContactId'] as const;
 
 /**
- * The top-level snapshot keys that name a contact: contactId (a note, a task,
- * the forget request), fromContactId and toContactId (a relationship), and
- * targetContactId (a referral, whose request body carries the new target's
- * name, email and phone). V1-72 review round 2.
+ * The top-level keys of the server-produced `after` snapshot that name a
+ * contact: contactId (a note, a task, the forget request), fromContactId and
+ * toContactId (a relationship), and targetContactId (a referral, whose request
+ * body carries the new target's name, email and phone). V1-72 review round 2.
  */
 export const CONTACT_REFERENCE_KEYS = ['contactId', 'fromContactId', 'toContactId', 'targetContactId'] as const;
 
+/** The shape the write-time check reads and rewrites; every business_events writer's input has it. */
+export interface ForgettableEvent {
+  businessId: string;
+  eventType?: string;
+  subjectType: string;
+  subjectId: string;
+  before?: unknown;
+  after?: unknown;
+  metadata?: unknown;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
 /**
  * The contacts a business event names, by the same rule the forget purge uses
- * to scrub stored rows (ContactPrivacyService.eraseForgottenContact): the
- * subject when it is a contact, and a CONTACT_REFERENCE_KEYS value at the top
- * level of the before or after snapshot.
+ * to scrub stored rows (ContactPrivacyService.eraseForgottenContact), and only
+ * from server-derived data (V1-72 review, SEC-1): the subject when it is a
+ * contact, a CONTACT_REFERENCE_KEYS value at the top level of the `after`
+ * snapshot (the handler's response), and metadata.routeContactId (the route's
+ * :contactId, recorded by the interceptor). Never `before`: the interceptor
+ * stores the raw request body there, before any DTO whitelisting, so a key a
+ * caller planted in it would let them strip an unrelated event's snapshots.
  */
-export function contactIdsOfEvent(input: Pick<CreateBusinessEventInput, 'subjectType' | 'subjectId' | 'before' | 'after'>): string[] {
+export function contactIdsOfEvent(input: Pick<ForgettableEvent, 'subjectType' | 'subjectId' | 'before' | 'after' | 'metadata'>): string[] {
   const ids = new Set<string>();
   if (input.subjectType === 'contact' && input.subjectId && input.subjectId !== 'unknown') ids.add(input.subjectId);
-  for (const snap of [input.before, input.after]) {
-    if (!snap || typeof snap !== 'object' || Array.isArray(snap)) continue;
+  const after = asRecord(input.after);
+  if (after) {
     for (const key of CONTACT_REFERENCE_KEYS) {
-      const id = (snap as Record<string, unknown>)[key];
+      const id = after[key];
       if (typeof id === 'string' && id.length > 0) ids.add(id);
     }
   }
+  const routeContactId = asRecord(input.metadata)?.routeContactId;
+  if (typeof routeContactId === 'string' && routeContactId.length > 0) ids.add(routeContactId);
   return [...ids];
 }
 
-function keptMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+function keptMetadata(metadata: unknown): Record<string, unknown> | undefined {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return undefined;
+  const source = metadata as Record<string, unknown>;
   const kept: Record<string, unknown> = {};
   for (const key of FORGOTTEN_EVENT_METADATA_KEYS) {
-    if (key in metadata) kept[key] = metadata[key];
+    if (key in source) kept[key] = source[key];
   }
   return kept;
+}
+
+const checkLogger = new Logger('ForgottenContactCheck');
+
+/**
+ * V1-72 (RR-ERASURE-BUSINESS-EVENTS, D-25): a row written after its person
+ * asked to be forgotten carries no personal data. Every business_events writer
+ * that can name a contact applies this right before its insert:
+ * BusinessEventService.emit/emitBatch (the interceptor's queue worker, sync
+ * fallback and replay all end there), KEY analytics track_event and the KEY
+ * cortex event bus audit (SEC-3). Decided at the write, so the forget
+ * request's own row and a write that lands after the purge committed are
+ * covered; the purge scrubs the rows written before.
+ *
+ * An event that names a contact (contactIdsOfEvent) of this business which,
+ * or which a contact it was merged into, has an open forget request, or has
+ * been purged (a purged request is detached and keeps only the contact's
+ * hash, matched over the named ids too, so a row that is gone still counts),
+ * is returned with before and after undefined and metadata reduced to
+ * FORGOTTEN_EVENT_METADATA_KEYS; event type, action, actor, subject and
+ * timestamps stay. One read, tenant-bound, only for an event that names a
+ * contact and carries something to drop. If the read fails the event is
+ * returned scrubbed (fail closed): a lost snapshot is the lesser harm.
+ */
+export async function withoutForgottenPersonalData<T extends ForgettableEvent>(
+  client: { $queryRaw: PrismaService['client']['$queryRaw'] },
+  input: T,
+): Promise<T> {
+  const ids = contactIdsOfEvent(input);
+  if (ids.length === 0) return input;
+  const kept = keptMetadata(input.metadata);
+  const hasPersonal =
+    input.before !== undefined ||
+    input.after !== undefined ||
+    (input.metadata !== undefined && input.metadata !== null &&
+      Object.keys(input.metadata as object).length !== Object.keys(kept ?? {}).length);
+  if (!hasPersonal) return input;
+  let forgotten = true;
+  try {
+    const rows = await client.$queryRaw<Array<{ forgotten: boolean }>>`
+      WITH RECURSIVE chain(id) AS (
+        SELECT id FROM contacts WHERE business_id = ${input.businessId} AND id = ANY(${ids})
+        UNION
+        SELECT c.merged_into_id FROM contacts c JOIN chain ON c.id = chain.id
+         WHERE c.business_id = ${input.businessId} AND c.merged_into_id IS NOT NULL
+      ),
+      -- The named ids themselves too: a purged contact's row may be gone
+      -- (the request is detached, ON DELETE SET NULL), its hash is not.
+      named(id) AS (SELECT id FROM chain UNION SELECT unnest(${ids}::text[]))
+      SELECT EXISTS (
+        SELECT 1 FROM contact_forget_requests r
+         WHERE r.business_id = ${input.businessId}
+           AND (
+             (r.status = 'requested' AND r.contact_id IN (SELECT id FROM named))
+             OR (r.status = 'purged' AND r.contact_hash IN (
+               SELECT 'sha256:' || encode(sha256(convert_to(${input.businessId} || ':' || named.id, 'UTF8')), 'hex') FROM named))
+           )
+      ) AS forgotten`;
+    forgotten = rows[0]?.forgotten === true;
+  } catch (err: unknown) {
+    checkLogger.warn(
+      `Forgotten-contact check failed; writing ${input.eventType ?? 'an event'} without snapshots: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  if (!forgotten) return input;
+  return { ...input, before: undefined, after: undefined, metadata: kept } as T;
 }
 
 @Injectable()
@@ -70,7 +158,7 @@ export class BusinessEventService {
     // what the row may not (V1-72 review).
     let input: CreateBusinessEventInput;
     try {
-      input = await this.withoutForgottenPersonalData(event);
+      input = await withoutForgottenPersonalData(this.prisma.client, event);
     } catch {
       // Never throw (the contract every caller relies on): an input the check
       // cannot read is written, if at all, without its snapshots.
@@ -116,71 +204,13 @@ export class BusinessEventService {
   }
 
   /**
-   * V1-72 (RR-ERASURE-BUSINESS-EVENTS, D-25): a row written after its person
-   * asked to be forgotten carries no personal data. The interceptor writes its
-   * row after the handler returned, outside any transaction, through a queue
-   * or a sync fallback, and every path ends here: so the forget request's own
-   * row (its body and the request it answers name the person) and a mutation
-   * whose write lands after the purge committed are decided at the write, not
-   * when the request was handled. The purge scrubs the rows written before.
-   *
-   * An event that names a contact (contactIdsOfEvent) of this business which,
-   * or which a contact it was merged into, has an open forget request, or has
-   * been purged (a purged request is detached and keeps only the contact's
-   * hash), is written with before and after NULL and metadata reduced to
-   * FORGOTTEN_EVENT_METADATA_KEYS; event type, action, actor, subject and
-   * timestamps stay. One read, tenant-bound, only for an event that names a
-   * contact and carries something to drop. If the read fails the event is
-   * written scrubbed (fail closed): a lost snapshot is the lesser harm.
-   */
-  private async withoutForgottenPersonalData(input: CreateBusinessEventInput): Promise<CreateBusinessEventInput> {
-    const ids = contactIdsOfEvent(input);
-    if (ids.length === 0) return input;
-    const kept = keptMetadata(input.metadata);
-    const hasPersonal =
-      input.before !== undefined ||
-      input.after !== undefined ||
-      (input.metadata !== undefined && Object.keys(input.metadata ?? {}).length !== Object.keys(kept ?? {}).length);
-    if (!hasPersonal) return input;
-    let forgotten = true;
-    try {
-      const rows = await this.prisma.client.$queryRaw<Array<{ forgotten: boolean }>>`
-        WITH RECURSIVE chain(id) AS (
-          SELECT id FROM contacts WHERE business_id = ${input.businessId} AND id = ANY(${ids})
-          UNION
-          SELECT c.merged_into_id FROM contacts c JOIN chain ON c.id = chain.id
-           WHERE c.business_id = ${input.businessId} AND c.merged_into_id IS NOT NULL
-        ),
-        -- The named ids themselves too: a purged contact's row may be gone
-        -- (the request is detached, ON DELETE SET NULL), its hash is not.
-        named(id) AS (SELECT id FROM chain UNION SELECT unnest(${ids}::text[]))
-        SELECT EXISTS (
-          SELECT 1 FROM contact_forget_requests r
-           WHERE r.business_id = ${input.businessId}
-             AND (
-               (r.status = 'requested' AND r.contact_id IN (SELECT id FROM named))
-               OR (r.status = 'purged' AND r.contact_hash IN (
-                 SELECT 'sha256:' || encode(sha256(convert_to(${input.businessId} || ':' || named.id, 'UTF8')), 'hex') FROM named))
-             )
-        ) AS forgotten`;
-      forgotten = rows[0]?.forgotten === true;
-    } catch (err: unknown) {
-      this.logger.warn(
-        `Forgotten-contact check failed; writing ${input.eventType} without snapshots: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    if (!forgotten) return input;
-    return { ...input, before: undefined, after: undefined, metadata: kept };
-  }
-
-  /**
    * Emit multiple events in a single transaction. Use for bulk operations.
    */
   async emitBatch(inputs: CreateBusinessEventInput[]): Promise<void> {
     if (inputs.length === 0) return;
     try {
       // The same forgotten-person check as emit (V1-72 review).
-      const scrubbed = await Promise.all(inputs.map((input) => this.withoutForgottenPersonalData(input)));
+      const scrubbed = await Promise.all(inputs.map((input) => withoutForgottenPersonalData(this.prisma.client, input)));
       await this.prisma.client.$transaction(
         scrubbed.map((input) =>
           this.prisma.client.businessEvent.create({

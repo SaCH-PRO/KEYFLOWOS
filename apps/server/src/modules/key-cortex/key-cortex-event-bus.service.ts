@@ -14,6 +14,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { withoutForgottenPersonalData } from '../business-events/business-event.service';
 import { Optional } from '@nestjs/common';
 import { CognitiveEventBusService } from './cognitive-event-bus.service';
 
@@ -226,6 +227,15 @@ export class KeyCortexEventBusService {
 
   private async persistAudit(event: KeyCortexEvent): Promise<void> {
     try {
+      // V1-72 review (SEC-3): the bus payload about a forgotten contact is not
+      // written (the same write-time check as BusinessEventService.emit).
+      const checked = await withoutForgottenPersonalData(this.prisma.client, {
+        businessId: event.businessId,
+        eventType: event.type,
+        subjectType: event.metadata?.entityType ?? 'KEY_CORTEX_EVENT',
+        subjectId: event.metadata?.entityId ?? event.id,
+        after: event.payload as unknown,
+      });
       await (this.prisma.client as any).businessEvent.create({
         data: {
           businessId: event.businessId,
@@ -235,7 +245,7 @@ export class KeyCortexEventBusService {
           actorType: event.source,
           actorId: event.userId ?? 'key_cortex',
           action: 'PUBLISHED',
-          after: event.payload as any,
+          after: checked.after as any,
           source: 'key_cortex_event_bus',
           // Phase 3 Skeleton: identity thread on audit ledger
           sessionId: event.metadata?.sessionId,

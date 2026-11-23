@@ -101,8 +101,8 @@ const PURGE_RETAINED_BASIS_DETAIL =
 const PURGE_NOT_SWEPT =
   'Records of other modules that reference the contact id and are not counted under erased or retained ' +
   '(for example messaging, campaigns, deals and journeys) are not swept by this purge. Business events are ' +
-  'swept when their subject is the contact or their snapshot names it at the top level (contactId, ' +
-  'fromContactId, toContactId, targetContactId); events ' +
+  'swept when their subject is the contact, their route named it (routeContactId), or the server response ' +
+  'snapshot names it at the top level (contactId, fromContactId, toContactId, targetContactId); events ' +
   'of the retained records (invoices, quotes, bookings) whose snapshot names the person otherwise are kept ' +
   'under the retained basis, and events whose snapshot names the person only inside a nested structure ' +
   '(for example duplicate-check and import requests) are not reached and not swept.';
@@ -900,8 +900,11 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
     //    BusinessEventInterceptor stores the request body and the response of
     //    every mutation, so a contact create or update holds the person's name,
     //    email and phone, and its metadata the caller's ip. A row names them
-    //    when its subject is one of them (subject_type 'contact'), or when its
-    //    before/after carries one of their ids as the top-level contactId (a
+    //    when its subject is one of them (subject_type 'contact'), when the
+    //    route's :contactId the interceptor recorded (metadata.routeContactId)
+    //    is one of them, or when its after (the server's response; never
+    //    before, the raw request body a caller could plant a key in, SEC-1)
+    //    carries one of their ids as the top-level contactId (a
     //    note, a task, the forget request itself), or another
     //    CONTACT_REFERENCE_KEYS key (a relationship, a referral): the same rule
     //    BusinessEventService.emit applies to rows written after the request.
@@ -926,9 +929,8 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
        WHERE business_id = ${businessId}
          AND (
            (subject_type = 'contact' AND subject_id = ANY(${ids}))
-           OR EXISTS (
-             SELECT 1 FROM unnest(${refKeys}::text[]) k
-              WHERE "before" ->> k = ANY(${ids}) OR "after" ->> k = ANY(${ids}))
+           OR EXISTS (SELECT 1 FROM unnest(${refKeys}::text[]) k WHERE "after" ->> k = ANY(${ids}))
+           OR metadata ->> 'routeContactId' = ANY(${ids})
          )
          AND (
            "before" IS NOT NULL
