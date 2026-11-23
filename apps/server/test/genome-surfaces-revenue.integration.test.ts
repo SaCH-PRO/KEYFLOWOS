@@ -204,7 +204,11 @@ beforeAll(async () => {
   const READINESS = [
     { businessId: ID.biz, module: 'finance', readinessScore: 33, requiredFacts: [], optionalFacts: [], missingFacts: [missing('FINANCIAL', 'finance', 'monthlyTarget', 'Monthly target TTD 912 unknown')], blockedReasons: ['Finance facts missing'], recommendedSetupActions: [], automationAllowed: false, riskLevel: 'HIGH', lastComputedAt: new Date().toISOString() },
     { businessId: ID.biz, module: 'commerce', readinessScore: 41, requiredFacts: [], optionalFacts: [], missingFacts: [], blockedReasons: [], recommendedSetupActions: [], automationAllowed: true, riskLevel: 'MEDIUM', lastComputedAt: new Date().toISOString() },
-    { businessId: ID.biz, module: 'crm', readinessScore: 60, requiredFacts: [], optionalFacts: [], missingFacts: [missing('CUSTOMER_MARKET', 'customer', 'segments', 'Segments unknown'), missing('SALES', 'sales', 'pipelineStages', 'Pipeline unknown')], blockedReasons: [], recommendedSetupActions: [], automationAllowed: true, riskLevel: 'MEDIUM', lastComputedAt: new Date().toISOString() },
+    { businessId: ID.biz, module: 'crm', readinessScore: 60, requiredFacts: [missing('CUSTOMER_MARKET', 'customer', 'segments', 'Segments unknown'), missing('SALES', 'sales', 'pipelineStages', 'Pipeline unknown')], optionalFacts: [], missingFacts: [missing('CUSTOMER_MARKET', 'customer', 'segments', 'Segments unknown'), missing('SALES', 'sales', 'pipelineStages', 'Pipeline unknown')], blockedReasons: ['Missing blocking fact: sales.pipelineStages'], recommendedSetupActions: [], automationAllowed: false, riskLevel: 'HIGH', lastComputedAt: new Date().toISOString() },
+    // Round 1 (security MAJOR-2): a module whose readiness is computed only from FINANCIAL facts ("Reports readiness is
+    // 33%" states the financial section's completeness), and one computed only from operations facts.
+    { businessId: ID.biz, module: 'reports', readinessScore: 33, requiredFacts: [missing('FINANCIAL', 'finance', 'currency', 'Currency unknown'), missing('FINANCIAL', 'finance', 'avg_ticket', 'Ticket unknown'), missing('FINANCIAL', 'finance', 'cost_structure', 'Costs unknown')], optionalFacts: [], missingFacts: [missing('FINANCIAL', 'finance', 'avg_ticket', 'Ticket unknown'), missing('FINANCIAL', 'finance', 'cost_structure', 'Costs unknown')], blockedReasons: ['Missing blocking fact: finance.avg_ticket'], recommendedSetupActions: ['Provide blocking fact: finance.avg_ticket'], automationAllowed: false, riskLevel: 'HIGH', lastComputedAt: new Date().toISOString() },
+    { businessId: ID.biz, module: 'sop', readinessScore: 50, requiredFacts: [missing('OPERATIONS_DELIVERY', 'operations', 'coreWorkflows', 'Workflows unknown'), missing('OPERATIONS_DELIVERY', 'operations', 'fulfillment', 'Fulfilment unknown')], optionalFacts: [], missingFacts: [missing('OPERATIONS_DELIVERY', 'operations', 'fulfillment', 'Fulfilment unknown')], blockedReasons: ['Missing blocking fact: operations.fulfillment'], recommendedSetupActions: [], automationAllowed: false, riskLevel: 'HIGH', lastComputedAt: new Date().toISOString() },
   ];
   const readinessStore = {
     computeReadiness: async () => READINESS,
@@ -346,7 +350,11 @@ beforeAll(async () => {
     operationsSystem: { coreWorkflows: ['intake'] },
     marketingSystem: { channels: ['ig'] },
     executionRoadmap: { today: ['t'], sevenDayPlan: ['s'] },
-    riskProfile: { legalRisks: ['l'], marketRisks: ['m'], operationalRisks: ['o'] },
+    riskProfile: { legalRisks: ['l'], marketRisks: ['m'], operationalRisks: ['o'], financialRisks: [{ description: 'Runway 31.7 days' }] },
+    // Round 1 (security MAJOR-3): money fields outside the three money DNA columns.
+    taxProfile: { country: 'TT', taxIdStatus: 'done', estimatedAnnualRevenue: 4500.25 },
+    offerArchitecture: { coreOffer: { name: 'Audit', price: 8765.43 } },
+    readinessScore: 44,
     completeness: 70,
     confidenceScores: { financials: 50, projectionProfile: 0, salesSystem: 0, identity: 100 },
     // The stored composites (GET blueprint and the executive brief read them).
@@ -392,6 +400,22 @@ describe('FU-GENOME-SURFACES-REVENUE: the genome surfaces serve finance-derived 
         expect(res.body.confidenceScores?.[column], `confidence ${column}`).toBeUndefined();
       }
       expect(res.body.confidenceScores.identity).toBe(100);
+      // Round 1 (both reviews, MAJOR-3): completeness averages the financials column's fill in, and every other core
+      // column's fill ratio is served, so the financials fill is recoverable: withheld, as is the blueprint readiness.
+      expect(res.body.completeness ?? null).toBeNull();
+      expect(res.body.readinessScore ?? null).toBeNull();
+      expect(res.body.withheldForRevenue).toEqual(expect.arrayContaining(['completeness', 'readinessScore']));
+      // Money fields outside the money DNA columns (D-100, D-234): revenue model, budget, offer prices, the annual
+      // revenue estimate, the financial risks.
+      expect(res.body.offerArchitecture).toEqual({});
+      expect(res.body.taxProfile.estimatedAnnualRevenue).toBeUndefined();
+      expect(res.body.taxProfile.taxIdStatus).toBe('done');
+      expect(res.body.riskProfile.financialRisks).toBeUndefined();
+      expect(res.body.riskProfile.legalRisks).toEqual(['l']);
+      expect(res.body.operatingModel.revenueModel).toBeUndefined();
+      expect(res.body.operatingModel.deliveryMode).toBe('remote');
+      expect(res.body.constraints.budgetRange).toBeUndefined();
+      expect(JSON.stringify(res.body)).not.toMatch(/retainer|Runway/);
       expect(res.body.identity.name).toBe('V80R');
       expect(JSON.stringify(res.body)).not.toMatch(FIGURES);
     }
@@ -532,7 +556,13 @@ describe('FU-GENOME-SURFACES-REVENUE: the genome surfaces serve finance-derived 
     const labels = (s.pulse?.dimensions ?? []).map((d: any) => d.label);
     expect(labels).not.toContain('Genome');
     expect(labels).not.toContain('Readiness');
-    expect(s.moduleReadiness.map((m: any) => m.module)).toEqual(['crm']);
+    // Round 1 (security MAJOR-2): a module whose readiness is computed from any money fact is withheld whole (its score,
+    // flags and reasons state the money section's completeness); only the operations-only module is served, and the
+    // health counts are the served modules'.
+    expect(s.moduleReadiness.map((m: any) => m.module)).toEqual(['sop']);
+    expect(s.health.blockedModuleCount).toBe(1);
+    expect(s.health.lowReadinessModuleCount).toBe(1);
+    expect(JSON.stringify(s)).not.toMatch(/Reports readiness|Crm readiness|finance\.avg_ticket|sales\.pipelineStages/);
     for (const m of s.moduleReadiness) for (const f of m.missingFacts) expect(f.section).not.toMatch(/FINANCIAL|SALES/);
     const all = [...s.topPriorities, ...s.risks, ...s.opportunities, ...s.genome.weakestSections, ...s.recommendedActions];
     const text = JSON.stringify(s);
@@ -559,7 +589,11 @@ describe('FU-GENOME-SURFACES-REVENUE: the genome surfaces serve finance-derived 
       expect(facts.data.facts.map((f: any) => f.id)).toEqual([`${P}fact_ops`]);
       expect(facts.data.count).toBe(1);
       const readiness = await tools.organ.executeTool('key_genome.get_readiness', ctx(reader), {});
-      expect(readiness.data.readiness.map((r: any) => r.module)).toEqual(['crm']);
+      expect(readiness.data.readiness.map((r: any) => r.module)).toEqual(['sop']);
+      for (const module of ['reports', 'crm']) {
+        const one = await tools.organ.executeTool('key_genome.get_readiness', ctx(reader), { module });
+        expect(one.data.readiness, module).toBeNull();
+      }
       const finance = await tools.organ.executeTool('key_genome.get_readiness', ctx(reader), { module: 'finance' });
       expect(finance.data.readiness).toBeNull();
       const dna = await tools.bridge.execute({ module: 'genome', action: 'get_dna', parameters: {}, businessId: ID.biz, userId: reader, source: 'key_cortex', timestamp: new Date(), correlationId: 'c' });
@@ -593,7 +627,7 @@ describe('FU-GENOME-SURFACES-REVENUE: the genome surfaces serve finance-derived 
       expect(snapshot.body.health.genomeIntegrity).toBe(57);
       expect(snapshot.body.keyGenome.overall).toBe(47);
       expect(snapshot.body.keyGenome.crossDomain?.healthScore).toBe(44);
-      expect(snapshot.body.moduleReadiness.map((m: any) => m.module)).toEqual(['finance', 'commerce', 'crm']);
+      expect(snapshot.body.moduleReadiness.map((m: any) => m.module)).toEqual(['finance', 'commerce', 'crm', 'reports', 'sop']);
     }
     // Interleaved reads: owner, member, owner, member.
     const seq = [ID.owner, ID.staffNone, ID.owner, ID.staffNone];
@@ -610,5 +644,40 @@ describe('FU-GENOME-SURFACES-REVENUE: the genome surfaces serve finance-derived 
     const cross = await get(bp('/genome', ID.biz2), ID.staffNone);
     expect(cross.status).toBe(403);
     expect(keysOf(cross.body)).not.toContain('genomeDnaScores');
+  });
+  it('SR-12 write routes answer the blueprint as GET does (round 1, both reviews MAJOR)', async () => {
+    const patch = await request(app.getHttpServer()).patch(bp()).set(HEADER, ID.staffNone).send({});
+    const dna = await request(app.getHttpServer()).patch(bp('/genome/dna/operations')).set(HEADER, ID.staffNone).send({ data: { coreWorkflows: ['intake'] } });
+    const onboarding = await request(app.getHttpServer()).post(bp('/infer/onboarding')).set(HEADER, ID.staffNone).send({ answers: {} });
+    for (const [name, res] of [['PATCH', patch], ['PATCH dna', dna], ['infer/onboarding', onboarding]] as const) {
+      expect(res.status, name).toBeLessThan(300);
+      for (const field of COMPOSITES) expect(res.body[field] ?? null, `${name} ${field}`).toBeNull();
+      expect(res.body.financials ?? {}, name).toEqual({});
+      expect(res.body.genomeDnaScores?.financial, name).toBeUndefined();
+      expect(res.body.completeness ?? null, name).toBeNull();
+      expect(JSON.stringify(res.body), name).not.toMatch(FIGURES);
+    }
+    const tool = await tools.organ.executeTool('key_genome.update_dna_section', { businessId: ID.biz, userId: ID.staffNone }, { sectionKey: 'operations', data: { coreWorkflows: ['intake'] } });
+    expect(tool.success).toBe(true);
+    for (const field of COMPOSITES) expect(tool.data[field] ?? null, `tool ${field}`).toBeNull();
+    expect(tool.data.financials).toEqual({});
+    expect(JSON.stringify(tool.data)).not.toMatch(FIGURES);
+    // The owner's write answers the whole blueprint.
+    const owner = await request(app.getHttpServer()).patch(bp()).set(HEADER, ID.owner).send({});
+    expect(owner.body.financials.avgTicket).toBe(4500.25);
+    expect(typeof owner.body.genomeIntegrity).toBe('number');
+  });
+
+  it('SR-13 a failed executive brief leaves the withheld composites null, not 0 (round 1, MINOR/NIT)', async () => {
+    const { BusinessIntelligenceService } = await import('../src/modules/intelligence/business-intelligence.service');
+    const intelligence = moduleRef.get(BusinessIntelligenceService);
+    const spy = vi.spyOn(intelligence, 'generateExecutiveBrief').mockRejectedValue(new Error('brief down'));
+    try {
+      const res = await get(`/business-command-center/businesses/${ID.biz}/snapshot`, ID.staffNone);
+      expect(res.status).toBe(200);
+      for (const field of COMPOSITES) expect(res.body.health[field] ?? null, field).toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
