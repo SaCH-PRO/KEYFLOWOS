@@ -60,10 +60,19 @@ describe('TemporalFlowController', () => {
     await controller.list('biz_1', {} as any);
     expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', undefined);
     expect((temporal.list as any).mock.calls[0][2]).toBeNull();
+    expect((temporal.list as any).mock.calls[0][3]).toBe(FILTER);
     await controller.calendar('biz_1', '2026-06-01', '2026-06-30');
     expect(temporal.calendarRange).toHaveBeenCalledWith('biz_1', '2026-06-01', '2026-06-30', null, FILTER);
     await controller.reminders('biz_1');
     expect(temporal.remindersDue).toHaveBeenCalledWith('biz_1', null, FILTER);
+  });
+
+  it('D-238 with the module filter: an analysis with no request user passes the reader as null and both filters', async () => {
+    const { controller, temporal } = makeController();
+    await controller.analyze('biz_1');
+    expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', undefined);
+    expect(temporal.readerMemoryFilter).toHaveBeenCalledWith('biz_1', undefined);
+    expect(temporal.analyze).toHaveBeenCalledWith('biz_1', FILTER, MEMORY_FILTER, null);
   });
 
   it('GET /calendar returns calendar range', async () => {
