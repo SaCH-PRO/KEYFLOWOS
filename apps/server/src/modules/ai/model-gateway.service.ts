@@ -1428,16 +1428,18 @@ export class ModelGatewayService {
     // overloaded_error mid-stream) and a close before message_stop are a
     // failed stream, not a finished one.
     let sawMessageStop = false;
-    let streamErrorEvent: { type?: unknown; message?: unknown } | undefined;
+    let sawErrorEvent = false;
+    let streamErrorEvent: { type?: unknown; message?: unknown } = {};
 
     try {
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        // Delta review: a last frame with no trailing newline is still read.
+        if (done && !buffer) break;
 
-        buffer += decoder.decode(value, { stream: true });
+        buffer += done ? `${decoder.decode()}\n` : decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
+        buffer = done ? '' : lines.pop() || '';
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
@@ -1504,18 +1506,25 @@ export class ModelGatewayService {
               }
 
               if (event.type === 'message_stop') sawMessageStop = true;
-              if (event.type === 'error') streamErrorEvent = event.error ?? {};
+              if (event.type === 'error') {
+                sawErrorEvent = true;
+                streamErrorEvent = event.error && typeof event.error === 'object' ? event.error : {};
+              }
             } catch {
               /* intentionally empty */
             }
-            if (streamErrorEvent) {
+            if (sawErrorEvent) {
+              // Provider text, logged on one bounded line (delta review).
+              const oneLine = (v: unknown, max: number) =>
+                Array.from(String(v ?? '').slice(0, max), (ch) => (ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127 ? ' ' : ch)).join('');
               this.logger.warn(
-                `Anthropic stream error event (${String(streamErrorEvent.type)}): ${String(streamErrorEvent.message ?? '')}`,
+                `Anthropic stream error event (${oneLine(streamErrorEvent.type, 64)}): ${oneLine(streamErrorEvent.message, 300)}`,
               );
               throw new ProviderStreamError(streamErrorEvent.type, 'Anthropic stream error event');
             }
           }
         }
+        if (done) break;
       }
     } finally {
       reader.releaseLock();
