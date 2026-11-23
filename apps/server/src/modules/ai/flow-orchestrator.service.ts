@@ -3038,6 +3038,12 @@ ${triage.standingContext}`;
           const combined = fullContent ? `${fullContent}\n\n${followUpContent}` : followUpContent;
           yield { type: 'content_delta', content: combined };
         }
+        // RR-STREAM-ERROR-NO-EFFECTS review SEC-B: as the first stream, a
+        // follow-up that ended in an error is shown as one and not saved as the answer.
+        if (chunk.type === 'error') {
+          yield { type: 'error', error: chunk.error };
+          return;
+        }
       }
 
       yield* this.finalizeStreamSession(

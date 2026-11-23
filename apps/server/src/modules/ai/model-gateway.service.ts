@@ -98,6 +98,24 @@ export interface GatewayResponse {
   contractValidation?: ContractValidationResult;
 }
 
+/**
+ * RR-STREAM-ERROR-NO-EFFECTS review SEC-A: a provider stream that reported an
+ * error part-way, or ended before its end marker. `providerErrorType` is the
+ * provider's error type only (e.g. overloaded_error), never its message.
+ */
+class ProviderStreamError extends Error {
+  readonly providerErrorType: string;
+  constructor(providerErrorType: unknown, detail: string) {
+    const type =
+      typeof providerErrorType === 'string' && /^[A-Za-z0-9_]{1,64}$/.test(providerErrorType)
+        ? providerErrorType
+        : 'unknown_error';
+    super(`${detail} (${type})`);
+    this.name = 'ProviderStreamError';
+    this.providerErrorType = type;
+  }
+}
+
 export interface StreamChunk {
   type: 'content_delta' | 'tool_call_delta' | 'usage' | 'done' | 'error';
   content?: string;
@@ -1175,9 +1193,13 @@ export class ModelGatewayService {
           `Stream provider ${candidate.provider}/${candidate.model} failed: ${lastError.message}`,
         );
         if (yieldedFromCandidate) {
+          // Review SEC-C: the member is told the provider and the error class
+          // only; the provider's message stays in the log line above.
+          const errorClass = /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(lastError?.name ?? '') ? lastError.name : 'Error';
+          const errorType = lastError instanceof ProviderStreamError ? `: ${lastError.providerErrorType}` : '';
           yield {
             type: 'error',
-            error: lastError.message,
+            error: `The ${candidate.provider} stream failed part-way (${errorClass}${errorType})`,
             provider: candidate.provider,
             model: candidate.model,
             fallbackUsed,
@@ -1402,6 +1424,11 @@ export class ModelGatewayService {
     let buffer = '';
     let inputTokens = 0;
     let outputTokens = 0;
+    // RR-STREAM-ERROR-NO-EFFECTS review SEC-A: an SSE error event (e.g.
+    // overloaded_error mid-stream) and a close before message_stop are a
+    // failed stream, not a finished one.
+    let sawMessageStop = false;
+    let streamErrorEvent: { type?: unknown; message?: unknown } | undefined;
 
     try {
       while (true) {
@@ -1475,14 +1502,27 @@ export class ModelGatewayService {
               if (event.type === 'message_delta' && event.usage) {
                 outputTokens = event.usage.output_tokens ?? 0;
               }
+
+              if (event.type === 'message_stop') sawMessageStop = true;
+              if (event.type === 'error') streamErrorEvent = event.error ?? {};
             } catch {
               /* intentionally empty */
+            }
+            if (streamErrorEvent) {
+              this.logger.warn(
+                `Anthropic stream error event (${String(streamErrorEvent.type)}): ${String(streamErrorEvent.message ?? '')}`,
+              );
+              throw new ProviderStreamError(streamErrorEvent.type, 'Anthropic stream error event');
             }
           }
         }
       }
     } finally {
       reader.releaseLock();
+    }
+
+    if (!sawMessageStop) {
+      throw new ProviderStreamError('stream_ended_without_message_stop', 'Anthropic stream ended early');
     }
 
     const totalTokens = inputTokens + outputTokens;
