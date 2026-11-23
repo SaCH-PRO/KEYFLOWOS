@@ -28,6 +28,7 @@ const fake = vi.hoisted(() => ({
   calls: [] as Array<{ name: string; arguments: unknown }>,
   failConnect: false,
   failListTools: false,
+  connectThrows: null as null | ((url: string) => unknown),
   tools: [{ name: 'x', description: 'fake tool x', inputSchema: { type: 'object', properties: {} } }],
 }));
 
@@ -49,6 +50,7 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
     async connect(transport: { url: string }) {
       fake.connects += 1;
       // As Node's fetch does: the error quotes the url in its normalized form (new URL(raw).href).
+      if (fake.connectThrows) throw fake.connectThrows(transport.url);
       if (fake.failConnect) throw new TypeError(`Request cannot be constructed from a URL that includes credentials: ${transport.url}`);
     }
     async listTools() {
@@ -104,6 +106,7 @@ beforeEach(() => {
   fake.calls.length = 0;
   fake.failConnect = false;
   fake.failListTools = false;
+  fake.connectThrows = null;
   errorLog = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
   vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
   warnLog = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
@@ -382,5 +385,38 @@ describe('RR-MCP-TENANT-BOUND (D-261, D-262): the MCP bridge serves a business o
     }
     expect(errorLines().join('\n')).not.toContain('/etc/v91a');
     noServerTouched();
+  });
+
+  it('MCP-17 the log redaction holds when an error quotes the url differently from the config: other case, an extended query, a bare "+" query value; an unprintable thrown value still reads as unavailable', async () => {
+    const cases: Array<{ url: string; quoted: (href: string) => unknown; secrets: string[] }> = [
+      // Percent-escape case differs from the config's.
+      { url: 'https://v91aUser:Pa%3Css@mcp.v91a.invalid/mcp', quoted: (href) => new Error(`failed: ${href.replace('Pa%3Css', 'Pa%3css')}`), secrets: ['pa%3css', 'v91auser'] },
+      // The error quotes the configured url with more query appended.
+      { url: 'https://mcp.v91a.invalid/mcp?token=v91aSharedTok', quoted: (href) => new Error(`failed: ${href}&sig=v91aServerSig`), secrets: ['v91asharedtok', 'v91aserversig'] },
+      // A query value quoted bare, in its form-encoded '+' spelling.
+      { url: 'https://mcp.v91a.invalid/mcp?x=v91a+plus+secret', quoted: () => new Error('bad value v91a+plus+secret'), secrets: ['v91a+plus+secret', 'v91a plus secret'] },
+    ];
+    for (const c of cases) {
+      warnLog.mockClear();
+      fake.connectThrows = c.quoted;
+      setServers([{ ...SERVER, key: 'quoted', url: c.url, businessIds: [BIZ_A] }]);
+      const mcp = new McpClientManagerService();
+      await rejection(callAs(mcp, BIZ_A, 'mcp__quoted__x'));
+      const lines = warnLog.mock.calls.map((x) => String(x[0])).join('\n').toLowerCase();
+      for (const secret of c.secrets) expect(lines, `${c.url} leaks ${secret}`).not.toContain(secret);
+      expect(lines).toContain('mcp.v91a.invalid');
+    }
+
+    fake.connectThrows = () => Object.create(null);
+    setServers([{ ...SERVER, businessIds: [BIZ_A] }]);
+    const err = await rejection(callAs(new McpClientManagerService(), BIZ_A, 'mcp__s__x'));
+    expect((err as Error).message).toMatch(/unavailable/);
+  });
+
+  it('MCP-18 a key ending in "_" (which mcp__<key>__<tool> cannot round-trip) is dropped with an error log', async () => {
+    setServers([{ ...SERVER, key: 'a_', businessIds: [BIZ_A] }]);
+    const mcp = new McpClientManagerService();
+    expect(mcp.isConfigured()).toBe(false);
+    expect(errorLines().some((l) => l.includes('"a_"') && /key/.test(l))).toBe(true);
   });
 });
