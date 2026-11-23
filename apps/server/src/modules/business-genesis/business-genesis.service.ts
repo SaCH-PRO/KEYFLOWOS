@@ -10,7 +10,7 @@ import type {
   BlueprintRiskItem,
 } from '../blueprint/blueprint.types';
 import { ModelGatewayService } from '../ai/model-gateway.service';
-import { coerceToContract } from '../ai/ai-output-contracts';
+import { coerceToContractState } from '../ai/ai-output-contracts';
 import type { GenesisIdeaExtractionContract } from '../ai/ai-output-contracts';
 import {
   GenesisActionPlan,
@@ -302,11 +302,18 @@ Use null or omit fields when unknown. Keep the summary concrete and actionable.`
       summary: ideaText.slice(0, 200),
       identity: {},
     };
-    const contract = coerceToContract<GenesisIdeaExtractionContract>(
+    const coerced = coerceToContractState<GenesisIdeaExtractionContract>(
       raw,
       'genesis_idea_extraction',
       fallback,
     );
+    if (coerced.state === 'coerced') {
+      // RR-STRUCTURED-PARSE-INVALID-STATE: the model's answer was replaced by the fallback; say so.
+      this.logger.warn(
+        `genesis_idea_extraction answer did not satisfy its contract; using the fallback (${coerced.errors.join('; ')})`,
+      );
+    }
+    const contract = coerced.value;
 
     const extracted = contractToBlueprintPatch(contract) as Partial<BlueprintData>;
     const suggestedEntityType = coerceEntityType(contract.legalProfile?.recommendedEntityType);

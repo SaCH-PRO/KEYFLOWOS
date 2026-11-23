@@ -1,3 +1,5 @@
+import { HttpException, HttpStatus } from '@nestjs/common';
+
 export interface IntentParseContract {
   objective: string;
   urgency: 'low' | 'normal' | 'high' | 'critical';
@@ -497,14 +499,64 @@ export function validateOutputContract(
   };
 }
 
+/**
+ * RR-STRUCTURED-PARSE-INVALID-STATE: coercion that says what it did. `valid`
+ * returns the payload as given; `coerced` returns the caller's fallback and
+ * the validation errors, so the caller can log that the model's answer was
+ * replaced instead of silently shipping the fallback as if it were the answer.
+ */
+export function coerceToContractState<T>(
+  data: unknown,
+  contractType: ContractType,
+  fallback: T,
+): { value: T; state: 'valid' | 'coerced'; errors: string[] } {
+  const validation = validateOutputContract(data, contractType);
+  if (validation.valid) {
+    return { value: data as T, state: 'valid', errors: [] };
+  }
+  return { value: fallback, state: 'coerced', errors: validation.errors };
+}
+
+/** Value-only form of coerceToContractState, kept for callers that only need the payload. */
 export function coerceToContract<T>(
   data: unknown,
   contractType: ContractType,
   fallback: T,
 ): T {
-  const validation = validateOutputContract(data, contractType);
-  if (validation.valid) {
-    return data as T;
+  return coerceToContractState(data, contractType, fallback).value;
+}
+
+/** One candidate's invalid answer, as the gateway saw it. */
+export interface ContractViolationAttempt {
+  provider: string;
+  model: string;
+  errors: string[];
+}
+
+/**
+ * RR-STRUCTURED-PARSE-INVALID-STATE: thrown by ModelGatewayService.complete()
+ * when no candidate produced output that satisfies the expected contract and
+ * at least one produced output that violated it. A 502 (the upstream answered,
+ * but not with what was asked), code 'contract_violation', every attempt
+ * listed by provider and model with its validation errors. The message keeps
+ * the 'AI output contract violation [<type>]' prefix the logs always carried.
+ * Distinct from the 503 of an unavailable provider, so a caller can tell a
+ * model that answered badly from a provider that did not answer.
+ */
+export class AiContractViolationError extends HttpException {
+  readonly code = 'contract_violation' as const;
+
+  constructor(
+    readonly contractType: ContractType,
+    readonly attempts: ContractViolationAttempt[],
+    detail?: string,
+  ) {
+    const summary = attempts.map((a) => `${a.provider}/${a.model}: ${a.errors.join('; ')}`).join(' | ');
+    const message = `AI output contract violation [${contractType}]: ${summary}${detail ? ` (${detail})` : ''}`;
+    super(
+      { code: 'contract_violation', contractType, attempts, message, error: 'Bad Gateway' },
+      HttpStatus.BAD_GATEWAY,
+    );
+    this.name = 'AiContractViolationError';
   }
-  return fallback;
 }
