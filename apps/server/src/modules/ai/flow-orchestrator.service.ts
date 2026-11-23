@@ -399,6 +399,14 @@ async function turnMemorySight(
 }
 
 /**
+ * MEM-PATTERNS-SIGHT (security review F1): whether a reader may read every pattern, whatever it states: a member reader
+ * with revenue read (readsDocumentExtractions) and expenses read, the two sights aiMemoryRowVisibleTo asks for.
+ */
+function readsEveryPattern(reader: string | null, sight: ModuleSight): boolean {
+  return reader !== null && readsDocumentExtractions(sight, reader) && sight('expenses');
+}
+
+/**
  * MEM-PATTERNS-SIGHT (P0; D-257, D-100, D-234, D-203): which AiMemory 'patterns' rows a flow turn's "USER PREFERENCES &
  * MEMORY" section may carry. PatternDetectorService stores a repeat late payer as "N overdue invoices totaling X"
  * ("Overdue: <total>"), and the block put every pattern into every turn. A turn that names no member and no position
@@ -1531,6 +1539,11 @@ export class FlowOrchestratorService {
           // low-confidence band while keeping anything recent or well-evidenced.
           minRankScore: 0.5,
           documentExtractions: readsDocumentExtractions(sight, reader),
+          // MEM-PATTERNS-SIGHT (security review F1; D-100, D-146): the perception block renders AiMemory rows too, and a
+          // pattern states money ("N overdue invoices totaling X") or an expense in its text. A reader who may not read
+          // every pattern (aiMemoryRowVisibleTo: a member reader with revenue and expenses read reads them all) gets none
+          // here, unread so that none takes another row's place; the memory section carries the patterns they may read.
+          aiMemoryPatterns: readsEveryPattern(reader, sight),
         });
         return readersOwnPromptMemory(this.prisma, businessId, reader, read, window, this.logger, 'perception', sight);
       };

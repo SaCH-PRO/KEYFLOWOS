@@ -98,4 +98,10 @@ export interface MemoryRetrievalOptions {
    * place in its limits). A prompt's read passes the reader's revenue sight (readsDocumentExtractions).
    */
   documentExtractions?: boolean;
+  /**
+   * MEM-PATTERNS-SIGHT (D-100, D-234, D-146): read the behavioural patterns (AiMemory rows of category 'patterns') too.
+   * Default true. A prompt's read for a reader who may not read every pattern (one stating money or an expense) passes
+   * false: a pattern is classified by its text, so none is read, and a withheld pattern takes no place in its limits.
+   */
+  aiMemoryPatterns?: boolean;
 }
