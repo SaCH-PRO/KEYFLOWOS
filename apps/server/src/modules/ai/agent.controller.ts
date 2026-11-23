@@ -359,7 +359,9 @@ export class AgentController {
     @Req() req?: AuthenticatedRequest,
   ) {
     if (!query) return { results: [] };
-    // MEM-SEMANTIC-SIGHT acceptance review: a bounded query (every search costs an embedding of it).
+    // MEM-SEMANTIC-SIGHT acceptance review: a bounded query (every search costs an embedding of it), and one string (a
+    // repeated or bracketed q parses to an array, whose length counts its items).
+    if (typeof query !== 'string') throw new BadRequestException('q must be one string');
     if (query.length > MAX_SEARCH_QUERY) throw new BadRequestException(`q must be at most ${MAX_SEARCH_QUERY} characters`);
     // MEM-DOC-EXTRACTION-SIGHT (D-234; orchestrator review COR-MDX-1): the copies of document extractions only for a
     // member with revenue read (readersModuleSight, the rule KEY's prompts read them by); the search leaves them out

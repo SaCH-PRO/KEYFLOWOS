@@ -745,11 +745,12 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
     const ok = await agent().get(`/ai/businesses/${ID.biz}/agent/memory/search`).query({ q: 'x'.repeat(500) }).set(HEADER, ID.owner);
     expect(ok.status).toBe(200);
     expect(embedCalls.length, 'a 500-character query is embedded').toBe(calls + 1);
-    // Delta review MINOR-1: a repeated or bracketed q (an array) is no way around the bound.
-    for (const qs of [`q=${'x'.repeat(501)}&q=y`, `q[]=${'x'.repeat(501)}`]) {
-      const res = await agent().get(`/ai/businesses/${ID.biz}/agent/memory/search?${qs}`).set(HEADER, ID.owner);
-      expect(res.status, `${qs.slice(0, 12)}: ${JSON.stringify(res.body).slice(0, 160)}`).toBe(400);
-    }
+    // Delta review MINOR-1: a repeated q (parsed to an array) is refused; a bracketed q (an array under the extended
+    // query parser, another key under the simple one) is refused or answers nothing. Neither is embedded.
+    const repeated = await agent().get(`/ai/businesses/${ID.biz}/agent/memory/search?q=${'x'.repeat(501)}&q=y`).set(HEADER, ID.owner);
+    expect(repeated.status, JSON.stringify(repeated.body).slice(0, 160)).toBe(400);
+    const bracketed = await agent().get(`/ai/businesses/${ID.biz}/agent/memory/search?q[]=${'x'.repeat(501)}`).set(HEADER, ID.owner);
+    expect(bracketed.status === 400 || (bracketed.status === 200 && bracketed.body.results.length === 0), JSON.stringify(bracketed.body).slice(0, 160)).toBe(true);
     expect(embedCalls.length, 'no embedding for a refused array query').toBe(calls + 1);
   });
 

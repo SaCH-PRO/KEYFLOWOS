@@ -276,8 +276,8 @@ export class MemoryConsolidationService {
    * first, before anything that can fail.
    *
    * Review SEC-W11MPS-1: a row also has semantic copies in ai_memory_embeddings
-   * (POST .../agent/memory/backfill, which a settings admin may send since MEM-SEMANTIC-SIGHT), which every member
-   * reads back (GET .../agent/memory/search, and KEY's memory block as
+   * (POST .../agent/memory/backfill, which a settings admin may send since MEM-SEMANTIC-SIGHT), which members
+   * read back as each copy's source allows (GET .../agent/memory/search, and KEY's memory block as
    * [ai_memory_embedding]: buildMemoryContext and chatMemoryFragments search them
    * with the turn's query). A withdrawn row's copies (source_type 'memory',
    * source_id the row's id) go with it, in one transaction. A copy whose content is

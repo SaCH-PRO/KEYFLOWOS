@@ -38,9 +38,11 @@ function textIsMoney(value: unknown): boolean {
  * salaries, suppliers, utilities).
  */
 const EXPENSE_WORDS =
-  /(?<![a-z])(expenses?|bills?|receipts?|budgets?|vendors?|suppliers?|rent|payroll|salar(?:y|ies)|wages?|utilit(?:y|ies)|overheads?|spend(?:ing)?)(?![a-z])/i;
+  /(?<![a-z])(expenses?|expenditures?|bills?|receipts?|budgets?|vendors?|suppliers?|rent|payroll|salar(?:y|ies)|wages?|utilit(?:y|ies)|overheads?|outgoings?|spend(?:s|ing)?|spent|costs?|payables?|purchases?|purchased|procure(?:ment|d)?|reimburs\w*|leases?|landlords?|insurance|premiums?|electricity|fuel|cogs)(?![a-z])/i;
+/** Delta review: labels are read word by word, camelCase split ('rentExpense', 'vendorBills'). */
 function textIsExpense(value: unknown): boolean {
-  return typeof value === 'string' && value !== '' && EXPENSE_WORDS.test(value);
+  if (typeof value !== 'string' || value === '') return false;
+  return EXPENSE_WORDS.test(value) || EXPENSE_WORDS.test(value.replace(/([a-z0-9])([A-Z])/g, '$1 $2'));
 }
 
 /** A knowledge chunk's source id: `<knowledgeSourceId>:<chunkIndex>` (KnowledgeIngestionService.ingestText). */
@@ -115,11 +117,14 @@ export function temporalMemoryModulesOf(row: TemporalRow, events: ReadonlyMap<st
     // Acceptance review (D-146): an expense in its text needs expenses read too.
     if ([event.title, event.summary, event.description].some(textIsExpense)) modules.add('expenses');
   }
+  // Delta review: a summary whose provenance names no module needs every module; the text taints below are added on top
+  // of that fallback, never instead of it (an event always adds its own modules, or every module, above).
+  if (modules.size === 0) add(EVENT_MODULES);
   if (textIsExpense(row.content) || textIsExpense(copyContent)) modules.add('expenses');
   if (textIsMoney(row.content) || textIsMoney(copyContent) || [row.entityType, row.type, row.sourceModule].some((label) => isMoneyLabel(label))) {
     modules.add('revenue');
   }
-  return modules.size ? [...modules] : [...EVENT_MODULES];
+  return [...modules];
 }
 
 /**
