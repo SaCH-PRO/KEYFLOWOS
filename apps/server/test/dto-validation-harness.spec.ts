@@ -21,9 +21,9 @@
  * request) and the service is a stub that records what it was given: this spec
  * is about the pipe, not about who may call the route.
  *
- * Runs under the default config (vitest.config.ts), and is the proof for every
- * apps/server vitest config, since all of them share one transform (see
- * vitest.shared.ts).
+ * Runs under the default config and vitest.e2e.config.ts, and is the proof for
+ * every apps/server vitest config, since all of them use one transform (see
+ * vitest.transform.config.ts).
  */
 import 'reflect-metadata';
 import { INestApplication } from '@nestjs/common';
@@ -131,6 +131,10 @@ describe('global ValidationPipe through configureNestApp (FU-VITEST-DECORATOR-ME
     expect(received).toHaveLength(1);
     expect(received[0]).toBeInstanceOf(CreateFollowUpDto);
     expect(received[0]).toEqual({ title: 'Call back', priority: 'HIGH' });
-    expect(Object.keys(received[0] as object).sort()).toEqual(['priority', 'title']);
+    // The stray fields are gone. (The DTO's declared optional fields are own
+    // keys holding undefined, as tsc's define semantics for class fields emit
+    // them in production; toEqual above ignores those.)
+    expect(received[0]).not.toHaveProperty('businessId');
+    expect(received[0]).not.toHaveProperty('isAdmin');
   });
 });
