@@ -135,11 +135,13 @@ const normalise = (t) => unquote(t).replace(/^\.\//, '').replace(/\\/g, '/');
  * Leading tokens read past before the command word, in any order and nesting:
  * `pnpm exec node`, `timeout <n> node`, `time node`. Not `nice`: its `-n 10`
  * form would leave `-n` as the command word, so a nice'd run fails closed.
+ * `envAfter`: only the shell keyword `time` reads `CI=1 node` after it; timeout
+ * and pnpm exec would exec `CI=1` as a program, so there it is the command word.
  */
 const WRAPPERS = [
-  [/^pnpm$/, /^exec$/],
-  [/^timeout$/, /^\S+$/],
-  [/^time$/],
+  { tokens: [/^pnpm$/, /^exec$/], envAfter: false },
+  { tokens: [/^timeout$/, /^\S+$/], envAfter: false },
+  { tokens: [/^time$/], envAfter: true },
 ];
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
@@ -147,9 +149,11 @@ const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
  * The patterns each `node --test` invocation in `shell` names: tokens after
  * `--test` that are not flags, up to the end of the simple command. Line
  * continuations are joined and inline `#` comments dropped first (a comment
- * may hold a separator). `node` must be the command word of its simple
- * command (after env assignments and the wrappers above, nested in any
- * order), so `echo "node --test x"` and a here-doc line are not runs. Node
+ * may hold a separator; a `#` inside quotes is also read as one, which fails
+ * closed). `node` must be the command word of its simple command (after env
+ * assignments and the wrappers above, nested in any order, env assignments
+ * only where the shell reads them), so `echo "node --test x"` and a here-doc
+ * line are not runs. Node
  * flags before `--test` are read past only in `--flag=value` form: a value
  * in its own token (`--import ./setup.mjs`) makes the line name nothing,
  * which fails closed. Every pattern token is returned, bare directories
@@ -157,21 +161,27 @@ const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
  */
 export function nodeTestPatterns(shell) {
   const joined = shell.replace(/\\\r?\n\s*/g, ' ');
-  // A comment runs from a whitespace-preceded `#` to the end of its physical line, separators included.
+  // A comment runs from a `#` at the start of a word (after whitespace or a separator) to the end of its
+  // physical line, separators included. Quotes are not parsed: a quoted `#` also ends the line for this reader,
+  // which can only refuse credit (the spec is then reported unrun), never grant it.
   const uncommented = joined
     .split(/\r?\n/)
-    .map((line) => line.replace(/(^|\s)#.*$/, '$1'))
+    .map((line) => line.replace(/(^|[\s;&|()])#.*$/, '$1'))
     .join('\n');
   const patterns = [];
   for (const segment of uncommented.split(/\r?\n|;|&&|\|\||\|/)) {
     let tokens = segment.trim().split(/\s+/).filter(Boolean);
+    const stripEnv = () => {
+      while (tokens.length && ENV_ASSIGNMENT.test(tokens[0])) tokens.shift();
+    };
+    stripEnv();
     for (let stripped = true; stripped; ) {
       stripped = false;
-      while (tokens.length && ENV_ASSIGNMENT.test(tokens[0])) tokens.shift();
       for (const wrapper of WRAPPERS) {
-        if (wrapper.every((re, k) => re.test(tokens[k] ?? ''))) {
-          tokens = tokens.slice(wrapper.length);
+        if (wrapper.tokens.every((re, k) => re.test(tokens[k] ?? ''))) {
+          tokens = tokens.slice(wrapper.tokens.length);
           stripped = true;
+          if (wrapper.envAfter) stripEnv();
         }
       }
     }
