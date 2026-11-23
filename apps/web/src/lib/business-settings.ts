@@ -157,10 +157,11 @@ const entries = new Map<string, Entry>();
 const readsStarted = new Map<string, number>();
 const answersRecorded = new Map<string, number>();
 /**
- * Per business id: the writes sent, and the newest write whose answer was recorded (NAV-A1, with BIZ-SETTINGS-WEB's
- * review note: the nav mounts the hook app-wide). Each door answers the whole business, so an older write's answer
- * that lands after a newer one's would put the older business back on screen: it records nothing, and the business
- * is read again.
+ * Per business id: the writes sent, and the newest write whose answer was recorded or whose outcome is uncertain
+ * (NAV-A1, with BIZ-SETTINGS-WEB's review note: the nav mounts the hook app-wide; FU-NAV-A1-CODEX-224). Each door
+ * answers the whole business, so an older write's answer that lands after a newer one's, or after a newer one that
+ * may have been applied, would put the older business back on screen: it records nothing, and the business is read
+ * again.
  */
 const writesSent = new Map<string, number>();
 const newestWriteRecorded = new Map<string, number>();
@@ -411,6 +412,13 @@ function recorded(
     // SEC6-1): if that re-read fails too, the next mount or look at the tab reads again. A 4xx is the server's
     // answer that nothing changed, and changes nothing here.
     if (res.status === undefined || res.status >= 500) {
+      // It also fences every older write's answer (FU-NAV-A1-CODEX-224): this write may have been applied after
+      // theirs, so an older answer landing from now on is a snapshot from before it. It is taken as the stale-answer
+      // check above takes an answer older than one recorded: nothing of it is recorded, and the business is read
+      // again. Raised only for the member acting, as the mark is (review SEC-3).
+      if (sentAs === actingMember()) {
+        newestWriteRecorded.set(businessId, Math.max(newestWriteRecorded.get(businessId) ?? 0, sequence));
+      }
       answerRecorded(businessId);
       const held = entries.get(businessId);
       if (!watched.has(businessId)) {

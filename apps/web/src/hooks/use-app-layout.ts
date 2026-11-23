@@ -171,8 +171,10 @@ export function useAppLayout(): AppLayoutState {
 
   // NAV-A1 (D-150, D-179): the hubs follow what the business sells and what this member may open.
   const businessSettings = useBusinessSettings();
-  // Not known while loading (review COR-2): no sells-dependent hub shows until it is, so no wrong bar flashes.
-  const sells = businessSettings.status === "loading" ? null : businessSettings.sells;
+  // Known only once the business's settings are ready (review COR-2; FU-NAV-A1-CODEX-224): idle (the first render,
+  // before the stored business is read), loading and failed all hold the defaults, not what the business sells, so
+  // no sells-dependent hub shows from them and no wrong bar flashes or stays.
+  const sells = businessSettings.status === "ready" ? businessSettings.sells : null;
   const moduleLevels = useMemberModuleLevels();
 
   const visibleHubs = useMemo(() => hubsFor(sells, moduleLevels), [sells, moduleLevels]);
