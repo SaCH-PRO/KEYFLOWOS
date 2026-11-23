@@ -626,7 +626,12 @@ describe('post-merge.sh [4/4] when V1-17 cannot apply, or is recorded without ru
     expect(forced.rows.some((r) => r.finished), 'control: V1-17 is recorded as finished').toBe(true);
     expect(forced.indexes, 'control: neither identity unique exists').toEqual([]);
     expect(forced.duplicate, 'control: a third live duplicate still fits').toBe('inserted');
-    expect(forced.run.output).toContain('No pending migrations to apply');
+    // V1-17 is recorded, so deploy has nothing to do about it: it applies no migration but those added after V1-17
+    // (FU-PATTERNS-ROUTES-SIGHT: written when V1-17 was the newest, this read "No pending migrations to apply").
+    const applied = [...forced.run.output.matchAll(/Applying migration `([^`]+)`/g)].map((m) => m[1]);
+    expect(applied, forced.run.output).not.toContain(MIGRATION);
+    expect(applied.filter((m) => m <= MIGRATION), forced.run.output).toEqual([]);
+    if (applied.length === 0) expect(forced.run.output).toContain('No pending migrations to apply');
     expect(forced.run.status, forced.run.output).not.toBe(0);
     expect(forced.run.output).toContain(EMAIL_LIVE);
     expect(forced.run.output).toContain(PHONE_LIVE);

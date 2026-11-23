@@ -7,7 +7,10 @@
 -- re-sorted every pattern row of the business: the read grew faster than linearly in withheld rows. This index matches
 -- the page query exactly (equality on business_id and category, range and order on updated_at, id), so each page is an
 -- index range scan and the read grows linearly. It adds nothing else: no column, no constraint, no data change.
+-- IF NOT EXISTS: schema.prisma declares the index (@@index), so a database built or kept in sync with db push already
+-- holds it (MAINTENANCE.md "Adopting a database built without migrations"); deploy is then a no-op there, as
+-- 20260808140000_bank_transaction_external_id_unique is.
 -- Rollback: DROP INDEX "ai_memories_business_id_category_updated_at_id_idx".
 
 -- CreateIndex
-CREATE INDEX "ai_memories_business_id_category_updated_at_id_idx" ON "ai_memories"("business_id", "category", "updated_at" DESC, "id" DESC);
+CREATE INDEX IF NOT EXISTS "ai_memories_business_id_category_updated_at_id_idx" ON "ai_memories"("business_id", "category", "updated_at" DESC, "id" DESC);
