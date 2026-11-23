@@ -723,6 +723,20 @@ function attachmentTruncationNotice(truncatedPositions: readonly number[], turnC
   return lines.length ? `_${lines.join(' ')}_` : '';
 }
 
+/** The most characters of an attachment's name, type or MIME type rendered for the model. */
+export const ATTACHMENT_LABEL_MAX_CHARS = 200;
+
+/**
+ * An attachment's name, type or MIME type as rendered inside a fenced block (Codex P1, #225): the
+ * uploader's text, so one line (control characters become spaces), capped, never split mid-character.
+ * The fence around it neutralises any marker in it.
+ */
+function attachmentLabel(value: unknown): string {
+  const text = String(value ?? '').replace(/\p{Cc}/gu, ' ');
+  const cps = Array.from(text);
+  return cps.length > ATTACHMENT_LABEL_MAX_CHARS ? `${cps.slice(0, ATTACHMENT_LABEL_MAX_CHARS).join('')}…` : text;
+}
+
 /**
  * V1-21d-KEY-DISPATCHER-TENANT-INCLUDES (V1-21c review ST-1, the TD9 class): a dispatcher read's
  * to-one relations, each kept only when the related row is `businessId`'s.
@@ -2041,11 +2055,11 @@ export class FlowOrchestratorService {
         if (visible.length > UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS) truncatedFiles?.push(attachments.indexOf(att) + 1);
         parts.push(
           // RR-UNTRUSTED-CONTENT-FENCE review m1: each file has its own cap inside the turn's one block.
-          `[Attachment: ${filename} (${att.type}, ${extractionInput.mimeType ?? mimeType})]\n${capUntrusted(visible, UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS)}`,
+          `[Attachment: ${attachmentLabel(filename)} (${attachmentLabel(att.type)}, ${attachmentLabel(extractionInput.mimeType ?? mimeType)})]\n${capUntrusted(visible, UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS)}`,
         );
       } catch (err: any) {
         parts.push(
-          `[Attachment: ${att.name ?? 'unnamed'} (${att.type}) — could not extract: ${err?.message ?? 'unknown error'}]`,
+          `[Attachment: ${attachmentLabel(att.name ?? 'unnamed')} (${attachmentLabel(att.type)}) — could not extract: ${attachmentLabel(err?.message ?? 'unknown error')}]`,
         );
       }
     }
@@ -2058,11 +2072,17 @@ export class FlowOrchestratorService {
     attachments?: FlowAttachment[],
   ): string {
     if (!attachments?.length) return content;
+    // RR-UNTRUSTED-CONTENT-FENCE Codex P1 (#225): an attachment's name and type are the uploader's text
+    // (and a replayed turn's attachments come from the client), so they never reach the model as the
+    // member's words. A turn saved since this packet holds its fenced extraction, which already names
+    // each file inside the block: nothing is added. A turn without one (saved before, or sent by the
+    // client) gets its metadata as a fenced block of its own.
+    if (containsUntrustedBlock(content)) return content;
     const fallbackParts = attachments.map(
       (att) =>
-        `[Attachment: ${att.name ?? 'unnamed'} (${att.type}) — see previous extraction above]`,
+        `[Attachment: ${attachmentLabel(att.name ?? 'unnamed')} (${attachmentLabel(att.type)}) — see previous extraction above]`,
     );
-    return `${content}\n\nATTACHMENT CONTEXT:\n${fallbackParts.join('\n')}`;
+    return `${content}\n\n${fenceUntrusted('attachment', `ATTACHMENT CONTEXT:\n${fallbackParts.join('\n')}`)}`;
   }
 
   private async *finalizeStreamSession(
