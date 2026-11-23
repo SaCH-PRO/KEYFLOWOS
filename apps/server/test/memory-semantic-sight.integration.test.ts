@@ -744,6 +744,39 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
     expect(embedCalls.length, 'no embedding for a refused query').toBe(calls);
     const ok = await agent().get(`/ai/businesses/${ID.biz}/agent/memory/search`).query({ q: 'x'.repeat(500) }).set(HEADER, ID.owner);
     expect(ok.status).toBe(200);
+    expect(embedCalls.length, 'a 500-character query is embedded').toBe(calls + 1);
+    // Delta review MINOR-1: a repeated or bracketed q (an array) is no way around the bound.
+    for (const qs of [`q=${'x'.repeat(501)}&q=y`, `q[]=${'x'.repeat(501)}`]) {
+      const res = await agent().get(`/ai/businesses/${ID.biz}/agent/memory/search?${qs}`).set(HEADER, ID.owner);
+      expect(res.status, `${qs.slice(0, 12)}: ${JSON.stringify(res.body).slice(0, 160)}`).toBe(400);
+    }
+    expect(embedCalls.length, 'no embedding for a refused array query').toBe(calls + 1);
+  });
+
+  it.each([
+    ['we spent TTD 4,000 on fuel', 'business_fact', 'fuel'],
+    ['monthly costs TTD 12,000', 'business_fact', 'costs'],
+    ['the lease is TTD 5,000', 'business_fact', 'lease'],
+    ['TTD 900 on the account', 'business_fact', 'rentExpense'],
+  ])('V71U-18 RED (delta review MINOR-1/2): an expense stated as %s (key %s / %s) needs expenses read: the revenue-only member does not get it, the revenue-and-expenses reader does', async (value, category, key) => {
+    await clearMemory();
+    try {
+      await memory.upsert(ID.biz, { category, key: `${P}${key}`, value: `${okMarker(13)} ${value}`, source: 'user' });
+      await semantic.backfillFromAiMemory(ID.biz);
+      expect((await searchFor('revnoexp', 50)).join('\n')).not.toContain(okMarker(13));
+      expect((await searchFor('revenue', 50)).join('\n')).toContain(okMarker(13));
+    } finally {
+      await clearMemory();
+    }
+  }, 120_000);
+
+  it("V71U-19 RED (delta review MINOR-3): a temporal summary whose entity, source module and events name no module needs every module even when its text names an expense or money (text taint is added on top of the fail-closed fallback, not instead of it)", async () => {
+    const { temporalMemoryModulesOf } = await import('../src/modules/ai/semantic-memory-sight');
+    const { EVENT_MODULES } = await import('../src/modules/key-cortex/key-cortex-prompt-context.service');
+    for (const content of ['the supplier called about the shipment', 'paid TTD 900']) {
+      const row = { id: 'x', entityType: 'thing', entityId: null, type: 'summary', sourceModule: 'misc', sourceEventIds: [], content, metadata: {} };
+      expect([...temporalMemoryModulesOf(row, new Map())].sort(), content).toEqual([...EVENT_MODULES].sort());
+    }
   });
 
   it('V71U-17 (orchestrator acceptance, correctness m-1; owner parity): for live sources the owner and a reader of every module are handed exactly the hits, in the same order and number, that the unprojected read serves; only the copies whose source is gone or stale (here: a deleted summary and an event copy with no source) are now withheld, for everyone', async () => {
