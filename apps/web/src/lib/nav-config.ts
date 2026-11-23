@@ -447,8 +447,9 @@ export function entryModules(item: NavItem, hub?: { module?: NavModule }): NavMo
 }
 
 /**
- * The hubs a business that sells `sells` has (D-150): a products business has no Schedule. `null` is not known yet
- * (the settings are loading): only the hubs every business has, so a products business never flashes Schedule.
+ * The hubs a business that sells `sells` has (D-150): a products business has no Schedule. `null` is not known (the
+ * settings are not ready: no business yet, loading, or failed): only the hubs every business has, so a products
+ * business never sees Schedule.
  */
 function hubsForSells(sells: BusinessSells | null): HubNavItem[] {
   return sells === "both" || sells === "services" ? hubNav : hubNav.filter((h) => h.id !== "schedule");
@@ -479,7 +480,7 @@ const BOTTOM_BAR_FALLBACK: BusinessHub[] = ["customers", "schedule", "sales", "m
  * its slot to the next one they can; never a hub they cannot open, so the bar may hold one hub, or none.
  */
 export function bottomBarFor(sells: BusinessSells | null, levels: ModuleLevels): HubNavItem[] {
-  // Not known yet: no slot, rather than the wrong two.
+  // Not known (not ready: no business yet, loading, or failed): no slot, rather than the wrong two.
   if (sells === null) return [];
   const open = hubsFor(sells, levels);
   const byId = (id: BusinessHub) => open.find((h) => h.id === id);
