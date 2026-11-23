@@ -5,6 +5,13 @@ import OpenAI from 'openai';
 import { validateOutputContract, type ContractType } from './ai-output-contracts';
 import { LLMCostService } from './llm-cost.service';
 import { LangfuseService } from './langfuse.service';
+import {
+  classifyProviderFailure,
+  failureCountsTowardCircuit,
+  failureIsRetryable,
+  ProviderHttpError,
+  type ProviderFailureClass,
+} from './provider-failure-class';
 import { keyDisabled } from '../../core/config/env';
 
 export type AiProvider = 'openai' | 'anthropic' | 'xai' | 'kimi' | 'google' | 'native' | 'opensource';
@@ -217,6 +224,8 @@ export interface ProviderHealth {
   lastErrorAt: Date | null;
   totalCalls: number;
   totalErrors: number;
+  /** Class of the last failure recorded for this provider (RR-GATEWAY-TYPED-FAILURES); null until one happens. */
+  lastFailureClass: ProviderFailureClass | null;
 }
 
 export interface ModelStrategy {
@@ -649,6 +658,7 @@ interface ProviderMetrics {
   totalErrors: number;
   latencies: number[];
   lastErrorAt: Date | null;
+  lastFailureClass: ProviderFailureClass | null;
 }
 
 interface CircuitBreakerState {
@@ -777,6 +787,7 @@ export class ModelGatewayService {
         totalErrors: 0,
         latencies: [],
         lastErrorAt: null,
+        lastFailureClass: null,
       });
       this.circuitBreakers.set(provider, {
         failures: 0,
@@ -1164,9 +1175,10 @@ export class ModelGatewayService {
         return;
       } catch (err: any) {
         lastError = err as Error;
-        this.recordProviderError(candidate.provider, preferences);
+        const failureClass = classifyProviderFailure(err);
+        this.recordProviderError(candidate.provider, preferences, failureClass);
         this.logger.error(
-          `Stream provider ${candidate.provider}/${candidate.model} failed: ${lastError.message}`,
+          `Stream provider ${candidate.provider}/${candidate.model} failed (${failureClass}): ${lastError.message}`,
         );
       }
     }
@@ -1373,7 +1385,7 @@ export class ModelGatewayService {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Anthropic streaming API error (${response.status}): ${errorText}`);
+      throw new ProviderHttpError('anthropic', response.status, `Anthropic streaming API error (${response.status}): ${errorText}`);
     }
 
     if (!response.body) {
@@ -2078,9 +2090,10 @@ export class ModelGatewayService {
         };
       } catch (err: any) {
         lastError = err as Error;
-        this.recordProviderError(provider, preferences);
+        const failureClass = classifyProviderFailure(err);
+        this.recordProviderError(provider, preferences, failureClass);
 
-        if (this.isRetryable(lastError) && attempt < ModelGatewayService.MAX_RETRIES) {
+        if (failureIsRetryable(failureClass) && attempt < ModelGatewayService.MAX_RETRIES) {
           await this.delay(ModelGatewayService.RETRY_DELAY_MS * (attempt + 1));
           continue;
         }
@@ -2325,7 +2338,7 @@ export class ModelGatewayService {
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Anthropic API error (${response.status}): ${errorText}`);
+      throw new ProviderHttpError('anthropic', response.status, `Anthropic API error (${response.status}): ${errorText}`);
     }
 
     interface AnthropicContentBlock {
@@ -3019,6 +3032,7 @@ export class ModelGatewayService {
         lastErrorAt: metrics.lastErrorAt,
         totalCalls: metrics.totalCalls,
         totalErrors: metrics.totalErrors,
+        lastFailureClass: metrics.lastFailureClass,
       });
     }
 
@@ -3197,14 +3211,29 @@ export class ModelGatewayService {
    * A call failed. With the dispatch's preferences, the failure counts against
    * the circuit of the credential that was used (R0-07 review ST-1): a BYOK
    * key's failures open only that key's circuit. Without them, the platform's.
+   *
+   * Only a failure whose class says the provider or the credential cannot serve
+   * counts toward a circuit (RR-GATEWAY-TYPED-FAILURES): server, network,
+   * timeout, auth, quota_exhausted and unknown. A rate limit, a bad request or
+   * the caller's own abort is recorded in the metrics (it was a failed call)
+   * and in lastFailureClass, and leaves the circuit as it was: three 429s on
+   * the platform key must not take the provider away from every business for
+   * the cooldown.
    */
-  private recordProviderError(provider: AiProvider, preferences?: AiPreferences): void {
+  private recordProviderError(
+    provider: AiProvider,
+    preferences?: AiPreferences,
+    failureClass: ProviderFailureClass = 'unknown',
+  ): void {
     const metrics = this.providerMetrics.get(provider);
     if (metrics) {
       metrics.totalCalls++;
       metrics.totalErrors++;
       metrics.lastErrorAt = new Date();
+      metrics.lastFailureClass = failureClass;
     }
+
+    if (!failureCountsTowardCircuit(failureClass)) return;
 
     const byokId = this.byokCircuitId(provider, preferences);
     let circuit: CircuitBreakerState | undefined;
@@ -3229,23 +3258,15 @@ export class ModelGatewayService {
       if (circuit.failures >= ModelGatewayService.CIRCUIT_BREAKER_FAILURE_THRESHOLD) {
         circuit.openUntil = new Date(Date.now() + ModelGatewayService.CIRCUIT_BREAKER_COOLDOWN_MS);
         this.logger.warn(
-          `Circuit breaker opened for ${provider}${byokId ? " (a business's own key)" : ''} until ${circuit.openUntil.toISOString()}`,
+          `Circuit breaker opened for ${provider}${byokId ? " (a business's own key)" : ''} after ${failureClass} until ${circuit.openUntil.toISOString()}`,
         );
       }
     }
   }
 
-  private isRetryable(error: Error): boolean {
-    const msg = error.message.toLowerCase();
-    return (
-      msg.includes('rate limit') ||
-      msg.includes('timeout') ||
-      msg.includes('429') ||
-      msg.includes('503') ||
-      msg.includes('500') ||
-      msg.includes('econnreset') ||
-      msg.includes('socket hang up')
-    );
+  /** Whether an attempt is retried in place: by the failure's class, never by a bare substring. */
+  private isRetryable(error: unknown): boolean {
+    return failureIsRetryable(classifyProviderFailure(error));
   }
 
   private delay(ms: number): Promise<void> {
