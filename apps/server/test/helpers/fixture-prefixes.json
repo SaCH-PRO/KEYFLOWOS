@@ -1176,6 +1176,11 @@
       "prefix": "v71y_",
       "owner": "apps/server/test/patterns-routes-sight.integration.test.ts",
       "packet": "V1-71 (FU-PATTERNS-ROUTES-SIGHT)"
+    },
+    {
+      "prefix": "v72q_",
+      "owner": "apps/server/test/insights-sight.integration.test.ts",
+      "packet": "V1-72 (FU-INSIGHTS-SIGHT)"
     }
   ],
   "pendingRenames": [],
