@@ -1131,6 +1131,11 @@
       "prefix": "v64g_",
       "owner": "apps/server/test/public-booking-payment-methods.integration.test.ts",
       "packet": "V1-64 (SWP-BOOKING-PAYMENT-GATE)"
+    },
+    {
+      "prefix": "v72w_",
+      "owner": "apps/server/test/contact-privacy-business-events.integration.test.ts",
+      "packet": "V1-72 (RR-ERASURE-BUSINESS-EVENTS)"
     }
   ],
   "pendingRenames": [],
