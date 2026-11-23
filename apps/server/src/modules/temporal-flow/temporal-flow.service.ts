@@ -1,5 +1,6 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { genomeReaderReadsRevenue, financialProposalsWithProvenance, isMoneyLabel, PROPOSAL_CLASSIFY_SELECT, proposalTextStatesMoney, structuredValueStatesMoney, type GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
+import { isGenomeEvolutionEvent, readableGenomeEvolutionEvents } from '../key-autonomy/key-action-genome-projection';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
@@ -88,7 +89,7 @@ export class TemporalFlowService {
    * with no `reader` argument (the scheduler, KEY tools applying their own authority) is unchanged; a request with no
    * user passes `null` and reads none.
    */
-  private async forReader<E extends { entityType?: string | null; entityId?: string | null; title?: string | null; description?: string | null; payload?: unknown; metadata?: unknown }>(
+  private async forReader<E extends { entityType?: string | null; entityId?: string | null; type?: string | null; title?: string | null; summary?: string | null; description?: string | null; payload?: unknown; metadata?: unknown; signals?: unknown }>(
     businessId: string,
     events: E[],
     reader: GenomeReader | null | undefined,
@@ -97,8 +98,15 @@ export class TemporalFlowService {
   ): Promise<E[]> {
     if (reader === undefined) return events;
     const proposals = events.filter((e) => e.entityType === 'key_action_proposal');
-    if (proposals.length === 0) return events;
+    const evolutions = events.filter((e) => isGenomeEvolutionEvent(e));
+    if (proposals.length === 0 && evolutions.length === 0) return events;
     if (readsRevenue ?? (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined))) return events;
+    // FU-KEY-ACTION-GENOME-PROJECTION (D-233, D-238): a genome-evolution decision row is served only when its proposal
+    // is read in this business, is of a non-money DNA section and nothing in it or the row states money (fail closed).
+    const evolutionFlags = await readableGenomeEvolutionEvents(this.prisma, businessId, evolutions);
+    const withheld = new Set<E>(evolutions.filter((_e, i) => !evolutionFlags[i]));
+    if (withheld.size) events = events.filter((e) => !withheld.has(e));
+    if (proposals.length === 0) return events;
     const ids = [...new Set(proposals.map((e) => e.entityId).filter((id): id is string => typeof id === 'string' && !!id))];
     let rows: Map<string, Record<string, unknown>>;
     try {
@@ -119,7 +127,9 @@ export class TemporalFlowService {
     return events.filter((e) => {
       if (e.entityType !== 'key_action_proposal') return true;
       const known = e.entityId ? financial.get(e.entityId) : undefined;
-      return known === false && !isMoneyLabel(e.title) && !isMoneyLabel(e.description) && !eventTextStatesMoney(e);
+      // The row's summary too (FU-KEY-ACTION-GENOME-PROJECTION: key.action.create_task copies the proposal's rationale there).
+      return known === false && !isMoneyLabel(e.title) && !isMoneyLabel(e.description) && !isMoneyLabel(e.summary)
+        && !proposalTextStatesMoney(e.summary) && !eventTextStatesMoney(e);
     });
   }
 
