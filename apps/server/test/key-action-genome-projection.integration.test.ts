@@ -59,11 +59,13 @@ const ID = {
   recFin: `${P}rec_fin`,
   recOps: `${P}rec_ops`,
   recOther: `${P}rec_other`,
+  recOpsMoney: `${P}rec_opsm`,
   propFin: `${P}prop_fin`,
   propFinQuiet: `${P}prop_finq`,
   propOps: `${P}prop_ops`,
   propCross: `${P}prop_cross`,
   propOpsSummary: `${P}prop_opss`,
+  propOpsPayload: `${P}prop_opsp`,
   evoFin: `${P}evo_fin`,
   evoSales: `${P}evo_sales`,
   evoOdd: `${P}evo_odd`,
@@ -253,6 +255,14 @@ beforeAll(async () => {
   await rec(ID.recFin, ID.biz, 'FINANCIAL', 'Tighten the follow-up cadence', 'Receivables of TTD 8,765.43 are past due; net margin is 31.7%.');
   await rec(ID.recOps, ID.biz, 'OPERATIONS', 'Confirm tomorrow appointments', 'Three appointments are unconfirmed.');
   await rec(ID.recOther, ID.biz2, 'OPERATIONS', 'Confirm tomorrow appointments', 'Three appointments are unconfirmed.');
+  // Round 3 (correctness NOTE): an OPERATIONS recommendation whose insight and recommendation text state a figure.
+  await db.genomeRecommendation.create({
+    data: {
+      id: ID.recOpsMoney, businessId: ID.biz, domain: 'OPERATIONS', title: 'Reduce weekend overtime', status: 'ACCEPTED',
+      diagnosis: 'Weekend shifts run long.', insight: 'Overtime cost TTD 912 last week.', recommendation: 'Cap overtime below TTD 912 a week.',
+      riskLevel: 'MEDIUM',
+    },
+  });
 
   // KEY action proposals in the shape GenomeRecommendationActionBridgeService.bridgeToProposal writes them.
   const proposal = (id: string, businessId: string, recommendationId: string, title: string, rationale: string) => db.keyActionProposal.create({
@@ -280,14 +290,19 @@ beforeAll(async () => {
 
   // key.action.create_task rows, in the shape KeyActionExecutorService.executeCreateTask writes them.
   const remindAt = new Date(Date.now() - 3600_000);
-  for (const p of [ID.propFin, ID.propFinQuiet, ID.propOps, ID.propCross, ID.propOpsSummary]) {
+  // Round 3 (security MINOR-1): a non-financial proposal whose create_task row's payload carries a figure under a key
+  // the named-key read does not look at (another writer, or the payload changed after execution).
+  await proposal(ID.propOpsPayload, ID.biz, ID.recOps, 'Follow up: Confirm tomorrow appointments', 'Three appointments are unconfirmed.');
+  for (const p of [ID.propFin, ID.propFinQuiet, ID.propOps, ID.propCross, ID.propOpsSummary, ID.propOpsPayload]) {
     const row = await db.keyActionProposal.findUnique({ where: { id: p } });
     await db.temporalFlowEvent.create({
       data: {
         id: `${p}_task`, businessId: ID.biz, source: 'KEY', type: 'key.action.create_task', module: 'key-autonomy',
         entityType: 'key_action_proposal', entityId: p, title: row.title,
         summary: p === ID.propOpsSummary ? 'Overtime cost TTD 912 last week' : row.rationale,
-        status: 'ACTION_REQUIRED', importance: 'NORMAL', payload: row.payload, reminderAt: remindAt, startsAt: remindAt,
+        status: 'ACTION_REQUIRED', importance: 'NORMAL',
+        payload: p === ID.propOpsPayload ? { ...row.payload, amountDue: 'TTD 912' } : row.payload,
+        reminderAt: remindAt, startsAt: remindAt,
       },
     });
   }
@@ -330,7 +345,9 @@ afterAll(async () => {
   await app?.close();
 });
 
-const ALL_TASKS = [ID.propCross, ID.propFin, ID.propFinQuiet, ID.propOps, ID.propOpsSummary].sort();
+const ALL_TASKS = [ID.propCross, ID.propFin, ID.propFinQuiet, ID.propOps, ID.propOpsSummary, ID.propOpsPayload].sort();
+/** The non-financial proposals a revenue-none member is served over REST. */
+const OPS_PROPOSALS = [ID.propOps, ID.propOpsSummary, ID.propOpsPayload].sort();
 const ALL_EVOS = [`${P}evo_other`, ID.evoFin, ID.evoOdd, ID.evoOps, ID.evoOpsMoney, ID.evoSales];
 
 describe('FU-KEY-ACTION-GENOME-PROJECTION: bridged FINANCIAL proposals and their timeline rows (D-128, D-233, D-238)', () => {
@@ -345,7 +362,7 @@ describe('FU-KEY-ACTION-GENOME-PROJECTION: bridged FINANCIAL proposals and their
   it('KAG-01 a revenue-none member is not served a proposal bridged from a FINANCIAL recommendation (list, by id)', async () => {
     const list = await get(proposalsUrl(), ID.staffNone);
     expect(list.status).toBe(200);
-    expect(list.body.map((p: any) => p.id).sort()).toEqual([ID.propOps, ID.propOpsSummary].sort());
+    expect(list.body.map((p: any) => p.id).sort()).toEqual(OPS_PROPOSALS);
     expect(JSON.stringify(list.body)).not.toMatch(FIGURES);
     for (const id of [ID.propFin, ID.propFinQuiet, ID.propCross]) {
       const one = await get(`${proposalsUrl()}/${id}`, ID.staffNone);
@@ -378,6 +395,8 @@ describe('FU-KEY-ACTION-GENOME-PROJECTION: bridged FINANCIAL proposals and their
   it('KAG-04 the bridge preview of a FINANCIAL recommendation needs revenue read; bridging it needs revenue write', async () => {
     SPY.preview.mockClear();
     SPY.bridge.mockClear();
+    // Round 2 review (correctness MINOR): no dependence on KAG-05b's bridge having run or not.
+    bridgedProposals.length = 0;
     const preview = await get(`${bridgeUrl(ID.recFin)}/action-preview`, ID.staffNone);
     expect(preview.status).toBe(403);
     expect(JSON.stringify(preview.body)).toContain(READ_DENIED);
@@ -450,7 +469,7 @@ describe('FU-KEY-ACTION-GENOME-PROJECTION: bridged FINANCIAL proposals and their
 
   it('KAG-07 round 2: a member whose explicit map has no revenue key is projected as revenue none', async () => {
     const list = await get(proposalsUrl(), ID.staffMissing);
-    expect(list.body.map((p: any) => p.id).sort()).toEqual([ID.propOps, ID.propOpsSummary].sort());
+    expect(list.body.map((p: any) => p.id).sort()).toEqual(OPS_PROPOSALS);
     for (const res of Object.values(await timelineReads(ID.staffMissing))) {
       expect(res.status).toBe(200);
       expect(res.body.filter((e: any) => e.entityType === 'genome_evolution_proposal').map((e: any) => e.entityId)).toEqual([ID.evoOps]);
@@ -465,13 +484,32 @@ describe('FU-KEY-ACTION-GENOME-PROJECTION: bridged FINANCIAL proposals and their
       expect(res.status, q).toBe(200);
       expect(JSON.stringify(res.body), q).not.toMatch(FIGURES);
       const ids = res.body.map((e: any) => e.entityId);
-      for (const hidden of [ID.evoFin, ID.evoSales, ID.evoOdd, ID.evoOpsMoney, `${P}evo_other`, ID.propFin, ID.propFinQuiet, ID.propCross, ID.propOpsSummary]) {
+      for (const hidden of [ID.evoFin, ID.evoSales, ID.evoOdd, ID.evoOpsMoney, `${P}evo_other`, ID.propFin, ID.propFinQuiet, ID.propCross, ID.propOpsSummary, ID.propOpsPayload]) {
         expect(ids, q).not.toContain(hidden);
       }
     }
     // Withheld rows fill the first page of a one-row read: the read pages on and serves a readable row.
     const one = await get(`${timelineUrl()}?type=genome_evolution.proposal_rejected&limit=1`, ID.staffNone);
     expect(one.body.map((e: any) => e.entityId)).toEqual([ID.evoOps]);
+  });
+
+  it('KAG-09 round 3: a create_task row whose payload carries a figure under any key is withheld though its proposal is non-financial', async () => {
+    for (const [name, res] of Object.entries(await timelineReads(ID.staffNone))) {
+      expect(res.body.some((e: any) => e.entityId === ID.propOpsPayload), name).toBe(false);
+      expect(res.body.some((e: any) => e.entityId === ID.propOps), name).toBe(true);
+    }
+  });
+
+  it('KAG-10 round 3: the preview of a recommendation whose own text states a figure needs revenue read, whatever its domain', async () => {
+    SPY.preview.mockClear();
+    const none = await get(`${bridgeUrl(ID.recOpsMoney)}/action-preview`, ID.staffNone);
+    expect(none.status).toBe(403);
+    expect(JSON.stringify(none.body)).toContain(READ_DENIED);
+    expect(JSON.stringify(none.body)).not.toMatch(FIGURES);
+    expect(SPY.preview).not.toHaveBeenCalled();
+    const read = await get(`${bridgeUrl(ID.recOpsMoney)}/action-preview`, ID.staffRead);
+    expect(read.status).toBe(200);
+    expect(JSON.stringify(read.body)).toMatch(/TTD 912/);
   });
 
   it('KAG-05c cross-tenant: a member of another business is refused this business\'s reads', async () => {
