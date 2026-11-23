@@ -32,6 +32,17 @@ function textIsMoney(value: unknown): boolean {
   return typeof value === 'string' && value !== '' && (isMoneyLabel(value) || proposalTextStatesMoney(value));
 }
 
+/**
+ * Acceptance review (D-146: expenses, bills, receipts, budgets and vendors are read at expenses read): whether free text
+ * states an expense. The words of the expenses module (MODULE_WORDS) and what a business pays out (rent, payroll,
+ * salaries, suppliers, utilities).
+ */
+const EXPENSE_WORDS =
+  /(?<![a-z])(expenses?|bills?|receipts?|budgets?|vendors?|suppliers?|rent|payroll|salar(?:y|ies)|wages?|utilit(?:y|ies)|overheads?|spend(?:ing)?)(?![a-z])/i;
+function textIsExpense(value: unknown): boolean {
+  return typeof value === 'string' && value !== '' && EXPENSE_WORDS.test(value);
+}
+
 /** A knowledge chunk's source id: `<knowledgeSourceId>:<chunkIndex>` (KnowledgeIngestionService.ingestText). */
 function knowledgeSourceIdOf(sourceId: string): string {
   const at = sourceId.lastIndexOf(':');
@@ -101,7 +112,10 @@ export function temporalMemoryModulesOf(row: TemporalRow, events: ReadonlyMap<st
     ) {
       modules.add('revenue');
     }
+    // Acceptance review (D-146): an expense in its text needs expenses read too.
+    if ([event.title, event.summary, event.description].some(textIsExpense)) modules.add('expenses');
   }
+  if (textIsExpense(row.content) || textIsExpense(copyContent)) modules.add('expenses');
   if (textIsMoney(row.content) || textIsMoney(copyContent) || [row.entityType, row.type, row.sourceModule].some((label) => isMoneyLabel(label))) {
     modules.add('revenue');
   }
@@ -180,7 +194,11 @@ export async function semanticHitsVisibleTo(
             isMoneyLabel(row.key) ||
             textIsMoney(row.value) ||
             textIsMoney(hit.content);
-          return !money || memberWithRevenue;
+          // Acceptance review (D-146): a row stating an expense needs a member with expenses read (and revenue read too
+          // when it also states money, as "expense: rent TTD 4,000" does).
+          // A document extraction keeps its own rule (MEM-DOC-EXTRACTION-SIGHT: revenue read).
+          const expense = row.category !== DOCUMENT_EXTRACTION_CATEGORY && [row.category, row.key, row.value, hit.content].some(textIsExpense);
+          return (!money || memberWithRevenue) && (!expense || (who.reader !== null && who.sight('expenses')));
         }
         case TEMPORAL_MEMORY_SOURCE_TYPE: {
           const row = temporal.get(hit.sourceId);

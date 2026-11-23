@@ -28,6 +28,8 @@ function triggerWriter(req: AuthenticatedRequest): string {
 
 /** MEM-SEMANTIC-SIGHT: the most hits GET .../agent/memory/search answers (as a reader's timeline read, MAX_READER_LIMIT). */
 const MAX_SEARCH_LIMIT = 500;
+/** MEM-SEMANTIC-SIGHT: the longest query GET .../agent/memory/search embeds. */
+const MAX_SEARCH_QUERY = 500;
 
 @Controller('ai')
 export class AgentController {
@@ -357,6 +359,8 @@ export class AgentController {
     @Req() req?: AuthenticatedRequest,
   ) {
     if (!query) return { results: [] };
+    // MEM-SEMANTIC-SIGHT acceptance review: a bounded query (every search costs an embedding of it).
+    if (query.length > MAX_SEARCH_QUERY) throw new BadRequestException(`q must be at most ${MAX_SEARCH_QUERY} characters`);
     // MEM-DOC-EXTRACTION-SIGHT (D-234; orchestrator review COR-MDX-1): the copies of document extractions only for a
     // member with revenue read (readersModuleSight, the rule KEY's prompts read them by); the search leaves them out
     // before its limit for anyone else. MEM-SEMANTIC-SIGHT: and every other hit only as its source allows
