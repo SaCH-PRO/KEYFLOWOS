@@ -212,7 +212,8 @@ describe('KeyExecutiveModeService', () => {
         },
         {
           provide: GenomeEvolutionService,
-          useValue: { list: async () => mockProposals },
+          // FU-GENOME-EVOLUTION-SURFACES: candidatesForReader passes the candidates through when no reader is given.
+          useValue: { list: async () => mockProposals, candidatesForReader: async (_b: string, c: unknown[]) => c },
         },
         {
           provide: BusinessAssetsService,

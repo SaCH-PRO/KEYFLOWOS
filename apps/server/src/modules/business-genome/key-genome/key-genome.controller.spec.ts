@@ -90,7 +90,12 @@ async function makeController() {
   // the caller's revenue level from their membership. These cases call handlers
   // without a request (no user), which reads as revenue 'none' without a query.
   const prisma = {
-    client: { membership: { findUnique: vi.fn().mockResolvedValue({ role: 'STAFF', permissionScopes: { revenue: 'read' } }) } },
+    client: {
+      membership: { findUnique: vi.fn().mockResolvedValue({ role: 'STAFF', permissionScopes: { revenue: 'read' } }) },
+      // FU-GENOME-EVOLUTION-SURFACES: the experiment routes read which recommendations were bridged to an experiment;
+      // none here (the provenance case is pinned by genome-evolution-surfaces.integration.test.ts).
+      genomeRecommendation: { findMany: vi.fn().mockResolvedValue([]) },
+    },
   };
 
   const moduleRef = await Test.createTestingModule({
