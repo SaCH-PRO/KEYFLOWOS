@@ -704,7 +704,12 @@ export class AiController {
   @Get('businesses/:businessId/ai/suggestions')
   async getSuggestions(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
     const who = await this.memoryReaderOf(businessId, req);
-    return this.suggestions.getPendingSuggestions(businessId, (row) => aiMemoryRowVisibleTo(row, who));
+    // Security review round 5 (transitional): a row stored before the stamp is read by every reading too
+    // (fieldsSightNeeds), so a word behind a JSON escape in it is read.
+    return this.suggestions.getPendingSuggestions(
+      businessId,
+      (row) => aiMemoryRowVisibleTo(row, who) && readerHolds(who, fieldsSightNeeds([row.key, row.value])),
+    );
   }
 
   /** FU-INSIGHTS-SIGHT: every suggestion is stored; the caller is answered those they may read, as their stored rows. */
@@ -1260,7 +1265,10 @@ export class AiController {
     return { insights };
   }
 
+  // FU-INSIGHTS-SIGHT (security review round 5, ISS-R5-1): it classifies up to PENDING_APPROVALS_READ_MAX approval items
+  // for a partial reader; CrmRateLimitGuard is on this controller.
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(20, 60_000)
   @Get('businesses/:businessId/ai/control-tower')
   async controlTower(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
     // FU-INSIGHTS-SIGHT (D-100, D-146): everything here as the caller may read it: the snapshot projected for them (the

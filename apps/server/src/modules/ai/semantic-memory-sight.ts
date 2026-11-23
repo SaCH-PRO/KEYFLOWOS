@@ -28,7 +28,7 @@ export const TEMPORAL_MEMORY_SOURCE_TYPE = 'temporal_memory';
 export const KNOWLEDGE_CHUNK_SOURCE_TYPE = 'document';
 
 /** Whether free text states money (a money word or a figure): the fail-closed text backstop of design 8.2. */
-function textIsMoney(value: unknown): boolean {
+export function textIsMoney(value: unknown): boolean {
   return typeof value === 'string' && value !== '' && (isMoneyLabel(value) || proposalTextStatesMoney(value));
 }
 
@@ -40,7 +40,7 @@ function textIsMoney(value: unknown): boolean {
 const EXPENSE_WORDS =
   /(?<![a-z])(expenses?|expenditures?|bills?|receipts?|budgets?|vendors?|suppliers?|rent|payroll|salar(?:y|ies)|wages?|utilit(?:y|ies)|overheads?|outgoings?|spend(?:s|ing)?|spent|costs?|payables?|purchases?|purchased|procure(?:ment|d)?|reimburs\w*|leases?|landlords?|insurance|premiums?|electricity|fuel|cogs)(?![a-z])/i;
 /** Delta review: labels are read word by word, camelCase split ('rentExpense', 'vendorBills'). */
-function textIsExpense(value: unknown): boolean {
+export function textIsExpense(value: unknown): boolean {
   if (typeof value !== 'string' || value === '') return false;
   return EXPENSE_WORDS.test(value) || EXPENSE_WORDS.test(value.replace(/([a-z0-9])([A-Z])/g, '$1 $2'));
 }
