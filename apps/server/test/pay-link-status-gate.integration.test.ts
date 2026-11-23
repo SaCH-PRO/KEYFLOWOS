@@ -29,6 +29,10 @@
  *   PL-06  send-email of PENDING, FAILED, FULLY_CREDITED or an unknown stored value answers 409
  *          before any email or link row; a live legacy link is not rotated.
  *   PL-07  send-email of the payable statuses is unchanged: one email carrying the one live link.
+ *   PL-09  KEY's commerce_send_invoice (flow-orchestrator) refuses PENDING, FAILED, FULLY_CREDITED
+ *          and an unknown stored value before any email, link row or status change, as send-email
+ *          does (D-248: KEY never emails the invoice without its pay button); a DRAFT and the
+ *          payable statuses still go out with the pay link.
  *   PL-08  cross-tenant: B's invoice ids under A's business answer POST payment-link with the
  *          same 404 whatever their status, and send-email with the same 403 it gave before; under
  *          B's business the guard refuses; nothing is written or sent.
@@ -74,6 +78,9 @@ const LEGACY = /^c[a-z0-9]{24}$/;
 
 let db: any;
 let app: any;
+let commerce: any;
+let prismaService: any;
+let FlowOrchestratorRef: any;
 let redis: any;
 
 /** The Gmail boundary: every email is recorded; nothing is sent. */
@@ -238,6 +245,10 @@ beforeAll(async () => {
     ],
   }).compile();
 
+  commerce = moduleRef.get(CommerceService);
+  prismaService = moduleRef.get(PrismaService);
+  ({ FlowOrchestratorService: FlowOrchestratorRef } = await import('../src/modules/ai/flow-orchestrator.service'));
+
   app = moduleRef.createNestApplication();
   // Identity attachment only. No guard is overridden.
   app.use(async (req: any, _res: any, next: any) => {
@@ -294,7 +305,7 @@ describe('POST payment-link status gate (FU-PAY-LINK-STATUS-GATE)', () => {
     const res = await payLink(ID.bizA, inv);
 
     expect(res.status, JSON.stringify(res.body)).toBe(409);
-    expect(JSON.stringify(res.body)).toContain(status);
+    expect(JSON.stringify(res.body)).toContain(`this invoice is ${status}`);
     expectNoContents(res.body, before);
     expect(await linksOf(inv), 'no pay link minted').toEqual([]);
     const after = await db.invoice.findUnique({ where: { id: inv } });
@@ -397,7 +408,7 @@ describe('send-email pay link status gate (FU-PAY-LINK-STATUS-GATE)', () => {
     const res = await sendEmail(ID.bizA, inv);
 
     expect(res.status, JSON.stringify(res.body)).toBe(409);
-    expect(JSON.stringify(res.body)).toContain(status);
+    expect(JSON.stringify(res.body)).toContain(`this invoice is ${status}`);
     expectNoContents(res.body, before);
     expect(sentEmails, 'no email').toEqual([]);
     expect(await linksOf(inv), 'no pay link').toEqual([]);
@@ -456,5 +467,80 @@ describe('cross-tenant (FU-PAY-LINK-STATUS-GATE)', () => {
     expect(new Set(sendAnswers).size, 'one answer whatever the status').toBe(1);
     expect(sentEmails).toEqual([]);
     for (const inv of Object.values(ids)) expect(await linksOf(inv)).toEqual([]);
+  });
+});
+
+/**
+ * KEY's commerce_send_invoice, the real FlowOrchestratorService handler over the real
+ * CommerceService and database. The transactional email service records and sends nothing;
+ * updateInvoiceStatus and the activity log are recorded.
+ */
+function keySend(invoiceId: string) {
+  const mail: Array<{ type: string; templateData: Record<string, any> }> = [];
+  const statusMoves: string[] = [];
+  const run = Object.assign(Object.create(FlowOrchestratorRef.prototype), {
+    prisma: prismaService,
+    getTransactionalEmail: () => ({
+      send: async (args: { type: string; templateData: Record<string, any> }) => {
+        mail.push(args);
+        return { status: 'SENT' };
+      },
+    }),
+    getCommerce: () => ({
+      automatedInvoiceUrl: (id: string, biz: string) => commerce.automatedInvoiceUrl(id, biz),
+      publicInvoiceUrl: (id: string, biz: string) => commerce.publicInvoiceUrl(id, biz),
+      updateInvoiceStatus: async (a: { status: string }) => {
+        statusMoves.push(a.status);
+        return { id: invoiceId, status: a.status };
+      },
+    }),
+    getActivityLog: () => ({ createActivity: async () => ({}) }),
+  }).executeToolAction(ID.bizA, 'commerce_send_invoice', { invoiceId });
+  return { run, mail, statusMoves };
+}
+
+describe("KEY's commerce_send_invoice (FU-PAY-LINK-STATUS-GATE, D-248)", () => {
+  it.each(SEND_REFUSED)('PL-09a %s: refused before any email, link row or status change', async (status) => {
+    const inv = await seedInvoice(ID.bizA, ID.contactA, status);
+    const before = await db.invoice.findUnique({ where: { id: inv } });
+
+    const { run, mail, statusMoves } = keySend(inv);
+    const err = await run.then(() => null, (e: Error) => e);
+
+    expect(err, 'the tool call fails').toBeInstanceOf(Error);
+    expect(err!.message).toContain(`this invoice is ${status}`);
+    expect(err!.message).not.toContain(before.invoiceNumber);
+    expect(mail, 'no email').toEqual([]);
+    expect(statusMoves, 'no status change').toEqual([]);
+    expect(await linksOf(inv), 'no pay link').toEqual([]);
+    expect((await db.invoice.findUnique({ where: { id: inv } })).status).toBe(status);
+  });
+
+  it.each(SEND_REFUSED)('PL-09b %s with a live legacy link: refused, no email, the token is not rotated', async (status) => {
+    const inv = await seedInvoice(ID.bizA, ID.contactA, status);
+    const legacy = await db.paymentLink.create({ data: { invoiceId: inv, businessId: ID.bizA } });
+
+    const { run, mail, statusMoves } = keySend(inv);
+    await expect(run).rejects.toThrow(`this invoice is ${status}`);
+
+    expect(mail).toEqual([]);
+    expect(statusMoves).toEqual([]);
+    expect((await linksOf(inv)).map((l: any) => [l.id, l.token, l.active, l.expiresAt])).toEqual([[legacy.id, legacy.token, true, null]]);
+  });
+
+  it.each(['DRAFT', ...PAYABLE] as const)('PL-09c %s: emailed once with the one live pay link, then moved to SENT', async (status) => {
+    const inv = await seedInvoice(ID.bizA, ID.contactA, status);
+
+    const { run, mail, statusMoves } = keySend(inv);
+    const result = await run;
+
+    expect(result.status).toBe('SENT');
+    const links = await linksOf(inv);
+    expect(links).toHaveLength(1);
+    expect(links[0].active).toBe(true);
+    expect(mail).toHaveLength(1);
+    expect(mail[0].type).toBe('invoice_sent');
+    expect(mail[0].templateData.invoiceUrl).toContain(`/public/invoice/${links[0].token}`);
+    expect(statusMoves).toEqual(['SENT']);
   });
 });
