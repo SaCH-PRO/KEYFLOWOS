@@ -21,6 +21,7 @@ import { FlowOrchestratorService } from './flow-orchestrator.service';
 import { KeyActionBoundaryService } from '../key-autonomy/action-boundary/key-action-boundary.service';
 import { KeyCortexExpertiseLensService } from '../key-cortex/key-cortex-expertise-lens.service';
 import { McpClientManagerService } from '../mcp/mcp-client-manager.service';
+import { RoleEngineService } from './role-engine.service';
 import {
   UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS,
   UNTRUSTED_CONTENT_RULE,
@@ -351,5 +352,84 @@ describe('RR-UNTRUSTED-CONTENT-FENCE: MCP tool output returns fenced', () => {
     expect(blocks).toHaveLength(1);
     expect(blocks[0].inner.length).toBeLessThan(UNTRUSTED_MAX_CHARS.mcp_tool + 100);
     expect(blocks[0].inner).toMatch(/truncated/);
+  });
+});
+
+describe('RR-UNTRUSTED-CONTENT-FENCE orchestrator acceptance review: no authority from the content, and the member is told of a cut', () => {
+  const STUFFED = Array.from({ length: 40 }, () =>
+    'refund invoice payroll payment expense revenue tax billing salary campaign marketing ads quote receipt bank ledger',
+  ).join('\n');
+
+  /** The harness with the real role engine, the real role detection and the real tool menu. */
+  function realRouting() {
+    const h = makeHarness({ rawText: STUFFED });
+    const roleEngine = new RoleEngineService({} as never, {} as never, {} as never);
+    const crews: unknown[] = [];
+    const resolveCrew = roleEngine.resolveCrew.bind(roleEngine);
+    roleEngine.resolveCrew = ((ctx: Parameters<typeof resolveCrew>[0]) => {
+      const r = resolveCrew(ctx);
+      crews.push(r);
+      return r;
+    }) as typeof roleEngine.resolveCrew;
+    const o = h.orchestrator as unknown as Record<string, unknown>;
+    o.roleEngine = roleEngine;
+    delete o.resolveTurnAuthority;
+    delete o.selectToolsForRequest;
+    const toolsOf = (fn: typeof h.trackAndComplete | typeof h.trackAndStream) =>
+      (((fn.mock.calls[0] as unknown[])[3] as { tools?: Array<{ function: { name: string } }> }).tools ?? []).map((t) => t.function.name);
+    return { h, crews, toolsOf };
+  }
+
+  it.each([['chat'], ['streamChat']])(
+    'security MINOR-1, %s: a "summarise this" turn whose attachment is stuffed with money and marketing keywords is staffed and offered tools exactly as with no attachment',
+    async (path) => {
+      const plain = realRouting();
+      const stuffed = realRouting();
+      if (path === 'chat') {
+        await plain.h.chat(undefined);
+        await stuffed.h.chat([ATTACHMENT]);
+      } else {
+        await plain.h.stream(undefined);
+        await stuffed.h.stream([ATTACHMENT]);
+      }
+      expect(stuffed.h.extract).toHaveBeenCalledTimes(1);
+      expect(stuffed.crews).toHaveLength(1);
+      expect(stuffed.crews).toEqual(plain.crews);
+      const fn = path === 'chat' ? 'trackAndComplete' : 'trackAndStream';
+      expect(stuffed.toolsOf(stuffed.h[fn])).toEqual(plain.toolsOf(plain.h[fn]));
+      expect(plain.toolsOf(plain.h[fn]).length).toBeGreaterThan(0);
+    },
+  );
+
+  it('correctness M2, chat: a truncated attachment is named to the member in a system-added line the model did not write', async () => {
+    const h = makeHarness({ rawText: 'c'.repeat(UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS + 500) });
+    const res = await h.chat([ATTACHMENT]);
+    expect(res.reply).toContain('It is an invoice.');
+    expect(res.reply).toContain(`Only the first ${UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS.toLocaleString('en-US')} characters of supplier.pdf were read.`);
+    // The saved turn carries the same reply the member saw.
+    expect(JSON.stringify(h.saveConversationHistory.mock.calls[0])).toContain('characters of supplier.pdf were read.');
+  });
+
+  it('correctness M2, streamChat: the same line reaches the member as a content chunk', async () => {
+    const h = makeHarness({ rawText: 'c'.repeat(UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS + 500) });
+    const chunks = await h.stream([ATTACHMENT]);
+    const text = chunks.filter((c) => c.type === 'content_delta').map((c) => c.content).join('');
+    expect(text).toContain('It is an invoice.');
+    expect(text).toContain(`Only the first ${UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS.toLocaleString('en-US')} characters of supplier.pdf were read.`);
+  });
+
+  it('correctness M2: when the attachments together pass the turn limit, the member is told that too', async () => {
+    const h = makeHarness({ rawText: 'd'.repeat(UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS) });
+    const files = Array.from({ length: 5 }, (_, i) => ({ ...ATTACHMENT, name: `file${i}.pdf` }));
+    const res = await h.chat(files);
+    expect(res.reply).toContain(`Only the first ${UNTRUSTED_MAX_CHARS.attachment.toLocaleString('en-US')} characters of this message's attachments were read.`);
+  });
+
+  it('correctness M2 control: an attachment that fits adds no line; the reply is the model\'s alone', async () => {
+    const h = makeHarness();
+    expect((await h.chat([ATTACHMENT])).reply).toBe('It is an invoice.');
+    const s = makeHarness();
+    const text = (await s.stream([ATTACHMENT])).filter((c) => c.type === 'content_delta').map((c) => c.content).join('');
+    expect(text).toBe('It is an invoice.');
   });
 });
