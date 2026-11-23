@@ -6,8 +6,8 @@
  * The W11-MEMORY-PROMOTE-SCOPE review residuals (wave 1), each reproduced here on the real database:
  *
  *   1. An AiMemory row has semantic copies in ai_memory_embeddings (source_type 'memory', source_id the row's id):
- *      POST /ai/businesses/:id/agent/memory/backfill (SemanticMemoryService.backfillFromAiMemory, which any member may
- *      send) writes one per row, UnifiedMemoryWriterService.store writes one with indexSemantic. Every member reads
+ *      POST /ai/businesses/:id/agent/memory/backfill (SemanticMemoryService.backfillFromAiMemory; since
+ *      MEM-SEMANTIC-SIGHT a settings admin's: the owner sends it here) writes one per row, UnifiedMemoryWriterService.store writes one with indexSemantic. Every member reads
  *      them back: GET .../agent/memory/search, and KEY's memory block as [ai_memory_embedding]
  *      (UnifiedMemoryRetrievalService.loadSemanticMemory, through buildMemoryContext and chatMemoryFragments). Only the
  *      consolidation's withdrawal removed a row's copies. Every other deletion left them, served:
@@ -436,8 +436,8 @@ describe('W1F-MEMORY-COPIES: every AiMemory deletion removes its semantic copies
       // The same category and key in another business of the owner's.
       const other = await app.api.put(ID.owner, { category: 'goals', key: `${P}goal_private`, value: OTHER }, ID.other);
 
-      // The STAFF member backfills the business's semantic memory; the owner backfills the other business's.
-      expect(await app.api.backfill(ID.member)).toBe(2);
+      // The owner backfills the business's semantic memory (MEM-SEMANTIC-SIGHT: settings admin), and the other business's.
+      expect(await app.api.backfill(ID.owner)).toBe(2);
       expect(await app.api.backfill(ID.owner, ID.other)).toBe(1);
       expect(await copiesOf(secret.id)).toEqual([backfillCopy('goals', `${P}goal_private`, SECRET)]);
       expect(await app.api.search(ID.member), 'before the delete').toContain('V70B-01-SECRET');
@@ -476,7 +476,7 @@ describe('W1F-MEMORY-COPIES: every AiMemory deletion removes its semantic copies
       expect(rows).toHaveLength(1);
       const keep = await app.api.put(ID.owner, { category: 'priorities', key: `${P}keep`, value: 'V70B-02-KEEP: call back within a day' });
 
-      expect(await app.api.backfill(ID.member)).toBe(2);
+      expect(await app.api.backfill(ID.owner)).toBe(2);
       expect((await copiesOf(rows[0].id)).join('\n')).toContain('V70B-SUGGESTION');
       expect(await app.api.search(ID.member), 'before the dismissal').toContain('V70B-SUGGESTION');
 
@@ -508,7 +508,7 @@ describe('W1F-MEMORY-COPIES: every AiMemory deletion removes its semantic copies
       const extraction = await db.aiMemory.findFirstOrThrow({ where: { businessId: ID.biz, category: 'document_extraction', key: DOC } });
       expect(await copiesOf(extraction.id)).toEqual([EXTRACT]);
 
-      expect(await app.api.backfill(ID.member)).toBe(4);
+      expect(await app.api.backfill(ID.owner)).toBe(4);
       expect(await copiesOf(extraction.id)).toEqual([backfillCopy('document_extraction', DOC, EXTRACT), EXTRACT].sort());
       const before = await app.api.search(ID.member);
       expect(before).toContain('V70B-03-EXTRACT');
@@ -551,7 +551,7 @@ describe('W1F-MEMORY-COPIES: every AiMemory deletion removes its semantic copies
           expiresAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
         },
       });
-      expect(await app.api.backfill(ID.member)).toBe(2);
+      expect(await app.api.backfill(ID.owner)).toBe(2);
       expect(await copiesOf(expired.id)).toHaveLength(1);
       // What a deletion before this packet left: a copy whose row is gone.
       const vector = `[${UNIT_VECTOR.join(',')}]`;
@@ -564,7 +564,10 @@ describe('W1F-MEMORY-COPIES: every AiMemory deletion removes its semantic copies
         `${P}mem_gone`,
         vector,
       );
-      // A document chunk (KnowledgeIngestionService's copy of a knowledge source), not a copy of an AiMemory row.
+      // A document chunk (KnowledgeIngestionService's copy of a knowledge source), not a copy of an AiMemory row. Its
+      // knowledge source exists (MEM-SEMANTIC-SIGHT: a chunk whose source is not found in the business is served to
+      // nobody, and one that is only to a member with revenue and expenses read, which a STAFF member has by role default).
+      await db.knowledgeSource.create({ data: { id: `${P}knowledge_1`, businessId: ID.biz, title: 'price list', sourceType: 'text', content: '', status: 'processed' } });
       await db.$executeRawUnsafe(
         `INSERT INTO ai_memory_embeddings (id, business_id, content, source_type, source_id, embedding, metadata, created_at)
          VALUES ($1, $2, $3, 'document', $4, $5::vector, '{}'::jsonb, NOW())`,
@@ -656,7 +659,7 @@ describe('W1F-MEMORY-COPIES: a backfill cannot write a copy of a row that is gon
       const keep = await app.api.put(ID.owner, { category: 'priorities', key: `${P}keep`, value: KEEP });
 
       const held = app.holdEmbedding('V70B-05-RACE');
-      const backfill = app.api.backfill(ID.member);
+      const backfill = app.api.backfill(ID.owner);
       await held.reached; // the backfill has read both rows; the race row's copy is not written yet
       expect(await app.api.del(ID.owner, 'goals', `${P}race`)).toBe(true);
       held.release();
@@ -680,7 +683,7 @@ describe('W1F-MEMORY-COPIES: a backfill cannot write a copy of a row that is gon
       const row = await app.api.put(ID.owner, { category: 'preferences', key: `${P}currency`, value: OLD });
 
       const held = app.holdEmbedding('V70B-06-OLD');
-      const backfill = app.api.backfill(ID.member);
+      const backfill = app.api.backfill(ID.owner);
       await held.reached;
       const rewritten = await app.api.put(ID.owner, { category: 'preferences', key: `${P}currency`, value: NEW });
       expect(rewritten.id).toBe(row.id); // the same row, rewritten in place
@@ -691,7 +694,7 @@ describe('W1F-MEMORY-COPIES: a backfill cannot write a copy of a row that is gon
       expect(await app.api.search(ID.member)).not.toContain('V70B-06-OLD');
 
       // Control: the next backfill copies what the row holds.
-      expect(await app.api.backfill(ID.member)).toBe(1);
+      expect(await app.api.backfill(ID.owner)).toBe(1);
       expect(await copiesOf(row.id)).toEqual([backfillCopy('preferences', `${P}currency`, NEW)]);
       expect(await app.api.search(ID.member)).toContain('V70B-06-NEW');
     } finally {
@@ -712,13 +715,13 @@ describe('W1F-MEMORY-COPIES: a backfill cannot write a copy of a row that is gon
     try {
       const RACE = 'V70B-07-RACE: the owner is buying out the partner';
       const race = await app.api.put(ID.owner, { category: 'goals', key: `${P}race_locked`, value: RACE });
-      expect(await app.api.backfill(ID.member)).toBe(1);
+      expect(await app.api.backfill(ID.owner)).toBe(1);
       const [existing] = await db.aiMemoryEmbedding.findMany({ where: { businessId: ID.biz, sourceId: race.id }, select: { id: true } });
       expect(existing).toBeDefined();
 
       // A second backfill reads the row and is held before it writes the copy.
       const held = app.holdEmbedding('V70B-07-RACE');
-      const backfill = track(app.api.backfill(ID.member));
+      const backfill = track(app.api.backfill(ID.owner));
       await held.reached;
 
       // Hold the existing copy's row lock.
@@ -776,7 +779,7 @@ describe('W1F-MEMORY-COPIES: a backfill cannot write a copy of a row that is gon
       });
 
       const held = app.holdEmbedding('V70B-08-LEAK');
-      const backfill = app.api.backfill(ID.member);
+      const backfill = app.api.backfill(ID.owner);
       await held.reached;
       const result = await new MemoryConsolidationService(prisma).run(ID.biz);
       expect(result.withdrawn).toBe(1);
@@ -810,7 +813,7 @@ describe('W1F-MEMORY-COPIES: a row rewritten in place serves only the value it h
       // The writer stores a document's extraction and indexes it (its own copy: content the value).
       await app.writer.storeDocumentExtraction(ID.biz, DOC, OLD_EXTRACT, { indexSemantic: true });
       const extraction = await db.aiMemory.findFirstOrThrow({ where: { businessId: ID.biz, category: 'document_extraction', key: DOC } });
-      expect(await app.api.backfill(ID.member)).toBe(2);
+      expect(await app.api.backfill(ID.owner)).toBe(2);
       expect(await copiesOf(row.id)).toEqual([backfillCopy('goals', `${P}goal`, OLD)]);
       expect(await copiesOf(extraction.id)).toEqual([backfillCopy('document_extraction', DOC, OLD_EXTRACT), OLD_EXTRACT].sort());
       const before = await app.api.search(ID.member);
@@ -832,7 +835,7 @@ describe('W1F-MEMORY-COPIES: a row rewritten in place serves only the value it h
       }
 
       // The next backfill copies what the rows hold, and those copies are served.
-      expect(await app.api.backfill(ID.member)).toBe(2);
+      expect(await app.api.backfill(ID.owner)).toBe(2);
       const after = await app.api.search(ID.member);
       expect(after).toContain(backfillCopy('goals', `${P}goal`, NEW));
       expect(after).toContain(backfillCopy('document_extraction', DOC, NEW_EXTRACT));
@@ -956,7 +959,7 @@ describe('W1F-MEMORY-COPIES: memory consolidation promotes on a code point and w
         data: [cognition(ID.owner, `${P}fn_leak10`, LEAK, 0.95), cognition(null, `${P}fn_nobody10`, 'crm.v70b_follow_up')],
       });
       const leaked = await db.aiMemory.create({ data: leakedPromotion(`${P}fn_leak10`, LEAK) });
-      expect(await app.api.backfill(ID.member)).toBe(1);
+      expect(await app.api.backfill(ID.owner)).toBe(1);
       expect(await copiesOf(leaked.id)).toHaveLength(1);
 
       // The promotion's write fails (any refusal of the database: here a stand-in for aiMemory.upsert), on the client

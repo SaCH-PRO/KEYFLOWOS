@@ -2197,7 +2197,7 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
    * (AiUsageService.trackEmbedding) is a stand-in that answers UNIT_VECTOR, after `beforeEmbedding(text)` (which may
    * hold one text back), so no request leaves the process. Over HTTP, on the real AgentController behind its real
    * AuthGuard and BusinessGuard (identity attachment as in aiMemoryOverHttp): POST
-   * /ai/businesses/:businessId/agent/memory/backfill, which any member may send (it copies every AiMemory row of the
+   * /ai/businesses/:businessId/agent/memory/backfill, which a settings admin may send (MEM-SEMANTIC-SIGHT; any member before) (it copies every AiMemory row of the
    * business into ai_memory_embeddings: source_type 'memory', source_id the row's id), and GET
    * /ai/businesses/:businessId/agent/memory/search, which answers any member the matching copies.
    */
@@ -2493,7 +2493,7 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
   }, 60_000);
 
   // W11-MEMORY-PROMOTE-SCOPE review SEC-W11MPS-1 (reproduced by the review on the real database): a promoted row has a
-  // second, semantic copy. POST /ai/businesses/:id/agent/memory/backfill (any member may send it) copies every AiMemory
+  // second, semantic copy. POST /ai/businesses/:id/agent/memory/backfill (a settings admin since MEM-SEMANTIC-SIGHT; any member before) copies every AiMemory
   // row of the business into ai_memory_embeddings (source_type 'memory', source_id the row's id, content
   // `learning: learned:<fn> = <value>`), and every member reads those copies back: GET .../agent/memory/search, and
   // KEY's memory block as [ai_memory_embedding] (buildMemoryContext and chatMemoryFragments search with the turn's
@@ -2580,8 +2580,8 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
       });
       const asking = { question: QUESTION, semantic: http.semantic };
 
-      // The STAFF member backfills the business's semantic memory: one copy of every AiMemory row.
-      expect(await http.backfill(ID.member)).toBe(await db.aiMemory.count({ where: { businessId: ID.memBiz } }));
+      // The owner backfills (MEM-SEMANTIC-SIGHT: the backfill needs settings admin) the business's semantic memory: one copy of every AiMemory row.
+      expect(await http.backfill(ID.owner)).toBe(await db.aiMemory.count({ where: { businessId: ID.memBiz } }));
       expect(await memoryCopies()).toEqual(
         [
           FACT_COPY,
@@ -2623,7 +2623,7 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
       // row's copy only after the run has withdrawn the row.
       await db.aiMemory.create({ data: promotion('v19c_mps_emb_race', EMB.RACE) });
       holdRace = true;
-      const racing = http.backfill(ID.member);
+      const racing = http.backfill(ID.owner);
       await raceReached;
       await consolidation.run(ID.memBiz);
       expect(await db.aiMemory.count({ where: { businessId: ID.memBiz, key: 'learned:v19c_mps_emb_race' } })).toBe(0);

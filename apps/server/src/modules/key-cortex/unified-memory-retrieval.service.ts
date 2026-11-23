@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SemanticMemoryService, aiMemoryWithoutSettings } from '../ai/semantic-memory.service';
+import { DOCUMENT_EXTRACTION_CATEGORY } from '../ai/ai-memory.service';
 import { KEY_OBSERVATION_SOURCE } from './key-cortex-event.service';
 import { GENOME_ROW_METADATA_KEY } from './unified-memory.types';
 import type { GenomeRowColumns, MemoryFragment, MemoryRetrievalOptions, MemorySourceType } from './unified-memory.types';
@@ -123,7 +124,13 @@ export class UnifiedMemoryRetrievalService {
     if (since) whereBase.createdAt = { gte: since };
     // FU-MEMORY-COPIES-REWRITE review SEC-FUMCR-2: not the settings rows (the owner's AI preferences with the BYOK keys'
     // ciphertext, the routing table, the autonomy settings): configuration, not memory, for no prompt.
-    const aiMemoryWhere = { ...whereBase, category: aiMemoryWithoutSettings() };
+    // MEM-DOC-EXTRACTION-SIGHT (D-234): nor the document extractions, unless the read asks for them (a reader with
+    // revenue read): unread, a withheld extraction takes no place in the take or the ranked limit below.
+    const settingsFree = aiMemoryWithoutSettings();
+    const aiMemoryWhere = {
+      ...whereBase,
+      category: options.documentExtractions === true ? settingsFree : { notIn: [...settingsFree.notIn, DOCUMENT_EXTRACTION_CATEGORY] },
+    };
 
     const includeEpisodic = options.includeEpisodic !== false;
     const episodicSince = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
@@ -463,6 +470,8 @@ export class UnifiedMemoryRetrievalService {
           ['ai_memory_embedding', 'memory', 'event', 'conversation', 'document'].includes(s as string),
         ) as any,
         minSimilarity: 0.65,
+        // MEM-DOC-EXTRACTION-SIGHT (D-234): nor the copies of document extractions, unless the read asks for them.
+        includeDocumentExtractionCopies: options.documentExtractions === true,
       });
 
       return results.map((r) => ({
