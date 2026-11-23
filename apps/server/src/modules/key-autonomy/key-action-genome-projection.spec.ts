@@ -8,6 +8,7 @@ import {
   isFinancialGenomeEvolution,
   isGenomeEvolutionEvent,
   readableGenomeEvolutionEvents,
+  dnaSectionViewForReader,
   requireBridgeRevenue,
 } from './key-action-genome-projection';
 
@@ -108,6 +109,28 @@ describe('readableGenomeEvolutionEvents', () => {
       { ...opsEvent, signals: { revenueImpact: 'TTD 4,500' } },
     ];
     expect(await readableGenomeEvolutionEvents(prisma, BIZ, variants)).toEqual(variants.map(() => false));
+  });
+});
+
+describe('dnaSectionViewForReader (round 7)', () => {
+  const row = (section: unknown, data: unknown, extra: Record<string, unknown> = {}) => ({
+    entityType: 'dna_section', entityId: typeof section === 'string' ? section : 'founder', type: 'genome.section_updated',
+    title: `${String(section)} DNA updated`, summary: `${String(section)} DNA was updated`, payload: { section, data }, ...extra,
+  });
+  it('withholds the money sections, an unknown section and a shape the writer never produces', () => {
+    for (const r of [row('financial', {}), row('sales', { salesChannels: ['direct'] }), row('treasury', {}), row(42, {}),
+      { ...row('founder', {}), payload: [] }, { ...row('founder', {}), entityId: 'financial' }]) {
+      expect(dnaSectionViewForReader(r as any), JSON.stringify(r)).toBe('withhold');
+    }
+  });
+  it('serves a neutral non-money row whole, and redacts one whose data holds a figure or money', () => {
+    expect(dnaSectionViewForReader(row('operations', { coreWorkflows: ['appointment-booking'] }) as any)).toBe('serve');
+    for (const data of [{ weeklyAvailabilityHours: 20 }, { teamSize: 4 }, { revenueModel: 'retainer' }, { financialRisks: [{ description: 'late payers' }] }]) {
+      expect(dnaSectionViewForReader(row('business', data) as any), JSON.stringify(data)).toBe('redact');
+    }
+  });
+  it('withholds a non-money row whose own title or summary states money', () => {
+    expect(dnaSectionViewForReader(row('founder', {}, { summary: 'founder DNA was updated: draws TTD 912 a week' }) as any)).toBe('withhold');
   });
 });
 

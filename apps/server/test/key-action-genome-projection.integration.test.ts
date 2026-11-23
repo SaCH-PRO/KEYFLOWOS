@@ -86,6 +86,9 @@ const WRITE_DENIED = (has: 'none' | 'read') => `Insufficient permissions: revenu
 let db: any;
 let app: any;
 let evolution: any;
+let executor: any;
+let blueprint: any;
+let proposalService: any;
 const SPY: Record<string, any> = {};
 const bridgedProposals: unknown[] = [];
 
@@ -156,6 +159,8 @@ beforeAll(async () => {
   const { TemporalFlowMemoryQueueService } = await import('../src/modules/temporal-flow/temporal-flow-memory.queue.service');
   const { TemporalFlowGenomeBridgeService } = await import('../src/modules/temporal-flow/temporal-flow-genome-bridge.service');
   const { GenomeEvolutionService } = await import('../src/modules/business-genome/genome-evolution.service');
+  const { KeyActionExecutorService } = await import('../src/modules/key-autonomy/key-action-executor.service');
+  const { BlueprintService } = await import('../src/modules/blueprint/blueprint.service');
   const { KeyGenomeBridgeController } = await import('../src/modules/key-autonomy/key-genome-bridge.controller');
   const { GenomeRecommendationActionBridgeService } = await import('../src/modules/key-autonomy/genome-recommendation-action-bridge.service');
   const { GenomeRecommendationService } = await import('../src/modules/business-genome/key-genome/genome-recommendation.service');
@@ -215,6 +220,16 @@ beforeAll(async () => {
 
   const prisma = moduleRef.get(PrismaService);
   evolution = new GenomeEvolutionService(prisma, offRoute('BlueprintService') as any, temporalOf(prisma));
+  // Round 7 (both reviews, MINOR): the real writers of the create_task and DNA section rows.
+  executor = new KeyActionExecutorService(
+    temporalOf(prisma), evolution, offRoute('ConstitutionVersionService') as any, offRoute('GenomeDocumentPackService') as any,
+    offRoute('KeyActionExecutorRegistryService') as any, offRoute('SafetyShellService') as any, offRoute('ActionAuditService') as any,
+  );
+  blueprint = new BlueprintService(
+    prisma, temporalOf(prisma), offRoute('GenomeScoringService') as any, offRoute('KeyGenomeService') as any,
+    offRoute('GenomeModuleReadinessService') as any, offRoute('KeyGenomeBackfillService') as any, offRoute('EventEmitter2') as any,
+  );
+  proposalService = proposalsOf(prisma);
   const bridge = moduleRef.get(GenomeRecommendationActionBridgeService);
   SPY.preview = vi.spyOn(bridge, 'previewRecommendationAction');
   SPY.bridge = vi.spyOn(bridge, 'bridgeRecommendation');
@@ -306,7 +321,16 @@ beforeAll(async () => {
   // Round 3 (security MINOR-1): a non-financial proposal whose create_task row's payload carries a figure under a key
   // the named-key read does not look at (another writer, or the payload changed after execution).
   await proposal(ID.propOpsPayload, ID.biz, ID.recOps, 'Follow up: Confirm tomorrow appointments', 'Three appointments are unconfirmed.');
-  for (const p of [ID.propFin, ID.propFinQuiet, ID.propOps, ID.propCross, ID.propOpsSummary, ID.propOpsPayload]) {
+  // Round 7: the plain proposals' create_task rows are written by KeyActionExecutorService.executeCreateTask itself; the
+  // two rows that differ from their proposal (a summary or payload another writer changed) are written in its shape.
+  const writesTasks = trackAsyncWrites([[TemporalFlowService.prototype, 'emit']]);
+  for (const p of [ID.propFin, ID.propFinQuiet, ID.propOps, ID.propCross]) {
+    await executor.executeCreateTask(ID.biz, await proposalService.get(ID.biz, p), ID.owner);
+  }
+  await writesTasks.drain();
+  writesTasks.restore();
+  await db.temporalFlowEvent.updateMany({ where: { businessId: ID.biz, type: 'key.action.create_task' }, data: { reminderAt: remindAt, startsAt: remindAt } });
+  for (const p of [ID.propOpsSummary, ID.propOpsPayload]) {
     const row = await db.keyActionProposal.findUnique({ where: { id: p } });
     await db.temporalFlowEvent.create({
       data: {
@@ -352,20 +376,28 @@ beforeAll(async () => {
   });
 
   // Round 6 (security P-1): approving an evolution proposal writes the DNA section through BlueprintService.updateDnaSection,
-  // which emits genome.section_updated (entityType dna_section) with the patch; rows in that writer's shape.
+  // which emits genome.section_updated (entityType dna_section) with the patch. Round 7: the rows are written by
+  // BlueprintService's own emitter (updateDnaSection's last step; its blueprint write is off these routes).
+  const writesDna = trackAsyncWrites([[TemporalFlowService.prototype, 'emit']]);
   for (const [section, data] of [
     ['financial', { avgTicket: 4500.25, pricingModel: 'retainer' }],
     ['sales', { salesChannels: ['direct-invoice'] }],
     ['operations', { coreWorkflows: ['appointment-booking'] }],
+    // Round 7 (correctness MINOR-1): an ordinary founder edit with a figure: served with its data redacted.
+    ['founder', { weeklyAvailabilityHours: 20 }],
   ] as const) {
-    await db.temporalFlowEvent.create({
-      data: {
-        id: `${P}dna_${section}`, businessId: ID.biz, source: 'KEY', type: 'genome.section_updated', module: 'business-genome',
-        entityType: 'dna_section', entityId: section, title: `${section} DNA updated`, summary: `${section} DNA was updated`,
-        importance: 'NORMAL', genomeImpactPotential: true, payload: { section, data }, reminderAt: remindAt, startsAt: remindAt,
-      },
-    });
+    blueprint.emitGenomeUpdated(ID.biz, 'genome.section_updated', `${section} DNA updated`, { section, data }, section);
   }
+  await writesDna.drain();
+  writesDna.restore();
+  await db.temporalFlowEvent.updateMany({ where: { businessId: ID.biz, entityType: 'dna_section' }, data: { reminderAt: remindAt, startsAt: remindAt } });
+  // Round 7 (correctness NOTE-3): a row of a shape the writer never produces (payload a list) fails closed.
+  await db.temporalFlowEvent.create({
+    data: {
+      id: `${P}dna_odd`, businessId: ID.biz, source: 'APP', type: 'genome.section_updated', entityType: 'dna_section', entityId: 'founder',
+      title: 'founder DNA updated', importance: 'NORMAL', payload: [{ avgTicket: 4500.25 }], reminderAt: remindAt, startsAt: remindAt,
+    },
+  });
   // Round 6 (correctness MINOR-2): a row naming the non-financial proposal whose own title states money (POST
   // temporal-flow takes any entityType).
   await db.temporalFlowEvent.create({
@@ -605,15 +637,31 @@ describe('FU-KEY-ACTION-GENOME-PROJECTION: bridged FINANCIAL proposals and their
   });
 
   it('KAG-14 round 6: DNA section rows of the financial and sales sections, and a proposal row whose title states money, are withheld', async () => {
+    const dna = (body: any[]) => body.filter((e: any) => e.entityType === 'dna_section');
     for (const [name, res] of Object.entries(await timelineReads(ID.staffNone))) {
-      const ids = res.body.map((e: any) => e.id);
-      expect(ids, name).toContain(`${P}dna_operations`);
-      for (const hidden of [`${P}dna_financial`, `${P}dna_sales`, `${P}titled_row`]) expect(ids, name).not.toContain(hidden);
+      expect(dna(res.body).map((e: any) => e.entityId).sort(), name).toEqual(['founder', 'operations']);
+      expect(res.body.map((e: any) => e.id), name).not.toContain(`${P}titled_row`);
       expect(JSON.stringify(res.body), name).not.toMatch(/owes 900/);
     }
     for (const [name, res] of Object.entries(await timelineReads(ID.owner))) {
-      const ids = res.body.map((e: any) => e.id);
-      for (const shown of [`${P}dna_financial`, `${P}dna_sales`, `${P}dna_operations`, `${P}titled_row`]) expect(ids, name).toContain(shown);
+      expect(dna(res.body).map((e: any) => e.entityId).sort(), name).toEqual(['financial', 'founder', 'founder', 'operations', 'sales']);
+      expect(res.body.map((e: any) => e.id), name).toContain(`${P}titled_row`);
+    }
+  });
+
+  it('KAG-15 round 7: a non-money DNA row with a figure is served redacted (its data withheld); revenue readers get it whole', async () => {
+    const founder = (body: any[]) => body.filter((e: any) => e.entityType === 'dna_section' && e.entityId === 'founder' && e.id !== `${P}dna_odd`);
+    for (const [name, res] of Object.entries(await timelineReads(ID.staffNone))) {
+      const [row] = founder(res.body);
+      expect(row, name).toBeDefined();
+      expect(row.title, name).toBe('founder DNA updated');
+      expect(JSON.stringify(row.payload), name).not.toMatch(/weeklyAvailabilityHours|20/);
+      expect(row.payload.section, name).toBe('founder');
+      const ops = res.body.find((e: any) => e.entityType === 'dna_section' && e.entityId === 'operations');
+      expect(ops.payload.data, name).toEqual({ coreWorkflows: ['appointment-booking'] });
+    }
+    for (const [name, res] of Object.entries(await timelineReads(ID.staffRead))) {
+      expect(founder(res.body)[0].payload.data, name).toEqual({ weeklyAvailabilityHours: 20 });
     }
   });
 
