@@ -417,18 +417,20 @@ export class TemporalFlowService {
 
   /**
    * MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (delta A1): writes `data` onto `row` (a memory of `businessId` an actor's sight
-   * admitted, visibleMemoryById) only while the row is still the one that was checked (its updatedAt unchanged), in one
+   * admitted, visibleMemoryById) only while the row is still the one that was checked (its updatedAt and its content
+   * unchanged: the content term holds when a rewrite is stamped in the same millisecond, @updatedAt being the app
+   * clock's), in one
    * statement that answers the row it wrote. null when the row is gone or was rewritten since the check (a summarizer
    * may write money text into it): the caller answers as for a missing memory, and nothing is written.
    */
   async updateMemoryIfUnchanged(
     businessId: string,
-    row: { id: string; updatedAt: Date },
+    row: { id: string; updatedAt: Date; content: string },
     data: { content?: string; confidence?: number; sourceEventIds?: string[]; metadata?: Record<string, unknown> },
   ) {
     try {
       return await this.prisma.client.temporalFlowMemory.update({
-        where: { id: row.id, businessId, updatedAt: row.updatedAt },
+        where: { id: row.id, businessId, updatedAt: row.updatedAt, content: row.content },
         data: {
           content: data.content,
           confidence: data.confidence,
@@ -446,9 +448,9 @@ export class TemporalFlowService {
    * MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (delta A2): deletes `row` (as updateMemoryIfUnchanged takes it) only while it is
    * still the one that was checked, in one statement. false when it is gone or was rewritten since the check.
    */
-  async deleteMemoryIfUnchanged(businessId: string, row: { id: string; updatedAt: Date }): Promise<boolean> {
+  async deleteMemoryIfUnchanged(businessId: string, row: { id: string; updatedAt: Date; content: string }): Promise<boolean> {
     const { count } = await this.prisma.client.temporalFlowMemory.deleteMany({
-      where: { id: row.id, businessId, updatedAt: row.updatedAt },
+      where: { id: row.id, businessId, updatedAt: row.updatedAt, content: row.content },
     });
     return count > 0;
   }
