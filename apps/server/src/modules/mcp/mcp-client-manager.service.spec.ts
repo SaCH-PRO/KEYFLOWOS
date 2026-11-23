@@ -463,4 +463,41 @@ describe('RR-MCP-TENANT-BOUND (D-261, D-262): the MCP bridge serves a business o
     await vi.waitFor(() => expect(logged).toHaveLength(1));
     expect(String(logged[0].output)).not.toContain('v91a-query-secret');
   });
+
+  it('MCP-22 a url longer than 2048 characters is dropped at load with a key-only error log', async () => {
+    const huge = `https://mcp.v91a.invalid/mcp?token=v91a${'s'.repeat(50_000)}`;
+    setServers([{ ...SERVER, key: 'huge', url: huge, businessIds: [BIZ_A] }]);
+    const mcp = new McpClientManagerService();
+    expect(mcp.isConfigured()).toBe(false);
+    const lines = errorLines().join('\n');
+    expect(lines).toContain('"huge"');
+    expect(lines).not.toContain('v91asss');
+    const err = await rejection(callAs(mcp, BIZ_A, 'mcp__huge__x'));
+    expect((err as Error).message).toMatch(REFUSAL);
+    noServerTouched();
+  });
+
+  it('MCP-23 the whole url is matched in any letter case, so a quote character in the password cannot split it', async () => {
+    const url = "https://v91aUser:p'v91alongsecret@mcp.v91a.invalid/mcp";
+    fake.connectThrows = () => new Error(`failed at ${url.toUpperCase()} now`);
+    setServers([{ ...SERVER, url, businessIds: [BIZ_A] }]);
+    await rejection(callAs(new McpClientManagerService(), BIZ_A, 'mcp__s__x'));
+    const line = String(warnLog.mock.calls.at(-1)?.[0]).toLowerCase();
+    expect(line).not.toContain('v91alongsecret');
+    expect(line).not.toContain('v91auser');
+  });
+
+  it('MCP-24 the server\'s bearer token is redacted wherever an error echoes it; a bare query word without "=" is not treated as a secret', async () => {
+    process.env.V91A_FAKE_MCP_TOKEN = 'v91a-bearer-secret';
+    try {
+      fake.connectThrows = () => new Error('401: invalid token v91a-bearer-secret (verbose mode)');
+      setServers([{ ...SERVER, url: 'https://mcp.v91a.invalid/mcp?verbose&token=v91aQueryTok', tokenEnvVar: 'V91A_FAKE_MCP_TOKEN', businessIds: [BIZ_A] }]);
+      await rejection(callAs(new McpClientManagerService(), BIZ_A, 'mcp__s__x'));
+      const line = String(warnLog.mock.calls.at(-1)?.[0]);
+      expect(line).not.toContain('v91a-bearer-secret');
+      expect(line).toContain('verbose mode');
+    } finally {
+      delete process.env.V91A_FAKE_MCP_TOKEN;
+    }
+  });
 });
