@@ -885,7 +885,7 @@ describe('ci-verdict: negative controls', () => {
       '      - uses: pnpm/action-setup@v3\n        with:\n          version: 9\n          run_install: true\n      - uses: actions/setup-node@v4',
     );
     assert.deepEqual(censusStepProblems(pnpmInstall), [
-      "'pnpm/action-setup@v3' before the census step may not set with.run_install (it would run pnpm install before the pin and census checks)",
+      "'pnpm/action-setup@v3' before the census step may set only `version` under with, found \"run_install: true\"",
     ]);
     const pnpmPlain = fixture().replace('      - uses: actions/setup-node@v4', '      - uses: pnpm/action-setup@v3\n        with:\n          version: 9\n      - uses: actions/setup-node@v4');
     assert.deepEqual(censusStepProblems(pnpmPlain), []);
