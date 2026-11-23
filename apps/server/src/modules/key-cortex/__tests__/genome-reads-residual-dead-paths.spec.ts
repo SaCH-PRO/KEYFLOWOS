@@ -31,6 +31,19 @@ describe('the legacy, unprojected genome reads are gone (orchestrator acceptance
     expect(source('key-cortex-reasoning.service.ts')).not.toMatch(/genome:context:/);
   });
 
+  it.each(['generateId', 'impactNumberToLevel', 'getDefaultSuggestions'])(
+    'RED-BEFORE (delta review MINOR-1): the helper %s, used only by the deleted methods, is gone too',
+    (method) => {
+      expect((KeyCortexReasoningService.prototype as any)[method]).toBeUndefined();
+    },
+  );
+
+  it('RED-BEFORE (delta review MINOR-1): no TTL setting is left that configures nothing', () => {
+    const src = source('key-cortex-reasoning.service.ts');
+    expect(src).not.toMatch(/GENOME_CONTEXT_TTL/);
+    expect(src).not.toMatch(/KEY_CORTEX_GENOME_CONTEXT_TTL_SECONDS/);
+  });
+
   it('control: the live entry points of the reasoning service stay', () => {
     for (const method of ['processQuery', 'streamQuery']) expect(typeof (KeyCortexReasoningService.prototype as any)[method], method).toBe('function');
   });

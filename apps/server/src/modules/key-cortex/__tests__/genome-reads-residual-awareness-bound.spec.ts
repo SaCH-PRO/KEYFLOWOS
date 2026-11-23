@@ -41,6 +41,7 @@ describe('the awareness read bound (orchestrator acceptance, correctness M1)', (
   it('control: a revenue reader reads 25 rows of a kind, as before', async () => {
     const { svc, findMany } = awareness();
     await svc.getAwareness('biz_A', { readsRevenue: true });
+    expect(findMany).toHaveBeenCalled();
     for (const call of findMany.mock.calls) expect(call[0].take).toBe(25);
   });
 });
