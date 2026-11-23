@@ -5,11 +5,7 @@ import { RedisService } from '../../core/redis/redis.service';
 import { KeyCortexGenomeBridgeService } from './key-cortex-genome-bridge.service';
 import { KeyCortexEventService } from './key-cortex-event.service';
 import { KeyCortexGenomeContextService } from './key-cortex-genome-context.service';
-import {
-  InteractionFeedback,
-  GenomeEnrichedContext,
-} from './key-cortex-reasoning.types';
-import { genomeContextForReader } from './genome-context-for-reader';
+import { InteractionFeedback } from './key-cortex-reasoning.types';
 
 /**
  * KeyCortexInteractionService
@@ -33,108 +29,6 @@ export class KeyCortexInteractionService {
     @Inject(KeyCortexEventService)
     private readonly eventService?: KeyCortexEventService,
   ) {}
-
-  /**
-   * Explain a decision by looking it up in the event log and generating
-   * a human-readable explanation that includes genome context at the time.
-   */
-  // FU-KEY-GENOME-READS-RESIDUAL (D-235): the decision is read in the business named (never across businesses), and
-  // the genome is projected for the reader; no reader given is a reader without revenue read (fails closed).
-  async explainDecision(decisionId: string, businessId?: string, readsRevenue = false): Promise<string> {
-    this.logger.debug(`[explainDecision] Looking up decision: ${decisionId}`);
-
-    try {
-      const eventLog: Array<{
-        step: string;
-        timestamp: Date;
-        data: Record<string, unknown>;
-      }> = [];
-
-      // FU-KEY-EVENT-COLUMNS: no event chain is read here. getEventChain is business-scoped (it used to read a
-      // correlation id across every business), and this method names no business, so it cannot ask for one; it
-      // reconstructs the decision from the session below, as it always has (no route calls it; the decision
-      // route is KeyCortexEvolutionService.explainDecision, which names the guarded business).
-
-      let decisionData: Record<string, unknown> = {};
-      if (eventLog.length === 0) {
-        const session = !businessId ? null : await (this.prisma.client as any).cortexSession.findFirst(
-          {
-          where: {
-            businessId,
-            messages: {
-                path: ['metadata', 'correlationId'],
-                equals: decisionId,
-              },
-            },
-            include: { messages: true },
-          },
-        );
-        if (session) {
-          decisionData = {
-            sessionId: session.id,
-            businessId: session.businessId,
-            messages: session.messages,
-          };
-        }
-      } else {
-        decisionData = {
-          eventLog,
-          steps: eventLog.map((e: any) => e.step),
-        };
-      }
-
-      let genomeContext: GenomeEnrichedContext | null = null;
-      if (decisionData.businessId) {
-        try {
-          genomeContext = genomeContextForReader(
-            await this.genomeContextService.getGenomeEnrichedContext(decisionData.businessId as string),
-            readsRevenue,
-          );
-        } catch {
-          // Genome context may not be available
-        }
-      }
-
-      const explanationPrompt = `You are KEY's decision-explanation engine. Explain this decision clearly and concisely.
-
-Decision ID: ${decisionId}
-
-Decision Steps:
-${eventLog.length > 0 ? eventLog.map((e: any) => `- ${e.step} at ${e.timestamp}`).join('\n') : 'Steps not available in event log'}
-
-${genomeContext ? `Genome Context at Decision Time:
-${genomeContext.genomeStage ? `- Genome Stage: ${genomeContext.genomeStage}\n` : ''}- Executive Readiness: ${genomeContext.executiveReadiness}%
-- DNA Scores: ${JSON.stringify(genomeContext.dnaScores)}
-- Active Signals: ${genomeContext.signals.length}
-- Top Recommendation: ${genomeContext.recommendations[0]?.title ?? 'None'}` : 'Genome context not available'}
-
-Write a 3-4 sentence explanation of this decision that a non-technical business owner can understand. Be transparent about what data was used and why the decision was made. Use first person ("I decided...").`;
-
-      const result = await (this.modelGateway as any).complete({
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You are KEY, an AI business partner. Explain your decisions clearly and transparently.',
-          },
-          { role: 'user', content: explanationPrompt },
-        ],
-        model: 'gpt-4o-mini',
-        temperature: 0.4,
-        maxTokens: 500,
-      });
-
-      return (
-        result.content?.trim() ??
-        `I made decision ${decisionId} based on the available business context and genome intelligence at that time.`
-      );
-    } catch (error: any) {
-      this.logger.error(
-        `[explainDecision] Failed for ${decisionId}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      return `Unable to explain decision ${decisionId}: ${error instanceof Error ? error.message : 'Unknown error'}`;
-    }
-  }
 
   /**
    * Learn from a user interaction by recording feedback and feeding outcomes
