@@ -759,7 +759,15 @@ export default function QuotesPanel({
       : undefined;
     // A sent quote has its link already (the same route Copy link uses); a
     // draft's is minted by the send itself.
-    const link = quote.status !== "DRAFT" && !quote.invoiceId ? (await fetchQuoteLink(quote)).url : null;
+    let link: string | null = null;
+    if (quote.status !== "DRAFT" && !quote.invoiceId) {
+      const fetched = await fetchQuoteLink(quote);
+      link = fetched.url;
+      // A refusal other than access (an expired quote, 400) is said now; the
+      // send itself would be refused later. Access (403) is not: the server's
+      // send adds the link, and the member needs no copy of it.
+      if (!link && fetched.error && !fetched.forbidden) toast.error(fetched.error);
+    }
     setSelectedQuote(quote);
     openComposer({
       to: quote.contact?.email || "",
@@ -1030,7 +1038,7 @@ export default function QuotesPanel({
           </p>
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-2" role="list" aria-label="Quotes">
           {filteredQuotes.length > 0 && (
             <div className="flex items-center gap-1 px-2 pb-1">
               <label className="min-w-[44px] min-h-[44px] flex items-center justify-center cursor-pointer">
@@ -1122,7 +1130,8 @@ export default function QuotesPanel({
             );
 
             return (
-              <div key={quote.id} className="flex items-start gap-1">
+              // The row is a list item that holds its own checkbox (journey D9 ticks the row it found by its number).
+              <div key={quote.id} role="listitem" aria-label={`Quote ${quote.quoteNumber}`} className="flex items-start gap-1">
                 <label className="min-w-[44px] min-h-[44px] flex items-center justify-center shrink-0 cursor-pointer">
                   <input
                     type="checkbox"
@@ -1228,13 +1237,16 @@ export default function QuotesPanel({
         {showConvertModal && selected && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
             <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="quote-convert-title"
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               className="bg-card rounded-2xl border border-border shadow-2xl p-6 max-w-md w-full space-y-4"
             >
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold">Convert Quote to Invoice</h3>
+                <h3 id="quote-convert-title" className="text-lg font-semibold">Convert Quote to Invoice</h3>
                 <button
                   onClick={() => {
                     setShowConvertModal(false);
@@ -1324,13 +1336,16 @@ export default function QuotesPanel({
         {showAcceptPrompt && selected && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
             <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="quote-accepted-title"
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               className="bg-card rounded-2xl border border-border shadow-2xl p-6 max-w-md w-full space-y-4"
             >
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold">Quote Accepted!</h3>
+                <h3 id="quote-accepted-title" className="text-lg font-semibold">Quote Accepted!</h3>
                 <button
                   onClick={() => {
                     setShowAcceptPrompt(false);

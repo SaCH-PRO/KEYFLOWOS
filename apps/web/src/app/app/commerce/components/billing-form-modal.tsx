@@ -186,6 +186,10 @@ export const BillingFormModal = React.memo(function BillingFormModal({
       setTemplateRefusal(null);
       return;
     }
+    // MOUNT-QUOTES (journey D2): the Notes section opens with the sheet when
+    // the notes matter, editing an existing document or one that already has
+    // notes (a duplicate); a new, empty document keeps it collapsed.
+    if (isEditing || notes.trim()) setSections((s) => (s.notes ? s : { ...s, notes: true }));
     fetchDocumentTemplates(businessId ?? undefined).then((res) => {
       if (res.data) {
         const type = docType === "invoice" ? "invoice" : "quote";
@@ -197,6 +201,7 @@ export const BillingFormModal = React.memo(function BillingFormModal({
         setPreviewTemplate(defaultId as TemplateId);
       }
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- isEditing and notes are read once, when the sheet opens
   }, [open, docType, businessId]);
 
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
