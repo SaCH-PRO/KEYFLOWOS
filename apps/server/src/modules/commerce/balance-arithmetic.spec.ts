@@ -518,10 +518,14 @@ describe('BA-07: which write-set web files a route renders (V36-CR-1)', () => {
 
   // MOUNT-QUOTES: the pipeline left Sales (D-150). Sales now renders the quotes
   // panel, the Collections tab (payments-tab.tsx, the pipeline's collections
-  // view on its own tab) and the revenue composer, which carries the
-  // payment-record modal; finance-pipeline.tsx is no longer mounted by any
-  // route. The balance surfaces this pins are the ones a route still renders.
-  it('the import graph sees the live balance surfaces: the nav "Invoices" hub, the invoice detail page, and Sales -> Collections tab and revenue composer -> payment-record modal', () => {
+  // view on its own tab) and the revenue composer. finance-pipeline.tsx is no
+  // longer mounted by any route, and with it the <PaymentRecordModal> screen
+  // (the pipeline was its only renderer): payment-record-modal.tsx stays
+  // route-reachable only through the attempt-key helper (newPaymentAttemptKey)
+  // that the composer and the invoice pages import. BA-04 / BA-05 still scan
+  // it through WRITE_SET_SURFACES; the modal screen having no route is recorded
+  // for the owner.
+  it('the import graph sees the live balance surfaces: the nav "Invoices" hub, the invoice detail page, Sales -> Collections tab, and the payment-record module (its attempt-key helper)', () => {
     expect(readFileSync(join(WEB_SRC, 'lib', 'nav-config.ts'), 'utf8'), 'the nav "Invoices" door is /app/commerce/invoices').toMatch(
       /label:\s*"Invoices",\s*href:\s*"\/app\/commerce\/invoices"/,
     );
