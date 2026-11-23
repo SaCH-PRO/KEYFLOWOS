@@ -12,7 +12,7 @@ import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-sco
 import { PrismaService } from '../../core/prisma/prisma.service';
 import type { AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { ReceivablesService } from './receivables.service';
-import { LedgerBalanceService } from './ledger-balance.service';
+import { LedgerBalanceService, isDateOnly, looksDateOnly } from './ledger-balance.service';
 import { FinanceOverviewService } from './finance-overview.service';
 import { FinanceAccountsService, type CreateAccountInput, type UpdateAccountInput } from './finance-accounts.service';
 import { FinanceCoaService, type CreateCoaInput, type UpdateCoaInput } from './finance-coa.service';
@@ -244,10 +244,19 @@ export class FinanceController {
     @Query('pageSize') pageSize?: string,
   ) {
     await this.ensureAccess((req as any).user.id, businessId);
+    // V1-66 (SWP-FIN-LEDGER, BUG-029): a date-only `to` (YYYY-MM-DD) goes to
+    // the service as the day it names, which covers the whole of it in the
+    // business's timezone; it was turned into midnight UTC here, so the
+    // service could not tell it from a timestamp and dropped the day. A
+    // date-only value that is not on the calendar (2026-02-31) is refused.
+    // Anything else is a timestamp, as before (`<=`).
+    const toDay = looksDateOnly(to) ? to : undefined;
+    if (toDay !== undefined && !isDateOnly(toDay)) throw new BadRequestException('Invalid to date');
     return this.ledgerBalance.getGeneralLedger(businessId, {
       accountId,
       from: from ? (() => { const d = new Date(from); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid from date'); return d; })() : undefined,
-      to: to ? (() => { const d = new Date(to); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid to date'); return d; })() : undefined,
+      to: to && toDay === undefined ? (() => { const d = new Date(to); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid to date'); return d; })() : undefined,
+      toDay,
       page: page ? (() => { const n = parseInt(page, 10); if (Number.isNaN(n)) throw new BadRequestException('Invalid page'); return n; })() : undefined,
       pageSize: pageSize ? (() => { const n = parseInt(pageSize, 10); if (Number.isNaN(n)) throw new BadRequestException('Invalid pageSize'); return n; })() : undefined,
     });

@@ -3,6 +3,14 @@ import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { DocumentParsingService } from '../ingestion/document-parsing.service';
 import { AiUsageService } from '../ai/ai-usage.service';
+import { isIP } from 'node:net';
+import {
+  CheckedAddress,
+  OutboundAddressRefusedError,
+  PinnedDispatcher,
+  isNonPublicAddress,
+  resolvePublicAddress,
+} from '../../core/security/outbound-address';
 
 /** The 41 CUAD clause labels (Contract Understanding Atticus Dataset). */
 export const CUAD_LABELS = [
@@ -57,6 +65,135 @@ function isDocumentHostOutage(status: number): boolean {
 }
 
 /**
+ * FU-CONTRACT-FETCH-OUTBOUND-GUARD (owner ruling D-246): the one answer to a document URL the server may
+ * not fetch (a non-public address by any spelling or by DNS, a redirect to one, a scheme other than http
+ * and https, credentials in the URL, a URL that does not parse, a host that does not resolve, a redirect
+ * chain past MAX_DOCUMENT_REDIRECTS). It names no address, no reason and no upstream status, so it tells
+ * the member nothing about the server's network. It is a final 400 (no cause): no outage.
+ */
+export const DOCUMENT_URL_REFUSED = 'The document URL must be a public http or https address';
+
+/** FU-CONTRACT-FETCH-OUTBOUND-GUARD: redirects a document fetch follows, each one checked before it is requested. */
+const MAX_DOCUMENT_REDIRECTS = 5;
+
+const documentUrlRefused = () => new BadRequestException(DOCUMENT_URL_REFUSED);
+
+/**
+ * FU-CONTRACT-FETCH-OUTBOUND-GUARD acceptance review (correctness M2): a redirect chain past
+ * MAX_DOCUMENT_REDIRECTS. Every host on it was public, so DOCUMENT_URL_REFUSED would be untrue; this is its own
+ * final 400 (no cause, not retried) and names no host.
+ */
+export const DOCUMENT_URL_TOO_MANY_REDIRECTS = 'The document URL redirected too many times';
+
+/** The deadline of a document fetch in production; ContractClauseService.documentFetchTimeoutMs. */
+export const DOCUMENT_FETCH_TIMEOUT_MS = 30_000;
+
+/**
+ * FU-CONTRACT-FETCH-OUTBOUND-GUARD acceptance review (correctness M1): give up a response body that will not
+ * be read, so the connection is released now rather than when the host ends it (the per-hop dispatcher's
+ * close() waits for a body in flight).
+ */
+async function discardBody(res: Response): Promise<void> {
+  try {
+    await res.body?.cancel();
+  } catch {
+    /* a body already read or cancelled */
+  }
+}
+
+/**
+ * FU-CONTRACT-FETCH-OUTBOUND-GUARD review round 1 (correctness 1, security 1): the resolver could not answer
+ * now (EAI_AGAIN, a timeout, a server failure; OutboundAddressRefusedError.transient). That says nothing
+ * about the name, so it is no refusal: it stays the plain failure a fetch whose lookup failed was before
+ * the guard (no HttpException), which the plan queue retries and counts. It names no host and no code.
+ */
+export class DocumentHostUnresolvedError extends Error {
+  constructor() {
+    super('The document host could not be resolved right now');
+    this.name = 'DocumentHostUnresolvedError';
+  }
+}
+
+/**
+ * FU-CONTRACT-FETCH-OUTBOUND-GUARD review round 1 (correctness 2): the fetch's deadline bounds resolving each
+ * host as well as the requests (fetch rejects with the signal's reason, a TimeoutError, as it did before
+ * the guard when its own lookup stalled).
+ */
+function underSignal<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+    work.then(
+      (value) => { signal.removeEventListener('abort', onAbort); resolve(value); },
+      (err) => { signal.removeEventListener('abort', onAbort); reject(err); },
+    );
+  });
+}
+
+/**
+ * FU-CONTRACT-FETCH-OUTBOUND-GUARD (D-246): the URL of a contract's document, checked as webhooks and the
+ * CRM link import check theirs (core/security/outbound-address.ts): http or https only, no credentials, no
+ * localhost name, an IP literal that is public (WHATWG URL has already turned a decimal, octal or hex IPv4
+ * spelling into its dotted form), and a name resolved once with every address public. The addresses that
+ * were checked are the only ones the fetch may connect to (PinnedDispatcher). Any refusal is
+ * DOCUMENT_URL_REFUSED.
+ */
+async function checkDocumentUrl(raw: string): Promise<{ url: URL; target: CheckedAddress }> {
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    throw documentUrlRefused();
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw documentUrlRefused();
+  if (url.username || url.password) throw documentUrlRefused();
+  const hostname = url.hostname.toLowerCase().replace(/^\[(.*)\]$/, '$1').replace(/\.$/, '');
+  if (!hostname || hostname === 'localhost' || hostname.endsWith('.localhost')) throw documentUrlRefused();
+  if (isIP(hostname) !== 0 && isNonPublicAddress(hostname)) throw documentUrlRefused();
+  try {
+    return { url, target: await resolvePublicAddress(hostname) };
+  } catch (err) {
+    if (err instanceof OutboundAddressRefusedError) throw err.transient ? new DocumentHostUnresolvedError() : documentUrlRefused();
+    throw err;
+  }
+}
+
+/**
+ * FU-CONTRACT-FETCH-OUTBOUND-GUARD (D-246): fetch a contract's document from a URL a member gave (the call's
+ * url or the contract's asset). Each request goes through a dispatcher pinned to the addresses its host was
+ * checked at, so a second DNS answer (rebinding) is never connected to; fetch does not follow a redirect on
+ * its own (redirect 'manual'): each target is checked the same way before it is requested, at most
+ * MAX_DOCUMENT_REDIRECTS of them. A host that answered (any status but a redirect) is handed back as it
+ * answered, so the caller's outage marking (W11-DISPATCH-REFUSAL-FINAL, D-134) is unchanged.
+ */
+async function fetchDocument(raw: string, timeoutMs: number): Promise<Response> {
+  const signal = AbortSignal.timeout(timeoutMs);
+  let { url, target } = await underSignal(checkDocumentUrl(raw), signal);
+  for (let hops = 0; ; hops++) {
+    const dispatcher = new PinnedDispatcher(target);
+    let response: Response;
+    try {
+      response = await fetch(url.toString(), { redirect: 'manual', dispatcher, signal } as RequestInit);
+    } finally {
+      // close() lets the request in flight finish, its body included, then ends the connection.
+      dispatcher.close().catch(() => undefined);
+    }
+    const location = response.status >= 300 && response.status < 400 ? response.headers.get('location') : null;
+    if (!location) return response;
+    await discardBody(response);
+    if (hops >= MAX_DOCUMENT_REDIRECTS) throw new BadRequestException(DOCUMENT_URL_TOO_MANY_REDIRECTS);
+    let next: string;
+    try {
+      next = new URL(location, url).toString();
+    } catch {
+      throw documentUrlRefused();
+    }
+    ({ url, target } = await underSignal(checkDocumentUrl(next), signal));
+  }
+}
+
+/**
  * CUAD-style contract clause extraction on top of the Docling parse layer:
  * contract source -> parsed markdown -> GPT-4o with the 41-label checklist as
  * a structured checklist -> persisted on the contract record. Output always
@@ -66,6 +203,12 @@ function isDocumentHostOutage(status: number): boolean {
 @Injectable()
 export class ContractClauseService {
   private readonly logger = new Logger(ContractClauseService.name);
+
+  /**
+   * FU-CONTRACT-FETCH-OUTBOUND-GUARD acceptance review (correctness M4): the deadline of one document fetch,
+   * DNS and every redirect hop included. DOCUMENT_FETCH_TIMEOUT_MS (30 s); only a test shortens it.
+   */
+  documentFetchTimeoutMs = DOCUMENT_FETCH_TIMEOUT_MS;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -150,8 +293,10 @@ export class ContractClauseService {
       };
     }
     if (opts.url) {
-      const res = await fetch(opts.url, { signal: AbortSignal.timeout(30_000) });
+      // FU-CONTRACT-FETCH-OUTBOUND-GUARD (D-246): a URL the server may not fetch is DOCUMENT_URL_REFUSED.
+      const res = await fetchDocument(opts.url, this.documentFetchTimeoutMs);
       if (!res.ok) {
+        await discardBody(res);
         throw new BadRequestException(
           `Could not fetch document URL (${res.status})`,
           isDocumentHostOutage(res.status) ? { cause: new DocumentHostUnavailableError(res.status), description: 'Bad Request' } : undefined,
@@ -168,7 +313,8 @@ export class ContractClauseService {
     if (contract.sourceAssetId) {
       const asset = await this.prisma.client.asset.findFirst({ where: { id: contract.sourceAssetId, businessId } });
       if (asset?.url && asset.url.startsWith('http')) {
-        const res = await fetch(asset.url, { signal: AbortSignal.timeout(30_000) });
+        // FU-CONTRACT-FETCH-OUTBOUND-GUARD (D-246): the asset's URL passes the same guard.
+        const res = await fetchDocument(asset.url, this.documentFetchTimeoutMs);
         if (res.ok) {
           return {
             buffer: Buffer.from(await res.arrayBuffer()),
@@ -177,6 +323,7 @@ export class ContractClauseService {
             source: 'asset',
           };
         }
+        await discardBody(res);
         // W11-DISPATCH-REFUSAL-FINAL review COR-1 (D-134): the asset's host did not answer (5xx, 408,
         // 429). What extractClauses answers is unchanged (its 400 'No source document available');
         // the host's status rides on it as its cause, so KEY's plan queue can tell an outage from a
