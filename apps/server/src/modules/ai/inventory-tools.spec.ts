@@ -194,8 +194,8 @@ describe('a transfer moves whole units (W11-KEY-TRANSFER-INTEGER)', () => {
 
   it("negative control: the 'number' branch is unchanged, so inventory_adjust_stock still takes a fractional quantityChange and still refuses text", () => {
     expect(getToolByName('inventory_adjust_stock')!.parameters.properties.quantityChange.type).toBe('number');
-    expect(() => validate('inventory_adjust_stock', { stockId: 's', quantityChange: 1.5, reasonCode: 'DAMAGED' })).not.toThrow();
-    expect(() => validate('inventory_adjust_stock', { stockId: 's', quantityChange: 'abc', reasonCode: 'DAMAGED' })).toThrow(
+    expect(() => validate('inventory_adjust_stock', { stockId: 's', quantityChange: 1.5, reasonCode: 'DAMAGE' })).not.toThrow();
+    expect(() => validate('inventory_adjust_stock', { stockId: 's', quantityChange: 'abc', reasonCode: 'DAMAGE' })).toThrow(
       /^Field "quantityChange" for inventory_adjust_stock must be a number$/,
     );
   });
