@@ -167,12 +167,16 @@ export class AnalyticsAdapterService {
   }) {
     // V1-72 review (SEC-3): KEY-supplied properties about a forgotten contact
     // are not written (the same write-time check as BusinessEventService.emit).
+    // routeContactId names a contact only when the interceptor records it from
+    // the route; a KEY-supplied one is dropped.
+    const properties: Record<string, unknown> = { ...(input.properties ?? {}) };
+    delete properties.routeContactId;
     const row = await withoutForgottenPersonalData(this.prisma.client, {
       businessId: input.businessId,
       eventType: input.eventName,
       subjectType: 'contact',
       subjectId: input.contactId ?? 'unknown',
-      metadata: (input.properties ?? {}) as Record<string, unknown>,
+      metadata: properties,
     });
     const event = await this.prisma.client.businessEvent.create({
       data: {

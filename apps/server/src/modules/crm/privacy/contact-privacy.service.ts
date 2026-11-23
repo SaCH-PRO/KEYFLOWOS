@@ -105,7 +105,8 @@ const PURGE_NOT_SWEPT =
   'snapshot names it at the top level (contactId, fromContactId, toContactId, targetContactId); events ' +
   'of the retained records (invoices, quotes, bookings) whose snapshot names the person otherwise are kept ' +
   'under the retained basis, and events whose snapshot names the person only inside a nested structure ' +
-  '(for example duplicate-check and import requests) are not reached and not swept.';
+  '(for example duplicate-check and import requests), or only in the request body (never read: a caller ' +
+  'could plant a contact id there), are not reached and not swept.';
 
 /**
  * V1-72 review round 2: the purge transaction scrubs the business's event log,
@@ -928,7 +929,7 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
              END
        WHERE business_id = ${businessId}
          AND (
-           (subject_type = 'contact' AND subject_id = ANY(${ids}))
+           (lower(subject_type) = 'contact' AND subject_id = ANY(${ids}))
            OR EXISTS (SELECT 1 FROM unnest(${refKeys}::text[]) k WHERE "after" ->> k = ANY(${ids}))
            OR metadata ->> 'routeContactId' = ANY(${ids})
          )

@@ -51,7 +51,9 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
  */
 export function contactIdsOfEvent(input: Pick<ForgettableEvent, 'subjectType' | 'subjectId' | 'before' | 'after' | 'metadata'>): string[] {
   const ids = new Set<string>();
-  if (input.subjectType === 'contact' && input.subjectId && input.subjectId !== 'unknown') ids.add(input.subjectId);
+  // Any casing: the KEY cortex event bus writes the bridge's entityType ('Contact').
+  if (typeof input.subjectType === 'string' && input.subjectType.toLowerCase() === 'contact' &&
+      input.subjectId && input.subjectId !== 'unknown') ids.add(input.subjectId);
   const after = asRecord(input.after);
   if (after) {
     for (const key of CONTACT_REFERENCE_KEYS) {
