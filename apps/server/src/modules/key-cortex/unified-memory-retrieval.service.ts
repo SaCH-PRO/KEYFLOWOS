@@ -3,8 +3,8 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { SemanticMemoryService, aiMemoryWithoutSettings } from '../ai/semantic-memory.service';
 import { DOCUMENT_EXTRACTION_CATEGORY } from '../ai/ai-memory.service';
 import { KEY_OBSERVATION_SOURCE } from './key-cortex-event.service';
-import { GENOME_ROW_METADATA_KEY } from './unified-memory.types';
-import type { GenomeRowColumns, MemoryFragment, MemoryRetrievalOptions, MemorySourceType } from './unified-memory.types';
+import { GENOME_ROW_METADATA_KEY, SEMANTIC_SOURCE_METADATA_KEY } from './unified-memory.types';
+import type { GenomeRowColumns, MemoryFragment, MemoryRetrievalOptions, MemorySourceType, SemanticSource } from './unified-memory.types';
 
 interface RawMemoryRow {
   id: string;
@@ -461,6 +461,11 @@ export class UnifiedMemoryRetrievalService {
     query: string,
     options: MemoryRetrievalOptions,
   ): Promise<RawMemoryRow[]> {
+    // MEM-UNIFIED-SEMANTIC-SIGHT (D-257, D-234, D-100): a hit's text is whatever its source holds (a temporal summary of
+    // an overdue invoice, a statement chunk, a money pattern's copy), so a read that carries no reader's sight reads no
+    // semantic memory at all (fail closed).
+    const sight = options.semanticSight;
+    if (!sight) return [];
     try {
       const results = await this.semanticMemory.search({
         businessId,
@@ -470,8 +475,12 @@ export class UnifiedMemoryRetrievalService {
           ['ai_memory_embedding', 'memory', 'event', 'conversation', 'document'].includes(s as string),
         ) as any,
         minSimilarity: 0.65,
-        // MEM-DOC-EXTRACTION-SIGHT (D-234): nor the copies of document extractions, unless the read asks for them.
-        includeDocumentExtractionCopies: options.documentExtractions === true,
+        // MEM-DOC-EXTRACTION-SIGHT (D-234): nor the copies of document extractions, unless the read asks for them and the
+        // reader may see them.
+        includeDocumentExtractionCopies: options.documentExtractions === true && sight.includeDocumentExtractionCopies === true,
+        // MEM-UNIFIED-SEMANTIC-SIGHT: MEM-SEMANTIC-SIGHT's reader projection (readerSearchOptions): each hit resolved to its
+        // source and kept only when its source's rule admits the reader, before the limit is cut.
+        visibleTo: sight.visibleTo,
       });
 
       return results.map((r) => ({
@@ -481,7 +490,8 @@ export class UnifiedMemoryRetrievalService {
         similarity: r.similarity,
         confidence: r.similarity,
         createdAt: r.metadata?.createdAt ? new Date(r.metadata.createdAt as string) : new Date(),
-        metadata: r.metadata,
+        // MEM-UNIFIED-SEMANTIC-SIGHT: the copy keeps its source, written after the copy's own metadata.
+        metadata: this.semanticMetadata(r),
       }));
     } catch (err: any) {
       this.logger.warn(`Semantic memory search failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -547,6 +557,17 @@ export class UnifiedMemoryRetrievalService {
     };
     const base = own && !Array.isArray(own) ? own : own === undefined ? {} : { raw: own };
     return { ...base, [GENOME_ROW_METADATA_KEY]: row };
+  }
+
+  /**
+   * MEM-UNIFIED-SEMANTIC-SIGHT (D-257): a semantic fragment's metadata: the copy's own, then its source (sourceType,
+   * sourceId) under SEMANTIC_SOURCE_METADATA_KEY, written last so the copy's own metadata cannot stand in for it.
+   */
+  private semanticMetadata(r: { sourceType: string; sourceId: string; metadata?: unknown }): Record<string, unknown> {
+    const own = this.safeMetadata(r.metadata);
+    const base = own && !Array.isArray(own) ? own : own === undefined ? {} : { raw: own };
+    const source: SemanticSource = { sourceType: r.sourceType, sourceId: r.sourceId };
+    return { ...base, [SEMANTIC_SOURCE_METADATA_KEY]: source };
   }
 
   private safeMetadata(metadata: any): Record<string, unknown> | undefined {
