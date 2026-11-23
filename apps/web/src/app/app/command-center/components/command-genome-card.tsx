@@ -3,6 +3,7 @@
 import { Dna, ArrowRight } from "lucide-react";
 import { openKey } from "@/components/key";
 import type { CommandCenterGenome } from "@/lib/api/business-command-center";
+import { pctOrWithheld, stageOrWithheld } from "@/lib/genome-withheld";
 
 interface CommandGenomeCardProps {
   genome: CommandCenterGenome;
@@ -17,17 +18,17 @@ export function CommandGenomeCard({ genome }: CommandGenomeCardProps) {
         </div>
         <div>
           <h3 className="text-sm font-semibold text-foreground">Business Genome</h3>
-          <p className="text-[10px] text-muted-foreground">{genome.stage.replace(/_/g, " ")}</p>
+          <p className="text-[10px] text-muted-foreground">{stageOrWithheld(genome.stage)}</p>
         </div>
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div className="rounded-xl p-2 bg-muted/30">
           <div className="text-[10px] text-muted-foreground">Integrity</div>
-          <div className="text-sm font-semibold">{genome.integrity}%</div>
+          <div className="text-sm font-semibold">{pctOrWithheld(genome.integrity)}</div>
         </div>
         <div className="rounded-xl p-2 bg-muted/30">
           <div className="text-[10px] text-muted-foreground">Readiness</div>
-          <div className="text-sm font-semibold">{genome.readiness}%</div>
+          <div className="text-sm font-semibold">{pctOrWithheld(genome.readiness)}</div>
         </div>
       </div>
       {genome.pendingProposals.length > 0 && (

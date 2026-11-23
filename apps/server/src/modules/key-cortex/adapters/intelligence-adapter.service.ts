@@ -57,7 +57,9 @@ export class IntelligenceAdapterService {
   }
 
   async getSnapshot(businessId: string) {
-    return this.commandCenter.snapshot(businessId);
+    // FU-GENOME-SURFACES-REVENUE (D-233): no member to read for, so read for none (null): the money composites and
+    // sections are withheld (fail closed), never served as to an internal caller.
+    return this.commandCenter.snapshot(businessId, null);
   }
 
   private async analyzeSentiment(input: { businessId: string; text?: string }) {

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { FileText, ScrollText, BarChart3, Shield, TrendingUp, ArrowRight, Loader2 } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { pctOrWithheld, stageOrWithheld } from "@/lib/genome-withheld";
 import { getConstitution, type GenomeIntegrityResult } from "@/lib/api/business-genome";
 
 interface GenomeReportsPanelProps {
@@ -133,11 +134,11 @@ export function GenomeReportsPanel({ genome, onOpenConstitution, onOpenDnaSectio
             <div className="mt-3 space-y-1 text-xs">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Genome Integrity</span>
-                <span className="font-medium">{genome.genomeIntegrity}%</span>
+                <span className="font-medium">{pctOrWithheld(genome.genomeIntegrity)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Stage</span>
-                <span className="font-medium">{genome.genomeStage.replace(/_/g, " ")}</span>
+                <span className="font-medium">{stageOrWithheld(genome.genomeStage)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">DNA Sections</span>

@@ -36,14 +36,16 @@ export interface DnaSectionScore {
 }
 
 export interface GenomeIntegrityResult {
-  genomeIntegrity: number;
-  genomeDnaScores: Record<DnaSectionKey, number>;
-  genomeDnaConfidence: Record<DnaSectionKey, number>;
-  genomeStage: GenomeStage;
+  /** null: withheld from a member without revenue read (D-233); named in withheldForRevenue. The DNA maps then carry no financial or sales key. */
+  genomeIntegrity: number | null;
+  genomeDnaScores: Partial<Record<DnaSectionKey, number>>;
+  genomeDnaConfidence: Partial<Record<DnaSectionKey, number>>;
+  genomeStage: GenomeStage | null;
   threePillarMinimumMet: boolean;
   dnaSections: DnaSectionScore[];
-  executiveReadinessScore: number;
+  executiveReadinessScore: number | null;
   readinessBreakdown: Record<string, number>;
+  withheldForRevenue?: string[];
 }
 
 export interface GenomeRecommendation {
@@ -55,13 +57,15 @@ export interface GenomeRecommendation {
 }
 
 export interface GenomeIntegritySummary {
-  genomeIntegrity: number;
-  genomeDnaScores: Record<DnaSectionKey, number>;
-  genomeDnaConfidence: Record<DnaSectionKey, number>;
-  genomeStage: GenomeStage;
+  /** null: withheld from a member without revenue read (D-233); named in withheldForRevenue. The DNA maps then carry no financial or sales key. */
+  genomeIntegrity: number | null;
+  genomeDnaScores: Partial<Record<DnaSectionKey, number>>;
+  genomeDnaConfidence: Partial<Record<DnaSectionKey, number>>;
+  genomeStage: GenomeStage | null;
   threePillarMinimumMet: boolean;
-  executiveReadinessScore: number;
+  executiveReadinessScore: number | null;
   readinessBreakdown: Record<string, number>;
+  withheldForRevenue?: string[];
 }
 
 export interface ThreePillarStatus {

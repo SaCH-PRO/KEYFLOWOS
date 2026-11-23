@@ -12,6 +12,7 @@ import {
 import { getExecutiveBrief, type BusinessExecutiveBrief } from "@/lib/api/intelligence";
 import { ProgressRing } from "@/components/ui-v2/progress-ring";
 import { Badge } from "@/components/ui-v2/badge";
+import { isServedScore, pctOrWithheld, stageOrWithheld, WITHHELD_LABEL } from "@/lib/genome-withheld";
 import { useAnimatedNumber } from "@/hooks/use-animated-number";
 import { GenomeMilestone } from "../../profile/components/business-genome/genome-milestone";
 
@@ -113,13 +114,19 @@ export function GenomeHero({ genome, onDnaClick }: GenomeHeroProps) {
     [genome.dnaSections],
   );
 
-  const integrityRingColor = genome.genomeIntegrity >= 80 ? "teal" : genome.genomeIntegrity >= 50 ? "orange" : "rose";
-  const animatedIntegrity = useAnimatedNumber(genome.genomeIntegrity, { duration: 1000, decimals: 0 });
-  const animatedReadiness = useAnimatedNumber(genome.executiveReadinessScore, { duration: 1000, decimals: 0 });
+  // FU-GENOME-SURFACES-REVENUE (D-233): the integrity, readiness and stage weight the financial and sales DNA; withheld
+  // from a member without revenue read (null), they show as withheld: no number, no grade colour, an empty ring.
+  const integrityWithheld = !isServedScore(genome.genomeIntegrity);
+  const readinessWithheld = !isServedScore(genome.executiveReadinessScore);
+  const integrityScore = genome.genomeIntegrity ?? 0;
+  const readinessScore = genome.executiveReadinessScore ?? 0;
+  const integrityRingColor = integrityWithheld ? "violet" : integrityScore >= 80 ? "teal" : integrityScore >= 50 ? "orange" : "rose";
+  const animatedIntegrity = useAnimatedNumber(integrityScore, { duration: 1000, decimals: 0 });
+  const animatedReadiness = useAnimatedNumber(readinessScore, { duration: 1000, decimals: 0 });
 
   return (
     <div className="space-y-5">
-      <GenomeMilestone businessId={businessId} integrity={genome.genomeIntegrity} />
+      {!integrityWithheld && <GenomeMilestone businessId={businessId} integrity={integrityScore} />}
 
       {/* Hero card */}
       <div
@@ -133,20 +140,20 @@ export function GenomeHero({ genome, onDnaClick }: GenomeHeroProps) {
           <div className="flex items-center gap-5">
             <div className="relative">
               <ProgressRing
-                value={genome.genomeIntegrity}
+                value={integrityScore}
                 size={96}
                 thickness={10}
                 segments={12}
                 color={integrityRingColor}
               />
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className="text-2xl font-bold">{animatedIntegrity}%</span>
+                <span className="text-2xl font-bold">{integrityWithheld ? WITHHELD_LABEL : `${animatedIntegrity}%`}</span>
                 <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Integrity</span>
               </div>
             </div>
             <div className="space-y-1.5 text-center sm:text-left">
-              <Badge color={genome.genomeIntegrity >= 80 ? "mint" : genome.genomeIntegrity >= 50 ? "gold" : "rose"}>
-                {genome.genomeStage.replace(/_/g, " ")}
+              <Badge color={integrityWithheld ? "muted" : integrityScore >= 80 ? "mint" : integrityScore >= 50 ? "gold" : "rose"}>
+                {stageOrWithheld(genome.genomeStage)}
               </Badge>
               <h2 className="text-xl font-semibold">Business Genome</h2>
               <p className="text-xs text-muted-foreground">
@@ -164,7 +171,7 @@ export function GenomeHero({ genome, onDnaClick }: GenomeHeroProps) {
               }}
             >
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Readiness</div>
-              <div className="text-lg font-bold mt-0.5 text-[hsl(var(--kf-success,160_70%_45%))]">{animatedReadiness}%</div>
+              <div className="text-lg font-bold mt-0.5 text-[hsl(var(--kf-success,160_70%_45%))]">{readinessWithheld ? WITHHELD_LABEL : `${animatedReadiness}%`}</div>
             </div>
             <div
               className="rounded-xl p-3 text-center border"
@@ -262,7 +269,7 @@ export function GenomeHero({ genome, onDnaClick }: GenomeHeroProps) {
               )}
             </div>
             <p className="text-xs text-muted-foreground line-clamp-2">
-              Executive Readiness: {brief.executiveReadinessScore}% · {brief.topPriorities.length} top-priority insight
+              Executive Readiness: {pctOrWithheld(brief.executiveReadinessScore)} · {brief.topPriorities.length} top-priority insight
               {brief.topPriorities.length === 1 ? "" : "s"}
             </p>
           </div>

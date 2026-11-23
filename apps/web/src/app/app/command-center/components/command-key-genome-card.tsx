@@ -3,12 +3,13 @@
 import { Dna, ArrowRight, AlertTriangle } from "lucide-react";
 import { openKey } from "@/components/key";
 import type { CommandCenterKeyGenome } from "@/lib/api/business-command-center";
+import { pctOrWithheld, WITHHELD_LABEL } from "@/lib/genome-withheld";
 
 interface CommandKeyGenomeCardProps {
   keyGenome: CommandCenterKeyGenome;
 }
 
-function Metric({ label, value, tone }: { label: string; value: number; tone?: "neutral" | "warning" | "danger" | "success" }) {
+function Metric({ label, value, tone }: { label: string; value: number | null; tone?: "neutral" | "warning" | "danger" | "success" }) {
   const color = {
     neutral: "text-muted-foreground",
     warning: "text-[hsl(var(--kf-warning))]",
@@ -19,15 +20,18 @@ function Metric({ label, value, tone }: { label: string; value: number; tone?: "
   return (
     <div className="rounded-xl p-2 bg-muted/30">
       <div className="text-[10px] text-muted-foreground">{label}</div>
-      <div className={`text-sm font-semibold ${color}`}>{value}%</div>
+      <div className={`text-sm font-semibold ${color}`}>{pctOrWithheld(value)}</div>
     </div>
   );
 }
 
 export function CommandKeyGenomeCard({ keyGenome }: CommandKeyGenomeCardProps) {
-  const hasFacts = keyGenome.sections.length > 0;
-
-  const overallTone = keyGenome.overall >= 70 ? "success" : keyGenome.overall >= 40 ? "warning" : "danger";
+  // FU-GENOME-SURFACES-REVENUE (D-233): the scores average the money sections in; withheld from a member without
+  // revenue read (null), shown as withheld, never as "not populated".
+  const withheld = Boolean(keyGenome.withheldForRevenue) || keyGenome.overall === null;
+  const hasFacts = withheld || keyGenome.sections.length > 0;
+  const grade = (v: number | null) => (v === null ? "neutral" : v >= 70 ? "success" : v >= 40 ? "warning" : "danger");
+  const overallTone = grade(keyGenome.overall);
 
   return (
     <div className="rounded-2xl border border-border/30 bg-card/40 p-4 space-y-3">
@@ -38,7 +42,7 @@ export function CommandKeyGenomeCard({ keyGenome }: CommandKeyGenomeCardProps) {
         <div>
           <h3 className="text-sm font-semibold text-foreground">KEY Genome</h3>
           <p className="text-[10px] text-muted-foreground">
-            {hasFacts ? "Evidence-backed readiness" : "Not populated yet"}
+            {withheld ? `Scores ${WITHHELD_LABEL.toLowerCase()} (revenue access)` : hasFacts ? "Evidence-backed readiness" : "Not populated yet"}
           </p>
         </div>
       </div>
@@ -54,7 +58,7 @@ export function CommandKeyGenomeCard({ keyGenome }: CommandKeyGenomeCardProps) {
         <>
           <div className="grid grid-cols-2 gap-2">
             <Metric label="Overall" value={keyGenome.overall} tone={overallTone} />
-            <Metric label="Confidence" value={keyGenome.confidence} tone={keyGenome.confidence >= 70 ? "success" : keyGenome.confidence >= 40 ? "warning" : "danger"} />
+            <Metric label="Confidence" value={keyGenome.confidence} tone={grade(keyGenome.confidence)} />
             <Metric label="Integrity" value={keyGenome.integrity} />
             <Metric label="Readiness" value={keyGenome.readiness} />
           </div>

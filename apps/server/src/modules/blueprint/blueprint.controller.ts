@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Optional, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Optional, Param, Patch, Post, Req, UseGuards, UseInterceptors } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { GenomeGateGuard } from '../../core/auth/genome-gate.guard';
@@ -9,6 +9,7 @@ import {
   genomeIntegrityForReader,
   readsRevenueFor,
 } from '../business-genome/key-genome/genome-composites-for-reader';
+import { BlueprintReaderInterceptor } from './blueprint-reader.interceptor';
 import { BlueprintService } from './blueprint.service';
 
 import { BlueprintPatch, DnaSectionKey } from './blueprint.types';
@@ -17,6 +18,8 @@ type ReaderRequest = { user?: { id?: string; role?: string } };
 
 @Controller('blueprint/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
+// FU-GENOME-SURFACES-REVENUE round 1: the write routes' blueprint answers, as GET serves them (D-233).
+@UseInterceptors(BlueprintReaderInterceptor)
 export class BlueprintController {
   constructor(
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,

@@ -221,7 +221,8 @@ export class KeyGenomeAdapterService extends KeyOrganAdapter {
             input.sectionKey as DnaSectionKey,
             input.data as Record<string, unknown>,
           );
-          return { success: true, data: updated };
+          // FU-GENOME-SURFACES-REVENUE round 1 (D-233): the answer is the blueprint as GET serves it to the member.
+          return { success: true, data: blueprintForReader(updated as unknown as Record<string, unknown>, await this.readerReadsRevenue(ctx)) };
         },
       ),
     ];

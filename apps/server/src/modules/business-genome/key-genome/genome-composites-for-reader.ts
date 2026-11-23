@@ -22,7 +22,7 @@ import type { PrismaService } from '../../../core/prisma/prisma.service';
 import type { DnaSectionKey, DnaSectionScore, GenomeIntegrityResult } from '../../blueprint/blueprint.types';
 import { dnaScoresForReader, genomeReaderReadsRevenue, isFinanceSignal, isMoneyLabel, type GenomeReader } from './genome-finance-scope';
 import { DNA_TO_KEY_GENOME_SECTION } from './key-genome.service';
-import type { KeyGenomeScore, ModuleReadinessData } from './key-genome.types';
+import type { ModuleReadinessData } from './key-genome.types';
 import type { ConstitutionStaleness, ConstitutionVersionData } from '../constitution-version.types';
 
 /** The composites withheld from a reader without revenue read. */
@@ -97,21 +97,48 @@ export function genomeIntegrityForReader<T extends Partial<GenomeIntegrityResult
  */
 export const MONEY_BLUEPRINT_COLUMNS = ['financials', 'projectionProfile', 'salesSystem'] as const;
 
-/** A blueprint (BlueprintService.getBlueprint) as a reader may see it: composites, money DNA and money columns withheld. */
+/**
+ * Money fields in the blueprint's other columns (D-100, D-234; round 1, security MAJOR-3): the offers' prices (the whole
+ * offer architecture), the annual revenue estimate, the financial risks, the revenue model and the budget range.
+ */
+const MONEY_BLUEPRINT_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  taxProfile: ['estimatedAnnualRevenue'],
+  riskProfile: ['financialRisks'],
+  operatingModel: ['revenueModel'],
+  constraints: ['budgetRange'],
+};
+const MONEY_WHOLE_COLUMNS: readonly string[] = [...MONEY_BLUEPRINT_COLUMNS, 'offerArchitecture'];
+
+/**
+ * A blueprint (BlueprintService.getBlueprint, or a write's answer) as a reader may see it: the composites, the money DNA,
+ * the money columns and fields withheld, and the completeness and blueprint readiness too (round 1, both reviews: the
+ * completeness averages the financials column's fill in, and every other core column's fill ratio is served, so the
+ * financials fill would be recoverable from it).
+ */
 export function blueprintForReader<T extends Record<string, unknown>>(blueprint: T, readsRevenue: boolean): T {
-  if (readsRevenue) return blueprint;
+  if (readsRevenue || !blueprint || typeof blueprint !== 'object') return blueprint;
   const out: Record<string, unknown> = genomeIntegrityForReader(blueprint as Partial<GenomeIntegrityResult>, false) as Record<string, unknown>;
-  for (const column of MONEY_BLUEPRINT_COLUMNS) {
+  for (const column of MONEY_WHOLE_COLUMNS) {
     if (column in blueprint) out[column] = {};
+  }
+  for (const [column, fields] of Object.entries(MONEY_BLUEPRINT_FIELDS)) {
+    const value = blueprint[column];
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const kept: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+    for (const field of fields) delete kept[field];
+    out[column] = kept;
   }
   const confidence = blueprint.confidenceScores;
   if (confidence && typeof confidence === 'object' && !Array.isArray(confidence)) {
     const kept: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(confidence)) {
-      if (!(MONEY_BLUEPRINT_COLUMNS as readonly string[]).includes(key)) kept[key] = value;
+      if (!MONEY_WHOLE_COLUMNS.includes(key)) kept[key] = value;
     }
     out.confidenceScores = kept;
   }
+  if ('completeness' in blueprint) out.completeness = null;
+  if ('readinessScore' in blueprint) out.readinessScore = null;
+  out.withheldForRevenue = [...withheldNames(), 'completeness', 'readinessScore'];
   return out as T;
 }
 
@@ -121,33 +148,25 @@ export function keyGenomeSectionsForReader<S extends { section: string }>(sectio
   return readsRevenue ? list : list.filter((s) => isServedKeySection(s.section));
 }
 
-/** A KEY genome score as a reader may see it: overall, integrity, readiness and confidence withheld, money sections left out. */
-export function keyGenomeScoreForReader(score: KeyGenomeScore, readsRevenue: boolean): KeyGenomeScore | (Omit<KeyGenomeScore, 'overall' | 'integrity' | 'readiness' | 'confidence'> & { overall: null; integrity: null; readiness: null; confidence: null; withheldForRevenue: string[] }) {
-  if (readsRevenue) return score;
-  return {
-    ...score,
-    overall: null,
-    integrity: null,
-    readiness: null,
-    confidence: null,
-    sections: keyGenomeSectionsForReader(score.sections, false),
-    withheldForRevenue: ['overall', 'integrity', 'readiness', 'confidence', 'FINANCIAL', 'SALES', 'OFFER_PRODUCT'],
-  };
-}
-
 /** A missing or required genome fact with money provenance (its section, domain or field), or nothing to classify it by. */
 export function isMoneyFact(fact: { section?: string | null; domain?: string | null; field?: string | null; sourceModule?: string | null }): boolean {
   return isFinanceSignal({ sourceModule: fact.sourceModule, section: fact.section, domain: fact.domain, field: fact.field }) || !isServedKeySection(fact.section);
 }
 
 /**
- * Module readiness as a reader may see it: a money module's readiness (finance, commerce: its score is the readiness of
- * the money facts) is withheld, and so is every money fact another module names as missing, required or optional.
+ * Module readiness as a reader may see it. A module's readiness score, automation flag, risk level, reasons and actions
+ * are computed over all of its required facts (GenomeModuleReadinessService), so a module that requires or misses any
+ * money fact (a reports module computed from FINANCIAL facts only states the financial section's completeness; round 1,
+ * security MAJOR-2), or a money module by name (finance, commerce), is withheld whole. The modules served keep their
+ * rows, without money optional facts.
  */
 export function moduleReadinessForReader<R extends Partial<ModuleReadinessData> & { module: string }>(rows: R[], readsRevenue: boolean): R[] {
   if (readsRevenue) return rows;
+  const factsOf = (r: R, key: 'missingFacts' | 'requiredFacts') =>
+    (Array.isArray(r[key]) ? r[key] : []) as Array<Parameters<typeof isMoneyFact>[0]>;
   return rows
     .filter((r) => !isMoneyLabel(r.module))
+    .filter((r) => !factsOf(r, 'requiredFacts').some(isMoneyFact) && !factsOf(r, 'missingFacts').some(isMoneyFact))
     .map((r) => {
       const out: Record<string, unknown> = { ...r };
       for (const key of ['missingFacts', 'requiredFacts', 'optionalFacts'] as const) {

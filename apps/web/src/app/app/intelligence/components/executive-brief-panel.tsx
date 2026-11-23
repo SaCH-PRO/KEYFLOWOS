@@ -7,6 +7,7 @@ import { IntelligencePriorityList } from "./intelligence-priority-list";
 import type { BusinessExecutiveBrief } from "@/lib/api/intelligence";
 import { getDocumentPackExportUrl } from "@/lib/api/business-genome";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { pctOrWithheld, stageOrWithheld } from "@/lib/genome-withheld";
 
 interface ExecutiveBriefPanelProps {
   brief: BusinessExecutiveBrief;
@@ -88,11 +89,12 @@ function ScoreCard({
   icon: Icon,
 }: {
   label: string;
-  score: number;
+  /** null: withheld from a member without revenue read (FU-GENOME-SURFACES-REVENUE, D-233). */
+  score: number | null;
   icon: React.ElementType;
 }) {
-  const color = scoreColor(score);
-  const bg = scoreBg(score);
+  const color = score === null ? "hsl(var(--kf-muted-foreground))" : scoreColor(score);
+  const bg = score === null ? "hsl(var(--kf-muted) / 0.08)" : scoreBg(score);
 
   return (
     <motion.div
@@ -106,7 +108,7 @@ function ScoreCard({
       </div>
       <div>
         <div className="text-lg font-bold tabular-nums" style={{ color }}>
-          {score}%
+          {pctOrWithheld(score)}
         </div>
         <div className="text-[10px] text-muted-foreground font-medium">{label}</div>
       </div>
@@ -114,8 +116,8 @@ function ScoreCard({
   );
 }
 
-function StageCard({ stage }: { stage: string }) {
-  const display = stage.replace(/_/g, " ");
+function StageCard({ stage }: { stage: string | null }) {
+  const display = stageOrWithheld(stage);
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.96 }}

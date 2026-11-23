@@ -3,6 +3,7 @@
 import { Activity, Dna, TrendingUp, FileCheck, Clock, AlertTriangle, Shield, ScrollText } from "lucide-react";
 import { Surface } from "@/components/ui-v2/surface";
 import { useAnimatedNumber } from "@/hooks/use-animated-number";
+import { pctOrWithheld, stageOrWithheld } from "@/lib/genome-withheld";
 import type { CommandCenterHealth } from "@/lib/api/business-command-center";
 
 interface CommandHealthStripV2Props {
@@ -73,29 +74,30 @@ function MetricCard({ metric }: { metric: HealthMetric }) {
 }
 
 export function CommandHealthStripV2({ health }: CommandHealthStripV2Props) {
-  const genomeTone = health.genomeIntegrity >= 70 ? "success" : health.genomeIntegrity >= 50 ? "warning" : "danger";
-  const readinessTone =
-    health.executiveReadinessScore >= 70 ? "success" : health.executiveReadinessScore >= 50 ? "warning" : "danger";
+  // FU-GENOME-SURFACES-REVENUE (D-233): a composite withheld from the member (null) shows as withheld: no grade, no bar.
+  const tone = (v: number | null): HealthMetric["tone"] => (v === null ? "neutral" : v >= 70 ? "success" : v >= 50 ? "warning" : "danger");
+  const genomeTone = tone(health.genomeIntegrity);
+  const readinessTone = tone(health.executiveReadinessScore);
 
   const metrics: HealthMetric[] = [
     {
       label: "Genome Integrity",
       icon: Dna,
-      value: `${health.genomeIntegrity}%`,
-      score: health.genomeIntegrity,
+      value: pctOrWithheld(health.genomeIntegrity),
+      score: health.genomeIntegrity ?? undefined,
       tone: genomeTone,
     },
     {
       label: "Readiness",
       icon: TrendingUp,
-      value: `${health.executiveReadinessScore}%`,
-      score: health.executiveReadinessScore,
+      value: pctOrWithheld(health.executiveReadinessScore),
+      score: health.executiveReadinessScore ?? undefined,
       tone: readinessTone,
     },
     {
       label: "Stage",
       icon: Activity,
-      value: health.genomeStage.replace(/_/g, " "),
+      value: stageOrWithheld(health.genomeStage),
       tone: "neutral",
     },
     {

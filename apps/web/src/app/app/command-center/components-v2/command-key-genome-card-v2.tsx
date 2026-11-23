@@ -7,6 +7,7 @@ import { Surface } from "@/components/ui-v2/surface";
 import { ProgressRing } from "@/components/ui-v2/progress-ring";
 import { StatOrb } from "@/components/ui-v2/stat-orb";
 import { Badge } from "@/components/ui-v2/badge";
+import { pctOrWithheld, WITHHELD_LABEL } from "@/lib/genome-withheld";
 import type { CommandCenterKeyGenome } from "@/lib/api/business-command-center";
 
 interface CommandKeyGenomeCardV2Props {
@@ -14,8 +15,13 @@ interface CommandKeyGenomeCardV2Props {
 }
 
 export function CommandKeyGenomeCardV2({ keyGenome }: CommandKeyGenomeCardV2Props) {
-  const hasFacts = keyGenome.sections.length > 0;
-  const overallColor = keyGenome.overall >= 70 ? "teal" : keyGenome.overall >= 40 ? "gold" : "rose";
+  // FU-GENOME-SURFACES-REVENUE (D-233): the scores average the money sections in; withheld from a member without
+  // revenue read (null): no ring, no grade, shown as withheld.
+  const withheld = Boolean(keyGenome.withheldForRevenue) || keyGenome.overall === null;
+  const hasFacts = withheld || keyGenome.sections.length > 0;
+  const overall = keyGenome.overall ?? 0;
+  const overallColor = overall >= 70 ? "teal" : overall >= 40 ? "gold" : "rose";
+  const confidence = keyGenome.confidence ?? 0;
 
   return (
     <Surface className="p-4 space-y-4">
@@ -26,7 +32,7 @@ export function CommandKeyGenomeCardV2({ keyGenome }: CommandKeyGenomeCardV2Prop
         <div>
           <h3 className="font-display text-sm font-semibold text-foreground">KEY Genome</h3>
           <p className="text-[10px] text-muted-foreground">
-            {hasFacts ? "Evidence-backed readiness" : "Not populated yet"}
+            {withheld ? `Scores ${WITHHELD_LABEL.toLowerCase()} (revenue access)` : hasFacts ? "Evidence-backed readiness" : "Not populated yet"}
           </p>
         </div>
       </div>
@@ -41,7 +47,10 @@ export function CommandKeyGenomeCardV2({ keyGenome }: CommandKeyGenomeCardV2Prop
       ) : (
         <>
           <div className="flex items-center gap-4">
-            <ProgressRing value={keyGenome.overall} size={80} thickness={8} color={overallColor}>
+            {withheld ? (
+              <div className="w-20 text-center text-xs font-semibold text-muted-foreground">{WITHHELD_LABEL}</div>
+            ) : (
+            <ProgressRing value={overall} size={80} thickness={8} color={overallColor}>
               <div className="text-center">
                 <span
                   className={cn(
@@ -56,14 +65,15 @@ export function CommandKeyGenomeCardV2({ keyGenome }: CommandKeyGenomeCardV2Prop
                 <span className="block text-[10px] text-muted-foreground uppercase tracking-wide">Overall</span>
               </div>
             </ProgressRing>
+            )}
             <div className="flex-1 grid grid-cols-2 gap-2">
               <StatOrb
                 label="Confidence"
-                value={`${keyGenome.confidence}%`}
-                color={keyGenome.confidence >= 70 ? "teal" : keyGenome.confidence >= 40 ? "gold" : "orange"}
+                value={pctOrWithheld(keyGenome.confidence)}
+                color={withheld ? "violet" : confidence >= 70 ? "teal" : confidence >= 40 ? "gold" : "orange"}
               />
-              <StatOrb label="Integrity" value={`${keyGenome.integrity}%`} color="violet" />
-              <StatOrb label="Readiness" value={`${keyGenome.readiness}%`} color="teal" />
+              <StatOrb label="Integrity" value={pctOrWithheld(keyGenome.integrity)} color="violet" />
+              <StatOrb label="Readiness" value={pctOrWithheld(keyGenome.readiness)} color="teal" />
             </div>
           </div>
 

@@ -8,6 +8,7 @@ import { getGenomeRecommendations, type GenomeIntegrityResult, type DnaSectionKe
 import { getExecutiveBrief, type BusinessExecutiveBrief } from "@/lib/api/intelligence";
 import { ProgressRing } from "@/components/ui-v2/progress-ring";
 import { Badge } from "@/components/ui-v2/badge";
+import { isServedScore, pctOrWithheld, stageOrWithheld, WITHHELD_LABEL } from "@/lib/genome-withheld";
 import { useAnimatedNumber } from "@/hooks/use-animated-number";
 import { GenomeMilestone } from "./genome-milestone";
 
@@ -141,14 +142,20 @@ export function GenomeOverview({ genome, onSectionClick }: GenomeOverviewProps) 
     .sort((a, b) => b.integrity - a.integrity)
     .slice(0, 3);
 
-  const integrityRingColor = genome.genomeIntegrity >= 80 ? "teal" : genome.genomeIntegrity >= 50 ? "orange" : "rose";
+  // FU-GENOME-SURFACES-REVENUE (D-233): the integrity, readiness and stage weight the financial and sales DNA; withheld
+  // from a member without revenue read (null), they show as withheld: no number, no grade colour, an empty ring.
+  const integrityWithheld = !isServedScore(genome.genomeIntegrity);
+  const readinessWithheld = !isServedScore(genome.executiveReadinessScore);
+  const integrityScore = genome.genomeIntegrity ?? 0;
+  const readinessScore = genome.executiveReadinessScore ?? 0;
+  const integrityRingColor = integrityWithheld ? "violet" : integrityScore >= 80 ? "teal" : integrityScore >= 50 ? "orange" : "rose";
 
-  const animatedIntegrity = useAnimatedNumber(genome.genomeIntegrity, { duration: 1000, decimals: 0 });
-  const animatedReadiness = useAnimatedNumber(genome.executiveReadinessScore, { duration: 1000, decimals: 0 });
+  const animatedIntegrity = useAnimatedNumber(integrityScore, { duration: 1000, decimals: 0 });
+  const animatedReadiness = useAnimatedNumber(readinessScore, { duration: 1000, decimals: 0 });
 
   return (
     <div className="space-y-5">
-      <GenomeMilestone businessId={businessId} integrity={genome.genomeIntegrity} />
+      {!integrityWithheld && <GenomeMilestone businessId={businessId} integrity={integrityScore} />}
       {/* Hero — single integrity ring + key stats */}
       <div
         className="rounded-2xl p-6 relative overflow-hidden"
@@ -161,21 +168,21 @@ export function GenomeOverview({ genome, onSectionClick }: GenomeOverviewProps) 
           <div className="flex items-center gap-5">
             <div className="relative">
               <ProgressRing
-                value={genome.genomeIntegrity}
+                value={integrityScore}
                 size={96}
                 thickness={10}
                 segments={12}
                 color={integrityRingColor}
               />
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <Dna className="w-5 h-5 mb-0.5" style={{ color: scoreColor(genome.genomeIntegrity) }} />
-                <span className="text-2xl font-bold">{animatedIntegrity}%</span>
+                <Dna className="w-5 h-5 mb-0.5" style={{ color: scoreColor(integrityScore) }} />
+                <span className="text-2xl font-bold">{integrityWithheld ? WITHHELD_LABEL : `${animatedIntegrity}%`}</span>
                 <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Integrity</span>
               </div>
             </div>
             <div className="space-y-1.5">
-              <Badge color={genome.genomeIntegrity >= 80 ? "mint" : genome.genomeIntegrity >= 50 ? "gold" : "rose"}>
-                {genome.genomeStage.replace(/_/g, " ")}
+              <Badge color={integrityWithheld ? "muted" : integrityScore >= 80 ? "mint" : integrityScore >= 50 ? "gold" : "rose"}>
+                {stageOrWithheld(genome.genomeStage)}
               </Badge>
               <h2 className="text-xl font-semibold">Business Genome</h2>
               <p className="text-xs text-muted-foreground">
@@ -187,8 +194,8 @@ export function GenomeOverview({ genome, onSectionClick }: GenomeOverviewProps) 
           <div className="flex-1 grid grid-cols-3 gap-3 w-full lg:w-auto">
             <StatCard
               label="Readiness"
-              value={`${animatedReadiness}%`}
-              color={genome.executiveReadinessScore >= 80 ? "teal" : genome.executiveReadinessScore >= 50 ? "orange" : "rose"}
+              value={`${readinessWithheld ? WITHHELD_LABEL : `${animatedReadiness}%`}`}
+              color={readinessWithheld ? "sky" : readinessScore >= 80 ? "teal" : readinessScore >= 50 ? "orange" : "rose"}
             />
             <StatCard label="Fields" value={`${capturedFields}/${totalFields}`} color="sky" />
             <StatCard
@@ -269,7 +276,7 @@ export function GenomeOverview({ genome, onSectionClick }: GenomeOverviewProps) 
               )}
             </div>
             <p className="text-xs text-muted-foreground line-clamp-2">
-              Executive Readiness: {brief.executiveReadinessScore}% · {brief.topPriorities.length} top-priority
+              Executive Readiness: {pctOrWithheld(brief.executiveReadinessScore)} · {brief.topPriorities.length} top-priority
               insight{brief.topPriorities.length === 1 ? "" : "s"}
               {brief.topPriorities.find((i) => i.id === "pending-evolution-proposals")
                 ? ` · ${brief.topPriorities.find((i) => i.id === "pending-evolution-proposals")?.title}`

@@ -34,7 +34,8 @@ export function KeyGenomeChip({ surface }: KeyGenomeChipProps) {
   }, []);
 
   const ready = genome?.threePillarMinimumMet ?? false;
-  const integrity = genome ? Math.round(genome.genomeIntegrity ?? 0) : null;
+  // FU-GENOME-SURFACES-REVENUE (D-233): a withheld integrity (null) is not shown as 0%; the chip says "Genome".
+  const integrity = genome && typeof genome.genomeIntegrity === "number" ? Math.round(genome.genomeIntegrity) : null;
   const active = chat.activeSessionId === GENOME_SESSION_ID;
 
   return (

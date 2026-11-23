@@ -17,6 +17,8 @@ import { CommandGenomeCard } from "../components/command-genome-card";
 import { CommandKeyGenomeCard } from "../components/command-key-genome-card";
 import { CommandKeyGenomeCardV2 } from "../components-v2/command-key-genome-card-v2";
 import { GenomeOrb } from "@/components/genome/genome-orb";
+import type { CommandCenterGenome, CommandCenterHealth, CommandCenterKeyGenome } from "@/lib/api/business-command-center";
+import type { GenomeIntegrityResult } from "@/lib/api/business-genome";
 
 afterEach(cleanup);
 
@@ -29,16 +31,16 @@ const WITHHELD_HEALTH = {
   ...counts, genomeIntegrity: null, executiveReadinessScore: null, genomeStage: null,
   keyGenomeOverall: null, keyGenomeReadiness: null, keyGenomeConfidence: null,
   withheldForRevenue: ["genomeIntegrity", "executiveReadinessScore", "genomeStage"],
-} as any;
+} satisfies CommandCenterHealth;
 const WHOLE_HEALTH = {
   ...counts, genomeIntegrity: 57, executiveReadinessScore: 61, genomeStage: "REVENUE_ENGINE",
   keyGenomeOverall: 47, keyGenomeReadiness: 44, keyGenomeConfidence: 61,
-} as any;
+} satisfies CommandCenterHealth;
 const WITHHELD_KEY_GENOME = {
   overall: null, integrity: null, readiness: null, confidence: null, computedAt: new Date().toISOString(),
   sections: [], weakestSections: [], withheldForRevenue: ["overall", "integrity", "readiness", "confidence"],
-} as any;
-const WITHHELD_GENOME = { integrity: null, readiness: null, stage: null, pendingProposals: [], weakestSections: [], withheldForRevenue: ["genomeIntegrity"] } as any;
+} satisfies CommandCenterKeyGenome;
+const WITHHELD_GENOME = { integrity: null, readiness: null, stage: null, pendingProposals: [], weakestSections: [], withheldForRevenue: ["genomeIntegrity"] } satisfies CommandCenterGenome;
 
 function expectWithheld(text: string) {
   expect(text).toMatch(/Withheld/);
@@ -72,7 +74,7 @@ describe("FU-GENOME-SURFACES-REVENUE: the withheld genome state", () => {
       genomeDnaScores: { founder: 100 }, genomeDnaConfidence: { founder: 100 }, readinessBreakdown: {},
       dnaSections: [{ key: "founder", label: "Founder DNA", integrity: 100, confidence: 100, summary: "", fieldsCaptured: 4, fieldsTotal: 4, missingFields: [], recommendation: "" }],
       withheldForRevenue: ["genomeIntegrity", "executiveReadinessScore", "genomeStage"],
-    } as any;
+    } satisfies GenomeIntegrityResult;
     const { container } = render(<GenomeOrb genome={genome} />);
     expectWithheld(container.textContent ?? "");
   });

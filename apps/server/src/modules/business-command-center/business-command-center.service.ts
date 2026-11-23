@@ -356,6 +356,7 @@ export class BusinessCommandCenterService {
       constitutionStaleness.stale,
       keyGenome,
       moduleReadiness,
+      readsRevenue,
     );
     const pulse = this.buildPulse(health, keyGenome, readsRevenue);
     const briefing = this.buildBriefing(health, ranked, keyGenome);
@@ -689,13 +690,15 @@ export class BusinessCommandCenterService {
     constitutionStale: boolean,
     keyGenome: CommandCenterKeyGenome,
     moduleReadiness: ModuleReadinessData[],
+    readsRevenue = true,
   ): CommandCenterHealth {
-    // D-233: the brief carries null composites for a reader without revenue read, and the KEY genome null scores.
-    const withheld = brief.withheldForRevenue || keyGenome.withheldForRevenue;
+    // D-233: the composites are null for a reader without revenue read, even when the brief failed and its fallback
+    // carries zeros (round 1).
+    const withheld = !readsRevenue || brief.withheldForRevenue || keyGenome.withheldForRevenue;
     return {
-      genomeIntegrity: brief.genomeIntegrity,
-      executiveReadinessScore: brief.executiveReadinessScore,
-      genomeStage: brief.genomeStage,
+      genomeIntegrity: withheld ? null : brief.genomeIntegrity,
+      executiveReadinessScore: withheld ? null : brief.executiveReadinessScore,
+      genomeStage: withheld ? null : brief.genomeStage,
       ...(withheld ? { withheldForRevenue: [...GENOME_COMPOSITES, 'keyGenomeOverall', 'keyGenomeReadiness', 'keyGenomeConfidence'] } : {}),
       criticalCount: rankedItems.filter((i) => i.priority === 'CRITICAL').length,
       highPriorityCount: rankedItems.filter((i) => i.priority === 'HIGH').length,

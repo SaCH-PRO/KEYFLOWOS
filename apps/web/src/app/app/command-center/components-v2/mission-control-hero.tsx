@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { Users, Fuel as FuelIcon } from "lucide-react";
+import { Dna, Users, Fuel as FuelIcon } from "lucide-react";
+import { pctOrWithheld } from "@/lib/genome-withheld";
 import { apiGet } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -107,7 +108,8 @@ function VitalCard({ vital, visual }: { vital: Vital; visual: React.ReactNode })
   );
 }
 
-export function MissionControlHero({ businessId, hullScore }: { businessId: string; hullScore: number }) {
+/** `hullScore` null: the KEY genome overall is withheld from the member (FU-GENOME-SURFACES-REVENUE, D-233). */
+export function MissionControlHero({ businessId, hullScore }: { businessId: string; hullScore: number | null }) {
   const [fuel, setFuel] = useState<{ safeToSpend: number; currency: string } | null>(null);
   const [crew, setCrew] = useState<{ count: number; avgScore: number } | null>(null);
   const [radar, setRadar] = useState<{ todayTotal: number; overdue: number } | null>(null);
@@ -149,7 +151,7 @@ export function MissionControlHero({ businessId, hullScore }: { businessId: stri
     };
   }, [businessId]);
 
-  const hullTone: Vital["tone"] = hullScore >= 70 ? "good" : hullScore >= 40 ? "warn" : "bad";
+  const hullTone: Vital["tone"] = hullScore === null ? "muted" : hullScore >= 70 ? "good" : hullScore >= 40 ? "warn" : "bad";
   const fuelTone: Vital["tone"] = !fuel ? "muted" : fuel.safeToSpend > 0 ? "good" : "warn";
   const crewTone: Vital["tone"] = !crew ? "muted" : crew.avgScore >= 70 ? "good" : crew.avgScore >= 40 ? "warn" : "bad";
   const radarTone: Vital["tone"] = !radar ? "muted" : radar.overdue > 0 ? "bad" : radar.todayTotal > 0 ? "good" : "muted";
@@ -158,7 +160,7 @@ export function MissionControlHero({ businessId, hullScore }: { businessId: stri
     () => [
       {
         label: "Hull Integrity",
-        value: `${Math.round(hullScore)}%`,
+        value: pctOrWithheld(hullScore),
         caption: "Genome completeness",
         tone: hullTone,
         href: "/app/genome",
@@ -196,7 +198,7 @@ export function MissionControlHero({ businessId, hullScore }: { businessId: stri
       aria-label="Mission control vitals"
       className="grid grid-cols-2 gap-3 lg:grid-cols-4"
     >
-      <VitalCard vital={vitals[0]} visual={<HullRing score={hullScore} tone={hullTone} />} />
+      <VitalCard vital={vitals[0]} visual={hullScore === null ? <Dna className={cn("h-8 w-8", TONE_TEXT[hullTone])} /> : <HullRing score={hullScore} tone={hullTone} />} />
       <VitalCard vital={vitals[1]} visual={<FuelIcon className={cn("h-8 w-8", TONE_TEXT[fuelTone])} />} />
       <VitalCard vital={vitals[2]} visual={<Users className={cn("h-8 w-8", TONE_TEXT[crewTone])} />} />
       <VitalCard vital={vitals[3]} visual={<RadarSweep active={!!radar && radar.overdue > 0} />} />

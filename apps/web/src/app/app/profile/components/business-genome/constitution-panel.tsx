@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ScrollText, Loader2, AlertCircle, RefreshCw, History, ChevronDown, ChevronUp, Archive, AlertTriangle, FileText } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { pctOrWithheld, stageOrWithheld } from "@/lib/genome-withheld";
 import {
   getLatestConstitutionVersion,
   getConstitutionVersions,
@@ -177,9 +178,10 @@ export function ConstitutionPanel({ genome }: ConstitutionPanelProps) {
                   Genome Integrity{" "}
                   <span
                     className="font-semibold"
-                    style={{ color: strengthVariant(version.sourceGenomeIntegrity ?? genome.genomeIntegrity).color }}
+                    style={{ color: strengthVariant(version.sourceGenomeIntegrity ?? genome.genomeIntegrity ?? 0).color }}
                   >
-                    {version.sourceGenomeIntegrity ?? genome.genomeIntegrity}%
+                    {/* FU-GENOME-SURFACES-REVENUE (D-233): null when withheld from the member. */}
+                    {pctOrWithheld(version.sourceGenomeIntegrity ?? genome.genomeIntegrity)}
                   </span>
                 </div>
                 <div
@@ -188,7 +190,7 @@ export function ConstitutionPanel({ genome }: ConstitutionPanelProps) {
                 >
                   Stage{" "}
                   <span className="font-semibold">
-                    {(version.sourceGenomeStage ?? genome.genomeStage).replace(/_/g, " ")}
+                    {stageOrWithheld(version.sourceGenomeStage ?? genome.genomeStage)}
                   </span>
                 </div>
               </div>

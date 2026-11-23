@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import type { GenomeIntegrityResult, GenomeStage } from "@/lib/api/business-genome";
 import { ProgressRing } from "@/components/ui-v2/progress-ring";
 import { Badge } from "@/components/ui-v2/badge";
+import { isServedScore, WITHHELD_LABEL } from "@/lib/genome-withheld";
 
 const STAGES: GenomeStage[] = [
   "CONCEPT",
@@ -71,15 +72,18 @@ export function GenomeOrb({ genome, compact, onBuildClick, className, ...props }
     );
   }
 
-  const integrity = Math.round(genome.genomeIntegrity);
-  const stage = STAGE_META[genome.genomeStage] ?? {
-    label: genome.genomeStage?.replace(/_/g, " ") ?? "Unknown",
-    short: genome.genomeStage?.replace(/_/g, " ") ?? "Unknown",
+  // FU-GENOME-SURFACES-REVENUE (D-233): the integrity, stage and readiness weight the financial and sales DNA; withheld
+  // from a member without revenue read (null), they show as withheld: no number, no grade, no stage position.
+  const integrityWithheld = !isServedScore(genome.genomeIntegrity);
+  const integrity = Math.round(genome.genomeIntegrity ?? 0);
+  const stage = (genome.genomeStage ? STAGE_META[genome.genomeStage] : undefined) ?? {
+    label: genome.genomeStage ? genome.genomeStage.replace(/_/g, " ") : WITHHELD_LABEL,
+    short: genome.genomeStage ? genome.genomeStage.replace(/_/g, " ") : WITHHELD_LABEL,
     color: "muted" as const,
     glow: "hsl(var(--kf-muted) / 0.25)",
   };
-  const ringColor = integrity >= 80 ? "teal" : integrity >= 50 ? "orange" : "rose";
-  const currentStageIndex = STAGES.indexOf(genome.genomeStage);
+  const ringColor = integrityWithheld ? "violet" : integrity >= 80 ? "teal" : integrity >= 50 ? "orange" : "rose";
+  const currentStageIndex = genome.genomeStage ? STAGES.indexOf(genome.genomeStage) : -1;
 
   const topSections = (genome.dnaSections ?? [])
     .slice()
@@ -128,7 +132,7 @@ export function GenomeOrb({ genome, compact, onBuildClick, className, ...props }
           >
             <div className="flex flex-col items-center leading-none">
               <span className={cn("font-display font-bold text-foreground", compact ? "text-sm" : "text-xl")}>
-                {integrity}%
+                {integrityWithheld ? WITHHELD_LABEL : `${integrity}%`}
               </span>
               {!compact && (
                 <span className="text-[10px] uppercase tracking-wide text-muted-foreground">integrity</span>
@@ -184,7 +188,7 @@ export function GenomeOrb({ genome, compact, onBuildClick, className, ...props }
       </div>
 
       {/* Stage stepper — horizontally scrollable on small screens */}
-      {!compact && (
+      {!compact && genome.genomeStage && (
         <div className="relative -mx-1" aria-label="Business stage progression">
           <div className="overflow-x-auto pb-2 scrollbar-hide">
             <div className="flex items-center min-w-[540px] px-1">
@@ -238,7 +242,7 @@ export function GenomeOrb({ genome, compact, onBuildClick, className, ...props }
         </div>
       )}
 
-      {!compact && genome.executiveReadinessScore !== undefined && (
+      {!compact && genome.executiveReadinessScore !== undefined && genome.executiveReadinessScore !== null && (
         <div className="relative flex items-center justify-between rounded-xl bg-surface-muted px-3 py-2">
           <span className="text-caption text-muted-foreground flex items-center gap-1.5">
             <TrendingUp className="h-3.5 w-3.5" />
