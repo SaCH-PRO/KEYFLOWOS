@@ -79,6 +79,12 @@ export interface TemporalMemorySight {
 
 /** The rows a projected memory read pages through at most before it answers what it has. */
 const MAX_MEMORY_SCAN = 5_000;
+/**
+ * Review round 1: the most rows one findMany answers (the database client's default-take guard, packages/db client.ts):
+ * a page is never asked for more, or a short page would read as the end of the rows. A memory read answers at most this
+ * many, as TemporalFlowMemoryService.findMany does under the same guard.
+ */
+const MEMORY_PAGE_CAP = 1_000;
 
 /**
  * FU-TEMPORAL-FLOW-INBOX-SCOPE: the modules that own timeline events. Withholding is computed over these only, so a
@@ -313,19 +319,27 @@ export class TemporalFlowService {
       },
       ms.filter,
     );
-    const page = Math.min(Math.max(limit, 50), MAX_MEMORY_SCAN);
+    const wanted = Math.min(limit, MEMORY_PAGE_CAP);
+    // Review round 1: pages grow (fewer reads past many withheld rows) up to the client's cap; a row seen on an earlier
+    // page (a summary rewritten in place while the scan runs moves up the order) is not answered twice.
     const out: Awaited<ReturnType<typeof this.prisma.client.temporalFlowMemory.findMany>> = [];
-    for (let skip = 0; out.length < limit && skip < MAX_MEMORY_SCAN; skip += page) {
+    const seen = new Set<string>();
+    let page = Math.min(Math.max(wanted, 50), MEMORY_PAGE_CAP);
+    for (let skip = 0; out.length < wanted && skip < MAX_MEMORY_SCAN; ) {
       const rows = await this.prisma.client.temporalFlowMemory.findMany({
         where,
         orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
         skip,
         take: page,
       });
-      out.push(...(await this.visibleMemories(businessId, rows, { who: ms.who })));
+      const fresh = rows.filter((row) => !seen.has(row.id));
+      fresh.forEach((row) => seen.add(row.id));
+      out.push(...(await this.visibleMemories(businessId, fresh, { who: ms.who })));
       if (rows.length < page) break;
+      skip += rows.length;
+      page = Math.min(page * 2, MEMORY_PAGE_CAP);
     }
-    return out.slice(0, limit);
+    return out.slice(0, wanted);
   }
 
   /** FU-TEMPORAL-FLOW-INBOX-SCOPE delta (item 1): of `memoryIds`, the ones of `businessId` `memoryFilter` lets through. */

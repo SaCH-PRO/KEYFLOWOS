@@ -94,7 +94,15 @@ export class TemporalAdapterService {
     }
   }
 
-  async deleteMemory(input: { businessId: string; memoryId: string }) {
+  async deleteMemory(input: { businessId: string; memoryId: string } & ActorInput) {
+    // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (review round 1): a memory the actor may not see is not deleted, and answers as a
+    // missing (or foreign) one does.
+    if (projected(input)) {
+      const sight = await this.flow.memorySight(input.businessId, input.actor);
+      if (!(await this.flow.visibleMemoryById(input.businessId, input.memoryId, sight))) {
+        return { deleted: false, memoryId: input.memoryId };
+      }
+    }
     const deleted = await this.temporal.deleteMemory(input.businessId, input.memoryId);
     return { deleted, memoryId: input.memoryId };
   }
@@ -223,6 +231,7 @@ export class TemporalAdapterService {
       case 'delete_memory': {
         const deletion = await this.deleteMemory({
           businessId: command.businessId,
+          actor: actorOf(command.userId),
           memoryId: command.parameters.memoryId as string,
         });
         return connectorOk(command, start, deletion);
