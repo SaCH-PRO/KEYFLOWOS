@@ -1,6 +1,7 @@
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { safeRedactedSnapshot } from '../../core/security/redaction';
 import {
   CreateBusinessEventInput,
   AuditFilter,
@@ -125,6 +126,26 @@ function keptMetadata(metadata: unknown): Record<string, unknown> | undefined {
 const checkLogger = new Logger('ForgottenContactCheck');
 
 /**
+ * RR-BUSINESS-EVENT-REDACT (V1-72, D-261): the snapshots a business event
+ * stores never carry a secret-named field. The HTTP interceptor already ran
+ * its own snapshots through safeRedactedSnapshot (field-name policy,
+ * SENSITIVE_FIELD_PATTERNS); every other writer that reaches emit/emitBatch
+ * (the queue worker, the resilient emitter's sync fallback and replay, direct
+ * service callers) stored before, after and metadata as given. Applied right
+ * before the write, so the row, the failure log and the event-bus fan-out all
+ * carry the same redacted copy. A snapshot that is not an object is dropped,
+ * as the interceptor drops it.
+ */
+export function redactedEventInput<T extends ForgettableEvent>(input: T): T {
+  return {
+    ...input,
+    before: safeRedactedSnapshot(input.before),
+    after: safeRedactedSnapshot(input.after),
+    metadata: safeRedactedSnapshot(input.metadata),
+  };
+}
+
+/**
  * V1-72 (RR-ERASURE-BUSINESS-EVENTS, D-25): a row written after its person
  * asked to be forgotten carries no personal data. Every business_events writer
  * that can name a contact applies this right before its insert:
@@ -206,12 +227,12 @@ export class BusinessEventService {
     // what the row may not (V1-72 review).
     let input: CreateBusinessEventInput;
     try {
-      input = await withoutForgottenPersonalData(this.prisma.client, event);
+      input = redactedEventInput(await withoutForgottenPersonalData(this.prisma.client, event));
     } catch {
       // Never throw (the contract every caller relies on): an input the check
       // cannot read is written, if at all, without its snapshots.
       input = event && typeof event === 'object'
-        ? { ...event, before: undefined, after: undefined, metadata: keptMetadata(event.metadata) }
+        ? { ...event, before: undefined, after: undefined, metadata: safeRedactedSnapshot(keptMetadata(event.metadata)) }
         : event;
     }
     try {
@@ -243,9 +264,15 @@ export class BusinessEventService {
       // subscribe to this signal. Fire-and-forget; never block audit emit.
       this.events?.emit('business_event.created', input);
     } catch (err: any) {
+      // Ids only: never the snapshots or metadata (RR-BUSINESS-EVENT-REDACT).
       this.logger.error(
         `Failed to emit business event: ${(err as Error).message}`,
-        { input: (JSON.stringify(input) ?? String(input)).slice(0, 500) },
+        {
+          businessId: input?.businessId,
+          eventType: input?.eventType,
+          subjectType: input?.subjectType,
+          subjectId: input?.subjectId,
+        },
       );
       // Never throw — audit failure should not break the business operation
     }
@@ -258,7 +285,9 @@ export class BusinessEventService {
     if (inputs.length === 0) return;
     try {
       // The same forgotten-person check as emit (V1-72 review).
-      const scrubbed = await Promise.all(inputs.map((input) => withoutForgottenPersonalData(this.prisma.client, input)));
+      const scrubbed = await Promise.all(
+        inputs.map(async (input) => redactedEventInput(await withoutForgottenPersonalData(this.prisma.client, input))),
+      );
       await this.prisma.client.$transaction(
         scrubbed.map((input) =>
           this.prisma.client.businessEvent.create({
