@@ -17,7 +17,8 @@
  *
  *   BSC-01..04  each package.json script (backfill:owner-memberships,
  *               backfill:google-identities, backfill:timeline-contacts,
- *               cleanup:custom-field-values) runs its dry run (no arguments)
+ *               cleanup:custom-field-values; BSC-06 encrypt:bank-tokens, V1-72)
+ *               runs its dry run (no arguments)
  *               exactly as `pnpm <name>` runs it from apps/server: the
  *               package.json command through `sh -c` with node_modules/.bin on
  *               PATH. The environment carries only DATABASE_URL (and, for the
@@ -194,6 +195,24 @@ describe.concurrent('operator scripts run the documented way (pnpm <name> from a
     async ({ expect }) => {
       const run = await runPackageScript('cleanup:custom-field-values', operatorEnv());
       expectCleanDryRun(expect, run, [/cross_bound_values\s+\d+/, /contacts_affected\s+\d+/, /businesses_affected\s+\d+/]);
+    },
+    SCRIPT_TIMEOUT_MS,
+  );
+
+  // RR-BANK-TOKEN-ENCRYPT (V1-72): the bank token encryption script, dry run (its seeded dry run and --apply are
+  // proven in bank-token-encryption.integration.test.ts).
+  it(
+    '[BSC-06] pnpm encrypt:bank-tokens: dry run exits 0 and prints its counts',
+    async ({ expect }) => {
+      const run = await runPackageScript('encrypt:bank-tokens', operatorEnv());
+      expectCleanDryRun(expect, run, [
+        /connections_scanned\s+\d+/,
+        /plaintext_tokens\s+\d+/,
+        /already_encrypted\s+\d+/,
+        /no_token\s+\d+/,
+        /would_encrypt\s+\d+/,
+      ]);
+      expect(`${run.out}\n${run.err}`).not.toContain(['enc', 'v1', ''].join(':'));
     },
     SCRIPT_TIMEOUT_MS,
   );

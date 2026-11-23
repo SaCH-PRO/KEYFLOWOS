@@ -19,9 +19,17 @@
  * schema.prisma, so a new `token` / `secret` / `credentials` column fails the
  * gate until someone decides, in writing, which of the three buckets it is in:
  *
- *   ENCRYPTED       covered by the extension
- *   LOOKUP_KEY      searched by value, so AES with a random IV would break it
+ *   ENCRYPTED          covered by the extension
+ *   LOOKUP_KEY         searched by value, so AES with a random IV would break it
  *   HANDLED_ELSEWHERE  encrypted or hashed by its own service
+ *   NOT_A_CREDENTIAL   named like a secret, holds none (RR-BANK-TOKEN-ENCRYPT)
+ *
+ * RR-BANK-TOKEN-ENCRYPT (V1-72): the name scan was anchored on the START of the
+ * field name, so BankConnection.accessToken, a bank provider's access token,
+ * was never scanned and sat in no bucket while it was stored in plaintext. The
+ * scan now also matches a name ENDING in Token or Secret(s), which covers every
+ * *AccessToken / *RefreshToken column, and every model that wider scan newly
+ * surfaced is classified below with its reason.
  *
  * The middle bucket is the one worth being explicit about. encryptToken uses
  * AES-256-GCM with a random IV, so the same plaintext yields different
@@ -32,6 +40,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import * as encryption from '../../../packages/db/src/middleware/token-encryption';
 
 const ROOT = join(__dirname, '..', '..', '..');
 const schema = readFileSync(join(ROOT, 'packages', 'db', 'prisma', 'schema.prisma'), 'utf8');
@@ -41,7 +50,8 @@ const extension = readFileSync(
 );
 
 /** Columns whose NAME says they hold a secret. */
-const SECRET_NAME = /^(token|secret|credentials?|password|apiKey|privateKey|accessKey|clientSecret|refreshToken|webhookSecret|signingKey)/i;
+const SECRET_NAME =
+  /^(token|secret|credentials?|password|apiKey|privateKey|accessKey|clientSecret|refreshToken|webhookSecret|signingKey)|(token|secrets?)$/i;
 
 /**
  * Prisma's scalar types, listed explicitly.
@@ -83,6 +93,18 @@ const LOOKUP_KEY: Record<string, string> = {
   PortalAccess: 'bearer link, findUnique({ where: { token } }) in portal.service.ts',
   PaymentLink: 'bearer link, looked up by token on the public payment page',
   ContactExportJob: 'bearer link, looked up by token on the export download',
+  // RR-BANK-TOKEN-ENCRYPT: surfaced by the suffix scan. Both are bearer links, looked up by value.
+  Quote: 'bearer link to the customer quote page, quote.findFirst({ where: { viewToken: token } }) in commerce.service.ts',
+  SitePageDraft: 'bearer preview link, sitePageDraft.findUnique({ where: { previewToken: token } }) in presence.service.ts',
+};
+
+/** The column each LOOKUP_KEY model is searched by (checked below against a real call site). */
+const LOOKUP_FIELD: Record<string, string> = {
+  PortalAccess: 'token',
+  PaymentLink: 'token',
+  ContactExportJob: 'token',
+  Quote: 'viewToken',
+  SitePageDraft: 'previewToken',
 };
 
 /** Encrypted or hashed by its own service rather than by the extension. */
@@ -90,6 +112,43 @@ const HANDLED_ELSEWHERE: Record<string, string> = {
   SupplierConnection: 'encryptCredentials/decryptCredentials in supplier/credentials.util',
   ConnectorAccount: 'column is refreshTokenEncrypted — already ciphertext by contract',
 };
+
+/**
+ * Named like a secret, holds no credential (RR-BANK-TOKEN-ENCRYPT). Each entry says what the column holds, so
+ * the day it starts holding a credential the reason is visibly false.
+ */
+const NOT_A_CREDENTIAL: Record<string, string> = {
+  DriveSyncCursor:
+    'pageToken is the Google Drive changes-feed page cursor (changes.list startPageToken): it names a position ' +
+    'in the feed and grants no access; the OAuth tokens that do are Business.drive*Token, encrypted',
+  IntellectualPropertyProfile:
+    'tradeSecrets is business text (String[], the trade secrets an IP profile lists), not a credential; ' +
+    'rest-scope-census.spec.ts classifies it the same way',
+};
+
+/** The extension hooks a model when it has a `    <delegate>: {` block. */
+function hooks(extensionText: string, model: string): boolean {
+  const delegate = model[0].toLowerCase() + model.slice(1);
+  return new RegExp(`^\\s{4}${delegate}: \\{`, 'm').test(extensionText);
+}
+
+/** Every secret-shaped model in no bucket, as `Model: field, field`. */
+function undecidedModels(extensionText: string): string[] {
+  return modelsWithSecretColumns()
+    .filter(
+      ({ model }) =>
+        !hooks(extensionText, model) && !LOOKUP_KEY[model] && !HANDLED_ELSEWHERE[model] && !NOT_A_CREDENTIAL[model],
+    )
+    .map(({ model, fields }) => `${model}: ${fields.join(', ')}`);
+}
+
+/** The extension text with one model's hook block cut out (the negative control). */
+function withoutHookBlock(extensionText: string, delegate: string): string {
+  const at = extensionText.indexOf(`    ${delegate}: {`);
+  if (at < 0) return extensionText;
+  const end = extensionText.indexOf('\n    },', at);
+  return extensionText.slice(0, at) + extensionText.slice(end + '\n    },'.length);
+}
 
 describe('every secret column has a decided home', () => {
   it('the schema scan finds something, or this whole file is vacuous', () => {
@@ -101,22 +160,52 @@ describe('every secret column has a decided home', () => {
   });
 
   it('no model holding a secret is silently uncovered', () => {
-    const covered = (model: string) => {
-      // The extension keys its hooks by the Prisma delegate name.
-      const delegate = model[0].toLowerCase() + model.slice(1);
-      return new RegExp(`^\\s{4}${delegate}: \\{`, 'm').test(extension);
-    };
-
-    const undecided = modelsWithSecretColumns()
-      .filter(({ model }) => !covered(model) && !LOOKUP_KEY[model] && !HANDLED_ELSEWHERE[model])
-      .map(({ model, fields }) => `${model}: ${fields.join(', ')}`);
-
     expect(
-      undecided,
-      'these hold secret-shaped columns and are in none of the three buckets. Either add ' +
-        'the model to token-encryption.ts, or add it to LOOKUP_KEY / HANDLED_ELSEWHERE here ' +
-        'with the reason. Silence is the one option that is not available.',
+      undecidedModels(extension),
+      'these hold secret-shaped columns and are in none of the four buckets. Either add ' +
+        'the model to token-encryption.ts, or add it to LOOKUP_KEY / HANDLED_ELSEWHERE / NOT_A_CREDENTIAL ' +
+        'here with the reason. Silence is the one option that is not available.',
     ).toEqual([]);
+  });
+
+  it('[V72S-C1] the scan sees a column whose name ENDS in AccessToken / RefreshToken / Token / Secret', () => {
+    for (const name of ['accessToken', 'gmailAccessToken', 'bankRefreshToken', 'pageToken', 'clientSecret', 'tradeSecrets', 'hmacSecret']) {
+      expect(SECRET_NAME.test(name), name).toBe(true);
+    }
+    for (const name of ['promptTokens', 'totalTokens', 'gmailTokenExpiry', 'previewExpiresAt']) {
+      expect(SECRET_NAME.test(name), name).toBe(false);
+    }
+    const bank = modelsWithSecretColumns().find((m) => m.model === 'BankConnection');
+    expect(bank?.fields, 'BankConnection.accessToken is scanned').toEqual(['accessToken']);
+  });
+
+  it('[V72S-C2] negative control: without its bankConnection hook block the extension leaves BankConnection undecided', () => {
+    expect(hooks(extension, 'BankConnection'), 'the extension hooks bankConnection').toBe(true);
+    const cut = withoutHookBlock(extension, 'bankConnection');
+    expect(hooks(cut, 'BankConnection')).toBe(false);
+    expect(undecidedModels(cut)).toEqual(['BankConnection: accessToken']);
+  });
+
+  it('[V72S-C3] a hooked model encrypts every secret-shaped column it has, not only some', () => {
+    const { ENCRYPTED_FIELDS } = encryption as unknown as { ENCRYPTED_FIELDS: Record<string, readonly string[]> };
+    const missing = modelsWithSecretColumns()
+      .filter(({ model }) => hooks(extension, model))
+      .flatMap(({ model, fields }) => fields.filter((f) => !(ENCRYPTED_FIELDS[model] ?? []).includes(f)).map((f) => `${model}.${f}`));
+    expect(missing, 'hooked, but this secret-shaped column is not in ENCRYPTED_FIELDS').toEqual([]);
+    expect(ENCRYPTED_FIELDS.BankConnection).toEqual(['accessToken']);
+  });
+
+  it('[V72S-C4] every bucket entry names a model the scan finds, in one bucket only', () => {
+    const found = new Set(modelsWithSecretColumns().map((m) => m.model));
+    const buckets = [LOOKUP_KEY, HANDLED_ELSEWHERE, NOT_A_CREDENTIAL];
+    for (const bucket of buckets) {
+      for (const model of Object.keys(bucket)) {
+        expect(found.has(model), `${model} is in a bucket but the scan finds no secret-shaped column on it`).toBe(true);
+        expect(hooks(extension, model), `${model} is in a bucket and also hooked by the extension`).toBe(false);
+        expect(buckets.filter((b) => b[model]).length, `${model} is in more than one bucket`).toBe(1);
+      }
+    }
+    expect(Object.keys(LOOKUP_FIELD).sort()).toEqual(Object.keys(LOOKUP_KEY).sort());
   });
 
   it('ChannelConnection is encrypted, because our own sync copies decrypted tokens into it', () => {
@@ -134,12 +223,12 @@ describe('every secret column has a decided home', () => {
     // hands it back as ciphertext — the integration keeps working right up
     // until something tries to USE the token, and then fails at the provider
     // with an auth error that names nothing.
-    for (const delegate of ['business', 'socialConnection', 'channelConnection', 'webhook']) {
+    for (const delegate of ['business', 'socialConnection', 'channelConnection', 'webhook', 'bankConnection']) {
       const at = extension.indexOf(`    ${delegate}: {`);
       expect(at, `${delegate} is not hooked`).toBeGreaterThan(-1);
       const next = extension.indexOf('\n    },', at);
       const block = extension.slice(at, next);
-      for (const op of ['create', 'update', 'findUnique', 'findFirst', 'findMany']) {
+      for (const op of ['create', 'update', 'upsert', 'findUnique', 'findFirst', 'findMany']) {
         expect(block, `${delegate} does not hook ${op}`).toMatch(
           new RegExp(`async ${op}\\(`),
         );
@@ -157,6 +246,7 @@ describe('the lookup-key exclusions are real, not an excuse', () => {
 
     for (const model of Object.keys(LOOKUP_KEY)) {
       const delegate = model[0].toLowerCase() + model.slice(1);
+      const field = LOOKUP_FIELD[model];
       let hits = '';
       try {
         hits = execSync(
@@ -166,9 +256,10 @@ describe('the lookup-key exclusions are real, not an excuse', () => {
       } catch {
         hits = '';
       }
+      // `where: { <field> }` or `where: { <field>: <value> }` as the first predicate, the value not null.
       expect(
-        /where:\s*\{\s*token|token:/.test(hits),
-        `${model} is on the lookup-key exemption list but nothing looks it up by token — ` +
+        new RegExp(`where:\\s*\\{\\s*${field}\\s*(?:[,}]|:\\s*(?!null\\b))`).test(hits),
+        `${model} is on the lookup-key exemption list but nothing looks it up by ${field} — ` +
           'it should be encrypted instead',
       ).toBe(true);
     }
