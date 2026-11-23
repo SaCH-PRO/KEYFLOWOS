@@ -382,7 +382,8 @@ export class SemanticMemoryService {
       // (AI_MEMORY_SETTINGS_CATEGORIES); only a backfill run before the review repair made one.
       let query = Prisma.sql`
         SELECT id, content, source_type, source_id, metadata,
-               1 - (embedding <=> ${vectorLiteral}::vector) as similarity
+               1 - (embedding <=> ${vectorLiteral}::vector) as similarity,
+               (embedding <=> ${vectorLiteral}::vector)::text as distance
         FROM "ai_memory_embeddings" e
         WHERE business_id = ${params.businessId}
           AND 1 - (embedding <=> ${vectorLiteral}::vector) >= ${minSim}
@@ -412,7 +413,15 @@ export class SemanticMemoryService {
         )`;
       }
 
-      const page = async (take: number, skip: number): Promise<SemanticMemory[]> => {
+      // Codex P2 on #226: a reader's read pages by keyset (similarity, then id), never by row offset: a copy written or
+      // deleted ahead of the read position between two pages can neither shift a hit past the next page nor repeat one.
+      // The cursor is the last row's distance as float8 text (exact: Postgres prints the shortest exact form) and its id.
+      type Cursor = { distance: string; id: string };
+      const distance = Prisma.sql`(embedding <=> ${vectorLiteral}::vector)`;
+      const page = async (take: number, after?: Cursor): Promise<Array<SemanticMemory & { distance: string }>> => {
+        const keyset = after
+          ? Prisma.sql` AND (${distance} > ${after.distance}::float8 OR (${distance} = ${after.distance}::float8 AND e.id > ${after.id}))`
+          : Prisma.empty;
         const results = await this.prisma.client.$queryRaw<Array<{
           id: string;
           content: string;
@@ -420,7 +429,8 @@ export class SemanticMemoryService {
           source_id: string;
           metadata: any;
           similarity: number;
-        }>>(Prisma.sql`${query} ORDER BY embedding <=> ${vectorLiteral}::vector, e.id LIMIT ${take} OFFSET ${skip}`);
+          distance: string;
+        }>>(Prisma.sql`${query}${keyset} ORDER BY ${distance}, e.id LIMIT ${take}`);
         return results.map((r) => ({
           id: r.id,
           content: r.content,
@@ -428,21 +438,25 @@ export class SemanticMemoryService {
           sourceId: r.source_id,
           metadata: typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata,
           similarity: Number(r.similarity),
+          distance: r.distance,
         }));
       };
+      const strip = ({ distance: _distance, ...hit }: SemanticMemory & { distance: string }): SemanticMemory => hit;
 
-      if (!params.visibleTo) return await page(limit, 0);
+      if (!params.visibleTo) return (await page(limit)).map(strip);
 
-      // MEM-SEMANTIC-SIGHT: filtered before the limit is cut (see visibleTo).
-      // Review: each page doubles (fewer round trips past many withheld hits), and a hit is kept once (a copy written
-      // between two pages shifts the offset).
+      // MEM-SEMANTIC-SIGHT: filtered before the limit is cut (see visibleTo). Each page doubles (fewer round trips past
+      // many withheld hits); a hit is kept once.
       const want = Math.max(0, Math.trunc(limit) || 0);
       const visible: SemanticMemory[] = [];
       const seen = new Set<string>();
       let batch = Math.max(want * 4, SEMANTIC_PAGE);
-      for (let skip = 0; visible.length < want && skip < MAX_SEMANTIC_SCAN; batch *= 2) {
-        const take = Math.min(batch, MAX_SEMANTIC_SCAN - skip);
-        const hits = await page(take, skip);
+      let after: Cursor | undefined;
+      for (let scanned = 0; visible.length < want && scanned < MAX_SEMANTIC_SCAN; batch *= 2) {
+        const take = Math.min(batch, MAX_SEMANTIC_SCAN - scanned);
+        const rows = await page(take, after);
+        if (rows.length === 0) break;
+        const hits = rows.map(strip);
         const keep = await params.visibleTo(hits);
         hits.forEach((hit, i) => {
           if (keep[i] === true && !seen.has(hit.id)) {
@@ -450,8 +464,10 @@ export class SemanticMemoryService {
             visible.push(hit);
           }
         });
-        skip += hits.length;
-        if (hits.length < take) break;
+        scanned += rows.length;
+        const last = rows[rows.length - 1];
+        after = { distance: last.distance, id: last.id };
+        if (rows.length < take) break;
       }
       return visible.slice(0, want);
     } catch (err: any) {
