@@ -67,8 +67,9 @@ interface SourceEvent {
 /**
  * MEM-SEMANTIC-SIGHT (design 8.2 taint propagation): the modules a reader needs to see a temporal-memory summary: those
  * its entity type and source module name, the union of those every source event names (its module, type, source and
- * entity type), and revenue when a source event is money (a KEY proposal's event, or money in its title, summary or
- * description) or the summary's own text (or its copy's) states money. A source event that is gone, or that names no
+ * entity type), and revenue when a source event is money (a KEY proposal's event, money or sales in its type, module
+ * or source, or money in its title, summary or description), when the row's own entity type, type or source module
+ * names money, or when the summary's own text (or its copy's) states money. A source event that is gone, or that names no
  * module, needs every module (D-227: unclassified fails closed); so does a summary that names none at all, and (review)
  * one that counts more events than it records as its source (metadata.eventCount above sourceEventIds: summarizeChannel
  * records 20 of up to 200), whose provenance is incomplete. The summarised entity's id (a channel's name) names modules
@@ -91,9 +92,19 @@ export function temporalMemoryModulesOf(row: TemporalRow, events: ReadonlyMap<st
     }
     const named = modulesNamedBy(event.module, event.type, event.source, event.entityType);
     add(named.length ? named : EVENT_MODULES);
-    if (event.entityType === 'key_action_proposal' || [event.title, event.summary, event.description].some(textIsMoney)) modules.add('revenue');
+    // Review round 3 (D-234: sales volume is finance by provenance): money or sales in the event's type, module or source
+    // (sale.completed, payments, checkout) is revenue too, though the module words name another module.
+    if (
+      event.entityType === 'key_action_proposal' ||
+      [event.type, event.module, event.source].some((label) => isMoneyLabel(label)) ||
+      [event.title, event.summary, event.description].some(textIsMoney)
+    ) {
+      modules.add('revenue');
+    }
   }
-  if (textIsMoney(row.content) || textIsMoney(copyContent)) modules.add('revenue');
+  if (textIsMoney(row.content) || textIsMoney(copyContent) || [row.entityType, row.type, row.sourceModule].some((label) => isMoneyLabel(label))) {
+    modules.add('revenue');
+  }
   return modules.size ? [...modules] : [...EVENT_MODULES];
 }
 

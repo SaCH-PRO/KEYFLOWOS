@@ -2104,10 +2104,10 @@ export class FlowOrchestratorService {
    * section, as TemporalFlowService and UnifiedMemoryRetrievalService already
    * do. Only the memory lookup is caught: a missing chat provider still fails
    * the turn from the gateway dispatch with its own 503.
+   *
+   * MEM-SEMANTIC-SIGHT (D-234, D-257): the turn's hits only, by each hit's source (semanticHitsVisibleTo), filtered
+   * before the top 5 are cut, for the perception block's reader and sight (turnMemorySight).
    */
-  //
-  // MEM-SEMANTIC-SIGHT (D-234, D-257): the turn's hits only, by each hit's source (semanticHitsVisibleTo), filtered
-  // before the top 5 are cut, for the perception block's reader and sight (turnMemorySight).
   private async buildSemanticMemorySection(
     businessId: string,
     query: string,
