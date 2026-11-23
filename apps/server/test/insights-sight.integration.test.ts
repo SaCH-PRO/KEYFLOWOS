@@ -556,4 +556,33 @@ describe('FU-INSIGHTS-SIGHT (D-100, D-234, D-146): monitoring insights, suggesti
       await clearData();
     }
   }, 300_000);
+
+  it('V72Q-13 RED (security review round 5, ISS-R5-1): GET .../ai/control-tower is rate limited (20 a minute per caller address and business): the 21st answers 429', async () => {
+    await clearData();
+    try {
+      const statuses: number[] = [];
+      for (let i = 0; i < 21; i++) {
+        const res = await agent().get(`/ai/businesses/${ID.biz}/ai/control-tower`).set(HEADER, ID.blind).set('x-forwarded-for', '10.76.1.1');
+        statuses.push(res.status);
+      }
+      expect(statuses.slice(0, 20).every((s) => s === 200), JSON.stringify(statuses)).toBe(true);
+      expect(statuses[20]).toBe(429);
+    } finally {
+      await clearData();
+    }
+  }, 300_000);
+
+  it('V72Q-14 RED (security review round 5, transitional): a suggestion row stored before the stamp (no sight words) whose expense sits behind a JSON line break is not answered to a member without expenses read', async () => {
+    await clearData();
+    try {
+      const legacy = { id: 'suggestion_client_risk_legacy', category: 'client_risk', title: 'V72Q-LEGACY clients going quiet', message: 'Follow up with them.\nrent is due', actions: [], severity: 'warning', createdAt: new Date() };
+      await db.aiMemory.create({
+        data: { businessId: ID.biz, category: 'suggestion', key: `client_risk_${Date.now()}`, value: JSON.stringify(legacy), source: 'key_ai', expiresAt: new Date(Date.now() + DAY) },
+      });
+      expect(text(await ok('get', 'revnoexp', '/ai/suggestions'))).not.toContain('V72Q-LEGACY');
+      expect(text(await ok('get', 'revenue', '/ai/suggestions')), 'control').toContain('V72Q-LEGACY');
+    } finally {
+      await clearData();
+    }
+  }, 300_000);
 });

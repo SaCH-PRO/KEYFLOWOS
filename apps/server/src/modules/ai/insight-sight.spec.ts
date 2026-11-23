@@ -44,3 +44,13 @@ describe('fieldsSightNeeds only ever adds readings (reviews round 4: ISS-R4-1, R
     expect(fieldsSightNeeds(['5 stale leads', { note: 'Follow up next week' }, null, 3])).toEqual([]);
   });
 });
+
+describe('fieldsSightNeeds is bounded (security review round 5, ISS-R5-1)', () => {
+  it('fields whose text exceeds the classifier bound need both sights, unread (fail closed, as D-238 does)', () => {
+    const big = 'printer jams '.repeat(4_000);
+    expect(fieldsSightNeeds([big, big])).toEqual(['revenue', 'expenses']);
+  });
+  it('under the bound, plain text still needs nothing (control)', () => {
+    expect(fieldsSightNeeds(['printer jams '.repeat(100)])).toEqual([]);
+  });
+});
