@@ -58,7 +58,8 @@ function textStatesMoney(value: unknown): boolean {
 function patchHoldsFigure(value: unknown, depth = 0): boolean {
   if (depth > 8) return true;
   if (typeof value === 'number' || typeof value === 'bigint') return true;
-  if (typeof value === 'string') return /\d/.test(value);
+  // Round 6: any decimal digit, ASCII or not (fullwidth figures read as figures).
+  if (typeof value === 'string') return /\p{Nd}/u.test(value);
   if (Array.isArray(value)) return value.some((v) => patchHoldsFigure(v, depth + 1));
   if (value && typeof value === 'object') return Object.values(value as Record<string, unknown>).some((v) => patchHoldsFigure(v, depth + 1));
   return false;
@@ -103,6 +104,26 @@ function eventStatesMoney(e: EvolutionEvent): boolean {
   if (payload && 'section' in payload && !nonMoneySection(payload.section)) return true;
   if (payload && patchHoldsFigure(payload.proposedPatch)) return true;
   return structuredValueStatesMoney(e.payload) || structuredValueStatesMoney(e.signals);
+}
+
+/**
+ * Round 6 (security review P-1): approving an evolution proposal writes the DNA section through
+ * BlueprintService.updateDnaSection, which records a genome.section_updated row (entityType dna_section, entityId the
+ * section, payload { section, data: the patch }); a direct DNA edit writes the same row. It is the same content as the
+ * decision row and is projected the same way.
+ */
+export function isDnaSectionEvent(e: { entityType?: string | null; type?: string | null }): boolean {
+  return e.entityType === 'dna_section' || e.type === 'genome.section_updated';
+}
+
+/** Whether a reader without revenue read may be served a DNA section row: a non-money section, no figure, no money. */
+export function readableDnaSectionEvent(e: EvolutionEvent): boolean {
+  const payload = e.payload && typeof e.payload === 'object' && !Array.isArray(e.payload) ? (e.payload as Record<string, unknown>) : {};
+  const section = typeof payload.section === 'string' ? payload.section : e.entityId;
+  if (!nonMoneySection(section)) return false;
+  if (typeof e.entityId === 'string' && e.entityId && !nonMoneySection(e.entityId)) return false;
+  if (patchHoldsFigure(payload.data)) return false;
+  return !eventStatesMoney(e);
 }
 
 /**
@@ -156,7 +177,7 @@ export async function requireBridgeRevenue(
   // them gates it too. Round 4 (correctness MAJOR-1): only text with a figure in it; money words alone ("paid channel",
   // "target CAC") are how the marketing and operations genomes write ordinary recommendations, which the list serves.
   const statesMoney = [recommendation.title, recommendation.diagnosis, recommendation.insight, recommendation.recommendation, recommendation.expectedGain]
-    .some((t) => typeof t === 'string' && /\d/.test(t) && textStatesMoney(t));
+    .some((t) => typeof t === 'string' && /\p{Nd}/u.test(t) && textStatesMoney(t));
   if (!statesMoney && !isFinanceRecommendation(recommendation)) return;
   const level = await genomeReaderRevenueLevel(prisma, businessId, reader);
   if (rankOf(level) < LEVEL_RANK[minLevel]) {

@@ -1,6 +1,6 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { genomeReaderReadsRevenue, financialProposalsWithProvenance, isMoneyLabel, PROPOSAL_CLASSIFY_SELECT, proposalTextStatesMoney, structuredValueStatesMoney, type GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
-import { isGenomeEvolutionEvent, readableGenomeEvolutionEvents } from '../key-autonomy/key-action-genome-projection';
+import { isDnaSectionEvent, isGenomeEvolutionEvent, readableDnaSectionEvent, readableGenomeEvolutionEvents } from '../key-autonomy/key-action-genome-projection';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
@@ -118,12 +118,15 @@ export class TemporalFlowService {
     if (reader === undefined) return events;
     const proposals = events.filter((e) => e.entityType === 'key_action_proposal');
     const evolutions = events.filter((e) => isGenomeEvolutionEvent(e));
-    if (proposals.length === 0 && evolutions.length === 0) return events;
+    const dnaSections = events.filter((e) => isDnaSectionEvent(e));
+    if (proposals.length === 0 && evolutions.length === 0 && dnaSections.length === 0) return events;
     if (readsRevenue ?? (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined))) return events;
     // FU-KEY-ACTION-GENOME-PROJECTION (D-233, D-238): a genome-evolution decision row is served only when its proposal
     // is read in this business, is of a non-money DNA section and nothing in it or the row states money (fail closed).
     const evolutionFlags = await readableGenomeEvolutionEvents(this.prisma, businessId, evolutions);
     const withheld = new Set<E>(evolutions.filter((_e, i) => !evolutionFlags[i]));
+    // Round 6: the DNA section row an approval (or a DNA edit) writes carries the same patch.
+    for (const e of dnaSections) if (!readableDnaSectionEvent(e)) withheld.add(e);
     if (withheld.size) events = events.filter((e) => !withheld.has(e));
     if (proposals.length === 0) return events;
     const ids = [...new Set(proposals.map((e) => e.entityId).filter((id): id is string => typeof id === 'string' && !!id))];
@@ -148,7 +151,9 @@ export class TemporalFlowService {
       const known = e.entityId ? financial.get(e.entityId) : undefined;
       // The row's summary too (FU-KEY-ACTION-GENOME-PROJECTION: key.action.create_task copies the proposal's rationale there).
       // Round 3 (security MINOR-1): the row's whole payload and signals are read, not only their named keys.
+      // Round 6 (correctness MINOR-2): the title and description are read as the summary is.
       return known === false && !isMoneyLabel(e.title) && !isMoneyLabel(e.description) && !isMoneyLabel(e.summary)
+        && !proposalTextStatesMoney(e.title) && !proposalTextStatesMoney(e.description)
         && !proposalTextStatesMoney(e.summary) && !eventTextStatesMoney(e)
         && !structuredValueStatesMoney(withoutRuleTrace(e.payload)) && !structuredValueStatesMoney(e.signals);
     });
