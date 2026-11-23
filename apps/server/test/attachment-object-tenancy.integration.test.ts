@@ -22,7 +22,10 @@
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from 'vitest';
 import { posix } from 'node:path';
+import 'reflect-metadata';
 import { BadRequestException } from '@nestjs/common';
+import { ROUTE_ARGS_METADATA } from '@nestjs/common/constants';
+import { resolveRequestBusinessId } from '../src/core/auth/request-business-id';
 import { Readable } from 'node:stream';
 import {
   S3Client,
@@ -162,6 +165,22 @@ describe('FU-ATTACHMENT-OBJECT-TENANCY: upload paths are bound to the issuing bu
   it('a business id that is not one key segment is a 400, never a key (review round 1, 500 -> 400)', async () => {
     for (const bad of ['a/b', '..', '', ' x', 'x%2Fy']) {
       await expect(controller().requestUploadUrl(bad, {})).rejects.toBeInstanceOf(BadRequestException);
+    }
+  });
+
+  it("the handler binds the tenant BusinessGuard checked (params, then body, then query), never another field (review round 2)", () => {
+    const args = Reflect.getMetadata(ROUTE_ARGS_METADATA, UploadsController, 'requestUploadUrl') ?? {};
+    const tenantArg = Object.values(args as Record<string, any>).find((a) => a.index === 0);
+    expect(tenantArg?.factory, 'parameter 0 is a custom (GuardedBusinessId) decorator').toBeTypeOf('function');
+    const ctx = (req: any) => ({ switchToHttp: () => ({ getRequest: () => req }) }) as any;
+    const cases = [
+      { body: { businessId: BIZ_A }, query: { businessId: BIZ_B } },
+      { body: { businessId: 7 }, query: { businessId: BIZ_B } },
+      { body: {}, query: { businessId: BIZ_B } },
+      { params: { businessId: BIZ_A }, body: { businessId: BIZ_B } },
+    ];
+    for (const req of cases) {
+      expect(tenantArg.factory(tenantArg.data, ctx(req))).toBe(resolveRequestBusinessId(req as any));
     }
   });
 
