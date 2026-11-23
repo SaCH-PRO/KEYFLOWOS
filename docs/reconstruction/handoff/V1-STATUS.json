@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "7109b6a485fd74f7ab7f7b421bd17f47a95a0793",
-  "main_commit_date": "2026-11-23T00:03:31+00:00",
+  "main_sha": "f759a85a49941df2c1920a737be36eb63217bb41",
+  "main_commit_date": "2026-11-23T01:10:55+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -27,13 +27,13 @@
   ]
  },
  "summary": {
-  "packets": 244,
-  "points": 395.5,
+  "packets": 346,
+  "points": 510.5,
   "by_status": {
    "done": {
-    "packets": 70,
-    "points": 106.5,
-    "pct_by_points": 26.9
+    "packets": 72,
+    "points": 110.5,
+    "pct_by_points": 21.6
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 174,
-    "points": 289,
-    "pct_by_points": 73.1
+    "packets": 274,
+    "points": 400,
+    "pct_by_points": 78.4
    }
   },
   "by_step": {
@@ -66,22 +66,22 @@
     "total": 7
    },
    "3": {
-    "done": 47,
+    "done": 48,
     "in-progress": 0,
-    "todo": 30,
-    "total": 77
+    "todo": 99,
+    "total": 147
    },
    "4": {
     "done": 2,
     "in-progress": 0,
-    "todo": 41,
-    "total": 43
+    "todo": 50,
+    "total": 52
    },
    "5": {
-    "done": 3,
+    "done": 4,
     "in-progress": 0,
-    "todo": 47,
-    "total": 50
+    "todo": 52,
+    "total": 56
    },
    "6": {
     "done": 2,
@@ -92,8 +92,8 @@
    "7": {
     "done": 0,
     "in-progress": 0,
-    "todo": 16,
-    "total": 16
+    "todo": 33,
+    "total": 33
    },
    "8": {
     "done": 0,
@@ -103,11 +103,11 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 151,
+   "prior-status-file": 150,
    "prior-status-file+wave-2b-commit": 28,
    "code-commit-subject": 9,
-   "compacted-commit": 14,
-   "no-evidence": 42
+   "compacted-commit": 16,
+   "no-evidence": 143
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -120,11 +120,10 @@
    "FU-WA-ESCAPE-RACE",
    "FU-PROPOSAL-REVENUE-SIGHT"
   ],
-  "todo_with_dependencies_met": 55
+  "todo_with_dependencies_met": 109
  },
  "critical_path": {
   "plan_recorded_remaining": [
-   "NAV-A1",
    "MOUNT-QUOTES",
    "SWP-INV-MATH",
    "SWP-INV-FORM-UX",
@@ -152,9 +151,8 @@
   ],
   "plan_recorded_total": 34,
   "longest_remaining_depends_on_chain": {
-   "weight": 51,
+   "weight": 48,
    "chain": [
-    "NAV-A1",
     "MOUNT-QUOTES",
     "SWP-INV-MATH",
     "SWP-INV-FORM-UX",
@@ -184,13 +182,13 @@
  },
  "ready": [
   {
-   "id": "NAV-A1",
-   "step": 3,
+   "id": "MOUNT-QUOTES",
+   "step": 4,
    "priority": "P0",
    "size": "L",
    "lane": "web",
    "on_critical_path": true,
-   "unblocks": 81
+   "unblocks": 55
   },
   {
    "id": "W11-KEY-TRANSFER-INTEGER",
@@ -199,7 +197,7 @@
    "size": "S",
    "lane": "server",
    "on_critical_path": false,
-   "unblocks": 51
+   "unblocks": 57
   },
   {
    "id": "SWP-STORE-LISTING-SERVER",
@@ -208,7 +206,7 @@
    "size": "M",
    "lane": "server",
    "on_critical_path": false,
-   "unblocks": 49
+   "unblocks": 50
   },
   {
    "id": "SWP-INV-PUBLIC-LINK",
@@ -217,7 +215,25 @@
    "size": "M",
    "lane": "both",
    "on_critical_path": false,
-   "unblocks": 46
+   "unblocks": 47
+  },
+  {
+   "id": "NAV-A3",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "on_critical_path": false,
+   "unblocks": 32
+  },
+  {
+   "id": "SWP-KEY-CHAT-WEB",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "web",
+   "on_critical_path": false,
+   "unblocks": 31
   },
   {
    "id": "W11-GENOME-RECS-DOMAIN",
@@ -226,7 +242,7 @@
    "size": "M",
    "lane": "server",
    "on_critical_path": false,
-   "unblocks": 24
+   "unblocks": 27
   },
   {
    "id": "W11-RUNWAY-BURN-CURRENCY",
@@ -235,7 +251,16 @@
    "size": "M",
    "lane": "server",
    "on_critical_path": false,
-   "unblocks": 24
+   "unblocks": 25
+  },
+  {
+   "id": "SWP-CONTACT-DETAIL",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "on_critical_path": false,
+   "unblocks": 21
   },
   {
    "id": "W11-SHIP-STOCK-DECREMENT",
@@ -245,6 +270,15 @@
    "lane": "server",
    "on_critical_path": false,
    "unblocks": 21
+  },
+  {
+   "id": "NAV-A2",
+   "step": 4,
+   "priority": "P0",
+   "size": "M",
+   "lane": "web",
+   "on_critical_path": false,
+   "unblocks": 13
   },
   {
    "id": "SWP-CENSUS-OPEN-WRITES",
@@ -274,6 +308,24 @@
    "unblocks": 9
   },
   {
+   "id": "RR-SCRIPT-SPECS-IN-CI",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "on_critical_path": false,
+   "unblocks": 9
+  },
+  {
+   "id": "MEM-CENSUS",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 8
+  },
+  {
    "id": "SWP-CENSUS-KEY-B",
    "step": 4,
    "priority": "P1",
@@ -281,6 +333,15 @@
    "lane": "server",
    "on_critical_path": false,
    "unblocks": 8
+  },
+  {
+   "id": "RR-OWNER-RULINGS-RECORD",
+   "step": 3,
+   "priority": "P2",
+   "size": "XS",
+   "lane": "docs",
+   "on_critical_path": false,
+   "unblocks": 7
   },
   {
    "id": "TOF-STALE-GATES-PKT",
@@ -292,13 +353,13 @@
    "unblocks": 7
   },
   {
-   "id": "MEM-CENSUS",
+   "id": "RR-TOOL-EFFECT-CLASS",
    "step": 3,
    "priority": "P1",
-   "size": "M",
+   "size": "S",
    "lane": "server",
    "on_critical_path": false,
-   "unblocks": 5
+   "unblocks": 6
   },
   {
    "id": "S0-SEC-LANE-DEPLOY",
@@ -343,12 +404,183 @@
    "size": "S",
    "lane": "server",
    "on_critical_path": false,
+   "unblocks": 3
+  },
+  {
+   "id": "FU-PROPOSAL-MONEY-TAG",
+   "step": 3,
+   "priority": "P1",
+   "size": "L",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 3
+  },
+  {
+   "id": "RR-ADMIN-LOGOUT",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "on_critical_path": false,
+   "unblocks": 2
+  },
+  {
+   "id": "RR-ERASURE-BUSINESS-EVENTS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 2
+  },
+  {
+   "id": "RR-UNTRUSTED-CONTENT-FENCE",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 2
+  },
+  {
+   "id": "RR-GATEWAY-TYPED-FAILURES",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 2
+  },
+  {
+   "id": "RR-UNKNOWN-COST-NOT-ZERO",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 2
+  },
+  {
+   "id": "RR-ANTHROPIC-TOOL-PARITY",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
    "unblocks": 2
   },
   {
    "id": "MEM-TEMPORAL-SCOPE",
    "step": 3,
    "priority": "P0",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "FU-TEMPORAL-FLOW-INBOX-SCOPE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-DB-CRYPTO-KEY-CENSUS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-MODEL-LIFECYCLE-GUARD",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "FU-ARCH-MAP-REFRESH",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "docs",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-ACTION-INTENT-ONE-CLASSIFIER",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-EVAL-HARNESS-NO-VACUOUS",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-LANGFUSE-INGESTION-CUTOVER",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-REDACTION-BY-CONTENT",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-TOOL-ARGS-MALFORMED-NEVER-RUN",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-CONNECTOR-STACK-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-SECURITY-SIGNAL-COUNTERS",
+   "step": 4,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "RR-STATUS-PATCH-CENSUS",
+   "step": 3,
+   "priority": "P3",
    "size": "S",
    "lane": "server",
    "on_critical_path": false,
@@ -369,15 +601,6 @@
    "priority": "P0",
    "size": "M",
    "lane": "both",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-SITE-ANALYTICS-REVENUE-SCOPE",
-   "step": 5,
-   "priority": "P0",
-   "size": "S",
-   "lane": "server",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -508,17 +731,26 @@
    "unblocks": 0
   },
   {
-   "id": "FU-PROPOSAL-MONEY-TAG",
-   "step": 3,
+   "id": "FU-STORE-ORDERS-MONEY-SCOPE",
+   "step": 5,
    "priority": "P1",
-   "size": "L",
-   "lane": "server",
+   "size": "S",
+   "lane": "both",
    "on_critical_path": false,
    "unblocks": 0
   },
   {
-   "id": "FU-TEMPORAL-FLOW-INBOX-SCOPE",
-   "step": 5,
+   "id": "FU-VITEST-DECORATOR-METADATA",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "gate",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "MEM-EXPIRED-NOT-SERVED",
+   "step": 3,
    "priority": "P1",
    "size": "S",
    "lane": "server",
@@ -526,7 +758,34 @@
    "unblocks": 0
   },
   {
-   "id": "MEM-EXPIRED-NOT-SERVED",
+   "id": "RR-BANK-TOKEN-ENCRYPT",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-MCP-TENANT-BOUND",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-STREAM-ERROR-NO-EFFECTS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-WEBHOOK-INGRESS-CENSUS",
    "step": 3,
    "priority": "P1",
    "size": "S",
@@ -558,15 +817,6 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-ARCH-MAP-REFRESH",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "docs",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -670,11 +920,245 @@
    "unblocks": 0
   },
   {
+   "id": "RR-BUSINESS-EVENT-REDACT",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-CORTEX-TYPED-RESULT",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-HEALTH-TIGHTENS-CONTROL",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-JOB-TENANT-CONTEXT",
+   "step": 4,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-KEY-FAKE-MODEL-TRAJECTORY",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-OAUTH-PKCE-GOOGLE-MICROSOFT",
+   "step": 4,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-OBJECT-STORAGE-POSTURE-CHECK",
+   "step": 7,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-RESPONSE-FORMAT-HONEST",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-RETENTION-EXPIRED-EXPORTS",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-COMMUNITY-LIKE-OWN-ACTION",
    "step": 3,
    "priority": "P3",
    "size": "S",
    "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-AI-CONTRACT-ZOD-FIRST",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-APPROVAL-MODEL-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-COG-RUNTIME-ENTRY-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-CRON-OCCURRENCE-LOCK",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-DEAD-EVENT-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-DIRECT-PROVIDER-CENSUS",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-ERROR-CAPSULE",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-FORWARDREF-RATCHET",
+   "step": 3,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-GOAL-WRITER-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-INDEX-COVERAGE-REPORT",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-INTEGRITY-WATCH",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-KEY-CORTEX-SIZE-RATCHET",
+   "step": 3,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-KEY-PROMPT-CANARY",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-SELFTUNE-CANDIDATE-ONLY",
+   "step": 3,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-SLO-AVAILABILITY-LEDGER",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-UNUSED-MODEL-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-WEB-CLIENT-RATCHET",
+   "step": 3,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "web",
    "on_critical_path": false,
    "unblocks": 0
   }
@@ -1509,16 +1993,18 @@
    "priority": "P0",
    "size": "L",
    "lane": "web",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "49f74ae2"
+   ],
    "depends_on": [
     "BIZ-SETTINGS-WEB",
     "MARKETING-REDIRECT-GATE"
    ],
    "title": "Hub navigation: seven hubs by business type, bottom bar, disclosure modes removed, plain labels, the redirect table, 'Customers' heading",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "WA-HELPER",
@@ -1552,7 +2038,7 @@
     "SWP-LAYERS"
    ],
    "title": "KEY chat: Send and Deep think send; the drawer loads its session list once; onboarding opens at the manual form",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-KEY-SHELL-SMOKE",
@@ -1654,7 +2140,7 @@
     "FAILURE-KIT"
    ],
    "title": "Sales > Quotes mounts quotes-panel.tsx: edit a draft, WhatsApp and Copy link, Send carries the link, Convert on accepted quotes keeps notes, bulk bar never deletes",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-INV-MATH",
@@ -1837,7 +2323,7 @@
     "FAILURE-KIT"
    ],
    "title": "Real index pages for Money and Settings, with Settings > Getting paid",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "EXPENSES-HUB-1",
@@ -1918,7 +2404,7 @@
     "NAV-A1"
    ],
    "title": "Breadcrumbs from the route registry, My account, store tab deep links and the Launch Pad storefront tile",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "CATALOG-1",
@@ -2530,7 +3016,7 @@
     "NAV-A1"
    ],
    "title": "Contact pages: labels instead of codes, an honest delete dialog, plain timeline events; side-panel tabs retired",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-CRM-WEB-POLISH",
@@ -4717,13 +5203,15 @@
    "priority": "P0",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "88350ee5"
+   ],
    "depends_on": [],
    "title": "Site analytics withholds paid revenue from readers without revenue read",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-TEMPORAL-FLOW-INBOX-SCOPE",
@@ -4860,6 +5348,1559 @@
    ],
    "title": "Chart-of-accounts seeder respects the code rule and update input is validated",
    "deps_met": true
+  },
+  {
+   "id": "RR-OWNER-RULINGS-RECORD",
+   "step": 3,
+   "priority": "P2",
+   "size": "XS",
+   "lane": "docs",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S1-RULINGS-RECORD"
+   ],
+   "title": "Record the owner's answers to the research-recommendation owner questions that hold packets (OQ-5, OQ-13, OQ-19, OQ-30) and the two RR migration approvals",
+   "deps_met": true
+  },
+  {
+   "id": "RR-KEY-SAFETY-POLICY",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-REDACTION-BY-CONTENT"
+   ],
+   "title": "KEY cortex input-safety check becomes an explicit, versioned policy: every rule class is evaluated, each finding class maps to an action, and a missing or throwing checker withholds tools instead of passing the query",
+   "deps_met": false
+  },
+  {
+   "id": "RR-UNTRUSTED-CONTENT-FENCE",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Document extractions and MCP tool output enter KEY's prompts inside a fenced untrusted-data block that cannot be closed from inside and carries no authority",
+   "deps_met": true
+  },
+  {
+   "id": "RR-STREAM-ERROR-NO-EFFECTS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "A model stream that failed part-way never splices a fallback answer onto it and never runs the tool calls it collected",
+   "deps_met": true
+  },
+  {
+   "id": "RR-REDACTION-BY-CONTENT",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Redaction detects card numbers and secret-shaped tokens by value, not only by field name",
+   "deps_met": true
+  },
+  {
+   "id": "RR-KEY-PROMPT-CANARY",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "A per-turn canary marker in KEY's system prompt: a tool call whose arguments carry it is refused, and a reply that echoes it is recorded",
+   "deps_met": true
+  },
+  {
+   "id": "RR-MODEL-LIFECYCLE-GUARD",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "A model lifecycle catalog the owner maintains: every routed model id must be in it, and a model marked retired is never dispatched to",
+   "deps_met": true
+  },
+  {
+   "id": "RR-GATEWAY-TYPED-FAILURES",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Model gateway classifies provider failures: a rate limit, a caller abort or a bad request does not open the provider circuit",
+   "deps_met": true
+  },
+  {
+   "id": "RR-LLM-ADMISSION-CONTROL",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-GATEWAY-TYPED-FAILURES"
+   ],
+   "title": "Per-business admission control on model calls: a bounded number in flight per business, shared across replicas, with a typed capacity refusal",
+   "deps_met": false
+  },
+  {
+   "id": "RR-CORTEX-BUS-BACKPRESSURE",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "MEM-CENSUS"
+   ],
+   "title": "KEY cortex event bus bounds its in-flight ledger writes and reports saturation instead of starting unbounded concurrent writes",
+   "deps_met": false
+  },
+  {
+   "id": "RR-UNKNOWN-COST-NOT-ZERO",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "One model price table; an unpriced model's cost is marked unpriced, never written as $0",
+   "deps_met": true
+  },
+  {
+   "id": "RR-OPENSOURCE-PROVIDER-SPLIT",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-UNKNOWN-COST-NOT-ZERO"
+   ],
+   "title": "Ollama and OpenRouter become two gateway resources with their own identity, health, circuit and cost, not one 'opensource' provider",
+   "deps_met": false
+  },
+  {
+   "id": "RR-MODEL-SELECTION-ONE-SEAM",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-MODEL-LIFECYCLE-GUARD"
+   ],
+   "title": "One model-selection seam: delete the dead cortex provider-selection map and ratchet model ids outside the gateway",
+   "deps_met": false
+  },
+  {
+   "id": "RR-DIRECT-PROVIDER-CENSUS",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Census of model-provider calls that bypass the gateway: a shrink-only spec fails on a new direct SDK or provider URL",
+   "deps_met": true
+  },
+  {
+   "id": "RR-ANTHROPIC-TOOL-PARITY",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Anthropic path keeps tool semantics: toolChoice 'none' honoured, assistant tool calls sent as tool_use and results as tool_result blocks",
+   "deps_met": true
+  },
+  {
+   "id": "RR-PROMPT-CACHE-PREFIX",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-UNKNOWN-COST-NOT-ZERO",
+    "RR-ANTHROPIC-TOOL-PARITY"
+   ],
+   "title": "Provider prompt caching: Anthropic system prefix marked cacheable, cached input tokens read from usage and priced",
+   "deps_met": false
+  },
+  {
+   "id": "RR-RESPONSE-FORMAT-HONEST",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "GatewayRequest.responseFormat is honoured: provider-native JSON mode where supported, prompted fallback otherwise, and the strategy used is recorded",
+   "deps_met": true
+  },
+  {
+   "id": "RR-AI-CONTRACT-ZOD-FIRST",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "First executable AI contract: intent_parse becomes one Zod schema deriving its type, its validator and the parse_intent tool schema",
+   "deps_met": true
+  },
+  {
+   "id": "RR-CORTEX-TYPED-RESULT",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "KEY cortex stops inventing a 70% confidence when its markdown answer has no Confidence section, and records whether the answer was parsed",
+   "deps_met": true
+  },
+  {
+   "id": "RR-STRUCTURED-PARSE-INVALID-STATE",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-GATEWAY-TYPED-FAILURES"
+   ],
+   "title": "Gateway contract violations are typed and costed, never a silent provider failure or a silent pass on empty output",
+   "deps_met": false
+  },
+  {
+   "id": "RR-TOOL-ARGS-MALFORMED-NEVER-RUN",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "KEY tool calls with unparseable arguments never run a tool: that call gets a visible refusal and the rest of the turn proceeds",
+   "deps_met": true
+  },
+  {
+   "id": "RR-STRICT-TOOL-SCHEMAS",
+   "step": 7,
+   "priority": "P3",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-KEY-TRANSFER-INTEGER",
+    "RR-ANTHROPIC-TOOL-PARITY",
+    "RR-TOOL-ARGS-MALFORMED-NEVER-RUN"
+   ],
+   "title": "KEY tool calls: advertised schemas are closed (no undeclared arguments) and strict where the provider supports it, after a census of the callers that send extra keys",
+   "deps_met": false
+  },
+  {
+   "id": "RR-KEY-RUN-BUDGET",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-TOOL-WRITES-SEQUENTIAL"
+   ],
+   "title": "A typed per-turn run budget for KEY: a cap on tool calls executed per model response, and pinned worst-case model attempts per turn",
+   "deps_met": false
+  },
+  {
+   "id": "RR-TOOL-EFFECT-CLASS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S0-LAND-INFLIGHT"
+   ],
+   "title": "Every FLOW_TOOLS entry declares an effect class: READ only when provably read-only, unknown tools never READ (census spec)",
+   "deps_met": true
+  },
+  {
+   "id": "RR-TOOL-EFFECT-METADATA",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-TOOL-EFFECT-CLASS"
+   ],
+   "title": "FLOW_TOOLS declare idempotency, reversibility and contract version, and WRITE is refined into INTERNAL_WRITE, EXTERNAL_EFFECT, MONEY or DESTRUCTIVE (census spec)",
+   "deps_met": false
+  },
+  {
+   "id": "RR-TOOL-WRITES-SEQUENTIAL",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-TOOL-EFFECT-CLASS"
+   ],
+   "title": "Flow chat runs the writes of one model turn one at a time in model order; only reads run in parallel",
+   "deps_met": false
+  },
+  {
+   "id": "RR-DISPATCH-NO-BLIND-RETRY",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-TOOL-EFFECT-CLASS",
+    "W11-DISPATCH-REFUSAL-FINAL"
+   ],
+   "title": "Plan queue never re-runs a write after a generic error: the step is recorded OUTCOME_UNKNOWN for a person to check",
+   "deps_met": false
+  },
+  {
+   "id": "RR-DISPATCH-ATOMIC-CLAIM",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-DISPATCH-NO-BLIND-RETRY"
+   ],
+   "title": "Plan queue takes an atomic durable claim on the idempotency key before running a step (no find-then-execute)",
+   "deps_met": false
+  },
+  {
+   "id": "RR-MCP-TENANT-BOUND",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "MCP bridge is tenant-bound or off: a bridged call carries the business and runs only for a business the server config names",
+   "deps_met": true
+  },
+  {
+   "id": "RR-CONNECTOR-STACK-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Census ratchet of the two connector stacks (ConnectorRegistry and KeyConnector): every importer is listed with its v1 journey, a new one fails",
+   "deps_met": true
+  },
+  {
+   "id": "RR-CONNECTOR-CONFORMANCE",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-CONNECTOR-STACK-CENSUS",
+    "RR-OWNER-RULINGS-RECORD"
+   ],
+   "title": "Connector conformance harness: a platform env key or a stored row is not 'connected'; failed smoke tests write no status; unimplemented sync is never success",
+   "deps_met": false
+  },
+  {
+   "id": "RR-WEBHOOK-INGRESS-CENSUS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Inbound webhook census (verification, replay, tenant source) and the per-business social webhook bound to the business's own page",
+   "deps_met": true
+  },
+  {
+   "id": "RR-INTENT-PARSER-ONE-TOOL-LIST",
+   "step": 7,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "KEY-TOOL-ALLOWLIST",
+    "KEY-TOOL-DOMAIN-HIDE"
+   ],
+   "title": "IntentParser offers the model the same per-business v1 tool set as chat, derived from FLOW_TOOLS, not a hand-written list",
+   "deps_met": false
+  },
+  {
+   "id": "RR-LEGACY-TOOLS-CLASSIFY",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "TOF-FINANCE-CANONICAL-TOOLS",
+    "KEY-TOOL-ALLOWLIST"
+   ],
+   "title": "Classify the 14 legacy KeyToolRegistry tools against FLOW_TOOLS in a checked-in equivalence table; route the SAME/ALIAS ones canonically",
+   "deps_met": false
+  },
+  {
+   "id": "RR-LEGACY-FALLBACK-REMOVE",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-LEGACY-TOOLS-CLASSIFY"
+   ],
+   "title": "Remove KeyCommand's legacy-registry fallback and KeyToolRegistryService once every legacy tool is canonical or retired",
+   "deps_met": false
+  },
+  {
+   "id": "RR-GOAL-WRITER-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Goal writer census: every writer of AiGoal and BusinessGoal listed with its provenance source; a new writer fails",
+   "deps_met": true
+  },
+  {
+   "id": "RR-HEALTH-TIGHTENS-CONTROL",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Pure health-to-control step: degraded or unreadable health only tightens a KEY action's control requirement, adopted at the action boundary",
+   "deps_met": true
+  },
+  {
+   "id": "RR-KEY-SAFE-MODE",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-TOOL-EFFECT-CLASS",
+    "KEY-CRONS-FLAGS"
+   ],
+   "title": "KEY_SAFE_MODE: a partial, operator-set safe mode where KEY reads and answers but runs no write and no autonomous action",
+   "deps_met": false
+  },
+  {
+   "id": "RR-ACTION-UNDERSTANDING-SERVER",
+   "step": 4,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-PROPOSAL-RESULT-READER-SCOPE",
+    "FU-PROPOSAL-MONEY-TAG"
+   ],
+   "title": "Server ActionUnderstanding projection on every KEY proposal: phase, authority, outcome verified only from outcome evidence, reversibility",
+   "deps_met": false
+  },
+  {
+   "id": "RR-ACTION-UNDERSTANDING-WEB",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-ACTION-UNDERSTANDING-SERVER",
+    "TODAY-4BLOCK"
+   ],
+   "title": "Web renders KEY proposals from the server's ActionUnderstanding: real block reason, 'done' vs 'verified', confirm vs approve",
+   "deps_met": false
+  },
+  {
+   "id": "RR-ACTION-BOUNDARY-NEXT-CAPABILITY",
+   "step": 4,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-ACTION-UNDERSTANDING-SERVER"
+   ],
+   "title": "Adopt a second capability (commerce_send_invoice) into the action boundary so it leaves a fingerprint-bound outcome-evidence receipt",
+   "deps_met": false
+  },
+  {
+   "id": "RR-MIGRATION-UNDO-TABLE",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-OWNER-RULINGS-RECORD"
+   ],
+   "title": "Isolated migration: the key_undoable_actions table for durable KEY undo records, proven on a fresh database",
+   "deps_met": false
+  },
+  {
+   "id": "RR-UNDO-DURABLE",
+   "step": 3,
+   "priority": "P3",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-MIGRATION-UNDO-TABLE"
+   ],
+   "title": "KEY undo records are durable (database, business-scoped, atomic claim) instead of a 5-minute in-process Map",
+   "deps_met": false
+  },
+  {
+   "id": "RR-ACTION-INTENT-ONE-CLASSIFIER",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "One action-intent classifier for KEY: the six divergent action-verb regexes become one exported function, so 'cancel', 'refund', 'pay' and 'remove' open the actions layer on the Cortex path as they do on Flow",
+   "deps_met": true
+  },
+  {
+   "id": "RR-TRIAGE-RISK-FLOOR",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-ACTION-INTENT-ONE-CLASSIFIER",
+    "MEM-SALIENCE-SIGHT"
+   ],
+   "title": "Cognitive triage takes an optional risk context that can only raise the effort tier; a money or destructive request gets the deliberate budget on the tool path and never grants authority",
+   "deps_met": false
+  },
+  {
+   "id": "RR-SELFTUNE-CANDIDATE-ONLY",
+   "step": 3,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Remove KEY's unreachable self-tuning path that applies model-chosen changes to AI preferences directly, and pin that no service writes AI preferences or tuning memory from a model response",
+   "deps_met": true
+  },
+  {
+   "id": "RR-LEARNING-OUTCOME-SEMANTICS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "MEM-CENSUS"
+   ],
+   "title": "A tool's execution result is recorded as execution, not as the user's acceptance, and confidence calibration counts only real user responses",
+   "deps_met": false
+  },
+  {
+   "id": "RR-EVAL-HARNESS-NO-VACUOUS",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "KEY's eval harness cannot pass vacuously: a suite proves it fails on its target defect, NOT_RUN and INDETERMINATE are distinct from PASS, and an empty suite or empty run is not green",
+   "deps_met": true
+  },
+  {
+   "id": "RR-EVAL-RUN-LINEAGE",
+   "step": 3,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-EVAL-HARNESS-NO-VACUOUS"
+   ],
+   "title": "Every eval run records the suite version, a definition hash and the commit it ran on, and a suite whose assertions change without a version bump fails a ratchet",
+   "deps_met": false
+  },
+  {
+   "id": "RR-KEY-FAKE-MODEL-TRAJECTORY",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-UNIT-MOCK-ISOLATION"
+   ],
+   "title": "A scripted fake model and a trajectory recorder for KEY's Flow turn, so tests assert which tools were offered, what the model proposed, the authority decision and the effect, with no network",
+   "deps_met": true
+  },
+  {
+   "id": "RR-COG-RUNTIME-ENTRY-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Census of every entry that starts a KEY cognitive turn or offers tools to a model, with its runtime, who may reach it and its authority path; a spec fails on an unregistered entry",
+   "deps_met": true
+  },
+  {
+   "id": "RR-APPROVAL-MODEL-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Census of every writer of KEY proposals, AI approval items, approval requests and Flow-bound confirmations, with what each approval gates and who may clear it; a spec fails on an unregistered writer",
+   "deps_met": true
+  },
+  {
+   "id": "RR-REFLECTION-HONEST",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "MEM-CENSUS"
+   ],
+   "title": "KEY's reflection maintenance stops reporting work it did not do, and the in-process dream journal is bounded and labelled unpersisted",
+   "deps_met": false
+  },
+  {
+   "id": "RR-MIGRATION-CASH-TARGET",
+   "step": 3,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-OWNER-RULINGS-RECORD"
+   ],
+   "title": "Isolated migration: Business.cashRunwayTargetMonths (nullable Float), proven on a fresh database",
+   "deps_met": false
+  },
+  {
+   "id": "RR-CASH-TARGET",
+   "step": 5,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-MIGRATION-CASH-TARGET",
+    "W11-RUNWAY-LEDGER-CASH"
+   ],
+   "title": "Owner-set cash runway target: the 'Protect cash runway' money move fires against the business's own target instead of a hard-coded three months, revenue-scoped and suggestion-only",
+   "deps_met": false
+  },
+  {
+   "id": "RR-LANGFUSE-INGESTION-CUTOVER",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "AI trace export leaves Langfuse's legacy /api/public/ingestion for OTLP/HTTP traces; exporter failures are counted and visible; business id is no longer sent as the user id",
+   "deps_met": true
+  },
+  {
+   "id": "RR-AI-TRACE-ATTEMPTS-CORRELATION",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-LANGFUSE-INGESTION-CUTOVER"
+   ],
+   "title": "The model gateway traces every attempt, including the failed and fallen-back ones, under one trace id per gateway call, with the caller's correlation id when it has one",
+   "deps_met": false
+  },
+  {
+   "id": "RR-SLO-AVAILABILITY-LEDGER",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Written availability objectives for the two probed endpoints, and the uptime monitor reports 30-day availability and remaining error budget against them",
+   "deps_met": true
+  },
+  {
+   "id": "RR-ERROR-CAPSULE",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Every recorded server failure carries a small reproduction capsule: release sha, replica, last correlation id and failure class",
+   "deps_met": true
+  },
+  {
+   "id": "RR-SECURITY-SIGNAL-COUNTERS",
+   "step": 4,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Runtime counters for security signals (bearer verification failures, cross-business refusals, webhook signature failures), visible to the platform super-admin",
+   "deps_met": true
+  },
+  {
+   "id": "RR-INTEGRITY-WATCH",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Read-only integrity check for impossible cross-business states between a row and its parent, served on demand to the platform super-admin",
+   "deps_met": true
+  },
+  {
+   "id": "RR-CRON-OCCURRENCE-LOCK",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "A scheduled job occurrence is claimed once across replicas and restarts; a census fails on any new @Cron that is neither claimed nor registered as idempotent",
+   "deps_met": true
+  },
+  {
+   "id": "RR-JOB-TENANT-CONTEXT",
+   "step": 4,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Per-business background work runs inside a tenant context so the Prisma tenant extension scopes it; a census lists every background entry point's tenancy mode",
+   "deps_met": true
+  },
+  {
+   "id": "RR-STATUS-PATCH-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Census of every generic update route that can write a lifecycle status, each registered as transition-checked, decision-refused or free label; a new unregistered one fails",
+   "deps_met": true
+  },
+  {
+   "id": "RR-CHANGE-ORDER-APPROVE-COMMAND",
+   "step": 4,
+   "priority": "P2",
+   "size": "S",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-STATUS-PATCH-CENSUS"
+   ],
+   "title": "Change orders are approved and rejected through commands that record the real approver; PATCH can no longer set a decision status or a client-chosen approvedBy",
+   "deps_met": false
+  },
+  {
+   "id": "RR-DEAD-EVENT-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "The event-wiring ratchet covers the other direction: no new event may be emitted with nothing listening, bridged or registered as intentionally publish-only",
+   "deps_met": true
+  },
+  {
+   "id": "RR-AUTHORITY-SHADOW-PARITY",
+   "step": 4,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-SECURITY-SIGNAL-COUNTERS"
+   ],
+   "title": "Evidence for the effective-authority cutover: a base-envelope parity matrix against the legacy guard on Postgres, and shadow mismatches counted, not only warn-logged",
+   "deps_met": false
+  },
+  {
+   "id": "RR-FORWARDREF-RATCHET",
+   "step": 3,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "forwardRef ratchet: the count of forwardRef module/provider cycles in server source may fall, never rise, and no new file may introduce one",
+   "deps_met": true
+  },
+  {
+   "id": "RR-WEB-CLIENT-RATCHET",
+   "step": 3,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "lib/client.ts ratchet: no new web file may import the monolithic client; the importer list may only shrink",
+   "deps_met": true
+  },
+  {
+   "id": "RR-KEY-CORTEX-SIZE-RATCHET",
+   "step": 3,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "key-cortex size ratchet: its source file count and largest-file line counts may fall, never rise",
+   "deps_met": true
+  },
+  {
+   "id": "RR-UNUSED-MODEL-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Census of Prisma models no code reads or writes; the list may shrink, and a new model with no reader or writer fails",
+   "deps_met": true
+  },
+  {
+   "id": "RR-ARCH-SCAN-CI",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-ARCH-MAP-REFRESH"
+   ],
+   "title": "CI runs the deterministic architecture scanners on each PR and reports the map diff (report-only; blocking needs an owner ruling)",
+   "deps_met": false
+  },
+  {
+   "id": "RR-BANK-TOKEN-ENCRYPT",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "BankConnection.accessToken is encrypted at rest like every other provider token column, and the secret-column census can no longer miss an *AccessToken column",
+   "deps_met": true
+  },
+  {
+   "id": "RR-DB-CRYPTO-KEY-CENSUS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Read-only census of which key every enc:v1: value was encrypted under, so the production key guard can be landed on evidence",
+   "deps_met": true
+  },
+  {
+   "id": "RR-DB-CRYPTO-PROD-GUARD",
+   "step": 3,
+   "priority": "P1",
+   "size": "XS",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-DB-CRYPTO-KEY-CENSUS",
+    "RR-OWNER-RULINGS-RECORD"
+   ],
+   "title": "packages/db token encryption refuses the in-repo fallback key in production (lands only on the owner's evidence)",
+   "deps_met": false
+  },
+  {
+   "id": "RR-BUSINESS-EVENT-REDACT",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "BusinessEventService.emit/emitBatch and ContactAuditService redact secret-named fields at the write, as the interceptor already does",
+   "deps_met": true
+  },
+  {
+   "id": "RR-ERASURE-BUSINESS-EVENTS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "The GDPR forget purge also scrubs the person's data from business_events (D-25)",
+   "deps_met": true
+  },
+  {
+   "id": "RR-ADMIN-LOGOUT",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Platform admin sign-out exists, and no sign-out leaves the admin bearer behind (it outranks every user token)",
+   "deps_met": true
+  },
+  {
+   "id": "RR-ADMIN-SHELL-SERVER-GATE",
+   "step": 7,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-ADMIN-LOGOUT"
+   ],
+   "title": "/admin pages are refused at the edge without an unexpired admin session cookie (the API stays the authority)",
+   "deps_met": false
+  },
+  {
+   "id": "RR-SESSION-STORAGE-CENSUS",
+   "step": 7,
+   "priority": "P3",
+   "size": "XS",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-ADMIN-LOGOUT"
+   ],
+   "title": "Census of every browser-readable place the web app stores a credential; a spec fails on a new one",
+   "deps_met": false
+  },
+  {
+   "id": "RR-RETENTION-EXPIRED-EXPORTS",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Expired or consumed contact export bundles are deleted from storage on the privacy scheduler, not kept forever",
+   "deps_met": true
+  },
+  {
+   "id": "RR-OBJECT-STORAGE-POSTURE-CHECK",
+   "step": 7,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Diagnostics reports whether the object-storage bucket is public and whether default encryption is on, before any upload header changes",
+   "deps_met": true
+  },
+  {
+   "id": "RR-SCRIPT-SPECS-IN-CI",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Every scripts/** node:test spec runs in a workflow, or is exempt with a reason (the agent-memory tests run nowhere today)",
+   "deps_met": true
+  },
+  {
+   "id": "RR-CI-REQUIRED-JOBS-AGGREGATE",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-SCRIPT-SPECS-IN-CI"
+   ],
+   "title": "One 'CI verdict' job that is red when any gating CI job failed, was skipped or was cancelled",
+   "deps_met": false
+  },
+  {
+   "id": "RR-GATE-LEDGER-MONOTONIC",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-SCRIPT-SPECS-IN-CI"
+   ],
+   "title": "CI compares every registered shrink-only ledger and floor ratchet between base and head and goes red when one moves the wrong way",
+   "deps_met": false
+  },
+  {
+   "id": "RR-GATE-LEDGER-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-SCRIPT-SPECS-IN-CI"
+   ],
+   "title": "Every file that declares a shrink-only ledger or ratchet is registered in ledger-sizes.mjs, or exempt with a reason",
+   "deps_met": false
+  },
+  {
+   "id": "RR-BUNDLE-RULING-CONFLICTS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "docs",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-SCRIPT-SPECS-IN-CI"
+   ],
+   "title": "The context bundle reports rulings that supersede, refine or widen the rulings a packet cites",
+   "deps_met": false
+  },
+  {
+   "id": "RR-BUNDLE-PROOF-PROFILE",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "docs",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-SCRIPT-SPECS-IN-CI"
+   ],
+   "title": "The context bundle attaches the matching research proof profile (fastest falsification, adversarial cases) by recorded rules, or says none matched",
+   "deps_met": false
+  },
+  {
+   "id": "RR-HOTSPOT-SCANNER",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "docs",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-SCRIPT-SPECS-IN-CI"
+   ],
+   "title": "Offline git-history hotspots (churn, fix density, co-change) computed per packet write set and shown in the bundle",
+   "deps_met": false
+  },
+  {
+   "id": "RR-STATUS-REVIEW-CYCLES",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "docs",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-SCRIPT-SPECS-IN-CI"
+   ],
+   "title": "V1-STATUS counts the review-repair and post-merge fix commits each packet needed, as far as main shows them",
+   "deps_met": false
+  },
+  {
+   "id": "RR-HOOK-PACKET-SCOPE",
+   "step": 3,
+   "priority": "P3",
+   "size": "M",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-SCRIPT-SPECS-IN-CI"
+   ],
+   "title": "Edits outside a packet's write set are flagged at edit time on pkt/V1-* branches, and a scope report lists them for the merge check",
+   "deps_met": false
+  },
+  {
+   "id": "RR-INDEX-COVERAGE-REPORT",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Census: every tenant model has an index led by businessId, or is acknowledged in a shrink-only list (first slice of the access-path audit)",
+   "deps_met": true
+  },
+  {
+   "id": "RR-ERASE-BUSINESS-TWO-STEP",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-OWNER-RULINGS-RECORD"
+   ],
+   "title": "Whole-business GDPR erasure needs a second, deliberate act and leaves a durable record (form set by the owner's answer)",
+   "deps_met": false
+  },
+  {
+   "id": "RR-STATUS-STALL-REPORT",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-SCRIPT-SPECS-IN-CI"
+   ],
+   "title": "V1-STATUS reports packets that have been ready for longer than a budget without landing (stall signal from main alone)",
+   "deps_met": false
+  },
+  {
+   "id": "RR-OAUTH-PKCE-GOOGLE-MICROSOFT",
+   "step": 4,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-PROVIDER-OUTAGE-CONNECT"
+   ],
+   "title": "Google Suite and Microsoft OAuth use PKCE (S256), with the verifier derived from the signed state so no new store is needed",
+   "deps_met": true
+  },
+  {
+   "id": "RR-PRIVACY-DELETED-CONTACT-GATES",
+   "step": 4,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-ERASURE-BUSINESS-EVENTS"
+   ],
+   "title": "A soft-deleted or forget-pending contact is neither exported nor emailed",
+   "deps_met": false
+  },
+  {
+   "id": "RR-FORGET-CANCEL-KEEPS-PRIOR-DELETE",
+   "step": 4,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-PRIVACY-DELETED-CONTACT-GATES"
+   ],
+   "title": "Cancelling a forget request restores only what the forget request deleted",
+   "deps_met": false
+  },
+  {
+   "id": "FU-VITEST-DECORATOR-METADATA",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Server tests run with decorator metadata, so DTO validation is exercised the way production runs it",
+   "deps_met": true
+  },
+  {
+   "id": "FU-TIMELINE-CALLERS-SCOPE",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-TEMPORAL-FLOW-INBOX-SCOPE"
+   ],
+   "title": "Every member-facing reader of the temporal-flow timeline applies the reader's module filter",
+   "deps_met": false
+  },
+  {
+   "id": "FU-UNTRUSTED-INBOUND-FENCE",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-UNTRUSTED-CONTENT-FENCE"
+   ],
+   "title": "Customer messages (email, WhatsApp, CRM) reach KEY's prompts only inside the untrusted-content fence",
+   "deps_met": false
+  },
+  {
+   "id": "FU-STORE-ORDERS-MONEY-SCOPE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-SITE-ANALYTICS-REVENUE-SCOPE"
+   ],
+   "title": "Store order lists and order detail withhold money fields from readers without revenue read",
+   "deps_met": true
+  },
+  {
+   "id": "FU-ATTACHMENT-PERSIST-SEPARATE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-UNTRUSTED-CONTENT-FENCE"
+   ],
+   "title": "Chat attachments are saved apart from the member's own text and replayed as their own fenced message",
+   "deps_met": false
   }
  ]
 }

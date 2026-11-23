@@ -55,17 +55,12 @@ describe('inventory has a door of its own', () => {
     expect(nav).toMatch(/label: "Inventory", href: "\/app\/inventory"/);
   });
 
-  it('and the disclosure allowlists know the label, or it is hidden again', () => {
-    // The failure mode this repeats: a nav label absent from MODE_OPERATE_ITEMS
-    // is filtered out silently, and `.filter(s => s.items.length > 0)` then
-    // drops the whole section. That is how the default nav once showed three
-    // items.
-    const modes = read(WEB_SRC, 'lib', 'disclosure-mode.ts');
-    const growth = modes.slice(modes.indexOf('growth: ['), modes.indexOf('enterprise: ['));
-    const enterprise = modes.slice(modes.indexOf('enterprise: ['));
-
-    expect(growth).toMatch(/"Inventory"/);
-    expect(enterprise).toMatch(/"Inventory"/);
+  it('and it sits in the Sales hub, where stock belongs beside what you sell (NAV-A1)', async () => {
+    // The disclosure allowlists that once hid it are gone (NAV-A1, D-150); the hub that holds it is
+    // Sales, shown to every business that sells products.
+    const { hubNav } = await import('../nav-config');
+    const sales = hubNav.find((h) => h.id === 'sales');
+    expect(sales?.items.map((i) => i.href)).toContain('/app/inventory');
   });
 });
 

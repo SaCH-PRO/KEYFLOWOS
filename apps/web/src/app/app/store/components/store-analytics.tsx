@@ -57,11 +57,10 @@ export function StoreAnalyticsDashboard({ businessId }: Props) {
           value: analytics.bookings.total.toLocaleString(),
           icon: Calendar,
         },
-        {
-          label: "Revenue (Period)",
-          value: formatPrice(analytics.revenue.inPeriod),
-          icon: DollarSign,
-        },
+        // D-100: the server leaves revenue out for a member without revenue read; no tile then.
+        ...(analytics.revenue
+          ? [{ label: "Revenue (Period)", value: formatPrice(analytics.revenue.inPeriod), icon: DollarSign }]
+          : []),
         {
           label: "Bookings (Period)",
           value: analytics.bookings.inPeriod.toLocaleString(),
@@ -242,8 +241,12 @@ export function StoreAnalyticsDashboard({ businessId }: Props) {
 
               <div>
                 {analytics && [
-                  { label: "Invoices (Period)", value: analytics.invoices.inPeriod.toLocaleString() },
-                  { label: "Invoices (Total)", value: analytics.invoices.total.toLocaleString() },
+                  ...(analytics.invoices
+                    ? [
+                        { label: "Invoices (Period)", value: analytics.invoices.inPeriod.toLocaleString() },
+                        { label: "Invoices (Total)", value: analytics.invoices.total.toLocaleString() },
+                      ]
+                    : []),
                   { label: "Products", value: analytics.catalog.products.toLocaleString() },
                   { label: "Services", value: analytics.catalog.services.toLocaleString() },
                   { label: "Last 7 Days Bookings", value: analytics.bookings.last7Days.toLocaleString() },

@@ -32,6 +32,7 @@ import { BusinessContextService } from './business-context.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { memberModuleLevels } from '../../core/auth/member-module-level';
 import { SupabaseAdminService } from '../../core/auth/supabase-admin.service';
 import {
   LOGOUT_REVOCATION_TTL_SECONDS,
@@ -857,6 +858,18 @@ export class IdentityController {
   @Get('businesses/:businessId')
   getBusiness(@Param('businessId') businessId: string, @CurrentUser() user?: AuthenticatedUser) {
     return this.identity.getBusiness(businessId, user ?? null);
+  }
+
+  /**
+   * NAV-A1 (owner rulings D-150 'hubs', D-179 'legacyaccess'): the caller's own level on every module of this
+   * business, read as ModuleScopeGuard reads it (memberModuleLevels), so the web's menu offers a member only the
+   * hubs their scopes open (journey J5). Any member of the business (BusinessGuard); it answers nothing about anyone
+   * else and grants nothing: every route is still guarded.
+   */
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/my-access')
+  async myModuleAccess(@Param('businessId') businessId: string, @CurrentUser() user?: AuthenticatedUser) {
+    return { modules: await memberModuleLevels(this.prisma, businessId, user ?? null) };
   }
 
   /**

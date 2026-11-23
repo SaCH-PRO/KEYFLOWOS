@@ -168,6 +168,24 @@ export class StorefrontConversionService {
   }
 
   /**
+   * FU-SITE-ANALYTICS-REVENUE-SCOPE (owner rulings D-100, D-234; security
+   * review M2): the daily funnel rows as the member asking may see them. Below
+   * revenue read each row is served without `revenue` (payment.completed
+   * totals) and `orders` (store_order.created counts: sales volume); views,
+   * cart adds, checkouts, bookings and the row's identity stay. `readsRevenue`
+   * is the caller's reading of the member's level (SiteService.readsRevenue).
+   */
+  async getFunnelForReader(
+    businessId: string,
+    readsRevenue: boolean,
+    options?: { from?: Date; to?: Date; kind?: ConversionKind; refId?: string },
+  ) {
+    const rows = await this.getFunnel(businessId, options);
+    if (readsRevenue) return rows;
+    return rows.map(({ revenue: _revenue, orders: _orders, ...row }) => row);
+  }
+
+  /**
    * Read funnel for a business across a time range (defaults to last 30 days).
    * Used by /conversion-funnel endpoints.
    */

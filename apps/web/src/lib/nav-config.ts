@@ -38,7 +38,6 @@ import {
   Bot,
   MessageSquare,
   Code,
-  Plug,
   Mail,
   FileText,
   RefreshCw,
@@ -55,9 +54,56 @@ import {
   Wallet,
   Dna,
   Landmark,
+  Settings,
 } from "lucide-react";
 import type { DormantFeatureFlagKey } from "./feature-flags";
+import type { BusinessHub, BusinessSells } from "./business-settings";
 import { NAV_ROUTE_LABELS } from "./semantic-routes";
+
+/**
+ * The app's navigation (NAV-A1; owner rulings D-150 'hubs', D-151 'labels', D-152 'hide', D-179 'legacyaccess').
+ *
+ * Seven hubs that fit what the business sells: Today, Customers, Sales, Schedule, Money, Your page and Settings.
+ * The desktop menu shows the hubs; the phone's bottom bar is Today, two hubs, New and More (bottomBarFor); every
+ * other screen is under More, grouped by hub and then by area. What decides what shows:
+ *   - what the business sells (useBusinessSettings().sells, stored on the business, BIZ-SETTINGS-WEB): a products
+ *     business has no Schedule hub;
+ *   - what the member may open: each hub and entry names the module scope that opens it (`module`), and an entry is
+ *     shown only when the member's level on it is read or more (GET identity/businesses/:b/my-access, read as
+ *     ModuleScopeGuard reads it). An answer that has not landed or failed hides nothing (WOS-R1): the server still
+ *     refuses every route the member may not use.
+ * The disclosure modes (startup / growth / enterprise) are gone: a per-browser label allowlist that hid most of the
+ * app more than once (see the disclosure spec in lib/__tests__).
+ *
+ * Every href is the final URL (nav-reachability.spec.ts): never a next.config redirect source and never a page that
+ * only forwards. /app/money and /app/settings only forward today, so the Money and Settings hubs name
+ * /app/financial-flow and /app/settings/business until NAV-A2 makes both real indexes.
+ *
+ * NAV-B-HIDE hides the screens v1 does not promise (D-152); until then they stay reachable under More.
+ */
+
+/** A module scope a nav entry needs read access on (core/authority/module-vocabulary.ts on the server). */
+export type NavModule =
+  | "crm"
+  | "revenue"
+  | "bookings"
+  | "storefront"
+  | "settings"
+  | "analytics"
+  | "operations"
+  | "expenses"
+  | "team"
+  | "projects"
+  | "content"
+  | "automations";
+
+export type AccessLevel = "none" | "read" | "write" | "admin";
+
+/**
+ * The member's level per module in the selected business, as the server answered it; null when unknown (no answer
+ * yet, a failed read). A module the answer does not name is unknown too.
+ */
+export type ModuleLevels = Partial<Record<string, AccessLevel>> | null;
 
 export interface ResolvedFeatureFlag {
   key: string;
@@ -74,13 +120,17 @@ export interface NavItem {
   matchTab?: string;
   /**
    * With matchTab: the entry lights only on this ?view of that tab
-   * (W9-WEB-COMMERCE-NAV). Quotes is the pipeline tab's quotes view, so it
-   * stays dark on the pipeline's other views.
+   * (W9-WEB-COMMERCE-NAV).
    */
   matchView?: string;
   exactMatch?: boolean;
   featureKey?: string;
   dormantFlag?: DormantFeatureFlagKey;
+  /**
+   * The module scope(s) its page's server reads require (every one named must be open to the member); a hub entry
+   * without one takes its hub's. nav-member-scope.spec.ts holds the cited table (controller path:line or D-179).
+   */
+  module?: NavModule | NavModule[];
 }
 
 /**
@@ -89,8 +139,7 @@ export interface NavItem {
  * matchView, that ?view); an exactMatch entry on its path with no ?tab; any
  * other on its path or below it. `search` is the current search params, read
  * reactively by the caller so a search-param-only navigation re-lights the
- * rail (W9-WEB-COMMERCE-NAV: the shell kept the tab it read on the last
- * pathname change).
+ * rail (W9-WEB-COMMERCE-NAV).
  */
 export function isNavItemActive(
   item: NavItem,
@@ -114,113 +163,87 @@ export interface NavSection {
   label: string;
   icon: LucideIcon;
   items: NavItem[];
-}
-
-export type DrawerSurface = "operate" | "build" | "me" | null;
-
-export interface PrimaryNavItem {
-  id: string;
-  label: string;
-  icon: LucideIcon;
+  /** A hub's section: its heading opens the hub's own page. */
   href?: string;
 }
 
+/** The desktop rail's drawers: "operate" is the More drawer (every section), "me" the member's own. */
+export type DrawerSurface = "operate" | "build" | "me" | null;
+
+/** A hub: its own page (href), the module that opens it (none for Today), and the screens it holds. */
+export interface HubNavItem {
+  id: BusinessHub;
+  label: string;
+  href: string;
+  icon: LucideIcon;
+  module?: NavModule;
+  items: NavItem[];
+  /** Other paths that belong to the hub, for its active state. */
+  alsoActiveOn?: string[];
+}
+
 // ============================================================================
-// PRIMARY RAIL
+// THE SEVEN HUBS (D-150, D-151)
 // ============================================================================
 
-export const primaryNav: PrimaryNavItem[] = [
-  // Label under decision D-09 — see NAV_ROUTE_LABELS in semantic-routes.ts.
-  { id: "cockpit", label: NAV_ROUTE_LABELS["/app/command-center"], icon: Zap, href: "/app/command-center" },
-  { id: "key-chat", label: "KEY", icon: Bot, href: "/app/key/chat" },
-  { id: "operate", label: "Operate", icon: Briefcase },
-  { id: "build", label: "Build", icon: Wrench },
-  { id: "me", label: "Me", icon: User },
-];
-
-// ============================================================================
-// OPERATE — Where you do your work
-// Grouped by utility & frequency (see docs/UI_MODULE_MAP_AND_IA_REVIEW.md):
-// daily-use surfaces first, dormant/placeholder surfaces stay out.
-// ============================================================================
-
-export const operateSections: NavSection[] = [
+export const hubNav: HubNavItem[] = [
+  { id: "today", label: NAV_ROUTE_LABELS["/app/command-center"], href: "/app/command-center", icon: Zap, items: [] },
   {
-    id: "key",
-    label: "KEY",
-    icon: Bot,
+    id: "customers", label: "Customers", href: "/app/crm/contacts", icon: Users, module: "crm",
+    alsoActiveOn: ["/app/crm"],
     items: [
-      { label: "Chat", href: "/app/key/chat", icon: MessageSquare },
-      { label: "Inbox", href: "/app/key-inbox", icon: Inbox },
-      { label: "Worker", href: "/app/key", icon: Bot },
-      { label: "Autonomy", href: "/app/key-autonomy", icon: CheckSquare },
-      { label: "Modes", href: "/app/key-modes", icon: BrainCircuit },
-      { label: "Data Inbox", href: "/app/data-inbox", icon: Layers },
-      { label: "Capture", href: "/app/capture", icon: Camera },
+      { label: "Deals", href: "/app/crm/deals", icon: TrendingUp },
+      // Companies, as distinct from the people at them; one entry also opens the [accountId] detail.
+      { label: "Companies", href: "/app/crm/accounts", icon: Building },
+      { label: "Segments", href: "/app/people-flow", icon: Contact },
+      { label: "Sequences", href: "/app/crm/sequences", icon: Send },
+      { label: "Support", href: "/app/helpdesk", icon: Headset },
+      { label: "Calls", href: "/app/call-tasks", icon: MessageCircle, dormantFlag: "salesPack" },
+      { label: "Customer insights", href: "/app/crm/intelligence", icon: Brain },
+      { label: "Data quality", href: "/app/crm/data-quality", icon: ShieldCheck },
+      { label: "Duplicates", href: "/app/crm/duplicates", icon: Layers },
+      { label: "Relationship map", href: "/app/crm/network", icon: Share2 },
+      // At-risk contacts, due tasks, next actions, the presence funnel.
+      { label: "Customer dashboard", href: "/app/crm/dashboard", icon: LayoutDashboard },
+      // The sales reps' revenue and commissions: its read (GET conversion/.../sales-reps) carries no scope on the server
+      // but answers PAID invoice totals per rep, so it needs revenue as well as customers (review: server follow-up).
+      { label: "Rep performance", href: "/app/sales-team", icon: Users, module: ["crm", "revenue"] },
     ],
   },
   {
-    id: "money",
-    label: "Money",
-    icon: Banknote,
+    // Label under D-151 (NAV_ROUTE_LABELS["/app/commerce"]). The pipeline and its quotes view are not doors here:
+    // MOUNT-QUOTES makes Quotes a tab of Sales.
+    id: "sales", label: NAV_ROUTE_LABELS["/app/commerce"], href: "/app/commerce", icon: Receipt, module: "revenue",
     items: [
-      { label: "Overview", href: "/app/financial-flow", icon: Banknote },
-      // Label under decision D-09 (NAV_ROUTE_LABELS["/app/commerce"]). Kept as
-      // a literal on purpose: nav-destinations.spec.ts and disclosure-mode.spec.ts
-      // read item labels and hrefs from this source as string literals, and a
-      // constant here would drop /app/commerce out of those gates. disclosure-mode.ts
-      // reads the constant, so a D-09 ruling is the constant plus this line;
-      // nav-labels-agree.spec.ts fails if this drifts from the constant.
-      { label: "Sales", href: "/app/commerce", icon: Receipt },
-      // Doors to the two documents an owner sends (CF-20). Invoices has its own
-      // hub; quotes have no page of their own and live in the pipeline tab,
-      // which opens its quotes view for ?view=quotes (finance-pipeline.tsx).
-      // Both are allowlisted in every disclosure mode, so the default (startup)
-      // nav shows them. The commerce page follows ?tab and the pipeline ?view
-      // while mounted, so Quotes works from the other tabs and from the
-      // pipeline's other views; it lights only on the quotes view (matchView),
-      // and the rail follows the search params (W9-WEB-COMMERCE-NAV).
       { label: "Invoices", href: "/app/commerce/invoices", icon: Receipt },
-      { label: "Quotes", href: "/app/commerce?tab=pipeline&view=quotes", icon: FileText, matchTab: "pipeline", matchView: "quotes" },
-      // The gateway console — transactions, links, refunds across three
-      // providers — sits under /app/commerce, so the drawer reached its
-      // subtree but never named it.
-      { label: "Payment gateway", href: "/app/commerce/gateway", icon: Landmark },
-      // Stock is money you have already spent and not yet earned back, so it
-      // belongs beside Sales rather than in a systems menu. It had no nav entry
-      // at all until 2026-08-07 — the command centre was a tab inside a
-      // dormant-flagged marketplace page, behind a redirect to a tab that did
-      // not exist.
+      // Stock is money spent and not yet earned back, so it sits beside what you sell.
       { label: "Inventory", href: "/app/inventory", icon: Boxes },
-      // A 792-line operations console over three gateways -- transactions,
-      // payment links, refunds -- that was never linked from anywhere.
+      // The gateway console: transactions, links, refunds across three providers.
+      { label: "Payment gateway", href: "/app/commerce/gateway", icon: Landmark },
+    ],
+  },
+  {
+    id: "schedule", label: "Schedule", href: "/app/schedule/calendar", icon: CalendarDays, module: "bookings",
+    alsoActiveOn: ["/app/calendar", "/app/schedule"],
+    items: [
+      { label: "Bookings", href: "/app/bookings", icon: Calendar },
+      { label: "Timeline", href: "/app/temporal-flow", icon: Clock },
+    ],
+  },
+  {
+    id: "money", label: "Money", href: "/app/financial-flow", icon: Banknote, module: "revenue",
+    alsoActiveOn: ["/app/money", "/app/finance"],
+    items: [
       { label: "Payments", href: "/app/payments", icon: CreditCard },
-      { label: "Expenses", href: "/app/expenses", icon: Receipt },
-      // One entry opens four routes: the request list, /new, /suppliers and
-      // the [requestId] detail. Purchasing is money leaving on a promise, so
-      // it belongs beside Expenses rather than in an operations menu.
-      { label: "Purchasing", href: "/app/procurement", icon: Truck },
-      // Recurring client fees. The periods -> hours -> invoice loop is still
-      // thin, but the register itself is real and reads live data.
+      { label: "Expenses", href: "/app/money/expenses", icon: Receipt, module: "expenses" },
+      // Purchasing is money leaving on a promise. Every procurement route needs operations (D-40).
+      { label: "Purchasing", href: "/app/procurement", icon: Truck, module: "operations" },
       { label: "Retainers", href: "/app/retainers", icon: RefreshCw },
-      { label: "Budgets", href: "/app/budgeting", icon: Target },
-      // Staff pay: a 319-line run/approve console that arrived with no door.
-      { label: "Payroll", href: "/app/payroll", icon: Wallet },
-      { label: "Reports", href: "/app/reports", icon: BarChart3 },
-
-      // ── The books ────────────────────────────────────────────────────────
-      //
-      // A complete double-entry engine — 43 service files behind these — that
-      // no user could reach. /app/finance and its sub-routes were absent from
-      // this file entirely, so the chart of accounts, the ledger, bank
-      // reconciliation, the tax rollup and the period close were built, tested
-      // and then left with no door. It is the single most valuable thing in the
-      // repository and it was the least reachable.
-      //
-      // "Accounts & tax setup" comes FIRST deliberately: it is where the chart
-      // of accounts and tax rates are defined, and the seven rows below it are
-      // unusable until that exists. Ordering here is onboarding order, not
-      // alphabetical.
+      { label: "Budgets", href: "/app/budgeting", icon: Target, module: "expenses" },
+      { label: "Payroll", href: "/app/payroll", icon: Wallet, module: "operations" },
+      // The report reads need revenue; D-179 also keeps Reports from a member with no analytics entry.
+      { label: "Reports", href: "/app/reports", icon: BarChart3, module: ["revenue", "analytics"] },
+      // The books. "Accounts & tax setup" first: the rows below it are unusable until it exists.
       { label: "Accounts & tax setup", href: "/app/finance/settings", icon: Cog },
       { label: "Reconcile bank", href: "/app/finance/reconciliation", icon: RefreshCw },
       { label: "Tax", href: "/app/finance/tax", icon: Scale },
@@ -230,52 +253,71 @@ export const operateSections: NavSection[] = [
       { label: "Trial balance", href: "/app/finance/trial-balance", icon: BarChart3 },
       { label: "Recurring journals", href: "/app/finance/recurring-journals", icon: RefreshCw },
       { label: "Assets & depreciation", href: "/app/finance/fixed-assets", icon: Building },
-      // Four more screens that were built against real services and left with
-      // no door, in the same way the eight above were until 2026-08-07.
       { label: "Bank rules", href: "/app/finance/bank-rules", icon: RefreshCw },
       { label: "Credit notes", href: "/app/finance/credit-notes", icon: Receipt },
       { label: "Exchange rates", href: "/app/finance/exchange-rates", icon: Globe },
-      // Pushes invoices and customers to QuickBooks/Xero. 418 lines, and two
-      // KEY tools already treat it as the manual path.
-      { label: "Accounting sync", href: "/app/accounting", icon: Calculator },
+      // QuickBooks / Xero sync (/app/accounting forwards here).
+      { label: "Accounting sync", href: "/app/money/books", icon: Calculator },
     ],
   },
   {
-    id: "customers",
-    label: "Customers",
-    icon: Users,
+    id: "page", label: "Your page", href: "/app/store", icon: Store, module: "storefront",
     items: [
-      { label: "Overview", href: "/app/people-flow", icon: Users },
-      { label: "Contacts", href: "/app/crm/contacts", icon: Contact },
-      { label: "Deals", href: "/app/crm/deals", icon: TrendingUp },
-      { label: "Sequences", href: "/app/crm/sequences", icon: Send },
-      { label: "Support", href: "/app/helpdesk", icon: Headset },
-      { label: "Calls", href: "/app/call-tasks", icon: MessageCircle, dormantFlag: "salesPack" },
-      { label: "Insights", href: "/app/crm/intelligence", icon: Brain },
-      // Companies, as distinct from the people at them. One entry also opens
-      // the [accountId] detail route.
-      { label: "Accounts", href: "/app/crm/accounts", icon: Building },
-      // 560 lines over three real endpoints (issues, stats, a fix wizard),
-      // and its sibling merge tool. A CRM silently rots without these and
-      // neither had a door.
-      { label: "Data quality", href: "/app/crm/data-quality", icon: ShieldCheck },
-      { label: "Duplicates", href: "/app/crm/duplicates", icon: Layers },
-      { label: "Relationship map", href: "/app/crm/network", icon: Share2 },
-      // 330 lines over ten endpoints — at-risk contacts, due tasks, next
-      // actions, the presence funnel. Distinct from "Overview" above, which
-      // reads people segments; checked before linking.
-      { label: "Dashboard", href: "/app/crm/dashboard", icon: LayoutDashboard },
-      { label: "Sales team", href: "/app/sales-team", icon: Users },
+      // Its overview (unscoped on the server) answers the business's paid invoice and order revenue, so it needs
+      // revenue as well as the hub's storefront (security review; server follow-up: project kpis.revenue).
+      { label: "Presence", href: "/app/presence", icon: Globe, module: ["storefront", "revenue"] },
+      // What a client sees when you share work with them.
+      { label: "Client portal", href: "/app/portal", icon: Globe },
     ],
   },
   {
-    id: "schedule",
-    label: "Schedule",
-    icon: CalendarDays,
+    id: "settings", label: "Settings", href: "/app/settings/business", icon: Settings, module: "settings",
+    alsoActiveOn: ["/app/settings", "/app/profile", "/app/genome", "/app/structure", "/app/key-connect", "/app/templates", "/app/trash"],
     items: [
-      { label: "Overview", href: "/app/temporal-flow", icon: Clock },
-      { label: "Calendar", href: "/app/calendar", icon: CalendarDays },
-      { label: "Bookings", href: "/app/bookings", icon: Calendar },
+      { label: "Business profile", href: "/app/profile", icon: BrainCircuit },
+      { label: "Business Genome", href: "/app/genome", icon: Dna },
+      { label: "Plan & billing", href: "/app/settings/billing", icon: CreditCard },
+      { label: "Team", href: "/app/settings/team", icon: Users, module: "team" },
+      { label: "Org chart", href: "/app/structure", icon: Layers, module: "team" },
+      { label: "AI", href: "/app/settings/ai", icon: Bot, module: "operations" },
+      { label: "Compliance", href: "/app/settings/compliance", icon: ShieldCheck },
+      { label: "Developers", href: "/app/settings/developers", icon: Code },
+      { label: "Integrations", href: "/app/key-connect", icon: Activity },
+      { label: "Templates", href: "/app/templates", icon: GraduationCap },
+      // Soft-deleted records, restorable.
+      { label: "Trash", href: "/app/trash", icon: Trash2 },
+    ],
+  },
+];
+
+/** The hub sections of More: each hub's own screens, the heading opening the hub. */
+export const operateSections: NavSection[] = hubNav
+  .filter((hub) => hub.items.length > 0)
+  .map((hub) => ({
+    id: hub.id,
+    label: hub.label,
+    icon: hub.icon,
+    href: hub.href,
+    items: hub.items.map((item) => (item.module || !hub.module ? item : { ...item, module: hub.module })),
+  }));
+
+// ============================================================================
+// MORE — everything that is not a hub (NAV-B-HIDE hides what v1 does not promise)
+// ============================================================================
+
+export const buildSections: NavSection[] = [
+  {
+    id: "key",
+    label: "KEY",
+    icon: Bot,
+    items: [
+      { label: "Chat", href: "/app/key/chat", icon: MessageSquare },
+      { label: "Inbox", href: "/app/key-inbox", icon: Inbox, module: "operations" },
+      { label: "Worker", href: "/app/key", icon: Bot },
+      { label: "Autonomy", href: "/app/key-autonomy", icon: CheckSquare },
+      { label: "Modes", href: "/app/key-modes", icon: BrainCircuit },
+      { label: "Data Inbox", href: "/app/data-inbox", icon: Layers, module: "operations" },
+      { label: "Capture", href: "/app/capture", icon: Camera },
     ],
   },
   {
@@ -283,19 +325,16 @@ export const operateSections: NavSection[] = [
     label: "Work",
     icon: FolderKanban,
     items: [
-      { label: "Projects", href: "/app/projects", icon: FolderKanban },
-      { label: "Approvals", href: "/app/approvals", icon: CheckSquare },
-      // Staff scorecards, team summary and trend snapshots. Arrived with the
-      // consolidation branch and had no entry anywhere.
-      { label: "Performance", href: "/app/performance", icon: Activity },
-      // The largest doorless screen in the product at 600 lines, fully
-      // writable. KEY has had three time tools since the arsenal work, all
-      // declaring /app/projects as their manual equivalent because this
-      // screen was not in the nav to point at.
-      { label: "Time tracking", href: "/app/time-tracking", icon: Clock },
-      { label: "Operations", href: "/app/operations", icon: Briefcase },
-      { label: "SOPs", href: "/app/operations-flow", icon: BookOpen },
-      { label: "Change orders", href: "/app/change-orders", icon: FileText },
+      // /app/projects forwards here.
+      { label: "Projects", href: "/app/work/projects", icon: FolderKanban, module: "projects" },
+      { label: "Approvals", href: "/app/approvals", icon: CheckSquare, module: "operations" },
+      { label: "Performance", href: "/app/performance", icon: Activity, module: "operations" },
+      { label: "Time tracking", href: "/app/time-tracking", icon: Clock, module: "projects" },
+      // Operations surfaces need operations (D-40); an older member with no entry is refused (D-179).
+      { label: "Operations", href: "/app/operations", icon: Briefcase, module: "operations" },
+      { label: "SOPs", href: "/app/operations-flow", icon: BookOpen, module: "operations" },
+      // Each change order carries its project's name, scope, amount and hours (as Time tracking, projects).
+      { label: "Change orders", href: "/app/change-orders", icon: FileText, module: "projects" },
     ],
   },
   {
@@ -303,28 +342,26 @@ export const operateSections: NavSection[] = [
     label: "Marketing",
     icon: Megaphone,
     items: [
-      { label: "Campaigns", href: "/app/marketing", icon: Mail },
+      // /app/marketing forwards to the campaigns; all three wear the contentScheduler dormant gate.
+      { label: "Campaigns", href: "/app/communicate/campaigns", icon: Mail, dormantFlag: "contentScheduler" },
+      { label: "Mailing lists", href: "/app/marketing/lists", icon: Users, dormantFlag: "contentScheduler", module: "content" },
+      // Its read (unscoped) answers 60-day paid order revenue, so it needs revenue.
+      { label: "Case studies", href: "/app/marketing/case-studies", icon: FileText, dormantFlag: "contentScheduler", module: "revenue" },
       { label: "Content", href: "/app/content-ops", icon: PenTool },
       { label: "Social", href: "/app/social", icon: Share2 },
       { label: "SEO", href: "/app/seo", icon: Globe, dormantFlag: "webPresencePack" },
-      // Events, ticket types, attendees and check-in — a four-route cluster
-      // that the consolidation branch shipped without a door.
       { label: "Events", href: "/app/events", icon: Calendar },
-      // A 516-line channel console. WhatsApp is the primary business channel
-      // in this market, and it had no door.
-      { label: "WhatsApp", href: "/app/whatsapp", icon: MessageCircle },
-      // Campaign PLANS, distinct from the campaigns above: fetchCampaignPlans
-      // against its own endpoint. Checked for duplication before linking.
+      { label: "WhatsApp", href: "/app/whatsapp", icon: MessageCircle, module: "operations" },
       { label: "Campaign plans", href: "/app/marketing-flow", icon: Megaphone },
     ],
   },
   {
-    id: "compliance",
-    label: "Compliance",
+    id: "legal",
+    label: "Legal",
     icon: ShieldCheck,
     items: [
       { label: "Evidence", href: "/app/evidence", icon: ShieldCheck },
-      { label: "Contracts", href: "/app/contracts", icon: FileText },
+      { label: "Contracts", href: "/app/contracts", icon: FileText, module: "operations" },
       { label: "Legal", href: "/app/legal", icon: Scale },
     ],
   },
@@ -333,87 +370,27 @@ export const operateSections: NavSection[] = [
     label: "Strategy",
     icon: Target,
     items: [
-      { label: "Insights", href: "/app/intelligence", icon: LayoutDashboard },
+      { label: "Business insights", href: "/app/intelligence", icon: LayoutDashboard },
       { label: "Goals", href: "/app/goals", icon: Target },
       { label: "Market", href: "/app/market", icon: Target },
-    ],
-  },
-];
-
-
-// Flattened Operate nav for disclosure-mode filtering and backward-compat
-export const operateNav: NavItem[] = operateSections.flatMap((s) => s.items);
-
-// ============================================================================
-// BUILD — Where you configure your business
-// ============================================================================
-
-export const buildSections: NavSection[] = [
-  {
-    id: "business",
-    label: "Business",
-    icon: Building,
-    items: [
-      { label: "Business Profile", href: "/app/profile", icon: BrainCircuit },
-      // The consolidated genome hub. Every card in the command centre links
-      // here; the nav did not.
-      { label: "Business Genome", href: "/app/genome", icon: Dna },
-      { label: "Storefront", href: "/app/store", icon: Store },
-      { label: "Presence", href: "/app/presence", icon: Globe },
-      { label: "Templates", href: "/app/templates", icon: GraduationCap },
-      // The brand-asset library — files and folders. Distinct from Money's
-      // "Assets & depreciation", which is equipment on the balance sheet;
-      // checked before linking so the nav does not offer two "Assets".
-      { label: "Asset library", href: "/app/assets", icon: Layers },
-      // What a client sees when you share work with them.
-      { label: "Client portal", href: "/app/portal", icon: Globe },
-    ],
-  },
-  {
-    id: "system",
-    label: "System",
-    icon: Cog,
-    items: [
-      { label: "Account", href: "/app/settings/profile", icon: User },
-      { label: "Workspace", href: "/app/settings", icon: Building },
-      { label: "Team", href: "/app/settings/team", icon: Users },
-      { label: "Org Chart", href: "/app/structure", icon: Layers },
-      { label: "AI", href: "/app/settings/ai", icon: Bot },
-      { label: "Compliance", href: "/app/settings/compliance", icon: ShieldCheck },
-      { label: "Developers", href: "/app/settings/developers", icon: Code },
-      // Soft-deleted records, restorable. A trash can nobody can open is a
-      // data-loss surface: deletes look permanent when they are not.
-      { label: "Trash", href: "/app/trash", icon: Trash2 },
-    ],
-  },
-  {
-    id: "connect",
-    label: "Connect",
-    icon: Plug,
-    items: [
-      { label: "Integrations", href: "/app/key-connect", icon: Activity },
     ],
   },
   {
     id: "automate",
     label: "Automate",
-    icon: Zap,
+    icon: Wrench,
     items: [
-      { label: "Flows", href: "/app/flows", icon: RefreshCw },
-      // 315 lines over seven API modules — the richest automation surface in
-      // the product, and the one with no way in.
+      { label: "Flows", href: "/app/flows", icon: RefreshCw, module: "automations" },
       { label: "Automations", href: "/app/automations", icon: Zap },
-      // Per-role flow catalogue; one entry also opens the [rolekey] detail.
       { label: "Role flows", href: "/app/key-flows", icon: Layers },
+      // The brand-asset library: files and folders (not Money's "Assets & depreciation").
+      { label: "Asset library", href: "/app/assets", icon: Layers, module: "content" },
     ],
   },
 ];
 
-// Flattened Build nav for disclosure-mode filtering and backward-compat
-export const buildNav: NavItem[] = buildSections.flatMap((s) => s.items);
-
 // ============================================================================
-// MORE — Dormant / coming-soon modules (hidden by default, collapsible)
+// DORMANT — coming-soon modules (hidden by their flags)
 // ============================================================================
 
 export const moreNav: NavItem[] = [
@@ -424,48 +401,157 @@ export const moreNav: NavItem[] = [
 ];
 
 // ============================================================================
-// ME — Personal hub
+// ME — the member's own
 // ============================================================================
 
 export const meNav: NavItem[] = [
   { label: "Profile", href: "/app/profile", icon: User },
-  { label: "Notifications", href: "/app/notifications", icon: Bell },
+  // /app/notifications forwards here.
+  { label: "Notifications", href: "/app/settings/notifications", icon: Bell },
 ];
 
 // ============================================================================
-// MOBILE BOTTOM NAV
+// WHAT A MEMBER IS SHOWN
 // ============================================================================
+
+const LEVELS: readonly AccessLevel[] = ["none", "read", "write", "admin"];
+
+/** The server's my-access answer, read strictly: only the four levels count; anything else is unknown (null). */
+export function memberModuleLevelsOf(answer: unknown): ModuleLevels {
+  if (!answer || typeof answer !== "object") return null;
+  const modules = (answer as { modules?: unknown }).modules;
+  if (!modules || typeof modules !== "object" || Array.isArray(modules)) return null;
+  const out: Partial<Record<string, AccessLevel>> = {};
+  for (const [module, level] of Object.entries(modules as Record<string, unknown>)) {
+    if (typeof level === "string" && (LEVELS as readonly string[]).includes(level)) out[module] = level as AccessLevel;
+  }
+  return out;
+}
 
 /**
- * `showUnreadBadge` marks the item that carries the unread count.
- *
- * It was a route comparison in the component — `item.href === "/app/inbox"` —
- * against an href that is `/app/data-inbox` here. So the badge never rendered,
- * and nothing said so. A flag on the item cannot drift from itself the way two
- * copies of a route string can.
+ * Whether a member with `levels` is shown an entry that needs `module` (every module, when several): hidden only on
+ * a known 'none'.
  */
-export const mobileBottomNav: Array<{
-  label: string;
-  href: string;
-  icon: LucideIcon;
-  showUnreadBadge?: boolean;
-}> = [
-  { label: "Home", href: "/app/command-center", icon: Zap },
-  { label: "Flows", href: "#flows", icon: Briefcase },
-  { label: "AI", href: "#key", icon: Brain },
-  { label: "Inbox", href: "/app/key-inbox", icon: Inbox, showUnreadBadge: true },
-  { label: "Me", href: "#me", icon: User },
-];
+export function canOpenModule(levels: ModuleLevels, module: NavModule | NavModule[] | undefined): boolean {
+  if (!module || !levels) return true;
+  return (Array.isArray(module) ? module : [module]).every((m) => {
+    const level = levels[m];
+    return level === undefined || level !== "none";
+  });
+}
+
+/** The modules an entry needs: its own, else (inside a hub) its hub's, else none. */
+export function entryModules(item: NavItem, hub?: { module?: NavModule }): NavModule[] {
+  const own = item.module ?? hub?.module;
+  return own === undefined ? [] : Array.isArray(own) ? own : [own];
+}
+
+/**
+ * The hubs a business that sells `sells` has (D-150): a products business has no Schedule. `null` is not known yet
+ * (the settings are loading): only the hubs every business has, so a products business never flashes Schedule.
+ */
+function hubsForSells(sells: BusinessSells | null): HubNavItem[] {
+  return sells === "both" || sells === "services" ? hubNav : hubNav.filter((h) => h.id !== "schedule");
+}
+
+/** The hubs a member is shown, in menu order, each holding only the screens they may open. */
+export function hubsFor(sells: BusinessSells | null, levels: ModuleLevels): HubNavItem[] {
+  return hubsForSells(sells)
+    .filter((hub) => canOpenModule(levels, hub.module))
+    .map((hub) => {
+      const items = hub.items.filter((item) => canOpenModule(levels, item.module ?? hub.module));
+      return items.length === hub.items.length ? hub : { ...hub, items };
+    });
+}
+
+/** The phone's two hub slots per what the business sells (intuitiveness principle 'The app fits what you sell'). */
+const BOTTOM_BAR: Record<BusinessSells, BusinessHub[]> = {
+  services: ["schedule", "customers"],
+  products: ["sales", "customers"],
+  both: ["schedule", "sales"],
+};
+
+/** Who takes a slot of a hub the member cannot open, in order. */
+const BOTTOM_BAR_FALLBACK: BusinessHub[] = ["customers", "schedule", "sales", "money"];
+
+/**
+ * The hubs between Today and New, and New and More, on the phone's bottom bar. A hub the member cannot open gives
+ * its slot to the next one they can; never a hub they cannot open, so the bar may hold one hub, or none.
+ */
+export function bottomBarFor(sells: BusinessSells | null, levels: ModuleLevels): HubNavItem[] {
+  // Not known yet: no slot, rather than the wrong two.
+  if (sells === null) return [];
+  const open = hubsFor(sells, levels);
+  const byId = (id: BusinessHub) => open.find((h) => h.id === id);
+  const chosen: HubNavItem[] = [];
+  for (const id of BOTTOM_BAR[sells]) {
+    const hub = byId(id);
+    if (hub) chosen.push(hub);
+  }
+  for (const id of BOTTOM_BAR_FALLBACK) {
+    if (chosen.length >= 2) break;
+    const hub = byId(id);
+    if (hub && !chosen.includes(hub)) chosen.push(hub);
+  }
+  // Slots in the bar's own order: the sells order first, then the fallbacks.
+  return chosen.slice(0, 2);
+}
+
+/** Entries a member may open, a section they emptied dropped. Returns the input when nothing is hidden. */
+function sectionsFor(sections: NavSection[], keep: (item: NavItem) => boolean): NavSection[] {
+  let changed = false;
+  const shown = sections.flatMap((section) => {
+    const items = section.items.filter(keep);
+    if (items.length === section.items.length) return [section];
+    changed = true;
+    return items.length > 0 ? [{ ...section, items }] : [];
+  });
+  return changed ? shown : sections;
+}
+
+/** More, as a member sees it: the hub sections they may open, then everything else they may open. */
+export function menuSectionsFor(
+  sells: BusinessSells | null,
+  levels: ModuleLevels,
+): { hubSections: NavSection[]; moreSections: NavSection[] } {
+  const forSells = new Set(hubsForSells(sells).map((h) => h.id as string));
+  const openHubs = new Set(hubsFor(sells, levels).map((h) => h.id as string));
+  // A screen with a module of its own (Expenses, Team) is shown to a member who may open it even when they may not
+  // open its hub's page (review COR-1); the section heading then opens nothing.
+  const hubSections = sectionsFor(
+    operateSections.filter((s) => forSells.has(s.id)),
+    (item) => canOpenModule(levels, item.module),
+  ).map((section) => (openHubs.has(section.id) ? section : { ...section, href: undefined }));
+  const moreSections = sectionsFor(buildSections, (item) => canOpenModule(levels, item.module));
+  return { hubSections, moreSections };
+}
+
+/** Whether `pathname` is the hub's own page (aria-current "page"); /app lands on Today (acceptance m5). */
+export function isHubPage(hub: HubNavItem, pathname: string): boolean {
+  return pathname === hub.href || (hub.id === "today" && pathname === "/app");
+}
+
+/** Whether `pathname` is in a hub: its own page, its screens, or a path it claims. */
+export function isHubActive(hub: HubNavItem, pathname: string): boolean {
+  const under = (p: string) => {
+    const base = p.split("?")[0];
+    return pathname === base || pathname.startsWith(base + "/");
+  };
+  if (hub.id === "today" && pathname === "/app") return true;
+  return under(hub.href) || hub.items.some((i) => under(i.href)) || (hub.alsoActiveOn ?? []).some(under);
+}
 
 // ============================================================================
 // BACKWARD COMPATIBILITY — Legacy exports
 // ============================================================================
 
+/** Every hub screen, flattened. */
+export const operateNav: NavItem[] = operateSections.flatMap((s) => s.items);
+/** Every other screen, flattened. */
+export const buildNav: NavItem[] = buildSections.flatMap((s) => s.items);
 /** @deprecated Use operateNav instead */
 export const workspacesNav = operateNav;
 /** @deprecated Use buildNav instead */
 export const studioNav = buildNav;
-/** @deprecated Use buildSections[0].items instead */
-export const publicNav: NavItem[] = buildSections[0].items;
 /** @deprecated Use moreNav instead */
 export const comingSoonNav = moreNav;
