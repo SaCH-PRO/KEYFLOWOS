@@ -96,7 +96,9 @@ export class PlannerService {
     const contextString = this.businessGraph.buildContextString(snapshot);
 
     // FU-CORTEX-PATTERNS-SIGHT (P0; D-257, D-100, D-234): the behavioural patterns the plan's member may read
-    // (promptPatternVisibility); a plan with no member (an agent trigger no member wrote) carries none.
+    // (promptPatternVisibility); a plan with no member (an agent trigger no member wrote) carries none. A plan made for a
+    // user id that is no member of the business (the flow tool goals_create_plan's KEY_SYSTEM_ACTOR_ID) carries only the
+    // patterns that state neither money nor an expense.
     const patternVisible = await promptPatternVisibility(this.prisma, businessId, userId, this.logger, 'planner');
     const memoryCtx = await this.memory.buildContextBlock(businessId, { patternVisible });
     const memorySection = this.memory.buildPromptSection(memoryCtx);

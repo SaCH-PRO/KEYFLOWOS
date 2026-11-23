@@ -2145,8 +2145,9 @@ export class KeyCortexQueryPipelineService {
       // MEM-UNIFIED-SEMANTIC-SIGHT (D-257, D-234): the semantic hits of the turn's text pass MEM-SEMANTIC-SIGHT's reader
       // projection before the read's limit.
       semanticSight: readerSearchOptions(this.prisma, query.businessId, { reader, sight }, this.logger),
-      // FU-CORTEX-PATTERNS-SIGHT (D-257, D-100, D-234): the behavioural patterns only for a reader who may read every one
-      // (readsEveryPattern), buildMemoryContext's rule for the same prompt.
+      // FU-CORTEX-PATTERNS-SIGHT (D-257, D-100, D-234): the behavioural pattern rows only for a reader who may read every
+      // one (readsEveryPattern), buildMemoryContext's rule for the same prompt; their semantic copies stay judged row by
+      // row (semanticSight: aiMemoryRowVisibleTo).
       aiMemoryPatterns: readsEveryPattern(reader, sight),
     });
     return readersOwnPromptMemory(this.prisma, query.businessId, reader, fragments, CHAT_MEMORY_FRAGMENTS, this.logger, 'chatMemory', sight);

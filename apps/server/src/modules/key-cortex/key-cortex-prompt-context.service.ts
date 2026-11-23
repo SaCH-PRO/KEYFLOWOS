@@ -955,7 +955,9 @@ export class KeyCortexPromptContextService {
           // FU-CORTEX-PATTERNS-SIGHT (D-257, D-100, D-234): the behavioural patterns state money ("N overdue invoices
           // totaling X") or an expense in their text, and readersOwnPromptMemory names no module for an AiMemory row. A
           // reader who may not read every pattern (readsEveryPattern: a member reader with revenue and expenses read) reads
-          // none, unread so that none takes another row's place, as the flow chat's perception block reads them.
+          // no pattern row, unread so that none takes another row's place, as the flow chat's perception block reads them.
+          // A pattern's semantic copy is still judged row by row (semanticSight above: aiMemoryRowVisibleTo), so a copy
+          // that states neither money nor an expense may still reach them.
           aiMemoryPatterns: readsEveryPattern(reader, sight),
         });
         const kept = await readersOwnPromptMemory(
