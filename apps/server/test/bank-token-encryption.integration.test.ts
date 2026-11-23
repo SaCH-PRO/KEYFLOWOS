@@ -43,6 +43,11 @@
  *            undecryptable: a database error exits 1 with nothing written, a row deleted after the scan is
  *            neither decrypted nor undecryptable; and --apply with nothing to encrypt exits 0 even when every
  *            stored ciphertext is undecryptable.
+ *   V72S-14  (review round 4: SEC-V72S-R4-1, COR-V72S-R4-1/2/3) the probe counts an error as undecryptable only
+ *            on a positive crypto signal (the GCM authentication failure, an ERR_CRYPTO_* code); any other error,
+ *            a raw driver error included, exits 1; the dry run refuses too with a @keyflow/db build that does not
+ *            encrypt the column (its counts would be wrong); and deleting a row that does not decrypt succeeds
+ *            (the delete result is not decrypted).
  *
  * Owner question OQ-4 (does production hold plaintext bank tokens today) is open; nothing here reads production.
  */
@@ -682,5 +687,56 @@ describe('BankConnection.accessToken is encrypted at rest (RR-BANK-TOKEN-ENCRYPT
     expect(countOf(vanished.text, 'already_encrypted')).toBe(0);
     expect(countOf(vanished.text, 'undecryptable')).toBe(0);
     expect(countOf(vanished.text, 'gone_since_read')).toBe(1);
+  });
+  it('[V72S-14] only a crypto failure is undecryptable, a stale build refuses the dry run too, and a row that does not decrypt can be deleted', async () => {
+    const { main } = await import('../scripts/encrypt-bank-connection-tokens');
+    const fa = await account(ID.bizScript3, 'V72S classify bank');
+    const sealed = await service.create(ID.bizScript3, { financialAccountId: fa, provider: 'plaid', accessToken: token('classify') });
+    const scope = `--business=${ID.bizScript3}`;
+    const probeThrowing = (err: unknown) =>
+      new Proxy(db, {
+        get(target, prop, receiver) {
+          if (prop !== 'bankConnection') return Reflect.get(target, prop, receiver);
+          return new Proxy(target.bankConnection, {
+            get(d, op, r) {
+              return op === 'findUnique' ? async () => { throw err; } : Reflect.get(d, op, r);
+            },
+          });
+        },
+      });
+    const run = async (argv: string[], probe: unknown, encryptedFields?: Record<string, readonly string[]>) => {
+      const lines: string[] = [];
+      const code = await main(argv, {
+        db: probe as any,
+        ...(encryptedFields ? { encryptedFields } : {}),
+        log: (...a: unknown[]) => lines.push(a.join(' ')),
+        error: (...a: unknown[]) => lines.push(a.join(' ')),
+      });
+      return { code, text: lines.join('\n') };
+    };
+
+    // A raw driver error (no P-code, plain name) is a failed read, not a foreign key.
+    const reset = await run([scope], probeThrowing(Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' })));
+    expect(reset.code, reset.text).toBe(1);
+    expect(reset.text).toMatch(/could not be read/);
+    // Node's own decrypt failures are undecryptable.
+    const gcm = await run([scope], probeThrowing(new Error('Unsupported state or unable to authenticate data')));
+    expect(gcm.code, gcm.text).toBe(0);
+    expect(countOf(gcm.text, 'undecryptable')).toBeGreaterThanOrEqual(1);
+    const tag = await run([scope], probeThrowing(Object.assign(new TypeError('Invalid authentication tag length: 0'), { code: 'ERR_CRYPTO_INVALID_AUTH_TAG' })));
+    expect(tag.code, tag.text).toBe(0);
+    expect(countOf(tag.text, 'undecryptable')).toBeGreaterThanOrEqual(1);
+
+    // A stale @keyflow/db build: the dry run's probe would decrypt nothing, so its counts would be wrong.
+    const stale = await run([scope], db, { Business: ['gmailAccessToken'] });
+    expect(stale.code, stale.text).toBe(2);
+    expect(stale.text).toMatch(/does not encrypt BankConnection\.accessToken/);
+
+    // Deleting a row that does not decrypt succeeds through the extension.
+    const garbage = [CIPHER_PREFIX, Buffer.from('v72s-delete-not-a-real-ciphertext-0000000000000').toString('base64')].join('');
+    const badId = await rawRow(ID.bizScript3, fa, `${P}s3_delete_bad`, garbage);
+    await expect(db.bankConnection.delete({ where: { id: badId } })).resolves.toBeTruthy();
+    expect(await db.$queryRawUnsafe('SELECT id FROM bank_connections WHERE id = $1', badId)).toEqual([]);
+    expect(await stored(sealed.id)).toMatch(new RegExp(`^${CIPHER_PREFIX}`));
   });
 });
