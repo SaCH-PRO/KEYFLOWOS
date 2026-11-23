@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { withoutForgottenPersonalData } from '../business-events/business-event.service';
 import { BusinessEvent, BusinessEventType, Prisma } from '@prisma/client';
 
 /**
@@ -307,6 +308,16 @@ export class KeyCortexEventService {
     const metadata = observationMetadata(module, params.payload, genome);
     const action = isToken(params.action) ? params.action : 'observation';
 
+    // Codex #226 census: the subject is a token the caller names, so it can be
+    // a contact; an observation about a forgotten one keeps no fields (the same
+    // write-time erasure check as BusinessEventService.emit).
+    const checked = await withoutForgottenPersonalData(this.prisma.client, {
+      businessId,
+      eventType: params.type,
+      subjectType: subject.type,
+      subjectId: subject.id,
+      metadata: metadata as unknown,
+    });
     const event = await this.prisma.client.businessEvent.create({
       data: {
         businessId,
@@ -317,7 +328,7 @@ export class KeyCortexEventService {
         actorId: isToken(params.source) ? params.source : 'key_cortex',
         action,
         source: KEY_OBSERVATION_SOURCE,
-        metadata: metadata as Prisma.InputJsonValue,
+        metadata: (checked.metadata ?? {}) as Prisma.InputJsonValue,
         sessionId: columnId(params.sessionId),
         correlationId: columnId(params.correlationId),
       },
