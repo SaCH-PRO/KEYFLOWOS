@@ -134,6 +134,13 @@ describe('dnaSectionViewForReader (round 7)', () => {
   });
 });
 
+describe('round 8: business-section money words', () => {
+  it('redacts a business DNA row whose data states money in words only', () => {
+    const row = { entityType: 'dna_section', entityId: 'business', type: 'genome.section_updated', title: 'business DNA updated', summary: 'business DNA was updated', payload: { section: 'business', data: { revenueModel: 'commission on every sale' } } };
+    expect(dnaSectionViewForReader(row as any)).toBe('redact');
+  });
+});
+
 describe('requireBridgeRevenue', () => {
   const reader = { id: 'u1', role: 'USER' };
   it('throws when the recommendation read fails (fail closed)', async () => {

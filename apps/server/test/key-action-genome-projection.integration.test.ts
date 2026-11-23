@@ -75,6 +75,8 @@ const ID = {
   evoOpsMoney: `${P}evo_opsm`,
   evoOps: `${P}evo_ops`,
   evoGrowth: `${P}evo_growth`,
+  evoApproveFin: `${P}evo_apfin`,
+  evoApproveBiz: `${P}evo_apbiz`,
   evoOther: `${P}evo_other`,
 };
 
@@ -89,6 +91,9 @@ let evolution: any;
 let executor: any;
 let blueprint: any;
 let proposalService: any;
+let GenomeEvolutionServiceClass: any;
+let prismaRef: any;
+let temporalRef: any;
 const SPY: Record<string, any> = {};
 const bridgedProposals: unknown[] = [];
 
@@ -220,6 +225,9 @@ beforeAll(async () => {
 
   const prisma = moduleRef.get(PrismaService);
   evolution = new GenomeEvolutionService(prisma, offRoute('BlueprintService') as any, temporalOf(prisma));
+  GenomeEvolutionServiceClass = GenomeEvolutionService;
+  prismaRef = prisma;
+  temporalRef = temporalOf(prisma);
   // Round 7 (both reviews, MINOR): the real writers of the create_task and DNA section rows.
   executor = new KeyActionExecutorService(
     temporalOf(prisma), evolution, offRoute('ConstitutionVersionService') as any, offRoute('GenomeDocumentPackService') as any,
@@ -407,6 +415,20 @@ beforeAll(async () => {
     },
   });
 
+  // Round 8 (correctness NOTE-2): a rule whose metadata states an amount, in the trace of a blocked row of the
+  // non-financial proposal; only the orchestrator's own count and score keys are left out of the read.
+  await db.temporalFlowEvent.create({
+    data: {
+      id: `${P}blocked_meta_row`, businessId: ID.biz, source: 'KEY', type: 'key.action.blocked_by_autonomy', module: 'key-autonomy',
+      entityType: 'key_action_proposal', entityId: ID.propOps, title: 'KEY action blocked_by_autonomy', summary: 'Action CREATE_TASK',
+      importance: 'HIGH', reminderAt: remindAt, startsAt: remindAt,
+      payload: {
+        actionType: 'CREATE_TASK', executedBy: ID.owner, reason: 'Tool CREATE_TASK success rate is below 30% — blocked',
+        ruleTrace: [{ source: 'AutonomyRule', rule: 'rule-7', result: 'allow', reason: 'Within the configured rule', metadata: { limit: 'TTD 912' } }],
+      },
+    },
+  });
+
   // Genome evolution proposals; their decision rows are written by the real GenomeEvolutionService below.
   const evo = (id: string, businessId: string, section: string, reason: string, proposedPatch: Record<string, unknown>) =>
     db.genomeEvolutionProposal.create({ data: { id, businessId, section, reason, proposedPatch, status: 'PENDING', confidence: 0.6 } });
@@ -421,6 +443,16 @@ beforeAll(async () => {
   // emitDecisionEvent does not await its write (round 2, correctness MINOR-2): its emits are tracked and drained.
   const writes = trackAsyncWrites([[TemporalFlowService.prototype, 'emit']]);
   for (const id of [ID.evoFin, ID.evoSales, ID.evoOdd, ID.evoOpsMoney, ID.evoOps, ID.evoGrowth]) await evolution.reject(ID.biz, id, ID.owner);
+  // Round 8 (both reviews, MINOR): the approval path through the real services. GenomeEvolutionService.approve calls
+  // BlueprintService.updateDnaSection, whose own emitter writes the DNA section row; only the blueprint write itself
+  // (updateBlueprint) and the integrity score it returns are stand-ins (off these routes).
+  await evo(ID.evoApproveFin, ID.biz, 'financial', 'Pricing review', { avgTicket: 4500.25 });
+  // Money in words only (no digit) in a non-money section: the DNA row is redacted, the decision row withheld.
+  await evo(ID.evoApproveBiz, ID.biz, 'business', 'Model review', { revenueModel: 'commission on every sale' });
+  vi.spyOn(blueprint, 'updateBlueprint').mockImplementation(async () => ({}) as any);
+  vi.spyOn(blueprint, 'calculateGenomeIntegrity').mockImplementation(async () => ({ overall: 0 }) as any);
+  const approving = new GenomeEvolutionServiceClass(prismaRef, blueprint, temporalRef);
+  for (const id of [ID.evoApproveFin, ID.evoApproveBiz]) await approving.approve(ID.biz, id, ID.owner);
   await writes.drain();
   writes.restore();
   // A decision row in this business naming another business's proposal (cannot be read here: fail closed).
@@ -433,11 +465,11 @@ beforeAll(async () => {
       payload: { proposalId: ID.evoOther, section: 'operations', status: 'REJECTED', proposedPatch: { coreWorkflows: ['appointment-booking'] } },
     },
   });
-  // The six rows the service wrote and the cross-business row above.
-  expect(await db.temporalFlowEvent.count({ where: { businessId: ID.biz, entityType: 'genome_evolution_proposal' } })).toBe(7);
+  // The eight rows the service wrote (six rejected, two approved) and the cross-business row above.
+  expect(await db.temporalFlowEvent.count({ where: { businessId: ID.biz, entityType: 'genome_evolution_proposal' } })).toBe(9);
   // The real writer's rows carry reminder and calendar times only when given; give them one so all three reads see them.
   await db.temporalFlowEvent.updateMany({
-    where: { businessId: ID.biz, entityType: 'genome_evolution_proposal' },
+    where: { businessId: ID.biz, entityType: { in: ['genome_evolution_proposal', 'dna_section'] }, NOT: { id: `${P}dna_odd` } },
     data: { reminderAt: remindAt, startsAt: remindAt, status: 'ACTION_REQUIRED' },
   });
 }, 60_000);
@@ -450,7 +482,7 @@ afterAll(async () => {
 const ALL_TASKS = [ID.propCross, ID.propFin, ID.propFinQuiet, ID.propOps, ID.propOpsSummary, ID.propOpsPayload].sort();
 /** The non-financial proposals a revenue-none member is served over REST. */
 const OPS_PROPOSALS = [ID.propOps, ID.propOpsSummary, ID.propOpsPayload].sort();
-const ALL_EVOS = [`${P}evo_other`, ID.evoFin, ID.evoGrowth, ID.evoOdd, ID.evoOps, ID.evoOpsMoney, ID.evoSales];
+const ALL_EVOS = [`${P}evo_other`, ID.evoApproveBiz, ID.evoApproveFin, ID.evoFin, ID.evoGrowth, ID.evoOdd, ID.evoOps, ID.evoOpsMoney, ID.evoSales];
 
 describe('FU-KEY-ACTION-GENOME-PROJECTION: bridged FINANCIAL proposals and their timeline rows (D-128, D-233, D-238)', () => {
   it('fixture: the real GenomeEvolutionService wrote the decision rows with the reason and patch in them', async () => {
@@ -586,7 +618,7 @@ describe('FU-KEY-ACTION-GENOME-PROJECTION: bridged FINANCIAL proposals and their
       expect(res.status, q).toBe(200);
       expect(JSON.stringify(res.body), q).not.toMatch(FIGURES);
       const ids = res.body.map((e: any) => e.entityId);
-      for (const hidden of [ID.evoFin, ID.evoSales, ID.evoOdd, ID.evoOpsMoney, ID.evoGrowth, `${P}evo_other`, ID.propFin, ID.propFinQuiet, ID.propCross, ID.propOpsSummary, ID.propOpsPayload]) {
+      for (const hidden of [ID.evoFin, ID.evoSales, ID.evoOdd, ID.evoOpsMoney, ID.evoGrowth, ID.evoApproveFin, ID.evoApproveBiz, `${P}evo_other`, ID.propFin, ID.propFinQuiet, ID.propCross, ID.propOpsSummary, ID.propOpsPayload]) {
         expect(ids, q).not.toContain(hidden);
       }
     }
@@ -639,12 +671,15 @@ describe('FU-KEY-ACTION-GENOME-PROJECTION: bridged FINANCIAL proposals and their
   it('KAG-14 round 6: DNA section rows of the financial and sales sections, and a proposal row whose title states money, are withheld', async () => {
     const dna = (body: any[]) => body.filter((e: any) => e.entityType === 'dna_section');
     for (const [name, res] of Object.entries(await timelineReads(ID.staffNone))) {
-      expect(dna(res.body).map((e: any) => e.entityId).sort(), name).toEqual(['founder', 'operations']);
+      expect(dna(res.body).map((e: any) => e.entityId).sort(), name).toEqual(['business', 'founder', 'operations']);
+      // Round 8: the business row an approval wrote is served redacted (money in words only).
+      const business = dna(res.body).find((e: any) => e.entityId === 'business');
+      expect(business.payload, name).toEqual({ section: 'business', redacted: true });
       expect(res.body.map((e: any) => e.id), name).not.toContain(`${P}titled_row`);
       expect(JSON.stringify(res.body), name).not.toMatch(/owes 900/);
     }
     for (const [name, res] of Object.entries(await timelineReads(ID.owner))) {
-      expect(dna(res.body).map((e: any) => e.entityId).sort(), name).toEqual(['financial', 'founder', 'founder', 'operations', 'sales']);
+      expect(dna(res.body).map((e: any) => e.entityId).sort(), name).toEqual(['business', 'financial', 'financial', 'founder', 'founder', 'operations', 'sales']);
       expect(res.body.map((e: any) => e.id), name).toContain(`${P}titled_row`);
     }
   });
@@ -662,6 +697,14 @@ describe('FU-KEY-ACTION-GENOME-PROJECTION: bridged FINANCIAL proposals and their
     }
     for (const [name, res] of Object.entries(await timelineReads(ID.staffRead))) {
       expect(founder(res.body)[0].payload.data, name).toEqual({ weeklyAvailabilityHours: 20 });
+    }
+  });
+
+  it('KAG-16 round 8: a blocked row whose rule metadata states an amount is withheld; the orchestrator counts alone are not', async () => {
+    for (const [name, res] of Object.entries(await timelineReads(ID.staffNone))) {
+      const ids = res.body.map((e: any) => e.id);
+      expect(ids, name).not.toContain(`${P}blocked_meta_row`);
+      expect(ids, name).toContain(`${P}blocked_row`);
     }
   });
 
