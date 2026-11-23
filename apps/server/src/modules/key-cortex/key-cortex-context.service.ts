@@ -316,7 +316,7 @@ Genome Stage: ${snapshot.genomeStage}
 Executive Readiness: ${snapshot.executiveReadiness}%
 DNA Scores: ${dnaEntries}
 Active: ${snapshot.recentTasks.length} tasks, ${snapshot.recentEvents.length} events, ${snapshot.activeProjects.length} projects
-Pending: ${snapshot.pendingInvoices} invoices, ${snapshot.unreadMessages} unread messages
+Pending: ${typeof snapshot.pendingInvoices === 'number' ? `${snapshot.pendingInvoices} invoices, ` : ''}${snapshot.unreadMessages} unread messages
 Recent: ${recentSummary}
 ========================`;
   }

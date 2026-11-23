@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { BusinessIntelligenceService } from '../intelligence/business-intelligence.service';
 import { KeyExecutiveModeService } from '../intelligence/key-executive-mode.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
+import type { GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { GenomeEvolutionService } from '../business-genome/genome-evolution.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
@@ -234,7 +235,15 @@ export class BusinessCommandCenterService {
     return { contacts, openInvoices, payments };
   }
 
-  async snapshot(businessId: string): Promise<BusinessCommandCenterSnapshot> {
+  /**
+   * `reader` (FU-PROPOSAL-REVENUE-SIGHT round 3, D-238): who the snapshot is read for. Given (a request's user, a KEY
+   * tool's actor, or null for none), the KEY proposals are the ones that reader may see (KeyActionProposalService.
+   * listForReader: a financial proposal is withheld from a reader without revenue read). Left out, the internal callers
+   * read every proposal, as before.
+   */
+  async snapshot(businessId: string, reader?: GenomeReader | null): Promise<BusinessCommandCenterSnapshot> {
+    const proposals = (status: 'PENDING' | 'APPROVED') =>
+      reader === undefined ? this.keyAutonomy.list(businessId, { status }) : this.keyAutonomy.listForReader(businessId, { status }, reader);
     const sources: SourceLog = {};
     const [
       executiveBrief,
@@ -257,8 +266,8 @@ export class BusinessCommandCenterService {
         () => Promise.all(MODES.map((mode) => this.keyModes.generateModeBrief(businessId, mode))),
         [] as KeyExecutiveModeBrief[],
       ),
-      this.safeResolve(sources, 'pendingApprovals', businessId, () => this.keyAutonomy.list(businessId, { status: 'PENDING' }), []),
-      this.safeResolve(sources, 'approvedAwaitingExecution', businessId, () => this.keyAutonomy.list(businessId, { status: 'APPROVED' }), []),
+      this.safeResolve(sources, 'pendingApprovals', businessId, () => proposals('PENDING'), []),
+      this.safeResolve(sources, 'approvedAwaitingExecution', businessId, () => proposals('APPROVED'), []),
       this.safeResolve(sources, 'temporalAnalysis', businessId, () => this.temporal.analyze(businessId), { summary: '', urgentItems: [], opportunities: [], risks: [], genomeProposalCandidates: [] } as TemporalFlowAnalysis),
       this.safeResolve(sources, 'genomeProposals', businessId, () => this.genomeEvolution.list(businessId, { status: 'PENDING' }), []),
       this.safeResolve(sources, 'genome', businessId, () => this.blueprint.calculateGenomeIntegrity(businessId), { genomeIntegrity: 0, threePillarMinimumMet: false, genomeDnaScores: {}, genomeDnaConfidence: {}, genomeStage: 'SEED', dnaSections: [], executiveReadinessScore: 0, readinessBreakdown: {} } as unknown as GenomeIntegrityResult),

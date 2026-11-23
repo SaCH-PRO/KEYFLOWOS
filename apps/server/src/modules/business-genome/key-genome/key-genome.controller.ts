@@ -24,7 +24,9 @@ import {
   genomeReaderRevenueLevel,
   isFinanceRecommendation,
   isFinanceSignal,
+  isMoneyLabel,
   isMoneyMemoryEvent,
+  readableMemoryEvents,
   listRecommendationsForReader,
   listSignalsForReader,
 } from './genome-finance-scope';
@@ -415,7 +417,8 @@ export class KeyGenomeController {
         throw err;
       });
     if (recommendation && isFinanceRecommendation(recommendation)) await this.requireRevenue(businessId, req, 'read');
-    return this.outcomeService.getExecutionStatus(businessId, recommendationId);
+    // D-238 (round 4, security minor 4): the linked KEY proposal is answered as the reader may see it.
+    return this.outcomeService.getExecutionStatus(businessId, recommendationId, { readsRevenue: await this.readsRevenue(businessId, req) });
   }
 
   @UseGuards(ModuleScopeGuard)
@@ -501,11 +504,20 @@ export class KeyGenomeController {
     @Param('businessId') businessId: string,
     @Query('status') status?: string,
     @Query('limit') limit?: string,
+    @Req() req?: GenomeRequest,
   ) {
-    return this.experimentService.listExperiments(businessId, {
-      status,
-      limit: limit !== undefined ? Number(limit) : undefined,
-    });
+    const asked = limit !== undefined ? Number(limit) : undefined;
+    // FU-PROPOSAL-REVENUE-SIGHT (security review MAJOR-2; D-234): an experiment made from a money signal or
+    // recommendation says so in its hypothesis, action or success metric; a reader without revenue read is not served
+    // it, and the limit counts what they are served.
+    if (await this.readsRevenue(businessId, req)) {
+      return this.experimentService.listExperiments(businessId, { status, limit: asked });
+    }
+    const rows = await this.experimentService.listExperiments(businessId, { status, limit: 1000 });
+    return firstN(
+      rows.filter((e: any) => !isMoneyLabel(e.hypothesis) && !isMoneyLabel(e.action) && !isMoneyLabel(e.successMetric)),
+      asked,
+    );
   }
 
   @Post('experiments')
@@ -575,7 +587,8 @@ export class KeyGenomeController {
     // score, overall risk) for a member without revenue read; the limit counts
     // the events that member is served.
     const rows = await this.memoryService.listMemoryEvents(businessId, { ...filters, limit: undefined });
-    return firstN(rows.filter((e) => !isMoneyMemoryEvent(e)), filters.limit);
+    // D-238 (round 3): a KEY proposal's event is judged by its proposal row too.
+    return firstN(await readableMemoryEvents(this.prisma, businessId, rows), filters.limit);
   }
 
   /**
@@ -610,7 +623,7 @@ export class KeyGenomeController {
     // SEC-GFS-4 (D-100): as GET memory. findSimilarMemory serves 25 by default;
     // the readable ones are taken from the latest 1000 (summarizeMemory's window).
     const rows = await this.memoryService.findSimilarMemory(businessId, { ...query, limit: 1000 });
-    return firstN(rows.filter((e) => !isMoneyMemoryEvent(e)), query.limit ?? 25);
+    return firstN(await readableMemoryEvents(this.prisma, businessId, rows), query.limit ?? 25);
   }
 
   @Get('memory/:memoryEventId')
@@ -621,7 +634,7 @@ export class KeyGenomeController {
   ) {
     const event = await this.memoryService.getMemoryEvent(businessId, memoryEventId);
     // SEC-GFS-4 (D-100): a finance or composite memory event needs revenue read.
-    if (isMoneyMemoryEvent(event)) await this.requireRevenue(businessId, req, 'read');
+    if (isMoneyMemoryEvent(event) || (await readableMemoryEvents(this.prisma, businessId, [event])).length === 0) await this.requireRevenue(businessId, req, 'read');
     return event;
   }
 

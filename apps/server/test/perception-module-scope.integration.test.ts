@@ -136,9 +136,22 @@ let watcher: any;
 let promptContextFor: (userId: string | undefined) => Promise<string>;
 let pipelinePromptFor: (userId: string | undefined, path: 'processQuery' | 'streamQuery') => Promise<string>;
 
+/**
+ * FU-PROPOSAL-REVENUE-SIGHT (owner ruling D-238): a proposal record stays business-wide only when its proposal is
+ * non-financial, so the proposals these cases record are real rows of a task (CREATE_TASK, crm).
+ */
+async function nonFinancialProposal(id: string, title: string) {
+  await db.keyActionProposal.upsert({
+    where: { id },
+    update: {},
+    create: { id, businessId: ID.biz, sourceType: 'KEY_CORTEX', actionType: 'CREATE_TASK', module: 'crm', title, status: 'PENDING', riskLevel: 'LOW' },
+  });
+}
+
 async function cleanup() {
   const byBiz = (table: string) => `DELETE FROM ${table} WHERE business_id LIKE ${sqlLikePrefix(P)}`;
   for (const sql of [
+    byBiz('key_action_proposals'),
     byBiz('business_events'),
     byBiz('cognitive_events'),
     byBiz('cortex_action_logs'),
@@ -928,12 +941,13 @@ describe('W1F-PERCEPTION-MODULE-SCOPE (SEC-W11FPS-3, D-71/D-146, D-57): percepti
       await clearPerceivedStores();
     }
 
+    await nonFinancialProposal(`${P}proposal_1`, 'V70C-PROPOSAL');
     await audit.emit(
       'GOVERNANCE_DECISION',
       'propose',
       'key_action_proposal',
       `${P}proposal_1`,
-      { businessId: ID.biz, actorType: 'ai', actorId: 'key_ai', source: 'ai', proposalId: `${P}proposal_1`, metadata: { toolName: 'v70c_tool', title: 'V70C-PROPOSAL' } },
+      { businessId: ID.biz, actorType: 'ai', actorId: 'key_ai', source: 'ai', proposalId: `${P}proposal_1`, metadata: { actionType: 'CREATE_TASK', module: 'crm', title: 'V70C-PROPOSAL' } },
       undefined,
       { status: 'PENDING', riskLevel: 'MEDIUM' },
     );
@@ -958,6 +972,7 @@ describe('W1F-PERCEPTION-MODULE-SCOPE, owner ruling D-203 (`supportdesk`): the C
     await MONEY[0].write();
     await MONEY[3].write();
     events.emit('contact.created', { contact: { id: `${P}contact_desk`, businessId: ID.biz, firstName: 'V70C-CONTACT-DESK' }, businessId: ID.biz });
+    await nonFinancialProposal(`${P}proposal_desk`, 'V70C proposal_desk');
     await audit.emit('GOVERNANCE_DECISION', 'propose', 'key_action_proposal', `${P}proposal_desk`, { businessId: ID.biz, proposalId: `${P}proposal_desk` }, undefined, { status: 'PENDING', riskLevel: 'LOW' });
     await waitForRows(['expense.created', 'payment.received', 'contact.created', 'GOVERNANCE_DECISION'], 5, 4);
     try {
@@ -1037,6 +1052,7 @@ describe("W1F-PERCEPTION-MODULE-SCOPE, owner ruling D-202 (`bridgememory`): a st
     await seedHistories();
     await MONEY[3].write();
     events.emit('contact.created', { contact: { id: `${P}contact_bridge`, businessId: ID.biz, firstName: 'V70C-CONTACT-BRIDGE' }, businessId: ID.biz });
+    await nonFinancialProposal(`${P}proposal_bridge`, 'V70C proposal_bridge');
     await audit.emit('GOVERNANCE_DECISION', 'propose', 'key_action_proposal', `${P}proposal_bridge`, { businessId: ID.biz, proposalId: `${P}proposal_bridge` }, undefined, { status: 'PENDING', riskLevel: 'LOW' });
     await waitForRows(['payment.received', 'contact.created', 'GOVERNANCE_DECISION'], 4, 3);
     try {
