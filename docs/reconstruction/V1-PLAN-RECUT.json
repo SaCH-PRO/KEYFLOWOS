@@ -11460,6 +11460,201 @@
    "scope": "(1) phone-voice-stream-auth NEGATIVE CONTROL tampers with sig.slice(0,-2)+'AA', identical to the real signature when it already ends in AA (~1/4096): flip a character instead. (2) books-read-doors BRD-01 asserts a 403 body contains no seeded 5-digit figure, but the body echoes path (cuid row ids) and correlationId (UUID), ~1/350 runs: strip path and correlationId before the assertion. (3) public-payment-intent.integration.test.ts hoists a static import (computeBalance) above its loadEnv(), so it fails locally without DATABASE_URL in the shell: move env loading or use a dynamic import. File (3) is Release 0 evidence (manifests/public-payment-intent.json): its change needs an owner ruling (r0_register AMEND) before it lands; (1) and (2) do not.",
    "definition_of_done": "RED where reproducible (forced signature ending, forced id containing the figure, unset DATABASE_URL). GREEN: each deterministic; what each test proves unchanged; full server suite green; proof:release0 MET.",
    "fixture_prefix": null
+  },
+  {
+   "id": "FU-NAV-A1-CODEX-224",
+   "title": "Nav treats unknown sells as unknown; an uncertain settings write fences older answers",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "A"
+   ],
+   "step": 5,
+   "lane": "web",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [
+    "NAV-A1"
+   ],
+   "files": [
+    "apps/web/src/hooks/use-app-layout.ts",
+    "apps/web/src/lib/business-settings.ts",
+    "apps/web/src/hooks/__tests__/use-app-layout-sells-*.test.ts (new)",
+    "apps/web/src/lib/__tests__/business-settings-uncertain-fence*.test.ts (new)"
+   ],
+   "decisions": [
+    "D-150",
+    "D-179"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "Two Codex P2 findings on PR #224 (wave 3f), verified real: (a) use-app-layout mapped only 'loading' sells to unknown, so idle (hydration) and failed exposed the default 'both' and a products-only business saw Schedule; (b) business-settings recorded() did not fence an older write's late success after a newer write ended uncertain (no status or 5xx), so settings could revert. Built and accepted before this row was written (in wave 3h).",
+   "definition_of_done": "RED: a products-only business sees Schedule while settings are idle or failed; an older write's success after an uncertain newer write is recorded. GREEN: sells null unless ready; the uncertain write fences older answers and forces a re-read; SEC-3/SEC5-1/SEC6-1/SEC6-2/COR-2 unchanged; web tsc, unit, lint green.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-CORTEX-EXECUTE-STRUCTURED-DTO",
+   "title": "KEY execute accepts the structured module+action call its handler documents",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 5,
+   "lane": "both",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [
+    "FU-VITEST-DECORATOR-METADATA"
+   ],
+   "files": [
+    "apps/server/src/modules/key-cortex/dto/*execute*.ts",
+    "apps/server/src/modules/key-cortex/key-cortex.controller.ts",
+    "apps/web/src/components/**/KeySuggestionCards.tsx"
+   ],
+   "decisions": [
+    "D-261"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "From FU-VITEST-DECORATOR-METADATA: ExecuteCommandDto requires `command`, but the handler (key-cortex.controller.ts ~2486) and the DTO comment document module+action without command, so the structured call is 400 in production. The only web caller (KeySuggestionCards.tsx ~150) sends neither and is 400 either way. Decide the either/or rule (command, or module+action) in the DTO, and fix the web caller.",
+   "definition_of_done": "RED: a module+action execute without command is 400 and the suggestion card's call is 400. GREEN: exactly one of command or module+action is required; the card's call succeeds for a permitted member and is refused per D-140/D-119 otherwise; full suites green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-UNIT-MOCK-ISOLATION-2",
+   "title": "Seeded order-dependent unit failures under vitest.unit.config.ts are isolated",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [],
+   "files": [
+    "apps/server/src/**/*.spec.ts (token-crypto.kdf-cache, key-cortex-tenant-binding, invoice-receipt.listener, proposal-revenue-sight, livekit pair)"
+   ],
+   "decisions": [
+    "D-261"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "From FU-VITEST-DECORATOR-METADATA: under isolate:false + shuffle, token-crypto.kdf-cache, key-cortex-tenant-binding.spec, invoice-receipt.listener, proposal-revenue-sight (timing) and the livekit.service/livekit-voice-session pair (shared livekit-server-sdk mock) fail at some seeds, with or without the swc transform. Apply the FU-UNIT-MOCK-ISOLATION pattern (vi.resetModules / scoped mocks).",
+   "definition_of_done": "RED: each named spec fails at a recorded seed under vitest.unit.config.ts. GREEN: all pass across seeds 1-20; no test weakened.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-BARE-400-AUDIT",
+   "title": "HTTP negative tests that assert a bare 400 still prove the check they target",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "M",
+   "priority": "P2",
+   "depends_on": [
+    "FU-VITEST-DECORATOR-METADATA"
+   ],
+   "files": [
+    "apps/server/test/**/*.test.ts"
+   ],
+   "decisions": [
+    "D-261"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "From FU-VITEST-DECORATOR-METADATA: with DTO validation now running in vitest, ~347 `400` assertions under test/ may now pass because the DTO refuses the body rather than the deeper check they target. Audit: each negative test asserts the refusal's message or reason, or sends a DTO-valid body so the deeper check is what refuses.",
+   "definition_of_done": "Each bare-400 assertion either names its reason or is shown to reach its target check (mutation: removing the target check turns it red). Full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-SETTINGS-MANUAL-STEP-FENCE",
+   "title": "The manual setup step's settings PATCH goes through the write sequence",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "A"
+   ],
+   "step": 5,
+   "lane": "web",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [
+    "FU-NAV-A1-CODEX-224"
+   ],
+   "files": [
+    "apps/web/src/**/manual-setup-step.tsx",
+    "apps/web/src/lib/business-settings.ts"
+   ],
+   "decisions": [
+    "D-150"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "From the FU-NAV-A1-CODEX-224 security review: manual-setup-step.tsx records its PATCH answer through noteBusinessSettings with no write sequence, so the newest-write fence does not cover it.",
+   "definition_of_done": "RED: an older sequenced write's late answer overwrites the manual step's newer PATCH. GREEN: the manual step's write is sequenced and fenced like the others; web suites green.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-WEB-PAYLINK-STATUS-BUTTONS",
+   "title": "Invoice panel offers pay-link copy and WhatsApp share only for payable invoices",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "E"
+   ],
+   "step": 5,
+   "lane": "web",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [
+    "FU-PAY-LINK-STATUS-GATE"
+   ],
+   "files": [
+    "apps/web/src/app/app/commerce/invoices/invoices-panel.tsx"
+   ],
+   "decisions": [
+    "D-256",
+    "D-248"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "From the FU-PAY-LINK-STATUS-GATE review: 'Copy payment link' and 'Share via WhatsApp' show for every status; on DRAFT, PENDING, FAILED and FULLY_CREDITED they now error ('Could not create a payment link'). Show them only for SENT, OVERDUE, PARTIALLY_PAID, PARTIALLY_CREDITED.",
+   "definition_of_done": "RED: the buttons render for a DRAFT invoice. GREEN: rendered only for payable statuses; web suites green.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-KEY-SEND-INVOICE-PAID-REFUSE",
+   "title": "KEY's send-invoice refuses a PAID or deleted invoice before emailing",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [
+    "FU-PAY-LINK-STATUS-GATE"
+   ],
+   "files": [
+    "apps/server/src/modules/ai/flow-orchestrator.service.ts"
+   ],
+   "decisions": [
+    "D-248"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "From the FU-PAY-LINK-STATUS-GATE review: KEY commerce_send_invoice emails a PAID invoice and then fails the PAID->SENT move; its invoice findFirst also lacks `deletedAt: null`. Refuse PAID (and soft-deleted invoices) before any side effect.",
+   "definition_of_done": "RED: KEY emails a PAID invoice; KEY finds a soft-deleted invoice. GREEN: both refused before any email or status change; cross-tenant cases pass; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
   }
  ],
  "moot": [

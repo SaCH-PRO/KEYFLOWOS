@@ -45,17 +45,16 @@ joins wave 3e. D-249 to D-254 are on main (wave 3d, #221).
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `b94477a7` (wave 3e, #223, merged 2026-11-23 01:10 UTC). 70 packets done on main; plan 346 (this branch).
+Main is at `6ccb6b4e` (wave 3f, #224, merged 2026-11-23 05:03 UTC). 72 packets done on main; plan 361 (this branch).
 Workers run on Opus (Fable spent until 2026-11-25 19:00 UTC); hold four. A second Claude account works the RR-* P2/P3
 lane (`docs/development/agent-memory/SECOND-ACCOUNT-SETUP.md`); it claims by pushing `pkt/V1-<ID>` and posts RETURN on
 #80; scan #80 every ~2 h and give each RETURN the two acceptance reviews. Its first claim: RR-SCRIPT-SPECS-IN-CI.
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
-| Wave 3f: PR #224 | `wave/v1-wave-3f` @ 2d72de46 | Local proof green (784/784, R0 MET, web clean). CI all green except Windows worker proof (running). Codex: 2 real P2 web findings, replied; fixed in FU-NAV-A1-CODEX-224 | Merge under D-239 when Windows proof is green |
-| Wave 3g | `wave/v1-wave-3g` @ cbb61d04 (stacked on 3f): MEM-TEMPORAL-SCOPE, FU-FINANCE-INTEL-DOORS, MEM-SALIENCE-SIGHT, RR-UNTRUSTED-CONTENT-FENCE, RR-STREAM-ERROR-NO-EFFECTS, FU-PAY-LINK-STATUS-GATE, RR-SCRIPT-SPECS-IN-CI | Proven: 796/797 (only A9-R2 known flake, 3/3 alone), R0 MET; auto-merge review CLEAN | PR after 3f merges |
-| Wave 3h (next) | FU-KEY-GENOME-READS-RESIDUAL @ 3336ab2a5, RR-ERASURE-BUSINESS-EVENTS @ 73357d77, FU-TEMPORAL-FLOW-INBOX-SCOPE @ 320ecb446 (merged main; confirmation review running), FU-NAV-A1-CODEX-224 @ 7b2a7995 (acceptance review running) | Accepted / reviewing | Build after 3g |
-| Wave 3i | MEM-DOC-EXTRACTION-SIGHT @ 55c8cfff + MEM-SEMANTIC-SIGHT @ 09bdc807 (ACCEPTED, minors: expense words, backfill gate Q21, limit<=0 embeds) | Accepted | Build after 3h |
+| Wave 3g: PR #225 | `wave/v1-wave-3g` @ cbb61d04: MEM-TEMPORAL-SCOPE, FU-FINANCE-INTEL-DOORS, MEM-SALIENCE-SIGHT, RR-UNTRUSTED-CONTENT-FENCE, RR-STREAM-ERROR-NO-EFFECTS, FU-PAY-LINK-STATUS-GATE, RR-SCRIPT-SPECS-IN-CI | Proven: 796/797 (only A9-R2 known flake, 3/3 alone), R0 MET; auto-merge review CLEAN | Merge under D-239 when CI is green |
+| Wave 3h | `wave/v1-wave-3h` @ a78053fe (stacked on 3g, 48 files): RR-ERASURE-BUSINESS-EVENTS, FU-TEMPORAL-FLOW-INBOX-SCOPE @ d2af8fc13, FU-NAV-A1-CODEX-224 @ 7b2a7995, RR-MCP-TENANT-BOUND @ d71ba902, MEM-DOC-EXTRACTION-SIGHT, MEM-SEMANTIC-SIGHT @ 09bdc807 (applied as its own delta over main+DOC) | Proof running (server, R0, web); assembly review running | PR after 3g merges |
+| Wave 3i | FU-KEY-GENOME-READS-RESIDUAL @ 3336ab2a5 + next returns | Accepted | Build after 3h (expect a key-cortex-consciousness.service.ts import conflict with MEM-SALIENCE: keep both) |
 | FU-VITEST-DECORATOR-METADATA | `pkt/V1-FU-VITEST-DECORATOR-METADATA` @ 83b6dfc8, session_017o9EBevZsyK5zcP7bWPk8g | STOPPED on owner question 20 (R0 REJECTED 37/39) | Owner ruling, then AMEND rows and re-prove |
 | MEM-PATTERNS-SIGHT (P0) | session_017o9EBeafoWPQry9ggXEDDK (on MEM-SEMANTIC branch) | Building | Acceptance review |
 | MEM-UNIFIED-SEMANTIC-SIGHT (P0) | session_017o9EBea375ryCZG7k6cSZh (on MEM-SEMANTIC branch) | Building | Acceptance review |
@@ -64,7 +63,7 @@ lane (`docs/development/agent-memory/SECOND-ACCOUNT-SETUP.md`); it claims by pus
 | RR-BANK-TOKEN-ENCRYPT (P1) | session_017o9EBdeAPCJoxrnvjWpV8w | Building (OQ-4 open) | Acceptance review |
 | Second lane: RR-GATEWAY-TYPED-FAILURES | other account | Building | Review its RETURN on #80 |
 
-Follow-ups to add to the plan with the next rulings commit: FU-NAV-A1-CODEX-224 (plan row, P1 web); FU-CORTEX-EXECUTE-STRUCTURED-DTO (ExecuteCommandDto requires command though the handler documents module+action; web KeySuggestionCards sends neither); FU-UNIT-MOCK-ISOLATION widened (seeded order-dependent unit failures); audit of bare-400 HTTP negative tests now that DTO validation runs; FU-SETTINGS-MANUAL-STEP-FENCE (manual-setup-step PATCH unsequenced); label v86s_ in fixture-prefixes.json; MEM-TEMPORAL-MEMORY-ROUTES-SIGHT must also cover temporal-adapter searchMemories/getRecentMemories. From FU-PAY-LINK-STATUS-GATE review: web hides
+Added to the plan 05:10 UTC: FU-NAV-A1-CODEX-224, FU-CORTEX-EXECUTE-STRUCTURED-DTO, FU-UNIT-MOCK-ISOLATION-2, FU-BARE-400-AUDIT, FU-SETTINGS-MANUAL-STEP-FENCE, FU-WEB-PAYLINK-STATUS-BUTTONS, FU-KEY-SEND-INVOICE-PAID-REFUSE. Still to do: label v86s_ in fixture-prefixes.json; MEM-TEMPORAL-MEMORY-ROUTES-SIGHT must also cover temporal-adapter searchMemories/getRecentMemories. From FU-PAY-LINK-STATUS-GATE review: web hides
 "Copy payment link" / WhatsApp share unless status is payable; KEY commerce_send_invoice refuses PAID up front (today it
 emails then fails the PAID->SENT move); KEY invoice findFirst lacks `deletedAt: null`. Recorded deviation: the
 pay-link packet touched flow-orchestrator.service.ts (+7, D-248) and invoice-send-delivery.spec.ts mock outside its write set.
