@@ -7,7 +7,8 @@
  * Dry run by default: counts bank connections, classifies each row's stored
  * access_token as plaintext (non-empty and not in the extension's ciphertext
  * form), already encrypted (decrypts with the loaded key), undecryptable (in
- * the ciphertext form but does not decrypt), or no token (null or empty),
+ * the ciphertext form but does not decrypt; a database error on that read
+ * exits 1), gone since the scan, or no token (null or empty),
  * prints the counts and one `<connection_id>  plaintext|undecryptable` line
  * per such row, and writes nothing.
  * It never prints a token, a ciphertext, a business id or the database URL.
@@ -84,6 +85,12 @@ function describeFailure(err: unknown): string {
   return typeof e?.name === 'string' ? e.name : 'unknown error';
 }
 
+/** A Prisma or driver error (a P-code or a Prisma* error name), as opposed to the cipher's own failure. */
+function isDatabaseError(err: unknown): boolean {
+  const e = err as { code?: unknown; name?: unknown };
+  return (typeof e?.code === 'string' && /^P\d{4}$/.test(e.code)) || (typeof e?.name === 'string' && e.name.startsWith('Prisma'));
+}
+
 const row = (label: string, n: number) => `  ${label.padEnd(24)} ${n}`;
 
 export async function main(
@@ -147,19 +154,30 @@ export async function main(
   // rewritten here: it needs an operator's decision.
   const undecryptable: string[] = [];
   let decrypted = 0;
+  let gone = 0;
   for (const item of prefixed) {
+    let found: unknown;
     try {
-      await database.bankConnection.findUnique({ where: { id: item.id }, select: { id: true, accessToken: true } });
-      decrypted += 1;
-    } catch {
+      found = await database.bankConnection.findUnique({ where: { id: item.id }, select: { id: true, accessToken: true } });
+    } catch (err: unknown) {
+      // SEC-V72S-R3-1: only a decrypt failure means "sealed under another key"; a database error is a failed read.
+      if (isDatabaseError(err)) {
+        error(`Bank connection ${item.id} could not be read: ${describeFailure(err)}. Nothing was written.`);
+        return 1;
+      }
       undecryptable.push(item.id);
+      continue;
     }
+    // A row deleted after the scan was not decrypted: it proves nothing about the key.
+    if (found) decrypted += 1;
+    else gone += 1;
   }
 
   log(row('connections_scanned', scanned.length));
   log(row('plaintext_tokens', plaintext.length));
   log(row('already_encrypted', decrypted));
   log(row('undecryptable', undecryptable.length));
+  log(row('gone_since_read', gone));
   log(row('no_token', none.length));
 
   if (!args.apply) {
@@ -172,7 +190,8 @@ export async function main(
   // SEC-V72S-R2-1: a key variable being set does not prove it is the API's key. When stored ciphertext exists and
   // none of it decrypts, the loaded key is almost certainly not the one the API used: refuse rather than seal the
   // plaintext rows under it. (With no stored ciphertext in scope there is nothing to check against.)
-  if (undecryptable.length > 0 && decrypted === 0) {
+  // With nothing to encrypt there is nothing to protect (COR-V72S-R3-2): report and exit 0.
+  if (plaintext.length > 0 && undecryptable.length > 0 && decrypted === 0) {
     error(
       `Refusing --apply: ${undecryptable.length} stored ciphertext value(s) and none decrypts with the loaded key ` +
         `(${keySource}); it is likely not the key the API runs with. Nothing was written.`,
