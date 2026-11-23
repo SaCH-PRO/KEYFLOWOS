@@ -536,4 +536,24 @@ describe('FU-INSIGHTS-SIGHT (D-100, D-234, D-146): monitoring insights, suggesti
       await clearData();
     }
   }, 300_000);
+
+  it("V72Q-12 RED (security review round 3, ISS-R3-1; correctness L-1): an expense word after a line break in an approval item's text (\"Call the\\nlandlord about the\\nlease renewal\") reaches no member without expenses read; an unmapped tool with no module (draft_followup_message) fails closed for a member without revenue read (D-238) and is shown to the owner", async () => {
+    await clearData();
+    try {
+      const item = (id: string, data: Record<string, unknown>) =>
+        db.aiApprovalItem.create({ data: { id: `${P}${id}`, businessId: ID.biz, status: 'pending', riskTier: 2, toolName: 'crm_create_task', module: 'crm', ...data } });
+      await item('lease', { title: 'V72Q-L1 Call about the renewal', description: 'Call the\nlandlord about the\nlease renewal' });
+      await item('tab', { title: 'V72Q-L2 Process the run', rationale: 'Process\tpayroll for the month' });
+      await item('draft', { title: 'V72Q-DRAFT follow up with three leads', description: 'Send a friendly follow-up', toolName: 'draft_followup_message', module: null });
+      const approvals = (tower: any) => tower.priorities.filter((p: any) => p.type === 'approval').map((p: any) => p.title).sort();
+      // Revenue read, operations read, no expenses read: neither expense item; the draft (revenue read) is shown.
+      expect(approvals(await ok('get', 'revnoexp', '/ai/control-tower'))).toEqual(['V72Q-DRAFT follow up with three leads']);
+      // No revenue read: the draft fails closed (an unmapped tool with no module, D-238); the expense items need expenses.
+      expect(approvals(await ok('get', 'blind', '/ai/control-tower'))).toEqual([]);
+      // Control: the owner gets all three.
+      expect(approvals(await ok('get', 'owner', '/ai/control-tower'))).toHaveLength(3);
+    } finally {
+      await clearData();
+    }
+  }, 300_000);
 });
