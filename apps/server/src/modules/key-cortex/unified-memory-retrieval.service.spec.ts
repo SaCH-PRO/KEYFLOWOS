@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { admitAllSemanticSightForTests } from '../../../test/helpers/semantic-sight.js';
 import { UnifiedMemoryRetrievalService } from './unified-memory-retrieval.service';
 
 function makePrisma(overrides?: Partial<any>) {
@@ -79,7 +80,7 @@ describe('UnifiedMemoryRetrievalService', () => {
     const visibleTo = vi.fn(async (hits: unknown[]) => hits.map(() => true));
     const fragments = await service.retrieveContext('biz_1', {
       query: 'invoice',
-      semanticSight: { includeDocumentExtractionCopies: false, visibleTo },
+      semanticSight: { ...admitAllSemanticSightForTests(false), visibleTo },
     });
 
     expect(fragments).toHaveLength(1);

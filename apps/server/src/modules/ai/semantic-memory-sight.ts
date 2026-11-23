@@ -9,6 +9,7 @@ import {
 } from '../key-cortex/key-cortex-prompt-context.service';
 import { isMoneyLabel, proposalTextStatesMoney } from '../business-genome/key-genome/genome-finance-scope';
 import { AI_MEMORY_COPY_SOURCE_TYPE, DOCUMENT_EXTRACTION_CATEGORY, type SemanticMemory } from './semantic-memory.service';
+import type { SemanticSight } from '../key-cortex/unified-memory.types';
 
 /**
  * MEM-SEMANTIC-SIGHT (P0; D-234, D-227, D-238, D-100, D-128, D-257): who a semantic memory read is for. `reader` is the
@@ -232,9 +233,10 @@ export function readerSearchOptions(
   businessId: string,
   who: SemanticReader,
   logger?: Pick<Logger, 'warn'>,
-): { includeDocumentExtractionCopies: boolean; visibleTo: (hits: SemanticMemory[]) => Promise<boolean[]> } {
+): SemanticSight {
+  // MEM-UNIFIED-SEMANTIC-SIGHT (delta A2): the one place a SemanticSight is made (its brand is type-only).
   return {
     includeDocumentExtractionCopies: readsDocumentExtractions(who.sight, who.reader),
-    visibleTo: (hits) => semanticHitsVisibleTo(prisma, businessId, who, hits, logger),
-  };
+    visibleTo: (hits: SemanticMemory[]) => semanticHitsVisibleTo(prisma, businessId, who, hits, logger),
+  } as SemanticSight;
 }

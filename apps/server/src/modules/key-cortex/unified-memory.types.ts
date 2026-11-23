@@ -41,11 +41,17 @@ export interface SemanticSource {
   sourceId: string;
 }
 
+/** MEM-UNIFIED-SEMANTIC-SIGHT (delta A2): a type-only brand; it exists at compile time alone. */
+declare const SEMANTIC_SIGHT_BRAND: unique symbol;
+
 /**
  * MEM-UNIFIED-SEMANTIC-SIGHT (D-257, D-234): what makes a semantic read one reader's: MEM-SEMANTIC-SIGHT's
- * readerSearchOptions (semantic-memory-sight.ts), passed to SemanticMemoryService.search as is.
+ * readerSearchOptions (semantic-memory-sight.ts), passed to SemanticMemoryService.search as is. Branded (delta A2): only
+ * readerSearchOptions makes one, so no caller hands the read an admit-all object literal by accident (tests build theirs
+ * through test/helpers/semantic-sight.js).
  */
 export interface SemanticSight {
+  readonly [SEMANTIC_SIGHT_BRAND]: true;
   includeDocumentExtractionCopies: boolean;
   visibleTo: (hits: SemanticMemory[]) => Promise<boolean[]>;
 }
