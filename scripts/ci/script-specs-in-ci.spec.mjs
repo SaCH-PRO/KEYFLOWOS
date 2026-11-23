@@ -442,6 +442,16 @@ describe('script-specs-in-ci: negative controls', () => {
     assert.deepEqual(nodeTestPatterns('timeout 5 time node --test scripts/x/a.spec.mjs'), []);
   });
 
+  it('after a single | the command is not a pipeline head: time there is the external program', () => {
+    assert.deepEqual(nodeTestPatterns('true | node --test scripts/x/a.spec.mjs'), ['scripts/x/a.spec.mjs']);
+    assert.deepEqual(nodeTestPatterns('true | CI=1 node --test scripts/x/a.spec.mjs'), ['scripts/x/a.spec.mjs']);
+    assert.deepEqual(nodeTestPatterns('true | time CI=1 node --test scripts/x/a.spec.mjs'), []);
+    assert.deepEqual(nodeTestPatterns('true | time node --test scripts/x/a.spec.mjs'), []);
+    // The keyword is accepted after `;`, `&&`, `||` and a newline.
+    assert.deepEqual(nodeTestPatterns('true && time CI=1 node --test scripts/x/a.spec.mjs'), ['scripts/x/a.spec.mjs']);
+    assert.deepEqual(nodeTestPatterns('false || time CI=1 node --test scripts/x/a.spec.mjs'), ['scripts/x/a.spec.mjs']);
+  });
+
   it('a stale EXEMPT path fails, and so does a needless or unexplained one', () => {
     const wf = { 'x.yml': 'jobs:\n  j:\n    steps:\n      - run: node --test scripts/x/a.spec.mjs\n' };
     const stale = census(['scripts/x/a.spec.mjs'], wf, { 'scripts/gone/z.spec.mjs': 'was removed' }).problems;
