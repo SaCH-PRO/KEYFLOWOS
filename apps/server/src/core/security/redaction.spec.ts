@@ -454,6 +454,85 @@ describe('redactSensitiveText and deepRedact on string values (RR-REDACTION-BY-C
     });
   });
 
+  describe('orchestrator acceptance round (A1, A2, B1, owner question 1): cost bound per pattern, anchors, zero-width separators, key shape, id keys', () => {
+    const budgetMs = 500; // generous for a loaded machine: the defect measured 12 s at 200 kB
+
+    it('A1: every pattern is linear: 200,000 characters of its worst input redact in well under a second', () => {
+      const worst: Array<[string, string]> = [
+        ['jwt: eyJ- repeats', 'eyJ-'.repeat(50_000)],
+        ['jwt: eyJ runs with dots', 'eyJaaaaaaa.'.repeat(18_182)],
+        ['bearer: Bearer repeats', 'Bearer '.repeat(28_572)],
+        ['bearer: Bearer + 19 letters', 'Bearer aaaaaaaaaaaaaaaaaaa '.repeat(7_408)],
+        ['aws: AKIA repeats', 'AKIA'.repeat(50_000)],
+        ['provider: sk- repeats', 'sk-'.repeat(66_667)],
+        ['provider: sk-a- repeats', 'sk-a-'.repeat(40_000)],
+        ['provider: ghp_ repeats', 'ghp_'.repeat(50_000)],
+        ['pem: BEGIN headers without END', '-----BEGIN PRIVATE KEY-----\n'.repeat(7_143)],
+        ['card: single digits and spaces', '1 '.repeat(100_000)],
+        ['card: 12 - groups', '12 - '.repeat(40_000)],
+        ['card: spaced cards', '4111 1111 1111 1111 '.repeat(10_000)],
+        ['card: zero-width joined digits', '4111​1111​1111​1111 '.repeat(9_090)],
+        ['prose', 'the quick brown fox jumps over 13 lazy dogs on 2026-11-23 at 09:30, invoice INV-2026-000123. '.repeat(2_151)],
+      ];
+      for (const [label, text] of worst) {
+        const start = performance.now();
+        redactSensitiveText(text);
+        const elapsed = performance.now() - start;
+        expect(elapsed, `${label}: ${elapsed.toFixed(0)} ms for ${text.length} chars`).toBeLessThan(budgetMs);
+      }
+    });
+
+    it('A2: a key prefix after an underscore or in upper case is still a key; a JWT after a dash or underscore is not (the anchor that keeps the scan linear)', () => {
+      expect(redactSensitiveText('x_ghp_' + 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789')).toBe('x_<secret>');
+      expect(redactSensitiveText('SK-' + 'proj' + '-' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4')).toBe('<secret>');
+      expect(redactSensitiveText('Sk-Ant-' + 'api03-' + 'Zz9Yy8Xx7Ww6Vv5Uu4Tt3Ss2Rr1Qq0')).toBe('<secret>');
+      expect(redactSensitiveText('GHP_' + 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789')).toBe('<secret>');
+      const jwt = ['eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9', 'eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4ifQ', 'SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c'].join('.');
+      expect(redactSensitiveText(`token=${jwt}`)).toBe('token=<secret>');
+      expect(redactSensitiveText(`token ${jwt}.`)).toBe('token <secret>.');
+      // Documented limit: a JWT glued to a letter, digit, dash or underscore is not a token boundary.
+      expect(redactSensitiveText(`token-${jwt}`)).toBe(`token-${jwt}`);
+    });
+
+    it('A2: zero-width characters between digit groups do not hide a card; where nothing matches, the text is returned as it was', () => {
+      for (const zw of ['​', '‌', '‍', '⁠']) {
+        expect(redactSensitiveText(`card 4111${zw}1111${zw}1111${zw}1111 ok`), JSON.stringify(zw)).toBe('card <card> ok');
+        expect(redactSensitiveText(`4111 1111${zw} 1111 1111`), JSON.stringify(zw)).toBe('<card>');
+      }
+      const untouched = 'note​with​zero​width joiners and 4111 1111 1111 1112';
+      expect(redactSensitiveText(untouched)).toBe(untouched);
+    });
+
+    it('B1: sk- needs a real key shape (a run of 20+ key characters without a dash): a product slug is not a secret', () => {
+      expect(redactSensitiveText('sk-classic-fit-cotton-shirt-blue')).toBe('sk-classic-fit-cotton-shirt-blue');
+      expect(redactSensitiveText('sku sk-2026-11-23-red-large-x-y-z-w')).toBe('sku sk-2026-11-23-red-large-x-y-z-w');
+      expect(redactSensitiveText('sk-' + 'proj' + '-' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4')).toBe('<secret>');
+      expect(redactSensitiveText('xoxb-' + '1234567890-' + '0987654321-' + 'AbCdEfGhIjKlMnOpQrStUvWx')).toBe('<secret>');
+      expect(redactSensitiveText('github_pat_' + '11ABCDEFG0' + '_abcdefghijklmnopqrstuvwxyz0123456789ABCDEF')).toBe('<secret>');
+    });
+
+    it('owner question 1 default: a field whose key ends in Id or _id is an identifier, not a card; secrets in it are still redacted', () => {
+      const out = deepRedact({
+        externalPostId: '4111111111111111',
+        platform_id: '5500 0000 0000 0004',
+        id: '378282246310005',
+        contactId: 'key ' + 'sk-' + 'proj' + '-' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4',
+        note: 'card 4111111111111111',
+        bid: '4111111111111111',
+        ids: ['4111111111111111'],
+      });
+      expect(out).toEqual({
+        externalPostId: '4111111111111111',
+        platform_id: '5500 0000 0000 0004',
+        id: '378282246310005',
+        contactId: 'key <secret>',
+        note: 'card <card>',
+        bid: '<card>', // "bid" does not end in the id suffix
+        ids: ['<card>'], // "ids" is not an id key either
+      });
+    });
+  });
+
   describe('the value patterns are a named, tested list', () => {
     it('every pattern has a name, a marker of <card> or <secret>, is global, and is exercised above; the list is frozen', () => {
       expect(SENSITIVE_VALUE_PATTERNS.length).toBeGreaterThanOrEqual(5);
