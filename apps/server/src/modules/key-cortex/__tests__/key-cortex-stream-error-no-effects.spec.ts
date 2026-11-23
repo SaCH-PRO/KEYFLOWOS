@@ -251,13 +251,12 @@ describe('streamQuery: a stream that ended in an error has no effects (RR-STREAM
   });
 
   describe('through the real gateway over an Anthropic stream (review SEC-A)', () => {
-    let savedAnthropicKey: string | undefined;
+    let savedEnv: NodeJS.ProcessEnv;
     beforeEach(() => {
-      savedAnthropicKey = process.env.ANTHROPIC_API_KEY;
+      savedEnv = { ...process.env };
     });
     afterEach(() => {
-      if (savedAnthropicKey === undefined) delete process.env.ANTHROPIC_API_KEY;
-      else process.env.ANTHROPIC_API_KEY = savedAnthropicKey;
+      process.env = savedEnv;
       vi.unstubAllGlobals();
     });
 

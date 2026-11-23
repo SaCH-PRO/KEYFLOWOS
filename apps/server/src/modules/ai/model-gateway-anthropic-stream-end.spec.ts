@@ -63,7 +63,8 @@ function gatewayOver(events: string[]) {
   const recordProviderSuccess = vi.spyOn(s, 'recordProviderSuccess');
   const recordProviderError = vi.spyOn(s, 'recordProviderError');
   const loggedErrors = vi.spyOn(s.logger, 'error').mockImplementation(() => undefined);
-  return { svc, fetchStub, recordProviderSuccess, recordProviderError, loggedErrors };
+  const loggedWarnings = vi.spyOn(s.logger, 'warn').mockImplementation(() => undefined);
+  return { svc, fetchStub, recordProviderSuccess, recordProviderError, loggedErrors, loggedWarnings };
 }
 
 const request: GatewayRequest = {
@@ -123,5 +124,38 @@ describe('streamAnthropic: a stream that errors or is cut off is a failed stream
     expect(chunks.find((c) => c.type === 'usage')!.usage).toMatchObject({ promptTokens: 5, completionTokens: 3 });
     expect(t.recordProviderSuccess).toHaveBeenCalledTimes(1);
     expect(t.recordProviderError).not.toHaveBeenCalled();
+  });
+
+  it('delta review: an error event whose error field is falsy still fails the stream, even when message_stop follows', async () => {
+    const t = gatewayOver([...TOOL_BLOCK, sse('error', { error: '' }), ...END]);
+
+    const chunks = await collect(t.svc);
+
+    expect(chunks.map((c) => c.type)).toEqual(['tool_call_delta', 'tool_call_delta', 'error']);
+    expect(chunks.at(-1)!.error).toBe('The anthropic stream failed part-way (ProviderStreamError: unknown_error)');
+    expect(t.recordProviderSuccess).not.toHaveBeenCalled();
+  });
+
+  it('delta review: a final message_stop frame with no trailing newline is still read, so a complete stream is not failed', async () => {
+    const t = gatewayOver([...TOOL_BLOCK, END[0], 'event: message_stop\ndata: {"type":"message_stop"}']);
+
+    const chunks = await collect(t.svc);
+
+    expect(chunks.map((c) => c.type)).toEqual(['tool_call_delta', 'tool_call_delta', 'usage', 'done']);
+    expect(t.recordProviderSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  it('delta review: the provider message is logged on one line, bounded, never verbatim', async () => {
+    const hostile = `line one\nFAKE LOG LINE ${'x'.repeat(2000)}`;
+    const t = gatewayOver([...TOOL_BLOCK, sse('error', { error: { type: 'overloaded_error', message: hostile } })]);
+
+    await collect(t.svc);
+
+    const lines = [...t.loggedWarnings.mock.calls, ...t.loggedErrors.mock.calls].map(([m]) => String(m));
+    expect(lines.some((l) => l.includes('overloaded_error'))).toBe(true);
+    for (const l of lines) {
+      expect(l).not.toMatch(/[\r\n]/);
+      expect(l.length).toBeLessThan(600);
+    }
   });
 });
