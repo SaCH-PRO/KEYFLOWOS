@@ -116,14 +116,32 @@ export function isDnaSectionEvent(e: { entityType?: string | null; type?: string
   return e.entityType === 'dna_section' || e.type === 'genome.section_updated';
 }
 
-/** Whether a reader without revenue read may be served a DNA section row: a non-money section, no figure, no money. */
-export function readableDnaSectionEvent(e: EvolutionEvent): boolean {
-  const payload = e.payload && typeof e.payload === 'object' && !Array.isArray(e.payload) ? (e.payload as Record<string, unknown>) : {};
-  const section = typeof payload.section === 'string' ? payload.section : e.entityId;
-  if (!nonMoneySection(section)) return false;
-  if (typeof e.entityId === 'string' && e.entityId && !nonMoneySection(e.entityId)) return false;
-  if (patchHoldsFigure(payload.data)) return false;
-  return !eventStatesMoney(e);
+/**
+ * What a reader without revenue read is served of a DNA section row (round 7):
+ * - 'withhold': a money or unknown section (financial, sales, anything not listed), a section the row names two ways
+ *   that disagree, a payload that is not a plain object or whose section is not a string, or a row whose own title,
+ *   summary or description states money;
+ * - 'redact': a listed non-money section whose data holds a figure or money (D-238 "safely redacted"): served with its
+ *   data left out, so the edit is visible but not its values;
+ * - 'serve': a listed non-money section with neutral data.
+ */
+export function dnaSectionViewForReader(e: EvolutionEvent): 'serve' | 'redact' | 'withhold' {
+  if (!e.payload || typeof e.payload !== 'object' || Array.isArray(e.payload)) return 'withhold';
+  const payload = e.payload as Record<string, unknown>;
+  if (typeof payload.section !== 'string') return 'withhold';
+  if (!nonMoneySection(payload.section)) return 'withhold';
+  if (e.entityId != null && (typeof e.entityId !== 'string' || e.entityId.trim().toLowerCase() !== payload.section.trim().toLowerCase())) return 'withhold';
+  if ([e.title, e.summary, e.description].some((t) => textStatesMoney(t) || patchHoldsFigure(t))) return 'withhold';
+  if (structuredValueStatesMoney(e.signals)) return 'withhold';
+  const rest = Object.fromEntries(Object.entries(payload).filter(([k]) => k !== 'data' && k !== 'section'));
+  if (Object.keys(rest).length && (patchHoldsFigure(rest) || structuredValueStatesMoney(rest))) return 'withhold';
+  return patchHoldsFigure(payload.data) || structuredValueStatesMoney(payload.data) ? 'redact' : 'serve';
+}
+
+/** The redacted view of a DNA section row: its payload is reduced to its section, marked redacted. */
+export function redactedDnaSectionEvent<E extends { payload?: unknown }>(e: E): E {
+  const section = (e.payload as Record<string, unknown>).section;
+  return { ...e, payload: { section, redacted: true } };
 }
 
 /**

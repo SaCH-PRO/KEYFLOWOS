@@ -1,6 +1,6 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { genomeReaderReadsRevenue, financialProposalsWithProvenance, isMoneyLabel, PROPOSAL_CLASSIFY_SELECT, proposalTextStatesMoney, structuredValueStatesMoney, type GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
-import { isDnaSectionEvent, isGenomeEvolutionEvent, readableDnaSectionEvent, readableGenomeEvolutionEvents } from '../key-autonomy/key-action-genome-projection';
+import { dnaSectionViewForReader, isDnaSectionEvent, isGenomeEvolutionEvent, readableGenomeEvolutionEvents, redactedDnaSectionEvent } from '../key-autonomy/key-action-genome-projection';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
@@ -125,9 +125,15 @@ export class TemporalFlowService {
     // is read in this business, is of a non-money DNA section and nothing in it or the row states money (fail closed).
     const evolutionFlags = await readableGenomeEvolutionEvents(this.prisma, businessId, evolutions);
     const withheld = new Set<E>(evolutions.filter((_e, i) => !evolutionFlags[i]));
-    // Round 6: the DNA section row an approval (or a DNA edit) writes carries the same patch.
-    for (const e of dnaSections) if (!readableDnaSectionEvent(e)) withheld.add(e);
-    if (withheld.size) events = events.filter((e) => !withheld.has(e));
+    // Round 6: the DNA section row an approval (or a DNA edit) writes carries the same patch. Round 7: a non-money
+    // section's row whose data holds a figure or money is served with its data left out.
+    const redacted = new Map<E, E>();
+    for (const e of dnaSections) {
+      const view = dnaSectionViewForReader(e);
+      if (view === 'withhold') withheld.add(e);
+      else if (view === 'redact') redacted.set(e, redactedDnaSectionEvent(e));
+    }
+    if (withheld.size || redacted.size) events = events.filter((e) => !withheld.has(e)).map((e) => redacted.get(e) ?? e);
     if (proposals.length === 0) return events;
     const ids = [...new Set(proposals.map((e) => e.entityId).filter((id): id is string => typeof id === 'string' && !!id))];
     let rows: Map<string, Record<string, unknown>>;
