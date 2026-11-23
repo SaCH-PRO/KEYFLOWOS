@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { LangfuseService } from './langfuse.service';
 import { errorRegistry } from '../../core/observability/error-registry';
 
@@ -235,7 +237,7 @@ describe('LangfuseService', () => {
 
   it('the legacy ingestion batch endpoint is gone from the module', () => {
     // Negative control for the cutover: the removed path may not come back under another name.
-    const source = require('node:fs').readFileSync(require.resolve('./langfuse.service'), 'utf8') as string;
+    const source = readFileSync(fileURLToPath(new URL('./langfuse.service.ts', import.meta.url)), 'utf8');
     expect(source).not.toMatch(/api\/public\/ingestion/);
     expect(source).not.toMatch(/trace-create|generation-create/);
   });
