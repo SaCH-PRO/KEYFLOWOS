@@ -35,6 +35,10 @@
  *   V72S-11  (review repairs SEC-V72S-1, COR-V72S-1) --apply refuses (exit 2, nothing written) when no key
  *            variable is set (it would encrypt with the in-repo dev key) and when the @keyflow/db build it
  *            loads does not encrypt BankConnection.accessToken (a stale build would write the plaintext back).
+ *   V72S-12  (review round 2: SEC-V72S-R2-1/2/3) a stored value in the ciphertext form that does not decrypt
+ *            with the loaded key is counted as undecryptable (not already_encrypted) and listed by id; --apply
+ *            refuses when rows fail to decrypt and none decrypt (the loaded key is likely not the API's), and
+ *            runs once one row proves the key; an unknown argument is not echoed back.
  *
  * Owner question OQ-4 (does production hold plaintext bank tokens today) is open; nothing here reads production.
  */
@@ -45,6 +49,10 @@ import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
+
+/** The key variable as it was before this file loaded anything (COR-V72S-R2-2), restored in afterAll. */
+const KEY_VAR = 'CONNECTOR_CREDENTIALS_KEY';
+const previousKey = process.env[KEY_VAR];
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
@@ -62,8 +70,6 @@ const SCRIPT_TIMEOUT_MS = 120_000;
  * operator script refuses --apply without a key in the environment, and the suite must read what it writes.
  * Restored in afterAll.
  */
-const KEY_VAR = 'CONNECTOR_CREDENTIALS_KEY';
-const previousKey = process.env[KEY_VAR];
 process.env[KEY_VAR] = [P, 'local', 'test', 'key'].join('-');
 
 const ID = {
@@ -73,6 +79,8 @@ const ID = {
   biz2: `${P}biz2`,
   /** The script's own business: only seeded rows, so its counts are exact. */
   bizScript: `${P}bizscript`,
+  /** V72S-12's business: a row that does not decrypt. */
+  bizScript2: `${P}bizscript2`,
 };
 
 /** A token built from fragments at run time, so no secret-shaped literal sits in the source. */
@@ -260,7 +268,7 @@ beforeAll(async () => {
   await app.init();
 
   await cleanup();
-  for (const [uid, bid] of [[ID.owner, ID.biz], [ID.owner2, ID.biz2], [ID.owner, ID.bizScript]] as const) {
+  for (const [uid, bid] of [[ID.owner, ID.biz], [ID.owner2, ID.biz2], [ID.owner, ID.bizScript], [ID.owner, ID.bizScript2]] as const) {
     if (!(await db.user.findUnique({ where: { id: uid } }))) {
       await db.user.create({ data: { id: uid, email: `${P}${uid.slice(P.length)}@test.local`, name: uid, role: 'USER' } });
     }
@@ -582,4 +590,43 @@ describe('BankConnection.accessToken is encrypted at rest (RR-BANK-TOKEN-ENCRYPT
     expect(lines.join('\n')).toMatch(/does not encrypt BankConnection\.accessToken/);
     expect(await stored(id), 'nothing written').toBe(plain);
   }, 3 * SCRIPT_TIMEOUT_MS);
+  it('[V72S-12] undecryptable rows are reported, --apply refuses when no stored ciphertext proves the key, and bad arguments are not echoed', async () => {
+    const fa = await account(ID.bizScript2, 'V72S undecryptable bank');
+    const garbage = [CIPHER_PREFIX, Buffer.from('v72s-not-a-real-ciphertext-value-000000000000').toString('base64')].join('');
+    const badId = await rawRow(ID.bizScript2, fa, `${P}s2_bad`, garbage);
+    const plain = token('undecr');
+    const plainId = await rawRow(ID.bizScript2, fa, `${P}s2_plain`, plain);
+
+    const dry = await runScript([`--business=${ID.bizScript2}`]);
+    const dryAll = `${dry.out}\n${dry.err}`;
+    expect(dry.code, dryAll).toBe(0);
+    expect(countOf(dry.out, 'plaintext_tokens')).toBe(1);
+    expect(countOf(dry.out, 'already_encrypted')).toBe(0);
+    expect(countOf(dry.out, 'undecryptable')).toBe(1);
+    expect(dry.out).toMatch(new RegExp(`^\\s+${badId}\\s+undecryptable\\s*$`, 'm'));
+    expect(listedIds(dry.out)).toEqual([plainId]);
+    expect(dryAll).not.toContain(garbage.slice(CIPHER_PREFIX.length));
+
+    const refused = await runScript(['--apply', `--business=${ID.bizScript2}`]);
+    const refusedAll = `${refused.out}\n${refused.err}`;
+    expect(refused.code, refusedAll).toBe(2);
+    expect(refusedAll).toMatch(/none decrypts with the loaded key/);
+    expect(await stored(plainId), 'nothing written').toBe(plain);
+    expect(await stored(badId)).toBe(garbage);
+
+    // One row the loaded key decrypts proves it: --apply then encrypts the plaintext and leaves the bad row as stored.
+    await service.create(ID.bizScript2, { financialAccountId: await account(ID.bizScript2, 'V72S proof bank'), provider: 'plaid', accessToken: token('proof') });
+    const applied = await runScript(['--apply', `--business=${ID.bizScript2}`]);
+    expect(applied.code, `${applied.out}\n${applied.err}`).toBe(0);
+    expect(countOf(applied.out, 'encrypted')).toBe(1);
+    expect((await stored(plainId))?.startsWith(CIPHER_PREFIX)).toBe(true);
+    expect(await stored(badId), 'an undecryptable row is never rewritten').toBe(garbage);
+
+    const { main } = await import('../scripts/encrypt-bank-connection-tokens');
+    const lines: string[] = [];
+    const pasted = ['--', 'pasted', 'token', 'value', '0042'].join('');
+    expect(await main([pasted], { db, log: () => undefined, error: (...a: unknown[]) => lines.push(a.join(' ')) })).toBe(2);
+    expect(lines.join(' ')).toMatch(/Usage/);
+    expect(lines.join(' '), 'an unknown argument is not echoed').not.toContain('pasted');
+  }, 4 * SCRIPT_TIMEOUT_MS);
 });

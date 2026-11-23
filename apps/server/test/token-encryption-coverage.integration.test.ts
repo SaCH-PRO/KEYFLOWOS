@@ -126,6 +126,19 @@ const NOT_A_CREDENTIAL: Record<string, string> = {
     'rest-scope-census.spec.ts classifies it the same way',
 };
 
+/**
+ * The exact secret-shaped columns each bucketed model is exempt for (review round 2, COR-V72S-R2-1). A bucket
+ * exempts the COLUMNS it names, not the model: a new secret-shaped column on a bucketed model (a credential added
+ * to Quote, say) fails the gate instead of riding the model's exemption.
+ */
+const BUCKET_FIELDS: Record<string, string[]> = {
+  ...Object.fromEntries(Object.entries(LOOKUP_FIELD).map(([model, field]) => [model, [field]])),
+  SupplierConnection: ['credentials'],
+  ConnectorAccount: ['refreshTokenEncrypted', 'tokenExpiresAt'],
+  DriveSyncCursor: ['pageToken'],
+  IntellectualPropertyProfile: ['tradeSecrets'],
+};
+
 /** The extension hooks a model when it has a `    <delegate>: {` block. */
 function hooks(extensionText: string, model: string): boolean {
   const delegate = model[0].toLowerCase() + model.slice(1);
@@ -206,6 +219,15 @@ describe('every secret column has a decided home', () => {
       }
     }
     expect(Object.keys(LOOKUP_FIELD).sort()).toEqual(Object.keys(LOOKUP_KEY).sort());
+  });
+
+  it('[V72S-C5] a bucket exempts exactly the columns it names: a new secret-shaped column on a bucketed model fails', () => {
+    const bucketed = [LOOKUP_KEY, HANDLED_ELSEWHERE, NOT_A_CREDENTIAL].flatMap((b) => Object.keys(b)).sort();
+    expect(Object.keys(BUCKET_FIELDS).sort(), 'every bucketed model names its exempt columns').toEqual(bucketed);
+    const scanned = Object.fromEntries(modelsWithSecretColumns().map(({ model, fields }) => [model, [...fields].sort()]));
+    for (const model of bucketed) {
+      expect(scanned[model], `${model}: the secret-shaped columns the scan finds are exactly the exempt ones`).toEqual([...BUCKET_FIELDS[model]].sort());
+    }
   });
 
   it('ChannelConnection is encrypted, because our own sync copies decrypted tokens into it', () => {
