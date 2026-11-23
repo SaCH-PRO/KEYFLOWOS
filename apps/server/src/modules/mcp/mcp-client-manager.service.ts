@@ -3,6 +3,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { McpServerConfig, BridgedTool } from './mcp.types';
 import { loadMcpServerConfigs, parseMcpToolName } from './mcp.types';
+import { fenceUntrusted } from '../ai/untrusted-content';
 
 const TOOL_CACHE_TTL_MS = 5 * 60 * 1000;
 const CONNECT_TIMEOUT_MS = 10_000;
@@ -75,9 +76,9 @@ export class McpClientManagerService implements OnModuleDestroy {
       ),
     ]);
 
-    // Tool output is untrusted content: cap it before it reaches prompts.
-    const text = JSON.stringify(result ?? null);
-    return text.length > 8000 ? text.slice(0, 8000) + '…(truncated)' : result;
+    // Tool output is untrusted content (RR-UNTRUSTED-CONTENT-FENCE): it reaches prompts only as a
+    // fenced, capped untrusted-data block, which the output cannot close from inside.
+    return fenceUntrusted('mcp_tool', JSON.stringify(result ?? null));
   }
 
   private async ensureEntry(config: McpServerConfig): Promise<ServerEntry | null> {

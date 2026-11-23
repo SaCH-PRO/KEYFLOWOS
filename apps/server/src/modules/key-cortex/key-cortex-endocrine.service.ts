@@ -35,6 +35,8 @@
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import type { CanonicalModule } from '../../core/authority/module-vocabulary';
+import { EVENT_MODULES, type ModuleSight } from './key-cortex-prompt-context.service';
 
 /**
  * The modulators KEY runs on.
@@ -68,6 +70,29 @@ export interface EndocrineSignal {
   magnitude: number;
   /** Evidence for the push. Required — an unexplained nudge is not admissible. */
   reason: string;
+  /**
+   * MEM-SALIENCE-SIGHT (D-234, D-100): the modules whose read scope a reader needs to be told this evidence (the
+   * salience service's signalModulesOf: an overdue-invoice count needs revenue). Absent: business-wide evidence (the
+   * immune, homeostasis and conscious-pipeline writers), which every reader's view carries.
+   */
+  modules?: readonly CanonicalModule[];
+}
+
+/**
+ * MEM-SALIENCE-SIGHT: one strand of a hormone, built only from evidence that needs the same modules. A reader without
+ * every module is told a level combined from the strands it may read, so evidence it may not read is neither shown as
+ * a Basis line nor felt in the level, the strength word or the effort multiplier.
+ */
+interface HormoneStrand {
+  level: number;
+  reasons: string[];
+  updatedAt: Date;
+  modules: readonly CanonicalModule[];
+}
+
+/** A reader with every module an event can name (EVENT_MODULES) is told the unprojected levels, exactly as before. */
+function seesEveryModule(sight: ModuleSight): boolean {
+  return EVENT_MODULES.every((module) => sight(module));
 }
 
 /**
@@ -98,6 +123,14 @@ export class KeyCortexEndocrineService {
   /** businessId → hormone → level. Working state; durability is below. */
   private readonly levels = new Map<string, Map<HormoneName, HormoneLevel>>();
 
+  /**
+   * MEM-SALIENCE-SIGHT: businessId → hormone → strand key (its sorted modules) → strand. Working state only: after a
+   * restart a reader without every module is told nothing until the strands are observed again (business-wide strands
+   * within the half hour, salience's within the hour), which fails toward saying less. The stored, hydrated levels
+   * carry no provenance, so they reach only the unprojected view.
+   */
+  private readonly strands = new Map<string, Map<HormoneName, Map<string, HormoneStrand>>>();
+
   /** Businesses whose state has been loaded from storage this process. */
   private readonly hydrated = new Set<string>();
 
@@ -111,7 +144,21 @@ export class KeyCortexEndocrineService {
    * property of this service is time-dependent, and a service whose decay
    * behaviour cannot be tested is one whose decay behaviour is unverified.
    */
-  release(businessId: string, signals: EndocrineSignal[], now: Date = new Date()): void {
+  release(
+    businessId: string,
+    signals: EndocrineSignal[],
+    now: Date = new Date(),
+    /**
+     * MEM-SALIENCE-SIGHT: doses that feed only the per-reader strands, never the unprojected level (each naming its
+     * modules; one without fails closed to every module). The salience service sends one per group of signals that
+     * need the same modules, so a reader's view is chosen among the signals it may read.
+     */
+    scoped: EndocrineSignal[] = [],
+  ): void {
+    for (const signal of signals) {
+      if (!signal.modules) this.strengthenStrand(businessId, signal, [], now);
+    }
+    for (const signal of scoped) this.strengthenStrand(businessId, signal, signal.modules ?? EVENT_MODULES, now);
     if (signals.length === 0) return;
     const forBusiness = this.levels.get(businessId) ?? new Map<HormoneName, HormoneLevel>();
 
@@ -149,6 +196,85 @@ export class KeyCortexEndocrineService {
     // because the thalamus calls it on the request path, and a hormone that
     // could not be written must never fail the message that observed it.
     void this.persist(businessId);
+  }
+
+  /**
+   * MEM-SALIENCE-SIGHT: push strands as release() pushes a level (same clamp, same asymptote, same decay).
+   *
+   * Review CR F1b: each module strand is ONE chain that carries the business-wide evidence too, never two chains
+   * combined at read time (decay is multiplicative on the level, so a split pair decays slower than the joint level
+   * the owner is told). A business-wide dose (no modules) strengthens the business-wide strand and every module strand
+   * already held; a module strand first observed starts from the business-wide strand's current level and reasons.
+   * Every strand thus takes, per observation, no more than the unprojected level takes, and never a dose from another
+   * module group.
+   */
+  private strengthenStrand(
+    businessId: string,
+    signal: EndocrineSignal,
+    modules: readonly CanonicalModule[],
+    now: Date,
+  ): void {
+    if (!signal.reason?.trim()) return;
+    const key = [...modules].sort().join(',');
+    const byHormone = this.strands.get(businessId) ?? new Map<HormoneName, Map<string, HormoneStrand>>();
+    const byKey = byHormone.get(signal.hormone) ?? new Map<string, HormoneStrand>();
+    const push = Math.min(Math.max(signal.magnitude, 0), MAX_SINGLE_PUSH);
+    const strengthen = (strandKey: string, strandModules: readonly CanonicalModule[], from: HormoneStrand | undefined) => {
+      // Review CR F3: a residue below the noise floor counts as 0, as read() drops the unprojected level there, so a
+      // strand never starts a dose higher than the level the owner is told.
+      const raw = from ? this.levelAt(from, now) : 0;
+      const base = raw < NOISE_FLOOR ? 0 : raw;
+      byKey.set(strandKey, {
+        level: base + push * (1 - base),
+        // Review SEC-MSS-4: nor its reasons, as read() forgets them with the level.
+        reasons: [...new Set([signal.reason, ...(base === 0 ? [] : (from?.reasons ?? []))])].slice(0, 5),
+        updatedAt: now,
+        modules: [...strandModules],
+      });
+    };
+    if (key === '') {
+      for (const [strandKey, strand] of [...byKey]) strengthen(strandKey, strand.modules, strand);
+      if (!byKey.has('')) strengthen('', [], undefined);
+    } else {
+      strengthen(key, modules, byKey.get(key) ?? byKey.get(''));
+    }
+    byHormone.set(signal.hormone, byKey);
+    this.strands.set(businessId, byHormone);
+  }
+
+  /**
+   * MEM-SALIENCE-SIGHT (D-234, D-100): the levels as `sight` may be told them. A reader with every module is told the
+   * unprojected levels (read). Any other reader is told, per hormone, the STRONGEST strand whose modules it may all
+   * read (the business-wide strand included; ties by key), with that strand's reasons; a hormone with no such strand
+   * above the noise floor is not described. Nothing a reader may not read enters its level, its reasons or their
+   * order. Review CR F1/F1b: one strand, never a combination, so a reader is told no more than the unprojected level
+   * (each strand takes no more per observation than it does: strengthenStrand).
+   */
+  readFor(businessId: string, sight: ModuleSight, now: Date = new Date()): HormoneLevel[] {
+    if (seesEveryModule(sight)) return this.read(businessId, now);
+    const byHormone = this.strands.get(businessId);
+    if (!byHormone) return [];
+
+    const live: HormoneLevel[] = [];
+    for (const [name, byKey] of byHormone) {
+      let strongest: (HormoneStrand & { key: string }) | null = null;
+      for (const [key, strand] of byKey) {
+        const level = this.levelAt(strand, now);
+        if (level < NOISE_FLOOR) {
+          byKey.delete(key);
+          continue;
+        }
+        if (!strand.modules.every((module) => sight(module))) continue;
+        if (!strongest || level > strongest.level || (level === strongest.level && key < strongest.key)) {
+          strongest = { ...strand, level, key };
+        }
+      }
+      if (byKey.size === 0) byHormone.delete(name);
+      if (!strongest) continue;
+      live.push({ name, level: strongest.level, reasons: [...strongest.reasons], updatedAt: strongest.updatedAt });
+    }
+    if (byHormone.size === 0) this.strands.delete(businessId);
+    return live.sort((a, b) => b.level - a.level || a.name.localeCompare(b.name));
   }
 
   /**
@@ -344,8 +470,10 @@ export class KeyCortexEndocrineService {
    * model told only "be cautious" becomes vaguely hedgy about everything; a
    * model told why becomes specifically careful about the right thing.
    */
-  describeForPrompt(businessId: string, now: Date = new Date()): string | null {
-    const active = this.read(businessId, now);
+  describeForPrompt(businessId: string, now: Date = new Date(), sight?: ModuleSight): string | null {
+    // MEM-SALIENCE-SIGHT: `sight` undefined is the unprojected view, for a caller that renders to no particular reader
+    // (the conscious pipeline today); the chat's standing context passes its viewer's (CognitiveTriageService).
+    const active = sight ? this.readFor(businessId, sight, now) : this.read(businessId, now);
     if (active.length === 0) return null;
 
     const lines = active.map((h) => {
@@ -369,8 +497,10 @@ export class KeyCortexEndocrineService {
    * think harder before answering. Dopamine deliberately does NOT reduce it —
    * optimism is not a reason to think less.
    */
-  effortMultiplier(businessId: string, now: Date = new Date()): number {
-    const caution = this.read(businessId, now)
+  effortMultiplier(businessId: string, now: Date = new Date(), sight?: ModuleSight): number {
+    // MEM-SALIENCE-SIGHT: by the viewer's levels when given, so the effort tier (and the arousal the chat reports) is
+    // no indirect channel for evidence that viewer may not read.
+    const caution = (sight ? this.readFor(businessId, sight, now) : this.read(businessId, now))
       .filter((h) => h.name !== 'dopamine')
       .reduce((max, h) => Math.max(max, h.level), 0);
     return 1 + Math.min(caution, 1) * 0.5;
@@ -379,6 +509,7 @@ export class KeyCortexEndocrineService {
   /** Clear all hormones for a business. */
   reset(businessId: string): void {
     this.levels.delete(businessId);
+    this.strands.delete(businessId);
   }
 
   /**
@@ -398,7 +529,7 @@ export class KeyCortexEndocrineService {
    * Decay is computed on read rather than on a timer because a timer would have
    * to fire per business and would keep dead tenants resident in memory.
    */
-  private levelAt(hormone: HormoneLevel, now: Date): number {
+  private levelAt(hormone: Pick<HormoneLevel, 'level' | 'updatedAt'>, now: Date): number {
     const hours = (now.getTime() - hormone.updatedAt.getTime()) / 3_600_000;
     if (hours <= 0) return hormone.level;
     return hormone.level * Math.pow(HOURLY_RETENTION, hours);

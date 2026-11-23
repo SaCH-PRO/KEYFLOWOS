@@ -7,6 +7,7 @@ import { KeyCortexEpigeneticsService } from './key-cortex-epigenetics.service';
 import { KeyCortexIncentiveService } from './key-cortex-incentive.service';
 import { KeyCortexSalienceService } from './key-cortex-salience.service';
 import { KeyCortexInteroceptionService } from './key-cortex-interoception.service';
+import { NO_MODULE_SIGHT, type ModuleSight } from './key-cortex-prompt-context.service';
 
 /**
  * The thalamus: how much cognition does this message deserve?
@@ -105,9 +106,14 @@ export class CognitiveTriageService {
    * Grade a message. Never throws — a triage failure must fall back to today's
    * behaviour, not break the chat.
    */
-  triage(businessId: string, text: string, hasAttachments = false): TriageVerdict {
+  /**
+   * MEM-SALIENCE-SIGHT (D-234, D-100): `sight` is the module sight of the reader the verdict's standing context is for
+   * (FlowOrchestratorService: the turn's member, read as ModuleScopeGuard reads the membership). The salience counts,
+   * the endocrine Basis lines and the arousal are those that reader may read. None given: no module (fail closed).
+   */
+  triage(businessId: string, text: string, hasAttachments = false, sight: ModuleSight = NO_MODULE_SIGHT): TriageVerdict {
     try {
-      return this.grade(businessId, text, hasAttachments);
+      return this.grade(businessId, text, hasAttachments, sight);
     } catch (err: unknown) {
       this.logger.warn(
         `[triage] fell back to standard: ${err instanceof Error ? err.message : String(err)}`,
@@ -116,7 +122,7 @@ export class CognitiveTriageService {
     }
   }
 
-  private grade(businessId: string, text: string, hasAttachments: boolean): TriageVerdict {
+  private grade(businessId: string, text: string, hasAttachments: boolean, sight: ModuleSight): TriageVerdict {
     if (!this.router) return this.fallback();
 
     const dimensions = this.router.classifyDimensions(text.toLowerCase());
@@ -147,7 +153,9 @@ export class CognitiveTriageService {
     // trivial reason, so it floors the message out of reflex.
     if (hasAttachments) score += 1;
 
-    const arousal = this.arousalFor(businessId);
+    // One clock for the arousal and the standing context, so both read the same levels.
+    const now = new Date();
+    const arousal = this.arousalFor(businessId, sight, now);
     score = score * arousal;
 
     const tier = this.tierFor(score, dimensions, hasAttachments, text);
@@ -157,7 +165,7 @@ export class CognitiveTriageService {
       score: Math.round(score * 100) / 100,
       taskCategory: this.categoryFor(),
       ...TIER_PARAMS[tier],
-      standingContext: this.standingContext(businessId),
+      standingContext: this.standingContext(businessId, sight, now),
       arousal: Math.round(arousal * 100) / 100,
       reason: this.reasonFor(tier, dimensions, arousal),
       dimensions,
@@ -219,10 +227,10 @@ export class CognitiveTriageService {
    * across instances — acceptable here because the failure direction is toward
    * the strict threshold (cheaper), never toward runaway spend.
    */
-  private arousalFor(businessId: string): number {
+  private arousalFor(businessId: string, sight: ModuleSight, now: Date): number {
     if (!this.endocrine) return 1;
     try {
-      return this.endocrine.effortMultiplier(businessId);
+      return this.endocrine.effortMultiplier(businessId, now, sight);
     } catch {
       return 1;
     }
@@ -306,7 +314,7 @@ export class CognitiveTriageService {
    * model "all systems normal" on every message spends tokens to say nothing
    * and trains it to skim the section.
    */
-  private standingContext(businessId: string): string | null {
+  private standingContext(businessId: string, sight: ModuleSight, now: Date): string | null {
     const parts: string[] = [];
 
     // READ ONLY. Triage does not release hormones.
@@ -333,7 +341,7 @@ export class CognitiveTriageService {
     }
 
     try {
-      const hormones = this.endocrine?.describeForPrompt(businessId);
+      const hormones = this.endocrine?.describeForPrompt(businessId, now, sight);
       if (hormones) parts.push(hormones);
     } catch {
       /* disposition is framing, never required */
@@ -362,7 +370,7 @@ export class CognitiveTriageService {
       // team distribution because withinBudget drops whole trailing sections —
       // "12 overdue invoices against a normal of 3" should survive a squeeze
       // that a tone preference does not.
-      const concerns = this.salience?.describeForPrompt(businessId) ?? null;
+      const concerns = this.salience?.describeForPrompt(businessId, now, sight) ?? null;
       if (concerns) parts.push(concerns);
     } catch {
       /* counted facts are framing too — never required */

@@ -1363,6 +1363,7 @@ export class KeyCortexQueryPipelineService {
         number,
         { id?: string; name?: string; arguments: string }
       >();
+      let streamError: string | undefined;
 
       for await (const chunk of stream) {
         if (chunk.provider) finalProvider = chunk.provider as CortexProvider;
@@ -1406,12 +1407,34 @@ export class KeyCortexQueryPipelineService {
           }
         }
 
-        if (chunk.error) {
+        // Review SEC-1: an error chunk stops the stream whatever its message
+        // (a provider that threw new Error() yields an empty one).
+        if (chunk.type === 'error' || chunk.error) {
+          streamError = chunk.error || 'The model stream failed';
           yield {
             type: 'error',
-            error: chunk.error,
+            error: streamError,
           };
+          break;
         }
+      }
+
+      // RR-STREAM-ERROR-NO-EFFECTS (D-261): a model stream that ended in an
+      // error has no effects. Its collected tool calls are not run, no command
+      // is parsed from its partial text, and the partial answer is not saved or
+      // reported as a completed turn: the stream ends on the error chunk.
+      if (streamError !== undefined) {
+        this.logger.warn(
+          `[streamQuery][${correlationId}] Model stream ended in an error; ${toolCallBuffers.size} collected tool call(s) not run, partial answer discarded`,
+        );
+        await this.logEvent(correlationId, 'STREAM_QUERY_ERROR', {
+          error: streamError,
+          partialAnswer: accumulatedText.length > 0 || toolCallBuffers.size > 0,
+          discardedToolCalls: toolCallBuffers.size,
+          provider: finalProvider,
+          model: finalModel,
+        });
+        return;
       }
 
       // Execute any streamed tool calls through the same autonomy-checked helper
