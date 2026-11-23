@@ -1160,6 +1160,11 @@
     {
       "prefix": "v86s_",
       "owner": "apps/server/test/site-analytics-revenue-scope.integration.test.ts"
+    },
+    {
+      "prefix": "v77o_",
+      "owner": "apps/server/test/attachment-object-tenancy.integration.test.ts",
+      "packet": "V1-77 (FU-ATTACHMENT-OBJECT-TENANCY)"
     }
   ],
   "pendingRenames": [],
