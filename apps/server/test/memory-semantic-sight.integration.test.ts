@@ -796,4 +796,54 @@ describe('MEM-SEMANTIC-SIGHT (D-234, D-257): semantic memory reaches a reader on
       await clearMemory();
     }
   }, 240_000);
+  it('V71U-20 RED (Codex P2 on #226): a copy deleted above the read position between two pages does not make the next-ranked visible hit go missing: the filtered read keeps its place by rank (similarity, then id), not by row offset', async () => {
+    await clearMemory();
+    try {
+      // 50 withheld copies ranked first (similarity 1), then 5 visible ones (0.94 down to 0.90).
+      for (let i = 0; i < 50; i++) {
+        await semantic.store({ businessId: ID.biz, content: `${ORPHAN} withheld ${i}`, sourceType: 'event', sourceId: `${P}w_${i}` });
+      }
+      for (let n = 1; n <= 5; n++) {
+        await semantic.store({ businessId: ID.biz, content: `${okMarker(n)} visible`, sourceType: 'event', sourceId: `${P}v_${n}` });
+      }
+      let pages = 0;
+      const hits = await semantic.search({
+        businessId: ID.biz, query: QUERY, limit: 5,
+        visibleTo: async (page: any[]) => {
+          pages += 1;
+          // Between the first and the second page another writer deletes one copy the first page already read.
+          if (pages === 1) await db.aiMemoryEmbedding.delete({ where: { id: page[0].id } });
+          return page.map((h: any) => h.content.includes('visible'));
+        },
+      });
+      expect(pages, 'premise: the first page (50 rows) held only withheld copies').toBeGreaterThan(1);
+      expect(hits.map((h: any) => h.content)).toEqual([1, 2, 3, 4, 5].map((n) => `${okMarker(n)} visible`));
+    } finally {
+      await clearMemory();
+    }
+  }, 120_000);
+
+  it('V71U-21 (Codex P2 on #226; coverage): a copy inserted above the read position between two pages neither repeats a hit nor drops one', async () => {
+    await clearMemory();
+    try {
+      for (let i = 0; i < 50; i++) {
+        await semantic.store({ businessId: ID.biz, content: `${ORPHAN} withheld ${i}`, sourceType: 'event', sourceId: `${P}w_${i}` });
+      }
+      for (let n = 1; n <= 5; n++) {
+        await semantic.store({ businessId: ID.biz, content: `${okMarker(n)} visible`, sourceType: 'event', sourceId: `${P}v_${n}` });
+      }
+      let pages = 0;
+      const hits = await semantic.search({
+        businessId: ID.biz, query: QUERY, limit: 5,
+        visibleTo: async (page: any[]) => {
+          pages += 1;
+          if (pages === 1) await semantic.store({ businessId: ID.biz, content: `${ORPHAN} late`, sourceType: 'event', sourceId: `${P}w_late` });
+          return page.map((h: any) => h.content.includes('visible'));
+        },
+      });
+      expect(hits.map((h: any) => h.content)).toEqual([1, 2, 3, 4, 5].map((n) => `${okMarker(n)} visible`));
+    } finally {
+      await clearMemory();
+    }
+  }, 120_000);
 });
