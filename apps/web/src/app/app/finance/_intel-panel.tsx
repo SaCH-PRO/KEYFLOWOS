@@ -12,6 +12,7 @@ import {
   type FinanceIntelActionItem,
 } from "@/lib/client";
 import { moduleReadRefusal } from "@/lib/module-access";
+import { isModuleScopeRefusal, moduleWriteRefusal } from "@/lib/module-scope-refusal";
 
 /**
  * FIN8 — "Needs Attention" panel. The daily insight strip is rendered
@@ -34,6 +35,10 @@ export function FinanceIntelPanel({
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // FU-FINANCE-INTEL-DOORS (owner ruling D-258): resolve and dismiss need revenue write, the scan revenue read. The web
+  // cannot read the member's own scope map, so the buttons stay and the server decides; every refusal or error it
+  // answers is said here (never dropped), and an item the server kept stays.
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -52,22 +57,34 @@ export function FinanceIntelPanel({
 
   const onScan = useCallback(async () => {
     setScanning(true);
-    await runFinanceIntelScan(businessId);
+    setActionError(null);
+    const r = await runFinanceIntelScan(businessId);
+    if (r.error) {
+      setActionError(
+        isModuleScopeRefusal(r, "revenue")
+          ? `You can't run the finance scan in this business: it needs revenue read access. ${r.error}`
+          : `The finance scan didn't run: ${r.error}`,
+      );
+    }
     await load();
     setScanning(false);
   }, [businessId, load]);
 
   const onResolve = useCallback(async (id: string) => {
     setBusyId(id);
+    setActionError(null);
     const r = await resolveFinanceIntelAction(businessId, id);
-    if (!r.error) setItems((cur) => cur.filter((x) => x.id !== id));
+    if (r.error) setActionError(moduleWriteRefusal(r, "revenue", "resolve finance action items"));
+    else setItems((cur) => cur.filter((x) => x.id !== id));
     setBusyId(null);
   }, [businessId]);
 
   const onDismiss = useCallback(async (id: string) => {
     setBusyId(id);
+    setActionError(null);
     const r = await dismissFinanceIntelAction(businessId, id);
-    if (!r.error) setItems((cur) => cur.filter((x) => x.id !== id));
+    if (r.error) setActionError(moduleWriteRefusal(r, "revenue", "dismiss finance action items"));
+    else setItems((cur) => cur.filter((x) => x.id !== id));
     setBusyId(null);
   }, [businessId]);
 
@@ -105,6 +122,10 @@ export function FinanceIntelPanel({
           )}
         </div>
       </div>
+
+      {actionError && (
+        <p className="text-xs text-amber-500 mb-2" role="alert">{actionError}</p>
+      )}
 
       {loading ? (
         <ul className="space-y-2" role="status" aria-label="Loading">
