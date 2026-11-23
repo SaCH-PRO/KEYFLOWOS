@@ -37,7 +37,8 @@ function table(rows: Row[], onRead?: (call: number) => void) {
       );
     }
     out.sort((a, b) => time(b, field) - time(a, field) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
-    return out.slice(args.skip ?? 0, (args.skip ?? 0) + (args.take ?? out.length));
+    // As Prisma returns it: updatedAt is never null (@updatedAt; a row never rewritten has its creation time).
+    return out.slice(args.skip ?? 0, (args.skip ?? 0) + (args.take ?? out.length)).map((r) => ({ ...r, updatedAt: r.updatedAt ?? r.createdAt }));
   };
   return { calls, findMany };
 }
@@ -106,7 +107,8 @@ describe('GET .../agent/patterns pages by keyset, bounded (FU-PATTERNS-ROUTES-SI
     const rows = [old, rewritten, plain(2), ...Array.from({ length: 300 }, (_, i) => money(10 + i))];
     const t = table(rows);
     const res = await controllerOver(t.findMany).getDetectedPatterns('biz', req);
-    expect(res.patterns.map((p: any) => p.id)).toEqual([plain(2).id, 'p_rewritten']);
+    // Ordered by updatedAt: the row rewritten 7 days ago before the one written 10 days ago.
+    expect(res.patterns.map((p: any) => p.id)).toEqual(['p_rewritten', plain(2).id]);
     const floor = Date.now() - 30 * 24 * 60 * 60 * 1000;
     for (const call of t.calls) {
       // Orchestrator ruling (A), COR-R3-1: the window is on updatedAt (a rewritten row is recent), ordered and keyed on it.
