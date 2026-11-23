@@ -1177,7 +1177,10 @@ describe('TOF-GRAPH-SCOPE-ARRAY review repair (D-71, D-114, D-140, D-57): a JSON
     request(rvApp.getHttpServer()).post(`/api/v1/cortex/plans/${planId}/execute`).set(as(userId)).send({ businessId: R.bizR });
   const cortexExecute = (userId: string, module: string, action: string) =>
     request(rvApp.getHttpServer()).post('/api/v1/cortex/execute').set(as(userId))
-      .send({ businessId: R.bizR, module, action, parameters: { marker: `v97x-${module}.${action}` } });
+      // ExecuteCommandDto requires a string command (FU-VITEST-DECORATOR-METADATA:
+      // the ValidationPipe now runs as in production); with module and action
+      // present the handler takes the structured path and never parses it.
+      .send({ businessId: R.bizR, command: `v97x ${module}.${action}`, module, action, parameters: { marker: `v97x-${module}.${action}` } });
   const cortexQuery = (userId: string, module: string, query: string) =>
     request(rvApp.getHttpServer()).post('/api/v1/cortex/query').set(as(userId)).send({ businessId: R.bizR, module, query });
   const graphOf = (userId: string) => request(rvApp.getHttpServer()).get(`/graph/business/${R.bizR}`).set(as(userId));
