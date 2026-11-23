@@ -37,6 +37,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const [checked, setChecked] = useState(false);
   const [allowed, setAllowed] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     const check = async () => {
@@ -132,7 +133,10 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               {/* RR-ADMIN-LOGOUT: the admin bearer outranks every user token, so the admin area signs out explicitly. */}
               <button
                 type="button"
+                disabled={signingOut}
                 onClick={async () => {
+                  if (signingOut) return;
+                  setSigningOut(true);
                   await adminSignOut();
                   router.replace("/admin/login");
                 }}

@@ -312,23 +312,24 @@ export function clearAdminSession() {
 }
 
 /**
- * RR-ADMIN-LOGOUT: the admin sign-out. Tells the server (POST api/admin/auth/logout
- * revokes the admin's tokens by cutoff) with the admin bearer, then clears the
- * session locally whatever the server answered: a sign-out that leaves the
- * bearer on the device because the network failed is the hazard, not the fix.
+ * RR-ADMIN-LOGOUT: the admin sign-out. The session leaves the device FIRST
+ * (the bearer is read for the server call, then cleared), then the server is
+ * told (POST api/admin/auth/logout revokes the admin's tokens by cutoff) with
+ * that bearer. A sign-out that leaves the bearer on the device because the
+ * network failed or stalled is the hazard, not the fix, so nothing here waits
+ * on the server to clear, and a failed or thrown request is swallowed.
  */
 export async function adminSignOut(): Promise<void> {
   if (typeof window === "undefined") return;
   const token = window.localStorage.getItem(ADMIN_TOKEN_KEY);
+  clearAdminSession();
   try {
     await fetch(`${getApiBase()}/api/admin/auth/logout`, {
       method: "POST",
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
   } catch {
-    // the local clearing below is what matters
-  } finally {
-    clearAdminSession();
+    // the local clearing above is what matters
   }
 }
 
@@ -342,7 +343,6 @@ export function clearStoredBusinessId() {
   window.localStorage.removeItem(REFRESH_TOKEN_KEY);
   window.localStorage.removeItem(USER_CACHE_KEY);
   window.localStorage.removeItem(BUSINESS_CACHE_KEY);
-  window.localStorage.removeItem("kf_auth_mode");
   clearTokenCookie();
   clearBusinessIdCookie();
   userCache = null;
