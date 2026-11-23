@@ -48,6 +48,8 @@ const ID = {
   expnorev: `${P}expnorev`,
   /** A platform SUPER_ADMIN with no membership: BusinessGuard admits them. */
   root: `${P}root`,
+  /** STAFF: revenue and expenses read, operations 'none' (the approval list's own gate). */
+  noops: `${P}noops`,
   biz: `${P}biz`,
   other: `${P}other`,
   otherBiz: `${P}biz2`,
@@ -62,8 +64,9 @@ const BLIND_SCOPES = {
 const REVENUE_SCOPES = { ...BLIND_SCOPES, revenue: 'read', expenses: 'read' };
 const REVENUE_NO_EXPENSES_SCOPES = { ...BLIND_SCOPES, revenue: 'read' };
 const EXPENSES_NO_REVENUE_SCOPES = { ...BLIND_SCOPES, expenses: 'read' };
+const NO_OPERATIONS_SCOPES = { ...REVENUE_SCOPES, operations: 'none' };
 
-type Reader = 'owner' | 'blind' | 'revenue' | 'revnoexp' | 'expnorev' | 'root';
+type Reader = 'owner' | 'blind' | 'revenue' | 'revnoexp' | 'expnorev' | 'root' | 'noops';
 const BLIND: Reader[] = ['blind', 'root'];
 
 /** The overdue total (4,000 + 3,341), the month's paid revenue and expenses (cost pressure: 900 of 1,000). */
@@ -79,6 +82,7 @@ const outbound: string[] = [];
 let db: any;
 let http: any;
 let monitor: any;
+let graph: any;
 let financialProposal: (p: any) => boolean;
 
 async function cleanup() {
@@ -86,6 +90,7 @@ async function cleanup() {
   for (const sql of [
     byBiz('ai_memory_embeddings'),
     byBiz('ai_memories'),
+    byBiz('ai_approval_items'),
     byBiz('invoices'),
     byBiz('expenses'),
     byBiz('contacts'),
@@ -104,11 +109,14 @@ async function cleanup() {
 
 /** Removes the business data the insights are made of (members stay), and the monitor's per-business cache. */
 async function clearData() {
-  for (const table of ['ai_memory_embeddings', 'ai_memories', 'invoices', 'expenses']) {
+  for (const table of ['ai_memory_embeddings', 'ai_memories', 'ai_approval_items', 'invoices', 'expenses']) {
     await db.$executeRawUnsafe(`DELETE FROM ${table} WHERE business_id LIKE ${sqlLikePrefix(P)}`);
   }
   await db.$executeRawUnsafe(`DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)} AND id NOT IN ($1, $2)`, ID.payer, ID.otherPayer);
   monitor.insightCache.clear();
+  // The business graph caches the full snapshot per business; the control tower reads it unforced.
+  graph.invalidateCache(ID.biz);
+  graph.invalidateCache(ID.otherBiz);
 }
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -187,18 +195,20 @@ beforeAll(async () => {
   const { ProactiveSuggestionService } = await import('../src/modules/ai/proactive-suggestion.service');
   const { StrategicIntelligenceService } = await import('../src/modules/ai/strategic-intelligence.service');
   const { isFinancialProposal } = await import('../src/modules/business-genome/key-genome/genome-finance-scope');
+  const { AiMemoryService } = await import('../src/modules/ai/ai-memory.service');
   financialProposal = isFinancialProposal as any;
 
   const prisma = new PrismaService();
-  const graph = new BusinessGraphService(prisma);
+  graph = new BusinessGraphService(prisma);
   const governance = { getAutonomySettings: async () => ({ mode: 'pro_auto', maxAutoTier: 1 }) };
   monitor = new ProAutoMonitorService(prisma, graph, governance as any, { logToolExecution: async () => undefined } as any, {} as any);
   const suggestions = new ProactiveSuggestionService(prisma, monitor, governance as any, new EventEmitter2());
   const strategic = new StrategicIntelligenceService(prisma, {} as any, graph);
+  const memory = new AiMemoryService(prisma, {} as any, { getBlueprint: async () => null } as any);
 
   const OFF_ROUTE = new Set([
     'AiAdvisorService', 'AiUsageService', 'AiExecutionLogService', 'AiOversightService',
-    'IntentParserService', 'PlannerService', 'AiMemoryService', 'ProfileIntelligenceService',
+    'IntentParserService', 'PlannerService', 'ProfileIntelligenceService',
     'WorkspaceRecommendationsService', 'ModelGatewayService', 'KeyCommandService',
     'AutopilotRulesService', 'AgentHealthService', 'JourneyOrchestratorService', 'MorningBriefingService',
     'UnifiedInboxService', 'GoalTrackerService', 'WorkloadAggregatorService', 'TaskPrioritizerService',
@@ -219,6 +229,7 @@ beforeAll(async () => {
       { provide: ProAutoMonitorService, useValue: monitor },
       { provide: ProactiveSuggestionService, useValue: suggestions },
       { provide: StrategicIntelligenceService, useValue: strategic },
+      { provide: AiMemoryService, useValue: memory },
     ],
   })
     .useMocker((token: any) => (OFF_ROUTE.has(typeof token === 'function' ? token.name : String(token)) ? {} : undefined))
@@ -241,7 +252,7 @@ beforeAll(async () => {
   await cleanup();
   for (const [id, role] of [
     [ID.owner, 'USER'], [ID.blind, 'USER'], [ID.revenue, 'USER'], [ID.revnoexp, 'USER'], [ID.expnorev, 'USER'],
-    [ID.root, 'SUPER_ADMIN'], [ID.other, 'USER'],
+    [ID.root, 'SUPER_ADMIN'], [ID.noops, 'USER'], [ID.other, 'USER'],
   ] as const) {
     await db.user.create({ data: { id, email: `${id}@${P}test.local`, role } });
   }
@@ -253,6 +264,7 @@ beforeAll(async () => {
     [ID.revenue, ID.biz, 'STAFF', { permissionScopes: REVENUE_SCOPES, maxApprovalTier: 0 }],
     [ID.revnoexp, ID.biz, 'STAFF', { permissionScopes: REVENUE_NO_EXPENSES_SCOPES, maxApprovalTier: 0 }],
     [ID.expnorev, ID.biz, 'STAFF', { permissionScopes: EXPENSES_NO_REVENUE_SCOPES, maxApprovalTier: 0 }],
+    [ID.noops, ID.biz, 'STAFF', { permissionScopes: NO_OPERATIONS_SCOPES, maxApprovalTier: 0 }],
     [ID.other, ID.otherBiz, 'OWNER', { maxApprovalTier: 4 }],
   ] as const) {
     await db.membership.create({ data: { id: m(userId), userId, businessId, role, ...extra } });
@@ -337,6 +349,12 @@ describe('FU-INSIGHTS-SIGHT (D-100, D-234, D-146): monitoring insights, suggesti
       expect(moneyIn(blind)).toEqual([]);
       expect(text(blind)).toContain('stale_leads');
       expect(moneyIn(await ok('get', 'root', '/ai/suggestions'))).toEqual([]);
+      // Correctness review round 1 (F-4): the stored row is withheld on the AiMemory read too (its stamp words).
+      for (const reader of BLIND) {
+        const rows = await ok('get', reader, '/ai/memory?category=suggestion');
+        expect(moneyIn(rows), reader).toEqual([]);
+        expect(text(rows), `${reader} control`).toContain('stale_leads');
+      }
     } finally {
       await clearData();
     }
@@ -425,6 +443,65 @@ describe('FU-INSIGHTS-SIGHT (D-100, D-234, D-146): monitoring insights, suggesti
         };
         expect(financialProposal(proposal), category).toBe(true);
       }
+    } finally {
+      await clearData();
+    }
+  }, 300_000);
+
+  it("V72Q-08 RED (security review round 1, ISS-1): the control tower's pending approvals: a money-bearing item reaches neither the revenue-none member nor the memberless SUPER_ADMIN, an expense-bearing one not the revenue-only member, and a member without operations read (the approval list's gate) gets none; the count follows what is shown", async () => {
+    await clearData();
+    try {
+      const item = (id: string, title: string, description: string) =>
+        db.aiApprovalItem.create({ data: { id: `${P}${id}`, businessId: ID.biz, toolName: 'draft_followup_message', title, description, status: 'pending', riskTier: 2 } });
+      await item('appr_money', 'Drive intake: Create invoice for Acme (TTD 4,567.00) from x.pdf', 'Create invoice and record payment');
+      await item('appr_expense', 'Record the landlord rent', 'Monthly rent to the landlord');
+      await item('appr_plain', 'V72Q-PLAIN follow up with three leads', 'Send a friendly follow-up');
+      const approvals = (tower: any) => tower.priorities.filter((p: any) => p.type === 'approval').map((p: any) => p.title);
+      for (const reader of BLIND) {
+        const tower = await ok('get', reader, '/ai/control-tower');
+        expect(approvals(tower), reader).toEqual(['V72Q-PLAIN follow up with three leads']);
+        expect(tower.pendingApprovals, reader).toBe(1);
+      }
+      const revnoexp = await ok('get', 'revnoexp', '/ai/control-tower');
+      expect(approvals(revnoexp).sort()).toEqual(['Drive intake: Create invoice for Acme (TTD 4,567.00) from x.pdf', 'V72Q-PLAIN follow up with three leads'].sort());
+      const noops = await ok('get', 'noops', '/ai/control-tower');
+      expect(approvals(noops)).toEqual([]);
+      expect(noops.pendingApprovals).toBe(0);
+      const owner = await ok('get', 'owner', '/ai/control-tower');
+      expect(approvals(owner)).toHaveLength(3);
+      expect(owner.pendingApprovals).toBe(3);
+    } finally {
+      await clearData();
+    }
+  }, 300_000);
+
+  it("V72Q-09 RED (correctness review round 1, F-1): the owner's control tower carries no treasury section or alert (the shared projection, as before: treasury, pipeline and support are KEY's standing context's), with unpaid bills over ledger cash", async () => {
+    await clearData();
+    try {
+      await seedStaleLeads();
+      await db.expense.create({ data: { id: `${ID.biz}_bill`, businessId: ID.biz, description: 'V72Q unpaid bill', amount: 5000, status: 'BILL', date: new Date() } });
+      graph.invalidateCache(ID.biz);
+      const tower = await ok('get', 'owner', '/ai/control-tower');
+      expect(tower.snapshot.healthIndicators.filter((h: any) => h.area === 'treasury'), text(tower.snapshot.healthIndicators)).toEqual([]);
+      expect(tower.priorities.filter((p: any) => p.module === 'treasury')).toEqual([]);
+      expect(tower.risks.filter((r: any) => r.module === 'treasury')).toEqual([]);
+    } finally {
+      await clearData();
+    }
+  }, 300_000);
+
+  it('V72Q-10 RED (reviews round 1, ISS-2 / F-2): a second refresh within the cooldown stores no second suggestion for a category already suggested', async () => {
+    await clearData();
+    try {
+      await seedStaleLeads();
+      await seedMoney();
+      await ok('post', 'owner', '/ai/suggestions/refresh');
+      const first = await db.aiMemory.count({ where: { businessId: ID.biz, category: 'suggestion' } });
+      expect(first, 'premise').toBeGreaterThanOrEqual(2);
+      monitor.insightCache.clear();
+      const again = await ok('post', 'owner', '/ai/suggestions/refresh');
+      expect(again.count).toBe(0);
+      expect(await db.aiMemory.count({ where: { businessId: ID.biz, category: 'suggestion' } })).toBe(first);
     } finally {
       await clearData();
     }
