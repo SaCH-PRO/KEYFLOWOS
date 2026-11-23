@@ -12,6 +12,7 @@ import { DocumentIntelligenceService } from './document-intelligence.service';
 import { SemanticMemoryService } from './semantic-memory.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { createAgentTrigger, updateAgentTrigger } from './agent-trigger.service';
+import { readersModuleSight, readsDocumentExtractions } from '../key-cortex/key-cortex-prompt-context.service';
 
 interface AuthenticatedRequest extends Request {
   user?: { id: string; email?: string; role?: string };
@@ -337,12 +338,19 @@ export class AgentController {
     @Param('businessId') businessId: string,
     @Query('q') query: string,
     @Query('limit') limit?: string,
+    @Req() req?: AuthenticatedRequest,
   ) {
     if (!query) return { results: [] };
+    // MEM-DOC-EXTRACTION-SIGHT (D-234; orchestrator review COR-MDX-1): the copies of document extractions only for a
+    // member with revenue read (readersModuleSight, the rule KEY's prompts read them by); the search leaves them out
+    // before its limit for anyone else.
+    const reader = req?.user?.id ?? null;
+    const sight = await readersModuleSight(this.prisma, businessId, reader, undefined, 'memorySearch');
     const results = await this.semanticMemory.search({
       businessId,
       query,
       limit: limit ? parseInt(limit, 10) : 5,
+      includeDocumentExtractionCopies: readsDocumentExtractions(sight, reader),
     });
     return { results };
   }

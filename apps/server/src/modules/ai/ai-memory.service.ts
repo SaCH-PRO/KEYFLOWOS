@@ -9,6 +9,7 @@ import {
   copyHoldsRowValue,
   isAiMemorySettingsCategory,
   type DroppedAiMemoryCopy,
+  DOCUMENT_EXTRACTION_CATEGORY,
 } from './semantic-memory.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 
@@ -39,6 +40,28 @@ export type MemoryCategory =
   | 'document_extraction';
 
 export type MemorySource = 'user' | 'inferred' | 'approval_signal' | 'pattern_analysis' | 'feedback_loop' | 'role_engine';
+
+/**
+ * MEM-DOC-EXTRACTION-SIGHT (D-234, D-257): the category KeyCortexDocumentService.extractData stores an uploaded document's
+ * extracted data under (key = the document's id). The document carries no classification (KeyDocument has only its file
+ * type), so an extraction may be an invoice or a statement: its provenance is unknown and it fails closed. Only a member
+ * reader with revenue read is handed one (the owner, a revenue reader); a member without revenue read and a turn with no
+ * member reader are not. The surfaces covered, rows and their semantic copies alike:
+ *  - KEY's prompt memory: the /ai flow chat's perception block and its "RELEVANT CONTEXT FROM MEMORY" section (chat and
+ *    stream, the staff bridge), POST /cortex/chat's buildMemoryContext and the pipeline's chatMemoryFragments
+ *    (UnifiedMemoryRetrievalService.documentExtractions, readersOwnPromptMemory);
+ *  - SemanticMemoryService.search, which leaves every copy out unless asked (includeDocumentExtractionCopies), and
+ *    GET .../agent/memory/search over it;
+ *  - GET .../ai/memory (whole and by category), GET .../ai/profile/status and the profile interview's prompt.
+ * GET .../ai/memory/context renders no extraction for anyone. The owners' digest counts them (it goes to the owners).
+ * Classifying documents so that non-financial extractions reach more readers is a later packet (open question Q4c).
+ */
+export { DOCUMENT_EXTRACTION_CATEGORY };
+
+/** MEM-DOC-EXTRACTION-SIGHT: `entries` without the document extractions (DOCUMENT_EXTRACTION_CATEGORY), in order. */
+export function withoutDocumentExtractions<T extends { category: string }>(entries: readonly T[]): T[] {
+  return entries.filter((entry) => entry.category !== DOCUMENT_EXTRACTION_CATEGORY);
+}
 
 export interface MemoryEntry {
   id: string;

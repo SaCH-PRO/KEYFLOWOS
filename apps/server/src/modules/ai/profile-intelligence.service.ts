@@ -1,6 +1,6 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { AiMemoryService, MemoryCategory } from './ai-memory.service';
+import { AiMemoryService, MemoryCategory, withoutDocumentExtractions } from './ai-memory.service';
 import { BusinessGraphService } from './business-graph.service';
 import { ModelGatewayService, GatewayMessage } from './model-gateway.service';
 import { AiUsageService } from './ai-usage.service';
@@ -51,7 +51,21 @@ const PROFILE_TOPICS = [
 @Injectable()
 export class ProfileIntelligenceService {
   private readonly logger = new Logger(ProfileIntelligenceService.name);
-  private readonly sessionCache = new Map<string, ProfileInterviewState>();
+  /**
+   * MEM-DOC-EXTRACTION-SIGHT orchestrator review (D-130): each member's own interview, keyed by the business AND the
+   * member (interviewKey). It was keyed by the business alone, so every member of a business shared one interview:
+   * the owner's turns and KEY's replies to them (which may restate what the owner's prompt carried) came back to a
+   * STAFF member in their prompt and in the response's state. Every route that reads it is behind BusinessGuard, so
+   * a member removed from the business reaches nothing they left in it. Delta review: each interview also keeps the
+   * revenue sight it was built under (`revenueSight`: the caller's readsDocumentExtractions); a turn under another sight
+   * starts a fresh interview, so turns and KEY's replies made while the member read revenue (the monthly revenue, an
+   * extraction) are not replayed once that read is gone.
+   */
+  private readonly sessionCache = new Map<string, { state: ProfileInterviewState; revenueSight: boolean }>();
+
+  private interviewKey(businessId: string, userId: string): string {
+    return JSON.stringify([businessId, userId]);
+  }
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -61,9 +75,9 @@ export class ProfileIntelligenceService {
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
   ) {}
 
-  async getInterviewState(businessId: string): Promise<ProfileInterviewState> {
-    const cached = this.sessionCache.get(businessId);
-    if (cached) return cached;
+  async getInterviewState(businessId: string, userId: string, revenueSight = false): Promise<ProfileInterviewState> {
+    const cached = this.sessionCache.get(this.interviewKey(businessId, userId));
+    if (cached && cached.revenueSight === revenueSight) return cached.state;
 
     const existingMemories = await this.memory.getAll(businessId);
     const completedTopics: string[] = [];
@@ -85,29 +99,39 @@ export class ProfileIntelligenceService {
       nextTopic,
     };
 
-    this.sessionCache.set(businessId, state);
+    this.sessionCache.set(this.interviewKey(businessId, userId), { state, revenueSight });
     return state;
   }
 
-  async chat(businessId: string, userMessage: string): Promise<{
+  /**
+   * MEM-DOC-EXTRACTION-SIGHT (D-234): `opts.documentExtractions` true only for a reader with revenue read (the
+   * controller decides); otherwise the prompt's known info carries no document extraction (withoutDocumentExtractions).
+   */
+  async chat(businessId: string, userId: string, userMessage: string, opts: { documentExtractions?: boolean } = {}): Promise<{
     reply: string;
     state: ProfileInterviewState;
     pendingExtractions: ProfileExtraction[];
     currentTopicUnlocks: string | null;
   }> {
-    const state = await this.getInterviewState(businessId);
+    const revenueSight = opts.documentExtractions === true;
+    const state = await this.getInterviewState(businessId, userId, revenueSight);
 
     state.messages.push({ role: 'user', content: userMessage });
 
     let businessContext: string;
     try {
-      const snapshot = await this.businessGraph.getSnapshot(businessId, false);
-      businessContext = `Business name: ${snapshot.business.name || 'Unknown'}. Currency: ${snapshot.business.currency || 'TTD'}. Clients: ${snapshot.contacts.total}. Products: ${snapshot.storefront.activeProductCount}. Monthly revenue: $${snapshot.revenue.monthlyRevenue.toLocaleString()}.`;
+      // MEM-DOC-EXTRACTION-SIGHT orchestrator review (D-100): the snapshot projected for the member who asks
+      // (keyContextSight): the monthly revenue only at revenue read; a member without it, and anyone who is no member,
+      // gets no revenue section and so no revenue line.
+      const snapshot = await this.businessGraph.getSnapshot(businessId, false, { viewerId: userId });
+      const revenueLine = snapshot.revenue ? ` Monthly revenue: $${snapshot.revenue.monthlyRevenue.toLocaleString()}.` : '';
+      businessContext = `Business name: ${snapshot.business.name || 'Unknown'}. Currency: ${snapshot.business.currency || 'TTD'}. Clients: ${snapshot.contacts.total}. Products: ${snapshot.storefront.activeProductCount}.${revenueLine}`;
     } catch {
       businessContext = 'Business context unavailable.';
     }
 
-    const existingMemories = await this.memory.getAll(businessId);
+    const allMemories = await this.memory.getAll(businessId);
+    const existingMemories = opts.documentExtractions === true ? allMemories : withoutDocumentExtractions(allMemories);
     const memoryContext = existingMemories.length > 0
       ? `Known info: ${existingMemories.map(m => `${m.category}/${m.key}: ${m.value}`).join('; ')}`
       : 'No prior information known about this business.';
@@ -210,7 +234,7 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
 
       state.nextTopic = PROFILE_TOPICS.find(t => !state.completedTopics.includes(t.topic))?.topic || null;
       state.messages.push({ role: 'assistant', content: reply });
-      this.sessionCache.set(businessId, state);
+      this.sessionCache.set(this.interviewKey(businessId, userId), { state, revenueSight });
 
       return {
         reply,
@@ -226,19 +250,21 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
     }
   }
 
-  async getCompletionSummary(businessId: string): Promise<{
+  async getCompletionSummary(businessId: string, userId: string, opts: { documentExtractions?: boolean } = {}): Promise<{
     completedTopics: string[];
     remainingTopics: string[];
     totalTopics: number;
     completionPercent: number;
     memories: Array<{ category: string; key: string; value: string; confidence: number }>;
   }> {
-    const state = await this.getInterviewState(businessId);
+    const state = await this.getInterviewState(businessId, userId, opts.documentExtractions === true);
     const remainingTopics = PROFILE_TOPICS
       .filter(t => !state.completedTopics.includes(t.topic))
       .map(t => t.label);
 
-    const memories = await this.memory.getAll(businessId);
+    // MEM-DOC-EXTRACTION-SIGHT (D-234): the document extractions only for a reader with revenue read.
+    const all = await this.memory.getAll(businessId);
+    const memories = opts.documentExtractions === true ? all : withoutDocumentExtractions(all);
 
     return {
       completedTopics: state.completedTopics,
@@ -249,8 +275,15 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
     };
   }
 
-  async confirmExtractions(businessId: string, confirmedKeys?: string[]): Promise<{ saved: number; skipped: number; rejected: number }> {
-    const state = this.sessionCache.get(businessId);
+  async confirmExtractions(
+    businessId: string,
+    userId: string,
+    confirmedKeys?: string[],
+    opts: { documentExtractions?: boolean } = {},
+  ): Promise<{ saved: number; skipped: number; rejected: number }> {
+    // Delta review: only what the member's interview proposed under the sight they hold now.
+    const cached = this.sessionCache.get(this.interviewKey(businessId, userId));
+    const state = cached && cached.revenueSight === (opts.documentExtractions === true) ? cached.state : undefined;
     if (!state || state.pendingConfirmations.length === 0) {
       return { saved: 0, skipped: 0, rejected: 0 };
     }
@@ -297,12 +330,12 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
 
     state.pendingConfirmations = state.pendingConfirmations.filter(e => !e.confirmed);
     state.nextTopic = PROFILE_TOPICS.find(t => !state.completedTopics.includes(t.topic))?.topic || null;
-    this.sessionCache.set(businessId, state);
+    this.sessionCache.set(this.interviewKey(businessId, userId), { state, revenueSight: opts.documentExtractions === true });
 
     return { saved, skipped, rejected };
   }
 
-  resetSession(businessId: string): void {
-    this.sessionCache.delete(businessId);
+  resetSession(businessId: string, userId: string): void {
+    this.sessionCache.delete(this.interviewKey(businessId, userId));
   }
 }
