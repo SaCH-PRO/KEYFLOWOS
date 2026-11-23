@@ -15,6 +15,7 @@ import {
   CortexSession,
 } from './key-cortex.types';
 import { GatewayMessage } from '../ai/model-gateway.service';
+import { readerSearchOptions } from '../ai/semantic-memory-sight';
 
 /** How many memory fragments a cortex chat prompt carries. */
 const PROMPT_MEMORY_FRAGMENTS = 15;
@@ -948,6 +949,9 @@ export class KeyCortexPromptContextService {
           limit: PROMPT_MEMORY_FRAGMENTS + PROMPT_MEMORY_HEADROOM,
           ...(reader ? { userId: reader } : { includeEpisodic: false }),
           documentExtractions: readsDocumentExtractions(sight, reader),
+          // MEM-UNIFIED-SEMANTIC-SIGHT (D-257, D-234): the semantic hits of the turn's query pass MEM-SEMANTIC-SIGHT's reader
+          // projection before the read's limit (no database client: no sight, so no semantic hit).
+          ...(this.prisma ? { semanticSight: readerSearchOptions(this.prisma, businessId, { reader, sight }, this.logger) } : {}),
         });
         const kept = await readersOwnPromptMemory(
           this.prisma,
