@@ -89,6 +89,7 @@
   "devDependencies": {
     "@golevelup/ts-vitest": "^2.0.8",
     "@nestjs/testing": "^11.1.19",
+    "@swc/core": "1.16.22",
     "@types/compression": "^1.8.1",
     "@types/express": "^5.0.5",
     "@types/multer": "^1.4.12",
