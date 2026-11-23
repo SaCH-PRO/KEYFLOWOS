@@ -12,17 +12,24 @@
 // install, next to the other script specs:
 //   1. a lint of every YAML file under docs/intelligence/research/ for the two
 //      shapes that broke the ledger: a plain (unquoted) mapping value that
-//      itself contains ': ' or ends in ':', and a sequence item placed at the
-//      same indentation as the mapping entries around it. Each finding names
-//      file:line.
+//      itself contains ': ' or ends in ':', and a sequence item that does not
+//      belong to the mapping around it (at the indentation of `key: value`
+//      entries, deeper than a `key: value` entry, or after a bare key whose
+//      value was already given deeper). Each finding names file:line.
 //   2. a full parse with the one YAML parser this repository has at hand
 //      without a dependency ruling: PyYAML through python3. When python3 or
-//      PyYAML is absent the full parse is reported as NOT RUN with the reason,
-//      loudly (a diagnostic line and a `todo`), never as a pass; the lint
-//      still runs. Locally: `node --test scripts/research/research-corpus-parse.spec.mjs`.
+//      PyYAML is absent the full parse is reported as NOT RUN with the reason:
+//      under CI (`CI` set, as GitHub Actions sets it) that is a FAILURE, so a
+//      runner without the parser cannot pass the ledger silently; locally it is
+//      a loud `todo` with a diagnostic line, never a pass. The lint still runs.
+//      Locally: `node --test scripts/research/research-corpus-parse.spec.mjs`.
 //
-// What the lint cannot see is left to the full parse: it is a guard for the
-// two known failure classes, not a YAML validator.
+// What the lint cannot see is left to the full parse: it is a line-based guard
+// for the known failure classes, not a YAML validator. Known misses, by design:
+// a continuation line of a multi-line plain scalar that looks like `key: value`;
+// text after a quoted scalar (`"a" b`); flow collections (`{a: b}`, `[a, b]`);
+// anchors, aliases and tags; a `key: value` written with a tab. PyYAML catches
+// those when it runs.
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -36,12 +43,23 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 export const RESEARCH_DIR = path.join('docs', 'intelligence', 'research');
 export const LEDGER = path.join(RESEARCH_DIR, 'RESEARCH-CORPUS.yaml');
 
-/** Every .yaml/.yml file under docs/intelligence/research/, repo-relative, sorted. */
-/** Decides how the full-parse test reports: declared here for the RED commit, implemented in the fix. */
-export function parseOutcome(_result, _env = process.env) {
-  throw new Error('parseOutcome: not implemented yet (review round 1)');
+/**
+ * How the full-parse test reports a parseResearchYaml result: a parser that did
+ * not run FAILS under CI (`CI` set and not 'false'/'0') and is a `todo` only on a
+ * developer machine; a parse that ran fails on its problems and passes otherwise.
+ */
+export function parseOutcome(result, env = process.env) {
+  if (!result.ran) {
+    const ci = env.CI !== undefined && env.CI !== '' && env.CI !== 'false' && env.CI !== '0';
+    return ci
+      ? { kind: 'fail', message: `full YAML parse NOT RUN in CI: ${result.reason}` }
+      : { kind: 'todo', message: `full YAML parse not run here: ${result.reason}` };
+  }
+  if (result.problems.length > 0) return { kind: 'fail', message: `\n${result.problems.join('\n')}\n` };
+  return { kind: 'pass', message: '' };
 }
 
+/** Every .yaml/.yml file under docs/intelligence/research/, repo-relative, sorted. */
 export function researchYamlFiles(root = ROOT) {
   const out = [];
   const walk = (dir) => {
@@ -58,19 +76,33 @@ export function researchYamlFiles(root = ROOT) {
 const indentOf = (line) => line.length - line.trimStart().length;
 /** A plain scalar starts with none of the YAML indicators that make a value safe to hold ': '. */
 const PLAIN_START = /^[^"'|>[{&*!%@`#-]/;
-const MAPPING_ENTRY = /^(\s*)(?:- )?([A-Za-z_][\w./-]*):(?:\s+(.*))?$/;
+/** `key:` or `key: value`, optionally as a `- ` item; the key may be quoted or any plain text without ':' or '#'. */
+const MAPPING_ENTRY = /^(\s*)(- +)?("[^"]*"|'[^']*'|[^\s"'#:[\]{}-][^:#]*?):(?:\s+(.*))?$/;
 const SEQUENCE_ITEM = /^(\s*)- /;
 
 /**
  * The two failure classes, as `{ line, message }` findings over a file's text.
  * Comments (`#` after whitespace) are dropped from a plain value before the
  * test, so `title: Foo # a: b` is not a finding.
+ *
+ * Structure is tracked as a stack of open frames { indent, kind, deeper }:
+ * 'entry' is `key: value`, 'key' a bare `key:` whose value comes deeper, 'item'
+ * a `- ` item, 'other' anything else. A `- key: ...` line opens an item frame
+ * and, at the key's column, an entry/key frame, so the item's sibling keys and
+ * a block scalar's extent are judged at that column.
  */
 export function lintYamlText(text) {
   const findings = [];
   const lines = text.split(/\r?\n/);
-  let previous = null; // the previous significant line: { indent, kind: 'entry' | 'key' | 'item' | 'other' }
-  let blockScalarIndent = null; // inside a `|`/`>` block: content lines are skipped
+  const stack = [];
+  let blockScalarIndent = null; // inside a `|`/`>` block: content lines deeper than this are skipped
+  const open = (indent, kind) => {
+    while (stack.length > 0 && stack[stack.length - 1].indent > indent) stack.pop();
+    const top = stack[stack.length - 1];
+    if (top && top.indent === indent) stack.pop();
+    else if (top) top.deeper = true;
+    stack.push({ indent, kind, deeper: false });
+  };
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
@@ -82,30 +114,47 @@ export function lintYamlText(text) {
     }
     const entry = MAPPING_ENTRY.exec(line);
     const item = SEQUENCE_ITEM.exec(line);
-    if (entry && entry[3] !== undefined && entry[3].trim() !== '') {
-      const value = entry[3].replace(/\s+#.*$/, '').trim();
+    const keyColumn = entry ? indent + (entry[2] ? entry[2].length : 0) : indent;
+    const hasValue = Boolean(entry) && entry[4] !== undefined && entry[4].trim() !== '';
+    if (hasValue) {
+      const value = entry[4].replace(/\s+#.*$/, '').trim();
       if (/^[|>]/.test(value)) {
-        blockScalarIndent = indent;
+        blockScalarIndent = keyColumn;
       } else if (PLAIN_START.test(value) && (/:\s/.test(value) || /:$/.test(value))) {
         findings.push({
           line: i + 1,
-          message: `plain (unquoted) value of '${entry[2]}' contains ': ' or ends in ':'; quote it ("...") so the colon is text, not a nested key`,
+          message: `plain (unquoted) value of '${entry[3]}' contains ': ' or ends in ':'; quote it ("...") so the colon is text, not a nested key`,
         });
       }
     }
     if (item) {
-      // A `- ` item is a sibling of the entries around it only when the previous
-      // significant line is a `key: value` entry at the same indentation: a
-      // sequence cannot sit inside a mapping at the mapping's own level.
-      if (previous && previous.kind === 'entry' && previous.indent === indent && !previous.item) {
+      // Close the frames this item leaves, then judge it against the frame it
+      // meets: at the same indentation it may follow another item, or a bare
+      // key whose value has not been given yet (`list:` then `- x`), but not a
+      // `key: value` entry nor a bare key whose value already came deeper
+      // (`rules:` / `  - a` / `- id: Y`); deeper than the top frame it may
+      // follow a bare key or an item, but not a `key: value` entry (`a: 1` /
+      // `  - x`).
+      while (stack.length > 0 && stack[stack.length - 1].indent > indent) stack.pop();
+      const top = stack[stack.length - 1];
+      let misplaced = false;
+      if (top && top.indent === indent) misplaced = top.kind === 'entry' || (top.kind === 'key' && top.deeper);
+      else if (top && top.indent < indent) misplaced = top.kind === 'entry';
+      if (misplaced) {
         findings.push({
           line: i + 1,
-          message: 'sequence item at the indentation of the mapping entries above it; move it into the list it belongs to (or indent it under a key)',
+          message: 'sequence item at the indentation of the mapping entries around it, deeper than a "key: value" entry, or after a key whose value was already given deeper; move it into the list it belongs to (or indent it under a key)',
         });
       }
     }
-    const kind = item ? 'item' : entry ? (entry[3] !== undefined && entry[3].trim() !== '' ? 'entry' : 'key') : 'other';
-    previous = { indent, kind, item: Boolean(item) };
+    if (item) {
+      open(indent, 'item');
+      if (entry) open(keyColumn, hasValue ? 'entry' : 'key');
+    } else if (entry) {
+      open(indent, hasValue ? 'entry' : 'key');
+    } else {
+      open(indent, 'other');
+    }
   }
   return findings;
 }
@@ -166,12 +215,13 @@ describe('FU-RESEARCH-CORPUS-YAML: the research ledger parses and stays parseabl
 
   it('every research YAML file parses (full parse through python3 + PyYAML; NOT RUN is reported, never passed)', (t) => {
     const result = parseResearchYaml();
-    if (!result.ran) {
-      t.diagnostic(`full YAML parse NOT RUN: ${result.reason}. Run this spec locally where python3 and PyYAML are installed.`);
-      t.todo(`full YAML parse not run here: ${result.reason}`);
+    const outcome = parseOutcome(result);
+    if (outcome.kind === 'todo') {
+      t.diagnostic(`full YAML parse NOT RUN: ${result.reason}. Run this spec locally where python3 and PyYAML are installed; under CI this is a failure.`);
+      t.todo(outcome.message);
       return;
     }
-    assert.deepEqual(result.problems, [], `\n${result.problems.join('\n')}\n`);
+    if (outcome.kind === 'fail') assert.fail(outcome.message);
   });
 });
 
