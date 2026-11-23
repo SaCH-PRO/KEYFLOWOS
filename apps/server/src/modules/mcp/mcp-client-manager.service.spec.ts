@@ -26,6 +26,7 @@ const fake = vi.hoisted(() => ({
   connects: 0,
   listTools: 0,
   calls: [] as Array<{ name: string; arguments: unknown }>,
+  failConnect: false,
   tools: [{ name: 'x', description: 'fake tool x', inputSchema: { type: 'object', properties: {} } }],
 }));
 
@@ -44,6 +45,7 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
     }
     async connect() {
       fake.connects += 1;
+      if (fake.failConnect) throw new Error('v91a fake connect refused');
     }
     async listTools() {
       fake.listTools += 1;
@@ -70,6 +72,7 @@ const REFUSAL = /MCP server not available to this business/;
 
 let savedEnv: string | undefined;
 let errorLog: ReturnType<typeof vi.spyOn>;
+let warnLog: ReturnType<typeof vi.spyOn>;
 
 function setServers(value: unknown) {
   process.env.MCP_REMOTE_SERVERS = typeof value === 'string' ? value : JSON.stringify(value);
@@ -94,9 +97,10 @@ beforeEach(() => {
   fake.connects = 0;
   fake.listTools = 0;
   fake.calls.length = 0;
+  fake.failConnect = false;
   errorLog = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
   vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
-  vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+  warnLog = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
 });
 
 afterEach(() => {
@@ -325,5 +329,17 @@ describe('RR-MCP-TENANT-BOUND (D-261, D-262): the MCP bridge serves a business o
     expect(errorLines().filter((l) => /key/.test(l))).toHaveLength(2);
     expect(await mcp.listBridgedTools(BIZ_A)).toEqual([]);
     noServerTouched();
+  });
+
+  it('MCP-14 a bound server that fails to connect is reported by key and host only: credentials in its url never reach the log', async () => {
+    fake.failConnect = true;
+    setServers([{ ...SERVER, url: 'https://user:pw@mcp.v91a.invalid/mcp?token=v91a-query-secret', businessIds: [BIZ_A] }]);
+    const mcp = new McpClientManagerService();
+    const err = await rejection(callAs(mcp, BIZ_A, 'mcp__s__x'));
+    expect((err as Error).message).toMatch(/unavailable/);
+    const lines = [...warnLog.mock.calls, ...errorLog.mock.calls].map((c) => String(c[0])).join('\n');
+    expect(lines).toContain('mcp.v91a.invalid');
+    expect(lines).not.toContain('user:pw');
+    expect(lines).not.toContain('v91a-query-secret');
   });
 });
