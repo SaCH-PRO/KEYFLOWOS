@@ -412,19 +412,24 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
       return null;
     };
     /**
-     * Route segments, compared as Express does (case-insensitively). A segment that is neither plain text nor a whole
-     * :param (a wildcard, optional braces, a param inside a segment) is unread: it is taken to match anything.
+     * Route segments, compared as Express does (case-insensitively). A segment that can span several segments or none
+     * (a wildcard, optional braces, a group) makes the path unread: it is taken to match anything. Any other segment
+     * that is not plain text (a :param, a param inside a segment) matches any one segment (correctness review round 6).
      */
     const segments = (p: string) => p.toLowerCase().split("/").filter(Boolean);
     const plain = (seg: string) => /^[a-z0-9._~-]+$/.test(seg);
     const param = (seg: string) => /^:\w+$/.test(seg);
-    const unread = (segs: string[]) => segs.some((seg) => !plain(seg) && !param(seg));
-    /** Whether two route paths can match the same request (a :param matches any one segment). */
+    /** A segment that may match several segments or none (a wildcard, an optional or a group): the whole path is unread. */
+    const spans = (seg: string) => /[*?+({]/.test(seg);
+    /** A segment that matches any one segment: a :param, or one that is neither plain text nor spans (as :token.gif). */
+    const anyOne = (seg: string) => param(seg) || (!plain(seg) && !spans(seg));
+    const unread = (segs: string[]) => segs.some(spans);
+    /** Whether two route paths can match the same request. */
     const overlaps = (a: string, b: string) => {
       const x = segments(a);
       const y = segments(b);
       if (unread(x) || unread(y)) return true;
-      return x.length === y.length && x.every((seg, i) => seg === y[i] || param(seg) || param(y[i]));
+      return x.length === y.length && x.every((seg, i) => seg === y[i] || anyOne(seg) || anyOne(y[i]));
     };
     /**
      * Whether an earlier route takes the cited route's own requests: it is at least as general, every segment the
@@ -435,7 +440,7 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
       const x = segments(earlier);
       const y = segments(cited);
       if (unread(x) || unread(y)) return true;
-      return x.length === y.length && x.every((seg, i) => seg === y[i] || param(seg));
+      return x.length === y.length && x.every((seg, i) => seg === y[i] || anyOne(seg));
     };
     const ROUTE = /^((?:modules|core)\/[^#]+\.ts)#(?:([A-Za-z0-9_]+) )?GET (.*)$/;
     const findRoute = (file: string, cls: string | undefined, route: string): ts.ClassElement | string => {
@@ -468,14 +473,19 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
       const citedPath = full(cited.owner as ts.ClassDeclaration, route);
       for (const st of sf.statements) {
         if (!ts.isClassDeclaration(st)) continue;
+        // Security review round 6: every controller in the file is read as the cited one is (so none inherits routes);
+        // a route on a class that is not a controller (a base another class could extend) fails; a route on a member
+        // whose name is not a plain identifier fails (Nest registers integer-like names first, whatever their place).
+        const isController = decoratorsOf(st).some((c) => decoratorCall(c)?.name === "Controller");
+        if (isController && controllerWhy(st)) return controllerWhy(st)!;
         for (const member of st.members) {
           for (const d of decoratorsOf(member)) {
             const call = decoratorCall(d);
             if (!call || !VERBS.has(call.name)) continue;
             if (call.arg === null) return `non-literal route ${d.getText()} in ${st.name?.text}`;
+            if (!isController) return `route ${d.getText()} on ${st.name?.text}, which is not a controller`;
+            if (!member.name || !ts.isIdentifier(member.name)) return `route ${d.getText()} on a member not named by a plain identifier`;
             if (member === cited.member || !(call.name === "Get" || call.name === "All")) continue;
-            if (!decoratorsOf(st).some((c) => decoratorCall(c)?.name === "Controller")) continue;
-            if (controllerWhy(st)) return controllerWhy(st)!;
             if (st !== cited.owner) {
               if (overlaps(full(st, call.arg), citedPath)) return `route ${d.getText()} in ${st.name?.text} overlaps the cited route`;
             } else if (member.pos < cited.member.pos && shadows(full(st, call.arg), citedPath)) return `cited route shadowed by an earlier ${d.getText()}`;
@@ -541,8 +551,10 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
 
     /**
      * Why code that runs at load or construction is not plainly declarative: a call other than a decorator's, new of a
-     * plain name, or LOAD_CALLS; a computed member access; an assignment other than this.<name> = ... .
+     * plain name, or LOAD_CALLS; a computed member access; any assignment.
      */
+    /** A member's name as the runtime sees it ('toString' and toString alike). */
+    const nameText = (name: ts.Node) => (ts.isIdentifier(name) || ts.isStringLiteralLike(name) || ts.isNumericLiteral(name) || ts.isPrivateIdentifier(name) ? name.text : name.getText());
     const loadTimeWhy = (node: ts.Node, imported: Map<string, string>, fail: (reason: string) => void) => {
       if (ts.isCallExpression(node)) {
         const callee = node.expression;
@@ -555,9 +567,8 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
       else if (ts.isTaggedTemplateExpression(node)) fail(`tagged template at load or construction: ${node.getText().slice(0, 80)}`);
       else if (ts.isElementAccessExpression(node) && !(ts.isStringLiteralLike(node.argumentExpression) || ts.isNumericLiteral(node.argumentExpression))) fail(`computed access at load or construction: ${node.getText().slice(0, 80)}`);
       else if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
-        const target = node.left;
-        const own = ts.isPropertyAccessExpression(target) && target.expression.kind === ts.SyntaxKind.ThisKeyword;
-        if (!own) fail(`assignment at load or construction: ${node.getText().slice(0, 80)}`);
+        // None at all (security review round 6: this.<handler> = ... in a constructor swaps the handler Nest serves).
+        fail(`assignment at load or construction: ${node.getText().slice(0, 80)}`);
       }
     };
     /** An import's module, as a path under the server src (a package name as written). */
@@ -614,7 +625,7 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
           if (!ts.isIdentifier(callee) || !(imported.has(callee.text) || localDecorators.has(callee.text))) fail(`decorator neither imported by name nor a DTO factory: ${node.getText().slice(0, 80)}`);
         }
         if (ts.isGetAccessor(node) || ts.isSetAccessor(node)) fail(`accessor ${node.name.getText()} (runs when read)`);
-        else if ((ts.isMethodDeclaration(node) || ts.isPropertyAssignment(node) || ts.isPropertyDeclaration(node) || ts.isShorthandPropertyAssignment(node)) && SELF_CALLED.has(node.name.getText())) fail(`self-called member ${node.name.getText()}`);
+        else if ((ts.isMethodDeclaration(node) || ts.isPropertyAssignment(node) || ts.isPropertyDeclaration(node) || ts.isShorthandPropertyAssignment(node)) && SELF_CALLED.has(nameText(node.name))) fail(`self-called member ${nameText(node.name)}`);
         else if ((ts.isClassDeclaration(node) || ts.isClassExpression(node)) && node.parent !== sf && (decoratorsOf(node).length || node.members.some((m) => decoratorsOf(m).length))) fail(`decorated class not at top level: ${node.name?.text ?? "anonymous"}`);
         else if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "forwardRef" && !(node.arguments.length === 1 && ts.isArrowFunction(node.arguments[0]) && ts.isIdentifier(node.arguments[0].body))) fail(`forwardRef other than () => <Class>: ${node.getText().slice(0, 80)}`);
         if (ts.isPropertyAccessExpression(node) && node.name.text === "prototype" && !(ts.isIdentifier(node.expression) && node.expression.text === "Object")) fail(`prototype reached: ${node.getText().slice(0, 80)}`);
