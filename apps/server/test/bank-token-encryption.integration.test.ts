@@ -39,6 +39,10 @@
  *            with the loaded key is counted as undecryptable (not already_encrypted) and listed by id; --apply
  *            refuses when rows fail to decrypt and none decrypt (the loaded key is likely not the API's), and
  *            runs once one row proves the key; an unknown argument is not echoed back.
+ *   V72S-13  (review round 3: SEC-V72S-R3-1, COR-V72S-R3-1/2) the decrypt probe counts only a decrypt failure as
+ *            undecryptable: a database error exits 1 with nothing written, a row deleted after the scan is
+ *            neither decrypted nor undecryptable; and --apply with nothing to encrypt exits 0 even when every
+ *            stored ciphertext is undecryptable.
  *
  * Owner question OQ-4 (does production hold plaintext bank tokens today) is open; nothing here reads production.
  */
@@ -81,6 +85,8 @@ const ID = {
   bizScript: `${P}bizscript`,
   /** V72S-12's business: a row that does not decrypt. */
   bizScript2: `${P}bizscript2`,
+  /** V72S-13's business. */
+  bizScript3: `${P}bizscript3`,
 };
 
 /** A token built from fragments at run time, so no secret-shaped literal sits in the source. */
@@ -268,7 +274,7 @@ beforeAll(async () => {
   await app.init();
 
   await cleanup();
-  for (const [uid, bid] of [[ID.owner, ID.biz], [ID.owner2, ID.biz2], [ID.owner, ID.bizScript], [ID.owner, ID.bizScript2]] as const) {
+  for (const [uid, bid] of [[ID.owner, ID.biz], [ID.owner2, ID.biz2], [ID.owner, ID.bizScript], [ID.owner, ID.bizScript2], [ID.owner, ID.bizScript3]] as const) {
     if (!(await db.user.findUnique({ where: { id: uid } }))) {
       await db.user.create({ data: { id: uid, email: `${P}${uid.slice(P.length)}@test.local`, name: uid, role: 'USER' } });
     }
@@ -629,4 +635,52 @@ describe('BankConnection.accessToken is encrypted at rest (RR-BANK-TOKEN-ENCRYPT
     expect(lines.join(' ')).toMatch(/Usage/);
     expect(lines.join(' '), 'an unknown argument is not echoed').not.toContain('pasted');
   }, 4 * SCRIPT_TIMEOUT_MS);
+  it('[V72S-13] the probe tells a database error from a decrypt failure, a vanished row proves nothing, and --apply with nothing to encrypt exits 0', async () => {
+    const { main } = await import('../scripts/encrypt-bank-connection-tokens');
+    const fa = await account(ID.bizScript3, 'V72S probe bank');
+    const garbage = [CIPHER_PREFIX, Buffer.from('v72s-probe-not-a-real-ciphertext-000000000000000').toString('base64')].join('');
+    const badId = await rawRow(ID.bizScript3, fa, `${P}s3_bad`, garbage);
+    const scope = `--business=${ID.bizScript3}`;
+    const run = async (argv: string[], findUnique?: (args: any) => Promise<unknown>) => {
+      const lines: string[] = [];
+      const probed = findUnique
+        ? new Proxy(db, {
+            get(target, prop, receiver) {
+              if (prop !== 'bankConnection') return Reflect.get(target, prop, receiver);
+              return new Proxy(target.bankConnection, {
+                get(d, op, r) {
+                  return op === 'findUnique' ? findUnique : Reflect.get(d, op, r);
+                },
+              });
+            },
+          })
+        : db;
+      const code = await main(argv, { db: probed, log: (...a: unknown[]) => lines.push(a.join(' ')), error: (...a: unknown[]) => lines.push(a.join(' ')) });
+      return { code, text: lines.join('\n') };
+    };
+
+    // Only undecryptable ciphertext in scope, nothing to encrypt: --apply has nothing to do and says so with exit 0.
+    const nothing = await run(['--apply', scope]);
+    expect(nothing.code, nothing.text).toBe(0);
+    expect(countOf(nothing.text, 'undecryptable')).toBe(1);
+    expect(countOf(nothing.text, 'encrypted')).toBe(0);
+    expect(await stored(badId)).toBe(garbage);
+
+    // A database error on the probe is not "undecryptable": exit 1, nothing written.
+    const plain = token('probe');
+    const plainId = await rawRow(ID.bizScript3, fa, `${P}s3_plain`, plain);
+    const dbError = Object.assign(new Error('pool timeout'), { code: 'P1001', name: 'PrismaClientKnownRequestError' });
+    const failed = await run(['--apply', scope], async () => { throw dbError; });
+    expect(failed.code, failed.text).toBe(1);
+    expect(failed.text).toMatch(/could not be read: database error P1001/);
+    expect(failed.text).not.toMatch(/^\s*undecryptable\s+1\s*$/m);
+    expect(await stored(plainId), 'nothing written').toBe(plain);
+
+    // A row gone between the scan and the probe is neither decrypted nor undecryptable: it proves no key.
+    const vanished = await run([scope], async () => null);
+    expect(vanished.code, vanished.text).toBe(0);
+    expect(countOf(vanished.text, 'already_encrypted')).toBe(0);
+    expect(countOf(vanished.text, 'undecryptable')).toBe(0);
+    expect(countOf(vanished.text, 'gone_since_read')).toBe(1);
+  });
 });
