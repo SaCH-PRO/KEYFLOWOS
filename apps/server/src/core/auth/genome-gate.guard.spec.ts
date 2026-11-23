@@ -16,13 +16,15 @@ function makeGuard(threePillarMet: boolean, scores: Record<string, number> = {})
     }),
   } as unknown as BlueprintService;
 
-  return { guard: new GenomeGateGuard(blueprint), blueprint };
+  // FU-GENOME-EVOLUTION-SURFACES round 4: the refusal names the integrity only to a revenue reader (an owner here).
+  const prisma = { client: { membership: { findUnique: vi.fn().mockResolvedValue({ role: 'OWNER', permissionScopes: null }) } } } as any;
+  return { guard: new GenomeGateGuard(blueprint, prisma), blueprint, prisma };
 }
 
 function makeContext(businessId: string) {
   return {
     switchToHttp: () => ({
-      getRequest: () => ({ params: { businessId } }),
+      getRequest: () => ({ params: { businessId }, user: { id: 'user_1', role: 'USER' } }),
     }),
   } as any;
 }
@@ -68,5 +70,19 @@ describe('GenomeGateGuard', () => {
 
     await guard.canActivate(context);
     expect(blueprint.calculateGenomeIntegrity).toHaveBeenCalledWith('biz_fallback');
+  });
+
+  it('FU-GENOME-EVOLUTION-SURFACES: the refusal leaves the integrity out for a member without revenue read (D-233)', async () => {
+    const { guard, prisma } = makeGuard(false, { founder: 60, business: 60, market: 10 });
+    prisma.client.membership.findUnique.mockResolvedValue({ role: 'STAFF', permissionScopes: { revenue: 'none' } });
+    try {
+      await guard.canActivate(makeContext('biz_1'));
+      throw new Error('expected a refusal');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ForbiddenException);
+      const response = (err as ForbiddenException).getResponse() as Record<string, unknown>;
+      expect(response.genomeIntegrity).toBeUndefined();
+      expect(response.missingPillars).toEqual(['market']);
+    }
   });
 });

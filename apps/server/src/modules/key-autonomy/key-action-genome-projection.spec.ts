@@ -10,6 +10,8 @@ import {
   readableGenomeEvolutionEvents,
   dnaSectionViewForReader,
   requireBridgeRevenue,
+  autonomyVerdictForReader,
+  financialExperimentFlags,
 } from './key-action-genome-projection';
 
 const BIZ = 'biz_1';
@@ -167,3 +169,26 @@ describe('requireBridgeRevenue', () => {
     await expect(requireBridgeRevenue(fin, BIZ, 'rec_f', undefined, 'read')).rejects.toBeInstanceOf(ForbiddenException);
   });
 });
+
+describe('FU-GENOME-EVOLUTION-SURFACES round 4 (security F3): fail-closed paths', () => {
+  it('a proposal of the KEY bridge\'s unclassified section (general) is financial', () => {
+    expect(isFinancialGenomeEvolution({ section: 'general', reason: 'Customers prefer evening slots', proposedPatch: {}, evidence: [] })).toBe(true);
+  });
+
+  it('autonomyVerdictForReader withholds a money key (by the caller\'s predicate), a cross-domain reason, and strips metadata', () => {
+    const v = { actionKey: 'crm.create_contact', reason: 'Requires approval', ruleTrace: [{ source: 'GenomeAutonomyGateService', reason: 'ok', metadata: { readinessScore: 9 } }], confidence: 0.7 };
+    expect(autonomyVerdictForReader(v, (k) => k === 'crm.create_contact')).toBeNull();
+    expect(autonomyVerdictForReader({ ...v, reason: 'Cross-domain risk is HIGH.' })).toBeNull();
+    const served = autonomyVerdictForReader(v) as any;
+    expect(served.ruleTrace[0].metadata).toBeUndefined();
+    expect('confidence' in served).toBe(false);
+    expect(autonomyVerdictForReader({ ...v, actionKey: 42 as any })).toBeNull();
+  });
+
+  it('financialExperimentFlags makes every experiment financial when the provenance read fails', async () => {
+    const prisma = { client: { genomeRecommendation: { findMany: vi.fn(async () => { throw new Error('db down'); }) } } } as any;
+    const exps = [{ id: 'e1', hypothesis: 'Reminders help', action: 'Send reminders', successMetric: 'No-shows' }, { id: 'e2', hypothesis: 'Greet walk-ins', action: 'Greet', successMetric: 'Bookings' }];
+    expect(await financialExperimentFlags(prisma, BIZ, exps)).toEqual([true, true]);
+  });
+});
+
