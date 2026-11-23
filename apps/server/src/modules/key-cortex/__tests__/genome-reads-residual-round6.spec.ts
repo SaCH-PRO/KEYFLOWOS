@@ -47,8 +47,8 @@ describe('streamQuery: the V3 prompt\'s ranked recommendations are read for the 
 
 describe('GET cortex/awareness reads with headroom for a reader without revenue read (round 6, security MINOR-2)', () => {
   const at = (i: number) => new Date(Date.UTC(2026, 10, 22, 12, 0, 0) - i * 60_000);
-  // The 30 newest concerns: the newest seven state money, the rest do not.
-  const rows = Array.from({ length: 30 }, (_, i) => ({
+  // The 40 newest concerns: the newest seven state money, the rest do not.
+  const rows = Array.from({ length: 40 }, (_, i) => ({
     key: `c_${i}`,
     value: JSON.stringify(i < 7 ? { headline: `Invoice ${i} for $4,000 is overdue` } : { headline: `Delivery ${i} slipped a day` }),
     confidence: 0.8,
