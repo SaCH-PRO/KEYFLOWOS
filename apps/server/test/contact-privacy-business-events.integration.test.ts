@@ -172,6 +172,18 @@ function holdsNoSecret(row: EventRow, secrets: string[]) {
 const api = () => request(app.getHttpServer());
 const as = (r: request.Test, user: string) => r.set('x-test-user', user);
 
+/**
+ * The request is due only for the instant of this suite's own purgeOne: the
+ * purge suite runs the global runPurgeCycle, which purges every due request in
+ * the shared database, possibly in parallel with this file.
+ */
+async function makeNotDue(contactId: string) {
+  await db.$executeRawUnsafe(
+    `UPDATE contact_forget_requests SET purge_at = now() + interval '7 days' WHERE contact_id = $1`,
+    contactId,
+  );
+}
+
 async function makeDue(contactId: string) {
   await db.$executeRawUnsafe(
     `UPDATE contact_forget_requests SET purge_at = now() - interval '1 minute' WHERE contact_id = $1`,
@@ -415,7 +427,6 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
   });
 
   it('a failure of the business-event scrub rolls the whole purge back', async () => {
-    await makeDue(subjectId);
     const failing = new Proxy(db, {
       get(target, prop, receiver) {
         if (prop !== '$transaction') return Reflect.get(target, prop, receiver);
@@ -439,7 +450,12 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
     const svc = new ContactPrivacyServiceCtor({ client: failing } as any, audit);
     // This request only (purgeOne, not the global cycle), so no other suite's
     // due request is purged here and no other suite's cycle can race this one.
-    await expect((svc as any).purgeOne(forgetRequestId, ID.bizA, subjectId)).rejects.toThrow('v72w: business-event scrub refused');
+    await makeDue(subjectId);
+    try {
+      await expect((svc as any).purgeOne(forgetRequestId, ID.bizA, subjectId)).rejects.toThrow('v72w: business-event scrub refused');
+    } finally {
+      await makeNotDue(subjectId);
+    }
 
     const [contact] = await db.$queryRawUnsafe(`SELECT email, first_name FROM contacts WHERE id = $1`, subjectId);
     expect(contact).toEqual({ email: PII.email, first_name: PII.firstName });
@@ -460,6 +476,7 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
         return (fn: any, opts?: any) => { txOptions.push(opts); return target.$transaction(fn, opts); };
       },
     });
+    await makeDue(subjectId);
     expect(await (new ContactPrivacyServiceCtor({ client: recording } as any, audit) as any).purgeOne(forgetRequestId, ID.bizA, subjectId)).toBe(true);
     expect((await db.contactForgetRequest.findUnique({ where: { id: forgetRequestId } }))?.status).toBe('purged');
     // The scrub reads the business's whole event log: the purge transaction
@@ -560,7 +577,7 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
     expect(forget.status).toBe(201);
     // The forget row is written while the request is open; then cancel.
     await waitForEvents((r) => r.some((e) => e.subject_id === forget.body.id));
-    const cancel =await as(api().post(`/crm/businesses/${ID.bizA}/contacts/${cancellerId}/forget/cancel`), ID.owner).send({});
+    const cancel = await as(api().post(`/crm/businesses/${ID.bizA}/contacts/${cancellerId}/forget/cancel`), ID.owner).send({});
     expect(cancel.status, JSON.stringify(cancel.body)).toBe(201);
     const rows = await waitForEvents((r) => r.some((e) => e.subject_id === forget.body.id) && r.some((e) => e.subject_id === cancellerId && e.event_type === 'contact.create' && e.metadata?.route?.endsWith('/cancel')));
     const forgetRow = rows.find((e) => e.subject_id === forget.body.id)!;
