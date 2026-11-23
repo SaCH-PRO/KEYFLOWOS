@@ -751,4 +751,24 @@ describe('FU-GENOME-SURFACES-REVENUE: the genome surfaces serve finance-derived 
       spy.mockRestore();
     }
   });
+  it('SR-17 genome-chat history serves no money DNA value, money field list or integrity (round 3, security MAJOR-1)', async () => {
+    // A message stored before this packet stated the integrity.
+    await db.genomeChatMessage.create({ data: { businessId: ID.biz, role: 'system', content: 'Updated operations DNA: coreWorkflows. Genome Integrity is now 57%.', metadata: { appliedSection: 'operations', appliedData: { coreWorkflows: ['intake'] } } } });
+    // The owner applies financial DNA; an assistant proposal of financial DNA is in the history too.
+    const applied = await request(app.getHttpServer()).post(`/genome-chat/businesses/${ID.biz}/apply-updates`).set(HEADER, ID.owner)
+      .send({ section: 'financial', data: { avgTicket: 4500.25, monthlyTarget: 8765.43 } });
+    expect(applied.status).toBeLessThan(300);
+    await db.genomeChatMessage.create({ data: { businessId: ID.biz, role: 'assistant', content: 'I can record that.', metadata: { proposedUpdates: { section: 'financial', data: { avgTicket: 4500.25 } } } } });
+    // Stored without the money values.
+    const stored = await db.genomeChatMessage.findMany({ where: { businessId: ID.biz, role: 'system' } });
+    expect(JSON.stringify(stored.filter((r: any) => r.metadata?.appliedSection === 'financial'))).not.toMatch(FIGURES);
+    const res = await get(`/genome-chat/businesses/${ID.biz}/messages`, ID.staffNone);
+    expect(res.status).toBe(200);
+    const text = JSON.stringify(res.body);
+    expect(text).not.toMatch(FIGURES);
+    expect(text).not.toMatch(/Genome Integrity|avgTicket|monthlyTarget|financial DNA/);
+    expect(res.body.some((m: any) => /operations DNA/.test(m.content))).toBe(true);
+    const owner = await get(`/genome-chat/businesses/${ID.biz}/messages`, ID.owner);
+    expect(JSON.stringify(owner.body)).toMatch(/financial DNA/);
+  });
 });
