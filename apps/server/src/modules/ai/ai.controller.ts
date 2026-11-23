@@ -1110,9 +1110,16 @@ export class AiController {
   @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(5, 60_000)
   @Post('businesses/:businessId/ai/memory/summarize-patterns')
-  async summarizePatterns(@Param('businessId') businessId: string) {
+  async summarizePatterns(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    // FU-PATTERNS-ROUTES-SIGHT review round 1 (security O-2; D-100): every summary is stored as a 'patterns' row (the
+    // owner reads them all); the caller is answered those they may read, as each row is read (aiMemoryRowVisibleTo).
+    const who = await this.memoryReaderOf(businessId, req);
     const patterns = await this.memory.summarizePatterns(businessId);
-    return { patterns };
+    return {
+      patterns: patterns.filter((value) =>
+        aiMemoryRowVisibleTo({ category: 'patterns', key: value.split(':')[0]?.trim().toLowerCase().replace(/\s+/g, '_') || 'general', value }, who),
+      ),
+    };
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

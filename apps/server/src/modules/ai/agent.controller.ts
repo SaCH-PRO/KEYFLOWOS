@@ -13,7 +13,7 @@ import { SemanticMemoryService } from './semantic-memory.service';
 import { aiMemoryRowVisibleTo, readerSearchOptions } from './semantic-memory-sight';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { createAgentTrigger, updateAgentTrigger } from './agent-trigger.service';
-import { readersModuleSight } from '../key-cortex/key-cortex-prompt-context.service';
+import { readersModuleSight, readsDocumentExtractions } from '../key-cortex/key-cortex-prompt-context.service';
 
 interface AuthenticatedRequest extends Request {
   user?: { id: string; email?: string; role?: string };
@@ -34,6 +34,12 @@ const MAX_SEARCH_QUERY = 500;
 /** FU-PATTERNS-ROUTES-SIGHT: how many patterns GET .../agent/patterns answers, and how many rows it reads at a time. */
 const PATTERNS_SHOWN = 50;
 const PATTERNS_PAGE = 200;
+/**
+ * Review round 1 (security F-1, correctness COR-FUPRS-2): the most rows one request reads. PatternDetectorService stores
+ * every detection under a new key, so a reader who may read few patterns would otherwise read the whole table. Past it
+ * a reader gets fewer than PATTERNS_SHOWN (never a withheld row); below it, the same patterns however many are withheld.
+ */
+const PATTERNS_SCAN_MAX = 2_000;
 
 /** A stored pattern's fields: a JSON object's own (PatternDetectorService), else the text as its description. */
 function patternFieldsOf(value: string): Record<string, unknown> {
@@ -163,25 +169,34 @@ export class AgentController {
    * in pages until PATTERNS_SHOWN are kept, so a withheld pattern takes no place: a reader's patterns are the same
    * whatever money patterns are newer. A pattern stored as plain text (summarizePatterns' "Peak activity hour: 9AM")
    * is answered as its description, where JSON.parse used to answer 500.
+   * Review round 1 (security F-1/F-4, correctness COR-FUPRS-1/2): keyset pages on (createdAt, id), so a pattern written
+   * between two pages neither repeats nor drops a row, and at most PATTERNS_SCAN_MAX rows a request.
    */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/agent/patterns')
   async getDetectedPatterns(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
-    const reader = req?.user?.id ?? null;
-    const who = { reader, sight: await readersModuleSight(this.prisma, businessId, reader, undefined, 'agentPatterns') };
+    const who = await this.memoryReaderOf(businessId, req, 'agentPatterns');
     const kept: Array<{ id: string; key: string; value: string; category: string; createdAt: Date; confidence: number }> = [];
-    for (let skip = 0; kept.length < PATTERNS_SHOWN; skip += PATTERNS_PAGE) {
-      const page = await this.prisma.client.aiMemory.findMany({
-        where: { businessId, category: 'patterns' },
+    let after: { createdAt: Date; id: string } | null = null;
+    for (let read = 0; kept.length < PATTERNS_SHOWN && read < PATTERNS_SCAN_MAX; ) {
+      const take = Math.min(PATTERNS_PAGE, PATTERNS_SCAN_MAX - read);
+      const page: typeof kept = await this.prisma.client.aiMemory.findMany({
+        where: {
+          businessId,
+          category: 'patterns',
+          ...(after ? { OR: [{ createdAt: { lt: after.createdAt } }, { createdAt: after.createdAt, id: { lt: after.id } }] } : {}),
+        },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        skip,
-        take: PATTERNS_PAGE,
+        take,
         select: { id: true, category: true, key: true, value: true, createdAt: true, confidence: true },
       });
+      read += page.length;
       for (const row of page) {
         if (kept.length < PATTERNS_SHOWN && aiMemoryRowVisibleTo(row, who)) kept.push(row);
       }
-      if (page.length < PATTERNS_PAGE) break;
+      if (page.length < take) break;
+      const last = page[page.length - 1];
+      after = { createdAt: last.createdAt, id: last.id };
     }
 
     return {
@@ -194,11 +209,28 @@ export class AgentController {
     };
   }
 
+  /**
+   * FU-PATTERNS-ROUTES-SIGHT review round 1 (security O-1; D-100, D-234): the scan stores every pattern it finds (the
+   * owner reads them all on GET .../agent/patterns) and answers the caller only those they may read, by the rule GET
+   * reads the stored row by (aiMemoryRowVisibleTo over the row PatternDetectorService stores: key
+   * `pattern_<category>_...`, the pattern as JSON). entitiesScanned counts the invoices read (sales volume, D-234), so
+   * only a member with revenue read is told it.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/agent/patterns/scan')
-  async triggerPatternScan(@Param('businessId') businessId: string) {
+  async triggerPatternScan(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    const who = await this.memoryReaderOf(businessId, req, 'agentPatternScan');
     const result = await this.patternDetector.scanBusiness(businessId);
-    return result;
+    const patterns = result.patterns.filter((pattern) =>
+      aiMemoryRowVisibleTo({ category: 'patterns', key: `pattern_${pattern.category}`, value: JSON.stringify(pattern) }, who),
+    );
+    return readsDocumentExtractions(who.sight, who.reader) ? { ...result, patterns } : { patterns, scanDurationMs: result.scanDurationMs };
+  }
+
+  /** FU-PATTERNS-ROUTES-SIGHT: the caller and their membership's module sight (a SUPER_ADMIN who is no member: none). */
+  private async memoryReaderOf(businessId: string, req: AuthenticatedRequest | undefined, logTag: string) {
+    const reader = req?.user?.id ?? null;
+    return { reader, sight: await readersModuleSight(this.prisma, businessId, reader, undefined, logTag) };
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
