@@ -1182,6 +1182,11 @@
       "packet": "V1-72 (RR-ERASURE-BUSINESS-EVENTS)"
     },
     {
+      "prefix": "v72x_",
+      "owner": "apps/server/test/contact-export-retention.integration.test.ts",
+      "packet": "V1-72 (RR-RETENTION-EXPIRED-EXPORTS)"
+    },
+    {
       "prefix": "v71w_",
       "owner": "apps/server/test/temporal-flow-inbox-scope.integration.test.ts",
       "packet": "V1-71 (FU-TEMPORAL-FLOW-INBOX-SCOPE)"
