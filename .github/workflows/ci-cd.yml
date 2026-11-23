@@ -54,6 +54,19 @@ jobs:
       - name: Check the Node runtime pin
         run: node --test scripts/ci/runtime-pin.spec.mjs
 
+      # RR-SCRIPT-SPECS-IN-CI (D-261, anti-fake-green): every tracked
+      # *.spec.mjs outside apps/ and packages/ must be named by a `node --test`
+      # line in a workflow or sit in the census's EXEMPT map with a reason
+      # (scripts/ci/script-specs-in-ci.spec.mjs). The three specs after the
+      # census gated nothing until this step: no workflow named them or their
+      # directory (the agent-memory tests behind D-253, the open-PR inventory,
+      # the research context compiler). They import only node: builtins and
+      # repo files, so they run here before install, like the pin check.
+      # Explicit files or `<dir>/*.spec.mjs` globs, never a bare directory,
+      # and no env (see the step above).
+      - name: Check every script spec runs in CI
+        run: node --test scripts/ci/script-specs-in-ci.spec.mjs scripts/agent-memory/tests/*.spec.mjs scripts/intelligence/open_pr_inventory.spec.mjs scripts/agent-control/research/tests/*.spec.mjs
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
