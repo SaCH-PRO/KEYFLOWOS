@@ -83,6 +83,15 @@ const ALLOWED_MEMORY_CATEGORIES = new Set<string>([
   'priorities', 'bottlenecks', 'corrections', 'patterns', 'preferences',
 ]);
 
+/**
+ * FU-PATTERNS-ROUTES-SIGHT (orchestrator ruling A): the most entries one PUT .../ai/memory/bulk writes. Ten categories
+ * are writable here (ALLOWED_MEMORY_CATEGORIES) and the preferences a member sets are a handful of keys each; no web
+ * screen calls the bulk route (the client helper upsertAiMemoryBulk has no caller) and the server's own writers call
+ * AiMemoryService.upsertMany directly. 50 is five keys for every category, far above any legitimate form, and bounds
+ * what one request adds to the rows every partial reader's GET .../agent/patterns pages over.
+ */
+const MAX_BULK_MEMORY_ENTRIES = 50;
+
 function assertMemoryCategoryAllowed(category: string): void {
   if (RESERVED_MEMORY_CATEGORIES.has(category)) {
     throw new BadRequestException(`Category "${category}" is reserved and cannot be modified through this endpoint`);
@@ -1054,7 +1063,10 @@ export class AiController {
     return { memories: entries.filter((row) => aiMemoryRowVisibleTo(row, who)) };
   }
 
+  // FU-PATTERNS-ROUTES-SIGHT (orchestrator ruling A, security round 3 F-1): each row a member writes is read by every
+  // partial reader's GET .../agent/patterns, so the writers are bounded (CrmRateLimitGuard is on this controller).
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(30, 60_000)
   @Put('businesses/:businessId/ai/memory')
   async upsertMemory(
     @Param('businessId') businessId: string,
@@ -1072,11 +1084,17 @@ export class AiController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(5, 60_000)
   @Put('businesses/:businessId/ai/memory/bulk')
   async upsertMemoryBulk(
     @Param('businessId') businessId: string,
     @Body() body: { entries: Array<{ category: MemoryCategory; key: string; value: string; confidence?: number }> },
   ) {
+    // FU-PATTERNS-ROUTES-SIGHT (orchestrator ruling A): at most MAX_BULK_MEMORY_ENTRIES a request, refused whole.
+    if (!Array.isArray(body?.entries)) throw new BadRequestException('entries must be an array');
+    if (body.entries.length > MAX_BULK_MEMORY_ENTRIES) {
+      throw new BadRequestException(`At most ${MAX_BULK_MEMORY_ENTRIES} entries a request`);
+    }
     for (const e of body.entries) {
       assertMemoryCategoryAllowed(e.category);
     }

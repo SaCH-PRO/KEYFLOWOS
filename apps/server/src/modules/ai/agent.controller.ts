@@ -178,34 +178,42 @@ export class AgentController {
    * whatever money patterns are newer. A pattern stored as plain text (summarizePatterns' "Peak activity hour: 9AM")
    * is answered as its description, where JSON.parse used to answer 500.
    * Review round 1 (security F-1/F-4, correctness COR-FUPRS-1/2): keyset pages on (createdAt, id), so a pattern written
-   * between two pages neither repeats nor drops a row. Review round 2 (security F-1): bounded by PATTERNS_WINDOW_DAYS,
-   * not by a row count, for a reader who may not read every pattern; the owner's one read is unchanged.
+   * between two pages neither repeats nor drops a row. Review round 2 (security F-1): bounded by PATTERNS_WINDOW_DAYS
+   * (of updatedAt, orchestrator ruling A), not by a row count, for a reader who may not read every pattern; the owner's
+   * one read is unchanged.
    */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/agent/patterns')
   async getDetectedPatterns(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
     const who = await this.memoryReaderOf(businessId, req, 'agentPatterns');
-    const select = { id: true, category: true, key: true, value: true, createdAt: true, confidence: true } as const;
-    const orderBy = [{ createdAt: 'desc' as const }, { id: 'desc' as const }];
-    type PatternRow = { id: string; key: string; value: string; category: string; createdAt: Date; confidence: number };
+    const select = { id: true, category: true, key: true, value: true, createdAt: true, updatedAt: true, confidence: true } as const;
+    type PatternRow = { id: string; key: string; value: string; category: string; createdAt: Date; updatedAt: Date; confidence: number };
     const kept: PatternRow[] = [];
     if (readsEveryPattern(who)) {
       // Review round 2 (COR-R2-2): a reader who may read every pattern (revenue and expenses read: the owner) reads the
       // newest PATTERNS_SHOWN in one read, as before.
-      const rows: PatternRow[] = await this.prisma.client.aiMemory.findMany({ where: { businessId, category: 'patterns' }, orderBy, take: PATTERNS_SHOWN, select });
+      const rows: PatternRow[] = await this.prisma.client.aiMemory.findMany({
+        where: { businessId, category: 'patterns' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: PATTERNS_SHOWN,
+        select,
+      });
       kept.push(...rows.filter((row) => aiMemoryRowVisibleTo(row, who)));
     } else {
+      // Orchestrator ruling (A): the window, the order and the keyset are on updatedAt (COR-R3-1: a fixed-key summary
+      // rewritten this week is recent, whenever it was first written), served by the index
+      // ai_memories (business_id, category, updated_at DESC, id DESC), so each page is an index range scan.
       const since = new Date(Date.now() - PATTERNS_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-      let after: { createdAt: Date; id: string } | null = null;
+      let after: { updatedAt: Date; id: string } | null = null;
       while (kept.length < PATTERNS_SHOWN) {
         const page: PatternRow[] = await this.prisma.client.aiMemory.findMany({
           where: {
             businessId,
             category: 'patterns',
-            createdAt: { gte: since },
-            ...(after ? { OR: [{ createdAt: { lt: after.createdAt } }, { createdAt: after.createdAt, id: { lt: after.id } }] } : {}),
+            updatedAt: { gte: since },
+            ...(after ? { OR: [{ updatedAt: { lt: after.updatedAt } }, { updatedAt: after.updatedAt, id: { lt: after.id } }] } : {}),
           },
-          orderBy,
+          orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
           take: PATTERNS_PAGE,
           select,
         });
@@ -214,7 +222,7 @@ export class AgentController {
         }
         if (page.length < PATTERNS_PAGE) break;
         const last = page[page.length - 1];
-        after = { createdAt: last.createdAt, id: last.id };
+        after = { updatedAt: last.updatedAt, id: last.id };
       }
     }
 
