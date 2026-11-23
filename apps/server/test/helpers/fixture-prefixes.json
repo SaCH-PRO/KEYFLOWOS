@@ -1200,6 +1200,11 @@
       "prefix": "v71z_",
       "owner": "apps/server/test/temporal-flow-upsert-race.integration.test.ts",
       "packet": "V1-71 (FU-TEMPORAL-FLOW-INBOX-SCOPE, Codex P1 #226)"
+    },
+    {
+      "prefix": "v72a_",
+      "owner": "apps/server/test/ai-approvals-money-sight.integration.test.ts",
+      "packet": "V1-72 (FU-AI-APPROVALS-MONEY-SIGHT)"
     }
   ],
   "pendingRenames": [],
