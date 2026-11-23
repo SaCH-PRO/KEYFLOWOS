@@ -45,7 +45,8 @@ function gatewayWith(script: Script) {
   const callProviderStream = vi.fn((_req: GatewayRequest, provider: AiProvider) => script(provider));
   s.callProviderStream = callProviderStream;
   const recordProviderError = vi.spyOn(s, 'recordProviderError');
-  return { svc, callProviderStream, recordProviderError };
+  const loggedErrors = vi.spyOn(s.logger, 'error').mockImplementation(() => undefined);
+  return { svc, callProviderStream, recordProviderError, loggedErrors };
 }
 
 const request: GatewayRequest = {
@@ -71,7 +72,7 @@ describe('streamComplete: no fallback after partial output (RR-STREAM-ERROR-NO-E
   });
 
   it('a candidate that throws after yielding a delta does not fall back', async () => {
-    const { svc, callProviderStream, recordProviderError } = gatewayWith(async function* (provider) {
+    const { svc, callProviderStream, recordProviderError, loggedErrors } = gatewayWith(async function* (provider) {
       if (provider === 'openai') {
         yield { type: 'content_delta', content: 'Hel' };
         throw new Error('primary stream reset');
@@ -86,7 +87,11 @@ describe('streamComplete: no fallback after partial output (RR-STREAM-ERROR-NO-E
       ['content_delta', 'Hel'],
       ['error', undefined],
     ]);
-    expect(chunks[1]).toMatchObject({ type: 'error', error: 'primary stream reset', provider: 'openai' });
+    expect(chunks[1]).toMatchObject({ type: 'error', provider: 'openai' });
+    // Review SEC-C: the member sees the provider and the error class, never the
+    // provider's own message; that stays in the server log.
+    expect(chunks[1].error).toBe('The openai stream failed part-way (Error)');
+    expect(loggedErrors).toHaveBeenCalledWith(expect.stringContaining('primary stream reset'));
     expect(callProviderStream).toHaveBeenCalledTimes(1);
     // The provider error is still recorded on the failing candidate's circuit.
     expect(recordProviderError).toHaveBeenCalledTimes(1);

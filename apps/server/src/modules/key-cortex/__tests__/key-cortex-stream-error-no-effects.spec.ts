@@ -8,9 +8,53 @@
  *
  * Scripted gateway streams only: no provider is called.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { KeyCortexQueryPipelineService } from '../key-cortex-query-pipeline.service';
 import { KeyCortexMemoryRetrievalService } from '../key-cortex-memory-retrieval.service';
+import { ModelGatewayService } from '../../ai/model-gateway.service';
+import { LangfuseService } from '../../ai/langfuse.service';
+
+/** One Anthropic SSE event. */
+const sse = (type: string, data: Record<string, unknown> = {}) =>
+  `event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`;
+const ANTHROPIC_TOOL_BLOCK = [
+  sse('message_start', { message: { usage: { input_tokens: 5 } } }),
+  sse('content_block_start', { index: 0, content_block: { type: 'tool_use', id: 'toolu_rr_c1', name: 'expenses_list', input: {} } }),
+  sse('content_block_delta', { index: 0, delta: { type: 'input_json_delta', partial_json: '{}' } }),
+  sse('content_block_stop', { index: 0 }),
+];
+const ANTHROPIC_OVERLOADED = sse('error', { error: { type: 'overloaded_error', message: 'Overloaded' } });
+
+/**
+ * The real ModelGatewayService, routed to Anthropic only, over a scripted SSE
+ * body (global fetch stubbed: no provider is called).
+ */
+function realGatewayOverAnthropic(events: string[]): ModelGatewayService {
+  process.env.ANTHROPIC_API_KEY = 'test-anthropic-key';
+  delete process.env.KEY_DISABLED;
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    expect(url).toBe('https://api.anthropic.com/v1/messages');
+    const enc = new TextEncoder();
+    return new Response(new ReadableStream({
+      start(controller) {
+        for (const e of events) controller.enqueue(enc.encode(e));
+        controller.close();
+      },
+    }), { status: 200 });
+  }));
+  const svc = new ModelGatewayService(
+    { client: { aiMemory: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn() } } } as any,
+    { recordCost: vi.fn().mockResolvedValue({}), getCurrentMonthSpend: vi.fn().mockResolvedValue({ total: 0, byProvider: {} }) } as any,
+    new LangfuseService(),
+  );
+  const s = svc as any;
+  s.routingTableLoaded = true;
+  s.getPreferences = vi.fn().mockResolvedValue({ aiMode: 'balanced' });
+  s.resolveStrategy = vi.fn().mockReturnValue({ primary: { provider: 'anthropic', model: 'claude-test' }, fallbacks: [] });
+  s.isProviderAvailable = vi.fn().mockReturnValue(true);
+  vi.spyOn(s.logger, 'error').mockImplementation(() => undefined);
+  return svc;
+}
 
 const prisma = {
   client: {
@@ -204,6 +248,34 @@ describe('streamQuery: a stream that ended in an error has no effects (RR-STREAM
     expect(savedAssistantMessages()).toEqual([]);
     expect(chunks.some((c) => c.type === 'done')).toBe(false);
     expect(chunks.at(-1)).toMatchObject({ type: 'error', error: expect.stringMatching(/\S/) });
+  });
+
+  describe('through the real gateway over an Anthropic stream (review SEC-A)', () => {
+    let savedAnthropicKey: string | undefined;
+    beforeEach(() => {
+      savedAnthropicKey = process.env.ANTHROPIC_API_KEY;
+    });
+    afterEach(() => {
+      if (savedAnthropicKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = savedAnthropicKey;
+      vi.unstubAllGlobals();
+    });
+
+    it.each([
+      ['a tool_use block then an SSE error event', [...ANTHROPIC_TOOL_BLOCK, ANTHROPIC_OVERLOADED]],
+      ['a tool_use block then a clean close without message_stop', [...ANTHROPIC_TOOL_BLOCK]],
+    ])('%s: the complete tool call is not run and nothing is saved', async (_title, events) => {
+      const real = realGatewayOverAnthropic(events);
+      gateway.streamComplete.mockImplementation((req: any) => real.streamComplete(req));
+
+      const chunks = await run();
+
+      expect(toolLoop.handleToolCalls).not.toHaveBeenCalled();
+      expect(actionDetection.detectActions).not.toHaveBeenCalled();
+      expect(savedAssistantMessages()).toEqual([]);
+      expect(chunks.some((c) => c.type === 'done')).toBe(false);
+      expect(chunks.at(-1)).toMatchObject({ type: 'error', error: expect.stringMatching(/anthropic/) });
+    });
   });
 
   it('control: a stream that completes still runs its tool call through the tool loop and ends with done', async () => {
