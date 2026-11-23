@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { ModelGatewayService } from '../ai/model-gateway.service';
-import { coerceToContract } from '../ai/ai-output-contracts';
+import { coerceToContractState } from '../ai/ai-output-contracts';
 import type {
   GenesisSwotPestlePositioningResult,
   GenesisCompetitorResult,
@@ -177,7 +177,12 @@ Return ONLY valid JSON matching this schema:
     try {
       const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
       const parsed = JSON.parse(cleaned);
-      return coerceToContract<T>(parsed, contract, fallback);
+      const coerced = coerceToContractState<T>(parsed, contract, fallback);
+      if (coerced.state === 'coerced') {
+        // RR-STRUCTURED-PARSE-INVALID-STATE: the model's answer was replaced by the fallback; say so.
+        this.logger.warn(`${contract} answer did not satisfy its contract; using the fallback (${coerced.errors.join('; ')})`);
+      }
+      return coerced.value;
     } catch (err: any) {
       this.logger.warn(`Failed to parse/coerce ${contract}: ${(err as Error).message}; using fallback`);
       return fallback;
