@@ -89,6 +89,7 @@ let profilePrompts: string[];
 let promptContextFor: (userId: string | undefined) => Promise<string>;
 let pipelinePromptFor: (userId: string | undefined) => Promise<string>;
 let profileReset: () => void;
+let semantic: any;
 
 async function cleanup() {
   const byBiz = (table: string) => `DELETE FROM ${table} WHERE business_id LIKE ${sqlLikePrefix(P)}`;
@@ -114,8 +115,9 @@ async function cleanup() {
   }
 }
 
-/** Removes every extraction (rows and their documents); the fact stays. */
+/** Removes every extraction (rows and their documents) and every semantic copy; the fact stays. */
 async function clearExtractions() {
+  await db.$executeRawUnsafe(`DELETE FROM ai_memory_embeddings WHERE business_id = $1`, ID.biz);
   await db.$executeRawUnsafe(`DELETE FROM ai_memories WHERE business_id = $1 AND category = 'document_extraction'`, ID.biz);
   await db.$executeRawUnsafe(`DELETE FROM key_documents WHERE business_id = $1`, ID.biz);
 }
@@ -180,7 +182,8 @@ async function everythingFor(reader: Reader) {
   const id = ID[reader];
   const flowTurn = await turn(id);
   return {
-    flowPrompt: flowTurn.prompt,
+    // The flow prompt states the hour (currentDateForPrompt): a run that crosses one must not read as a difference.
+    flowPrompt: flowTurn.prompt.replace(/\d{4}-\d{2}-\d{2}T\d{2}:00Z/g, '<hour>'),
     // A new chat session's id is random on every turn: compared as present, not by value.
     flowBody: { ...(flowTurn.body as Record<string, unknown>), sessionId: typeof (flowTurn.body as any)?.sessionId === 'string' ? '<new session>' : undefined },
     buildMemoryContext: await promptContextFor(id),
@@ -225,8 +228,15 @@ beforeAll(async () => {
   const { UnifiedMemoryRetrievalService } = await import('../src/modules/key-cortex/unified-memory-retrieval.service');
   const { UnifiedMemoryWriterService } = await import('../src/modules/key-cortex/unified-memory-writer.service');
   const { KeyCortexDocumentService } = await import('../src/modules/key-cortex/key-cortex-document.service');
+  const { SemanticMemoryService } = await import('../src/modules/ai/semantic-memory.service');
 
   prisma = new PrismaService();
+  // The semantic store: the real SemanticMemoryService over the real ai_memory_embeddings table; the embedding provider
+  // is a stand-in answering one fixed unit vector, so every copy matches every query at similarity 1.
+  const UNIT_VECTOR = Array.from({ length: 1536 }, (_, i) => (i === 0 ? 1 : 0));
+  semantic = new SemanticMemoryService(prisma, new EventEmitter2(), {
+    trackEmbedding: async (_b: string, _u: unknown, _o: string, texts: string[]) => texts.map(() => UNIT_VECTOR),
+  } as any);
 
   // The real memory service and writer (getAll, getByCategory, upsert and buildContextBlock read and write the
   // database; the blueprint has none for this business).
@@ -425,7 +435,8 @@ beforeAll(async () => {
         parseStructuredResponse: () => ({ role: 'assistant', recommendation: 'ok', confidence: 80 }),
       } as any,
       { detectMood: () => 'casual' } as any,
-      new KeyCortexMemoryRetrievalService(new UnifiedMemoryRetrievalService(prisma, { search: async () => [] } as any)),
+      // The pipeline's read passes the turn's text as its query: the real semantic store answers it.
+      new KeyCortexMemoryRetrievalService(new UnifiedMemoryRetrievalService(prisma, semantic)),
       { route: async () => route } as any,
     );
     await pipeline.processQuery({ text: 'what happened lately', businessId: ID.biz, userId } as any, { integrationV2Enabled: false, genomeV3Enabled: false });
@@ -531,4 +542,26 @@ describe('MEM-DOC-EXTRACTION-SIGHT (D-234 fail closed, D-257): a document extrac
       await clearExtractions();
     }
   }, 240_000);
+
+  it("differential, semantic copies (review finding): once every row is copied into the semantic store (POST .../agent/memory/backfill), the blind STAFF member's and the memberless SUPER_ADMIN's pipeline prompt is identical whether or not 200 extractions and their copies exist: the copies take no place in the semantic read's limit, and the fact's copy still renders", async () => {
+    await clearExtractions();
+    await semantic.backfillFromAiMemory(ID.biz);
+    const before: Record<string, string> = {};
+    for (const reader of BLIND_READERS) before[reader] = await pipelinePromptFor(ID[reader]);
+    try {
+      expect(before.blind, 'the fact\'s copy renders').toContain('[ai_memory_embedding]');
+      await extractInvoices(200);
+      // The backfill copies every row again, the fact too: its copy is dropped first, so the fact keeps exactly one.
+      await db.aiMemoryEmbedding.deleteMany({ where: { businessId: ID.biz } });
+      await semantic.backfillFromAiMemory(ID.biz);
+      expect(await db.aiMemoryEmbedding.count({ where: { businessId: ID.biz, content: { startsWith: 'document_extraction: ' } } })).toBe(200);
+      expect(await db.aiMemoryEmbedding.count({ where: { businessId: ID.biz } })).toBe(201);
+      for (const reader of BLIND_READERS) expect(await pipelinePromptFor(ID[reader]), reader).toEqual(before[reader]);
+      // Control: the owner's pipeline prompt renders the extractions' copies.
+      expect((await pipelinePromptFor(ID.owner)).match(/\[ai_memory_embedding\] [^\n]*document_extraction/g)?.length ?? 0).toBeGreaterThan(0);
+      expect(outbound, 'no outbound request').toEqual([]);
+    } finally {
+      await clearExtractions();
+    }
+  }, 300_000);
 });

@@ -87,6 +87,11 @@ describe('MEM-DOC-EXTRACTION-SIGHT: readersOwnPromptMemory', () => {
     const without = await readersOwnPromptMemory(prisma as any, 'biz_1', 'revenue', fragments, 50, undefined, undefined, (m) => m === 'crm');
     expect(without.map((f) => f.id)).toEqual(['fact', 'copy_fact']);
   });
+
+  it('a memberless turn sees none even when its sight holds revenue (a contact-only position: no member reader)', async () => {
+    const kept = await readersOwnPromptMemory(prisma as any, 'biz_1', null, fragments, 50, undefined, undefined, () => true);
+    expect(kept.map((f) => f.id)).toEqual(['fact', 'copy_fact']);
+  });
 });
 
 describe('MEM-DOC-EXTRACTION-SIGHT: the memory read takes document extractions only when asked', () => {
@@ -112,5 +117,36 @@ describe('MEM-DOC-EXTRACTION-SIGHT: the memory read takes document extractions o
     const notIn = await readWhere(true);
     expect(notIn).toContain('settings');
     expect(notIn).not.toContain('document_extraction');
+  });
+
+  // Review finding (semantic copies crowd the read): the semantic search leaves out the copies of document extractions
+  // unless the read asks for them, so they take no place in its limit either.
+  const searchParams = async (documentExtractions?: boolean) => {
+    const search = vi.fn(async () => []);
+    const db = { client: new Proxy({}, { get: () => ({ findMany: vi.fn(async () => []) }) }) };
+    const service = new UnifiedMemoryRetrievalService(db as any, { search } as any);
+    await service.retrieveContext('biz_1', { query: 'q', ...(documentExtractions === undefined ? {} : { documentExtractions }) });
+    return (search.mock.calls[0] as any)[0];
+  };
+
+  it('the semantic search is told to leave out the copies of document extractions by default and when false, and not when true', async () => {
+    expect((await searchParams()).withoutDocumentExtractionCopies).toBe(true);
+    expect((await searchParams(false)).withoutDocumentExtractionCopies).toBe(true);
+    expect((await searchParams(true)).withoutDocumentExtractionCopies).toBe(false);
+  });
+});
+
+describe("MEM-DOC-EXTRACTION-SIGHT: the owners' digest keeps the extractions (review finding: owner behaviour unchanged)", () => {
+  it('KeyCortexDigestService asks its memory read for document extractions (the digest goes to the business owners)', async () => {
+    const { KeyCortexDigestService } = await import('./key-cortex-digest.service');
+    const retrieveContext = vi.fn(async () => []);
+    const service = new KeyCortexDigestService(
+      { getMentalModel: vi.fn(async () => null) } as any,
+      { generateBusinessReport: vi.fn(async () => null) } as any,
+      { retrieveContext } as any,
+      {} as any,
+    );
+    await service.generateDailyDigest('biz_1');
+    expect(retrieveContext).toHaveBeenCalledWith('biz_1', expect.objectContaining({ documentExtractions: true }));
   });
 });
