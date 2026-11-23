@@ -1669,11 +1669,17 @@ export class AiController {
     @Param('businessId') businessId: string,
     @Query('entityType') entityType: string,
     @Query('entityId') entityId: string,
+    @Req() req?: AuthenticatedRequest,
   ) {
     if (!entityType || !entityId) {
       throw new BadRequestException('entityType and entityId are required');
     }
-    return this.workspaceRecs.getCrossModuleLinks(businessId, entityType, entityId);
+    // FU-STRATEGIC-ROUTES-SIGHT (security review round 1, OOS-1; D-100): a contact's invoices (number, status, amount)
+    // only at revenue read; without it the list is withheld whole (empty: an invoice's existence and status are money
+    // signals too). Bookings and projects state no money.
+    const who = await this.memoryReaderOf(businessId, req);
+    const links = await this.workspaceRecs.getCrossModuleLinks(businessId, entityType, entityId);
+    return readerHolds(who, ['revenue']) ? links : { ...links, invoices: [] };
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

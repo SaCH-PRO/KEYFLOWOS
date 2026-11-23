@@ -17,7 +17,24 @@ const BOTH: readonly InsightSight[] = ['revenue', 'expenses'];
  * opex, outflows, and a cash flow or break-even however spelt ('cash_flow', 'Cash-flow').
  */
 const NET_WORDS =
-  /(?<![a-z])(?:un|non-?)?(profits?|profitab\w*|margins?|net|break[\s_-]?even|cash[\s_-]?flows?|ebitda|burn(?:ing|[\s_-]?rate)?|loss(?:es)?|losing[\s_-]?money|deficits?|surplus(?:es)?|in[\s_-]the[\s_-](?:red|black)|p\s*(?:&|and)\s*l|overspen\w*|opex|outflows?)(?![a-z])/i;
+  /(?<![a-z])(?:un|non-?)?(profits?|profitab\w*|margins?|net|break[\s_-]?even|cash[\s_-]?flows?|ebitda|burn(?:ing|[\s_-]?rate)?|loss(?:es)?|losing[\s_-]?money|deficits?|surplus(?:es)?|in[\s_-]the[\s_-](?:red|black)|p\s*(?:&|and)\s*l|overspen\w*|opex|outflows?|bottom[\s_-]?lines?|insolven\w*|solven\w*|liquidity|runways?|underwater|payback)(?![a-z])/i;
+/** Review round 2 (SR2-4): revenue by its other names (turnover, takings, the top line). */
+const MONEY_WORDS = /(?<![a-z])(turnover|takings|top[\s_-]?lines?)(?![a-z])/i;
+
+/**
+ * Review round 2 (SR2-1, SR2-3, CR2-3): the text as it reads: NFKC-folded (fullwidth and mathematical letters and
+ * digits), soft hyphens and zero-width characters removed, and every script's decimal digits as ASCII digits.
+ */
+const INVISIBLE = /[\u00ad\u200b-\u200d\u2060\ufeff]/g;
+function digitValue(ch: string): string {
+  let code = ch.codePointAt(0)!;
+  let start = code;
+  while (/\p{Nd}/u.test(String.fromCodePoint(start - 1)) && code - start < 64) start -= 1;
+  return String((code - start) % 10);
+}
+function folded(text: string): string {
+  return text.normalize('NFKC').replace(INVISIBLE, '').replace(/\p{Nd}/gu, (ch) => (/[0-9]/.test(ch) ? ch : digitValue(ch)));
+}
 const camelSplit = (text: string) => text.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
 function statesNet(text: string): boolean {
   if (text.length > MAX_FIELDS_CLASSIFIED) return true;
@@ -30,21 +47,29 @@ function statesNet(text: string): boolean {
  * between them allowed), a digit with a k/M/bn, % or x after it, or a number word. Read with the text NFKC-folded
  * (fullwidth digits). A lone digit ('call 2 leads') and a date alone ('2026-11-23') state no figure.
  */
-const FIGURE = /\d[\s,.'\u00a0\u202f]?\d|\d\s*(?:k|m|mm|bn|b|%|x)(?![a-z])|(?<![a-z])(?:hundred|thousand|million|billion|grand)s?(?![a-z])/i;
-const DATE_ALONE = /^\s*\d{4}-\d{2}-\d{2}(?:[T ][\d:.]+Z?)?\s*$/;
+const FIGURE =
+  /\d[\s,.'\u00a0\u202f]?\d|\d\s*(?:k|m|mm|bn|b|%|x|percent|pct|per[\s-]?cent)(?![a-z])|(?<![a-z])(?:hundred|thousand|million|billion|grand)s?(?![a-z])/i;
+/** Review round 2 (SR2-2): a date, with a clock time at most: nothing after it. */
+const DATE_ALONE = /^\s*\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:?\d{2})?)?\s*$/;
 function statesFigure(text: string): boolean {
   if (text.length > MAX_FIELDS_CLASSIFIED) return true;
-  if (DATE_ALONE.test(text)) return false;
-  const folded = text.normalize('NFKC');
-  return readingsOf(folded).some((reading) => FIGURE.test(reading));
+  const plain = folded(text);
+  if (DATE_ALONE.test(plain)) return false;
+  return readingsOf(plain).some((reading) => FIGURE.test(reading));
 }
 
-/** A text's sights: money and expenses by the AiMemory rule (fieldsSightNeeds), revenue for a figure, both for net profit. */
+/**
+ * A text's sights, on the text as written and as it reads (folded): money and expenses by the AiMemory rule
+ * (fieldsSightNeeds), revenue for a figure or revenue's other names, both for net profit.
+ */
 function textNeeds(text: string): readonly InsightSight[] {
-  if (statesNet(text)) return BOTH;
-  const needs = fieldsSightNeeds([text]);
-  if (needs.length === 2) return BOTH;
-  return statesFigure(text) && !needs.includes('revenue') ? [...needs, 'revenue'] : needs;
+  const plain = folded(text);
+  const texts = plain === text ? [text] : [text, plain];
+  if (texts.some(statesNet)) return BOTH;
+  const needs = new Set<InsightSight>(fieldsSightNeeds(texts));
+  if (needs.size === 2) return BOTH;
+  if (statesFigure(text) || texts.some((t) => readingsOf(t).some((reading) => MONEY_WORDS.test(reading)))) needs.add('revenue');
+  return (['revenue', 'expenses'] as const).filter((sight) => needs.has(sight));
 }
 
 /**
