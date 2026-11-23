@@ -37,21 +37,49 @@ export function textSightNeeds(text: string): InsightSight[] {
   ];
 }
 
+/** A value's control characters blanked, in strings and object keys alike, all the way down. */
+function blankControls(value: unknown): unknown {
+  if (typeof value === 'string') return value.replace(/\p{Cc}/gu, ' ');
+  if (Array.isArray(value)) return value.map(blankControls);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [blankControls(k) as string, blankControls(v)]));
+  }
+  return value;
+}
+
 /**
- * Security review round 3 (ISS-R3-1): the sights a list of fields needs, each field read as written: a string as it is,
- * a structured value as JSON with its strings' control characters blanked first. Reading JSON.stringify of the whole list
- * turned a line break, tab or carriage return into an escape letter glued to the next word ('\\nrent', '\\tpayroll'),
- * and the word-bounded expense rule missed it.
+ * The readings of a text (as D-238's readings do, a reading is only ever added): the text as written; its escapes
+ * (`\n`, `\t`, `\"`, `\\`, `\uXXXX`) read as spaces; its `\uXXXX` escapes decoded; and each with its control
+ * characters blanked. A word after an escape or a control character is read in one of them.
+ */
+function readingsOf(text: string): string[] {
+  const escapesAsSpaces = text.replace(/\\+(?:u[0-9a-fA-F]{4}|[bfnrt"/])?/g, ' ');
+  const decoded = text.replace(/\\u([0-9a-fA-F]{4})/g, (_m, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+  const blank = (t: string) => t.replace(/\p{Cc}/gu, ' ');
+  return [...new Set([text, escapesAsSpaces, decoded, blank(text), blank(escapesAsSpaces), blank(decoded)])];
+}
+
+/**
+ * Security review round 3 (ISS-R3-1), reviews round 4 (ISS-R4-1, R3-C1, R3-C2): the sights a list of fields needs, by
+ * every reading of each field and of the whole list: a string as written, a structured value as JSON as it is and with
+ * its control characters blanked (keys included), and every reading of those (readingsOf), with the list read whole as
+ * JSON as it always was. Readings are only ever added: one that misses a word (an escape glued to it, a control
+ * character before a figure) never takes the place of one that reads it.
  */
 export function fieldsSightNeeds(fields: readonly unknown[]): InsightSight[] {
   const needs = new Set<InsightSight>();
+  const read = (text: string) => {
+    for (const reading of readingsOf(text)) for (const sight of textSightNeeds(reading)) needs.add(sight);
+  };
+  read(JSON.stringify(fields) ?? '');
   for (const field of fields) {
     if (field === null || field === undefined) continue;
-    const text =
-      typeof field === 'string'
-        ? field
-        : JSON.stringify(field, (_key, value) => (typeof value === 'string' ? value.replace(/\p{Cc}/gu, ' ') : value)) ?? '';
-    for (const sight of textSightNeeds(text)) needs.add(sight);
+    if (typeof field === 'string') {
+      read(field);
+    } else {
+      read(JSON.stringify(field) ?? '');
+      read(JSON.stringify(blankControls(field)) ?? '');
+    }
   }
   return (['revenue', 'expenses'] as const).filter((sight) => needs.has(sight));
 }
