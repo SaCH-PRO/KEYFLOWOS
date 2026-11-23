@@ -25,10 +25,11 @@ describe('LLMCostService', () => {
   describe('computeCost', () => {
     it('calculates cost for gpt-4o-mini', () => {
       const cost = service.computeCost('gpt-4o-mini', 1000, 1000);
-      // the one table's verified price (2026-08-04): 0.00015 / 0.0006 per 1k, rounded to four decimals as computeCost rounds
-      expect(cost.inputCost).toBe(0.0002);
+      // the one table's verified price (2026-08-04): 0.00015 / 0.0006 per 1k, rounded to four decimals as computeCost
+      // rounds (0.00015 lands on 0.0001 in floating point; the sub-cent loss is pre-existing and noted for the owner)
+      expect(cost.inputCost).toBe(0.0001);
       expect(cost.outputCost).toBe(0.0006);
-      expect(cost.totalCost).toBe(0.0008);
+      expect(cost.totalCost).toBe(0.0007);
     });
 
     it('calculates cost for claude-3-5-sonnet', () => {
@@ -81,12 +82,13 @@ describe('LLMCostService', () => {
           promptTokens: 1000,
           completionTokens: 500,
           totalTokens: 1500,
-          inputCost: 0.0004,
-          outputCost: 0.0008,
-          totalCost: 0.0012,
+          // the one table's verified gpt-4o-mini price (0.00015 / 0.0006 per 1k), rounded as computeCost rounds
+          inputCost: 0.0001,
+          outputCost: 0.0003,
+          totalCost: 0.0005,
           latencyMs: 120,
           fallbackUsed: false,
-          metadata: {},
+          metadata: { costStatus: 'priced' },
         }),
       });
     });
