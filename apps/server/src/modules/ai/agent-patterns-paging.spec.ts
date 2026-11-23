@@ -108,7 +108,8 @@ describe('GET .../agent/patterns pages by keyset, bounded (FU-PATTERNS-ROUTES-SI
       expect(gte, JSON.stringify(call.where)).toBeInstanceOf(Date);
       expect(Math.abs(gte!.getTime() - floor)).toBeLessThan(60_000);
     }
-    const owner = await controllerOver(table(rows).findMany, 'OWNER', null).getDetectedPatterns('biz', { user: { id: 'u_owner' } } as any);
+    // The owner's one read has no window: with fewer than 50 patterns, the older one is answered to them.
+    const owner = await controllerOver(table([old, plain(2)]).findMany, 'OWNER', null).getDetectedPatterns('biz', { user: { id: 'u_owner' } } as any);
     expect(owner.patterns.map((p: any) => p.id)).toContain('p_old');
   });
 
