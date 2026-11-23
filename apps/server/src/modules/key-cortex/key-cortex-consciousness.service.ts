@@ -92,7 +92,8 @@ import {
   KeyCortexEndocrineService,
   type EndocrineSignal,
 } from './key-cortex-endocrine.service';
-import { isFinanceRecommendation, isMoneyLabel, proposalTextStatesMoney } from '../business-genome/key-genome/genome-finance-scope';
+import { isMoneyLabel, proposalTextStatesMoney } from '../business-genome/key-genome/genome-finance-scope';
+import { genomeRecommendationsForReader } from './genome-context-for-reader';
 
 /**
  * One completed step of the consciousness pipeline, emitted as it finishes.
@@ -1198,9 +1199,11 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
       // Round 2 (correctness minor 2): a reader without revenue read is read with headroom before five are taken.
       const genomeState = await this.genomeBridge.getRankedRecommendations(businessId, readsRevenue ? undefined : 50);
       if (genomeState) {
+        // Round 4 (security NIT-2): projected and ordered as the reader's recommendations are (genomeRecommendationsForReader),
+        // not in the money-weighted rank.
         const visible = readsRevenue
           ? genomeState
-          : genomeState.filter((rec: any) => !isFinanceRecommendation({ domain: rec?.domain ?? rec?.category ?? null, title: rec?.title ?? null }));
+          : genomeRecommendationsForReader(genomeState.map((rec: any) => ({ ...rec, category: rec?.domain ?? rec?.category ?? null })), false);
         for (const rec of visible.slice(0, 5)) {
           const r = rec as unknown as { title?: string; recommendation?: string };
           const label = typeof rec === 'string' ? rec : r.title ?? r.recommendation ?? 'Genome recommendation';

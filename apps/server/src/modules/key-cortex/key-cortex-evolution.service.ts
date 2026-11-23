@@ -165,7 +165,6 @@ export interface UnifiedReport {
  * v3 makes it genome-aware, so KEY's learning feeds genome evolution
  * and genome evolution feeds KEY's adaptation.
  */
-
 @Injectable()
 export class KeyCortexEvolutionService {
   private readonly logger = new Logger(KeyCortexEvolutionService.name);

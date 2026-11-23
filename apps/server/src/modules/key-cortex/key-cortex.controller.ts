@@ -568,12 +568,6 @@ export const CortexMember = createParamDecorator((_data: unknown, ctx: Execution
 });
 
 /**
- * W11-CORTEX-SESSION-SNAPSHOT-SCOPE (KC-SEC-3; D-57, D-100): whether the member
- * CortexMemberAuthorityGuard loaded may read revenue, as ModuleScopeGuard decides
- * GET insights/revenue (memberScopeMap; a platform SUPER_ADMIN passes). No
- * authority reads none (fails closed).
- */
-/**
  * FU-KEY-GENOME-READS-RESIDUAL round 3 (security MINOR-1; SEC-V109b-1, D-130, D-140): whether the viewer has the
  * business owner's full sight: a platform SUPER_ADMIN, or an OWNER whose scopes read every module the OWNER role reads by
  * default (as mayReadFullKeyContext). A scoped OWNER (an explicit map narrower than that) does not.
@@ -588,6 +582,12 @@ export function viewerHasFullOwnerSight(viewer: CortexMemberAuthority | undefine
   );
 }
 
+/**
+ * W11-CORTEX-SESSION-SNAPSHOT-SCOPE (KC-SEC-3; D-57, D-100): whether the member
+ * CortexMemberAuthorityGuard loaded may read revenue, as ModuleScopeGuard decides
+ * GET insights/revenue (memberScopeMap; a platform SUPER_ADMIN passes). No
+ * authority reads none (fails closed).
+ */
 export function viewerReadsRevenue(viewer: CortexMemberAuthority | undefined): boolean {
   if (!viewer) return false;
   if (viewer.superAdmin) return true;
