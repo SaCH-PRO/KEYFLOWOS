@@ -1,0 +1,433 @@
+/**
+ * FU-KEY-ACTION-GENOME-PROJECTION (owner rulings D-128, D-233, D-238). Found by the NAV-A1 and
+ * FU-TEMPORAL-FLOW-INBOX-SCOPE security reviews: a KEY action proposal bridged from a FINANCIAL genome
+ * recommendation, and the timeline rows written by key-action-executor (key.action.create_task copies the
+ * proposal's title, rationale and payload) and by genome-evolution (`${section} proposal <status>: ${reason}`
+ * with the proposed patch, for the financial and sales DNA sections too), reach a member without revenue read.
+ *
+ * Paths under test, each served to a STAFF member whose explicit scope map says revenue:'none':
+ *
+ *   KAG-01  GET /key-autonomy/.../actions/proposals and proposals/:id: a proposal bridged from a FINANCIAL
+ *           recommendation (neutral title, figures in its rationale; and one whose text is neutral, financial only
+ *           by its provenance) is withheld (list) or 404 (by id). The non-financial bridged proposal is served.
+ *   KAG-02  GET /temporal-flow/businesses/:id (list, calendar, reminders): the key.action.create_task row of the
+ *           financial proposal is withheld; that of the non-financial proposal is served.
+ *   KAG-03  The same reads: genome-evolution decision rows (written by the real GenomeEvolutionService) of the
+ *           financial and sales sections, of an unknown section, of an operations proposal whose reason states a
+ *           figure, and of a proposal that cannot be read in this business (another tenant's id, fail closed) are
+ *           withheld; the operations row with neutral text is served.
+ *   KAG-04  GET business-genome/.../key-genome/recommendations/:id/action-preview of the FINANCIAL recommendation
+ *           answers 403 with ModuleScopeGuard's message and never reaches the bridge service; POST bridge-action of
+ *           it answers 403 'revenue requires write access' for revenue none and read, and creates no proposal. The
+ *           operations recommendation is previewed as before.
+ *   KAG-05  Controls: the owner and a revenue:'read' member are served every row unchanged (the revenue:'read'
+ *           member is refused only the financial bridge-action, a write); a member of another business is refused
+ *           this business's reads by BusinessGuard.
+ *
+ * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard, ModuleScopeGuard, the global
+ * TenantInterceptor, KeyActionProposalService's reads, TemporalFlowService, GenomeEvolutionService (its writer),
+ * GenomeRecommendationService.getRecommendation and GenomeRecommendationActionBridgeService run against the
+ * database at DATABASE_URL. Collaborators off these routes are stand-ins that throw if reached; the bridge's
+ * proposal writer is a recorder (the gate under test is before it). Identity attachment is a stand-in: a test
+ * middleware reads `x-test-user` and attaches `{ id, email, role }` as AuthMiddleware would.
+ *
+ * Fixtures: prefix `v73k_` (registered in test/helpers/fixture-prefixes.json); hard-deleted by raw SQL in
+ * beforeAll and afterAll; no $transaction wrapping.
+ */
+import 'reflect-metadata';
+import path from 'path';
+import { config as loadEnv } from 'dotenv';
+import request from 'supertest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { sqlLikePrefix } from './helpers/sql-like.js';
+
+loadEnv({ path: path.resolve(__dirname, '../../../.env') });
+
+const P = 'v73k_';
+const HEADER = 'x-test-user';
+
+const ID = {
+  owner: `${P}owner`,
+  staffNone: `${P}staffNone`,
+  staffRead: `${P}staffRead`,
+  outsider: `${P}outsider`,
+  biz: `${P}biz`,
+  biz2: `${P}biz2`,
+  recFin: `${P}rec_fin`,
+  recOps: `${P}rec_ops`,
+  recOther: `${P}rec_other`,
+  propFin: `${P}prop_fin`,
+  propFinQuiet: `${P}prop_finq`,
+  propOps: `${P}prop_ops`,
+  propCross: `${P}prop_cross`,
+  evoFin: `${P}evo_fin`,
+  evoSales: `${P}evo_sales`,
+  evoOdd: `${P}evo_odd`,
+  evoOpsMoney: `${P}evo_opsm`,
+  evoOps: `${P}evo_ops`,
+  evoOther: `${P}evo_other`,
+};
+
+/** Figures only the financial rows of this fixture carry (D-233: withheld from a reader without revenue read). */
+const FIGURES = /8,?765\.43|31\.7%|4,?500\.25|TTD 912/;
+const READ_DENIED = 'Insufficient permissions: revenue requires read access (you have none)';
+const WRITE_DENIED = (has: 'none' | 'read') => `Insufficient permissions: revenue requires write access (you have ${has})`;
+
+let db: any;
+let app: any;
+let evolution: any;
+const SPY: Record<string, any> = {};
+const bridgedProposals: unknown[] = [];
+
+async function cleanup() {
+  for (const sql of [
+    `DELETE FROM temporal_flow_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM genome_evolution_proposals WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM key_action_proposals WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM genome_recommendations WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
+  ]) {
+    try { await db.$executeRawUnsafe(sql); } catch { /* best-effort */ }
+  }
+}
+
+function attachIdentity(nest: any) {
+  nest.use(async (req: any, _res: any, next: any) => {
+    const header = req.headers[HEADER];
+    const id = typeof header === 'string' ? header : undefined;
+    if (id && id.startsWith(P)) {
+      const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+      if (user) req.user = { id: user.id, email: user.email, role: user.role };
+    }
+    next();
+  });
+}
+
+const get = (url: string, as: string) => request(app.getHttpServer()).get(url).set(HEADER, as);
+const post = (url: string, as: string, body: Record<string, unknown>) =>
+  request(app.getHttpServer()).post(url).set(HEADER, as).send(body);
+
+const proposalsUrl = (biz = ID.biz) => `/key-autonomy/businesses/${biz}/actions/proposals`;
+const timelineUrl = (biz = ID.biz) => `/temporal-flow/businesses/${biz}`;
+const bridgeUrl = (rec: string, biz = ID.biz) => `/business-genome/businesses/${biz}/key-genome/recommendations/${rec}`;
+const FROM = new Date(Date.now() - 10 * 86400_000).toISOString();
+const TO = new Date(Date.now() + 86400_000).toISOString();
+
+/** Every timeline read a reader is served, by the three routes. */
+async function timelineReads(as: string) {
+  const list = await get(`${timelineUrl()}?limit=200`, as);
+  const calendar = await get(`${timelineUrl()}/calendar?from=${FROM}&to=${TO}`, as);
+  const reminders = await get(`${timelineUrl()}/reminders`, as);
+  return { list, calendar, reminders };
+}
+
+const entityIds = (body: any) => (Array.isArray(body) ? body : []).map((e: any) => e.entityId).sort();
+
+beforeAll(async () => {
+  const dbMod = await import('@keyflow/db');
+  db = dbMod.db;
+
+  const { Test } = await import('@nestjs/testing');
+  const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+  const { PrismaService } = await import('../src/core/prisma/prisma.service');
+  const { AuthGuard } = await import('../src/core/auth/auth.guard');
+  const { BusinessGuard } = await import('../src/core/auth/business.guard');
+  const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
+  const { TenantInterceptor } = await import('../src/core/tenant/tenant.interceptor');
+  const { KeyActionProposalController } = await import('../src/modules/key-autonomy/key-action-proposal.controller');
+  const { KeyActionProposalService } = await import('../src/modules/key-autonomy/key-action-proposal.service');
+  const { KeyCortexApprovalOrchestratorService } = await import('../src/modules/key-cortex/key-cortex-approval-orchestrator.service');
+  const { TemporalFlowController } = await import('../src/modules/temporal-flow/temporal-flow.controller');
+  const { TemporalFlowService } = await import('../src/modules/temporal-flow/temporal-flow.service');
+  const { TemporalFlowMemoryService } = await import('../src/modules/temporal-flow/temporal-flow-memory.service');
+  const { TemporalFlowMemoryQueueService } = await import('../src/modules/temporal-flow/temporal-flow-memory.queue.service');
+  const { TemporalFlowGenomeBridgeService } = await import('../src/modules/temporal-flow/temporal-flow-genome-bridge.service');
+  const { GenomeEvolutionService } = await import('../src/modules/business-genome/genome-evolution.service');
+  const { KeyGenomeBridgeController } = await import('../src/modules/key-autonomy/key-genome-bridge.controller');
+  const { GenomeRecommendationActionBridgeService } = await import('../src/modules/key-autonomy/genome-recommendation-action-bridge.service');
+  const { GenomeRecommendationService } = await import('../src/modules/business-genome/key-genome/genome-recommendation.service');
+
+  const offRoute = (name: string) => new Proxy({}, {
+    // Nest's lifecycle hooks and promise probes are not calls into the collaborator.
+    get: (_t, prop) => (prop === 'then' || (typeof prop === 'string' && /^(on|before)(Module|Application)/.test(prop))
+      ? undefined
+      : () => { throw new Error(`${name}.${String(prop)} is off the routes under test`); }),
+  });
+
+  const built: Record<string, any> = {};
+  const once = (name: string, make: () => any) => (built[name] ??= make());
+  const temporalOf = (prisma: any) => once('temporal', () => new TemporalFlowService(prisma, undefined as any, undefined as any));
+  const proposalsOf = (prisma: any) => once('proposals', () => new KeyActionProposalService(
+    prisma, temporalOf(prisma), offRoute('EventEmitter2') as any, offRoute('KeyActionPolicyService') as any,
+    offRoute('KeyActionExecutorService') as any, offRoute('KeyActionGenomePolicyService') as any,
+    offRoute('AutonomyOrchestratorService') as any, offRoute('KeyActionBoundaryService') as any,
+  ));
+  const recommendationsOf = (prisma: any) => once('recommendations', () => new GenomeRecommendationService(
+    prisma, offRoute('GenomeSignalService') as any, offRoute('GenomeModuleReadinessService') as any,
+    offRoute('GenomeScoringService') as any, offRoute('GenomeExperimentService') as any,
+    offRoute('GenomeMemoryService') as any, offRoute('OutcomeLearningService') as any, offRoute('GenomeRecommendationOutcomeService') as any,
+  ));
+  // The bridge writes its proposal through KeyActionProposalService.create; a recorder stands in for it (the gate
+  // under test runs before the bridge service).
+  const proposalRecorder = {
+    create: async (businessId: string, input: unknown) => {
+      bridgedProposals.push({ businessId, input });
+      return { id: `${P}bridged_${bridgedProposals.length}` };
+    },
+    list: async () => [],
+  };
+  const bridgeOf = (prisma: any) => once('bridge', () => new GenomeRecommendationActionBridgeService(
+    prisma, recommendationsOf(prisma), offRoute('GenomeExperimentService') as any, proposalRecorder as any,
+    { requiresApproval: () => true } as any, { getReadiness: async () => [] } as any,
+  ));
+  const live = (token: any, make: (prisma: any) => any) => ({ provide: token, inject: [PrismaService], useFactory: make });
+
+  const moduleRef = await Test.createTestingModule({
+    controllers: [KeyActionProposalController, TemporalFlowController, KeyGenomeBridgeController],
+    providers: [
+      PrismaService,
+      AuthGuard,
+      BusinessGuard,
+      ModuleScopeGuard,
+      live(TemporalFlowService, temporalOf),
+      live(KeyActionProposalService, proposalsOf),
+      live(GenomeRecommendationService, recommendationsOf),
+      live(GenomeRecommendationActionBridgeService, bridgeOf),
+      { provide: KeyCortexApprovalOrchestratorService, useValue: offRoute('KeyCortexApprovalOrchestratorService') },
+      { provide: TemporalFlowMemoryService, useValue: offRoute('TemporalFlowMemoryService') },
+      { provide: TemporalFlowMemoryQueueService, useValue: offRoute('TemporalFlowMemoryQueueService') },
+      { provide: TemporalFlowGenomeBridgeService, useValue: offRoute('TemporalFlowGenomeBridgeService') },
+    ],
+  }).compile();
+
+  const prisma = moduleRef.get(PrismaService);
+  evolution = new GenomeEvolutionService(prisma, offRoute('BlueprintService') as any, temporalOf(prisma));
+  const bridge = moduleRef.get(GenomeRecommendationActionBridgeService);
+  SPY.preview = vi.spyOn(bridge, 'previewRecommendationAction');
+  SPY.bridge = vi.spyOn(bridge, 'bridgeRecommendation');
+  // Marking the recommendation applied is bookkeeping after the bridge's own write (outcome learning, outcome
+  // recorder); it answers the recommendation, as the real method does.
+  vi.spyOn(moduleRef.get(GenomeRecommendationService), 'applyRecommendation')
+    .mockImplementation(async (_b: string, id: string) => ({ id }) as any);
+
+  app = moduleRef.createNestApplication();
+  attachIdentity(app);
+  app.useGlobalInterceptors(new TenantInterceptor(prisma));
+  app.useGlobalFilters(new GlobalHttpExceptionFilter());
+  await app.init();
+
+  await cleanup();
+  for (const id of [ID.owner, ID.staffNone, ID.staffRead, ID.outsider]) {
+    await db.user.create({ data: { id, email: `${id}@test.local`, name: id, role: 'USER' } });
+  }
+  await db.business.create({ data: { id: ID.biz, name: 'V73K Projection', slug: `${P}biz`, ownerId: ID.owner, currency: 'TTD' } });
+  await db.business.create({ data: { id: ID.biz2, name: 'V73K Other', slug: `${P}biz2`, ownerId: ID.outsider, currency: 'TTD' } });
+  for (const [user, biz, role, permissionScopes] of [
+    [ID.owner, ID.biz, 'OWNER', undefined],
+    [ID.staffNone, ID.biz, 'STAFF', { revenue: 'none', crm: 'read', operations: 'write' }],
+    [ID.staffRead, ID.biz, 'STAFF', { revenue: 'read', crm: 'read', operations: 'write' }],
+    [ID.outsider, ID.biz2, 'OWNER', undefined],
+  ] as const) {
+    await db.membership.create({
+      data: { id: `${user}_${biz}_m`, userId: user, businessId: biz, role, ...(permissionScopes ? { permissionScopes } : {}) },
+    });
+  }
+
+  // Genome recommendations, as the finance and operations genomes write them. The FINANCIAL one carries figures.
+  const rec = (id: string, businessId: string, domain: string, title: string, diagnosis: string) => db.genomeRecommendation.create({
+    data: {
+      id, businessId, domain, title, diagnosis, status: 'ACCEPTED',
+      insight: diagnosis, recommendation: `Act on: ${title}`, riskLevel: 'MEDIUM',
+    },
+  });
+  await rec(ID.recFin, ID.biz, 'FINANCIAL', 'Tighten the follow-up cadence', 'Receivables of TTD 8,765.43 are past due; net margin is 31.7%.');
+  await rec(ID.recOps, ID.biz, 'OPERATIONS', 'Confirm tomorrow appointments', 'Three appointments are unconfirmed.');
+  await rec(ID.recOther, ID.biz2, 'OPERATIONS', 'Confirm tomorrow appointments', 'Three appointments are unconfirmed.');
+
+  // KEY action proposals in the shape GenomeRecommendationActionBridgeService.bridgeToProposal writes them.
+  const proposal = (id: string, businessId: string, recommendationId: string, title: string, rationale: string) => db.keyActionProposal.create({
+    data: {
+      id, businessId, sourceType: 'GENOME_EVOLUTION', sourceId: recommendationId, title, summary: title, rationale,
+      actionType: 'CREATE_TASK', riskLevel: 'LOW', status: 'PENDING',
+      payload: { title, source: 'KEY_GENOME_RECOMMENDATION', recommendationId, bridgeActionKind: 'MANUAL_TASK' },
+    },
+  });
+  await proposal(ID.propFin, ID.biz, ID.recFin, 'Follow up: Tighten the follow-up cadence', 'Receivables of TTD 8,765.43 are past due; net margin is 31.7%.');
+  await proposal(ID.propFinQuiet, ID.biz, ID.recFin, 'Follow up: Tighten the follow-up cadence', 'Recommended by the business genome.');
+  await proposal(ID.propOps, ID.biz, ID.recOps, 'Follow up: Confirm tomorrow appointments', 'Three appointments are unconfirmed.');
+  // Bridged from another business's recommendation id: it cannot be read in this business (fail closed).
+  await proposal(ID.propCross, ID.biz, ID.recOther, 'Follow up: Confirm tomorrow appointments', 'Three appointments are unconfirmed.');
+
+  // key.action.create_task rows, in the shape KeyActionExecutorService.executeCreateTask writes them.
+  const remindAt = new Date(Date.now() - 3600_000);
+  for (const p of [ID.propFin, ID.propFinQuiet, ID.propOps, ID.propCross]) {
+    const row = await db.keyActionProposal.findUnique({ where: { id: p } });
+    await db.temporalFlowEvent.create({
+      data: {
+        id: `${p}_task`, businessId: ID.biz, source: 'KEY', type: 'key.action.create_task', module: 'key-autonomy',
+        entityType: 'key_action_proposal', entityId: p, title: row.title, summary: row.rationale,
+        status: 'ACTION_REQUIRED', importance: 'NORMAL', payload: row.payload, reminderAt: remindAt, startsAt: remindAt,
+      },
+    });
+  }
+
+  // Genome evolution proposals; their decision rows are written by the real GenomeEvolutionService below.
+  const evo = (id: string, businessId: string, section: string, reason: string, proposedPatch: Record<string, unknown>) =>
+    db.genomeEvolutionProposal.create({ data: { id, businessId, section, reason, proposedPatch, status: 'PENDING', confidence: 0.6 } });
+  await evo(ID.evoFin, ID.biz, 'financial', 'Gross margin moved to 31.7% this quarter', { grossMarginPercent: 31.7, pricingModel: 'retainer' });
+  await evo(ID.evoSales, ID.biz, 'sales', 'Average deal closes at TTD 4,500.25', { averageDealSize: 4500.25 });
+  await evo(ID.evoOdd, ID.biz, 'treasury_notes', 'Collected TTD 912 in deposits', { deposits: 912 });
+  await evo(ID.evoOpsMoney, ID.biz, 'operations', 'Overtime cost TTD 912 last week', { coreWorkflows: ['overtime'] });
+  await evo(ID.evoOps, ID.biz, 'operations', 'Bookings are handled through WhatsApp', { coreWorkflows: ['appointment-booking'] });
+  await evo(ID.evoOther, ID.biz2, 'operations', 'Bookings are handled through WhatsApp', { coreWorkflows: ['appointment-booking'] });
+  for (const id of [ID.evoFin, ID.evoSales, ID.evoOdd, ID.evoOpsMoney, ID.evoOps]) await evolution.reject(ID.biz, id, ID.owner);
+  // A decision row in this business naming another business's proposal (cannot be read here: fail closed).
+  await db.temporalFlowEvent.create({
+    data: {
+      id: `${P}evo_cross_row`, businessId: ID.biz, source: 'KEY', type: 'genome_evolution.proposal_rejected',
+      module: 'business-genome', entityType: 'genome_evolution_proposal', entityId: ID.evoOther,
+      title: 'Genome evolution proposal rejected', summary: 'operations proposal rejected: Bookings are handled through WhatsApp',
+      importance: 'HIGH', genomeImpactPotential: true,
+      payload: { proposalId: ID.evoOther, section: 'operations', status: 'REJECTED', proposedPatch: { coreWorkflows: ['appointment-booking'] } },
+    },
+  });
+  // emitDecisionEvent does not await its write: wait for the five rows.
+  for (let i = 0; i < 50; i += 1) {
+    const n = await db.temporalFlowEvent.count({ where: { businessId: ID.biz, entityType: 'genome_evolution_proposal' } });
+    if (n >= 6) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  // The real writer's rows carry reminder and calendar times only when given; give them one so all three reads see them.
+  await db.temporalFlowEvent.updateMany({
+    where: { businessId: ID.biz, entityType: 'genome_evolution_proposal' },
+    data: { reminderAt: remindAt, startsAt: remindAt, status: 'ACTION_REQUIRED' },
+  });
+}, 60_000);
+
+afterAll(async () => {
+  await cleanup();
+  await app?.close();
+});
+
+const ALL_TASKS = [ID.propCross, ID.propFin, ID.propFinQuiet, ID.propOps];
+const ALL_EVOS = [`${P}evo_other`, ID.evoFin, ID.evoOdd, ID.evoOps, ID.evoOpsMoney, ID.evoSales];
+
+describe('FU-KEY-ACTION-GENOME-PROJECTION: bridged FINANCIAL proposals and their timeline rows (D-128, D-233, D-238)', () => {
+  it('fixture: the real GenomeEvolutionService wrote the decision rows with the reason and patch in them', async () => {
+    const rows = await db.temporalFlowEvent.findMany({ where: { businessId: ID.biz, entityType: 'genome_evolution_proposal' } });
+    expect(rows.map((r: any) => r.entityId).sort()).toEqual(ALL_EVOS.slice().sort());
+    const fin = rows.find((r: any) => r.entityId === ID.evoFin);
+    expect(fin.summary).toMatch(/financial proposal rejected: Gross margin moved to 31\.7%/);
+    expect(JSON.stringify(fin.payload)).toMatch(/31\.7/);
+  });
+
+  it('KAG-01 a revenue-none member is not served a proposal bridged from a FINANCIAL recommendation (list, by id)', async () => {
+    const list = await get(proposalsUrl(), ID.staffNone);
+    expect(list.status).toBe(200);
+    expect(list.body.map((p: any) => p.id).sort()).toEqual([ID.propOps]);
+    expect(JSON.stringify(list.body)).not.toMatch(FIGURES);
+    for (const id of [ID.propFin, ID.propFinQuiet, ID.propCross]) {
+      const one = await get(`${proposalsUrl()}/${id}`, ID.staffNone);
+      expect(one.status).toBe(404);
+      expect(JSON.stringify(one.body)).not.toMatch(FIGURES);
+    }
+    expect((await get(`${proposalsUrl()}/${ID.propOps}`, ID.staffNone)).status).toBe(200);
+  });
+
+  it('KAG-02 a revenue-none member is not served the create_task timeline row of a financial proposal', async () => {
+    const reads = await timelineReads(ID.staffNone);
+    for (const res of Object.values(reads)) {
+      expect(res.status).toBe(200);
+      const tasks = res.body.filter((e: any) => e.type === 'key.action.create_task').map((e: any) => e.entityId).sort();
+      expect(tasks).toEqual([ID.propOps]);
+    }
+  });
+
+  it('KAG-03 a revenue-none member is not served genome-evolution rows of financial, sales, unknown, money-stating or unreadable proposals', async () => {
+    const reads = await timelineReads(ID.staffNone);
+    for (const [name, res] of Object.entries(reads)) {
+      expect(res.status, name).toBe(200);
+      const evos = res.body.filter((e: any) => e.entityType === 'genome_evolution_proposal').map((e: any) => e.entityId);
+      expect(evos, name).toEqual([ID.evoOps]);
+      expect(JSON.stringify(res.body), name).not.toMatch(FIGURES);
+      expect(JSON.stringify(res.body), name).not.toMatch(/financial proposal|sales proposal/);
+    }
+  });
+
+  it('KAG-04 the bridge preview of a FINANCIAL recommendation needs revenue read; bridging it needs revenue write', async () => {
+    SPY.preview.mockClear();
+    SPY.bridge.mockClear();
+    const preview = await get(`${bridgeUrl(ID.recFin)}/action-preview`, ID.staffNone);
+    expect(preview.status).toBe(403);
+    expect(JSON.stringify(preview.body)).toContain(READ_DENIED);
+    expect(JSON.stringify(preview.body)).not.toMatch(FIGURES);
+    expect(SPY.preview).not.toHaveBeenCalled();
+
+    for (const [as, has] of [[ID.staffNone, 'none'], [ID.staffRead, 'read']] as const) {
+      const bridged = await post(`${bridgeUrl(ID.recFin)}/bridge-action`, as, { confirmBridge: true });
+      expect(bridged.status).toBe(403);
+      expect(JSON.stringify(bridged.body)).toContain(WRITE_DENIED(has));
+      expect(JSON.stringify(bridged.body)).not.toMatch(FIGURES);
+    }
+    expect(SPY.bridge).not.toHaveBeenCalled();
+    expect(bridgedProposals).toEqual([]);
+
+    const ops = await get(`${bridgeUrl(ID.recOps)}/action-preview`, ID.staffNone);
+    expect(ops.status).toBe(200);
+    expect(ops.body.recommendationId).toBe(ID.recOps);
+  });
+
+  it('KAG-04b an unknown or other-tenant recommendation id answers as before (404), with nothing of the other tenant', async () => {
+    for (const as of [ID.staffNone, ID.owner]) {
+      const res = await get(`${bridgeUrl(ID.recOther)}/action-preview`, as);
+      expect(res.status).toBe(404);
+      expect(JSON.stringify(res.body)).not.toMatch(/appointments/);
+    }
+  });
+
+  it('KAG-05 controls: the owner and a revenue-read member are served every row unchanged', async () => {
+    for (const as of [ID.owner, ID.staffRead]) {
+      const list = await get(proposalsUrl(), as);
+      expect(list.status).toBe(200);
+      expect(list.body.map((p: any) => p.id).sort()).toEqual(ALL_TASKS);
+      const fin = list.body.find((p: any) => p.id === ID.propFin);
+      expect(fin.rationale).toMatch(/8,765\.43/);
+      expect((await get(`${proposalsUrl()}/${ID.propFin}`, as)).status).toBe(200);
+
+      const reads = await timelineReads(as);
+      for (const [name, res] of Object.entries(reads)) {
+        expect(res.status, name).toBe(200);
+        const tasks = res.body.filter((e: any) => e.type === 'key.action.create_task').map((e: any) => e.entityId).sort();
+        expect(tasks, name).toEqual(ALL_TASKS);
+        const evos = res.body.filter((e: any) => e.entityType === 'genome_evolution_proposal').map((e: any) => e.entityId).sort();
+        expect(evos, name).toEqual(ALL_EVOS.slice().sort());
+        const finRow = res.body.find((e: any) => e.entityId === ID.evoFin);
+        expect(finRow.summary, name).toMatch(/31\.7%/);
+      }
+
+      const preview = await get(`${bridgeUrl(ID.recFin)}/action-preview`, as);
+      expect(preview.status).toBe(200);
+      expect(preview.body.recommendationId).toBe(ID.recFin);
+    }
+  });
+
+  it('KAG-05b the owner may still bridge the FINANCIAL recommendation (revenue write); the bridge is reached', async () => {
+    SPY.bridge.mockClear();
+    const res = await post(`${bridgeUrl(ID.recFin)}/bridge-action`, ID.owner, { confirmBridge: true });
+    expect(SPY.bridge).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(201);
+    expect(res.body.recommendationId).toBe(ID.recFin);
+    expect(['CREATED', 'ALREADY_EXISTS']).toContain(res.body.status);
+  });
+
+  it('KAG-05c cross-tenant: a member of another business is refused this business\'s reads', async () => {
+    for (const url of [proposalsUrl(), timelineUrl(), `${bridgeUrl(ID.recFin)}/action-preview`]) {
+      const res = await get(url, ID.outsider);
+      expect(res.status).toBe(403);
+      expect(JSON.stringify(res.body)).not.toMatch(FIGURES);
+    }
+  });
+});

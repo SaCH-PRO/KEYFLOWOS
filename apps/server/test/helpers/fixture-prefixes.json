@@ -1156,6 +1156,11 @@
       "prefix": "v57r_",
       "owner": "apps/server/test/send-reminder-status-gate.integration.test.ts",
       "packet": "V1-57 (FU-SEND-REMINDER-SERVER-GATE)"
+    },
+    {
+      "prefix": "v73k_",
+      "owner": "apps/server/test/key-action-genome-projection.integration.test.ts",
+      "packet": "V1-73 (FU-KEY-ACTION-GENOME-PROJECTION)"
     }
   ],
   "pendingRenames": [],
