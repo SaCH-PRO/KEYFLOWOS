@@ -8,6 +8,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { KeyCortexGenomeContextService } from '../key-cortex-genome-context.service';
+import { rankedRecommendationsForReader } from '../genome-context-for-reader';
 import { KeyCortexConsciousnessService } from '../key-cortex-consciousness.service';
 import { CortexMemberAuthorityGuard, KeyCortexController } from '../key-cortex.controller';
 
@@ -24,9 +25,13 @@ describe('the chat path\'s ranked recommendations (round 4, security MINOR-1 / c
   // The business's top five are four finance rows and one operations row; five more operations rows rank below them.
   const ranked = [fin(1), fin(2), ops(1), fin(3), fin(4), ops(2), ops(3), ops(4), ops(5), ops(6)];
 
+  // As the pipeline reads them: through the genome context service's getRankedRecommendations, with the limit the reader
+  // calls for (round 5: the stand-in services of the chat integration test expose that method, not a new one).
+  const read = (svc: KeyCortexGenomeContextService) => (limit: number) => svc.getRankedRecommendations('biz_A', limit);
+
   it('RED-BEFORE: a reader without revenue read is handed five non-finance rows, not what is left of the top five', async () => {
     const { svc, bridge } = genomeContext(ranked);
-    const out = await svc.getRankedRecommendationsForReader('biz_A', false);
+    const out = await rankedRecommendationsForReader(read(svc), false);
     expect(out.map((r) => r.id)).toEqual(['ops_1', 'ops_2', 'ops_3', 'ops_4', 'ops_5']);
     expect(bridge.getRankedRecommendations).toHaveBeenCalledWith('biz_A', 50);
     for (const r of out as any[]) expect(r).not.toHaveProperty('genomeScore');
@@ -34,22 +39,22 @@ describe('the chat path\'s ranked recommendations (round 4, security MINOR-1 / c
 
   it('RED-BEFORE: with no reader it fails closed', async () => {
     const { svc } = genomeContext(ranked);
-    const out = await svc.getRankedRecommendationsForReader('biz_A');
+    const out = await rankedRecommendationsForReader(read(svc));
     expect(out.map((r) => r.category)).not.toContain('FINANCIAL');
   });
 
   it('control: a revenue reader is handed the top five as before, in the ranker\'s order', async () => {
     const { svc, bridge } = genomeContext(ranked);
-    const out = await svc.getRankedRecommendationsForReader('biz_A', true);
+    const out = await rankedRecommendationsForReader(read(svc), true);
     expect(out).toEqual(await svc.getRankedRecommendations('biz_A', 5));
     expect(out.map((r) => r.id)).toEqual(['fin_1', 'fin_2', 'ops_1', 'fin_3', 'fin_4']);
     expect(bridge.getRankedRecommendations).toHaveBeenNthCalledWith(1, 'biz_A', 5);
   });
 
-  it('RED-BEFORE: the query pipeline reads them for the reader, not the business\'s top five', () => {
+  it('RED-BEFORE: the query pipeline reads them for the reader, through getRankedRecommendations, not the business\'s top five', () => {
     const source = readFileSync(join(__dirname, '..', 'key-cortex-query-pipeline.service.ts'), 'utf8');
-    expect(source).not.toMatch(/genomeContextService\.getRankedRecommendations\(/);
-    expect(source).toMatch(/genomeContextService\.getRankedRecommendationsForReader\(\s*query\.businessId,\s*await this\.readsRevenue\(query\),?\s*\)/);
+    expect(source).not.toMatch(/getRankedRecommendationsForReader/);
+    expect(source).toMatch(/rankedRecommendationsForReader\(\s*\(limit\) => this\.genomeContextService\.getRankedRecommendations\(query\.businessId, limit\),\s*await this\.readsRevenue\(query\),?\s*\)/);
   });
 });
 
