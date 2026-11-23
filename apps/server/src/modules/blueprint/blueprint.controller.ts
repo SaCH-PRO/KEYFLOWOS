@@ -2,37 +2,24 @@ import { Body, Controller, Get, Inject, Param, Patch, Post, Req, UseGuards } fro
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { GenomeGateGuard } from '../../core/auth/genome-gate.guard';
-import { BlueprintService } from './blueprint.service';
+import { BlueprintService, onboardingAnswersPatch } from './blueprint.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import {
-  isFinancialGenomeEvolution,
-  patchHoldsFigure,
-  requireRevenueLevel,
-} from '../key-autonomy/key-action-genome-projection';
-import { structuredValueStatesMoney } from '../business-genome/key-genome/genome-finance-scope';
+import { requireRevenueLevel } from '../key-autonomy/key-action-genome-projection';
+import { isFinancialBlueprintPatch, isFinancialDnaWrite, MONEY_BLUEPRINT_COLUMNS, OTHER_BLUEPRINT_COLUMNS } from './genome-write-scope';
 
 import { BlueprintPatch, DnaSectionKey } from './blueprint.types';
 
 /**
- * FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128): the blueprint columns behind the financial and sales DNA sections
- * (DNA_SECTION_CONFIG: financials and projectionProfile, salesSystem) and the offer architecture (the offer ladder: the
- * business model and pricing, D-234).
+ * FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128): whether an onboarding answer set writes financial genome content: the
+ * patch it builds (onboardingAnswersPatch) is financial, or a dotted answer names a money or unknown column (an unknown
+ * column is dropped by the build; it fails closed here all the same).
  */
-const MONEY_BLUEPRINT_COLUMNS: ReadonlySet<string> = new Set(['financials', 'projectionProfile', 'salesSystem', 'offerArchitecture']);
-/** Every other blueprint column (BlueprintSectionKey); a key not listed in either set fails closed. */
-const OTHER_BLUEPRINT_COLUMNS: ReadonlySet<string> = new Set([
-  'identity', 'operatingModel', 'goals', 'constraints', 'brand', 'customerModel', 'intelligence', 'workflowModel',
-  'aiPreferences', 'founderProfile', 'legalProfile', 'registrationProfile', 'taxProfile', 'ownershipProfile',
-  'marketProfile', 'marketingSystem', 'operationsSystem', 'riskProfile', 'complianceProfile', 'executionRoadmap',
-  'documentProfile',
-]);
-
-/** Whether a blueprint patch writes financial genome content (D-128): a money or unknown column, or money or a figure in it. */
-function isFinancialBlueprintPatch(patch: unknown): boolean {
-  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return true;
-  const columns = Object.keys(patch as Record<string, unknown>);
-  if (columns.some((c) => MONEY_BLUEPRINT_COLUMNS.has(c) || !OTHER_BLUEPRINT_COLUMNS.has(c))) return true;
-  return structuredValueStatesMoney(patch) || patchHoldsFigure(patch);
+function isFinancialOnboardingWrite(answers: Record<string, unknown>): boolean {
+  if (!answers || typeof answers !== 'object' || Array.isArray(answers)) return true;
+  const dottedColumns = Object.keys(answers).filter((k) => k.includes('.')).map((k) => k.split('.')[0]);
+  if (dottedColumns.some((c) => MONEY_BLUEPRINT_COLUMNS.has(c) || !OTHER_BLUEPRINT_COLUMNS.has(c))) return true;
+  const built = onboardingAnswersPatch(answers);
+  return Object.keys(built).length > 0 && isFinancialBlueprintPatch(built);
 }
 
 type BlueprintRequest = { user?: { id?: string; role?: string } };
@@ -62,7 +49,8 @@ export class BlueprintController {
     @Body() body: BlueprintPatch,
     @Req() req?: BlueprintRequest,
   ) {
-    // FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128): the blueprint behind the financial and sales DNA, or money-stating text.
+    // FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128): a money or unknown column, a money field, or a value stating money
+    // (genome-write-scope).
     if (isFinancialBlueprintPatch(body)) await this.requireRevenueWrite(businessId, req);
     return this.blueprint.updateBlueprint(businessId, body);
   }
@@ -71,8 +59,12 @@ export class BlueprintController {
   async inferFromOnboarding(
     @Param('businessId') businessId: string,
     @Body() body: { answers: Record<string, unknown> },
+    @Req() req?: BlueprintRequest,
   ) {
-    return this.blueprint.inferFromOnboarding(businessId, body.answers || {});
+    // FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128): the same rule on the patch the answers build.
+    const answers = body?.answers || {};
+    if (isFinancialOnboardingWrite(answers)) await this.requireRevenueWrite(businessId, req);
+    return this.blueprint.inferFromOnboarding(businessId, answers);
   }
 
   @Post('infer/events')
@@ -143,11 +135,10 @@ export class BlueprintController {
     @Body() body: { data?: Record<string, unknown> },
     @Req() req?: BlueprintRequest,
   ) {
-    // FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128): the evolution approve gate's rule (isFinancialGenomeEvolution: the
-    // financial and sales sections, an unknown section, money or a figure in the data), so a direct DNA write cannot
-    // bypass it.
+    // FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128): the financial, sales or an unknown section, a money field, or a value
+    // stating money (genome-write-scope), so a direct DNA write cannot bypass the evolution approve gate for finance.
     const data = body?.data || {};
-    if (isFinancialGenomeEvolution({ section, proposedPatch: data })) await this.requireRevenueWrite(businessId, req);
+    if (isFinancialDnaWrite(section, data)) await this.requireRevenueWrite(businessId, req);
     return this.blueprint.updateDnaSection(businessId, section, data);
   }
 }

@@ -11,7 +11,8 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { autonomyReasonStatesMoney } from './key-action-genome-projection';
+import { autonomyReasonStatesMoney, isFinancialGenomeEvolution, requireRevenueLevel } from './key-action-genome-projection';
+import { isSystemActor } from '../../core/auth/system-actor';
 import { financialProposalsWithProvenance, financialProposalWithProvenance, genomeReaderReadsRevenue, nonFinancialProposalForReader, redactedProposalView, type GenomeReader, type ProposalFields } from '../business-genome/key-genome/genome-finance-scope';
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { KeyActionExecutorService } from './key-action-executor.service';
@@ -65,6 +66,8 @@ type ClaimOutcome =
 const BLOCKED_BY_AUTONOMY = 'KEY\'s autonomy rules do not allow this action now.';
 const NEEDS_CONFIRMATION = 'This action needs your confirmation under the business\'s autonomy rules.';
 const BLOCKED_BY_GENOME = 'KEY cannot run this action until a business readiness check passes.';
+/** The genome-risk confirmation answer: the web proposal card offers the confirmation on "requires confirmation". */
+const GENOME_RISK_NEEDS_CONFIRMATION = 'This action requires confirmation of a business readiness risk.';
 
 @Injectable()
 export class KeyActionProposalService {
@@ -383,6 +386,18 @@ export class KeyActionProposalService {
       throw new NotFoundException('High-risk action requires explicit confirmation');
     }
 
+    // FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128; round-1 BLOCKING): a financial genome evolution proposal made for the
+    // executing member needs their revenue write, checked here, before the execution claim, so a refusal leaves the
+    // owner-approved proposal APPROVED (GenomeEvolutionService.create checks it again, and the executor answers a
+    // refusal there as a failed outcome). KEY's own execution (no member, or its system actor) is unchanged.
+    if (proposal.actionType === 'CREATE_GENOME_EVOLUTION_PROPOSAL' && executedBy && !isSystemActor(executedBy)) {
+      const payload = (proposal.payload ?? {}) as Record<string, unknown>;
+      const fields = { section: payload.section, reason: payload.reason, proposedPatch: payload.proposedPatch, evidence: payload.evidence };
+      if (isFinancialGenomeEvolution(fields as Parameters<typeof isFinancialGenomeEvolution>[0])) {
+        await requireRevenueLevel(this.prisma, businessId, { id: executedBy }, 'write');
+      }
+    }
+
     // KF-EXEC-ACTION-001: an EXECUTE_TOOL proposal for an adopted capability
     // is governed as that capability. Evaluating the wrapper name here meant
     // the tool's own blocklist entry, module and tier were never consulted.
@@ -445,7 +460,7 @@ export class KeyActionProposalService {
     }
 
     if (genomeDecision.requiresExtraConfirmation && !confirmGenomeRisk) {
-      throw new BadRequestException(await this.reasonForActor(businessId, executedBy, genomeDecision.message, BLOCKED_BY_GENOME));
+      throw new BadRequestException(await this.reasonForActor(businessId, executedBy, genomeDecision.message, GENOME_RISK_NEEDS_CONFIRMATION));
     }
 
     if (governed) {
@@ -692,21 +707,22 @@ export class KeyActionProposalService {
   }
 
   /**
-   * A refusal recorded on a proposal that is still APPROVED. Conditional, so
-   * it cannot overwrite a concurrent execution that has claimed the proposal.
-   */
-  /**
    * FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-233, D-238): the autonomy verdict's reason, or the genome policy's message, as
    * the executing member is answered it. One that states money or the cross-domain risk (the finance and revenue-quality
    * readiness and risk gates write those) reaches a member without revenue read as a neutral message; a revenue reader,
-   * and KEY's own execution (no member), get it as before. A failed read answers the neutral message (fail closed).
+   * and KEY's own execution (no member, or its system actor 'key_ai'), get it as before. A failed read answers the
+   * neutral message (fail closed).
    */
   private async reasonForActor(businessId: string, executedBy: string | undefined, reason: string, neutral: string): Promise<string> {
-    if (!executedBy || !autonomyReasonStatesMoney(reason)) return reason;
+    if (!executedBy || isSystemActor(executedBy) || !autonomyReasonStatesMoney(reason)) return reason;
     const readsRevenue = await genomeReaderReadsRevenue(this.prisma, businessId, { id: executedBy }).catch(() => false);
     return readsRevenue ? reason : neutral;
   }
 
+  /**
+   * A refusal recorded on a proposal that is still APPROVED. Conditional, so
+   * it cannot overwrite a concurrent execution that has claimed the proposal.
+   */
   private async recordBlocked(
     businessId: string,
     proposalId: string,

@@ -51,10 +51,12 @@ export class GenomeChatController {
   async applyUpdates(
     @Param('businessId') businessId: string,
     @Body() body: ApplyUpdatesDto,
-    @Req() req: Request & { user?: { id?: string } },
+    @Req() req: Request & { user?: { id?: string; role?: string } },
   ) {
     const userId = req.user?.id ?? 'unknown';
     return this.chat.applyUpdates(businessId, userId, body.section, body.data, {
+      // FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128): a financial update needs this member's revenue write.
+      actor: req.user?.id ? { id: req.user.id, role: req.user.role } : undefined,
       messageId: body.messageId,
       confidence: body.confidence,
       source: body.source,

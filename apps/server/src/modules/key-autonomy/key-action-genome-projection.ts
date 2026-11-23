@@ -65,7 +65,7 @@ export function patchHoldsFigure(value: unknown, depth = 0): boolean {
   return false;
 }
 
-function nonMoneySection(section: unknown): boolean {
+export function nonMoneySection(section: unknown): boolean {
   return typeof section === 'string' && NON_MONEY_EVOLUTION_SECTIONS.has(section.trim().toLowerCase());
 }
 

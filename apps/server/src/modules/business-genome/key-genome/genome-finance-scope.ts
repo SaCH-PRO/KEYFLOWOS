@@ -50,7 +50,8 @@ const MONEY_TERMS = new RegExp(
     // compensation too.
     '(?<!de)commission', '(?<!over)compensat', '(?<![a-z])bonus(?:es)?(?![a-z])', 'incentiv', 'stipend',
     'lifetime', 'acquisition_?cost', 'budget', 'expense', 'conversion', 'forecast', 'churn', 'transaction', 'opportunit',
-    'unit_?economics', 'cross_?domain', 'money', 'receivable', 'payable', 'quote', 'quotation', 'reimburs', 'discount',
+    // Cross-domain risk as the autonomy gates write it: cross-domain, cross_domain, cross domain (round-1 review).
+    'unit_?economics', 'cross[\\s_-]?domain', 'money', 'receivable', 'payable', 'quote', 'quotation', 'reimburs', 'discount',
     // A promo code is money; promote / promotion is not (round-3 correctness minor).
     '(?<![a-z])promo(?!t)', 'coupon', 'deposit', 'payout', 'purchase', 'wallet', 'ledger', 'salar', 'subscription', 'overdue', 'storelink',
     // Letter-bounded (correctness review MINOR-3: apricot, costume, cashier, suspend, data collection are not money).

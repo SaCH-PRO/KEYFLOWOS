@@ -6,6 +6,9 @@ import type { DnaSectionKey, GenomeIntegrityResult } from '../blueprint/blueprin
 import { GenomeFactService } from '../business-genome/key-genome/genome-fact.service';
 import { GenomeEvidenceService } from '../business-genome/key-genome/genome-evidence.service';
 import { DNA_TO_KEY_GENOME_SECTION } from '../business-genome/key-genome/key-genome.service';
+import { isFinancialDnaWrite } from '../blueprint/genome-write-scope';
+import { requireRevenueLevel } from '../key-autonomy/key-action-genome-projection';
+import type { GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
 
 export interface GenomeChatMessage {
   id: string;
@@ -25,6 +28,8 @@ export interface ProposedGenomeUpdate {
 }
 
 export interface ApplyGenomeUpdateOptions {
+  /** The member applying the update, as the request carries them (id and role); without it, the userId alone. */
+  actor?: GenomeReader;
   messageId?: string;
   confidence?: number;
   source?: string;
@@ -127,6 +132,12 @@ export class GenomeChatService {
     data: Record<string, unknown>,
     opts?: ApplyGenomeUpdateOptions,
   ): Promise<GenomeIntegrityResult> {
+    // FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128): the DNA write's rule (genome-write-scope); a financial update needs
+    // the member's revenue write (ModuleScopeGuard's 403 message). No member is no revenue write.
+    if (isFinancialDnaWrite(section, data)) {
+      const actor = opts?.actor ?? (userId && userId !== 'unknown' ? { id: userId } : undefined);
+      await requireRevenueLevel(this.prisma, businessId, actor, 'write');
+    }
     await this.blueprint.updateDnaSection(businessId, section, data);
     const genome = await this.blueprint.calculateGenomeIntegrity(businessId);
 

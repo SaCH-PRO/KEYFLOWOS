@@ -31,6 +31,9 @@ function makeService(responseContent: string) {
         }),
         findMany: vi.fn().mockResolvedValue([]),
       },
+      // FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128): a financial update needs the member's revenue write; user_1 owns.
+      user: { findUnique: vi.fn().mockResolvedValue({ role: 'USER' }) },
+      membership: { findUnique: vi.fn().mockResolvedValue({ role: 'OWNER', permissionScopes: null }) },
     },
   } as unknown as PrismaService;
 

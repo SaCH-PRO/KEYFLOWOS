@@ -719,346 +719,9 @@ export class BlueprintService {
     answers: Record<string, unknown>,
     tx?: PrismaTx,
   ): Promise<BlueprintData> {
-    const patch: BlueprintPatch = {};
-
-    // Support nested keys like legalProfile.hasPhysicalLocation by splitting on '.'
-    for (const [key, value] of Object.entries(answers)) {
-      if (!key.includes('.') || value === undefined || value === null) continue;
-      const [section, ...rest] = key.split('.');
-      if (!SECTION_KEYS.includes(section as BlueprintSectionKey)) continue;
-      const field = rest.join('.');
-      if (!field) continue;
-      (patch as Record<string, Record<string, unknown>>)[section] =
-        (patch as Record<string, Record<string, unknown>>)[section] || {};
-      (patch as Record<string, Record<string, unknown>>)[section][field] = value;
-    }
-
-    const identity: Partial<BlueprintIdentity> = (patch.identity as any) || {};
-    if (typeof answers.businessName === 'string') identity.name = answers.businessName;
-    if (typeof answers.businessIntent === 'string') identity.oneLiner = answers.businessIntent;
-    if (typeof answers.archetype === 'string') identity.archetype = answers.archetype;
-    if (typeof answers.industry === 'string') identity.industry = answers.industry;
-    if (typeof answers.tagline === 'string') identity.tagline = answers.tagline;
-    if (typeof answers.country === 'string') identity.country = answers.country;
-    if (Object.keys(identity).length) patch.identity = identity;
-
-    const operating: Partial<BlueprintOperatingModel> = (patch.operatingModel as any) || {};
-    if (typeof answers.revenueModel === 'string') operating.revenueModel = answers.revenueModel;
-    if (typeof answers.deliveryMode === 'string') operating.deliveryMode = answers.deliveryMode;
-    if (typeof answers.serviceArea === 'string') operating.serviceArea = answers.serviceArea;
-    if (typeof answers.teamSize === 'string') operating.teamSize = answers.teamSize;
-    if (Array.isArray(answers.channels)) {
-      operating.channels = answers.channels.filter((c): c is string => typeof c === 'string');
-    }
-    if (Object.keys(operating).length) patch.operatingModel = operating;
-
-    const constraints: Partial<BlueprintConstraints> = (patch.constraints as any) || {};
-    if (typeof answers.budgetRange === 'string') constraints.budgetRange = answers.budgetRange;
-    if (typeof answers.timeCommitment === 'string') constraints.timeCommitment = answers.timeCommitment;
-    if (typeof answers.riskTolerance === 'string') constraints.riskTolerance = answers.riskTolerance;
-    if (Object.keys(constraints).length) patch.constraints = constraints;
-
-    const goals: Partial<BlueprintGoals> = (patch.goals as any) || {};
-    if (typeof answers.northStar === 'string') goals.northStar = answers.northStar;
-    if (Array.isArray(answers.ninetyDayGoals)) {
-      goals.ninetyDayGoals = answers.ninetyDayGoals.filter((g): g is string => typeof g === 'string');
-    }
-    if (Array.isArray(answers.twelveMonthGoals)) {
-      goals.twelveMonthGoals = answers.twelveMonthGoals.filter((g): g is string => typeof g === 'string');
-    }
-    if (Object.keys(goals).length) patch.goals = goals;
-
-    const brand: Partial<BlueprintBrand> = (patch.brand as any) || {};
-    if (typeof answers.brandVoice === 'string') brand.voice = answers.brandVoice;
-    if (typeof answers.brandTone === 'string') brand.tone = answers.brandTone;
-    if (typeof answers.primaryColor === 'string') brand.primaryColor = answers.primaryColor;
-    if (typeof answers.secondaryColor === 'string') brand.secondaryColor = answers.secondaryColor;
-    if (typeof answers.logoUrl === 'string') brand.logoUrl = answers.logoUrl;
-    if (Array.isArray(answers.valueProps)) {
-      brand.valueProps = answers.valueProps.filter((v): v is string => typeof v === 'string');
-    }
-    if (Object.keys(brand).length) patch.brand = brand;
-
-    const customer: Partial<BlueprintCustomerModel> = (patch.customerModel as any) || {};
-    if (typeof answers.idealCustomer === 'string') customer.idealCustomer = answers.idealCustomer;
-    if (typeof answers.targetCustomer === 'string') customer.idealCustomer = answers.targetCustomer;
-    if (Array.isArray(answers.segments)) {
-      customer.segments = answers.segments.filter((s): s is string => typeof s === 'string');
-    }
-    if (Array.isArray(answers.painPoints)) {
-      customer.painPoints = answers.painPoints.filter((s): s is string => typeof s === 'string');
-    }
-    if (Array.isArray(answers.jobsToBeDone)) {
-      customer.jobsToBeDone = answers.jobsToBeDone.filter((s): s is string => typeof s === 'string');
-    }
-    if (Object.keys(customer).length) patch.customerModel = customer;
-
-    const financials: Partial<BlueprintFinancials> = (patch.financials as any) || {};
-    if (typeof answers.currency === 'string') financials.currency = answers.currency;
-    if (typeof answers.pricingModel === 'string') financials.pricingModel = answers.pricingModel;
-    if (typeof answers.avgTicket === 'number') financials.avgTicket = answers.avgTicket;
-    if (typeof answers.monthlyTarget === 'number') financials.monthlyTarget = answers.monthlyTarget;
-    if (Object.keys(financials).length) patch.financials = financials;
-
-    // Genesis section mappings
-    const founderProfile: Partial<BlueprintFounderProfile> = (patch.founderProfile as any) || {};
-    if (typeof answers.founderName === 'string') founderProfile.founderName = answers.founderName;
-    if (typeof answers.background === 'string') founderProfile.background = answers.background;
-    if (Array.isArray(answers.skills)) {
-      founderProfile.skills = answers.skills.filter((s): s is string => typeof s === 'string');
-    }
-    if (Array.isArray(answers.weaknesses)) {
-      founderProfile.weaknesses = answers.weaknesses.filter((s): s is string => typeof s === 'string');
-    }
-    if (typeof answers.riskTolerance === 'string') founderProfile.riskTolerance = answers.riskTolerance;
-    if (typeof answers.weeklyAvailabilityHours === 'number') {
-      founderProfile.weeklyAvailabilityHours = answers.weeklyAvailabilityHours;
-    }
-    if (typeof answers.visionStatement === 'string') founderProfile.visionStatement = answers.visionStatement;
-    if (Object.keys(founderProfile).length) patch.founderProfile = founderProfile;
-
-    const legalProfile: Partial<BlueprintLegalProfile> = (patch.legalProfile as any) || {};
-    if (typeof answers.hasPhysicalLocation === 'boolean') {
-      legalProfile.hasPhysicalLocation = answers.hasPhysicalLocation;
-    }
-    if (typeof answers.hasRegulatedActivity === 'boolean') {
-      legalProfile.regulatedIndustry = answers.hasRegulatedActivity;
-    }
-    if (typeof answers.regulatedIndustry === 'boolean') {
-      legalProfile.regulatedIndustry = answers.regulatedIndustry;
-    }
-    const rawEntityType =
-      answers.recommendedEntityType ??
-      answers.entityType ??
-      answers.legalStructurePreference;
-    if (typeof rawEntityType === 'string') {
-      legalProfile.recommendedEntityType = normalizeRecommendedEntityType(rawEntityType);
-    }
-    if (typeof answers.entityTypeReason === 'string') {
-      legalProfile.entityTypeReason = answers.entityTypeReason;
-    }
-    if (typeof answers.disclaimerAcceptedAt === 'string') {
-      legalProfile.disclaimerAcceptedAt = answers.disclaimerAcceptedAt;
-    }
-    if (Array.isArray(answers.regulatedIndustryNotes)) {
-      legalProfile.regulatedIndustryNotes = answers.regulatedIndustryNotes.filter(
-        (n): n is string => typeof n === 'string',
-      );
-    }
-    if (Object.keys(legalProfile).length) patch.legalProfile = legalProfile;
-
-    const registrationProfile: Partial<BlueprintRegistrationProfile> =
-      (patch.registrationProfile as any) || {};
-    if (typeof answers.registrationStatus === 'string') {
-      registrationProfile.businessNameStatus = answers.registrationStatus;
-    }
-    if (typeof answers.hasEmployees === 'boolean') {
-      registrationProfile.hasEmployees = answers.hasEmployees;
-      registrationProfile.nisEmployerStatus = answers.hasEmployees ? 'NOT_STARTED' : 'NOT_NEEDED';
-    }
-    if (typeof answers.estimatedAnnualRevenue === 'number') {
-      registrationProfile.vatStatus = answers.estimatedAnnualRevenue > 500000 ? 'REQUIRED' : 'NOT_REQUIRED';
-    }
-    if (Object.keys(registrationProfile).length) patch.registrationProfile = registrationProfile;
-
-    const taxProfile: Partial<BlueprintTaxProfile> = (patch.taxProfile as any) || {};
-    if (typeof answers.country === 'string') taxProfile.country = answers.country;
-    if (typeof answers.estimatedAnnualRevenue === 'number') {
-      taxProfile.estimatedAnnualRevenue = answers.estimatedAnnualRevenue;
-    }
-    if (typeof answers.payrollExpected === 'boolean') taxProfile.payrollExpected = answers.payrollExpected;
-    if (typeof answers.contractorPaymentsExpected === 'boolean') {
-      taxProfile.contractorPaymentsExpected = answers.contractorPaymentsExpected;
-    }
-    if (Object.keys(taxProfile).length) patch.taxProfile = taxProfile;
-
-    const ownershipProfile: Partial<BlueprintOwnershipProfile> = (patch.ownershipProfile as any) || {};
-    if (typeof answers.hasPartners === 'boolean') ownershipProfile.hasPartners = answers.hasPartners;
-    if (Array.isArray(answers.owners)) ownershipProfile.owners = answers.owners as BlueprintOwner[];
-    if (Object.keys(ownershipProfile).length) patch.ownershipProfile = ownershipProfile;
-
-    const marketProfile: Partial<BlueprintMarketProfile> = (patch.marketProfile as any) || {};
-    if (typeof answers.targetGeography === 'string') marketProfile.targetGeography = answers.targetGeography;
-    if (typeof answers.marketCategory === 'string') marketProfile.marketCategory = answers.marketCategory;
-    if (typeof answers.marketStage === 'string') marketProfile.marketStage = answers.marketStage;
-    if (Array.isArray(answers.trends)) {
-      marketProfile.trends = answers.trends.filter((s): s is string => typeof s === 'string');
-    }
-    if (Array.isArray(answers.barriersToEntry)) {
-      marketProfile.barriersToEntry = answers.barriersToEntry.filter(
-        (s): s is string => typeof s === 'string',
-      );
-    }
-    if (Array.isArray(answers.demandSignals)) {
-      marketProfile.demandSignals = answers.demandSignals.filter(
-        (s): s is string => typeof s === 'string',
-      );
-    }
-    if (Object.keys(marketProfile).length) patch.marketProfile = marketProfile;
-
-    const offerArchitecture: Partial<BlueprintOfferArchitecture> = (patch.offerArchitecture as any) || {};
-    if (answers.coreOffer && typeof answers.coreOffer === 'object') {
-      offerArchitecture.coreOffer = answers.coreOffer as BlueprintOffer;
-    }
-    if (Array.isArray(answers.offerLadder)) {
-      offerArchitecture.offerLadder = answers.offerLadder as BlueprintOffer[];
-    }
-    if (Array.isArray(answers.pricingTiers)) {
-      offerArchitecture.pricingTiers = answers.pricingTiers as BlueprintOffer[];
-    }
-    if (Array.isArray(answers.upsells)) {
-      offerArchitecture.upsells = answers.upsells as BlueprintOffer[];
-    }
-    if (Array.isArray(answers.recurringRevenueOpportunities)) {
-      offerArchitecture.recurringRevenueOpportunities =
-        answers.recurringRevenueOpportunities.filter((s): s is string => typeof s === 'string');
-    }
-    if (Object.keys(offerArchitecture).length) patch.offerArchitecture = offerArchitecture;
-
-    const salesSystem: Partial<BlueprintSalesSystem> = (patch.salesSystem as any) || {};
-    if (Array.isArray(answers.salesChannels)) {
-      salesSystem.salesChannels = answers.salesChannels.map((c) => {
-        if (typeof c === 'string') return { channel: c, priority: 'MEDIUM' as const };
-        return c as BlueprintSalesChannel;
-      });
-    }
-    if (Array.isArray(answers.pipelineStages)) {
-      salesSystem.pipelineStages = answers.pipelineStages as BlueprintPipelineStage[];
-    }
-    if (Array.isArray(answers.leadSources)) {
-      salesSystem.leadSources = answers.leadSources.filter((s): s is string => typeof s === 'string');
-    }
-    if (answers.conversionAssumptions && typeof answers.conversionAssumptions === 'object') {
-      salesSystem.conversionAssumptions = answers.conversionAssumptions as BlueprintConversionAssumptions;
-    }
-    if (Array.isArray(answers.followUpCadence)) {
-      salesSystem.followUpCadence = answers.followUpCadence as BlueprintFollowUpStep[];
-    }
-    if (Object.keys(salesSystem).length) patch.salesSystem = salesSystem;
-
-    const marketingSystem: Partial<BlueprintMarketingSystem> = (patch.marketingSystem as any) || {};
-    if (Array.isArray(answers.channels)) {
-      marketingSystem.channels = answers.channels.map((c) => {
-        if (typeof c === 'string') return { channel: c, priority: 'MEDIUM' as const };
-        return c as BlueprintMarketingChannel;
-      });
-    }
-    if (Array.isArray(answers.contentPillars)) {
-      marketingSystem.contentPillars = answers.contentPillars.filter(
-        (s): s is string => typeof s === 'string',
-      );
-    }
-    if (Array.isArray(answers.campaignIdeas)) {
-      marketingSystem.campaignIdeas = answers.campaignIdeas.filter(
-        (s): s is string => typeof s === 'string',
-      );
-    }
-    if (typeof answers.brandNarrative === 'string') {
-      marketingSystem.brandNarrative = answers.brandNarrative;
-    }
-    if (Array.isArray(answers.launchPlan)) {
-      marketingSystem.launchPlan = answers.launchPlan.filter((s): s is string => typeof s === 'string');
-    }
-    if (Object.keys(marketingSystem).length) patch.marketingSystem = marketingSystem;
-
-    const operationsSystem: Partial<BlueprintOperationsSystem> = (patch.operationsSystem as any) || {};
-    if (Array.isArray(answers.coreWorkflows)) {
-      operationsSystem.coreWorkflows = answers.coreWorkflows as BlueprintWorkflowStep[];
-    }
-    if (Array.isArray(answers.dailyChecklist)) {
-      operationsSystem.dailyChecklist = answers.dailyChecklist.filter(
-        (s): s is string => typeof s === 'string',
-      );
-    }
-    if (Array.isArray(answers.weeklyChecklist)) {
-      operationsSystem.weeklyChecklist = answers.weeklyChecklist.filter(
-        (s): s is string => typeof s === 'string',
-      );
-    }
-    if (Array.isArray(answers.fulfillmentProcess)) {
-      operationsSystem.fulfillmentProcess = answers.fulfillmentProcess as BlueprintWorkflowStep[];
-    }
-    if (Array.isArray(answers.customerSupportProcess)) {
-      operationsSystem.customerSupportProcess = answers.customerSupportProcess as BlueprintWorkflowStep[];
-    }
-    if (Array.isArray(answers.vendorProcess)) {
-      operationsSystem.vendorProcess = answers.vendorProcess as BlueprintWorkflowStep[];
-    }
-    if (Object.keys(operationsSystem).length) patch.operationsSystem = operationsSystem;
-
-    const projectionProfile: Partial<BlueprintProjectionProfile> = (patch.projectionProfile as any) || {};
-    if (typeof answers.startupCapital === 'number') projectionProfile.startupCapital = answers.startupCapital;
-    if (typeof answers.startupCosts === 'number') projectionProfile.startupCosts = answers.startupCosts;
-    if (typeof answers.monthlyFixedCosts === 'number') {
-      projectionProfile.monthlyFixedCosts = answers.monthlyFixedCosts;
-    }
-    if (typeof answers.variableCostPercent === 'number') {
-      projectionProfile.variableCostPercent = answers.variableCostPercent;
-    }
-    if (typeof answers.expectedMonthlyUnits === 'number') {
-      projectionProfile.expectedMonthlyUnits = answers.expectedMonthlyUnits;
-    }
-    if (typeof answers.conservativeMonthlyUnits === 'number') {
-      projectionProfile.conservativeMonthlyUnits = answers.conservativeMonthlyUnits;
-    }
-    if (typeof answers.aggressiveMonthlyUnits === 'number') {
-      projectionProfile.aggressiveMonthlyUnits = answers.aggressiveMonthlyUnits;
-    }
-    if (Object.keys(projectionProfile).length) patch.projectionProfile = projectionProfile;
-
-    const riskProfile: Partial<BlueprintRiskProfile> = (patch.riskProfile as any) || {};
-    if (Array.isArray(answers.financialRisks)) {
-      riskProfile.financialRisks = answers.financialRisks as BlueprintRiskItem[];
-    }
-    if (Array.isArray(answers.legalRisks)) {
-      riskProfile.legalRisks = answers.legalRisks as BlueprintRiskItem[];
-    }
-    if (Array.isArray(answers.marketRisks)) {
-      riskProfile.marketRisks = answers.marketRisks as BlueprintRiskItem[];
-    }
-    if (Array.isArray(answers.operationalRisks)) {
-      riskProfile.operationalRisks = answers.operationalRisks as BlueprintRiskItem[];
-    }
-    if (Array.isArray(answers.founderRisks)) {
-      riskProfile.founderRisks = answers.founderRisks as BlueprintRiskItem[];
-    }
-    if (Array.isArray(answers.mitigationPlan)) {
-      riskProfile.mitigationPlan = answers.mitigationPlan.filter((s): s is string => typeof s === 'string');
-    }
-    if (Object.keys(riskProfile).length) patch.riskProfile = riskProfile;
-
-    const complianceProfile: Partial<BlueprintComplianceProfile> = (patch.complianceProfile as any) || {};
-    if (Array.isArray(answers.complianceItems)) {
-      complianceProfile.complianceItems = answers.complianceItems as ComplianceItem[];
-    }
-    if (typeof answers.complianceScore === 'number') {
-      complianceProfile.complianceScore = answers.complianceScore;
-    }
-    if (Object.keys(complianceProfile).length) patch.complianceProfile = complianceProfile;
-
-    const executionRoadmap: Partial<BlueprintExecutionRoadmap> = (patch.executionRoadmap as any) || {};
-    if (Array.isArray(answers.today)) {
-      executionRoadmap.today = answers.today.filter((s): s is string => typeof s === 'string');
-    }
-    if (Array.isArray(answers.sevenDayPlan)) {
-      executionRoadmap.sevenDayPlan = answers.sevenDayPlan.filter((s): s is string => typeof s === 'string');
-    }
-    if (Array.isArray(answers.thirtyDayPlan)) {
-      executionRoadmap.thirtyDayPlan = answers.thirtyDayPlan.filter((s): s is string => typeof s === 'string');
-    }
-    if (Array.isArray(answers.ninetyDayPlan)) {
-      executionRoadmap.ninetyDayPlan = answers.ninetyDayPlan.filter(
-        (s): s is string => typeof s === 'string',
-      );
-    }
-    if (Array.isArray(answers.twelveMonthMilestones)) {
-      executionRoadmap.twelveMonthMilestones = answers.twelveMonthMilestones.filter(
-        (s): s is string => typeof s === 'string',
-      );
-    }
-    if (Object.keys(executionRoadmap).length) patch.executionRoadmap = executionRoadmap;
-
-    return this.updateBlueprint(businessId, patch, tx);
+    // FU-GENOME-DNA-WRITES-AND-INTEGRITY: the patch is built by onboardingAnswersPatch, which the controller also
+    // classifies (D-128).
+    return this.updateBlueprint(businessId, onboardingAnswersPatch(answers), tx);
   }
 
   /**
@@ -1760,4 +1423,351 @@ export class BlueprintService {
 
     return result;
   }
+}
+
+/**
+ * The blueprint patch an onboarding answer set writes (BlueprintService.inferFromOnboarding): dotted keys
+ * ("legalProfile.hasPhysicalLocation") into their column, and the flat answers into the columns they map to. Pure, so
+ * POST infer/onboarding classifies exactly the patch that is written (FU-GENOME-DNA-WRITES-AND-INTEGRITY, D-128).
+ */
+export function onboardingAnswersPatch(answers: Record<string, unknown>): BlueprintPatch {
+  const patch: BlueprintPatch = {};
+
+  // Support nested keys like legalProfile.hasPhysicalLocation by splitting on '.'
+  for (const [key, value] of Object.entries(answers)) {
+    if (!key.includes('.') || value === undefined || value === null) continue;
+    const [section, ...rest] = key.split('.');
+    if (!SECTION_KEYS.includes(section as BlueprintSectionKey)) continue;
+    const field = rest.join('.');
+    if (!field) continue;
+    (patch as Record<string, Record<string, unknown>>)[section] =
+      (patch as Record<string, Record<string, unknown>>)[section] || {};
+    (patch as Record<string, Record<string, unknown>>)[section][field] = value;
+  }
+
+  const identity: Partial<BlueprintIdentity> = (patch.identity as any) || {};
+  if (typeof answers.businessName === 'string') identity.name = answers.businessName;
+  if (typeof answers.businessIntent === 'string') identity.oneLiner = answers.businessIntent;
+  if (typeof answers.archetype === 'string') identity.archetype = answers.archetype;
+  if (typeof answers.industry === 'string') identity.industry = answers.industry;
+  if (typeof answers.tagline === 'string') identity.tagline = answers.tagline;
+  if (typeof answers.country === 'string') identity.country = answers.country;
+  if (Object.keys(identity).length) patch.identity = identity;
+
+  const operating: Partial<BlueprintOperatingModel> = (patch.operatingModel as any) || {};
+  if (typeof answers.revenueModel === 'string') operating.revenueModel = answers.revenueModel;
+  if (typeof answers.deliveryMode === 'string') operating.deliveryMode = answers.deliveryMode;
+  if (typeof answers.serviceArea === 'string') operating.serviceArea = answers.serviceArea;
+  if (typeof answers.teamSize === 'string') operating.teamSize = answers.teamSize;
+  if (Array.isArray(answers.channels)) {
+    operating.channels = answers.channels.filter((c): c is string => typeof c === 'string');
+  }
+  if (Object.keys(operating).length) patch.operatingModel = operating;
+
+  const constraints: Partial<BlueprintConstraints> = (patch.constraints as any) || {};
+  if (typeof answers.budgetRange === 'string') constraints.budgetRange = answers.budgetRange;
+  if (typeof answers.timeCommitment === 'string') constraints.timeCommitment = answers.timeCommitment;
+  if (typeof answers.riskTolerance === 'string') constraints.riskTolerance = answers.riskTolerance;
+  if (Object.keys(constraints).length) patch.constraints = constraints;
+
+  const goals: Partial<BlueprintGoals> = (patch.goals as any) || {};
+  if (typeof answers.northStar === 'string') goals.northStar = answers.northStar;
+  if (Array.isArray(answers.ninetyDayGoals)) {
+    goals.ninetyDayGoals = answers.ninetyDayGoals.filter((g): g is string => typeof g === 'string');
+  }
+  if (Array.isArray(answers.twelveMonthGoals)) {
+    goals.twelveMonthGoals = answers.twelveMonthGoals.filter((g): g is string => typeof g === 'string');
+  }
+  if (Object.keys(goals).length) patch.goals = goals;
+
+  const brand: Partial<BlueprintBrand> = (patch.brand as any) || {};
+  if (typeof answers.brandVoice === 'string') brand.voice = answers.brandVoice;
+  if (typeof answers.brandTone === 'string') brand.tone = answers.brandTone;
+  if (typeof answers.primaryColor === 'string') brand.primaryColor = answers.primaryColor;
+  if (typeof answers.secondaryColor === 'string') brand.secondaryColor = answers.secondaryColor;
+  if (typeof answers.logoUrl === 'string') brand.logoUrl = answers.logoUrl;
+  if (Array.isArray(answers.valueProps)) {
+    brand.valueProps = answers.valueProps.filter((v): v is string => typeof v === 'string');
+  }
+  if (Object.keys(brand).length) patch.brand = brand;
+
+  const customer: Partial<BlueprintCustomerModel> = (patch.customerModel as any) || {};
+  if (typeof answers.idealCustomer === 'string') customer.idealCustomer = answers.idealCustomer;
+  if (typeof answers.targetCustomer === 'string') customer.idealCustomer = answers.targetCustomer;
+  if (Array.isArray(answers.segments)) {
+    customer.segments = answers.segments.filter((s): s is string => typeof s === 'string');
+  }
+  if (Array.isArray(answers.painPoints)) {
+    customer.painPoints = answers.painPoints.filter((s): s is string => typeof s === 'string');
+  }
+  if (Array.isArray(answers.jobsToBeDone)) {
+    customer.jobsToBeDone = answers.jobsToBeDone.filter((s): s is string => typeof s === 'string');
+  }
+  if (Object.keys(customer).length) patch.customerModel = customer;
+
+  const financials: Partial<BlueprintFinancials> = (patch.financials as any) || {};
+  if (typeof answers.currency === 'string') financials.currency = answers.currency;
+  if (typeof answers.pricingModel === 'string') financials.pricingModel = answers.pricingModel;
+  if (typeof answers.avgTicket === 'number') financials.avgTicket = answers.avgTicket;
+  if (typeof answers.monthlyTarget === 'number') financials.monthlyTarget = answers.monthlyTarget;
+  if (Object.keys(financials).length) patch.financials = financials;
+
+  // Genesis section mappings
+  const founderProfile: Partial<BlueprintFounderProfile> = (patch.founderProfile as any) || {};
+  if (typeof answers.founderName === 'string') founderProfile.founderName = answers.founderName;
+  if (typeof answers.background === 'string') founderProfile.background = answers.background;
+  if (Array.isArray(answers.skills)) {
+    founderProfile.skills = answers.skills.filter((s): s is string => typeof s === 'string');
+  }
+  if (Array.isArray(answers.weaknesses)) {
+    founderProfile.weaknesses = answers.weaknesses.filter((s): s is string => typeof s === 'string');
+  }
+  if (typeof answers.riskTolerance === 'string') founderProfile.riskTolerance = answers.riskTolerance;
+  if (typeof answers.weeklyAvailabilityHours === 'number') {
+    founderProfile.weeklyAvailabilityHours = answers.weeklyAvailabilityHours;
+  }
+  if (typeof answers.visionStatement === 'string') founderProfile.visionStatement = answers.visionStatement;
+  if (Object.keys(founderProfile).length) patch.founderProfile = founderProfile;
+
+  const legalProfile: Partial<BlueprintLegalProfile> = (patch.legalProfile as any) || {};
+  if (typeof answers.hasPhysicalLocation === 'boolean') {
+    legalProfile.hasPhysicalLocation = answers.hasPhysicalLocation;
+  }
+  if (typeof answers.hasRegulatedActivity === 'boolean') {
+    legalProfile.regulatedIndustry = answers.hasRegulatedActivity;
+  }
+  if (typeof answers.regulatedIndustry === 'boolean') {
+    legalProfile.regulatedIndustry = answers.regulatedIndustry;
+  }
+  const rawEntityType =
+    answers.recommendedEntityType ??
+    answers.entityType ??
+    answers.legalStructurePreference;
+  if (typeof rawEntityType === 'string') {
+    legalProfile.recommendedEntityType = normalizeRecommendedEntityType(rawEntityType);
+  }
+  if (typeof answers.entityTypeReason === 'string') {
+    legalProfile.entityTypeReason = answers.entityTypeReason;
+  }
+  if (typeof answers.disclaimerAcceptedAt === 'string') {
+    legalProfile.disclaimerAcceptedAt = answers.disclaimerAcceptedAt;
+  }
+  if (Array.isArray(answers.regulatedIndustryNotes)) {
+    legalProfile.regulatedIndustryNotes = answers.regulatedIndustryNotes.filter(
+      (n): n is string => typeof n === 'string',
+    );
+  }
+  if (Object.keys(legalProfile).length) patch.legalProfile = legalProfile;
+
+  const registrationProfile: Partial<BlueprintRegistrationProfile> =
+    (patch.registrationProfile as any) || {};
+  if (typeof answers.registrationStatus === 'string') {
+    registrationProfile.businessNameStatus = answers.registrationStatus;
+  }
+  if (typeof answers.hasEmployees === 'boolean') {
+    registrationProfile.hasEmployees = answers.hasEmployees;
+    registrationProfile.nisEmployerStatus = answers.hasEmployees ? 'NOT_STARTED' : 'NOT_NEEDED';
+  }
+  if (typeof answers.estimatedAnnualRevenue === 'number') {
+    registrationProfile.vatStatus = answers.estimatedAnnualRevenue > 500000 ? 'REQUIRED' : 'NOT_REQUIRED';
+  }
+  if (Object.keys(registrationProfile).length) patch.registrationProfile = registrationProfile;
+
+  const taxProfile: Partial<BlueprintTaxProfile> = (patch.taxProfile as any) || {};
+  if (typeof answers.country === 'string') taxProfile.country = answers.country;
+  if (typeof answers.estimatedAnnualRevenue === 'number') {
+    taxProfile.estimatedAnnualRevenue = answers.estimatedAnnualRevenue;
+  }
+  if (typeof answers.payrollExpected === 'boolean') taxProfile.payrollExpected = answers.payrollExpected;
+  if (typeof answers.contractorPaymentsExpected === 'boolean') {
+    taxProfile.contractorPaymentsExpected = answers.contractorPaymentsExpected;
+  }
+  if (Object.keys(taxProfile).length) patch.taxProfile = taxProfile;
+
+  const ownershipProfile: Partial<BlueprintOwnershipProfile> = (patch.ownershipProfile as any) || {};
+  if (typeof answers.hasPartners === 'boolean') ownershipProfile.hasPartners = answers.hasPartners;
+  if (Array.isArray(answers.owners)) ownershipProfile.owners = answers.owners as BlueprintOwner[];
+  if (Object.keys(ownershipProfile).length) patch.ownershipProfile = ownershipProfile;
+
+  const marketProfile: Partial<BlueprintMarketProfile> = (patch.marketProfile as any) || {};
+  if (typeof answers.targetGeography === 'string') marketProfile.targetGeography = answers.targetGeography;
+  if (typeof answers.marketCategory === 'string') marketProfile.marketCategory = answers.marketCategory;
+  if (typeof answers.marketStage === 'string') marketProfile.marketStage = answers.marketStage;
+  if (Array.isArray(answers.trends)) {
+    marketProfile.trends = answers.trends.filter((s): s is string => typeof s === 'string');
+  }
+  if (Array.isArray(answers.barriersToEntry)) {
+    marketProfile.barriersToEntry = answers.barriersToEntry.filter(
+      (s): s is string => typeof s === 'string',
+    );
+  }
+  if (Array.isArray(answers.demandSignals)) {
+    marketProfile.demandSignals = answers.demandSignals.filter(
+      (s): s is string => typeof s === 'string',
+    );
+  }
+  if (Object.keys(marketProfile).length) patch.marketProfile = marketProfile;
+
+  const offerArchitecture: Partial<BlueprintOfferArchitecture> = (patch.offerArchitecture as any) || {};
+  if (answers.coreOffer && typeof answers.coreOffer === 'object') {
+    offerArchitecture.coreOffer = answers.coreOffer as BlueprintOffer;
+  }
+  if (Array.isArray(answers.offerLadder)) {
+    offerArchitecture.offerLadder = answers.offerLadder as BlueprintOffer[];
+  }
+  if (Array.isArray(answers.pricingTiers)) {
+    offerArchitecture.pricingTiers = answers.pricingTiers as BlueprintOffer[];
+  }
+  if (Array.isArray(answers.upsells)) {
+    offerArchitecture.upsells = answers.upsells as BlueprintOffer[];
+  }
+  if (Array.isArray(answers.recurringRevenueOpportunities)) {
+    offerArchitecture.recurringRevenueOpportunities =
+      answers.recurringRevenueOpportunities.filter((s): s is string => typeof s === 'string');
+  }
+  if (Object.keys(offerArchitecture).length) patch.offerArchitecture = offerArchitecture;
+
+  const salesSystem: Partial<BlueprintSalesSystem> = (patch.salesSystem as any) || {};
+  if (Array.isArray(answers.salesChannels)) {
+    salesSystem.salesChannels = answers.salesChannels.map((c) => {
+      if (typeof c === 'string') return { channel: c, priority: 'MEDIUM' as const };
+      return c as BlueprintSalesChannel;
+    });
+  }
+  if (Array.isArray(answers.pipelineStages)) {
+    salesSystem.pipelineStages = answers.pipelineStages as BlueprintPipelineStage[];
+  }
+  if (Array.isArray(answers.leadSources)) {
+    salesSystem.leadSources = answers.leadSources.filter((s): s is string => typeof s === 'string');
+  }
+  if (answers.conversionAssumptions && typeof answers.conversionAssumptions === 'object') {
+    salesSystem.conversionAssumptions = answers.conversionAssumptions as BlueprintConversionAssumptions;
+  }
+  if (Array.isArray(answers.followUpCadence)) {
+    salesSystem.followUpCadence = answers.followUpCadence as BlueprintFollowUpStep[];
+  }
+  if (Object.keys(salesSystem).length) patch.salesSystem = salesSystem;
+
+  const marketingSystem: Partial<BlueprintMarketingSystem> = (patch.marketingSystem as any) || {};
+  if (Array.isArray(answers.channels)) {
+    marketingSystem.channels = answers.channels.map((c) => {
+      if (typeof c === 'string') return { channel: c, priority: 'MEDIUM' as const };
+      return c as BlueprintMarketingChannel;
+    });
+  }
+  if (Array.isArray(answers.contentPillars)) {
+    marketingSystem.contentPillars = answers.contentPillars.filter(
+      (s): s is string => typeof s === 'string',
+    );
+  }
+  if (Array.isArray(answers.campaignIdeas)) {
+    marketingSystem.campaignIdeas = answers.campaignIdeas.filter(
+      (s): s is string => typeof s === 'string',
+    );
+  }
+  if (typeof answers.brandNarrative === 'string') {
+    marketingSystem.brandNarrative = answers.brandNarrative;
+  }
+  if (Array.isArray(answers.launchPlan)) {
+    marketingSystem.launchPlan = answers.launchPlan.filter((s): s is string => typeof s === 'string');
+  }
+  if (Object.keys(marketingSystem).length) patch.marketingSystem = marketingSystem;
+
+  const operationsSystem: Partial<BlueprintOperationsSystem> = (patch.operationsSystem as any) || {};
+  if (Array.isArray(answers.coreWorkflows)) {
+    operationsSystem.coreWorkflows = answers.coreWorkflows as BlueprintWorkflowStep[];
+  }
+  if (Array.isArray(answers.dailyChecklist)) {
+    operationsSystem.dailyChecklist = answers.dailyChecklist.filter(
+      (s): s is string => typeof s === 'string',
+    );
+  }
+  if (Array.isArray(answers.weeklyChecklist)) {
+    operationsSystem.weeklyChecklist = answers.weeklyChecklist.filter(
+      (s): s is string => typeof s === 'string',
+    );
+  }
+  if (Array.isArray(answers.fulfillmentProcess)) {
+    operationsSystem.fulfillmentProcess = answers.fulfillmentProcess as BlueprintWorkflowStep[];
+  }
+  if (Array.isArray(answers.customerSupportProcess)) {
+    operationsSystem.customerSupportProcess = answers.customerSupportProcess as BlueprintWorkflowStep[];
+  }
+  if (Array.isArray(answers.vendorProcess)) {
+    operationsSystem.vendorProcess = answers.vendorProcess as BlueprintWorkflowStep[];
+  }
+  if (Object.keys(operationsSystem).length) patch.operationsSystem = operationsSystem;
+
+  const projectionProfile: Partial<BlueprintProjectionProfile> = (patch.projectionProfile as any) || {};
+  if (typeof answers.startupCapital === 'number') projectionProfile.startupCapital = answers.startupCapital;
+  if (typeof answers.startupCosts === 'number') projectionProfile.startupCosts = answers.startupCosts;
+  if (typeof answers.monthlyFixedCosts === 'number') {
+    projectionProfile.monthlyFixedCosts = answers.monthlyFixedCosts;
+  }
+  if (typeof answers.variableCostPercent === 'number') {
+    projectionProfile.variableCostPercent = answers.variableCostPercent;
+  }
+  if (typeof answers.expectedMonthlyUnits === 'number') {
+    projectionProfile.expectedMonthlyUnits = answers.expectedMonthlyUnits;
+  }
+  if (typeof answers.conservativeMonthlyUnits === 'number') {
+    projectionProfile.conservativeMonthlyUnits = answers.conservativeMonthlyUnits;
+  }
+  if (typeof answers.aggressiveMonthlyUnits === 'number') {
+    projectionProfile.aggressiveMonthlyUnits = answers.aggressiveMonthlyUnits;
+  }
+  if (Object.keys(projectionProfile).length) patch.projectionProfile = projectionProfile;
+
+  const riskProfile: Partial<BlueprintRiskProfile> = (patch.riskProfile as any) || {};
+  if (Array.isArray(answers.financialRisks)) {
+    riskProfile.financialRisks = answers.financialRisks as BlueprintRiskItem[];
+  }
+  if (Array.isArray(answers.legalRisks)) {
+    riskProfile.legalRisks = answers.legalRisks as BlueprintRiskItem[];
+  }
+  if (Array.isArray(answers.marketRisks)) {
+    riskProfile.marketRisks = answers.marketRisks as BlueprintRiskItem[];
+  }
+  if (Array.isArray(answers.operationalRisks)) {
+    riskProfile.operationalRisks = answers.operationalRisks as BlueprintRiskItem[];
+  }
+  if (Array.isArray(answers.founderRisks)) {
+    riskProfile.founderRisks = answers.founderRisks as BlueprintRiskItem[];
+  }
+  if (Array.isArray(answers.mitigationPlan)) {
+    riskProfile.mitigationPlan = answers.mitigationPlan.filter((s): s is string => typeof s === 'string');
+  }
+  if (Object.keys(riskProfile).length) patch.riskProfile = riskProfile;
+
+  const complianceProfile: Partial<BlueprintComplianceProfile> = (patch.complianceProfile as any) || {};
+  if (Array.isArray(answers.complianceItems)) {
+    complianceProfile.complianceItems = answers.complianceItems as ComplianceItem[];
+  }
+  if (typeof answers.complianceScore === 'number') {
+    complianceProfile.complianceScore = answers.complianceScore;
+  }
+  if (Object.keys(complianceProfile).length) patch.complianceProfile = complianceProfile;
+
+  const executionRoadmap: Partial<BlueprintExecutionRoadmap> = (patch.executionRoadmap as any) || {};
+  if (Array.isArray(answers.today)) {
+    executionRoadmap.today = answers.today.filter((s): s is string => typeof s === 'string');
+  }
+  if (Array.isArray(answers.sevenDayPlan)) {
+    executionRoadmap.sevenDayPlan = answers.sevenDayPlan.filter((s): s is string => typeof s === 'string');
+  }
+  if (Array.isArray(answers.thirtyDayPlan)) {
+    executionRoadmap.thirtyDayPlan = answers.thirtyDayPlan.filter((s): s is string => typeof s === 'string');
+  }
+  if (Array.isArray(answers.ninetyDayPlan)) {
+    executionRoadmap.ninetyDayPlan = answers.ninetyDayPlan.filter(
+      (s): s is string => typeof s === 'string',
+    );
+  }
+  if (Array.isArray(answers.twelveMonthMilestones)) {
+    executionRoadmap.twelveMonthMilestones = answers.twelveMonthMilestones.filter(
+      (s): s is string => typeof s === 'string',
+    );
+  }
+  if (Object.keys(executionRoadmap).length) patch.executionRoadmap = executionRoadmap;
+  return patch;
 }

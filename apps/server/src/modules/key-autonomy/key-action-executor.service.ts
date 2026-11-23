@@ -1,4 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import { isSystemActor } from '../../core/auth/system-actor';
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { GenomeEvolutionService } from '../business-genome/genome-evolution.service';
 import { ConstitutionVersionService } from '../business-genome/constitution-version.service';
@@ -147,17 +148,26 @@ export class KeyActionExecutorService {
       confidence?: number;
     };
 
-    const created = await this.genomeEvolution.create(businessId, {
-      section: payload.section as any,
-      proposedPatch: payload.proposedPatch,
-      reason: payload.reason,
-      evidence: payload.evidence,
-      confidence: payload.confidence,
-      createdBy,
-      sourceEventIds: proposal.sourceId ? [proposal.sourceId] : undefined,
     // FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128): a financial proposal made for the executing member needs their revenue
-    // write; KEY's own execution (no member) is unchanged.
-    }, createdBy ? { actor: { id: createdBy } } : {});
+    // write; KEY's own execution (no member, or its system actor) is unchanged. A refusal is a failed outcome, so the
+    // proposal ends FAILED rather than held in EXECUTING (round-1 BLOCKING; KeyActionProposalService.execute checks
+    // it before the claim too).
+    const actor = createdBy && !isSystemActor(createdBy) ? { actor: { id: createdBy } } : {};
+    let created: { id: string };
+    try {
+      created = await this.genomeEvolution.create(businessId, {
+        section: payload.section as any,
+        proposedPatch: payload.proposedPatch,
+        reason: payload.reason,
+        evidence: payload.evidence,
+        confidence: payload.confidence,
+        createdBy,
+        sourceEventIds: proposal.sourceId ? [proposal.sourceId] : undefined,
+      }, actor);
+    } catch (err) {
+      if (err instanceof ForbiddenException) return { success: false, error: err.message };
+      throw err;
+    }
 
     return {
       success: true,
