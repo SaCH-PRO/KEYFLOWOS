@@ -300,11 +300,16 @@ describe('a link that names an invoice opens that invoice (CF-21)', () => {
     expect(resolvesToRoute('/app/commerce/invoices/inv_123')).toBe(true);
   });
 
-  it('commerce still drops ?tab=invoices onto the pipeline — the defect these links fell into', () => {
-    // Characterises the destination: if commerce ever honours ?tab=invoices
-    // with an id, this fails and the ledger below can be revisited.
+  it('commerce sends ?tab=invoices to the invoices list (MOUNT-QUOTES), still not to the invoice these links name', () => {
+    // Characterises the destination. Before MOUNT-QUOTES the page dropped
+    // ?tab=invoices onto the pipeline; now its landing table sends it to
+    // /app/commerce/invoices (the list). Neither opens the invoice an id names:
+    // if commerce ever honours ?tab=invoices with an id, this fails and the
+    // ledger below can be revisited.
     const commerce = read('app/app/commerce/page.tsx');
-    expect(commerce).toMatch(/\["quotes", "invoices", "payments"\]\.includes\(paramTab\)/);
+    expect(commerce).toMatch(/if \(tab === "invoices"\) return "invoices";/);
+    expect(commerce).toMatch(/router\.replace\(INVOICES_ROUTE\)/);
+    expect(commerce).toMatch(/const INVOICES_ROUTE = "\/app\/commerce\/invoices";/);
     expect(commerce, 'commerce now reads ?invoice= — revisit this gate').not.toMatch(
       /get\("invoice(Id)?"\)/,
     );
@@ -556,10 +561,11 @@ describe('the nav has a door to invoices; the quotes door leaves the Sales menu 
   // click changes only its search params, so the page must follow ?tab after
   // mount. That is rendered, not string-matched, in
   // app/app/commerce/__tests__/commerce-tab-follows-url.test.tsx (review F2).
-  it('the commerce page follows ?tab while mounted', () => {
+  it('the commerce page follows ?tab (and the legacy ?view) while mounted', () => {
     const commerce = read('app/app/commerce/page.tsx');
     expect(commerce).toMatch(/const paramTab = searchParams\.get\("tab"\);/);
-    expect(commerce).toMatch(/\}, \[paramTab\]\);/);
+    expect(commerce).toMatch(/const paramView = searchParams\.get\("view"\);/);
+    expect(commerce).toMatch(/\}, \[paramTab, paramView, router\]\);/);
   });
 
   // W9-WEB-COMMERCE-NAV: the rail follows a search-param-only click. The Quotes entry it was written
