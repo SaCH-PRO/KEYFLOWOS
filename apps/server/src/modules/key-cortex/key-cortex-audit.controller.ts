@@ -17,7 +17,7 @@ import { SelfAssessmentService } from './self-assessment.service';
 import { DigitalEmployeeAcceptanceService } from './digital-employee-acceptance.service';
 import { ValueLearningService } from './value-learning.service';
 import { ComplianceMapService } from '../key-autonomy/compliance-map.service';
-import { genomeReaderReadsRevenue } from '../business-genome/key-genome/genome-finance-scope';
+import { financialProposalsWithProvenance, genomeReaderReadsRevenue, PROPOSAL_CLASSIFY_SELECT } from '../business-genome/key-genome/genome-finance-scope';
 import { autonomyVerdictForReader } from '../key-autonomy/key-action-genome-projection';
 
 /**
@@ -141,6 +141,10 @@ export class KeyCortexAuditController {
    * health in). The totals are counts only and are unchanged. Revenue readers: unchanged.
    */
   @Get('audit/decisions')
+  // Packet item 3, the guard: no module scope is added here. The rule recommended for this route and its sibling audit
+  // reads is ai read (they are KEY's own records; STAFF defaults to ai none), but adding it removes the compliance
+  // page from every default STAFF member, an access change that belongs to SWP-CENSUS-KEY-B (this controller's census
+  // rows) and the owner. The revenue projection below applies either way: ai read does not imply revenue read.
   async auditDecisions(
     @GuardedBusinessId() guardedBusinessId: string | undefined,
     @Req() req?: { user?: { id?: string; role?: string } },
@@ -158,10 +162,26 @@ export class KeyCortexAuditController {
 
       const reader = req?.user?.id ? { id: req.user.id, role: req.user.role } : undefined;
       if (await genomeReaderReadsRevenue(this.prisma, businessId, reader)) return { businessId, total, blocked, recent };
+      // Round 2 (security MAJOR-3b, D-238): a verdict about a KEY proposal is judged by that proposal too (its own fields
+      // or the recommendation it was bridged from, read in this business); a financial or unfound proposal withholds it.
+      const proposalIds = [...new Set(recent.map((v) => v.proposalId).filter((id): id is string => !!id))];
+      let financialProposal: Map<string, boolean>;
+      try {
+        const rows = proposalIds.length
+          ? await this.prisma.client.keyActionProposal.findMany({ where: { businessId, id: { in: proposalIds } }, select: PROPOSAL_CLASSIFY_SELECT })
+          : [];
+        const flags = await financialProposalsWithProvenance(this.prisma, businessId, rows as never);
+        financialProposal = new Map(rows.map((r: { id: string }, i: number) => [r.id, flags[i]]));
+      } catch {
+        financialProposal = new Map();
+      }
       const visible = recent
+        .filter((v) => !v.proposalId || financialProposal.get(v.proposalId) === false)
         .map((verdict) => autonomyVerdictForReader(verdict))
         .filter((verdict): verdict is NonNullable<typeof verdict> => verdict !== null);
-      return { businessId, total, blocked, recent: visible };
+      // Round 2 (security MINOR-5): the totals count what the reader is served, so the difference does not count the
+      // withheld verdicts.
+      return { businessId, total: visible.length, blocked: visible.filter((v) => v.allowed === false).length, recent: visible };
     });
   }
 

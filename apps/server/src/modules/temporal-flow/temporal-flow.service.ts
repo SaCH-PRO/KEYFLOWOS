@@ -104,8 +104,33 @@ export class TemporalFlowService {
     if (proposals.length === 0 && evolutions.length === 0 && dnaSections.length === 0 && !composites) return events;
     if (readsRevenue ?? (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined))) return events;
     // FU-GENOME-EVOLUTION-SURFACES (D-233): the genome's composite scores (genome.updated, constitution rows) weight the
-    // financial and sales DNA sections; they are left out of every row's payload.
-    if (composites) events = events.map((e) => (carriesCompositeScores(e.payload) ? ({ ...e, payload: withoutCompositeScores(e.payload) } as E) : e));
+    // financial and sales DNA sections; they are left out of every row's payload, as the last step (round 2: the
+    // withhold and redact sets below are keyed by the rows as read), with the row's summary and description when they
+    // state a figure (GenomeIntegrityChangeListener writes "genome integrity changed from 52% to 57%" there).
+    const served = await this.projectGenomeRows(businessId, events, proposals, evolutions, dnaSections);
+    return composites ? served.map((e) => this.withoutComposites(e)) : served;
+  }
+
+  /** Round 2: a row with its composite scores left out, and its summary and description when they state a figure. */
+  private withoutComposites<E extends { payload?: unknown; summary?: string | null; description?: string | null }>(e: E): E {
+    if (!carriesCompositeScores(e.payload)) return e;
+    const figure = (t: unknown) => typeof t === 'string' && /\p{Nd}/u.test(t);
+    return {
+      ...e,
+      payload: withoutCompositeScores(e.payload),
+      ...(figure(e.summary) ? { summary: null } : {}),
+      ...(figure(e.description) ? { description: null } : {}),
+    };
+  }
+
+  /** The genome-evolution, DNA section and KEY proposal projections of forReader (rows as read). */
+  private async projectGenomeRows<E extends { entityType?: string | null; entityId?: string | null; type?: string | null; title?: string | null; summary?: string | null; description?: string | null; payload?: unknown; metadata?: unknown; signals?: unknown }>(
+    businessId: string,
+    events: E[],
+    proposals: E[],
+    evolutions: E[],
+    dnaSections: E[],
+  ): Promise<E[]> {
     // FU-KEY-ACTION-GENOME-PROJECTION (D-233, D-238): a genome-evolution decision row is served only when its proposal
     // is read in this business, is of a non-money DNA section and nothing in it or the row states money (fail closed).
     const evolutionFlags = await readableGenomeEvolutionEvents(this.prisma, businessId, evolutions);

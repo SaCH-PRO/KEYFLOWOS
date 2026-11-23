@@ -1,4 +1,5 @@
 import { Injectable, Inject, forwardRef } from '@nestjs/common';
+import { financialExperimentFlags } from '../../key-autonomy/key-action-genome-projection';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { GenomeSignalService } from './genome-signal.service';
 import { GenomeRecommendationService } from './genome-recommendation.service';
@@ -102,7 +103,13 @@ export class KeyGenomeGovernanceService {
     const readinessList = readsRevenue ? allReadiness : allReadiness.filter((r) => !isMoneyLabel(r.module));
     // Security review MAJOR-2: an experiment made from a money signal or recommendation states it in its hypothesis,
     // action or success metric (GenomeRecommendationService.buildSignalExperimentInput).
-    const servedExperiments = served(experimentsAll, (e) => isMoneyLabel(e.hypothesis) || isMoneyLabel(e.action) || isMoneyLabel(e.successMetric));
+    // FU-GENOME-EVOLUTION-SURFACES (round 2, security MAJOR-4): and by provenance (bridged from a FINANCIAL
+    // recommendation) and completion result, as GET experiments is (financialExperimentFlags; fail closed).
+    const financialExperimentIds = readsRevenue
+      ? new Set<string>()
+      : await financialExperimentFlags(this.prisma, businessId, experimentsAll as never)
+        .then((flags) => new Set(experimentsAll.filter((_e, i) => flags[i]).map((e) => e.id)));
+    const servedExperiments = served(experimentsAll, (e) => financialExperimentIds.has(e.id) || isMoneyLabel(e.hypothesis) || isMoneyLabel(e.action) || isMoneyLabel(e.successMetric));
     const departments = readsRevenue ? allDepartments : allDepartments.filter((d) => !isMoneyLabel(d.code) && !isMoneyLabel(d.name));
 
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);

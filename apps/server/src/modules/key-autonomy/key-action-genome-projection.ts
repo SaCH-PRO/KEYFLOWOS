@@ -264,12 +264,16 @@ export async function requireRevenueLevel(
  * audit). A verdict on a money action, or whose reason or rule-trace text states money, is withheld (null); any other is
  * served with its rule-trace metadata left out (the genome gate's scores average finance in).
  */
-export function autonomyVerdictForReader<V extends { actionKey?: unknown; reason?: unknown; ruleTrace?: unknown }>(verdict: V): V | null {
+export function autonomyVerdictForReader<V extends { actionKey?: unknown; reason?: unknown; ruleTrace?: unknown; confidence?: unknown }>(
+  verdict: V,
+): Omit<V, 'confidence'> | null {
   if (typeof verdict.actionKey !== 'string' || textStatesMoney(verdict.actionKey)) return null;
   if (textStatesMoney(verdict.reason)) return null;
   const trace = ruleTraceWithoutMetadata({ ruleTrace: verdict.ruleTrace }) as { ruleTrace?: unknown };
   if (structuredValueStatesMoney(trace.ruleTrace)) return null;
-  return { ...verdict, ruleTrace: trace.ruleTrace };
+  // Round 2 (security MAJOR-3a): the verdict's confidence is the genome gate's confidence score (min(1, score/100)).
+  const { confidence: _confidence, ...rest } = verdict;
+  return { ...rest, ruleTrace: trace.ruleTrace };
 }
 
 /**
@@ -282,9 +286,14 @@ export function autonomyVerdictForReader<V extends { actionKey?: unknown; reason
 export async function financialExperimentFlags(
   prisma: Pick<PrismaService, 'client'>,
   businessId: string,
-  experiments: Array<{ id: string; hypothesis?: unknown; action?: unknown; successMetric?: unknown }>,
+  experiments: Array<{ id: string; hypothesis?: unknown; action?: unknown; successMetric?: unknown; result?: unknown }>,
 ): Promise<boolean[]> {
-  const own = experiments.map((e) => [e.hypothesis, e.action, e.successMetric].some(textStatesMoney));
+  // Round 2 (correctness MAJOR-3): an experiment's own text is financial by a money label, or by the money vocabulary
+  // only beside a figure (the bridge preview's rule: "paid channel" is how the marketing genome writes an ordinary
+  // recommendation, and the experiment bridged from it is served as the recommendation is). Its completion result is
+  // read whole (correctness MINOR-6).
+  const ownText = (t: unknown) => typeof t === 'string' && (isMoneyLabel(t) || (/\p{Nd}/u.test(t) && textStatesMoney(t)));
+  const own = experiments.map((e) => [e.hypothesis, e.action, e.successMetric].some(ownText) || structuredValueStatesMoney(e.result));
   const ids = experiments.filter((_e, i) => !own[i]).map((e) => e.id);
   if (ids.length === 0) return own;
   let bridged: Set<string>;

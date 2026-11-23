@@ -49,6 +49,11 @@ function makeService() {
       genomeMemoryEvent: {
         count: vi.fn().mockResolvedValue(0),
       },
+      // FU-GENOME-EVOLUTION-SURFACES: the experiments bridged from a recommendation (none here; provenance is pinned by
+      // genome-evolution-surfaces.integration.test.ts GES-11).
+      genomeRecommendation: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
     },
   } as any;
 

@@ -567,10 +567,11 @@ describe('FU-GENOME-EVOLUTION-SURFACES (D-128, D-233, D-238)', () => {
     expect(owner.body.recent.find((v: any) => v.id === ID.vOps).ruleTrace[0].metadata.readinessScore).toBe(8317);
     expect(owner.body.recent.find((v: any) => v.id === ID.vOps).confidence).toBe(0.7);
     expect(owner.body.total).toBe(4);
-    // Round 2 (packet item 3): the decisions log is KEY's (ai): a member who cannot read ai is refused.
+    // Packet item 3: no module scope is added to this route (an access change for SWP-CENSUS-KEY-B and the owner); a
+    // member who reads revenue but not ai is served it whole, as before.
     const noAi = await get(`/api/v1/cortex/audit/decisions?businessId=${ID.biz}`, ID.staffNoAi);
-    expect(noAi.status).toBe(403);
-    expect(JSON.stringify(noAi.body)).toContain('Insufficient permissions: ai requires read access (you have none)');
+    expect(noAi.status).toBe(200);
+    expect(noAi.body.total).toBe(4);
   });
 
   it('GES-08 timeline genome.updated and constitution rows are served without their composite scores', async () => {

@@ -42,7 +42,8 @@ describe('GenomeEvolutionController', () => {
   it('POST /evolution-proposals/generate-from-temporal-flow generates candidates', async () => {
     const { controller, service } = makeController();
     const result = await controller.generateFromTemporalFlow('biz_1', { user: { id: 'user_1' } } as any);
-    expect(service.generateFromTemporalFlow).toHaveBeenCalledWith('biz_1', 'user_1');
+    // An owner writes revenue: every candidate may be made (no moneySections restriction).
+    expect(service.generateFromTemporalFlow).toHaveBeenCalledWith('biz_1', 'user_1', {});
     expect(result).toHaveLength(1);
   });
 

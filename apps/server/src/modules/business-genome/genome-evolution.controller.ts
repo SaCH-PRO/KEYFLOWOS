@@ -71,8 +71,12 @@ export class GenomeEvolutionController {
   async create(
     @Param('businessId') businessId: string,
     @Body() body: CreateGenomeEvolutionProposalDto,
-    @Req() req: { user?: { id?: string } },
+    @Req() req: EvolutionRequest,
   ) {
+    // Round 2 (D-128): writing a financial proposal needs revenue write.
+    await this.requireActingAuthority(businessId, req, {
+      section: body?.section, reason: body?.reason, proposedPatch: body?.proposedPatch, evidence: body?.evidence,
+    });
     return this.service.create(businessId, {
       ...body,
       createdBy: this.userId(req),
@@ -85,7 +89,9 @@ export class GenomeEvolutionController {
     @Param('businessId') businessId: string,
     @Req() req: EvolutionRequest,
   ) {
-    const created = await this.service.generateFromTemporalFlow(businessId, this.userId(req));
+    // Round 2 (D-128): a member without revenue write does not make financial proposals.
+    const writesRevenue = await requireRevenueLevel(this.prisma, businessId, this.reader(req) ?? undefined, 'write').then(() => true, () => false);
+    const created = await this.service.generateFromTemporalFlow(businessId, this.userId(req), writesRevenue ? {} : { moneySections: false });
     return this.service.visibleTo(businessId, created, this.reader(req));
   }
 

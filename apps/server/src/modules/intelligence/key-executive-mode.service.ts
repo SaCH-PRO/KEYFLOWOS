@@ -74,6 +74,11 @@ export class KeyExecutiveModeService {
       this.businessAssets.list(businessId),
     ]);
 
+    // Round 2 (FU-GENOME-EVOLUTION-SURFACES, review MAJOR-1): the genome-update candidates the reader may be shown.
+    temporalAnalysis.genomeProposalCandidates = await this.genomeEvolution.candidatesForReader(
+      businessId, temporalAnalysis.genomeProposalCandidates ?? [], reader,
+    );
+
     const findings: KeyModeFinding[] = [
       ...this.fromExecutiveBrief(keyMode, config.focusDomains, executiveBrief),
       ...this.fromDnaScores(keyMode, config.dnaSections, blueprint),

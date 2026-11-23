@@ -84,6 +84,21 @@ export class GenomeEvolutionService {
     return rows.filter((row) => !isFinancialGenomeEvolution(row));
   }
 
+  /**
+   * Round 2 (FU-GENOME-EVOLUTION-SURFACES, review MAJOR-1): the Temporal Flow genome-update candidates (findGenomeSignals:
+   * section, reason, evidence) a reader may be shown. A reader without revenue read is shown only the non-financial ones
+   * (the paid-invoice sales candidate is withheld). A call with no reader argument is unchanged.
+   */
+  async candidatesForReader<C extends { section: string; reason: string; evidence?: string[] }>(
+    businessId: string,
+    candidates: C[],
+    reader: GenomeReader | null | undefined,
+  ): Promise<C[]> {
+    if (reader === undefined || candidates.length === 0) return candidates;
+    if (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined)) return candidates;
+    return candidates.filter((c) => !isFinancialGenomeEvolution({ section: c.section, reason: c.reason, evidence: c.evidence }));
+  }
+
   /** One proposal of `businessId` (404 for an unknown id or one of another business). */
   async get(businessId: string, proposalId: string): Promise<GenomeEvolutionProposalData> {
     return this.findOrThrow(businessId, proposalId);
@@ -110,9 +125,15 @@ export class GenomeEvolutionService {
     return this.serialize(row);
   }
 
+  /**
+   * `opts.moneySections` (round 2, D-128): false when the member who asked may not write financial genome content
+   * (no revenue write); a candidate that would be a financial proposal (isFinancialGenomeEvolution) is then not made.
+   * Left out (KEY, the scheduler), every candidate is made as before.
+   */
   async generateFromTemporalFlow(
     businessId: string,
     createdBy?: string,
+    opts: { moneySections?: boolean } = {},
   ): Promise<GenomeEvolutionProposalData[]> {
     const candidates = await this.temporal.findGenomeSignals(businessId);
     if (!candidates.length) return [];
@@ -127,10 +148,12 @@ export class GenomeEvolutionService {
     for (const candidate of candidates) {
       if (!isDnaSectionKey(candidate.section)) continue;
       if (pendingSections.has(candidate.section)) continue;
+      const patch = this.buildPatchForSection(candidate.section, candidate.evidence);
+      if (opts.moneySections === false && isFinancialGenomeEvolution({ section: candidate.section, reason: candidate.reason, proposedPatch: patch, evidence: candidate.evidence })) continue;
 
       const proposal = await this.create(businessId, {
         section: candidate.section,
-        proposedPatch: this.buildPatchForSection(candidate.section, candidate.evidence),
+        proposedPatch: patch,
         reason: candidate.reason,
         evidence: candidate.evidence,
         confidence: 0.6,
