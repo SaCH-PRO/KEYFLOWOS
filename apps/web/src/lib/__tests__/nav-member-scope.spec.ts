@@ -188,21 +188,24 @@ describe("NAV-A1: the hubs a member is shown", () => {
 /* ───────────────────────── every entry's module, cited (acceptance M1) ───────────────────────── */
 
 /**
- * The module(s) each nav entry needs, and why. Every row is a claim the test below checks; citations (paths under
- * apps/server/src):
- *   "<path>:<line>"                    a @Get its page's main read calls, whose decorator block carries
- *                                      @RequireModuleScope of modules the row names (and no others);
- *   "unscoped:<path>:<line>"           a @Get its page's main read calls that carries no module scope;
+ * The module(s) each nav entry needs, and why. Every row is a claim the test below checks. Claims locate server code
+ * by what it declares, never by line, so other packets moving lines cannot break them (wave 3f). Citations (paths
+ * under apps/server/src):
+ *   "<path>#[<Class> ]GET <route>"     the @Get('<route>') its page's main read calls (inside controller <Class> when the
+ *                                      file has two such routes), whose decorator block carries @RequireModuleScope of
+ *                                      modules the row names (and no others);
+ *   "unscoped:<path>#[<Class> ]GET <route>"   a read its page calls that carries no module scope;
+ *   "service-check:<path>#[<Class> ]GET <route>"   a read that filters or withholds by the member's levels itself;
  *   "hub:<id>"                         the hub that holds the entry, whose module the row then names;
- *   "data:<path>:<line>:<module> <id>" server code (identifier <id> on that line) showing an unscoped read answers
- *                                      that module's data; the row must name the module;
- *   "service-check:<path>:<line>"      a @Get that filters by the member's levels itself;
+ *   "data:<path>:<module> <identifier> ..."   server code (the identifier must be in that file) showing an unscoped
+ *                                      read answers that module's data; the row must name the module;
  *   "D-<n>:<module> ..."               an owner ruling justifying that module (D-<n> alone: beside the unscoped read
  *                                      of a row with no module);
- *   "tracked:<path>:<line>:<module> <id> <FU-packet> ..."  a pre-existing server exposure (an unscoped read answering
- *                                      that module's data) tracked in a follow-up server packet, with the nav left as
- *                                      it is by the orchestrator's decision of 2026-11-22 (D-100). It justifies nothing.
- * Each module a row names must be justified; a row with no module cites the unscoped read it rests on.
+ *   "tracked:<path>:<module> <identifier> <FU-packet> ..."   a pre-existing server exposure tracked in a follow-up
+ *                                      server packet, with the nav left as it is by the orchestrator's decision of
+ *                                      2026-11-22 (D-100). It justifies nothing; the identifier must still be in the file.
+ * A route that is missing or ambiguous fails. Each module a row names must be justified; a row with no module cites
+ * the unscoped read it rests on.
  */
 const SRV = (f: string, route: string) => `modules/${f}#${route}`;
 const MODULE_TABLE: Record<string, { modules: string[]; cite: string[] }> = {
