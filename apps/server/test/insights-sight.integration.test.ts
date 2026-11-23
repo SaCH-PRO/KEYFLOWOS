@@ -484,6 +484,10 @@ describe('FU-INSIGHTS-SIGHT (D-100, D-234, D-146): monitoring insights, suggesti
       await seedStaleLeads();
       await db.expense.create({ data: { id: `${ID.biz}_bill`, businessId: ID.biz, description: 'V72Q unpaid bill', amount: 5000, status: 'BILL', date: new Date() } });
       graph.invalidateCache(ID.biz);
+      // Correctness review round 2 (L-1): the premise: this business does raise a treasury alert, for a viewer who
+      // reads treasury (KEY's standing context).
+      const standing = await graph.getSnapshotForViewer(ID.biz, ID.owner);
+      expect(standing.healthIndicators.filter((h: any) => h.area === 'treasury').length, 'premise').toBeGreaterThan(0);
       const tower = await ok('get', 'owner', '/ai/control-tower');
       expect(tower.snapshot.healthIndicators.filter((h: any) => h.area === 'treasury'), text(tower.snapshot.healthIndicators)).toEqual([]);
       expect(tower.priorities.filter((p: any) => p.module === 'treasury')).toEqual([]);
@@ -505,6 +509,29 @@ describe('FU-INSIGHTS-SIGHT (D-100, D-234, D-146): monitoring insights, suggesti
       const again = await ok('post', 'owner', '/ai/suggestions/refresh');
       expect(again.count).toBe(0);
       expect(await db.aiMemory.count({ where: { businessId: ID.biz, category: 'suggestion' } })).toBe(first);
+    } finally {
+      await clearData();
+    }
+  }, 300_000);
+
+  it("V72Q-11 RED (security review round 2, ISS-R2-1): a pending approval item is classified by every field the approval proposals are (D-238): money only in its expected benefit, only in its affected entities, or only in a commerce tool reaches no member without revenue read; a billing item reaches no member without revenue read either (billing is revenue)", async () => {
+    await clearData();
+    try {
+      const item = (id: string, data: Record<string, unknown>) =>
+        db.aiApprovalItem.create({ data: { id: `${P}${id}`, businessId: ID.biz, status: 'pending', riskTier: 2, toolName: 'draft_followup_message', ...data } });
+      await item('k1', { title: 'K1 Chase Acme Ltd', description: 'Send the reminder', expectedBenefit: 'Recover TTD 7,341' });
+      await item('k2', { title: 'K2 Chase Acme Ltd', description: 'Send the reminder', affectedEntities: { amount: 7341, currency: 'TTD' } });
+      await item('k3', { title: 'K3 Generate drafts for completed work', toolName: 'commerce_generate_draft_invoices', module: 'commerce' });
+      await item('k4', { title: 'K4 Bill retainer overages', toolName: 'retainers_bill_overages', module: 'commerce' });
+      await item('k5', { title: 'V72Q-PLAIN follow up with three leads', description: 'Send a friendly follow-up' });
+      const approvals = (tower: any) => tower.priorities.filter((p: any) => p.type === 'approval').map((p: any) => p.title).sort();
+      for (const reader of ['blind', 'expnorev'] as Reader[]) {
+        const tower = await ok('get', reader, '/ai/control-tower');
+        expect(approvals(tower), reader).toEqual(['V72Q-PLAIN follow up with three leads']);
+        expect(tower.pendingApprovals, reader).toBe(1);
+      }
+      // Control: a member with revenue and expenses read (and operations read) gets them all.
+      expect(approvals(await ok('get', 'revenue', '/ai/control-tower'))).toHaveLength(5);
     } finally {
       await clearData();
     }
