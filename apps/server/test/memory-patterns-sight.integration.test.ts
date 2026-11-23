@@ -246,6 +246,15 @@ async function deskSections() {
 
 const lower = (x: unknown) => (typeof x === 'string' ? x : JSON.stringify(x)).toLowerCase();
 const statesMoney = (text: string) => text.includes(TOTAL) || /overdue|revenue dropped/i.test(text);
+/**
+ * Security review round 1 (F1): the whole system prompt, not only the memory section, may carry a pattern (the
+ * perception block renders AiMemory rows as `[ai_memory]` fragments). The prompt's own instructions may use the word
+ * "overdue", so the whole prompt is checked for the patterns' own text.
+ */
+const MONEY_MARKERS = [`totaling ${TOTAL}`, 'Repeat late payer', 'Revenue dropped', `revenue (${TOTAL})`, 'overdue_invoice_cluster', 'revenue_drop'];
+const promptStatesMoney = (prompt: string) => MONEY_MARKERS.filter((marker) => prompt.includes(marker));
+/** A prompt with its clock readings masked (the 0-vs-N differential compares two turns taken moments apart). */
+const masked = (prompt: string) => prompt.replace(/\d{4}-\d{2}-\d{2}T[\d:.]+Z?/g, '<ts>').replace(/\b\d{1,2}:\d{2}(:\d{2})?\s*(AM|PM|am|pm)?/g, '<clock>');
 
 beforeAll(async () => {
   globalThis.fetch = (async (input: unknown) => {
@@ -525,7 +534,8 @@ describe('MEM-PATTERNS-SIGHT (D-257, D-100, D-234, D-203): flow-chat behavioural
       expect(scan.patterns.some((p: any) => p.description.includes(`totaling ${OTHER_TOTAL}`)), 'premise').toBe(true);
       const owner = await sectionsFor('owner');
       expect(owner.chat).toContain(`totaling ${TOTAL}`);
-      expect(owner.chat).not.toContain(OTHER_TOTAL);
+      expect(owner.chat).not.toContain(`totaling ${OTHER_TOTAL}`);
+      expect(owner.chat).not.toContain('Overdue: 5000');
       flow.prompts.length = 0;
       const res = await agent()
         .post(`/ai/businesses/${ID.otherBiz}/flow/chat`)
@@ -535,7 +545,8 @@ describe('MEM-PATTERNS-SIGHT (D-257, D-100, D-234, D-203): flow-chat behavioural
       expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
       const other = memorySection(onePrompt('other owner'));
       expect(other).toContain(`totaling ${OTHER_TOTAL}`);
-      expect(other).not.toContain(TOTAL);
+      expect(other).not.toContain(`totaling ${TOTAL}`);
+      expect(other).not.toContain('Overdue: 4000');
       // A member of this business asking on the other business's route is refused by BusinessGuard.
       const crossed = await agent()
         .post(`/ai/businesses/${ID.otherBiz}/flow/chat`)
@@ -547,4 +558,59 @@ describe('MEM-PATTERNS-SIGHT (D-257, D-100, D-234, D-203): flow-chat behavioural
       await clearPatterns();
     }
   }, 240_000);
+
+  it('V71V-07 RED (correctness review COR-MPS-2): the revenue-none STAFF member alone: neither the memory section nor any other part of the chat and stream prompts carries the overdue-invoice total; the owner\'s does (control)', async () => {
+    await clearPatterns();
+    try {
+      await seedPlainPatterns();
+      await seedMoneyPattern();
+      const prompts = { chat: await chatPromptFor('blind'), stream: await streamPromptFor('blind') };
+      for (const [surface, prompt] of Object.entries(prompts)) {
+        expect(statesMoney(memorySection(prompt)), `blind ${surface} section`).toBe(false);
+        expect(promptStatesMoney(prompt), `blind ${surface} prompt`).toEqual([]);
+      }
+      expect(promptStatesMoney(await chatPromptFor('owner')), 'owner control').toContain(`totaling ${TOTAL}`);
+    } finally {
+      await clearPatterns();
+    }
+  }, 240_000);
+
+  it('V71V-08 RED (security review F1): the whole system prompt, the perception block included: no money pattern for the revenue-none member, the memberless SUPER_ADMIN or a contact-only position, no expense pattern for the revenue-only member, and nothing for the support desk; each prompt is identical (clock masked) with 0 or N money and expense patterns', async () => {
+    await clearPatterns();
+    try {
+      await seedPlainPatterns();
+      const contactOnly = {
+        businessId: ID.biz, jobRole: { id: ID.jobRole, name: 'V71V Staff', permissions: REVENUE_SCOPES }, membershipId: null, userId: null, membership: null, phoneMembers: [],
+      };
+      const all = async () => ({
+        blind: [await chatPromptFor('blind'), await streamPromptFor('blind')],
+        root: [await chatPromptFor('root'), await streamPromptFor('root')],
+        position: [await positionPrompt(contactOnly, false), await positionPrompt(contactOnly, true)],
+        desk: [await deskPrompt(false), await deskPrompt(true)],
+        revnoexp: [await chatPromptFor('revnoexp'), await streamPromptFor('revnoexp')],
+      });
+      const before = await all();
+      // Control: the perception block is live in this harness (it renders the non-money patterns as ai_memory fragments).
+      expect(before.blind[0], 'control: perception block').toContain('[ai_memory] patterns');
+      await seedMoneyPattern();
+      await seedMoreMoneyPatterns(4);
+      await memory.upsert(ID.biz, { category: 'patterns', key: 'expense_cycle', value: EXPENSE, confidence: 0.8, source: 'pattern_analysis' });
+      // Control: the revenue-and-expenses reader's whole prompt carries both.
+      const revenue = await chatPromptFor('revenue');
+      expect(promptStatesMoney(revenue).length, 'control: money reaches the revenue reader').toBeGreaterThan(0);
+      expect(revenue, 'control: the expense reaches the revenue-and-expenses reader').toContain(EXPENSE);
+      const after = await all();
+      for (const [who, prompts] of Object.entries(after)) {
+        prompts.forEach((prompt, i) => {
+          const label = `${who} ${i ? 'stream' : 'chat'}`;
+          if (who !== 'revnoexp') expect(promptStatesMoney(prompt), label).toEqual([]);
+          expect(prompt, `${label}: expense`).not.toContain(EXPENSE);
+          expect(masked(prompt), `${label}: differential`).toBe(masked((before as any)[who][i]));
+        });
+      }
+      expect(outbound, 'no outbound request').toEqual([]);
+    } finally {
+      await clearPatterns();
+    }
+  }, 300_000);
 });
