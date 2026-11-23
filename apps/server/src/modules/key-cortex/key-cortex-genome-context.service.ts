@@ -42,7 +42,8 @@ export class KeyCortexGenomeContextService {
     businessId: string,
   ): Promise<GenomeEnrichedContext> {
     // v2 (FU-KEY-CHAT-GENOME-MONEY-SIGHT): signals carry section and domain; a v1 entry lacks them.
-    const cacheKey = `genome:context:v2:${businessId}`;
+    // v3 (FU-KEY-GENOME-READS-RESIDUAL round 8): the entry carries the signal pool; a v2 entry lacks it.
+    const cacheKey = `genome:context:v3:${businessId}`;
     const cached = await this.redis.getJson<GenomeEnrichedContext>(cacheKey);
     if (cached) {
       this.logger.debug(
@@ -62,6 +63,16 @@ export class KeyCortexGenomeContextService {
     const genomeIntelligence =
       await (this.genomeBridgeService as any).getGenomeIntelligence(businessId);
 
+    const toSignal = (sig: any) => ({
+      id: sig.id ?? this.generateId(),
+      type: sig.type ?? 'info',
+      message: sig.message ?? '',
+      module: sig.module ?? 'general',
+      section: sig.section ?? null,
+      domain: sig.domain ?? null,
+      severity: sig.severity ?? 'low',
+      createdAt: sig.createdAt ? new Date(sig.createdAt) : new Date(),
+    });
     const enriched: GenomeEnrichedContext = {
       dnaScores: genomeIntelligence.dnaScores ?? {},
       genomeStage: genomeIntelligence.genomeStage ?? 'unknown',
@@ -77,16 +88,8 @@ export class KeyCortexGenomeContextService {
           genomeScore: rec.genomeScore ?? 0,
         }),
       ),
-      signals: (genomeIntelligence.signals ?? []).map((sig: any) => ({
-        id: sig.id ?? this.generateId(),
-        type: sig.type ?? 'info',
-        message: sig.message ?? '',
-        module: sig.module ?? 'general',
-        section: sig.section ?? null,
-        domain: sig.domain ?? null,
-        severity: sig.severity ?? 'low',
-        createdAt: sig.createdAt ? new Date(sig.createdAt) : new Date(),
-      })),
+      signals: (genomeIntelligence.signals ?? []).map(toSignal),
+      signalPool: (genomeIntelligence.signalPool ?? genomeIntelligence.signals ?? []).map(toSignal),
       opportunities: (genomeIntelligence.opportunities ?? []).map(
         (opp: any) => ({
           id: opp.id ?? this.generateId(),

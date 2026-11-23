@@ -14,6 +14,11 @@
 import { dnaScoresForReader, isFinanceRecommendation, isFinanceSignal, isMoneyLabel } from '../business-genome/key-genome/genome-finance-scope';
 import type { GenomeEnrichedContext, GenomeRecommendation } from './key-cortex-reasoning.types';
 
+/** The genome signals a genome context serves (the newest NEW signals). */
+export const GENOME_SIGNALS_SERVED = 20;
+/** D-235 round 8: the newest NEW signals read once, from which a reader without revenue read is projected. */
+export const GENOME_SIGNAL_POOL = 100;
+
 /**
  * FU-KEY-GENOME-READS-RESIDUAL (D-235, D-233 "no inference via a score, grade or categorical indicator"): executive
  * readiness is recomputed as the mean of the DNA dimensions the reader may see (it averages, and the bridge can set it
@@ -35,13 +40,18 @@ export function genomeContextForReader(context: GenomeEnrichedContext, readsReve
   if (readsRevenue) return context;
   const dnaScores = dnaScoresForReader(context.dnaScores, false) as Record<string, number>;
   // D-235: the genome stage is a categorical indicator of the whole genome, money dimensions included: withheld.
-  const { genomeStage: _stage, ...rest } = context;
+  // Round 8: the signal pool is read to project the signals and is never handed on.
+  const { genomeStage: _stage, signalPool, ...rest } = context;
   return {
     ...rest,
     executiveReadiness: readinessFromVisibleDna(dnaScores),
     autonomyMap: autonomyMapForReader(context.autonomyMap),
     dnaScores,
-    signals: (context.signals ?? []).filter((s) => !isFinanceSignal({ sourceModule: s.module, section: s.section, domain: s.domain, signalType: s.type })),
+    // Round 8 (security MINOR-1): projected from the pool (the newest signals), then limited to what a context serves,
+    // so how many are handed does not tell how many of the newest twenty were finance or sales.
+    signals: (signalPool ?? context.signals ?? [])
+      .filter((s) => !isFinanceSignal({ sourceModule: s.module, section: s.section, domain: s.domain, signalType: s.type }))
+      .slice(0, GENOME_SIGNALS_SERVED),
     recommendations: genomeRecommendationsForReader(context.recommendations ?? [], false),
     opportunities: [],
   };

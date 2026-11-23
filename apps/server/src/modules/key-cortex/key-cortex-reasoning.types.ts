@@ -13,6 +13,11 @@ export interface GenomeEnrichedContext {
   executiveReadiness: number;
   recommendations: GenomeRecommendation[];
   signals: GenomeSignal[];
+  /**
+   * D-235 round 8: the newest signals, of which `signals` are the first twenty. Unprojected; read only to project the
+   * signals for a reader without revenue read, and never handed on by that projection.
+   */
+  signalPool?: GenomeSignal[];
   opportunities: GenomeOpportunity[];
   autonomyMap: Record<string, boolean>;
   timestamp: Date;
