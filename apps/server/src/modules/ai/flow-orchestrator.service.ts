@@ -4058,9 +4058,10 @@ ${triage.standingContext}`;
     // that passes nothing arrives there undeclared and is refused.
     action?: KeyDispatchAction,
   ): Promise<any> {
-    // Bridged MCP tools route to the allowlisted remote server.
+    // Bridged MCP tools route to the allowlisted remote server, for this business only
+    // (RR-MCP-TENANT-BOUND): a server not bound to it refuses before connecting.
     if (isMcpToolName(toolName)) {
-      return this.getMcp().callTool(toolName, args);
+      return this.getMcp().callTool(businessId, toolName, args);
     }
     switch (toolName) {
       case 'update_business_blueprint': {
