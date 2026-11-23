@@ -544,4 +544,58 @@ describe('FU-PATTERNS-ROUTES-SIGHT (D-257, D-100, D-234, D-146): the memory and 
       await clearMemory();
     }
   }, 240_000);
+
+  it("V71Y-12 (orchestrator ruling A; COR-R3-1, TST-R3-1): on Postgres, a reader who may not read every pattern is answered the patterns updated in the last 30 days: one written and last updated 40 days ago is not answered to them (the owner's is), one written 40 days ago and rewritten now is", async () => {
+    await clearMemory();
+    try {
+      const longAgo = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
+      await db.aiMemory.createMany({
+        data: [
+          { businessId: ID.biz, category: 'patterns', key: 'v71y_stale', value: 'V71Y-STALE Most active day: Monday', source: 'pattern_analysis', createdAt: longAgo, updatedAt: longAgo },
+          { businessId: ID.biz, category: 'patterns', key: 'peak_activity_hour', value: 'Peak activity hour: 3AM', source: 'pattern_analysis', createdAt: longAgo, updatedAt: longAgo },
+        ],
+      });
+      // summarizePatterns' rewrite of its fixed key (AiMemoryService.upsert: updatedAt moves, createdAt stays).
+      await memory.upsert(ID.biz, { category: 'patterns', key: 'peak_activity_hour', value: PEAK, confidence: 0.8, source: 'pattern_analysis' });
+      for (const reader of BLIND) {
+        const descriptions = (await ok(reader, '/agent/patterns')).patterns.map((p: any) => p.description);
+        expect(descriptions, reader).toEqual([PEAK]);
+      }
+      const owner = (await ok('owner', '/agent/patterns')).patterns.map((p: any) => p.description);
+      expect(owner, 'owner').toEqual(expect.arrayContaining([PEAK, 'V71Y-STALE Most active day: Monday']));
+    } finally {
+      await clearMemory();
+    }
+  }, 240_000);
+
+  it('V71Y-13 RED (orchestrator ruling A): the memory writers are bounded: PUT .../ai/memory/bulk refuses more than 50 entries (400, nothing written) and is rate limited to 5 a minute; PUT .../ai/memory to 30 a minute (429 past it)', async () => {
+    await clearMemory();
+    try {
+      const entries = (n: number) => Array.from({ length: n }, (_, i) => ({ category: 'patterns', key: `v71y_bulk_${i}`, value: `Most active day: ${i}` }));
+      const bulk = (n: number, ip: string) => agent().put(`/ai/businesses/${ID.biz}/ai/memory/bulk`).set(HEADER, ID.blind).set('x-forwarded-for', ip).send({ entries: entries(n) });
+      const tooMany = await bulk(51, '10.74.10.1');
+      expect(tooMany.status, text(tooMany.body)).toBe(400);
+      expect(await db.aiMemory.count({ where: { businessId: ID.biz, key: { startsWith: 'v71y_bulk_' } } })).toBe(0);
+      expect((await bulk(50, '10.74.10.2')).status).toBe(200);
+      const bulkStatuses: number[] = [];
+      for (let i = 0; i < 6; i++) bulkStatuses.push((await bulk(1, '10.74.10.3')).status);
+      expect(bulkStatuses).toEqual([200, 200, 200, 200, 200, 429]);
+      const single: number[] = [];
+      for (let i = 0; i < 31; i++) {
+        const res = await agent().put(`/ai/businesses/${ID.biz}/ai/memory`).set(HEADER, ID.blind).set('x-forwarded-for', '10.74.10.4')
+          .send({ category: 'patterns', key: `v71y_one_${i}`, value: 'Most active day: Friday' });
+        single.push(res.status);
+      }
+      expect(single.slice(0, 30).every((s) => s === 200), text(single)).toBe(true);
+      expect(single[30]).toBe(429);
+    } finally {
+      await clearMemory();
+    }
+  }, 240_000);
+
+  it('V71Y-14 RED (orchestrator ruling A): ai_memories carries the index the windowed pattern read pages on: (business_id, category, updated_at DESC, id DESC)', async () => {
+    const rows: Array<{ indexdef: string }> = await db.$queryRawUnsafe(`SELECT indexdef FROM pg_indexes WHERE tablename = 'ai_memories'`);
+    const defs = rows.map((r) => r.indexdef.replace(/\s+/g, ' '));
+    expect(defs.some((d) => /\(business_id, category, updated_at DESC, id DESC\)/.test(d)), defs.join('\n')).toBe(true);
+  });
 });

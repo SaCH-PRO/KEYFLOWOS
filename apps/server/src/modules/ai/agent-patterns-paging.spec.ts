@@ -8,32 +8,35 @@
 import { describe, it, expect } from 'vitest';
 import { AgentController } from './agent.controller';
 
-interface Row { id: string; businessId: string; category: string; key: string; value: string; createdAt: Date; confidence: number }
+interface Row { id: string; businessId: string; category: string; key: string; value: string; createdAt: Date; updatedAt?: Date; confidence: number }
 
 const BLIND_SCOPES = {
   crm: 'read', bookings: 'read', projects: 'read', content: 'read', automations: 'read', storefront: 'read',
   analytics: 'read', operations: 'read', ai: 'read', team: 'read', expenses: 'none', revenue: 'none',
 };
 
-/** A table of 'patterns' rows, newest first, that answers findMany as Prisma would (keyset OR, skip, take, order). */
+/**
+ * A table of 'patterns' rows that answers findMany as Prisma would: the window (`createdAt` or `updatedAt` gte), the
+ * keyset OR on the ordered time column, skip, take, and the two-key order. A row with no updatedAt was never rewritten.
+ */
 function table(rows: Row[], onRead?: (call: number) => void) {
   const calls: any[] = [];
   const findMany = async (args: any) => {
     calls.push(args);
     onRead?.(calls.length);
+    const field: 'createdAt' | 'updatedAt' = Object.keys(args.orderBy?.[0] ?? { createdAt: 'desc' })[0] as any;
+    const time = (r: Row, f: 'createdAt' | 'updatedAt') => (f === 'updatedAt' ? r.updatedAt ?? r.createdAt : r.createdAt).getTime();
     let out = rows.filter((r) => r.businessId === args.where.businessId && r.category === args.where.category);
-    if (args.where.createdAt?.gte) out = out.filter((r) => r.createdAt >= args.where.createdAt.gte);
+    for (const f of ['createdAt', 'updatedAt'] as const) {
+      if (args.where[f]?.gte) out = out.filter((r) => time(r, f) >= args.where[f].gte.getTime());
+    }
     const or = args.where.OR as Array<any> | undefined;
     if (or) {
       out = out.filter((r) =>
-        or.some((c) =>
-          c.createdAt?.lt !== undefined
-            ? r.createdAt < c.createdAt.lt
-            : r.createdAt.getTime() === c.createdAt.getTime() && r.id < c.id.lt,
-        ),
+        or.some((c) => (c[field]?.lt !== undefined ? time(r, field) < c[field].lt.getTime() : time(r, field) === c[field].getTime() && r.id < c.id.lt)),
       );
     }
-    out.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+    out.sort((a, b) => time(b, field) - time(a, field) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
     return out.slice(args.skip ?? 0, (args.skip ?? 0) + (args.take ?? out.length));
   };
   return { calls, findMany };
@@ -98,13 +101,18 @@ describe('GET .../agent/patterns pages by keyset, bounded (FU-PATTERNS-ROUTES-SI
 
   it("a reader who may not read every pattern reads the last PATTERNS_WINDOW_DAYS days only: every read carries the window, and an older pattern is not answered to them (the owner's is)", async () => {
     const old: Row = { ...plain(1), id: 'p_old', createdAt: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000) };
-    const rows = [old, plain(2), ...Array.from({ length: 300 }, (_, i) => money(10 + i))];
+    // COR-R3-1: a fixed-key summary first written 40 days ago and rewritten last week is answered.
+    const rewritten: Row = { ...plain(3), id: 'p_rewritten', createdAt: new Date(Date.now() - 40 * 24 * 60 * 60 * 1000), updatedAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) };
+    const rows = [old, rewritten, plain(2), ...Array.from({ length: 300 }, (_, i) => money(10 + i))];
     const t = table(rows);
     const res = await controllerOver(t.findMany).getDetectedPatterns('biz', req);
-    expect(res.patterns.map((p: any) => p.id)).toEqual([plain(2).id]);
+    expect(res.patterns.map((p: any) => p.id)).toEqual([plain(2).id, 'p_rewritten']);
     const floor = Date.now() - 30 * 24 * 60 * 60 * 1000;
     for (const call of t.calls) {
-      const gte = call.where.createdAt?.gte as Date | undefined;
+      // Orchestrator ruling (A), COR-R3-1: the window is on updatedAt (a rewritten row is recent), ordered and keyed on it.
+      expect(call.orderBy).toEqual([{ updatedAt: 'desc' }, { id: 'desc' }]);
+      expect(call.where.createdAt, 'no createdAt window').toBeUndefined();
+      const gte = call.where.updatedAt?.gte as Date | undefined;
       expect(gte, JSON.stringify(call.where)).toBeInstanceOf(Date);
       expect(Math.abs(gte!.getTime() - floor)).toBeLessThan(60_000);
     }
