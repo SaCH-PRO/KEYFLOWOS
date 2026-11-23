@@ -128,8 +128,10 @@ export class TemporalFlowService {
       if (e.entityType !== 'key_action_proposal') return true;
       const known = e.entityId ? financial.get(e.entityId) : undefined;
       // The row's summary too (FU-KEY-ACTION-GENOME-PROJECTION: key.action.create_task copies the proposal's rationale there).
+      // Round 3 (security MINOR-1): the row's whole payload and signals are read, not only their named keys.
       return known === false && !isMoneyLabel(e.title) && !isMoneyLabel(e.description) && !isMoneyLabel(e.summary)
-        && !proposalTextStatesMoney(e.summary) && !eventTextStatesMoney(e);
+        && !proposalTextStatesMoney(e.summary) && !eventTextStatesMoney(e)
+        && !structuredValueStatesMoney(e.payload) && !structuredValueStatesMoney(e.signals);
     });
   }
 

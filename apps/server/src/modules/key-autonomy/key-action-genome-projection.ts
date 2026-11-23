@@ -23,9 +23,9 @@ import {
  *    proposal states money; anything else (an unknown section, a proposal that cannot be read, a failed read)
  *    is withheld (fail closed, D-227, D-234).
  * 2. GenomeRecommendationActionBridgeService previews and bridges a genome recommendation into a KEY action
- *    proposal, copying its title, diagnosis and recommendation text. For a FINANCIAL recommendation
- *    (isFinanceRecommendation) the preview needs revenue read and the bridge revenue write, exactly as the KEY
- *    genome controller's own recommendation routes do (SEC-GFS-4; D-128's acting clause).
+ *    proposal, copying its title, diagnosis, insight and recommendation text. For a FINANCIAL recommendation
+ *    (isFinanceRecommendation), or one whose own text states money, the preview needs revenue read and the bridge
+ *    revenue write, as the KEY genome controller's own recommendation routes do (SEC-GFS-4; D-128's acting clause).
  */
 
 export const GENOME_EVOLUTION_ENTITY = 'genome_evolution_proposal';
@@ -129,9 +129,13 @@ export async function requireBridgeRevenue(
 ): Promise<void> {
   const recommendation = await prisma.client.genomeRecommendation.findFirst({
     where: { id: recommendationId, businessId },
-    select: { domain: true, title: true, diagnosis: true },
+    select: { domain: true, title: true, diagnosis: true, insight: true, recommendation: true, expectedGain: true },
   });
-  if (!recommendation || !isFinanceRecommendation(recommendation)) return;
+  if (!recommendation) return;
+  // Round 3: the preview copies the diagnosis, insight and recommendation text, so money in any of them gates it too.
+  const statesMoney = [recommendation.title, recommendation.diagnosis, recommendation.insight, recommendation.recommendation, recommendation.expectedGain]
+    .some(textStatesMoney);
+  if (!statesMoney && !isFinanceRecommendation(recommendation)) return;
   const level = await genomeReaderRevenueLevel(prisma, businessId, reader);
   if (rankOf(level) < LEVEL_RANK[minLevel]) {
     throw new ForbiddenException(`Insufficient permissions: revenue requires ${minLevel} access (you have ${level})`);
