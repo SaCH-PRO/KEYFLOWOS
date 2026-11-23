@@ -88,7 +88,17 @@ export class LangfuseService {
    */
   traceLlmCall(input: LlmTraceInput): void {
     if (!this.enabled) return;
-    void this.exportSpan(buildTraceExport(input));
+    // Building the payload is part of the export, not of the caller's turn: a
+    // shape error here is counted like a failed POST and never thrown back into
+    // the gateway, where it would skip the cost write that follows this call.
+    let payload: ExportTraceServiceRequest;
+    try {
+      payload = buildTraceExport(input);
+    } catch (err: unknown) {
+      this.exportFailed(err);
+      return;
+    }
+    void this.exportSpan(payload);
   }
 
   private async exportSpan(payload: ExportTraceServiceRequest): Promise<void> {
@@ -113,8 +123,14 @@ export class LangfuseService {
 
   private exportFailed(err: unknown): void {
     this.failures += 1;
+    // The registry keeps the message, redacted by its own rules; the log names
+    // only the class, because fetch echoes the request URL (base URL included,
+    // credentials and all) into some of its errors.
     errorRegistry.record('other', 'langfuse.export', err);
-    this.logger.warn(`Langfuse export failed: ${err instanceof Error ? err.message : String(err)}`);
+    const kind = err instanceof Error ? err.name : typeof err;
+    this.logger.warn(
+      `Langfuse export failed (${kind}); ${this.failures} since boot, detail on GET api/diagnostics/errors as langfuse.export`,
+    );
   }
 }
 
@@ -173,11 +189,15 @@ const STATUS_CODE_OK = 1;
 function str(key: string, value: string): KeyValue {
   return { key, value: { stringValue: value } };
 }
+/** A finite number or 0: NaN and Infinity are not valid int64/double in the proto JSON mapping. */
+function finite(value: number): number {
+  return Number.isFinite(value) ? value : 0;
+}
 function int(key: string, value: number): KeyValue {
-  return { key, value: { intValue: String(Math.trunc(value)) } };
+  return { key, value: { intValue: String(Math.trunc(finite(value))) } };
 }
 function dbl(key: string, value: number): KeyValue {
-  return { key, value: { doubleValue: value } };
+  return { key, value: { doubleValue: finite(value) } };
 }
 function bool(key: string, value: boolean): KeyValue {
   return { key, value: { boolValue: value } };
@@ -189,8 +209,10 @@ function bool(key: string, value: boolean): KeyValue {
  * computed, never a user id, never prompt or completion text.
  */
 export function buildTraceExport(input: LlmTraceInput, now = Date.now()): ExportTraceServiceRequest {
-  const endMs = now;
-  const startMs = now - Math.max(0, input.latencyMs);
+  // Whole milliseconds: BigInt() rejects fractions, and a non-finite latency is no latency.
+  const latencyMs = Math.max(0, Math.round(finite(input.latencyMs)));
+  const endMs = Math.round(now);
+  const startMs = endMs - latencyMs;
   const attributes: KeyValue[] = [
     str('gen_ai.system', input.provider),
     str('gen_ai.request.model', input.model),
@@ -203,7 +225,7 @@ export function buildTraceExport(input: LlmTraceInput, now = Date.now()): Export
     str('key.task_category', input.taskCategory),
     bool('key.fallback_used', input.fallbackUsed),
     str('key.source', input.source ?? 'complete'),
-    int('key.latency_ms', input.latencyMs),
+    int('key.latency_ms', latencyMs),
   ];
   if (input.contractType) attributes.push(str('key.contract_type', input.contractType));
   if (input.sessionId) attributes.push(str('langfuse.session.id', input.sessionId));
