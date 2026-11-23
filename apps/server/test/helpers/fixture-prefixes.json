@@ -1230,6 +1230,11 @@
       "prefix": "v75r_",
       "owner": "apps/server/test/memory-temporal-routes-sight.integration.test.ts",
       "packet": "V1-75 (MEM-TEMPORAL-MEMORY-ROUTES-SIGHT)"
+    },
+    {
+      "prefix": "v71y_",
+      "owner": "apps/server/test/patterns-routes-sight.integration.test.ts",
+      "packet": "V1-71 (FU-PATTERNS-ROUTES-SIGHT)"
     }
   ],
   "pendingRenames": [],
