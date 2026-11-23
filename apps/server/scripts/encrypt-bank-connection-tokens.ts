@@ -31,9 +31,11 @@
  *   pnpm encrypt:bank-tokens --business=<id>       # dry run, scoped to business(es)
  *   pnpm encrypt:bank-tokens --apply               # encrypt the plaintext rows
  *
- * --apply refuses (exit 2, nothing written) when no key variable is set, when
- * the @keyflow/db build it loads does not encrypt the column, and when stored
- * ciphertext exists in scope but none of it decrypts with the loaded key.
+ * Both modes refuse (exit 2) when the @keyflow/db build loaded does not
+ * encrypt the column. --apply also refuses (exit 2, nothing written) when no
+ * key variable is set, and when there are plaintext rows to encrypt while
+ * stored ciphertext exists in scope and none of it decrypts with the loaded key.
+ * Each rewritten row's updated_at moves to the time of the run (@updatedAt).
  *
  * Exit status: 0 done, 1 database read/update failure, 2 bad arguments or a refused --apply.
  */
@@ -85,10 +87,15 @@ function describeFailure(err: unknown): string {
   return typeof e?.name === 'string' ? e.name : 'unknown error';
 }
 
-/** A Prisma or driver error (a P-code or a Prisma* error name), as opposed to the cipher's own failure. */
-function isDatabaseError(err: unknown): boolean {
-  const e = err as { code?: unknown; name?: unknown };
-  return (typeof e?.code === 'string' && /^P\d{4}$/.test(e.code)) || (typeof e?.name === 'string' && e.name.startsWith('Prisma'));
+/**
+ * The cipher's own failure, recognised by a positive signal (SEC-V72S-R4-1, COR-V72S-R4-1): Node's AES-GCM
+ * authentication failure (a plain Error with that message), or an ERR_CRYPTO_* / ERR_OSSL_* code (a bad IV or tag
+ * length). Anything else, a Prisma error or a raw driver or network error, is a failed read.
+ */
+function isDecryptFailure(err: unknown): boolean {
+  const e = err as { code?: unknown; message?: unknown };
+  if (typeof e?.code === 'string') return /^ERR_(CRYPTO|OSSL)_/.test(e.code);
+  return typeof e?.message === 'string' && e.message === 'Unsupported state or unable to authenticate data';
 }
 
 const row = (label: string, n: number) => `  ${label.padEnd(24)} ${n}`;
@@ -121,13 +128,14 @@ export async function main(
       error('Refusing --apply: no encryption key variable is set (CONNECTOR_CREDENTIALS_KEY, CREDENTIALS_ENCRYPTION_KEY or JWT_SECRET). Set the key the API runs with. Nothing was written.');
       return 2;
     }
-    // COR-V72S-1: a @keyflow/db build from before RR-BANK-TOKEN-ENCRYPT has no bankConnection hook, so each
-    // update would write the plaintext back unchanged.
-    const fields = deps.encryptedFields ?? (ENCRYPTED_FIELDS as unknown as Record<string, readonly string[]>);
-    if (!(fields.BankConnection ?? []).includes('accessToken')) {
-      error('Refusing --apply: the @keyflow/db build loaded does not encrypt BankConnection.accessToken (rebuild it with `pnpm --filter @keyflow/db build`). Nothing was written.');
-      return 2;
-    }
+  }
+  // COR-V72S-1, COR-V72S-R4-2: a @keyflow/db build from before RR-BANK-TOKEN-ENCRYPT has no bankConnection hook:
+  // --apply would write each plaintext back unchanged, and the dry run's decrypt probe would decrypt nothing, so
+  // every 'enc:v1:' row would count as already encrypted whatever key sealed it. Both modes refuse.
+  const fields = deps.encryptedFields ?? (ENCRYPTED_FIELDS as unknown as Record<string, readonly string[]>);
+  if (!(fields.BankConnection ?? []).includes('accessToken')) {
+    error('Refusing to run: the @keyflow/db build loaded does not encrypt BankConnection.accessToken (rebuild it with `pnpm --filter @keyflow/db build`). Nothing was written.');
+    return 2;
   }
 
   const scopeSql = args.businessIds.length > 0 ? ' WHERE business_id = ANY($1::text[])' : '';
@@ -161,7 +169,7 @@ export async function main(
       found = await database.bankConnection.findUnique({ where: { id: item.id }, select: { id: true, accessToken: true } });
     } catch (err: unknown) {
       // SEC-V72S-R3-1: only a decrypt failure means "sealed under another key"; a database error is a failed read.
-      if (isDatabaseError(err)) {
+      if (!isDecryptFailure(err)) {
         error(`Bank connection ${item.id} could not be read: ${describeFailure(err)}. Nothing was written.`);
         return 1;
       }

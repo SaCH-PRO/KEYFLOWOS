@@ -173,9 +173,13 @@ const WEBHOOK_ENCRYPTED_FIELDS = new Set<string>(ENCRYPTED_FIELDS.Webhook);
  * Every write seals the value, even one already shaped like ciphertext (see
  * encryptWith). The script writes plaintext only (it skips prefixed rows).
  *
+ * delete is deliberately not hooked: its result is the row already gone, and
+ * decrypting it would turn the removal of a row that does not decrypt into an
+ * error after the commit (COR-V72S-R4-3). Callers discard the deleted token.
+ *
  * Unlike the models above, every write and read operation that can carry the
  * column is hooked (createMany, updateMany and their AndReturn forms, the
- * OrThrow reads, delete): a bulk write that named the token would otherwise
+ * OrThrow reads): a bulk write that named the token would otherwise
  * store plaintext with no error, and an OrThrow read would hand back ciphertext.
  */
 const BANK_CONNECTION_ENCRYPTED_FIELDS = new Set<string>(ENCRYPTED_FIELDS.BankConnection);
@@ -519,9 +523,6 @@ export const tokenEncryptionExtension = Prisma.defineExtension({
         }
         const results = await query(args);
         return results.map((r) => decryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, r));
-      },
-      async delete({ args, query }) {
-        return decryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, await query(args));
       },
     },
   },
