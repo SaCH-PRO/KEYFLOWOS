@@ -79,7 +79,7 @@ export const TOKEN_COST_PER_1K: Record<string, { input: number; output: number }
 /** The model an unpriced call is billed as: the most expensive common chat model, so the estimate overstates. */
 export const UNPRICED_FALLBACK_MODEL = 'gpt-4o';
 
-/** How a cost row was priced: from the table, or estimated at the fallback rate because the model is not in it. */
+/** How a cost row was priced: 'priced' from the table; 'unpriced_estimate' when the model is not in it and the figure is the gpt-4o-rate estimate priceFor answers. */
 export type CostStatus = 'priced' | 'unpriced_estimate';
 
 /**

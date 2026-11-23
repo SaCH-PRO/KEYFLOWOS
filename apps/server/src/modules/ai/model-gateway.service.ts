@@ -3,7 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from 'crypto';
 import OpenAI from 'openai';
 import { validateOutputContract, type ContractType } from './ai-output-contracts';
-import { LLMCostService, TOKEN_COST_PER_1K, priceFor, costStatusFor, type CostStatus } from './llm-cost.service';
+import { LLMCostService, priceFor, costStatusFor, type CostStatus } from './llm-cost.service';
 import { LangfuseService } from './langfuse.service';
 import {
   classifyProviderFailure,
@@ -1283,7 +1283,7 @@ export class ModelGatewayService {
       if (chunk.usage) {
         const promptTokens = chunk.usage.prompt_tokens ?? 0;
         const completionTokens = chunk.usage.completion_tokens ?? 0;
-        const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['gpt-4o'];
+        const costs = priceFor(model);
         const estimatedCost =
           (promptTokens / 1000) * costs.input +
           (completionTokens / 1000) * costs.output;
@@ -1508,7 +1508,7 @@ export class ModelGatewayService {
     }
 
     const totalTokens = inputTokens + outputTokens;
-    const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['claude-3-5-sonnet-20241022'];
+    const costs = priceFor(model);
     const estimatedCost =
       (inputTokens / 1000) * costs.input +
       (outputTokens / 1000) * costs.output;
@@ -1583,7 +1583,7 @@ export class ModelGatewayService {
       if (chunk.usage) {
         const promptTokens = chunk.usage.prompt_tokens ?? 0;
         const completionTokens = chunk.usage.completion_tokens ?? 0;
-        const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['grok-2'];
+        const costs = priceFor(model);
         const estimatedCost =
           (promptTokens / 1000) * costs.input +
           (completionTokens / 1000) * costs.output;
@@ -1660,7 +1660,7 @@ export class ModelGatewayService {
       if (chunk.usage) {
         const promptTokens = chunk.usage.prompt_tokens ?? 0;
         const completionTokens = chunk.usage.completion_tokens ?? 0;
-        const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['moonshot-v1-8k'];
+        const costs = priceFor(model);
         const estimatedCost =
           (promptTokens / 1000) * costs.input +
           (completionTokens / 1000) * costs.output;
@@ -2271,7 +2271,7 @@ export class ModelGatewayService {
     const promptTokens = response.usage?.prompt_tokens ?? 0;
     const completionTokens = response.usage?.completion_tokens ?? 0;
     const totalTokens = promptTokens + completionTokens;
-    const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['gpt-4o'];
+    const costs = priceFor(model);
     const estimatedCost =
       (promptTokens / 1000) * costs.input +
       (completionTokens / 1000) * costs.output;
@@ -2414,7 +2414,7 @@ export class ModelGatewayService {
     const promptTokens = data.usage?.input_tokens ?? 0;
     const completionTokens = data.usage?.output_tokens ?? 0;
     const totalTokens = promptTokens + completionTokens;
-    const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['claude-3-5-sonnet-20241022'];
+    const costs = priceFor(model);
     const estimatedCost =
       (promptTokens / 1000) * costs.input +
       (completionTokens / 1000) * costs.output;
@@ -2466,7 +2466,7 @@ export class ModelGatewayService {
     const promptTokens = response.usage?.prompt_tokens ?? 0;
     const completionTokens = response.usage?.completion_tokens ?? 0;
     const totalTokens = promptTokens + completionTokens;
-    const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['grok-2'];
+    const costs = priceFor(model);
     const estimatedCost =
       (promptTokens / 1000) * costs.input +
       (completionTokens / 1000) * costs.output;
@@ -2529,7 +2529,7 @@ export class ModelGatewayService {
     const promptTokens = response.usage?.prompt_tokens ?? 0;
     const completionTokens = response.usage?.completion_tokens ?? 0;
     const totalTokens = promptTokens + completionTokens;
-    const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['moonshot-v1-8k'];
+    const costs = priceFor(model);
     const estimatedCost =
       (promptTokens / 1000) * costs.input +
       (completionTokens / 1000) * costs.output;
@@ -2691,17 +2691,17 @@ export class ModelGatewayService {
         const promptTokens = chunk.usage.prompt_tokens ?? 0;
         const completionTokens = chunk.usage.completion_tokens ?? 0;
         const costs = priceFor(model);
+        const estimatedCost =
+          (promptTokens / 1000) * costs.input +
+          (completionTokens / 1000) * costs.output;
         yield {
           type: 'usage',
           usage: {
             promptTokens,
             completionTokens,
             totalTokens: promptTokens + completionTokens,
-            estimatedCost:
-              Math.round(
-                ((promptTokens / 1000) * costs.input +
-                  (completionTokens / 1000) * costs.output) * 10000,
-              ) / 10000,
+            estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+            costStatus: costStatusFor(model),
           },
         };
       }

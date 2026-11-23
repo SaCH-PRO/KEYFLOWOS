@@ -4,7 +4,7 @@ import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { AI_CREDIT_COSTS, AI_OVERAGE_RATE_TTD, AI_OVERAGE_RATE_USD, isBillableAiFeature } from '../subscriptions/plans';
 import { OutputCategory, ResolvedTemplate, injectQualityDirectives, validateAiOutput, buildQualityDirectiveSuffix } from './ai-quality';
 import { OutputTemplateService } from './output-template.service';
-import { costStatusFor, type CostStatus } from './llm-cost.service';
+import { costStatusFor, priceFor, type CostStatus } from './llm-cost.service';
 import { ModelGatewayService, TaskCategory, GatewayMessage, BudgetStatus, AiProvider, GatewayRequest, GatewayResponse, StreamChunk, AiUnavailableCode, keyDisabledRefusal } from './model-gateway.service';
 import OpenAI from 'openai';
 import { safeInterval } from '../../core/scheduling/safe-interval';
@@ -1001,12 +1001,8 @@ export class AiUsageService {
       const completionTokens = usage?.completion_tokens ?? 0;
       const totalTokens = usage?.total_tokens ?? promptTokens + completionTokens;
 
-      // Vision model pricing
-      const costs: Record<string, { input: number; output: number }> = {
-        'gpt-4o': { input: 0.005, output: 0.015 },
-        'gpt-4o-mini': { input: 0.0004, output: 0.0016 },
-      };
-      const costRates = costs[model] || costs['gpt-4o'];
+      // Vision model pricing: the one table (RR-UNKNOWN-COST-NOT-ZERO), never a local copy.
+      const costRates = priceFor(model);
       const estimatedCost = (promptTokens / 1000) * costRates.input + (completionTokens / 1000) * costRates.output;
 
       this.persistUsageLog(
@@ -1023,7 +1019,7 @@ export class AiUsageService {
           creditsUsed: creditCost,
           latencyMs,
           taskCategory: 'extraction',
-          metadata: { maxTokens, temperature, vision: true },
+          metadata: { maxTokens, temperature, vision: true, costStatus: costStatusFor(model) },
         },
         businessId,
         creditCost,
