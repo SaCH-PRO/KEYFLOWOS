@@ -392,6 +392,26 @@ describe('script-specs-in-ci: negative controls', () => {
     assert.deepEqual(nodeTestPatterns('nice -n 10 node --test scripts/x/a.spec.mjs'), []);
   });
 
+  it('an env assignment is read past only where the shell would: before the command, or after time', () => {
+    assert.deepEqual(nodeTestPatterns('CI=1 timeout 5 node --test scripts/x/a.spec.mjs'), ['scripts/x/a.spec.mjs']);
+    assert.deepEqual(nodeTestPatterns('time CI=1 node --test scripts/x/a.spec.mjs'), ['scripts/x/a.spec.mjs']);
+    // timeout and pnpm exec exec their next word as a program: `CI=1` is no program, node never starts.
+    assert.deepEqual(nodeTestPatterns('timeout 5 CI=1 node --test scripts/x/a.spec.mjs'), []);
+    assert.deepEqual(nodeTestPatterns('pnpm exec CI=1 node --test scripts/x/a.spec.mjs'), []);
+  });
+
+  it('a # straight after a separator is a comment, as in bash; a # inside quotes fails closed', () => {
+    assert.deepEqual(nodeTestPatterns('node --test scripts/x/a.spec.mjs;# x; node --test scripts/y/b.spec.mjs'), [
+      'scripts/x/a.spec.mjs',
+    ]);
+    assert.deepEqual(nodeTestPatterns('node --test scripts/x/a.spec.mjs &&# node --test scripts/y/b.spec.mjs'), [
+      'scripts/x/a.spec.mjs',
+    ]);
+    // The reader does not parse quotes: a quoted `#` ends the line for it, so a later command on the same
+    // line names nothing and CI fails loudly. Put the run on its own line.
+    assert.deepEqual(nodeTestPatterns('echo "a # b"; node --test scripts/x/a.spec.mjs'), []);
+  });
+
   it('a stale EXEMPT path fails, and so does a needless or unexplained one', () => {
     const wf = { 'x.yml': 'jobs:\n  j:\n    steps:\n      - run: node --test scripts/x/a.spec.mjs\n' };
     const stale = census(['scripts/x/a.spec.mjs'], wf, { 'scripts/gone/z.spec.mjs': 'was removed' }).problems;
