@@ -178,3 +178,24 @@ describe('sightedStrategic review round 2 (FU-STRATEGIC-ROUTES-SIGHT)', () => {
     expect(bl.notes).toEqual(['SAFEMARK fine']);
   });
 });
+
+describe('sightedStrategic review round 3 (FU-STRATEGIC-ROUTES-SIGHT)', () => {
+  const marks = ['‎', '‬', '⁦', '͏', '️', '⁡', '⁣', '᠎', '\u{e0020}', 'ㅤ', '⠀'];
+
+  it('CR3-1 / SR3-1: no default-ignorable code point, combining mark or blank filler hides net profit, an expense or a figure', () => {
+    const rev = sightedStrategic({ notes: [...marks.map((x) => `pro${x}fit is thin`), 'SAFEMARK fine'] }, revnoexp) as any;
+    expect(rev.notes).toEqual(['SAFEMARK fine']);
+    const bl = sightedStrategic({ notes: [...marks.map((x) => `re${x}nt is due`), ...marks.map((x) => `4${x}5${x}0${x}0`), 'SAFEMARK fine'] }, blind) as any;
+    expect(bl.notes).toEqual(['SAFEMARK fine']);
+  });
+
+  it('SR3-2: a single digit with a scale word (mn, mil, mio, lakh, lac, crore, 万, 億, 亿, 千) is a figure', () => {
+    const out = sightedStrategic({ notes: ['about 5 mn this year', '5 mil', '3 mio', '5 lakh', '2 lacs', '2 crore', '5万', '3億', '2亿', '8千', 'SAFEMARK fine'] }, blind) as any;
+    expect(out.notes).toEqual(['SAFEMARK fine']);
+  });
+
+  it('SR3-3: an item is read on its folded text too', () => {
+    expect(strategicItemNeeds({ title: 'pro‎fit is thin' })).toEqual(['revenue', 'expenses']);
+    expect(strategicItemNeeds({ title: 'ｐｒｏｆｉｔ is thin' })).toEqual(['revenue', 'expenses']);
+  });
+});

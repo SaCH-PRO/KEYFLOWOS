@@ -162,8 +162,11 @@ let graph: any;
 async function cleanup() {
   const byBiz = (table: string) => `DELETE FROM ${table} WHERE business_id LIKE ${sqlLikePrefix(P)}`;
   for (const sql of [
+    byBiz('bookings'),
+    byBiz('projects'),
     byBiz('invoices'),
     byBiz('expenses'),
+    byBiz('services'),
     byBiz('contacts'),
     byBiz('team_activity_logs'),
     byBiz('memberships'),
@@ -179,7 +182,7 @@ async function cleanup() {
 }
 
 async function clearData() {
-  for (const table of ['invoices', 'expenses']) {
+  for (const table of ['bookings', 'projects', 'invoices', 'expenses', 'services']) {
     await db.$executeRawUnsafe(`DELETE FROM ${table} WHERE business_id LIKE ${sqlLikePrefix(P)}`);
   }
   await db.$executeRawUnsafe(`DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)} AND id <> $1`, ID.payer);
@@ -495,7 +498,15 @@ describe('FU-STRATEGIC-ROUTES-SIGHT (D-100, D-234, D-146): the strategic routes 
     await clearData();
     try {
       await seed();
+      // Review round 3 (CR3-3): a booking and a project for the contact, so the other links are proven kept.
+      await db.service.create({ data: { id: `${P}svc`, businessId: ID.biz, name: 'V72S Cut', price: 100, duration: 60 } });
+      const start = new Date(Date.now() + 2 * DAY);
+      await db.booking.create({ data: { id: `${P}bk`, businessId: ID.biz, contactId: ID.payer, serviceId: `${P}svc`, startTime: start, endTime: new Date(start.getTime() + 3_600_000) } });
+      await db.project.create({ data: { id: `${P}prj`, businessId: ID.biz, name: 'V72S fit-out', contactId: ID.payer } });
       const route = `/ai/cross-module-links?entityType=contact&entityId=${ID.payer}`;
+      const ownerLinks = await ok('owner', route);
+      expect(ownerLinks.bookings.map((b: any) => b.id), 'control').toEqual([`${P}bk`]);
+      expect(ownerLinks.projects.map((x: any) => x.id), 'control').toEqual([`${P}prj`]);
       for (const reader of ['owner', 'revenue', 'revnoexp'] as Reader[]) {
         const body = await ok(reader, route);
         expect(body.invoices.length, `${reader} control`).toBe(3);
@@ -504,7 +515,8 @@ describe('FU-STRATEGIC-ROUTES-SIGHT (D-100, D-234, D-146): the strategic routes 
       for (const reader of NO_REVENUE) {
         const body = await ok(reader, route);
         expect(body.invoices, reader).toEqual([]);
-        expect(Array.isArray(body.bookings) && Array.isArray(body.projects), `${reader} keeps the other links`).toBe(true);
+        expect(body.bookings, `${reader} keeps the bookings`).toEqual(ownerLinks.bookings);
+        expect(body.projects, `${reader} keeps the projects`).toEqual(ownerLinks.projects);
         for (const marker of ['3341', '4000', `${ID.payer}-od1`, 'SENT', 'PAID']) expect(text(body), `${reader} ${marker}`).not.toContain(marker);
       }
       const other = await agent().get(`/ai/businesses/${ID.biz}${route}`).set(HEADER, ID.other).set('x-forwarded-for', nextIp());
