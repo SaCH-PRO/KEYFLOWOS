@@ -3819,6 +3819,15 @@ ${triage.standingContext}`;
         if (isNaN(num)) throw new BadRequestException(`Field "${key}" for ${toolName} must be a number`);
         args[key] = num;
       }
+      // W11-KEY-TRANSFER-INTEGER: 'integer' reads a number or a numeric string as the 'number'
+      // branch does, then requires a whole number, so the schema and the route refuse the same thing.
+      if (schema.type === 'integer') {
+        const num = typeof value === 'number' ? value : Number(value);
+        if (typeof value === 'boolean' || (typeof value === 'string' && value.trim() === '') || !Number.isInteger(num)) {
+          throw new BadRequestException(`Field "${key}" for ${toolName} must be a whole number`);
+        }
+        args[key] = num;
+      }
       if (schema.type === 'boolean' && typeof value !== 'boolean') {
         if (value === 'true') args[key] = true;
         else if (value === 'false') args[key] = false;
