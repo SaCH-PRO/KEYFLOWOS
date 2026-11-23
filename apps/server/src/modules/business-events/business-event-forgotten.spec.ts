@@ -82,12 +82,17 @@ describe('BusinessEventService: a forgotten person is dropped on every write pat
   });
 });
 
-describe('contactIdsOfEvent: the keys that name a contact (V1-72 review round 2)', () => {
-  it('reads contactId, fromContactId, toContactId and targetContactId at the top level of before and after', () => {
+describe('contactIdsOfEvent: only server-derived data names a contact (V1-72 review round 2, SEC-1)', () => {
+  it('reads the subject, contactId/fromContactId/toContactId/targetContactId of the after snapshot, and the route contactId', () => {
     expect(contactIdsOfEvent({
       subjectType: 'contact', subjectId: 'rel_1',
-      before: { toContactId: 'c_to' },
-      after: { contactId: 'c_1', fromContactId: 'c_from', targetContactId: 'c_target' },
-    }).sort()).toEqual(['c_1', 'c_from', 'c_target', 'c_to', 'rel_1']);
+      before: { toContactId: 'c_planted', contactId: 'c_planted2' },
+      after: { contactId: 'c_1', fromContactId: 'c_from', toContactId: 'c_to', targetContactId: 'c_target' },
+      metadata: { routeContactId: 'c_route' },
+    }).sort()).toEqual(['c_1', 'c_from', 'c_route', 'c_target', 'c_to', 'rel_1']);
+  });
+
+  it('never reads the request body (before): a planted key names no one', () => {
+    expect(contactIdsOfEvent({ subjectType: 'invoice', subjectId: 'inv_1', before: { contactId: 'c_planted' }, after: { id: 'inv_1' } })).toEqual([]);
   });
 });

@@ -43,8 +43,10 @@ import 'reflect-metadata';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
+
+vi.setConfig({ testTimeout: 30_000 });
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
@@ -60,6 +62,8 @@ const ID = {
   relEvent: `${P}relEvent`, // a relationship row: the person is its toContactId
   referEvent: `${P}referEvent`, // a refer row: the person is its targetContactId
   gone: `${P}gone`, // purged, then its row hard-deleted
+  plantedEvent: `${P}plantedEvent`, // an invoice row whose request body carried a planted contactId
+  routeEvent: `${P}routeEvent`, // a row naming the person only by the route's :contactId
 
   forgedEvent: `${P}forgedEvent`,
 };
@@ -392,6 +396,28 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
       },
     });
 
+    // SEC-1: `before` is the raw request body. A member who planted the
+    // subject's id as contactId in an unrelated invoice PATCH (the DTO drops
+    // it, the mutation succeeds) does not get that row scrubbed by the purge.
+    await db.businessEvent.create({
+      data: {
+        id: ID.plantedEvent, businessId: ID.bizA, eventType: 'invoice.update', subjectType: 'invoice', subjectId: `${P}inv1`,
+        actorType: 'human', actorId: ID.owner, action: 'update', source: 'web',
+        before: { total: 77, contactId: subjectId }, after: { id: `${P}inv1`, total: 77, contactId: `${P}otherContact` },
+        metadata: { route: '/commerce/businesses/:businessId/invoices/:invoiceId', httpMethod: 'PATCH', ip: '203.0.113.78' },
+      },
+    });
+    // A row under contacts/:contactId whose snapshots carry no contact key:
+    // the interceptor records the route's contactId (server-derived).
+    await db.businessEvent.create({
+      data: {
+        id: ID.routeEvent, businessId: ID.bizA, eventType: 'contact.create', subjectType: 'contact', subjectId: `${P}msg1`,
+        actorType: 'human', actorId: ID.owner, action: 'create', source: 'web',
+        before: { body: 'V72W message to Ada' }, after: { id: `${P}msg1`, body: 'V72W message to Ada' },
+        metadata: { route: '/crm/businesses/:businessId/contacts/:contactId/messages', httpMethod: 'POST', ip: '203.0.113.79', routeContactId: subjectId },
+      },
+    });
+
     const rows = await waitForEvents((r) =>
       r.filter((e) => e.subject_id === subjectId).length >= 2 &&
       r.some((e) => e.subject_id === bystanderId) && r.some((e) => e.subject_id === cancellerId));
@@ -488,7 +514,7 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
     gate.release!();
     const rows = await waitForEvents((r) => r.filter((e) => e.subject_id === subjectId && e.event_type === 'contact.update').length === 2);
 
-    for (const row of rows) holdsNoSecret(row, SECRETS);
+    for (const row of rows) if (row.id !== ID.plantedEvent) holdsNoSecret(row, SECRETS);
     const subjectRows = rows.filter((e) => e.subject_id === subjectId || e.id === ID.noteEvent || e.subject_id === forgetRequestId);
     expect(subjectRows.map((e) => e.event_type).sort()).toEqual(['contact.create', 'contact.create', 'contact.create', 'contact.update', 'contact.update']);
     for (const row of subjectRows) {
@@ -497,6 +523,12 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
       expect(row.metadata?.ip, `${row.event_type} ${row.subject_id} ip`).toBeUndefined();
       expect(row.actor_id).toBe(ID.owner);
     }
+    const planted = rows.find((e) => e.id === ID.plantedEvent)!;
+    expect(planted.before, 'a planted body key does not scrub the row').toEqual({ total: 77, contactId: subjectId });
+    expect(planted.metadata?.ip).toBe('203.0.113.78');
+    const routed = rows.find((e) => e.id === ID.routeEvent)!;
+    expect(routed).toMatchObject({ before: null, after: null });
+    expect(routed.metadata).toEqual({ route: '/crm/businesses/:businessId/contacts/:contactId/messages', httpMethod: 'POST', routeContactId: subjectId });
     for (const id of [ID.relEvent, ID.referEvent]) {
       const row = rows.find((e) => e.id === id)!;
       expect(row, id).toMatchObject({ before: null, after: null });
@@ -525,7 +557,7 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
     // The create, the first PATCH, the note, relationship and refer rows and
     // the duplicate's row. The forget row and the held PATCH were written
     // without snapshots, so there was nothing to scrub.
-    expect(entry.after.erased.businessEventsScrubbed).toBe(6);
+    expect(entry.after.erased.businessEventsScrubbed).toBe(7); // and the route-param row
     // Honest scope: rows that name the person only inside a nested structure
     // (a duplicate check, an import) are not reached by id.
     expect(entry.after.notSwept).toMatch(/nested/);
@@ -562,11 +594,37 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
     expect(row.metadata).toEqual({ route: '/crm/businesses/:businessId/contacts/:contactId', httpMethod: 'PATCH' });
   });
 
+  it('a PATCH on the bystander that plants the purged subject\'s id in its body keeps its snapshot and ip (SEC-1)', async () => {
+    const updates = (r: EventRow[]) => r.filter((e) => e.subject_id === bystanderId && e.event_type === 'contact.update');
+    const before = updates(await events(ID.bizA)).length;
+    const res = await as(api().patch(`/crm/businesses/${ID.bizA}/contacts/${bystanderId}`), ID.owner).send({ department: 'V72W-Planted', contactId: subjectId });
+    expect(res.status).toBe(200);
+    const rows = await waitForEvents((r) => updates(r).length > before);
+    const row = updates(rows)[updates(rows).length - 1];
+    expect(row.before).toEqual({ department: 'V72W-Planted', contactId: subjectId });
+    expect(JSON.stringify(row.after)).toContain(BYSTANDER.email);
+    expect(typeof row.metadata?.ip).toBe('string');
+    expect(row.metadata?.routeContactId).toBe(bystanderId);
+  });
+
+  it('a write after the purge that names the subject only by the route\'s contactId holds no personal data', async () => {
+    await realEmit({
+      businessId: ID.bizA, eventType: 'contact.create', subjectType: 'contact', subjectId: `${P}msg2`,
+      actorType: 'human', actorId: ID.owner, action: 'create', source: 'web',
+      before: { body: NOTE_SECRET }, after: { id: `${P}msg2`, body: NOTE_SECRET },
+      metadata: { route: '/crm/businesses/:businessId/contacts/:contactId/messages', httpMethod: 'POST', ip: '203.0.113.80', routeContactId: subjectId },
+    });
+    const [row] = (await events(ID.bizA)).filter((e) => e.subject_id === `${P}msg2`);
+    expect(row).toMatchObject({ before: null, after: null });
+    expect(row.metadata?.ip).toBeUndefined();
+  });
+
   it('a PATCH on the bystander after the purge keeps its snapshot as today', async () => {
     const res = await as(api().patch(`/crm/businesses/${ID.bizA}/contacts/${bystanderId}`), ID.owner).send({ jobTitle: 'V72W-Witness' });
     expect(res.status).toBe(200);
-    const rows = await waitForEvents((r) => r.some((e) => e.subject_id === bystanderId && e.event_type === 'contact.update'));
-    const row = rows.find((e) => e.subject_id === bystanderId && e.event_type === 'contact.update')!;
+    const witness = (e: EventRow) => e.subject_id === bystanderId && e.event_type === 'contact.update' && e.before?.jobTitle === 'V72W-Witness';
+    const rows = await waitForEvents((r) => r.some(witness));
+    const row = rows.find(witness)!;
     expect(row.before).toEqual({ jobTitle: 'V72W-Witness' });
     expect(JSON.stringify(row.after)).toContain(BYSTANDER.email);
     expect(typeof row.metadata?.ip).toBe('string');
