@@ -381,7 +381,8 @@ describe("MOUNT-QUOTES: Sales > Quotes mounts the quotes panel", () => {
     expect(screen.queryAllByText("ACCEPTED")).toEqual([]);
     expect(screen.getAllByText("Accepted").length).toBeGreaterThan(0);
     expect(screen.getAllByText("TTD 1,066.00").length).toBeGreaterThan(0);
-    expect(screen.getByText("Expires")).toBeInTheDocument();
+    // The detail lays its dates out twice (the compact and the full panes).
+    expect(screen.getAllByText("Expires").length).toBeGreaterThan(0);
   });
 
   it("QPM-08 RED-BEFORE: the detail re-reads the quote from the list, so an accept or a refresh is what it shows", () => {
