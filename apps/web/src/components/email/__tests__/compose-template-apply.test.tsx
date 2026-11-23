@@ -18,7 +18,8 @@
  * route, and its subject is fixed; an error it answers is shown and keeps the
  * composer open. Other contexts are untouched.
  *
- *   CTA-01  RED-BEFORE  quote context, no subject: subject "Quote #Q-7 from Acme Bakery", body carries the link
+ *   CTA-01  RED-BEFORE  quote context, no subject: subject "Quote #Q-7 from Acme Bakery", body carries the link;
+ *                       the text handed to `send` does not (review SEC-MQ-1: the request body is audited)
  *   CTA-02  RED-BEFORE  `send` is called per recipient with subject, htmlBody and text; onSent then onClose; no Gmail call
  *   CTA-03  control     an invoice context without `send` goes to the Gmail route with the caller's subject, as before
  *   CTA-04  RED-BEFORE  a quote context with no link says the link is in the email and carries no URL
@@ -98,9 +99,15 @@ describe("MOUNT-QUOTES: the Send Quote compose", () => {
     expect(draft.htmlBody).toContain('href="https://app.keyflow.test/quote/tok_v1mq"');
     expect(draft.htmlBody).toContain("Q-7");
     expect(draft.htmlBody).toContain("Ana Lee");
-    expect(draft.text).toContain("https://app.keyflow.test/quote/tok_v1mq");
+    // Review SEC-MQ-1: the text that goes to the document's route (and so into
+    // the audited request body) never carries the bearer link; the route adds
+    // the link itself. The member still sees it in the composer body.
+    expect(draft.text).not.toContain("https://app.keyflow.test/quote/tok_v1mq");
+    expect(draft.text).not.toMatch(/https?:\/\//);
+    expect(draft.text).not.toMatch(/view and accept it here/i);
     expect(draft.text).not.toMatch(/<[a-z/]/i);
     expect(draft.text).toMatch(/Hi Ana Lee,\n/);
+    expect(draft.text).toMatch(/Q-7/);
   });
 
   it("CTA-02 RED-BEFORE: `send` is called once per recipient and nothing goes to the Gmail route; onSent then onClose", async () => {

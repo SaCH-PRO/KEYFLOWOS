@@ -36,6 +36,8 @@
  *   QPM-10  RED-BEFORE  Send via email on a sent quote opens the composer with the template context
  *                       (business name, the token link) and a send that posts to send-email
  *   QPM-11  RED-BEFORE  the detail's Send Quote on a draft sends by email (no bare status flip)
+ *   QPM-12  RED-BEFORE  the detail's envelope offers Send via email for a draft or sent quote only, as the row
+ *                       menu does (review SEC-MQ-3: an accepted quote's accept link is not re-emailed from here)
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import React, { useEffect, useState } from "react";
@@ -455,5 +457,16 @@ describe("MOUNT-QUOTES: Sales > Quotes mounts the quotes panel", () => {
     await prefill.send!({ to: "ana@example.test", subject: "s", htmlBody: "<p>See attached</p>", text: "See attached" });
     expect(server.of((c) => c.path.endsWith("/quotes/q_draft/send-email"))).toHaveLength(1);
     await waitFor(() => expect(holder.quotes[0]!.status).toBe("SENT"));
+  });
+
+  it("QPM-12 RED-BEFORE: the detail's envelope offers Send via email for a draft or sent quote only", () => {
+    installServer();
+    for (const [q, offered] of [[DRAFT, true], [SENT, true], [ACCEPTED, false]] as const) {
+      renderPanel([q]);
+      fireEvent.click(screen.getAllByText(q.quoteNumber)[0]!);
+      const detail = screen.getByTestId("quote-detail");
+      expect(within(detail).queryByTitle("Send via email") !== null, q.status).toBe(offered);
+      cleanup();
+    }
   });
 });
