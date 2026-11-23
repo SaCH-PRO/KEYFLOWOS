@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { Logger } from '@nestjs/common';
 import { LangfuseService } from './langfuse.service';
 import { errorRegistry } from '../../core/observability/error-registry';
 
@@ -37,6 +38,7 @@ describe('LangfuseService', () => {
 
   afterEach(() => {
     expect(unstubbedFetchCalls, 'a case let fetch through unstubbed').toBe(0);
+    expect(vi.isMockFunction(globalThis.fetch), 'a case restored the real fetch').toBe(true);
     process.env = { ...savedEnv };
     vi.restoreAllMocks();
   });
@@ -233,6 +235,54 @@ describe('LangfuseService', () => {
       process.off('unhandledRejection', onUnhandled);
     }
     expect(unhandled).toEqual([]);
+  });
+
+  it('review round 1: a non-integer or non-finite latency never throws into the gateway; the export still goes out with whole milliseconds', async () => {
+    // BigInt() throws on 12.7 and NaN; a synchronous throw here would skip the cost write that follows traceLlmCall.
+    withKeys();
+    vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 200 }));
+    const svc = new LangfuseService();
+    expect(() => svc.traceLlmCall({ ...sampleCall(), latencyMs: 12.7 })).not.toThrow();
+    expect(() => svc.traceLlmCall({ ...sampleCall(), latencyMs: Number.NaN })).not.toThrow();
+    await flush();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(svc.exportFailures).toBe(0);
+    const first = spanOf(JSON.parse((vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string));
+    expect(BigInt(first.endTimeUnixNano) - BigInt(first.startTimeUnixNano)).toBe(13n * 1_000_000n);
+    expect(attrs(first)['key.latency_ms']).toBe(13);
+    const second = spanOf(JSON.parse((vi.mocked(fetch).mock.calls[1][1] as RequestInit).body as string));
+    expect(second.startTimeUnixNano).toBe(second.endTimeUnixNano);
+    expect(attrs(second)['key.latency_ms']).toBe(0);
+  });
+
+  it('review round 1: non-finite token counts and cost are sent as 0, never as NaN, Infinity or null', async () => {
+    withKeys();
+    vi.mocked(fetch).mockResolvedValue(new Response(null, { status: 200 }));
+    new LangfuseService().traceLlmCall({ ...sampleCall(), promptTokens: Number.NaN, completionTokens: Number.POSITIVE_INFINITY, totalCost: Number.NaN });
+    await flush();
+    const raw = (vi.mocked(fetch).mock.calls[0][1] as RequestInit).body as string;
+    expect(raw).not.toMatch(/NaN|Infinity|null/);
+    const a = attrs(spanOf(JSON.parse(raw)));
+    expect(a['gen_ai.usage.input_tokens']).toBe(0);
+    expect(a['gen_ai.usage.output_tokens']).toBe(0);
+    expect(a['gen_ai.usage.cost']).toBe(0);
+  });
+
+  it('review round 1: the warn log names the failure class, not the raw error text (a credentialed base URL echoed by fetch stays out of the container log)', async () => {
+    withKeys('https://pk-user:sk-pass@lf.example.com');
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    vi.mocked(fetch).mockRejectedValue(new TypeError('Request cannot be constructed from a URL that includes credentials: https://pk-user:sk-pass@lf.example.com/api/public/otel/v1/traces'));
+    const svc = new LangfuseService();
+    svc.traceLlmCall(sampleCall());
+    await flush();
+    expect(svc.exportFailures).toBe(1);
+    const logged = warn.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(logged).toMatch(/Langfuse export failed \(TypeError\)/);
+    expect(logged).not.toMatch(/sk-pass|pk-user|lf\.example\.com/);
+    // the registry keeps the detail, redacted by its own rules
+    const entry = errorRegistry.snapshot(200).entries.find((e) => e.label === 'langfuse.export' && /credentials/.test(e.message));
+    expect(entry).toBeDefined();
+    expect(entry!.message).not.toMatch(/sk-pass/);
   });
 
   it('the legacy ingestion batch endpoint is gone from the module', () => {
