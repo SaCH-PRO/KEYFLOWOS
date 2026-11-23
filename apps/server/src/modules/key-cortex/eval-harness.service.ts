@@ -263,22 +263,28 @@ export class EvalHarnessService {
     this.registerSuite({
       name: 'memory-retrieval-precision',
       description:
-        'Shape only: UnifiedMemoryRetrievalService returns a ranked list. Precision itself is measured by MEM-EVAL-SUITE (D-257), so this assertion is INDETERMINATE, never PASS.',
+        'Shape only: UnifiedMemoryRetrievalService returns a ranked list. A malformed list FAILS; a well-formed or empty one is INDETERMINATE, never PASS, because precision itself is measured by MEM-EVAL-SUITE (D-257).',
       assertions: [
         {
           name: 'retrieval returns an array with rank scores (shape only; precision is measured by MEM-EVAL-SUITE)',
           run: async () => {
             if (!this.unifiedMemory) throw new EvalNotRunError('UnifiedMemoryRetrievalService');
-            const fragments = await this.unifiedMemory.retrieveContext('eval_biz', {
+            const fragments: unknown = await this.unifiedMemory.retrieveContext('eval_biz', {
               query: 'quarterly revenue',
               limit: 5,
             });
-            const wellFormed = Array.isArray(fragments) && fragments.every((f) => typeof f.rankScore === 'number');
+            // A broken shape is a broken result, not missing data: FAIL through check().
+            if (!Array.isArray(fragments)) return { wellFormed: false, reason: 'not an array' };
+            const malformed = fragments.findIndex(
+              (f) => typeof f !== 'object' || f === null || typeof (f as { rankScore?: unknown }).rankScore !== 'number',
+            );
+            if (malformed >= 0) return { wellFormed: false, reason: `entry ${malformed} has no numeric rankScore` };
+            // The shape holds (empty lists included): precision cannot be judged here.
             throw new EvalIndeterminateError(
-              `shape only (${wellFormed ? 'well-formed' : 'malformed'} ranked list); precision is measured by MEM-EVAL-SUITE`,
+              `shape only (well-formed ranked list of ${fragments.length}); precision is measured by MEM-EVAL-SUITE`,
             );
           },
-          check: () => false,
+          check: (r: any) => r.wellFormed,
         },
       ],
     });
