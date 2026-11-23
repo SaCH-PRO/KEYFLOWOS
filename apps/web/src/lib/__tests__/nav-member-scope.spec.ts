@@ -370,16 +370,16 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
       }
       return sf;
     };
-    /** A decorator's name and its first argument when that is a plain string ('' for no argument; null otherwise). */
     /**
      * A decorator as a call: its name (the last part of a qualified callee such as Nest.Get), whether the callee was
      * qualified, and its first argument when that is a plain string ('' for no argument; null otherwise). Null when
      * the decorator is not a call of a name at all.
      */
+    const unparen = (e: ts.Expression): ts.Expression => (ts.isParenthesizedExpression(e) ? unparen(e.expression) : e);
     const decoratorCall = (d: ts.Decorator): { name: string; qualified: boolean; arg: string | null } | null => {
-      const e = ts.skipParentheses(d.expression);
+      const e = unparen(d.expression);
       if (!ts.isCallExpression(e)) return null;
-      const callee = ts.skipParentheses(e.expression);
+      const callee = unparen(e.expression);
       const name = ts.isIdentifier(callee) ? callee.text : ts.isPropertyAccessExpression(callee) ? callee.name.text : null;
       if (name === null) return null;
       const first = e.arguments[0];
@@ -417,9 +417,39 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
       return inScope[0].member;
     };
     /**
+     * The decorators a cited GET handler may carry: every name found on a GET handler in the server today. A closed
+     * list, so a scope decorator under another name (an alias, applyDecorators, a wrapper) fails closed (closing
+     * review round 2). Adding a name is a review decision about whether it can set the module scope.
+     */
+    const KNOWN_DECORATORS = new Set(["Get", "UseGuards", "RequireModuleScope", "RateLimit", "CrmRateLimit", "PublicRateLimit", "ShadowEffectiveAuthority", "Header", "HttpCode", "RequireFeature"]);
+    /** What can set the module scope: renaming any of these on import could hide it under another name. */
+    const SCOPE_CAPABLE = new Set(["RequireModuleScope", "SetMetadata", "applyDecorators", "MODULE_SCOPE_KEY", "ModuleScopeGuard"]);
+    /**
+     * Why a cited file cannot be read with certainty, or null: an import renames something that can set the scope or
+     * binds a known decorator name to something else, a namespace import, a local declaration of a known decorator
+     * name, or the file names the scope metadata key, its value, or Reflect metadata writes (scope set outside the
+     * handler's own decorators).
+     */
+    const unreadableFile = (file: string): string | null => {
+      const sf = parse(file);
+      let why: string | null = null;
+      const visit = (node: ts.Node) => {
+        if (why) return;
+        if (ts.isImportSpecifier(node) && node.propertyName && (SCOPE_CAPABLE.has(node.propertyName.text) || KNOWN_DECORATORS.has(node.name.text))) why = `renamed import ${node.getText()}`;
+        else if (ts.isNamespaceImport(node)) why = `namespace import ${node.getText()}`;
+        else if ((ts.isVariableDeclaration(node) || ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) && node.name && ts.isIdentifier(node.name) && KNOWN_DECORATORS.has(node.name.text)) why = `local ${node.name.text}`;
+        else if (ts.isIdentifier(node) && (node.text === "MODULE_SCOPE_KEY" || node.text === "defineMetadata")) why = `scope metadata written outside a decorator (${node.text})`;
+        else if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && node.text === "module_scope") why = "scope metadata key named outside a decorator";
+        ts.forEachChild(node, visit);
+      };
+      visit(sf);
+      return why;
+    };
+    /**
      * Why a handler's decorators cannot be read with certainty, or null. Anything this check cannot read fails
-     * closed (closing review): a decorator that is not a call of a plain name, a qualified or aliased scope, a scope
-     * whose module is not a literal, or a raw SetMetadata (which may set the module scope key directly).
+     * closed (closing reviews): a decorator that is not a call of a plain name, a qualified decorator, a name outside
+     * KNOWN_DECORATORS (an aliased or composed scope, a raw SetMetadata), a scope whose module is not a literal, or a
+     * file that can set the scope some other way (unreadableFile).
      */
     const unreadable = (member: ts.ClassElement): string | null => {
       for (const d of decoratorsOf(member)) {
@@ -427,10 +457,10 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
         const text = d.getText();
         if (!call) return `unreadable decorator ${text}`;
         if (call.qualified) return `qualified decorator ${text}`;
-        if (call.name === "SetMetadata" || /MODULE_SCOPE_KEY/.test(text)) return `raw metadata decorator ${text}`;
+        if (!KNOWN_DECORATORS.has(call.name)) return `unlisted decorator ${text}`;
         if (call.name === "RequireModuleScope" && call.arg === null) return `non-literal scope ${text}`;
       }
-      return null;
+      return unreadableFile(member.getSourceFile().fileName);
     };
     /** The modules a handler's own @RequireModuleScope decorators name (each a literal, by unreadable()). */
     const scopesOf = (member: ts.ClassElement) =>
