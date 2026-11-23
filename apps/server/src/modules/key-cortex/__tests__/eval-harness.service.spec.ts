@@ -196,6 +196,32 @@ describe('EvalHarnessService: no vacuous pass (RR-EVAL-HARNESS-NO-VACUOUS)', () 
     expect((await without.runSuite('memory-retrieval-precision')).assertions[0].status).toBe('NOT_RUN');
   });
 
+  it('memory-retrieval-precision FAILS on a malformed ranked list (non-numeric rankScore, a non-array); only the empty and the well-formed lists are INDETERMINATE', async () => {
+    // Orchestrator repair note (comment 7094172436): a failed shape check means the result is
+    // broken, not that the data is missing. Before this fix every outcome was INDETERMINATE.
+    const withMemory = (retrieveContext: () => Promise<unknown>) =>
+      new EvalHarnessService(mockAutonomyOrchestrator as any, mockConstitutionValues as any, { retrieveContext } as any, mockPlanEngine as any);
+
+    const nonNumeric = await withMemory(async () => [{ id: 'm1', rankScore: 'high' }]).runSuite('memory-retrieval-precision');
+    expect(nonNumeric.assertions[0]).toMatchObject({ status: 'FAIL', passed: false });
+    expect(nonNumeric.failed).toBe(1);
+    expect(nonNumeric.indeterminate).toBe(0);
+    expect(nonNumeric.green).toBe(false);
+
+    const missingScore = await withMemory(async () => [{ id: 'm1', rankScore: 0.9 }, { id: 'm2' }]).runSuite('memory-retrieval-precision');
+    expect(missingScore.assertions[0].status).toBe('FAIL');
+
+    const notAList = await withMemory(async () => null).runSuite('memory-retrieval-precision');
+    expect(notAList.assertions[0].status).toBe('FAIL');
+
+    const empty = await withMemory(async () => []).runSuite('memory-retrieval-precision');
+    expect(empty.assertions[0].status).toBe('INDETERMINATE');
+    expect(empty.assertions[0].error ?? '').toMatch(/MEM-EVAL-SUITE/);
+
+    const wellFormed = await wired().runSuite('memory-retrieval-precision');
+    expect(wellFormed.assertions[0].status).toBe('INDETERMINATE');
+  });
+
   it('a harness-side throw is ERROR, distinct from FAIL and NOT_RUN, and the suite is not green', async () => {
     const harness = wired();
     harness.registerSuite({
