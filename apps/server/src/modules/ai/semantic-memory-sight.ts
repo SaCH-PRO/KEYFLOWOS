@@ -4,6 +4,8 @@ import type { CanonicalModule } from '../../core/authority/module-vocabulary';
 import {
   EVENT_MODULES,
   modulesNamedBy,
+  promptMemoryReader,
+  readersModuleSight,
   readsDocumentExtractions,
   type ModuleSight,
 } from '../key-cortex/key-cortex-prompt-context.service';
@@ -151,6 +153,49 @@ export function aiMemoryRowVisibleTo(
   // A document extraction keeps its own rule (MEM-DOC-EXTRACTION-SIGHT: revenue read).
   const expense = row.category !== DOCUMENT_EXTRACTION_CATEGORY && [row.category, row.key, row.value, copyContent].some(textIsExpense);
   return (!money || readsDocumentExtractions(who.sight, who.reader)) && (!expense || (who.reader !== null && who.sight('expenses')));
+}
+
+/**
+ * MEM-PATTERNS-SIGHT (security review F1), shared by FU-CORTEX-PATTERNS-SIGHT: whether a reader may read every pattern,
+ * whatever it states: a member reader with revenue read (readsDocumentExtractions) and expenses read, the two sights
+ * aiMemoryRowVisibleTo asks for. A memory read for any other reader passes aiMemoryPatterns: false.
+ */
+export function readsEveryPattern(reader: string | null, sight: ModuleSight): boolean {
+  return reader !== null && readsDocumentExtractions(sight, reader) && sight('expenses');
+}
+
+/**
+ * FU-CORTEX-PATTERNS-SIGHT (P0; D-257, D-100, D-234): which AiMemory 'patterns' rows a prompt read for `userId` may carry
+ * (AiMemoryService.buildContextBlock's patternVisible), by the flow chat's rule (MEM-PATTERNS-SIGHT's
+ * turnPatternVisibility) for a turn with no staff position: no requester (a plan no member asked for), no pattern at
+ * all; otherwise each row by aiMemoryRowVisibleTo for the requester while a member (promptMemoryReader) and their module
+ * sight (readersModuleSight); a requester who is no member keeps only the rows that state neither money nor an expense.
+ * A membership or scope read that fails is caught inside those two helpers (no reader, no module), so it too keeps only
+ * the rows that state neither, as turnPatternVisibility does over the same helpers. A caller built without its database
+ * client (a wiring fault, logged), or any other failure here, keeps no pattern (fail closed). The intent parser and the
+ * planner use it.
+ */
+export async function promptPatternVisibility(
+  prisma: PrismaService | undefined,
+  businessId: string,
+  userId: string | null | undefined,
+  logger: Pick<Logger, 'warn'>,
+  logTag: string,
+): Promise<(row: { category: string; key: string; value: string }) => boolean> {
+  if (!userId) return () => false;
+  if (!prisma) {
+    // Review round 1 (security finding 2): no client reads no membership, so no sight: said loudly, it is a wiring fault.
+    logger.warn(`[${logTag}][${businessId}] no database client: no reader sight, no pattern served (wiring fault)`);
+    return () => false;
+  }
+  try {
+    const reader = await promptMemoryReader(prisma, businessId, userId, logger, logTag);
+    const sight = await readersModuleSight(prisma, businessId, reader, logger, logTag);
+    return (row) => aiMemoryRowVisibleTo(row, { reader, sight });
+  } catch (err: unknown) {
+    logger.warn(`[${logTag}][${businessId}] reader sight unresolved, no pattern served: ${err instanceof Error ? err.message : String(err)}`);
+    return () => false;
+  }
 }
 
 /**

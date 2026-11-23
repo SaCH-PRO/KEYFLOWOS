@@ -15,7 +15,7 @@ import {
   CortexSession,
 } from './key-cortex.types';
 import { GatewayMessage } from '../ai/model-gateway.service';
-import { readerSearchOptions } from '../ai/semantic-memory-sight';
+import { readerSearchOptions, readsEveryPattern } from '../ai/semantic-memory-sight';
 
 /** How many memory fragments a cortex chat prompt carries. */
 const PROMPT_MEMORY_FRAGMENTS = 15;
@@ -952,6 +952,13 @@ export class KeyCortexPromptContextService {
           // MEM-UNIFIED-SEMANTIC-SIGHT (D-257, D-234): the semantic hits of the turn's query pass MEM-SEMANTIC-SIGHT's reader
           // projection before the read's limit (no database client: no sight, so no semantic hit).
           ...(this.prisma ? { semanticSight: readerSearchOptions(this.prisma, businessId, { reader, sight }, this.logger) } : {}),
+          // FU-CORTEX-PATTERNS-SIGHT (D-257, D-100, D-234): the behavioural patterns state money ("N overdue invoices
+          // totaling X") or an expense in their text, and readersOwnPromptMemory names no module for an AiMemory row. A
+          // reader who may not read every pattern (readsEveryPattern: a member reader with revenue and expenses read) reads
+          // no pattern row, unread so that none takes another row's place, as the flow chat's perception block reads them.
+          // A pattern's semantic copy is still judged row by row (semanticSight above: aiMemoryRowVisibleTo), so a copy
+          // that states neither money nor an expense may still reach them.
+          aiMemoryPatterns: readsEveryPattern(reader, sight),
         });
         const kept = await readersOwnPromptMemory(
           this.prisma,
