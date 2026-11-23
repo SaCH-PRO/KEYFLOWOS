@@ -42,7 +42,17 @@
  *   NMS-18 orchestrator acceptance M1 (D-179 fully enforced): a legacy bookkeeper {revenue: write, expenses: write}
  *          with no operations entry sees none of Payroll, Approvals, Performance, Data Inbox, Inbox (KEY), Contracts
  *          or WhatsApp; and every nav entry names the module(s) its page's server reads require, cross-checked row by
- *          row against the controller's @RequireModuleScope (file:line), so an entry added without a row fails.
+ *          row against the cited controller's @RequireModuleScope, so an entry added without a row fails. A claim
+ *          names the controller file and the route (GET + declared path, with its class when ambiguous) or an
+ *          identifier, never a line, and the checker reads the file through the TypeScript parser: it fails when the
+ *          route is missing or ambiguous, its scope differs from the claim, or a tracked identifier disappears, and it
+ *          fails closed on anything in a cited file it cannot read with certainty (see unreadable, unreadableFile,
+ *          findRoute).
+ *          Documented limits (orchestrator ruling 2026-11-23): NMS-18 does not read (1) code defined in another file
+ *          (an imported decorator's, class's or function's definition, which may run at load) or (2) metadata written
+ *          inside a function or method body when it runs. The server guard is the boundary; FU-NMS-SERVER-METADATA
+ *          (a server spec reading MODULE_SCOPE_KEY and the route table from the compiled controllers for every cited
+ *          route) is the follow-up that holds both.
  *   NMS-09 the desktop menu (Main navigation) shows the hubs as links named by their plain labels, and a products
  *          business's menu names no Schedule (journey A4); a front-desk member's menu offers no Sales, Money, Your
  *          page or Settings hub (J5).
@@ -433,7 +443,7 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
     };
     /**
      * Whether an earlier route takes the cited route's own requests: it is at least as general, every segment the
-     * same or a :param (correctness review round 5: a literal such as items/due declared before items/:id is routine
+     * same or a segment matching any one segment (anyOne; correctness review round 5: a literal such as items/due declared before items/:id is routine
      * Nest ordering and takes only requests whose param equals that literal).
      */
     const shadows = (earlier: string, cited: string) => {
@@ -477,6 +487,15 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
         // a route on a class that is not a controller (a base another class could extend) fails; a route on a member
         // whose name is not a plain identifier fails (Nest registers integer-like names first, whatever their place).
         const isController = decoratorsOf(st).some((c) => decoratorCall(c)?.name === "Controller");
+        // Security review round 7: a second member of the same name replaces the first at runtime and takes its
+        // decorators and its place in Nest's route order, so a name may be declared once (overload signatures aside).
+        const names = new Set<string>();
+        for (const member of st.members) {
+          if (!member.name || ts.isConstructorDeclaration(member) || (ts.isMethodDeclaration(member) && !member.body)) continue;
+          const key = `${ts.getCombinedModifierFlags(member as ts.Declaration) & ts.ModifierFlags.Static ? "static " : ""}${nameText(member.name)}`;
+          if (names.has(key)) return `member ${key} declared twice in ${st.name?.text}`;
+          names.add(key);
+        }
         if (isController && controllerWhy(st)) return controllerWhy(st)!;
         for (const member of st.members) {
           for (const d of decoratorsOf(member)) {
@@ -549,12 +568,13 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
      */
     const SELF_CALLED = new Set(["toString", "valueOf", "toJSON", "then", "onModuleInit", "onApplicationBootstrap", "onModuleDestroy", "beforeApplicationShutdown", "onApplicationShutdown"]);
 
-    /**
-     * Why code that runs at load or construction is not plainly declarative: a call other than a decorator's, new of a
-     * plain name, or LOAD_CALLS; a computed member access; any assignment.
-     */
     /** A member's name as the runtime sees it ('toString' and toString alike). */
     const nameText = (name: ts.Node) => (ts.isIdentifier(name) || ts.isStringLiteralLike(name) || ts.isNumericLiteral(name) || ts.isPrivateIdentifier(name) ? name.text : name.getText());
+    /**
+     * Why code that runs at load or construction is not plainly declarative: a call other than a decorator's, new of a
+     * plain name, or LOAD_CALLS; a computed member access; any write (an assignment, ++ or --, delete, or a for-in/of
+     * whose target is not a fresh declaration).
+     */
     const loadTimeWhy = (node: ts.Node, imported: Map<string, string>, fail: (reason: string) => void) => {
       if (ts.isCallExpression(node)) {
         const callee = node.expression;
@@ -569,7 +589,11 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
       else if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
         // None at all (security review round 6: this.<handler> = ... in a constructor swaps the handler Nest serves).
         fail(`assignment at load or construction: ${node.getText().slice(0, 80)}`);
-      }
+      } else if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) && (node.operator === ts.SyntaxKind.PlusPlusToken || node.operator === ts.SyntaxKind.MinusMinusToken)) {
+        // Security review round 7: an imported table (LEVEL_RANK.none++) is as writable as by assignment.
+        fail(`increment or decrement at load or construction: ${node.getText().slice(0, 80)}`);
+      } else if (ts.isDeleteExpression(node)) fail(`delete at load or construction: ${node.getText().slice(0, 80)}`);
+      else if ((ts.isForInStatement(node) || ts.isForOfStatement(node)) && !ts.isVariableDeclarationList(node.initializer)) fail(`for-in/of writing an existing target at load or construction: ${node.getText().slice(0, 80)}`);
     };
     /** An import's module, as a path under the server src (a package name as written). */
     const resolveImport = (file: string, spec: string) =>
@@ -692,6 +716,25 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
         .map(decoratorCall)
         .filter((c): c is { name: string; qualified: boolean; arg: string } => c?.name === "RequireModuleScope" && c.arg !== null)
         .map((c) => c.arg);
+    /**
+     * Whether the scope guard runs on a handler (security review round 7): ModuleScopeGuard is no app-wide guard, so
+     * it must be named in @UseGuards on the handler or its controller, itself or a class of the file that extends it.
+     */
+    const scopeEnforced = (member: ts.ClassElement) => {
+      const sf = member.getSourceFile();
+      const subclasses = new Set(
+        sf.statements
+          .filter((st): st is ts.ClassDeclaration => ts.isClassDeclaration(st) && !!st.name && !!st.heritageClauses?.some((h) => h.token === ts.SyntaxKind.ExtendsKeyword && h.types.some((t) => t.expression.getText() === "ModuleScopeGuard")))
+          .map((st) => st.name!.text),
+      );
+      const guards = [member, member.parent].flatMap((node) =>
+        decoratorsOf(node).flatMap((d) => {
+          const e = unparen(d.expression);
+          return ts.isCallExpression(e) && ts.isIdentifier(unparen(e.expression)) && (unparen(e.expression) as ts.Identifier).text === "UseGuards" ? e.arguments.filter(ts.isIdentifier).map((a) => a.text) : [];
+        }),
+      );
+      return guards.some((g) => g === "ModuleScopeGuard" || subclasses.has(g));
+    };
     /** Whether a handler carries any @RequireModuleScope at all. */
     const anyScope = (member: ts.ClassElement) => decoratorsOf(member).some((d) => decoratorCall(d)?.name === "RequireModuleScope");
     /**
@@ -729,6 +772,7 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
           }
           const scoped = scopesOf(found);
           if (scoped.length === 0 || !scoped.every((mod) => row.modules.includes(mod))) bad.push(`${href}: ${cite} scopes ${JSON.stringify(scoped)}`);
+          else if (!scopeEnforced(found)) bad.push(`${href}: ${cite}: no ModuleScopeGuard in @UseGuards on the handler or its controller, so its scope is not enforced`);
           scoped.forEach((mod) => justified.add(mod));
         } else if (cite.startsWith("unscoped:") && (m = ROUTE.exec(cite.slice("unscoped:".length)))) {
           const found = findRoute(m[1], m[2], m[3]);
