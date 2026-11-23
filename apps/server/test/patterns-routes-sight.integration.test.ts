@@ -45,6 +45,8 @@ const ID = {
   revnoexp: `${P}revnoexp`,
   /** A platform SUPER_ADMIN with no membership: BusinessGuard admits them. */
   root: `${P}root`,
+  /** STAFF, as blind, who starts no profile interview before V71Y-19 (the interview is cached per member). */
+  blind2: `${P}blind2`,
   biz: `${P}biz`,
   other: `${P}other`,
   otherBiz: `${P}biz2`,
@@ -59,7 +61,7 @@ const BLIND_SCOPES = {
 const REVENUE_SCOPES = { ...BLIND_SCOPES, revenue: 'read', expenses: 'read' };
 const REVENUE_NO_EXPENSES_SCOPES = { ...BLIND_SCOPES, revenue: 'read' };
 
-type Reader = 'owner' | 'blind' | 'revenue' | 'revnoexp' | 'root';
+type Reader = 'owner' | 'blind' | 'revenue' | 'revnoexp' | 'root' | 'blind2';
 const BLIND: Reader[] = ['blind', 'root'];
 
 const TOTAL = '7341';
@@ -278,6 +280,7 @@ beforeAll(async () => {
     [ID.revenue, 'USER'],
     [ID.revnoexp, 'USER'],
     [ID.root, 'SUPER_ADMIN'],
+    [ID.blind2, 'USER'],
     [ID.other, 'USER'],
   ] as const) {
     await db.user.create({ data: { id, email: `${id}@${P}test.local`, role } });
@@ -289,6 +292,7 @@ beforeAll(async () => {
     [ID.blind, ID.biz, 'STAFF', { permissionScopes: BLIND_SCOPES, maxApprovalTier: 0 }],
     [ID.revenue, ID.biz, 'STAFF', { permissionScopes: REVENUE_SCOPES, maxApprovalTier: 0 }],
     [ID.revnoexp, ID.biz, 'STAFF', { permissionScopes: REVENUE_NO_EXPENSES_SCOPES, maxApprovalTier: 0 }],
+    [ID.blind2, ID.biz, 'STAFF', { permissionScopes: BLIND_SCOPES, maxApprovalTier: 0 }],
     [ID.other, ID.otherBiz, 'OWNER', { maxApprovalTier: 4 }],
   ] as const) {
     await db.membership.create({ data: { id: m(userId), userId, businessId, role, ...extra } });
@@ -680,26 +684,41 @@ describe('FU-PATTERNS-ROUTES-SIGHT (D-257, D-100, D-234, D-146): the memory and 
     }
   }, 240_000);
 
-  it("V71Y-18 RED (security review round 6, F-2): the profile interview stores no 'patterns' row and no key over 200 or value over 2,000 characters (or not text): only the bounded goal of the model's extractions is confirmed", async () => {
+  // Correctness review round 7 (COR-R6-4): one interview per leg, so each leg fails on its own assertion at RED.
+  const interviewStores = async (extraction: Record<string, unknown>, ip: string) => {
+    const extractions = [{ topic: 'goals', category: 'goals', key: 'v71y_goal', value: 'Open a second location', confidence: 0.9 }, extraction];
+    profileModel.reply = 'Noted.\n```extract\n' + JSON.stringify(extractions) + '\n```';
+    const chat = await agent().post(`/ai/businesses/${ID.biz}/ai/profile/chat`).set(HEADER, ID.blind).set('x-forwarded-for', ip).send({ message: 'V71Y my goals' });
+    expect(chat.status, text(chat.body).slice(0, 300)).toBe(201);
+    const confirm = await agent().post(`/ai/businesses/${ID.biz}/ai/profile/confirm`).set(HEADER, ID.blind).set('x-forwarded-for', ip).send({});
+    return { status: confirm.status, rows: await db.aiMemory.findMany({ where: { businessId: ID.biz }, select: { category: true, key: true } }) };
+  };
+  it.each([
+    ["a 'patterns' row", { topic: 'goals', category: 'patterns', key: 'v71y_pattern', value: 'Most active day: Monday', confidence: 0.9 }, '10.74.13.1'],
+    ['a key over 200 characters', { topic: 'goals', category: 'goals', key: `v71y_${'k'.repeat(200)}`, value: 'Long key', confidence: 0.9 }, '10.74.13.2'],
+    ['a value over 2,000 characters', { topic: 'goals', category: 'goals', key: 'v71y_long_value', value: 'v'.repeat(2_001), confidence: 0.9 }, '10.74.13.3'],
+    ['a value that is not text', { topic: 'goals', category: 'goals', key: 'v71y_object_value', value: { nested: true }, confidence: 0.9 }, '10.74.13.4'],
+  ])('V71Y-18 RED (security review round 6, F-2): the profile interview does not store %s; the bounded goal beside it is stored', async (_leg, extraction, ip) => {
     await clearMemory();
     try {
-      const extractions = [
-        { topic: 'goals', category: 'goals', key: 'v71y_goal', value: 'Open a second location', confidence: 0.9 },
-        { topic: 'goals', category: 'patterns', key: 'v71y_pattern', value: 'Most active day: Monday', confidence: 0.9 },
-        { topic: 'goals', category: 'goals', key: `v71y_${'k'.repeat(200)}`, value: 'Long key', confidence: 0.9 },
-        { topic: 'goals', category: 'goals', key: 'v71y_long_value', value: 'v'.repeat(2_001), confidence: 0.9 },
-        { topic: 'goals', category: 'goals', key: 'v71y_object_value', value: { nested: true }, confidence: 0.9 },
-      ];
-      // The interview's own block format (ProfileIntelligenceService: a fenced `extract` block at the reply's end).
-      profileModel.reply = 'Noted.\n```extract\n' + JSON.stringify(extractions) + '\n```';
-      const chat = await agent().post(`/ai/businesses/${ID.biz}/ai/profile/chat`).set(HEADER, ID.blind).set('x-forwarded-for', nextIp()).send({ message: 'V71Y my goals' });
-      expect(chat.status, text(chat.body).slice(0, 300)).toBe(201);
-      const confirm = await agent().post(`/ai/businesses/${ID.biz}/ai/profile/confirm`).set(HEADER, ID.blind).set('x-forwarded-for', nextIp()).send({});
-      expect(confirm.status, text(confirm.body)).toBe(201);
-      const rows = await db.aiMemory.findMany({ where: { businessId: ID.biz }, select: { category: true, key: true } });
+      const { status, rows } = await interviewStores(extraction as Record<string, unknown>, ip as string);
+      expect(status).toBe(201);
       expect(rows).toEqual([{ category: 'goals', key: 'v71y_goal' }]);
     } finally {
       profileModel.reply = 'v71y: tell me more.';
+      await clearMemory();
+    }
+  }, 240_000);
+
+  it("V71Y-19 (security review round 7, F-2): GET .../ai/profile/status reports a topic complete only from rows the caller may read: an owner's money goal completes 'goals' for the owner and not for the revenue-none member", async () => {
+    await clearMemory();
+    try {
+      await memory.upsert(ID.biz, { category: 'goals', key: 'six_month_target', value: MONEY_GOAL, confidence: 1, source: 'user' });
+      // Members who have started no interview in this suite (it is cached per member, from its first read).
+      const status = async (reader: Reader) => (await ok(reader, '/ai/profile/status')).completedTopics as string[];
+      expect(await status('revenue'), 'control: revenue and expenses read').toContain('goals');
+      expect(await status('blind2')).not.toContain('goals');
+    } finally {
       await clearMemory();
     }
   }, 240_000);

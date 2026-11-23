@@ -106,4 +106,40 @@ describe('PatternDetectorService stores no pattern over 2,000 characters (FU-PAT
       expect(['critical', 'warning', 'info']).toContain(p.severity);
     }
   });
+
+  // Correctness review round 7 (COR-R6-1): the expense stamp must not itself read as money ('expense' is a money
+  // term): an expense-only pattern stays readable by a member with expenses read and without revenue read.
+  it('an expense-only cluster (late suppliers) stays visible to a member with expenses read and no revenue read, and withheld from one without expenses read', async () => {
+    const tickets = [0, 1, 2].map((i) => ({ id: `t${i}`, title: 'late suppliers', status: 'OPEN', priority: 'LOW', orgUnitId: null, createdAt: new Date() }));
+    const { detector, stored } = detectorOver(tickets, '{"patterns": []}');
+    const scan = await detector.scanBusiness('biz');
+    const row = stored.find((r) => r.key.startsWith('pattern_support_cluster_'))!;
+    expect(visibleTo(row, noRevenue), row.value).toBe(true);
+    expect(visibleTo(row, noExpenses), row.value).toBe(false);
+    const answered = scan.patterns.find((p: any) => p.category === 'support_cluster');
+    expect(visibleTo({ key: 'pattern_support_cluster', value: JSON.stringify(answered) }, noRevenue)).toBe(true);
+  });
+
+  // COR-R6-2: the class is decided on what is stored (the capped entities, with their text unclipped): 100 harmless
+  // tickets made the uncapped JSON exceed the classifier's bound (money, fail closed) though nothing stored states money.
+  it('a harmless cluster of 100 tickets with long titles is not withheld as money', async () => {
+    const title = `printer jams ${'z'.repeat(950)}`;
+    const tickets = Array.from({ length: 100 }, (_, i) => ({ id: `t${i}`, title, status: 'OPEN', priority: 'LOW', orgUnitId: null, createdAt: new Date() }));
+    const { detector, stored } = detectorOver(tickets, '{"patterns": []}');
+    await detector.scanBusiness('biz');
+    const row = stored.find((r) => r.key.startsWith('pattern_support_cluster_'))!;
+    expect(visibleTo(row, noRevenue), row.value.slice(0, 300)).toBe(true);
+  });
+
+  // COR-R6-3: a model's severity in another case is kept, not downgraded.
+  it("a model severity of 'Critical' or 'WARNING' is kept (lower-cased)", async () => {
+    const tickets = [0, 1].map((i) => ({ id: `t${i}`, title: `ticket ${i}`, status: 'OPEN', priority: 'LOW', orgUnitId: null, createdAt: new Date() }));
+    const model = JSON.stringify({ patterns: [
+      { category: 'a', severity: 'Critical', title: 'A', description: 'a', confidence: 0.5, suggestedAction: 'a' },
+      { category: 'b', severity: 'WARNING', title: 'B', description: 'b', confidence: 0.5, suggestedAction: 'b' },
+    ] });
+    const { detector } = detectorOver(tickets, model);
+    const scan = await detector.scanBusiness('biz');
+    expect(scan.patterns.map((p: any) => p.severity)).toEqual(['critical', 'warning']);
+  });
 });
