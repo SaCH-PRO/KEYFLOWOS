@@ -86,6 +86,7 @@ async function cleanup() {
     byBiz('ai_memories'),
     byBiz('invoices'),
     byBiz('contacts'),
+    byBiz('ai_execution_logs'),
     byBiz('team_activity_logs'),
     byBiz('memberships'),
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -384,10 +385,13 @@ describe('FU-PATTERNS-ROUTES-SIGHT (D-257, D-100, D-234, D-146): the memory and 
       expect(await ok('owner', '/ai/memory/context')).toEqual(JSON.parse(JSON.stringify(await memory.buildContextBlock(ID.biz))));
       expect((await ok('owner', '/ai/memory')).memories).toEqual(JSON.parse(JSON.stringify(await memory.getAll(ID.biz))));
       expect((await ok('owner', '/ai/memory?category=goals')).memories).toEqual(JSON.parse(JSON.stringify(await memory.getByCategory(ID.biz, 'goals'))));
-      const rows = await db.aiMemory.findMany({ where: { businessId: ID.biz, category: 'patterns' }, orderBy: { createdAt: 'desc' }, take: 50 });
+      const rows = await db.aiMemory.findMany({ where: { businessId: ID.biz, category: 'patterns' }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 50 });
       const patterns = (await ok('owner', '/agent/patterns')).patterns;
       expect(patterns).toHaveLength(rows.length);
       expect(patterns.map((p: any) => p.confidence)).toEqual(rows.map((r: any) => r.confidence));
+      // Correctness review TST-FUPRS-3: the same rows in the same order (a JSON pattern's own id is spread over the row's).
+      expect(patterns.map((p: any) => p.detectedAt)).toEqual(rows.map((r: any) => r.createdAt.toISOString()));
+      expect(patterns.filter((p: any) => !p.category).map((p: any) => p.id)).toEqual(rows.filter((r: any) => !r.value.startsWith('{')).map((r: any) => r.id));
       // A JSON pattern is answered as before: its fields spread over the row's id, with the row's time and confidence.
       const overdueRow = rows.find((r: any) => r.key.startsWith('pattern_overdue_invoice_cluster'));
       const overdue = patterns.find((p: any) => p.category === 'overdue_invoice_cluster');
@@ -439,15 +443,69 @@ describe('FU-PATTERNS-ROUTES-SIGHT (D-257, D-100, D-234, D-146): the memory and 
       await overdueInvoices(ID.biz, ID.payer, 4000, 3341);
       await detector.scanBusiness(ID.biz);
       await seedMoneyJsonOnly();
+      // Correctness review TST-FUPRS-4: every route's leak is collected before asserting, so a RED run shows each.
+      const leaks: Record<string, string[]> = {};
       for (const reader of BLIND) {
         for (const [route, body] of Object.entries(await everythingFor(reader))) {
-          expect(moneyIn(body), `${reader} ${route}: ${text(body).slice(0, 400)}`).toEqual([]);
+          const found = moneyIn(body);
+          if (found.length) leaks[`${reader} ${route}`] = found;
         }
       }
+      expect(leaks).toEqual({});
       const owner = await everythingFor('owner');
       expect(moneyIn(owner['/agent/patterns']).length, 'owner control').toBeGreaterThan(0);
       expect(text(owner['/ai/memory?category=goals']), 'owner control').toContain(MONEY_GOAL);
     } finally {
+      await clearMemory();
+    }
+  }, 240_000);
+
+  it("V71Y-08 RED (security review O-1): POST .../agent/patterns/scan answers the caller only the patterns they may read: the revenue-none member and the memberless SUPER_ADMIN get no money pattern and no invoice-derived count; the owner gets the overdue total (control)", async () => {
+    await clearMemory();
+    try {
+      await overdueInvoices(ID.biz, ID.payer, 4000, 3341);
+      const scan = async (reader: Reader) => {
+        const res = await agent().post(`/ai/businesses/${ID.biz}/agent/patterns/scan`).set(HEADER, ID[reader]).set('x-forwarded-for', nextIp());
+        expect(res.status, `${reader}: ${text(res.body).slice(0, 300)}`).toBe(201);
+        return res.body;
+      };
+      const leaks: Record<string, unknown> = {};
+      for (const reader of BLIND) {
+        const body = await scan(reader);
+        if (moneyIn(body).length) leaks[`${reader} patterns`] = moneyIn(body);
+        if (body.entitiesScanned !== undefined) leaks[`${reader} entitiesScanned`] = body.entitiesScanned;
+        expect(Array.isArray(body.patterns), reader).toBe(true);
+      }
+      expect(leaks).toEqual({});
+      const owner = await scan('owner');
+      expect(text(owner.patterns), 'owner control').toContain(`totaling ${TOTAL}`);
+      expect(owner.entitiesScanned, 'owner control').toBeGreaterThan(0);
+    } finally {
+      await clearMemory();
+    }
+  }, 240_000);
+
+  it("V71Y-09 RED (security review O-2): POST .../ai/memory/summarize-patterns answers the caller only the summaries they may read: a tool summary naming a money tool reaches the owner, not the revenue-none member; the plain summaries reach both", async () => {
+    await clearMemory();
+    try {
+      for (let i = 0; i < 6; i++) {
+        await db.aiExecutionLog.create({
+          data: { businessId: ID.biz, action: 'tool_call', toolName: 'commerce_send_payment_reminder', module: 'commerce', success: true, riskTier: 1 },
+        });
+      }
+      const summarize = async (reader: Reader) => {
+        const res = await agent().post(`/ai/businesses/${ID.biz}/ai/memory/summarize-patterns`).set(HEADER, ID[reader]).set('x-forwarded-for', nextIp());
+        expect(res.status, `${reader}: ${text(res.body).slice(0, 300)}`).toBe(201);
+        return res.body.patterns as string[];
+      };
+      const owner = await summarize('owner');
+      expect(owner.some((p) => p.includes('commerce_send_payment_reminder')), `owner control: ${text(owner)}`).toBe(true);
+      expect(owner.some((p) => p.startsWith('Peak activity hour')), `owner control: ${text(owner)}`).toBe(true);
+      const blind = await summarize('blind');
+      expect(blind.filter((p) => p.includes('commerce_send_payment_reminder')), text(blind)).toEqual([]);
+      expect(blind.some((p) => p.startsWith('Peak activity hour')), `blind control: ${text(blind)}`).toBe(true);
+    } finally {
+      await db.$executeRawUnsafe(`DELETE FROM ai_execution_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`);
       await clearMemory();
     }
   }, 240_000);
