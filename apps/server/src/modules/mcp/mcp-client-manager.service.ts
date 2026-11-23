@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { McpServerConfig, BridgedTool } from './mcp.types';
@@ -7,6 +7,9 @@ import { loadMcpServerConfigs, parseMcpToolName } from './mcp.types';
 const TOOL_CACHE_TTL_MS = 5 * 60 * 1000;
 const CONNECT_TIMEOUT_MS = 10_000;
 const CALL_TIMEOUT_MS = 60_000;
+
+/** One answer for an unknown server, an unbound one and one bound to other businesses. */
+const NOT_AVAILABLE = 'MCP server not available to this business';
 
 interface ServerEntry {
   config: McpServerConfig;
@@ -18,10 +21,17 @@ interface ServerEntry {
 
 /**
  * Owns connections to allowlisted remote MCP servers and exposes their tools
- * to the flow tool registry. Connections are lazy (first use), cached, and
- * never leak across tenants: every call carries the caller's businessId and
- * tools are cached per businessId+server so tool output never crosses
- * businesses.
+ * to the flow tool registry. Connections are lazy (first use) and cached once
+ * per server, with that server's one bearer token (shared by every business
+ * the server is bound to; per-business credentials are a later slice).
+ *
+ * Tenancy (RR-MCP-TENANT-BOUND, D-261/D-262): each server config names the
+ * businesses it may serve (`businessIds`). listBridgedTools(businessId) lists
+ * only servers bound to that business, and callTool(businessId, ...) refuses
+ * any other business with a ForbiddenException before anything connects. An
+ * unknown server, an unbound one (dropped at load) and one bound to other
+ * businesses all get the same refusal. With MCP_REMOTE_SERVERS empty nothing
+ * here runs.
  */
 @Injectable()
 export class McpClientManagerService implements OnModuleDestroy {
@@ -30,7 +40,7 @@ export class McpClientManagerService implements OnModuleDestroy {
   private readonly configs: McpServerConfig[];
 
   constructor() {
-    this.configs = loadMcpServerConfigs();
+    this.configs = loadMcpServerConfigs((message) => this.logger.error(message));
     if (this.configs.length > 0) {
       this.logger.log(`MCP client manager: ${this.configs.length} allowlisted server(s) configured`);
     }
@@ -48,22 +58,26 @@ export class McpClientManagerService implements OnModuleDestroy {
     return this.configs.length > 0;
   }
 
-  /** List bridged tools across all enabled servers (cached per business). */
-  async listBridgedTools(_businessId: string): Promise<BridgedTool[]> {
+  /** List bridged tools of the enabled servers bound to this business. */
+  async listBridgedTools(businessId: string): Promise<BridgedTool[]> {
     const out: BridgedTool[] = [];
     for (const config of this.configs) {
+      if (!config.businessIds.includes(businessId)) continue;
       const entry = await this.ensureEntry(config);
       if (entry) out.push(...entry.tools);
     }
     return out;
   }
 
-  /** Execute a bridged MCP tool by its mcp__server__tool name. */
-  async callTool(bridgedName: string, args: Record<string, unknown>): Promise<unknown> {
+  /**
+   * Execute a bridged MCP tool by its mcp__server__tool name for a business.
+   * Refused (ForbiddenException) unless that server names the business.
+   */
+  async callTool(businessId: string, bridgedName: string, args: Record<string, unknown>): Promise<unknown> {
     const parsed = parseMcpToolName(bridgedName);
     if (!parsed) throw new Error(`Not an MCP tool: ${bridgedName}`);
     const config = this.configs.find((c) => c.key === parsed.serverKey);
-    if (!config) throw new Error(`MCP server not allowlisted: ${parsed.serverKey}`);
+    if (!config || !config.businessIds.includes(businessId)) throw new ForbiddenException(NOT_AVAILABLE);
 
     const entry = await this.ensureEntry(config);
     if (!entry?.client) throw new Error(`MCP server ${config.name} is unavailable`);
