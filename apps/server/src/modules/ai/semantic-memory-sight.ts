@@ -129,6 +129,31 @@ export function temporalMemoryModulesOf(row: TemporalRow, events: ReadonlyMap<st
 }
 
 /**
+ * MEM-SEMANTIC-SIGHT, shared by MEM-PATTERNS-SIGHT (D-234, D-100, D-146): whether `who` may be handed an AiMemory row
+ * (or its semantic copy, `copyContent`). A document extraction (DOCUMENT_EXTRACTION_CATEGORY), and a row whose
+ * category, key or value states money, or whose copy does (a pattern totalling overdue invoices, a revenue goal), only
+ * to a member reader with revenue read (readsDocumentExtractions); a row stating an expense only to a member reader with
+ * expenses read (and revenue read too when it also states money, as "expense: rent TTD 4,000" does); any other row
+ * business-wide, as readersOwnPromptMemory serves AiMemory rows.
+ */
+export function aiMemoryRowVisibleTo(
+  row: { category: string; key: string; value: string },
+  who: SemanticReader,
+  copyContent?: string,
+): boolean {
+  const money =
+    row.category === DOCUMENT_EXTRACTION_CATEGORY ||
+    isMoneyLabel(row.category) ||
+    isMoneyLabel(row.key) ||
+    textIsMoney(row.value) ||
+    textIsMoney(copyContent);
+  // Acceptance review (D-146): a row stating an expense needs a member with expenses read.
+  // A document extraction keeps its own rule (MEM-DOC-EXTRACTION-SIGHT: revenue read).
+  const expense = row.category !== DOCUMENT_EXTRACTION_CATEGORY && [row.category, row.key, row.value, copyContent].some(textIsExpense);
+  return (!money || readsDocumentExtractions(who.sight, who.reader)) && (!expense || (who.reader !== null && who.sight('expenses')));
+}
+
+/**
  * MEM-SEMANTIC-SIGHT: for each hit, whether `who` may be handed it, by its source's own rule (sourceType, sourceId,
  * always within `businessId`):
  * - an AiMemory copy ('memory') as its row: a document extraction (DOCUMENT_EXTRACTION_CATEGORY), and (re-review, D-234
@@ -193,18 +218,7 @@ export async function semanticHitsVisibleTo(
       switch (hit.sourceType) {
         case AI_MEMORY_COPY_SOURCE_TYPE: {
           const row = memoryRowsById.get(hit.sourceId);
-          if (row === undefined) return false;
-          const money =
-            row.category === DOCUMENT_EXTRACTION_CATEGORY ||
-            isMoneyLabel(row.category) ||
-            isMoneyLabel(row.key) ||
-            textIsMoney(row.value) ||
-            textIsMoney(hit.content);
-          // Acceptance review (D-146): a row stating an expense needs a member with expenses read (and revenue read too
-          // when it also states money, as "expense: rent TTD 4,000" does).
-          // A document extraction keeps its own rule (MEM-DOC-EXTRACTION-SIGHT: revenue read).
-          const expense = row.category !== DOCUMENT_EXTRACTION_CATEGORY && [row.category, row.key, row.value, hit.content].some(textIsExpense);
-          return (!money || memberWithRevenue) && (!expense || (who.reader !== null && who.sight('expenses')));
+          return row !== undefined && aiMemoryRowVisibleTo(row, who, hit.content);
         }
         case TEMPORAL_MEMORY_SOURCE_TYPE: {
           const row = temporal.get(hit.sourceId);

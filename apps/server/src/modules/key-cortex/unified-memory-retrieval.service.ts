@@ -127,10 +127,14 @@ export class UnifiedMemoryRetrievalService {
     // MEM-DOC-EXTRACTION-SIGHT (D-234): nor the document extractions, unless the read asks for them (a reader with
     // revenue read): unread, a withheld extraction takes no place in the take or the ranked limit below.
     const settingsFree = aiMemoryWithoutSettings();
-    const aiMemoryWhere = {
-      ...whereBase,
-      category: options.documentExtractions === true ? settingsFree : { notIn: [...settingsFree.notIn, DOCUMENT_EXTRACTION_CATEGORY] },
-    };
+    // MEM-PATTERNS-SIGHT (D-100, D-234): nor the behavioural patterns, when the read says so (a reader who may not read
+    // every pattern): unread, a withheld pattern takes no place in the take or the ranked limit either.
+    const unreadCategories = [
+      ...settingsFree.notIn,
+      ...(options.documentExtractions === true ? [] : [DOCUMENT_EXTRACTION_CATEGORY]),
+      ...(options.aiMemoryPatterns === false ? ['patterns'] : []),
+    ];
+    const aiMemoryWhere = { ...whereBase, category: { notIn: unreadCategories } };
 
     const includeEpisodic = options.includeEpisodic !== false;
     const episodicSince = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
