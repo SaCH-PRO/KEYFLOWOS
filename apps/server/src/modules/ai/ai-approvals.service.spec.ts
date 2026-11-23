@@ -184,6 +184,8 @@ describe('AiApprovalsService', () => {
 
   describe('getStats', () => {
     it('returns aggregated counts', async () => {
+      // FU-AI-APPROVALS-MONEY-SIGHT: the database counts are a reader's who holds revenue and expenses read (the OWNER).
+      (prisma.client as any).membership = { findUnique: vi.fn().mockResolvedValue({ role: 'OWNER', permissionScopes: null }) };
       prisma.client.aiApprovalItem.count.mockResolvedValueOnce(5);
       prisma.client.aiApprovalItem.count.mockResolvedValueOnce(2);
       prisma.client.aiApprovalItem.count.mockResolvedValueOnce(1);
@@ -193,7 +195,7 @@ describe('AiApprovalsService', () => {
         { module: null, _count: { module: 2 } },
       ]);
 
-      const result = await service.getStats('biz_1');
+      const result = await service.getStats('biz_1', 'u_owner');
 
       expect(result).toEqual({
         pending: 5,

@@ -247,15 +247,20 @@ async function seed() {
 }
 
 let approvalSeq = 0;
-/** A pending item routed to `assignmentId` (ApprovalRoutingService's result). */
+/**
+ * A pending item routed to `assignmentId` (ApprovalRoutingService's result). FU-AI-APPROVALS-MONEY-SIGHT (D-238): a
+ * money item (it was a commerce_refund_payment) now also needs revenue write held by the position, which a contact-only
+ * position never holds (test/ai-approvals-money-sight.integration.test.ts and approval-item-sight-resolve.spec.ts pin
+ * that); these cases test the tier caps, so the item is one that states no money.
+ */
 async function pendingItem(assignmentId: string, riskTier: number) {
   approvalSeq += 1;
   return db.aiApprovalItem.create({
     data: {
       id: `${P}item_${approvalSeq}`,
       businessId: ID.bizA,
-      toolName: 'commerce_refund_payment',
-      title: `v21b refund ${approvalSeq}`,
+      toolName: 'crm_create_task',
+      title: `v21b follow-up ${approvalSeq}`,
       riskTier,
       status: 'pending',
       approverAssignmentId: assignmentId,

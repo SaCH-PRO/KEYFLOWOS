@@ -1,3 +1,4 @@
+import { approvalActorOf, approvalItemsVisibleTo } from './approval-item-sight';
 import {
   Body,
   Controller,
@@ -1282,6 +1283,12 @@ export class GraphActionsController {
       for (const row of rows) proposerOf.set(row.id, row.userId ?? null);
     }
     const isOwn = (requesterId: string | null | undefined) => mayRead.seesEveryPlan || (!!requesterId && requesterId === viewer.id);
+    // FU-AI-APPROVALS-MONEY-SIGHT (D-100, D-234, D-238): an approval item (pending, or approved and runnable) is queued
+    // for the viewer only when they may read it (approvalItemNeeds: money at revenue read, expenses at expenses read).
+    const sightActor = await approvalActorOf(this.prisma, businessId, viewer.id);
+    const inSight = new Set(
+      approvalItemsVisibleTo(sightActor, [...pendingApprovals, ...(approvedItems ?? [])]).map((a) => a.id),
+    );
 
     // Recheck AI-PLANS-READ and KEY-R3a (D-74): each step judged by the tool the executor dispatches
     // for it (or its KEY-cortex module), a contact read's output withheld from all but the OWNER,
@@ -1289,7 +1296,7 @@ export class GraphActionsController {
     const activePlans = await visiblePlans((listedPlans ?? []).filter((p) => isOwn(p.userId)), mayRead);
 
     const pending = pendingApprovals
-      .filter((a) => mayRead.step(a.toolName) && isOwn(a.planId ? proposerOf.get(a.planId) : a.userId))
+      .filter((a) => inSight.has(a.id) && mayRead.step(a.toolName) && isOwn(a.planId ? proposerOf.get(a.planId) : a.userId))
       .map((a: any) => ({
       id: a.id,
       type: 'pending_approval' as const,
@@ -1336,7 +1343,7 @@ export class GraphActionsController {
         affectedEntities: p.modules ?? [],
       }));
 
-    const approved = await this.approvedRunnableSteps(businessId, viewer, approvedItems);
+    const approved = await this.approvedRunnableSteps(businessId, viewer, (approvedItems ?? []).filter((a) => inSight.has(a.id)));
 
     let items = [...approved, ...pending, ...planItems, ...logs];
     if (status) {

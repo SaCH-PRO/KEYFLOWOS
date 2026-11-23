@@ -33,6 +33,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { assertBusinessOwnerMember, BYOK_OWNER_ONLY } from '../../core/auth/business-owner';
 import { KeyCommandService } from './key-command.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
+import { approvalActorOf, assertMaySeeApprovalItem, assertMayWriteApprovalItem } from './approval-item-sight';
 import { KeyCortexApprovalOrchestratorService } from '../key-cortex/key-cortex-approval-orchestrator.service';
 
 /**
@@ -879,12 +880,18 @@ export class AiController {
     }
 
     // Compatibility fallback: legacy aiApprovalItem records are migrated once on resolution.
+    const notFound = () => new NotFoundException(`Approval item ${approvalId} not found for business ${businessId}`);
     const item = await this.prisma.client.aiApprovalItem.findFirst({
       where: { id: approvalId, businessId },
     });
-    if (!item) throw new NotFoundException(`Approval item ${approvalId} not found for business ${businessId}`);
+    if (!item) throw notFound();
 
+    // FU-AI-APPROVALS-MONEY-SIGHT (D-100, D-234, D-238): an item the resolver may not read is answered as one not in
+    // the business; acting on (migrating, approving, rejecting, deferring) a financial one needs write on its sights.
+    const actor = await approvalActorOf(this.prisma, businessId, userId);
+    assertMaySeeApprovalItem(actor, item, notFound);
     await this.assertCanResolveApproval(businessId, item.riskTier, userId);
+    assertMayWriteApprovalItem(actor, item);
 
     if (resolution === 'deferred') {
       await this.prisma.client.aiApprovalItem.update({

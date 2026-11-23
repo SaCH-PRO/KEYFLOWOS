@@ -56,8 +56,10 @@ export class AiApprovalsController {
   async listItems(
     @Param('businessId') businessId: string,
     @Query() query: ListAiApprovalsQuery,
+    @Req() req?: Request & { user?: { id?: string } },
   ) {
-    return this.service.listItems(businessId, query);
+    // FU-AI-APPROVALS-MONEY-SIGHT (D-100, D-234, D-238): only the items the caller may read (approval-item-sight.ts).
+    return this.service.listItems(businessId, query, req?.user?.id ?? null);
   }
 
   @Get('items/:itemId')
@@ -65,8 +67,9 @@ export class AiApprovalsController {
   async getItem(
     @Param('businessId') businessId: string,
     @Param('itemId') itemId: string,
+    @Req() req?: Request & { user?: { id?: string } },
   ) {
-    return this.service.getItem(businessId, itemId);
+    return this.service.getItem(businessId, itemId, req?.user?.id ?? null);
   }
 
   @Post('items/:itemId/resolve')
@@ -92,7 +95,7 @@ export class AiApprovalsController {
 
   @Get('stats')
   @RequireModuleScope('operations')
-  async getStats(@Param('businessId') businessId: string) {
-    return this.service.getStats(businessId);
+  async getStats(@Param('businessId') businessId: string, @Req() req?: Request & { user?: { id?: string } }) {
+    return this.service.getStats(businessId, req?.user?.id ?? null);
   }
 }

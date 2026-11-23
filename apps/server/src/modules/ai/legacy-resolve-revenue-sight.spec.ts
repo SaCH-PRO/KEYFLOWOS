@@ -14,7 +14,14 @@ const RESOLVED = { ...MIGRATED, status: 'APPROVED', payload: { amount: 4000 } };
 function controller(viewForReader: (b: string, p: any, r: any) => Promise<unknown>) {
   const c = Object.create(AiController.prototype) as any;
   c.proposals = { get: vi.fn(async () => { throw new NotFoundException('Action proposal not found'); }), viewForReader: vi.fn(viewForReader) };
-  c.prisma = { client: { aiApprovalItem: { findFirst: vi.fn(async () => ITEM), update: vi.fn(async () => ITEM) } } };
+  // FU-AI-APPROVALS-MONEY-SIGHT: acting on a financial item needs revenue write (approval-item-sight-resolve.spec.ts
+  // pins that a resolver without it is refused); the resolver here holds it, and is still answered through the view.
+  c.prisma = {
+    client: {
+      aiApprovalItem: { findFirst: vi.fn(async () => ITEM), update: vi.fn(async () => ITEM) },
+      membership: { findUnique: vi.fn(async () => ({ role: 'STAFF', permissionScopes: { revenue: 'write' } })) },
+    },
+  };
   c.assertCanResolveApproval = vi.fn(async () => undefined);
   c.migrateAiApprovalItemToProposal = vi.fn(async () => MIGRATED);
   c.approvalOrchestrator = { approve: vi.fn(async () => RESOLVED), reject: vi.fn(async () => ({ ...RESOLVED, status: 'REJECTED' })) };

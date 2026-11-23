@@ -115,6 +115,11 @@ export class StaffChatBridgeService {
         orderBy: { createdAt: 'asc' },
       });
       if (pending) {
+        // FU-AI-APPROVALS-MONEY-SIGHT (D-100, D-234, D-238): the item is named (in the reply and in KEY's hint) only
+        // to a position that may read it; otherwise it is "a pending approval" (AiOversightService decides, fail closed).
+        const named = await this.getOversight()
+          .approvalVisibleToPosition(businessId, assignment.id, pending)
+          .catch(() => false);
         const decision = this.parseReplyDecision(body);
         if (decision && claim === 'unidentified') {
           // No provider message id: it could be a replay, so it decides nothing (WB-3).
@@ -125,12 +130,14 @@ export class StaffChatBridgeService {
           try {
             const oversight = this.getOversight();
             await oversight.resolveApprovalByAssignment(pending.id, businessId, assignment.id, decision);
-            return { handled: true, reply: `Got it — I've ${decision} "${pending.title}".` };
+            return { handled: true, reply: named ? `Got it — I've ${decision} "${pending.title}".` : `Got it — I've ${decision} the pending approval.` };
           } catch (err) {
             return { handled: true, reply: `I couldn't apply that: ${err instanceof Error ? err.message : 'unknown error'}. Open the app to decide instead.` };
           }
         }
-        pendingApprovalHint = `${displayName} has a pending approval: "${pending.title}" (Tier ${pending.riskTier}). If this message is a reply to it, gently ask them to say YES or NO; otherwise just help with what they asked.`;
+        pendingApprovalHint = named
+          ? `${displayName} has a pending approval: "${pending.title}" (Tier ${pending.riskTier}). If this message is a reply to it, gently ask them to say YES or NO; otherwise just help with what they asked.`
+          : `${displayName} has a pending approval (Tier ${pending.riskTier}) whose details are in the app. If this message is a reply to it, gently ask them to say YES or NO or to open the app; otherwise just help with what they asked.`;
       }
     }
 

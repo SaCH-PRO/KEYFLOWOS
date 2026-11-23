@@ -10,6 +10,17 @@ import { ApprovalRoutingService, redactContactDetails } from './approval-routing
 import { JobRolePolicyService, JobRoleEnvelope, approvalTierForPosition } from '../structure/job-role-policy.service';
 import { HOLDER_ACCOUNT, holderMembershipHere, membersByPhone } from '../structure/position-holders';
 import { membershipApprovalTier } from '../../core/authority/approval-tier';
+import {
+  actorMaySee,
+  approvalActorOfMemberships,
+  approvalItemNeeds,
+  assertMaySeeApprovalItem,
+  assertMayWriteApprovalItem,
+  NO_APPROVAL_ACTOR,
+  type ApprovalActor,
+  type ApprovalItemContent,
+} from './approval-item-sight';
+import type { ApprovalRouteResult } from './approval-routing.service';
 
 export type RiskTier = 1 | 2 | 3 | 4;
 
@@ -538,7 +549,7 @@ export class AiOversightService {
    */
   private async routeAndNotify(
     businessId: string,
-    item: { id: string; title: string; description: string | null },
+    item: { id: string; title: string; description: string | null } & ApprovalItemContent,
     tier: RiskTier,
     module: string | null,
   ): Promise<void> {
@@ -553,7 +564,7 @@ export class AiOversightService {
       return;
     }
 
-    const notifyResult = await this.approvalRouting.notifyApprover(businessId, route, { id: item.id, title: item.title, description: item.description, riskTier: tier });
+    const notifyResult = await this.approvalRouting.notifyApprover(businessId, route, await this.notificationFor(businessId, route, item, tier));
     if (notifyResult.sent) {
       await this.prisma.client.aiApprovalItem.update({ where: { id: item.id }, data: { notifiedAt: new Date() } });
     } else if (notifyResult.error) {
@@ -572,7 +583,7 @@ export class AiOversightService {
     if (tier === 4 && route.method !== 'owner_fallback') {
       const ownerRoute = await this.approvalRouting.resolveOwner(businessId);
       if (ownerRoute) {
-        const ownerNotify = await this.approvalRouting.notifyApprover(businessId, ownerRoute, { id: item.id, title: item.title, description: item.description, riskTier: tier });
+        const ownerNotify = await this.approvalRouting.notifyApprover(businessId, ownerRoute, await this.notificationFor(businessId, ownerRoute, item, tier));
         if (!ownerNotify.sent && ownerNotify.error) {
           // W6-LOG-ADDRESSES-AND-DOCS (9B-D2, SEC-W5SEC-1, repair SEC-W6LOG-1): as
           // above, for the owner's address, and the owner's number (resolveOwner
@@ -583,20 +594,95 @@ export class AiOversightService {
     }
   }
 
+  /**
+   * FU-AI-APPROVALS-MONEY-SIGHT (D-100, D-234, D-238): what the approver a route names is sent about an item. An
+   * approver who may read it (approvalItemNeeds, by the levels of the member the route names and of every member who
+   * uses the phone it texts) is sent its title and description as before; anyone else (a member without the sight, a
+   * contact-only position, an approver whose membership cannot be read) is told only that an approval is waiting.
+   */
+  private async notificationFor(
+    businessId: string,
+    route: ApprovalRouteResult,
+    item: { id: string; title: string; description: string | null } & ApprovalItemContent,
+    tier: RiskTier,
+  ): Promise<{ id: string; title: string; description: string | null; riskTier: number }> {
+    const actor = await this.routeActor(businessId, route);
+    if (actorMaySee(actor, approvalItemNeeds(item))) return { id: item.id, title: item.title, description: item.description, riskTier: tier };
+    return { id: item.id, title: 'An AI action is waiting for your approval', description: null, riskTier: tier };
+  }
+
+  /** The levels a route's recipient holds: its member's, and every member's whose phone it texts (the weakest). */
+  private async routeActor(businessId: string, route: ApprovalRouteResult): Promise<ApprovalActor> {
+    try {
+      const memberships: Array<{ role: string; permissionScopes: unknown }> = [];
+      if (route.approverMembershipId) {
+        const m = await this.prisma.client.membership.findFirst({
+          where: { id: route.approverMembershipId, businessId },
+          select: { role: true, permissionScopes: true },
+        });
+        if (!m) return NO_APPROVAL_ACTOR;
+        memberships.push(m);
+      } else if (route.approverUserId) {
+        const m = await this.prisma.client.membership.findUnique({
+          where: { userId_businessId: { userId: route.approverUserId, businessId } },
+          select: { role: true, permissionScopes: true },
+        });
+        if (!m) return NO_APPROVAL_ACTOR;
+        memberships.push(m);
+      }
+      if ((route.channel === 'whatsapp' || route.channel === 'sms') && route.contactPhone) {
+        memberships.push(...(await membersByPhone(this.prisma, businessId, route.contactPhone)));
+      }
+      return approvalActorOfMemberships(memberships);
+    } catch {
+      return NO_APPROVAL_ACTOR;
+    }
+  }
+
+  /**
+   * FU-AI-APPROVALS-MONEY-SIGHT: the levels a staff position acts with: the weakest of its holder's membership in this
+   * business and of every member who uses its phone (the memberships approvalTierForPosition caps the tier by); a
+   * contact-only position with no such member holds none.
+   */
+  private positionActor(
+    membership: { role: string; permissionScopes: unknown } | null,
+    phoneMembers: ReadonlyArray<{ role: string; permissionScopes: unknown }>,
+  ): ApprovalActor {
+    return approvalActorOfMemberships([...(membership ? [membership] : []), ...phoneMembers]);
+  }
+
+  /**
+   * FU-AI-APPROVALS-MONEY-SIGHT: whether the staff position `assignmentId` may read `item` (the staff chat bridge names
+   * a pending item to the position only then). Fails closed: an ended or missing position, or a read that fails, may not.
+   */
+  async approvalVisibleToPosition(businessId: string, assignmentId: string, item: ApprovalItemContent): Promise<boolean> {
+    try {
+      const assignment = await this.prisma.client.orgAssignment.findFirst({
+        where: { id: assignmentId, businessId, endedAt: null },
+        include: { jobRole: true, membership: { include: { user: { select: HOLDER_ACCOUNT } } } },
+      });
+      if (!assignment) return false;
+      const [membership, phoneMembers] = await Promise.all([
+        holderMembershipHere(this.prisma, businessId, assignment),
+        membersByPhone(this.prisma, businessId, assignment.contactPhone),
+      ]);
+      return actorMaySee(this.positionActor(membership, phoneMembers), approvalItemNeeds(item));
+    } catch {
+      return false;
+    }
+  }
+
   async resolveApproval(
     approvalId: string,
     businessId: string,
     resolution: 'approved' | 'rejected' | 'deferred',
     resolvedByUserId: string,
   ) {
+    const notFound = () => new NotFoundException(`Approval item ${approvalId} not found for business ${businessId}`);
     const item = await this.prisma.client.aiApprovalItem.findFirst({
       where: { id: approvalId, businessId },
     });
-    if (!item) throw new NotFoundException(`Approval item ${approvalId} not found for business ${businessId}`);
-
-    if (item.status !== 'pending') {
-      throw new BadRequestException(`Approval item is already resolved (status: "${item.status}") — cannot re-resolve`);
-    }
+    if (!item) throw notFound();
 
     const user = await this.prisma.client.user.findUnique({ where: { id: resolvedByUserId } });
     const isSuperAdmin = user?.role === 'SUPER_ADMIN';
@@ -604,6 +690,17 @@ export class AiOversightService {
     const membership = await this.prisma.client.membership.findFirst({
       where: { userId: resolvedByUserId, businessId },
     });
+
+    // FU-AI-APPROVALS-MONEY-SIGHT (D-100, D-234, D-238): an item the resolver may not read (its money needs revenue
+    // read, its expenses expenses read; a SUPER_ADMIN who is no member holds neither) is answered exactly as an item
+    // that is not in the business, before anything else is said about it.
+    const actor = membership ? approvalActorOfMemberships([membership]) : NO_APPROVAL_ACTOR;
+    assertMaySeeApprovalItem(actor, item, notFound);
+
+    if (item.status !== 'pending') {
+      throw new BadRequestException(`Approval item is already resolved (status: "${item.status}") — cannot re-resolve`);
+    }
+
     if (!membership && !isSuperAdmin) throw new NotFoundException('User is not a member of this business');
 
     if (!isSuperAdmin) {
@@ -615,6 +712,9 @@ export class AiOversightService {
         throw new ForbiddenException(`Tier ${item.riskTier} approvals require approval tier ${item.riskTier} or higher (you have tier ${memberTier})`);
       }
     }
+
+    // FU-AI-APPROVALS-MONEY-SIGHT: approving, rejecting or deferring a financial item needs write on its sights.
+    assertMayWriteApprovalItem(actor, item);
 
     return this.finalizeResolution(item, businessId, resolution, {
       resolvedByUserId,
@@ -642,13 +742,11 @@ export class AiOversightService {
     assignmentId: string,
     resolution: 'approved' | 'rejected' | 'deferred',
   ) {
+    const notFound = () => new NotFoundException(`Approval item ${approvalId} not found for business ${businessId}`);
     const item = await this.prisma.client.aiApprovalItem.findFirst({
       where: { id: approvalId, businessId },
     });
-    if (!item) throw new NotFoundException(`Approval item ${approvalId} not found for business ${businessId}`);
-    if (item.status !== 'pending') {
-      throw new BadRequestException(`Approval item is already resolved (status: "${item.status}") — cannot re-resolve`);
-    }
+    if (!item) throw notFound();
     if (item.approverAssignmentId !== assignmentId) {
       throw new ForbiddenException('This position is not the resolved approver for this item');
     }
@@ -658,20 +756,31 @@ export class AiOversightService {
       include: { jobRole: true, membership: { include: { user: { select: HOLDER_ACCOUNT } } } },
     });
     if (!assignment) throw new NotFoundException('Approver assignment not found or ended');
-    if (!assignment.autoApprovalViaReply) {
-      throw new ForbiddenException('This position is not authorized for reply-based approval');
-    }
 
     const [membership, phoneMembers] = await Promise.all([
       holderMembershipHere(this.prisma, businessId, assignment),
       membersByPhone(this.prisma, businessId, assignment.contactPhone),
     ]);
+    // FU-AI-APPROVALS-MONEY-SIGHT (D-100, D-234, D-238): the position reads and acts with the weakest levels of every
+    // membership that acts through it (a contact-only position with none holds no sight). An item it may not read is
+    // answered as one not in the business.
+    const actor = this.positionActor(membership, phoneMembers);
+    assertMaySeeApprovalItem(actor, item, notFound);
+
+    if (item.status !== 'pending') {
+      throw new BadRequestException(`Approval item is already resolved (status: "${item.status}") — cannot re-resolve`);
+    }
+    if (!assignment.autoApprovalViaReply) {
+      throw new ForbiddenException('This position is not authorized for reply-based approval');
+    }
+
     const cap = approvalTierForPosition({ ...assignment, businessId, membership, phoneMembers });
     if (cap.refusal) throw new ForbiddenException(cap.refusal);
     const effectiveTier = cap.tier;
     if (item.riskTier > effectiveTier) {
       throw new ForbiddenException(`Tier ${item.riskTier} approvals require approval tier ${item.riskTier} or higher (position has tier ${effectiveTier})`);
     }
+    assertMayWriteApprovalItem(actor, item);
 
     return this.finalizeResolution(item, businessId, resolution, {
       resolvedByUserId: assignment.userId ?? null,
