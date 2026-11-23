@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
+import { classifyActionIntent } from './action-intent';
 import {
   CortexQuery,
   CortexSession,
@@ -391,11 +392,7 @@ export class KeyCortexSessionService {
     const lower = text.toLowerCase();
     if (/\b(how|what|why|when|who|where)\b/.test(lower))
       return `question about "${text.slice(0, 60)}"`;
-    if (
-      /\b(create|make|schedule|send|update|delete|run|execute|build|generate|draft)\b/.test(
-        lower,
-      )
-    )
+    if (classifyActionIntent(lower).isAction)
       return `request to "${text.slice(0, 60)}"`;
     if (
       /\b(analyze|evaluate|assess|compare|recommend|suggest|advise)\b/.test(

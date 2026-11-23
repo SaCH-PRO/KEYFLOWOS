@@ -68,6 +68,7 @@ import { TrustExplanationService } from './trust-explanation.service';
 // -- Phase D: Learning & Metacognition (optional) --
 import { KeyCortexLearningService } from './key-cortex-learning.service';
 
+import { classifyActionIntent } from './action-intent';
 import {
   GenomeEnrichedContext,
   Suggestion,
@@ -369,7 +370,7 @@ export class KeyCortexReasoningService {
     const text = query.text.toLowerCase();
 
     // Action-heavy queries → tool-calling
-    if (query.enableActions && /\b(create|add|schedule|send|update|delete|run|execute|make|book|invoice|task|email|reminder|workflow)\b/.test(text)) {
+    if (query.enableActions && classifyActionIntent(text).isAction) {
       return 'tool-calling';
     }
 
