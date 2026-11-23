@@ -228,18 +228,48 @@ describe('RR-STRUCTURED-PARSE-INVALID-STATE: contract violations are typed and c
     expect(afterOutage).toMatchObject({ provider: 'anthropic', fallbackUsed: true, outputState: 'valid' });
   });
 
-  it('a violation followed by a provider outage still rejects as a contract violation, with the outage in the message', async () => {
+  it('a violation followed by a provider outage still rejects as a contract violation; the detail names the failure class, never the provider text', async () => {
+    // Review round 1: the 502 body is client-facing; a provider message can carry hosts, bodies or key fragments.
     stubProviders(
       service,
       async () => ({ content: TOO_SHORT, usage }),
       async () => {
-        throw new Error('HTTP 503 Service Unavailable');
+        throw new Error('Anthropic API error (401): {"type":"error"} connect ECONNREFUSED 10.1.2.3:8080 sk-ant-secret');
       },
     );
     const rejection = await service.complete(baseRequest({ expectedContract: 'reply_draft' })).catch((e) => e);
     expect(rejection).toBeInstanceOf(AiContractViolationError);
     expect((rejection.getResponse() as any).attempts).toHaveLength(1);
-    expect(rejection.message).toMatch(/also failed|provider/i);
+    const body = JSON.stringify(rejection.getResponse());
+    expect(rejection.message).toMatch(/another candidate failed with a provider error \(auth\)/);
+    expect(body).not.toMatch(/10\.1\.2\.3|sk-ant|ECONNREFUSED|Anthropic API error/);
+  });
+
+  it('review round 1: a provider outage BEFORE the violation is worded the same way (no "later")', async () => {
+    stubProviders(
+      service,
+      async () => {
+        throw new Error('HTTP 503 Service Unavailable');
+      },
+      async () => ({ content: TOO_SHORT, usage }),
+    );
+    const rejection = await service.complete(baseRequest({ expectedContract: 'reply_draft' })).catch((e) => e);
+    expect(rejection).toBeInstanceOf(AiContractViolationError);
+    expect((rejection.getResponse() as any).attempts.map((a: any) => a.provider)).toEqual(['anthropic']);
+    expect(rejection.message).toMatch(/another candidate failed with a provider error \(server\)/);
+    expect(rejection.message).not.toMatch(/later/);
+  });
+
+  it('review round 1: a violation is one answered call in provider health, not a second call: totalCalls 1, totalErrors 1', async () => {
+    stubProviders(
+      service,
+      async () => ({ content: TOO_SHORT, usage }),
+      async () => ({ content: VALID_DRAFT, usage }),
+    );
+    await service.complete(baseRequest({ expectedContract: 'reply_draft' }));
+    expect(health(service, 'openai')).toMatchObject({ totalCalls: 1, totalErrors: 1, lastFailureClass: 'contract_violation', circuitOpen: false });
+    expect(health(service, 'anthropic')).toMatchObject({ totalCalls: 1, totalErrors: 0 });
+    expect(health(service, 'openai').lastErrorAt).toBeTruthy();
   });
 
   it('the tool-call shape is validated too: malformed tool arguments are a violation, valid arguments pass', async () => {
