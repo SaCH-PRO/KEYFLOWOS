@@ -27,6 +27,7 @@ const fake = vi.hoisted(() => ({
   listTools: 0,
   calls: [] as Array<{ name: string; arguments: unknown }>,
   failConnect: false,
+  failListTools: false,
   tools: [{ name: 'x', description: 'fake tool x', inputSchema: { type: 'object', properties: {} } }],
 }));
 
@@ -34,7 +35,9 @@ vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({
   StreamableHTTPClientTransport: class {
     constructor(url: URL, opts?: { requestInit?: { headers?: Record<string, string> } }) {
       fake.transports.push({ url: String(url), headers: opts?.requestInit?.headers });
+      this.url = String(url);
     }
+    url: string;
   },
 }));
 
@@ -43,12 +46,14 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
     constructor() {
       fake.clients += 1;
     }
-    async connect() {
+    async connect(transport: { url: string }) {
       fake.connects += 1;
-      if (fake.failConnect) throw new Error('v91a fake connect refused');
+      // As Node's fetch does: the error quotes the url in its normalized form (new URL(raw).href).
+      if (fake.failConnect) throw new TypeError(`Request cannot be constructed from a URL that includes credentials: ${transport.url}`);
     }
     async listTools() {
       fake.listTools += 1;
+      if (fake.failListTools) throw new Error(`listTools failed at https://v91aUser:v91aPass@mcp.v91a.invalid/mcp?token=v91a-query-secret`);
       return { tools: fake.tools };
     }
     async callTool(req: { name: string; arguments: unknown }) {
@@ -98,6 +103,7 @@ beforeEach(() => {
   fake.listTools = 0;
   fake.calls.length = 0;
   fake.failConnect = false;
+  fake.failListTools = false;
   errorLog = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
   vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
   warnLog = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
@@ -331,15 +337,50 @@ describe('RR-MCP-TENANT-BOUND (D-261, D-262): the MCP bridge serves a business o
     noServerTouched();
   });
 
-  it('MCP-14 a bound server that fails to connect is reported by key and host only: credentials in its url never reach the log', async () => {
-    fake.failConnect = true;
-    setServers([{ ...SERVER, url: 'https://user:pw@mcp.v91a.invalid/mcp?token=v91a-query-secret', businessIds: [BIZ_A] }]);
+  it('MCP-14 a bound server that fails to connect is logged by its key and host only: credentials and query in its url never reach the log, whatever form the error quotes the url in', async () => {
+    const SECRETS = ['v91aUser', 'v91aPass', 'v91a-query-secret', 'p%40ss', 'abc%20def'];
+    for (const url of [
+      'https://v91aUser:v91aPass@MCP.V91A.invalid:443/mcp?token=v91a-query-secret',
+      'https://v91aUser:v91aPass@MCP.V91A.invalid?token=v91a-query-secret',
+      'https://v91aUser:p%40ss w@MCP.V91A.invalid:443/mcp?token=abc def',
+      'https://v91aUser:v91aPass@mcp.v91a.invalid/mcp?token=v91a-query-secret',
+    ]) {
+      fake.failConnect = true;
+      warnLog.mockClear();
+      errorLog.mockClear();
+      setServers([{ ...SERVER, key: 'logged', url, businessIds: [BIZ_A] }]);
+      const mcp = new McpClientManagerService();
+      const err = await rejection(callAs(mcp, BIZ_A, 'mcp__logged__x'));
+      expect((err as Error).message).toMatch(/unavailable/);
+      const lines = [...warnLog.mock.calls, ...errorLog.mock.calls].map((c) => String(c[0])).join('\n');
+      for (const secret of SECRETS) expect(lines, `${url} leaks ${secret}`).not.toContain(secret);
+      expect(lines, url).toContain('"logged"');
+      expect(lines.toLowerCase(), url).toContain('mcp.v91a.invalid');
+    }
+  });
+
+  it('MCP-15 a listTools failure is logged the same way: no url credentials or query in the warning', async () => {
+    fake.failListTools = true;
+    setServers([{ ...SERVER, businessIds: [BIZ_A] }]);
     const mcp = new McpClientManagerService();
-    const err = await rejection(callAs(mcp, BIZ_A, 'mcp__s__x'));
-    expect((err as Error).message).toMatch(/unavailable/);
-    const lines = [...warnLog.mock.calls, ...errorLog.mock.calls].map((c) => String(c[0])).join('\n');
-    expect(lines).toContain('mcp.v91a.invalid');
-    expect(lines).not.toContain('user:pw');
-    expect(lines).not.toContain('v91a-query-secret');
+    await mcp.listBridgedTools(BIZ_A);
+    const lines = warnLog.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(lines).toMatch(/listTools failed/);
+    for (const secret of ['v91aUser', 'v91aPass', 'v91a-query-secret']) expect(lines).not.toContain(secret);
+  });
+
+  it('MCP-16 a url that does not parse, or is not http(s), is dropped at load with a key-only error log', async () => {
+    const bad = [
+      { ...SERVER, key: 'unparsed', url: 'not a url', businessIds: [BIZ_A] },
+      { ...SERVER, key: 'filescheme', url: 'file:///etc/v91a', businessIds: [BIZ_A] },
+      { ...SERVER, key: 'wsscheme', url: 'ws://mcp.v91a.invalid/mcp', businessIds: [BIZ_A] },
+    ];
+    setServers([...bad, { ...SERVER, key: 'plainhttp', url: 'http://mcp.v91a.invalid/mcp', businessIds: [BIZ_A] }]);
+    expect(loadMcpServerConfigs((m) => errorLog(m)).map((c) => c.key)).toEqual(['plainhttp']);
+    for (const { key } of bad) {
+      expect(errorLines().some((l) => l.includes(`"${key}"`) && /url/.test(l)), `no error log for ${key}`).toBe(true);
+    }
+    expect(errorLines().join('\n')).not.toContain('/etc/v91a');
+    noServerTouched();
   });
 });
