@@ -24,12 +24,12 @@
  * .../ai/memory/context, .../ai/profile/status, POST .../ai/profile/chat) behind AuthGuard and BusinessGuard over the
  * real AiMemoryService and ProfileIntelligenceService.
  *
- * Stand-ins: identity attachment (a middleware reads `x-v74d-user`), the model provider (it records the system prompt
+ * Stand-ins: identity attachment (a middleware reads `x-v71s-user`), the model provider (it records the system prompt
  * it is handed and answers fixed text), the document chunk store (Redis: no chunks), the other context reads of the
  * prompts, and the semantic store (answers nothing). globalThis.fetch is a tap that refuses and records every outbound
  * request: none is made.
  *
- * Fixture prefix v74d_ (MEM-DOC-EXTRACTION-SIGHT), cleaned with sqlLikePrefix().
+ * Fixture prefix v71s_ (MEM-DOC-EXTRACTION-SIGHT), cleaned with sqlLikePrefix().
  */
 import 'reflect-metadata';
 import path from 'path';
@@ -40,8 +40,8 @@ import { sqlLikePrefix } from './helpers/sql-like.js';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
-const P = 'v74d_';
-const HEADER = 'x-v74d-user';
+const P = 'v71s_';
+const HEADER = 'x-v71s-user';
 
 const ID = {
   owner: `${P}owner`,
@@ -67,15 +67,15 @@ const READS_REVENUE: Record<Reader, boolean> = { owner: true, blind: false, reve
 const BLIND_READERS: Reader[] = READERS.filter((r) => !READS_REVENUE[r]);
 
 /** A business-wide AiMemory fact: every reader's prompt carries it (the memory block renders). */
-const FACT = 'V74D-FACT: we open at nine';
+const FACT = 'V71S-FACT: we open at nine';
 /** The extracted invoice's markers: its total and its number. */
 const INVOICE_TOTAL = '4812.37';
-const INVOICE_NUMBER = 'V74D-INV-0042';
+const INVOICE_NUMBER = 'V71S-INV-0042';
 /** The document ids' prefix: the extraction row's key, which every prompt line of it starts with (the prompts cut a
  * row's content at 250 characters, before the extracted figures). */
 const DOC_KEY = `${P}doc_`;
 const EXTRACTION_MARKERS = [INVOICE_TOTAL, INVOICE_NUMBER, 'document_extraction', DOC_KEY];
-const TURN = 'v74d: how are we doing this month?';
+const TURN = 'v71s: how are we doing this month?';
 
 const saved = { fetch: globalThis.fetch };
 const outbound: string[] = [];
@@ -171,7 +171,7 @@ async function profilePromptFor(userId: string): Promise<string> {
     .post(aiRoute('profile/chat'))
     .set(HEADER, userId)
     .set('x-forwarded-for', `10.74.5.${ip % 250}`)
-    .send({ message: 'v74d: we sell lunches' });
+    .send({ message: 'v71s: we sell lunches' });
   expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(201);
   expect(profilePrompts, `one model call for ${userId}`).toHaveLength(1);
   return profilePrompts[0];
@@ -199,7 +199,7 @@ async function everythingFor(reader: Reader) {
 beforeAll(async () => {
   globalThis.fetch = (async (input: unknown) => {
     outbound.push(String(input));
-    throw new Error('v74d: no outbound traffic in this suite');
+    throw new Error('v71s: no outbound traffic in this suite');
   }) as typeof fetch;
 
   const dbMod = await import('@keyflow/db');
@@ -246,7 +246,7 @@ beforeAll(async () => {
   // the model's answer is the extracted invoice.
   const gateway = {
     complete: async () => ({
-      content: JSON.stringify({ data: { total: Number(INVOICE_TOTAL), number: INVOICE_NUMBER, vendor: 'V74D Supplies' }, confidence: 0.92 }),
+      content: JSON.stringify({ data: { total: Number(INVOICE_TOTAL), number: INVOICE_NUMBER, vendor: 'V71S Supplies' }, confidence: 0.92 }),
     }),
   };
   const redisStandIn = { redis: { scan: async () => ['0', []] }, getJson: async () => null };
@@ -265,7 +265,7 @@ beforeAll(async () => {
     },
     async trackAndComplete(_businessId: string, _userId: unknown, _task: string, req: GatewayRequest) {
       prompts.push(systemOf(req));
-      return { content: 'v74d: noted.', toolCalls: [], usage };
+      return { content: 'v71s: noted.', toolCalls: [], usage };
     },
   };
   const recorder = { emit() { return true; }, async recordEvent() { return undefined; }, async create() { return undefined; } };
@@ -275,7 +275,7 @@ beforeAll(async () => {
   const providers = new Map<unknown, unknown>();
   const moduleRef = {
     get(token: any) {
-      if (!providers.has(token)) throw new Error(`v74d: no provider for ${token?.name ?? String(token)}`);
+      if (!providers.has(token)) throw new Error(`v71s: no provider for ${token?.name ?? String(token)}`);
       return providers.get(token);
     },
   };
@@ -292,7 +292,7 @@ beforeAll(async () => {
     executionLog: { logToolExecution: async () => undefined, log: async () => undefined },
     businessGraph: {
       invalidateCache() {},
-      getSnapshot: async () => ({ business: { name: 'V74D Biz' } }),
+      getSnapshot: async () => ({ business: { name: 'V71S Biz' } }),
       buildContextString: () => '',
     },
     memory: { buildContextBlock: async () => ({}), buildPromptSection: () => '' },
@@ -314,13 +314,13 @@ beforeAll(async () => {
   const profileUsage = {
     async trackAndComplete(_businessId: string, _userId: unknown, _task: string, req: GatewayRequest) {
       profilePrompts.push(systemOf(req));
-      return { content: 'v74d: tell me more.', toolCalls: [], usage };
+      return { content: 'v71s: tell me more.', toolCalls: [], usage };
     },
   };
   const profile = new ProfileIntelligenceService(
     prisma,
     memory,
-    { getSnapshot: async () => { throw new Error('v74d: no snapshot'); } } as any,
+    { getSnapshot: async () => { throw new Error('v71s: no snapshot'); } } as any,
     {} as any,
     profileUsage as any,
   );
@@ -453,7 +453,7 @@ beforeAll(async () => {
   ] as const) {
     await db.user.create({ data: { id, email: `${id}@${P}test.local`, role } });
   }
-  await db.business.create({ data: { id: ID.biz, name: 'V74D Biz', slug: `${P}biz`, ownerId: ID.owner, currency: 'TTD' } });
+  await db.business.create({ data: { id: ID.biz, name: 'V71S Biz', slug: `${P}biz`, ownerId: ID.owner, currency: 'TTD' } });
   for (const [userId, role, extra] of [
     [ID.owner, 'OWNER', { maxApprovalTier: 4 }],
     [ID.blind, 'STAFF', { permissionScopes: BLIND_SCOPES, maxApprovalTier: 0 }],

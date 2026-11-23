@@ -1133,9 +1133,9 @@
       "packet": "V1-64 (SWP-BOOKING-PAYMENT-GATE)"
     },
     {
-      "prefix": "v74d_",
+      "prefix": "v71s_",
       "owner": "apps/server/test/memory-doc-extraction-sight.integration.test.ts",
-      "packet": "MEM-DOC-EXTRACTION-SIGHT"
+      "packet": "V1-71 (MEM-DOC-EXTRACTION-SIGHT)"
     }
   ],
   "pendingRenames": [],
