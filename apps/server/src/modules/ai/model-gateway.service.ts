@@ -224,7 +224,12 @@ export interface ProviderHealth {
   lastErrorAt: Date | null;
   totalCalls: number;
   totalErrors: number;
-  /** Class of the last failure recorded for this provider (RR-GATEWAY-TYPED-FAILURES); null until one happens. */
+  /**
+   * Class of the most recent failure recorded on the platform credential of this
+   * provider (RR-GATEWAY-TYPED-FAILURES). Informational and additive: it is not
+   * cleared by a later success, and a failure on a business's own (BYOK) key never
+   * sets it, since this health is read by every business of the platform.
+   */
   lastFailureClass: ProviderFailureClass | null;
 }
 
@@ -3226,16 +3231,17 @@ export class ModelGatewayService {
     failureClass: ProviderFailureClass = 'unknown',
   ): void {
     const metrics = this.providerMetrics.get(provider);
+    const byokId = this.byokCircuitId(provider, preferences);
     if (metrics) {
       metrics.totalCalls++;
       metrics.totalErrors++;
       metrics.lastErrorAt = new Date();
-      metrics.lastFailureClass = failureClass;
+      // The class is shown to every business: only the platform credential's failures set it.
+      if (!byokId) metrics.lastFailureClass = failureClass;
     }
 
     if (!failureCountsTowardCircuit(failureClass)) return;
 
-    const byokId = this.byokCircuitId(provider, preferences);
     let circuit: CircuitBreakerState | undefined;
     if (byokId) {
       circuit = this.byokCircuitBreakers.get(byokId);

@@ -16,7 +16,8 @@
  *
  * Inputs read, in order: the caller-abort shapes; the OpenAI SDK's typed
  * connection errors; an HTTP status (`err.status` on an OpenAI SDK APIError or
- * on a ProviderHttpError) with `err.code`/`err.type` for the 429 split; a Node
+ * on a ProviderHttpError) with `err.code`/`err.type` for the 429 split and 402 as
+ * quota; a Node
  * network error code (`err.code`, or `err.cause.code` under fetch); and only
  * then, for a plain Error, its message with whole-number status codes
  * (`\b500\b` does not match 'max_tokens 5000').
@@ -81,11 +82,21 @@ function codeOf(e: ErrorLike): string | undefined {
   return cause && typeof cause.code === 'string' ? cause.code : undefined;
 }
 
+/**
+ * The documented quota signals on a 429: OpenAI's `insufficient_quota` (code or type) and Moonshot's
+ * `exceeded_current_quota_error` (type). The words of the message are never read on the status path:
+ * Google's ordinary per-minute throttle says "check quota" and is a rate limit.
+ */
+const QUOTA_MARKERS = ['insufficient_quota', 'exceeded_current_quota_error'];
+
 function classifyStatus(status: number, e: ErrorLike): ProviderFailureClass {
   if (status === 429) {
     const marker = `${typeof e.code === 'string' ? e.code : ''} ${typeof e.type === 'string' ? e.type : ''}`.toLowerCase();
-    return marker.includes('insufficient_quota') || /\b(billing|quota)\b/i.test(String(e.message ?? '')) ? 'quota_exhausted' : 'rate_limited';
+    return QUOTA_MARKERS.some((m) => marker.includes(m)) ? 'quota_exhausted' : 'rate_limited';
   }
+  // 402 Payment Required: OpenRouter and other OpenAI-compatible providers answer it when the credential
+  // has no credits. The credential cannot serve, like insufficient_quota.
+  if (status === 402) return 'quota_exhausted';
   if (status === 401 || status === 403) return 'auth';
   if (status === 408) return 'timeout';
   if (status >= 500) return 'server';
@@ -96,7 +107,7 @@ function classifyStatus(status: number, e: ErrorLike): ProviderFailureClass {
 /** The message fallback, for plain Errors thrown by paths that carry no status (and for tests that stub them). */
 function classifyMessage(message: string): ProviderFailureClass {
   const msg = message.toLowerCase();
-  if (/insufficient_quota|exceeded your current quota/.test(msg)) return 'quota_exhausted';
+  if (/insufficient_quota|exceeded_current_quota_error|\b402\b/.test(msg)) return 'quota_exhausted';
   if (/\b429\b|rate limit/.test(msg)) return 'rate_limited';
   if (/\b(401|403)\b|invalid api key|incorrect api key|invalid x-api-key|unauthorized|authentication/.test(msg)) return 'auth';
   if (/\b(400|404|413|422)\b/.test(msg)) return 'bad_request';
