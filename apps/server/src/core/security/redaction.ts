@@ -23,10 +23,12 @@
  * prefix plus 20 key characters, a PEM header), so an invoice number, a phone
  * number, a date, a UUID or a 16-digit number that fails Luhn is untouched.
  * Residual over-redaction, by design: about one in ten 14 to 19 digit numeric
- * identifiers passes Luhn (every IMEI does) and becomes <card>; a card-shaped
- * digit group that completes a valid window with a card is redacted with it;
- * a cut-off PEM block takes the rest of its string leaf. See
- * redactCardWindows for the card rules.
+ * identifiers passes Luhn (every IMEI does) and becomes <card>; a grouped
+ * numeric list (several four- or five-digit groups in a row) is redacted
+ * about one time in four or five; a card-shaped digit group that completes a
+ * valid window with a card is redacted with it; a cut-off PEM block takes the
+ * rest of its string leaf. See redactCardWindows for the card rules and what
+ * is not covered.
  */
 export const SENSITIVE_FIELD_PATTERNS = [
   'password',
@@ -97,29 +99,46 @@ const CARD_MAX_DIGITS = 19;
 
 /**
  * A card number is a window of 13 to 19 digits, made of whole groups of a
- * digit run (groups are split by one to three spaces, tabs, no-break spaces
- * or dashes), that passes Luhn, and is card-shaped: a single unbroken group,
- * or a multi-group window whose first group has 4+ digits and every group
- * 3+ (4-4-4-4, 4-6-5, 4-4-4-4-3), so a date's parts or a phone's 3-3-4 never
- * join a window; a 13-digit window must start with 4 (legacy Visa is the
- * only 13-digit scheme, and that rule keeps every 13-digit epoch-millisecond
- * id intact). EVERY valid window in the run is redacted (their union), so a
- * neighbouring group that happens to complete a valid window with the head
- * of a card can never leave the card's tail visible; the neighbours outside
- * every valid window stay. An unbroken group longer than 19 digits is not a
- * card (longer than any scheme) and is left whole.
+ * digit run (groups are split by one to three spaces, tabs, no-break, thin or
+ * narrow no-break spaces, hyphens or en dashes), that passes Luhn, and is
+ * card-shaped: a single unbroken group; a multi-group window whose first
+ * group has 4+ digits and every group 3+ (4-4-4-4, 4-6-5, 4-4-4-4-3); or a
+ * generic four-digit mask whose last group has 1 or 2 digits after groups of
+ * exactly four (4-4-4-1, 4-4-4-2, 4-4-4-4-1, 4-4-4-4-2: a 13-digit Visa, a
+ * 14-digit Diners, a 17 or 18 digit Maestro typed under a #### mask). So a
+ * date's parts or a phone's 3-3-4 never join a window. A 13-digit window must
+ * start with 4 (legacy Visa is the only 13-digit scheme, and that rule keeps
+ * every 13-digit epoch-millisecond id intact). EVERY valid window in the run
+ * is redacted (their union), so a neighbouring group that happens to complete
+ * a valid window with the head of a card can never leave the card's tail
+ * visible; the neighbours outside every valid window stay, and two adjacent
+ * cards merge into one marker. An unbroken group longer than 19 digits is
+ * not a card (longer than any scheme) and is left whole.
  *
- * Residual, by design: about one in ten 14 to 19 digit numeric identifiers
- * passes Luhn (an IMEI always does), so such an id in a note becomes <card>;
- * and a card-shaped neighbour that completes a valid window with a card is
- * redacted with it. A card broken across lines, or joined by dots, slashes or
- * four or more spaces, is not covered.
+ * Residual over-redaction, by design and measured on synthetic notes: about
+ * one in ten single 14 to 19 digit numeric identifiers passes Luhn (an IMEI
+ * always does) and becomes <card>; grouped numeric lists pay the union rule,
+ * about one in four runs of four to six four-digit groups and one in five
+ * lists of four five-digit ids; a card-shaped neighbour that completes a
+ * valid window with a card (about one in eight next to a card) is redacted
+ * with it. Not covered, by design: a card broken across lines, or joined by
+ * dots, slashes or four or more spaces; a card typed in two-digit pairs or
+ * with a short group before the last (4-3-3-3-1); a card written directly
+ * after a plus sign (the E.164 rule); and a digit glued to the number.
  */
-const CARD_SEPARATOR = /([ \t\u00a0-]{1,3})/;
+const CARD_SEPARATOR = /([ \t\u00a0\u2009\u202f\u2013-]{1,3})/;
 
+/** Groups of exactly four, then a last group of one or two digits: a number typed under a generic #### mask. */
+function genericMaskWithShortTail(groupLengths: readonly number[]): boolean {
+  const last = groupLengths[groupLengths.length - 1];
+  return last >= 1 && last <= 2 && groupLengths.length >= 4 && groupLengths.slice(0, -1).every((len) => len === 4);
+}
+
+/** Monotone under appending a group: once a window is not card-shaped, no longer window from the same start is. */
 function cardShaped(groupLengths: readonly number[]): boolean {
   if (groupLengths.length === 1) return true;
-  return groupLengths[0] >= 4 && groupLengths.every((len) => len >= 3);
+  if (groupLengths[0] >= 4 && groupLengths.every((len) => len >= 3)) return true;
+  return genericMaskWithShortTail(groupLengths);
 }
 
 function redactCardWindows(run: string): string {
@@ -204,12 +223,12 @@ export const SENSITIVE_VALUE_PATTERNS: readonly Readonly<SensitiveValuePattern>[
     pattern: new RegExp(String.raw`\b(?:sk-ant-|sk-|xoxb-|ghp_|github_pat_)${KEY_CHARS}{20,}`, 'g'),
   }),
   freeze({
-    // A maximal run of digit groups joined by one to three spaces, tabs, no-break spaces or dashes, not
-    // preceded by a digit or a plus sign (an E.164 phone number is never a card). The windows inside it are
-    // found by redactCardWindows.
+    // A maximal run of digit groups joined by one to three spaces, tabs, no-break, thin or narrow no-break
+    // spaces, hyphens or en dashes, not preceded by a digit or a plus sign (an E.164 phone number is never a
+    // card). The windows inside it are found by redactCardWindows.
     name: 'card-number-luhn',
     marker: CARD_MARKER,
-    pattern: /(?<![\d+])\d+(?:[ \t\u00a0-]{1,3}\d+)*(?!\d)/g,
+    pattern: /(?<![\d+])\d+(?:[ \t\u00a0\u2009\u202f\u2013-]{1,3}\d+)*(?!\d)/g,
     rewrite: redactCardWindows,
   }),
 ]);
