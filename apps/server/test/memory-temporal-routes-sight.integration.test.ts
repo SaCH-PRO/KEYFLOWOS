@@ -307,6 +307,9 @@ describe('MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (D-257, D-234, D-100): the temporal m
       for (const reader of [...BLIND, ...SEEING]) {
         const seen = await everythingFor(reader);
         for (const [surface, text] of Object.entries(seen)) {
+          // KEY's timeline is checked by V75R-06: an inbox event whose own title names money is an operations event on the
+          // timeline (FU-TEMPORAL-FLOW-INBOX-SCOPE's rule, the REST timeline's too); only the memory surfaces taint by text.
+          if (surface === 'KEY get_timeline') continue;
           if (SEEING.includes(reader)) {
             if (!lower(text).includes(REV)) wrong.push(`${reader} ${surface}: money withheld from a reader who may see it`);
           } else if (lower(text).includes(REV) || text.includes(AMOUNT)) {
@@ -322,6 +325,28 @@ describe('MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (D-257, D-234, D-100): the temporal m
         expect(ops[surface], `opsNoRev ${surface}: ordinary summary`).toContain(okMarker(1));
       }
       expect(outbound).toEqual([]);
+    } finally {
+      await clearMemory();
+    }
+  }, 300_000);
+
+  it('V75R-06 KEY get_timeline applies the timeline\'s reader filter: a member without revenue read, and a bookings-only member, get no event of a money-owning module (payment, invoice) and exactly the events GET temporal-flow/businesses/:id answers them; the owner gets every event', async () => {
+    await clearMemory();
+    try {
+      await seed();
+      const moneyTypes = (events: any[]) => events.filter((e) => /^(payment|invoice)\./.test(e.type)).length;
+      for (const reader of ['opsNoRev', 'bookingsOnly', 'owner'] as Reader[]) {
+        const tool = await connector.execute(cmd(reader, 'get_timeline', { limit: 50 }));
+        expect(tool.success, JSON.stringify(tool.error)).toBe(true);
+        const rest = await get(reader, '?limit=50');
+        expect(rest.status).toBe(200);
+        expect(tool.data.map((e: any) => e.id), `${reader}: KEY's timeline is the REST timeline`).toEqual(rest.body.map((e: any) => e.id));
+        if (reader === 'owner') expect(moneyTypes(tool.data)).toBe(4);
+        else expect(moneyTypes(tool.data), reader).toBe(0);
+      }
+      const none = await connector.execute(cmd(null, 'get_timeline', { limit: 50 }));
+      expect(moneyTypes(none.data)).toBe(0);
+      expect(lower(JSON.stringify(none.data))).not.toContain(REV);
     } finally {
       await clearMemory();
     }
