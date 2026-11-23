@@ -170,7 +170,8 @@ export function readsEveryPattern(reader: string | null, sight: ModuleSight): bo
  * turnPatternVisibility) for a turn with no staff position: no requester (a plan no member asked for), no pattern at
  * all; otherwise each row by aiMemoryRowVisibleTo for the requester while a member (promptMemoryReader) and their module
  * sight (readersModuleSight); a requester who is no member keeps only the rows that state neither money nor an expense. A
- * sight that cannot be resolved keeps no pattern (fail closed). The intent parser and the planner use it.
+ * sight that cannot be resolved, or a caller built without its database client (a wiring fault, logged), keeps no
+ * pattern (fail closed). The intent parser and the planner use it.
  */
 export async function promptPatternVisibility(
   prisma: PrismaService | undefined,
@@ -180,6 +181,11 @@ export async function promptPatternVisibility(
   logTag: string,
 ): Promise<(row: { category: string; key: string; value: string }) => boolean> {
   if (!userId) return () => false;
+  if (!prisma) {
+    // Review round 1 (security finding 2): no client reads no membership, so no sight: said loudly, it is a wiring fault.
+    logger.warn(`[${logTag}][${businessId}] no database client: no reader sight, no pattern served (wiring fault)`);
+    return () => false;
+  }
   try {
     const reader = await promptMemoryReader(prisma, businessId, userId, logger, logTag);
     const sight = await readersModuleSight(prisma, businessId, reader, logger, logTag);
