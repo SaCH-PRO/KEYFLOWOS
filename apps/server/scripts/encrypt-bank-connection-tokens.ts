@@ -33,11 +33,13 @@
  *
  * Both modes refuse (exit 2) when the @keyflow/db build loaded does not
  * encrypt the column. --apply also refuses (exit 2, nothing written) when no
- * key variable is set, and when there are plaintext rows to encrypt while
- * stored ciphertext exists in scope and none of it decrypts with the loaded key.
+ * key variable is set, and, when there are plaintext rows to encrypt, unless
+ * the loaded key decrypts at least one stored ciphertext of any encrypted model
+ * anywhere in the database (not only in the --business scope): the key proof.
  * Each rewritten row's updated_at moves to the time of the run (@updatedAt).
  *
- * Exit status: 0 done, 1 database read/update failure, 2 bad arguments or a refused --apply.
+ * Exit status: 0 done, 1 database read/update failure, 2 bad arguments, a stale
+ * @keyflow/db build (either mode) or a refused --apply.
  */
 import { db, tokenEncryptionKeySource, ENCRYPTED_FIELDS } from '@keyflow/db';
 
@@ -99,6 +101,50 @@ function isDecryptFailure(err: unknown): boolean {
 }
 
 const row = (label: string, n: number) => `  ${label.padEnd(24)} ${n}`;
+
+interface ProbeDelegate {
+  findMany(args: unknown): Promise<Array<{ id: string }>>;
+  findUnique(args: unknown): Promise<Record<string, unknown> | null>;
+}
+
+/** Stored values sampled per encrypted column when proving the key. */
+const PROOF_SAMPLE = 5;
+
+/**
+ * Orchestrator A1: proves the loaded key is the one the API sealed with, by decrypting at least one stored
+ * ciphertext of ANY model in the extension's field map, searched across the whole database (never only the
+ * --business scope). BankConnection is tried first, then the others in map order. Each candidate is read by id
+ * through the extension, which decrypts it; a decrypt failure moves on to the next candidate, any other error
+ * is thrown (the caller exits 1). Returns the model that proved the key, or null when nothing decrypts (or
+ * nothing is stored encrypted at all).
+ *
+ * Chosen over an explicit --key-source=<VAR> flag: naming the variable proves only that the operator typed the
+ * API's variable name, not that its value in this shell is the API's value; a successful decrypt proves both.
+ */
+async function proveKey(database: Db, fields: Record<string, readonly string[]>): Promise<string | null> {
+  const models = Object.keys(fields).sort((a, b) => (a === 'BankConnection' ? -1 : b === 'BankConnection' ? 1 : 0));
+  const delegates = database as unknown as Record<string, ProbeDelegate | undefined>;
+  for (const model of models) {
+    const delegate = delegates[model[0].toLowerCase() + model.slice(1)];
+    if (!delegate) continue;
+    for (const field of fields[model]) {
+      const candidates = await delegate.findMany({
+        where: { [field]: { startsWith: CIPHER_PREFIX } },
+        select: { id: true },
+        take: PROOF_SAMPLE,
+      });
+      for (const { id } of candidates) {
+        try {
+          const found = await delegate.findUnique({ where: { id }, select: { id: true, [field]: true } });
+          if (found && typeof found[field] === 'string') return model;
+        } catch (err: unknown) {
+          if (!isDecryptFailure(err)) throw err;
+        }
+      }
+    }
+  }
+  return null;
+}
 
 export async function main(
   argv: string[],
@@ -195,16 +241,26 @@ export async function main(
     return 0;
   }
 
-  // SEC-V72S-R2-1: a key variable being set does not prove it is the API's key. When stored ciphertext exists and
-  // none of it decrypts, the loaded key is almost certainly not the one the API used: refuse rather than seal the
-  // plaintext rows under it. (With no stored ciphertext in scope there is nothing to check against.)
   // With nothing to encrypt there is nothing to protect (COR-V72S-R3-2): report and exit 0.
-  if (plaintext.length > 0 && undecryptable.length > 0 && decrypted === 0) {
-    error(
-      `Refusing --apply: ${undecryptable.length} stored ciphertext value(s) and none decrypts with the loaded key ` +
-        `(${keySource}); it is likely not the key the API runs with. Nothing was written.`,
-    );
-    return 2;
+  if (plaintext.length > 0) {
+    // Orchestrator A1 (supersedes SEC-V72S-R2-1's scoped check): a key variable being set does not prove it is the
+    // API's key. Unless the loaded key decrypts a stored ciphertext somewhere in the database, refuse rather than
+    // seal the plaintext rows under a key the API cannot read.
+    let provenBy: string | null;
+    try {
+      provenBy = await proveKey(database, fields);
+    } catch (err: unknown) {
+      error(`Stored ciphertext could not be read to prove the key: ${describeFailure(err)}. Nothing was written.`);
+      return 1;
+    }
+    if (!provenBy) {
+      error(
+        `Refusing --apply: no stored ciphertext decrypts with the loaded key (${keySource}), searched across every ` +
+          'encrypted model in the whole database; it is likely not the key the API runs with. Nothing was written.',
+      );
+      return 2;
+    }
+    log(`  key proven by            ${provenBy}`);
   }
 
   let done = 0;
