@@ -72,7 +72,7 @@ const PLAIN_NODE_TEST = /^node --test(?: [A-Za-z0-9_./*-]+)+$/;
 /** The only steps that may run before the census step (an earlier step can write GITHUB_ENV or GITHUB_PATH): what runtime-pin.spec.mjs allows before its own step, plus that step. */
 const BEFORE_CENSUS = [
   { uses: /^actions\/checkout@/, keys: ['name', 'uses'] },
-  { uses: /^pnpm\/action-setup@/, keys: ['name', 'uses', 'with'], forbidWith: /^run_install\s*:/, forbidWhy: 'it would run pnpm install before the pin and census checks' },
+  { uses: /^pnpm\/action-setup@/, keys: ['name', 'uses', 'with'], withOnly: /^version\s*:/ }, // run_install would run pnpm install before the pin and census checks
   { uses: /^actions\/setup-node@/, keys: ['name', 'uses', 'with'] },
   { run: 'node --test scripts/ci/runtime-pin.spec.mjs', keys: ['name', 'run'] },
 ];
@@ -266,6 +266,7 @@ export function readJob(lines) {
       run: value(s.fields.run),
       runStyle: s.fields.run?.raw,
       with: s.fields.with?.block ?? [],
+      withInline: s.fields.with?.raw ?? '',
     })),
   };
 }
@@ -484,9 +485,11 @@ export function censusStepProblems(source) {
     }
     const over = s.keys.filter((k) => !allowed.keys.includes(k));
     if (over.length) problems.push(`'${label}' before the census step may not set ${over.join(', ')}`);
-    if (allowed.forbidWith && s.with.some((line) => allowed.forbidWith.test(line))) {
-      const key = allowed.forbidWith.source.replace(/^\^|\\s\*:$/g, '');
-      problems.push(`'${label}' before the census step may not set with.${key} (${allowed.forbidWhy})`);
+    if (allowed.withOnly && s.keys.includes('with')) {
+      const odd = s.withInline !== '' ? [s.withInline] : s.with.filter((line) => !allowed.withOnly.test(line));
+      if (odd.length) {
+        problems.push(`'${label}' before the census step may set only \`version\` under with, found ${JSON.stringify(odd.join(' '))}`);
+      }
     }
   }
   return problems;
