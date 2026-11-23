@@ -65,7 +65,7 @@ import {
 } from './key-cortex-prompt-context.service';
 import { userCanAccessBusiness } from '../../core/auth/business.guard';
 import { LEVEL_RANK, memberScopeMap, rankOf } from '../../core/authority/module-vocabulary';
-import { genomeContextForReader, genomeSuggestionsForReader } from './genome-context-for-reader';
+import { genomeContextForReader, genomeSuggestionsForReader, rankedRecommendationsForReader } from './genome-context-for-reader';
 import type { CortexMemberAuthority } from './key-cortex.controller';
 import { KeyCortexToolLoopService } from './key-cortex-tool-loop.service';
 import { KeyCortexActionDetectionService } from './key-cortex-action-detection.service';
@@ -484,8 +484,8 @@ export class KeyCortexQueryPipelineService {
       if (flags.genomeV3Enabled && this.genomeBridgeService) {
         try {
           // Read with headroom for a reader without revenue read (D-235 round 4, security MINOR-1).
-          rankedRecommendations = await this.genomeContextService.getRankedRecommendationsForReader(
-            query.businessId,
+          rankedRecommendations = await rankedRecommendationsForReader(
+            (limit) => this.genomeContextService.getRankedRecommendations(query.businessId, limit),
             await this.readsRevenue(query),
           );
           this.logger.log(

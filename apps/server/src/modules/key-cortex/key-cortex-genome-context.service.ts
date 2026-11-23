@@ -137,20 +137,6 @@ export class KeyCortexGenomeContextService {
   }
 
   /**
-   * FU-KEY-GENOME-READS-RESIDUAL round 4 (D-235; security MINOR-1): the ranked recommendations projected for the reader.
-   * A reader without revenue read (or no reader: fails closed) is read with headroom before the limit is taken, so how
-   * many of the business's top rows are finance or sales cannot be read from how many the reader is handed.
-   */
-  async getRankedRecommendationsForReader(
-    businessId: string,
-    readsRevenue = false,
-    limit = 5,
-  ): Promise<GenomeRecommendation[]> {
-    const rows = await this.getRankedRecommendations(businessId, readsRevenue ? limit : 50);
-    return genomeRecommendationsForReader(rows, readsRevenue).slice(0, limit);
-  }
-
-  /**
    * Determine whether KEY should suggest a proactive action based on genome signals.
    */
   // D-235: no reader given is a reader without revenue read (fails closed).

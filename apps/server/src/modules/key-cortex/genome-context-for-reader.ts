@@ -68,6 +68,19 @@ export function genomeRecommendationsForReader<T extends Pick<GenomeRecommendati
     .map(({ r }) => r);
 }
 
+/**
+ * FU-KEY-GENOME-READS-RESIDUAL round 4 (D-235; security MINOR-1): ranked recommendations projected for the reader. A
+ * reader without revenue read (or no reader: fails closed) is read with headroom before the limit is taken, so how many of
+ * the business's top rows are finance or sales cannot be read from how many the reader is handed.
+ */
+export async function rankedRecommendationsForReader<T extends Pick<GenomeRecommendation, 'category'>>(
+  read: (limit: number) => Promise<T[]>,
+  readsRevenue = false,
+  limit = 5,
+): Promise<T[]> {
+  return genomeRecommendationsForReader(await read(readsRevenue ? limit : 50), readsRevenue).slice(0, limit);
+}
+
 /** Proactive suggestions carry the recommendation's domain, or the signal's module, as their category. */
 export function genomeSuggestionsForReader<T extends { category?: string | null }>(rows: T[], readsRevenue: boolean): T[] {
   if (readsRevenue) return rows;
