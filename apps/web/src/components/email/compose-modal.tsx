@@ -180,6 +180,25 @@ const TONES = [
 ];
 
 const escapeHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * The text a document's own route is handed: the body as plain text with the
+ * customer's link left out (the paragraph that carries it, and any other
+ * mention). The route adds the link itself, and its request body is stored by
+ * the business-event interceptor, which redacts by key name only, so a bearer
+ * link in the message would persist in plain text (review SEC-MQ-1; the
+ * CR-V152-1 leak on another route). The member still sees the link in the
+ * composer.
+ */
+export function textForDocumentRoute(html: string, link?: string | null): string {
+  const url = link?.trim();
+  if (!url) return htmlToText(html);
+  const escaped = escapeRegExp(url);
+  const escapedHtml = escapeRegExp(escapeHtml(url));
+  const withoutParagraph = html.replace(new RegExp(`<p\\b[^>]*>(?:(?!<\\/p>)[\\s\\S])*?(?:${escaped}|${escapedHtml})(?:(?!<\\/p>)[\\s\\S])*?<\\/p>`, "gi"), "");
+  return htmlToText(withoutParagraph).split(url).join("").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
 
 function applyTemplate(template: EmailTemplate, context?: ComposePrefill["context"]) {
   let subject = template.subject;
@@ -338,7 +357,7 @@ export function ComposeModal({ open, onClose, prefill, onSent }: ComposeModalPro
         // The document's own route (MOUNT-QUOTES): it builds the email with the
         // customer's link and moves the document; a refusal keeps the composer.
         for (const recipient of toEmails) {
-          const answer = await prefill.send({ to: recipient, subject, htmlBody: body, text: htmlToText(body) });
+          const answer = await prefill.send({ to: recipient, subject, htmlBody: body, text: textForDocumentRoute(body, prefill.context?.link) });
           if (answer && answer.error) {
             toast.error(answer.error);
             setSending(false);

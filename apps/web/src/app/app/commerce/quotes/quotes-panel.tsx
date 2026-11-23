@@ -1455,13 +1455,16 @@ export default function QuotesPanel({
                         <Link2 className="w-4 h-4 text-slate-400" />
                       </button>
                     )}
-                    <button
-                      onClick={() => { void openSendQuoteEmail(selected); }}
-                      className="p-2 rounded-lg hover:bg-blue-500/10 transition-colors"
-                      title="Send via email"
-                    >
-                      <Mail className="w-4 h-4 text-blue-400" />
-                    </button>
+                    {/* As the row menu: a draft or sent quote only (review SEC-MQ-3: an accepted quote's accept link is not re-emailed from here). */}
+                    {(selected.status === "DRAFT" || selected.status === "SENT") && !selected.invoiceId && (
+                      <button
+                        onClick={() => { void openSendQuoteEmail(selected); }}
+                        className="p-2 rounded-lg hover:bg-blue-500/10 transition-colors"
+                        title="Send via email"
+                      >
+                        <Mail className="w-4 h-4 text-blue-400" />
+                      </button>
+                    )}
                   </div>
                 </div>
                 {selected.status === "DRAFT" && (
