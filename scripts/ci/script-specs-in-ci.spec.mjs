@@ -360,6 +360,24 @@ describe('script-specs-in-ci: negative controls', () => {
     assert.deepEqual(nodeTestPatterns('node --import=./setup.mjs --test scripts/x/a.spec.mjs'), ['scripts/x/a.spec.mjs']);
   });
 
+  it('an inline comment that contains a shell separator is still a comment', () => {
+    assert.deepEqual(nodeTestPatterns('node --test scripts/x/a.spec.mjs # later; node --test scripts/y/b.spec.mjs'), [
+      'scripts/x/a.spec.mjs',
+    ]);
+    assert.deepEqual(nodeTestPatterns('node --test scripts/x/a.spec.mjs # && node --test scripts/y/b.spec.mjs'), [
+      'scripts/x/a.spec.mjs',
+    ]);
+    // A `#` glued to a token is part of the token, as in bash.
+    assert.deepEqual(nodeTestPatterns('node --test scripts/x/a.spec.mjs#frag'), ['scripts/x/a.spec.mjs#frag']);
+  });
+
+  it('wrappers nest in any order; nice is not a wrapper (its -n form would hide the command)', () => {
+    assert.deepEqual(nodeTestPatterns('timeout 5 pnpm exec node --test scripts/x/a.spec.mjs'), ['scripts/x/a.spec.mjs']);
+    assert.deepEqual(nodeTestPatterns('time timeout 5 node --test scripts/x/a.spec.mjs'), ['scripts/x/a.spec.mjs']);
+    assert.deepEqual(nodeTestPatterns('nice node --test scripts/x/a.spec.mjs'), []);
+    assert.deepEqual(nodeTestPatterns('nice -n 10 node --test scripts/x/a.spec.mjs'), []);
+  });
+
   it('a stale EXEMPT path fails, and so does a needless or unexplained one', () => {
     const wf = { 'x.yml': 'jobs:\n  j:\n    steps:\n      - run: node --test scripts/x/a.spec.mjs\n' };
     const stale = census(['scripts/x/a.spec.mjs'], wf, { 'scripts/gone/z.spec.mjs': 'was removed' }).problems;
