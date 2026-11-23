@@ -38,6 +38,8 @@
  *   QPM-10  RED-BEFORE  Send via email on a sent quote opens the composer with the template context
  *                       (business name, the token link) and a send that posts to send-email
  *   QPM-11  RED-BEFORE  the detail's Send Quote on a draft sends by email (no bare status flip)
+ *   QPM-13  RED-BEFORE  the row's Convert is named even with its label hidden; the auto-convert toggle no longer
+ *                       answers to /convert/i (journey D6 on a phone flipped the toggle instead of converting)
  *   QPM-12  RED-BEFORE  the detail's envelope offers Send via email for a draft or sent quote only, as the row
  *                       menu does (review SEC-MQ-3: an accepted quote's accept link is not re-emailed from here)
  */
@@ -478,5 +480,19 @@ describe("MOUNT-QUOTES: Sales > Quotes mounts the quotes panel", () => {
       expect(within(detail).queryByTitle("Send via email") !== null, q.status).toBe(offered);
       cleanup();
     }
+  });
+
+  it("QPM-13 RED-BEFORE: the row's Convert is named Convert even where its label is hidden, and no other control on the panel answers to /convert/i (journey D6 on a phone)", () => {
+    installServer();
+    renderPanel([ACCEPTED]);
+    const row = screen.getAllByRole("listitem")[0]!;
+    // The smart call to action carries an accessible name (its text is hidden under sm:).
+    expect(within(row).getByRole("button", { name: "Convert" })).toBeInTheDocument();
+    // Journey D finds a row's action by /convert/i on the page once the menu is open; the
+    // auto-convert preference toggle used to be the only match on a phone and got flipped.
+    expect(screen.getAllByRole("button", { name: /convert/i }).map((b) => b.getAttribute("aria-label") ?? b.textContent?.trim())).toEqual(["Convert"]);
+    openMenu();
+    expect(screen.getAllByRole("button", { name: /convert/i }).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("Convert to invoice")).toBeInTheDocument();
   });
 });
