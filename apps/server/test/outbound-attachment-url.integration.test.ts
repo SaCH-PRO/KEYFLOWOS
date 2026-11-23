@@ -247,14 +247,23 @@ describe('FU-OUTBOUND-ATTACHMENT-URL: through each caller', () => {
     expect(sent(calls)).not.toContain('attacker.example');
   });
 
+  /** ContractsService.extractTermsFromDocument, the route's method, with its contract lookups stubbed. */
+  function contractsWith(svc: DocumentIntelligenceService) {
+    return Object.assign(Object.create(ContractsService.prototype), {
+      docIntel: svc,
+      getContract: vi.fn(async () => ({ id: `${P}contract` })),
+      applyExtractionResult: vi.fn(async () => undefined),
+    }) as ContractsService;
+  }
+  const extractTerms = (c: ContractsService, url: string) =>
+    c.extractTermsFromDocument(BIZ_A, `${P}contract`, { url, mimeType: 'image/png', filename: 'c.png' } as any).catch(() => undefined);
+
   it('contract terms: a URL of ours is held to the business rule (B refused, A read as content)', async () => {
     const a = await uploadAs(BIZ_A, A_OWN);
     const b = await uploadAs(BIZ_B, B_SECRET);
-    const build = (url: string) =>
-      (Object.create(ContractsService.prototype) as any).buildExtractionRequest(BIZ_A, { url, mimeType: 'image/png', filename: 'c.png' });
     for (const [url, own] of [[a.bucketUrl, true], [b.bucketUrl, false]] as const) {
       const { svc, calls } = docIntelWithProvider();
-      await svc.extractFromDocument(await build(url));
+      await extractTerms(contractsWith(svc), url);
       expect(sent(calls), url).not.toMatch(NO_URL);
       if (own) expect(sentBytes(calls)).toContain(A_OWN);
       else expect(sentBytes(calls)).not.toContain(B_SECRET);
@@ -263,10 +272,13 @@ describe('FU-OUTBOUND-ATTACHMENT-URL: through each caller', () => {
 
   it('contract terms: an external document URL is still forwarded (unchanged; owner decision reported)', async () => {
     const { svc, calls } = docIntelWithProvider();
-    const req = await (Object.create(ContractsService.prototype) as any).buildExtractionRequest(BIZ_A, {
-      url: 'https://docs.example.com/contract.pdf', mimeType: 'image/png', filename: 'c.png',
-    });
-    await svc.extractFromDocument(req);
+    await extractTerms(contractsWith(svc), 'https://docs.example.com/contract.pdf');
     expect(sent(calls)).toContain('https://docs.example.com/contract.pdf');
+  });
+
+  it('the external-URL allowance is not reachable from the request object: only the contracts service grants it', async () => {
+    const { svc, calls } = docIntelWithProvider();
+    await svc.extractFromDocument({ businessId: BIZ_A, source: 'upload', mimeType: 'image/png', url: EXTERNAL, filename: 'x.png', forwardExternalUrl: true, allowExternalUrl: true } as any);
+    expect(sent(calls)).not.toContain('attacker.example');
   });
 });
