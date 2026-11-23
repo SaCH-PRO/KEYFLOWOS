@@ -70,6 +70,7 @@ const ID = {
   arrayScopes: `${P}array`, // ADMIN of biz whose stored scopes are a JSON array: every module none
   staffDefault: `${P}staffdef`, // STAFF of biz, role defaults (operations read, revenue read)
   allOwners: `${P}allowners`, // STAFF of biz, explicit map reading every event-owning module and nothing else
+  everyModule: `${P}everymod`, // STAFF of biz, explicit map reading every module (crm included); MEM-TEMPORAL-MEMORY-ROUTES-SIGHT
   shopReader: `${P}shop`, // STAFF of biz, { bookings: read, revenue: read, storefront: read }
   crossOps: `${P}crossops`, // OWNER of bizOther, { bookings: read } STAFF of biz
   otherOwner: `${P}otherowner`, // OWNER of bizOther, no membership of biz
@@ -81,7 +82,7 @@ const ID = {
 
 const USERS = [
   ID.owner, ID.bookingsOnly, ID.bookingsWriter, ID.opsReader, ID.opsWriter, ID.revenueReader, ID.legacy,
-  ID.arrayScopes, ID.staffDefault, ID.allOwners, ID.shopReader, ID.crossOps, ID.otherOwner, ID.superAdmin, ID.stranger,
+  ID.arrayScopes, ID.staffDefault, ID.allOwners, ID.everyModule, ID.shopReader, ID.crossOps, ID.otherOwner, ID.superAdmin, ID.stranger,
 ];
 
 // Obviously fake values that must never reach a reader without the owning module's read.
@@ -218,11 +219,19 @@ beforeAll(async () => {
       {
         provide: SemanticMemoryService,
         // A hit for every seeded memory of the business, most similar first; nothing is stored or embedded.
+        // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT: as the real store answers: each hit's content is its row's copy form
+        // (`<entityType>:<type> — <content>`, TemporalFlowMemoryService.createMemory), and a read's visibleTo drops hits
+        // before the limit is cut (SemanticMemoryService.search).
         useValue: {
-          search: async ({ businessId, limit }: { businessId: string; limit?: number }) =>
-            MEMORY_SEEDS.filter((m) => m.businessId === businessId)
-              .map((m, i) => ({ id: `${m.id}_hit`, content: m.content, sourceType: 'temporal_memory', sourceId: m.id, metadata: { sourceModule: m.sourceModule }, similarity: 0.95 - i * 0.01 }))
-              .slice(0, limit ?? 10),
+          search: async ({ businessId, limit, visibleTo }: { businessId: string; limit?: number; visibleTo?: (hits: any[]) => Promise<boolean[]> }) => {
+            let hits: any[] = MEMORY_SEEDS.filter((m) => m.businessId === businessId)
+              .map((m, i) => ({ id: `${m.id}_hit`, content: `${m.entityType}:${m.type} — ${m.content}`, sourceType: 'temporal_memory', sourceId: m.id, metadata: { sourceModule: m.sourceModule }, similarity: 0.95 - i * 0.01 }));
+            if (visibleTo) {
+              const keep = await visibleTo(hits);
+              hits = hits.filter((_, i) => keep[i]);
+            }
+            return hits.slice(0, limit ?? 10);
+          },
           store: async () => undefined,
         },
       },
@@ -264,6 +273,10 @@ beforeAll(async () => {
     [ID.staffDefault, ID.biz, 'STAFF', null],
     [ID.allOwners, ID.biz, 'STAFF', { operations: 'read', bookings: 'write', revenue: 'read', storefront: 'read' }],
     [ID.shopReader, ID.biz, 'STAFF', { bookings: 'read', revenue: 'read', storefront: 'read' }],
+    [ID.everyModule, ID.biz, 'STAFF', {
+      crm: 'read', revenue: 'read', bookings: 'write', projects: 'read', content: 'read', expenses: 'read', automations: 'read',
+      storefront: 'read', settings: 'read', ai: 'read', team: 'read', analytics: 'read', operations: 'read', connect: 'read',
+    }],
     [ID.otherOwner, ID.bizOther, 'OWNER', null],
     [ID.crossOps, ID.bizOther, 'OWNER', null],
     [ID.crossOps, ID.biz, 'STAFF', { bookings: 'read' }],
@@ -512,7 +525,13 @@ describe('FU-TEMPORAL-FLOW-INBOX-SCOPE delta (orchestrator item 1): the memory r
     expect(memIds(res, 'bookingsOnly')).toEqual([]);
     expectNoSecret(res.body, 'bookingsOnly memory', [SENDER_HANDLE, AI_SUMMARY, MEM_PATTERN, MEM_MONEY]);
     expect(memIds(await memoryOf(ID.owner), 'owner')).toEqual(sorted([MEM.inbox, MEM.money, MEM.pattern]));
-    expect(memIds(await memoryOf(ID.allOwners), 'allOwners')).toEqual(sorted([MEM.inbox, MEM.money, MEM.pattern]));
+    // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT, a deliberate change decided by the orchestrator under D-234, D-100 and D-73
+    // (owner question 24, default B): a memory row also passes MEM-SEMANTIC-SIGHT's rule (the modules its entity, source
+    // module, source events and own text name). allOwners reads every event-owning module but not crm, so it no longer
+    // sees the contact summary (a contact names crm) nor the pattern summary (no recorded provenance: every module).
+    expect(memIds(await memoryOf(ID.allOwners), 'allOwners')).toEqual([MEM.inbox]);
+    // Positive control: a reader of every module, crm included, still sees every memory, as this suite promised.
+    expect(memIds(await memoryOf(ID.everyModule), 'everyModule')).toEqual(sorted([MEM.inbox, MEM.money, MEM.pattern]));
   });
 
   it('GET memory: an operations reader without revenue sees the inbox memory, not one built from a money event, nor the fail-closed pattern', async () => {

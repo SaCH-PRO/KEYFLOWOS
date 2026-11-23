@@ -62,7 +62,7 @@ interface TemporalRow {
   content: string;
 }
 /** The copy TemporalFlowMemoryService.createMemory embeds of a row: `<entityType>:<type> — <content>`. */
-function temporalCopyOf(row: TemporalRow): string {
+export function temporalCopyOf(row: Pick<TemporalRow, 'entityType' | 'type' | 'content'>): string {
   return `${row.entityType}:${row.type} — ${row.content}`;
 }
 

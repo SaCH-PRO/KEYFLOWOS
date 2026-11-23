@@ -15,6 +15,10 @@ const mkCmd = (action: string, parameters: Record<string, unknown> = {}): Connec
   correlationId: 'corr_001',
 });
 
+const READER_FILTER = { NOT: { module: 'payments' } };
+const SIGHT = { filter: undefined, who: { reader: 'user_456', sight: () => true } };
+const ACTOR = { id: 'user_456' };
+
 describe('TemporalAdapterService', () => {
   let service: TemporalAdapterService;
   let memory: TemporalFlowMemoryService;
@@ -32,9 +36,17 @@ describe('TemporalAdapterService', () => {
       getStats: vi.fn(),
     } as unknown as TemporalFlowMemoryService;
 
+    // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT: a command reads for its actor (TemporalFlowService.memorySight / readerFilter); this
+    // stand-in's sight admits every memory, so the delegations below are what the projection hands on.
     flow = {
       list: vi.fn(),
       calendarRange: vi.fn(),
+      readerFilter: vi.fn().mockResolvedValue(READER_FILTER),
+      memorySight: vi.fn().mockResolvedValue(SIGHT),
+      visibleMemories: vi.fn(async (_b: string, rows: unknown[]) => rows),
+      visibleMemoryById: vi.fn(async (_b: string, id: string) => ({ id })),
+      searchVisibleMemory: vi.fn(),
+      listMemory: vi.fn(),
     } as unknown as TemporalFlowService;
 
     service = new TemporalAdapterService(memory, flow);
@@ -54,6 +66,7 @@ describe('TemporalAdapterService', () => {
     const result = await service.execute(mkCmd('recall_memory', { key: 'k1' }));
     expect(result.success).toBe(true);
     expect(result.data).toEqual({ id: 'm1', content: 'hello' });
+    expect(flow.memorySight).toHaveBeenCalledWith('biz_123', ACTOR);
   });
 
   it('delete_memory deletes and returns status', async () => {
@@ -89,11 +102,14 @@ describe('TemporalAdapterService', () => {
 
   // ── Queries ───────────────────────────────────────────────────────────────
 
-  it('search_memories delegates to searchMemory', async () => {
-    (memory.searchMemory as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 'm1' }]);
+  it('search_memories delegates to the actor\'s projected search (MEM-TEMPORAL-MEMORY-ROUTES-SIGHT)', async () => {
+    (flow.searchVisibleMemory as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 'm1' }]);
     const result = await service.execute(mkCmd('search_memories', { query: 'hello' }));
     expect(result.success).toBe(true);
-    expect(memory.searchMemory).toHaveBeenCalledWith('biz_123', 'hello', 10);
+    expect(result.data).toEqual([{ id: 'm1' }]);
+    expect(flow.memorySight).toHaveBeenCalledWith('biz_123', ACTOR);
+    expect(flow.searchVisibleMemory).toHaveBeenCalledWith('biz_123', 'hello', 10, SIGHT);
+    expect(memory.searchMemory).not.toHaveBeenCalled();
   });
 
   it('get_timeline uses calendarRange when from/to provided', async () => {
@@ -102,14 +118,16 @@ describe('TemporalAdapterService', () => {
     expect(result.success).toBe(true);
     // D-238 (round-3 security M4): the timeline is read for the command's actor, so a financial KEY proposal's events are
     // withheld from an actor without revenue read.
-    expect(flow.calendarRange).toHaveBeenCalledWith('biz_123', '2026-01-01', '2026-01-31', { id: 'user_456' });
+    // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT: and only the events of the modules the actor may read (readerFilter).
+    expect(flow.readerFilter).toHaveBeenCalledWith('biz_123', ACTOR);
+    expect(flow.calendarRange).toHaveBeenCalledWith('biz_123', '2026-01-01', '2026-01-31', { id: 'user_456' }, READER_FILTER);
   });
 
   it('RED-BEFORE (D-238): get_timeline without a range lists the timeline for the command actor', async () => {
     (flow.list as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 'e1' }]);
     const result = await service.execute(mkCmd('get_timeline', {}));
     expect(result.success).toBe(true);
-    expect(flow.list).toHaveBeenCalledWith('biz_123', expect.anything(), { id: 'user_456' });
+    expect(flow.list).toHaveBeenCalledWith('biz_123', expect.anything(), { id: 'user_456' }, READER_FILTER);
   });
 
   it('get_memory_stats returns stats', async () => {
@@ -120,10 +138,14 @@ describe('TemporalAdapterService', () => {
   });
 
   it('get_recent_memories returns recent memories', async () => {
-    (memory.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 'm1' }]);
+    (flow.listMemory as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: 'm1' }]);
     const result = await service.execute(mkCmd('get_recent_memories', { limit: 5 }));
     expect(result.success).toBe(true);
-    expect(memory.findMany).toHaveBeenCalledWith('biz_123', { limit: 5 });
+    expect(result.data).toEqual([{ id: 'm1' }]);
+    // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT: the actor's memories only (KEY's context assembly, with no actor, still reads
+    // findMany: getRecentMemories called with no actor key).
+    expect(flow.listMemory).toHaveBeenCalledWith('biz_123', { limit: 5 }, SIGHT);
+    expect(memory.findMany).not.toHaveBeenCalled();
   });
 
   it('returns connectorFail for unknown action', async () => {
