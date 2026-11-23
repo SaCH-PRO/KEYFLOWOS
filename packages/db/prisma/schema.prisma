@@ -8224,6 +8224,8 @@ model AiMemory {
 
   @@unique([businessId, category, key])
   @@index([businessId, category])
+  /// FU-PATTERNS-ROUTES-SIGHT: GET .../agent/patterns pages a partial reader's window on (updated_at, id).
+  @@index([businessId, category, updatedAt(sort: Desc), id(sort: Desc)])
   @@map("ai_memories")
 }
 

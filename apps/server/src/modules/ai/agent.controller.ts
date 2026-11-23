@@ -10,10 +10,11 @@ import { UndoService } from './undo.service';
 import { CalendarIntelligenceService } from './calendar-intelligence.service';
 import { DocumentIntelligenceService } from './document-intelligence.service';
 import { SemanticMemoryService } from './semantic-memory.service';
-import { readerSearchOptions } from './semantic-memory-sight';
+import { aiMemoryRowVisibleTo, readerSearchOptions } from './semantic-memory-sight';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard';
 import { createAgentTrigger, updateAgentTrigger } from './agent-trigger.service';
-import { readersModuleSight } from '../key-cortex/key-cortex-prompt-context.service';
+import { readersModuleSight, readsDocumentExtractions } from '../key-cortex/key-cortex-prompt-context.service';
 
 interface AuthenticatedRequest extends Request {
   user?: { id: string; email?: string; role?: string };
@@ -30,6 +31,34 @@ function triggerWriter(req: AuthenticatedRequest): string {
 const MAX_SEARCH_LIMIT = 500;
 /** MEM-SEMANTIC-SIGHT: the longest query GET .../agent/memory/search embeds. */
 const MAX_SEARCH_QUERY = 500;
+
+/** FU-PATTERNS-ROUTES-SIGHT: how many patterns GET .../agent/patterns answers, and how many rows it reads at a time. */
+const PATTERNS_SHOWN = 50;
+const PATTERNS_PAGE = 200;
+/**
+ * Review round 2 (security F-1): how far back a reader who may not read every pattern reads. Round 1 bounded the rows a
+ * request read (2,000), but that bound counted withheld rows, so whether a visible pattern was answered told the reader
+ * how many money patterns were newer. A fixed window bounds the read by time instead: what such a reader is answered
+ * depends only on the rows they may read in it. (The table grows because PatternDetectorService stores every
+ * detection under a new key: a follow-up, outside this route.)
+ */
+const PATTERNS_WINDOW_DAYS = 30;
+
+/** Whether a reader may read every pattern, whatever it states: a member with revenue and expenses read. */
+function readsEveryPattern(who: { reader: string | null; sight: (module: any) => boolean }): boolean {
+  return who.reader !== null && readsDocumentExtractions(who.sight, who.reader) && who.sight('expenses');
+}
+
+/** A stored pattern's fields: a JSON object's own (PatternDetectorService), else the text as its description. */
+function patternFieldsOf(value: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+  } catch {
+    // Plain text (summarizePatterns, the delegation loop).
+  }
+  return { description: value };
+}
 
 @Controller('ai')
 export class AgentController {
@@ -141,30 +170,99 @@ export class AgentController {
     return { processed: count };
   }
 
+  /**
+   * FU-PATTERNS-ROUTES-SIGHT (D-100, D-234, D-146): the newest PATTERNS_SHOWN patterns the caller may read: each row by
+   * aiMemoryRowVisibleTo for the caller and their membership's module sight (a pattern stating money only with revenue
+   * read, one stating an expense only with expenses read; a SUPER_ADMIN who is no member has no module). Rows are read
+   * in pages until PATTERNS_SHOWN are kept, so a withheld pattern takes no place: a reader's patterns are the same
+   * whatever money patterns are newer. A pattern stored as plain text (summarizePatterns' "Peak activity hour: 9AM")
+   * is answered as its description, where JSON.parse used to answer 500.
+   * Review round 1 (security F-1/F-4, correctness COR-FUPRS-1/2): keyset pages on (createdAt, id), so a pattern written
+   * between two pages neither repeats nor drops a row. Review round 2 (security F-1): bounded by PATTERNS_WINDOW_DAYS
+   * (of updatedAt, orchestrator ruling A), not by a row count, for a reader who may not read every pattern; the owner's
+   * one read is unchanged.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/agent/patterns')
-  async getDetectedPatterns(@Param('businessId') businessId: string) {
-    const memories = await this.prisma.client.aiMemory.findMany({
-      where: { businessId, category: 'patterns' },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-    });
+  async getDetectedPatterns(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    const who = await this.memoryReaderOf(businessId, req, 'agentPatterns');
+    const select = { id: true, category: true, key: true, value: true, createdAt: true, updatedAt: true, confidence: true } as const;
+    type PatternRow = { id: string; key: string; value: string; category: string; createdAt: Date; updatedAt: Date; confidence: number };
+    const kept: PatternRow[] = [];
+    if (readsEveryPattern(who)) {
+      // Review round 2 (COR-R2-2): a reader who may read every pattern (revenue and expenses read: the owner) reads the
+      // newest PATTERNS_SHOWN in one read, as before.
+      const rows: PatternRow[] = await this.prisma.client.aiMemory.findMany({
+        where: { businessId, category: 'patterns' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take: PATTERNS_SHOWN,
+        select,
+      });
+      kept.push(...rows.filter((row) => aiMemoryRowVisibleTo(row, who)));
+    } else {
+      // Orchestrator ruling (A): the window, the order and the keyset are on updatedAt (COR-R3-1: a fixed-key summary
+      // rewritten this week is recent, whenever it was first written), served by the index
+      // ai_memories (business_id, category, updated_at DESC, id DESC), so each page is an index range scan.
+      const since = new Date(Date.now() - PATTERNS_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+      let after: { updatedAt: Date; id: string } | null = null;
+      while (kept.length < PATTERNS_SHOWN) {
+        const page: PatternRow[] = await this.prisma.client.aiMemory.findMany({
+          where: {
+            businessId,
+            category: 'patterns',
+            // After the first page, (updatedAt, id) < the last row read, written so Postgres reads it as an index range:
+            // updatedAt <= last bounds the range, and the OR drops the rows of that last instant already read (an OR
+            // alone was a filter: a deep page re-read every newer row).
+            updatedAt: after ? { gte: since, lte: after.updatedAt } : { gte: since },
+            ...(after ? { OR: [{ updatedAt: { lt: after.updatedAt } }, { id: { lt: after.id } }] } : {}),
+          },
+          orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+          take: PATTERNS_PAGE,
+          select,
+        });
+        for (const row of page) {
+          if (kept.length < PATTERNS_SHOWN && aiMemoryRowVisibleTo(row, who)) kept.push(row);
+        }
+        if (page.length < PATTERNS_PAGE) break;
+        const last = page[page.length - 1];
+        after = { updatedAt: last.updatedAt, id: last.id };
+      }
+    }
 
     return {
-      patterns: memories.map((m) => ({
+      patterns: kept.map((m) => ({
         id: m.id,
-        ...JSON.parse(m.value),
+        ...patternFieldsOf(m.value),
         detectedAt: m.createdAt,
         confidence: m.confidence,
       })),
     };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * FU-PATTERNS-ROUTES-SIGHT review round 1 (security O-1; D-100, D-234): the scan stores every pattern it finds (the
+   * owner reads them all on GET .../agent/patterns) and answers the caller only those they may read, by the rule GET
+   * reads the stored row by (aiMemoryRowVisibleTo over the row PatternDetectorService stores: key
+   * `pattern_<category>_...`, the pattern as JSON). entitiesScanned counts the invoices read (sales volume, D-234), so
+   * only a member with revenue read is told it.
+   */
+  // Review round 2 (security O-2): each scan stores a row per pattern found; rate limited as summarize-patterns is.
+  @UseGuards(AuthGuard, BusinessGuard, CrmRateLimitGuard)
+  @CrmRateLimit(5, 60_000)
   @Post('businesses/:businessId/agent/patterns/scan')
-  async triggerPatternScan(@Param('businessId') businessId: string) {
+  async triggerPatternScan(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    const who = await this.memoryReaderOf(businessId, req, 'agentPatternScan');
     const result = await this.patternDetector.scanBusiness(businessId);
-    return result;
+    const patterns = result.patterns.filter((pattern) =>
+      aiMemoryRowVisibleTo({ category: 'patterns', key: `pattern_${pattern.category}`, value: JSON.stringify(pattern) }, who),
+    );
+    return readsDocumentExtractions(who.sight, who.reader) ? { ...result, patterns } : { patterns, scanDurationMs: result.scanDurationMs };
+  }
+
+  /** FU-PATTERNS-ROUTES-SIGHT: the caller and their membership's module sight (a SUPER_ADMIN who is no member: none). */
+  private async memoryReaderOf(businessId: string, req: AuthenticatedRequest | undefined, logTag: string) {
+    const reader = req?.user?.id ?? null;
+    return { reader, sight: await readersModuleSight(this.prisma, businessId, reader, undefined, logTag) };
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

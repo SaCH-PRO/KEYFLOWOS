@@ -138,6 +138,8 @@ export interface MemoryRetrievalOptions {
    * MEM-PATTERNS-SIGHT (D-100, D-234, D-146): read the behavioural patterns (AiMemory rows of category 'patterns') too.
    * Default true. A prompt's read for a reader who may not read every pattern (one stating money or an expense) passes
    * false: a pattern is classified by its text, so none is read, and a withheld pattern takes no place in its limits.
+   * It governs the structured AiMemory read only: a semantic copy of a pattern (ai_memory_embeddings, read when `query`
+   * is given) is not touched by it; the semantic search's own rule (readerSearchOptions) governs those.
    */
   aiMemoryPatterns?: boolean;
 }

@@ -3,6 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ModelGatewayService } from './model-gateway.service';
 import { AiMemoryService } from './ai-memory.service';
+import { aiMemoryRowVisibleTo, type SemanticReader } from './semantic-memory-sight';
 import { AiUsageService } from './ai-usage.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
 import { schedulersDisabled } from '../../core/config/env';
@@ -17,12 +18,121 @@ export interface DetectedPattern {
   confidence: number;
   suggestedAction: string;
   suggestedTool?: string;
+  /**
+   * FU-PATTERNS-ROUTES-SIGHT: the sights the whole pattern needed before it was bounded (boundedPattern), as the words
+   * the text rule reads as those sights: 'revenue' (revenue read), 'suppliers' (expenses read).
+   */
+  sight?: Array<'revenue' | 'suppliers'>;
 }
 
 export interface PatternScanResult {
   patterns: DetectedPattern[];
   scanDurationMs: number;
   entitiesScanned: number;
+}
+
+/**
+ * FU-PATTERNS-ROUTES-SIGHT (security review round 5, F-1): the most characters one stored pattern (its JSON, the
+ * AiMemory row's value) holds, as the memory PUTs bound what a member writes. A support cluster copies member-written
+ * ticket titles into its title and labels, and a model pattern's text is the model's: unbounded, one scan stored rows
+ * of ~400 KB, which every partial reader's GET .../agent/patterns reads and classifies for 30 days.
+ */
+export const MAX_STORED_PATTERN_LENGTH = 2_000;
+const PATTERN_TEXT_MAX = 300;
+const PATTERN_LABEL_MAX = 120;
+const PATTERN_ENTITIES_MAX = 8;
+
+/**
+ * Correctness review round 8 (COR-R7-1): `text` cut to at most `n` characters, never inside a word (a run of letters
+ * and digits): a cut inside one could leave a money or expense word ('feedback' to 'fee', 'rentals' to 'rent') and
+ * withhold the stored row from readers who may read the whole pattern. The cut word is dropped whole.
+ */
+export function cutAtWordBoundary(text: string, n: number): string {
+  if (text.length <= n) return text;
+  const word = /[\p{L}\p{N}]/u;
+  let at = Math.max(0, n);
+  if (at > 0 && word.test(text[at] ?? '') && word.test(text[at - 1])) {
+    while (at > 0 && word.test(text[at - 1])) at--;
+  }
+  return text.slice(0, at);
+}
+
+/** A field's text, control characters (which JSON escapes six-fold) blanked, clipped to `max` on a word boundary. */
+function clip(value: unknown, max: number): string {
+  const text = (typeof value === 'string' ? value : String(value ?? '')).replace(/[\u0000-\u001f\u007f]/g, ' ');
+  return text.length > max ? `${cutAtWordBoundary(text, max - 1)}…` : text;
+}
+
+const SEVERITIES: ReadonlySet<string> = new Set(['critical', 'warning', 'info']);
+/** Two probe readers: a member without revenue read, and one without expenses read (each with every other module). */
+const WITHOUT_REVENUE = { reader: 'pattern-class', sight: (module: string) => module !== 'revenue' } as unknown as SemanticReader;
+const WITHOUT_EXPENSES = { reader: 'pattern-class', sight: (module: string) => module !== 'expenses' } as unknown as SemanticReader;
+
+/**
+ * Correctness review round 6 (COR-R5-1): the sights a pattern needs, decided on the pattern as it will be stored but
+ * with its text unclipped (round 7, COR-R6-2: its affected entities already capped, since the dropped ones are never
+ * stored or answered), as aiMemoryRowVisibleTo reads the stored row (key `pattern_<category>`, the pattern as JSON):
+ * clipping can cut the words or figure that make it money or an expense.
+ */
+export function patternSightOf(pattern: DetectedPattern): Array<'revenue' | 'expenses'> {
+  const stored = { ...pattern, affectedEntities: (pattern.affectedEntities ?? []).slice(0, PATTERN_ENTITIES_MAX) };
+  const row = { category: 'patterns', key: `pattern_${String(pattern.category)}`, value: JSON.stringify(stored) };
+  return [
+    ...(aiMemoryRowVisibleTo(row, WITHOUT_REVENUE) ? [] : (['revenue'] as const)),
+    ...(aiMemoryRowVisibleTo(row, WITHOUT_EXPENSES) ? [] : (['expenses'] as const)),
+  ];
+}
+
+/**
+ * The words a bounded pattern's `sight` carries, one per sight, each read by the text rule exactly as that sight:
+ * 'revenue' (a money term: revenue read), 'suppliers' (an expense word and no money term: expenses read). Round 7
+ * (COR-R6-1): 'expenses' itself is a money term too, so it withheld an expense-only pattern from a member with
+ * expenses read and no revenue read.
+ */
+const SIGHT_WORD = { revenue: 'revenue', expenses: 'suppliers' } as const;
+
+/**
+ * A pattern whose JSON is at most MAX_STORED_PATTERN_LENGTH: its text clipped (control characters blanked), its
+ * severity one of the three, its affected entities capped; and, when the whole pattern stated money or an expense, a
+ * `sight` naming it ('revenue', 'expenses'), so the stored row and the answer are withheld as the whole pattern was,
+ * however much is clipped. If the JSON is still over the bound (escaped quotes, backslashes), the entities go, then
+ * every text field is halved until it fits.
+ */
+export function boundedPattern(pattern: DetectedPattern): DetectedPattern {
+  const sight = patternSightOf(pattern);
+  const bounded: DetectedPattern = {
+    ...pattern,
+    id: clip(pattern.id, 80),
+    category: clip(pattern.category, 80),
+    severity: (SEVERITIES.has(String(pattern.severity).toLowerCase()) ? String(pattern.severity).toLowerCase() : 'info') as DetectedPattern['severity'],
+    title: clip(pattern.title, PATTERN_TEXT_MAX),
+    description: clip(pattern.description, PATTERN_TEXT_MAX),
+    suggestedAction: clip(pattern.suggestedAction, PATTERN_TEXT_MAX),
+    ...(pattern.suggestedTool !== undefined ? { suggestedTool: clip(pattern.suggestedTool, 80) } : {}),
+    affectedEntities: (pattern.affectedEntities ?? []).slice(0, PATTERN_ENTITIES_MAX).map((e) => ({
+      type: clip(e.type, 40),
+      id: clip(e.id, 60),
+      label: clip(e.label, PATTERN_LABEL_MAX),
+    })),
+    ...(sight.length ? { sight: sight.map((needed) => SIGHT_WORD[needed]) } : {}),
+  };
+  const texts = ['title', 'description', 'suggestedAction', 'id', 'category', 'suggestedTool'] as const;
+  while (JSON.stringify(bounded).length > MAX_STORED_PATTERN_LENGTH) {
+    if (bounded.affectedEntities.length) {
+      bounded.affectedEntities = [];
+      continue;
+    }
+    let shortened = false;
+    for (const field of texts) {
+      const text = bounded[field];
+      if (typeof text === 'string' && text.length > 0) {
+        (bounded as unknown as Record<string, string>)[field] = cutAtWordBoundary(text, Math.floor(text.length / 2));
+        shortened = true;
+      }
+    }
+    if (!shortened) break;
+  }
+  return bounded;
 }
 
 @Injectable()
@@ -95,7 +205,8 @@ export class PatternDetectorService implements OnModuleInit, OnModuleDestroy {
     // Run AI-powered pattern detection for complex clusters
     const aiPatterns = await this.detectAiPatterns(businessId, tickets, bookings, contacts);
 
-    const allPatterns = [...localPatterns, ...aiPatterns];
+    // FU-PATTERNS-ROUTES-SIGHT (security review round 5, F-1): every pattern is stored and answered bounded.
+    const allPatterns = [...localPatterns, ...aiPatterns].map(boundedPattern);
 
     // Store patterns and emit events
     for (const pattern of allPatterns) {

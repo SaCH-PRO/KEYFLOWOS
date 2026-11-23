@@ -18,7 +18,8 @@ import {
   visiblePlans,
   type GraphPlanReadScope,
 } from './graph-actions.controller';
-import { AiMemoryService, MemoryCategory, withoutDocumentExtractions } from './ai-memory.service';
+import { AiMemoryService, MemoryCategory, summaryPatternKey } from './ai-memory.service';
+import { aiMemoryRowVisibleTo, type SemanticReader } from './semantic-memory-sight';
 import { readersModuleSight, readsDocumentExtractions } from '../key-cortex/key-cortex-prompt-context.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
 import { ProAutoMonitorService } from './pro-auto-monitor.service';
@@ -81,6 +82,46 @@ const ALLOWED_MEMORY_CATEGORIES = new Set<string>([
   'goals', 'tone', 'riskTolerance', 'outreachStyle', 'reportingCadence',
   'priorities', 'bottlenecks', 'corrections', 'patterns', 'preferences',
 ]);
+
+/**
+ * FU-PATTERNS-ROUTES-SIGHT (orchestrator ruling A): the most entries one PUT .../ai/memory/bulk writes. Ten categories
+ * are writable here (ALLOWED_MEMORY_CATEGORIES) and the preferences a member sets are a handful of keys each; no web
+ * screen calls the bulk route (the client helper upsertAiMemoryBulk has no caller) and the server's own writers call
+ * AiMemoryService.upsertMany directly. 50 is five keys for every category, far above any legitimate form, and bounds
+ * what one request adds to the rows every partial reader's GET .../agent/patterns pages over.
+ */
+const MAX_BULK_MEMORY_ENTRIES = 50;
+/**
+ * FU-PATTERNS-ROUTES-SIGHT (security review round 4, F-1): the largest key and value a member's PUT writes. A partial
+ * reader's GET .../agent/patterns reads and classifies every withheld row of its window, so its cost follows the bytes
+ * withheld, not the rows: without a size bound a member's 30 writes a minute of ~100 KB each cost every such read about
+ * a thousand times what as many short rows do. Preferences, goals and the other categories written here are a line of
+ * text (the AI preferences panel derives keys of at most 50 characters); 200 and 2,000 are far above any of them.
+ */
+const MAX_MEMORY_KEY_LENGTH = 200;
+const MAX_MEMORY_VALUE_LENGTH = 2_000;
+
+/** Refuses a key or value a member may not write (missing, not text, or over its bound). */
+function assertMemoryEntryBounded(entry: { key?: unknown; value?: unknown }): void {
+  if (typeof entry?.key !== 'string' || entry.key.length > MAX_MEMORY_KEY_LENGTH) {
+    throw new BadRequestException(`key must be text of at most ${MAX_MEMORY_KEY_LENGTH} characters`);
+  }
+  if (typeof entry.value !== 'string' || entry.value.length > MAX_MEMORY_VALUE_LENGTH) {
+    throw new BadRequestException(`value must be text of at most ${MAX_MEMORY_VALUE_LENGTH} characters`);
+  }
+}
+
+/**
+ * FU-PATTERNS-ROUTES-SIGHT (security review rounds 6-7): what a member's profile interview is read under: revenue read,
+ * expenses read (its cache is kept per both) and the AiMemory rows they may read (aiMemoryRowVisibleTo).
+ */
+function interviewSightOf(documentExtractions: boolean, who: SemanticReader) {
+  return {
+    documentExtractions,
+    expensesSight: who.reader !== null && who.sight('expenses'),
+    rowVisible: (row: { category: string; key: string; value: string }) => aiMemoryRowVisibleTo(row, who),
+  };
+}
 
 function assertMemoryCategoryAllowed(category: string): void {
   if (RESERVED_MEMORY_CATEGORIES.has(category)) {
@@ -1026,6 +1067,16 @@ export class AiController {
     return readsDocumentExtractions(sight, reader);
   }
 
+  /**
+   * FU-PATTERNS-ROUTES-SIGHT (D-100, D-234, D-146): who an AiMemory read over REST is for: the caller, with their
+   * membership's module sight (readersModuleSight: a SUPER_ADMIN who is no member, or a membership read that fails, has
+   * none). Each row is then kept by aiMemoryRowVisibleTo, the rule the flow chat and the semantic store read it by.
+   */
+  private async memoryReaderOf(businessId: string, req: AuthenticatedRequest | undefined): Promise<SemanticReader> {
+    const reader = req?.user?.id ?? null;
+    return { reader, sight: await readersModuleSight(this.prisma, businessId, reader, undefined, 'aiMemory') };
+  }
+
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/memory')
   async getMemory(
@@ -1034,20 +1085,26 @@ export class AiController {
     @Req() req?: AuthenticatedRequest,
   ) {
     // MEM-DOC-EXTRACTION-SIGHT: a reader without revenue read is handed no document extraction (none by category either).
-    const sees = await this.readsDocumentExtractions(businessId, req);
+    // FU-PATTERNS-ROUTES-SIGHT: nor any row stating money (a pattern totalling overdue invoices, a revenue goal); a row
+    // stating an expense only with expenses read (aiMemoryRowVisibleTo, which holds the document-extraction rule too).
+    const who = await this.memoryReaderOf(businessId, req);
     const entries = category
       ? await this.memory.getByCategory(businessId, category as MemoryCategory)
       : await this.memory.getAll(businessId);
-    return { memories: sees ? entries : withoutDocumentExtractions(entries) };
+    return { memories: entries.filter((row) => aiMemoryRowVisibleTo(row, who)) };
   }
 
+  // FU-PATTERNS-ROUTES-SIGHT (orchestrator ruling A, security round 3 F-1): each row a member writes is read by every
+  // partial reader's GET .../agent/patterns, so the writers are bounded (CrmRateLimitGuard is on this controller).
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(30, 60_000)
   @Put('businesses/:businessId/ai/memory')
   async upsertMemory(
     @Param('businessId') businessId: string,
     @Body() body: { category: MemoryCategory; key: string; value: string; confidence?: number },
   ) {
     assertMemoryCategoryAllowed(body.category);
+    assertMemoryEntryBounded(body);
     const entry = await this.memory.upsert(businessId, {
       category: body.category,
       key: body.key,
@@ -1059,13 +1116,22 @@ export class AiController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @CrmRateLimit(5, 60_000)
   @Put('businesses/:businessId/ai/memory/bulk')
   async upsertMemoryBulk(
     @Param('businessId') businessId: string,
     @Body() body: { entries: Array<{ category: MemoryCategory; key: string; value: string; confidence?: number }> },
   ) {
+    // FU-PATTERNS-ROUTES-SIGHT (orchestrator ruling A): at most MAX_BULK_MEMORY_ENTRIES a request, refused whole.
+    if (!Array.isArray(body?.entries)) throw new BadRequestException('entries must be an array');
+    if (body.entries.length > MAX_BULK_MEMORY_ENTRIES) {
+      throw new BadRequestException(`At most ${MAX_BULK_MEMORY_ENTRIES} entries a request`);
+    }
     for (const e of body.entries) {
+      // Reviews round 5 (R5-1): an entry that is not an object is a 400, not a TypeError's 500.
+      if (!e || typeof e !== 'object' || Array.isArray(e)) throw new BadRequestException('each entry must be an object');
       assertMemoryCategoryAllowed(e.category);
+      assertMemoryEntryBounded(e);
     }
     const results = await this.memory.upsertMany(
       businessId,
@@ -1086,19 +1152,27 @@ export class AiController {
     return { deleted };
   }
 
+  /** FU-PATTERNS-ROUTES-SIGHT (D-100, D-146): the context block of the AiMemory rows the caller may read (memoryReaderOf). */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/memory/context')
-  async getMemoryContext(@Param('businessId') businessId: string) {
-    const ctx = await this.memory.buildContextBlock(businessId);
-    return ctx;
+  async getMemoryContext(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    const who = await this.memoryReaderOf(businessId, req);
+    return this.memory.buildContextBlock(businessId, { rowVisible: (row) => aiMemoryRowVisibleTo(row, who) });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(5, 60_000)
   @Post('businesses/:businessId/ai/memory/summarize-patterns')
-  async summarizePatterns(@Param('businessId') businessId: string) {
+  async summarizePatterns(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    // FU-PATTERNS-ROUTES-SIGHT review round 1 (security O-2; D-100): every summary is stored as a 'patterns' row (the
+    // owner reads them all); the caller is answered those they may read, as each row is read (aiMemoryRowVisibleTo).
+    const who = await this.memoryReaderOf(businessId, req);
     const patterns = await this.memory.summarizePatterns(businessId);
-    return { patterns };
+    return {
+      patterns: patterns.filter((value) =>
+        aiMemoryRowVisibleTo({ category: 'patterns', key: summaryPatternKey(value), value }, who),
+      ),
+    };
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -1464,7 +1538,9 @@ export class AiController {
     // the interview is the caller's own (D-130).
     const userId = profileMember(req);
     const documentExtractions = await this.readsDocumentExtractions(businessId, req);
-    return this.profileIntelligence.chat(businessId, userId, body.message.trim(), { documentExtractions });
+    // FU-PATTERNS-ROUTES-SIGHT (security review round 6, F-1): the interview's known info is the rows the member may read.
+    const who = await this.memoryReaderOf(businessId, req);
+    return this.profileIntelligence.chat(businessId, userId, body.message.trim(), interviewSightOf(documentExtractions, who));
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -1472,7 +1548,9 @@ export class AiController {
   async profileStatus(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
     const userId = profileMember(req);
     const documentExtractions = await this.readsDocumentExtractions(businessId, req);
-    return this.profileIntelligence.getCompletionSummary(businessId, userId, { documentExtractions });
+    // FU-PATTERNS-ROUTES-SIGHT (security review round 6, F-1): the memories answered are the rows the member may read.
+    const who = await this.memoryReaderOf(businessId, req);
+    return this.profileIntelligence.getCompletionSummary(businessId, userId, interviewSightOf(documentExtractions, who));
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -1484,7 +1562,9 @@ export class AiController {
   ) {
     const userId = profileMember(req);
     const documentExtractions = await this.readsDocumentExtractions(businessId, req);
-    return this.profileIntelligence.confirmExtractions(businessId, userId, body.confirmedKeys, { documentExtractions });
+    // FU-PATTERNS-ROUTES-SIGHT (round 7): the interview proposed under the member's whole sight (revenue and expenses).
+    const who = await this.memoryReaderOf(businessId, req);
+    return this.profileIntelligence.confirmExtractions(businessId, userId, body.confirmedKeys, interviewSightOf(documentExtractions, who));
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

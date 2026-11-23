@@ -30,8 +30,25 @@ export interface ProfileInterviewState {
 const SAFE_PROFILE_CATEGORIES = new Set<string>([
   'goals', 'tone', 'riskTolerance', 'outreachStyle',
   'reportingCadence', 'priorities', 'bottlenecks',
-  'corrections', 'patterns', 'preferences',
+  'corrections', 'preferences',
 ]);
+// FU-PATTERNS-ROUTES-SIGHT (security review round 6, F-2): 'patterns' is no interview topic's category (PROFILE_TOPICS);
+// it is the detector's and KEY's, read by every partial reader's GET .../agent/patterns. And an extraction is stored only
+// as text within the bounds the memory PUTs keep (ai.controller assertMemoryEntryBounded).
+const MAX_PROFILE_KEY_LENGTH = 200;
+const MAX_PROFILE_VALUE_LENGTH = 2_000;
+function extractionBounded(ext: { key?: unknown; value?: unknown }): boolean {
+  return typeof ext.key === 'string' && ext.key.length <= MAX_PROFILE_KEY_LENGTH && typeof ext.value === 'string' && ext.value.length <= MAX_PROFILE_VALUE_LENGTH;
+}
+
+/** FU-PATTERNS-ROUTES-SIGHT: which AiMemory rows a reader may be shown (the caller's aiMemoryRowVisibleTo). */
+export type MemoryRowVisible = (row: { category: string; key: string; value: string }) => boolean;
+/** What a member's interview is read under: revenue read (documentExtractions), expenses read, and the rows they may read. */
+export interface InterviewSight {
+  documentExtractions?: boolean;
+  expensesSight?: boolean;
+  rowVisible?: MemoryRowVisible;
+}
 
 const BLOCKED_KEYS = new Set<string>([
   'autonomy', 'admin', 'mode', 'blockedTools', 'blockedModules',
@@ -61,7 +78,15 @@ export class ProfileIntelligenceService {
    * starts a fresh interview, so turns and KEY's replies made while the member read revenue (the monthly revenue, an
    * extraction) are not replayed once that read is gone.
    */
-  private readonly sessionCache = new Map<string, { state: ProfileInterviewState; revenueSight: boolean }>();
+  private readonly sessionCache = new Map<string, { state: ProfileInterviewState; sight: string }>();
+
+  /**
+   * FU-PATTERNS-ROUTES-SIGHT (security review round 7 F-1, COR-R6-5): the sight an interview is built under is revenue
+   * read AND expenses read (the prompt's known info is filtered by both), so a turn under either changed starts afresh.
+   */
+  private sightOf(opts: InterviewSight): string {
+    return JSON.stringify([opts.documentExtractions === true, opts.expensesSight === true]);
+  }
 
   private interviewKey(businessId: string, userId: string): string {
     return JSON.stringify([businessId, userId]);
@@ -75,11 +100,13 @@ export class ProfileIntelligenceService {
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
   ) {}
 
-  async getInterviewState(businessId: string, userId: string, revenueSight = false): Promise<ProfileInterviewState> {
+  async getInterviewState(businessId: string, userId: string, opts: InterviewSight = {}): Promise<ProfileInterviewState> {
+    const sight = this.sightOf(opts);
     const cached = this.sessionCache.get(this.interviewKey(businessId, userId));
-    if (cached && cached.revenueSight === revenueSight) return cached.state;
+    if (cached && cached.sight === sight) return cached.state;
 
-    const existingMemories = await this.memory.getAll(businessId);
+    // Security review round 7 (F-2): a topic is complete only from rows the member may read (opts.rowVisible).
+    const existingMemories = (await this.memory.getAll(businessId)).filter((row) => !opts.rowVisible || opts.rowVisible(row));
     const completedTopics: string[] = [];
 
     for (const topic of PROFILE_TOPICS) {
@@ -99,7 +126,7 @@ export class ProfileIntelligenceService {
       nextTopic,
     };
 
-    this.sessionCache.set(this.interviewKey(businessId, userId), { state, revenueSight });
+    this.sessionCache.set(this.interviewKey(businessId, userId), { state, sight });
     return state;
   }
 
@@ -107,14 +134,14 @@ export class ProfileIntelligenceService {
    * MEM-DOC-EXTRACTION-SIGHT (D-234): `opts.documentExtractions` true only for a reader with revenue read (the
    * controller decides); otherwise the prompt's known info carries no document extraction (withoutDocumentExtractions).
    */
-  async chat(businessId: string, userId: string, userMessage: string, opts: { documentExtractions?: boolean } = {}): Promise<{
+  async chat(businessId: string, userId: string, userMessage: string, opts: InterviewSight = {}): Promise<{
     reply: string;
     state: ProfileInterviewState;
     pendingExtractions: ProfileExtraction[];
     currentTopicUnlocks: string | null;
   }> {
-    const revenueSight = opts.documentExtractions === true;
-    const state = await this.getInterviewState(businessId, userId, revenueSight);
+    const sight = this.sightOf(opts);
+    const state = await this.getInterviewState(businessId, userId, opts);
 
     state.messages.push({ role: 'user', content: userMessage });
 
@@ -131,7 +158,10 @@ export class ProfileIntelligenceService {
     }
 
     const allMemories = await this.memory.getAll(businessId);
-    const existingMemories = opts.documentExtractions === true ? allMemories : withoutDocumentExtractions(allMemories);
+    // FU-PATTERNS-ROUTES-SIGHT (security review round 6, F-1): and only the rows the member may read (opts.rowVisible).
+    const existingMemories = (opts.documentExtractions === true ? allMemories : withoutDocumentExtractions(allMemories)).filter(
+      (row) => !opts.rowVisible || opts.rowVisible(row),
+    );
     const memoryContext = existingMemories.length > 0
       ? `Known info: ${existingMemories.map(m => `${m.category}/${m.key}: ${m.value}`).join('; ')}`
       : 'No prior information known about this business.';
@@ -215,6 +245,10 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
               this.logger.warn(`Profile extraction rejected: blocked key "${ext.key}"`);
               continue;
             }
+            if (!extractionBounded(ext)) {
+              this.logger.warn('Profile extraction rejected: key or value not text within its bound');
+              continue;
+            }
             pendingExtractions.push({
               category: ext.category,
               key: ext.key,
@@ -234,7 +268,7 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
 
       state.nextTopic = PROFILE_TOPICS.find(t => !state.completedTopics.includes(t.topic))?.topic || null;
       state.messages.push({ role: 'assistant', content: reply });
-      this.sessionCache.set(this.interviewKey(businessId, userId), { state, revenueSight });
+      this.sessionCache.set(this.interviewKey(businessId, userId), { state, sight });
 
       return {
         reply,
@@ -250,21 +284,22 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
     }
   }
 
-  async getCompletionSummary(businessId: string, userId: string, opts: { documentExtractions?: boolean } = {}): Promise<{
+  async getCompletionSummary(businessId: string, userId: string, opts: InterviewSight = {}): Promise<{
     completedTopics: string[];
     remainingTopics: string[];
     totalTopics: number;
     completionPercent: number;
     memories: Array<{ category: string; key: string; value: string; confidence: number }>;
   }> {
-    const state = await this.getInterviewState(businessId, userId, opts.documentExtractions === true);
+    const state = await this.getInterviewState(businessId, userId, opts);
     const remainingTopics = PROFILE_TOPICS
       .filter(t => !state.completedTopics.includes(t.topic))
       .map(t => t.label);
 
     // MEM-DOC-EXTRACTION-SIGHT (D-234): the document extractions only for a reader with revenue read.
     const all = await this.memory.getAll(businessId);
-    const memories = opts.documentExtractions === true ? all : withoutDocumentExtractions(all);
+    // FU-PATTERNS-ROUTES-SIGHT (security review round 6, F-1): and only the rows the member may read (opts.rowVisible).
+    const memories = (opts.documentExtractions === true ? all : withoutDocumentExtractions(all)).filter((row) => !opts.rowVisible || opts.rowVisible(row));
 
     return {
       completedTopics: state.completedTopics,
@@ -279,11 +314,11 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
     businessId: string,
     userId: string,
     confirmedKeys?: string[],
-    opts: { documentExtractions?: boolean } = {},
+    opts: InterviewSight = {},
   ): Promise<{ saved: number; skipped: number; rejected: number }> {
     // Delta review: only what the member's interview proposed under the sight they hold now.
     const cached = this.sessionCache.get(this.interviewKey(businessId, userId));
-    const state = cached && cached.revenueSight === (opts.documentExtractions === true) ? cached.state : undefined;
+    const state = cached && cached.sight === this.sightOf(opts) ? cached.state : undefined;
     if (!state || state.pendingConfirmations.length === 0) {
       return { saved: 0, skipped: 0, rejected: 0 };
     }
@@ -299,7 +334,7 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
         continue;
       }
 
-      if (!SAFE_PROFILE_CATEGORIES.has(ext.category as string) || BLOCKED_KEYS.has(ext.key)) {
+      if (!SAFE_PROFILE_CATEGORIES.has(ext.category as string) || BLOCKED_KEYS.has(ext.key) || !extractionBounded(ext)) {
         this.logger.warn(`Confirmation rejected: unsafe category/key "${ext.category}/${ext.key}"`);
         rejected++;
         ext.confirmed = true;
@@ -330,7 +365,7 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
 
     state.pendingConfirmations = state.pendingConfirmations.filter(e => !e.confirmed);
     state.nextTopic = PROFILE_TOPICS.find(t => !state.completedTopics.includes(t.topic))?.topic || null;
-    this.sessionCache.set(this.interviewKey(businessId, userId), { state, revenueSight: opts.documentExtractions === true });
+    this.sessionCache.set(this.interviewKey(businessId, userId), { state, sight: this.sightOf(opts) });
 
     return { saved, skipped, rejected };
   }
