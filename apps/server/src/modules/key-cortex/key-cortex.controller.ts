@@ -140,7 +140,9 @@ import { GuardedBusinessId, resolveRequestBusinessId } from '../../core/auth/req
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { membershipApprovalTier } from '../../core/authority/approval-tier';
 import {
+  CANONICAL_MODULES,
   DEFAULT_APPROVAL_TIERS,
+  defaultScopesForRole,
   LEVEL_RANK,
   MAX_APPROVAL_TIER,
   memberScopeMap,
@@ -564,6 +566,21 @@ export const CortexMember = createParamDecorator((_data: unknown, ctx: Execution
   if (!authority) throw new ForbiddenException('The member this command acts for was not established');
   return authority;
 });
+
+/**
+ * FU-KEY-GENOME-READS-RESIDUAL round 3 (security MINOR-1; SEC-V109b-1, D-130, D-140): whether the viewer has the
+ * business owner's full sight: a platform SUPER_ADMIN, or an OWNER whose scopes read every module the OWNER role reads by
+ * default (as mayReadFullKeyContext). A scoped OWNER (an explicit map narrower than that) does not.
+ */
+export function viewerHasFullOwnerSight(viewer: CortexMemberAuthority | undefined): boolean {
+  if (!viewer) return false;
+  if (viewer.superAdmin) return true;
+  if (viewer.role !== 'OWNER') return false;
+  const ownerDefaults = defaultScopesForRole('OWNER');
+  return CANONICAL_MODULES.every(
+    (module) => rankOf(ownerDefaults[module]) < LEVEL_RANK.read || rankOf(viewer.scopes[module] || 'none') >= LEVEL_RANK.read,
+  );
+}
 
 /**
  * W11-CORTEX-SESSION-SNAPSHOT-SCOPE (KC-SEC-3; D-57, D-100): whether the member
@@ -4432,9 +4449,13 @@ export class KeyCortexController {
    */
   @Get('evolution/decision')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(CortexMemberAuthorityGuard)
   async evolutionExplainDecision(
     @GuardedBusinessId() businessId: string,
     @Query('decisionId') decisionId?: string,
+    // FU-KEY-GENOME-READS-RESIDUAL (D-235): explained for the reader (a finance or sales decision does not exist for a
+    // reader without revenue read).
+    @CortexMember() viewer?: CortexMemberAuthority,
   ): Promise<{
     explanation: string;
     factors: Array<{ name: string; weight: number; value: unknown }>;
@@ -4448,8 +4469,15 @@ export class KeyCortexController {
     }
 
     try {
-      return await this.evolution.explainDecision(decisionId, businessId);
+      return await this.evolution.explainDecision(decisionId, businessId, {
+        readsRevenue: viewerReadsRevenue(viewer),
+        userId: viewer?.userId,
+        // Round 2 (security MAJOR-3): an owner or a platform admin is explained any decision of the business.
+        ownerView: viewerHasFullOwnerSight(viewer),
+      });
     } catch (err: any) {
+      // A decision that does not exist (another business's, or a money decision the reader may not see) is a 404.
+      if (err instanceof NotFoundException) throw err;
       this.logger.error(`Evolution explain error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to explain decision');
     }
@@ -4615,10 +4643,13 @@ export class KeyCortexController {
    * this and nothing read it back — KEY was noticing into a drawer nobody opens.
    */
   @Get('awareness')
+  @UseGuards(CortexMemberAuthorityGuard)
   async getAwareness(
     @GuardedBusinessId() businessId: string,
     @Query('kinds') kinds?: string,
     @Query('sinceDays') sinceDays?: string,
+    // D-235: an item that states money is withheld from a reader without revenue read.
+    @CortexMember() viewer?: CortexMemberAuthority,
   ): Promise<{
     items: unknown[];
     counts: Record<string, number>;
@@ -4647,6 +4678,7 @@ export class KeyCortexController {
     const summary = await this.awareness.getAwareness(businessId, {
       kinds: requested as Array<keyof typeof AWARENESS_TYPES>,
       sinceDays: days,
+      readsRevenue: viewerReadsRevenue(viewer),
     });
 
     return {

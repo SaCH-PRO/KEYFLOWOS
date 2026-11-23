@@ -8,10 +8,21 @@
 
 export interface GenomeEnrichedContext {
   dnaScores: Record<string, number>;
-  genomeStage: string;
+  /** Withheld (undefined) for a reader without revenue read (D-235: a categorical indicator of the whole genome). */
+  genomeStage?: string;
   executiveReadiness: number;
   recommendations: GenomeRecommendation[];
   signals: GenomeSignal[];
+  /**
+   * D-235 round 8: the newest signals, of which `signals` are the first twenty. Unprojected; read only to project the
+   * signals for a reader without revenue read, and never handed on by that projection.
+   */
+  signalPool?: GenomeSignal[];
+  /**
+   * D-235 round 9: the business's top-ranked recommendations, of which `recommendations` are the first ten. Unprojected;
+   * read only to project the recommendations for a reader without revenue read, and never handed on by that projection.
+   */
+  recommendationPool?: GenomeRecommendation[];
   opportunities: GenomeOpportunity[];
   autonomyMap: Record<string, boolean>;
   timestamp: Date;

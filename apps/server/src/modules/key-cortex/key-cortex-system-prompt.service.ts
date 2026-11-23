@@ -129,7 +129,8 @@ export class KeyCortexSystemPromptService {
       lines.push(`  ${key}: ${bar} ${score}%`);
     }
 
-    lines.push(`Genome Stage: ${genomeContext.genomeStage}`);
+    // D-235: the stage is withheld for a reader without revenue read.
+    if (genomeContext.genomeStage) lines.push(`Genome Stage: ${genomeContext.genomeStage}`);
     lines.push(`Executive Readiness: ${genomeContext.executiveReadiness}%`);
 
     const urgentSignals = genomeContext.signals.filter(

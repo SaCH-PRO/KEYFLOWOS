@@ -3,7 +3,6 @@ import {
   Logger,
   Inject,
   Optional,
-  ServiceUnavailableException,
 } from '@nestjs/common';
 import {
   ModelGatewayService,
@@ -68,11 +67,7 @@ import { TrustExplanationService } from './trust-explanation.service';
 // -- Phase D: Learning & Metacognition (optional) --
 import { KeyCortexLearningService } from './key-cortex-learning.service';
 
-import {
-  GenomeEnrichedContext,
-  Suggestion,
-  InteractionFeedback,
-} from './key-cortex-reasoning.types';
+import { InteractionFeedback } from './key-cortex-reasoning.types';
 
 /**
  * KeyCortexReasoningService — The Core Reasoning Brain of KEY Cortex.
@@ -85,9 +80,6 @@ import {
 @Injectable()
 export class KeyCortexReasoningService {
   private readonly logger = new Logger(KeyCortexReasoningService.name);
-
-  /** Genome-enriched context cache TTL in seconds (default: 60 seconds). */
-  private readonly GENOME_CONTEXT_TTL: number;
 
   /** Feature flag: enable integration layer v2 if all required services are available. */
   private readonly integrationV2Enabled: boolean;
@@ -171,11 +163,6 @@ export class KeyCortexReasoningService {
     @Inject(KeyCortexLearningService)
     private readonly learningService?: KeyCortexLearningService,
   ) {
-    this.GENOME_CONTEXT_TTL = parseInt(
-      process.env.KEY_CORTEX_GENOME_CONTEXT_TTL_SECONDS ?? '60',
-      10,
-    );
-
     this.integrationV2Enabled = !!(
       this.connectorService &&
       this.commandService &&
@@ -535,404 +522,13 @@ export class KeyCortexReasoningService {
 
 
   // ==========================================================================
-  // 4. Suggestion Generation (preserved + v2 enrichment)
+  // 4. Interaction learning
   // ==========================================================================
-
-  /**
-   * Generate follow-up suggestions based on the last assistant message and business context.
-   *
-   * v2: When the integration layer is active, suggestions include module-aware
-   * recommendations based on the full business context.
-   */
-  async generateSuggestions(
-    businessId: string,
-    lastMessage: string,
-    v2Context?: Record<string, unknown>,
-  ): Promise<string[]> {
-    try {
-      const contextSnapshot =
-        await this.contextService.buildContextSnapshot(businessId);
-
-      let extraContext = '';
-      if (v2Context && this.integrationV2Enabled) {
-        const moduleNames = Object.keys(v2Context).join(', ');
-        extraContext = `\nAvailable modules: ${moduleNames}. You can suggest actions across any of these modules.`;
-      }
-
-      const suggestionPrompt = `Based on the following AI assistant response and business context, suggest 3 natural follow-up questions or commands the user might want to ask next.
-
-Assistant's last message (excerpt): "${lastMessage.slice(0, 500)}"
-
-Business context:
-- Genome Stage: ${contextSnapshot.genomeStage}
-- Pending invoices: ${contextSnapshot.pendingInvoices}
-- Active projects: ${contextSnapshot.activeProjects.length}
-- Unread messages: ${contextSnapshot.unreadMessages}${extraContext}
-
-Return ONLY a JSON array of 3 strings. Each should be a complete, natural sentence.
-Example: ["Can you break that down by month?", "Create a task for this", "What are the risks?"]`;
-
-      const result = await (this.modelGateway as any).complete({
-        messages: [{ role: 'user', content: suggestionPrompt }],
-        model: 'gpt-4o-mini',
-        temperature: 0.8,
-        maxTokens: 500,
-      });
-
-      const jsonMatch = result.content.match(/\[[\s\S]*\]/);
-      if (!jsonMatch) {
-        return this.getDefaultSuggestions(contextSnapshot);
-      }
-
-      const suggestions: string[] = JSON.parse(jsonMatch[0]);
-      return suggestions
-        .filter((s: any) => typeof s === 'string' && s.length > 5)
-        .slice(0, 3);
-    } catch (error: any) {
-      this.logger.warn(
-        `[generateSuggestions] Failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      return [
-        'Can you explain that in more detail?',
-        'Create a task from this analysis',
-        'What are the next steps?',
-      ];
-    }
-  }
-
-  // ==========================================================================
-  // 5. v3 Genome-Aware Reasoning Helpers (preserved public API)
-  // ==========================================================================
-
-  /**
-   * Get a genome-enriched context by combining genome intelligence with the v2 context.
-   * Results are cached for 60 seconds to avoid repeated calls.
-   */
-  async getGenomeEnrichedContext(
-    businessId: string,
-  ): Promise<GenomeEnrichedContext> {
-    // Check cache first
-    const cacheKey = `genome:context:${businessId}`;
-    const cached = await this.redis.getJson<GenomeEnrichedContext>(cacheKey);
-    if (cached) {
-      this.logger.debug(
-        `[getGenomeEnrichedContext] Cache hit for business=${businessId}`,
-      );
-      return cached;
-    }
-
-    if (!this.genomeBridgeService) {
-      throw new ServiceUnavailableException(
-        'Genome bridge service is not available',
-      );
-    }
-
-    this.logger.debug(
-      `[getGenomeEnrichedContext] Building genome-enriched context for business=${businessId}`,
-    );
-
-    // Call genome bridge for intelligence
-    const genomeIntelligence =
-      await (this.genomeBridgeService as any).getGenomeIntelligence(businessId);
-
-    // Merge into a single enriched context object
-    const enriched: GenomeEnrichedContext = {
-      dnaScores: genomeIntelligence.dnaScores ?? {},
-      genomeStage: genomeIntelligence.genomeStage ?? 'unknown',
-      executiveReadiness: genomeIntelligence.executiveReadiness ?? 0,
-      recommendations: (genomeIntelligence.recommendations ?? []).map(
-        (rec: any) => ({
-          id: rec.id ?? this.generateId(),
-          title: rec.title ?? 'Untitled recommendation',
-          description: rec.description ?? '',
-          impact: rec.impact ?? 'medium',
-          category: rec.category ?? 'general',
-          confidence: rec.confidence ?? 0.5,
-          genomeScore: rec.genomeScore ?? 0,
-        }),
-      ),
-      signals: (genomeIntelligence.signals ?? []).map((sig: any) => ({
-        id: sig.id ?? this.generateId(),
-        type: sig.type ?? 'info',
-        message: sig.message ?? '',
-        module: sig.module ?? 'general',
-        severity: sig.severity ?? 'low',
-        createdAt: sig.createdAt ? new Date(sig.createdAt) : new Date(),
-      })),
-      opportunities: (genomeIntelligence.opportunities ?? []).map(
-        (opp: any) => ({
-          id: opp.id ?? this.generateId(),
-          title: opp.title ?? 'Untitled opportunity',
-          estimatedValue: opp.estimatedValue ?? 0,
-          category: opp.category ?? 'general',
-          confidence: opp.confidence ?? 0.5,
-        }),
-      ),
-      autonomyMap: genomeIntelligence.autonomyMap ?? {},
-      timestamp: new Date(),
-    };
-
-    // Cache for 60 seconds
-    await this.redis.setJson(cacheKey, enriched, this.GENOME_CONTEXT_TTL);
-
-    this.logger.debug(
-      `[getGenomeEnrichedContext] Built genome-enriched context: ${enriched.recommendations.length} recommendations, ${enriched.signals.length} signals, ${enriched.opportunities.length} opportunities`,
-    );
-
-    return enriched;
-  }
-
-  /**
-   * Determine whether KEY should suggest a proactive action based on genome signals.
-   */
-  async shouldSuggestProactiveAction(businessId: string): Promise<boolean> {
-    if (!this.genomeBridgeService) {
-      return false;
-    }
-
-    try {
-      // Get latest genome context (uses cache)
-      const genomeContext = await this.getGenomeEnrichedContext(businessId);
-
-      // Check for urgent/critical signals
-      const hasCriticalSignals = genomeContext.signals.some(
-        (s) => s.severity === 'critical' || s.severity === 'high',
-      );
-      if (hasCriticalSignals) {
-        this.logger.debug(
-          `[shouldSuggestProactiveAction] business=${businessId}: critical signals detected — proactive action warranted`,
-        );
-        return true;
-      }
-
-      // Check for declining DNA trends (compare with cached previous)
-      const previousScores = await this.redis.getJson<Record<string, number>>(
-        `genome:dna:previous:${businessId}`,
-      );
-      if (previousScores && genomeContext.dnaScores) {
-        for (const [key, currentScore] of Object.entries(
-          genomeContext.dnaScores,
-        )) {
-          const previousScore = previousScores[key];
-          if (previousScore && currentScore < previousScore - 10) {
-            this.logger.debug(
-              `[shouldSuggestProactiveAction] business=${businessId}: DNA score ${key} declined from ${previousScore} to ${currentScore} — proactive action warranted`,
-            );
-            return true;
-          }
-        }
-      }
-
-      // Store current scores for next comparison
-      await this.redis.setJson(
-        `genome:dna:previous:${businessId}`,
-        genomeContext.dnaScores,
-        3600,
-      );
-
-      // Check for high-confidence opportunities
-      const hasHighValueOpportunities = genomeContext.opportunities.some(
-        (o) => o.confidence > 0.8 && o.estimatedValue > 5000,
-      );
-      if (hasHighValueOpportunities) {
-        this.logger.debug(
-          `[shouldSuggestProactiveAction] business=${businessId}: high-value opportunities detected — proactive action warranted`,
-        );
-        return true;
-      }
-
-      return false;
-    } catch (err: any) {
-      this.logger.warn(
-        `[shouldSuggestProactiveAction] business=${businessId}: check failed — ${err instanceof Error ? err.message : String(err)}`,
-      );
-      return false;
-    }
-  }
-
-  /**
-   * Get proactive suggestions based on genome intelligence.
-   */
-  async getProactiveSuggestions(businessId: string): Promise<Suggestion[]> {
-    if (!this.genomeBridgeService) {
-      return [];
-    }
-
-    try {
-      // Get genome context (uses cache)
-      const genomeContext = await this.getGenomeEnrichedContext(businessId);
-
-      // Also get v2 context for richer suggestions
-      let v2Context: any = {};
-      if (this.integrationV2Enabled && this.contextV2Service) {
-        try {
-          v2Context =
-            (await this.contextV2Service.getFullContext(businessId)) ?? {};
-        } catch {
-          // Non-critical
-        }
-      }
-
-      // Get genome-ranked recommendations
-      const rankedRecs = await this.genomeBridgeService.getRankedRecommendations(
-        businessId,
-        5,
-      );
-
-      // Filter to top 3 most impactful
-      const topRecs = rankedRecs
-        .filter((r) => r.impact >= 0.7 || r.confidence > 0.7)
-        .slice(0, 3);
-
-      // Format as suggestions
-      const suggestions: Suggestion[] = topRecs.map((rec) => ({
-        id: rec.id ?? this.generateId(),
-        title: rec.title,
-        description: rec.recommendation ?? rec.insight,
-        impact: this.impactNumberToLevel(rec.impact),
-        category: rec.domain,
-        source: 'genome',
-        confidence: rec.confidence,
-        action: `Consider ${rec.title.toLowerCase()} to improve ${rec.domain}`,
-      }));
-
-      // If no high-impact recommendations, use urgent signals
-      if (suggestions.length === 0) {
-        const urgentSignals = genomeContext.signals.filter((s: any) => s.severity === 'critical' || s.severity === 'high',
-        );
-        for (const signal of urgentSignals.slice(0, 3)) {
-          suggestions.push({
-            id: signal.id,
-            title: `Action needed: ${signal.module}`,
-            description: signal.message,
-            impact:
-              signal.severity === 'critical'
-                ? 'high'
-                : signal.severity === 'high'
-                  ? 'high'
-                  : 'medium',
-            category: signal.module,
-            source: 'genome',
-            confidence: 0.9,
-            action: `Address ${signal.type} in ${signal.module}: ${signal.message}`,
-          });
-        }
-      }
-
-      this.logger.debug(
-        `[getProactiveSuggestions] business=${businessId}: generated ${suggestions.length} proactive suggestions`,
-      );
-
-      return suggestions;
-    } catch (err: any) {
-      this.logger.warn(
-        `[getProactiveSuggestions] business=${businessId}: failed — ${err instanceof Error ? err.message : String(err)}`,
-      );
-      return [];
-    }
-  }
-
-  /**
-   * Explain a decision by looking it up in the event log and generating
-   * a human-readable explanation that includes genome context at the time.
-   */
-  async explainDecision(decisionId: string): Promise<string> {
-    this.logger.debug(`[explainDecision] Looking up decision: ${decisionId}`);
-
-    try {
-      // Look up the decision in the event log
-      const eventLog: Array<{
-        step: string;
-        timestamp: Date;
-        data: Record<string, unknown>;
-      }> = [];
-
-      // FU-KEY-EVENT-COLUMNS: no event chain is read here. getEventChain is business-scoped (it used to read a
-      // correlation id across every business), and this method names no business, so it cannot ask for one; it
-      // reconstructs the decision from the session below, as it always has (no route calls it; the decision
-      // route is KeyCortexEvolutionService.explainDecision, which names the guarded business).
-
-      // If no event log, try to reconstruct from session/prisma
-      let decisionData: Record<string, unknown> = {};
-      if (eventLog.length === 0) {
-        // Try to find the session message with this correlation ID
-        const session = await (this.prisma.client as any).cortexSession.findFirst({
-          where: {
-            messages: {
-              path: ['metadata', 'correlationId'],
-              equals: decisionId,
-            },
-          },
-          include: { messages: true },
-        });
-        if (session) {
-          decisionData = {
-            sessionId: session.id,
-            businessId: session.businessId,
-            messages: session.messages,
-          };
-        }
-      } else {
-        decisionData = {
-          eventLog,
-          steps: eventLog.map((e: any) => e.step),
-        };
-      }
-
-      // Get genome context at the time of decision (best effort)
-      let genomeContext: GenomeEnrichedContext | null = null;
-      if (this.genomeBridgeService && decisionData.businessId) {
-        try {
-          genomeContext = await this.getGenomeEnrichedContext(
-            decisionData.businessId as string,
-          );
-        } catch {
-          // Genome context may not be available
-        }
-      }
-
-      // Use AI to generate a human-readable explanation
-      const explanationPrompt = `You are KEY's decision-explanation engine. Explain this decision clearly and concisely.
-
-Decision ID: ${decisionId}
-
-Decision Steps:
-${eventLog.length > 0 ? eventLog.map((e: any) => `- ${e.step} at ${e.timestamp}`).join('\n') : 'Steps not available in event log'}
-
-${genomeContext ? `Genome Context at Decision Time:
-- Genome Stage: ${genomeContext.genomeStage}
-- Executive Readiness: ${genomeContext.executiveReadiness}%
-- DNA Scores: ${JSON.stringify(genomeContext.dnaScores)}
-- Active Signals: ${genomeContext.signals.length}
-- Top Recommendation: ${genomeContext.recommendations[0]?.title ?? 'None'}` : 'Genome context not available'}
-
-Write a 3-4 sentence explanation of this decision that a non-technical business owner can understand. Be transparent about what data was used and why the decision was made. Use first person ("I decided...").`;
-
-      const result = await (this.modelGateway as any).complete({
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You are KEY, an AI business partner. Explain your decisions clearly and transparently.',
-          },
-          { role: 'user', content: explanationPrompt },
-        ],
-        model: 'gpt-4o-mini',
-        temperature: 0.4,
-        maxTokens: 500,
-      });
-
-      return (
-        result.content?.trim() ??
-        `I made decision ${decisionId} based on the available business context and genome intelligence at that time.`
-      );
-    } catch (error: any) {
-      this.logger.error(
-        `[explainDecision] Failed for ${decisionId}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      return `Unable to explain decision ${decisionId}: ${error instanceof Error ? error.message : 'Unknown error'}`;
-    }
-  }
+  //
+  // FU-KEY-GENOME-READS-RESIDUAL (D-235): the legacy suggestion and genome-aware helpers that stood here
+  // (generateSuggestions, getGenomeEnrichedContext and its genome:context cache, shouldSuggestProactiveAction,
+  // getProactiveSuggestions, explainDecision) had no caller and bypassed the reader projection; they were deleted.
+  // The live paths are KeyCortexSuggestionService and KeyCortexGenomeContextService with genomeContextForReader.
 
   /**
    * Learn from a user interaction by recording feedback, updating preferences,
@@ -1074,7 +670,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
 
 
   // ==========================================================================
-  // 6. v2 PUBLIC API — Direct Command Execution (preserved)
+  // 5. v2 PUBLIC API — Direct Command Execution (preserved)
   // ==========================================================================
 
   /**
@@ -1167,7 +763,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
   }
 
   // ==========================================================================
-  // 7. v2 PUBLIC API — Module Query (preserved)
+  // 6. v2 PUBLIC API — Module Query (preserved)
   // ==========================================================================
 
   /**
@@ -1222,7 +818,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
   }
 
   // ==========================================================================
-  // 8. v2 PUBLIC API — Get Capabilities (preserved)
+  // 7. v2 PUBLIC API — Get Capabilities (preserved)
   // ==========================================================================
 
   /**
@@ -1251,7 +847,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
   }
 
   // ==========================================================================
-  // 9. Gateway-compatible streaming alias (preserved)
+  // 8. Gateway-compatible streaming alias (preserved)
   // ==========================================================================
 
   /**
@@ -1438,39 +1034,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
     ];
   }
 
-  private generateId(): string {
-    return `crtx_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
-  }
-
   private generateCorrelationId(): string {
     return `corr_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-  }
-
-  private impactNumberToLevel(impact: number): 'high' | 'medium' | 'low' {
-    if (impact >= 0.7) return 'high';
-    if (impact >= 0.4) return 'medium';
-    return 'low';
-  }
-
-  private getDefaultSuggestions(
-    context: CortexContextSnapshot,
-  ): string[] {
-    const suggestions: string[] = [
-      'Can you break that down by category?',
-      'Create a task from this analysis',
-      'What are the risks I should watch for?',
-    ];
-
-    if (context.pendingInvoices > 0) {
-      suggestions.push(
-        `Follow up on ${context.pendingInvoices} pending invoices`,
-      );
-    }
-
-    if (context.activeProjects.length > 0) {
-      suggestions.push('Show me project status updates');
-    }
-
-    return suggestions.slice(0, 3);
   }
 }

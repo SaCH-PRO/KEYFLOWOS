@@ -68,7 +68,7 @@ import {
 import { readerSearchOptions } from '../ai/semantic-memory-sight';
 import { userCanAccessBusiness } from '../../core/auth/business.guard';
 import { LEVEL_RANK, memberScopeMap, rankOf } from '../../core/authority/module-vocabulary';
-import { genomeContextForReader, genomeRecommendationsForReader, genomeSuggestionsForReader } from './genome-context-for-reader';
+import { genomeContextForReader, genomeSuggestionsForReader, rankedRecommendationsForReader } from './genome-context-for-reader';
 import type { CortexMemberAuthority } from './key-cortex.controller';
 import { KeyCortexToolLoopService } from './key-cortex-tool-loop.service';
 import { KeyCortexActionDetectionService } from './key-cortex-action-detection.service';
@@ -486,11 +486,9 @@ export class KeyCortexQueryPipelineService {
       let rankedRecommendations: GenomeRecommendation[] = [];
       if (flags.genomeV3Enabled && this.genomeBridgeService) {
         try {
-          rankedRecommendations = genomeRecommendationsForReader(
-            await this.genomeContextService.getRankedRecommendations(
-              query.businessId,
-              5,
-            ),
+          // Read with headroom for a reader without revenue read (D-235 round 4, security MINOR-1).
+          rankedRecommendations = await rankedRecommendationsForReader(
+            (limit) => this.genomeContextService.getRankedRecommendations(query.businessId, limit),
             await this.readsRevenue(query),
           );
           this.logger.log(
@@ -1271,6 +1269,7 @@ export class KeyCortexQueryPipelineService {
           contextSnapshot,
           v2Context,
           genomeContext,
+          // Projected for the reader from the cached ranked pool (D-235 rounds 6, 9): no ranking per turn.
           genomeContext.recommendations.slice(0, 5),
           false,
         );
@@ -1338,8 +1337,8 @@ export class KeyCortexQueryPipelineService {
       yield {
         type: 'thought',
         thought: genomeContext
-          ? `Analyzing genome-aware context for ${contextSnapshot.genomeStage} stage business — ${genomeContext.signals.length} active signals, ${genomeContext.recommendations.length} recommendations available...`
-          : `Analyzing context for ${contextSnapshot.genomeStage} stage business${flags.integrationV2Enabled ? ' with full module awareness' : ''}...`,
+          ? this.genomeStreamThought(contextSnapshot.genomeStage, genomeContext, await this.readsRevenue(query))
+          : `Analyzing context for ${contextSnapshot.genomeStage ? `${contextSnapshot.genomeStage} stage ` : ''}business${flags.integrationV2Enabled ? ' with full module awareness' : ''}...`,
       };
 
       let accumulatedText = '';
@@ -2055,6 +2054,21 @@ export class KeyCortexQueryPipelineService {
   }
 
   /**
+   * FU-KEY-GENOME-READS-RESIDUAL round 7 (D-235; MINOR-1 of both reviews): the stream's opening thought. The projected
+   * signals and recommendations are what is left of the business's newest and top-ranked rows, so their counts are told
+   * only to a revenue reader (as before); anyone else is told no count.
+   */
+  private genomeStreamThought(
+    genomeStage: string | undefined,
+    genomeContext: Pick<GenomeEnrichedContext, 'signals' | 'recommendations'>,
+    readsRevenue: boolean,
+  ): string {
+    const subject = `Analyzing genome-aware context for ${genomeStage ? `${genomeStage} stage ` : ''}business`;
+    if (!readsRevenue) return `${subject}...`;
+    return `${subject} — ${genomeContext.signals.length} active signals, ${genomeContext.recommendations.length} recommendations available...`;
+  }
+
+  /**
    * FU-KEY-CHAT-GENOME-MONEY-SIGHT (D-128, D-100): whether the turn's reader may read revenue, as
    * ModuleScopeGuard decides it (memberAuthority: a platform SUPER_ADMIN passes; else the member's
    * scopes). No user or no membership reads none (fails closed). Read once per turn.
@@ -2428,7 +2442,7 @@ export class KeyCortexQueryPipelineService {
     let score = 0.7;
 
     if (content.includes('$') || content.includes('%')) score += 0.1;
-    if (content.toLowerCase().includes(context.genomeStage.toLowerCase()))
+    if (context.genomeStage && content.toLowerCase().includes(context.genomeStage.toLowerCase()))
       score += 0.05;
     if (content.length > 200) score += 0.05;
 

@@ -5,15 +5,13 @@ import { RedisService } from '../../core/redis/redis.service';
 import { KeyCortexGenomeBridgeService } from './key-cortex-genome-bridge.service';
 import { KeyCortexEventService } from './key-cortex-event.service';
 import { KeyCortexGenomeContextService } from './key-cortex-genome-context.service';
-import {
-  InteractionFeedback,
-  GenomeEnrichedContext,
-} from './key-cortex-reasoning.types';
+import { InteractionFeedback } from './key-cortex-reasoning.types';
 
 /**
  * KeyCortexInteractionService
  *
- * Handles decision explanations and learning from user interactions.
+ * Handles learning from user interactions (FU-KEY-GENOME-READS-RESIDUAL deleted its uncalled, unprojected
+ * explainDecision).
  */
 @Injectable()
 export class KeyCortexInteractionService {
@@ -32,105 +30,6 @@ export class KeyCortexInteractionService {
     @Inject(KeyCortexEventService)
     private readonly eventService?: KeyCortexEventService,
   ) {}
-
-  /**
-   * Explain a decision by looking it up in the event log and generating
-   * a human-readable explanation that includes genome context at the time.
-   */
-  async explainDecision(decisionId: string): Promise<string> {
-    this.logger.debug(`[explainDecision] Looking up decision: ${decisionId}`);
-
-    try {
-      const eventLog: Array<{
-        step: string;
-        timestamp: Date;
-        data: Record<string, unknown>;
-      }> = [];
-
-      // FU-KEY-EVENT-COLUMNS: no event chain is read here. getEventChain is business-scoped (it used to read a
-      // correlation id across every business), and this method names no business, so it cannot ask for one; it
-      // reconstructs the decision from the session below, as it always has (no route calls it; the decision
-      // route is KeyCortexEvolutionService.explainDecision, which names the guarded business).
-
-      let decisionData: Record<string, unknown> = {};
-      if (eventLog.length === 0) {
-        const session = await (this.prisma.client as any).cortexSession.findFirst(
-          {
-            where: {
-              messages: {
-                path: ['metadata', 'correlationId'],
-                equals: decisionId,
-              },
-            },
-            include: { messages: true },
-          },
-        );
-        if (session) {
-          decisionData = {
-            sessionId: session.id,
-            businessId: session.businessId,
-            messages: session.messages,
-          };
-        }
-      } else {
-        decisionData = {
-          eventLog,
-          steps: eventLog.map((e: any) => e.step),
-        };
-      }
-
-      let genomeContext: GenomeEnrichedContext | null = null;
-      if (decisionData.businessId) {
-        try {
-          genomeContext = await this.genomeContextService.getGenomeEnrichedContext(
-            decisionData.businessId as string,
-          );
-        } catch {
-          // Genome context may not be available
-        }
-      }
-
-      const explanationPrompt = `You are KEY's decision-explanation engine. Explain this decision clearly and concisely.
-
-Decision ID: ${decisionId}
-
-Decision Steps:
-${eventLog.length > 0 ? eventLog.map((e: any) => `- ${e.step} at ${e.timestamp}`).join('\n') : 'Steps not available in event log'}
-
-${genomeContext ? `Genome Context at Decision Time:
-- Genome Stage: ${genomeContext.genomeStage}
-- Executive Readiness: ${genomeContext.executiveReadiness}%
-- DNA Scores: ${JSON.stringify(genomeContext.dnaScores)}
-- Active Signals: ${genomeContext.signals.length}
-- Top Recommendation: ${genomeContext.recommendations[0]?.title ?? 'None'}` : 'Genome context not available'}
-
-Write a 3-4 sentence explanation of this decision that a non-technical business owner can understand. Be transparent about what data was used and why the decision was made. Use first person ("I decided...").`;
-
-      const result = await (this.modelGateway as any).complete({
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You are KEY, an AI business partner. Explain your decisions clearly and transparently.',
-          },
-          { role: 'user', content: explanationPrompt },
-        ],
-        model: 'gpt-4o-mini',
-        temperature: 0.4,
-        maxTokens: 500,
-      });
-
-      return (
-        result.content?.trim() ??
-        `I made decision ${decisionId} based on the available business context and genome intelligence at that time.`
-      );
-    } catch (error: any) {
-      this.logger.error(
-        `[explainDecision] Failed for ${decisionId}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-      return `Unable to explain decision ${decisionId}: ${error instanceof Error ? error.message : 'Unknown error'}`;
-    }
-  }
 
   /**
    * Learn from a user interaction by recording feedback and feeding outcomes
