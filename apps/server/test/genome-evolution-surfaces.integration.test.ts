@@ -53,6 +53,8 @@ const ID = {
   owner: `${P}owner`,
   staffNone: `${P}staffNone`,
   staffRead: `${P}staffRead`,
+  staffMissing: `${P}staffMissing`,
+  staffNoAi: `${P}staffNoAi`,
   outsider: `${P}outsider`,
   biz: `${P}biz`,
   biz2: `${P}biz2`,
@@ -63,6 +65,7 @@ const ID = {
   evoOps: `${P}evo_ops`,
   evoGrowth: `${P}evo_growth`,
   evoFinAct: `${P}evo_finact`,
+  evoFinOwner: `${P}evo_finown`,
   evoOpsAct: `${P}evo_opsact`,
   evoOpsOwner: `${P}evo_opsown`,
   evoOpsEdit: `${P}evo_opsedit`,
@@ -72,6 +75,11 @@ const ID = {
   expOps: `${P}exp_ops`,
   expMoney: `${P}exp_money`,
   expOther: `${P}exp_other`,
+  expPaidChannel: `${P}exp_paidch`,
+  expResult: `${P}exp_result`,
+  recOtherBiz: `${P}rec_otherbiz`,
+  propFinVerdict: `${P}prop_finv`,
+  vProp: `${P}v_prop`,
   vFin: `${P}v_fin`,
   vOps: `${P}v_ops`,
   vOpsReason: `${P}v_opsr`,
@@ -213,6 +221,15 @@ beforeAll(async () => {
   ));
   const experimentsOf = (prisma: any) => once('experiments', () => new GenomeExperimentService(prisma, new Proxy({}, { get: (_t, prop) => (prop === 'then' ? undefined : async () => null) }) as any));
   const live = (token: any, make: (prisma: any) => any) => ({ provide: token, inject: [PrismaService], useFactory: make });
+  // Round 2 (security MAJOR-4): the governance summary, real, over this fixture's experiments; its other inputs (signals,
+  // recommendations, readiness, departments, scores) are empty.
+  const { KeyGenomeGovernanceService } = await import('../src/modules/business-genome/key-genome/key-genome-governance.service');
+  const governanceOf = (prisma: any) => once('governance', () => new KeyGenomeGovernanceService(
+    prisma, { listSignals: async () => [] } as any, { listRecommendations: async () => [] } as any, experimentsOf(prisma),
+    { getReadiness: async () => [] } as any,
+    { computeFactScores: async () => [], computeBusinessScore: () => ({ overall: 0, integrity: 0, readiness: 0, confidence: 0, sections: [] }) } as any,
+    { listDepartments: async () => [] } as any,
+  ));
 
   // KeyGenomeController's collaborators other than the experiment service and Prisma are off these routes.
   const keyGenomeStubs = await Promise.all([
@@ -267,7 +284,8 @@ beforeAll(async () => {
       { provide: DigitalEmployeeAcceptanceService, useValue: offRoute('DigitalEmployeeAcceptanceService') },
       { provide: ValueLearningService, useValue: offRoute('ValueLearningService') },
       { provide: ComplianceMapService, useValue: offRoute('ComplianceMapService') },
-      ...keyGenomeStubs.map((token) => ({ provide: token, useValue: {} })),
+      live(KeyGenomeGovernanceService, governanceOf),
+      ...keyGenomeStubs.filter((token) => token !== KeyGenomeGovernanceService).map((token) => ({ provide: token, useValue: {} })),
     ],
   }).compile();
 
@@ -279,7 +297,7 @@ beforeAll(async () => {
   await app.init();
 
   await cleanup();
-  for (const id of [ID.owner, ID.staffNone, ID.staffRead, ID.outsider]) {
+  for (const id of [ID.owner, ID.staffNone, ID.staffRead, ID.staffMissing, ID.staffNoAi, ID.outsider]) {
     await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, name: id, role: 'USER' } });
   }
   await db.business.create({ data: { id: ID.biz, name: 'V76G Evolution', slug: `${P}biz`, ownerId: ID.owner, currency: 'TTD' } });
@@ -289,6 +307,9 @@ beforeAll(async () => {
     [ID.owner, ID.biz, 'OWNER', undefined],
     [ID.staffNone, ID.biz, 'STAFF', { revenue: 'none', crm: 'read', operations: 'write', settings: 'write', ai: 'write' }],
     [ID.staffRead, ID.biz, 'STAFF', { revenue: 'read', crm: 'read', operations: 'write', settings: 'write', ai: 'write' }],
+    // Round 2: an explicit map with no revenue key (reads revenue none), and a member who reads revenue but not KEY (ai).
+    [ID.staffMissing, ID.biz, 'STAFF', { crm: 'read', operations: 'write', settings: 'write', ai: 'write' }],
+    [ID.staffNoAi, ID.biz, 'STAFF', { revenue: 'read', crm: 'read', ai: 'none' }],
     [ID.outsider, ID.biz2, 'OWNER', undefined],
     [ID.owner, ID.biz3, 'OWNER', undefined],
     [ID.staffNone, ID.biz3, 'STAFF', { revenue: 'none', crm: 'read', operations: 'write', settings: 'write', ai: 'write' }],
@@ -307,6 +328,8 @@ beforeAll(async () => {
   await evo(ID.evoOps, ID.biz, 'operations', 'Bookings are handled through WhatsApp', { coreWorkflows: ['appointment-booking'] });
   await evo(ID.evoGrowth, ID.biz, 'growth', 'Repeat clients come back through WhatsApp', { sevenDayPlan: ['Ask for referrals'] });
   await evo(ID.evoFinAct, ID.biz, 'financial', 'Pricing review', { avgTicket: 4500.25 });
+  // Round 2 (correctness MINOR-8): the owner-parity approval has its own row (no order dependence on GES-02).
+  await evo(ID.evoFinOwner, ID.biz, 'financial', 'Pricing review', { avgTicket: 4500.25 });
   await evo(ID.evoOpsAct, ID.biz, 'operations', 'Confirm appointments by message', { coreWorkflows: ['confirmation'] });
   await evo(ID.evoOpsOwner, ID.biz, 'operations', 'Track no-shows', { coreWorkflows: ['no-show tracking'] });
   await evo(ID.evoOpsEdit, ID.biz, 'operations', 'Reminder the day before', { coreWorkflows: ['reminders'] });
@@ -320,6 +343,20 @@ beforeAll(async () => {
   await exp(ID.expOps, ID.biz, 'Reminders reduce no-shows', 'Send reminders the day before', 'No-show count');
   await exp(ID.expMoney, ID.biz, 'Overtime cost TTD 912 last week', 'Cap overtime', 'Overtime hours');
   await exp(ID.expOther, ID.biz2, 'Reminders reduce no-shows', 'Send reminders the day before', 'No-show count');
+  // Round 2 (correctness MAJOR-3): bridged from the marketing genome's own non-financial recommendation ("paid channel":
+  // money words, no figure); served as the recommendation is.
+  await exp(ID.expPaidChannel, ID.biz, 'A single active channel creates fragility.', 'Identify and activate at least one additional owned, earned, or paid channel.', 'Measure whether the recommendation improves the target business outcome.');
+  // Round 2 (correctness MINOR-6): neutral text, money in the completion result.
+  await db.genomeExperiment.create({
+    data: { id: ID.expResult, businessId: ID.biz, hypothesis: 'Reminders reduce no-shows', action: 'Send reminders', successMetric: 'No-show count', status: 'COMPLETED', result: { notes: 'Revenue up TTD 912 after reminders' } },
+  });
+  // Round 2 (security MINOR-8): another business's FINANCIAL recommendation naming this business's experiment id.
+  await db.genomeRecommendation.create({
+    data: {
+      id: ID.recOtherBiz, businessId: ID.biz2, domain: 'FINANCIAL', title: 'Other business cash plan', status: 'APPLIED',
+      diagnosis: 'Cash is short.', insight: 'Cash is short.', recommendation: 'Collect faster.', riskLevel: 'MEDIUM', suggestedExperimentId: ID.expOps,
+    },
+  });
   await db.genomeRecommendation.create({
     data: {
       id: ID.recFin, businessId: ID.biz, domain: 'FINANCIAL', title: 'Tighten the follow-up cadence', status: 'APPLIED',
@@ -334,10 +371,20 @@ beforeAll(async () => {
   });
   await verdict(ID.vFin, 'commerce.create_invoice', 'Invoice of TTD 912 needs approval', [{ source: 'StaticPolicy', rule: 'invoice', result: 'supervised', reason: 'Invoices need approval' }]);
   await verdict(ID.vOps, 'CREATE_TASK', 'Tool CREATE_TASK success rate is below 30% — blocked', [
-    { source: 'GenomeAutonomyGateService', rule: 'genome-gate', result: 'allow', reason: 'Genome readiness gate passed', metadata: { readinessScore: 83, confidenceScore: 0.7, riskLevel: 'MEDIUM' } },
+    { source: 'GenomeAutonomyGateService', rule: 'genome-gate', result: 'allow', reason: 'Genome readiness gate passed', metadata: { readinessScore: 8317, confidenceScore: 0.7, riskLevel: 'MEDIUM' } },
     { source: 'ToolOutcomeScore', rule: 'tool-score-CREATE_TASK', result: 'supervised', reason: 'Tool CREATE_TASK success rate is 20% over 5 uses', metadata: { successRate: 0.2, totalUses: 5 } },
   ]);
   await verdict(ID.vOpsReason, 'CREATE_TASK', 'KEY cannot execute this action because finance readiness is critically low (12/100).', []);
+  // Round 2 (security MAJOR-3b): a verdict on a KEY proposal bridged from a FINANCIAL recommendation, its own text neutral.
+  await db.keyActionProposal.create({
+    data: {
+      id: ID.propFinVerdict, businessId: ID.biz, sourceType: 'GENOME_EVOLUTION', sourceId: ID.recFin, title: 'Follow up: Tighten the follow-up cadence',
+      actionType: 'CREATE_TASK', riskLevel: 'LOW', status: 'PENDING', payload: { source: 'KEY_GENOME_RECOMMENDATION', recommendationId: ID.recFin },
+    },
+  });
+  await db.autonomyVerdict.create({
+    data: { id: ID.vProp, businessId: ID.biz, actionKey: 'CREATE_TASK', allowed: true, requiresApproval: true, tier: 'supervised', confidence: 0.61, reason: 'Allowed with approval', ruleTrace: [], proposalId: ID.propFinVerdict },
+  });
 
   // Timeline: a genome.updated row from BlueprintService's own emitter shape and a constitution.version_generated row
   // as ConstitutionVersionService writes it.
@@ -358,10 +405,35 @@ beforeAll(async () => {
     },
   });
 
+  // Round 2 (both reviews, MAJOR): GenomeIntegrityChangeListener's auto-version change notes, written as the summary.
+  await db.temporalFlowEvent.create({
+    data: {
+      id: `${P}constitution_auto`, businessId: ID.biz, source: 'KEY', type: 'constitution.version_generated', module: 'business-genome',
+      entityType: 'business_constitution_version', entityId: `${P}const_v3`, title: 'Business Constitution v3 generated',
+      summary: 'Auto-versioned: genome integrity changed from 52% to 57% (+5).', importance: 'HIGH',
+      payload: { version: 3, genomeIntegrity: 57, executiveReadinessScore: 61, genomeStage: 'GROWTH' }, reminderAt: remindAt,
+    },
+  });
+  // Round 2 (correctness MINOR-4): a financial DNA row that also carries a composite key (POST temporal-flow takes any
+  // payload); it must stay withheld.
+  await db.temporalFlowEvent.create({
+    data: {
+      id: `${P}dna_fin_composite`, businessId: ID.biz, source: 'APP', type: 'genome.section_updated', module: 'business-genome',
+      entityType: 'dna_section', entityId: 'financial', title: 'financial DNA updated', importance: 'NORMAL', reminderAt: remindAt,
+      payload: { section: 'financial', data: { avgTicket: 4500.25 }, genomeIntegrity: 57 },
+    },
+  });
+
   // biz3: three paid-invoice rows make the generator propose a sales-section change (findGenomeSignals).
   for (let i = 0; i < 3; i += 1) {
     await db.temporalFlowEvent.create({
       data: { id: `${P}paid_${i}`, businessId: ID.biz3, source: 'APP', type: 'invoice.paid', module: 'commerce', title: `Invoice ${i} paid`, importance: 'NORMAL' },
+    });
+  }
+  // Round 2 (correctness MINOR-8): five bookings make the generator propose an operations change too (served).
+  for (let i = 0; i < 5; i += 1) {
+    await db.temporalFlowEvent.create({
+      data: { id: `${P}booking_${i}`, businessId: ID.biz3, source: 'APP', type: 'booking.created', module: 'bookings', title: `Booking ${i}`, importance: 'NORMAL' },
     });
   }
 }, 120_000);
@@ -371,15 +443,17 @@ afterAll(async () => {
   await app?.close();
 });
 
-const BIZ_EVOS = [ID.evoFin, ID.evoSales, ID.evoOpsMoney, ID.evoOps, ID.evoGrowth, ID.evoFinAct, ID.evoOpsAct, ID.evoOpsOwner, ID.evoOpsEdit].sort();
+const BIZ_EVOS = [ID.evoFin, ID.evoSales, ID.evoOpsMoney, ID.evoOps, ID.evoGrowth, ID.evoFinAct, ID.evoFinOwner, ID.evoOpsAct, ID.evoOpsOwner, ID.evoOpsEdit].sort();
 const NON_FIN_EVOS = [ID.evoOps, ID.evoGrowth, ID.evoOpsAct, ID.evoOpsOwner, ID.evoOpsEdit].sort();
 
 describe('FU-GENOME-EVOLUTION-SURFACES (D-128, D-233, D-238)', () => {
   it('GES-01 the evolution proposals list serves a revenue-none member only the non-financial proposals', async () => {
-    const res = await get(evoUrl(), ID.staffNone);
-    expect(res.status).toBe(200);
-    expect(res.body.map((p: any) => p.id).sort()).toEqual(NON_FIN_EVOS);
-    expect(JSON.stringify(res.body)).not.toMatch(FIGURES);
+    for (const as of [ID.staffNone, ID.staffMissing]) {
+      const res = await get(evoUrl(), as);
+      expect(res.status).toBe(200);
+      expect(res.body.map((p: any) => p.id).sort()).toEqual(NON_FIN_EVOS);
+      expect(JSON.stringify(res.body)).not.toMatch(FIGURES);
+    }
     for (const as of [ID.owner, ID.staffRead]) {
       const all = await get(evoUrl(), as);
       expect(all.body.map((p: any) => p.id).sort()).toEqual(BIZ_EVOS);
@@ -425,20 +499,25 @@ describe('FU-GENOME-EVOLUTION-SURFACES (D-128, D-233, D-238)', () => {
   });
 
   it('GES-03b the owner may still approve a financial proposal (owner parity)', async () => {
-    const res = await post(`${evoUrl()}/${ID.evoFinAct}/approve`, ID.owner);
+    const res = await post(`${evoUrl()}/${ID.evoFinOwner}/approve`, ID.owner);
     expect(res.status).toBe(201);
     expect(res.body.proposal.status).toBe('APPROVED');
     expect(dnaWrites.some((w: any) => w.section === 'financial')).toBe(true);
   });
 
-  it('GES-04 generate-from-temporal-flow answers a revenue-none member only the non-financial proposals it made', async () => {
+  it('GES-04 generate-from-temporal-flow: a member without revenue write makes and is answered only non-financial proposals', async () => {
     const res = await post(`/business-genome/businesses/${ID.biz3}/evolution-proposals/generate-from-temporal-flow`, ID.staffNone);
     expect(res.status).toBe(201);
-    expect(res.body.some((p: any) => p.section === 'sales')).toBe(false);
+    expect(res.body.map((p: any) => p.section)).toEqual(['operations']);
     expect(JSON.stringify(res.body)).not.toMatch(/invoice/i);
-    // It was made: the owner reads it.
+    // Round 2 (security MINOR-6, D-128): no sales-section proposal was written for them.
+    expect((await db.genomeEvolutionProposal.findMany({ where: { businessId: ID.biz3, section: 'sales' } })).length).toBe(0);
+    // The owner's run makes the sales one; the owner reads it.
+    const owner = await post(`/business-genome/businesses/${ID.biz3}/evolution-proposals/generate-from-temporal-flow`, ID.owner);
+    expect(owner.status).toBe(201);
+    expect(owner.body.map((p: any) => p.section)).toEqual(['sales']);
     const all = await get(evoUrl(ID.biz3), ID.owner);
-    expect(all.body.some((p: any) => p.section === 'sales')).toBe(true);
+    expect(all.body.map((p: any) => p.section).sort()).toEqual(['operations', 'sales']);
   });
 
   it('GES-05 the command-center snapshot carries no financial proposal text for a revenue-none member', async () => {
@@ -447,11 +526,9 @@ describe('FU-GENOME-EVOLUTION-SURFACES (D-128, D-233, D-238)', () => {
     const json = JSON.stringify(res.body);
     expect(json).not.toMatch(FIGURES);
     expect(json).not.toMatch(/Average deal closes|Gross margin|Overtime cost/);
-    const items = (res.body.items ?? res.body.priorities ?? []) as any[];
     const all = JSON.stringify(res.body);
     for (const id of [ID.evoFin, ID.evoSales, ID.evoOpsMoney]) expect(all).not.toContain(id);
     expect(all).toContain(ID.evoOps);
-    void items;
     const owner = JSON.stringify((await get(`/business-command-center/businesses/${ID.biz}/snapshot`, ID.owner)).body);
     expect(owner).toContain(ID.evoFin);
     expect(owner).toMatch(/Gross margin moved to 31\.7%/);
@@ -479,10 +556,21 @@ describe('FU-GENOME-EVOLUTION-SURFACES (D-128, D-233, D-238)', () => {
     expect(res.body.recent.map((v: any) => v.id)).toEqual([ID.vOps]);
     expect(res.body.recent[0].ruleTrace.some((t: any) => 'metadata' in t)).toBe(false);
     expect(res.body.recent[0].ruleTrace.map((t: any) => t.source)).toEqual(['GenomeAutonomyGateService', 'ToolOutcomeScore']);
-    expect(JSON.stringify(res.body)).not.toMatch(/TTD 912|finance readiness|readinessScore|83/);
+    expect(JSON.stringify(res.body.recent)).not.toMatch(/TTD 912|finance readiness|readinessScore|8317/);
+    // Round 2 (security MAJOR-3a): the verdict's confidence is the genome gate's confidence score.
+    expect(res.body.recent[0].confidence).toBeUndefined();
+    // Round 2 (security MINOR-5): the totals count what the reader is served.
+    expect(res.body.total).toBe(1);
+    expect(res.body.blocked).toBe(1);
     const owner = await get(`/api/v1/cortex/audit/decisions?businessId=${ID.biz}`, ID.owner);
-    expect(owner.body.recent.map((v: any) => v.id).sort()).toEqual([ID.vFin, ID.vOps, ID.vOpsReason].sort());
-    expect(owner.body.recent.find((v: any) => v.id === ID.vOps).ruleTrace[0].metadata.readinessScore).toBe(83);
+    expect(owner.body.recent.map((v: any) => v.id).sort()).toEqual([ID.vFin, ID.vOps, ID.vOpsReason, ID.vProp].sort());
+    expect(owner.body.recent.find((v: any) => v.id === ID.vOps).ruleTrace[0].metadata.readinessScore).toBe(8317);
+    expect(owner.body.recent.find((v: any) => v.id === ID.vOps).confidence).toBe(0.7);
+    expect(owner.body.total).toBe(4);
+    // Round 2 (packet item 3): the decisions log is KEY's (ai): a member who cannot read ai is refused.
+    const noAi = await get(`/api/v1/cortex/audit/decisions?businessId=${ID.biz}`, ID.staffNoAi);
+    expect(noAi.status).toBe(403);
+    expect(JSON.stringify(noAi.body)).toContain('Insufficient permissions: ai requires read access (you have none)');
   });
 
   it('GES-08 timeline genome.updated and constitution rows are served without their composite scores', async () => {
@@ -502,16 +590,18 @@ describe('FU-GENOME-EVOLUTION-SURFACES (D-128, D-233, D-238)', () => {
   it('GES-09 experiments: bridged from FINANCIAL, or stating money, need revenue read; acting on one needs revenue write', async () => {
     const list = await get(expUrl(), ID.staffNone);
     expect(list.status).toBe(200);
-    expect(list.body.map((e: any) => e.id)).toEqual([ID.expOps]);
-    for (const id of [ID.expFin, ID.expMoney]) {
+    expect(list.body.map((e: any) => e.id).sort()).toEqual([ID.expOps, ID.expPaidChannel].sort());
+    for (const id of [ID.expFin, ID.expMoney, ID.expResult]) {
       const one = await get(`${expUrl()}/${id}`, ID.staffNone);
       expect(one.status, id).toBe(403);
       expect(JSON.stringify(one.body)).toContain(READ_DENIED);
       expect(JSON.stringify(one.body)).not.toMatch(FIGURES);
     }
+    // expOps is named by another business's FINANCIAL recommendation: that has no effect here.
     expect((await get(`${expUrl()}/${ID.expOps}`, ID.staffNone)).status).toBe(200);
+    expect((await get(`${expUrl()}/${ID.expPaidChannel}`, ID.staffNone)).status).toBe(200);
     for (const [as, has] of [[ID.staffNone, 'none'], [ID.staffRead, 'read']] as const) {
-      for (const action of ['start', 'cancel']) {
+      for (const action of ['start', 'cancel', 'complete']) {
         const res = await post(`${expUrl()}/${ID.expFin}/${action}`, as);
         expect(res.status, `${as} ${action}`).toBe(403);
         expect(JSON.stringify(res.body)).toContain(WRITE_DENIED(has));
@@ -520,9 +610,52 @@ describe('FU-GENOME-EVOLUTION-SURFACES (D-128, D-233, D-238)', () => {
     expect((await db.genomeExperiment.findUnique({ where: { id: ID.expFin } })).status).toBe('PROPOSED');
     expect((await get(`${expUrl()}/${ID.expFin}`, ID.staffRead)).status).toBe(200);
     const ownerList = await get(expUrl(), ID.owner);
-    expect(ownerList.body.map((e: any) => e.id).sort()).toEqual([ID.expFin, ID.expMoney, ID.expOps].sort());
+    expect(ownerList.body.map((e: any) => e.id).sort()).toEqual([ID.expFin, ID.expMoney, ID.expOps, ID.expPaidChannel, ID.expResult].sort());
     const started = await post(`${expUrl()}/${ID.expFin}/start`, ID.owner);
     expect(started.status).toBe(201);
+  });
+
+  it('GES-06b the mode briefs and the snapshot do not quote the sales genome-update candidate made from paid invoices', async () => {
+    for (const mode of ['GROWTH_ADVISOR', 'STRATEGIST', 'EXECUTIVE_ASSISTANT']) {
+      const res = await get(`/intelligence/businesses/${ID.biz3}/key-modes/${mode}`, ID.staffNone);
+      expect(res.status, mode).toBe(200);
+      expect(JSON.stringify(res.body), mode).not.toMatch(/Paid invoice activity|paid invoice events|Genome update candidate: Sales/i);
+    }
+    const snap = await get(`/business-command-center/businesses/${ID.biz3}/snapshot`, ID.staffNone);
+    expect(JSON.stringify(snap.body)).not.toMatch(/Paid invoice activity|paid invoice events/i);
+    const owner = await get(`/intelligence/businesses/${ID.biz3}/key-modes/GROWTH_ADVISOR`, ID.owner);
+    expect(JSON.stringify(owner.body)).toMatch(/Paid invoice activity/);
+  });
+
+  it('GES-08b the constitution row whose summary states the integrity change is served without it; a financial DNA row with a composite key stays withheld', async () => {
+    const res = await get(`/temporal-flow/businesses/${ID.biz}?limit=200`, ID.staffNone);
+    const auto = res.body.find((e: any) => e.id === `${P}constitution_auto`);
+    expect(auto).toBeDefined();
+    expect(JSON.stringify(auto)).not.toMatch(/\d+%|integrity changed/);
+    expect(res.body.some((e: any) => e.id === `${P}dna_fin_composite`)).toBe(false);
+    const owner = await get(`/temporal-flow/businesses/${ID.biz}?limit=200`, ID.owner);
+    expect(owner.body.find((e: any) => e.id === `${P}constitution_auto`).summary).toMatch(/52% to 57%/);
+  });
+
+  it('GES-11 the governance summary does not list experiments bridged from FINANCIAL or stating money', async () => {
+    const res = await get(`/business-genome/businesses/${ID.biz}/key-genome/governance`, ID.staffNone);
+    expect(res.status).toBe(200);
+    const json = JSON.stringify(res.body);
+    for (const id of [ID.expFin, ID.expMoney, ID.expResult]) expect(json).not.toContain(id);
+    expect(json).toContain(ID.expOps);
+    const owner = JSON.stringify((await get(`/business-genome/businesses/${ID.biz}/key-genome/governance`, ID.owner)).body);
+    expect(owner).toContain(ID.expFin);
+  });
+
+  it('GES-12 creating a financial or sales evolution proposal needs revenue write (D-128)', async () => {
+    for (const [as, has] of [[ID.staffNone, 'none'], [ID.staffRead, 'read']] as const) {
+      const res = await post(evoUrl(), as, { section: 'financial', reason: 'Pricing review', proposedPatch: { pricingModel: 'retainer' } });
+      expect(res.status).toBe(403);
+      expect(JSON.stringify(res.body)).toContain(WRITE_DENIED(has));
+    }
+    expect((await db.genomeEvolutionProposal.count({ where: { businessId: ID.biz, reason: 'Pricing review', createdBy: { in: [ID.staffNone, ID.staffRead] } } }))).toBe(0);
+    const ok = await post(evoUrl(), ID.staffNone, { section: 'operations', reason: 'Confirm walk-ins', proposedPatch: { coreWorkflows: ['walk-ins'] } });
+    expect(ok.status).toBe(201);
   });
 
   it('GES-10 cross-tenant: another business is refused; its ids answer 404 here', async () => {
