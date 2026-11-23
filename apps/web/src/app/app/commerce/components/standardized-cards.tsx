@@ -41,7 +41,10 @@ export function OverflowMenu({ children }: OverflowMenuProps) {
       {open && (
         <div
           className="absolute right-0 top-full mt-1 z-50 min-w-[180px] rounded-xl border border-border/60 bg-popover shadow-xl py-1 animate-in fade-in-0 zoom-in-95"
-          onClick={() => setOpen(false)}
+          // Capture, not bubble: each item stops its click from bubbling (so the row behind it does not
+          // open), which left the menu open after a choice; on a phone it then lay over the sheet the
+          // choice opened and took its taps (MOUNT-QUOTES, live sweep). The item's own handler still runs.
+          onClickCapture={() => setOpen(false)}
         >
           {children}
         </div>
