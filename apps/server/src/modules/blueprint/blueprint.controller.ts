@@ -1,15 +1,55 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { GenomeGateGuard } from '../../core/auth/genome-gate.guard';
 import { BlueprintService } from './blueprint.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import {
+  isFinancialGenomeEvolution,
+  patchHoldsFigure,
+  requireRevenueLevel,
+} from '../key-autonomy/key-action-genome-projection';
+import { structuredValueStatesMoney } from '../business-genome/key-genome/genome-finance-scope';
 
 import { BlueprintPatch, DnaSectionKey } from './blueprint.types';
+
+/**
+ * FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128): the blueprint columns behind the financial and sales DNA sections
+ * (DNA_SECTION_CONFIG: financials and projectionProfile, salesSystem) and the offer architecture (the offer ladder: the
+ * business model and pricing, D-234).
+ */
+const MONEY_BLUEPRINT_COLUMNS: ReadonlySet<string> = new Set(['financials', 'projectionProfile', 'salesSystem', 'offerArchitecture']);
+/** Every other blueprint column (BlueprintSectionKey); a key not listed in either set fails closed. */
+const OTHER_BLUEPRINT_COLUMNS: ReadonlySet<string> = new Set([
+  'identity', 'operatingModel', 'goals', 'constraints', 'brand', 'customerModel', 'intelligence', 'workflowModel',
+  'aiPreferences', 'founderProfile', 'legalProfile', 'registrationProfile', 'taxProfile', 'ownershipProfile',
+  'marketProfile', 'marketingSystem', 'operationsSystem', 'riskProfile', 'complianceProfile', 'executionRoadmap',
+  'documentProfile',
+]);
+
+/** Whether a blueprint patch writes financial genome content (D-128): a money or unknown column, or money or a figure in it. */
+function isFinancialBlueprintPatch(patch: unknown): boolean {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return true;
+  const columns = Object.keys(patch as Record<string, unknown>);
+  if (columns.some((c) => MONEY_BLUEPRINT_COLUMNS.has(c) || !OTHER_BLUEPRINT_COLUMNS.has(c))) return true;
+  return structuredValueStatesMoney(patch) || patchHoldsFigure(patch);
+}
+
+type BlueprintRequest = { user?: { id?: string; role?: string } };
 
 @Controller('blueprint/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
 export class BlueprintController {
-  constructor(@Inject(BlueprintService) private readonly blueprint: BlueprintService) {}
+  constructor(
+    @Inject(BlueprintService) private readonly blueprint: BlueprintService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+  ) {}
+
+  /** D-128: writing financial genome content needs revenue write (ModuleScopeGuard's 403 message). */
+  private async requireRevenueWrite(businessId: string, req?: BlueprintRequest): Promise<void> {
+    const reader = req?.user?.id ? { id: req.user.id, role: req.user.role } : undefined;
+    await requireRevenueLevel(this.prisma, businessId, reader, 'write');
+  }
 
   @Get()
   async get(@Param('businessId') businessId: string) {
@@ -20,7 +60,10 @@ export class BlueprintController {
   async update(
     @Param('businessId') businessId: string,
     @Body() body: BlueprintPatch,
+    @Req() req?: BlueprintRequest,
   ) {
+    // FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128): the blueprint behind the financial and sales DNA, or money-stating text.
+    if (isFinancialBlueprintPatch(body)) await this.requireRevenueWrite(businessId, req);
     return this.blueprint.updateBlueprint(businessId, body);
   }
 
@@ -98,7 +141,13 @@ export class BlueprintController {
     @Param('businessId') businessId: string,
     @Param('section') section: DnaSectionKey,
     @Body() body: { data?: Record<string, unknown> },
+    @Req() req?: BlueprintRequest,
   ) {
-    return this.blueprint.updateDnaSection(businessId, section, body.data || {});
+    // FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128): the evolution approve gate's rule (isFinancialGenomeEvolution: the
+    // financial and sales sections, an unknown section, money or a figure in the data), so a direct DNA write cannot
+    // bypass it.
+    const data = body?.data || {};
+    if (isFinancialGenomeEvolution({ section, proposedPatch: data })) await this.requireRevenueWrite(businessId, req);
+    return this.blueprint.updateDnaSection(businessId, section, data);
   }
 }

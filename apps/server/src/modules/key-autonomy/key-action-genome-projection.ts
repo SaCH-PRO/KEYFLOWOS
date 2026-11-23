@@ -55,7 +55,7 @@ function textStatesMoney(value: unknown): boolean {
  * money vocabulary does not read; the genome-evolution generator's own patches are lists of words. Patches only: the
  * generator's evidence counts events ("5 booking events detected.").
  */
-function patchHoldsFigure(value: unknown, depth = 0): boolean {
+export function patchHoldsFigure(value: unknown, depth = 0): boolean {
   if (depth > 8) return true;
   if (typeof value === 'number' || typeof value === 'bigint') return true;
   // Round 6: any decimal digit, ASCII or not (fullwidth figures read as figures).
@@ -259,6 +259,14 @@ export function withoutCompositeScores(payload: unknown): unknown {
  * (GenomeCrossDomainService), so a verdict naming it can tell a revenue-none reader that finance is at risk (D-233).
  */
 const CROSS_DOMAIN_RISK = /cross[\s_-]?domain/i;
+
+/**
+ * FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-233, D-238): whether an autonomy verdict reason or a genome-policy message states
+ * money or the cross-domain risk (as autonomyVerdictForReader judges a verdict's reason).
+ */
+export function autonomyReasonStatesMoney(reason: unknown): boolean {
+  return typeof reason === 'string' && (textStatesMoney(reason) || CROSS_DOMAIN_RISK.test(reason));
+}
 
 /** 403 with ModuleScopeGuard's message when the reader's revenue level is below `minLevel` (SUPER_ADMIN passes). */
 export async function requireRevenueLevel(

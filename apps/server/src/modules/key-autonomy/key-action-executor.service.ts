@@ -155,7 +155,9 @@ export class KeyActionExecutorService {
       confidence: payload.confidence,
       createdBy,
       sourceEventIds: proposal.sourceId ? [proposal.sourceId] : undefined,
-    });
+    // FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128): a financial proposal made for the executing member needs their revenue
+    // write; KEY's own execution (no member) is unchanged.
+    }, createdBy ? { actor: { id: createdBy } } : {});
 
     return {
       success: true,

@@ -1,4 +1,5 @@
 import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
+import { isFinancialGenomeEvolution, requireRevenueLevel } from '../key-autonomy/key-action-genome-projection';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCortexEventService, actionResultOf, type KeyActionResult, type KeyCortexClaim } from './key-cortex-event.service';
 import { KeyCortexEvidenceService } from './key-cortex-evidence.service';
@@ -296,8 +297,18 @@ export class KeyCortexGenomeBridgeService {
   async createEvolutionProposal(
     businessId: string,
     input: Record<string, unknown>,
+    /**
+     * FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128): the member on whose behalf (none today: KEY's pattern detection and
+     * learning call this). Given, a financial proposal needs their revenue write, as GenomeEvolutionService.create does.
+     */
+    opts: { actor?: { id?: string; role?: string } } = {},
   ): Promise<Record<string, unknown>> {
     this.logger.debug(`[createEvolutionProposal] ${businessId}`);
+    if (opts.actor && isFinancialGenomeEvolution({
+      section: (input.section as string) ?? 'general', reason: input.reason, proposedPatch: input.proposedPatch, evidence: input.evidence,
+    })) {
+      await requireRevenueLevel(this.prisma, businessId, opts.actor, 'write');
+    }
     const created = await this.prisma.client.genomeEvolutionProposal.create({
       data: {
         businessId,

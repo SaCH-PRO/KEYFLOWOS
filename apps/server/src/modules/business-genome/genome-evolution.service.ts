@@ -11,7 +11,7 @@ import { BlueprintService } from '../blueprint/blueprint.service';
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { DNA_SECTION_KEYS, type DnaSectionKey } from '../blueprint/blueprint.types';
 import { genomeReaderReadsRevenue, type GenomeReader } from './key-genome/genome-finance-scope';
-import { isFinancialGenomeEvolution } from '../key-autonomy/key-action-genome-projection';
+import { isFinancialGenomeEvolution, requireRevenueLevel } from '../key-autonomy/key-action-genome-projection';
 import type {
   GenomeEvolutionProposalData,
   GenomeEvolutionProposalInput,
@@ -107,7 +107,16 @@ export class GenomeEvolutionService {
   async create(
     businessId: string,
     input: GenomeEvolutionProposalInput,
+    /**
+     * FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128): the member on whose behalf the proposal is made (KEY executing a
+     * proposal for them). Given, a financial proposal (isFinancialGenomeEvolution) needs their revenue write. Left out
+     * (the controller gates its own create; KEY's own processes), unchanged.
+     */
+    opts: { actor?: GenomeReader } = {},
   ): Promise<GenomeEvolutionProposalData> {
+    if (opts.actor && isFinancialGenomeEvolution({ section: input.section, reason: input.reason, proposedPatch: input.proposedPatch, evidence: input.evidence })) {
+      await requireRevenueLevel(this.prisma, businessId, opts.actor, 'write');
+    }
     const row = await this.prisma.client.genomeEvolutionProposal.create({
       data: {
         businessId,

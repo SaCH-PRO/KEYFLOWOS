@@ -32,7 +32,9 @@ function makeController() {
     updateDnaSection: vi.fn().mockResolvedValue({ id: 'bp_1', updated: true }),
   } as unknown as BlueprintService;
 
-  const controller = new BlueprintController(blueprint);
+  // FU-GENOME-DNA-WRITES-AND-INTEGRITY: the revenue-write gate reads the member's level; an owner here (revenue write).
+  const prisma = { client: { membership: { findUnique: vi.fn().mockResolvedValue({ role: 'OWNER', permissionScopes: null }) } } } as any;
+  const controller = new BlueprintController(blueprint, prisma);
   return { controller, blueprint };
 }
 
@@ -82,7 +84,7 @@ describe('BlueprintController genome endpoints', () => {
     const { controller, blueprint } = makeController();
     const section: DnaSectionKey = 'financial';
     const data = { monthlyFixedCosts: 3000 };
-    const result = await controller.updateDnaSection('biz_1', section, { data });
+    const result = await controller.updateDnaSection('biz_1', section, { data }, { user: { id: 'user_1', role: 'USER' } });
     expect(blueprint.updateDnaSection).toHaveBeenCalledWith('biz_1', section, data);
     expect(result).toEqual({ id: 'bp_1', updated: true });
   });

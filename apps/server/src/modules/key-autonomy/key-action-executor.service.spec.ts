@@ -119,6 +119,8 @@ describe('KeyActionExecutorService', () => {
     expect(genomeEvolution.create).toHaveBeenCalledWith(
       'biz_1',
       expect.objectContaining({ ...payload, createdBy: 'user_1' }),
+      // FU-GENOME-DNA-WRITES-AND-INTEGRITY: the executing member, for the revenue-write gate on a financial payload.
+      { actor: { id: 'user_1' } },
     );
   });
 
