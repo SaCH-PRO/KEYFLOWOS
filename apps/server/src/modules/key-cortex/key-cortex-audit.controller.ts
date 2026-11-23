@@ -127,8 +127,10 @@ export class KeyCortexAuditController {
     return {
       scope: 'synthetic' as const,
       results,
-      // Green only when every suite has at least one assertion and every assertion is PASS
+      // Green only when every suite in `results` has at least one assertion and every assertion is PASS
       // (RR-EVAL-HARNESS-NO-VACUOUS): NOT_RUN, INDETERMINATE, ERROR and an empty suite are not green.
+      // It speaks for the suites returned, so with `suite` named it is that one suite's verdict only;
+      // a caller wanting the harness verdict runs them all.
       allPass: runIsGreen(results),
     };
   }

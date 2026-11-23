@@ -41,11 +41,13 @@ export interface EvalSuiteResult {
   name: string;
   description: string;
   passed: number;
-  /** Assertions that measured and did not hold (FAIL) or threw (ERROR). */
+  /** Assertions that measured their claim and it did not hold (FAIL). */
   failed: number;
   notRun: number;
   indeterminate: number;
+  /** Assertions whose run or check threw an ordinary error (ERROR). */
   errors: number;
+  /** passed + failed + notRun + indeterminate + errors: the five statuses partition the assertions. */
   total: number;
   /** At least one assertion, and every one PASS. An empty suite is not green. */
   green: boolean;
@@ -85,16 +87,31 @@ function isExplainedTraceEntry(entry: unknown): boolean {
   return typeof e.source === 'string' && e.source.length > 0 && typeof e.result === 'string' && e.result.length > 0;
 }
 
+const SEND_VERBS: ReadonlySet<string> = new Set(['send', 'resend', 'email', 'deliver']);
+
 /**
- * A plan step whose capability is an invoice send, in the planner's fallback
- * spelling (`send_invoice` under module commerce) or a canonical tool name
- * (`commerce.send_invoice`, `invoice.email`). `create_invoice` is not a send.
+ * A plan step whose capability is an invoice send: its name, split into
+ * tokens (module and action, on dots, underscores, dashes, slashes and
+ * camelCase), ends in `send invoice` or `invoice send` (also resend, email,
+ * deliver). That covers the planner's fallback (`send_invoice` under module
+ * commerce), the canonical `commerce.send_invoice`, the flow tool registry's
+ * `commerce_send_invoice` and `sendInvoice`. `create_invoice` is not a send,
+ * and neither is a longer name that only mentions both words
+ * (`send_invoice_reminder`, `send_invoices_report`).
  */
 function isInvoiceSendStep(step: unknown): boolean {
   if (!step || typeof step !== 'object') return false;
   const { action, module } = step as { action?: unknown; module?: unknown };
-  const name = `${typeof module === 'string' ? module : ''}.${typeof action === 'string' ? action : ''}`.toLowerCase();
-  return /(send|email|deliver)[._-]?invoice|invoice[._-]?(send|email|deliver)/.test(name);
+  const tokens = [module, action]
+    .filter((part): part is string => typeof part === 'string')
+    .join('.')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  if (tokens.length < 2) return false;
+  const [before, last] = [tokens[tokens.length - 2], tokens[tokens.length - 1]];
+  return (SEND_VERBS.has(before) && last === 'invoice') || (before === 'invoice' && SEND_VERBS.has(last));
 }
 
 /**
@@ -147,7 +164,8 @@ export class EvalHarnessService {
       const start = Date.now();
       try {
         const result = await assertion.run();
-        const held = assertion.check(result);
+        // Exactly `true` passes: a truthy non-boolean or a promise from check() is FAIL, never PASS.
+        const held = assertion.check(result) === true;
         assertionResults.push({
           name: assertion.name,
           status: held ? 'PASS' : 'FAIL',
@@ -172,7 +190,7 @@ export class EvalHarnessService {
       name: suite.name,
       description: suite.description,
       passed: count('PASS'),
-      failed: count('FAIL') + count('ERROR'),
+      failed: count('FAIL'),
       notRun: count('NOT_RUN'),
       indeterminate: count('INDETERMINATE'),
       errors: count('ERROR'),
@@ -183,7 +201,7 @@ export class EvalHarnessService {
     };
 
     this.logger.log(
-      `[runSuite] ${result.name}: ${result.green ? 'GREEN' : 'NOT GREEN'} ${result.passed}/${result.total} passed, ${result.failed} failed, ${result.notRun} not run, ${result.indeterminate} indeterminate, in ${result.durationMs}ms`,
+      `[runSuite] ${result.name}: ${result.green ? 'GREEN' : 'NOT GREEN'} ${result.passed}/${result.total} passed, ${result.failed} failed, ${result.notRun} not run, ${result.indeterminate} indeterminate, ${result.errors} errors, in ${result.durationMs}ms`,
     );
 
     return result;
@@ -313,7 +331,7 @@ export class EvalHarnessService {
     this.registerSuite({
       name: 'planning-correctness',
       description:
-        'Verifies that KeyCortexPlannerService decomposes "send invoice to customer" into steps one of which sends an invoice.',
+        'Verifies that KeyCortexPlannerService decomposes "send invoice to customer" into steps one of which is an invoice send (send_invoice, not create_invoice or a reminder).',
       assertions: [
         {
           name: '"send invoice to customer" yields a step whose capability is an invoice send',
