@@ -17,8 +17,14 @@
  * assumed. The real FlowOrchestratorService.executeToolDirectly / executeTool / executeToolAction run over
  * stand-ins for the member scope check, the execution log, governance's tier and the business graph cache.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { ForbiddenException, Logger } from '@nestjs/common';
+
+// FU-UNIT-MOCK-ISOLATION (vitest.unit.config.ts runs isolate:false): McpClientManagerService is imported
+// by every spec that imports FlowOrchestratorService, so reset the registry before this file's imports and
+// after its last test; otherwise this spec can get a copy bound to the real SDK, or leave its fake to others.
+vi.hoisted(() => vi.resetModules());
+afterAll(() => vi.resetModules());
 
 const fake = vi.hoisted(() => ({
   transports: [] as Array<{ url: string; headers: Record<string, string> | undefined }>,
@@ -424,7 +430,7 @@ describe('RR-MCP-TENANT-BOUND (D-261, D-262): the MCP bridge serves a business o
   });
 
   it('MCP-19 a huge error body from a server is logged in linear time and capped: no event-loop stall', async () => {
-    const body = 'a'.repeat(60_000);
+    const body = 'a'.repeat(200_000);
     fake.connectThrows = () => new Error(`Error POSTing to endpoint: ${body}`);
     setServers([{ ...SERVER, businessIds: [BIZ_A] }]);
     const mcp = new McpClientManagerService();
