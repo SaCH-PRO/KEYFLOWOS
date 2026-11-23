@@ -249,3 +249,14 @@ describe('RR-UNKNOWN-COST-NOT-ZERO: review round 1 controls', () => {
     }
   });
 });
+
+describe('RR-UNKNOWN-COST-NOT-ZERO: confirmation controls', () => {
+  it('a model name that is an Object.prototype key is unpriced, not a free ride through the table object', () => {
+    for (const name of ['constructor', 'toString', 'hasOwnProperty', '__proto__']) {
+      expect(priceFor(name), name).toEqual({ ...TOKEN_COST_PER_1K['gpt-4o'], priced: false });
+      expect(costStatusFor(name), name).toBe('unpriced_estimate');
+      const cost = new LLMCostService(mockPrisma()).computeCost(name, 1000, 1000);
+      expect(Number.isFinite(cost.totalCost) && cost.totalCost > 0, name).toBe(true);
+    }
+  });
+});
