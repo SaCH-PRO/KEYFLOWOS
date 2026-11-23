@@ -135,13 +135,16 @@ const normalise = (t) => unquote(t).replace(/^\.\//, '').replace(/\\/g, '/');
  * Leading tokens read past before the command word, in any order and nesting:
  * `pnpm exec node`, `timeout <n> node`, `time node`. Not `nice`: its `-n 10`
  * form would leave `-n` as the command word, so a nice'd run fails closed.
- * `envAfter`: only the shell keyword `time` reads `CI=1 node` after it; timeout
- * and pnpm exec would exec `CI=1` as a program, so there it is the command word.
+ * `time` is the shell keyword only as the first word of the pipeline (`headOnly`):
+ * after an assignment or another wrapper it is an external program, which would
+ * exec a following `CI=1` as a program, so there it stays the command word.
+ * Only the keyword reads `CI=1 node` after it (`envAfter`); timeout and pnpm exec
+ * exec their next word.
  */
 const WRAPPERS = [
-  { tokens: [/^pnpm$/, /^exec$/], envAfter: false },
-  { tokens: [/^timeout$/, /^\S+$/], envAfter: false },
-  { tokens: [/^time$/], envAfter: true },
+  { tokens: [/^pnpm$/, /^exec$/], envAfter: false, headOnly: false },
+  { tokens: [/^timeout$/, /^\S+$/], envAfter: false, headOnly: false },
+  { tokens: [/^time$/], envAfter: true, headOnly: true },
 ];
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
@@ -151,9 +154,9 @@ const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
  * continuations are joined and inline `#` comments dropped first (a comment
  * may hold a separator; a `#` inside quotes is also read as one, which fails
  * closed). `node` must be the command word of its simple command (after env
- * assignments and the wrappers above, nested in any order, env assignments
- * only where the shell reads them), so `echo "node --test x"` and a here-doc
- * line are not runs. Node
+ * assignments and the wrappers above, nested in any order except that `time`
+ * counts only as the first word, and env assignments only where the shell
+ * reads them), so `echo "node --test x"` and a here-doc line are not runs. Node
  * flags before `--test` are read past only in `--flag=value` form: a value
  * in its own token (`--import ./setup.mjs`) makes the line name nothing,
  * which fails closed. Every pattern token is returned, bare directories
@@ -171,16 +174,22 @@ export function nodeTestPatterns(shell) {
   const patterns = [];
   for (const segment of uncommented.split(/\r?\n|;|&&|\|\||\|/)) {
     let tokens = segment.trim().split(/\s+/).filter(Boolean);
+    let head = true; // still at the first word of the pipeline: nothing but the keyword `time` read so far
     const stripEnv = () => {
-      while (tokens.length && ENV_ASSIGNMENT.test(tokens[0])) tokens.shift();
+      while (tokens.length && ENV_ASSIGNMENT.test(tokens[0])) {
+        tokens.shift();
+        head = false;
+      }
     };
     stripEnv();
     for (let stripped = true; stripped; ) {
       stripped = false;
       for (const wrapper of WRAPPERS) {
+        if (wrapper.headOnly && !head) continue;
         if (wrapper.tokens.every((re, k) => re.test(tokens[k] ?? ''))) {
           tokens = tokens.slice(wrapper.tokens.length);
           stripped = true;
+          if (!wrapper.headOnly) head = false;
           if (wrapper.envAfter) stripEnv();
         }
       }
