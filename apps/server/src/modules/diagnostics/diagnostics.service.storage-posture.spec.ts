@@ -279,7 +279,9 @@ describe('DiagnosticsService.checkObjectStorage: bucket posture (RR-OBJECT-STORA
       const result = await service().checkObjectStorage();
       expect(result.status, call).toBe('warn');
       expect(result.detail, call).toContain(action);
-      expect(result.detail, call).not.toMatch(new RegExp(`s3:${call.replace(/Command$/, '')}\\b`));
+      // the naive `s3:<call name>` guess is wrong for two of the three calls; it must not appear there
+      const naive = `s3:${call.replace(/Command$/, '')}`;
+      if (naive !== action) expect(result.detail, call).not.toContain(naive);
     }
   });
 
