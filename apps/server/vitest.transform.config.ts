@@ -27,9 +27,10 @@ import swc from 'unplugin-swc';
  *
  * KNOWN DIFFERENCES FROM tsc. swc compiles a file at a time, without type
  * information:
- *  - A parameter typed as an enum, or as an alias of a primitive or of a
- *    literal union (type Mode = 'a' | 'b'), gets Object (or the enum object)
- *    in its metadata where tsc writes String, Number or Boolean. The
+ *  - A parameter typed as an imported enum, or as an alias of a primitive or
+ *    of a literal union (type Mode = 'a' | 'b'), gets Object (or the enum
+ *    object) in its metadata where tsc writes String, Number or Boolean. (An
+ *    enum declared in the same file gets String or Number, as under tsc.) The
  *    ValidationPipe then treats it as Object (not validated, not converted),
  *    where tsc's String/Number would convert a route or query parameter.
  *    Interfaces, object-type aliases and `import type` names are Object in
