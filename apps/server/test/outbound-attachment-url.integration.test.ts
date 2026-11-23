@@ -29,7 +29,7 @@ import { Readable } from 'node:stream';
 import { S3Client, GetObjectCommand, HeadObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { UploadsController } from '../src/modules/uploads/uploads.controller';
 import { UploadsService } from '../src/modules/uploads/uploads.service';
-import { DocumentIntelligenceService } from '../src/modules/ai/document-intelligence.service';
+import { DocumentIntelligenceService, documentExtractionFailed, DocumentExtractionFailedError } from '../src/modules/ai/document-intelligence.service';
 import { FlowOrchestratorService } from '../src/modules/ai/flow-orchestrator.service';
 import { ExpensesController } from '../src/modules/expenses/expenses.controller';
 import { AgentController } from '../src/modules/ai/agent.controller';
@@ -67,6 +67,7 @@ beforeAll(() => {
       bucket.set(key, { body: Buffer.from(cmd.input.Body as any), contentType: cmd.input.ContentType });
       return {} as any;
     }
+    if (storageOutage) throw Object.assign(new Error('ServiceUnavailable'), { name: 'ServiceUnavailable', $metadata: { httpStatusCode: 503 } });
     const hit = bucket.get(key);
     if (cmd instanceof HeadObjectCommand) {
       if (!hit) throw Object.assign(new Error('NotFound'), { name: 'NotFound', $metadata: { httpStatusCode: 404 } });
@@ -74,7 +75,10 @@ beforeAll(() => {
     }
     if (cmd instanceof GetObjectCommand) {
       if (!hit) throw Object.assign(new Error('NoSuchKey'), { name: 'NoSuchKey', $metadata: { httpStatusCode: 404 } });
-      return { Body: Readable.from([hit.body]), ContentType: hit.contentType, ContentLength: hit.body.length } as any;
+      // A store that does not report a length (chunked) is modelled by `hideLength`.
+      const chunks = [] as Buffer[];
+      for (let i = 0; i < hit.body.length; i += 1 << 20) chunks.push(hit.body.subarray(i, i + (1 << 20)));
+      return { Body: Readable.from(chunks), ContentType: hit.contentType, ContentLength: hideLength ? undefined : hit.body.length } as any;
     }
     throw new Error(`unexpected S3 command in test: ${cmd?.constructor?.name}`);
   });
@@ -88,13 +92,19 @@ afterAll(() => {
   }
 });
 
-beforeEach(() => bucket.clear());
+let storageOutage = false;
+let hideLength = false;
+beforeEach(() => {
+  bucket.clear();
+  storageOutage = false;
+  hideLength = false;
+});
 
 /** A member of `businessId` uploads `content` as the web client does; returns what the client holds. */
-async function uploadAs(businessId: string, content: string) {
+async function uploadAs(businessId: string, content: string | Buffer, contentType = 'image/png') {
   const res = await new UploadsController(new UploadsService()).requestUploadUrl(businessId, { name: 'r.png', contentType: 'image/png' });
   const key = norm(decodeURIComponent(new URL(res.uploadURL).pathname).replace(/^\/+/, '').replace(`${BUCKET}/`, ''));
-  bucket.set(key, { body: Buffer.from(content), contentType: 'image/png' });
+  bucket.set(key, { body: Buffer.isBuffer(content) ? content : Buffer.from(content), contentType });
   return {
     objectPath: res.objectPath,
     presignedPut: res.uploadURL,
@@ -141,6 +151,18 @@ const NO_URL = /https?:\/\/|\/objects\//;
 
 const extract = (svc: DocumentIntelligenceService, businessId: string, url: string, mimeType = 'image/png') =>
   svc.extractFromDocument({ businessId, source: 'upload', mimeType, url, filename: 'r.png' });
+
+/** ContractsService.extractTermsFromDocument, the route's method, with its contract lookups stubbed. */
+function contractsWith(svc: DocumentIntelligenceService) {
+  return Object.assign(Object.create(ContractsService.prototype), {
+    docIntel: svc,
+    getContract: vi.fn(async () => ({ id: `${P}contract` })),
+    applyExtractionResult: vi.fn(async () => undefined),
+  }) as ContractsService;
+}
+const extractTerms = (c: ContractsService, url: string) =>
+  c.extractTermsFromDocument(BIZ_A, `${P}contract`, { url, mimeType: 'image/png', filename: 'c.png' } as any).catch(() => undefined);
+
 
 // ─── tests ──────────────────────────────────────────────────────────────────
 
@@ -247,17 +269,6 @@ describe('FU-OUTBOUND-ATTACHMENT-URL: through each caller', () => {
     expect(sent(calls)).not.toContain('attacker.example');
   });
 
-  /** ContractsService.extractTermsFromDocument, the route's method, with its contract lookups stubbed. */
-  function contractsWith(svc: DocumentIntelligenceService) {
-    return Object.assign(Object.create(ContractsService.prototype), {
-      docIntel: svc,
-      getContract: vi.fn(async () => ({ id: `${P}contract` })),
-      applyExtractionResult: vi.fn(async () => undefined),
-    }) as ContractsService;
-  }
-  const extractTerms = (c: ContractsService, url: string) =>
-    c.extractTermsFromDocument(BIZ_A, `${P}contract`, { url, mimeType: 'image/png', filename: 'c.png' } as any).catch(() => undefined);
-
   it('contract terms: a URL of ours is held to the business rule (B refused, A read as content)', async () => {
     const a = await uploadAs(BIZ_A, A_OWN);
     const b = await uploadAs(BIZ_B, B_SECRET);
@@ -280,5 +291,103 @@ describe('FU-OUTBOUND-ATTACHMENT-URL: through each caller', () => {
     const { svc, calls } = docIntelWithProvider();
     await svc.extractFromDocument({ businessId: BIZ_A, source: 'upload', mimeType: 'image/png', url: EXTERNAL, filename: 'x.png', forwardExternalUrl: true, allowExternalUrl: true } as any);
     expect(sent(calls)).not.toContain('attacker.example');
+  });
+});
+
+describe('FU-OUTBOUND-ATTACHMENT-URL review round 1', () => {
+  const BIG = 25 * 1024 * 1024;
+
+  it('S1-1: an object over the read cap is not buffered: it answers as an absent file, through the document service and flow chat', async () => {
+    const big = await uploadAs(BIZ_A, Buffer.concat([Buffer.from(A_OWN), Buffer.alloc(BIG, 0x61)]));
+    const { svc, calls } = docIntelWithProvider();
+    const r = await extract(svc, BIZ_A, big.bucketUrl);
+    expect(calls).toHaveLength(0);
+    expect(r).toMatchObject({ documentType: 'unknown', confidence: 0 });
+    hideLength = true; // a store that reports no length is cut off while streaming
+    const r2 = await extract(svc, BIZ_A, big.bucketUrl);
+    expect(calls).toHaveLength(0);
+    expect(r2).toEqual(r);
+    const { svc: docIntel, calls: flowCalls } = docIntelWithProvider();
+    const flow = Object.assign(Object.create(FlowOrchestratorService.prototype), {
+      logger: { warn: vi.fn(), log: vi.fn(), error: vi.fn(), debug: vi.fn() },
+      getDocumentIntelligence: () => docIntel,
+    });
+    await (flow as any).buildAttachmentContext(BIZ_A, [{ type: 'image', name: 'big.png', mimeType: 'image/png', objectPath: big.objectPath, url: big.bucketUrl }]);
+    expect(sentBytes(flowCalls)).not.toContain(A_OWN);
+  });
+
+  it('S1-1: an object under the cap (the 10 MB upload limit) is still read', async () => {
+    const ok = await uploadAs(BIZ_A, Buffer.concat([Buffer.from(A_OWN), Buffer.alloc(10 * 1024 * 1024 - 64, 0x61)]));
+    const { svc, calls } = docIntelWithProvider();
+    await extract(svc, BIZ_A, ok.bucketUrl);
+    expect(calls).toHaveLength(1);
+    expect(sent(calls)).not.toMatch(NO_URL);
+  });
+
+  it('S1-3/C1-1: a storage outage on an object of ours is a failed read (retryable), not an absent file; nothing is sent', async () => {
+    const a = await uploadAs(BIZ_A, A_OWN);
+    storageOutage = true;
+    const { svc, calls } = docIntelWithProvider();
+    const r = await extract(svc, BIZ_A, a.bucketUrl);
+    expect(calls).toHaveLength(0);
+    expect(documentExtractionFailed(r)).toBe(true);
+    const err = await contractsWith(svc).extractTermsFromDocument(BIZ_A, `${P}contract`, { url: a.bucketUrl, mimeType: 'image/png', filename: 'c.png' } as any).catch((e: any) => e);
+    expect(err?.cause).toBeInstanceOf(DocumentExtractionFailedError);
+  });
+
+  it("S1-3: during an outage another business's object still reads exactly as absent (refused before the bucket is asked)", async () => {
+    const b = await uploadAs(BIZ_B, B_SECRET);
+    const absentOwn = (await uploadAs(BIZ_A, A_OWN)).bucketUrl.replace(/[^/]+$/, `${P}absent`);
+    storageOutage = true;
+    const { svc } = docIntelWithProvider();
+    const foreign = await extract(svc, BIZ_A, b.bucketUrl);
+    expect(documentExtractionFailed(foreign)).toBe(false);
+    storageOutage = false;
+    const absent = await extract(svc, BIZ_A, absentOwn);
+    expect(foreign).toEqual(absent);
+  });
+
+  it('S1-2: the contracts carve-out forwards only an http(s) URL to a public host, without credentials', async () => {
+    for (const url of [
+      'http://169.254.169.254/latest/meta-data/',
+      'http://127.0.0.1:8080/x.pdf',
+      'http://[::1]/x.pdf',
+      'http://10.0.0.5/c.pdf',
+      'http://localhost/c.pdf',
+      'http://svc.localhost/c.pdf',
+      'https://user:pw@docs.example.com/c.pdf',
+      'file:///etc/passwd',
+      'javascript:alert(1)',
+      'ftp://docs.example.com/c.pdf',
+    ]) {
+      const { svc, calls } = docIntelWithProvider();
+      await contractsWith(svc).extractTermsFromDocument(BIZ_A, `${P}contract`, { url, mimeType: 'image/png', filename: 'c.png' } as any).catch(() => undefined);
+      expect(calls, url).toHaveLength(0);
+    }
+  });
+
+  it('C1-3: with an endpoint that has a path (Supabase Storage /storage/v1/s3), issued paths and bucket URLs are still ours', async () => {
+    const saved = process.env.S3_ENDPOINT;
+    process.env.S3_ENDPOINT = 'http://127.0.0.1:9/storage/v1/s3';
+    vi.resetModules();
+    try {
+      const fresh = await import('../src/core/object-storage/objectStorage');
+      const storage = new fresh.ObjectStorageService();
+      const uploadURL = await storage.getObjectEntityUploadURL(BIZ_A);
+      expect(new URL(uploadURL).pathname.startsWith(`/storage/v1/s3/${BUCKET}/${PRIVATE_DIR}/uploads/${BIZ_A}/`)).toBe(true);
+      const objectPath = storage.normalizeObjectEntityPath(uploadURL);
+      expect(fresh.isObjectPathOfBusiness(objectPath, BIZ_A), objectPath).toBe(true);
+      expect(storage.objectPathFromClientUrl(uploadURL.split('?')[0])).toBe(objectPath);
+    } finally {
+      process.env.S3_ENDPOINT = saved;
+      vi.resetModules();
+    }
+  });
+
+  it('C1-4: the stored content type is what the model is told, not the caller\'s guess', async () => {
+    const a = await uploadAs(BIZ_A, A_OWN, 'application/pdf');
+    const { svc, calls } = docIntelWithProvider();
+    await extract(svc, BIZ_A, a.apiUrl, 'image/jpeg');
+    expect(sent(calls)).toContain('data:application/pdf;base64,');
   });
 });
