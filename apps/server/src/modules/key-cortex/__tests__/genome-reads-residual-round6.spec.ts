@@ -12,38 +12,8 @@ import { KeyCortexAwarenessService } from '../key-cortex-awareness.service';
 const fin = (i: number) => ({ id: `fin_${i}`, title: `Raise the retainer ${i}`, description: 'x', impact: 'high', category: 'FINANCIAL', confidence: 0.9 });
 const ops = (i: number) => ({ id: `ops_${i}`, title: `Write the SOPs ${i}`, description: 'y', impact: 'medium', category: 'OPERATIONS', confidence: 0.5 });
 
-describe('streamQuery: the V3 prompt\'s ranked recommendations are read for the reader (round 6, security MINOR-1)', () => {
-  function pipeline(ranked: any[]) {
-    const svc = Object.create(KeyCortexQueryPipelineService.prototype) as any;
-    svc.logger = { log: vi.fn(), warn: vi.fn(), debug: vi.fn(), error: vi.fn() };
-    svc.genomeContextService = { getRankedRecommendations: vi.fn(async (_b: string, limit = 5) => ranked.slice(0, limit)) };
-    return svc;
-  }
-  // The business's top ten (as the enriched context holds them) are seven finance rows and three operations rows; more
-  // operations rows rank below them.
-  const ranked = [fin(1), fin(2), ops(1), fin(3), fin(4), fin(5), ops(2), fin(6), fin(7), ops(3), ops(4), ops(5), ops(6)];
-  const projectedTopTen = [ops(1), ops(2), ops(3)];
-
-  it('RED-BEFORE: a reader without revenue read is handed five non-finance rows, not what is left of the top ten', async () => {
-    const svc = pipeline(ranked);
-    const out = await svc.streamPromptRecommendations('biz_A', { recommendations: projectedTopTen }, false);
-    expect(out.map((r: any) => r.id)).toEqual(['ops_1', 'ops_2', 'ops_3', 'ops_4', 'ops_5']);
-    expect(svc.genomeContextService.getRankedRecommendations).toHaveBeenCalledWith('biz_A', 50);
-  });
-
-  it('RED-BEFORE: when the ranked read fails, a reader without revenue read is handed none (fails closed), not the top-ten remainder', async () => {
-    const svc = pipeline(ranked);
-    svc.genomeContextService.getRankedRecommendations = vi.fn(async () => { throw new Error('bridge down'); });
-    expect(await svc.streamPromptRecommendations('biz_A', { recommendations: projectedTopTen }, false)).toEqual([]);
-  });
-
-  it('control: a revenue reader is handed the first five of the genome context, as before, with no extra read', async () => {
-    const svc = pipeline(ranked);
-    const context = { recommendations: ranked.slice(0, 10) };
-    expect(await svc.streamPromptRecommendations('biz_A', context, true)).toEqual(ranked.slice(0, 5));
-    expect(svc.genomeContextService.getRankedRecommendations).not.toHaveBeenCalled();
-  });
-});
+// Round 9 (correctness MINOR-1): the stream's V3 prompt no longer makes a ranked read per turn; its headroom comes from
+// the ranked pool the cached genome context carries (genome-reads-residual-round9.spec.ts).
 
 describe('GET cortex/awareness reads with headroom for a reader without revenue read (round 6, security MINOR-2)', () => {
   const at = (i: number) => new Date(Date.UTC(2026, 10, 22, 12, 0, 0) - i * 60_000);
