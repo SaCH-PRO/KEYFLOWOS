@@ -98,6 +98,24 @@ export interface GatewayResponse {
   contractValidation?: ContractValidationResult;
 }
 
+/**
+ * RR-STREAM-ERROR-NO-EFFECTS review SEC-A: a provider stream that reported an
+ * error part-way, or ended before its end marker. `providerErrorType` is the
+ * provider's error type only (e.g. overloaded_error), never its message.
+ */
+class ProviderStreamError extends Error {
+  readonly providerErrorType: string;
+  constructor(providerErrorType: unknown, detail: string) {
+    const type =
+      typeof providerErrorType === 'string' && /^[A-Za-z0-9_]{1,64}$/.test(providerErrorType)
+        ? providerErrorType
+        : 'unknown_error';
+    super(`${detail} (${type})`);
+    this.name = 'ProviderStreamError';
+    this.providerErrorType = type;
+  }
+}
+
 export interface StreamChunk {
   type: 'content_delta' | 'tool_call_delta' | 'usage' | 'done' | 'error';
   content?: string;
@@ -1115,6 +1133,11 @@ export class ModelGatewayService {
         );
       }
 
+      // RR-STREAM-ERROR-NO-EFFECTS (D-261): once a chunk of this candidate has
+      // reached the consumer, its failure ends the stream; the next candidate is
+      // tried only while nothing has been yielded, so no second answer is spliced
+      // onto a partial one and no tool deltas of two providers mix.
+      let yieldedFromCandidate = false;
       try {
         const startTime = Date.now();
         const stream = this.callProviderStream(request, candidate.provider, candidate.model, preferences);
@@ -1133,6 +1156,7 @@ export class ModelGatewayService {
             lastUsageChunk = enriched;
           }
 
+          yieldedFromCandidate = true;
           yield enriched;
         }
 
@@ -1168,6 +1192,21 @@ export class ModelGatewayService {
         this.logger.error(
           `Stream provider ${candidate.provider}/${candidate.model} failed: ${lastError.message}`,
         );
+        if (yieldedFromCandidate) {
+          // Review SEC-C: the member is told the provider and the error class
+          // only; the provider's message stays in the log line above.
+          const errorClass = /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(lastError?.name ?? '') ? lastError.name : 'Error';
+          const errorType = lastError instanceof ProviderStreamError ? `: ${lastError.providerErrorType}` : '';
+          yield {
+            type: 'error',
+            error: `The ${candidate.provider} stream failed part-way (${errorClass}${errorType})`,
+            provider: candidate.provider,
+            model: candidate.model,
+            fallbackUsed,
+            fallbackProvider,
+          };
+          return;
+        }
       }
     }
 
@@ -1385,15 +1424,22 @@ export class ModelGatewayService {
     let buffer = '';
     let inputTokens = 0;
     let outputTokens = 0;
+    // RR-STREAM-ERROR-NO-EFFECTS review SEC-A: an SSE error event (e.g.
+    // overloaded_error mid-stream) and a close before message_stop are a
+    // failed stream, not a finished one.
+    let sawMessageStop = false;
+    let sawErrorEvent = false;
+    let streamErrorEvent: { type?: unknown; message?: unknown } = {};
 
     try {
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        // Delta review: a last frame with no trailing newline is still read.
+        if (done && !buffer) break;
 
-        buffer += decoder.decode(value, { stream: true });
+        buffer += done ? `${decoder.decode()}\n` : decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
+        buffer = done ? '' : lines.pop() || '';
 
         for (const line of lines) {
           if (line.startsWith('data: ')) {
@@ -1458,14 +1504,34 @@ export class ModelGatewayService {
               if (event.type === 'message_delta' && event.usage) {
                 outputTokens = event.usage.output_tokens ?? 0;
               }
+
+              if (event.type === 'message_stop') sawMessageStop = true;
+              if (event.type === 'error') {
+                sawErrorEvent = true;
+                streamErrorEvent = event.error && typeof event.error === 'object' ? event.error : {};
+              }
             } catch {
               /* intentionally empty */
             }
+            if (sawErrorEvent) {
+              // Provider text, logged on one bounded line (delta review).
+              const oneLine = (v: unknown, max: number) =>
+                Array.from(String(v ?? '').slice(0, max), (ch) => (ch.charCodeAt(0) < 32 || ch.charCodeAt(0) === 127 ? ' ' : ch)).join('');
+              this.logger.warn(
+                `Anthropic stream error event (${oneLine(streamErrorEvent.type, 64)}): ${oneLine(streamErrorEvent.message, 300)}`,
+              );
+              throw new ProviderStreamError(streamErrorEvent.type, 'Anthropic stream error event');
+            }
           }
         }
+        if (done) break;
       }
     } finally {
       reader.releaseLock();
+    }
+
+    if (!sawMessageStop) {
+      throw new ProviderStreamError('stream_ended_without_message_stop', 'Anthropic stream ended early');
     }
 
     const totalTokens = inputTokens + outputTokens;

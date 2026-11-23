@@ -79,7 +79,7 @@ describe('TemporalFlowMemoryService', () => {
     });
 
     expect(prisma.client.temporalFlowMemory.update).toHaveBeenCalledWith({
-      where: { id: 'mem_existing' },
+      where: { id: 'mem_existing', businessId: 'biz_1' },
       data: expect.objectContaining({ content: 'Updated memory' }),
     });
   });

@@ -1160,6 +1160,21 @@
     {
       "prefix": "v86s_",
       "owner": "apps/server/test/site-analytics-revenue-scope.integration.test.ts"
+    },
+    {
+      "prefix": "v71t_",
+      "owner": "apps/server/test/temporal-memory-scope.integration.test.ts",
+      "packet": "V1-71 (MEM-TEMPORAL-SCOPE)"
+    },
+    {
+      "prefix": "v71x_",
+      "owner": "apps/server/test/finance-intel-doors.integration.test.ts",
+      "packet": "V1-71 (FU-FINANCE-INTEL-DOORS)"
+    },
+    {
+      "prefix": "v57p_",
+      "owner": "apps/server/test/pay-link-status-gate.integration.test.ts",
+      "packet": "V1-57 (FU-PAY-LINK-STATUS-GATE)"
     }
   ],
   "pendingRenames": [],

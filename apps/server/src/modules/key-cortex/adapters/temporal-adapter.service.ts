@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
 import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { TemporalFlowMemoryService } from '../../temporal-flow/temporal-flow-memory.service';
@@ -7,6 +7,27 @@ import type {
   TemporalFlowMemoryEntityType,
   TemporalFlowMemoryType,
 } from '../../temporal-flow/temporal-flow-memory.types';
+
+const KEY_ERROR = 'Memory key must be a non-empty string';
+
+/** MEM-TEMPORAL-SCOPE: a memory key from a command is used only as a non-empty string (never an operator object). */
+function requireKey(key: unknown): string {
+  if (typeof key !== 'string' || key.length === 0) throw new BadRequestException(KEY_ERROR);
+  return key;
+}
+
+/** MEM-TEMPORAL-SCOPE: consolidation keys are a list of non-empty strings (never a string spread into characters). */
+function requireKeys(keys: unknown): string[] {
+  if (!Array.isArray(keys) || !keys.every((k) => typeof k === 'string' && k.length > 0)) {
+    throw new BadRequestException('Memory keys must be a list of non-empty strings');
+  }
+  return keys as string[];
+}
+
+/** Only string tags: a string is not spread into characters, a missing list adds none. */
+function stringTags(tags: unknown): string[] {
+  return Array.isArray(tags) ? tags.filter((t): t is string => typeof t === 'string') : [];
+}
 
 /**
  * Typed adapter that exposes the temporal-memory methods expected by
@@ -28,15 +49,17 @@ export class TemporalAdapterService {
     tags?: string[];
     importance?: string;
   }) {
+    const key = requireKey(input.key);
+    const tags = stringTags(input.tags);
     return this.temporal.createMemory({
       businessId: input.businessId,
       entityType: 'business',
-      entityId: input.key,
+      entityId: key,
       type: 'insight',
       content: JSON.stringify(input.value),
       sourceModule: 'key_cortex',
-      sourceEventIds: input.tags ?? [],
-      metadata: { ttlDays: input.ttlDays, importance: input.importance, key: input.key },
+      sourceEventIds: tags,
+      metadata: { ttlDays: input.ttlDays, importance: input.importance, key },
       confidence: input.importance === 'high' ? 0.9 : input.importance === 'low' ? 0.3 : 0.5,
     });
   }
@@ -45,7 +68,7 @@ export class TemporalAdapterService {
     const memories = await this.temporal.findByEntity(
       input.businessId,
       'business',
-      input.key,
+      requireKey(input.key),
     );
     return memories[0] ?? null;
   }
@@ -62,7 +85,7 @@ export class TemporalAdapterService {
     importance?: string;
   }) {
     const confidence = input.importance === 'high' ? 0.9 : input.importance === 'low' ? 0.3 : undefined;
-    return this.temporal.updateMemory(input.memoryId, {
+    return this.temporal.updateMemory(input.businessId, input.memoryId, {
       content: input.value ? JSON.stringify(input.value) : undefined,
       confidence,
     });
@@ -73,17 +96,19 @@ export class TemporalAdapterService {
     memoryId: string;
     tags: string[];
   }) {
-    const memory = await this.temporal.findMany(input.businessId, { entityId: input.memoryId });
-    const existing = memory[0];
+    // MEM-TEMPORAL-SCOPE: the memory is looked up and updated by the same id, within the caller's business.
+    const existing = await this.temporal.findById(input.businessId, input.memoryId);
     if (!existing) {
       throw new NotFoundException('Memory not found');
     }
     const existingTags = Array.isArray(existing.sourceEventIds) ? existing.sourceEventIds : [];
-    return this.temporal.updateMemory(input.memoryId, {
-      sourceEventIds: Array.from(new Set([...existingTags, ...input.tags])),
+    const added = stringTags(input.tags);
+    const tags = Array.from(new Set([...existingTags, ...added]));
+    return this.temporal.updateMemory(input.businessId, input.memoryId, {
+      sourceEventIds: tags,
       metadata: {
         ...(existing.metadata as Record<string, unknown> | undefined),
-        tags: Array.from(new Set([...existingTags, ...input.tags])),
+        tags,
       },
     });
   }
@@ -93,8 +118,11 @@ export class TemporalAdapterService {
     keys: string[];
     summaryKey: string;
   }) {
+    // Every key, the summary key included, is checked before any read or write.
+    const keys = requireKeys(input.keys);
+    requireKey(input.summaryKey);
     const contents: string[] = [];
-    for (const key of input.keys) {
+    for (const key of keys) {
       const found = await this.recallMemory({ businessId: input.businessId, key });
       if (found && (found as { content?: string }).content) {
         contents.push(String((found as { content: string }).content));
@@ -106,7 +134,7 @@ export class TemporalAdapterService {
     return this.storeMemory({
       businessId: input.businessId,
       key: input.summaryKey,
-      value: { consolidatedFrom: input.keys, count: contents.length, summary: merged },
+      value: { consolidatedFrom: keys, count: contents.length, summary: merged },
       importance: 'medium',
     });
   }

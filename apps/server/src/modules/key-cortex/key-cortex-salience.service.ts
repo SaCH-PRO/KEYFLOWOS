@@ -3,6 +3,8 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCortexEndocrineService } from './key-cortex-endocrine.service';
 import { keyCronsDisabled } from '../../core/config/env';
+import type { CanonicalModule } from '../../core/authority/module-vocabulary';
+import { EVENT_MODULES, type ModuleSight } from './key-cortex-prompt-context.service';
 
 /**
  * The amygdala — what, out of everything KEY noticed, actually matters.
@@ -99,6 +101,38 @@ const OPPORTUNITY_SIGNALS: Record<string, number> = {
   'contact.created': 0.4,
 };
 
+/**
+ * MEM-SALIENCE-SIGHT (D-234, D-100, D-57): the modules whose read scope a reader needs to be told a signal's count, by
+ * its event type. Counts of overdue invoices, invoices paid and payments received are transaction-derived signals and
+ * need revenue read; the others need the module their records belong to (a negative-sentiment signal is an inbox
+ * message's, operations, as eventModulesOf files its subject KeyInboxMessage). A type this map does not name needs every
+ * module (EVENT_MODULES): it fails closed, as an unclassified event does (D-227, D-234).
+ */
+const SIGNAL_MODULES: Readonly<Record<string, readonly CanonicalModule[]>> = {
+  'proactive.invoice_overdue': ['revenue'],
+  'proactive.negative_sentiment': ['operations'],
+  'proactive.booking_no_show': ['bookings'],
+  'invoice.paid': ['revenue'],
+  'payment.received': ['revenue'],
+  'booking.created': ['bookings'],
+  'booking.completed': ['bookings'],
+  'contact.created': ['crm'],
+};
+
+/**
+ * MEM-SALIENCE-SIGHT review SEC-MSS-1: the signal types of each valence and how many concerns an appraisal keeps
+ * (MAX_CONCERNS, cut in scoreSignals BEFORE any reader's filter). A spec holds each list within that cap, so no signal
+ * a reader may not read can push one it may read out of the cached appraisal.
+ */
+export function salienceSignalTypes(): { threat: string[]; opportunity: string[]; maxConcerns: number } {
+  return { threat: Object.keys(THREAT_SIGNALS), opportunity: Object.keys(OPPORTUNITY_SIGNALS), maxConcerns: MAX_CONCERNS };
+}
+
+/** MEM-SALIENCE-SIGHT: the modules a reader needs to be told `signal` (SIGNAL_MODULES; unknown: every module). */
+export function signalModulesOf(signal: string): readonly CanonicalModule[] {
+  return Object.prototype.hasOwnProperty.call(SIGNAL_MODULES, signal) ? SIGNAL_MODULES[signal] : EVENT_MODULES;
+}
+
 export interface Concern {
   signal: string;
   /** Which way this cuts. Threat raises caution; opportunity widens exploration. */
@@ -192,6 +226,12 @@ export class KeyCortexSalienceService {
     // tolerance while dopamine widens exploration, and effortMultiplier
     // deliberately reads only the caution side — so optimism can never buy less
     // thinking, no matter how good the week.
+    //
+    // MEM-SALIENCE-SIGHT: each dose names the modules its evidence needs (signalModulesOf), and alongside them goes
+    // one dose per valence for each group of signals that need the same modules, from that group's strongest. Those
+    // feed only the per-reader view (KeyCortexEndocrineService.release's `scoped`), so the disposition a reader without
+    // revenue read is told is derived from the signals that reader may see, chosen among those alone: an overdue-invoice
+    // count that outranks the no-shows neither appears in it nor keeps the no-shows out of it.
     const signals = [];
     const worstThreat = threats[0];
     const bestOpportunity = opportunities[0];
@@ -201,6 +241,7 @@ export class KeyCortexSalienceService {
         hormone: 'cortisol' as const,
         magnitude: worstThreat.salience * 0.35,
         reason: worstThreat.summary,
+        modules: signalModulesOf(worstThreat.signal),
       });
     }
     if (bestOpportunity) {
@@ -208,10 +249,14 @@ export class KeyCortexSalienceService {
         hormone: 'dopamine' as const,
         magnitude: bestOpportunity.salience * 0.35,
         reason: bestOpportunity.summary,
+        modules: signalModulesOf(bestOpportunity.signal),
       });
     }
 
-    this.endocrine.release(businessId, signals);
+    this.endocrine.release(businessId, signals, new Date(), [
+      ...this.strongestPerSight('cortisol', threats),
+      ...this.strongestPerSight('dopamine', opportunities),
+    ]);
 
     this.logger.log(
       `[salience] ${businessId}: ${threats.length} threat(s), ${opportunities.length} opportunity(s)` +
@@ -238,13 +283,20 @@ export class KeyCortexSalienceService {
    * than a stale reading: a count from six hours ago asserted in the present
    * tense is worse than saying nothing.
    */
-  describeForPrompt(businessId: string, now: Date = new Date()): string | null {
+  describeForPrompt(businessId: string, now: Date = new Date(), sight?: ModuleSight): string | null {
     const entry = this.current.get(businessId);
     if (!entry) return null;
     if (now.getTime() - entry.appraisedAt.getTime() > CONCERN_TTL_MS) return null;
 
-    const threats = entry.concerns.filter((c) => c.valence === 'threat').slice(0, 3);
-    const momentum = entry.concerns.filter((c) => c.valence === 'opportunity').slice(0, 1);
+    // MEM-SALIENCE-SIGHT (D-234, D-100): a reader is told only the signals whose modules it may read (signalModulesOf),
+    // and the top threats and momentum are chosen AFTER that filter, so a withheld signal does not change which others
+    // appear. `sight` undefined: the unprojected feed (every signal), for a caller that renders to no reader; the chat's
+    // standing context always passes its viewer's sight (CognitiveTriageService.triage, which fails closed).
+    const visible = sight
+      ? entry.concerns.filter((c) => signalModulesOf(c.signal).every((module) => sight(module)))
+      : entry.concerns;
+    const threats = visible.filter((c) => c.valence === 'threat').slice(0, 3);
+    const momentum = visible.filter((c) => c.valence === 'opportunity').slice(0, 1);
     const shown = [...threats, ...momentum];
     if (shown.length === 0) return null;
 
@@ -412,6 +464,28 @@ export class KeyCortexSalienceService {
         `[salience] persist failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+  }
+
+  /**
+   * MEM-SALIENCE-SIGHT: one dose per group of concerns that need the same modules (signalModulesOf), from that group's
+   * strongest (`concerns` is ranked strongest first), each naming its modules. The per-reader endocrine view is built
+   * from these alone, so what one group contributes never depends on another group's signals.
+   */
+  private strongestPerSight(
+    hormone: 'cortisol' | 'dopamine',
+    concerns: Concern[],
+  ): Array<{ hormone: 'cortisol' | 'dopamine'; magnitude: number; reason: string; modules: readonly CanonicalModule[] }> {
+    const strongest = new Map<string, Concern>();
+    for (const c of concerns) {
+      const key = [...signalModulesOf(c.signal)].sort().join(',');
+      if (!strongest.has(key)) strongest.set(key, c);
+    }
+    return [...strongest.values()].map((c) => ({
+      hormone,
+      magnitude: c.salience * 0.35,
+      reason: c.summary,
+      modules: signalModulesOf(c.signal),
+    }));
   }
 
   /** Rank threat signals. Never throws. */

@@ -1,7 +1,9 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, Query, UseGuards, Inject } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, Query, Req, UseGuards, Inject } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { assertMemberModuleLevel, type ModuleLevelActor } from '../../core/auth/member-module-level';
+import { PrismaService } from '../../core/prisma/prisma.service';
 import { RulesService } from './rules.service';
 import { SignalsService } from './signals.service';
 import { HealthScoreService } from './health-score.service';
@@ -18,6 +20,7 @@ export class IntelligenceController {
     @Inject(HealthScoreService) private readonly health: HealthScoreService,
     @Inject(ScheduledScansService) private readonly scans: ScheduledScansService,
     @Inject(EntityResolverService) private readonly resolver: EntityResolverService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   // ─── Rules ───
@@ -118,9 +121,15 @@ export class IntelligenceController {
   }
 
   // ─── Scans ───
+  // FU-FINANCE-INTEL-DOORS (owner ruling D-258: "POST intelligence scan (finance and the intelligence module's scan)
+  // needs revenue read"): the scan writes money signals and command items (overdue invoices, open quotes,
+  // uncategorised expenses), so beside the route's settings write (ModuleScopeGuard, unchanged) it needs revenue read,
+  // checked first in the handler with the guard's words, before anything is read or written. The scheduled run
+  // (runAllScans) has no member and is unchanged.
   @Post('scan')
   @RequireModuleScope('settings', 'write')
-  async runScan(@Param('businessId') businessId: string) {
+  async runScan(@Param('businessId') businessId: string, @Req() req: { user?: ModuleLevelActor }) {
+    await assertMemberModuleLevel(this.prisma, businessId, req?.user, 'revenue', 'read');
     await this.scans.scanBusiness(businessId);
     return { success: true };
   }
