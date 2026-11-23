@@ -45,6 +45,16 @@ function eventTextStatesMoney(e: { payload?: unknown; metadata?: unknown }): boo
   return false;
 }
 
+/**
+ * Round 4 (correctness MINOR-2): a lifecycle row's payload without the autonomy rule trace KeyActionProposalService
+ * copies into it (the orchestrator's own counts, e.g. totalUses); its reason is still read by eventTextStatesMoney.
+ */
+function withoutRuleTrace(payload: unknown): unknown {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !('ruleTrace' in payload)) return payload;
+  const { ruleTrace: _ruleTrace, ...rest } = payload as Record<string, unknown>;
+  return rest;
+}
+
 /** The most rows a reader may ask one timeline read for, and the most rows that read scans before it answers what it has. */
 const MAX_READER_LIMIT = 500;
 const MAX_READER_SCAN = 5_000;
@@ -131,7 +141,7 @@ export class TemporalFlowService {
       // Round 3 (security MINOR-1): the row's whole payload and signals are read, not only their named keys.
       return known === false && !isMoneyLabel(e.title) && !isMoneyLabel(e.description) && !isMoneyLabel(e.summary)
         && !proposalTextStatesMoney(e.summary) && !eventTextStatesMoney(e)
-        && !structuredValueStatesMoney(e.payload) && !structuredValueStatesMoney(e.signals);
+        && !structuredValueStatesMoney(withoutRuleTrace(e.payload)) && !structuredValueStatesMoney(e.signals);
     });
   }
 

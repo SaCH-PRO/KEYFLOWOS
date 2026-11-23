@@ -49,6 +49,21 @@ function textStatesMoney(value: unknown): boolean {
   return typeof value === 'string' && (isMoneyLabel(value) || proposalTextStatesMoney(value));
 }
 
+/**
+ * Round 4 (security A1): a figure anywhere in a proposed DNA patch: a number, or a string with a digit in it. The
+ * blueprint's money fields (monthlyTarget, avgTicket, ...) and targets ("Hit 120k this quarter") carry bare figures the
+ * money vocabulary does not read; the genome-evolution generator's own patches are lists of words. Patches only: the
+ * generator's evidence counts events ("5 booking events detected.").
+ */
+function patchHoldsFigure(value: unknown, depth = 0): boolean {
+  if (depth > 8) return true;
+  if (typeof value === 'number' || typeof value === 'bigint') return true;
+  if (typeof value === 'string') return /\d/.test(value);
+  if (Array.isArray(value)) return value.some((v) => patchHoldsFigure(v, depth + 1));
+  if (value && typeof value === 'object') return Object.values(value as Record<string, unknown>).some((v) => patchHoldsFigure(v, depth + 1));
+  return false;
+}
+
 function nonMoneySection(section: unknown): boolean {
   return typeof section === 'string' && NON_MONEY_EVOLUTION_SECTIONS.has(section.trim().toLowerCase());
 }
@@ -58,6 +73,7 @@ export function isFinancialGenomeEvolution(row: GenomeEvolutionFields | null | u
   if (!row) return true;
   if (!nonMoneySection(row.section)) return true;
   if (textStatesMoney(row.reason)) return true;
+  if (patchHoldsFigure(row.proposedPatch)) return true;
   return structuredValueStatesMoney(row.proposedPatch) || structuredValueStatesMoney(row.evidence);
 }
 
@@ -82,6 +98,7 @@ function eventStatesMoney(e: EvolutionEvent): boolean {
   if ([e.title, e.summary, e.description].some(textStatesMoney)) return true;
   const payload = e.payload && typeof e.payload === 'object' && !Array.isArray(e.payload) ? (e.payload as Record<string, unknown>) : null;
   if (payload && 'section' in payload && !nonMoneySection(payload.section)) return true;
+  if (payload && patchHoldsFigure(payload.proposedPatch)) return true;
   return structuredValueStatesMoney(e.payload) || structuredValueStatesMoney(e.signals);
 }
 
@@ -132,9 +149,11 @@ export async function requireBridgeRevenue(
     select: { domain: true, title: true, diagnosis: true, insight: true, recommendation: true, expectedGain: true },
   });
   if (!recommendation) return;
-  // Round 3: the preview copies the diagnosis, insight and recommendation text, so money in any of them gates it too.
+  // Round 3: the preview copies the diagnosis, insight and recommendation text, so a figure stated as money in any of
+  // them gates it too. Round 4 (correctness MAJOR-1): only text with a figure in it; money words alone ("paid channel",
+  // "target CAC") are how the marketing and operations genomes write ordinary recommendations, which the list serves.
   const statesMoney = [recommendation.title, recommendation.diagnosis, recommendation.insight, recommendation.recommendation, recommendation.expectedGain]
-    .some(textStatesMoney);
+    .some((t) => typeof t === 'string' && /\d/.test(t) && textStatesMoney(t));
   if (!statesMoney && !isFinanceRecommendation(recommendation)) return;
   const level = await genomeReaderRevenueLevel(prisma, businessId, reader);
   if (rankOf(level) < LEVEL_RANK[minLevel]) {
