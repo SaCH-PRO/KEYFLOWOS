@@ -452,7 +452,7 @@ describe('FU-INSIGHTS-SIGHT (D-100, D-234, D-146): monitoring insights, suggesti
     await clearData();
     try {
       const item = (id: string, title: string, description: string) =>
-        db.aiApprovalItem.create({ data: { id: `${P}${id}`, businessId: ID.biz, toolName: 'draft_followup_message', title, description, status: 'pending', riskTier: 2 } });
+        db.aiApprovalItem.create({ data: { id: `${P}${id}`, businessId: ID.biz, toolName: 'crm_create_task', module: 'crm', title, description, status: 'pending', riskTier: 2 } });
       await item('appr_money', 'Drive intake: Create invoice for Acme (TTD 4,567.00) from x.pdf', 'Create invoice and record payment');
       await item('appr_expense', 'Record the landlord rent', 'Monthly rent to the landlord');
       await item('appr_plain', 'V72Q-PLAIN follow up with three leads', 'Send a friendly follow-up');
@@ -518,7 +518,7 @@ describe('FU-INSIGHTS-SIGHT (D-100, D-234, D-146): monitoring insights, suggesti
     await clearData();
     try {
       const item = (id: string, data: Record<string, unknown>) =>
-        db.aiApprovalItem.create({ data: { id: `${P}${id}`, businessId: ID.biz, status: 'pending', riskTier: 2, toolName: 'draft_followup_message', ...data } });
+        db.aiApprovalItem.create({ data: { id: `${P}${id}`, businessId: ID.biz, status: 'pending', riskTier: 2, toolName: 'crm_create_task', module: 'crm', ...data } });
       await item('k1', { title: 'K1 Chase Acme Ltd', description: 'Send the reminder', expectedBenefit: 'Recover TTD 7,341' });
       await item('k2', { title: 'K2 Chase Acme Ltd', description: 'Send the reminder', affectedEntities: { amount: 7341, currency: 'TTD' } });
       await item('k3', { title: 'K3 Generate drafts for completed work', toolName: 'commerce_generate_draft_invoices', module: 'commerce' });
