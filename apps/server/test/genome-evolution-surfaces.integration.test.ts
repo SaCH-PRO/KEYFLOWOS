@@ -102,7 +102,7 @@ const ID = {
 };
 
 /** Figures only the financial rows of this fixture carry. */
-const FIGURES = /31\.7|4,?500\.25|TTD 912|8,?765\.43/;
+const FIGURES = /31\.7%|4,?500\.25|TTD 912|8,?765\.43/;
 const READ_DENIED = 'Insufficient permissions: revenue requires read access (you have none)';
 const WRITE_DENIED = (has: 'none' | 'read') => `Insufficient permissions: revenue requires write access (you have ${has})`;
 
