@@ -371,41 +371,75 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
       return sf;
     };
     /** A decorator's name and its first argument when that is a plain string ('' for no argument; null otherwise). */
-    const decoratorCall = (d: ts.Decorator): { name: string; arg: string | null } | null => {
-      const e = d.expression;
-      if (!ts.isCallExpression(e) || !ts.isIdentifier(e.expression)) return null;
+    /**
+     * A decorator as a call: its name (the last part of a qualified callee such as Nest.Get), whether the callee was
+     * qualified, and its first argument when that is a plain string ('' for no argument; null otherwise). Null when
+     * the decorator is not a call of a name at all.
+     */
+    const decoratorCall = (d: ts.Decorator): { name: string; qualified: boolean; arg: string | null } | null => {
+      const e = ts.skipParentheses(d.expression);
+      if (!ts.isCallExpression(e)) return null;
+      const callee = ts.skipParentheses(e.expression);
+      const name = ts.isIdentifier(callee) ? callee.text : ts.isPropertyAccessExpression(callee) ? callee.name.text : null;
+      if (name === null) return null;
       const first = e.arguments[0];
       const arg = !first ? "" : ts.isStringLiteral(first) || ts.isNoSubstitutionTemplateLiteral(first) ? first.text : null;
-      return { name: e.expression.text, arg };
+      return { name, qualified: !ts.isIdentifier(callee), arg };
     };
+    const decoratorsOf = (node: ts.Node) => (ts.canHaveDecorators(node) ? ts.getDecorators(node) ?? [] : []);
     /**
-     * The route a claim names: the method decorated @Get('<route>') (an empty route is @Get() or @Get('')), inside
-     * the class `cls` when one is named. Exactly one must exist: a missing or ambiguous route is a failure.
+     * The route a claim names: the class member decorated @Get('<route>') (an empty route is @Get() or @Get('')),
+     * inside the class `cls` when one is named. Every class in the file is searched, nested and expression classes
+     * included: exactly one match must exist, and it must be in a top-level named class; anything else fails.
      */
     const ROUTE = /^((?:modules|core)\/[^#]+\.ts)#(?:([A-Za-z0-9_]+) )?GET (.*)$/;
     const findRoute = (file: string, cls: string | undefined, route: string): ts.ClassElement | string => {
-      const classes = parse(file).statements.filter(ts.isClassDeclaration);
-      const inScope = cls ? classes.filter((c) => c.name?.text === cls) : classes;
-      if (cls && inScope.length === 0) return `no class ${cls}`;
-      const hits = inScope.flatMap((c) =>
-        c.members.filter((m) => (ts.canHaveDecorators(m) ? ts.getDecorators(m) ?? [] : []).some((d) => {
-          const call = decoratorCall(d);
-          return call?.name === "Get" && call.arg === route;
-        })),
-      );
-      if (hits.length === 0) return "no such route";
-      if (hits.length > 1) return `ambiguous route (${hits.length} @Get) — name its controller class`;
-      return hits[0];
+      const sf = parse(file);
+      const hits: { owner: ts.ClassLikeDeclaration; member: ts.ClassElement }[] = [];
+      const visit = (node: ts.Node) => {
+        if (ts.isClassDeclaration(node) || ts.isClassExpression(node)) {
+          for (const member of node.members) {
+            if (decoratorsOf(member).some((d) => {
+              const call = decoratorCall(d);
+              return call?.name === "Get" && call.arg === route;
+            })) hits.push({ owner: node, member });
+          }
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(sf);
+      const topLevel = (c: ts.ClassLikeDeclaration) => ts.isClassDeclaration(c) && c.parent === sf && !!c.name;
+      if (hits.some((h) => !topLevel(h.owner))) return "route also declared in a nested or expression class: cite by hand";
+      if (cls && !sf.statements.some((st) => ts.isClassDeclaration(st) && st.name?.text === cls)) return `no class ${cls}`;
+      const inScope = cls ? hits.filter((h) => h.owner.name?.text === cls) : hits;
+      if (inScope.length === 0) return "no such route";
+      if (inScope.length > 1) return `ambiguous route (${inScope.length} @Get) — name its controller class`;
+      return inScope[0].member;
     };
-    /** The modules a handler's own @RequireModuleScope decorators name. */
+    /**
+     * Why a handler's decorators cannot be read with certainty, or null. Anything this check cannot read fails
+     * closed (closing review): a decorator that is not a call of a plain name, a qualified or aliased scope, a scope
+     * whose module is not a literal, or a raw SetMetadata (which may set the module scope key directly).
+     */
+    const unreadable = (member: ts.ClassElement): string | null => {
+      for (const d of decoratorsOf(member)) {
+        const call = decoratorCall(d);
+        const text = d.getText();
+        if (!call) return `unreadable decorator ${text}`;
+        if (call.qualified) return `qualified decorator ${text}`;
+        if (call.name === "SetMetadata" || /MODULE_SCOPE_KEY/.test(text)) return `raw metadata decorator ${text}`;
+        if (call.name === "RequireModuleScope" && call.arg === null) return `non-literal scope ${text}`;
+      }
+      return null;
+    };
+    /** The modules a handler's own @RequireModuleScope decorators name (each a literal, by unreadable()). */
     const scopesOf = (member: ts.ClassElement) =>
-      (ts.canHaveDecorators(member) ? ts.getDecorators(member) ?? [] : [])
+      decoratorsOf(member)
         .map(decoratorCall)
-        .filter((c): c is { name: string; arg: string } => c?.name === "RequireModuleScope" && c.arg !== null)
+        .filter((c): c is { name: string; qualified: boolean; arg: string } => c?.name === "RequireModuleScope" && c.arg !== null)
         .map((c) => c.arg);
-    /** Whether a handler carries any @RequireModuleScope at all (a non-literal argument included). */
-    const anyScope = (member: ts.ClassElement) =>
-      (ts.canHaveDecorators(member) ? ts.getDecorators(member) ?? [] : []).some((d) => decoratorCall(d)?.name === "RequireModuleScope");
+    /** Whether a handler carries any @RequireModuleScope at all. */
+    const anyScope = (member: ts.ClassElement) => decoratorsOf(member).some((d) => decoratorCall(d)?.name === "RequireModuleScope");
     /**
      * An identifier the claim names must be in the file's code: an identifier of that name, or (for a title such as
      * the timeline's "Analysis:") whole-word text in a string or template literal. Comments never count.
@@ -434,12 +468,18 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
             bad.push(`${href}: ${cite}: ${found}`);
             continue;
           }
+          const why = unreadable(found);
+          if (why) {
+            bad.push(`${href}: ${cite}: ${why}`);
+            continue;
+          }
           const scoped = scopesOf(found);
           if (scoped.length === 0 || !scoped.every((mod) => row.modules.includes(mod))) bad.push(`${href}: ${cite} scopes ${JSON.stringify(scoped)}`);
           scoped.forEach((mod) => justified.add(mod));
         } else if (cite.startsWith("unscoped:") && (m = ROUTE.exec(cite.slice("unscoped:".length)))) {
           const found = findRoute(m[1], m[2], m[3]);
           if (typeof found === "string") bad.push(`${href}: ${cite}: ${found}`);
+          else if (unreadable(found)) bad.push(`${href}: ${cite}: ${unreadable(found)}`);
           else if (anyScope(found)) bad.push(`${href}: ${cite} is scoped`);
         } else if ((m = /^hub:([a-z]+)$/.exec(cite))) {
           const hub = hubNav.find((h) => h.id === m![1]);
