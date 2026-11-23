@@ -1333,7 +1333,7 @@ export class KeyCortexQueryPipelineService {
       yield {
         type: 'thought',
         thought: genomeContext
-          ? `Analyzing genome-aware context for ${contextSnapshot.genomeStage ? `${contextSnapshot.genomeStage} stage ` : ''}business — ${genomeContext.signals.length} active signals, ${genomeContext.recommendations.length} recommendations available...`
+          ? this.genomeStreamThought(contextSnapshot.genomeStage, genomeContext, await this.readsRevenue(query))
           : `Analyzing context for ${contextSnapshot.genomeStage ? `${contextSnapshot.genomeStage} stage ` : ''}business${flags.integrationV2Enabled ? ' with full module awareness' : ''}...`,
       };
 
@@ -2024,6 +2024,21 @@ export class KeyCortexQueryPipelineService {
       MEMBER_AUTHORITY.set(query, authority);
     }
     return authority;
+  }
+
+  /**
+   * FU-KEY-GENOME-READS-RESIDUAL round 7 (D-235; MINOR-1 of both reviews): the stream's opening thought. The projected
+   * signals and recommendations are what is left of the business's newest and top-ranked rows, so their counts are told
+   * only to a revenue reader (as before); anyone else is told no count.
+   */
+  private genomeStreamThought(
+    genomeStage: string | undefined,
+    genomeContext: Pick<GenomeEnrichedContext, 'signals' | 'recommendations'>,
+    readsRevenue: boolean,
+  ): string {
+    const subject = `Analyzing genome-aware context for ${genomeStage ? `${genomeStage} stage ` : ''}business`;
+    if (!readsRevenue) return `${subject}...`;
+    return `${subject} — ${genomeContext.signals.length} active signals, ${genomeContext.recommendations.length} recommendations available...`;
   }
 
   /**
