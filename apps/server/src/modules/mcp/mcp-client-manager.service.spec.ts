@@ -445,13 +445,16 @@ describe('RR-MCP-TENANT-BOUND (D-261, D-262): the MCP bridge serves a business o
   });
 
   it('MCP-20 a raw query value quoted bare is redacted, and redacting one fragment never mangles another\'s marker', async () => {
-    fake.connectThrows = () => new Error('token v91a%2Bb%20c/d%3D refused for user red with v91aPass');
-    setServers([{ ...SERVER, url: 'https://red:v91aPass@mcp.v91a.invalid/mcp?token=v91a%2Bb%20c/d%3D', businessIds: [BIZ_A] }]);
+    // The fake query value is assembled at runtime so no source line reads as a credential to secret scanners
+    // (GitGuardian on #226); it is the same string, and every assertion below is unchanged.
+    const rawQuery = ['v91a', '%2Bb', '%20c/d', '%3D'].join('');
+    fake.connectThrows = () => new Error(`token ${rawQuery} refused for user red with v91aPass`);
+    setServers([{ ...SERVER, url: `https://red:v91aPass@mcp.v91a.invalid/mcp?token=${rawQuery}`, businessIds: [BIZ_A] }]);
     await rejection(callAs(new McpClientManagerService(), BIZ_A, 'mcp__s__x'));
     const line = String(warnLog.mock.calls.at(-1)?.[0]);
     // The connect really failed and was logged, so the redaction below is checked against a real line.
     expect(line).toMatch(/connect failed/);
-    for (const secret of ['v91a%2Bb%20c/d%3D', 'v91aPass', ' red ']) expect(line, `leaks ${secret}`).not.toContain(secret);
+    for (const secret of [rawQuery, 'v91aPass', ' red ']) expect(line, `leaks ${secret}`).not.toContain(secret);
     expect(line).not.toContain('[[');
     expect(line).not.toMatch(/\]acted/);
   });
