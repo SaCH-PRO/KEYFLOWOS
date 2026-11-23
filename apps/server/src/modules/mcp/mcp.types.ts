@@ -59,6 +59,7 @@ export function loadMcpServerConfigs(log: ConfigLog = () => undefined): McpServe
     return [];
   }
   const out: McpServerConfig[] = [];
+  const keys = new Set<string>();
   parsed.forEach((s: unknown, index) => {
     const c = s as Partial<McpServerConfig> | null;
     const label = c && typeof c.key === 'string' ? JSON.stringify(c.key) : `#${index}`;
@@ -66,11 +67,20 @@ export function loadMcpServerConfigs(log: ConfigLog = () => undefined): McpServe
       log(`MCP_REMOTE_SERVERS entry ${label} dropped: it needs a string key and url`);
       return;
     }
+    if (c.key.length === 0 || c.key.includes('__')) {
+      log(`MCP server ${label} dropped: a key must be non-empty and may not contain "__"`);
+      return;
+    }
     if (c.enabled === false) return;
+    if (keys.has(c.key)) {
+      log(`MCP server ${label} dropped: another server already uses that key`);
+      return;
+    }
     if (!validBusinessIds(c.businessIds)) {
       log(`MCP server ${label} dropped: businessIds must be a non-empty array of business ids; it serves no business until it is bound`);
       return;
     }
+    keys.add(c.key);
     out.push({ ...(c as McpServerConfig), businessIds: [...c.businessIds] });
   });
   return out;
