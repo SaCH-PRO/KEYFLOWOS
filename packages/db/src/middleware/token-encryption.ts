@@ -56,6 +56,11 @@ function getDerivedKey(): Buffer {
 export function encryptToken(plaintext: string | null | undefined): string | null {
   if (!plaintext) return plaintext ?? null;
   if (plaintext.startsWith(PREFIX)) return plaintext;
+  return seal(plaintext);
+}
+
+/** AES-256-GCM with a random IV, in the 'enc:v1:' form. Always encrypts: a prefixed input is sealed like any other. */
+function seal(plaintext: string): string {
   const { createCipheriv, randomBytes } = getCrypto();
   const key = getDerivedKey();
   const iv = randomBytes(16);
@@ -165,6 +170,9 @@ const WEBHOOK_ENCRYPTED_FIELDS = new Set<string>(ENCRYPTED_FIELDS.Webhook);
  * correctly until apps/server/scripts/encrypt-bank-connection-tokens.ts --apply
  * rewrites them (owner authority only; dry run by default).
  *
+ * Every write seals the value, even one already shaped like ciphertext (see
+ * encryptWith). The script writes plaintext only (it skips prefixed rows).
+ *
  * Unlike the models above, every write and read operation that can carry the
  * column is hooked (createMany, updateMany and their AndReturn forms, the
  * OrThrow reads, delete): a bulk write that named the token would otherwise
@@ -193,16 +201,22 @@ const BANK_CONNECTION_ENCRYPTED_FIELDS = new Set<string>(ENCRYPTED_FIELDS.BankCo
  * the model to copy when those three are done.
  */
 
-function encryptWith(fields: Set<string>, data: Record<string, unknown>): Record<string, unknown> {
+/**
+ * Encrypts the named fields of a write's data. `always` (BankConnection) seals every non-empty value, even one
+ * already shaped like ciphertext: that model's token comes only from API input, never as a ciphertext copied from
+ * another row, and passing a caller's 'enc:v1:...' through stored a value no read could decrypt (SEC-V72S-2).
+ */
+function encryptWith(fields: Set<string>, data: Record<string, unknown>, always = false): Record<string, unknown> {
+  const enc = (v: string) => (always ? (v ? seal(v) : v) : encryptToken(v));
   const result = { ...data };
   for (const key of Object.keys(result)) {
     if (!fields.has(key)) continue;
     const value = result[key];
     if (typeof value === 'string') {
-      result[key] = encryptToken(value);
+      result[key] = enc(value);
     } else if (value && typeof value === 'object' && typeof (value as { set?: unknown }).set === 'string') {
       // Prisma's `{ set: value }` form of a scalar update writes the same column.
-      result[key] = { ...(value as object), set: encryptToken((value as { set: string }).set) };
+      result[key] = { ...(value as object), set: enc((value as { set: string }).set) };
     }
   }
   return result;
@@ -439,37 +453,37 @@ export const tokenEncryptionExtension = Prisma.defineExtension({
     bankConnection: {
       async create({ args, query }) {
         if (args.data) {
-          args = { ...args, data: encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.data as Record<string, unknown>) as any };
+          args = { ...args, data: encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.data as Record<string, unknown>, true) as any };
         }
         return decryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, await query(args));
       },
       async createMany({ args, query }) {
         if (args.data) {
           const data = Array.isArray(args.data)
-            ? args.data.map((d) => encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, d as Record<string, unknown>))
-            : encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.data as Record<string, unknown>);
+            ? args.data.map((d) => encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, d as Record<string, unknown>, true))
+            : encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.data as Record<string, unknown>, true);
           args = { ...args, data: data as any };
         }
         return query(args);
       },
       async update({ args, query }) {
         if (args.data) {
-          args = { ...args, data: encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.data as Record<string, unknown>) as any };
+          args = { ...args, data: encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.data as Record<string, unknown>, true) as any };
         }
         return decryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, await query(args));
       },
       async updateMany({ args, query }) {
         if (args.data) {
-          args = { ...args, data: encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.data as Record<string, unknown>) as any };
+          args = { ...args, data: encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.data as Record<string, unknown>, true) as any };
         }
         return query(args);
       },
       async upsert({ args, query }) {
         if (args.create) {
-          args = { ...args, create: encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.create as Record<string, unknown>) as any };
+          args = { ...args, create: encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.create as Record<string, unknown>, true) as any };
         }
         if (args.update) {
-          args = { ...args, update: encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.update as Record<string, unknown>) as any };
+          args = { ...args, update: encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.update as Record<string, unknown>, true) as any };
         }
         return decryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, await query(args));
       },
@@ -492,8 +506,8 @@ export const tokenEncryptionExtension = Prisma.defineExtension({
       async createManyAndReturn({ args, query }) {
         if (args.data) {
           const data = Array.isArray(args.data)
-            ? args.data.map((d) => encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, d as Record<string, unknown>))
-            : encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.data as Record<string, unknown>);
+            ? args.data.map((d) => encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, d as Record<string, unknown>, true))
+            : encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.data as Record<string, unknown>, true);
           args = { ...args, data: data as any };
         }
         const results = await query(args);
@@ -501,7 +515,7 @@ export const tokenEncryptionExtension = Prisma.defineExtension({
       },
       async updateManyAndReturn({ args, query }) {
         if (args.data) {
-          args = { ...args, data: encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.data as Record<string, unknown>) as any };
+          args = { ...args, data: encryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, args.data as Record<string, unknown>, true) as any };
         }
         const results = await query(args);
         return results.map((r) => decryptWith(BANK_CONNECTION_ENCRYPTED_FIELDS, r));

@@ -28,9 +28,12 @@
  *   pnpm encrypt:bank-tokens --business=<id>       # dry run, scoped to business(es)
  *   pnpm encrypt:bank-tokens --apply               # encrypt the plaintext rows
  *
- * Exit status: 0 done, 1 database read/update failure, 2 bad arguments.
+ * --apply refuses (exit 2, nothing written) when no key variable is set, and
+ * when the @keyflow/db build it loads does not encrypt the column.
+ *
+ * Exit status: 0 done, 1 database read/update failure, 2 bad arguments or a refused --apply.
  */
-import { db, tokenEncryptionKeySource } from '@keyflow/db';
+import { db, tokenEncryptionKeySource, ENCRYPTED_FIELDS } from '@keyflow/db';
 
 /** The extension's ciphertext form (packages/db/src/middleware/token-encryption.ts PREFIX). */
 const CIPHER_PREFIX = 'enc:v1:';
@@ -78,7 +81,10 @@ function describeFailure(err: unknown): string {
 
 const row = (label: string, n: number) => `  ${label.padEnd(24)} ${n}`;
 
-export async function main(argv: string[], deps: { db?: Db; log?: Log; error?: Log } = {}): Promise<number> {
+export async function main(
+  argv: string[],
+  deps: { db?: Db; log?: Log; error?: Log; encryptedFields?: Record<string, readonly string[]> } = {},
+): Promise<number> {
   const log: Log = deps.log ?? console.log;
   const error: Log = deps.error ?? console.error;
   const args = parseArgs(argv);
@@ -94,7 +100,23 @@ export async function main(argv: string[], deps: { db?: Db; log?: Log; error?: L
       ? `Bank connection token encryption (RR-BANK-TOKEN-ENCRYPT, V1-72) - APPLY: encrypting plaintext tokens${scope}`
       : `Bank connection token encryption (RR-BANK-TOKEN-ENCRYPT, V1-72) - DRY RUN: nothing is written; re-run with --apply to encrypt${scope}`,
   );
-  log(`  key source               ${tokenEncryptionKeySource() ?? 'none set (dev fallback key)'}`);
+  const keySource = tokenEncryptionKeySource();
+  log(`  key source               ${keySource ?? 'none set (dev fallback key)'}`);
+  if (args.apply) {
+    // SEC-V72S-1: without a key variable the extension falls back to the in-repo dev key, so the rewritten tokens
+    // would be readable by anyone with the repo and unreadable by an API running on its real key.
+    if (!keySource) {
+      error('Refusing --apply: no encryption key variable is set (CONNECTOR_CREDENTIALS_KEY, CREDENTIALS_ENCRYPTION_KEY or JWT_SECRET). Set the key the API runs with. Nothing was written.');
+      return 2;
+    }
+    // COR-V72S-1: a @keyflow/db build from before RR-BANK-TOKEN-ENCRYPT has no bankConnection hook, so each
+    // update would write the plaintext back unchanged.
+    const fields = deps.encryptedFields ?? (ENCRYPTED_FIELDS as unknown as Record<string, readonly string[]>);
+    if (!(fields.BankConnection ?? []).includes('accessToken')) {
+      error('Refusing --apply: the @keyflow/db build loaded does not encrypt BankConnection.accessToken (rebuild it with `pnpm --filter @keyflow/db build`). Nothing was written.');
+      return 2;
+    }
+  }
 
   const scopeSql = args.businessIds.length > 0 ? ' WHERE business_id = ANY($1::text[])' : '';
   const scopeParams = args.businessIds.length > 0 ? [args.businessIds] : [];
