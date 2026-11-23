@@ -1,8 +1,10 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
+import { PrismaService } from '../../core/prisma/prisma.service';
 import { BusinessGraphService } from './business-graph.service';
 import { AiMemoryService } from './ai-memory.service';
 import { ModelGatewayService, GatewayMessage } from './model-gateway.service';
 import { AiUsageService } from './ai-usage.service';
+import { promptPatternVisibility } from './semantic-memory-sight';
 
 export interface ParsedIntent {
   objective: string;
@@ -137,13 +139,21 @@ export class IntentParserService {
     @Inject(AiMemoryService) private readonly memory: AiMemoryService,
     @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
+    // FU-CORTEX-PATTERNS-SIGHT: the requester's membership and module sight are read for the patterns (no client: none).
+    @Optional() @Inject(PrismaService) private readonly prisma?: PrismaService,
   ) {}
 
-  async parse(businessId: string, userInput: string): Promise<ParsedIntent> {
+  /**
+   * FU-CORTEX-PATTERNS-SIGHT (P0; D-257, D-100, D-234): `requesterId` is the member the parse is for (the route's
+   * req.user.id). The behavioural patterns in its prompt are those they may read (promptPatternVisibility); no requester,
+   * no pattern.
+   */
+  async parse(businessId: string, userInput: string, requesterId?: string | null): Promise<ParsedIntent> {
     const snapshot = await this.businessGraph.getSnapshot(businessId);
     const contextString = this.businessGraph.buildContextString(snapshot);
 
-    const memoryCtx = await this.memory.buildContextBlock(businessId);
+    const patternVisible = await promptPatternVisibility(this.prisma, businessId, requesterId, this.logger, 'intentParser');
+    const memoryCtx = await this.memory.buildContextBlock(businessId, { patternVisible });
     const memorySection = this.memory.buildPromptSection(memoryCtx);
 
     const systemPrompt = `You are KeyFlow AI's intent parser. Your job is to analyze a user's natural-language request and call the parse_intent function with a structured intent object.

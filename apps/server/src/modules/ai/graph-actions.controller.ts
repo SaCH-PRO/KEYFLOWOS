@@ -973,7 +973,8 @@ export class GraphActionsController {
       throw new BadRequestException('Input is required');
     }
     const userId = req?.user?.id;
-    const intent = await this.intentParser.parse(businessId, body.input);
+    // FU-CORTEX-PATTERNS-SIGHT (D-100, D-234): parsed for the requesting member (the patterns they may read).
+    const intent = await this.intentParser.parse(businessId, body.input, userId);
     if (intent.clarificationNeeded) {
       return { intent, plan: null, clarificationNeeded: true };
     }

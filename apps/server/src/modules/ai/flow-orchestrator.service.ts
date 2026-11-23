@@ -133,7 +133,7 @@ import {
   type ModuleSight,
 } from '../key-cortex/key-cortex-prompt-context.service';
 import { KeyCortexConsciousnessService } from '../key-cortex/key-cortex-consciousness.service';
-import { aiMemoryRowVisibleTo, readerSearchOptions } from './semantic-memory-sight';
+import { aiMemoryRowVisibleTo, readerSearchOptions, readsEveryPattern } from './semantic-memory-sight';
 import { ProcurementService } from '../procurement/procurement.service';
 import {
   ActionNotClearedError,
@@ -407,14 +407,6 @@ async function turnMemorySight(
       ? await readersModuleSight(self.prisma, businessId, reader, self.logger, logTag)
       : candidate && reader !== candidate ? NO_MODULE_SIGHT : moduleSightOf(positionModules);
   return { reader, sight };
-}
-
-/**
- * MEM-PATTERNS-SIGHT (security review F1): whether a reader may read every pattern, whatever it states: a member reader
- * with revenue read (readsDocumentExtractions) and expenses read, the two sights aiMemoryRowVisibleTo asks for.
- */
-function readsEveryPattern(reader: string | null, sight: ModuleSight): boolean {
-  return reader !== null && readsDocumentExtractions(sight, reader) && sight('expenses');
 }
 
 /**

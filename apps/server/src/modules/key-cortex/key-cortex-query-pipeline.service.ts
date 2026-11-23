@@ -65,7 +65,7 @@ import {
   readersOwnPromptMemory,
   readsDocumentExtractions,
 } from './key-cortex-prompt-context.service';
-import { readerSearchOptions } from '../ai/semantic-memory-sight';
+import { readerSearchOptions, readsEveryPattern } from '../ai/semantic-memory-sight';
 import { userCanAccessBusiness } from '../../core/auth/business.guard';
 import { LEVEL_RANK, memberScopeMap, rankOf } from '../../core/authority/module-vocabulary';
 import { genomeContextForReader, genomeRecommendationsForReader, genomeSuggestionsForReader } from './genome-context-for-reader';
@@ -2145,6 +2145,9 @@ export class KeyCortexQueryPipelineService {
       // MEM-UNIFIED-SEMANTIC-SIGHT (D-257, D-234): the semantic hits of the turn's text pass MEM-SEMANTIC-SIGHT's reader
       // projection before the read's limit.
       semanticSight: readerSearchOptions(this.prisma, query.businessId, { reader, sight }, this.logger),
+      // FU-CORTEX-PATTERNS-SIGHT (D-257, D-100, D-234): the behavioural patterns only for a reader who may read every one
+      // (readsEveryPattern), buildMemoryContext's rule for the same prompt.
+      aiMemoryPatterns: readsEveryPattern(reader, sight),
     });
     return readersOwnPromptMemory(this.prisma, query.businessId, reader, fragments, CHAT_MEMORY_FRAGMENTS, this.logger, 'chatMemory', sight);
   }

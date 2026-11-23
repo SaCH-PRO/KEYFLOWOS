@@ -8,6 +8,7 @@ import { AiMemoryService } from './ai-memory.service';
 import { ParsedIntent } from './intent-parser.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { getToolByName } from './flow-tool-registry';
+import { promptPatternVisibility } from './semantic-memory-sight';
 
 /**
  * Trial-N integration review (correctness NEW-2 / V1-31c CRR-1): the stored tool of a step is a
@@ -94,7 +95,10 @@ export class PlannerService {
     const snapshot = await this.businessGraph.getSnapshot(businessId);
     const contextString = this.businessGraph.buildContextString(snapshot);
 
-    const memoryCtx = await this.memory.buildContextBlock(businessId);
+    // FU-CORTEX-PATTERNS-SIGHT (P0; D-257, D-100, D-234): the behavioural patterns the plan's member may read
+    // (promptPatternVisibility); a plan with no member (an agent trigger no member wrote) carries none.
+    const patternVisible = await promptPatternVisibility(this.prisma, businessId, userId, this.logger, 'planner');
+    const memoryCtx = await this.memory.buildContextBlock(businessId, { patternVisible });
     const memorySection = this.memory.buildPromptSection(memoryCtx);
 
     const blueprintCtx = await this.blueprint.getBlueprintContext(businessId);
