@@ -82,7 +82,7 @@ describe('MEM-DOC-EXTRACTION-SIGHT: the perception read asks for document extrac
 });
 
 /** The include flag the flow chat's semantic memory section searches with, for one turn (COR-MDX-1). */
-async function semanticIncludeFor(userId: string | undefined, server?: ReturnType<typeof positionTurn>): Promise<unknown> {
+async function semanticIncludeFor(userId: string | undefined, server?: ReturnType<typeof positionTurn>, searches = 1): Promise<unknown> {
   const search = vi.fn(async () => []);
   const impl = (FlowOrchestratorService.prototype as any).buildSemanticMemorySection;
   const instance = {
@@ -97,8 +97,8 @@ async function semanticIncludeFor(userId: string | undefined, server?: ReturnTyp
   // The turn's reader and sight, as the perception block resolves them.
   Object.setPrototypeOf(instance, FlowOrchestratorService.prototype);
   await impl.call(instance, 'biz_1', 'how are we doing', userId, server);
-  expect(search).toHaveBeenCalledTimes(1);
-  return (search.mock.calls[0] as any)[0].includeDocumentExtractionCopies;
+  expect(search).toHaveBeenCalledTimes(searches);
+  return (search.mock.calls[0] as any)?.[0].includeDocumentExtractionCopies;
 }
 
 describe('MEM-DOC-EXTRACTION-SIGHT (COR-MDX-1): the flow chat semantic section includes copies of extractions only with revenue sight', () => {
@@ -116,6 +116,7 @@ describe('MEM-DOC-EXTRACTION-SIGHT (COR-MDX-1): the flow chat semantic section i
     expect((await semanticIncludeFor(undefined, positionTurn({ readerUserId: 'staff', modules: ['crm'] }))) === true).toBe(false);
     expect((await semanticIncludeFor(undefined, positionTurn({ readerUserId: null, modules: ['revenue'] }))) === true).toBe(false);
     expect((await semanticIncludeFor(undefined, positionTurn({ readerUserId: 'removed', modules: ['revenue'] }))) === true).toBe(false);
-    expect((await semanticIncludeFor(undefined, undefined)) === true).toBe(false);
+    // MEM-SEMANTIC-SIGHT review (D-203): the support desk's turn reads no semantic memory at all (no search).
+    expect(await semanticIncludeFor(undefined, undefined, 0)).toBeUndefined();
   });
 });
