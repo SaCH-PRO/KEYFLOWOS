@@ -44,7 +44,8 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
  * to scrub stored rows (ContactPrivacyService.eraseForgottenContact), and only
  * from server-derived data (V1-72 review, SEC-1): the subject when it is a
  * contact, a CONTACT_REFERENCE_KEYS value at the top level of the `after`
- * snapshot (the handler's response), and metadata.routeContactId (the route's
+ * snapshot (the handler's response) of a contact-subject event, and
+ * metadata.routeContactId (the route's
  * :contactId, recorded by the interceptor). Never `before`: the interceptor
  * stores the raw request body there, before any DTO whitelisting, so a key a
  * caller planted in it would let them strip an unrelated event's snapshots.
@@ -52,9 +53,12 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 export function contactIdsOfEvent(input: Pick<ForgettableEvent, 'subjectType' | 'subjectId' | 'before' | 'after' | 'metadata'>): string[] {
   const ids = new Set<string>();
   // Any casing: the KEY cortex event bus writes the bridge's entityType ('Contact').
-  if (typeof input.subjectType === 'string' && input.subjectType.toLowerCase() === 'contact' &&
-      input.subjectId && input.subjectId !== 'unknown') ids.add(input.subjectId);
-  const after = asRecord(input.after);
+  const contactSubject = typeof input.subjectType === 'string' && input.subjectType.toLowerCase() === 'contact';
+  if (contactSubject && input.subjectId && input.subjectId !== 'unknown') ids.add(input.subjectId);
+  // The after snapshot only on a contact subject (option B, delta review): some
+  // writers (time-cost, revenue attribution) store a caller-chosen contactId
+  // unchecked and echo it, so on any other subject it could strip the row.
+  const after = contactSubject ? asRecord(input.after) : undefined;
   if (after) {
     for (const key of CONTACT_REFERENCE_KEYS) {
       const id = after[key];

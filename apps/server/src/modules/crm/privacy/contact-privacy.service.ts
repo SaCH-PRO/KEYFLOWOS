@@ -101,10 +101,11 @@ const PURGE_RETAINED_BASIS_DETAIL =
 const PURGE_NOT_SWEPT =
   'Records of other modules that reference the contact id and are not counted under erased or retained ' +
   '(for example messaging, campaigns, deals and journeys) are not swept by this purge. Business events are ' +
-  'swept when their subject is the contact, their route named it (routeContactId), or the server response ' +
-  'snapshot names it at the top level (contactId, fromContactId, toContactId, targetContactId); events ' +
-  'of the retained records (invoices, quotes, bookings) whose snapshot names the person otherwise are kept ' +
-  'under the retained basis, and events whose snapshot names the person only inside a nested structure ' +
+  'swept when their subject is the contact, their route named it (routeContactId), or, for a contact ' +
+  'subject, the server response snapshot names it at the top level (contactId, fromContactId, toContactId, ' +
+  'targetContactId). Events of the retained records (invoices, quotes, bookings) and other non-contact ' +
+  'subjects are kept under the retained basis even when they carry its contactId, and events whose ' +
+  'snapshot names the person only inside a nested structure ' +
   '(for example duplicate-check and import requests), or only in the request body (never read: a caller ' +
   'could plant a contact id there), are not reached and not swept.';
 
@@ -903,7 +904,7 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
     //    email and phone, and its metadata the caller's ip. A row names them
     //    when its subject is one of them (subject_type 'contact'), when the
     //    route's :contactId the interceptor recorded (metadata.routeContactId)
-    //    is one of them, or when its after (the server's response; never
+    //    is one of them, or, for a contact subject, when its after (the server's response; never
     //    before, the raw request body a caller could plant a key in, SEC-1)
     //    carries one of their ids as the top-level contactId (a
     //    note, a task, the forget request itself), or another
@@ -930,7 +931,8 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
        WHERE business_id = ${businessId}
          AND (
            (lower(subject_type) = 'contact' AND subject_id = ANY(${ids}))
-           OR EXISTS (SELECT 1 FROM unnest(${refKeys}::text[]) k WHERE "after" ->> k = ANY(${ids}))
+           OR (lower(subject_type) = 'contact'
+               AND EXISTS (SELECT 1 FROM unnest(${refKeys}::text[]) k WHERE "after" ->> k = ANY(${ids})))
            OR metadata ->> 'routeContactId' = ANY(${ids})
          )
          AND (
