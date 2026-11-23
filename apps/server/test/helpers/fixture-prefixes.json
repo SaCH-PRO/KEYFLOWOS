@@ -1195,6 +1195,11 @@
       "prefix": "v71u_",
       "owner": "apps/server/test/memory-semantic-sight.integration.test.ts",
       "packet": "V1-71 (MEM-SEMANTIC-SIGHT)"
+    },
+    {
+      "prefix": "v73k_",
+      "owner": "apps/server/test/key-action-genome-projection.integration.test.ts",
+      "packet": "V1-73 (FU-KEY-ACTION-GENOME-PROJECTION)"
     }
   ],
   "pendingRenames": [],
