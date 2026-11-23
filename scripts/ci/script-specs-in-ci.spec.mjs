@@ -296,6 +296,43 @@ describe('script-specs-in-ci: negative controls', () => {
     assert.deepEqual(covered['scripts/c/three.spec.mjs'], ['x.yml:8']);
   });
 
+  it('an inline shell comment after the patterns is not a pattern', () => {
+    const wf = { 'x.yml': 'jobs:\n  j:\n    steps:\n      - run: node --test scripts/x/a.spec.mjs # not scripts/y/b.spec.mjs\n' };
+    const { covered } = census(['scripts/x/a.spec.mjs', 'scripts/y/b.spec.mjs'], wf, {});
+    assert.deepEqual(covered['scripts/x/a.spec.mjs'], ['x.yml:4']);
+    assert.deepEqual(covered['scripts/y/b.spec.mjs'], []);
+    assert.deepEqual(nodeTestPatterns('node --test scripts/x/a.spec.mjs # not scripts/y/b.spec.mjs'), ['scripts/x/a.spec.mjs']);
+  });
+
+  it('text that merely mentions node --test (echo, a here-doc body) is not a run', () => {
+    const wf = {
+      'x.yml': [
+        'jobs:',
+        '  j:',
+        '    steps:',
+        '      - run: echo "node --test scripts/x/a.spec.mjs"',
+        '      - run: |',
+        '          cat > note.txt <<EOF',
+        '          run: node --test scripts/y/b.spec.mjs',
+        '          EOF',
+        '',
+      ].join('\n'),
+    };
+    const { covered } = census(['scripts/x/a.spec.mjs', 'scripts/y/b.spec.mjs'], wf, {});
+    assert.deepEqual(covered['scripts/x/a.spec.mjs'], []);
+    assert.deepEqual(covered['scripts/y/b.spec.mjs'], []);
+  });
+
+  it('node as the command, behind env assignments, timeout or pnpm exec, counts; node flags with a separate value fail closed', () => {
+    assert.deepEqual(nodeTestPatterns('CI=1 timeout 600 node --test scripts/x/a.spec.mjs'), ['scripts/x/a.spec.mjs']);
+    assert.deepEqual(nodeTestPatterns('pnpm exec node --test scripts/x/a.spec.mjs'), ['scripts/x/a.spec.mjs']);
+    assert.deepEqual(nodeTestPatterns('cd scripts && node --test ci/a.spec.mjs'), ['ci/a.spec.mjs']);
+    // `--import ./setup.mjs` (a value in its own token) is not read past: the line names nothing, so CI
+    // fails loudly rather than crediting the spec. Use `--import=./setup.mjs` on such a line.
+    assert.deepEqual(nodeTestPatterns('node --import ./setup.mjs --test scripts/x/a.spec.mjs'), []);
+    assert.deepEqual(nodeTestPatterns('node --import=./setup.mjs --test scripts/x/a.spec.mjs'), ['scripts/x/a.spec.mjs']);
+  });
+
   it('a stale EXEMPT path fails, and so does a needless or unexplained one', () => {
     const wf = { 'x.yml': 'jobs:\n  j:\n    steps:\n      - run: node --test scripts/x/a.spec.mjs\n' };
     const stale = census(['scripts/x/a.spec.mjs'], wf, { 'scripts/gone/z.spec.mjs': 'was removed' }).problems;
