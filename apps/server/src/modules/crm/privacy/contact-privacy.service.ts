@@ -29,7 +29,7 @@ import { contactWhereBase } from '../crm.helpers';
 import { resolveCrmAccess, visibilityClause } from '../crm-permissions.helper';
 import { safeInterval } from '../../../core/scheduling/safe-interval';
 import { schedulersDisabled } from '../../../core/config/env';
-import { FORGOTTEN_EVENT_METADATA_KEYS } from '../../business-events/business-event.service';
+import { CONTACT_REFERENCE_KEYS, FORGOTTEN_EVENT_METADATA_KEYS } from '../../business-events/business-event.service';
 
 const DEFAULT_PURGE_INTERVAL_MS = 30 * 60_000;
 const DEFAULT_GRACE_DAYS = 7;
@@ -101,9 +101,18 @@ const PURGE_RETAINED_BASIS_DETAIL =
 const PURGE_NOT_SWEPT =
   'Records of other modules that reference the contact id and are not counted under erased or retained ' +
   '(for example messaging, campaigns, deals and journeys) are not swept by this purge. Business events are ' +
-  'swept when their subject is the contact or their snapshot carries its contactId at the top level; events ' +
+  'swept when their subject is the contact or their snapshot names it at the top level (contactId, ' +
+  'fromContactId, toContactId, targetContactId); events ' +
   'of the retained records (invoices, quotes, bookings) whose snapshot names the person otherwise are kept ' +
   'under the retained basis.';
+
+/**
+ * V1-72 review round 2: the purge transaction scrubs the business's event log,
+ * which no index narrows by snapshot key, so it may not run under Prisma's 5 s
+ * interactive default; a timeout there would roll the whole erasure back on
+ * every cycle.
+ */
+const PURGE_TX_OPTIONS = { maxWait: 10_000, timeout: 120_000 } as const;
 
 /** Audit action recording export bundle objects the purge could not delete from storage. */
 const STORAGE_CLEANUP_FAILED_ACTION = 'forget_storage_cleanup_failed';
@@ -646,7 +655,7 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
       });
       if (claimed.count === 0) return null;
       return this.eraseForgottenContact(tx as unknown as Prisma.TransactionClient, { requestId, businessId, contactId, contactHash, now, purgeStart });
-    });
+    }, PURGE_TX_OPTIONS);
 
     if (exportKeys === null) return false;
     await this.deleteExportBundles(requestId, businessId, contactHash, exportKeys);
@@ -734,7 +743,7 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
         purgeStart,
         legacyPurgedAt: row.purgedAt,
       });
-    });
+    }, PURGE_TX_OPTIONS);
     if (exportKeys === null) return false;
     await this.deleteExportBundles(row.requestId, row.businessId, row.contactHash, exportKeys);
     return true;
@@ -892,7 +901,8 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
     //    email and phone, and its metadata the caller's ip. A row names them
     //    when its subject is one of them (subject_type 'contact'), or when its
     //    before/after carries one of their ids as the top-level contactId (a
-    //    note, a task, the forget request itself): the same rule
+    //    note, a task, the forget request itself), or another
+    //    CONTACT_REFERENCE_KEYS key (a relationship, a referral): the same rule
     //    BusinessEventService.emit applies to rows written after the request.
     //    The row is kept (event type, action, actor, subject, timestamps are
     //    the business's evidence that something happened); before and after
@@ -900,6 +910,7 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
     //    Raw SQL because the JSON paths are not Prisma-filterable in one
     //    statement. Only rows that still hold something are counted.
     const keptKeys = [...FORGOTTEN_EVENT_METADATA_KEYS];
+    const refKeys = [...CONTACT_REFERENCE_KEYS];
     const businessEventsScrubbed = await tx.$executeRaw`
       UPDATE business_events
          SET "before" = NULL,
@@ -914,8 +925,9 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
        WHERE business_id = ${businessId}
          AND (
            (subject_type = 'contact' AND subject_id = ANY(${ids}))
-           OR "before" ->> 'contactId' = ANY(${ids})
-           OR "after" ->> 'contactId' = ANY(${ids})
+           OR EXISTS (
+             SELECT 1 FROM unnest(${refKeys}::text[]) k
+              WHERE "before" ->> k = ANY(${ids}) OR "after" ->> k = ANY(${ids}))
          )
          AND (
            "before" IS NOT NULL

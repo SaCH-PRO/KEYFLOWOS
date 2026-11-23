@@ -17,17 +17,28 @@ import {
 export const FORGOTTEN_EVENT_METADATA_KEYS = ['route', 'httpMethod'] as const;
 
 /**
+ * The top-level snapshot keys that name a contact: contactId (a note, a task,
+ * the forget request), fromContactId and toContactId (a relationship), and
+ * targetContactId (a referral, whose request body carries the new target's
+ * name, email and phone). V1-72 review round 2.
+ */
+export const CONTACT_REFERENCE_KEYS = ['contactId', 'fromContactId', 'toContactId', 'targetContactId'] as const;
+
+/**
  * The contacts a business event names, by the same rule the forget purge uses
  * to scrub stored rows (ContactPrivacyService.eraseForgottenContact): the
- * subject when it is a contact, and a top-level contactId of the before or
- * after snapshot (a note, a forget request, a task on a contact).
+ * subject when it is a contact, and a CONTACT_REFERENCE_KEYS value at the top
+ * level of the before or after snapshot.
  */
 export function contactIdsOfEvent(input: Pick<CreateBusinessEventInput, 'subjectType' | 'subjectId' | 'before' | 'after'>): string[] {
   const ids = new Set<string>();
   if (input.subjectType === 'contact' && input.subjectId && input.subjectId !== 'unknown') ids.add(input.subjectId);
   for (const snap of [input.before, input.after]) {
-    const id = snap && typeof snap === 'object' && !Array.isArray(snap) ? (snap as Record<string, unknown>).contactId : undefined;
-    if (typeof id === 'string' && id.length > 0) ids.add(id);
+    if (!snap || typeof snap !== 'object' || Array.isArray(snap)) continue;
+    for (const key of CONTACT_REFERENCE_KEYS) {
+      const id = (snap as Record<string, unknown>)[key];
+      if (typeof id === 'string' && id.length > 0) ids.add(id);
+    }
   }
   return [...ids];
 }
@@ -57,7 +68,16 @@ export class BusinessEventService {
   async emit(event: CreateBusinessEventInput): Promise<void> {
     // Scrubbed before anything else, so the failure log below never holds
     // what the row may not (V1-72 review).
-    const input = await this.withoutForgottenPersonalData(event);
+    let input = event;
+    try {
+      input = await this.withoutForgottenPersonalData(event);
+    } catch {
+      // Never throw (the contract every caller relies on): an input the check
+      // cannot read is written, if at all, without its snapshots.
+      input = event && typeof event === 'object'
+        ? { ...event, before: undefined, after: undefined, metadata: keptMetadata(event.metadata) }
+        : event;
+    }
     try {
       await this.prisma.client.businessEvent.create({
         data: {
@@ -89,7 +109,7 @@ export class BusinessEventService {
     } catch (err: any) {
       this.logger.error(
         `Failed to emit business event: ${(err as Error).message}`,
-        { input: JSON.stringify(input).slice(0, 500) },
+        { input: (JSON.stringify(input) ?? String(input)).slice(0, 500) },
       );
       // Never throw — audit failure should not break the business operation
     }
@@ -130,14 +150,17 @@ export class BusinessEventService {
           UNION
           SELECT c.merged_into_id FROM contacts c JOIN chain ON c.id = chain.id
            WHERE c.business_id = ${input.businessId} AND c.merged_into_id IS NOT NULL
-        )
+        ),
+        -- The named ids themselves too: a purged contact's row may be gone
+        -- (the request is detached, ON DELETE SET NULL), its hash is not.
+        named(id) AS (SELECT id FROM chain UNION SELECT unnest(${ids}::text[]))
         SELECT EXISTS (
           SELECT 1 FROM contact_forget_requests r
            WHERE r.business_id = ${input.businessId}
              AND (
-               (r.status = 'requested' AND r.contact_id IN (SELECT id FROM chain))
+               (r.status = 'requested' AND r.contact_id IN (SELECT id FROM named))
                OR (r.status = 'purged' AND r.contact_hash IN (
-                 SELECT 'sha256:' || encode(sha256(convert_to(${input.businessId} || ':' || chain.id, 'UTF8')), 'hex') FROM chain))
+                 SELECT 'sha256:' || encode(sha256(convert_to(${input.businessId} || ':' || named.id, 'UTF8')), 'hex') FROM named))
              )
         ) AS forgotten`;
       forgotten = rows[0]?.forgotten === true;
