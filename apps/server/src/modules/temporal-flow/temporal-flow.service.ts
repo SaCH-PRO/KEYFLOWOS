@@ -46,30 +46,23 @@ function eventTextStatesMoney(e: { payload?: unknown; metadata?: unknown }): boo
 }
 
 /**
- * The rule-trace metadata keys AutonomyOrchestratorService writes as its own counts and scores (tool outcome guard,
- * genome gate, module policy): read as figures by the money vocabulary, they carry no money.
+ * Round 9 (security MAJOR-1): a lifecycle row's payload with every autonomy rule-trace entry's `metadata` left out. The
+ * orchestrator's metadata holds its counts and scores; the genome gate's scores average the affected domains' health,
+ * revenue quality and finance among them (D-233), and a rule may record an amount. A reader without revenue read is
+ * served the row this way, and the row is classified as served. Each entry's rule, source, result and reason stay; a
+ * trace that is not a list is left as it is (and read whole). Returns the payload itself when there is nothing to drop.
  */
-const RULE_TRACE_COUNT_KEYS: ReadonlySet<string> = new Set([
-  'successRate', 'totalUses', 'readinessScore', 'confidenceScore', 'missingFacts', 'priority',
-]);
-
-/**
- * Round 4 (correctness MINOR-2), narrowed in rounds 5 and 8: a lifecycle row's payload with the orchestrator's own count
- * and score keys left out of each autonomy rule-trace entry's metadata. Every entry's rule, source, result and reason,
- * and any other metadata key, are still read; a trace that is not a list of objects is read whole.
- */
-function withoutRuleTrace(payload: unknown): unknown {
+function ruleTraceWithoutMetadata(payload: unknown): unknown {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !('ruleTrace' in payload)) return payload;
   const { ruleTrace, ...rest } = payload as Record<string, unknown>;
   if (!Array.isArray(ruleTrace)) return payload;
+  if (!ruleTrace.some((entry) => entry && typeof entry === 'object' && !Array.isArray(entry) && 'metadata' in entry)) return payload;
   return {
     ...rest,
     ruleTrace: ruleTrace.map((entry) => {
       if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
-      const { metadata, ...kept } = entry as Record<string, unknown>;
-      if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return metadata === undefined ? kept : { ...kept, metadata };
-      const other = Object.fromEntries(Object.entries(metadata as Record<string, unknown>).filter(([k]) => !RULE_TRACE_COUNT_KEYS.has(k)));
-      return Object.keys(other).length ? { ...kept, metadata: other } : kept;
+      const { metadata: _metadata, ...kept } = entry as Record<string, unknown>;
+      return kept;
     }),
   };
 }
@@ -162,17 +155,26 @@ export class TemporalFlowService {
     const entries = [...rows.entries()];
     const flags = await financialProposalsWithProvenance(this.prisma, businessId, entries.map(([, row]) => row as never));
     const financial = new Map<string, boolean>(entries.map(([id], i) => [id, flags[i]]));
-    return events.filter((e) => {
-      if (e.entityType !== 'key_action_proposal') return true;
+    const served: E[] = [];
+    for (const e of events) {
+      if (e.entityType !== 'key_action_proposal') {
+        served.push(e);
+        continue;
+      }
       const known = e.entityId ? financial.get(e.entityId) : undefined;
+      // Round 9: the row as it is served (its rule-trace metadata left out) is the row that is classified.
+      const payload = ruleTraceWithoutMetadata(e.payload);
+      const view = payload === e.payload ? e : ({ ...e, payload } as E);
       // The row's summary too (FU-KEY-ACTION-GENOME-PROJECTION: key.action.create_task copies the proposal's rationale there).
       // Round 3 (security MINOR-1): the row's whole payload and signals are read, not only their named keys.
       // Round 6 (correctness MINOR-2): the title and description are read as the summary is.
-      return known === false && !isMoneyLabel(e.title) && !isMoneyLabel(e.description) && !isMoneyLabel(e.summary)
+      const readable = known === false && !isMoneyLabel(e.title) && !isMoneyLabel(e.description) && !isMoneyLabel(e.summary)
         && !proposalTextStatesMoney(e.title) && !proposalTextStatesMoney(e.description)
-        && !proposalTextStatesMoney(e.summary) && !eventTextStatesMoney(e)
-        && !structuredValueStatesMoney(withoutRuleTrace(e.payload)) && !structuredValueStatesMoney(e.signals);
-    });
+        && !proposalTextStatesMoney(e.summary) && !eventTextStatesMoney(view)
+        && !structuredValueStatesMoney(payload) && !structuredValueStatesMoney(e.signals);
+      if (readable) served.push(view);
+    }
+    return served;
   }
 
   async list(businessId: string, query: TemporalFlowListQuery = {}, reader?: GenomeReader | null) {
