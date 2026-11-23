@@ -45,7 +45,7 @@ function buildCards(modules: ControlTowerModules, dashboard: StrategicDashboard)
       status: modules.contacts.staleLeadCount > 10 ? "critical" : modules.contacts.staleLeadCount > 0 ? "warn" : "good",
     },
     ...(revenue ? [
-    {
+    ({
       key: "revenue",
       label: "Revenue",
       icon: CreditCard,
@@ -53,7 +53,7 @@ function buildCards(modules: ControlTowerModules, dashboard: StrategicDashboard)
       primary: `${fmtD(revenue.monthlyRevenue)} this month`,
       secondary: overdueInvoices > 0 ? `${overdueInvoices} overdue` : `${fmtD(revenue.outstandingAmount)} outstanding`,
       status: overdueInvoices > 3 ? "critical" : overdueInvoices > 0 ? "warn" : "good",
-    }] as ModuleCard[] : []),
+    }) satisfies ModuleCard] : []),
     {
       key: "calendar",
       label: "Calendar",
@@ -64,7 +64,7 @@ function buildCards(modules: ControlTowerModules, dashboard: StrategicDashboard)
       status: modules.bookings.utilizationRate < 30 ? "warn" : "good",
     },
     ...(expenses ? [
-    {
+    ({
       key: "expenses",
       label: "Expenses",
       icon: Receipt,
@@ -72,7 +72,7 @@ function buildCards(modules: ControlTowerModules, dashboard: StrategicDashboard)
       primary: `${fmtD(expenses.totalThisMonth)} this month`,
       secondary: expenses.budgetUtilization > 0 ? `${expenses.budgetUtilization.toFixed(0)}% of budget` : "No budgets set",
       status: expenses.budgetUtilization > 100 ? "critical" : expenses.budgetUtilization > 90 ? "warn" : "good",
-    }] as ModuleCard[] : []),
+    }) satisfies ModuleCard] : []),
     {
       key: "projects",
       label: "Projects",

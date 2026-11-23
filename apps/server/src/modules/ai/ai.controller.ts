@@ -21,6 +21,7 @@ import {
 import { AiMemoryService, MemoryCategory, summaryPatternKey } from './ai-memory.service';
 import { aiMemoryRowVisibleTo, type SemanticReader } from './semantic-memory-sight';
 import { dashboardFor, insightNeeds, readerHolds, textSightNeeds } from './insight-sight';
+import { isFinancialProposal } from '../business-genome/key-genome/genome-finance-scope';
 import { readersModuleSight, readsDocumentExtractions } from '../key-cortex/key-cortex-prompt-context.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
 import { ProAutoMonitorService } from './pro-auto-monitor.service';
@@ -1283,10 +1284,25 @@ export class AiController {
       }),
       readsEverything ? this.prisma.client.aiApprovalItem.count({ where: { businessId, status: 'pending' } }) : Promise.resolve(0),
     ]);
+    // Security review round 2 (ISS-R2-1): each item is read as the approval proposal it becomes
+    // (migrateAiApprovalItemToProposal), every field of it: without revenue read, an item D-238 classifies financial
+    // (isFinancialProposal: its text, parameters, affected entities, tool and module; fail closed) is withheld; and an
+    // item whose any field states an expense needs expenses read.
+    const approvalShown = (a: (typeof pendingItems)[number]) => {
+      const proposal = {
+        actionType: 'EXECUTE_TOOL', toolName: a.toolName, module: a.module, title: a.title, description: a.description,
+        summary: a.description, rationale: a.rationale, expectedBenefit: a.expectedBenefit, risks: a.risks,
+        inputPayload: a.inputPayload, payload: a.inputPayload, affectedEntities: a.affectedEntities,
+      };
+      if (!readerHolds(who, ['revenue']) && isFinancialProposal(proposal)) return false;
+      return readerHolds(who, textSightNeeds(JSON.stringify([
+        a.title, a.description, a.rationale, a.expectedBenefit, a.risks, a.inputPayload, a.affectedEntities, a.toolName, a.module,
+      ])));
+    };
     const shownApprovals = readsEverything
       ? pendingItems
       : who.reader !== null && who.sight('operations')
-        ? pendingItems.filter((a) => readerHolds(who, textSightNeeds(JSON.stringify([a.title, a.description, a.rationale, a.inputPayload]))))
+        ? pendingItems.filter(approvalShown)
         : [];
     const approvals = shownApprovals.slice(0, 20);
     const totalPendingApprovals = readsEverything ? totalPending : shownApprovals.length;
