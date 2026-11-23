@@ -206,6 +206,14 @@ describe('FU-ATTACHMENT-OBJECT-TENANCY: the client upload namespace is written o
     }
   });
 
+  it('a subdir under uploads/, or with a dot or empty segment, is refused by name (review round 4)', async () => {
+    const storage = new ObjectStorageService();
+    for (const subdir of [`uploads/${BIZ_A}`, `/uploads/${BIZ_A}/`, 'uploads/x', `./uploads/${BIZ_A}`, `x/../uploads/${BIZ_A}`, `uploads//${BIZ_A}`]) {
+      await expect(storage.uploadBuffer(Buffer.from(B_SECRET), { subdir }), subdir).rejects.toThrow(/is not allowed/);
+    }
+    expect([...bucket.values()].some((o) => o.body.toString('utf8') === B_SECRET)).toBe(false);
+  });
+
   it('the default and the existing server namespaces still write', async () => {
     const storage = new ObjectStorageService();
     await expect(storage.uploadBuffer(Buffer.from('x'))).resolves.toHaveProperty('objectPath');
