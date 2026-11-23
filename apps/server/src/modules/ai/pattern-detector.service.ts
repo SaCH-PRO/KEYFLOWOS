@@ -18,8 +18,11 @@ export interface DetectedPattern {
   confidence: number;
   suggestedAction: string;
   suggestedTool?: string;
-  /** FU-PATTERNS-ROUTES-SIGHT: the sights the whole pattern needed before it was bounded (boundedPattern). */
-  sight?: Array<'revenue' | 'expenses'>;
+  /**
+   * FU-PATTERNS-ROUTES-SIGHT: the sights the whole pattern needed before it was bounded (boundedPattern), as the words
+   * the text rule reads as those sights: 'revenue' (revenue read), 'suppliers' (expenses read).
+   */
+  sight?: Array<'revenue' | 'suppliers'>;
 }
 
 export interface PatternScanResult {
@@ -51,17 +54,27 @@ const WITHOUT_REVENUE = { reader: 'pattern-class', sight: (module: string) => mo
 const WITHOUT_EXPENSES = { reader: 'pattern-class', sight: (module: string) => module !== 'expenses' } as unknown as SemanticReader;
 
 /**
- * Correctness review round 6 (COR-R5-1): the sights a pattern needs, decided on the whole pattern as it was detected
- * (as aiMemoryRowVisibleTo reads its stored row: key `pattern_<category>`, the pattern as JSON), before it is clipped:
+ * Correctness review round 6 (COR-R5-1): the sights a pattern needs, decided on the pattern as it will be stored but
+ * with its text unclipped (round 7, COR-R6-2: its affected entities already capped, since the dropped ones are never
+ * stored or answered), as aiMemoryRowVisibleTo reads the stored row (key `pattern_<category>`, the pattern as JSON):
  * clipping can cut the words or figure that make it money or an expense.
  */
 export function patternSightOf(pattern: DetectedPattern): Array<'revenue' | 'expenses'> {
-  const row = { category: 'patterns', key: `pattern_${String(pattern.category)}`, value: JSON.stringify(pattern) };
+  const stored = { ...pattern, affectedEntities: (pattern.affectedEntities ?? []).slice(0, PATTERN_ENTITIES_MAX) };
+  const row = { category: 'patterns', key: `pattern_${String(pattern.category)}`, value: JSON.stringify(stored) };
   return [
     ...(aiMemoryRowVisibleTo(row, WITHOUT_REVENUE) ? [] : (['revenue'] as const)),
     ...(aiMemoryRowVisibleTo(row, WITHOUT_EXPENSES) ? [] : (['expenses'] as const)),
   ];
 }
+
+/**
+ * The words a bounded pattern's `sight` carries, one per sight, each read by the text rule exactly as that sight:
+ * 'revenue' (a money term: revenue read), 'suppliers' (an expense word and no money term: expenses read). Round 7
+ * (COR-R6-1): 'expenses' itself is a money term too, so it withheld an expense-only pattern from a member with
+ * expenses read and no revenue read.
+ */
+const SIGHT_WORD = { revenue: 'revenue', expenses: 'suppliers' } as const;
 
 /**
  * A pattern whose JSON is at most MAX_STORED_PATTERN_LENGTH: its text clipped (control characters blanked), its
@@ -76,7 +89,7 @@ export function boundedPattern(pattern: DetectedPattern): DetectedPattern {
     ...pattern,
     id: clip(pattern.id, 80),
     category: clip(pattern.category, 80),
-    severity: (SEVERITIES.has(pattern.severity) ? pattern.severity : 'info') as DetectedPattern['severity'],
+    severity: (SEVERITIES.has(String(pattern.severity).toLowerCase()) ? String(pattern.severity).toLowerCase() : 'info') as DetectedPattern['severity'],
     title: clip(pattern.title, PATTERN_TEXT_MAX),
     description: clip(pattern.description, PATTERN_TEXT_MAX),
     suggestedAction: clip(pattern.suggestedAction, PATTERN_TEXT_MAX),
@@ -86,7 +99,7 @@ export function boundedPattern(pattern: DetectedPattern): DetectedPattern {
       id: clip(e.id, 60),
       label: clip(e.label, PATTERN_LABEL_MAX),
     })),
-    ...(sight.length ? { sight } : {}),
+    ...(sight.length ? { sight: sight.map((needed) => SIGHT_WORD[needed]) } : {}),
   };
   const texts = ['title', 'description', 'suggestedAction', 'id', 'category', 'suggestedTool'] as const;
   while (JSON.stringify(bounded).length > MAX_STORED_PATTERN_LENGTH) {

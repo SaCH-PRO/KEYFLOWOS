@@ -111,6 +111,18 @@ function assertMemoryEntryBounded(entry: { key?: unknown; value?: unknown }): vo
   }
 }
 
+/**
+ * FU-PATTERNS-ROUTES-SIGHT (security review rounds 6-7): what a member's profile interview is read under: revenue read,
+ * expenses read (its cache is kept per both) and the AiMemory rows they may read (aiMemoryRowVisibleTo).
+ */
+function interviewSightOf(documentExtractions: boolean, who: SemanticReader) {
+  return {
+    documentExtractions,
+    expensesSight: who.reader !== null && who.sight('expenses'),
+    rowVisible: (row: { category: string; key: string; value: string }) => aiMemoryRowVisibleTo(row, who),
+  };
+}
+
 function assertMemoryCategoryAllowed(category: string): void {
   if (RESERVED_MEMORY_CATEGORIES.has(category)) {
     throw new BadRequestException(`Category "${category}" is reserved and cannot be modified through this endpoint`);
@@ -1528,7 +1540,7 @@ export class AiController {
     const documentExtractions = await this.readsDocumentExtractions(businessId, req);
     // FU-PATTERNS-ROUTES-SIGHT (security review round 6, F-1): the interview's known info is the rows the member may read.
     const who = await this.memoryReaderOf(businessId, req);
-    return this.profileIntelligence.chat(businessId, userId, body.message.trim(), { documentExtractions, rowVisible: (row) => aiMemoryRowVisibleTo(row, who) });
+    return this.profileIntelligence.chat(businessId, userId, body.message.trim(), interviewSightOf(documentExtractions, who));
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -1538,7 +1550,7 @@ export class AiController {
     const documentExtractions = await this.readsDocumentExtractions(businessId, req);
     // FU-PATTERNS-ROUTES-SIGHT (security review round 6, F-1): the memories answered are the rows the member may read.
     const who = await this.memoryReaderOf(businessId, req);
-    return this.profileIntelligence.getCompletionSummary(businessId, userId, { documentExtractions, rowVisible: (row) => aiMemoryRowVisibleTo(row, who) });
+    return this.profileIntelligence.getCompletionSummary(businessId, userId, interviewSightOf(documentExtractions, who));
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -1550,7 +1562,9 @@ export class AiController {
   ) {
     const userId = profileMember(req);
     const documentExtractions = await this.readsDocumentExtractions(businessId, req);
-    return this.profileIntelligence.confirmExtractions(businessId, userId, body.confirmedKeys, { documentExtractions });
+    // FU-PATTERNS-ROUTES-SIGHT (round 7): the interview proposed under the member's whole sight (revenue and expenses).
+    const who = await this.memoryReaderOf(businessId, req);
+    return this.profileIntelligence.confirmExtractions(businessId, userId, body.confirmedKeys, interviewSightOf(documentExtractions, who));
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
