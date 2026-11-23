@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "583b79bea643a8db0a9333faa23f36dd3ec5a9a0",
-  "main_commit_date": "2026-11-22T22:43:02+00:00",
+  "main_sha": "7109b6a485fd74f7ab7f7b421bd17f47a95a0793",
+  "main_commit_date": "2026-11-23T00:03:31+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 395.5,
   "by_status": {
    "done": {
-    "packets": 69,
-    "points": 104.5,
-    "pct_by_points": 26.4
+    "packets": 70,
+    "points": 106.5,
+    "pct_by_points": 26.9
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 175,
-    "points": 291,
-    "pct_by_points": 73.6
+    "packets": 174,
+    "points": 289,
+    "pct_by_points": 73.1
    }
   },
   "by_step": {
@@ -66,9 +66,9 @@
     "total": 7
    },
    "3": {
-    "done": 46,
+    "done": 47,
     "in-progress": 0,
-    "todo": 31,
+    "todo": 30,
     "total": 77
    },
    "4": {
@@ -105,9 +105,9 @@
   "by_derivation": {
    "prior-status-file": 151,
    "prior-status-file+wave-2b-commit": 28,
-   "code-commit-subject": 8,
+   "code-commit-subject": 9,
    "compacted-commit": 14,
-   "no-evidence": 43
+   "no-evidence": 42
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -117,9 +117,10 @@
    "FU-PROVIDER-ERROR-HYGIENE",
    "FU-PHONE-COUNTRY-DUPLICATES",
    "FU-KEY-MEMORY-MONEY-SIGHT",
-   "FU-WA-ESCAPE-RACE"
+   "FU-WA-ESCAPE-RACE",
+   "FU-PROPOSAL-REVENUE-SIGHT"
   ],
-  "todo_with_dependencies_met": 53
+  "todo_with_dependencies_met": 55
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -291,15 +292,6 @@
    "unblocks": 7
   },
   {
-   "id": "FU-PROPOSAL-REVENUE-SIGHT",
-   "step": 3,
-   "priority": "P0",
-   "size": "M",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 6
-  },
-  {
    "id": "MEM-CENSUS",
    "step": 3,
    "priority": "P1",
@@ -328,6 +320,15 @@
   },
   {
    "id": "FU-KEY-GENOME-READS-RESIDUAL",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 3
+  },
+  {
+   "id": "MEM-DOC-EXTRACTION-SIGHT",
    "step": 3,
    "priority": "P0",
    "size": "M",
@@ -426,6 +427,15 @@
    "unblocks": 0
   },
   {
+   "id": "FU-KEY-ACTION-GENOME-PROJECTION",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-KEY-INVOICE-EMAIL-PAY-LINK",
    "step": 3,
    "priority": "P1",
@@ -493,6 +503,15 @@
    "step": 5,
    "priority": "P1",
    "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-PROPOSAL-MONEY-TAG",
+   "step": 3,
+   "priority": "P1",
+   "size": "L",
    "lane": "server",
    "on_critical_path": false,
    "unblocks": 0
@@ -4195,15 +4214,17 @@
    "priority": "P0",
    "size": "M",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
-   "uncertain": false,
-   "evidence": [],
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "e6a039ff"
+   ],
    "depends_on": [
     "FU-GENOME-REVENUE-CLASSIFIER"
    ],
    "title": "KEY proposal records reach a reader without revenue read only when the proposal itself is non-financial",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-CORTEX-INSIGHT-CASH-TRUTH",
@@ -4247,7 +4268,7 @@
     "FU-PROPOSAL-REVENUE-SIGHT"
    ],
    "title": "KEY proposal writers tag money at creation, so proposal visibility stops depending on wording",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-BOOKING-PAGE-PAYMENT-METHOD",
@@ -4482,7 +4503,7 @@
     "FU-PROPOSAL-REVENUE-SIGHT"
    ],
    "title": "Document extractions in AI memory reach prompts and GET /ai/memory only for readers allowed to see that document",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "MEM-SEMANTIC-SIGHT",
@@ -4732,7 +4753,7 @@
     "FU-PROPOSAL-REVENUE-SIGHT"
    ],
    "title": "KEY action proposals bridged from FINANCIAL genome recommendations go through the revenue projection",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-CONVERSION-REPS-REVENUE",
