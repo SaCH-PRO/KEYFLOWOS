@@ -71,6 +71,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
           drawerSurface={layout.drawerSurface}
           setDrawerSurface={layout.setDrawerSurface}
           isPrimaryActive={layout.isPrimaryActive}
+          visibleHubs={layout.visibleHubs}
           visibleOperateSections={layout.visibleOperateSections}
           visibleBuildSections={layout.visibleBuildSections}
           visibleMoreNav={layout.visibleMoreNav}
@@ -86,11 +87,6 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
           <AppHeader
             setMobileDrawerOpen={layout.setMobileDrawerOpen}
             copilotModule={layout.copilotModule}
-            disclosureMode={layout.disclosureMode}
-            setDisclosureMode={layout.setDisclosureMode}
-            modeMenuOpen={layout.modeMenuOpen}
-            setModeMenuOpen={layout.setModeMenuOpen}
-            modeMenuRef={layout.modeMenuRef}
             addMenuOpen={layout.addMenuOpen}
             setAddMenuOpen={layout.setAddMenuOpen}
             notifications={layout.notifications}
@@ -143,6 +139,9 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         notifOpen={layout.notifOpen}
         setNotifOpen={layout.setNotifOpen}
         unreadCount={layout.unreadCount}
+        addMenuOpen={layout.addMenuOpen}
+        setAddMenuOpen={layout.setAddMenuOpen}
+        bottomBarHubs={layout.bottomBarHubs}
         visibleOperateSections={layout.visibleOperateSections}
         visibleBuildSections={layout.visibleBuildSections}
         visibleMoreNav={layout.visibleMoreNav}

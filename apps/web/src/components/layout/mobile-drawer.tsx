@@ -65,9 +65,18 @@ function MobileSection({
     >
       <div className="flex items-center gap-2 px-2 mb-1">
         <div className="w-3 h-[2px] rounded-full bg-gradient-to-r from-[hsl(var(--kf-accent2))] to-transparent" />
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-          {section.label}
-        </span>
+        {section.href ? (
+          // A hub's section (NAV-A1): its heading opens the hub's own page.
+          <Link
+            href={section.href}
+            onClick={onNavigate}
+            className="text-[12px] font-semibold uppercase tracking-wider text-foreground/80 hover:text-foreground min-h-[44px] flex items-center focus-ring rounded"
+          >
+            {section.label}
+          </Link>
+        ) : (
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{section.label}</h3>
+        )}
       </div>
       <div className="flex flex-col gap-px">
         {section.items.map((item) => {
@@ -201,12 +210,14 @@ export function MobileDrawer({
             </div>
             <div>
               <h1 className="text-sm font-bold tracking-tight">KEYFLOWOS</h1>
-              <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Command Center</p>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Menu</p>
             </div>
           </div>
           <button
+            type="button"
             onClick={closeDrawer}
-            className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            aria-label="Close navigation menu"
+            className="p-2.5 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
@@ -266,7 +277,7 @@ export function MobileDrawer({
             <span>{NAV_ROUTE_LABELS["/app/command-center"]}</span>
           </Link>
 
-          {/* OPERATE */}
+          {/* The hubs' screens (NAV-A1): each hub heading opens the hub */}
           <AnimatePresence>
             {visibleOperateSections.map((section, i) => (
               <motion.div
@@ -286,7 +297,7 @@ export function MobileDrawer({
             ))}
           </AnimatePresence>
 
-          {/* BUILD */}
+          {/* Everything else */}
           <AnimatePresence>
             {visibleBuildSections.map((section, i) => (
               <motion.div

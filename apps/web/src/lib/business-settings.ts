@@ -156,6 +156,14 @@ const entries = new Map<string, Entry>();
 /** Per business id: the reads started, and the answers recorded, so a late read never undoes a newer answer. */
 const readsStarted = new Map<string, number>();
 const answersRecorded = new Map<string, number>();
+/**
+ * Per business id: the writes sent, and the newest write whose answer was recorded (NAV-A1, with BIZ-SETTINGS-WEB's
+ * review note: the nav mounts the hook app-wide). Each door answers the whole business, so an older write's answer
+ * that lands after a newer one's would put the older business back on screen: it records nothing, and the business
+ * is read again.
+ */
+const writesSent = new Map<string, number>();
+const newestWriteRecorded = new Map<string, number>();
 /** Reads in flight, per member and business id: readers that ask together share one. */
 const inFlight = new Map<string, Promise<void>>();
 /** Per business id: how many mounted hooks read it (they are read again when the cache is dropped or goes stale). */
@@ -340,6 +348,8 @@ export function noteBusinessSettings(businessId: string, answer: unknown, sentAs
 /** Forgets everything read (tests; nothing in the app needs it). */
 export function resetBusinessSettings(): void {
   entries.clear();
+  writesSent.clear();
+  newestWriteRecorded.clear();
   readsStarted.clear();
   answersRecorded.clear();
   inFlight.clear();
@@ -348,6 +358,13 @@ export function resetBusinessSettings(): void {
 }
 
 /* ─────────────────────────────── the two doors ─────────────────────────────── */
+
+/** The sequence number of a write about to be sent for `businessId`. */
+function nextWrite(businessId: string): number {
+  const sequence = (writesSent.get(businessId) ?? 0) + 1;
+  writesSent.set(businessId, sequence);
+  return sequence;
+}
 
 type WriteAnswer = Awaited<ReturnType<typeof apiPatch<Record<string, unknown>>>>;
 
@@ -365,7 +382,27 @@ const UNCONFIRMED_ANSWER = "The change was sent, but the business does not show 
  * what was sent (`holds`); anything less is an error in plain words, and what the business holds is read again.
  * The answer is recorded for the member who sent the write (`sentAs`), never for one who took the browser since.
  */
-function recorded(businessId: string, sentAs: string, res: WriteAnswer, holds: (settings: BusinessSettings) => boolean): WriteAnswer {
+function recorded(
+  businessId: string,
+  sentAs: string,
+  res: WriteAnswer,
+  holds: (settings: BusinessSettings) => boolean,
+  sequence: number,
+): WriteAnswer {
+  if (res.error === null && sentAs === actingMember() && (newestWriteRecorded.get(businessId) ?? 0) > sequence) {
+    // A newer write was answered first: this answer is older than what is held. It records nothing (any read still
+    // out is overtaken too), and the business is read again, so what it holds now is shown.
+    answerRecorded(businessId);
+    if (watched.has(businessId)) void loadBusinessSettings(businessId, { force: true });
+    else if (entries.delete(businessId)) emit();
+    const own = confirmedBusinessSettings(businessId, res.data);
+    if (!own) return { data: null, error: UNREADABLE_ANSWER, status: res.status };
+    return holds(own) ? res : { data: null, error: UNCONFIRMED_ANSWER, status: res.status };
+  }
+  // Only an answer recorded for the member acting raises the mark (review SEC-3).
+  if (res.error === null && sentAs === actingMember()) {
+    newestWriteRecorded.set(businessId, Math.max(newestWriteRecorded.get(businessId) ?? 0, sequence));
+  }
   if (res.error !== null) {
     // The outcome is unknown when the server's answer never arrived (no status: a dropped connection, a timeout)
     // or was a 5xx (a gateway that gave up while the server went on, a failure after the write was stored): the
@@ -405,8 +442,9 @@ function recorded(businessId: string, sentAs: string, res: WriteAnswer, holds: (
 export async function saveBusinessSells(businessId: string, sells: BusinessSells): Promise<WriteAnswer> {
   if (!isBusinessSells(sells)) return notSent("Choose services, products or both.");
   const sentAs = actingMember();
+  const sequence = nextWrite(businessId);
   const res = await apiPatch<Record<string, unknown>>(`/identity/businesses/${encodeURIComponent(businessId)}`, { sells });
-  return recorded(businessId, sentAs, res, (held) => held.sells === sells);
+  return recorded(businessId, sentAs, res, (held) => held.sells === sells, sequence);
 }
 
 /** The body the door is sent: advancedCrm and depth as named, nothing else; null when that is not a write. */
@@ -438,6 +476,7 @@ export async function saveAdvancedSettings(businessId: string, write: BusinessAd
   const body = advancedSettingsBody(write);
   if (!body) return notSent("Choose the Advanced CRM switch or a hub's depth to change.");
   const sentAs = actingMember();
+  const sequence = nextWrite(businessId);
   const res = await apiPatch<Record<string, unknown>>(`/identity/businesses/${encodeURIComponent(businessId)}/advanced-settings`, body);
   return recorded(
     businessId,
@@ -451,6 +490,7 @@ export async function saveAdvancedSettings(businessId: string, write: BusinessAd
         const answered = isPlainObject(res.data) && isPlainObject(res.data.depth) ? res.data.depth : null;
         return answered !== null && hasOwn(answered, hub) && answered[hub] === depth && held.depth[hub as BusinessHub] === depth;
       }),
+    sequence,
   );
 }
 

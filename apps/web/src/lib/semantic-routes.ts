@@ -150,7 +150,8 @@ export interface SemanticRoute {
  * module and this one is not, so any importer gets a plain string.
  */
 export const NAV_ROUTE_LABELS = {
-  "/app/command-center": "Command Center",
+  // D-151 (owner ruling 2026-11-13): the home hub is Today, the sales hub Sales.
+  "/app/command-center": "Today",
   "/app/commerce": "Sales",
 } as const satisfies Record<string, string>;
 
@@ -169,13 +170,13 @@ export const SEMANTIC_ROUTES: SemanticRoute[] = [
   /* ─── Contacts ─── */
   { segment: "network", label: "Network", workspace: "contacts", icon: Users },
   { segment: "contacts", label: "Contacts", workspace: "contacts", icon: Users, isDetailSurface: true, entityType: "contact" },
-  { segment: "crm", label: "Network", workspace: "contacts", icon: Users, alias: "/app/crm/contacts" },
+  { segment: "crm", label: "Customers", workspace: "contacts", icon: Users, alias: "/app/crm/contacts" },
   { segment: "pipeline", label: "Contacts", workspace: "contacts", icon: Users },
   { segment: "deals", label: "Deals", workspace: "contacts", icon: Target, isDetailSurface: true, entityType: "deal" },
   { segment: "sequences", label: "Sequences", workspace: "contacts", icon: Mail, isDetailSurface: true, entityType: "sequence" },
 
   /* ─── Commerce ─── */
-  { segment: "commerce", label: NAV_ROUTE_LABELS["/app/commerce"], workspace: "commerce", icon: Banknote, parentOverride: [{ label: "Money", href: "/app/money" }] },
+  { segment: "commerce", label: NAV_ROUTE_LABELS["/app/commerce"], workspace: "commerce", icon: Banknote },
   { segment: "invoices", label: "Invoices", workspace: "commerce", icon: Receipt, isDetailSurface: true, entityType: "invoice" },
   { segment: "quotes", label: "Quotes", workspace: "commerce", icon: FileText, isDetailSurface: true, entityType: "quote" },
   { segment: "products", label: "Products", workspace: "commerce", icon: Package, isDetailSurface: true, entityType: "product" },
@@ -185,10 +186,11 @@ export const SEMANTIC_ROUTES: SemanticRoute[] = [
 
   /* ─── Calendar ─── */
   { segment: "calendar", label: "Calendar", workspace: "calendar", icon: Calendar },
+  { segment: "schedule", label: "Schedule", workspace: "calendar", icon: Calendar },
   { segment: "bookings", label: "Bookings", workspace: "calendar", icon: Calendar, isDetailSurface: true, entityType: "booking" },
 
   /* ─── Storefront ─── */
-  { segment: "store", label: "Presence", workspace: "storefront", icon: Store },
+  { segment: "store", label: "Your page", workspace: "storefront", icon: Store },
   { segment: "presence", label: "Presence", workspace: "storefront", icon: Store },
 
   /* ─── Finance ─── */
@@ -228,7 +230,7 @@ export const SEMANTIC_ROUTES: SemanticRoute[] = [
   { segment: "webhooks", label: "Webhooks", workspace: "connect", icon: Code },
 
   /* ─── Team ─── */
-  { segment: "settings", label: "Studio", workspace: "settings", icon: Settings, isConfigSurface: true },
+  { segment: "settings", label: "Settings", workspace: "settings", icon: Settings, isConfigSurface: true },
   { segment: "structure", label: "Org Chart", workspace: "team", icon: Users },
   { segment: "team", label: "Team", workspace: "team", icon: Users },
   { segment: "profile", label: "Profile", workspace: "settings", icon: Users, isConfigSurface: true },

@@ -109,19 +109,33 @@ const nextConfig: NextConfig = {
    * back to localhost:3001 for the standard local dev setup.
    */
   async redirects() {
-    // KEYFLOW unification (Task #292): the legacy "Control Tower" surface
-    // is now the KEY mainstay dashboard at /app/keyflow-command. Permanent
-    // 308 so external links and bookmarks survive.
+    // NAV-A1 (D-150, D-151): the three old cockpit stubs go straight to Today
+    // (/app/command-center) with a 307. /app/control-tower was a 308 to the
+    // /app/keyflow-command stub (KEYFLOW unification, Task #292), itself a page
+    // that redirected to the cockpit, and /app/briefing a page redirect to that
+    // stub. A changed redirect is a 307: a browser that cached the old 308 still
+    // lands on /app/keyflow-command, which now answers this 307. The stub pages
+    // stay (no route is deleted).
     return [
       {
+        source: "/app/keyflow-command",
+        destination: "/app/command-center",
+        permanent: false,
+      },
+      {
         source: "/app/control-tower",
-        destination: "/app/keyflow-command",
-        permanent: true,
+        destination: "/app/command-center",
+        permanent: false,
       },
       {
         source: "/app/control-tower/:path*",
-        destination: "/app/keyflow-command",
-        permanent: true,
+        destination: "/app/command-center",
+        permanent: false,
+      },
+      {
+        source: "/app/briefing",
+        destination: "/app/command-center",
+        permanent: false,
       },
       // REMOVED 2026-08-07: /app/payments -> /app/commerce?tab=payments.
       //

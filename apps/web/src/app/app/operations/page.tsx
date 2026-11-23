@@ -396,7 +396,7 @@ export default function OperationsPage() {
                         <Bot className="w-4 h-4 text-primary" />
                         KEY Needs Approval
                       </h3>
-                      <button onClick={() => router.push("/app/keyflow-command")} className="text-xs text-primary hover:underline flex items-center gap-1">
+                      <button onClick={() => router.push("/app/command-center")} className="text-xs text-primary hover:underline flex items-center gap-1">
                         Review <ArrowRight className="w-3 h-3" />
                       </button>
                     </div>
