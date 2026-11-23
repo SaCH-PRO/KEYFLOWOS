@@ -52,6 +52,7 @@ import { BusinessGraphService } from './business-graph.service';
 import { PlannerService } from './planner.service';
 import { getOpenAiToolDefinitions, getToolByName, RiskLevel, ToolFamily, wrapToolResult, FlowTool, CORTEX_TOOL_BRIDGE, isCortexBridgedTool } from './flow-tool-registry';
 import { KeyCortexToolRegistryService } from '../key-cortex/key-cortex-tool-registry.service';
+import { classifyActionIntent } from '../key-cortex/action-intent';
 import { KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
 import { RetryableConflictException } from '../../core/utils/retryable-conflict';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
@@ -1420,12 +1421,9 @@ export class FlowOrchestratorService {
     if (triage?.tier !== 'deliberate') return false;
     if (hasAttachments) return false;
 
-    // Anything that asks KEY to DO something stays on the tool path.
-    if (
-      /\b(create|make|add|send|schedule|book|update|change|delete|remove|cancel|invoice|draft|generate|assign|move|set|mark|pay|refund|publish|post)\b/i.test(
-        message,
-      )
-    ) {
+    // Anything that asks KEY to DO something stays on the tool path (the one
+    // vocabulary, shared with the Cortex sites: RR-ACTION-INTENT-ONE-CLASSIFIER).
+    if (classifyActionIntent(message).isAction) {
       return false;
     }
 
