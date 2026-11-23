@@ -9,8 +9,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { NotFoundException } from '@nestjs/common';
 import { KeyCortexEvolutionService } from '../key-cortex-evolution.service';
-import { KeyCortexInteractionService } from '../key-cortex-interaction.service';
-import { KeyCortexReasoningService } from '../key-cortex-reasoning.service';
 import { KeyCortexGenomeContextService } from '../key-cortex-genome-context.service';
 import { KeyCortexConsciousnessService } from '../key-cortex-consciousness.service';
 import { KeyCortexAwarenessService } from '../key-cortex-awareness.service';
@@ -86,73 +84,9 @@ function promptOf(model: { complete: ReturnType<typeof vi.fn> }) {
   return JSON.stringify(model.complete.mock.calls.map((c) => c[0]));
 }
 
-describe('KeyCortexInteractionService.explainDecision (D-235 inventory row 2)', () => {
-  function interaction(sessionBiz: string) {
-    const svc = Object.create(KeyCortexInteractionService.prototype) as any;
-    svc.logger = { debug: vi.fn(), warn: vi.fn(), error: vi.fn(), log: vi.fn() };
-    const findFirst = vi.fn(async ({ where }: any) => (where.businessId && where.businessId !== sessionBiz ? null : { id: 'sess', businessId: sessionBiz, messages: [] }));
-    svc.prisma = { client: { cortexSession: { findFirst } } };
-    svc.genomeContextService = { getGenomeEnrichedContext: vi.fn(async () => CTX) };
-    svc.modelGateway = { complete: vi.fn(async () => ({ content: 'ok' })) };
-    return { svc, findFirst };
-  }
-
-  it('RED-BEFORE: the session is read in the business named, and another business\'s genome is never read', async () => {
-    const { svc, findFirst } = interaction('biz_B');
-    await svc.explainDecision('corr_1', 'biz_A', false);
-    expect(findFirst.mock.calls[0][0].where).toMatchObject({ businessId: 'biz_A' });
-    expect(svc.genomeContextService.getGenomeEnrichedContext).not.toHaveBeenCalledWith('biz_B');
-  });
-
-  it('RED-BEFORE: a reader without revenue read (and no reader) gets a prompt with no finance or sales DNA, readiness or finance recommendation', async () => {
-    for (const reads of [false, undefined]) {
-      const { svc } = interaction('biz_A');
-      await svc.explainDecision('corr_1', 'biz_A', reads);
-      const prompt = promptOf(svc.modelGateway);
-      expect(prompt, String(reads)).not.toMatch(/"finance"|\\"finance\\"|finance\\":|sales\\":|revenue\\":/);
-      expect(prompt, String(reads)).not.toContain('Raise prices');
-      expect(prompt, String(reads)).not.toContain('Executive Readiness: 30');
-    }
-  });
-});
-
-describe('KeyCortexReasoningService legacy genome paths (D-235 inventory rows 3, 4)', () => {
-  function reasoning() {
-    const svc = Object.create(KeyCortexReasoningService.prototype) as any;
-    svc.logger = { debug: vi.fn(), warn: vi.fn(), error: vi.fn(), log: vi.fn() };
-    svc.getGenomeEnrichedContext = vi.fn(async () => CTX);
-    const store = new Map<string, unknown>();
-    svc.redis = { getJson: vi.fn(async (k: string) => store.get(k) ?? null), setJson: vi.fn(async (k: string, v: unknown) => store.set(k, v)) };
-    svc.genomeBridgeService = { getRankedRecommendations: vi.fn(async () => [{ id: 'r_fin', title: 'Raise prices', recommendation: 'x', impact: 0.9, confidence: 0.9, domain: 'FINANCIAL' }, { id: 'r_ops', title: 'Write the SOPs', recommendation: 'y', impact: 0.9, confidence: 0.9, domain: 'OPERATIONS' }]) };
-    svc.integrationV2Enabled = false;
-    svc.modelGateway = { complete: vi.fn(async () => ({ content: 'ok' })) };
-    svc.prisma = { client: { cortexSession: { findFirst: vi.fn(async ({ where }: any) => (where.businessId === 'biz_A' ? { id: 's', businessId: 'biz_A', messages: [] } : null)) } } };
-    return { svc, store };
-  }
-
-  it('RED-BEFORE: legacy getProactiveSuggestions with no reader (and for a reader without revenue read) offers no finance recommendation or finance signal', async () => {
-    for (const reads of [false, undefined]) {
-      const { svc } = reasoning();
-      const out = await svc.getProactiveSuggestions('biz_A', reads);
-      expect(JSON.stringify(out), String(reads)).not.toContain('Raise prices');
-      expect(JSON.stringify(out), String(reads)).not.toContain('Runway');
-    }
-  });
-
-  it('RED-BEFORE: legacy shouldSuggestProactiveAction is not decided by a finance signal or a money opportunity for a reader without revenue read, and stores no projected DNA', async () => {
-    const { svc, store } = reasoning();
-    expect(await svc.shouldSuggestProactiveAction('biz_A', false)).toBe(false);
-    const stored = store.get('genome:dna:previous:biz_A') as Record<string, number> | undefined;
-    if (stored) expect(stored).toMatchObject({ finance: 30 });
-  });
-
-  it('RED-BEFORE: legacy explainDecision reads the session in the business named and projects the genome', async () => {
-    const { svc } = reasoning();
-    await svc.explainDecision('corr_1', 'biz_A', false);
-    expect(svc.prisma.client.cortexSession.findFirst.mock.calls[0][0].where).toMatchObject({ businessId: 'biz_A' });
-    expect(promptOf(svc.modelGateway)).not.toContain('Raise prices');
-  });
-});
+// Inventory rows 2-4 (KeyCortexInteractionService.explainDecision; KeyCortexReasoningService's legacy
+// getProactiveSuggestions, shouldSuggestProactiveAction, explainDecision and its genome:context cache) had no
+// production caller and were deleted (orchestrator acceptance, correctness M2): genome-reads-residual-dead-paths.spec.ts.
 
 describe('KeyCortexGenomeContextService: fail-closed defaults, the DNA cache, the ranking (D-235 inventory rows 5, 6)', () => {
   function service(recs: any[] = []) {
@@ -292,14 +226,6 @@ describe('round-2 review repairs (security MAJOR-1..3; correctness MAJOR-1, mino
     const snap = snapshotForViewer({ businessId: 'b', genomeStage: 'growth', executiveReadiness: 30, genomeDna: DNA, keyMetrics: {}, recentTasks: [], recentEvents: [], activeProjects: [], teamMembers: [], unreadMessages: 0 } as any, false);
     await sg.generateSuggestions('b', 'hello', undefined, false, snap);
     expect(promptOf(sg.modelGateway)).not.toContain('undefined');
-    const r = Object.create(KeyCortexReasoningService.prototype) as any;
-    r.logger = { debug: vi.fn(), warn: vi.fn(), error: vi.fn(), log: vi.fn() };
-    r.genomeBridgeService = {};
-    r.getGenomeEnrichedContext = vi.fn(async () => CTX);
-    r.modelGateway = { complete: vi.fn(async () => ({ content: 'ok' })) };
-    r.prisma = { client: { cortexSession: { findFirst: vi.fn(async () => ({ id: 's', businessId: 'biz_A', messages: [] })) } } };
-    await r.explainDecision('corr_1', 'biz_A', false);
-    expect(promptOf(r.modelGateway)).not.toContain('undefined');
   });
 
   it('RED-BEFORE (security MAJOR-3): a decision is explained only to the user who made it, unless the reader is an owner; patterns are withheld from other readers', async () => {
