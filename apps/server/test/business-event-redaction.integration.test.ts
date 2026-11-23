@@ -54,16 +54,12 @@ let events: EventEmitter2;
 let service: BusinessEventService;
 let audit: ContactAuditService;
 
-const CLEANUP = [
-  (p: string) => `DELETE FROM contact_audit_entries WHERE business_id LIKE ${p}`,
-  (p: string) => `DELETE FROM business_events WHERE business_id LIKE ${p}`,
-  (p: string) => `DELETE FROM contacts WHERE business_id LIKE ${p}`,
-  (p: string) => `DELETE FROM businesses WHERE id LIKE ${p}`,
-  (p: string) => `DELETE FROM users WHERE id LIKE ${p}`,
-];
-
 async function cleanup() {
-  for (const sql of CLEANUP) await db.$executeRawUnsafe(sql(sqlLikePrefix(P)));
+  await db.$executeRawUnsafe(`DELETE FROM contact_audit_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`);
+  await db.$executeRawUnsafe(`DELETE FROM business_events WHERE business_id LIKE ${sqlLikePrefix(P)}`);
+  await db.$executeRawUnsafe(`DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`);
+  await db.$executeRawUnsafe(`DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`);
+  await db.$executeRawUnsafe(`DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`);
 }
 
 const base = (suffix: string, extra: Partial<CreateBusinessEventInput> = {}): CreateBusinessEventInput => ({
