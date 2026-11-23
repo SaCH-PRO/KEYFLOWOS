@@ -457,11 +457,14 @@ describe('FU-INSIGHTS-SIGHT (D-100, D-234, D-146): monitoring insights, suggesti
       await item('appr_expense', 'Record the landlord rent', 'Monthly rent to the landlord');
       await item('appr_plain', 'V72Q-PLAIN follow up with three leads', 'Send a friendly follow-up');
       const approvals = (tower: any) => tower.priorities.filter((p: any) => p.type === 'approval').map((p: any) => p.title);
-      for (const reader of BLIND) {
-        const tower = await ok('get', reader, '/ai/control-tower');
-        expect(approvals(tower), reader).toEqual(['V72Q-PLAIN follow up with three leads']);
-        expect(tower.pendingApprovals, reader).toBe(1);
-      }
+      const blind = await ok('get', 'blind', '/ai/control-tower');
+      expect(approvals(blind)).toEqual(['V72Q-PLAIN follow up with three leads']);
+      expect(blind.pendingApprovals).toBe(1);
+      // The memberless SUPER_ADMIN reads no module here (readersModuleSight, as every read of this packet), so no
+      // approval item at all, the plain one included.
+      const root = await ok('get', 'root', '/ai/control-tower');
+      expect(approvals(root)).toEqual([]);
+      expect(root.pendingApprovals).toBe(0);
       const revnoexp = await ok('get', 'revnoexp', '/ai/control-tower');
       expect(approvals(revnoexp).sort()).toEqual(['Drive intake: Create invoice for Acme (TTD 4,567.00) from x.pdf', 'V72Q-PLAIN follow up with three leads'].sort());
       const noops = await ok('get', 'noops', '/ai/control-tower');
