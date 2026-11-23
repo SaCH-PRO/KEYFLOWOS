@@ -149,3 +149,32 @@ describe('sightedStrategic review round 1 (FU-STRATEGIC-ROUTES-SIGHT)', () => {
     expect(JSON.stringify(sightedStrategic(answer, blind))).toContain('SAFEMARK a');
   });
 });
+
+describe('sightedStrategic review round 2 (FU-STRATEGIC-ROUTES-SIGHT)', () => {
+  it('SR2-1 / CR2-3: decimal digits of any script state a figure (Arabic-Indic, Extended Arabic-Indic, Devanagari)', () => {
+    const out = sightedStrategic({ notes: ['Avg ٤٬٠٠٠ in July', 'Avg ۴۰۰۰ in July', 'Avg ४००० in July', 'SAFEMARK July is busy'] }, blind) as any;
+    expect(out.notes).toEqual(['SAFEMARK July is busy']);
+  });
+
+  it('SR2-2: a date stands alone only as a date (and a clock time): a figure after it is a figure', () => {
+    const out = sightedStrategic({ a: '2026-11-23', b: '2026-11-23T09:30:00Z', c: '2026-11-23 4000', d: '2026-11-23T4.000.000', e: '2026-11-23 ...8500' }, blind) as any;
+    expect(out).toEqual({ a: '2026-11-23', b: '2026-11-23T09:30:00Z' });
+  });
+
+  it('SR2-3: net profit and expenses are read in fullwidth and mathematical letters and through soft hyphens and zero-width characters', () => {
+    const rev = sightedStrategic({ notes: ['ｐｒｏｆｉｔ is thin', '𝐩𝐫𝐨𝐟𝐢𝐭 is thin', 'pro­fit is thin', 'pro​fit is thin', 'SAFEMARK fine'] }, revnoexp) as any;
+    expect(rev.notes).toEqual(['SAFEMARK fine']);
+    const bl = sightedStrategic({ notes: ['ｓｐｅｎｔ a lot', 're​nt is due', 'SAFEMARK fine'] }, blind) as any;
+    expect(bl.notes).toEqual(['SAFEMARK fine']);
+  });
+
+  it('SR2-4: the bottom line, solvency, liquidity, a runway, being underwater and payback are net position; turnover, takings and the top line are money; a percent in words is a figure', () => {
+    const rev = sightedStrategic(
+      { notes: ['Protect the bottom line', 'Risk of being insolvent', 'solvency is fine', 'liquidity is tight', 'cash runway is short', 'underwater on the van', 'payback in a year', 'SAFEMARK fine'] },
+      revnoexp,
+    ) as any;
+    expect(rev.notes).toEqual(['SAFEMARK fine']);
+    const bl = sightedStrategic({ notes: ['turnover is up', 'takings are down', 'grow the top line', 'grew 8 percent', 'up 8 pct', 'up 8 per cent', 'SAFEMARK fine'] }, blind) as any;
+    expect(bl.notes).toEqual(['SAFEMARK fine']);
+  });
+});

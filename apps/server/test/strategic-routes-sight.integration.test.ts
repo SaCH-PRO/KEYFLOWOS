@@ -490,4 +490,27 @@ describe('FU-STRATEGIC-ROUTES-SIGHT (D-100, D-234, D-146): the strategic routes 
       MODEL.strategic_risk_scan = saved;
     }
   }, 300_000);
+
+  it('V72S-11 RED (security review round 1, OOS-1, folded in by the orchestrator): GET .../ai/cross-module-links answers a contact\'s invoices (number, status, amount) only to revenue readers; their bookings and projects (no money) reach every member', async () => {
+    await clearData();
+    try {
+      await seed();
+      const route = `/ai/cross-module-links?entityType=contact&entityId=${ID.payer}`;
+      for (const reader of ['owner', 'revenue', 'revnoexp'] as Reader[]) {
+        const body = await ok(reader, route);
+        expect(body.invoices.length, `${reader} control`).toBe(3);
+        expect(body.invoices.map((i: any) => i.amount).sort(), reader).toEqual([3341, 4000, 4000]);
+      }
+      for (const reader of NO_REVENUE) {
+        const body = await ok(reader, route);
+        expect(body.invoices, reader).toEqual([]);
+        expect(Array.isArray(body.bookings) && Array.isArray(body.projects), `${reader} keeps the other links`).toBe(true);
+        for (const marker of ['3341', '4000', `${ID.payer}-od1`, 'SENT', 'PAID']) expect(text(body), `${reader} ${marker}`).not.toContain(marker);
+      }
+      const other = await agent().get(`/ai/businesses/${ID.biz}${route}`).set(HEADER, ID.other).set('x-forwarded-for', nextIp());
+      expect(other.status, 'cross-tenant').toBe(403);
+    } finally {
+      await clearData();
+    }
+  }, 300_000);
 });
