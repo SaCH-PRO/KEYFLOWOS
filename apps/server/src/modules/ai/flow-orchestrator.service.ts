@@ -2100,7 +2100,7 @@ export class FlowOrchestratorService {
         // always publicly readable.
         if (att.objectPath?.startsWith('/objects/')) {
           try {
-            const { buffer, contentType } = await storage.getObjectEntityBuffer(att.objectPath);
+            const { buffer, contentType } = await storage.getObjectEntityBuffer(att.objectPath, businessId);
             extractionInput = {
               businessId,
               source: att.objectPath,
