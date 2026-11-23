@@ -204,118 +204,119 @@ describe("NAV-A1: the hubs a member is shown", () => {
  *                                      it is by the orchestrator's decision of 2026-11-22 (D-100). It justifies nothing.
  * Each module a row names must be justified; a row with no module cites the unscoped read it rests on.
  */
-const SRV = (f: string, line: number) => `modules/${f}:${line}`;
+const SRV = (f: string, route: string) => `modules/${f}#${route}`;
 const MODULE_TABLE: Record<string, { modules: string[]; cite: string[] }> = {
   // Hubs
-  "/app/command-center": { modules: [], cite: ["unscoped:modules/business-command-center/business-command-center.controller.ts:25", "D-96 every member's home"] },
-  "/app/crm/contacts": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", 493)] },
-  "/app/commerce": { modules: ["revenue"], cite: [SRV("commerce/commerce.controller.ts", 706)] },
-  "/app/schedule/calendar": { modules: ["bookings"], cite: [SRV("calendar/calendar.controller.ts", 256)] },
-  "/app/financial-flow": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 359)] },
-  "/app/store": { modules: ["storefront"], cite: ["unscoped:modules/bookings/bookings.controller.ts:358", "D-150:storefront hub rule: no read route checks storefront; the hub follows the scope (J5)", "tracked:modules/site/site.service.ts:310:revenue revenueInPeriod FU-SITE-ANALYTICS-REVENUE-SCOPE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100"] },
-  "/app/settings/business": { modules: ["settings"], cite: ["unscoped:modules/identity/identity.controller.ts:858", "D-150:settings hub rule (J5); its writes need settings"] },
+  "/app/command-center": { modules: [], cite: ["unscoped:modules/business-command-center/business-command-center.controller.ts#GET snapshot", "D-96 every member's home"] },
+  "/app/crm/contacts": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", "GET businesses/:businessId/contacts")] },
+  "/app/commerce": { modules: ["revenue"], cite: [SRV("commerce/commerce.controller.ts", "GET businesses/:businessId/invoices")] },
+  "/app/schedule/calendar": { modules: ["bookings"], cite: [SRV("calendar/calendar.controller.ts", "GET businesses/:businessId/events")] },
+  "/app/financial-flow": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET overview")] },
+  // The store's analytics read withholds revenue below revenue read (FU-SITE-ANALYTICS-REVENUE-SCOPE, in wave 3f).
+  "/app/store": { modules: ["storefront"], cite: ["unscoped:modules/bookings/bookings.controller.ts#GET businesses/:businessId/services", "D-150:storefront hub rule: no read route checks storefront; the hub follows the scope (J5)", "service-check:modules/site/site.controller.ts#GET businesses/:businessId/analytics"] },
+  "/app/settings/business": { modules: ["settings"], cite: ["unscoped:modules/identity/identity.controller.ts#GET businesses/:businessId", "D-150:settings hub rule (J5); its writes need settings"] },
   // Customers
-  "/app/crm/deals": { modules: ["crm"], cite: [SRV("crm/crm-deals.controller.ts", 216)] },
-  "/app/crm/accounts": { modules: ["crm"], cite: [SRV("crm/crm-accounts.controller.ts", 22)] },
-  "/app/people-flow": { modules: ["crm"], cite: ["unscoped:modules/people-flow/people-flow.controller.ts:18", "hub:customers"] },
-  "/app/crm/sequences": { modules: ["crm"], cite: ["unscoped:modules/crm/crm-sequence.controller.ts:33", "hub:customers"] },
-  "/app/helpdesk": { modules: ["crm"], cite: ["unscoped:modules/helpdesk/helpdesk.controller.ts:13", "hub:customers"] },
-  "/app/call-tasks": { modules: ["crm"], cite: [SRV("call-tasks/call-task.controller.ts", 95)] },
-  "/app/crm/intelligence": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", 1108)] },
-  "/app/crm/data-quality": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", 865)] },
-  "/app/crm/duplicates": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", 1558)] },
-  "/app/crm/network": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", 338)] },
-  "/app/crm/dashboard": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", 493)] },
-  "/app/sales-team": { modules: ["crm", "revenue"], cite: ["unscoped:modules/conversion/conversion.controller.ts:67", "data:modules/conversion/sales-team.service.ts:80:revenue revenueAttributed, the PAID invoice totals per rep (security review: the route itself carries no scope)", "hub:customers", "tracked:modules/conversion/sales-team.service.ts:80:revenue revenueAttributed FU-CONVERSION-REPS-REVENUE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100"] },
+  "/app/crm/deals": { modules: ["crm"], cite: [SRV("crm/crm-deals.controller.ts", "GET businesses/:businessId/deals")] },
+  "/app/crm/accounts": { modules: ["crm"], cite: [SRV("crm/crm-accounts.controller.ts", "GET businesses/:businessId/accounts")] },
+  "/app/people-flow": { modules: ["crm"], cite: ["unscoped:modules/people-flow/people-flow.controller.ts#GET overview", "hub:customers"] },
+  "/app/crm/sequences": { modules: ["crm"], cite: ["unscoped:modules/crm/crm-sequence.controller.ts#GET businesses/:businessId/sequences", "hub:customers"] },
+  "/app/helpdesk": { modules: ["crm"], cite: ["unscoped:modules/helpdesk/helpdesk.controller.ts#GET businesses/:businessId/tickets", "hub:customers"] },
+  "/app/call-tasks": { modules: ["crm"], cite: [SRV("call-tasks/call-task.controller.ts", "GET businesses/:businessId/calls")] },
+  "/app/crm/intelligence": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", "GET businesses/:businessId/relationship-health/at-risk")] },
+  "/app/crm/data-quality": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", "GET businesses/:businessId/data-quality/stats")] },
+  "/app/crm/duplicates": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", "GET businesses/:businessId/duplicates")] },
+  "/app/crm/network": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", "GET businesses/:businessId/network")] },
+  "/app/crm/dashboard": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", "GET businesses/:businessId/contacts")] },
+  "/app/sales-team": { modules: ["crm", "revenue"], cite: ["unscoped:modules/conversion/conversion.controller.ts#GET businesses/:businessId/sales-reps", "data:modules/conversion/sales-team.service.ts:revenue revenueAttributed, the PAID invoice totals per rep (security review: the route itself carries no scope)", "hub:customers", "tracked:modules/conversion/sales-team.service.ts:revenue revenueAttributed FU-CONVERSION-REPS-REVENUE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100"] },
   // Sales
-  "/app/commerce/invoices": { modules: ["revenue"], cite: [SRV("commerce/commerce.controller.ts", 706)] },
-  "/app/inventory": { modules: ["revenue"], cite: [SRV("commerce/commerce.controller.ts", 300)] },
-  "/app/commerce/gateway": { modules: ["revenue"], cite: [SRV("payments/payments-ops.controller.ts", 78)] },
+  "/app/commerce/invoices": { modules: ["revenue"], cite: [SRV("commerce/commerce.controller.ts", "GET businesses/:businessId/invoices")] },
+  "/app/inventory": { modules: ["revenue"], cite: [SRV("commerce/commerce.controller.ts", "GET businesses/:businessId/products")] },
+  "/app/commerce/gateway": { modules: ["revenue"], cite: [SRV("payments/payments-ops.controller.ts", "GET gateways")] },
   // Schedule
-  "/app/bookings": { modules: ["bookings"], cite: ["unscoped:modules/bookings/bookings.controller.ts:101", "hub:schedule"] },
-  "/app/temporal-flow": { modules: ["bookings"], cite: ["unscoped:modules/temporal-flow/temporal-flow.controller.ts:34", "hub:schedule", "tracked:modules/temporal-flow/temporal-flow-key-inbox.listener.ts:100:operations Analysis: FU-TEMPORAL-FLOW-INBOX-SCOPE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100"] },
+  "/app/bookings": { modules: ["bookings"], cite: ["unscoped:modules/bookings/bookings.controller.ts#GET businesses/:businessId", "hub:schedule"] },
+  "/app/temporal-flow": { modules: ["bookings"], cite: ["unscoped:modules/temporal-flow/temporal-flow.controller.ts#GET ", "hub:schedule", "tracked:modules/temporal-flow/temporal-flow-key-inbox.listener.ts:operations Analysis: FU-TEMPORAL-FLOW-INBOX-SCOPE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100"] },
   // Money
-  "/app/payments": { modules: ["revenue"], cite: [SRV("payments/payments-ops.controller.ts", 90)] },
-  "/app/money/expenses": { modules: ["expenses"], cite: [SRV("expenses/expenses.controller.ts", 20)] },
-  "/app/procurement": { modules: ["operations"], cite: [SRV("procurement/procurement.controller.ts", 30)] },
-  "/app/retainers": { modules: ["revenue"], cite: ["unscoped:modules/retainers/retainer.controller.ts:151", "hub:money"] },
-  "/app/budgeting": { modules: ["expenses"], cite: [SRV("expenses/expenses.controller.ts", 243)] },
-  "/app/payroll": { modules: ["operations"], cite: [SRV("payroll/payroll.controller.ts", 22)] },
-  "/app/reports": { modules: ["revenue", "analytics"], cite: [SRV("reports/reports.controller.ts", 56), "D-179:analytics"] },
-  "/app/finance/settings": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 611)] },
-  "/app/finance/reconciliation": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 466)] },
-  "/app/finance/tax": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 1101)] },
-  "/app/finance/accounting-periods": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 1575)] },
-  "/app/finance/ledger": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 236)] },
-  "/app/finance/journal": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 191)] },
-  "/app/finance/trial-balance": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 265)] },
-  "/app/finance/recurring-journals": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 756)] },
-  "/app/finance/fixed-assets": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 1742)] },
-  "/app/finance/bank-rules": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 662)] },
-  "/app/finance/credit-notes": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", 1493)] },
-  "/app/finance/exchange-rates": { modules: ["revenue"], cite: ["unscoped:modules/finance/finance.controller.ts:1698", "hub:money"] },
-  "/app/money/books": { modules: ["revenue"], cite: [SRV("commerce/accounting.controller.ts", 61)] },
+  "/app/payments": { modules: ["revenue"], cite: [SRV("payments/payments-ops.controller.ts", "GET transactions")] },
+  "/app/money/expenses": { modules: ["expenses"], cite: [SRV("expenses/expenses.controller.ts", "GET businesses/:businessId/expenses")] },
+  "/app/procurement": { modules: ["operations"], cite: [SRV("procurement/procurement.controller.ts", "GET businesses/:businessId")] },
+  "/app/retainers": { modules: ["revenue"], cite: ["unscoped:modules/retainers/retainer.controller.ts#GET businesses/:businessId", "hub:money"] },
+  "/app/budgeting": { modules: ["expenses"], cite: [SRV("expenses/expenses.controller.ts", "GET businesses/:businessId/expense-budgets")] },
+  "/app/payroll": { modules: ["operations"], cite: [SRV("payroll/payroll.controller.ts", "GET rates")] },
+  "/app/reports": { modules: ["revenue", "analytics"], cite: [SRV("reports/reports.controller.ts", "GET businesses/:businessId/reports/generate"), "D-179:analytics"] },
+  "/app/finance/settings": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET settings")] },
+  "/app/finance/reconciliation": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET accounts")] },
+  "/app/finance/tax": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET tax-liabilities")] },
+  "/app/finance/accounting-periods": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET accounting-periods")] },
+  "/app/finance/ledger": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET general-ledger")] },
+  "/app/finance/journal": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET journal-entries")] },
+  "/app/finance/trial-balance": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET trial-balance")] },
+  "/app/finance/recurring-journals": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET recurring-journal-entries")] },
+  "/app/finance/fixed-assets": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET fixed-assets")] },
+  "/app/finance/bank-rules": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET bank-rules")] },
+  "/app/finance/credit-notes": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET credit-notes")] },
+  "/app/finance/exchange-rates": { modules: ["revenue"], cite: ["unscoped:modules/finance/finance.controller.ts#GET exchange-rates", "hub:money"] },
+  "/app/money/books": { modules: ["revenue"], cite: [SRV("commerce/accounting.controller.ts", "GET businesses/:businessId/summary")] },
   // Your page
   // Its overview (unscoped) answers kpis.revenue: every PAID invoice in the period plus store orders (security review
   // round 2), so it needs revenue as well as the hub's storefront.
-  "/app/presence": { modules: ["storefront", "revenue"], cite: ["unscoped:modules/site/presence/presence.controller.ts:79", "data:modules/site/presence/presence-overview.service.ts:254:revenue invoicesRevenue, the PAID invoice totals in kpis.revenue", "hub:page", "tracked:modules/site/presence/presence-overview.service.ts:254:revenue invoicesRevenue FU-PRESENCE-REVENUE-SCOPE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100 (also the leads tab contact email and phone)"] },
-  "/app/portal": { modules: ["storefront"], cite: ["unscoped:modules/portal/portal.controller.ts:29", "hub:page"] },
+  "/app/presence": { modules: ["storefront", "revenue"], cite: ["unscoped:modules/site/presence/presence.controller.ts#GET businesses/:businessId/overview", "data:modules/site/presence/presence-overview.service.ts:revenue invoicesRevenue, the PAID invoice totals in kpis.revenue", "hub:page", "tracked:modules/site/presence/presence-overview.service.ts:revenue invoicesRevenue FU-PRESENCE-REVENUE-SCOPE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100 (also the leads tab contact email and phone)"] },
+  "/app/portal": { modules: ["storefront"], cite: ["unscoped:modules/portal/portal.controller.ts#GET businesses/:businessId/access", "hub:page"] },
   // Settings
-  "/app/profile": { modules: ["settings"], cite: ["unscoped:modules/identity/identity.controller.ts:858", "hub:settings"] },
-  "/app/genome": { modules: ["settings"], cite: ["unscoped:modules/business-genome/key-genome/key-genome.controller.ts:248", "hub:settings"] },
-  "/app/settings/billing": { modules: ["settings"], cite: ["unscoped:modules/subscriptions/subscriptions.controller.ts:36", "hub:settings"] },
-  "/app/settings/team": { modules: ["team"], cite: [SRV("identity/identity.controller.ts", 1255)] },
-  "/app/structure": { modules: ["team"], cite: [SRV("structure/structure.controller.ts", 180)] },
-  "/app/settings/ai": { modules: ["operations"], cite: [SRV("ai/ai-settings.controller.ts", 33)] },
-  "/app/settings/compliance": { modules: ["settings"], cite: ["unscoped:modules/communications/omnichannel.controller.ts:253", "hub:settings"] },
-  "/app/settings/developers": { modules: ["settings"], cite: [SRV("api-keys/api-keys.controller.ts", 25)] },
-  "/app/key-connect": { modules: ["settings"], cite: ["unscoped:core/connectors/connector.controller.ts:156", "hub:settings"] },
-  "/app/templates": { modules: ["settings"], cite: ["unscoped:modules/templates/templates.controller.ts:13", "hub:settings"] },
-  "/app/trash": { modules: ["settings"], cite: ["hub:settings", "service-check:modules/trash/trash.controller.ts:325"] },
+  "/app/profile": { modules: ["settings"], cite: ["unscoped:modules/identity/identity.controller.ts#GET businesses/:businessId", "hub:settings"] },
+  "/app/genome": { modules: ["settings"], cite: ["unscoped:modules/business-genome/key-genome/key-genome.controller.ts#GET recommendations", "hub:settings"] },
+  "/app/settings/billing": { modules: ["settings"], cite: ["unscoped:modules/subscriptions/subscriptions.controller.ts#GET businesses/:businessId/billing-dashboard", "hub:settings"] },
+  "/app/settings/team": { modules: ["team"], cite: [SRV("identity/identity.controller.ts", "GET businesses/:businessId/team/dashboard")] },
+  "/app/structure": { modules: ["team"], cite: [SRV("structure/structure.controller.ts", "GET businesses/:businessId/stats")] },
+  "/app/settings/ai": { modules: ["operations"], cite: [SRV("ai/ai-settings.controller.ts", "GET businesses/:businessId/ai/settings/workload-config")] },
+  "/app/settings/compliance": { modules: ["settings"], cite: ["unscoped:modules/communications/omnichannel.controller.ts#GET consent", "hub:settings"] },
+  "/app/settings/developers": { modules: ["settings"], cite: [SRV("api-keys/api-keys.controller.ts", "GET ")] },
+  "/app/key-connect": { modules: ["settings"], cite: ["unscoped:core/connectors/connector.controller.ts#GET businesses/:businessId/dashboard", "hub:settings"] },
+  "/app/templates": { modules: ["settings"], cite: ["unscoped:modules/templates/templates.controller.ts#GET templates", "hub:settings"] },
+  "/app/trash": { modules: ["settings"], cite: ["hub:settings", "service-check:modules/trash/trash.controller.ts#GET "] },
   // KEY
-  "/app/key/chat": { modules: [], cite: ["unscoped:modules/ai/flow.controller.ts:99"] },
-  "/app/key-inbox": { modules: ["operations"], cite: [SRV("key-inbox/key-inbox.controller.ts", 125)] },
-  "/app/key": { modules: [], cite: ["unscoped:modules/ai/ai.controller.ts:1643"] },
-  "/app/key-autonomy": { modules: [], cite: ["unscoped:modules/key-autonomy/key-action-proposal.controller.ts:36", "tracked:modules/key-autonomy/genome-recommendation-action-bridge.service.ts:141:revenue rationale FU-KEY-ACTION-GENOME-PROJECTION pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100"] },
-  "/app/key-modes": { modules: [], cite: ["unscoped:modules/intelligence/key-executive-mode.controller.ts:14"] },
-  "/app/data-inbox": { modules: ["operations"], cite: [SRV("ingestion/data-inbox.controller.ts", 23)] },
-  "/app/capture": { modules: [], cite: ["unscoped:modules/device/device.controller.ts:48"] },
+  "/app/key/chat": { modules: [], cite: ["unscoped:modules/ai/flow.controller.ts#GET businesses/:businessId/flow/sessions"] },
+  "/app/key-inbox": { modules: ["operations"], cite: [SRV("key-inbox/key-inbox.controller.ts", "GET threads")] },
+  "/app/key": { modules: [], cite: ["unscoped:modules/ai/ai.controller.ts#GET businesses/:businessId/key/commands"] },
+  "/app/key-autonomy": { modules: [], cite: ["unscoped:modules/key-autonomy/key-action-proposal.controller.ts#GET proposals", "tracked:modules/key-autonomy/genome-recommendation-action-bridge.service.ts:revenue rationale FU-KEY-ACTION-GENOME-PROJECTION pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100"] },
+  "/app/key-modes": { modules: [], cite: ["unscoped:modules/intelligence/key-executive-mode.controller.ts#GET "] },
+  "/app/data-inbox": { modules: ["operations"], cite: [SRV("ingestion/data-inbox.controller.ts", "GET items")] },
+  "/app/capture": { modules: [], cite: ["unscoped:modules/device/device.controller.ts#GET captures"] },
   // Work
-  "/app/work/projects": { modules: ["projects"], cite: [SRV("projects/projects.controller.ts", 43)] },
+  "/app/work/projects": { modules: ["projects"], cite: [SRV("projects/projects.controller.ts", "GET businesses/:businessId")] },
   // The manual tab's reads are unscoped; D-179 keeps this operations surface (its KEY tab reads ai-approvals,
   // operations) out of a menu without operations (orchestrator acceptance M1).
-  "/app/approvals": { modules: ["operations"], cite: ["unscoped:modules/approvals/approval.controller.ts:67", SRV("ai/ai-approvals.controller.ts", 54), "D-179:operations"] },
-  "/app/performance": { modules: ["operations"], cite: [SRV("staff-performance/staff-performance.controller.ts", 30)] },
+  "/app/approvals": { modules: ["operations"], cite: ["unscoped:modules/approvals/approval.controller.ts#GET businesses/:businessId/approvals", SRV("ai/ai-approvals.controller.ts", "GET items"), "D-179:operations"] },
+  "/app/performance": { modules: ["operations"], cite: [SRV("staff-performance/staff-performance.controller.ts", "GET team-summary")] },
   // Its time-entry reads are unscoped; every entry is logged against a project, read through the projects picker.
-  "/app/time-tracking": { modules: ["projects"], cite: ["unscoped:modules/time-tracking/time-entry.controller.ts:174", SRV("projects/projects.controller.ts", 43)] },
-  "/app/operations": { modules: ["operations"], cite: ["unscoped:modules/content-ops/content-ops.controller.ts:68", "D-179:operations"] },
-  "/app/operations-flow": { modules: ["operations"], cite: ["unscoped:modules/sop/sop.controller.ts:13", "D-179:operations"] },
+  "/app/time-tracking": { modules: ["projects"], cite: ["unscoped:modules/time-tracking/time-entry.controller.ts#GET businesses/:businessId/running", SRV("projects/projects.controller.ts", "GET businesses/:businessId")] },
+  "/app/operations": { modules: ["operations"], cite: ["unscoped:modules/content-ops/content-ops.controller.ts#GET businesses/:businessId/content-requests", "D-179:operations"] },
+  "/app/operations-flow": { modules: ["operations"], cite: ["unscoped:modules/sop/sop.controller.ts#GET sops", "D-179:operations"] },
   // Its list (unscoped) answers each change order with its project's name, scope, amount and hours: project data, as
   // for Time tracking (security review round 3).
-  "/app/change-orders": { modules: ["projects"], cite: ["unscoped:modules/change-orders/change-order.controller.ts:111", "data:modules/change-orders/change-order.service.ts:84:projects project, the project's id and name on every row"] },
+  "/app/change-orders": { modules: ["projects"], cite: ["unscoped:modules/change-orders/change-order.controller.ts#GET businesses/:businessId", "data:modules/change-orders/change-order.service.ts:projects project, the project's id and name on every row"] },
   // Marketing
-  "/app/communicate/campaigns": { modules: [], cite: ["unscoped:modules/email-marketing/email-marketing.controller.ts:18"] },
-  "/app/marketing/lists": { modules: ["content"], cite: [SRV("email-marketing/marketing-sync.controller.ts", 53)] },
-  "/app/marketing/case-studies": { modules: ["revenue"], cite: ["unscoped:modules/site/site.controller.ts:688", "data:modules/site/case-study.service.ts:155:revenue recentRevenue, stored in metrics and answered by the list read", "tracked:modules/site/case-study.service.ts:155:revenue recentRevenue FU-CASE-STUDY-REVENUE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100"] },
-  "/app/content-ops": { modules: [], cite: ["unscoped:modules/content-ops/content-ops.controller.ts:68"] },
-  "/app/social": { modules: [], cite: ["unscoped:modules/social/social.controller.ts:325"] },
-  "/app/seo": { modules: [], cite: ["unscoped:modules/seo/seo.controller.ts:71"] },
-  "/app/events": { modules: [], cite: ["unscoped:modules/events/events.controller.ts:41"] },
-  "/app/whatsapp": { modules: ["operations"], cite: [SRV("whatsapp/whatsapp.controller.ts", 166)] },
-  "/app/marketing-flow": { modules: [], cite: ["unscoped:modules/marketing/marketing.controller.ts:13"] },
+  "/app/communicate/campaigns": { modules: [], cite: ["unscoped:modules/email-marketing/email-marketing.controller.ts#GET businesses/:businessId/campaigns"] },
+  "/app/marketing/lists": { modules: ["content"], cite: [SRV("email-marketing/marketing-sync.controller.ts", "GET businesses/:businessId/lists")] },
+  "/app/marketing/case-studies": { modules: ["revenue"], cite: ["unscoped:modules/site/site.controller.ts#GET businesses/:businessId/case-studies", "data:modules/site/case-study.service.ts:revenue recentRevenue, stored in metrics and answered by the list read", "tracked:modules/site/case-study.service.ts:revenue recentRevenue FU-CASE-STUDY-REVENUE pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100"] },
+  "/app/content-ops": { modules: [], cite: ["unscoped:modules/content-ops/content-ops.controller.ts#GET businesses/:businessId/content-requests"] },
+  "/app/social": { modules: [], cite: ["unscoped:modules/social/social.controller.ts#GET businesses/:businessId/connections"] },
+  "/app/seo": { modules: [], cite: ["unscoped:modules/seo/seo.controller.ts#GET businesses/:businessId/dashboard"] },
+  "/app/events": { modules: [], cite: ["unscoped:modules/events/events.controller.ts#GET businesses/:businessId/events"] },
+  "/app/whatsapp": { modules: ["operations"], cite: [SRV("whatsapp/whatsapp.controller.ts", "GET businesses/:businessId/status")] },
+  "/app/marketing-flow": { modules: [], cite: ["unscoped:modules/marketing/marketing.controller.ts#GET campaigns"] },
   // Legal
-  "/app/evidence": { modules: [], cite: ["unscoped:modules/evidence/evidence.controller.ts:53"] },
-  "/app/contracts": { modules: ["operations"], cite: [SRV("contracts/contracts.controller.ts", 28)] },
-  "/app/legal": { modules: [], cite: ["unscoped:modules/blueprint/blueprint.controller.ts:14"] },
+  "/app/evidence": { modules: [], cite: ["unscoped:modules/evidence/evidence.controller.ts#GET businesses/:businessId/evidence"] },
+  "/app/contracts": { modules: ["operations"], cite: [SRV("contracts/contracts.controller.ts", "GET ")] },
+  "/app/legal": { modules: [], cite: ["unscoped:modules/blueprint/blueprint.controller.ts#GET "] },
   // Strategy
-  "/app/intelligence": { modules: [], cite: ["unscoped:modules/intelligence/business-intelligence.controller.ts:14"] },
-  "/app/goals": { modules: [], cite: ["unscoped:modules/key-cortex/key-cortex-goals.controller.ts:233"] },
-  "/app/market": { modules: [], cite: ["unscoped:modules/business-genesis/business-genesis.controller.ts:99"] },
+  "/app/intelligence": { modules: [], cite: ["unscoped:modules/intelligence/business-intelligence.controller.ts#GET executive-brief"] },
+  "/app/goals": { modules: [], cite: ["unscoped:modules/key-cortex/key-cortex-goals.controller.ts#GET goals"] },
+  "/app/market": { modules: [], cite: ["unscoped:modules/business-genesis/business-genesis.controller.ts#GET market-strategy"] },
   // Automate
-  "/app/flows": { modules: ["automations"], cite: [SRV("flow/flow.controller.ts", 206)] },
-  "/app/automations": { modules: [], cite: ["unscoped:modules/automation/automation.controller.ts:30"] },
-  "/app/key-flows": { modules: [], cite: ["unscoped:modules/flow-signal/flow-signal-role.controller.ts:14"] },
-  "/app/assets": { modules: ["content"], cite: [SRV("assets/asset.controller.ts", 48)] },
+  "/app/flows": { modules: ["automations"], cite: [SRV("flow/flow.controller.ts", "GET businesses/:businessId/flows")] },
+  "/app/automations": { modules: [], cite: ["unscoped:modules/automation/automation.controller.ts#GET businesses/:businessId/playbooks"] },
+  "/app/key-flows": { modules: [], cite: ["unscoped:modules/flow-signal/flow-signal-role.controller.ts#FlowSignalRoleController GET roles"] },
+  "/app/assets": { modules: ["content"], cite: [SRV("assets/asset.controller.ts", "GET businesses/:businessId/assets")] },
 };
 
 describe("NAV-A1 acceptance M1: every nav entry needs what its page's server reads need", () => {
@@ -384,48 +385,75 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
         // real comments are removed (final security review).
         .replace(/('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`)|\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, (_m, str: string | undefined) => str ?? "");
     };
-    const at = (file: string, line: number) => {
-      const lines = fs.readFileSync(path.join(SERVER_SRC, file), "utf8").split("\n");
-      return { lines, i: line - 1 };
+    const source = (file: string) => fs.readFileSync(path.join(SERVER_SRC, file), "utf8");
+    /**
+     * Locates a route by what it declares, not by line (wave 3f: merged packets moved the lines): the @Get whose
+     * argument is exactly `route` (an empty route is @Get()), inside the controller class `cls` when one is named.
+     * Exactly one must exist: a missing or an ambiguous route is a failure.
+     */
+    const ROUTE = /^((?:modules|core)\/[^#]+\.ts)#(?:([A-Za-z0-9_]+) )?GET (.*)$/;
+    const findRoute = (file: string, cls: string | undefined, route: string): { lines: string[]; i: number } | string => {
+      const lines = source(file).split("\n");
+      let from = 0;
+      let to = lines.length;
+      if (cls) {
+        from = lines.findIndex((l) => new RegExp(`\\bclass ${cls}\\b`).test(l));
+        if (from < 0) return `no class ${cls}`;
+        const next = lines.findIndex((l, i) => i > from && /^\s*export\s+class\s/.test(l));
+        to = next < 0 ? lines.length : next;
+      }
+      const q = route.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const get = route === "" ? /@Get\(\s*\)/ : new RegExp(`@Get\\(\\s*(['"\`])${q}\\1\\s*\\)`);
+      const hits: number[] = [];
+      for (let i = from; i < to; i++) if (get.test(lines[i])) hits.push(i);
+      if (hits.length === 0) return "no such route";
+      if (hits.length > 1) return `ambiguous route (${hits.length} @Get) — name its controller class`;
+      return { lines, i: hits[0] };
     };
+    /** The module scopes on the route's own decorator block. */
+    const scopesOf = (lines: string[], i: number) =>
+      [...decorators(lines, i).matchAll(/RequireModuleScope\(\s*'([a-z]+)'/g)].map((x) => x[1]);
+    /** An identifier the claim names must occur in the file as code (a whole word). */
+    const hasIdentifier = (file: string, id: string) =>
+      new RegExp(`(^|[^A-Za-z0-9_$])${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^A-Za-z0-9_$]|$)`).test(source(file));
     const bad: string[] = [];
     for (const [href, row] of Object.entries(MODULE_TABLE)) {
       if (row.cite.length === 0) bad.push(`${href}: no reason`);
       const justified = new Set<string>();
       for (const cite of row.cite) {
         let m: RegExpExecArray | null;
-        if ((m = /^((?:modules|core)\/[^:]+\.ts):(\d+)$/.exec(cite))) {
-          const { lines, i } = at(m[1], Number(m[2]));
-          if (!/@Get\(/.test(lines[i] ?? "")) bad.push(`${href}: ${cite} is not a @Get`);
-          const scoped = [...decorators(lines, i).matchAll(/RequireModuleScope\(\s*'([a-z]+)'/g)].map((x) => x[1]);
+        if ((m = ROUTE.exec(cite))) {
+          const found = findRoute(m[1], m[2], m[3]);
+          if (typeof found === "string") {
+            bad.push(`${href}: ${cite}: ${found}`);
+            continue;
+          }
+          const scoped = scopesOf(found.lines, found.i);
           if (scoped.length === 0 || !scoped.every((mod) => row.modules.includes(mod))) bad.push(`${href}: ${cite} scopes ${JSON.stringify(scoped)}`);
           scoped.forEach((mod) => justified.add(mod));
-        } else if ((m = /^unscoped:((?:modules|core)\/[^:]+\.ts):(\d+)$/.exec(cite))) {
-          const { lines, i } = at(m[1], Number(m[2]));
-          if (!/@Get\(/.test(lines[i] ?? "")) bad.push(`${href}: ${cite} is not a @Get`);
-          if (/RequireModuleScope\(/.test(decorators(lines, i))) bad.push(`${href}: ${cite} is scoped`);
+        } else if (cite.startsWith("unscoped:") && (m = ROUTE.exec(cite.slice("unscoped:".length)))) {
+          const found = findRoute(m[1], m[2], m[3]);
+          if (typeof found === "string") bad.push(`${href}: ${cite}: ${found}`);
+          else if (/RequireModuleScope\(/.test(decorators(found.lines, found.i))) bad.push(`${href}: ${cite} is scoped`);
         } else if ((m = /^hub:([a-z]+)$/.exec(cite))) {
           const hub = hubNav.find((h) => h.id === m![1]);
           if (!hub || !hub.items.some((item) => item.href === href)) bad.push(`${href}: not in hub ${m[1]}`);
           else if (hub.module) justified.add(hub.module);
-        } else if ((m = /^data:((?:modules|core)\/[^:]+\.ts):(\d+):([a-z]+) /.exec(cite))) {
-          const { lines, i } = at(m[1], Number(m[2]));
-          // The identifier the citation names first must be on that line, so a moved line fails rather than passes.
-          const named = cite.slice(m[0].length).split(/[\s,]/)[0];
-          if (!named || !(lines[i] ?? "").includes(named)) bad.push(`${href}: ${cite}: "${named}" is not on that line`);
-          if (!row.modules.includes(m[3])) bad.push(`${href}: ${cite} names ${m[3]}, which the row lacks`);
-          justified.add(m[3]);
-        } else if ((m = /^tracked:((?:modules|core)\/[^:]+\.ts):(\d+):([a-z]+) (\S+) (FU-[A-Z0-9-]+) (.+)$/.exec(cite))) {
-          // Recorded, not justifying: the identifier is on the line, and the follow-up packet and decision are named.
-          const { lines, i } = at(m[1], Number(m[2]));
-          if (!(lines[i] ?? "").includes(m[4])) bad.push(`${href}: ${cite}: "${m[4]}" is not on that line`);
-          if (!/^pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100/.test(m[6])) bad.push(`${href}: ${cite}: no decision named`);
+        } else if ((m = /^data:((?:modules|core)\/[^:]+\.ts):([a-z]+) ([A-Za-z_$][\w$]*)[\s,]/.exec(cite))) {
+          // The identifier must still be in the file, so a removed field fails rather than passes.
+          if (!hasIdentifier(m[1], m[3])) bad.push(`${href}: ${cite}: "${m[3]}" is not in ${m[1]}`);
+          if (!row.modules.includes(m[2])) bad.push(`${href}: ${cite} names ${m[2]}, which the row lacks`);
+          justified.add(m[2]);
+        } else if ((m = /^tracked:((?:modules|core)\/[^:]+\.ts):([a-z]+) ([A-Za-z_$][\w$]*:?) (FU-[A-Z0-9-]+) (.+)$/.exec(cite))) {
+          // Recorded, not justifying: the identifier is still in the file, and the follow-up packet and decision are named.
+          if (!source(m[1]).includes(m[3])) bad.push(`${href}: ${cite}: "${m[3]}" is not in ${m[1]}`);
+          if (!/^pre-existing server exposure, tracked; nav unchanged by orchestrator decision 2026-11-22 under D-100/.test(m[5])) bad.push(`${href}: ${cite}: no decision named`);
         } else if (cite.startsWith("tracked:")) {
           // A tracked claim that does not parse is never accepted by another branch (closing review).
           bad.push(`${href}: malformed tracked citation ${cite}`);
-        } else if ((m = /^service-check:((?:modules|core)\/[^:]+\.ts):(\d+)$/.exec(cite))) {
-          const { lines, i } = at(m[1], Number(m[2]));
-          if (!/@Get\(/.test(lines[i] ?? "")) bad.push(`${href}: ${cite} is not a @Get`);
+        } else if (cite.startsWith("service-check:") && (m = ROUTE.exec(cite.slice("service-check:".length)))) {
+          const found = findRoute(m[1], m[2], m[3]);
+          if (typeof found === "string") bad.push(`${href}: ${cite}: ${found}`);
         } else if ((m = /^D-\d+:([a-z]+)\b/.exec(cite))) {
           // A ruling justifies only the module it names (security review round 2).
           if (!row.modules.includes(m[1])) bad.push(`${href}: ${cite} names ${m[1]}, which the row lacks`);
