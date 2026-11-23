@@ -45,21 +45,20 @@ joins wave 3e. D-249 to D-254 are on main (wave 3d, #221).
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `6ccb6b4e` (wave 3f, #224, merged 2026-11-23 05:03 UTC). 72 packets done on main; plan 361 (this branch).
+Main is at `040c2a60` (wave 3g, #225, merged 2026-11-23 06:27 UTC). Plan 361 (this branch); see V1-STATUS for done count.
 Workers run on Opus (Fable spent until 2026-11-25 19:00 UTC); hold four. A second Claude account works the RR-* P2/P3
 lane (`docs/development/agent-memory/SECOND-ACCOUNT-SETUP.md`); it claims by pushing `pkt/V1-<ID>` and posts RETURN on
 #80; scan #80 every ~2 h and give each RETURN the two acceptance reviews. Its first claim: RR-SCRIPT-SPECS-IN-CI.
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
-| Wave 3g: PR #225 | `wave/v1-wave-3g` @ 3fc79627 (7 packets + Codex P1 fix RR-UNTRUSTED-CONTENT-FENCE-CODEX-225, confirmed both lenses) | Proven at 3fc79627: 797/797, R0 MET. CI green except Windows proof (running) | Merge under D-239 when CI green |
-| Wave 3h | `wave/v1-wave-3h` @ 09669d8b (stacked on 3g; 6 packets + integration fix 958636d8 for MCP-tenant x fence spec) | Proven at 958636d8 (808/808, R0 MET, web clean); re-proof at 09669d8b running | PR after 3g merges |
-| Wave 3i (next) | FU-KEY-GENOME-READS-RESIDUAL @ 3336ab2a5, MEM-UNIFIED-SEMANTIC-SIGHT @ d8cfafc2 (stacked on MEM-SEMANTIC: apply own delta), MEM-PATTERNS-SIGHT @ 389ac2ca (same; conflicts with UNIFIED only in unified-memory.types.ts and fixture json: keep both), RR-GATEWAY-TYPED-FAILURES @ 33ab461f (+ FU-GATEWAY-STREAM-ERROR-CLASS at integration), RR-BANK-TOKEN-ENCRYPT (after A1 script repair) | Accepted | Build after 3h |
+| Wave 3h: PR #226 | `wave/v1-wave-3h` @ 09669d8b (6 packets + MCP x fence integration fix) | Proven: 808/808, R0 MET, web clean | Merge under D-239 when CI green (check-in 07:49) |
+| Wave 3i | `wave/v1-wave-3i` @ 43586168 (stacked on 3h, 33 files): FU-KEY-ACTION-GENOME-PROJECTION, RR-GATEWAY-TYPED-FAILURES, RR-BANK-TOKEN-ENCRYPT @ 457c0d14, MEM-UNIFIED-SEMANTIC-SIGHT, MEM-PATTERNS-SIGHT (both applied as own delta over MEM-SEMANTIC; types.ts keeps both options) | Proof + assembly review running | PR after 3h merges |
+| Wave 3j (next) | FU-KEY-GENOME-READS-RESIDUAL @ 3336ab2a5 (28 files) + next returns (FU-PATTERNS-ROUTES-SIGHT, MEM-TEMPORAL-MEMORY-ROUTES-SIGHT, FU-GENOME-EVOLUTION-SURFACES, FU-ATTACHMENT-OBJECT-TENANCY) | Accepted / building | Build after 3i |
 | FU-ATTACHMENT-OBJECT-TENANCY (P0, security) | session_017o9EBhe1oanHeGuPsPEcQv | Verifying suspected cross-tenant object read via client objectPath | Acceptance review; land ASAP |
-| RR-BANK-TOKEN-ENCRYPT | session_017o9EBdeAPCJoxrnvjWpV8w | ACCEPTED at db868fa7; script A1 (wrong-key sealing) repair | Confirm, then 3i |
-| FU-PATTERNS-ROUTES-SIGHT (P0, new) | session_017o9EBeafoWPQry9ggXEDDK (on MEM-PATTERNS) | Building: /ai/memory/context, /agent/patterns, /ai/memory | Acceptance review |
+| FU-PATTERNS-ROUTES-SIGHT (P0, new) | session_017o9EBeafoWPQry9ggXEDDK (on MEM-PATTERNS) | Building option A (writer bounds + ai_memories index migration, approved) | Acceptance review |
 | MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (P0) | session_017o9EBea375ryCZG7k6cSZh (on wave 3h) | Building (option B, Q24) | Acceptance review |
-| FU-KEY-ACTION-GENOME-PROJECTION (P1) | session_017o9EBfKdTMK1cKeLRzg5q6 | Building | Acceptance review |
+| FU-GENOME-EVOLUTION-SURFACES (P0, new) | session_017o9EBfKdTMK1cKeLRzg5q6 (on KEY-ACTION branch) | Building: evolution-proposals routes, command-center GENOME_PROPOSAL, cortex audit decisions | Acceptance review |
 | FU-VITEST-DECORATOR-METADATA | session_017o9EBevZsyK5zcP7bWPk8g @ 83b6dfc8 | STOPPED on owner Q20 | Owner ruling |
 | Second lane | other account | RR-REDACTION-BY-CONTENT REJECTED (JWT ReDoS) repairing; RR-EVAL-HARNESS-NO-VACUOUS building | Review RETURNs on #80 |
 

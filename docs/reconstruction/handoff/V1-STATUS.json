@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "9fcfeab4ed93287de5405a449fd3595e7e40c7a7",
-  "main_commit_date": "2026-11-23T05:04:06+00:00",
+  "main_sha": "0b233a098484b2b7cf4c0c36b82ade18743fef86",
+  "main_commit_date": "2026-11-23T06:28:24+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 527.5,
   "by_status": {
    "done": {
-    "packets": 72,
-    "points": 110.5,
-    "pct_by_points": 20.9
+    "packets": 79,
+    "points": 118.5,
+    "pct_by_points": 22.5
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 289,
-    "points": 417,
-    "pct_by_points": 79.1
+    "packets": 282,
+    "points": 409,
+    "pct_by_points": 77.5
    }
   },
   "by_step": {
@@ -66,9 +66,9 @@
     "total": 7
    },
    "3": {
-    "done": 48,
+    "done": 53,
     "in-progress": 0,
-    "todo": 99,
+    "todo": 94,
     "total": 147
    },
    "4": {
@@ -78,9 +78,9 @@
     "total": 52
    },
    "5": {
-    "done": 4,
+    "done": 6,
     "in-progress": 0,
-    "todo": 67,
+    "todo": 65,
     "total": 71
    },
    "6": {
@@ -106,8 +106,8 @@
    "prior-status-file": 150,
    "prior-status-file+wave-2b-commit": 28,
    "code-commit-subject": 9,
-   "compacted-commit": 16,
-   "no-evidence": 158
+   "compacted-commit": 23,
+   "no-evidence": 151
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -120,7 +120,7 @@
    "FU-WA-ESCAPE-RACE",
    "FU-PROPOSAL-REVENUE-SIGHT"
   ],
-  "todo_with_dependencies_met": 113
+  "todo_with_dependencies_met": 122
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -308,15 +308,6 @@
    "unblocks": 9
   },
   {
-   "id": "RR-SCRIPT-SPECS-IN-CI",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "gate",
-   "on_critical_path": false,
-   "unblocks": 9
-  },
-  {
    "id": "MEM-CENSUS",
    "step": 3,
    "priority": "P1",
@@ -398,15 +389,6 @@
    "unblocks": 3
   },
   {
-   "id": "MEM-SALIENCE-SIGHT",
-   "step": 3,
-   "priority": "P0",
-   "size": "S",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 3
-  },
-  {
    "id": "FU-PROPOSAL-MONEY-TAG",
    "step": 3,
    "priority": "P1",
@@ -423,15 +405,6 @@
    "lane": "server",
    "on_critical_path": false,
    "unblocks": 3
-  },
-  {
-   "id": "FU-PAY-LINK-STATUS-GATE",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 2
   },
   {
    "id": "FU-TEMPORAL-FLOW-INBOX-SCOPE",
@@ -461,24 +434,6 @@
    "unblocks": 2
   },
   {
-   "id": "RR-STREAM-ERROR-NO-EFFECTS",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 2
-  },
-  {
-   "id": "RR-UNTRUSTED-CONTENT-FENCE",
-   "step": 3,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 2
-  },
-  {
    "id": "RR-GATEWAY-TYPED-FAILURES",
    "step": 3,
    "priority": "P2",
@@ -504,15 +459,6 @@
    "lane": "server",
    "on_critical_path": false,
    "unblocks": 2
-  },
-  {
-   "id": "MEM-TEMPORAL-SCOPE",
-   "step": 3,
-   "priority": "P0",
-   "size": "S",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 1
   },
   {
    "id": "FU-NAV-A1-CODEX-224",
@@ -623,15 +569,6 @@
    "unblocks": 1
   },
   {
-   "id": "FU-FINANCE-INTEL-DOORS",
-   "step": 5,
-   "priority": "P0",
-   "size": "S",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-GENOME-SURFACES-REVENUE",
    "step": 3,
    "priority": "P0",
@@ -669,6 +606,15 @@
   },
   {
    "id": "FU-DOC-FETCH-BODY-CAP",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-FLOW-SAVE-EXECUTED-TOOL-TURN",
    "step": 5,
    "priority": "P1",
    "size": "S",
@@ -767,6 +713,15 @@
    "unblocks": 0
   },
   {
+   "id": "FU-UNTRUSTED-INBOUND-FENCE",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "MEM-EXPIRED-NOT-SERVED",
    "step": 3,
    "priority": "P1",
@@ -830,6 +785,15 @@
    "unblocks": 0
   },
   {
+   "id": "FU-ATTACHMENT-PERSIST-SEPARATE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "both",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-CASE-STUDY-REVENUE",
    "step": 5,
    "priority": "P2",
@@ -866,6 +830,15 @@
    "unblocks": 0
   },
   {
+   "id": "FU-KEY-SEND-INVOICE-PAID-REFUSE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-LEDGER-ZONED-FROM",
    "step": 5,
    "priority": "P2",
@@ -889,6 +862,15 @@
    "priority": "P2",
    "size": "S",
    "lane": "gate",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-OPENAI-FINISH-REASON",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -947,7 +929,25 @@
    "unblocks": 0
   },
   {
+   "id": "FU-WEB-PAYLINK-STATUS-BUTTONS",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "MEM-CONSOLIDATION-CHECKPOINT",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "MEM-TEMPORAL-EMBED-DEDUP",
    "step": 5,
    "priority": "P2",
    "size": "S",
@@ -965,11 +965,29 @@
    "unblocks": 0
   },
   {
+   "id": "RR-CI-REQUIRED-JOBS-AGGREGATE",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "RR-CORTEX-TYPED-RESULT",
    "step": 3,
    "priority": "P2",
    "size": "S",
    "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-GATE-LEDGER-MONOTONIC",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -1064,6 +1082,24 @@
    "unblocks": 0
   },
   {
+   "id": "RR-BUNDLE-PROOF-PROFILE",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "docs",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-BUNDLE-RULING-CONFLICTS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "docs",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "RR-COG-RUNTIME-ENTRY-CENSUS",
    "step": 3,
    "priority": "P3",
@@ -1118,11 +1154,38 @@
    "unblocks": 0
   },
   {
+   "id": "RR-GATE-LEDGER-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "RR-GOAL-WRITER-CENSUS",
    "step": 3,
    "priority": "P3",
    "size": "S",
    "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-HOOK-PACKET-SCOPE",
+   "step": 3,
+   "priority": "P3",
+   "size": "M",
+   "lane": "gate",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-HOTSPOT-SCANNER",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "docs",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -1174,6 +1237,24 @@
   {
    "id": "RR-SLO-AVAILABILITY-LEDGER",
    "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-STATUS-REVIEW-CYCLES",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "docs",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-STATUS-STALL-REPORT",
+   "step": 3,
    "priority": "P3",
    "size": "S",
    "lane": "gate",
@@ -4989,13 +5070,15 @@
    "priority": "P0",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "aa0e3249"
+   ],
    "depends_on": [],
    "title": "Temporal-flow memory updates and tags only touch the caller's business; the unscoped semantic delete is scoped",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "MEM-EXPIRED-NOT-SERVED",
@@ -5050,13 +5133,15 @@
    "priority": "P0",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "6d788425"
+   ],
    "depends_on": [],
    "title": "The salience feed in every chat prompt omits money-derived signals for readers without revenue read",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "MEM-CLASS-COLUMNS",
@@ -5125,7 +5210,7 @@
     "FU-MEMORY-COPIES-REWRITE"
    ],
    "title": "One semantic copy per temporal summary; stale duplicates removed by a dry-run-first command",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "MEM-HONEST-RETRIEVAL",
@@ -5179,13 +5264,15 @@
    "priority": "P0",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "60e9b4a0"
+   ],
    "depends_on": [],
    "title": "Finance intelligence scan, resolve and dismiss require revenue scope (D-258)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-HEALTH-MONEY-SCOPE",
@@ -5327,15 +5414,17 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "ea7e2ac5"
+   ],
    "depends_on": [
     "FU-SEND-REMINDER-SERVER-GATE"
    ],
    "title": "Public pay links are minted only for invoices someone owes",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-REMINDER-HONESTY",
@@ -5423,13 +5512,15 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "5490f971"
+   ],
    "depends_on": [],
    "title": "Document extractions and MCP tool output enter KEY's prompts inside a fenced untrusted-data block that cannot be closed from inside and carries no authority",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-STREAM-ERROR-NO-EFFECTS",
@@ -5437,13 +5528,15 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "9f7fcfc7"
+   ],
    "depends_on": [],
    "title": "A model stream that failed part-way never splices a fallback answer onto it and never runs the tool calls it collected",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-REDACTION-BY-CONTENT",
@@ -6630,13 +6723,15 @@
    "priority": "P2",
    "size": "S",
    "lane": "gate",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "cbb61d04"
+   ],
    "depends_on": [],
    "title": "Every scripts/** node:test spec runs in a workflow, or is exempt with a reason (the agent-memory tests run nowhere today)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-CI-REQUIRED-JOBS-AGGREGATE",
@@ -6652,7 +6747,7 @@
     "RR-SCRIPT-SPECS-IN-CI"
    ],
    "title": "One 'CI verdict' job that is red when any gating CI job failed, was skipped or was cancelled",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-GATE-LEDGER-MONOTONIC",
@@ -6668,7 +6763,7 @@
     "RR-SCRIPT-SPECS-IN-CI"
    ],
    "title": "CI compares every registered shrink-only ledger and floor ratchet between base and head and goes red when one moves the wrong way",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-GATE-LEDGER-CENSUS",
@@ -6684,7 +6779,7 @@
     "RR-SCRIPT-SPECS-IN-CI"
    ],
    "title": "Every file that declares a shrink-only ledger or ratchet is registered in ledger-sizes.mjs, or exempt with a reason",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-BUNDLE-RULING-CONFLICTS",
@@ -6700,7 +6795,7 @@
     "RR-SCRIPT-SPECS-IN-CI"
    ],
    "title": "The context bundle reports rulings that supersede, refine or widen the rulings a packet cites",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-BUNDLE-PROOF-PROFILE",
@@ -6716,7 +6811,7 @@
     "RR-SCRIPT-SPECS-IN-CI"
    ],
    "title": "The context bundle attaches the matching research proof profile (fastest falsification, adversarial cases) by recorded rules, or says none matched",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-HOTSPOT-SCANNER",
@@ -6732,7 +6827,7 @@
     "RR-SCRIPT-SPECS-IN-CI"
    ],
    "title": "Offline git-history hotspots (churn, fix density, co-change) computed per packet write set and shown in the bundle",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-STATUS-REVIEW-CYCLES",
@@ -6748,7 +6843,7 @@
     "RR-SCRIPT-SPECS-IN-CI"
    ],
    "title": "V1-STATUS counts the review-repair and post-merge fix commits each packet needed, as far as main shows them",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-HOOK-PACKET-SCOPE",
@@ -6764,7 +6859,7 @@
     "RR-SCRIPT-SPECS-IN-CI"
    ],
    "title": "Edits outside a packet's write set are flagged at edit time on pkt/V1-* branches, and a scope report lists them for the merge check",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-INDEX-COVERAGE-REPORT",
@@ -6810,7 +6905,7 @@
     "RR-SCRIPT-SPECS-IN-CI"
    ],
    "title": "V1-STATUS reports packets that have been ready for longer than a budget without landing (stall signal from main alone)",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-OAUTH-PKCE-GOOGLE-MICROSOFT",
@@ -6904,7 +6999,7 @@
     "RR-UNTRUSTED-CONTENT-FENCE"
    ],
    "title": "Customer messages (email, WhatsApp, CRM) reach KEY's prompts only inside the untrusted-content fence",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-STORE-ORDERS-MONEY-SCOPE",
@@ -6936,7 +7031,7 @@
     "RR-UNTRUSTED-CONTENT-FENCE"
    ],
    "title": "Chat attachments are saved apart from the member's own text and replayed as their own fenced message",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "MEM-PATTERNS-SIGHT",
@@ -7001,7 +7096,7 @@
     "RR-STREAM-ERROR-NO-EFFECTS"
    ],
    "title": "A failed flow follow-up stream still saves the tool turn that already ran",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-OPENAI-FINISH-REASON",
@@ -7017,7 +7112,7 @@
     "RR-STREAM-ERROR-NO-EFFECTS"
    ],
    "title": "OpenAI-compatible stream adapters treat a close without a finish reason as a failure",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-CONTACTID-WRITER-VALIDATION",
@@ -7157,7 +7252,7 @@
     "FU-PAY-LINK-STATUS-GATE"
    ],
    "title": "Invoice panel offers pay-link copy and WhatsApp share only for payable invoices",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-KEY-SEND-INVOICE-PAID-REFUSE",
@@ -7173,7 +7268,7 @@
     "FU-PAY-LINK-STATUS-GATE"
    ],
    "title": "KEY's send-invoice refuses a PAID or deleted invoice before emailing",
-   "deps_met": false
+   "deps_met": true
   }
  ]
 }
