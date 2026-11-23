@@ -20,7 +20,7 @@ import {
 } from './graph-actions.controller';
 import { AiMemoryService, MemoryCategory, summaryPatternKey } from './ai-memory.service';
 import { aiMemoryRowVisibleTo, type SemanticReader } from './semantic-memory-sight';
-import { dashboardFor, fieldsSightNeeds, insightNeeds, readerHolds } from './insight-sight';
+import { dashboardFor, fieldsSightNeeds, insightNeeds, keepWithinBudget, readerHolds } from './insight-sight';
 import { isFinancialProposal } from '../business-genome/key-genome/genome-finance-scope';
 import { readersModuleSight, readsDocumentExtractions } from '../key-cortex/key-cortex-prompt-context.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
@@ -127,6 +127,11 @@ function interviewSightOf(documentExtractions: boolean, who: SemanticReader) {
 
 /** FU-INSIGHTS-SIGHT (security review round 1, ISS-1): the most pending approval items the control tower reads to filter. */
 const PENDING_APPROVALS_READ_MAX = 500;
+/**
+ * FU-INSIGHTS-SIGHT (security review round 6, ISS-R6-1): the most characters of approval-item text one control-tower
+ * request classifies for a partial reader; items past it are withheld unclassified and not counted (keepWithinBudget).
+ */
+const APPROVALS_CLASSIFY_BUDGET = 1_000_000;
 
 function assertMemoryCategoryAllowed(category: string): void {
   if (RESERVED_MEMORY_CATEGORIES.has(category)) {
@@ -1108,7 +1113,16 @@ export class AiController {
     const entries = category
       ? await this.memory.getByCategory(businessId, category as MemoryCategory)
       : await this.memory.getAll(businessId);
-    return { memories: entries.filter((row) => aiMemoryRowVisibleTo(row, who)) };
+    // FU-INSIGHTS-SIGHT (security review round 6, OOS-R6-1, transitional): a suggestion row is read here as on
+    // GET .../ai/suggestions, by every reading (fieldsSightNeeds), so a word behind a JSON escape in a row stored before
+    // the stamp is read.
+    return {
+      memories: entries.filter(
+        (row) =>
+          aiMemoryRowVisibleTo(row, who) &&
+          (row.category !== 'suggestion' || readerHolds(who, fieldsSightNeeds([row.key, row.value]))),
+      ),
+    };
   }
 
   // FU-PATTERNS-ROUTES-SIGHT (orchestrator ruling A, security round 3 F-1): each row a member writes is read by every
@@ -1303,14 +1317,15 @@ export class AiController {
         inputPayload: a.inputPayload, payload: a.inputPayload, affectedEntities: a.affectedEntities,
       };
       if (!readerHolds(who, ['revenue']) && isFinancialProposal(proposal)) return false;
-      return readerHolds(who, fieldsSightNeeds([
-        a.title, a.description, a.rationale, a.expectedBenefit, a.risks, a.inputPayload, a.affectedEntities, a.toolName, a.module,
-      ]));
+      return readerHolds(who, fieldsSightNeeds(approvalFields(a)));
     };
+    const approvalFields = (a: (typeof pendingItems)[number]): unknown[] => [
+      a.title, a.description, a.rationale, a.expectedBenefit, a.risks, a.inputPayload, a.affectedEntities, a.toolName, a.module,
+    ];
     const shownApprovals = readsEverything
       ? pendingItems
       : who.reader !== null && who.sight('operations')
-        ? pendingItems.filter(approvalShown)
+        ? keepWithinBudget(pendingItems, (a) => (JSON.stringify(approvalFields(a)) ?? '').length, approvalShown, APPROVALS_CLASSIFY_BUDGET)
         : [];
     const approvals = shownApprovals.slice(0, 20);
     const totalPendingApprovals = readsEverything ? totalPending : shownApprovals.length;

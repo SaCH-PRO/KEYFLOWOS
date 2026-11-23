@@ -91,11 +91,35 @@ export function fieldsSightNeeds(fields: readonly unknown[]): InsightSight[] {
     for (const reading of readingsOf(text)) {
       if (seen.has(reading)) continue;
       seen.add(reading);
-      for (const sight of textSightNeeds(reading)) needs.add(sight);
+      // Security review round 6 (ISS-R6-1): each rule runs only until its sight is found.
+      if (!needs.has('revenue') && textIsMoney(reading)) needs.add('revenue');
+      if (!needs.has('expenses') && textIsExpense(reading)) needs.add('expenses');
       if (needs.size === 2) return ['revenue', 'expenses'];
     }
   }
   return (['revenue', 'expenses'] as const).filter((sight) => needs.has(sight));
+}
+
+/**
+ * Security review round 6 (ISS-R6-1): what one request classifies is bounded as a whole. Items are classified in order
+ * while their sizes fit the budget; the first item that does not fit, and every item after it, is withheld unclassified
+ * (fail closed).
+ */
+export function keepWithinBudget<T>(
+  items: readonly T[],
+  sizeOf: (item: T) => number,
+  keep: (item: T) => boolean,
+  budget: number,
+): T[] {
+  const kept: T[] = [];
+  let spent = 0;
+  for (const item of items) {
+    const size = sizeOf(item);
+    if (spent + size > budget) break;
+    spent += size;
+    if (keep(item)) kept.push(item);
+  }
+  return kept;
 }
 
 /** An insight's needs: its category's (both when the category is unknown) and its text's. */
