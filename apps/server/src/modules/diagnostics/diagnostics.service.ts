@@ -38,6 +38,132 @@ function worstStatus(statuses: CheckStatus[]): CheckStatus {
   return 'pass';
 }
 
+// ---------------------------------------------------------------------------
+// Object-storage posture (RR-OBJECT-STORAGE-POSTURE-CHECK): pure, so the
+// verdict is testable without a client.
+
+/** One read-only bucket call, as it came back. */
+export type PostureProbe =
+  | { call: string; ok: true; value: unknown }
+  | { call: string; ok: false; kind: 'absent' | 'denied' | 'not-implemented' | 'error'; code: string; message: string };
+
+/** Error codes that mean "the bucket has none of this", not "the call is unsupported". */
+const POSTURE_ABSENT_CODES = new Set([
+  'NoSuchPublicAccessBlockConfiguration',
+  'NoSuchBucketPolicy',
+  'ServerSideEncryptionConfigurationNotFoundError',
+]);
+
+/**
+ * Sorts an SDK error into what it says about the provider: the configuration
+ * is absent (a 404 with one of the known codes), the credentials may not read
+ * it (access denied), the provider does not implement the call
+ * (NotImplemented, 501, or any other 4xx), or something else went wrong.
+ */
+export function classifyPostureError(err: unknown): {
+  kind: 'absent' | 'denied' | 'not-implemented' | 'error';
+  code: string;
+  message: string;
+} {
+  const e = (err ?? {}) as { name?: unknown; Code?: unknown; message?: unknown; $metadata?: { httpStatusCode?: unknown } };
+  const code = String(e.name || e.Code || 'Error');
+  const message = typeof e.message === 'string' && e.message ? e.message : code;
+  const http = typeof e.$metadata?.httpStatusCode === 'number' ? e.$metadata.httpStatusCode : undefined;
+  if (POSTURE_ABSENT_CODES.has(code)) return { kind: 'absent', code, message };
+  if (code === 'AccessDenied' || http === 403) return { kind: 'denied', code, message };
+  if (code === 'NotImplemented' || http === 501 || (http !== undefined && http >= 400 && http < 500)) {
+    return { kind: 'not-implemented', code, message };
+  }
+  return { kind: 'error', code, message };
+}
+
+const PUBLIC_ACCESS_BLOCK_FLAGS = ['BlockPublicAcls', 'IgnorePublicAcls', 'BlockPublicPolicy', 'RestrictPublicBuckets'] as const;
+
+/**
+ * The verdict: 'fail' when the bucket policy makes the bucket public; 'pass'
+ * only when public access is fully blocked, the policy is not public (or
+ * there is none) and default encryption is on; otherwise 'warn', with one
+ * line per probe saying what was found or why it could not be judged.
+ */
+export function evaluateStoragePosture(probes: {
+  publicAccessBlock: PostureProbe;
+  policyStatus: PostureProbe;
+  encryption: PostureProbe;
+}): { status: CheckStatus; summary: string; lines: string[] } {
+  const lines: string[] = [];
+  let isPublic = false;
+  let blocked = false;
+  let encrypted = false;
+
+  const unjudged = (p: Extract<PostureProbe, { ok: false }>): string => {
+    switch (p.kind) {
+      case 'denied':
+        return `${p.call}: access denied (grant the diagnostics credentials s3:${p.call})`;
+      case 'not-implemented':
+        return `${p.call}: not implemented by this provider (${p.code}); verify in the provider console`;
+      default:
+        return `${p.call}: ${p.code}: ${p.message}`;
+    }
+  };
+
+  const pab = probes.publicAccessBlock;
+  if (pab.ok) {
+    const cfg = ((pab.value as { PublicAccessBlockConfiguration?: Record<string, unknown> } | undefined)?.PublicAccessBlockConfiguration ?? {});
+    const off = PUBLIC_ACCESS_BLOCK_FLAGS.filter((flag) => cfg[flag] !== true);
+    if (off.length === 0) {
+      blocked = true;
+      lines.push('GetPublicAccessBlock: public access blocked');
+    } else {
+      lines.push(`GetPublicAccessBlock: public access not fully blocked (${off.join(', ')} off)`);
+    }
+  } else if (pab.kind === 'absent') {
+    lines.push('GetPublicAccessBlock: no public access block configured');
+  } else {
+    lines.push(unjudged(pab));
+  }
+
+  const policy = probes.policyStatus;
+  let policyKnownNotPublic = false;
+  if (policy.ok) {
+    if ((policy.value as { PolicyStatus?: { IsPublic?: unknown } } | undefined)?.PolicyStatus?.IsPublic === true) {
+      isPublic = true;
+      lines.push('GetBucketPolicyStatus: the bucket policy makes the bucket PUBLIC');
+    } else {
+      policyKnownNotPublic = true;
+      lines.push('GetBucketPolicyStatus: bucket policy is not public');
+    }
+  } else if (policy.kind === 'absent') {
+    policyKnownNotPublic = true;
+    lines.push('GetBucketPolicyStatus: no bucket policy');
+  } else {
+    lines.push(unjudged(policy));
+  }
+
+  const enc = probes.encryption;
+  if (enc.ok) {
+    const rules = (enc.value as { ServerSideEncryptionConfiguration?: { Rules?: unknown } } | undefined)
+      ?.ServerSideEncryptionConfiguration?.Rules;
+    if (Array.isArray(rules) && rules.length > 0) {
+      encrypted = true;
+      const algo = (rules[0] as { ApplyServerSideEncryptionByDefault?: { SSEAlgorithm?: unknown } } | undefined)
+        ?.ApplyServerSideEncryptionByDefault?.SSEAlgorithm;
+      lines.push(`GetBucketEncryption: default encryption on${algo ? ` (${algo})` : ''}`);
+    } else {
+      lines.push('GetBucketEncryption: no default encryption rule');
+    }
+  } else if (enc.kind === 'absent') {
+    lines.push('GetBucketEncryption: no default encryption configured');
+  } else {
+    lines.push(unjudged(enc));
+  }
+
+  if (isPublic) return { status: 'fail', summary: 'bucket is PUBLIC', lines };
+  if (blocked && policyKnownNotPublic && encrypted) {
+    return { status: 'pass', summary: 'public access blocked, default encryption on', lines };
+  }
+  return { status: 'warn', summary: 'not verified as private and encrypted (see detail)', lines };
+}
+
 @Injectable()
 export class DiagnosticsService {
   private readonly logger = new Logger(DiagnosticsService.name);
@@ -144,9 +270,13 @@ export class DiagnosticsService {
     // Supabase Storage, Wasabi, etc.). Verifies real connectivity.
     if (s3Bucket) {
       try {
-        const { S3Client, HeadBucketCommand } = await import(
-          '@aws-sdk/client-s3'
-        );
+        const {
+          S3Client,
+          HeadBucketCommand,
+          GetPublicAccessBlockCommand,
+          GetBucketPolicyStatusCommand,
+          GetBucketEncryptionCommand,
+        } = await import('@aws-sdk/client-s3');
         const client = new S3Client({
           region: s3Region,
           endpoint: s3Endpoint,
@@ -159,12 +289,38 @@ export class DiagnosticsService {
               : undefined,
         });
         await client.send(new HeadBucketCommand({ Bucket: s3Bucket }));
+
+        // RR-OBJECT-STORAGE-POSTURE-CHECK: reachable is not the same as safe.
+        // Three read-only bucket-level calls say whether the bucket is public
+        // and whether default encryption is on; each is judged on its own, so
+        // a provider that lacks one (R2, MinIO, Supabase Storage) gets a warn
+        // naming it, never a false pass and never a false fail. No object is
+        // written or read here; PutObject headers are a later slice.
+        const probe = async (call: string, send: () => Promise<unknown>): Promise<PostureProbe> => {
+          try {
+            return { call, ok: true, value: await send() };
+          } catch (err: unknown) {
+            return { call, ok: false, ...classifyPostureError(err) };
+          }
+        };
+        const posture = evaluateStoragePosture({
+          publicAccessBlock: await probe('GetPublicAccessBlock', () =>
+            client.send(new GetPublicAccessBlockCommand({ Bucket: s3Bucket })),
+          ),
+          policyStatus: await probe('GetBucketPolicyStatus', () =>
+            client.send(new GetBucketPolicyStatusCommand({ Bucket: s3Bucket })),
+          ),
+          encryption: await probe('GetBucketEncryption', () =>
+            client.send(new GetBucketEncryptionCommand({ Bucket: s3Bucket })),
+          ),
+        });
         return {
           name: 'Object Storage',
-          status: 'pass',
+          status: posture.status,
           latencyMs: elapsed(),
           checkedAt: checkedAt(),
-          message: `S3 bucket "${s3Bucket}" reachable`,
+          message: `S3 bucket "${s3Bucket}" reachable; posture: ${posture.summary}`,
+          detail: posture.lines.join('; '),
         };
       } catch (err: any) {
         return {
