@@ -26,6 +26,9 @@
  *   V72S-07  --apply re-checks each row: a row whose token changed between the scan and the write is skipped
  *            (changed_since_read), not overwritten.
  *   V72S-08  tenancy is unchanged: another business's owner cannot read, change or delete the connection.
+ *   V72S-09  no other Prisma door stores or hands back the wrong form: createMany, createManyAndReturn,
+ *            updateMany, updateManyAndReturn and the `{ set }` update form store ciphertext; findUniqueOrThrow,
+ *            findFirstOrThrow and the AndReturn forms read the plaintext.
  *
  * Owner question OQ-4 (does production hold plaintext bank tokens today) is open; nothing here reads production.
  */
@@ -484,5 +487,34 @@ describe('BankConnection.accessToken is encrypted at rest (RR-BANK-TOKEN-ENCRYPT
     await runWithTenant(ID.biz2, ID.owner2, async () => {
       expect(await db.bankConnection.findFirst({ where: { id } })).toBeNull();
     });
+  });
+  it('[V72S-09] bulk writes, the { set } form and the OrThrow reads store ciphertext and read plaintext', async () => {
+    const fa = await account(ID.biz, 'V72S bulk bank');
+    const isCipher = async (id: string, plain: string) => {
+      const raw = await stored(id);
+      expect(raw?.startsWith(CIPHER_PREFIX), `${id} stored as ciphertext`).toBe(true);
+      expect(raw).not.toContain(plain);
+    };
+    const p1 = token('many1');
+    await db.bankConnection.createMany({ data: [{ id: `${P}bulk1`, businessId: ID.biz, financialAccountId: fa, provider: 'plaid', accessToken: p1, status: 'DISCONNECTED' }] });
+    await isCipher(`${P}bulk1`, p1);
+    const p2 = token('many2');
+    const returned = await db.bankConnection.createManyAndReturn({ data: [{ id: `${P}bulk2`, businessId: ID.biz, financialAccountId: fa, provider: 'plaid', accessToken: p2, status: 'DISCONNECTED' }] });
+    expect(returned.map((r: any) => r.accessToken)).toEqual([p2]);
+    await isCipher(`${P}bulk2`, p2);
+
+    const p3 = token('updmany');
+    await db.bankConnection.updateMany({ where: { id: `${P}bulk1` }, data: { accessToken: p3 } });
+    await isCipher(`${P}bulk1`, p3);
+    const p4 = token('updmanyret');
+    const updatedRows = await db.bankConnection.updateManyAndReturn({ where: { id: `${P}bulk2` }, data: { accessToken: p4 } });
+    expect(updatedRows.map((r: any) => r.accessToken)).toEqual([p4]);
+    await isCipher(`${P}bulk2`, p4);
+    const p5 = token('setform');
+    await db.bankConnection.update({ where: { id: `${P}bulk1` }, data: { accessToken: { set: p5 } } });
+    await isCipher(`${P}bulk1`, p5);
+
+    expect((await db.bankConnection.findUniqueOrThrow({ where: { id: `${P}bulk1` } })).accessToken).toBe(p5);
+    expect((await db.bankConnection.findFirstOrThrow({ where: { id: `${P}bulk2` } })).accessToken).toBe(p4);
   });
 });
