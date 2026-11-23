@@ -40,6 +40,7 @@ import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
+import { trackAsyncWrites } from './helpers/async-writes.js';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
@@ -50,6 +51,8 @@ const ID = {
   owner: `${P}owner`,
   staffNone: `${P}staffNone`,
   staffRead: `${P}staffRead`,
+  staffMissing: `${P}staffMissing`,
+  superAdmin: `${P}superAdmin`,
   outsider: `${P}outsider`,
   biz: `${P}biz`,
   biz2: `${P}biz2`,
@@ -60,6 +63,7 @@ const ID = {
   propFinQuiet: `${P}prop_finq`,
   propOps: `${P}prop_ops`,
   propCross: `${P}prop_cross`,
+  propOpsSummary: `${P}prop_opss`,
   evoFin: `${P}evo_fin`,
   evoSales: `${P}evo_sales`,
   evoOdd: `${P}evo_odd`,
@@ -220,8 +224,8 @@ beforeAll(async () => {
   await app.init();
 
   await cleanup();
-  for (const id of [ID.owner, ID.staffNone, ID.staffRead, ID.outsider]) {
-    await db.user.create({ data: { id, email: `${id}@test.local`, name: id, role: 'USER' } });
+  for (const id of [ID.owner, ID.staffNone, ID.staffRead, ID.staffMissing, ID.superAdmin, ID.outsider]) {
+    await db.user.create({ data: { id, email: `${id}@test.local`, name: id, role: id === ID.superAdmin ? 'SUPER_ADMIN' : 'USER' } });
   }
   await db.business.create({ data: { id: ID.biz, name: 'V73K Projection', slug: `${P}biz`, ownerId: ID.owner, currency: 'TTD' } });
   await db.business.create({ data: { id: ID.biz2, name: 'V73K Other', slug: `${P}biz2`, ownerId: ID.outsider, currency: 'TTD' } });
@@ -229,6 +233,9 @@ beforeAll(async () => {
     [ID.owner, ID.biz, 'OWNER', undefined],
     [ID.staffNone, ID.biz, 'STAFF', { revenue: 'none', crm: 'read', operations: 'write' }],
     [ID.staffRead, ID.biz, 'STAFF', { revenue: 'read', crm: 'read', operations: 'write' }],
+    // Round 2 (security MINOR-2): an explicit map without a revenue key reads revenue 'none'.
+    [ID.staffMissing, ID.biz, 'STAFF', { crm: 'read', operations: 'write' }],
+    [ID.superAdmin, ID.biz, 'STAFF', { crm: 'read' }],
     [ID.outsider, ID.biz2, 'OWNER', undefined],
   ] as const) {
     await db.membership.create({
@@ -260,15 +267,26 @@ beforeAll(async () => {
   await proposal(ID.propOps, ID.biz, ID.recOps, 'Follow up: Confirm tomorrow appointments', 'Three appointments are unconfirmed.');
   // Bridged from another business's recommendation id: it cannot be read in this business (fail closed).
   await proposal(ID.propCross, ID.biz, ID.recOther, 'Follow up: Confirm tomorrow appointments', 'Three appointments are unconfirmed.');
+  // Round 2 (security MINOR-1): a non-financial proposal whose create_task row's summary states a figure (another
+  // writer, or the rationale changed after execution).
+  await db.keyActionProposal.create({
+    data: {
+      id: ID.propOpsSummary, businessId: ID.biz, sourceType: 'GENOME_EVOLUTION', sourceId: ID.recOps,
+      title: 'Follow up: Confirm tomorrow appointments', summary: 'Confirm tomorrow appointments', rationale: 'Three appointments are unconfirmed.',
+      actionType: 'CREATE_TASK', riskLevel: 'LOW', status: 'PENDING',
+      payload: { title: 'Confirm tomorrow appointments', source: 'KEY_GENOME_RECOMMENDATION', recommendationId: ID.recOps, bridgeActionKind: 'MANUAL_TASK' },
+    },
+  });
 
   // key.action.create_task rows, in the shape KeyActionExecutorService.executeCreateTask writes them.
   const remindAt = new Date(Date.now() - 3600_000);
-  for (const p of [ID.propFin, ID.propFinQuiet, ID.propOps, ID.propCross]) {
+  for (const p of [ID.propFin, ID.propFinQuiet, ID.propOps, ID.propCross, ID.propOpsSummary]) {
     const row = await db.keyActionProposal.findUnique({ where: { id: p } });
     await db.temporalFlowEvent.create({
       data: {
         id: `${p}_task`, businessId: ID.biz, source: 'KEY', type: 'key.action.create_task', module: 'key-autonomy',
-        entityType: 'key_action_proposal', entityId: p, title: row.title, summary: row.rationale,
+        entityType: 'key_action_proposal', entityId: p, title: row.title,
+        summary: p === ID.propOpsSummary ? 'Overtime cost TTD 912 last week' : row.rationale,
         status: 'ACTION_REQUIRED', importance: 'NORMAL', payload: row.payload, reminderAt: remindAt, startsAt: remindAt,
       },
     });
@@ -283,7 +301,11 @@ beforeAll(async () => {
   await evo(ID.evoOpsMoney, ID.biz, 'operations', 'Overtime cost TTD 912 last week', { coreWorkflows: ['overtime'] });
   await evo(ID.evoOps, ID.biz, 'operations', 'Bookings are handled through WhatsApp', { coreWorkflows: ['appointment-booking'] });
   await evo(ID.evoOther, ID.biz2, 'operations', 'Bookings are handled through WhatsApp', { coreWorkflows: ['appointment-booking'] });
+  // emitDecisionEvent does not await its write (round 2, correctness MINOR-2): its emits are tracked and drained.
+  const writes = trackAsyncWrites([[TemporalFlowService.prototype, 'emit']]);
   for (const id of [ID.evoFin, ID.evoSales, ID.evoOdd, ID.evoOpsMoney, ID.evoOps]) await evolution.reject(ID.biz, id, ID.owner);
+  await writes.drain();
+  writes.restore();
   // A decision row in this business naming another business's proposal (cannot be read here: fail closed).
   await db.temporalFlowEvent.create({
     data: {
@@ -294,12 +316,8 @@ beforeAll(async () => {
       payload: { proposalId: ID.evoOther, section: 'operations', status: 'REJECTED', proposedPatch: { coreWorkflows: ['appointment-booking'] } },
     },
   });
-  // emitDecisionEvent does not await its write: wait for the five rows.
-  for (let i = 0; i < 50; i += 1) {
-    const n = await db.temporalFlowEvent.count({ where: { businessId: ID.biz, entityType: 'genome_evolution_proposal' } });
-    if (n >= 6) break;
-    await new Promise((r) => setTimeout(r, 100));
-  }
+  // The five rows the service wrote and the cross-business row above.
+  expect(await db.temporalFlowEvent.count({ where: { businessId: ID.biz, entityType: 'genome_evolution_proposal' } })).toBe(6);
   // The real writer's rows carry reminder and calendar times only when given; give them one so all three reads see them.
   await db.temporalFlowEvent.updateMany({
     where: { businessId: ID.biz, entityType: 'genome_evolution_proposal' },
@@ -312,7 +330,7 @@ afterAll(async () => {
   await app?.close();
 });
 
-const ALL_TASKS = [ID.propCross, ID.propFin, ID.propFinQuiet, ID.propOps];
+const ALL_TASKS = [ID.propCross, ID.propFin, ID.propFinQuiet, ID.propOps, ID.propOpsSummary].sort();
 const ALL_EVOS = [`${P}evo_other`, ID.evoFin, ID.evoOdd, ID.evoOps, ID.evoOpsMoney, ID.evoSales];
 
 describe('FU-KEY-ACTION-GENOME-PROJECTION: bridged FINANCIAL proposals and their timeline rows (D-128, D-233, D-238)', () => {
@@ -327,7 +345,7 @@ describe('FU-KEY-ACTION-GENOME-PROJECTION: bridged FINANCIAL proposals and their
   it('KAG-01 a revenue-none member is not served a proposal bridged from a FINANCIAL recommendation (list, by id)', async () => {
     const list = await get(proposalsUrl(), ID.staffNone);
     expect(list.status).toBe(200);
-    expect(list.body.map((p: any) => p.id).sort()).toEqual([ID.propOps]);
+    expect(list.body.map((p: any) => p.id).sort()).toEqual([ID.propOps, ID.propOpsSummary].sort());
     expect(JSON.stringify(list.body)).not.toMatch(FIGURES);
     for (const id of [ID.propFin, ID.propFinQuiet, ID.propCross]) {
       const one = await get(`${proposalsUrl()}/${id}`, ID.staffNone);
@@ -389,7 +407,7 @@ describe('FU-KEY-ACTION-GENOME-PROJECTION: bridged FINANCIAL proposals and their
   });
 
   it('KAG-05 controls: the owner and a revenue-read member are served every row unchanged', async () => {
-    for (const as of [ID.owner, ID.staffRead]) {
+    for (const as of [ID.owner, ID.staffRead, ID.superAdmin]) {
       const list = await get(proposalsUrl(), as);
       expect(list.status).toBe(200);
       expect(list.body.map((p: any) => p.id).sort()).toEqual(ALL_TASKS);
@@ -421,6 +439,39 @@ describe('FU-KEY-ACTION-GENOME-PROJECTION: bridged FINANCIAL proposals and their
     expect(res.status).toBe(201);
     expect(res.body.recommendationId).toBe(ID.recFin);
     expect(['CREATED', 'ALREADY_EXISTS']).toContain(res.body.status);
+  });
+
+  it('KAG-06 round 2: a create_task row whose summary states a figure is withheld though its proposal is non-financial', async () => {
+    for (const res of Object.values(await timelineReads(ID.staffNone))) {
+      expect(res.body.some((e: any) => e.entityId === ID.propOpsSummary)).toBe(false);
+      expect(JSON.stringify(res.body)).not.toMatch(FIGURES);
+    }
+  });
+
+  it('KAG-07 round 2: a member whose explicit map has no revenue key is projected as revenue none', async () => {
+    const list = await get(proposalsUrl(), ID.staffMissing);
+    expect(list.body.map((p: any) => p.id).sort()).toEqual([ID.propOps, ID.propOpsSummary].sort());
+    for (const res of Object.values(await timelineReads(ID.staffMissing))) {
+      expect(res.status).toBe(200);
+      expect(res.body.filter((e: any) => e.entityType === 'genome_evolution_proposal').map((e: any) => e.entityId)).toEqual([ID.evoOps]);
+      expect(JSON.stringify(res.body)).not.toMatch(FIGURES);
+    }
+    expect((await get(`${bridgeUrl(ID.recFin)}/action-preview`, ID.staffMissing)).status).toBe(403);
+  });
+
+  it('KAG-08 round 2: the type, module and entity filters and a small page do not route around the projection', async () => {
+    for (const q of ['type=genome_evolution.proposal_rejected', 'module=business-genome', 'source=KEY', 'type=key.action.create_task', 'module=key-autonomy']) {
+      const res = await get(`${timelineUrl()}?${q}&limit=200`, ID.staffNone);
+      expect(res.status, q).toBe(200);
+      expect(JSON.stringify(res.body), q).not.toMatch(FIGURES);
+      const ids = res.body.map((e: any) => e.entityId);
+      for (const hidden of [ID.evoFin, ID.evoSales, ID.evoOdd, ID.evoOpsMoney, `${P}evo_other`, ID.propFin, ID.propFinQuiet, ID.propCross, ID.propOpsSummary]) {
+        expect(ids, q).not.toContain(hidden);
+      }
+    }
+    // Withheld rows fill the first page of a one-row read: the read pages on and serves a readable row.
+    const one = await get(`${timelineUrl()}?type=genome_evolution.proposal_rejected&limit=1`, ID.staffNone);
+    expect(one.body.map((e: any) => e.entityId)).toEqual([ID.evoOps]);
   });
 
   it('KAG-05c cross-tenant: a member of another business is refused this business\'s reads', async () => {
