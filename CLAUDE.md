@@ -2,6 +2,14 @@
 
 Claude Code is a bounded implementation worker inside the KEYFLOWOS multi-agent control system. ChatGPT is the programme command center and human-facing interface.
 
+Continuing the v1 programme (any account, any tool): start with these three files, then use them to decide what else
+on the list below you need. They are derived or checkpoint files: issue #80, the plan and the build map outrank them.
+- `docs/development/agent-memory/README.md` (how the agents' memory works, and the briefs and runbook)
+- `docs/reconstruction/handoff/ORCHESTRATOR-STATE.md` (standing instructions, work in flight with branch and next
+  action, open owner questions)
+- `docs/reconstruction/handoff/V1-STATUS.md` (generated: `node scripts/agent-memory/status.mjs`)
+For one packet, run `node scripts/agent-memory/bundle.mjs <PACKET-ID>` instead of reading the plan or build map whole.
+
 Before substantial work, read:
 1. `AGENTS.md`
 2. `docs/development/EXECUTION_CONTROL_STANDARD.md`
@@ -19,6 +27,8 @@ GitHub issue #80 — KEYFLOWOS Agent Control Room — ChatGPT ↔ Claude Code.
 Read:
 ```bash
 gh issue view 80 --repo SaCH-PRO/KEYFLOWOS --comments
+# if that is refused in your environment, read recent comments with:
+gh api 'repos/SaCH-PRO/KEYFLOWOS/issues/80/comments?per_page=100&since=<ISO date>'
 ```
 
 Reply:
@@ -61,6 +71,10 @@ Claude MUST:
 - never touch production, send real provider traffic, rebaseline forensics, or refresh the programme map without explicit authority.
 
 ## Return
+
+After a wave PR merges, or a packet returns, or the owner rules: run `node scripts/agent-memory/status.mjs`, rewrite
+`docs/reconstruction/handoff/ORCHESTRATOR-STATE.md` (rewrite in place, never append), push both, and record the event
+on issue #80. Nothing that is needed to continue may live only in a session, a container or a scratch directory.
 
 Before claiming local completion Claude MUST:
 - push the bounded implementation branch;

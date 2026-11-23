@@ -191,3 +191,11 @@ Both scripts use the standard library only, exclude build/vendor/runtime artifac
 
 After any architecture-affecting change, re-run the scanners and update the relevant `/architecture/` documents. The map must reflect the code.
 
+## Agent memory layer
+
+Process memory for coding agents lives in `docs/development/agent-memory/` (layers, worker and review briefs, wave
+runbook, owner question format) and `scripts/agent-memory/` (generated status, per-packet context bundle, compaction
+helper). A packet worker is assigned by a pointer to `PACKET-WORKER-BRIEF.md` and a packet id. Keep the conversation
+small: delegate wide reads, never paste logs, and write every ruling and finding to issue #80 or a file in the turn it
+happens. Anything needed to continue the work must be pushed to GitHub (a branch, a PR, issue #80), never left only in
+a session, a container or a scratch directory.

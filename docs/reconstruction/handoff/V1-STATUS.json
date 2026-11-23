@@ -1,0 +1,4101 @@
+{
+ "_generated": {
+  "by": "scripts/agent-memory/status.mjs",
+  "do_not_edit": "Generated file. Change the inputs and re-run the script.",
+  "main_sha": "2b2d32861c50a47667b8229d00c1005dbfaabfe0",
+  "main_commit_date": "2026-11-22T19:26:53+00:00",
+  "inputs": [
+   "docs/reconstruction/V1-PLAN-RECUT.json",
+   "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
+   "git log fa4eb1f3^..main (commit subjects)"
+  ],
+  "how_status_is_derived": {
+   "compacted-commit": "done: a fix/feat commit on main with subject \"... pkt/V1-<ID> (compacted)\". Certain.",
+   "prior-status-file": "done or todo as V1-STATUS-2026-11-20.json recorded it (\"merged-main\" or \"todo\"). Certain for done; todo means no later evidence was found.",
+   "prior-status-file+wave-2b-commit": "done: the prior file said \"wave-2b\" and the wave 2b commit is on main. Certain.",
+   "code-commit-subject": "done: a fix/feat commit on main names the packet id, but not in the compacted form. UNCERTAIN: the commit may be a partial or a repair.",
+   "unmerged-branch": "in-progress: only with --with-branches (never in the committed file). origin/pkt/V1-<ID> exists in this clone and no done evidence is on main. UNCERTAIN: depends on which branches this clone has fetched; a stale branch also counts.",
+   "prior-status-file(in-progress)": "in-progress: the prior file said so and nothing newer is on main. UNCERTAIN.",
+   "prior-status-file(wave-2b)": "in-progress: the prior file said \"wave-2b\" and no wave 2b commit is on main. UNCERTAIN. Cannot occur on main today.",
+   "no-evidence": "todo: the packet was added to the plan after the prior status file and no fix or feat commit on main names it (docs and test commits may)."
+  },
+  "limits": [
+   "Work on wave PRs, unpushed worktrees and child sessions is invisible here: see ORCHESTRATOR-STATE.md section 3.",
+   "The committed file is a function of main alone, so it shows no in-progress work that is only on a branch. For a branch view run: git fetch origin \"+refs/heads/pkt/*:refs/remotes/origin/pkt/*\" && node scripts/agent-memory/status.mjs --with-branches --stdout",
+   "A compacted commit that was later reverted still counts as done: the script reads subjects, not trees.",
+   "The plan critical path was computed at the re-cut (validation.critical_path) and does not include packets added later."
+  ]
+ },
+ "summary": {
+  "packets": 210,
+  "points": 350.5,
+  "by_status": {
+   "done": {
+    "packets": 62,
+    "points": 93.5,
+    "pct_by_points": 26.7
+   },
+   "in-progress": {
+    "packets": 0,
+    "points": 0,
+    "pct_by_points": 0
+   },
+   "todo": {
+    "packets": 148,
+    "points": 257,
+    "pct_by_points": 73.3
+   }
+  },
+  "by_step": {
+   "0": {
+    "done": 1,
+    "in-progress": 0,
+    "todo": 2,
+    "total": 3
+   },
+   "1": {
+    "done": 9,
+    "in-progress": 0,
+    "todo": 4,
+    "total": 13
+   },
+   "2": {
+    "done": 6,
+    "in-progress": 0,
+    "todo": 1,
+    "total": 7
+   },
+   "3": {
+    "done": 44,
+    "in-progress": 0,
+    "todo": 26,
+    "total": 70
+   },
+   "4": {
+    "done": 1,
+    "in-progress": 0,
+    "todo": 38,
+    "total": 39
+   },
+   "5": {
+    "done": 0,
+    "in-progress": 0,
+    "todo": 27,
+    "total": 27
+   },
+   "6": {
+    "done": 1,
+    "in-progress": 0,
+    "todo": 30,
+    "total": 31
+   },
+   "7": {
+    "done": 0,
+    "in-progress": 0,
+    "todo": 16,
+    "total": 16
+   },
+   "8": {
+    "done": 0,
+    "in-progress": 0,
+    "todo": 4,
+    "total": 4
+   }
+  },
+  "by_derivation": {
+   "prior-status-file": 156,
+   "prior-status-file+wave-2b-commit": 28,
+   "code-commit-subject": 8,
+   "compacted-commit": 7,
+   "no-evidence": 11
+  },
+  "uncertain": [
+   "W11-CORTEX-INSIGHT-QUERIES",
+   "SWP-SEC-AUDIT-TRUTH",
+   "SWP-PROFILE-TEAMSIZE",
+   "FU-IDENTITY-FINANCE-COLUMNS",
+   "FU-PROVIDER-ERROR-HYGIENE",
+   "FU-PHONE-COUNTRY-DUPLICATES",
+   "FU-KEY-MEMORY-MONEY-SIGHT",
+   "FU-WA-ESCAPE-RACE"
+  ],
+  "todo_with_dependencies_met": 30
+ },
+ "critical_path": {
+  "plan_recorded_remaining": [
+   "NAV-A1",
+   "MOUNT-QUOTES",
+   "SWP-INV-MATH",
+   "SWP-INV-FORM-UX",
+   "SWP-QUOTE-COMPOSER-CONTACT",
+   "SWP-CONTACT-QUICKADD",
+   "SWP-INV-LIST",
+   "W11-WEB-OWNER-MEMBERSHIP-REFUSAL",
+   "SWP-REMOVED-MEMBER-NOTICE",
+   "SWP-INV-DETAIL",
+   "SWP-INV-REFUND-UI",
+   "CLAIM-LOOP",
+   "READY-TO-SEND",
+   "TODAY-AGGREGATE",
+   "DEMO-PREVIEW",
+   "TODAY-4BLOCK",
+   "HARNESS-REMOVAL",
+   "NAV-B-HIDE",
+   "NAV-B-HIDE-2",
+   "NAV-B-LINKS",
+   "NAV-B-LINKS-KEY",
+   "SWEEP-RERUN-S7",
+   "GATE-JOURNEY-RUN",
+   "GATE-STAGING-RUN",
+   "GATE-OWNER-TEST"
+  ],
+  "plan_recorded_total": 34,
+  "longest_remaining_depends_on_chain": {
+   "weight": 51,
+   "chain": [
+    "NAV-A1",
+    "MOUNT-QUOTES",
+    "SWP-INV-MATH",
+    "SWP-INV-FORM-UX",
+    "SWP-QUOTE-COMPOSER-CONTACT",
+    "SWP-CONTACT-QUICKADD",
+    "SWP-INV-LIST",
+    "W11-WEB-OWNER-MEMBERSHIP-REFUSAL",
+    "SWP-REMOVED-MEMBER-NOTICE",
+    "SWP-INV-DETAIL",
+    "SWP-INV-REFUND-UI",
+    "CLAIM-LOOP",
+    "READY-TO-SEND",
+    "TODAY-AGGREGATE",
+    "DEMO-PREVIEW",
+    "TODAY-4BLOCK",
+    "HARNESS-REMOVAL",
+    "NAV-B-HIDE",
+    "NAV-B-HIDE-2",
+    "NAV-B-LINKS",
+    "NAV-B-LINKS-KEY",
+    "SWEEP-RERUN-S7",
+    "GATE-JOURNEY-RUN",
+    "GATE-STAGING-RUN",
+    "GATE-OWNER-TEST"
+   ]
+  }
+ },
+ "ready": [
+  {
+   "id": "NAV-A1",
+   "step": 3,
+   "priority": "P0",
+   "size": "L",
+   "lane": "web",
+   "on_critical_path": true,
+   "unblocks": 81
+  },
+  {
+   "id": "W11-KEY-TRANSFER-INTEGER",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 51
+  },
+  {
+   "id": "SWP-STORE-LISTING-SERVER",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 49
+  },
+  {
+   "id": "SWP-INV-MONEY-TOTALS",
+   "step": 4,
+   "priority": "P0",
+   "size": "M",
+   "lane": "both",
+   "on_critical_path": false,
+   "unblocks": 48
+  },
+  {
+   "id": "W11-RUNWAY-LEDGER-CASH",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 26
+  },
+  {
+   "id": "W11-GENOME-RECS-DOMAIN",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 24
+  },
+  {
+   "id": "W11-SHIP-STOCK-DECREMENT",
+   "step": 6,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 21
+  },
+  {
+   "id": "SWP-FIN-LEDGER",
+   "step": 6,
+   "priority": "P1",
+   "size": "M",
+   "lane": "both",
+   "on_critical_path": false,
+   "unblocks": 11
+  },
+  {
+   "id": "SWEEP-RERUN-S2",
+   "step": 2,
+   "priority": "P1",
+   "size": "S",
+   "lane": "gate",
+   "on_critical_path": false,
+   "unblocks": 9
+  },
+  {
+   "id": "SWP-CENSUS-GENOME",
+   "step": 4,
+   "priority": "P1",
+   "size": "L",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 9
+  },
+  {
+   "id": "SWP-COA-UNIQUE-CODE",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 9
+  },
+  {
+   "id": "SWP-CENSUS-KEY-B",
+   "step": 4,
+   "priority": "P1",
+   "size": "L",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 8
+  },
+  {
+   "id": "TOF-STALE-GATES-PKT",
+   "step": 1,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "on_critical_path": false,
+   "unblocks": 7
+  },
+  {
+   "id": "S0-SEC-LANE-DEPLOY",
+   "step": 0,
+   "priority": "P0",
+   "size": "M",
+   "lane": "gate",
+   "on_critical_path": false,
+   "unblocks": 4
+  },
+  {
+   "id": "S0-DEPENDABOT-FREEZE",
+   "step": 0,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "on_critical_path": false,
+   "unblocks": 4
+  },
+  {
+   "id": "FU-KEY-GENOME-READS-RESIDUAL",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "FU-PROPOSAL-REVENUE-SIGHT",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 1
+  },
+  {
+   "id": "FU-CONTRACT-FETCH-OUTBOUND-GUARD",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-GENOME-SURFACES-REVENUE",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "both",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-CONTACT-AUDIT-RESIDUAL",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-CORTEX-INSIGHT-CASH-TRUTH",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-KEY-INVOICE-EMAIL-PAY-LINK",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-MERGE-CONTACTS-UNIQUE",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "W1F-ORDER-TRANSITIONS",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "W1F-STORE-PAYPAL",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "W1F-STORE-STRIPE-R0",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-ARCH-MAP-REFRESH",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "docs",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-OVERLAY-LAYER-TABLE",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "web",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-UNIT-GUARD-CI",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-COMMUNITY-LIKE-OWN-ACTION",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  }
+ ],
+ "packets": [
+  {
+   "id": "S0-LAND-INFLIGHT",
+   "step": 0,
+   "priority": "P0",
+   "size": "M",
+   "lane": "gate",
+   "status": "done",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Land the in-flight branches in order, each review repair closed first: #208 (int/converge-final), pkt/PR195-JOURNAL-SCOPE (with PR195-KEY-GATES), pkt/SWEEP-P0-SCOPES",
+   "deps_met": null
+  },
+  {
+   "id": "S0-SEC-LANE-DEPLOY",
+   "step": 0,
+   "priority": "P0",
+   "size": "M",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Security-only deploy lane: sec/v1-hold-1 = production's deployed ref plus SWEEP-P0's fix commits, proven on that ref and deployed through deploy.sh, exempt from the product hold",
+   "deps_met": true
+  },
+  {
+   "id": "S0-DEPENDABOT-FREEZE",
+   "step": 0,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Freeze dependabot PRs #199-#207 until after the gate (security advisories excepted)",
+   "deps_met": true
+  },
+  {
+   "id": "S1-RULINGS-RECORD",
+   "step": 1,
+   "priority": "P0",
+   "size": "S",
+   "lane": "docs",
+   "status": "done",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S0-LAND-INFLIGHT"
+   ],
+   "title": "Record the 37 owner rulings (D-150 onward) and the authorities the plan needs",
+   "deps_met": null
+  },
+  {
+   "id": "USAGE-COUNT-SCRIPT",
+   "step": 1,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S0-LAND-INFLIGHT"
+   ],
+   "title": "Read-only production usage count per module the v1 hide census would flag off (the owner runs it)",
+   "deps_met": null
+  },
+  {
+   "id": "TOF-STALE-GATES-PKT",
+   "step": 1,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S0-LAND-INFLIGHT"
+   ],
+   "title": "stale-gates covers pkt/* heads, where the agent gate runs (D-22)",
+   "deps_met": true
+  },
+  {
+   "id": "TOF-LISTER-FORK-PRS",
+   "step": 1,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "TOF-STALE-GATES-PKT"
+   ],
+   "title": "The sweep's PR lister excludes fork impl/* PRs (#185)",
+   "deps_met": false
+  },
+  {
+   "id": "TOF-WORKER-CURSOR-PROOF",
+   "step": 1,
+   "priority": "P3",
+   "size": "M",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "TOF-LISTER-FORK-PRS"
+   ],
+   "title": "Worker cursor-idempotency proof runs in CI instead of skipping (#114 part 2, PRS-M49)",
+   "deps_met": false
+  },
+  {
+   "id": "TOF-CI-PYTHON-HARVESTER",
+   "step": 1,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "TOF-WORKER-CURSOR-PROOF"
+   ],
+   "title": "CI runs the scripts/intelligence harvester tests with Python (PRS-M54)",
+   "deps_met": false
+  },
+  {
+   "id": "W11-KEY-CHAT-SESSION-BIND",
+   "step": 1,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S0-LAND-INFLIGHT"
+   ],
+   "title": "WS key:chat uses only the member own KEY session (cross-tenant session summary leak, SEC-W11MC-1)",
+   "deps_met": null
+  },
+  {
+   "id": "W11-MEMORY-PROMOTE-SCOPE",
+   "step": 1,
+   "priority": "P0",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-KEY-CHAT-SESSION-BIND"
+   ],
+   "title": "Memory consolidation promotes only member-less cognition rows into business-wide AI memory (SEC-W11MC-2)",
+   "deps_met": null
+  },
+  {
+   "id": "W11-FLOW-PERCEPTION-SCOPE",
+   "step": 1,
+   "priority": "P0",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-MEMORY-PROMOTE-SCOPE"
+   ],
+   "title": "The /ai flow chat perception block and buildMemoryContext keep only the reader own cognition memory (SEC-W11MC-3)",
+   "deps_met": null
+  },
+  {
+   "id": "W11-ORDER-CANCEL-RELEASE",
+   "step": 1,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S0-LAND-INFLIGHT"
+   ],
+   "title": "PATCH cancel (marketplace and storefront) takes the routing claim and releases reservations (F-35)",
+   "deps_met": null
+  },
+  {
+   "id": "W11-CHECKOUT-PAIR-SCOPE",
+   "step": 1,
+   "priority": "P0",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-ORDER-CANCEL-RELEASE"
+   ],
+   "title": "The paid door's stock decrement reads only the business's own stock row (W11SEAM-SM-CR-1)",
+   "deps_met": null
+  },
+  {
+   "id": "W11-STORE-OWN-PAYMENT-KEYS",
+   "step": 1,
+   "priority": "P0",
+   "size": "L",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-CHECKOUT-PAIR-SCOPE"
+   ],
+   "title": "Storefronts offer PayPal and Stripe only with the business own complete credentials (D-138)",
+   "deps_met": null
+  },
+  {
+   "id": "GATE-HARNESS",
+   "step": 2,
+   "priority": "P0",
+   "size": "M",
+   "lane": "gate",
+   "status": "done",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S0-LAND-INFLIGHT"
+   ],
+   "title": "Journey gate harness: Playwright projects at 375x812 and 1440x900 against `next build`, with AI_DISABLED, KEY_DISABLED and production flag runs",
+   "deps_met": null
+  },
+  {
+   "id": "GATE-JOURNEYS-A-F",
+   "step": 2,
+   "priority": "P0",
+   "size": "L",
+   "lane": "gate",
+   "status": "done",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "GATE-HARNESS"
+   ],
+   "title": "Journeys A-F as failing Playwright specs (start, catalog, customer, quote-to-deposit, invoice and get paid, bookings)",
+   "deps_met": null
+  },
+  {
+   "id": "GATE-JOURNEYS-G-L",
+   "step": 2,
+   "priority": "P0",
+   "size": "L",
+   "lane": "gate",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "GATE-HARNESS"
+   ],
+   "title": "Journeys G-L as failing Playwright specs (sell online, money, Today, team, KEY, quick sale)",
+   "deps_met": null
+  },
+  {
+   "id": "SWP-CENSUS-HIDDEN",
+   "step": 2,
+   "priority": "P0",
+   "size": "L",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "USAGE-COUNT-SCRIPT",
+    "S0-LAND-INFLIGHT"
+   ],
+   "title": "REST scope census, Hidden-module controllers: one blanket module-scope guard (326 open rows, 42 controllers)",
+   "deps_met": null
+  },
+  {
+   "id": "SWEEP-RERUN-S2",
+   "step": 2,
+   "priority": "P1",
+   "size": "S",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "GATE-HARNESS",
+    "GATE-JOURNEYS-A-F",
+    "GATE-JOURNEYS-G-L",
+    "SWP-CENSUS-HIDDEN"
+   ],
+   "title": "Browser sweep checkpoint after step 2",
+   "deps_met": true
+  },
+  {
+   "id": "TOF-GRAPH-SCOPE-ARRAY",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S0-LAND-INFLIGHT"
+   ],
+   "title": "KEY graph actions read a JSON-array permissionScopes as an explicit map, like ModuleScopeGuard",
+   "deps_met": null
+  },
+  {
+   "id": "W11-OWNER-MAP-UNMAPPED-TOOLS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "TOF-GRAPH-SCOPE-ARRAY"
+   ],
+   "title": "An explicit permission map on an OWNER membership also binds unmapped KEY tools (D-140)",
+   "deps_met": null
+  },
+  {
+   "id": "W11-CORTEX-INSIGHT-QUERIES",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "6df334c5"
+   ],
+   "depends_on": [
+    "W11-OWNER-MAP-UNMAPPED-TOOLS"
+   ],
+   "title": "KEY cortex insight queries select real Contact fields, so revenue analysis and profit opportunities work on real data (SEC-W11CRR-2)",
+   "deps_met": null
+  },
+  {
+   "id": "W11-CORTEX-SESSION-SNAPSHOT-SCOPE",
+   "step": 3,
+   "priority": "P0",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "5a5b04d1"
+   ],
+   "depends_on": [
+    "W11-CORTEX-INSIGHT-QUERIES",
+    "W11-KEY-CHAT-SESSION-BIND"
+   ],
+   "title": "POST cortex/sessions answers no revenue figure to a member without revenue read (KC-SEC-3)",
+   "deps_met": null
+  },
+  {
+   "id": "W11-DISPATCH-REFUSAL-FINAL",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "a3196eee"
+   ],
+   "depends_on": [
+    "W11-CORTEX-SESSION-SNAPSHOT-SCOPE",
+    "W11-FLOW-PERCEPTION-SCOPE"
+   ],
+   "title": "Plan queue answers a tool's 400 (and non-retryable 409) once, uncounted (DS-05)",
+   "deps_met": null
+  },
+  {
+   "id": "W11-KEY-TRANSFER-INTEGER",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-DISPATCH-REFUSAL-FINAL"
+   ],
+   "title": "KEY's inventory_transfer_stock advertises quantity as a whole number, and the chat validator enforces 'integer' parameters",
+   "deps_met": true
+  },
+  {
+   "id": "TOF-FINANCE-CANONICAL-TOOLS",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-KEY-TRANSFER-INTEGER"
+   ],
+   "title": "KEY canonical finance intelligence tools (#161) under revenue read",
+   "deps_met": false
+  },
+  {
+   "id": "W11-OWNER-HELPER-REST",
+   "step": 3,
+   "priority": "P2",
+   "size": "L",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "TOF-FINANCE-CANONICAL-TOOLS",
+    "W11-OWNER-HELPER-D11",
+    "W11-PROVIDER-OUTAGE-503"
+   ],
+   "title": "One owner rule for the remaining owner checks, with a census that keeps Business.ownerId out of owner checks",
+   "deps_met": false
+  },
+  {
+   "id": "TOF-KEY-SELF-MODEL",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-OWNER-HELPER-REST"
+   ],
+   "title": "KEY operational self-model (#162): correct fields, real errors, and one consumer",
+   "deps_met": false
+  },
+  {
+   "id": "TOF-KNOWLEDGE-UPLOAD",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "TOF-KEY-SELF-MODEL"
+   ],
+   "title": "Business knowledge upload (#134): module-scoped routes and only approved documents reach cortex.search_knowledge",
+   "deps_met": false
+  },
+  {
+   "id": "KEY-TOOL-ALLOWLIST",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "TOF-FINANCE-CANONICAL-TOOLS",
+    "TOF-KNOWLEDGE-UPLOAD",
+    "W11-OWNER-MAP-UNMAPPED-TOOLS",
+    "USAGE-COUNT-SCRIPT"
+   ],
+   "title": "KEY tool allowlist mechanism and the unconditional removals (execute_custom_logic, the D-119 dotted tools, payroll writes)",
+   "deps_met": false
+  },
+  {
+   "id": "KEY-CRONS-FLAGS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "KEY-TOOL-ALLOWLIST"
+   ],
+   "title": "KEY_CRONS_DISABLED term plus per-producer flags for growth-intelligence, momentum, analytics and intelligence scans (never DISABLE_SCHEDULERS in production)",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-TEAM-INVITE-SERVER",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S0-LAND-INFLIGHT"
+   ],
+   "title": "Team invites are case-insensitive by email; the team list marks pending invites",
+   "deps_met": null
+  },
+  {
+   "id": "W11-OWNER-HELPER-D11",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-TEAM-INVITE-SERVER"
+   ],
+   "title": "One owner rule: shared isBusinessOwnerMember helper for the D-11 owner checks, D11W-04 re-pinned",
+   "deps_met": null
+  },
+  {
+   "id": "BIZ-SETTINGS-SERVER",
+   "step": 3,
+   "priority": "P0",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-OWNER-HELPER-D11"
+   ],
+   "title": "Per-business settings on the server: what you sell (services/products/both), Advanced CRM switch and hub depth, owner-only (D-11), stored in Business.metaData",
+   "deps_met": null
+  },
+  {
+   "id": "SWP-ORDERBY-SINGLE-KEY",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-TEAM-INVITE-SERVER"
+   ],
+   "title": "Prisma orderBy objects with two keys: AI Skills and contact Tasks load; a census refuses the shape",
+   "deps_met": null
+  },
+  {
+   "id": "SWP-SEC-AUDIT-TRUTH",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "both",
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "6465ee59"
+   ],
+   "depends_on": [
+    "SWP-ORDERBY-SINGLE-KEY"
+   ],
+   "title": "Security audit stops claiming MFA it does not track; only settings readers run it",
+   "deps_met": null
+  },
+  {
+   "id": "SWP-COA-UNIQUE-CODE",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-SEC-AUDIT-TRUTH"
+   ],
+   "title": "Chart of Accounts refuses a duplicate account code",
+   "deps_met": true
+  },
+  {
+   "id": "W11-PROVIDER-OUTAGE-503",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S0-LAND-INFLIGHT"
+   ],
+   "title": "Gmail and Drive clients answer a provider outage as 503 provider_unavailable, not 400",
+   "deps_met": null
+  },
+  {
+   "id": "W11-PROVIDER-OUTAGE-CONNECT",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-PROVIDER-OUTAGE-503"
+   ],
+   "title": "Google connect, Graph, CRM-Google and Calendar clients map provider outages to 503 provider_unavailable",
+   "deps_met": null
+  },
+  {
+   "id": "SWP-CRM-SEARCH",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S0-LAND-INFLIGHT"
+   ],
+   "title": "CRM: tag search is case-insensitive and partial; duplicate check normalises phone spellings",
+   "deps_met": null
+  },
+  {
+   "id": "TOF-CONTACT-AUDIT-AWAIT",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-CRM-SEARCH"
+   ],
+   "title": "Every contact write records its audit row (D-25): CrmService.auditContact is no longer fire-and-forget",
+   "deps_met": null
+  },
+  {
+   "id": "WA-E164-SERVER",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "TOF-CONTACT-AUDIT-AWAIT",
+    "SWP-CRM-SEARCH"
+   ],
+   "title": "Contact phone numbers are stored in E.164 using the business's country",
+   "deps_met": null
+  },
+  {
+   "id": "TOF-WEBSITE-ENRICHMENT",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "TOF-CONTACT-AUDIT-AWAIT",
+    "WA-E164-SERVER"
+   ],
+   "title": "Contact enrichment from the business website (#63) through the outbound address guard",
+   "deps_met": null
+  },
+  {
+   "id": "SWP-LAYERS",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "web",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S0-LAND-INFLIGHT",
+    "GATE-JOURNEYS-A-F"
+   ],
+   "title": "Overlays: remove KeyChatBubbleV2 and GenomeIntegrityBanner from app/layout.tsx; one z-index layer contract; header 'Ask KEY' works on phones",
+   "deps_met": null
+  },
+  {
+   "id": "FIX-CONTACT-PARAMS",
+   "step": 3,
+   "priority": "P0",
+   "size": "S",
+   "lane": "web",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-LAYERS"
+   ],
+   "title": "Every link to a contact's main page opens it: /app/crm/contacts/[contactId] awaits params (Next 16), plus a census of dynamic server pages",
+   "deps_met": null
+  },
+  {
+   "id": "MARKETING-REDIRECT-GATE",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FIX-CONTACT-PARAMS"
+   ],
+   "title": "The /app/marketing redirect no longer bypasses the dormant-feature gate",
+   "deps_met": null
+  },
+  {
+   "id": "FAILURE-KIT",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-LAYERS"
+   ],
+   "title": "Shared failure kit: refusal helper on PR195's moduleReadRefusal/moduleWriteRefusal, one refusal toast, one no-access state, one status-label map",
+   "deps_met": null
+  },
+  {
+   "id": "SWP-PROFILE-TEAMSIZE",
+   "step": 3,
+   "priority": "P0",
+   "size": "S",
+   "lane": "both",
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "72c2721a"
+   ],
+   "depends_on": [
+    "WA-HELPER"
+   ],
+   "title": "Business Profile saves: team size options match the server enum; the error is visible",
+   "deps_met": null
+  },
+  {
+   "id": "BIZ-SETTINGS-WEB",
+   "step": 3,
+   "priority": "P0",
+   "size": "S",
+   "lane": "web",
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "1fe5f550"
+   ],
+   "depends_on": [
+    "SWP-PROFILE-TEAMSIZE",
+    "BIZ-SETTINGS-SERVER"
+   ],
+   "title": "Onboarding asks 'services, products or both' and takes only TTD or USD; Settings > Business profile shows what you sell and the Advanced CRM switch",
+   "deps_met": null
+  },
+  {
+   "id": "NAV-A1",
+   "step": 3,
+   "priority": "P0",
+   "size": "L",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "BIZ-SETTINGS-WEB",
+    "MARKETING-REDIRECT-GATE"
+   ],
+   "title": "Hub navigation: seven hubs by business type, bottom bar, disclosure modes removed, plain labels, the redirect table, 'Customers' heading",
+   "deps_met": true
+  },
+  {
+   "id": "WA-HELPER",
+   "step": 3,
+   "priority": "P1",
+   "size": "L",
+   "lane": "web",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S0-LAND-INFLIGHT",
+    "GATE-JOURNEYS-A-F"
+   ],
+   "title": "One WhatsApp helper: wa.me links to the customer's E.164 number with prefilled text and the tokenized link, used by all 24 web files",
+   "deps_met": null
+  },
+  {
+   "id": "SWP-KEY-CHAT-WEB",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "NAV-A1",
+    "SWP-LAYERS"
+   ],
+   "title": "KEY chat: Send and Deep think send; the drawer loads its session list once; onboarding opens at the manual form",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-KEY-SHELL-SMOKE",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-KEY-CHAT-WEB",
+    "NAV-A1"
+   ],
+   "title": "KEY shell: no 401 loop from the awareness panel, the drawer never opens by itself, and no KEY UI renders when the server reports KEY disabled",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-BOOKING-SLOTS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-KEY-SHELL-SMOKE"
+   ],
+   "title": "Public booking offers only free slots that end before closing",
+   "deps_met": false
+  },
+  {
+   "id": "SWEEP-RERUN-S3",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "TOF-GRAPH-SCOPE-ARRAY",
+    "W11-OWNER-MAP-UNMAPPED-TOOLS",
+    "W11-CORTEX-INSIGHT-QUERIES",
+    "W11-CORTEX-SESSION-SNAPSHOT-SCOPE",
+    "W11-DISPATCH-REFUSAL-FINAL",
+    "W11-KEY-TRANSFER-INTEGER",
+    "TOF-FINANCE-CANONICAL-TOOLS",
+    "W11-OWNER-HELPER-REST",
+    "TOF-KEY-SELF-MODEL",
+    "TOF-KNOWLEDGE-UPLOAD",
+    "KEY-TOOL-ALLOWLIST",
+    "KEY-CRONS-FLAGS",
+    "SWP-TEAM-INVITE-SERVER",
+    "W11-OWNER-HELPER-D11",
+    "W11-PROVIDER-OUTAGE-503",
+    "W11-PROVIDER-OUTAGE-CONNECT",
+    "BIZ-SETTINGS-SERVER",
+    "SWP-ORDERBY-SINGLE-KEY",
+    "SWP-SEC-AUDIT-TRUTH",
+    "SWP-COA-UNIQUE-CODE",
+    "SWP-CRM-SEARCH",
+    "TOF-CONTACT-AUDIT-AWAIT",
+    "WA-E164-SERVER",
+    "TOF-WEBSITE-ENRICHMENT",
+    "SWP-LAYERS",
+    "FIX-CONTACT-PARAMS",
+    "MARKETING-REDIRECT-GATE",
+    "FAILURE-KIT",
+    "WA-HELPER",
+    "SWP-PROFILE-TEAMSIZE",
+    "BIZ-SETTINGS-WEB",
+    "SWP-KEY-CHAT-WEB",
+    "SWP-KEY-SHELL-SMOKE",
+    "SWP-BOOKING-SLOTS",
+    "NAV-A1",
+    "SWEEP-RERUN-S2"
+   ],
+   "title": "Browser sweep checkpoint after step 3",
+   "deps_met": false
+  },
+  {
+   "id": "MOUNT-QUOTES",
+   "step": 4,
+   "priority": "P0",
+   "size": "L",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "NAV-A1",
+    "WA-HELPER",
+    "FAILURE-KIT"
+   ],
+   "title": "Sales > Quotes mounts quotes-panel.tsx: edit a draft, WhatsApp and Copy link, Send carries the link, Convert on accepted quotes keeps notes, bulk bar never deletes",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-INV-MATH",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "MOUNT-QUOTES"
+   ],
+   "title": "Invoice and quote forms: the preview equals the saved total under the server's tax order; clearing the tax rate removes the tax",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-INV-FORM-UX",
+   "step": 4,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-INV-MATH"
+   ],
+   "title": "Invoice forms: line totals visible, client required with a plain message, not-found edit page, no dead template picker",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-QUOTE-COMPOSER-CONTACT",
+   "step": 4,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-INV-FORM-UX",
+    "FAILURE-KIT"
+   ],
+   "title": "Quote composer: missing client is said; a quick-added contact shows as chosen; a duplicate phone is explained",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-CONTACT-QUICKADD",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-QUOTE-COMPOSER-CONTACT",
+    "FAILURE-KIT",
+    "FIX-CONTACT-PARAMS"
+   ],
+   "title": "Contacts quick add: refusals are shown and the form is kept; Company is sent; no invented 'User' last name",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-INV-LIST",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-CONTACT-QUICKADD",
+    "MOUNT-QUOTES"
+   ],
+   "title": "Invoices list: business currency, complete Duplicate and search, readable cards, honest Unpaid filter, and Record balance / Remind on part-paid rows",
+   "deps_met": false
+  },
+  {
+   "id": "W11-WEB-OWNER-MEMBERSHIP-REFUSAL",
+   "step": 4,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-INV-LIST"
+   ],
+   "title": "Web handling of bootstrap 403 OWNER_MEMBERSHIP_REQUIRED: forget the stale workspace id, name the refusal on the OAuth callback",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-REMOVED-MEMBER-NOTICE",
+   "step": 4,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-WEB-OWNER-MEMBERSHIP-REFUSAL"
+   ],
+   "title": "A removed member is told they were removed instead of landing silently in an empty workspace",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-INV-DETAIL",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-REMOVED-MEMBER-NOTICE",
+    "SWP-INV-PUBLIC-LINK"
+   ],
+   "title": "Invoice detail: payments list refreshes, Amount due is the remaining balance, no Mark paid on drafts, sent is recorded, Print prints the invoice",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-INV-REFUND-UI",
+   "step": 4,
+   "priority": "P2",
+   "size": "M",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-INV-DETAIL"
+   ],
+   "title": "Refund a manual payment from the invoice and the Payments hub",
+   "deps_met": false
+  },
+  {
+   "id": "DECIMALS-WEB",
+   "step": 4,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-INV-REFUND-UI",
+    "DECIMALS-SERVER"
+   ],
+   "title": "Invoice and quote forms accept part quantities (2 decimals) on non-stock lines and say plainly that stock lines take whole units",
+   "deps_met": false
+  },
+  {
+   "id": "NAV-A2",
+   "step": 4,
+   "priority": "P0",
+   "size": "M",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "NAV-A1",
+    "FAILURE-KIT"
+   ],
+   "title": "Real index pages for Money and Settings, with Settings > Getting paid",
+   "deps_met": false
+  },
+  {
+   "id": "EXPENSES-HUB-1",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "NAV-A2",
+    "FAILURE-KIT"
+   ],
+   "title": "Expense detail and bills: Delete tells the truth, Void a posted expense with a confirm step, and Approve asks which account and method pay the bill",
+   "deps_met": false
+  },
+  {
+   "id": "EXPENSES-HUB-2",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "EXPENSES-HUB-1"
+   ],
+   "title": "Expense form: business currency, today's Trinidad date, 'bill to pay later', and 'Recurring' creates a real schedule",
+   "deps_met": false
+  },
+  {
+   "id": "EXPENSES-HUB-3",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "EXPENSES-HUB-2"
+   ],
+   "title": "Expenses page: categories and recurring tabs mounted, no-access state for refused members, toolbar that works, receipt photo upload, no invented figures",
+   "deps_met": false
+  },
+  {
+   "id": "SEND-TO-ACCOUNTANT",
+   "step": 4,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "EXPENSES-HUB-3"
+   ],
+   "title": "Money > Reports: one 'Send to my accountant' button on the existing export ZIP and email",
+   "deps_met": false
+  },
+  {
+   "id": "NAV-A3",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "NAV-A1"
+   ],
+   "title": "Breadcrumbs from the route registry, My account, store tab deep links and the Launch Pad storefront tile",
+   "deps_met": false
+  },
+  {
+   "id": "CATALOG-1",
+   "step": 4,
+   "priority": "P0",
+   "size": "L",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "NAV-A3",
+    "W11-OWNER-HELPER-D11"
+   ],
+   "title": "Sales > Products: create, edit and archive products through useProducts; each product listed once on the store; Launch counts once; a template applies once",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-STORE-FRAME",
+   "step": 4,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "CATALOG-1",
+    "NAV-A1",
+    "NAV-A3"
+   ],
+   "title": "Embeddable widgets and the in-app store preview can be framed (X-Frame-Options/CSP per route)",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-STORE-OPS-WEB",
+   "step": 4,
+   "priority": "P3",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-STORE-FRAME"
+   ],
+   "title": "Store operations: order cards say which order; amounts in the business currency",
+   "deps_met": false
+  },
+  {
+   "id": "SALES-ORDERS-TAB",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "MOUNT-QUOTES",
+    "SWP-STORE-OPS-WEB"
+   ],
+   "title": "Sales > Orders: store orders and quick sales on /app/commerce for businesses that sell products",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-INV-MONEY-TOTALS",
+   "step": 4,
+   "priority": "P0",
+   "size": "M",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S0-LAND-INFLIGHT"
+   ],
+   "title": "Money totals count deposits and part payments: commerce stats, Executive Summary outstanding, Collections health",
+   "deps_met": true
+  },
+  {
+   "id": "SWP-INV-PUBLIC-LINK",
+   "step": 4,
+   "priority": "P0",
+   "size": "M",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-INV-MONEY-TOTALS"
+   ],
+   "title": "Invoice links: no customer link for a draft; a voided link says voided; the customer page shows tax, discount and the currency code",
+   "deps_met": false
+  },
+  {
+   "id": "MIGRATION-SET-A",
+   "step": 4,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-INV-PUBLIC-LINK",
+    "S1-RULINGS-RECORD"
+   ],
+   "title": "The v1 hold migration set, authored once and proven on a fresh database: part quantities, Business VAT number, tier pricing tables",
+   "deps_met": false
+  },
+  {
+   "id": "DECIMALS-SERVER",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "MIGRATION-SET-A",
+    "SWP-INV-PUBLIC-LINK",
+    "KEY-TOOL-ALLOWLIST",
+    "SWP-STORE-LISTING-SERVER"
+   ],
+   "title": "Invoice and quote lines accept up to 2 decimal places on non-stock lines; stock-product lines stay whole units",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-BOOKING-PAYMENT-GATE",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "ad9d5121"
+   ],
+   "depends_on": [
+    "W11-STORE-OWN-PAYMENT-KEYS"
+   ],
+   "title": "Public booking refuses a payment method the business cannot take (no 'Payment: PayPal' with nothing paid)",
+   "deps_met": null
+  },
+  {
+   "id": "SWP-STORE-LISTING-SERVER",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-BOOKING-PAYMENT-GATE"
+   ],
+   "title": "Public store lists only products added to the store; checkout refuses a product not on it",
+   "deps_met": true
+  },
+  {
+   "id": "SWP-STORE-OVERSELL",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-STORE-LISTING-SERVER"
+   ],
+   "title": "Storefront refuses an order for more stock than the business holds; the refusal names the product, not its id",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-SERVICE-DEPOSIT",
+   "step": 4,
+   "priority": "P2",
+   "size": "M",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-STORE-OVERSELL"
+   ],
+   "title": "Services can require a deposit (fields persisted and edited); the deposit tip links to the editor",
+   "deps_met": false
+  },
+  {
+   "id": "W11-GENOME-RECS-DOMAIN",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S0-LAND-INFLIGHT"
+   ],
+   "title": "Genome recommendation generation creates FINANCIAL recommendations only for members with revenue write; genome bridges withhold the finance snapshot without revenue read (D-128)",
+   "deps_met": true
+  },
+  {
+   "id": "W11-PROPOSAL-RESULT-READER-SCOPE",
+   "step": 4,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-GENOME-RECS-DOMAIN"
+   ],
+   "title": "An approved KEY proposal's stored result is projected for the member who reads it (SEC-SR-2)",
+   "deps_met": false
+  },
+  {
+   "id": "W11-GENOME-RUNWAY",
+   "step": 4,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-PROPOSAL-RESULT-READER-SCOPE"
+   ],
+   "title": "Finance genome LOW_RUNWAY: business currency instead of hard-coded TTD, and the cash it reads",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-CENSUS-KEY-A",
+   "step": 4,
+   "priority": "P1",
+   "size": "L",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "KEY-CRONS-FLAGS",
+    "SWP-CENSUS-HIDDEN"
+   ],
+   "title": "REST scope census, KEY batch A: ai, agent, output templates, graph actions, bookings AI, blueprint onboarding (60 open rows, 6 controllers)",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-CENSUS-KEY-B",
+   "step": 4,
+   "priority": "P1",
+   "size": "L",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "REST scope census, KEY batch B: cortex, goals, audit, action proposals, genome bridge (46 open rows, 5 controllers)",
+   "deps_met": true
+  },
+  {
+   "id": "SWP-CENSUS-GENOME",
+   "step": 4,
+   "priority": "P1",
+   "size": "L",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "REST scope census, KEY batch C: genome, genesis, blueprint, keyflow command, momentum, growth intelligence (70 open rows, 9 controllers)",
+   "deps_met": true
+  },
+  {
+   "id": "SWEEP-RERUN-S4",
+   "step": 4,
+   "priority": "P1",
+   "size": "S",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-GENOME-RECS-DOMAIN",
+    "W11-PROPOSAL-RESULT-READER-SCOPE",
+    "W11-GENOME-RUNWAY",
+    "MOUNT-QUOTES",
+    "SWP-INV-MATH",
+    "DECIMALS-WEB",
+    "SWP-INV-FORM-UX",
+    "SWP-QUOTE-COMPOSER-CONTACT",
+    "SWP-CONTACT-QUICKADD",
+    "SWP-INV-LIST",
+    "W11-WEB-OWNER-MEMBERSHIP-REFUSAL",
+    "SWP-REMOVED-MEMBER-NOTICE",
+    "SWP-INV-DETAIL",
+    "SWP-INV-REFUND-UI",
+    "EXPENSES-HUB-1",
+    "EXPENSES-HUB-2",
+    "EXPENSES-HUB-3",
+    "SEND-TO-ACCOUNTANT",
+    "CATALOG-1",
+    "SWP-STORE-FRAME",
+    "SWP-STORE-OPS-WEB",
+    "SWP-INV-MONEY-TOTALS",
+    "SWP-INV-PUBLIC-LINK",
+    "DECIMALS-SERVER",
+    "SWP-BOOKING-PAYMENT-GATE",
+    "SWP-STORE-LISTING-SERVER",
+    "SWP-STORE-OVERSELL",
+    "SWP-SERVICE-DEPOSIT",
+    "SALES-ORDERS-TAB",
+    "NAV-A2",
+    "NAV-A3",
+    "SWP-CENSUS-KEY-A",
+    "SWP-CENSUS-KEY-B",
+    "SWP-CENSUS-GENOME",
+    "MIGRATION-SET-A",
+    "SWEEP-RERUN-S3"
+   ],
+   "title": "Browser sweep checkpoint after step 4",
+   "deps_met": false
+  },
+  {
+   "id": "W11-RUNWAY-LEDGER-CASH",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S0-LAND-INFLIGHT"
+   ],
+   "title": "FIN_CASHFLOW_RISK and the 'Protect cash runway' money move read the ledger cash position in the business currency and name other-currency cash (D-107)",
+   "deps_met": true
+  },
+  {
+   "id": "W11-CASH-READERS-LEDGER",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-RUNWAY-LEDGER-CASH"
+   ],
+   "title": "Cashflow forecast and health score read the ledger cash position, not the currentBalance snapshot",
+   "deps_met": false
+  },
+  {
+   "id": "W11-RUNWAY-BURN-CURRENCY",
+   "step": 5,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-CASH-READERS-LEDGER"
+   ],
+   "title": "Runway burn counts business-currency expenses; money-moves burn window stops at now",
+   "deps_met": false
+  },
+  {
+   "id": "TOF-PAYROLL-DISCARD",
+   "step": 5,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-RUNWAY-BURN-CURRENCY"
+   ],
+   "title": "Discard a DRAFT payroll run, and a legacy run in a non-business currency (D-144), server side",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-FIN-OVERVIEW-TRUTH",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-RUNWAY-BURN-CURRENCY",
+    "TOF-PAYROLL-DISCARD",
+    "USAGE-COUNT-SCRIPT"
+   ],
+   "title": "Financial Flow: Net Profit (MTD) ignores voided bills; paid recurring expenses are not 'bills due'; Safe to Spend refreshes after a reserve change",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-FIN-CASH-SOURCES",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-FIN-OVERVIEW-TRUTH"
+   ],
+   "title": "Cash readers: the Reports cash-flow forecast reads ledger cash; cash position excludes future-dated entries; Run now posts today",
+   "deps_met": false
+  },
+  {
+   "id": "TODAY-AGGREGATE",
+   "step": 5,
+   "priority": "P0",
+   "size": "L",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-FIN-CASH-SOURCES",
+    "W11-GENOME-RUNWAY",
+    "READY-TO-SEND",
+    "CLAIM-LOOP"
+   ],
+   "title": "One server read for Today: Needs you, Today's list, Pulse and Get set up, filtered per member (D-96) with Pulse gated on revenue:read (D-57)",
+   "deps_met": false
+  },
+  {
+   "id": "DEMO-PREVIEW",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "TODAY-AGGREGATE",
+    "W11-OWNER-HELPER-REST"
+   ],
+   "title": "Onboarding stops seeding a demo contact and DRAFT invoice; the checklist shows a sample as a preview instead",
+   "deps_met": false
+  },
+  {
+   "id": "CLAIM-LOOP",
+   "step": 5,
+   "priority": "P0",
+   "size": "M",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-INV-PUBLIC-LINK",
+    "DECIMALS-SERVER",
+    "SWP-STORE-LISTING-SERVER",
+    "SWP-INV-REFUND-UI"
+   ],
+   "title": "Bank-transfer claim loop: 'I've paid by bank transfer' becomes a Needs-you item; Confirm records the payment in one tap; the pay page tells the truth",
+   "deps_met": false
+  },
+  {
+   "id": "READY-TO-SEND",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "CLAIM-LOOP",
+    "WA-E164-SERVER"
+   ],
+   "title": "'Ready to send' reminders: overdue invoices and tomorrow's bookings as rows with WhatsApp text and the token link; email only when Gmail is connected",
+   "deps_met": false
+  },
+  {
+   "id": "OWNER-ALERTS-SERVER",
+   "step": 5,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "READY-TO-SEND"
+   ],
+   "title": "Owner alerts: a new booking, a paid invoice or order, or a bank-transfer claim pushes to the owner's phone, with an email to the owner as fallback",
+   "deps_met": false
+  },
+  {
+   "id": "OWNER-ALERTS-WEB",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "OWNER-ALERTS-SERVER"
+   ],
+   "title": "Push setup reaches the API, an 'install on your phone' step, and alert settings",
+   "deps_met": false
+  },
+  {
+   "id": "TODAY-4BLOCK",
+   "step": 5,
+   "priority": "P0",
+   "size": "L",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "TODAY-AGGREGATE",
+    "OWNER-ALERTS-WEB",
+    "DEMO-PREVIEW",
+    "SWP-KEY-SHELL-SMOKE",
+    "NAV-A3"
+   ],
+   "title": "Today in four blocks (Needs you, Today, Pulse, Get set up) on the one server read; the metaphor hero, genome readiness and 23 other widgets removed",
+   "deps_met": false
+  },
+  {
+   "id": "KEY-PASTE-BOX",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "TODAY-4BLOCK",
+    "MOUNT-QUOTES",
+    "SWP-INV-FORM-UX",
+    "SWP-KEY-SHELL-SMOKE",
+    "DECIMALS-WEB"
+   ],
+   "title": "KEY where the work is: 'Paste the customer's message' on New quote, New invoice and New booking; 'Draft reminder' on overdue rows; every form still works with KEY off",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-CONTACT-DETAIL",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FIX-CONTACT-PARAMS",
+    "FAILURE-KIT",
+    "NAV-A1"
+   ],
+   "title": "Contact pages: labels instead of codes, an honest delete dialog, plain timeline events; side-panel tabs retired",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-CRM-WEB-POLISH",
+   "step": 5,
+   "priority": "P3",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-CONTACT-DETAIL"
+   ],
+   "title": "Contacts web: Table view honours the main search; CRM dashboard readable in dark mode with the right group label",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-TEAM-WEB",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-CRM-WEB-POLISH",
+    "SWP-TEAM-INVITE-SERVER",
+    "FAILURE-KIT"
+   ],
+   "title": "Team page: no-access state for refused members, the role resets after an invite, pending invites look pending, emails normalised",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-FIN-WEB-CRASHES",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-TEAM-WEB"
+   ],
+   "title": "Reports: switching Books tabs never crashes",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-UI-COPY",
+   "step": 5,
+   "priority": "P3",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-FIN-WEB-CRASHES",
+    "SWP-KEY-SHELL-SMOKE"
+   ],
+   "title": "Plain words instead of developer text in Calendar, Events and Settings",
+   "deps_met": false
+  },
+  {
+   "id": "W11-WEB-INVENTORY-REFUSALS",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-UI-COPY",
+    "FAILURE-KIT"
+   ],
+   "title": "Inventory command center: transfer refusals pinned; the Manual adjustment note is required and said so",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-CALENDAR-TRUTH",
+   "step": 5,
+   "priority": "P2",
+   "size": "M",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-WEB-INVENTORY-REFUSALS"
+   ],
+   "title": "Calendar: bookings show client and staff names and can be confirmed; the fake AI panel is unmounted",
+   "deps_met": false
+  },
+  {
+   "id": "W11-WEB-ACTION-DETAIL-WRAP",
+   "step": 5,
+   "priority": "P3",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-CALENDAR-TRUTH"
+   ],
+   "title": "Let the LOW_RUNWAY action detail wrap at phone width in the Money ActionList",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-SHELL-MINOR",
+   "step": 5,
+   "priority": "P3",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-WEB-ACTION-DETAIL-WRAP"
+   ],
+   "title": "The offline banner is silent while online",
+   "deps_met": false
+  },
+  {
+   "id": "BIZ-SWITCHER",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-SHELL-MINOR",
+    "SWP-REMOVED-MEMBER-NOTICE",
+    "NAV-A1",
+    "SWP-KEY-SHELL-SMOKE"
+   ],
+   "title": "A small business switcher in the account menu for owners and accountants with more than one business (D-10)",
+   "deps_met": false
+  },
+  {
+   "id": "SWEEP-RERUN-S5",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-RUNWAY-LEDGER-CASH",
+    "W11-CASH-READERS-LEDGER",
+    "W11-RUNWAY-BURN-CURRENCY",
+    "SWP-FIN-OVERVIEW-TRUTH",
+    "SWP-FIN-CASH-SOURCES",
+    "TODAY-AGGREGATE",
+    "DEMO-PREVIEW",
+    "CLAIM-LOOP",
+    "READY-TO-SEND",
+    "OWNER-ALERTS-SERVER",
+    "OWNER-ALERTS-WEB",
+    "TODAY-4BLOCK",
+    "KEY-PASTE-BOX",
+    "SWP-CONTACT-DETAIL",
+    "SWP-CRM-WEB-POLISH",
+    "SWP-TEAM-WEB",
+    "SWP-FIN-WEB-CRASHES",
+    "SWP-UI-COPY",
+    "W11-WEB-INVENTORY-REFUSALS",
+    "SWP-CALENDAR-TRUTH",
+    "W11-WEB-ACTION-DETAIL-WRAP",
+    "SWP-SHELL-MINOR",
+    "BIZ-SWITCHER",
+    "TOF-PAYROLL-DISCARD",
+    "SWEEP-RERUN-S4"
+   ],
+   "title": "Browser sweep checkpoint after step 5",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-QUOTE-PUBLIC-PAGE",
+   "step": 6,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-INV-PUBLIC-LINK",
+    "MOUNT-QUOTES"
+   ],
+   "title": "Public quote page shows the business, subtotal, tax and discount",
+   "deps_met": false
+  },
+  {
+   "id": "VAT-BASICS",
+   "step": 6,
+   "priority": "P1",
+   "size": "M",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "MIGRATION-SET-A",
+    "SWP-QUOTE-PUBLIC-PAGE",
+    "SWP-INV-DETAIL",
+    "CLAIM-LOOP",
+    "BIZ-SETTINGS-WEB"
+   ],
+   "title": "VAT basics: a VAT registration number on the business, printed on invoices, receipts, PDFs and customer pages whenever tax is charged; tax off by default with a 12.5% preset",
+   "deps_met": false
+  },
+  {
+   "id": "CUSTOMER-PAGE-HONESTY",
+   "step": 6,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "VAT-BASICS",
+    "CATALOG-1",
+    "WA-HELPER",
+    "OWNER-ALERTS-SERVER"
+   ],
+   "title": "Honest customer pages: no unearned badges or 'Open Now', slug URLs, product page from the storefront payload, /site/<slug> redirects to /book/<slug>, no client order-notify call",
+   "deps_met": false
+  },
+  {
+   "id": "W11-STOREFRONT-PAYPAL-LIST",
+   "step": 6,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "CUSTOMER-PAGE-HONESTY",
+    "W11-STORE-OWN-PAYMENT-KEYS"
+   ],
+   "title": "Storefront checkout offers PayPal only once the server's gateway list carries it",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-STORE-PUBLIC-POLISH",
+   "step": 6,
+   "priority": "P3",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-STOREFRONT-PAYPAL-LIST"
+   ],
+   "title": "Public store: readable cart, quantity capped at stock, offline store says temporarily unavailable",
+   "deps_met": false
+  },
+  {
+   "id": "HARNESS-REMOVAL",
+   "step": 6,
+   "priority": "P1",
+   "size": "M",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-STORE-PUBLIC-POLISH",
+    "TODAY-4BLOCK"
+   ],
+   "title": "Remove the developer harness and fake-data pages customers and crawlers can reach, and the KF Store drawer",
+   "deps_met": false
+  },
+  {
+   "id": "W11-INV-SET-MOVEMENT",
+   "step": 6,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "9e3b756b"
+   ],
+   "depends_on": [
+    "W11-ORDER-CANCEL-RELEASE"
+   ],
+   "title": "A direct stock set writes one ADJUSTMENT movement with its actor and protects reserved (D-139)",
+   "deps_met": null
+  },
+  {
+   "id": "W11-SHIP-STOCK-DECREMENT",
+   "step": 6,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-INV-SET-MOVEMENT"
+   ],
+   "title": "Fulfil 'ship' decrements processed tracked stock once, under the routing claim, in its transaction (F-26)",
+   "deps_met": true
+  },
+  {
+   "id": "W11-STOREFRONT-ROUTE-DECREMENTED",
+   "step": 6,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-SHIP-STOCK-DECREMENT",
+    "USAGE-COUNT-SCRIPT"
+   ],
+   "title": "Routing does not reserve storefront lines whose stock the checkout already decremented (F-36)",
+   "deps_met": false
+  },
+  {
+   "id": "W11-STOREFRONT-FULFIL-STEPS",
+   "step": 6,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-STOREFRONT-ROUTE-DECREMENTED"
+   ],
+   "title": "Fulfil 'confirm'/'process' read a storefront order in its own vocabulary (paid CONFIRMED storefront orders cannot be processed)",
+   "deps_met": false
+  },
+  {
+   "id": "W11-PLANTED-STOCK-CENSUS",
+   "step": 6,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-STOREFRONT-FULFIL-STEPS",
+    "USAGE-COUNT-SCRIPT"
+   ],
+   "title": "Operator census and owner-approved cleanup of inventory_stocks rows whose business is not their product's or warehouse's business (dry run by default)",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-INV-SKU-COUNT",
+   "step": 6,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-PLANTED-STOCK-CENSUS"
+   ],
+   "title": "Inventory 'Total SKUs' counts products, not stock rows",
+   "deps_met": false
+  },
+  {
+   "id": "QUICK-SALE-SERVER",
+   "step": 6,
+   "priority": "P1",
+   "size": "L",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-INV-SKU-COUNT",
+    "SWP-STORE-OVERSELL"
+   ],
+   "title": "Quick counter sale on the store-order path: owner-created, paid in cash or bank transfer, optional customer, stock and COGS post",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-CENSUS-MARKETPLACE",
+   "step": 6,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "QUICK-SALE-SERVER",
+    "W11-INV-SET-MOVEMENT"
+   ],
+   "title": "REST scope census, Marketplace batch: operator order create, post-purchase jobs, promote to content (3 open rows, 1 controllers)",
+   "deps_met": false
+  },
+  {
+   "id": "QUICK-SALE-WEB",
+   "step": 6,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "QUICK-SALE-SERVER",
+    "NAV-A1",
+    "SALES-ORDERS-TAB"
+   ],
+   "title": "+ New > Quick sale: pick items, take cash or bank transfer, optional customer, share the receipt by WhatsApp or QR",
+   "deps_met": false
+  },
+  {
+   "id": "PLAN-TABLE",
+   "step": 6,
+   "priority": "P1",
+   "size": "L",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "QUICK-SALE-SERVER",
+    "W11-OWNER-HELPER-REST",
+    "DEMO-PREVIEW"
+   ],
+   "title": "One plan and feature table: every advertised limit is enforced or removed; FREE lets a habit form; plan copy without autopilot, unlimited AI or dormant features",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-PUBLIC-SITE-MINOR",
+   "step": 6,
+   "priority": "P3",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "PLAN-TABLE"
+   ],
+   "title": "Public site: the Pricing choice carries into sign-up; 'View demo' goes to the pricing page",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-FIN-LEDGER",
+   "step": 6,
+   "priority": "P1",
+   "size": "M",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S0-LAND-INFLIGHT"
+   ],
+   "title": "General Ledger: the end date is inclusive; the page sends pageSize, formats dates and money, picks accounts by name; Accounts opens its tab",
+   "deps_met": true
+  },
+  {
+   "id": "SWP-CENSUS-OPEN-WRITES",
+   "step": 6,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-FIN-LEDGER"
+   ],
+   "title": "Chart-of-accounts writes under Money write (D-146, coawrite) and the census batch plan",
+   "deps_met": false
+  },
+  {
+   "id": "W11-CALLS-LIST-PAGING",
+   "step": 6,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-CENSUS-OPEN-WRITES"
+   ],
+   "title": "Calls list: ?limit/?offset pass the production pipe, and the list has a total order (scheduledAt asc, id asc)",
+   "deps_met": false
+  },
+  {
+   "id": "W11-QUERY-DTO-COERCION",
+   "step": 6,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-CALLS-LIST-PAGING"
+   ],
+   "title": "Query DTOs coerce numeric query values (assets, data-inbox) and a census keeps every @Query() DTO passing the production pipe",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-QUERY-CORS-HEADERS",
+   "step": 6,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-QUERY-DTO-COERCION"
+   ],
+   "title": "Public visitor/cart/checkout events pass CORS (X-Visitor-Id, X-Session-Id allowed)",
+   "deps_met": false
+  },
+  {
+   "id": "W11-ORDER-METADATA-WRITERS",
+   "step": 6,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-QUERY-CORS-HEADERS"
+   ],
+   "title": "Abandoned-checkout flag and Shopify order sync write order metadata in one statement (F-27)",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-READ-SCOPE-CENSUS",
+   "step": 6,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "TODAY-AGGREGATE",
+    "READY-TO-SEND",
+    "CLAIM-LOOP"
+   ],
+   "title": "A read-side REST scope census: membership-only GET routes that answer module data or secrets",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-CENSUS-V1-A",
+   "step": 6,
+   "priority": "P0",
+   "size": "L",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-CENSUS-GENOME",
+    "SWP-BOOKING-PAYMENT-GATE",
+    "SWP-SERVICE-DEPOSIT",
+    "CATALOG-1"
+   ],
+   "title": "REST scope census, v1 hubs batch A: bookings, calendar, catalog, document templates, commerce insights, lead forms (47 open rows, 6 controllers)",
+   "deps_met": false
+  },
+  {
+   "id": "SWP-CENSUS-V1-B",
+   "step": 6,
+   "priority": "P0",
+   "size": "L",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-KEY-SHELL-SMOKE"
+   ],
+   "title": "REST scope census, v1 hubs batch B: site, presence, onboarding concierge, approvals, identity, actions, notifications, connectors (48 open rows, 9 controllers)",
+   "deps_met": false
+  },
+  {
+   "id": "TOF-TIER-PRICING-SCHEMA",
+   "step": 6,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "MIGRATION-SET-A",
+    "DECIMALS-SERVER",
+    "CLAIM-LOOP",
+    "READY-TO-SEND"
+   ],
+   "title": "Tiered pricing service: tenant-bound PricingService and commerce wiring (the migration and the tenant model list moved to MIGRATION-SET-A)",
+   "deps_met": false
+  },
+  {
+   "id": "TOF-TIER-PRICING-ROUTES",
+   "step": 6,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "TOF-TIER-PRICING-SCHEMA"
+   ],
+   "title": "Tiered pricing routes: tier prices, contact tier and a price lookup under revenue scopes",
+   "deps_met": false
+  },
+  {
+   "id": "TOF-TIER-PRICING-WEB",
+   "step": 6,
+   "priority": "P2",
+   "size": "M",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "TOF-TIER-PRICING-ROUTES",
+    "CATALOG-1",
+    "MOUNT-QUOTES",
+    "KEY-PASTE-BOX"
+   ],
+   "title": "Tiered pricing in the web: product wholesale price, contact tier, composer prefill",
+   "deps_met": false
+  },
+  {
+   "id": "SWEEP-RERUN-S6",
+   "step": 6,
+   "priority": "P1",
+   "size": "S",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "TOF-TIER-PRICING-SCHEMA",
+    "TOF-TIER-PRICING-ROUTES",
+    "SWP-QUOTE-PUBLIC-PAGE",
+    "VAT-BASICS",
+    "CUSTOMER-PAGE-HONESTY",
+    "W11-STOREFRONT-PAYPAL-LIST",
+    "SWP-STORE-PUBLIC-POLISH",
+    "HARNESS-REMOVAL",
+    "W11-INV-SET-MOVEMENT",
+    "W11-SHIP-STOCK-DECREMENT",
+    "W11-STOREFRONT-ROUTE-DECREMENTED",
+    "W11-STOREFRONT-FULFIL-STEPS",
+    "W11-PLANTED-STOCK-CENSUS",
+    "SWP-INV-SKU-COUNT",
+    "QUICK-SALE-SERVER",
+    "QUICK-SALE-WEB",
+    "PLAN-TABLE",
+    "SWP-PUBLIC-SITE-MINOR",
+    "SWP-FIN-LEDGER",
+    "SWP-CENSUS-OPEN-WRITES",
+    "SWP-READ-SCOPE-CENSUS",
+    "W11-CALLS-LIST-PAGING",
+    "W11-QUERY-DTO-COERCION",
+    "SWP-QUERY-CORS-HEADERS",
+    "W11-ORDER-METADATA-WRITERS",
+    "TOF-TIER-PRICING-WEB",
+    "SWP-CENSUS-V1-A",
+    "SWP-CENSUS-V1-B",
+    "SWP-CENSUS-MARKETPLACE",
+    "SWEEP-RERUN-S5"
+   ],
+   "title": "Browser sweep checkpoint after step 6",
+   "deps_met": false
+  },
+  {
+   "id": "NAV-B-LEGACY-SERVER",
+   "step": 7,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "USAGE-COUNT-SCRIPT",
+    "SWP-KEY-SHELL-SMOKE",
+    "BIZ-SETTINGS-SERVER",
+    "SWP-CENSUS-V1-B"
+   ],
+   "title": "Per-business legacy modules: a server read of which hidden modules this business already has data in",
+   "deps_met": false
+  },
+  {
+   "id": "KEY-TOOL-DOMAIN-HIDE",
+   "step": 7,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "KEY-TOOL-ALLOWLIST",
+    "NAV-B-LEGACY-SERVER"
+   ],
+   "title": "KEY withholds hidden-module tool families per business, after the usage count, from the shared module list",
+   "deps_met": false
+  },
+  {
+   "id": "NAV-B-HIDE",
+   "step": 7,
+   "priority": "P1",
+   "size": "L",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "NAV-B-LEGACY-SERVER",
+    "USAGE-COUNT-SCRIPT",
+    "NAV-A1",
+    "SWP-CALENDAR-TRUTH",
+    "W11-WEB-INVENTORY-REFUSALS",
+    "HARNESS-REMOVAL"
+   ],
+   "title": "Hide census, part 1: the per-business read-only mechanism and the hidden routes around Customers, Sales, Schedule, Money and Settings",
+   "deps_met": false
+  },
+  {
+   "id": "NAV-B-HIDE-2",
+   "step": 7,
+   "priority": "P1",
+   "size": "L",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "NAV-B-HIDE"
+   ],
+   "title": "Hide census, part 2: the marketing, projects, contracts, procurement, automation, flow and KEY-extras route families",
+   "deps_met": false
+  },
+  {
+   "id": "HIDE-DEV-WEBHOOKS",
+   "step": 7,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "NAV-B-HIDE",
+    "NAV-B-HIDE-2",
+    "NAV-A2"
+   ],
+   "title": "Hide Settings > Developers (API keys) and Settings > Webhooks until V1.5; the scope fixes stay",
+   "deps_met": false
+  },
+  {
+   "id": "NAV-B-LINKS",
+   "step": 7,
+   "priority": "P1",
+   "size": "L",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "NAV-B-HIDE-2",
+    "TODAY-AGGREGATE",
+    "SWP-SERVICE-DEPOSIT",
+    "W11-RUNWAY-BURN-CURRENCY",
+    "DEMO-PREVIEW"
+   ],
+   "title": "Server link census and remap, part 1: the shared map, the web resolver and the hub-side emitters",
+   "deps_met": false
+  },
+  {
+   "id": "NAV-B-LINKS-KEY",
+   "step": 7,
+   "priority": "P2",
+   "size": "L",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "NAV-B-LINKS",
+    "KEY-TOOL-DOMAIN-HIDE"
+   ],
+   "title": "Server link census and remap, part 2: the KEY emitters (capability map, tool registry, role engine, KEY services)",
+   "deps_met": false
+  },
+  {
+   "id": "W11-TRANSIENT-CONFLICT",
+   "step": 7,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-SHIP-STOCK-DECREMENT",
+    "W11-STORE-OWN-PAYMENT-KEYS",
+    "W11-OWNER-HELPER-D11",
+    "VAT-BASICS"
+   ],
+   "title": "Share isLostTransactionConflict with identity bootstrap, PayPal capture recording and the KEY action boundary (F-37)",
+   "deps_met": false
+  },
+  {
+   "id": "W11-LOAD-SENSITIVE-TESTS",
+   "step": 7,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-TRANSIENT-CONFLICT"
+   ],
+   "title": "Three suites that fail only under machine load get deterministic budgets (MW-06 pool, ST-2 5s, EE-08/MR-02 waits)",
+   "deps_met": false
+  },
+  {
+   "id": "W11-PAGING-TOTAL-ORDER-A",
+   "step": 7,
+   "priority": "P3",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-LOAD-SENSITIVE-TESTS",
+    "SWP-INV-SKU-COUNT",
+    "SWP-SERVICE-DEPOSIT",
+    "CATALOG-1",
+    "TOF-CONTACT-AUDIT-AWAIT",
+    "CLAIM-LOOP",
+    "VAT-BASICS",
+    "QUICK-SALE-SERVER"
+   ],
+   "title": "Paged lists get a total order (money and customer-facing lists) plus a paged-order census with a shrinking allow-list",
+   "deps_met": false
+  },
+  {
+   "id": "W11-PAGING-TOTAL-ORDER-B",
+   "step": 7,
+   "priority": "P3",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-PAGING-TOTAL-ORDER-A",
+    "SWP-CENSUS-HIDDEN"
+   ],
+   "title": "Paged lists get a total order (AI, KEY, flow, inbox, command lists); census allow-list shrinks",
+   "deps_met": false
+  },
+  {
+   "id": "W11-PAGING-TOTAL-ORDER-C",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-PAGING-TOTAL-ORDER-B",
+    "VAT-BASICS"
+   ],
+   "title": "Paged lists get a total order (admin, analytics, device, identity, signals lists); census allow-list emptied",
+   "deps_met": false
+  },
+  {
+   "id": "W11-RELEASE0-INDEX-STALE",
+   "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-PAGING-TOTAL-ORDER-C"
+   ],
+   "title": "release0-index.json: drop the explained entries whose todo is gone (three with a wrong status)",
+   "deps_met": false
+  },
+  {
+   "id": "MIGRATION-SET-B",
+   "step": 7,
+   "priority": "P0",
+   "size": "S",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "MIGRATION-SET-A",
+    "VAT-BASICS",
+    "DECIMALS-SERVER",
+    "TOF-TIER-PRICING-ROUTES"
+   ],
+   "title": "Rehearse the v1 hold migration set with deploy.sh against a production-like snapshot and record the single deploy",
+   "deps_met": false
+  },
+  {
+   "id": "SWEEP-RERUN-S7",
+   "step": 7,
+   "priority": "P1",
+   "size": "S",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "NAV-B-HIDE",
+    "HIDE-DEV-WEBHOOKS",
+    "NAV-B-LINKS",
+    "W11-TRANSIENT-CONFLICT",
+    "W11-LOAD-SENSITIVE-TESTS",
+    "W11-PAGING-TOTAL-ORDER-A",
+    "W11-PAGING-TOTAL-ORDER-B",
+    "W11-PAGING-TOTAL-ORDER-C",
+    "W11-RELEASE0-INDEX-STALE",
+    "NAV-B-LEGACY-SERVER",
+    "NAV-B-HIDE-2",
+    "KEY-TOOL-DOMAIN-HIDE",
+    "NAV-B-LINKS-KEY",
+    "MIGRATION-SET-B",
+    "SWEEP-RERUN-S6"
+   ],
+   "title": "Browser sweep checkpoint after step 7",
+   "deps_met": false
+  },
+  {
+   "id": "GATE-JOURNEY-RUN",
+   "step": 8,
+   "priority": "P0",
+   "size": "M",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S0-SEC-LANE-DEPLOY",
+    "S0-DEPENDABOT-FREEZE",
+    "TOF-CI-PYTHON-HARVESTER",
+    "SWEEP-RERUN-S7"
+   ],
+   "title": "Gate part 1: journeys A-L green at 375x812 and 1440x900 under AI_DISABLED and KEY_DISABLED against a production build; zero open blocker/major on v1 surfaces; proof:release0 MET",
+   "deps_met": false
+  },
+  {
+   "id": "GATE-SCHEDULER-RUN",
+   "step": 8,
+   "priority": "P0",
+   "size": "S",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "GATE-JOURNEY-RUN"
+   ],
+   "title": "Gate part 2: a scheduler-enabled run with a controlled clock (overdue, booking reminders, recurring invoice, recurring expense) and the KEY cron flags on",
+   "deps_met": false
+  },
+  {
+   "id": "GATE-STAGING-RUN",
+   "step": 8,
+   "priority": "P0",
+   "size": "M",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "GATE-JOURNEY-RUN",
+    "MIGRATION-SET-B"
+   ],
+   "title": "Gate part 3: staging provider run checklist and execution (sandbox Supabase, WiPay, Gmail, push; capped AI-on smoke)",
+   "deps_met": false
+  },
+  {
+   "id": "GATE-OWNER-TEST",
+   "step": 8,
+   "priority": "P0",
+   "size": "S",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "GATE-STAGING-RUN"
+   ],
+   "title": "Gate part 4: owner-test protocol with five Trinidad and Tobago owners on their own phones, unassisted",
+   "deps_met": false
+  },
+  {
+   "id": "SWEEP-P0-FOLLOWUP",
+   "step": 2,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S0-LAND-INFLIGHT"
+   ],
+   "title": "Close the last credential-binding and export-receiver holes the SWEEP-P0 round-3 rechecks found, and the census owner questions answered by default",
+   "deps_met": null
+  },
+  {
+   "id": "W1F-KEYCHAT-OWNSESSION",
+   "step": 2,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-KEY-CHAT-SESSION-BIND"
+   ],
+   "title": "KEY chat routes decide session ownership without writing, then read the actor's own session (SEC-W11KCSB-1)",
+   "deps_met": null
+  },
+  {
+   "id": "W1F-MEMORY-COPIES",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-MEMORY-PROMOTE-SCOPE"
+   ],
+   "title": "Every AiMemory deletion also removes its ai_memory_embeddings copies; promotion cuts on code points; the backfill cannot resurrect a withdrawn copy",
+   "deps_met": null
+  },
+  {
+   "id": "W1F-PERCEPTION-MODULE-SCOPE",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-FLOW-PERCEPTION-SCOPE"
+   ],
+   "title": "KEY perception follows module scopes; the customer support desk and the staff phone bridge get only what the owner ruled",
+   "deps_met": null
+  },
+  {
+   "id": "W1F-ORDER-TRANSITIONS",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-ORDER-CANCEL-RELEASE"
+   ],
+   "title": "Order status edits are transition-checked and ship/cancel writers compare-and-set, so a shipped order never ends cancelled and a ship never overwrites a cancel",
+   "deps_met": true
+  },
+  {
+   "id": "W1F-SETTLE-NO-STOCK",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-CHECKOUT-PAIR-SCOPE",
+    "SWP-STORE-OVERSELL"
+   ],
+   "title": "A provider settlement whose stock has run out records the money and alerts the business; stock reads are business-scoped everywhere",
+   "deps_met": false
+  },
+  {
+   "id": "W1F-STORE-STRIPE-R0",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-STORE-OWN-PAYMENT-KEYS"
+   ],
+   "title": "The platform's Stripe signature never settles a store order; store refunds map to their order",
+   "deps_met": true
+  },
+  {
+   "id": "W1F-STORE-PAYPAL",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-STORE-OWN-PAYMENT-KEYS"
+   ],
+   "title": "Store PayPal is offered only when it can settle (webhook id in the store's PayPal set and on Settings > Payments)",
+   "deps_met": true
+  },
+  {
+   "id": "W1F-KEY-EVIDENCE-WRITE",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "USAGE-COUNT-SCRIPT"
+   ],
+   "title": "KEY's evidence writer stops throwing on columns the evidence table does not have, so a deliberative KEY answer cannot fail at step 11",
+   "deps_met": null
+  },
+  {
+   "id": "PR210-PAYPAL-STORE-REFUND",
+   "step": 1,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-STORE-OWN-PAYMENT-KEYS"
+   ],
+   "title": "A store's own PayPal refund and reversal webhooks are verified with that store's app and reverse the store order's payment",
+   "deps_met": null
+  },
+  {
+   "id": "BIZ-SETTINGS-ADMIN-DOOR",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "BIZ-SETTINGS-SERVER"
+   ],
+   "title": "The Advanced CRM switch and the per-hub depth choices can be changed by the owner or an admin, as ruling D-150 adopted",
+   "deps_met": null
+  },
+  {
+   "id": "FU-DELIVERY-TOKEN-DECRYPT",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWEEP-P0-FOLLOWUP"
+   ],
+   "title": "Queued Gmail and WhatsApp sends use the decrypted connection token, not the stored ciphertext",
+   "deps_met": null
+  },
+  {
+   "id": "FU-SEED-SUPERADMIN-PLACEHOLDER",
+   "step": 3,
+   "priority": "P2",
+   "size": "XS",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-TEAM-INVITE-SERVER"
+   ],
+   "title": "The super-admin seed never promotes a team-invite placeholder, so the real admin's first sign-in is not refused",
+   "deps_met": null
+  },
+  {
+   "id": "FU-UNIT-MOCK-ISOLATION",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Unit runs can never reach a real provider SDK: module mocks hold under the shared-process unit config, and outbound network is refused in unit tests",
+   "deps_met": null
+  },
+  {
+   "id": "FU-FINANCE-SETTINGS-SCOPE",
+   "step": 3,
+   "priority": "P0",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWEEP-P0-FOLLOWUP"
+   ],
+   "title": "Only a member who may export the books can change where the accountant export goes; finance settings reads and writes carry a module scope",
+   "deps_met": null
+  },
+  {
+   "id": "TOF-CONTACT-AUDIT-CREATE",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "TOF-CONTACT-AUDIT-AWAIT"
+   ],
+   "title": "A contact create writes its audit row in its own transaction (D-25), with the CP-FH-01 amendment ruled in D-204",
+   "deps_met": null
+  },
+  {
+   "id": "FU-FINANCE-SETTINGS-PATCH",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "both",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-FINANCE-SETTINGS-SCOPE"
+   ],
+   "title": "Finance settings PATCH applies the D-205 rule; the accountant box learns in advance whether 'Remember' will be allowed",
+   "deps_met": null
+  },
+  {
+   "id": "FU-IDENTITY-FINANCE-COLUMNS",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "ab7fb422"
+   ],
+   "depends_on": [
+    "FU-FINANCE-SETTINGS-SCOPE"
+   ],
+   "title": "Business reads stop handing finance settings to members who may not read them",
+   "deps_met": null
+  },
+  {
+   "id": "FU-CONTACT-AUDIT-RESIDUAL",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "TOF-CONTACT-AUDIT-CREATE"
+   ],
+   "title": "Every remaining contact write records its audit row durably (D-25), notes and tasks included (D-207)",
+   "deps_met": true
+  },
+  {
+   "id": "FU-MERGE-CONTACTS-UNIQUE",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "TOF-CONTACT-AUDIT-AWAIT"
+   ],
+   "title": "Merging two contacts no longer fails when the primary lacks the duplicate's email or phone",
+   "deps_met": true
+  },
+  {
+   "id": "FU-MEMORY-COPIES-REWRITE",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W1F-MEMORY-COPIES"
+   ],
+   "title": "An AI memory rewritten in place drops the semantic copies of its old value",
+   "deps_met": null
+  },
+  {
+   "id": "FU-KEY-EVENT-COLUMNS",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W1F-KEY-EVIDENCE-WRITE"
+   ],
+   "title": "KEY's event writer uses the real business_events columns, and KEY's own observations are kept there (D-220)",
+   "deps_met": null
+  },
+  {
+   "id": "FU-UNIT-GUARD-CI",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-UNIT-MOCK-ISOLATION"
+   ],
+   "title": "CI unit runs refuse non-loopback network calls; the remaining shared-process mock misses are fixed",
+   "deps_met": true
+  },
+  {
+   "id": "FU-OVERLAY-LAYER-TABLE",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-LAYERS"
+   ],
+   "title": "Page-level overlays join the shell's layer table",
+   "deps_met": true
+  },
+  {
+   "id": "FU-PROVIDER-ERROR-HYGIENE",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "b065df18"
+   ],
+   "depends_on": [
+    "W11-PROVIDER-OUTAGE-CONNECT"
+   ],
+   "title": "Provider error bodies never reach responses; Business Profile insights answer an outage as 503",
+   "deps_met": null
+  },
+  {
+   "id": "FU-PHONE-COUNTRY-DUPLICATES",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "6a6ec628"
+   ],
+   "depends_on": [
+    "WA-E164-SERVER"
+   ],
+   "title": "Phone duplicates match only within the business's own country code (D-211), everywhere a contact is created",
+   "deps_met": null
+  },
+  {
+   "id": "FU-COMMUNITY-LIKE-OWN-ACTION",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "prior-status-file",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-CENSUS-HIDDEN"
+   ],
+   "title": "Liking a community post is the member's own action (D-216)",
+   "deps_met": true
+  },
+  {
+   "id": "FU-WA-CONTACT-PHONE",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "both",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "WA-HELPER",
+    "WA-E164-SERVER"
+   ],
+   "title": "A contact with only a phone number can get a WhatsApp share after the owner confirms the number once",
+   "deps_met": null
+  },
+  {
+   "id": "FU-DATAQUALITY-MASS-ASSIGN",
+   "step": 3,
+   "priority": "P0",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "prior-status-file+wave-2b-commit",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "WA-E164-SERVER"
+   ],
+   "title": "Contact data-quality fixes write only the fields they fix, and only on contacts the member may open",
+   "deps_met": null
+  },
+  {
+   "id": "FU-KEY-MEMORY-MONEY-SIGHT",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "76b48238"
+   ],
+   "depends_on": [
+    "W1F-PERCEPTION-MODULE-SCOPE"
+   ],
+   "title": "KEY's memory and proposals show money only to members who may read it",
+   "deps_met": null
+  },
+  {
+   "id": "FU-WA-ESCAPE-RACE",
+   "step": 3,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "status": "done",
+   "derived_from": "code-commit-subject",
+   "uncertain": true,
+   "evidence": [
+    "048e5fcf"
+   ],
+   "depends_on": [
+    "FU-WA-CONTACT-PHONE"
+   ],
+   "title": "The WhatsApp confirm step takes Escape from the moment it is on screen",
+   "deps_met": null
+  },
+  {
+   "id": "FU-KEY-CHAT-GENOME-MONEY-SIGHT",
+   "step": 3,
+   "priority": "P0",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "f06ff07e"
+   ],
+   "depends_on": [
+    "W11-CORTEX-SESSION-SNAPSHOT-SCOPE"
+   ],
+   "title": "A KEY chat turn hands finance genome rows and opportunity values only to revenue readers",
+   "deps_met": null
+  },
+  {
+   "id": "FU-GENOME-REVENUE-CLASSIFIER",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "both",
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "2478a115"
+   ],
+   "depends_on": [
+    "FU-KEY-CHAT-GENOME-MONEY-SIGHT"
+   ],
+   "title": "One provenance-based revenue classifier for every genome reader (finance DNA and sales-derived rows need revenue read)",
+   "deps_met": null
+  },
+  {
+   "id": "FU-KEY-GENOME-READS-RESIDUAL",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-GENOME-REVENUE-CLASSIFIER"
+   ],
+   "title": "Every remaining KEY genome read resolves its reader before it reaches a prompt, stream or answer",
+   "deps_met": true
+  },
+  {
+   "id": "OPS-CONSOLE-READONLY",
+   "step": 7,
+   "priority": "P2",
+   "size": "M",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-KEY-GENOME-READS-RESIDUAL"
+   ],
+   "title": "The owner's read-only engineering console in the platform admin area",
+   "deps_met": false
+  },
+  {
+   "id": "FU-GENOME-SURFACES-REVENUE",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-GENOME-REVENUE-CLASSIFIER"
+   ],
+   "title": "The genome's other surfaces show finance and sales scores and rows only to revenue readers",
+   "deps_met": true
+  },
+  {
+   "id": "FU-PROPOSAL-REVENUE-SIGHT",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-GENOME-REVENUE-CLASSIFIER"
+   ],
+   "title": "KEY proposal records reach a reader without revenue read only when the proposal itself is non-financial",
+   "deps_met": true
+  },
+  {
+   "id": "FU-CORTEX-INSIGHT-CASH-TRUTH",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "The KEY insight report reads cash in from payment rows by date and outstanding from the balance",
+   "deps_met": true
+  },
+  {
+   "id": "FU-ARCH-MAP-REFRESH",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "docs",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Regenerate the architecture dependency and inventory maps from the deterministic scanners",
+   "deps_met": true
+  },
+  {
+   "id": "FU-PROPOSAL-MONEY-TAG",
+   "step": 3,
+   "priority": "P1",
+   "size": "L",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-PROPOSAL-REVENUE-SIGHT"
+   ],
+   "title": "KEY proposal writers tag money at creation, so proposal visibility stops depending on wording",
+   "deps_met": false
+  },
+  {
+   "id": "FU-BOOKING-PAGE-PAYMENT-METHOD",
+   "step": 6,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-BOOKING-PAYMENT-GATE",
+    "W11-STOREFRONT-PAYPAL-LIST"
+   ],
+   "title": "The booking page sends the chosen payment method and its own slug, and never confirms a payment that has not happened",
+   "deps_met": false
+  },
+  {
+   "id": "FU-CONTRACT-FETCH-OUTBOUND-GUARD",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-DISPATCH-REFUSAL-FINAL"
+   ],
+   "title": "Contract document fetches pass the outbound-address guard (no SSRF through contract_extract_clauses)",
+   "deps_met": true
+  },
+  {
+   "id": "FU-KEY-INVOICE-EMAIL-PAY-LINK",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "W11-DISPATCH-REFUSAL-FINAL"
+   ],
+   "title": "KEY does not email an invoice without its pay button on a transient pay-link conflict, and never sends it twice",
+   "deps_met": true
+  },
+  {
+   "id": "FU-MARKETPLACE-PAID-PAYMENT-ROW",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-INV-MONEY-TOTALS"
+   ],
+   "title": "The marketplace order writer records a payment row for a PAID invoice, and rowless PAID invoices are backfilled",
+   "deps_met": false
+  }
+ ]
+}

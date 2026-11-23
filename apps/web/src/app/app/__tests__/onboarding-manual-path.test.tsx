@@ -278,7 +278,7 @@ describe("onboarding: the manual path completes without AI (D-03)", () => {
   it("Finish saves the minimal profile, POSTs /complete once, and lands on the command center", async () => {
     renderPage();
     const step = await manualStep();
-    await fillProfile(step, { name: "  k06a Bread House ", currency: "usd", timezone: "America/New_York" });
+    await fillProfile(step, { name: "  k06a Bread House ", currency: "USD", timezone: "America/New_York" });
 
     fireEvent.click(step.getByRole("button", { name: /finish setup/i }));
 
@@ -464,7 +464,7 @@ describe("onboarding: the manual path completes without AI (D-03)", () => {
       renderPage();
       const step = await manualStep();
       await prefilled(step);
-      await fillProfile(step, { name: "k06a Bread House", currency: "usd", timezone: "America/New_York" });
+      await fillProfile(step, { name: "k06a Bread House", currency: "USD", timezone: "America/New_York" });
       fireEvent.click(step.getByRole("button", { name: /finish setup/i }));
       await expectAskTheOwner(step);
     });
@@ -494,7 +494,7 @@ describe("onboarding: the manual path completes without AI (D-03)", () => {
       renderPage();
       const step = await manualStep();
       await prefilled(step);
-      await fillProfile(step, { name: "k06a Bread House", currency: "usd", timezone: "America/New_York" });
+      await fillProfile(step, { name: "k06a Bread House", currency: "USD", timezone: "America/New_York" });
       fireEvent.click(step.getByRole("button", { name: /finish setup/i }));
       await waitFor(() => expect(nav.router.replace).toHaveBeenCalledWith("/app/command-center"));
       expect(writes()).toEqual([key("POST", completePath), key("PATCH", businessPath)]);

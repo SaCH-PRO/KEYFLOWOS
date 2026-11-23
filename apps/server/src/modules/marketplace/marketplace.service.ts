@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ConflictException, UnauthorizedException, Inject, forwardRef } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import ExcelJS from 'exceljs';
 import { createHash, randomBytes } from 'crypto';
@@ -7,7 +7,7 @@ import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { lockStockRowPairsInOrder, STOCK_LOCK_TX_OPTIONS } from '../../core/inventory/stock-lock-order';
-import { createStockRowOrConflict, ownedProductsAndWarehouses, retryOnOwnStockRowRace } from '../../core/inventory/stock-ownership';
+import { createStockRowOrConflict, ownedProductsAndWarehouses, retryOnOwnStockRowRace, StockRowHeldConflict } from '../../core/inventory/stock-ownership';
 import { purchaseOrderLineRefusal, readPurchaseOrderLine } from '../../core/inventory/purchase-order-lines';
 import { StoreOrderService } from '../site/store-order.service';
 import { TransactionalEmailService, NotificationType } from '../notifications/transactional-email.service';
@@ -161,6 +161,21 @@ function readInventoryUpsert(data: unknown): InventoryUpsertFields {
   }
   return { productId, warehouseId, quantity, reserved, reorderAt, costPerUnit, currency };
 }
+
+/** W11-INV-SET-MOVEMENT (D-139): the stable codes of a stock set's refusals (the response body's `code`). */
+export const INVENTORY_RESERVED_NOT_EDITABLE = 'RESERVED_NOT_EDITABLE';
+export const INVENTORY_QUANTITY_BELOW_RESERVED = 'QUANTITY_BELOW_RESERVED';
+
+/**
+ * W11-INV-SET-MOVEMENT (D-139): what a stock set's one movement is recorded
+ * as. Chosen by the caller in code (the route's handler, the Excel import),
+ * never read from a request body.
+ */
+type InventorySetRecord =
+  /** POST .../inventory: reasonCode SET, createdBy the acting member. */
+  | { reasonCode: 'SET'; createdBy: string }
+  /** The Excel import's row: reasonCode EXCEL_IMPORT with its note, as the import wrote it before. */
+  | { reasonCode: 'EXCEL_IMPORT'; label: string };
 
 /**
  * W10-STORE-ORDER-PAID review (SEC-SOP-1, D-112): a field the order routes
@@ -517,8 +532,42 @@ export class MarketplaceService {
    * transaction is run once more only when the row holding the pair is the
    * business's own (or gone), read outside the rolled-back transaction; a
    * planted row's 409 (D-137) is answered after one run, not two.
+   *
+   * W11-INV-SET-MOVEMENT (owner ruling D-139; the review's SEC-UPS-2): a set
+   * wrote no stock movement and named no actor (the controller passed no
+   * member), took a quantity below the row's reserved quantity, and let a
+   * member rewrite reserved by hand (clearing what routed orders hold). Now,
+   * in the same transaction as the stock write and under the same row lock:
+   *   - a set that changes the quantity writes one ADJUSTMENT movement,
+   *     reasonCode SET, quantityChange the new quantity minus the quantity
+   *     this transaction read under the lock (a new row: its whole quantity),
+   *     createdBy the acting member, referenceId null; an unchanged quantity,
+   *     or a body naming none, writes no movement;
+   *   - a quantity below the row's reserved quantity is refused with 400
+   *     (QUANTITY_BELOW_RESERVED), nothing written;
+   *   - reserved is never written here: a body naming it is refused with 400
+   *     (RESERVED_NOT_EDITABLE) unless it is the stored value (0 for a pair
+   *     with no row); only order reservations change it.
+   * `actorId` is the authenticated member (MarketplaceController, req.user.id
+   * as AuthGuard set it), required in the type; the check below is for a
+   * caller that passes none at run time. A set with no member is refused
+   * (401) before anything is read: no stock change is recorded without who
+   * made it. The body never names the actor or the movement's reason.
    */
-  async upsertInventory(businessId: string, data: any) {
+  async upsertInventory(businessId: string, data: any, actorId: string) {
+    if (typeof actorId !== 'string' || actorId.length === 0) {
+      throw new UnauthorizedException('An inventory set needs the member making it');
+    }
+    return this.setInventoryStock(businessId, data, { reasonCode: 'SET', createdBy: actorId });
+  }
+
+  /**
+   * The stock set itself (upsertInventory's doc): POST .../inventory and each
+   * row of the Excel import. `record` says what the one movement of a quantity
+   * change is written as, so the import keeps its single EXCEL_IMPORT movement
+   * (D-139) and no SET movement is written beside it.
+   */
+  private async setInventoryStock(businessId: string, data: unknown, record: InventorySetRecord) {
     const fields = readInventoryUpsert(data);
     const { productId, warehouseId } = fields;
     const owned = await ownedProductsAndWarehouses(this.prisma.client, businessId, [productId], [warehouseId]);
@@ -528,21 +577,69 @@ export class MarketplaceService {
     // SEC-UPS-1 / W11-STOCK-ROW-RACE: a create that loses the pair to the business's own row is run again once.
     return retryOnOwnStockRowRace(this.prisma.client, businessId, () =>
       this.prisma.client.$transaction(async (tx) => {
-        await lockStockRowPairsInOrder(tx, businessId, [{ productId, warehouseId }]);
-        const existing = await tx.inventoryStock.findFirst({ where: { businessId, productId, warehouseId } });
+        const locked = await lockStockRowPairsInOrder(tx, businessId, [{ productId, warehouseId }]);
+        let existing = await tx.inventoryStock.findFirst({ where: { businessId, productId, warehouseId } });
+        // W11-INV-SET-MOVEMENT review (SEC-R2-1): a row created and committed between the lock statement (which then
+        // locked nothing) and this read was read unlocked, so a reservation or a receipt committing after the read was
+        // not seen by the checks below, nor by the movement's difference. Such a row is locked now and read again
+        // (one row, the pair's: no new edge in the stock lock order); a row gone meanwhile reads as none.
+        if (existing && !locked.includes(existing.id)) {
+          const lockedNow = await lockStockRowPairsInOrder(tx, businessId, [{ productId, warehouseId }]);
+          existing = await tx.inventoryStock.findFirst({ where: { businessId, productId, warehouseId } });
+          // Round-3 review (SEC-R3-1, COR-R3-4): a row read now that this second statement did not lock either
+          // (the first deleted, another created meanwhile) is not acted on: the transaction rolls back (nothing is
+          // written yet) and is run again once, as a lost create is (retryOnOwnStockRowRace).
+          if (existing && !lockedNow.includes(existing.id)) throw new StockRowHeldConflict({ productId, warehouseId });
+        }
+
+        // D-139: checked against the row as read under its lock (a pair with no row reserves nothing).
+        const storedReserved = existing?.reserved ?? 0;
+        if (fields.reserved !== undefined && fields.reserved !== storedReserved) {
+          throw new BadRequestException({
+            code: INVENTORY_RESERVED_NOT_EDITABLE,
+            message: 'Inventory reserved cannot be set directly; only order reservations change it',
+          });
+        }
+        if (fields.quantity !== undefined && fields.quantity < storedReserved) {
+          throw new BadRequestException({
+            code: INVENTORY_QUANTITY_BELOW_RESERVED,
+            message: `Inventory quantity cannot be less than the quantity reserved for orders (${storedReserved})`,
+          });
+        }
+        const previousQuantity = existing ? existing.quantity : null;
+        const quantityChange = fields.quantity === undefined ? 0 : fields.quantity - (previousQuantity ?? 0);
+        /** The set's one movement, after the stock write, in this transaction. */
+        const writeMovement = async () => {
+          if (quantityChange === 0) return;
+          await tx.stockMovement.create({
+            data: {
+              businessId,
+              warehouseId,
+              productId,
+              type: 'ADJUSTMENT',
+              quantityChange,
+              reasonCode: record.reasonCode,
+              referenceId: null,
+              ...(record.reasonCode === 'SET'
+                ? { createdBy: record.createdBy }
+                : { note: `Excel import: ${record.label}${previousQuantity !== null ? ` (was ${previousQuantity})` : ' (new)'}` }),
+            },
+          });
+        };
 
         if (existing) {
-          return tx.inventoryStock.update({
+          const updated = await tx.inventoryStock.update({
             where: { id: existing.id },
             data: {
               quantity: fields.quantity ?? existing.quantity,
-              reserved: fields.reserved ?? existing.reserved,
               reorderAt: fields.reorderAt ?? existing.reorderAt,
               costPerUnit: fields.costPerUnit ?? existing.costPerUnit,
               currency: fields.currency ?? existing.currency,
             },
             include: { product: true, warehouse: true },
           });
+          await writeMovement();
+          return updated;
         }
 
         const create = () =>
@@ -552,14 +649,16 @@ export class MarketplaceService {
               productId,
               warehouseId,
               quantity: fields.quantity ?? 0,
-              reserved: fields.reserved ?? 0,
+              reserved: 0,
               reorderAt: fields.reorderAt,
               costPerUnit: fields.costPerUnit,
               currency: fields.currency ?? 'TTD',
             },
             include: { product: true, warehouse: true },
           });
-        return createStockRowOrConflict({ productId, warehouseId }, create);
+        const created = await createStockRowOrConflict({ productId, warehouseId }, create);
+        await writeMovement();
+        return created;
       }, STOCK_LOCK_TX_OPTIONS),
     );
   }
@@ -2950,9 +3049,12 @@ export class MarketplaceService {
     const results = { imported: 0, skipped: 0, errors: [] as string[] };
 
     for (const row of rows) {
+      /** The row as the sheet names it (its SKU, else its product name), for an error raised while it is set. */
+      let rowLabel = '';
       try {
         const sku = String(row['SKU'] || row['sku'] || '').trim();
         const productName = String(row['Product Name'] || row['product_name'] || row['name'] || '').trim();
+        rowLabel = sku || productName;
         const warehouseName = String(row['Warehouse'] || row['warehouse'] || '').trim();
         const qty = parseInt(row['Quantity On Hand'] ?? row['quantity'] ?? row['qty'] ?? 0, 10);
         const reorderLevel = row['Reorder Level'] !== null ? parseInt(row['Reorder Level'] ?? row['reorder_level'] ?? '', 10) : undefined;
@@ -2967,38 +3069,27 @@ export class MarketplaceService {
         if (!warehouse) { results.errors.push(`Warehouse not found: ${warehouseName}`); results.skipped++; continue; }
 
         // W11-INV-UPSERT-SCOPE: the business's own row of the pair (a row of another record holding it is not this
-        // business's stock; upsertInventory then answers 409, recorded as this row's error).
-        const existingStock = await this.prisma.client.inventoryStock.findFirst({
-          where: { businessId, productId: product.id, warehouseId: warehouse.id },
-        });
-        const previousQty = existingStock?.quantity ?? null;
-
-        await this.upsertInventory(businessId, {
-          productId: product.id,
-          warehouseId: warehouse.id,
-          quantity: qty,
-          reorderAt: isNaN(reorderLevel as number) ? undefined : reorderLevel,
-          costPerUnit: isNaN(costPerUnit as number) ? undefined : costPerUnit,
-        });
-
-        const qtyChange = previousQty !== null ? qty - previousQty : qty;
-        if (qtyChange !== 0) {
-          await this.prisma.client.stockMovement.create({
-            data: {
-              businessId,
-              warehouseId: warehouse.id,
-              productId: product.id,
-              type: 'ADJUSTMENT',
-              quantityChange: qtyChange,
-              reasonCode: 'EXCEL_IMPORT',
-              note: `Excel import: ${sku || productName}${previousQty !== null ? ` (was ${previousQty})` : ' (new)'}`,
-            },
-          });
-        }
+        // business's stock; the set then answers 409, recorded as this row's error).
+        // W11-INV-SET-MOVEMENT (D-139): the row's single EXCEL_IMPORT movement is written by the set itself, in its
+        // transaction, from the quantity read under the row's lock (it was written after the set, outside it, from a
+        // quantity read before it); no SET movement beside it. The sheet's Reserved column is not read, and a
+        // quantity below the row's reserved quantity is refused, recorded as this row's error.
+        await this.setInventoryStock(
+          businessId,
+          {
+            productId: product.id,
+            warehouseId: warehouse.id,
+            quantity: qty,
+            reorderAt: isNaN(reorderLevel as number) ? undefined : reorderLevel,
+            costPerUnit: isNaN(costPerUnit as number) ? undefined : costPerUnit,
+          },
+          { reasonCode: 'EXCEL_IMPORT', label: sku || productName },
+        );
 
         results.imported++;
       } catch (err: any) {
-        results.errors.push(err.message);
+        // W11-INV-SET-MOVEMENT (acceptance B-1): the error names the row, so a skipped row can be found in a long sheet.
+        results.errors.push(rowLabel ? `${rowLabel}: ${err.message}` : err.message);
         results.skipped++;
       }
     }
