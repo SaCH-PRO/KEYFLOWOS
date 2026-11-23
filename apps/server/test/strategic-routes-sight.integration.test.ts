@@ -470,7 +470,8 @@ describe('FU-STRATEGIC-ROUTES-SIGHT (D-100, D-234, D-146): the strategic routes 
       risks: [
         { category: 'cash_flow', title: 'Squeeze in March', description: 'Outflows will exceed collections', severity: 'high', likelihood: 'likely' },
         { category: 'overdue', title: 'Acme owes 4,000', description: 'Two invoices past due', severity: 'high', likelihood: 'likely' },
-        { category: 'churn', title: 'SAFEMARK quiet clients', description: 'SAFEMARK three regulars have not booked', severity: 'medium', likelihood: 'possible' },
+        // 'churn' is read as money by the shared rule (revenue lost); 'operational' is not.
+        { category: 'operational', title: 'SAFEMARK quiet clients', description: 'SAFEMARK three regulars have not booked', severity: 'medium', likelihood: 'possible' },
       ],
       mitigations: ['SAFEMARK confirm bookings a day ahead'],
       urgentActions: ['Chase the 7341 still owed'],

@@ -1300,7 +1300,7 @@ export class AiController {
     return {
       actions: actions.filter((a) =>
         readerHolds(who, [
-          ...(STRATEGIC_ACTION_NEEDS[a.type] ?? ['revenue', 'expenses']),
+          ...(Object.hasOwn(STRATEGIC_ACTION_NEEDS, a.type) ? STRATEGIC_ACTION_NEEDS[a.type] : (['revenue', 'expenses'] as const)),
           ...(a.estimatedValue !== undefined || a.category === 'revenue' ? (['revenue'] as const) : []),
           // Its words: priority and category are the service's own labels ('opportunity' is no pipeline figure).
           ...strategicItemNeeds([a.type, a.title, a.description]),

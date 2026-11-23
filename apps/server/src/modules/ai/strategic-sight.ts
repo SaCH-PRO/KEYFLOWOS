@@ -11,20 +11,40 @@ import type { SemanticReader } from './semantic-memory-sight';
 const BOTH: readonly InsightSight[] = ['revenue', 'expenses'];
 
 /**
- * Net profit and what it is made of (revenue less expenses): a margin, a profit, a cash flow, a burn. Stating one states
- * both sides, so it needs both sights. Read on every reading of the text, and with camelCase split ('grossMarginPct').
+ * Net profit and what it is made of (revenue less expenses): a margin, a profit or loss, a cash flow, a burn, a deficit,
+ * outflows. Stating one states both sides, so it needs both sights. Read on every reading of the text, and with
+ * camelCase split ('grossMarginPct'). Review round 1 (SR1-3, CR1-1): 'unprofitable', a loss, the red, P&L, overspending,
+ * opex, outflows, and a cash flow or break-even however spelt ('cash_flow', 'Cash-flow').
  */
-const NET_WORDS = /(?<![a-z])(profits?|profitab\w*|margins?|net|break-?even|cash ?flows?|ebitda|burn(?:ing| rate)?)(?![a-z])/i;
+const NET_WORDS =
+  /(?<![a-z])(?:un|non-?)?(profits?|profitab\w*|margins?|net|break[\s_-]?even|cash[\s_-]?flows?|ebitda|burn(?:ing|[\s_-]?rate)?|loss(?:es)?|losing[\s_-]?money|deficits?|surplus(?:es)?|in[\s_-]the[\s_-](?:red|black)|p\s*(?:&|and)\s*l|overspen\w*|opex|outflows?)(?![a-z])/i;
 const camelSplit = (text: string) => text.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
 function statesNet(text: string): boolean {
   if (text.length > MAX_FIELDS_CLASSIFIED) return true;
   return readingsOf(text).some((reading) => NET_WORDS.test(reading) || NET_WORDS.test(camelSplit(reading)));
 }
 
-/** A text's sights: money and expenses by the AiMemory rule (fieldsSightNeeds), and both for net profit. */
+/**
+ * Review round 1 (SR1-1): a figure, written as a string. The scans are written from revenue totals ("Avg Revenue $X" a
+ * month), so a figure the model writes without a currency sign is revenue all the same: two digits or more (separators
+ * between them allowed), a digit with a k/M/bn, % or x after it, or a number word. Read with the text NFKC-folded
+ * (fullwidth digits). A lone digit ('call 2 leads') and a date alone ('2026-11-23') state no figure.
+ */
+const FIGURE = /\d[\s,.'\u00a0\u202f]?\d|\d\s*(?:k|m|mm|bn|b|%|x)(?![a-z])|(?<![a-z])(?:hundred|thousand|million|billion|grand)s?(?![a-z])/i;
+const DATE_ALONE = /^\s*\d{4}-\d{2}-\d{2}(?:[T ][\d:.]+Z?)?\s*$/;
+function statesFigure(text: string): boolean {
+  if (text.length > MAX_FIELDS_CLASSIFIED) return true;
+  if (DATE_ALONE.test(text)) return false;
+  const folded = text.normalize('NFKC');
+  return readingsOf(folded).some((reading) => FIGURE.test(reading));
+}
+
+/** A text's sights: money and expenses by the AiMemory rule (fieldsSightNeeds), revenue for a figure, both for net profit. */
 function textNeeds(text: string): readonly InsightSight[] {
+  if (statesNet(text)) return BOTH;
   const needs = fieldsSightNeeds([text]);
-  return needs.length === 2 || statesNet(text) ? BOTH : needs;
+  if (needs.length === 2) return BOTH;
+  return statesFigure(text) && !needs.includes('revenue') ? [...needs, 'revenue'] : needs;
 }
 
 /**
@@ -53,15 +73,22 @@ const STRATEGIC_KEY_NEEDS: Readonly<Record<string, readonly InsightSight[]>> = {
 const SHARED_NUMBER_KEYS: ReadonlySet<string> = new Set(['neglectedLeads']);
 
 /**
- * A key's sights: STRATEGIC_KEY_NEEDS', an expense named in it, and both for net profit. Money named in a key is not
- * read (the money rule takes 'opportunities' for a pipeline); a key's value is read on its own, and a figure needs
- * revenue read wherever it stands.
+ * The scans' own schema keys the money rule takes for money ('opportunities' for a pipeline, a price): read as plain
+ * keys. Every other key is read like text (review round 1, SR1-2): 'revenueTrend', 'topClientsByRevenue', a key that is
+ * itself a figure.
  */
+const KEYS_NOT_MONEY: ReadonlySet<string> = new Set(['opportunities', 'bundleOpportunities', 'currentPrice', 'suggestedPrice', 'pricingPrinciples']);
+
+/** A key's sights: STRATEGIC_KEY_NEEDS' (own keys only: SR1-4), and its words' and figures' as text, camelCase split. */
 function keyNeeds(key: string): readonly InsightSight[] {
-  if (statesNet(key)) return BOTH;
-  const named = STRATEGIC_KEY_NEEDS[key] ?? [];
-  const expense = fieldsSightNeeds([key, camelSplit(key)]).includes('expenses');
-  return expense ? [...new Set<InsightSight>([...named, 'expenses'])] : named;
+  const needs = new Set<InsightSight>(Object.hasOwn(STRATEGIC_KEY_NEEDS, key) ? STRATEGIC_KEY_NEEDS[key] : []);
+  for (const text of [key, camelSplit(key)]) {
+    for (const sight of textNeeds(text)) needs.add(sight);
+  }
+  if (KEYS_NOT_MONEY.has(key) && !(Object.hasOwn(STRATEGIC_KEY_NEEDS, key) && STRATEGIC_KEY_NEEDS[key].includes('revenue'))) {
+    needs.delete('revenue');
+  }
+  return [...needs];
 }
 
 const WITHHELD = Symbol('withheld');
@@ -99,7 +126,8 @@ export function sightedStrategic<T>(answer: T, who: SemanticReader): T {
           if (top) continue;
           return WITHHELD;
         }
-        out[k] = kept;
+        // Defined, not assigned: a '__proto__' key from the model is a plain field (SR1-4), never the prototype.
+        Object.defineProperty(out, k, { value: kept, enumerable: true, writable: true, configurable: true });
       }
       return out;
     }
