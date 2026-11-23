@@ -714,7 +714,7 @@ describe('ci-verdict: negative controls', () => {
     // Review round 1, F5. GitHub rejects duplicate mapping keys; the spec must not read past them.
     const twoJobs = fixture().replace('jobs:\n', 'jobs:\n  ci-verdict:\n    name: decoy\n    runs-on: x\n    steps:\n      - run: exit 0\n');
     assert.ok(verdictProblems(twoJobs).some((p) => /job id ci-verdict appears 2 times/.test(p)), verdictProblems(twoJobs).join('\n'));
-    const twoRegions = `${fixture()}jobs:\n  ghost:\n    runs-on: x\n`;
+    const twoRegions = `${fixture()}\njobs:\n  ghost:\n    runs-on: x\n`;
     assert.ok(verdictProblems(twoRegions).some((p) => /2 top-level jobs: lines/.test(p)), verdictProblems(twoRegions).join('\n'));
     const twoRuns = fixture().replace('        run: |', '        run: exit 0\n        run: |');
     assert.ok(verdictProblems(twoRuns).some((p) => /duplicate key run/.test(p)), verdictProblems(twoRuns).join('\n'));
