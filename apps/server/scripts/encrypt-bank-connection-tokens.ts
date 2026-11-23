@@ -36,6 +36,10 @@
  * key variable is set, and, when there are plaintext rows to encrypt, unless
  * the loaded key decrypts at least one stored ciphertext of any encrypted model
  * anywhere in the database (not only in the --business scope): the key proof.
+ * It samples the newest values of each encrypted column and prints how many
+ * decrypted and failed. A database with no encrypted value at all cannot prove
+ * a key: write one token through the API first. A value left under a key the
+ * API no longer uses would also prove that old key: read the counts.
  * Each rewritten row's updated_at moves to the time of the run (@updatedAt).
  *
  * Exit status: 0 done, 1 database read/update failure, 2 bad arguments, a stale
@@ -107,23 +111,34 @@ interface ProbeDelegate {
   findUnique(args: unknown): Promise<Record<string, unknown> | null>;
 }
 
-/** Stored values sampled per encrypted column when proving the key. */
-const PROOF_SAMPLE = 5;
+/** Stored values sampled per encrypted column when proving the key, newest first (updatedAt desc). */
+const PROOF_SAMPLE = 25;
+
+interface KeyProof {
+  /** The first model whose sampled ciphertext decrypted, or null. */
+  provenBy: string | null;
+  decrypted: number;
+  failed: number;
+}
 
 /**
  * Orchestrator A1: proves the loaded key is the one the API sealed with, by decrypting at least one stored
  * ciphertext of ANY model in the extension's field map, searched across the whole database (never only the
- * --business scope). BankConnection is tried first, then the others in map order. Each candidate is read by id
- * through the extension, which decrypts it; a decrypt failure moves on to the next candidate, any other error
- * is thrown (the caller exits 1). Returns the model that proved the key, or null when nothing decrypts (or
- * nothing is stored encrypted at all).
+ * --business scope). BankConnection is tried first, then the others in map order; in each column the newest
+ * values (updatedAt desc) are sampled first, so a value sealed under the key the API uses today is tried before
+ * old ones. Every sampled value is read by id through the extension, which decrypts it; a decrypt failure is
+ * counted, any other error is thrown (the caller exits 1). The counts are printed so a database holding values
+ * under more than one key is visible to the operator.
  *
  * Chosen over an explicit --key-source=<VAR> flag: naming the variable proves only that the operator typed the
  * API's variable name, not that its value in this shell is the API's value; a successful decrypt proves both.
+ * Its limit: a value still stored under a key the API no longer uses (before a rotation) also decrypts with that
+ * old key; the newest-first sampling and the printed counts are what make that visible.
  */
-async function proveKey(database: Db, fields: Record<string, readonly string[]>): Promise<string | null> {
+async function proveKey(database: Db, fields: Record<string, readonly string[]>): Promise<KeyProof> {
   const models = Object.keys(fields).sort((a, b) => (a === 'BankConnection' ? -1 : b === 'BankConnection' ? 1 : 0));
   const delegates = database as unknown as Record<string, ProbeDelegate | undefined>;
+  const proof: KeyProof = { provenBy: null, decrypted: 0, failed: 0 };
   for (const model of models) {
     const delegate = delegates[model[0].toLowerCase() + model.slice(1)];
     if (!delegate) continue;
@@ -131,19 +146,25 @@ async function proveKey(database: Db, fields: Record<string, readonly string[]>)
       const candidates = await delegate.findMany({
         where: { [field]: { startsWith: CIPHER_PREFIX } },
         select: { id: true },
+        orderBy: { updatedAt: 'desc' },
         take: PROOF_SAMPLE,
       });
       for (const { id } of candidates) {
         try {
           const found = await delegate.findUnique({ where: { id }, select: { id: true, [field]: true } });
-          if (found && typeof found[field] === 'string') return model;
+          if (found && typeof found[field] === 'string') {
+            proof.decrypted += 1;
+            proof.provenBy ??= model;
+          }
         } catch (err: unknown) {
           if (!isDecryptFailure(err)) throw err;
+          proof.failed += 1;
         }
       }
     }
+    if (proof.provenBy) return proof;
   }
-  return null;
+  return proof;
 }
 
 export async function main(
@@ -246,21 +267,25 @@ export async function main(
     // Orchestrator A1 (supersedes SEC-V72S-R2-1's scoped check): a key variable being set does not prove it is the
     // API's key. Unless the loaded key decrypts a stored ciphertext somewhere in the database, refuse rather than
     // seal the plaintext rows under a key the API cannot read.
-    let provenBy: string | null;
+    let proof: KeyProof;
     try {
-      provenBy = await proveKey(database, fields);
+      proof = await proveKey(database, fields);
     } catch (err: unknown) {
       error(`Stored ciphertext could not be read to prove the key: ${describeFailure(err)}. Nothing was written.`);
       return 1;
     }
-    if (!provenBy) {
+    log(row('key_proof_decrypted', proof.decrypted));
+    log(row('key_proof_failed', proof.failed));
+    if (!proof.provenBy) {
       error(
         `Refusing --apply: no stored ciphertext decrypts with the loaded key (${keySource}), searched across every ` +
-          'encrypted model in the whole database; it is likely not the key the API runs with. Nothing was written.',
+          'encrypted model in the whole database; it is likely not the key the API runs with. Nothing was written. ' +
+          'If the database holds no encrypted value at all, write one token through the API (it seals with the key ' +
+          'it runs on, e.g. reconnect one integration) and run again.',
       );
       return 2;
     }
-    log(`  key proven by            ${provenBy}`);
+    log(`  key proven by            ${proof.provenBy}`);
   }
 
   let done = 0;
