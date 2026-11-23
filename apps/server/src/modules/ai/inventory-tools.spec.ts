@@ -23,6 +23,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { FLOW_TOOLS, getToolByName } from './flow-tool-registry';
+import { FlowOrchestratorService } from './flow-orchestrator.service';
 
 const orchestrator = readFileSync(join(__dirname, 'flow-orchestrator.service.ts'), 'utf8');
 const tools = FLOW_TOOLS.filter((t) => t.name.startsWith('inventory_'));
@@ -158,5 +159,49 @@ describe('the roles that carry stock can reach it', () => {
     const exec = roleEngine.slice(roleEngine.indexOf('  executive: {'));
     expect(exec).toMatch(/'inventory_summary'/);
     expect(exec).not.toMatch(/'inventory_\*'/);
+  });
+});
+
+/**
+ * W11-KEY-TRANSFER-INTEGER (D-134): the transfer tool advertises a whole-number quantity and the
+ * chat validator enforces 'integer'. Before this packet the schema said { type: 'number' }, the
+ * validator accepted any number, and MarketplaceService.transferInventory refused 1.5 with a 400
+ * the schema never mentioned. The 'number' branch (inventory_adjust_stock.quantityChange) is
+ * unchanged, as is every other error text (call-log-visibility CL-05c pins them).
+ */
+describe('a transfer moves whole units (W11-KEY-TRANSFER-INTEGER)', () => {
+  const validate = (toolName: string, args: Record<string, unknown>) =>
+    (Object.create(FlowOrchestratorService.prototype) as any).validateToolInput(toolName, args);
+  const transfer = (quantity: unknown) => ({ productId: 'p', fromWarehouseId: 'a', toWarehouseId: 'b', quantity });
+
+  it('advertises quantity as an integer and says so', () => {
+    const q = getToolByName('inventory_transfer_stock')!.parameters.properties.quantity;
+    expect(q.type).toBe('integer');
+    expect(q.description.toLowerCase()).toContain('whole');
+  });
+
+  it('accepts a whole number, coerces a numeric string, and refuses a fraction or text in the validator\'s own words', () => {
+    expect(() => validate('inventory_transfer_stock', transfer(2))).not.toThrow();
+    const coerced = transfer('2');
+    validate('inventory_transfer_stock', coerced);
+    expect(coerced.quantity).toBe(2);
+    for (const bad of [1.5, '1.5', 'abc', '']) {
+      expect(() => validate('inventory_transfer_stock', transfer(bad)), String(bad)).toThrow(
+        bad === '' ? /Missing required fields for inventory_transfer_stock: quantity/ : /^Field "quantity" for inventory_transfer_stock must be a whole number$/,
+      );
+    }
+  });
+
+  it("negative control: the 'number' branch is unchanged, so inventory_adjust_stock still takes a fractional quantityChange and still refuses text", () => {
+    expect(getToolByName('inventory_adjust_stock')!.parameters.properties.quantityChange.type).toBe('number');
+    expect(() => validate('inventory_adjust_stock', { stockId: 's', quantityChange: 1.5, reasonCode: 'DAMAGED' })).not.toThrow();
+    expect(() => validate('inventory_adjust_stock', { stockId: 's', quantityChange: 'abc', reasonCode: 'DAMAGED' })).toThrow(
+      /^Field "quantityChange" for inventory_adjust_stock must be a number$/,
+    );
+  });
+
+  it('no other tool advertises an integer parameter yet, so the new branch reaches only the transfer', () => {
+    const withInteger = FLOW_TOOLS.filter((t) => Object.values(t.parameters.properties).some((p) => p.type === 'integer')).map((t) => t.name);
+    expect(withInteger).toEqual(['inventory_transfer_stock']);
   });
 });
