@@ -13,9 +13,8 @@ import { IsDate, isISO8601 } from 'class-validator';
  * it. The accepted set is a subset of what @IsISO8601() accepts: the ISO
  * strings `new Date()` can parse. ISO basic, week and ordinal forms
  * (20261201T100000Z, 2026-W49-2, 2026-335) pass isISO8601 but parse to an
- * Invalid Date, which IsDate refuses. As with @Type(() => Date) before, a
- * non-strict isISO8601 admits an out-of-range day (2026-02-30), which Date
- * rolls over to 2026-03-02.
+ * Invalid Date, which IsDate refuses. isISO8601 (non-strict) admits an
+ * out-of-range day (2026-02-30), which Date rolls over to 2026-03-02.
  */
 export function IsIsoDate(): PropertyDecorator {
   return applyDecorators(

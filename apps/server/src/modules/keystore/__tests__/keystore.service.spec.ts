@@ -10,7 +10,6 @@ import { db } from '@keyflow/db';
 import { isValidStatusTransition } from '../types/keystore.types';
 import type { CreateOrderDto, CreateListingDto, UpdateOrderStatusDto } from '../dto';
 
-// Mock Prisma client
 /**
  * FU-UNIT-MOCK-ISOLATION (vitest.unit.config.ts, isolate:false): this file's
  * vi.mock must reach a module that other spec files also import. Without a
@@ -28,6 +27,7 @@ afterAll(() => {
   vi.resetModules();
 });
 
+// Mock Prisma client
 vi.mock('@keyflow/db', () => ({
   db: {
     keystoreServiceCategory: {

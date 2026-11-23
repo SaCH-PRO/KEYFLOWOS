@@ -113,7 +113,8 @@ describe('KeyCortexReflectionService', () => {
     it('never queries KeyCortexInsight — no such table exists', () => {
       const src = codeOf(KeyCortexReflectionService.prototype.constructor);
       expect(src).toContain('getLastReflectionSession');
-      expect(src).not.toContain('KeyCortexInsight');
+      // Case-insensitive, so a Prisma accessor (db.keyCortexInsight) counts too.
+      expect(src.toLowerCase()).not.toContain('keycortexinsight');
     });
 
     it('does not fabricate evidence for hypothesis sources', async () => {
