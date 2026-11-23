@@ -1,6 +1,7 @@
 import { Injectable, Inject, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { withoutForgottenPersonalData } from '../business-events/business-event.service';
 import { VisualClassifierService, VisualClassification } from './visual-classifier.service';
 import { CommandService } from '../command/command.service';
 import { DocumentIntelligenceService } from '../ai/document-intelligence.service';
@@ -260,7 +261,17 @@ export class DeviceService {
       recommendedBy: 'SYSTEM',
     });
 
-    // Timeline event
+    // Timeline event. Codex #226 (RR-ERASURE-BUSINESS-EVENTS): it names the
+    // person (metadata.name), so it runs the same write-time erasure check as
+    // BusinessEventService.emit: a contact forgotten while this call completes
+    // gets a row without the name.
+    const checked = await withoutForgottenPersonalData(this.prisma.client, {
+      businessId,
+      eventType: 'contact_created_from_capture',
+      subjectType: 'contact',
+      subjectId: contact.id,
+      metadata: { visualIntakeId: intake.id, name: input.name } as Record<string, unknown>,
+    });
     await this.prisma.client.businessEvent.create({
       data: {
         businessId,
@@ -271,7 +282,7 @@ export class DeviceService {
         actorId: _userId ?? 'system',
         action: 'create',
         source: 'web',
-        metadata: { visualIntakeId: intake.id, name: input.name },
+        metadata: (checked.metadata ?? {}) as Prisma.InputJsonValue,
       },
     });
 
