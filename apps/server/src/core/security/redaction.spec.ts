@@ -467,6 +467,9 @@ describe('redactSensitiveText and deepRedact on string values (RR-REDACTION-BY-C
         ['provider: sk- repeats', 'sk-'.repeat(66_667)],
         ['provider: sk-a- repeats', 'sk-a-'.repeat(40_000)],
         ['provider: ghp_ repeats', 'ghp_'.repeat(50_000)],
+        ['provider: sk-ant- repeats', 'sk-ant-'.repeat(28_572)],
+        ['provider: sk-proj- + 19 then space', ('sk-proj-' + 'a'.repeat(19) + ' ').repeat(7_143)],
+        ['provider: sk-svcacct- repeats', 'sk-svcacct-'.repeat(18_182)],
         ['pem: BEGIN headers without END', '-----BEGIN PRIVATE KEY-----\n'.repeat(7_143)],
         ['card: single digits and spaces', '1 '.repeat(100_000)],
         ['card: 12 - groups', '12 - '.repeat(40_000)],
@@ -571,6 +574,24 @@ describe('redactSensitiveText and deepRedact on string values (RR-REDACTION-BY-C
       }
       const plain = 'soft­hyphen‎only, no secret 4111 1111 1111 1112';
       expect(redactSensitiveText(plain)).toBe(plain);
+    });
+  });
+
+  describe('repair round 3: the other OpenAI key prefixes with base64url bodies are never slugs', () => {
+    const body = (n: number, seed: number) => {
+      const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_';
+      let out = '';
+      for (let i = 0; i < n; i += 1) out += (i + 1) % 15 === 0 ? '-' : alphabet[(seed * 7 + i * 13) % alphabet.length];
+      return out;
+    };
+
+    it('sk-svcacct- (service account) and sk-admin- (admin) keys with dashes in the body are redacted whole', () => {
+      expect(redactSensitiveText('k ' + 'sk-svcacct-' + '-' + body(100, 11))).toBe('k <secret>');
+      expect(redactSensitiveText('k ' + 'sk-svcacct-' + body(100, 12) + ' z')).toBe('k <secret> z');
+      expect(redactSensitiveText('k ' + 'sk-admin-' + '-' + body(100, 13))).toBe('k <secret>');
+      expect(redactSensitiveText('k ' + 'SK-ADMIN-' + body(60, 14))).toBe('k <secret>');
+      // Bare sk- is still the slug-proof shape.
+      expect(redactSensitiveText('sk-classic-fit-cotton-shirt-blue')).toBe('sk-classic-fit-cotton-shirt-blue');
     });
   });
 
