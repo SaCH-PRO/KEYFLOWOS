@@ -195,7 +195,9 @@ describe("FU-ATTACHMENT-OBJECT-TENANCY: flow chat never reads another business's
 
   it("a refused object reads exactly like an object that does not exist (existence is not revealed)", async () => {
     const bPath = await uploadAs(BIZ_B, B_SECRET);
-    const missing = bPath.replace(/[^/]+$/, `${P}does-not-exist`);
+    // Absent in A's own namespace: a path A could legitimately hold, whose object is not there.
+    const aPath = await uploadAs(BIZ_A, A_OWN);
+    const missing = aPath.replace(/[^/]+$/, `${P}does-not-exist`);
     const foreign = await attachAs(BIZ_A, bPath);
     const absent = await attachAs(BIZ_A, missing);
     expect(shape(foreign, bPath)).toEqual(shape(absent, missing));
