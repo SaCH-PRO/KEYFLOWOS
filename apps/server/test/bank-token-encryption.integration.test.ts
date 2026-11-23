@@ -748,6 +748,9 @@ describe('BankConnection.accessToken is encrypted at rest (RR-BANK-TOKEN-ENCRYPT
     const id = await rawRow(ID.bizScript4, fa, `${P}s4_wrongkey`, plain);
     const scope = `--business=${ID.bizScript4}`;
     const wrong = [P, 'not', 'the', 'api', 'key', String(Date.now())].join('-');
+    // Ciphertext under the suite key, OUTSIDE the --business scope (A1's case stays: none in scope). Created first,
+    // so the test supplies its own ciphertext for both halves when run alone (COR-A1C-1).
+    await service.create(ID.biz, { financialAccountId: await account(ID.biz, 'V72S proof bank 2'), provider: 'plaid', accessToken: token('proof2') });
 
     // A1's case: the operator's shell has JWT_SECRET, the API ran on CONNECTOR_CREDENTIALS_KEY.
     const dry = await runScript([scope], true, { JWT_SECRET: wrong });
@@ -767,8 +770,7 @@ describe('BankConnection.accessToken is encrypted at rest (RR-BANK-TOKEN-ENCRYPT
       expect(await stored(id), 'nothing written').toBe(plain);
     }
 
-    // With the key the suite's ciphertext is sealed under (a row of another business), the proof holds.
-    await service.create(ID.biz, { financialAccountId: await account(ID.biz, 'V72S proof bank 2'), provider: 'plaid', accessToken: token('proof2') });
+    // With the key the suite's ciphertext is sealed under (the row of another business above), the proof holds.
     const ok = await runScript(['--apply', scope]);
     expect(ok.code, `${ok.out}\n${ok.err}`).toBe(0);
     expect(ok.out).toMatch(/key proven by\s+\w+/);
