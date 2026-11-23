@@ -24,7 +24,9 @@ const PROACTIVE_FINANCE_ROW = {
   reason: '3 pending/overdue invoices require attention',
   createdAt: new Date(),
 };
-const OPS_ROW = { id: 'sig_ops', sourceModule: 'key_autonomy', section: 'OPERATIONS', domain: 'tasks', signalType: 'RISK_PATTERN', reason: 'tasks overdue', createdAt: new Date() };
+const OPS_ROW = { id: 'sig_ops', sourceModule: 'key_autonomy', section: 'OPERATIONS', domain: 'tasks', signalType: 'RISK_PATTERN', reason: 'tasks are behind schedule', createdAt: new Date() };
+// Codex P1 on #228: a signal's text is now read by the money vocabulary too, which reads "overdue" as money (D-234, fails
+// closed), so the operations row's reason is worded without it (genome-signal-text-sight.spec.ts pins that case).
 
 function bridgeSignal(row: Record<string, unknown>) {
   const bridge = Object.create(KeyCortexGenomeBridgeService.prototype) as any;

@@ -36,6 +36,11 @@ describe('a genome signal is judged by its text too (Codex P1 on #228)', () => {
     for (const s of out.signals) expect(s.message).toMatch(/^Delivery \d+ slipped$/);
   });
 
+  it('the shared vocabulary applies to the text as it does to the labels: an operations signal saying "tasks overdue" is withheld (D-234, fails closed)', () => {
+    const out = genomeContextForReader(ctx([opsSignal('s_overdue', 'tasks overdue'), plain]), false) as any;
+    expect(out.signals.map((s: any) => s.id)).toEqual(['s_plain']);
+  });
+
   it('control: a revenue reader is served the context as it was', () => {
     const c = ctx([money, plain]);
     expect(genomeContextForReader(c, true)).toBe(c);

@@ -153,6 +153,11 @@ export type GenomeRowFields = {
   diagnosis?: string | null;
   /** A memory event's own metadata (a KEY_ACTION_PROPOSAL outcome carries its proposal's actionType, module, toolName). */
   metadata?: unknown;
+  /** A genome signal's own text (Codex P1 on #228): its reason (served by the KEY bridge as `message`), evidence, proposed value. */
+  reason?: unknown;
+  message?: unknown;
+  evidence?: unknown;
+  proposedValue?: unknown;
 };
 
 function mentionsMoney(...values: Array<string | null | undefined>): boolean {
@@ -185,7 +190,14 @@ export function isMoneyLabel(value: string | null | undefined): boolean {
 
 /** A genome signal with money or sales provenance, or with nothing to classify it by: D-128, D-234. */
 export function isFinanceSignal(row: GenomeRowFields): boolean {
-  return mentionsMoney(row.sourceModule, row.section, row.domain, row.signalType, row.field) || unclassified(row.section, row.domain);
+  if (mentionsMoney(row.sourceModule, row.section, row.domain, row.signalType, row.field) || unclassified(row.section, row.domain)) return true;
+  // Codex P1 on #228 (D-234: authorization follows the data's meaning, not only its labels): a signal made from an inbox
+  // thread keeps the customer's text as its reason, so a signal with non-money labels can state money in its text, its
+  // evidence or its proposed value. Read with the proposal vocabulary, under one reading budget; unreadable fails closed.
+  const budget: ReadingBudget = { left: READING_BUDGET };
+  return [row.reason, row.message, row.evidence, row.proposedValue].some((value) =>
+    typeof value === 'string' ? textStatesMoney(value, budget) : structuredValueStatesMoney(value, budget),
+  );
 }
 
 /** A genome recommendation in a money or sales domain (FINANCIAL, SALES, ...), titled for a money figure, made from a money signal, or with no domain: D-128, D-234. */
