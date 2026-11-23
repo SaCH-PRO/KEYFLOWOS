@@ -26,9 +26,11 @@
  *
  *   QPM-01  RED-BEFORE  the Quotes door mounts the panel: "Search quotes...", "New Quote", the rows
  *   QPM-02  pin         Edit on a draft opens the builder in edit mode and PATCHes the quote (notes kept)
- *   QPM-03  pin         ticking a row's checkbox selects it and opens no detail; the card does
+ *   QPM-03  pin         ticking a row's checkbox selects it and opens no detail; the card does; the row is a
+ *                       list item holding its checkbox (review F2c, journey D9's rowOf)
  *   QPM-04  pin         the bulk bar's Status menu offers Send All and Reject All only
- *   QPM-05  pin         Convert on an accepted quote posts the quote's own tax, discount and notes
+ *   QPM-05  pin         Convert on an accepted quote posts the quote's own tax, discount and notes; the
+ *                       convert form is a dialog (review F2b, journey D6)
  *   QPM-06  RED-BEFORE  the detail is given "Expires" for its second date
  *   QPM-07  RED-BEFORE  the detail prints the status in plain words and the total formatted
  *   QPM-08  RED-BEFORE  the detail re-reads the quote from the list
@@ -319,6 +321,12 @@ describe("MOUNT-QUOTES: Sales > Quotes mounts the quotes panel", () => {
     expect(screen.getByRole("button", { name: /^status$/i })).toBeInTheDocument();
     fireEvent.click(screen.getAllByText(DRAFT.quoteNumber)[0]!);
     expect(screen.getByTestId("quote-detail")).toBeInTheDocument();
+    // Review round 1 (F2c): the row is a list item that holds its own checkbox,
+    // so a row found by its number (journey D's rowOf) can be ticked.
+    const rows = screen.getAllByRole("listitem");
+    expect(rows).toHaveLength(1);
+    expect(within(rows[0]!).getByRole("checkbox")).toBe(box);
+    expect(within(rows[0]!).getAllByText(DRAFT.quoteNumber).length).toBeGreaterThan(0);
   });
 
   it("QPM-04: the bulk bar's Status menu offers Send All and Reject All only (no Void, nothing that deletes)", () => {
@@ -336,7 +344,9 @@ describe("MOUNT-QUOTES: Sales > Quotes mounts the quotes panel", () => {
     renderPanel([ACCEPTED]);
     openMenu();
     fireEvent.click(screen.getByText("Convert to invoice"));
-    const notes = screen.getByPlaceholderText("Payment terms or notes...") as HTMLTextAreaElement;
+    // Review round 1 (F2b): the convert form is a dialog (journey D's D6 presses the dialog's Create Invoice).
+    const dialog = screen.getByRole("dialog", { name: /convert quote to invoice/i });
+    const notes = within(dialog).getByPlaceholderText("Payment terms or notes...") as HTMLTextAreaElement;
     expect(notes.value).toBe(NOTES);
     fireEvent.click(screen.getByRole("button", { name: "Create Invoice" }));
     await waitFor(() => expect(server.of((c) => c.path.endsWith("/quotes/q_acc/convert"))).toHaveLength(1));

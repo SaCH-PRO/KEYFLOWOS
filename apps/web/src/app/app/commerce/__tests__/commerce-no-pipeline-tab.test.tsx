@@ -178,11 +178,12 @@ describe("MOUNT-QUOTES: no Pipeline tab on Sales; every pipeline door lands on a
     expect(activeTab()).toBe("snapshot");
     expect(shown()).toEqual(["snapshot"]);
     cleanup();
-    openAt("/app/commerce?tab=recurring");
+    openAt("/app/commerce?tab=recurring&view=invoices");
     expect(activeTab()).toBe("recurring");
     fireEvent.click(screen.getByRole("tab", { name: "Quotes" }));
     expect(activeTab()).toBe("quotes");
-    expect(url().tab).toBe("quotes");
+    // A tab click drops a stale ?view with it (review F8).
+    expect(url()).toEqual({ tab: "quotes", view: null });
     fireEvent.click(screen.getByRole("tab", { name: "Collections" }));
     expect(activeTab()).toBe("collections");
     expect(url().tab).toBe("collections");
