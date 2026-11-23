@@ -181,7 +181,8 @@ async function everythingFor(reader: Reader) {
   const flowTurn = await turn(id);
   return {
     flowPrompt: flowTurn.prompt,
-    flowBody: flowTurn.body,
+    // A new chat session's id is random on every turn: compared as present, not by value.
+    flowBody: { ...(flowTurn.body as Record<string, unknown>), sessionId: typeof (flowTurn.body as any)?.sessionId === 'string' ? '<new session>' : undefined },
     buildMemoryContext: await promptContextFor(id),
     pipeline: await pipelinePromptFor(id),
     memory: await getJson(id, 'memory'),
@@ -518,7 +519,9 @@ describe('MEM-DOC-EXTRACTION-SIGHT (D-234 fail closed, D-257): a document extrac
       await extractInvoices(60);
       for (const reader of BLIND_READERS) {
         const after = await everythingFor(reader);
-        expect(after, reader).toEqual(before[reader]);
+        const was = before[reader] as Record<string, unknown>;
+        expect(Object.keys(after).sort(), reader).toEqual(Object.keys(was).sort());
+        for (const [surface, value] of Object.entries(after)) expect(value, `${reader} ${surface}`).toEqual(was[surface]);
         expect(after.buildMemoryContext, `${reader}: fact`).toContain(FACT);
       }
       // Control: the owner's read does carry the extractions, so the differential is not vacuous.
