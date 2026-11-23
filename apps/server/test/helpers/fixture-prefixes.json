@@ -1200,6 +1200,11 @@
       "prefix": "v71z_",
       "owner": "apps/server/test/temporal-flow-upsert-race.integration.test.ts",
       "packet": "V1-71 (FU-TEMPORAL-FLOW-INBOX-SCOPE, Codex P1 #226)"
+    },
+    {
+      "prefix": "v73k_",
+      "owner": "apps/server/test/key-action-genome-projection.integration.test.ts",
+      "packet": "V1-73 (FU-KEY-ACTION-GENOME-PROJECTION)"
     }
   ],
   "pendingRenames": [],
