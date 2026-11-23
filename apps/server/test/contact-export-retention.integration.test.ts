@@ -26,6 +26,16 @@
  *     entry, no schema change);
  *   - with DISABLE_FORGET_SCHEDULER=true no interval starts.
  *
+ * Review round 1: a consumed job is swept only once its last download is 15
+ * minutes old (resolveDownload signs a 5-minute URL before it marks the job
+ * consumed); a job whose objects storage refuses gets ONE
+ * forget_storage_cleanup_failed entry, later failures only warn, and jobs with
+ * such an entry are ordered after the others so they never starve the batch;
+ * when storage is not configured at all the sweep skips the cycle without
+ * writing anything. The fixtures are due only for the instant of this suite's
+ * own cycles (makeDue / makeLive, as the purge suites do): another suite's
+ * global cycle running beside this one must not find them.
+ *
  * runPurgeCycle is global: it purges every due forget request and repairs
  * every legacy purge in the shared database, and the purge suites make their
  * requests due for the instant of their own cycle. So this suite's service
@@ -54,14 +64,17 @@ const ID = {
   cFresh: `${P}cFresh`,
   cRecent: `${P}cRecent`,
   cFail: `${P}cFail`,
+  cJustConsumed: `${P}cJustConsumed`,
   cOther: `${P}cOther`,
   jExpired: `${P}jExpired`,
   jConsumed: `${P}jConsumed`,
   jFresh: `${P}jFresh`,
   jRecent: `${P}jRecent`,
   jFail: `${P}jFail`,
+  jJustConsumed: `${P}jJustConsumed`,
   jOther: `${P}jOther`,
 };
+const ALL_JOBS = [ID.jExpired, ID.jConsumed, ID.jFresh, ID.jRecent, ID.jFail, ID.jJustConsumed, ID.jOther];
 const keysOf = (job: string) => [`private/contact-exports/${P}/${job}/1.json`, `private/contact-exports/${P}/${job}/1.zip`];
 
 let db: any;
@@ -112,6 +125,24 @@ const job = (id: string, businessId: string, contactId: string, extra: Record<st
   ...extra,
 });
 
+/** The fixtures take their due shapes only for the instant of a cycle of this suite. */
+async function makeDue() {
+  const set = (id: string, sql: string) => db.$executeRawUnsafe(`UPDATE contact_export_jobs SET ${sql} WHERE id = $1`, id);
+  await set(ID.jExpired, `expires_at = now() - interval '2 days'`);
+  await set(ID.jFail, `expires_at = now() - interval '3 days'`);
+  await set(ID.jRecent, `expires_at = now() - interval '1 hour'`);
+  await set(ID.jConsumed, `download_count = 1, consumed_at = now() - interval '1 hour', last_downloaded_at = now() - interval '1 hour'`);
+  await set(ID.jJustConsumed, `download_count = 1, consumed_at = now() - interval '2 minutes', last_downloaded_at = now() - interval '2 minutes'`);
+}
+async function makeLive() {
+  await db.$executeRawUnsafe(
+    `UPDATE contact_export_jobs SET expires_at = now() + interval '5 days', download_count = 0, consumed_at = NULL, last_downloaded_at = NULL WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+  );
+}
+async function snapshot() {
+  return Object.fromEntries((await db.contactExportJob.findMany({ where: { id: { in: ALL_JOBS } } })).map((j: any) => [j.id, j]));
+}
+
 async function deletedEntries(jobId: string) {
   return db.contactAuditEntry.findMany({ where: { action: 'export_bundle_deleted', entityType: 'contact_export_job', entityId: jobId } });
 }
@@ -142,25 +173,27 @@ beforeAll(async () => {
   await db.business.create({ data: { id: ID.bizA, name: 'V72X Biz A', ownerId: ID.owner } });
   await db.business.create({ data: { id: ID.bizB, name: 'V72X Biz B', ownerId: ID.owner } });
   for (const [c, biz] of [
-    [ID.cExpired, ID.bizA], [ID.cConsumed, ID.bizA], [ID.cFresh, ID.bizA], [ID.cRecent, ID.bizA], [ID.cFail, ID.bizA], [ID.cOther, ID.bizB],
+    [ID.cExpired, ID.bizA], [ID.cConsumed, ID.bizA], [ID.cFresh, ID.bizA], [ID.cRecent, ID.bizA], [ID.cFail, ID.bizA],
+    [ID.cJustConsumed, ID.bizA], [ID.cOther, ID.bizB],
   ] as const) {
     await db.contact.create({ data: { id: c, businessId: biz, firstName: 'V72X', lastName: c.slice(P.length) } });
   }
-  const now = Date.now();
+  // Seeded live; makeDue() gives each its shape for the instant of a cycle:
+  // jExpired expired two days ago; jConsumed's one download used an hour ago;
+  // jJustConsumed's two minutes ago (inside the 15-minute grace); jRecent
+  // expired an hour ago (inside the 24h grace); jFail expired three days ago
+  // and the storage refuses its keys on the first cycle; jFresh and jOther
+  // (another business) stay live.
+  const live = Date.now() + 5 * DAY;
   await db.contactExportJob.createMany({
     data: [
-      // expired two days ago, never downloaded
-      job(ID.jExpired, ID.bizA, ID.cExpired, { expiresAt: new Date(now - 2 * DAY) }),
-      // link still valid, but its one download is used up
-      job(ID.jConsumed, ID.bizA, ID.cConsumed, { expiresAt: new Date(now + 5 * DAY), downloadCount: 1, maxDownloads: 1, consumedAt: new Date(now - 3600_000), lastDownloadedAt: new Date(now - 3600_000) }),
-      // live: valid for five more days, not downloaded
-      job(ID.jFresh, ID.bizA, ID.cFresh, { expiresAt: new Date(now + 5 * DAY) }),
-      // expired one hour ago: inside the 24h grace, not yet swept
-      job(ID.jRecent, ID.bizA, ID.cRecent, { expiresAt: new Date(now - 3600_000) }),
-      // expired, and the storage will refuse its keys on the first cycle
-      job(ID.jFail, ID.bizA, ID.cFail, { expiresAt: new Date(now - 3 * DAY) }),
-      // another business's live job
-      job(ID.jOther, ID.bizB, ID.cOther, { expiresAt: new Date(now + 5 * DAY) }),
+      job(ID.jExpired, ID.bizA, ID.cExpired, { expiresAt: new Date(live) }),
+      job(ID.jConsumed, ID.bizA, ID.cConsumed, { expiresAt: new Date(live) }),
+      job(ID.jFresh, ID.bizA, ID.cFresh, { expiresAt: new Date(live) }),
+      job(ID.jRecent, ID.bizA, ID.cRecent, { expiresAt: new Date(live) }),
+      job(ID.jFail, ID.bizA, ID.cFail, { expiresAt: new Date(live) }),
+      job(ID.jJustConsumed, ID.bizA, ID.cJustConsumed, { expiresAt: new Date(live) }),
+      job(ID.jOther, ID.bizB, ID.cOther, { expiresAt: new Date(live) }),
     ],
   });
 }, 120_000);
@@ -171,68 +204,121 @@ afterAll(async () => {
 });
 
 describe('RR-RETENTION-EXPIRED-EXPORTS: the purge cycle sweeps expired and consumed export bundles', () => {
-  let before: Record<string, any>;
-  let firstCycle: string[];
+  let dueBefore: Record<string, any>;
 
-  it('RED-BEFORE: one cycle deletes both objects of the expired job and of the consumed job, and nothing else; the storage failure is recorded and retried', async () => {
-    before = Object.fromEntries((await db.contactExportJob.findMany({ where: { businessId: { in: [ID.bizA, ID.bizB] } } })).map((j: any) => [j.id, j]));
-    firstCycle = await cycleWith(new Set(keysOf(ID.jFail)));
-
-    // RED at 9a7b5011: nothing is ever sent to storage.
-    expect([...firstCycle].sort()).toEqual([...keysOf(ID.jExpired), ...keysOf(ID.jConsumed)].sort());
-
-    // the rows are kept, every field unchanged
-    const after = Object.fromEntries((await db.contactExportJob.findMany({ where: { businessId: { in: [ID.bizA, ID.bizB] } } })).map((j: any) => [j.id, j]));
-    expect(Object.keys(after).sort()).toEqual(Object.keys(before).sort());
-    for (const id of Object.keys(before)) expect(after[id], id).toEqual(before[id]);
-
-    // one export_bundle_deleted entry per swept job, naming job, contact and keys
-    for (const [jobId, contactId] of [[ID.jExpired, ID.cExpired], [ID.jConsumed, ID.cConsumed]]) {
-      const entries = await deletedEntries(jobId);
-      expect(entries, jobId).toHaveLength(1);
-      expect(entries[0]).toMatchObject({ businessId: ID.bizA, contactId, entityType: 'contact_export_job', entityId: jobId });
-      expect(entries[0].contactHash).toBe(audit.hashContact(ID.bizA, contactId));
-      expect(entries[0].after).toMatchObject({ jsonKey: keysOf(jobId)[0], zipKey: keysOf(jobId)[1] });
-    }
-    // the untouched jobs: no entry of either kind
-    for (const jobId of [ID.jFresh, ID.jRecent, ID.jOther]) {
-      expect(await deletedEntries(jobId), jobId).toHaveLength(0);
-      expect(await failedEntries(jobId), jobId).toHaveLength(0);
-    }
-  });
-
-  it('the job whose objects the storage refused is kept, recorded as a cleanup failure with its keys, and swept by the next cycle', async () => {
-    expect(await deletedEntries(ID.jFail)).toHaveLength(0);
-    const failed = await failedEntries(ID.jFail);
-    expect(failed).toHaveLength(1);
-    expect(failed[0]).toMatchObject({ businessId: ID.bizA, contactId: ID.cFail, entityId: ID.jFail });
-    expect([...failed[0].after.failedKeys].sort()).toEqual([...keysOf(ID.jFail)].sort());
-
-    const secondCycle = await cycleWith();
-    expect([...secondCycle].sort()).toEqual([...keysOf(ID.jFail)].sort());
-    expect(await deletedEntries(ID.jFail)).toHaveLength(1);
-    expect(await db.contactExportJob.findUnique({ where: { id: ID.jFail } })).toEqual(before[ID.jFail]);
-  });
-
-  it('a further cycle sends nothing: a swept job is never swept again, and the live jobs stay', async () => {
-    const thirdCycle = await cycleWith();
-    expect(thirdCycle).toEqual([]);
-    expect(await deletedEntries(ID.jExpired)).toHaveLength(1);
-    expect(await deletedEntries(ID.jConsumed)).toHaveLength(1);
-    expect(await db.contactExportJob.count({ where: { businessId: { in: [ID.bizA, ID.bizB] } } })).toBe(6);
-  });
-
-  it('negative control: with DISABLE_FORGET_SCHEDULER=true no interval starts (and NODE_ENV=test disables schedulers anyway)', () => {
-    const prev = process.env.DISABLE_FORGET_SCHEDULER;
-    process.env.DISABLE_FORGET_SCHEDULER = 'true';
+  it('control: with object storage not configured the sweep skips the cycle and writes nothing', async () => {
+    await makeDue();
     try {
-      const svc = new ContactPrivacyService(prisma, audit);
-      svc.onModuleInit();
-      expect((svc as any).intervalRef).toBeNull();
-      svc.onModuleDestroy();
+      const entriesBefore = await db.contactAuditEntry.count({ where: { businessId: { in: [ID.bizA, ID.bizB] } } });
+      const spy = vi.spyOn(privacy as any, 's3').mockImplementation(() => { throw new Error('S3_BUCKET not configured for contact export storage'); });
+      const warn = vi.spyOn((privacy as any).logger, 'warn');
+      try {
+        await privacy.runPurgeCycle();
+      } finally {
+        spy.mockRestore();
+      }
+      const warned = warn.mock.calls.map((c: any[]) => String(c[0]));
+      warn.mockRestore();
+      expect(await db.contactAuditEntry.count({ where: { businessId: { in: [ID.bizA, ID.bizB] } } })).toBe(entriesBefore);
+      expect(warned.filter((w) => w.includes('export') && w.includes('not configured'))).toHaveLength(1);
     } finally {
-      if (prev === undefined) delete process.env.DISABLE_FORGET_SCHEDULER;
-      else process.env.DISABLE_FORGET_SCHEDULER = prev;
+      await makeLive();
+    }
+  });
+
+  it('RED-BEFORE: one cycle deletes both objects of the expired job and of the consumed job, and nothing else; the storage failure is recorded', async () => {
+    await makeDue();
+    try {
+      dueBefore = await snapshot();
+      const firstCycle = await cycleWith(new Set(keysOf(ID.jFail)));
+
+      // RED at 9a7b5011: nothing is ever sent to storage.
+      expect([...firstCycle].sort()).toEqual([...keysOf(ID.jExpired), ...keysOf(ID.jConsumed)].sort());
+
+      // the rows are kept, every field unchanged
+      const after = await snapshot();
+      expect(Object.keys(after).sort()).toEqual(Object.keys(dueBefore).sort());
+      for (const id of ALL_JOBS) expect(after[id], id).toEqual(dueBefore[id]);
+
+      // one export_bundle_deleted entry per swept job, naming job, contact and keys
+      for (const [jobId, contactId] of [[ID.jExpired, ID.cExpired], [ID.jConsumed, ID.cConsumed]]) {
+        const entries = await deletedEntries(jobId);
+        expect(entries, jobId).toHaveLength(1);
+        expect(entries[0]).toMatchObject({ businessId: ID.bizA, contactId, entityType: 'contact_export_job', entityId: jobId });
+        expect(entries[0].contactHash).toBe(audit.hashContact(ID.bizA, contactId));
+        expect(entries[0].after).toMatchObject({ jsonKey: keysOf(jobId)[0], zipKey: keysOf(jobId)[1] });
+      }
+      // the untouched jobs: no entry of either kind (live, inside the 24h grace, inside the 15-minute consumed grace, another business)
+      for (const jobId of [ID.jFresh, ID.jRecent, ID.jJustConsumed, ID.jOther]) {
+        expect(await deletedEntries(jobId), jobId).toHaveLength(0);
+        expect(await failedEntries(jobId), jobId).toHaveLength(0);
+      }
+      // the refused job: kept, one failure entry with its keys, no deleted entry
+      expect(await deletedEntries(ID.jFail)).toHaveLength(0);
+      const failed = await failedEntries(ID.jFail);
+      expect(failed).toHaveLength(1);
+      expect(failed[0]).toMatchObject({ businessId: ID.bizA, contactId: ID.cFail, entityType: 'contact_export_job', entityId: ID.jFail });
+      expect([...failed[0].after.failedKeys].sort()).toEqual([...keysOf(ID.jFail)].sort());
+    } finally {
+      await makeLive();
+    }
+  });
+
+  it('a job the storage keeps refusing is retried every cycle but recorded once; the cycle that succeeds sweeps it and records it', async () => {
+    await makeDue();
+    try {
+      const secondCycle = await cycleWith(new Set(keysOf(ID.jFail)));
+      expect(secondCycle).toEqual([]);
+      expect(await failedEntries(ID.jFail)).toHaveLength(1);
+      expect(await deletedEntries(ID.jFail)).toHaveLength(0);
+
+      const thirdCycle = await cycleWith();
+      expect([...thirdCycle].sort()).toEqual([...keysOf(ID.jFail)].sort());
+      expect(await deletedEntries(ID.jFail)).toHaveLength(1);
+      expect(await failedEntries(ID.jFail)).toHaveLength(1);
+      expect(await db.contactExportJob.findUnique({ where: { id: ID.jFail } })).toEqual(dueBefore[ID.jFail]);
+    } finally {
+      await makeLive();
+    }
+  });
+
+  it('a further cycle sends nothing: a swept job is never swept again, and every row stays', async () => {
+    await makeDue();
+    try {
+      expect(await cycleWith()).toEqual([]);
+      expect(await deletedEntries(ID.jExpired)).toHaveLength(1);
+      expect(await deletedEntries(ID.jConsumed)).toHaveLength(1);
+      expect(await db.contactExportJob.count({ where: { id: { in: ALL_JOBS } } })).toBe(ALL_JOBS.length);
+    } finally {
+      await makeLive();
+    }
+  });
+
+  it('negative control: with the schedulers opted in for test, DISABLE_FORGET_SCHEDULER=true starts no interval, and without it one starts (and is cleared)', () => {
+    const prev = { opt: process.env.ENABLE_SCHEDULERS_IN_TEST, flag: process.env.DISABLE_FORGET_SCHEDULER };
+    process.env.ENABLE_SCHEDULERS_IN_TEST = '1';
+    try {
+      process.env.DISABLE_FORGET_SCHEDULER = 'true';
+      const off = new ContactPrivacyService(prisma, audit);
+      const log = vi.spyOn((off as any).logger, 'log');
+      off.onModuleInit();
+      expect((off as any).intervalRef).toBeNull();
+      expect(log.mock.calls.map((c: any[]) => String(c[0])).some((m) => m.includes('disabled via env'))).toBe(true);
+      log.mockRestore();
+      off.onModuleDestroy();
+
+      delete process.env.DISABLE_FORGET_SCHEDULER;
+      const on = new ContactPrivacyService(prisma, audit);
+      on.onModuleInit();
+      try {
+        expect((on as any).intervalRef).not.toBeNull();
+      } finally {
+        on.onModuleDestroy();
+      }
+      expect((on as any).intervalRef).toBeNull();
+    } finally {
+      if (prev.opt === undefined) delete process.env.ENABLE_SCHEDULERS_IN_TEST; else process.env.ENABLE_SCHEDULERS_IN_TEST = prev.opt;
+      if (prev.flag === undefined) delete process.env.DISABLE_FORGET_SCHEDULER; else process.env.DISABLE_FORGET_SCHEDULER = prev.flag;
     }
   });
 });
