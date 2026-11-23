@@ -60,6 +60,9 @@ const ID = {
   recOps: `${P}rec_ops`,
   recOther: `${P}rec_other`,
   recOpsMoney: `${P}rec_opsm`,
+  recMkt: `${P}rec_mkt`,
+  recMktInputs: `${P}rec_mkti`,
+  recCapacity: `${P}rec_cap`,
   propFin: `${P}prop_fin`,
   propFinQuiet: `${P}prop_finq`,
   propOps: `${P}prop_ops`,
@@ -255,6 +258,15 @@ beforeAll(async () => {
   await rec(ID.recFin, ID.biz, 'FINANCIAL', 'Tighten the follow-up cadence', 'Receivables of TTD 8,765.43 are past due; net margin is 31.7%.');
   await rec(ID.recOps, ID.biz, 'OPERATIONS', 'Confirm tomorrow appointments', 'Three appointments are unconfirmed.');
   await rec(ID.recOther, ID.biz2, 'OPERATIONS', 'Confirm tomorrow appointments', 'Three appointments are unconfirmed.');
+  // Round 4 (correctness MAJOR-1): recommendations as the marketing and operations genomes write them; their text names
+  // money words but states no figure, and the recommendations list serves them to a revenue-none member.
+  for (const [id, domain, title, insight, diagnosis, recommendation, expectedGain] of [
+    [ID.recMkt, 'MARKETING', 'Add active growth channels', 'A single active channel creates fragility.', 'Fewer than two active growth channels are recorded.', 'Identify and activate at least one additional owned, earned, or paid channel.', 'Improve diversification and reduce acquisition risk.'],
+    [ID.recMktInputs, 'MARKETING', 'Complete missing marketing/growth inputs', 'Missing inputs reduce confidence and actionability.', 'Missing inputs: growth_channels, content_strategy.', 'Record growth channels, content strategy, target CAC, and conversion rates.', 'Increase marketing genome confidence and readiness.'],
+    [ID.recCapacity, 'OPERATIONS', 'Plan capacity increase', 'Capacity cannot support current demand reliably.', 'Average utilization is 92%.', 'Add capacity, reduce backlog, or adjust sales commitments.', null],
+  ] as const) {
+    await db.genomeRecommendation.create({ data: { id, businessId: ID.biz, domain, title, insight, diagnosis, recommendation, expectedGain, status: 'ACCEPTED', riskLevel: 'MEDIUM' } });
+  }
   // Round 3 (correctness NOTE): an OPERATIONS recommendation whose insight and recommendation text state a figure.
   await db.genomeRecommendation.create({
     data: {
@@ -306,6 +318,20 @@ beforeAll(async () => {
       },
     });
   }
+
+  // Round 4 (correctness MINOR-2): a blocked_by_autonomy row of the non-financial proposal, in the shape
+  // KeyActionProposalService.emitLifecycleEvent writes it with AutonomyOrchestrator's ToolOutcomeScore trace.
+  await db.temporalFlowEvent.create({
+    data: {
+      id: `${P}blocked_row`, businessId: ID.biz, source: 'KEY', type: 'key.action.blocked_by_autonomy', module: 'key-autonomy',
+      entityType: 'key_action_proposal', entityId: ID.propOps, title: 'KEY action blocked_by_autonomy', summary: 'Action CREATE_TASK',
+      importance: 'HIGH', reminderAt: remindAt, startsAt: remindAt,
+      payload: {
+        actionType: 'CREATE_TASK', executedBy: ID.owner, reason: 'Autonomy rules require supervision',
+        ruleTrace: [{ source: 'ToolOutcomeScore', rule: 'tool-score-CREATE_TASK', result: 'supervised', reason: 'Tool CREATE_TASK has a poor track record', metadata: { successRate: 0.2, totalUses: 5 } }],
+      },
+    },
+  });
 
   // Genome evolution proposals; their decision rows are written by the real GenomeEvolutionService below.
   const evo = (id: string, businessId: string, section: string, reason: string, proposedPatch: Record<string, unknown>) =>
@@ -510,6 +536,20 @@ describe('FU-KEY-ACTION-GENOME-PROJECTION: bridged FINANCIAL proposals and their
     const read = await get(`${bridgeUrl(ID.recOpsMoney)}/action-preview`, ID.staffRead);
     expect(read.status).toBe(200);
     expect(JSON.stringify(read.body)).toMatch(/TTD 912/);
+  });
+
+  it('KAG-11 round 4: recommendations as the marketing and operations genomes write them are still previewed for revenue none', async () => {
+    for (const id of [ID.recMkt, ID.recMktInputs, ID.recCapacity]) {
+      const res = await get(`${bridgeUrl(id)}/action-preview`, ID.staffNone);
+      expect(res.status, id).toBe(200);
+      expect(res.body.recommendationId, id).toBe(id);
+    }
+  });
+
+  it('KAG-12 round 4: the blocked_by_autonomy row of a non-financial proposal is served (its rule trace counts uses, not money)', async () => {
+    for (const [name, res] of Object.entries(await timelineReads(ID.staffNone))) {
+      expect(res.body.some((e: any) => e.id === `${P}blocked_row`), name).toBe(true);
+    }
   });
 
   it('KAG-05c cross-tenant: a member of another business is refused this business\'s reads', async () => {

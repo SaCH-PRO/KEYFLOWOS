@@ -34,6 +34,22 @@ describe('isFinancialGenomeEvolution', () => {
     expect(isFinancialGenomeEvolution({ ...opsRow, evidence: ['Invoices of TTD 4,500 are overdue'] })).toBe(true);
   });
 
+  it('round 4 (security A1): withholds a patch that holds a bare figure (a blueprint money field, a target)', () => {
+    for (const proposedPatch of [{ monthlyTarget: 50000 }, { avgTicket: 350 }, { ninetyDayGoals: ['Hit 120k this quarter'] }, { goals: [{ target: 12.5 }] }]) {
+      expect(isFinancialGenomeEvolution({ ...opsRow, section: 'growth', proposedPatch }), JSON.stringify(proposedPatch)).toBe(true);
+    }
+  });
+
+  it('round 4: serves the rows the genome-evolution generator writes (its evidence counts events)', () => {
+    for (const [section, proposedPatch, reason] of [
+      ['marketing', { channels: ['WhatsApp'] }, 'WhatsApp appears to be a meaningful acquisition source.'],
+      ['operations', { coreWorkflows: ['appointment-booking'] }, 'Rising booking volume suggests operations workflows are material.'],
+      ['risk', { operationalRisks: ['Asset expiry reminders detected'] }, 'Expiring assets indicate active risk management needs.'],
+    ] as const) {
+      expect(isFinancialGenomeEvolution({ section, proposedPatch, reason, evidence: ['5 booking events detected.'] }), section).toBe(false);
+    }
+  });
+
   it('serves a neutral row of each listed non-money section (case and spaces folded)', () => {
     for (const section of ['founder', 'vision', 'business', 'market', 'legal', 'operations', 'marketing', 'growth', 'technology', 'risk', ' Operations ']) {
       expect(isFinancialGenomeEvolution({ ...opsRow, section }), section).toBe(false);
