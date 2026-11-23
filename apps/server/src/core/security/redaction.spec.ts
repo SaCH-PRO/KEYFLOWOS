@@ -533,6 +533,47 @@ describe('redactSensitiveText and deepRedact on string values (RR-REDACTION-BY-C
     });
   });
 
+  describe('repair round 2: real key bodies with dashes, AWS anchor, key tail, more invisible characters', () => {
+    const body = (n: number, seed: number) => {
+      // Deterministic base64url-like body of n characters with a dash every 15th character (no secret is real).
+      const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_';
+      let out = '';
+      for (let i = 0; i < n; i += 1) out += (i + 1) % 15 === 0 ? '-' : alphabet[(seed * 7 + i * 13) % alphabet.length];
+      return out;
+    };
+
+    it('F1: an Anthropic or OpenAI key whose body starts with or contains dashes is still a key (never-slug prefixes keep the plain 20+ rule)', () => {
+      expect(redactSensitiveText('k ' + 'sk-ant-' + 'api03--v-F1JiMIvoSLnY0WGT_FF-jNkDITQdPVeQzOFPqmnGSIh0Ah6VeIyXUYxmOnHCY5iSG2LECqCRropTUbQC1Fw6l-EzDzME')).toBe('k <secret>');
+      expect(redactSensitiveText('k ' + 'sk-ant-api03-' + body(95, 3))).toBe('k <secret>');
+      expect(redactSensitiveText('k ' + 'sk-proj-' + body(156, 5))).toBe('k <secret>');
+      expect(redactSensitiveText('k ' + 'sk-proj-' + '-' + body(60, 9))).toBe('k <secret>');
+      expect(redactSensitiveText('k ' + 'xoxb-1-2-3-4-5-' + 'AbCdEfGhIjKlMnOpQrStUvWx')).toBe('k <secret>');
+      // Bare sk- keeps the slug-proof shape: a product slug stays, a legacy key is redacted, an empty segment is allowed.
+      expect(redactSensitiveText('sk-classic-fit-cotton-shirt-blue')).toBe('sk-classic-fit-cotton-shirt-blue');
+      expect(redactSensitiveText('sk-' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4P5q6')).toBe('<secret>');
+      expect(redactSensitiveText('sk-' + '-' + 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4P5q6')).toBe('<secret>');
+    });
+
+    it('F2: the AWS key id is anchored on letters and digits, not word boundaries: x_AKIA... is a key, 17 characters are not', () => {
+      expect(redactSensitiveText('x_' + 'AKIA' + 'IOSFODNN7EXAMPLE')).toBe('x_<secret>');
+      expect(redactSensitiveText('AKIA' + 'IOSFODNN7EXAMPLE' + 'X')).toBe('AKIA' + 'IOSFODNN7EXAMPLE' + 'X');
+      expect(redactSensitiveText('AKIA' + 'IOSFODNN7EXAMPLE' + '_x')).toBe('<secret>_x');
+    });
+
+    it('F3: the key tail is part of the key: a dashed continuation after the 20-run is redacted with it', () => {
+      expect(redactSensitiveText('sk-' + 'A'.repeat(20) + '-' + 'B'.repeat(10))).toBe('<secret>');
+      expect(redactSensitiveText('ghp_' + 'A'.repeat(36) + '-tail')).toBe('<secret>');
+    });
+
+    it('F4: soft hyphen and the directional marks between digit groups do not hide a card either', () => {
+      for (const inv of ['­', '‎', '‏']) {
+        expect(redactSensitiveText(`card 4111${inv}1111${inv}1111${inv}1111 ok`), JSON.stringify(inv)).toBe('card <card> ok');
+      }
+      const plain = 'soft­hyphen‎only, no secret 4111 1111 1111 1112';
+      expect(redactSensitiveText(plain)).toBe(plain);
+    });
+  });
+
   describe('the value patterns are a named, tested list', () => {
     it('every pattern has a name, a marker of <card> or <secret>, is global, and is exercised above; the list is frozen', () => {
       expect(SENSITIVE_VALUE_PATTERNS.length).toBeGreaterThanOrEqual(5);
