@@ -50,7 +50,10 @@
  *   V72S-15  (orchestrator A1) --apply refuses (exit 2, nothing written) unless the loaded key decrypts at least
  *            one stored ciphertext of any encrypted model, searched across the whole database and not only the
  *            --business scope: a wrong key (JWT_SECRET while the API ran on CONNECTOR_CREDENTIALS_KEY) no longer
- *            seals every row under itself. The dry run still reports the key variable it would use.
+ *            seals every row under itself. The dry run still reports the key variable it would use. The proof
+ *            samples the newest ciphertext of each column first and prints how many sampled values decrypted and
+ *            failed; the refusal says how to get past it (write one token through the API). Runs on a business
+ *            with no ciphertext in scope, so the exit code alone tells it from the old scoped check.
  *
  * Owner question OQ-4 (does production hold plaintext bank tokens today) is open; nothing here reads production.
  */
@@ -93,8 +96,10 @@ const ID = {
   bizScript: `${P}bizscript`,
   /** V72S-12's business: a row that does not decrypt. */
   bizScript2: `${P}bizscript2`,
-  /** V72S-13's business. */
+  /** V72S-13 and V72S-14's business. */
   bizScript3: `${P}bizscript3`,
+  /** V72S-15's business: only the plaintext row, so no ciphertext in scope (orchestrator A1's case). */
+  bizScript4: `${P}bizscript4`,
 };
 
 /** A token built from fragments at run time, so no secret-shaped literal sits in the source. */
@@ -283,7 +288,7 @@ beforeAll(async () => {
   await app.init();
 
   await cleanup();
-  for (const [uid, bid] of [[ID.owner, ID.biz], [ID.owner2, ID.biz2], [ID.owner, ID.bizScript], [ID.owner, ID.bizScript2], [ID.owner, ID.bizScript3]] as const) {
+  for (const [uid, bid] of [[ID.owner, ID.biz], [ID.owner2, ID.biz2], [ID.owner, ID.bizScript], [ID.owner, ID.bizScript2], [ID.owner, ID.bizScript3], [ID.owner, ID.bizScript4]] as const) {
     if (!(await db.user.findUnique({ where: { id: uid } }))) {
       await db.user.create({ data: { id: uid, email: `${P}${uid.slice(P.length)}@test.local`, name: uid, role: 'USER' } });
     }
@@ -738,10 +743,10 @@ describe('BankConnection.accessToken is encrypted at rest (RR-BANK-TOKEN-ENCRYPT
     expect(await stored(sealed.id)).toMatch(new RegExp(`^${CIPHER_PREFIX}`));
   });
   it('[V72S-15] --apply refuses unless the loaded key decrypts a stored ciphertext somewhere in the database', async () => {
-    const fa = await account(ID.bizScript3, 'V72S wrong key bank');
+    const fa = await account(ID.bizScript4, 'V72S wrong key bank');
     const plain = token('wrongkey');
-    const id = await rawRow(ID.bizScript3, fa, `${P}s3_wrongkey`, plain);
-    const scope = `--business=${ID.bizScript3}`;
+    const id = await rawRow(ID.bizScript4, fa, `${P}s4_wrongkey`, plain);
+    const scope = `--business=${ID.bizScript4}`;
     const wrong = [P, 'not', 'the', 'api', 'key', String(Date.now())].join('-');
 
     // A1's case: the operator's shell has JWT_SECRET, the API ran on CONNECTOR_CREDENTIALS_KEY.
@@ -754,6 +759,10 @@ describe('BankConnection.accessToken is encrypted at rest (RR-BANK-TOKEN-ENCRYPT
       const all = `${run.out}\n${run.err}`;
       expect(run.code, all).toBe(2);
       expect(all).toMatch(/no stored ciphertext decrypts with the loaded key/);
+      // How to get past it, and what the proof sampled (newest first), so a mixed-key database is visible.
+      expect(all).toMatch(/through the API/);
+      expect(countOf(run.out, 'key_proof_decrypted')).toBe(0);
+      expect(countOf(run.out, 'key_proof_failed')).toBeGreaterThanOrEqual(1);
       expect(all).not.toContain(wrong);
       expect(await stored(id), 'nothing written').toBe(plain);
     }
@@ -763,6 +772,8 @@ describe('BankConnection.accessToken is encrypted at rest (RR-BANK-TOKEN-ENCRYPT
     const ok = await runScript(['--apply', scope]);
     expect(ok.code, `${ok.out}\n${ok.err}`).toBe(0);
     expect(ok.out).toMatch(/key proven by\s+\w+/);
+    expect(countOf(ok.out, 'key_proof_decrypted')).toBeGreaterThanOrEqual(1);
+    expect(countOf(ok.out, 'key_proof_failed')).toBeGreaterThanOrEqual(0);
     expect((await stored(id))?.startsWith(CIPHER_PREFIX)).toBe(true);
     expect((await db.bankConnection.findFirst({ where: { id } })).accessToken).toBe(plain);
   }, 4 * SCRIPT_TIMEOUT_MS);
