@@ -70,6 +70,7 @@ import {
   containsUntrustedBlock,
   exceedsUntrustedCap,
   fenceUntrusted,
+  withoutInvisible,
   withUntrustedContentRule,
   withoutUntrustedBlocks,
 } from './untrusted-content';
@@ -706,15 +707,14 @@ function withUntrustedContentRuleWhereFenced(messages: GatewayMessage[]): Gatewa
 
 /**
  * RR-UNTRUSTED-CONTENT-FENCE review M2: the line the server adds to a reply when an attachment's text
- * was cut to its cap, so the member knows KEY read only part of it. Built here, not by the model. The
- * file name is the uploader's, shown as plain text: control characters become spaces and markdown is
- * escaped, so a name cannot render as a link or break the line.
+ * was cut to its cap, so the member knows KEY read only part of it. Built here, not by the model, and
+ * naming each attachment by its position in the message, never by its file name: the name is the
+ * uploader's text, and this line is saved as KEY's reply and replayed to the model (round 4, security
+ * F2: a name could otherwise speak as KEY, carry a role sign-off, a link or a bidi override).
  */
-function attachmentTruncationNotice(truncatedFiles: readonly string[], turnCapReached: boolean): string {
-  const plain = (name: string) =>
-    name.replace(/\p{Cc}/gu, ' ').replace(/[\\`*_[\]()<>#!|~]/g, '\\$&').slice(0, 120);
-  const lines = truncatedFiles.map(
-    (f) => `Only the first ${UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS.toLocaleString('en-US')} characters of ${plain(f)} were read.`,
+function attachmentTruncationNotice(truncatedPositions: readonly number[], turnCapReached: boolean): string {
+  const lines = truncatedPositions.map(
+    (n) => `Only the first ${UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS.toLocaleString('en-US')} characters of attachment ${n} were read.`,
   );
   if (turnCapReached) {
     lines.push(`Only the first ${UNTRUSTED_MAX_CHARS.attachment.toLocaleString('en-US')} characters of this message's attachments were read.`);
@@ -1993,8 +1993,8 @@ export class FlowOrchestratorService {
   private async buildAttachmentContext(
     businessId: string,
     attachments?: FlowAttachment[],
-    /** Filled with the name of each file whose extraction was cut to its cap (review M2). */
-    truncatedFiles?: string[],
+    /** Filled with the 1-based position of each file whose extraction was cut to its cap (review M2). */
+    truncatedFiles?: number[],
   ): Promise<string> {
     if (!attachments?.length) return '';
     const docIntel = this.getDocumentIntelligence();
@@ -2035,10 +2035,12 @@ export class FlowOrchestratorService {
         const summary = result.rawText?.trim()
           ? `${result.documentType?.toUpperCase() ?? 'DOCUMENT'}\n${result.rawText}`
           : JSON.stringify(result);
-        if (summary.length > UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS) truncatedFiles?.push(filename);
+        // Measured, and cut, without the invisible characters the fence removes (round 4, correctness F2).
+        const visible = withoutInvisible(summary);
+        if (visible.length > UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS) truncatedFiles?.push(attachments.indexOf(att) + 1);
         parts.push(
           // RR-UNTRUSTED-CONTENT-FENCE review m1: each file has its own cap inside the turn's one block.
-          `[Attachment: ${filename} (${att.type}, ${extractionInput.mimeType ?? mimeType})]\n${capUntrusted(summary, UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS)}`,
+          `[Attachment: ${filename} (${att.type}, ${extractionInput.mimeType ?? mimeType})]\n${capUntrusted(visible, UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS)}`,
         );
       } catch (err: any) {
         parts.push(
@@ -2162,7 +2164,7 @@ export class FlowOrchestratorService {
     const effectiveSessionId = sessionId || randomUUID();
     // RR-UNTRUSTED-CONTENT-FENCE: the extraction is text a third party wrote. It is fenced, and it
     // reaches the model as a message of its own beside the member's, never inside it.
-    const truncatedFiles: string[] = [];
+    const truncatedFiles: number[] = [];
     const extraction = await this.buildAttachmentContext(businessId, attachments, truncatedFiles);
     const attachmentContext = fenceUntrusted('attachment', extraction);
     const enrichedMessage = attachmentContext ? `${message}\n\n${attachmentContext}` : message;
@@ -2622,7 +2624,7 @@ ${triage.standingContext}`;
     const effectiveSessionId = sessionId || randomUUID();
     // RR-UNTRUSTED-CONTENT-FENCE: the extraction is text a third party wrote. It is fenced, and it
     // reaches the model as a message of its own beside the member's, never inside it.
-    const truncatedFiles: string[] = [];
+    const truncatedFiles: number[] = [];
     const extraction = await this.buildAttachmentContext(businessId, attachments, truncatedFiles);
     const attachmentContext = fenceUntrusted('attachment', extraction);
     const enrichedMessage = attachmentContext ? `${message}\n\n${attachmentContext}` : message;
@@ -2657,7 +2659,11 @@ ${triage.standingContext}`;
       };
       return;
     }
-    if (attachmentNotice) yield { type: 'content_delta', content: `${attachmentNotice}\n\n` };
+    // content_delta chunks are cumulative (replace semantics), so the line leads every one of them and
+    // the content saved with the turn, not only the first (round 4, correctness F1).
+    const shown = (content: string): string =>
+      attachmentNotice ? (content ? `${attachmentNotice}\n\n${content}` : attachmentNotice) : content;
+    if (attachmentNotice) yield { type: 'content_delta', content: attachmentNotice };
 
     // PR195-PORT, PR195-KEY-GATES review repair (SEC-P195KG-2): as chat(), the figures this member may read (the
     // viewer projection); a turn with no member, none.
@@ -2891,7 +2897,7 @@ ${triage.standingContext}`;
           fullContent += chunk.content;
           // Yield cumulative content so clients can render with replace
           // semantics (raw provider deltas are fragments).
-          yield { type: 'content_delta', content: fullContent };
+          yield { type: 'content_delta', content: shown(fullContent) };
         }
 
         if (chunk.type === 'tool_call_delta' && chunk.toolCall) {
@@ -2932,7 +2938,7 @@ ${triage.standingContext}`;
           message,
           enrichedMessage,
           attachments,
-          fullContent,
+          shown(fullContent),
           undefined,
           undefined,
           undefined,
@@ -2975,7 +2981,7 @@ ${triage.standingContext}`;
 
       if (blocked.length > 0) {
         const blockMessage = `I can't execute that action right now: ${blocked.map(b => b.decision.reason).join('; ')}`;
-        yield { type: 'content_delta', content: blockMessage };
+        yield { type: 'content_delta', content: shown(blockMessage) };
         yield* this.finalizeStreamSession(
           businessId,
           effectiveSessionId,
@@ -2983,7 +2989,7 @@ ${triage.standingContext}`;
           message,
           enrichedMessage,
           attachments,
-          blockMessage,
+          shown(blockMessage),
           toolCalls,
           undefined,
           undefined,
@@ -3013,7 +3019,7 @@ ${triage.standingContext}`;
         ).join('\n');
 
         const formalMessage = `These actions require formal approval and have been added to your approval queue:\n${approvalMessages}`;
-        yield { type: 'content_delta', content: formalMessage };
+        yield { type: 'content_delta', content: shown(formalMessage) };
         yield* this.finalizeStreamSession(
           businessId,
           effectiveSessionId,
@@ -3021,7 +3027,7 @@ ${triage.standingContext}`;
           message,
           enrichedMessage,
           attachments,
-          formalMessage,
+          shown(formalMessage),
           toolCalls,
           undefined,
           undefined,
@@ -3052,7 +3058,7 @@ ${triage.standingContext}`;
           message,
           enrichedMessage,
           attachments,
-          fullContent,
+          shown(fullContent),
           toolCalls,
           undefined,
           pendingConfirmations,
@@ -3108,7 +3114,7 @@ ${triage.standingContext}`;
           // Cumulative, continuing from the pre-tool text so the client
           // can keep rendering with replace semantics.
           const combined = fullContent ? `${fullContent}\n\n${followUpContent}` : followUpContent;
-          yield { type: 'content_delta', content: combined };
+          yield { type: 'content_delta', content: shown(combined) };
         }
       }
 
@@ -3119,7 +3125,7 @@ ${triage.standingContext}`;
         message,
         enrichedMessage,
         attachments,
-        followUpContent,
+        shown(followUpContent),
         toolCalls,
         toolResults,
         undefined,

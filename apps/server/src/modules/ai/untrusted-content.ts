@@ -128,7 +128,8 @@ function skeletonOf(cp: string): string {
 // runs are adjacent and a long whitespace run is scanned in linear time (review F3).
 const MARKER_RE = new RegExp(
   `(?:${spellings('<', BRACKET_CPS, ['lt', 'lsaquo', 'lang', 'lessdot'])})` +
-    `\\s*(?:(${spellings('[/\\\\]', SLASH_CPS, ['sol', 'bsol', 'frasl'])})\\s*)?untrusted`,
+    // One or more slashes, so a JSON-escaped (\\/) or doubled (//) slash reads as one (round 4, security F4).
+    `\\s*(?:((?:${spellings('[/\\\\]', SLASH_CPS, ['sol', 'bsol', 'frasl'])})+)\\s*)?untrusted`,
   'g',
 );
 
@@ -191,8 +192,26 @@ function neutraliseMarkers(text: string): string {
  */
 const INVISIBLE_RE = /(?![\u200c\u200d])\p{Cf}/gu;
 
-function withoutInvisible(text: string | null | undefined): string {
-  return typeof text === 'string' ? text.replace(INVISIBLE_RE, '') : '';
+/**
+ * Round 4 (security F1): other characters that render as nothing and can carry a hidden message.
+ * Variation selectors spell bytes after an emoji ("emoji smuggling"): the supplementary ones
+ * (U+E0100-E01EF) and U+FE00-FE0D go; of the emoji presentation selectors FE0E/FE0F one is kept
+ * directly after the character it styles, so emoji still render. Also the combining grapheme joiner,
+ * the Mongolian free variation selectors and the blank fillers (Hangul fillers, the blank Braille
+ * pattern), which the marker search already drops. Removing the Cf tag characters also turns the
+ * subdivision flags (England, Scotland, Wales) into a plain black flag, as it removes the Arabic
+ * number signs U+0600-0605: neither matters in a business document.
+ */
+const SILENT_RE = /[\u{e0100}-\u{e01ef}\ufe00-\ufe0d\u034f\u180b-\u180f\u115f\u1160\u3164\uffa0\u2800]/gu;
+const PRESENTATION_RE = /[\ufe0e\ufe0f]+/g;
+
+/** The text without invisible characters, as the model is sent it. */
+export function withoutInvisible(text: string | null | undefined): string {
+  if (typeof text !== 'string') return '';
+  return text
+    .replace(INVISIBLE_RE, '')
+    .replace(SILENT_RE, '')
+    .replace(PRESENTATION_RE, (run: string, at: number, all: string) => (at > 0 && !/\s/.test(all[at - 1]) ? run[0] : ''));
 }
 
 /** True when fenceUntrusted(source, text) cuts the text at its source's cap. */
