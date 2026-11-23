@@ -26,6 +26,13 @@
  *     entry, no schema change);
  *   - with DISABLE_FORGET_SCHEDULER=true no interval starts.
  *
+ * runPurgeCycle is global: it purges every due forget request and repairs
+ * every legacy purge in the shared database, and the purge suites make their
+ * requests due for the instant of their own cycle. So this suite's service
+ * instance has purgeOne and repairLegacyPurges stubbed to no-ops: its cycles
+ * read the due list (harmless) and run the export sweep, and never purge or
+ * repair another suite's rows while running beside it.
+ *
  * Requires DATABASE_URL. Every seeded row carries the `v72x_` prefix and is
  * hard-deleted by raw SQL (sqlLikePrefix) in beforeAll and afterAll. Cases
  * tagged RED-BEFORE fail at 9a7b5011 (no DeleteObject is ever sent).
@@ -126,6 +133,9 @@ beforeAll(async () => {
   prisma = moduleRef.get(PrismaServiceClass);
   audit = new ContactAuditService(prisma);
   privacy = new ContactPrivacyService(prisma, audit);
+  // This instance never purges or repairs another suite's rows (see the header).
+  vi.spyOn(privacy as any, 'purgeOne').mockResolvedValue(false);
+  vi.spyOn(privacy as any, 'repairLegacyPurges').mockResolvedValue(0);
 
   await cleanup();
   await db.user.create({ data: { id: ID.owner, email: `${P}owner@test.local`, role: 'USER' } });
