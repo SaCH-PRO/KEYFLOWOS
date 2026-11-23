@@ -74,6 +74,7 @@ const ID = {
   evoOdd: `${P}evo_odd`,
   evoOpsMoney: `${P}evo_opsm`,
   evoOps: `${P}evo_ops`,
+  evoGrowth: `${P}evo_growth`,
   evoOther: `${P}evo_other`,
 };
 
@@ -230,7 +231,7 @@ beforeAll(async () => {
 
   await cleanup();
   for (const id of [ID.owner, ID.staffNone, ID.staffRead, ID.staffMissing, ID.superAdmin, ID.outsider]) {
-    await db.user.create({ data: { id, email: `${id}@test.local`, name: id, role: id === ID.superAdmin ? 'SUPER_ADMIN' : 'USER' } });
+    await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, name: id, role: id === ID.superAdmin ? 'SUPER_ADMIN' : 'USER' } });
   }
   await db.business.create({ data: { id: ID.biz, name: 'V73K Projection', slug: `${P}biz`, ownerId: ID.owner, currency: 'TTD' } });
   await db.business.create({ data: { id: ID.biz2, name: 'V73K Other', slug: `${P}biz2`, ownerId: ID.outsider, currency: 'TTD' } });
@@ -326,9 +327,26 @@ beforeAll(async () => {
       id: `${P}blocked_row`, businessId: ID.biz, source: 'KEY', type: 'key.action.blocked_by_autonomy', module: 'key-autonomy',
       entityType: 'key_action_proposal', entityId: ID.propOps, title: 'KEY action blocked_by_autonomy', summary: 'Action CREATE_TASK',
       importance: 'HIGH', reminderAt: remindAt, startsAt: remindAt,
+      // Round 5 (correctness M3): the orchestrator's own strings (autonomy-orchestrator.service.ts, tool outcome guard).
       payload: {
-        actionType: 'CREATE_TASK', executedBy: ID.owner, reason: 'Autonomy rules require supervision',
-        ruleTrace: [{ source: 'ToolOutcomeScore', rule: 'tool-score-CREATE_TASK', result: 'supervised', reason: 'Tool CREATE_TASK has a poor track record', metadata: { successRate: 0.2, totalUses: 5 } }],
+        actionType: 'CREATE_TASK', executedBy: ID.owner, reason: 'Tool CREATE_TASK success rate is below 30% — blocked',
+        ruleTrace: [{ source: 'ToolOutcomeScore', rule: 'tool-score-CREATE_TASK', result: 'supervised', reason: 'Tool CREATE_TASK success rate is 20% over 5 uses', metadata: { successRate: 0.2, totalUses: 5 } }],
+      },
+    },
+  });
+  // Round 5 (security MINOR-3, correctness M2): a business-wide allow rule whose reason states money, in the trace of a
+  // blocked row of the same non-financial proposal (allow entries are not copied into the row's reason).
+  await db.temporalFlowEvent.create({
+    data: {
+      id: `${P}blocked_rule_row`, businessId: ID.biz, source: 'KEY', type: 'key.action.blocked_by_autonomy', module: 'key-autonomy',
+      entityType: 'key_action_proposal', entityId: ID.propOps, title: 'KEY action blocked_by_autonomy', summary: 'Action CREATE_TASK',
+      importance: 'HIGH', reminderAt: remindAt, startsAt: remindAt,
+      payload: {
+        actionType: 'CREATE_TASK', executedBy: ID.owner, reason: 'Tool CREATE_TASK success rate is below 30% — blocked',
+        ruleTrace: [
+          { source: 'AutonomyRule', rule: 'auto-small-payments', result: 'allow', reason: 'Payments under TTD 912 are auto-approved' },
+          { source: 'ToolOutcomeScore', rule: 'tool-score-CREATE_TASK', result: 'supervised', reason: 'Tool CREATE_TASK success rate is 20% over 5 uses', metadata: { successRate: 0.2, totalUses: 5 } },
+        ],
       },
     },
   });
@@ -341,10 +359,12 @@ beforeAll(async () => {
   await evo(ID.evoOdd, ID.biz, 'treasury_notes', 'Collected TTD 912 in deposits', { deposits: 912 });
   await evo(ID.evoOpsMoney, ID.biz, 'operations', 'Overtime cost TTD 912 last week', { coreWorkflows: ['overtime'] });
   await evo(ID.evoOps, ID.biz, 'operations', 'Bookings are handled through WhatsApp', { coreWorkflows: ['appointment-booking'] });
+  // Round 5 (security MAJOR-1): a bare figure in the reason only (no currency, no money word; the patch is neutral).
+  await evo(ID.evoGrowth, ID.biz, 'growth', 'Hit 120k this quarter', { ninetyDayPlan: ['Grow repeat bookings'] });
   await evo(ID.evoOther, ID.biz2, 'operations', 'Bookings are handled through WhatsApp', { coreWorkflows: ['appointment-booking'] });
   // emitDecisionEvent does not await its write (round 2, correctness MINOR-2): its emits are tracked and drained.
   const writes = trackAsyncWrites([[TemporalFlowService.prototype, 'emit']]);
-  for (const id of [ID.evoFin, ID.evoSales, ID.evoOdd, ID.evoOpsMoney, ID.evoOps]) await evolution.reject(ID.biz, id, ID.owner);
+  for (const id of [ID.evoFin, ID.evoSales, ID.evoOdd, ID.evoOpsMoney, ID.evoOps, ID.evoGrowth]) await evolution.reject(ID.biz, id, ID.owner);
   await writes.drain();
   writes.restore();
   // A decision row in this business naming another business's proposal (cannot be read here: fail closed).
@@ -357,8 +377,8 @@ beforeAll(async () => {
       payload: { proposalId: ID.evoOther, section: 'operations', status: 'REJECTED', proposedPatch: { coreWorkflows: ['appointment-booking'] } },
     },
   });
-  // The five rows the service wrote and the cross-business row above.
-  expect(await db.temporalFlowEvent.count({ where: { businessId: ID.biz, entityType: 'genome_evolution_proposal' } })).toBe(6);
+  // The six rows the service wrote and the cross-business row above.
+  expect(await db.temporalFlowEvent.count({ where: { businessId: ID.biz, entityType: 'genome_evolution_proposal' } })).toBe(7);
   // The real writer's rows carry reminder and calendar times only when given; give them one so all three reads see them.
   await db.temporalFlowEvent.updateMany({
     where: { businessId: ID.biz, entityType: 'genome_evolution_proposal' },
@@ -374,7 +394,7 @@ afterAll(async () => {
 const ALL_TASKS = [ID.propCross, ID.propFin, ID.propFinQuiet, ID.propOps, ID.propOpsSummary, ID.propOpsPayload].sort();
 /** The non-financial proposals a revenue-none member is served over REST. */
 const OPS_PROPOSALS = [ID.propOps, ID.propOpsSummary, ID.propOpsPayload].sort();
-const ALL_EVOS = [`${P}evo_other`, ID.evoFin, ID.evoOdd, ID.evoOps, ID.evoOpsMoney, ID.evoSales];
+const ALL_EVOS = [`${P}evo_other`, ID.evoFin, ID.evoGrowth, ID.evoOdd, ID.evoOps, ID.evoOpsMoney, ID.evoSales];
 
 describe('FU-KEY-ACTION-GENOME-PROJECTION: bridged FINANCIAL proposals and their timeline rows (D-128, D-233, D-238)', () => {
   it('fixture: the real GenomeEvolutionService wrote the decision rows with the reason and patch in them', async () => {
@@ -510,7 +530,7 @@ describe('FU-KEY-ACTION-GENOME-PROJECTION: bridged FINANCIAL proposals and their
       expect(res.status, q).toBe(200);
       expect(JSON.stringify(res.body), q).not.toMatch(FIGURES);
       const ids = res.body.map((e: any) => e.entityId);
-      for (const hidden of [ID.evoFin, ID.evoSales, ID.evoOdd, ID.evoOpsMoney, `${P}evo_other`, ID.propFin, ID.propFinQuiet, ID.propCross, ID.propOpsSummary, ID.propOpsPayload]) {
+      for (const hidden of [ID.evoFin, ID.evoSales, ID.evoOdd, ID.evoOpsMoney, ID.evoGrowth, `${P}evo_other`, ID.propFin, ID.propFinQuiet, ID.propCross, ID.propOpsSummary, ID.propOpsPayload]) {
         expect(ids, q).not.toContain(hidden);
       }
     }
@@ -549,6 +569,14 @@ describe('FU-KEY-ACTION-GENOME-PROJECTION: bridged FINANCIAL proposals and their
   it('KAG-12 round 4: the blocked_by_autonomy row of a non-financial proposal is served (its rule trace counts uses, not money)', async () => {
     for (const [name, res] of Object.entries(await timelineReads(ID.staffNone))) {
       expect(res.body.some((e: any) => e.id === `${P}blocked_row`), name).toBe(true);
+    }
+  });
+
+  it('KAG-13 round 5: a blocked row whose rule trace states money is withheld; a growth row whose reason states a bare figure is withheld', async () => {
+    for (const [name, res] of Object.entries(await timelineReads(ID.staffNone))) {
+      expect(res.body.some((e: any) => e.id === `${P}blocked_rule_row`), name).toBe(false);
+      expect(res.body.some((e: any) => e.entityId === ID.evoGrowth), name).toBe(false);
+      expect(JSON.stringify(res.body), name).not.toMatch(/120k/);
     }
   });
 

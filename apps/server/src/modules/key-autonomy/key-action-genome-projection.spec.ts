@@ -40,6 +40,12 @@ describe('isFinancialGenomeEvolution', () => {
     }
   });
 
+  it('round 5 (security MAJOR-1): withholds a reason that holds a bare figure', () => {
+    for (const reason of ['Hit 120k this quarter', 'Average ticket rose to 350', 'Takings were 9,800 last week', 'Turnover reached 2.4m']) {
+      expect(isFinancialGenomeEvolution({ ...opsRow, section: 'growth', reason }), reason).toBe(true);
+    }
+  });
+
   it('round 4: serves the rows the genome-evolution generator writes (its evidence counts events)', () => {
     for (const [section, proposedPatch, reason] of [
       ['marketing', { channels: ['WhatsApp'] }, 'WhatsApp appears to be a meaningful acquisition source.'],
@@ -87,6 +93,9 @@ describe('readableGenomeEvolutionEvents', () => {
   it("withholds a row whose own text, payload section, patch or signals state money though its proposal is neutral", async () => {
     const prisma = prismaWith(async () => [opsRow]);
     const variants = [
+      // Round 5: a bare figure in the row's own summary or description.
+      { ...opsEvent, summary: 'operations proposal rejected: Hit 120k this quarter' },
+      { ...opsEvent, description: 'Takings were 9,800 last week' },
       { ...opsEvent, summary: 'operations proposal rejected: Overtime cost TTD 912' },
       { ...opsEvent, title: 'Net margin proposal rejected' },
       { ...opsEvent, payload: { ...opsEvent.payload, section: 'financial' } },
