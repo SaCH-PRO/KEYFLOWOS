@@ -52,18 +52,18 @@ lane (`docs/development/agent-memory/SECOND-ACCOUNT-SETUP.md`); it claims by pus
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
-| Wave 3g: PR #225 | `wave/v1-wave-3g` @ cbb61d04: MEM-TEMPORAL-SCOPE, FU-FINANCE-INTEL-DOORS, MEM-SALIENCE-SIGHT, RR-UNTRUSTED-CONTENT-FENCE, RR-STREAM-ERROR-NO-EFFECTS, FU-PAY-LINK-STATUS-GATE, RR-SCRIPT-SPECS-IN-CI | Proven: 796/797 (only A9-R2 known flake, 3/3 alone), R0 MET; auto-merge review CLEAN | Merge under D-239 when CI is green |
-| Wave 3h | `wave/v1-wave-3h` @ a78053fe (stacked on 3g, 48 files): RR-ERASURE-BUSINESS-EVENTS, FU-TEMPORAL-FLOW-INBOX-SCOPE @ d2af8fc13, FU-NAV-A1-CODEX-224 @ 7b2a7995, RR-MCP-TENANT-BOUND @ d71ba902, MEM-DOC-EXTRACTION-SIGHT, MEM-SEMANTIC-SIGHT @ 09bdc807 (applied as its own delta over main+DOC) | Proof running (server, R0, web); assembly review running | PR after 3g merges |
-| Wave 3i | FU-KEY-GENOME-READS-RESIDUAL @ 3336ab2a5 + next returns | Accepted | Build after 3h (expect a key-cortex-consciousness.service.ts import conflict with MEM-SALIENCE: keep both) |
-| FU-VITEST-DECORATOR-METADATA | `pkt/V1-FU-VITEST-DECORATOR-METADATA` @ 83b6dfc8, session_017o9EBevZsyK5zcP7bWPk8g | STOPPED on owner question 20 (R0 REJECTED 37/39) | Owner ruling, then AMEND rows and re-prove |
-| MEM-PATTERNS-SIGHT (P0) | session_017o9EBeafoWPQry9ggXEDDK (on MEM-SEMANTIC branch) | Building | Acceptance review |
-| MEM-UNIFIED-SEMANTIC-SIGHT (P0) | session_017o9EBea375ryCZG7k6cSZh (on MEM-SEMANTIC branch) | Building | Acceptance review |
+| Wave 3g: PR #225 | `wave/v1-wave-3g` @ 3fc79627 (7 packets + Codex P1 fix RR-UNTRUSTED-CONTENT-FENCE-CODEX-225, confirmed both lenses) | Proven at 3fc79627: 797/797, R0 MET. CI green except Windows proof (running) | Merge under D-239 when CI green |
+| Wave 3h | `wave/v1-wave-3h` @ 09669d8b (stacked on 3g; 6 packets + integration fix 958636d8 for MCP-tenant x fence spec) | Proven at 958636d8 (808/808, R0 MET, web clean); re-proof at 09669d8b running | PR after 3g merges |
+| Wave 3i (next) | FU-KEY-GENOME-READS-RESIDUAL @ 3336ab2a5, MEM-UNIFIED-SEMANTIC-SIGHT @ d8cfafc2 (stacked on MEM-SEMANTIC: apply own delta), MEM-PATTERNS-SIGHT @ 389ac2ca (same; conflicts with UNIFIED only in unified-memory.types.ts and fixture json: keep both), RR-GATEWAY-TYPED-FAILURES @ 33ab461f (+ FU-GATEWAY-STREAM-ERROR-CLASS at integration), RR-BANK-TOKEN-ENCRYPT (after A1 script repair) | Accepted | Build after 3h |
+| FU-ATTACHMENT-OBJECT-TENANCY (P0, security) | session_017o9EBhe1oanHeGuPsPEcQv | Verifying suspected cross-tenant object read via client objectPath | Acceptance review; land ASAP |
+| RR-BANK-TOKEN-ENCRYPT | session_017o9EBdeAPCJoxrnvjWpV8w | ACCEPTED at db868fa7; script A1 (wrong-key sealing) repair | Confirm, then 3i |
+| FU-PATTERNS-ROUTES-SIGHT (P0, new) | session_017o9EBeafoWPQry9ggXEDDK (on MEM-PATTERNS) | Building: /ai/memory/context, /agent/patterns, /ai/memory | Acceptance review |
+| MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (P0) | session_017o9EBea375ryCZG7k6cSZh (on wave 3h) | Building (option B, Q24) | Acceptance review |
 | FU-KEY-ACTION-GENOME-PROJECTION (P1) | session_017o9EBfKdTMK1cKeLRzg5q6 | Building | Acceptance review |
-| RR-MCP-TENANT-BOUND (P1) | session_017o9EBdXHPD49Rc4zHwMj4K | Building (OQ-1 open) | Acceptance review |
-| RR-BANK-TOKEN-ENCRYPT (P1) | session_017o9EBdeAPCJoxrnvjWpV8w | Building (OQ-4 open) | Acceptance review |
-| Second lane: RR-GATEWAY-TYPED-FAILURES | other account | Building | Review its RETURN on #80 |
+| FU-VITEST-DECORATOR-METADATA | session_017o9EBevZsyK5zcP7bWPk8g @ 83b6dfc8 | STOPPED on owner Q20 | Owner ruling |
+| Second lane | other account | RR-REDACTION-BY-CONTENT REJECTED (JWT ReDoS) repairing; RR-EVAL-HARNESS-NO-VACUOUS building | Review RETURNs on #80 |
 
-Added to the plan 05:10 UTC: FU-NAV-A1-CODEX-224, FU-CORTEX-EXECUTE-STRUCTURED-DTO, FU-UNIT-MOCK-ISOLATION-2, FU-BARE-400-AUDIT, FU-SETTINGS-MANUAL-STEP-FENCE, FU-WEB-PAYLINK-STATUS-BUTTONS, FU-KEY-SEND-INVOICE-PAID-REFUSE. Still to do: label v86s_ in fixture-prefixes.json; MEM-TEMPORAL-MEMORY-ROUTES-SIGHT must also cover temporal-adapter searchMemories/getRecentMemories. From FU-PAY-LINK-STATUS-GATE review: web hides
+To add to the plan next: FU-GATEWAY-STREAM-ERROR-CLASS, FU-CORTEX-PATTERNS-SIGHT (O-2, after UNIFIED lands), FU-PLANNER-INTENT-PATTERNS-SIGHT (O-3), FU-AI-MEMORY-WRITE-INTEGRITY (O-6), FU-SEMANTIC-HITS-FENCE (semantic hits enter the prompt unfenced), FU-PROVIDER-ERROR-TEXT-REDACT, FU-ATTACHMENT-OBJECT-TENANCY (row). Added to the plan 05:10 UTC: FU-NAV-A1-CODEX-224, FU-CORTEX-EXECUTE-STRUCTURED-DTO, FU-UNIT-MOCK-ISOLATION-2, FU-BARE-400-AUDIT, FU-SETTINGS-MANUAL-STEP-FENCE, FU-WEB-PAYLINK-STATUS-BUTTONS, FU-KEY-SEND-INVOICE-PAID-REFUSE. Still to do: label v86s_ in fixture-prefixes.json; MEM-TEMPORAL-MEMORY-ROUTES-SIGHT must also cover temporal-adapter searchMemories/getRecentMemories. From FU-PAY-LINK-STATUS-GATE review: web hides
 "Copy payment link" / WhatsApp share unless status is payable; KEY commerce_send_invoice refuses PAID up front (today it
 emails then fails the PAID->SENT move); KEY invoice findFirst lacks `deletedAt: null`. Recorded deviation: the
 pay-link packet touched flow-orchestrator.service.ts (+7, D-248) and invoice-send-delivery.spec.ts mock outside its write set.
@@ -136,6 +136,15 @@ Format: `docs/development/agent-memory/OWNER-QUESTION-FORMAT.md`. Safe defaults 
 21. MEM-SEMANTIC-SIGHT gated the semantic backfill to settings:admin (STAFF were allowed before). Ratify? (Default: yes.)
 22. With sells unknown (first settings read failed, nothing cached), a services business loses Schedule until refocus
     (FU-NAV-A1-CODEX-224). Differs from the "unknown hides nothing" rule for member levels. (Default: accept.)
+23. RR-GATEWAY-TYPED-FAILURES: should an Anthropic 400 "credit balance is too low" count as exhausted quota (opens the
+    platform circuit)? (Default as built: bad_request, not counted.)
+24. MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (orchestrator chose B): structured temporal memory rows now also apply the
+    money/expense text taint and provenance rule, so a member with a partial module map (e.g. no crm) loses contact
+    summaries and provenance-less pattern summaries; FU-TEMPORAL-FLOW-INBOX-SCOPE's v71w:515 expectation narrowed.
+    Every-module readers and owners unchanged. (Default: B.)
+25. RR-REDACTION-BY-CONTENT: ~9.6% of random 15-digit ids (and 17-digit platform ids) pass Luhn and become <card>,
+    now also in KEY tool answers (externalPostId, platformId). Exempt *Id/_id keys from card matching? (Asked the lane
+    to exempt them; confirm.) Also: add sk_live_, xoxp-, AIza prefixes?
 
 ## 5. How to work here (learned the hard way)
 
