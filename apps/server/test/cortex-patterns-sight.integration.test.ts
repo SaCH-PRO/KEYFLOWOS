@@ -563,6 +563,49 @@ describe('FU-CORTEX-PATTERNS-SIGHT (D-257, D-100, D-234): the cortex chat, the i
     }
   }, 600_000);
 
+  it('V78C-07 (correctness review round 1, finding 3): the intent parser and the planner keep each pattern a reader may read: the revenue-none member, the revenue-only member and the SUPER_ADMIN who is no member still get the plain patterns there; the cortex chat and stream read no pattern for them (readsEveryPattern), only the fact', async () => {
+    await clearPatterns();
+    try {
+      await seedPlain();
+      await seedMoneyPattern();
+      await seedExpensePattern();
+      for (const reader of ['blind', 'revnoexp', 'root'] as Reader[]) {
+        const seen = await everyPromptFor(reader);
+        for (const surface of ['intent', 'plan', 'actionsPlan'] as Surface[]) {
+          expect(seen[surface], `${reader} ${surface}: plain pattern`).toContain(PEAK);
+          expect(seen[surface], `${reader} ${surface}: plain pattern`).toContain(OPS);
+          expect(seen[surface], `${reader} ${surface}: expense`).not.toContain(EXPENSE);
+        }
+        // The revenue-only member may read the money pattern (D-100) where rows are kept one by one.
+        for (const surface of ['intent', 'plan', 'actionsPlan'] as Surface[]) {
+          if (reader === 'revnoexp') expect(seen[surface], `revnoexp ${surface}: money`).toContain(`totaling ${TOTAL}`);
+          else expect(promptStatesMoney(seen[surface]), `${reader} ${surface}: money`).toEqual([]);
+        }
+        for (const surface of ['chat', 'stream'] as Surface[]) {
+          expect(seen[surface], `${reader} ${surface}: no pattern read`).not.toContain(PEAK);
+          expect(seen[surface], `${reader} ${surface}: no pattern read`).not.toContain('[ai_memory] patterns');
+          if (reader !== 'root') expect(seen[surface], `${reader} ${surface}: control`).toContain(FACT);
+        }
+      }
+    } finally {
+      await clearPatterns();
+    }
+  }, 300_000);
+
+  it('V78C-08 (security review round 1, finding 2; correctness finding 4): a prompt read with no database client keeps no pattern and says so (the wiring fault is logged, not silent)', async () => {
+    const { promptPatternVisibility } = await import('../src/modules/ai/semantic-memory-sight');
+    const warnings: string[] = [];
+    const logger = { warn: (msg: string) => warnings.push(msg) };
+    const visible = await promptPatternVisibility(undefined, ID.biz, ID.owner, logger, 'v78c');
+    expect(visible({ category: 'patterns', key: 'peak_activity_hour', value: PEAK })).toBe(false);
+    expect(visible({ category: 'patterns', key: 'x', value: `2 overdue invoices totaling ${TOTAL}` })).toBe(false);
+    expect(warnings.some((w) => w.includes('no database client')), JSON.stringify(warnings)).toBe(true);
+    // A requester-less read is not a wiring fault: no pattern, no warning.
+    const before = warnings.length;
+    expect((await promptPatternVisibility(prisma, ID.biz, undefined, logger, 'v78c'))({ category: 'patterns', key: 'k', value: PEAK })).toBe(false);
+    expect(warnings).toHaveLength(before);
+  });
+
   it("V78C-06 cross-tenant: another business's money pattern never reaches this business's owner (cortex and planner), this business's never reaches the other owner's, and a member of this business is refused the other business's routes", async () => {
     await clearPatterns();
     try {
