@@ -96,6 +96,11 @@ describe('contactIdsOfEvent: only server-derived data names a contact (V1-72 rev
     expect(contactIdsOfEvent({ subjectType: 'Contact', subjectId: 'c_1', after: { contact: { id: 'c_1' } } })).toEqual(['c_1']);
   });
 
+  it('reads the after snapshot only when the subject is a contact: a caller-chosen contactId echoed by a time-cost or revenue-attribution row names no one (option B)', () => {
+    expect(contactIdsOfEvent({ subjectType: 'unknown', subjectId: 'tc_1', after: { id: 'tc_1', contactId: 'c_forgotten' } })).toEqual([]);
+    expect(contactIdsOfEvent({ subjectType: 'invoice', subjectId: 'inv_1', after: { id: 'inv_1', contactId: 'c_forgotten' } })).toEqual([]);
+  });
+
   it('never reads the request body (before): a planted key names no one', () => {
     expect(contactIdsOfEvent({ subjectType: 'invoice', subjectId: 'inv_1', before: { contactId: 'c_planted' }, after: { id: 'inv_1' } })).toEqual([]);
   });

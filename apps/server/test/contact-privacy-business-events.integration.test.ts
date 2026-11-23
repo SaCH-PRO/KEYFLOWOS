@@ -64,6 +64,7 @@ const ID = {
   gone: `${P}gone`, // purged, then its row hard-deleted
   plantedEvent: `${P}plantedEvent`, // an invoice row whose request body carried a planted contactId
   routeEvent: `${P}routeEvent`, // a row naming the person only by the route's :contactId
+  timeCostEvent: `${P}timeCostEvent`, // a time-cost row whose caller-chosen contactId the response echoes
   busEvent: `${P}busEvent`, // a KEY cortex bus audit row: subject_type 'Contact' (capitalised), the contact nested in after
 
   forgedEvent: `${P}forgedEvent`,
@@ -419,6 +420,17 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
       },
     });
 
+    // Option B: a time-cost entry stores a caller-chosen contactId unchecked
+    // and echoes it in its response. A row whose subject is not a contact is
+    // not reached through after.contactId, so that path cannot strip a row.
+    await db.businessEvent.create({
+      data: {
+        id: ID.timeCostEvent, businessId: ID.bizA, eventType: 'unknown.update', subjectType: 'unknown', subjectId: `${P}tc1`,
+        actorType: 'human', actorId: ID.owner, action: 'update', source: 'web',
+        before: { minutes: 6000, costRate: 500, contactId: subjectId }, after: { id: `${P}tc1`, minutes: 6000, costRate: 500, contactId: subjectId },
+        metadata: { route: '/commerce/businesses/:businessId/time-cost/:id', httpMethod: 'PATCH', ip: '203.0.113.81' },
+      },
+    });
     // The KEY cortex event bus writes subject_type from the bridge's entityType,
     // capitalised ('Contact'), with the whole contact nested in its payload.
     await db.businessEvent.create({
@@ -526,7 +538,7 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
     gate.release!();
     const rows = await waitForEvents((r) => r.filter((e) => e.subject_id === subjectId && e.event_type === 'contact.update').length === 2);
 
-    for (const row of rows) if (row.id !== ID.plantedEvent) holdsNoSecret(row, SECRETS);
+    for (const row of rows) if (row.id !== ID.plantedEvent && row.id !== ID.timeCostEvent) holdsNoSecret(row, SECRETS);
     const subjectRows = rows.filter((e) => (e.subject_id === subjectId && e.id !== ID.busEvent) || e.id === ID.noteEvent || e.subject_id === forgetRequestId);
     expect(subjectRows.map((e) => e.event_type).sort()).toEqual(['contact.create', 'contact.create', 'contact.create', 'contact.update', 'contact.update']);
     for (const row of subjectRows) {
@@ -538,6 +550,9 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
     const planted = rows.find((e) => e.id === ID.plantedEvent)!;
     expect(planted.before, 'a planted body key does not scrub the row').toEqual({ total: 77, contactId: subjectId });
     expect(planted.metadata?.ip).toBe('203.0.113.78');
+    const timeCost = rows.find((e) => e.id === ID.timeCostEvent)!;
+    expect(timeCost.after, 'a non-contact subject is not reached through after.contactId').toEqual({ id: `${P}tc1`, minutes: 6000, costRate: 500, contactId: subjectId });
+    expect(timeCost.metadata?.ip).toBe('203.0.113.81');
     const bus = rows.find((e) => e.id === ID.busEvent)!;
     expect(bus).toMatchObject({ before: null, after: null, metadata: {}, subject_type: 'Contact' });
     const routed = rows.find((e) => e.id === ID.routeEvent)!;
@@ -577,6 +592,8 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
     expect(entry.after.notSwept).toMatch(/nested/);
     // SEC-1: the request body is never read, so a row naming the person only there is not reached.
     expect(entry.after.notSwept).toMatch(/request body/);
+    // Option B: retained-record events are kept even when they carry its contactId.
+    expect(entry.after.notSwept).toMatch(/even when they carry its contactId/);
   });
 
   it('a write after the purge that names the merged duplicate holds no personal data', async () => {
@@ -633,6 +650,18 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
     const [row] = (await events(ID.bizA)).filter((e) => e.subject_id === `${P}msg2`);
     expect(row).toMatchObject({ before: null, after: null });
     expect(row.metadata?.ip).toBeUndefined();
+  });
+
+  it('a time-cost write after the purge that echoes the purged subject\'s id as contactId keeps its snapshot and ip (option B)', async () => {
+    await realEmit({
+      businessId: ID.bizA, eventType: 'unknown.update', subjectType: 'unknown', subjectId: `${P}tc2`,
+      actorType: 'human', actorId: ID.owner, action: 'update', source: 'web',
+      before: { minutes: 1 }, after: { id: `${P}tc2`, minutes: 1, contactId: subjectId },
+      metadata: { route: '/commerce/businesses/:businessId/time-cost/:id', httpMethod: 'PATCH', ip: '203.0.113.82' },
+    });
+    const [row] = (await events(ID.bizA)).filter((e) => e.subject_id === `${P}tc2`);
+    expect(row.after).toEqual({ id: `${P}tc2`, minutes: 1, contactId: subjectId });
+    expect(row.metadata?.ip).toBe('203.0.113.82');
   });
 
   it('a PATCH on the bystander after the purge keeps its snapshot as today', async () => {
