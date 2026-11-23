@@ -342,8 +342,9 @@ export const BillingFormModal = React.memo(function BillingFormModal({
           </div>
         }
         footer={
-          <div className="space-y-3">
-            <div className="flex items-center justify-between text-sm">
+          // The footer fills the sheet and its buttons wrap, so on a phone Create / Update stays on screen (journey D1, D2).
+          <div className="w-full min-w-0 space-y-3">
+            <div className="flex items-center justify-between gap-3 text-sm">
               <div className="space-y-1 text-muted-foreground">
                 <div className="flex justify-between gap-8">
                   <span>Subtotal</span>
@@ -369,7 +370,7 @@ export const BillingFormModal = React.memo(function BillingFormModal({
                 </p>
               </div>
             </div>
-            <div className="flex items-center justify-end gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={handleClose}

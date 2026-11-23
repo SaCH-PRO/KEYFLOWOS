@@ -925,11 +925,11 @@ export default function QuotesPanel({
                 ? "bg-green-500/20 text-green-400 border-green-500/30"
                 : "bg-white/[0.02] text-muted-foreground/60 border-border/40 hover:bg-white/[0.05]"
             }`}
-            title="When enabled, accepting a quote will automatically open the invoice conversion dialog"
-            aria-label="Toggle auto-convert"
+            title="When enabled, accepting a quote opens the invoice form at once"
+            aria-label="Toggle: open the invoice form when a quote is accepted"
           >
             {autoConvertToInvoice ? <ToggleRight className="w-3.5 h-3.5" /> : <ToggleLeft className="w-3.5 h-3.5" />}
-            <span className="hidden sm:inline">Auto-convert</span>
+            <span className="hidden sm:inline">Invoice on accept</span>
           </button>
         </div>
 
@@ -1160,6 +1160,8 @@ export default function QuotesPanel({
                 smartCTA={
                   <button
                     onClick={handleSmartAction}
+                    // The label is hidden under sm:, so the button carries its name (journey D finds "Convert" on a phone).
+                    aria-label={smartCTA.label}
                     disabled={!!actionLoading[quote.id] || (smartCTA.actionKey === "convert" && !!quote.invoiceId)}
                     className={`inline-flex items-center gap-1 px-2.5 min-w-[44px] min-h-[44px] justify-center rounded-lg text-[11px] font-medium transition-all disabled:opacity-50 ${smartCTA.bgColor} ${smartCTA.color} ${smartCTA.hoverBgColor}`}
                   >
