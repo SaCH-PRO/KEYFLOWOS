@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
 import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { TemporalFlowMemoryService } from '../../temporal-flow/temporal-flow-memory.service';
-import { TemporalFlowService } from '../../temporal-flow/temporal-flow.service';
+import { TemporalFlowService, type TemporalFlowReader } from '../../temporal-flow/temporal-flow.service';
 import type {
   TemporalFlowMemoryEntityType,
   TemporalFlowMemoryType,
@@ -28,6 +28,15 @@ function requireKeys(keys: unknown): string[] {
 function stringTags(tags: unknown): string[] {
   return Array.isArray(tags) ? tags.filter((t): t is string => typeof t === 'string') : [];
 }
+
+/**
+ * MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (D-257, D-234, D-100): who a KEY temporal command reads for. A command's reads carry
+ * `actor` (the command's userId, or null when it names none: nobody, so nothing a module owns); a method called with no
+ * `actor` key at all (KEY's context assembly) reads as before and is that caller's to project.
+ */
+type ActorInput = { actor?: TemporalFlowReader };
+const actorOf = (userId: unknown): TemporalFlowReader => (typeof userId === 'string' && userId ? { id: userId } : null);
+const projected = (input: ActorInput) => Object.prototype.hasOwnProperty.call(input, 'actor');
 
 /**
  * Typed adapter that exposes the temporal-memory methods expected by
@@ -64,16 +73,45 @@ export class TemporalAdapterService {
     });
   }
 
-  async recallMemory(input: { businessId: string; key: string }) {
+  async recallMemory(input: { businessId: string; key: string } & ActorInput) {
     const memories = await this.temporal.findByEntity(
       input.businessId,
       'business',
       requireKey(input.key),
     );
-    return memories[0] ?? null;
+    // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT: the first memory of the key the actor may see.
+    if (!projected(input)) return memories[0] ?? null;
+    const sight = await this.flow.memorySight(input.businessId, input.actor);
+    return (await this.flow.visibleMemories(input.businessId, memories, sight))[0] ?? null;
   }
 
-  async deleteMemory(input: { businessId: string; memoryId: string }) {
+  /**
+   * MEM-TEMPORAL-MEMORY-ROUTES-SIGHT: under an actor, the memory as the actor's sight admits it (the row that was
+   * checked), or a NotFoundException exactly as for a missing (or foreign) memory. undefined when the call has no actor.
+   */
+  private async visibleRowFor(input: { businessId: string; memoryId: string } & ActorInput) {
+    if (!projected(input)) return undefined;
+    const sight = await this.flow.memorySight(input.businessId, input.actor);
+    const row = await this.flow.visibleMemoryById(input.businessId, input.memoryId, sight);
+    if (!row) throw new NotFoundException('Memory not found');
+    return row;
+  }
+
+  /** Delta A1: a conditional write that matched nothing (the row changed since the check) answers as a missing memory. */
+  private written<T>(row: T | null): T {
+    if (!row) throw new NotFoundException('Memory not found');
+    return row;
+  }
+
+  async deleteMemory(input: { businessId: string; memoryId: string } & ActorInput) {
+    // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (review round 1, delta A2): a memory the actor may not see is not deleted, and
+    // answers as a missing (or foreign) one does; nor is one rewritten since the check (the delete is conditional on it).
+    if (projected(input)) {
+      const sight = await this.flow.memorySight(input.businessId, input.actor);
+      const row = await this.flow.visibleMemoryById(input.businessId, input.memoryId, sight);
+      const deleted = row ? await this.flow.deleteMemoryIfUnchanged(input.businessId, row) : false;
+      return { deleted, memoryId: input.memoryId };
+    }
     const deleted = await this.temporal.deleteMemory(input.businessId, input.memoryId);
     return { deleted, memoryId: input.memoryId };
   }
@@ -83,47 +121,55 @@ export class TemporalAdapterService {
     memoryId: string;
     value?: Record<string, unknown>;
     importance?: string;
-  }) {
+  } & ActorInput) {
     const confidence = input.importance === 'high' ? 0.9 : input.importance === 'low' ? 0.3 : undefined;
-    return this.temporal.updateMemory(input.businessId, input.memoryId, {
-      content: input.value ? JSON.stringify(input.value) : undefined,
-      confidence,
-    });
+    const patch = { content: input.value ? JSON.stringify(input.value) : undefined, confidence };
+    // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (delta A1): under an actor, written only onto the row that was checked, and the row
+    // handed back is the one written (a row rewritten since the check is neither written nor handed back).
+    const checked = await this.visibleRowFor(input);
+    if (checked) return this.written(await this.flow.updateMemoryIfUnchanged(input.businessId, checked, patch));
+    return this.temporal.updateMemory(input.businessId, input.memoryId, patch);
   }
 
   async tagMemory(input: {
     businessId: string;
     memoryId: string;
     tags: string[];
-  }) {
+  } & ActorInput) {
     // MEM-TEMPORAL-SCOPE: the memory is looked up and updated by the same id, within the caller's business.
-    const existing = await this.temporal.findById(input.businessId, input.memoryId);
+    // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (delta A1): under an actor, the row the actor's sight admitted is the one tagged,
+    // only while unchanged, and the row handed back is the one written.
+    const checked = await this.visibleRowFor(input);
+    const existing = checked ?? (await this.temporal.findById(input.businessId, input.memoryId));
     if (!existing) {
       throw new NotFoundException('Memory not found');
     }
     const existingTags = Array.isArray(existing.sourceEventIds) ? existing.sourceEventIds : [];
     const added = stringTags(input.tags);
     const tags = Array.from(new Set([...existingTags, ...added]));
-    return this.temporal.updateMemory(input.businessId, input.memoryId, {
+    const patch = {
       sourceEventIds: tags,
       metadata: {
         ...(existing.metadata as Record<string, unknown> | undefined),
         tags,
       },
-    });
+    };
+    if (checked) return this.written(await this.flow.updateMemoryIfUnchanged(input.businessId, checked, patch));
+    return this.temporal.updateMemory(input.businessId, input.memoryId, patch);
   }
 
   async consolidateMemories(input: {
     businessId: string;
     keys: string[];
     summaryKey: string;
-  }) {
+  } & ActorInput) {
     // Every key, the summary key included, is checked before any read or write.
     const keys = requireKeys(input.keys);
     requireKey(input.summaryKey);
     const contents: string[] = [];
     for (const key of keys) {
-      const found = await this.recallMemory({ businessId: input.businessId, key });
+      // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT: only memories the actor may see are merged (the merge is handed back).
+      const found = await this.recallMemory({ businessId: input.businessId, key, ...(projected(input) ? { actor: input.actor } : {}) });
       if (found && (found as { content?: string }).content) {
         contents.push(String((found as { content: string }).content));
       }
@@ -139,28 +185,41 @@ export class TemporalAdapterService {
     });
   }
 
-  async searchMemories(input: { businessId: string; query: string; limit?: number }) {
-    return this.temporal.searchMemory(input.businessId, input.query, input.limit ?? 10);
+  async searchMemories(input: { businessId: string; query: string; limit?: number } & ActorInput) {
+    if (!projected(input)) return this.temporal.searchMemory(input.businessId, input.query, input.limit ?? 10);
+    // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT: the actor's hits only, filtered before the limit.
+    const sight = await this.flow.memorySight(input.businessId, input.actor);
+    return this.flow.searchVisibleMemory(input.businessId, input.query, input.limit ?? 10, sight);
   }
 
   async getTimeline(input: { businessId: string; from?: string; to?: string; limit?: number; actorId?: string }) {
     // D-238 (round 3, security M4): the timeline is read for the command's actor (no actor is no reader), so a financial
     // KEY proposal's events are withheld from an actor without revenue read.
     const reader = input.actorId ? { id: input.actorId } : null;
+    // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (FU-TEMPORAL-FLOW-INBOX-SCOPE's rule, D-100): only the events of the modules the
+    // actor may read, in the query before its limit (no actor: none a module owns).
+    const readerFilter = await this.flow.readerFilter(input.businessId, reader);
     if (input.from && input.to) {
-      return this.flow.calendarRange(input.businessId, input.from, input.to, reader);
+      return this.flow.calendarRange(input.businessId, input.from, input.to, reader, readerFilter);
     }
-    return this.flow.list(input.businessId, { limit: input.limit ?? 50 }, reader);
+    return this.flow.list(input.businessId, { limit: input.limit ?? 50 }, reader, readerFilter);
   }
 
   async getMemoryStats(input: { businessId: string }) {
     return this.temporal.getStats(input.businessId);
   }
 
-  async getRecentMemories(input: { businessId: string; limit?: number }) {
-    return this.temporal.findMany(input.businessId, { limit: input.limit ?? 10 });
+  async getRecentMemories(input: { businessId: string; limit?: number } & ActorInput) {
+    if (!projected(input)) return this.temporal.findMany(input.businessId, { limit: input.limit ?? 10 });
+    // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT: the actor's memories only, filtered before the limit.
+    const sight = await this.flow.memorySight(input.businessId, input.actor);
+    return this.flow.listMemory(input.businessId, { limit: input.limit ?? 10 }, sight);
   }
 
+  /**
+   * MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (D-257, D-234): every read a command makes, and the row tag_memory and update_memory
+   * hand back, is the command's actor's (actorOf: no userId is nobody).
+   */
   async execute(command: ConnectorCommand): Promise<ConnectorResult> {
     const start = Date.now();
     switch (command.action) {
@@ -178,6 +237,7 @@ export class TemporalAdapterService {
       case 'recall_memory': {
         const memory = await this.recallMemory({
           businessId: command.businessId,
+          actor: actorOf(command.userId),
           key: command.parameters.key as string,
         });
         return connectorOk(command, start, memory);
@@ -185,6 +245,7 @@ export class TemporalAdapterService {
       case 'delete_memory': {
         const deletion = await this.deleteMemory({
           businessId: command.businessId,
+          actor: actorOf(command.userId),
           memoryId: command.parameters.memoryId as string,
         });
         return connectorOk(command, start, deletion);
@@ -192,6 +253,7 @@ export class TemporalAdapterService {
       case 'update_memory': {
         const updated = await this.updateMemory({
           businessId: command.businessId,
+          actor: actorOf(command.userId),
           memoryId: command.parameters.memoryId as string,
           value: command.parameters.value as Record<string, unknown>,
           importance: command.parameters.importance as string,
@@ -201,6 +263,7 @@ export class TemporalAdapterService {
       case 'tag_memory': {
         const tagged = await this.tagMemory({
           businessId: command.businessId,
+          actor: actorOf(command.userId),
           memoryId: command.parameters.memoryId as string,
           tags: command.parameters.tags as string[],
         });
@@ -209,6 +272,7 @@ export class TemporalAdapterService {
       case 'consolidate_memories': {
         const consolidated = await this.consolidateMemories({
           businessId: command.businessId,
+          actor: actorOf(command.userId),
           keys: command.parameters.keys as string[],
           summaryKey: command.parameters.summaryKey as string,
         });
@@ -217,6 +281,7 @@ export class TemporalAdapterService {
       case 'search_memories': {
         const found = await this.searchMemories({
           businessId: command.businessId,
+          actor: actorOf(command.userId),
           query: command.parameters.query as string,
           limit: (command.parameters.limit as number) || 10,
         });
@@ -239,6 +304,7 @@ export class TemporalAdapterService {
       case 'get_recent_memories': {
         const recent = await this.getRecentMemories({
           businessId: command.businessId,
+          actor: actorOf(command.userId),
           limit: (command.parameters.limit as number) || 10,
         });
         return connectorOk(command, start, recent);

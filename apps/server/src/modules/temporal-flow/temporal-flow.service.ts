@@ -6,6 +6,23 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { LEVEL_RANK, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
 import { TemporalFlowMemoryService } from './temporal-flow-memory.service';
+import type { SemanticReader } from '../ai/semantic-memory-sight';
+
+/**
+ * MEM-TEMPORAL-MEMORY-ROUTES-SIGHT: MEM-SEMANTIC-SIGHT's helpers, loaded on first use. They import KEY's prompt stack,
+ * which reaches services that inject this one (BlueprintService): imported at load time, the cycle leaves an injected
+ * constructor type undefined and the server does not start (app-module-boots).
+ */
+const sightHelpers = async () => {
+  const [sight, promptContext] = await Promise.all([
+    import('../ai/semantic-memory-sight'),
+    import('../key-cortex/key-cortex-prompt-context.service'),
+  ]);
+  return { ...sight, readersModuleSight: promptContext.readersModuleSight };
+};
+
+/** MEM-SEMANTIC-SIGHT's source type of a temporal-memory copy (semantic-memory-sight.ts TEMPORAL_MEMORY_SOURCE_TYPE). */
+const TEMPORAL_MEMORY_SOURCE_TYPE = 'temporal_memory';
 import type {
   TemporalFlowAnalysis,
   TemporalFlowEventInput,
@@ -80,6 +97,26 @@ const MAX_READER_SCAN = 5_000;
  * do not yet, and are the review's follow-ups (FU-TEMPORAL-FLOW-INBOX-SCOPE review N-1), not readers this rule covers.
  */
 export type TemporalFlowReader = { id?: string; role?: string } | null | undefined;
+
+/**
+ * MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (D-257, D-234, D-100): what a temporal memory read may hand its reader. `filter` is
+ * FU-TEMPORAL-FLOW-INBOX-SCOPE's readerMemoryFilter (in the query: a memory's source module and the events withheld from
+ * the reader); `who` is MEM-SEMANTIC-SIGHT's reader (semanticHitsVisibleTo: the modules a summary's entity, source module,
+ * source events and own text name, money and expenses by taint). A memory reaches the reader only when both admit it.
+ */
+export interface TemporalMemorySight {
+  filter?: Record<string, unknown>;
+  who: SemanticReader;
+}
+
+/** The rows a projected memory read pages through at most before it answers what it has. */
+const MAX_MEMORY_SCAN = 5_000;
+/**
+ * Review round 1: the most rows one findMany answers (the database client's default-take guard, packages/db client.ts):
+ * a page is never asked for more, or a short page would read as the end of the rows. A memory read answers at most this
+ * many, as TemporalFlowMemoryService.findMany does under the same guard.
+ */
+const MEMORY_PAGE_CAP = 1_000;
 
 /**
  * FU-TEMPORAL-FLOW-INBOX-SCOPE: the modules that own timeline events. Withholding is computed over these only, so a
@@ -321,30 +358,49 @@ export class TemporalFlowService {
   }
 
   /**
-   * FU-TEMPORAL-FLOW-INBOX-SCOPE delta (item 1): the memories of `businessId` a reader with `memoryFilter`
-   * (readerMemoryFilter) may see, as TemporalFlowMemoryService.findMany reads them. An entity id that is not a string
-   * matches nothing.
+   * FU-TEMPORAL-FLOW-INBOX-SCOPE delta (item 1), MEM-TEMPORAL-MEMORY-ROUTES-SIGHT: the memories of `businessId` a reader
+   * with `ms` may see, as TemporalFlowMemoryService.findMany reads them (newest updated first, 100 unless a limit is
+   * given): readerMemoryFilter in the query, then MEM-SEMANTIC-SIGHT's rule (visibleMemories), page by page until the
+   * limit is filled, so a withheld memory takes no place. An entity id that is not a string matches nothing.
    */
   async listMemory(
     businessId: string,
     query: { entityType?: string; entityId?: string | null; type?: string; limit?: number | string },
-    memoryFilter: Record<string, unknown>,
+    ms: TemporalMemorySight,
   ) {
     if (query.entityId !== undefined && query.entityId !== null && typeof query.entityId !== 'string') return [];
-    const limit = Number(query.limit);
-    return this.prisma.client.temporalFlowMemory.findMany({
-      where: this.scoped(
-        {
-          businessId,
-          ...(query.entityType ? { entityType: String(query.entityType) } : {}),
-          ...(query.entityId !== undefined ? { entityId: query.entityId ?? null } : {}),
-          ...(query.type ? { type: String(query.type) } : {}),
-        },
-        memoryFilter,
-      ),
-      orderBy: { updatedAt: 'desc' },
-      take: Number.isInteger(limit) && limit > 0 ? limit : 100,
-    });
+    const asked = Number(query.limit);
+    const limit = Number.isInteger(asked) && asked > 0 ? asked : 100;
+    const where = this.scoped(
+      {
+        businessId,
+        ...(query.entityType ? { entityType: String(query.entityType) } : {}),
+        ...(query.entityId !== undefined ? { entityId: query.entityId ?? null } : {}),
+        ...(query.type ? { type: String(query.type) } : {}),
+      },
+      ms.filter,
+    );
+    const wanted = Math.min(limit, MEMORY_PAGE_CAP);
+    // Review round 1: pages grow (fewer reads past many withheld rows) up to the client's cap; a row seen on an earlier
+    // page (a summary rewritten in place while the scan runs moves up the order) is not answered twice.
+    const out: Awaited<ReturnType<typeof this.prisma.client.temporalFlowMemory.findMany>> = [];
+    const seen = new Set<string>();
+    let page = Math.min(Math.max(wanted, 50), MEMORY_PAGE_CAP);
+    for (let skip = 0; out.length < wanted && skip < MAX_MEMORY_SCAN; ) {
+      const rows = await this.prisma.client.temporalFlowMemory.findMany({
+        where,
+        orderBy: [{ updatedAt: 'desc' }, { id: 'asc' }],
+        skip,
+        take: page,
+      });
+      const fresh = rows.filter((row) => !seen.has(row.id));
+      fresh.forEach((row) => seen.add(row.id));
+      out.push(...(await this.visibleMemories(businessId, fresh, { who: ms.who })));
+      if (rows.length < page) break;
+      skip += rows.length;
+      page = Math.min(page * 2, MEMORY_PAGE_CAP);
+    }
+    return out.slice(0, wanted);
   }
 
   /** FU-TEMPORAL-FLOW-INBOX-SCOPE delta (item 1): of `memoryIds`, the ones of `businessId` `memoryFilter` lets through. */
@@ -356,6 +412,132 @@ export class TemporalFlowService {
       select: { id: true },
     });
     return new Set(rows.map((r: { id: string }) => r.id));
+  }
+
+  /**
+   * MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (D-257, D-234, D-100): the sight of `reader`'s temporal memory reads in `businessId`:
+   * readerMemoryFilter, and the member's module sight read as ModuleScopeGuard reads it (readersModuleSight: no member,
+   * no module). A platform SUPER_ADMIN passes, as readerFilter passes them (the guard admits them). No reader: nothing
+   * (every summary names a module, or every module).
+   */
+  async memorySight(businessId: string, reader: TemporalFlowReader): Promise<TemporalMemorySight> {
+    const filter = await this.readerMemoryFilter(businessId, reader);
+    if (reader?.role === 'SUPER_ADMIN' && reader.id) return { filter, who: { reader: reader.id, sight: () => true } };
+    const id = reader?.id ?? null;
+    const { readersModuleSight } = await sightHelpers();
+    const sight = await readersModuleSight(this.prisma, businessId, id, this.logger, 'temporalMemory');
+    return { filter, who: { reader: id, sight } };
+  }
+
+  /**
+   * MEM-TEMPORAL-MEMORY-ROUTES-SIGHT: of `rows` (temporal memories of `businessId`), the ones `ms` admits, in order: its
+   * filter (readerMemoryFilter) and MEM-SEMANTIC-SIGHT's rule for a summary (semanticHitsVisibleTo over the row's own
+   * copy form, so the row is read again within the business and a row changed since is left out). A read that fails
+   * raises (nothing is served).
+   */
+  async visibleMemories<R extends { id: string; entityType: string; type: string; content: string }>(
+    businessId: string,
+    rows: R[],
+    ms: TemporalMemorySight,
+  ): Promise<R[]> {
+    if (!rows.length) return rows;
+    const passed = ms.filter ? await this.visibleMemoryIds(businessId, rows.map((row) => row.id), ms.filter) : undefined;
+    const candidates = passed ? rows.filter((row) => passed.has(row.id)) : rows;
+    if (!candidates.length) return candidates;
+    const { semanticHitsVisibleTo, temporalCopyOf } = await sightHelpers();
+    const keep = await semanticHitsVisibleTo(
+      this.prisma,
+      businessId,
+      ms.who,
+      candidates.map((row) => ({ sourceType: TEMPORAL_MEMORY_SOURCE_TYPE, sourceId: row.id, content: temporalCopyOf(row) })),
+      this.logger,
+    );
+    return candidates.filter((_, i) => keep[i]);
+  }
+
+  /**
+   * MEM-TEMPORAL-SCOPE / MEM-TEMPORAL-MEMORY-ROUTES-SIGHT: one memory of `businessId` by id when `ms` admits it, else
+   * null: a memory withheld from the reader reads as a missing one (and as another business's).
+   */
+  async visibleMemoryById(businessId: string, memoryId: unknown, ms: TemporalMemorySight) {
+    if (typeof memoryId !== 'string' || !memoryId || typeof businessId !== 'string' || !businessId) return null;
+    const row = await this.prisma.client.temporalFlowMemory.findFirst({ where: { id: memoryId, businessId } });
+    if (!row) return null;
+    const [visible] = await this.visibleMemories(businessId, [row], ms);
+    return visible ?? null;
+  }
+
+  /**
+   * MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (delta A1): writes `data` onto `row` (a memory of `businessId` an actor's sight
+   * admitted, visibleMemoryById) only while the row is still the one that was checked (its updatedAt and its content
+   * unchanged: the content term holds when a rewrite is stamped in the same millisecond, @updatedAt being the app
+   * clock's), in one
+   * statement that answers the row it wrote. null when the row is gone or was rewritten since the check (a summarizer
+   * may write money text into it): the caller answers as for a missing memory, and nothing is written.
+   */
+  async updateMemoryIfUnchanged(
+    businessId: string,
+    row: { id: string; updatedAt: Date; content: string },
+    data: { content?: string; confidence?: number; sourceEventIds?: string[]; metadata?: Record<string, unknown> },
+  ) {
+    try {
+      return await this.prisma.client.temporalFlowMemory.update({
+        where: { id: row.id, businessId, updatedAt: row.updatedAt, content: row.content },
+        data: {
+          content: data.content,
+          confidence: data.confidence,
+          sourceEventIds: data.sourceEventIds,
+          metadata: data.metadata as never,
+        },
+      });
+    } catch (err) {
+      if ((err as { code?: unknown } | null)?.code === 'P2025') return null;
+      throw err;
+    }
+  }
+
+  /**
+   * MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (delta A2): deletes `row` (as updateMemoryIfUnchanged takes it) only while it is
+   * still the one that was checked, in one statement. false when it is gone or was rewritten since the check.
+   */
+  async deleteMemoryIfUnchanged(businessId: string, row: { id: string; updatedAt: Date; content: string }): Promise<boolean> {
+    const { count } = await this.prisma.client.temporalFlowMemory.deleteMany({
+      where: { id: row.id, businessId, updatedAt: row.updatedAt, content: row.content },
+    });
+    return count > 0;
+  }
+
+  /**
+   * MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (D-257, D-234): the semantic search of `businessId`'s temporal memories for a reader:
+   * as TemporalFlowMemoryService.searchMemory searches (temporal_memory copies, similarity 0.7 or more), each hit kept only
+   * when MEM-SEMANTIC-SIGHT's reader projection (readerSearchOptions) and readerMemoryFilter both admit it, before the
+   * limit is cut (the search pages on past withheld hits). A query that is not one non-empty string reads nothing.
+   */
+  async searchVisibleMemory(
+    businessId: string,
+    query: unknown,
+    limit: number,
+    ms: TemporalMemorySight,
+    minSimilarity = 0.7,
+  ) {
+    if (!this.semanticMemory || typeof query !== 'string' || !query.trim()) return [];
+    const max = Number.isInteger(limit) && limit > 0 ? limit : 10;
+    const { readerSearchOptions } = await sightHelpers();
+    const reader = readerSearchOptions(this.prisma, businessId, ms.who, this.logger);
+    return this.semanticMemory.search({
+      businessId,
+      query,
+      limit: max,
+      sourceTypes: [TEMPORAL_MEMORY_SOURCE_TYPE],
+      minSimilarity,
+      includeDocumentExtractionCopies: reader.includeDocumentExtractionCopies,
+      visibleTo: async (hits) => {
+        const keep = await reader.visibleTo(hits);
+        if (!ms.filter) return keep;
+        const passed = await this.visibleMemoryIds(businessId, hits.map((hit) => hit.sourceId), ms.filter);
+        return hits.map((hit, i) => keep[i] && passed.has(hit.sourceId));
+      },
+    });
   }
 
   /** FU-TEMPORAL-FLOW-INBOX-SCOPE: `where` with the reader's filter (readerFilter) added, when one is given. */
@@ -561,7 +743,7 @@ export class TemporalFlowService {
   async analyze(
     businessId: string,
     readerFilter?: Record<string, unknown>,
-    memoryFilter?: Record<string, unknown>,
+    memorySight?: TemporalMemorySight,
     reader?: GenomeReader | null,
   ): Promise<TemporalFlowAnalysis> {
     const recent = await this.list(businessId, { limit: 500 }, reader, readerFilter);
@@ -638,7 +820,7 @@ export class TemporalFlowService {
 
     const genomeProposalCandidates = await this.findGenomeSignals(businessId, recent);
 
-    const memoryInsights = await this.buildMemoryInsights(businessId, memoryFilter);
+    const memoryInsights = await this.buildMemoryInsights(businessId, memorySight);
 
     const summaryParts = [
       `${recent.length} events analyzed.`,
@@ -662,18 +844,20 @@ export class TemporalFlowService {
   }
 
   /**
-   * FU-TEMPORAL-FLOW-INBOX-SCOPE delta (item 1): given a memory filter (readerMemoryFilter), the memories and the
-   * semantic recall carry only memories the reader may see.
+   * FU-TEMPORAL-FLOW-INBOX-SCOPE delta (item 1), MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (D-257, D-234): given a reader's memory
+   * sight (memorySight), the listed summaries and the semantic recall carry only memories the reader may see, each
+   * filtered before its limit (listMemory, searchVisibleMemory). With none (the command center, the executive brief,
+   * KEY's analyze_timeline, which apply their own authority), every memory, as before.
    */
   private async buildMemoryInsights(
     businessId: string,
-    memoryFilter?: Record<string, unknown>,
+    memorySight?: TemporalMemorySight,
   ): Promise<TemporalFlowMemoryInsight[]> {
     const insights: NonNullable<TemporalFlowAnalysis['memoryInsights']> = [];
     if (!this.memoryService) return insights;
 
-    const recentMemory = memoryFilter
-      ? await this.listMemory(businessId, { limit: 20 }, memoryFilter)
+    const recentMemory = memorySight
+      ? await this.listMemory(businessId, { limit: 20 }, memorySight)
       : await this.memoryService.findMany(businessId, { limit: 20 });
     for (const memory of recentMemory) {
       if (memory.confidence < 0.6) continue;
@@ -688,18 +872,17 @@ export class TemporalFlowService {
 
     if (this.semanticMemory) {
       try {
-        const recall = await this.semanticMemory.search({
-          businessId,
-          query: 'overdue invoice complaint urgent follow-up',
-          limit: 3,
-          sourceTypes: ['temporal_memory'],
-          minSimilarity: 0.72,
-        });
-        const visible = memoryFilter
-          ? await this.visibleMemoryIds(businessId, recall.map((hit) => hit.sourceId), memoryFilter)
-          : undefined;
+        const recallQuery = 'overdue invoice complaint urgent follow-up';
+        const recall = memorySight
+          ? await this.searchVisibleMemory(businessId, recallQuery, 3, memorySight, 0.72)
+          : await this.semanticMemory.search({
+              businessId,
+              query: recallQuery,
+              limit: 3,
+              sourceTypes: [TEMPORAL_MEMORY_SOURCE_TYPE],
+              minSimilarity: 0.72,
+            });
         for (const hit of recall) {
-          if (visible && !visible.has(hit.sourceId)) continue;
           insights.push({
             title: 'Memory recall: follow-up context',
             reason: hit.content,
@@ -707,7 +890,7 @@ export class TemporalFlowService {
           });
         }
       } catch {
-        // semantic search is optional; ignore failures
+        // semantic search is optional; ignore failures (a projected recall that fails serves nothing)
       }
     }
 
