@@ -56,9 +56,12 @@ export class ProfileIntelligenceService {
    * member (interviewKey). It was keyed by the business alone, so every member of a business shared one interview:
    * the owner's turns and KEY's replies to them (which may restate what the owner's prompt carried) came back to a
    * STAFF member in their prompt and in the response's state. Every route that reads it is behind BusinessGuard, so
-   * a member removed from the business reaches nothing they left in it.
+   * a member removed from the business reaches nothing they left in it. Delta review: each interview also keeps the
+   * revenue sight it was built under (`revenueSight`: the caller's readsDocumentExtractions); a turn under another sight
+   * starts a fresh interview, so turns and KEY's replies made while the member read revenue (the monthly revenue, an
+   * extraction) are not replayed once that read is gone.
    */
-  private readonly sessionCache = new Map<string, ProfileInterviewState>();
+  private readonly sessionCache = new Map<string, { state: ProfileInterviewState; revenueSight: boolean }>();
 
   private interviewKey(businessId: string, userId: string): string {
     return JSON.stringify([businessId, userId]);
@@ -72,9 +75,9 @@ export class ProfileIntelligenceService {
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
   ) {}
 
-  async getInterviewState(businessId: string, userId: string): Promise<ProfileInterviewState> {
+  async getInterviewState(businessId: string, userId: string, revenueSight = false): Promise<ProfileInterviewState> {
     const cached = this.sessionCache.get(this.interviewKey(businessId, userId));
-    if (cached) return cached;
+    if (cached && cached.revenueSight === revenueSight) return cached.state;
 
     const existingMemories = await this.memory.getAll(businessId);
     const completedTopics: string[] = [];
@@ -96,7 +99,7 @@ export class ProfileIntelligenceService {
       nextTopic,
     };
 
-    this.sessionCache.set(this.interviewKey(businessId, userId), state);
+    this.sessionCache.set(this.interviewKey(businessId, userId), { state, revenueSight });
     return state;
   }
 
@@ -110,7 +113,8 @@ export class ProfileIntelligenceService {
     pendingExtractions: ProfileExtraction[];
     currentTopicUnlocks: string | null;
   }> {
-    const state = await this.getInterviewState(businessId, userId);
+    const revenueSight = opts.documentExtractions === true;
+    const state = await this.getInterviewState(businessId, userId, revenueSight);
 
     state.messages.push({ role: 'user', content: userMessage });
 
@@ -230,7 +234,7 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
 
       state.nextTopic = PROFILE_TOPICS.find(t => !state.completedTopics.includes(t.topic))?.topic || null;
       state.messages.push({ role: 'assistant', content: reply });
-      this.sessionCache.set(this.interviewKey(businessId, userId), state);
+      this.sessionCache.set(this.interviewKey(businessId, userId), { state, revenueSight });
 
       return {
         reply,
@@ -253,7 +257,7 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
     completionPercent: number;
     memories: Array<{ category: string; key: string; value: string; confidence: number }>;
   }> {
-    const state = await this.getInterviewState(businessId, userId);
+    const state = await this.getInterviewState(businessId, userId, opts.documentExtractions === true);
     const remainingTopics = PROFILE_TOPICS
       .filter(t => !state.completedTopics.includes(t.topic))
       .map(t => t.label);
@@ -271,8 +275,15 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
     };
   }
 
-  async confirmExtractions(businessId: string, userId: string, confirmedKeys?: string[]): Promise<{ saved: number; skipped: number; rejected: number }> {
-    const state = this.sessionCache.get(this.interviewKey(businessId, userId));
+  async confirmExtractions(
+    businessId: string,
+    userId: string,
+    confirmedKeys?: string[],
+    opts: { documentExtractions?: boolean } = {},
+  ): Promise<{ saved: number; skipped: number; rejected: number }> {
+    // Delta review: only what the member's interview proposed under the sight they hold now.
+    const cached = this.sessionCache.get(this.interviewKey(businessId, userId));
+    const state = cached && cached.revenueSight === (opts.documentExtractions === true) ? cached.state : undefined;
     if (!state || state.pendingConfirmations.length === 0) {
       return { saved: 0, skipped: 0, rejected: 0 };
     }
@@ -319,7 +330,7 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
 
     state.pendingConfirmations = state.pendingConfirmations.filter(e => !e.confirmed);
     state.nextTopic = PROFILE_TOPICS.find(t => !state.completedTopics.includes(t.topic))?.topic || null;
-    this.sessionCache.set(this.interviewKey(businessId, userId), state);
+    this.sessionCache.set(this.interviewKey(businessId, userId), { state, revenueSight: opts.documentExtractions === true });
 
     return { saved, skipped, rejected };
   }
