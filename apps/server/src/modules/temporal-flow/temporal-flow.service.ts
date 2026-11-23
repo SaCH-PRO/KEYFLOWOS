@@ -180,15 +180,7 @@ export class TemporalFlowService {
     const data = this.buildCreateData(input);
 
     if (input.externalId && writerFilter) {
-      const key = { businessId: input.businessId, source: input.source, externalId: input.externalId };
-      const existing = await this.prisma.client.temporalFlowEvent.findFirst({ where: key, select: { id: true } });
-      if (existing) {
-        const visible = await this.prisma.client.temporalFlowEvent.findFirst({
-          where: this.scoped({ id: existing.id, businessId: input.businessId }, writerFilter),
-          select: { id: true },
-        });
-        if (!visible) throw new ForbiddenException('This event belongs to a module you cannot read');
-      }
+      return this.emitScoped(input, data, writerFilter);
     }
 
     if (input.externalId) {
@@ -208,6 +200,43 @@ export class TemporalFlowService {
     return this.prisma.client.temporalFlowEvent.create({
       data: { ...data, id: randomUUID() },
     });
+  }
+
+  /**
+   * FU-TEMPORAL-FLOW-INBOX-SCOPE, Codex P1 on #226: a write by external id for a writer with a filter, authorized and
+   * written in one statement, so no row inserted between a check and the write can be reached. A check-then-upsert had a
+   * window: a protected event a connector inserted after the check was updated in place.
+   *
+   * Create first. A new key is the writer's own event. On the key's unique conflict (the row exists, whenever it
+   * arrived), update it only through a conditional updateMany whose where carries the writer's filter: Postgres
+   * evaluates the filter on the row it updates, in the UPDATE itself, so a row the writer cannot read is never written.
+   * No row updated (invisible, or gone since the conflict) answers the same 403 as before. The row is read back under
+   * the same filter.
+   *
+   * Why not a locked or serializable transaction: the race is an insert of a row that does not exist yet, which
+   * SELECT ... FOR UPDATE cannot lock; serializable isolation would need a retry loop for its serialization failures.
+   * The unique key already serializes the two inserts, and a conditional update leaves no window.
+   */
+  private async emitScoped(
+    input: TemporalFlowEventInput,
+    data: ReturnType<TemporalFlowService['buildCreateData']>,
+    writerFilter: Record<string, unknown>,
+  ) {
+    try {
+      return await this.prisma.client.temporalFlowEvent.create({ data });
+    } catch (err) {
+      if ((err as { code?: unknown } | null)?.code !== 'P2002') throw err;
+    }
+    const key = { businessId: input.businessId, source: input.source, externalId: input.externalId };
+    const { count } = await this.prisma.client.temporalFlowEvent.updateMany({
+      where: this.scoped(key, writerFilter),
+      data: this.buildUpdateData(input),
+    });
+    const row = count
+      ? await this.prisma.client.temporalFlowEvent.findFirst({ where: this.scoped(key, writerFilter) })
+      : null;
+    if (!row) throw new ForbiddenException('This event belongs to a module you cannot read');
+    return row;
   }
 
   /**
