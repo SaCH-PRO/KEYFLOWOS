@@ -30,8 +30,19 @@ export interface ProfileInterviewState {
 const SAFE_PROFILE_CATEGORIES = new Set<string>([
   'goals', 'tone', 'riskTolerance', 'outreachStyle',
   'reportingCadence', 'priorities', 'bottlenecks',
-  'corrections', 'patterns', 'preferences',
+  'corrections', 'preferences',
 ]);
+// FU-PATTERNS-ROUTES-SIGHT (security review round 6, F-2): 'patterns' is no interview topic's category (PROFILE_TOPICS);
+// it is the detector's and KEY's, read by every partial reader's GET .../agent/patterns. And an extraction is stored only
+// as text within the bounds the memory PUTs keep (ai.controller assertMemoryEntryBounded).
+const MAX_PROFILE_KEY_LENGTH = 200;
+const MAX_PROFILE_VALUE_LENGTH = 2_000;
+function extractionBounded(ext: { key?: unknown; value?: unknown }): boolean {
+  return typeof ext.key === 'string' && ext.key.length <= MAX_PROFILE_KEY_LENGTH && typeof ext.value === 'string' && ext.value.length <= MAX_PROFILE_VALUE_LENGTH;
+}
+
+/** FU-PATTERNS-ROUTES-SIGHT: which AiMemory rows a reader may be shown (the caller's aiMemoryRowVisibleTo). */
+export type MemoryRowVisible = (row: { category: string; key: string; value: string }) => boolean;
 
 const BLOCKED_KEYS = new Set<string>([
   'autonomy', 'admin', 'mode', 'blockedTools', 'blockedModules',
@@ -107,7 +118,7 @@ export class ProfileIntelligenceService {
    * MEM-DOC-EXTRACTION-SIGHT (D-234): `opts.documentExtractions` true only for a reader with revenue read (the
    * controller decides); otherwise the prompt's known info carries no document extraction (withoutDocumentExtractions).
    */
-  async chat(businessId: string, userId: string, userMessage: string, opts: { documentExtractions?: boolean } = {}): Promise<{
+  async chat(businessId: string, userId: string, userMessage: string, opts: { documentExtractions?: boolean; rowVisible?: MemoryRowVisible } = {}): Promise<{
     reply: string;
     state: ProfileInterviewState;
     pendingExtractions: ProfileExtraction[];
@@ -131,7 +142,10 @@ export class ProfileIntelligenceService {
     }
 
     const allMemories = await this.memory.getAll(businessId);
-    const existingMemories = opts.documentExtractions === true ? allMemories : withoutDocumentExtractions(allMemories);
+    // FU-PATTERNS-ROUTES-SIGHT (security review round 6, F-1): and only the rows the member may read (opts.rowVisible).
+    const existingMemories = (opts.documentExtractions === true ? allMemories : withoutDocumentExtractions(allMemories)).filter(
+      (row) => !opts.rowVisible || opts.rowVisible(row),
+    );
     const memoryContext = existingMemories.length > 0
       ? `Known info: ${existingMemories.map(m => `${m.category}/${m.key}: ${m.value}`).join('; ')}`
       : 'No prior information known about this business.';
@@ -215,6 +229,10 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
               this.logger.warn(`Profile extraction rejected: blocked key "${ext.key}"`);
               continue;
             }
+            if (!extractionBounded(ext)) {
+              this.logger.warn('Profile extraction rejected: key or value not text within its bound');
+              continue;
+            }
             pendingExtractions.push({
               category: ext.category,
               key: ext.key,
@@ -250,7 +268,7 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
     }
   }
 
-  async getCompletionSummary(businessId: string, userId: string, opts: { documentExtractions?: boolean } = {}): Promise<{
+  async getCompletionSummary(businessId: string, userId: string, opts: { documentExtractions?: boolean; rowVisible?: MemoryRowVisible } = {}): Promise<{
     completedTopics: string[];
     remainingTopics: string[];
     totalTopics: number;
@@ -264,7 +282,8 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
 
     // MEM-DOC-EXTRACTION-SIGHT (D-234): the document extractions only for a reader with revenue read.
     const all = await this.memory.getAll(businessId);
-    const memories = opts.documentExtractions === true ? all : withoutDocumentExtractions(all);
+    // FU-PATTERNS-ROUTES-SIGHT (security review round 6, F-1): and only the rows the member may read (opts.rowVisible).
+    const memories = (opts.documentExtractions === true ? all : withoutDocumentExtractions(all)).filter((row) => !opts.rowVisible || opts.rowVisible(row));
 
     return {
       completedTopics: state.completedTopics,
@@ -299,7 +318,7 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
         continue;
       }
 
-      if (!SAFE_PROFILE_CATEGORIES.has(ext.category as string) || BLOCKED_KEYS.has(ext.key)) {
+      if (!SAFE_PROFILE_CATEGORIES.has(ext.category as string) || BLOCKED_KEYS.has(ext.key) || !extractionBounded(ext)) {
         this.logger.warn(`Confirmation rejected: unsafe category/key "${ext.category}/${ext.key}"`);
         rejected++;
         ext.confirmed = true;

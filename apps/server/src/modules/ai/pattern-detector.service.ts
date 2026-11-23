@@ -3,6 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ModelGatewayService } from './model-gateway.service';
 import { AiMemoryService } from './ai-memory.service';
+import { aiMemoryRowVisibleTo, type SemanticReader } from './semantic-memory-sight';
 import { AiUsageService } from './ai-usage.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
 import { schedulersDisabled } from '../../core/config/env';
@@ -17,6 +18,8 @@ export interface DetectedPattern {
   confidence: number;
   suggestedAction: string;
   suggestedTool?: string;
+  /** FU-PATTERNS-ROUTES-SIGHT: the sights the whole pattern needed before it was bounded (boundedPattern). */
+  sight?: Array<'revenue' | 'expenses'>;
 }
 
 export interface PatternScanResult {
@@ -36,17 +39,44 @@ const PATTERN_TEXT_MAX = 300;
 const PATTERN_LABEL_MAX = 120;
 const PATTERN_ENTITIES_MAX = 8;
 
+/** A field's text, control characters (which JSON escapes six-fold) blanked, clipped to `max`. */
 function clip(value: unknown, max: number): string {
-  const text = typeof value === 'string' ? value : String(value ?? '');
+  const text = (typeof value === 'string' ? value : String(value ?? '')).replace(/[\u0000-\u001f\u007f]/g, ' ');
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
-/** A pattern whose JSON is at most MAX_STORED_PATTERN_LENGTH: its text clipped, its affected entities capped. */
+const SEVERITIES: ReadonlySet<string> = new Set(['critical', 'warning', 'info']);
+/** Two probe readers: a member without revenue read, and one without expenses read (each with every other module). */
+const WITHOUT_REVENUE = { reader: 'pattern-class', sight: (module: string) => module !== 'revenue' } as unknown as SemanticReader;
+const WITHOUT_EXPENSES = { reader: 'pattern-class', sight: (module: string) => module !== 'expenses' } as unknown as SemanticReader;
+
+/**
+ * Correctness review round 6 (COR-R5-1): the sights a pattern needs, decided on the whole pattern as it was detected
+ * (as aiMemoryRowVisibleTo reads its stored row: key `pattern_<category>`, the pattern as JSON), before it is clipped:
+ * clipping can cut the words or figure that make it money or an expense.
+ */
+export function patternSightOf(pattern: DetectedPattern): Array<'revenue' | 'expenses'> {
+  const row = { category: 'patterns', key: `pattern_${String(pattern.category)}`, value: JSON.stringify(pattern) };
+  return [
+    ...(aiMemoryRowVisibleTo(row, WITHOUT_REVENUE) ? [] : (['revenue'] as const)),
+    ...(aiMemoryRowVisibleTo(row, WITHOUT_EXPENSES) ? [] : (['expenses'] as const)),
+  ];
+}
+
+/**
+ * A pattern whose JSON is at most MAX_STORED_PATTERN_LENGTH: its text clipped (control characters blanked), its
+ * severity one of the three, its affected entities capped; and, when the whole pattern stated money or an expense, a
+ * `sight` naming it ('revenue', 'expenses'), so the stored row and the answer are withheld as the whole pattern was,
+ * however much is clipped. If the JSON is still over the bound (escaped quotes, backslashes), the entities go, then
+ * every text field is halved until it fits.
+ */
 export function boundedPattern(pattern: DetectedPattern): DetectedPattern {
+  const sight = patternSightOf(pattern);
   const bounded: DetectedPattern = {
     ...pattern,
     id: clip(pattern.id, 80),
     category: clip(pattern.category, 80),
+    severity: (SEVERITIES.has(pattern.severity) ? pattern.severity : 'info') as DetectedPattern['severity'],
     title: clip(pattern.title, PATTERN_TEXT_MAX),
     description: clip(pattern.description, PATTERN_TEXT_MAX),
     suggestedAction: clip(pattern.suggestedAction, PATTERN_TEXT_MAX),
@@ -56,9 +86,25 @@ export function boundedPattern(pattern: DetectedPattern): DetectedPattern {
       id: clip(e.id, 60),
       label: clip(e.label, PATTERN_LABEL_MAX),
     })),
+    ...(sight.length ? { sight } : {}),
   };
-  // The parts above are bounded to well under the limit; a pattern still over it (unforeseen fields) keeps no entities.
-  return JSON.stringify(bounded).length <= MAX_STORED_PATTERN_LENGTH ? bounded : { ...bounded, affectedEntities: [] };
+  const texts = ['title', 'description', 'suggestedAction', 'id', 'category', 'suggestedTool'] as const;
+  while (JSON.stringify(bounded).length > MAX_STORED_PATTERN_LENGTH) {
+    if (bounded.affectedEntities.length) {
+      bounded.affectedEntities = [];
+      continue;
+    }
+    let shortened = false;
+    for (const field of texts) {
+      const text = bounded[field];
+      if (typeof text === 'string' && text.length > 0) {
+        (bounded as unknown as Record<string, string>)[field] = text.slice(0, Math.floor(text.length / 2));
+        shortened = true;
+      }
+    }
+    if (!shortened) break;
+  }
+  return bounded;
 }
 
 @Injectable()

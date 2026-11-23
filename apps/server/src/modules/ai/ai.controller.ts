@@ -1526,7 +1526,9 @@ export class AiController {
     // the interview is the caller's own (D-130).
     const userId = profileMember(req);
     const documentExtractions = await this.readsDocumentExtractions(businessId, req);
-    return this.profileIntelligence.chat(businessId, userId, body.message.trim(), { documentExtractions });
+    // FU-PATTERNS-ROUTES-SIGHT (security review round 6, F-1): the interview's known info is the rows the member may read.
+    const who = await this.memoryReaderOf(businessId, req);
+    return this.profileIntelligence.chat(businessId, userId, body.message.trim(), { documentExtractions, rowVisible: (row) => aiMemoryRowVisibleTo(row, who) });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -1534,7 +1536,9 @@ export class AiController {
   async profileStatus(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
     const userId = profileMember(req);
     const documentExtractions = await this.readsDocumentExtractions(businessId, req);
-    return this.profileIntelligence.getCompletionSummary(businessId, userId, { documentExtractions });
+    // FU-PATTERNS-ROUTES-SIGHT (security review round 6, F-1): the memories answered are the rows the member may read.
+    const who = await this.memoryReaderOf(businessId, req);
+    return this.profileIntelligence.getCompletionSummary(businessId, userId, { documentExtractions, rowVisible: (row) => aiMemoryRowVisibleTo(row, who) });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
