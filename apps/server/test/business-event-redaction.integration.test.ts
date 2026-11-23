@@ -153,7 +153,7 @@ describe('RR-BUSINESS-EVENT-REDACT: BusinessEventService redacts secret-named fi
       }));
       expect(errorSpy).toHaveBeenCalled();
       const logged = JSON.stringify(errorSpy.mock.calls);
-      expect(logged).not.toMatch(/sk-test-fail|tok-fail|apiKey|accessToken|route/);
+      expect(logged).not.toMatch(/sk-test-fail|tok-fail|apiKey|accessToken|"\/f"/);
       expect(logged).toMatch(new RegExp(`${P}missing_business`));
       expect(logged).toMatch(new RegExp(`${P}event\\.fail`));
     } finally {
@@ -181,6 +181,25 @@ describe('RR-BUSINESS-EVENT-REDACT: BusinessEventService redacts secret-named fi
   });
 });
 
+describe('RR-BUSINESS-EVENT-REDACT: review round 1, the event input is not rewritten and an unserialisable snapshot fails closed', () => {
+  it("emit leaves the caller's input object as it was; the redacted copy is what is stored and fanned out", async () => {
+    const metadata = { apiKey: 'sk-caller-keeps', route: '/k' };
+    const input = base('callercopy', { metadata });
+    await service.emit(input);
+    expect(input.metadata).toBe(metadata);
+    expect(metadata.apiKey).toBe('sk-caller-keeps');
+    const row = await storedEvent('callercopy');
+    expect(row.metadata).toEqual({ apiKey: REDACTED, route: '/k' });
+  });
+
+  it('a snapshot JSON cannot serialise (a BigInt) is dropped and the event is still written without it (recorded behaviour; on main the row was lost)', async () => {
+    await service.emit(base('bigint', { after: { n: BigInt(1) } as unknown as Record<string, unknown>, metadata: { route: '/b' } }));
+    const row = await storedEvent('bigint');
+    expect(row.after).toBeNull();
+    expect(row.metadata).toEqual({ route: '/b' });
+  });
+});
+
 describe('RR-BUSINESS-EVENT-REDACT: ContactAuditService redacts the diffed before/after', () => {
   it('RED-BEFORE: a write whose before/after carries a secret-named key stores the marker and names the field as changed', async () => {
     await audit.writeOrThrow({
@@ -196,6 +215,18 @@ describe('RR-BUSINESS-EVENT-REDACT: ContactAuditService redacts the diffed befor
     expect(rows[0].before).toEqual({ gmailAccessToken: REDACTED });
     expect(rows[0].after).toEqual({ gmailAccessToken: REDACTED, email: `${P}new@test.local` });
     expect(JSON.stringify(rows)).not.toMatch(/gat-old|gat-new/);
+  });
+
+  it("review round 1: the caller's own objects are not rewritten: a nested secret in `after` is still in clear on the row the caller returns, and redacted only in the stored entry", async () => {
+    const updated = { firstName: 'V72V', custom: { apiToken: 'live-token-stays', colour: 'blue' } };
+    const existing = { firstName: 'V72V', custom: { apiToken: 'old-token-stays', colour: 'red' } };
+    await audit.writeOrThrow({ businessId: ID.biz, contactId: ID.contact, action: 'restored', before: existing, after: updated });
+    expect(updated.custom.apiToken).toBe('live-token-stays');
+    expect(existing.custom.apiToken).toBe('old-token-stays');
+    const rows = await db.contactAuditEntry.findMany({ where: { businessId: ID.biz, contactId: ID.contact, action: 'restored' } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].after).toEqual({ custom: { apiToken: REDACTED, colour: 'blue' } });
+    expect(rows[0].before).toEqual({ custom: { apiToken: REDACTED, colour: 'red' } });
   });
 
   it('negative control: a write with no secret-named key stores its diff as today', async () => {
