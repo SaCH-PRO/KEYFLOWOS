@@ -6081,8 +6081,10 @@ export class CommerceService {
    * FU-PAY-LINK-STATUS-GATE: the pay-link gate (issuePaymentLink,
    * sendWithPublicInvoiceUrl). A link may be issued for the statuses above, and,
    * when `issuing` (the invoice is handed to the customer as it is issued), a
-   * DRAFT. PAID and VOID are refused by the callers before this, with their
-   * own text. Public for KEY's commerce_send_invoice (flow-orchestrator),
+   * DRAFT. PAID and VOID never reach this gate: issuePaymentLink refuses them
+   * first with their own text, sendWithPublicInvoiceUrl hands them to
+   * publicInvoiceUrl (the most recent link, or none), and KEY's send passes
+   * PAID over it as before. Public for KEY's commerce_send_invoice (flow-orchestrator),
    * which refuses through it before its email, as send-email does (D-248).
    */
   static assertPayLinkStatus(status: string, issuing: boolean): void {
