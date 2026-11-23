@@ -1215,6 +1215,11 @@
       "prefix": "v71v_",
       "owner": "apps/server/test/memory-patterns-sight.integration.test.ts",
       "packet": "V1-71 (MEM-PATTERNS-SIGHT)"
+    },
+    {
+      "prefix": "v78c_",
+      "owner": "apps/server/test/cortex-patterns-sight.integration.test.ts",
+      "packet": "V1-78 (FU-CORTEX-PATTERNS-SIGHT)"
     }
   ],
   "pendingRenames": [],
