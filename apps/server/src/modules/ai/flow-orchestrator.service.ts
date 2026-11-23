@@ -65,8 +65,10 @@ import { SemanticMemoryService } from './semantic-memory.service';
 import { ObjectStorageService } from '../../core/object-storage';
 import {
   UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS,
+  UNTRUSTED_MAX_CHARS,
   capUntrusted,
   containsUntrustedBlock,
+  exceedsUntrustedCap,
   fenceUntrusted,
   withUntrustedContentRule,
   withoutUntrustedBlocks,
@@ -700,6 +702,24 @@ function withUntrustedContentRuleWhereFenced(messages: GatewayMessage[]): Gatewa
   if (!messages.some((m) => typeof m.content === 'string' && containsUntrustedBlock(m.content))) return messages;
   messages[0] = { ...system, content: withUntrustedContentRule(system.content) };
   return messages;
+}
+
+/**
+ * RR-UNTRUSTED-CONTENT-FENCE review M2: the line the server adds to a reply when an attachment's text
+ * was cut to its cap, so the member knows KEY read only part of it. Built here, not by the model. The
+ * file name is the uploader's, shown as plain text: control characters become spaces and markdown is
+ * escaped, so a name cannot render as a link or break the line.
+ */
+function attachmentTruncationNotice(truncatedFiles: readonly string[], turnCapReached: boolean): string {
+  const plain = (name: string) =>
+    name.replace(/\p{Cc}/gu, ' ').replace(/[\\`*_[\]()<>#!|~]/g, '\\$&').slice(0, 120);
+  const lines = truncatedFiles.map(
+    (f) => `Only the first ${UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS.toLocaleString('en-US')} characters of ${plain(f)} were read.`,
+  );
+  if (turnCapReached) {
+    lines.push(`Only the first ${UNTRUSTED_MAX_CHARS.attachment.toLocaleString('en-US')} characters of this message's attachments were read.`);
+  }
+  return lines.length ? `_${lines.join(' ')}_` : '';
 }
 
 /**
@@ -1973,6 +1993,8 @@ export class FlowOrchestratorService {
   private async buildAttachmentContext(
     businessId: string,
     attachments?: FlowAttachment[],
+    /** Filled with the name of each file whose extraction was cut to its cap (review M2). */
+    truncatedFiles?: string[],
   ): Promise<string> {
     if (!attachments?.length) return '';
     const docIntel = this.getDocumentIntelligence();
@@ -2013,6 +2035,7 @@ export class FlowOrchestratorService {
         const summary = result.rawText?.trim()
           ? `${result.documentType?.toUpperCase() ?? 'DOCUMENT'}\n${result.rawText}`
           : JSON.stringify(result);
+        if (summary.length > UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS) truncatedFiles?.push(filename);
         parts.push(
           // RR-UNTRUSTED-CONTENT-FENCE review m1: each file has its own cap inside the turn's one block.
           `[Attachment: ${filename} (${att.type}, ${extractionInput.mimeType ?? mimeType})]\n${capUntrusted(summary, UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS)}`,
@@ -2139,10 +2162,14 @@ export class FlowOrchestratorService {
     const effectiveSessionId = sessionId || randomUUID();
     // RR-UNTRUSTED-CONTENT-FENCE: the extraction is text a third party wrote. It is fenced, and it
     // reaches the model as a message of its own beside the member's, never inside it.
-    const attachmentContext = fenceUntrusted('attachment', await this.buildAttachmentContext(businessId, attachments));
+    const truncatedFiles: string[] = [];
+    const extraction = await this.buildAttachmentContext(businessId, attachments, truncatedFiles);
+    const attachmentContext = fenceUntrusted('attachment', extraction);
     const enrichedMessage = attachmentContext ? `${message}\n\n${attachmentContext}` : message;
+    // Review M2: a cut is told to the member in a line the server adds, which the model does not write.
+    const attachmentNotice = attachmentTruncationNotice(truncatedFiles, exceedsUntrustedCap('attachment', extraction));
 
-    const result = await (async (): Promise<FlowResponse> => {
+    let result = await (async (): Promise<FlowResponse> => {
     // Staff the turn if roles were not explicitly provided.
     //
     // An explicit `role` argument still pins the turn to exactly that hat — a
@@ -2150,7 +2177,9 @@ export class FlowOrchestratorService {
     // behaviour precisely.
     const authority: CrewResolution = role
       ? { primary: role, crew: [role], scores: {} as Record<BusinessRole, number> }
-      : await this.resolveTurnAuthority(businessId, enrichedMessage, conversationHistory, pageContext);
+      // Orchestrator acceptance review (security MINOR-1): the crew, and with it the tool menu and the
+      // governance ceiling, is staffed from the member's own words, never from an attachment's text.
+      : await this.resolveTurnAuthority(businessId, message, conversationHistory, pageContext);
     const detectedRole = authority.primary;
     const crew = authority.crew;
 
@@ -2194,7 +2223,7 @@ export class FlowOrchestratorService {
     const selectedTools = await this.selectToolsForRequest(
       businessId,
       crew,
-      `${enrichedMessage}\n${pageContext?.route ?? ''}`,
+      `${message}\n${pageContext?.route ?? ''}`,
       envelope,
       userId,
     );
@@ -2543,6 +2572,9 @@ ${triage.standingContext}`;
       throw error;
     }
     })();
+    if (attachmentNotice) {
+      result = { ...result, reply: result.reply ? `${attachmentNotice}\n\n${result.reply}` : attachmentNotice };
+    }
 
     // Persist the turn to the FlowSession so it can be resumed later.
     const userMessage: FlowMessage = {
@@ -2590,8 +2622,12 @@ ${triage.standingContext}`;
     const effectiveSessionId = sessionId || randomUUID();
     // RR-UNTRUSTED-CONTENT-FENCE: the extraction is text a third party wrote. It is fenced, and it
     // reaches the model as a message of its own beside the member's, never inside it.
-    const attachmentContext = fenceUntrusted('attachment', await this.buildAttachmentContext(businessId, attachments));
+    const truncatedFiles: string[] = [];
+    const extraction = await this.buildAttachmentContext(businessId, attachments, truncatedFiles);
+    const attachmentContext = fenceUntrusted('attachment', extraction);
     const enrichedMessage = attachmentContext ? `${message}\n\n${attachmentContext}` : message;
+    // Review M2: a cut is told to the member in a line the server adds, which the model does not write.
+    const attachmentNotice = attachmentTruncationNotice(truncatedFiles, exceedsUntrustedCap('attachment', extraction));
 
     // Staff the turn if roles were not explicitly provided.
     //
@@ -2600,7 +2636,9 @@ ${triage.standingContext}`;
     // behaviour precisely.
     const authority: CrewResolution = role
       ? { primary: role, crew: [role], scores: {} as Record<BusinessRole, number> }
-      : await this.resolveTurnAuthority(businessId, enrichedMessage, conversationHistory, pageContext);
+      // Orchestrator acceptance review (security MINOR-1): the crew, and with it the tool menu and the
+      // governance ceiling, is staffed from the member's own words, never from an attachment's text.
+      : await this.resolveTurnAuthority(businessId, message, conversationHistory, pageContext);
     const detectedRole = authority.primary;
     const crew = authority.crew;
 
@@ -2619,6 +2657,7 @@ ${triage.standingContext}`;
       };
       return;
     }
+    if (attachmentNotice) yield { type: 'content_delta', content: `${attachmentNotice}\n\n` };
 
     // PR195-PORT, PR195-KEY-GATES review repair (SEC-P195KG-2): as chat(), the figures this member may read (the
     // viewer projection); a turn with no member, none.
@@ -2648,7 +2687,7 @@ ${triage.standingContext}`;
     const selectedTools = await this.selectToolsForRequest(
       businessId,
       crew,
-      `${enrichedMessage}\n${pageContext?.route ?? ''}`,
+      `${message}\n${pageContext?.route ?? ''}`,
       envelope,
       userId,
     );

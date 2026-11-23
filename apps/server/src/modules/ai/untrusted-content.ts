@@ -72,7 +72,40 @@ const CONFUSABLES: Readonly<Record<string, string>> = {
   'а': 'a', 'е': 'e', 'ѕ': 's', 'г': 'r', 'т': 't', 'ԁ': 'd', 'п': 'n',
   'ո': 'n', 'ս': 'u', 'υ': 'u', 'τ': 't', 'ε': 'e', 'ɴ': 'n', 'ʀ': 'r',
   'ᴜ': 'u', 'ᴛ': 't', 'ꜱ': 's', 'ᴅ': 'd', 'ᴇ': 'e', 'ɗ': 'd', 'ѵ': 'v',
+  // Orchestrator acceptance review (security MINOR-2): less-than with dot, the reverse-solidus
+  // operator (read as a slash, as '\\' is), Armenian oh (read as the round u of "untrusted").
+  '\u22d6': '<', '\u29f5': '\\', '\u0585': 'u',
 };
+
+/** The code points that read as '<' or as the slash of a closing marker (NFKC forms included). */
+const BRACKET_CPS = [0x3c, 0xff1c, 0xfe64, ...Object.keys(CONFUSABLES).filter((k) => CONFUSABLES[k] === '<').map((k) => k.codePointAt(0)!)];
+const SLASH_CPS = [
+  0x2f, 0x5c, 0xff0f, 0xfe68, 0xff3c,
+  ...Object.keys(CONFUSABLES).filter((k) => CONFUSABLES[k] === '/' || CONFUSABLES[k] === '\\').map((k) => k.codePointAt(0)!),
+];
+
+/**
+ * Every spelling of one of these characters as written in text that something may decode: the
+ * character itself (after folding), numeric and named HTML entities, once or more times
+ * double-encoded (&amp;lt;), JavaScript and JSON escapes (\u003c, \u{3c}, \x3c) and URL escapes (%3c).
+ * Read on the lower-cased skeleton.
+ */
+function spellings(literal: string, cps: number[], named: string[]): string {
+  const alts = new Set<string>([literal]);
+  const entity = (body: string) => `&(?:amp;)*${body};?`;
+  for (const n of named) alts.add(entity(n));
+  for (const cp of new Set(cps)) {
+    const hex = cp.toString(16);
+    alts.add(entity(`#0*${cp}`));
+    alts.add(entity(`#x0*${hex}`));
+    alts.add(`\\\\u0*${hex}`);
+    alts.add(`\\\\u\\{0*${hex}\\}`);
+    if (cp <= 0xff) alts.add(`\\\\x0*${hex}`);
+    if (cp < 0x80) alts.add(`%${hex}`);
+  }
+  return [...alts].join('|');
+}
+
 
 /** How one code point reads: no invisible or combining characters, compatibility forms folded, lower case. */
 // Hangul fillers and the blank Braille pattern render as blank but are not format characters (review F4).
@@ -93,8 +126,11 @@ function skeletonOf(cp: string): string {
 // An opening or closing marker as read: '<' (or an entity or escape for it), an optional '/',
 // "untrusted". The whitespace after the '/' sits inside its optional group, so no two unbounded
 // runs are adjacent and a long whitespace run is scanned in linear time (review F3).
-const MARKER_RE =
-  /(?:<|&lt;?|&#0*60;?|&#x0*3c;?|&lsaquo;?|&lang;?|\\u0*3c|\\x3c|%3c)\s*(?:(\/|&sol;?|&frasl;?|&#0*47;?|&#x0*2f;?|\\u0*2f|%2f)\s*)?untrusted/g;
+const MARKER_RE = new RegExp(
+  `(?:${spellings('<', BRACKET_CPS, ['lt', 'lsaquo', 'lang', 'lessdot'])})` +
+    `\\s*(?:(${spellings('[/\\\\]', SLASH_CPS, ['sol', 'bsol', 'frasl'])})\\s*)?untrusted`,
+  'g',
+);
 
 interface Skeleton {
   text: string;
@@ -146,6 +182,24 @@ function neutraliseMarkers(text: string): string {
   return current.replace(/</g, '(');
 }
 
+/**
+ * Orchestrator acceptance review (security MINOR-3): invisible format characters (Unicode category
+ * Cf) carry no meaning in a business document and can carry a hidden instruction (tag characters
+ * U+E0000-E007F spell ASCII invisibly) or reorder what a reader sees (bidi controls). They are
+ * removed from the text the model is sent, except ZWNJ (U+200C) and ZWJ (U+200D): Persian and
+ * other Arabic-script text, the Indic scripts (Devanagari half forms) and emoji sequences need them.
+ */
+const INVISIBLE_RE = /(?![\u200c\u200d])\p{Cf}/gu;
+
+function withoutInvisible(text: string | null | undefined): string {
+  return typeof text === 'string' ? text.replace(INVISIBLE_RE, '') : '';
+}
+
+/** True when fenceUntrusted(source, text) cuts the text at its source's cap. */
+export function exceedsUntrustedCap(source: UntrustedSource, text: string | null | undefined): boolean {
+  return withoutInvisible(text).length > UNTRUSTED_MAX_CHARS[source];
+}
+
 /** Cut to at most max UTF-16 units without splitting a surrogate pair, noting what was cut. */
 export function capUntrusted(text: string, max: number): string {
   if (text.length <= max) return text;
@@ -161,8 +215,9 @@ export function capUntrusted(text: string, max: number): string {
  */
 export function fenceUntrusted(source: UntrustedSource, text: string | null | undefined): string {
   if (!SOURCES.has(source)) throw new Error(`fenceUntrusted: unknown source ${String(source)}`);
-  if (typeof text !== 'string' || !text.trim()) return '';
-  const inner = neutraliseMarkers(capUntrusted(text, UNTRUSTED_MAX_CHARS[source]));
+  const visible = withoutInvisible(text);
+  if (!visible.trim()) return '';
+  const inner = neutraliseMarkers(capUntrusted(visible, UNTRUSTED_MAX_CHARS[source]));
   const id = createHash('sha256').update(`${source}\u0000${inner}`).digest('hex').slice(0, 16);
   return `<untrusted source="${source}" id="${id}">\n${inner}\n</untrusted id="${id}">`;
 }
