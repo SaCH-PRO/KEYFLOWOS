@@ -60,6 +60,11 @@ const marketplace = MarketplaceController.prototype as unknown as Record<string,
 
 /** [handler, its route, the scope it needs]. */
 const BOOKS_WRITES: ReadonlyArray<readonly [string, string]> = [
+  // the chart of accounts: a row every posting may name (D-146, coawrite: only members with Money write;
+  // SWP-CENSUS-OPEN-WRITES)
+  ['createCoa', 'POST chart-of-accounts'],
+  ['updateCoa', 'PATCH chart-of-accounts/:id'],
+  ['archiveCoa', 'DELETE chart-of-accounts/:id'],
   // bank and cash accounts: create posts the opening balance against owner equity (V1-37b)
   ['createAccount', 'POST accounts'],
   ['updateAccount', 'PATCH accounts/:id'],
@@ -110,9 +115,6 @@ const EXPENSE_PAYMENTS: ReadonlyArray<readonly [string, string]> = [
  * the reserves, the bank connections and the exchange rates are listed as owner questions.
  */
 const REVIEWED_UNSCOPED: Readonly<Record<string, string>> = {
-  'POST chart-of-accounts': 'the chart: a row postings may name, posting nothing and fixing no amount (owner question)',
-  'PATCH chart-of-accounts/:id': 'the chart: a row postings may name, posting nothing and fixing no amount (owner question)',
-  'DELETE chart-of-accounts/:id': 'the chart: archives a row, posting nothing (owner question)',
   'POST tax-rates': 'tax rates: invoice settings; the default rate is the owner-only profile (D-11)',
   'PATCH tax-rates/:id': 'tax rates: invoice settings; the default rate is the owner-only profile (D-11)',
   'DELETE tax-rates/:id': 'tax rates: invoice settings; the default rate is the owner-only profile (D-11)',

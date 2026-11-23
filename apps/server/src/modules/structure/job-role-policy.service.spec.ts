@@ -125,6 +125,8 @@ const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: s
     write: [
       'commerce_create_invoice', 'commerce_create_quote', 'commerce_convert_quote', 'commerce_update_invoice', 'payments_create_link', 'payments_revoke_link', 'commerce_mark_invoice_paid',
       'finance_auto_match_bank', 'reconcile_run_auto_match', 'reconcile_match_line',
+      // SWP-CENSUS-OPEN-WRITES (D-146, coawrite): POST chart-of-accounts needs revenue write, so the chart tool (tier 2) is revenue write
+      'finance_create_coa_account',
     ],
     // finance_post_journal_entry: POST finance journal-entries needs revenue write since PR195-JOURNAL-SCOPE
     // (CR-P195-4), and the tool is tier 3, so KEY needs admin (D-36's ladder)
@@ -514,7 +516,10 @@ describe('JobRolePolicyService — legacy tool-family keys keep working', () => 
   it('a legacy key is still refused on write by V1-21, but an existing row is still read', () => {
     expect(jobRolePermissionsProblem({ finance: 'write' })).toMatch(/Invalid module: finance/);
     expect(passes(envelope({ finance: 'write' }), 'finance_expense_breakdown')).toBe(true);
-    expect(passes(envelope({ finance: 'write' }), 'finance_create_coa_account')).toBe(true);
+    // SWP-CENSUS-OPEN-WRITES (D-146, coawrite): POST chart-of-accounts needs revenue write now, so the chart tool is
+    // governed and only the revenue key reaches it; the legacy `finance` key no longer does (D-35's narrowing)
+    expect(allows(envelope({ finance: 'write' }), 'finance_create_coa_account')).toBe(false);
+    expect(passes(envelope({ revenue: 'write' }), 'finance_create_coa_account')).toBe(true);
     // V1-81 (D-57): the money reports are governed by revenue:read now, so the legacy key loses them
     expect(allows(envelope({ finance: 'write' }), 'finance_cashflow')).toBe(false);
     // Tier 3: {finance: 'write'} was refused it at the gate before (maxRiskTier 2); the
@@ -574,12 +579,13 @@ describe('JobRolePolicyService — legacy tool-family keys keep working', () => 
     const lost = (key: string) => reachedBefore(LEGACY[key], 'admin').filter((t) => ROUTE_GOVERNED.has(t));
     // V1-81 (owner ruling D-57): the five money report tools and finance_view_receivables (FOLLOW3-A6) are governed by revenue:read;
     // PR195-JOURNAL-SCOPE (CR-P195-4): finance_post_journal_entry by revenue write;
-    // PR195-BOOKS-DOORS (SEC-P195JS-1): finance_auto_match_bank by revenue write
+    // PR195-BOOKS-DOORS (SEC-P195JS-1): finance_auto_match_bank by revenue write;
+    // SWP-CENSUS-OPEN-WRITES (D-146, coawrite): finance_create_coa_account by revenue write
     // PR195-KEY-GATES (SEC-P195BW-4/5; D-57, D-146): and the Books reads the FinanceController reads now hold at revenue
     // read: finance_customer_balance, finance_list_action_items, finance_list_bank_accounts (D-35's narrowing)
     expect(lost('finance')).toEqual([
       'expenses_create', 'expenses_list', 'finance_auto_match_bank', 'finance_balance_sheet', 'finance_cashflow', 'finance_create_bill',
-      'finance_customer_balance', 'finance_list_action_items', 'finance_list_bank_accounts', 'finance_list_bills',
+      'finance_create_coa_account', 'finance_customer_balance', 'finance_list_action_items', 'finance_list_bank_accounts', 'finance_list_bills',
       'finance_pay_bill', 'finance_post_journal_entry', 'finance_profit_and_loss', 'finance_revenue_breakdown', 'finance_tax_summary',
       'finance_view_payables', 'finance_view_receivables',
     ]);

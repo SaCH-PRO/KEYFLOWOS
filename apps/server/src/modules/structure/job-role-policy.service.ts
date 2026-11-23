@@ -148,6 +148,9 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
     // Books' module (PR195-BOOKS-DOORS, review finding SEC-P195JS-1), so the legacy `finance` key no longer
     // reaches finance_auto_match_bank (D-35's narrowing)
     finance_auto_match_bank: 'write', reconcile_match_line: 'write', reconcile_run_auto_match: 'write',
+    // finance_create_coa_account: POST chart-of-accounts requires revenue write (SWP-CENSUS-OPEN-WRITES; owner ruling
+    // D-146, coawrite: only Money write changes the chart), the member route to FinanceCoaService.create
+    finance_create_coa_account: 'write',
     // finance_list_bank_accounts (GET accounts), finance_customer_balance (GET customers/:contactId/balance),
     // finance_list_action_items (GET intelligence/actions), reconcile_list_unmatched (GET accounts/:accountId/
     // bank-transactions): the Books reads need revenue read (owner rulings D-57, D-146; PR195-KEY-GATES, review
