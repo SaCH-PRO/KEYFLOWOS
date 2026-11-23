@@ -299,4 +299,31 @@ describe('RR-MCP-TENANT-BOUND (D-261, D-262): the MCP bridge serves a business o
       delete process.env.V91A_FAKE_MCP_TOKEN;
     }
   });
+
+  it('MCP-12 two configs with one key: the later one is dropped with an error log, so business B bound by it never reaches the first server\'s url', async () => {
+    setServers([
+      { ...SERVER, businessIds: [BIZ_A] },
+      { ...SERVER, url: 'https://mcp-b.v91a.invalid/mcp', businessIds: [BIZ_B] },
+    ]);
+    const mcp = new McpClientManagerService();
+    expect(errorLines().some((l) => l.includes('"s"') && /key/.test(l)), 'no error log for the duplicate key').toBe(true);
+    await callAs(mcp, BIZ_A, 'mcp__s__x');
+    const err = await rejection(callAs(mcp, BIZ_B, 'mcp__s__x'));
+    expect((err as Error).message).toMatch(REFUSAL);
+    expect(await mcp.listBridgedTools(BIZ_B)).toEqual([]);
+    expect(fake.transports.map((t) => t.url)).toEqual([SERVER.url]);
+    expect(fake.calls).toHaveLength(1);
+  });
+
+  it('MCP-13 a key that is empty or contains "__" (which bridged names cannot round-trip) is dropped with an error log', async () => {
+    setServers([
+      { ...SERVER, key: '', businessIds: [BIZ_A] },
+      { ...SERVER, key: 'a__b', businessIds: [BIZ_A] },
+    ]);
+    const mcp = new McpClientManagerService();
+    expect(mcp.isConfigured()).toBe(false);
+    expect(errorLines().filter((l) => /key/.test(l))).toHaveLength(2);
+    expect(await mcp.listBridgedTools(BIZ_A)).toEqual([]);
+    noServerTouched();
+  });
 });
