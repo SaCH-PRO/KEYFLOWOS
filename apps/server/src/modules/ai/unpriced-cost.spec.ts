@@ -52,6 +52,7 @@ import * as costMod from './llm-cost.service';
 import { LLMCostService, TOKEN_COST_PER_1K } from './llm-cost.service';
 import { ModelGatewayService, type GatewayRequest } from './model-gateway.service';
 import { LangfuseService } from './langfuse.service';
+import { AiUsageService } from './ai-usage.service';
 
 type Priced = { input: number; output: number; priced: boolean };
 const priceFor: (model: string) => Priced =
@@ -185,5 +186,66 @@ describe('RR-UNKNOWN-COST-NOT-ZERO: an unpriced model is never written as $0', (
     // the native path rounds its estimate to four decimals, as on main
     expect(res.usage.estimatedCost).toBe(Math.round((0.00015 + 0.0006) * 10000) / 10000);
     expect(res.usage.costStatus).toBe('priced');
+  });
+});
+
+describe('RR-UNKNOWN-COST-NOT-ZERO: review round 1 controls', () => {
+  const gatewaySrc = readFileSync(join(__dirname, 'model-gateway.service.ts'), 'utf8');
+
+  it('every usage object a provider path builds carries costStatus, the Google stream included, and no provider prices by its own named fallback any more', () => {
+    const usageObjects = (gatewaySrc.match(/\n\s+estimatedCost: Math\.round\(estimatedCost \* 10000\) \/ 10000,/g) ?? []).length;
+    const marked = (gatewaySrc.match(/costStatus: costStatusFor\(model\),/g) ?? []).length;
+    expect(usageObjects).toBeGreaterThan(10);
+    expect(marked).toBe(usageObjects);
+    // the single lookup: no `TOKEN_COST_PER_1K[model] || ...` left in the gateway
+    expect(gatewaySrc).not.toMatch(/TOKEN_COST_PER_1K\[model\] \|\|/);
+  });
+
+  it('no second price table hides anywhere under apps/server/src: per-1k prices are literals in llm-cost.service.ts only', () => {
+    const offenders = tsFilesUnder(SRC_ROOT)
+      .filter((f) => !f.endsWith('llm-cost.service.ts'))
+      .filter((f) => /'gpt-4o(-mini)?':\s*\{\s*input:\s*[\d.]+/.test(readFileSync(f, 'utf8')))
+      .map((f) => f.replace(SRC_ROOT, ''));
+    expect(offenders).toEqual([]);
+  });
+
+  it("recordCost's mark comes from the table, never from the caller's metadata", async () => {
+    const prisma = mockPrisma();
+    const row = await new LLMCostService(prisma).recordCost({
+      businessId: 'biz_cost', provider: 'native', model: 'native-llm', taskCategory: 'general',
+      promptTokens: 10, completionTokens: 10, totalTokens: 20, inputCost: 0, outputCost: 0, totalCost: 0, latencyMs: 1,
+      metadata: { costStatus: 'priced', source: 'stream' },
+    });
+    expect(row.metadata).toEqual({ source: 'stream', costStatus: 'unpriced_estimate' });
+  });
+
+  it("the AiUsageLog row for an unpriced model carries costStatus 'unpriced_estimate', from the gateway's usage or, failing that, from the table", async () => {
+    const aiUsageLog = { create: vi.fn().mockResolvedValue({}), aggregate: vi.fn().mockResolvedValue({ _sum: { creditsUsed: 0, estimatedCost: 0 } }), groupBy: vi.fn().mockResolvedValue([]), findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) };
+    const subscriptions = { getActiveSubscription: vi.fn().mockResolvedValue({ plan: 'KEYFLOW', status: 'ACTIVE', limits: { aiCreditsPerMonth: -1 }, subscription: { currency: 'TTD', priceMonthly: 500 } }) };
+    const templates = { resolveTemplate: vi.fn().mockResolvedValue(null) };
+    const content = 'A long enough answer to pass the general output validation, with several sentences of specific content. '.repeat(3);
+    const gateway = { complete: vi.fn(), getBudgetStatus: vi.fn(), streamComplete: vi.fn() };
+    const usage = new AiUsageService({ client: { aiUsageLog } } as any, subscriptions as any, templates as any, gateway as any);
+    try {
+      // the gateway marked it
+      gateway.complete.mockResolvedValue({ content, provider: 'native', model: 'native-llm', usage: { promptTokens: 1000, completionTokens: 1000, totalTokens: 2000, estimatedCost: GPT4O_1K_1K(), costStatus: 'unpriced_estimate' }, latencyMs: 5, fallbackUsed: false });
+      await usage.callAi({ businessId: 'biz_cost', feature: 'chat', messages: [{ role: 'user', content: 'hi' }] });
+      await vi.waitFor(() => expect(aiUsageLog.create).toHaveBeenCalledTimes(1));
+      expect(aiUsageLog.create.mock.calls[0][0].data).toMatchObject({ model: 'native-llm', estimatedCost: GPT4O_1K_1K(), metadata: expect.objectContaining({ costStatus: 'unpriced_estimate' }) });
+
+      // an older gateway response without the field: the table decides
+      gateway.complete.mockResolvedValue({ content, provider: 'native', model: 'native-llm', usage: { promptTokens: 1000, completionTokens: 1000, totalTokens: 2000, estimatedCost: GPT4O_1K_1K() }, latencyMs: 5, fallbackUsed: false });
+      await usage.callAi({ businessId: 'biz_cost', feature: 'chat', messages: [{ role: 'user', content: 'hi again' }] });
+      await vi.waitFor(() => expect(aiUsageLog.create).toHaveBeenCalledTimes(2));
+      expect(aiUsageLog.create.mock.calls[1][0].data.metadata).toMatchObject({ costStatus: 'unpriced_estimate' });
+
+      // and a priced model is marked priced
+      gateway.complete.mockResolvedValue({ content, provider: 'openai', model: 'gpt-4o-mini', usage: { promptTokens: 50, completionTokens: 100, totalTokens: 150, estimatedCost: 0.001, costStatus: 'priced' }, latencyMs: 5, fallbackUsed: false });
+      await usage.callAi({ businessId: 'biz_cost', feature: 'chat', messages: [{ role: 'user', content: 'third' }] });
+      await vi.waitFor(() => expect(aiUsageLog.create).toHaveBeenCalledTimes(3));
+      expect(aiUsageLog.create.mock.calls[2][0].data.metadata).toMatchObject({ costStatus: 'priced' });
+    } finally {
+      usage.onModuleDestroy?.();
+    }
   });
 });
