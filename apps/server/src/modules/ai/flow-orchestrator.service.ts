@@ -63,6 +63,17 @@ import { BlueprintService } from '../blueprint/blueprint.service';
 import { AiMessageSenderService } from './ai-message-sender.service';
 import { SemanticMemoryService } from './semantic-memory.service';
 import { ObjectStorageService } from '../../core/object-storage';
+import {
+  UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS,
+  UNTRUSTED_MAX_CHARS,
+  capUntrusted,
+  containsUntrustedBlock,
+  exceedsUntrustedCap,
+  fenceUntrusted,
+  withoutInvisible,
+  withUntrustedContentRule,
+  withoutUntrustedBlocks,
+} from './untrusted-content';
 import { RoleEngineService, BusinessRole, RoleDetectionContext, CrewResolution } from './role-engine.service';
 import { ContentRequestService } from '../content-ops/content-request.service';
 import { CallLogService, type CallLogViewer } from '../call-tasks/call-log.service';
@@ -682,6 +693,37 @@ function withEvidenceDiscipline(systemPrompt: string): string {
 }
 
 /**
+ * RR-UNTRUSTED-CONTENT-FENCE: when any message of a turn carries a fenced untrusted-data block (an
+ * attachment's extraction, a fenced tool result), the system prompt carries the rule that such blocks
+ * are data, never instructions. Once, and only then: a turn with no block is sent exactly as before.
+ * Replaces messages[0] rather than editing it, so an array spread from another shares nothing changed.
+ */
+function withUntrustedContentRuleWhereFenced(messages: GatewayMessage[]): GatewayMessage[] {
+  const system = messages[0];
+  if (system?.role !== 'system' || typeof system.content !== 'string') return messages;
+  if (!messages.some((m) => typeof m.content === 'string' && containsUntrustedBlock(m.content))) return messages;
+  messages[0] = { ...system, content: withUntrustedContentRule(system.content) };
+  return messages;
+}
+
+/**
+ * RR-UNTRUSTED-CONTENT-FENCE review M2: the line the server adds to a reply when an attachment's text
+ * was cut to its cap, so the member knows KEY read only part of it. Built here, not by the model, and
+ * naming each attachment by its position in the message, never by its file name: the name is the
+ * uploader's text, and this line is saved as KEY's reply and replayed to the model (round 4, security
+ * F2: a name could otherwise speak as KEY, carry a role sign-off, a link or a bidi override).
+ */
+function attachmentTruncationNotice(truncatedPositions: readonly number[], turnCapReached: boolean): string {
+  const lines = truncatedPositions.map(
+    (n) => `Only the first ${UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS.toLocaleString('en-US')} characters of attachment ${n} were read.`,
+  );
+  if (turnCapReached) {
+    lines.push(`Only the first ${UNTRUSTED_MAX_CHARS.attachment.toLocaleString('en-US')} characters of this message's attachments were read.`);
+  }
+  return lines.length ? `_${lines.join(' ')}_` : '';
+}
+
+/**
  * V1-21d-KEY-DISPATCHER-TENANT-INCLUDES (V1-21c review ST-1, the TD9 class): a dispatcher read's
  * to-one relations, each kept only when the related row is `businessId`'s.
  *
@@ -1293,9 +1335,11 @@ export class FlowOrchestratorService {
           voice: 'default',
           mood: 'neutral',
           preferredProvider: 'openai',
+          // RR-UNTRUSTED-CONTENT-FENCE review F1: the cortex prompt carries no untrusted-content rule,
+          // so a fenced block from an earlier turn reaches it as a placeholder, not as its text.
           messages: conversationHistory.slice(-10).map((m) => ({
             role: m.role,
-            content: m.content,
+            content: typeof m.content === 'string' ? withoutUntrustedBlocks(m.content, '[attachment text withheld]') : m.content,
             timestamp: now,
           })),
           createdAt: now,
@@ -1950,6 +1994,8 @@ export class FlowOrchestratorService {
   private async buildAttachmentContext(
     businessId: string,
     attachments?: FlowAttachment[],
+    /** Filled with the 1-based position of each file whose extraction was cut to its cap (review M2). */
+    truncatedFiles?: number[],
   ): Promise<string> {
     if (!attachments?.length) return '';
     const docIntel = this.getDocumentIntelligence();
@@ -1990,8 +2036,12 @@ export class FlowOrchestratorService {
         const summary = result.rawText?.trim()
           ? `${result.documentType?.toUpperCase() ?? 'DOCUMENT'}\n${result.rawText}`
           : JSON.stringify(result);
+        // Measured, and cut, without the invisible characters the fence removes (round 4, correctness F2).
+        const visible = withoutInvisible(summary);
+        if (visible.length > UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS) truncatedFiles?.push(attachments.indexOf(att) + 1);
         parts.push(
-          `[Attachment: ${filename} (${att.type}, ${extractionInput.mimeType ?? mimeType})]\n${summary}`,
+          // RR-UNTRUSTED-CONTENT-FENCE review m1: each file has its own cap inside the turn's one block.
+          `[Attachment: ${filename} (${att.type}, ${extractionInput.mimeType ?? mimeType})]\n${capUntrusted(visible, UNTRUSTED_ATTACHMENT_FILE_MAX_CHARS)}`,
         );
       } catch (err: any) {
         parts.push(
@@ -2132,10 +2182,16 @@ export class FlowOrchestratorService {
     // Enrich message with any uploaded document/PDF/image context so role detection
     // and the LLM prompt both see the attachment contents.
     const effectiveSessionId = sessionId || randomUUID();
-    const attachmentContext = await this.buildAttachmentContext(businessId, attachments);
+    // RR-UNTRUSTED-CONTENT-FENCE: the extraction is text a third party wrote. It is fenced, and it
+    // reaches the model as a message of its own beside the member's, never inside it.
+    const truncatedFiles: number[] = [];
+    const extraction = await this.buildAttachmentContext(businessId, attachments, truncatedFiles);
+    const attachmentContext = fenceUntrusted('attachment', extraction);
     const enrichedMessage = attachmentContext ? `${message}\n\n${attachmentContext}` : message;
+    // Review M2: a cut is told to the member in a line the server adds, which the model does not write.
+    const attachmentNotice = attachmentTruncationNotice(truncatedFiles, exceedsUntrustedCap('attachment', extraction));
 
-    const result = await (async (): Promise<FlowResponse> => {
+    let result = await (async (): Promise<FlowResponse> => {
     // Staff the turn if roles were not explicitly provided.
     //
     // An explicit `role` argument still pins the turn to exactly that hat — a
@@ -2143,7 +2199,9 @@ export class FlowOrchestratorService {
     // behaviour precisely.
     const authority: CrewResolution = role
       ? { primary: role, crew: [role], scores: {} as Record<BusinessRole, number> }
-      : await this.resolveTurnAuthority(businessId, enrichedMessage, conversationHistory, pageContext);
+      // Orchestrator acceptance review (security MINOR-1): the crew, and with it the tool menu and the
+      // governance ceiling, is staffed from the member's own words, never from an attachment's text.
+      : await this.resolveTurnAuthority(businessId, message, conversationHistory, pageContext);
     const detectedRole = authority.primary;
     const crew = authority.crew;
 
@@ -2187,7 +2245,7 @@ export class FlowOrchestratorService {
     const selectedTools = await this.selectToolsForRequest(
       businessId,
       crew,
-      `${enrichedMessage}\n${pageContext?.route ?? ''}`,
+      `${message}\n${pageContext?.route ?? ''}`,
       envelope,
       userId,
     );
@@ -2347,7 +2405,9 @@ ${triage.standingContext}`;
       }
     }
 
-    messages.push({ role: 'user', content: enrichedMessage });
+    if (attachmentContext) messages.push({ role: 'user', content: attachmentContext });
+    messages.push({ role: 'user', content: message });
+    withUntrustedContentRuleWhereFenced(messages);
 
     try {
       const gatewayResponse = await this.aiUsage.trackAndComplete(
@@ -2511,7 +2571,7 @@ ${triage.standingContext}`;
         undefined,
         'flow_chat',
         {
-          messages: followUpMessages,
+          messages: withUntrustedContentRuleWhereFenced(followUpMessages),
           maxTokens: 500,
           temperature: 0.7,
         },
@@ -2534,6 +2594,9 @@ ${triage.standingContext}`;
       throw error;
     }
     })();
+    if (attachmentNotice) {
+      result = { ...result, reply: result.reply ? `${attachmentNotice}\n\n${result.reply}` : attachmentNotice };
+    }
 
     // Persist the turn to the FlowSession so it can be resumed later.
     const userMessage: FlowMessage = {
@@ -2579,8 +2642,14 @@ ${triage.standingContext}`;
     const envelope = this.serverEnvelope(server);
     // Enrich message with uploaded document/image context.
     const effectiveSessionId = sessionId || randomUUID();
-    const attachmentContext = await this.buildAttachmentContext(businessId, attachments);
+    // RR-UNTRUSTED-CONTENT-FENCE: the extraction is text a third party wrote. It is fenced, and it
+    // reaches the model as a message of its own beside the member's, never inside it.
+    const truncatedFiles: number[] = [];
+    const extraction = await this.buildAttachmentContext(businessId, attachments, truncatedFiles);
+    const attachmentContext = fenceUntrusted('attachment', extraction);
     const enrichedMessage = attachmentContext ? `${message}\n\n${attachmentContext}` : message;
+    // Review M2: a cut is told to the member in a line the server adds, which the model does not write.
+    const attachmentNotice = attachmentTruncationNotice(truncatedFiles, exceedsUntrustedCap('attachment', extraction));
 
     // Staff the turn if roles were not explicitly provided.
     //
@@ -2589,7 +2658,9 @@ ${triage.standingContext}`;
     // behaviour precisely.
     const authority: CrewResolution = role
       ? { primary: role, crew: [role], scores: {} as Record<BusinessRole, number> }
-      : await this.resolveTurnAuthority(businessId, enrichedMessage, conversationHistory, pageContext);
+      // Orchestrator acceptance review (security MINOR-1): the crew, and with it the tool menu and the
+      // governance ceiling, is staffed from the member's own words, never from an attachment's text.
+      : await this.resolveTurnAuthority(businessId, message, conversationHistory, pageContext);
     const detectedRole = authority.primary;
     const crew = authority.crew;
 
@@ -2608,6 +2679,11 @@ ${triage.standingContext}`;
       };
       return;
     }
+    // content_delta chunks are cumulative (replace semantics), so the line leads every one of them and
+    // the content saved with the turn, not only the first (round 4, correctness F1).
+    const shown = (content: string): string =>
+      attachmentNotice ? (content ? `${attachmentNotice}\n\n${content}` : attachmentNotice) : content;
+    if (attachmentNotice) yield { type: 'content_delta', content: attachmentNotice };
 
     // PR195-PORT, PR195-KEY-GATES review repair (SEC-P195KG-2): as chat(), the figures this member may read (the
     // viewer projection); a turn with no member, none.
@@ -2637,7 +2713,7 @@ ${triage.standingContext}`;
     const selectedTools = await this.selectToolsForRequest(
       businessId,
       crew,
-      `${enrichedMessage}\n${pageContext?.route ?? ''}`,
+      `${message}\n${pageContext?.route ?? ''}`,
       envelope,
       userId,
     );
@@ -2706,7 +2782,9 @@ ${triage.standingContext}`;
       }
     }
 
-    messages.push({ role: 'user', content: enrichedMessage });
+    if (attachmentContext) messages.push({ role: 'user', content: attachmentContext });
+    messages.push({ role: 'user', content: message });
+    withUntrustedContentRuleWhereFenced(messages);
 
     // Publish the thalamic verdict before the answer starts. Nothing branches
     // on this — it exists so the tier distribution over real traffic can be
@@ -2839,7 +2917,7 @@ ${triage.standingContext}`;
           fullContent += chunk.content;
           // Yield cumulative content so clients can render with replace
           // semantics (raw provider deltas are fragments).
-          yield { type: 'content_delta', content: fullContent };
+          yield { type: 'content_delta', content: shown(fullContent) };
         }
 
         if (chunk.type === 'tool_call_delta' && chunk.toolCall) {
@@ -2880,7 +2958,7 @@ ${triage.standingContext}`;
           message,
           enrichedMessage,
           attachments,
-          fullContent,
+          shown(fullContent),
           undefined,
           undefined,
           undefined,
@@ -2923,7 +3001,7 @@ ${triage.standingContext}`;
 
       if (blocked.length > 0) {
         const blockMessage = `I can't execute that action right now: ${blocked.map(b => b.decision.reason).join('; ')}`;
-        yield { type: 'content_delta', content: blockMessage };
+        yield { type: 'content_delta', content: shown(blockMessage) };
         yield* this.finalizeStreamSession(
           businessId,
           effectiveSessionId,
@@ -2931,7 +3009,7 @@ ${triage.standingContext}`;
           message,
           enrichedMessage,
           attachments,
-          blockMessage,
+          shown(blockMessage),
           toolCalls,
           undefined,
           undefined,
@@ -2961,7 +3039,7 @@ ${triage.standingContext}`;
         ).join('\n');
 
         const formalMessage = `These actions require formal approval and have been added to your approval queue:\n${approvalMessages}`;
-        yield { type: 'content_delta', content: formalMessage };
+        yield { type: 'content_delta', content: shown(formalMessage) };
         yield* this.finalizeStreamSession(
           businessId,
           effectiveSessionId,
@@ -2969,7 +3047,7 @@ ${triage.standingContext}`;
           message,
           enrichedMessage,
           attachments,
-          formalMessage,
+          shown(formalMessage),
           toolCalls,
           undefined,
           undefined,
@@ -3000,7 +3078,7 @@ ${triage.standingContext}`;
           message,
           enrichedMessage,
           attachments,
-          fullContent,
+          shown(fullContent),
           toolCalls,
           undefined,
           pendingConfirmations,
@@ -3044,7 +3122,7 @@ ${triage.standingContext}`;
         undefined,
         'flow_chat_stream',
         {
-          messages: followUpMessages,
+          messages: withUntrustedContentRuleWhereFenced(followUpMessages),
           maxTokens: 500,
           temperature: 0.7,
         },
@@ -3056,7 +3134,7 @@ ${triage.standingContext}`;
           // Cumulative, continuing from the pre-tool text so the client
           // can keep rendering with replace semantics.
           const combined = fullContent ? `${fullContent}\n\n${followUpContent}` : followUpContent;
-          yield { type: 'content_delta', content: combined };
+          yield { type: 'content_delta', content: shown(combined) };
         }
       }
 
@@ -3067,7 +3145,7 @@ ${triage.standingContext}`;
         message,
         enrichedMessage,
         attachments,
-        followUpContent,
+        shown(followUpContent),
         toolCalls,
         toolResults,
         undefined,
