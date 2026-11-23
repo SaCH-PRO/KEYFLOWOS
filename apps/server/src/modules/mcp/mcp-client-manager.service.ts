@@ -20,17 +20,30 @@ function safeHost(url: string): string {
 }
 
 /**
- * An error message fit for the log: the server's url, in the form it was
- * configured and in the normalized form fetch quotes, any other url (cut to
- * its host), and the url's user, password and query are all removed. A url may
- * carry credentials (user:pw@, ?token=), and errors quote it.
+ * An error message fit for the log. A url may carry credentials (user:pw@,
+ * ?token=) and errors quote it, so, in order:
+ * 1. the server's url, as configured or in the normalized form fetch quotes,
+ *    and whatever url text follows it, becomes `<url host>`;
+ * 2. any other url becomes `<url host>` (its user, path and query go);
+ * 3. the url's user, password and query values of 3 or more characters, raw,
+ *    decoded and form-encoded, are removed wherever they still appear, in any
+ *    letter case. Shorter values are left: they would erase ordinary words.
+ * A thrown value that cannot be printed is logged as `<unprintable error>`.
  */
 function logSafe(err: unknown, configUrl: string): string {
-  let message = String((err as Error)?.message ?? err);
-  const fragments = [configUrl];
+  let message: string;
+  try {
+    message = String((err as Error)?.message ?? err);
+  } catch {
+    return '<unprintable error>';
+  }
+  const host = safeHost(configUrl);
+  const wholes = [configUrl];
+  const fragments: string[] = [];
   try {
     const u = new URL(configUrl);
-    fragments.push(u.href, u.username, u.password, u.search, u.search.slice(1));
+    wholes.push(u.href);
+    fragments.push(u.username, u.password, u.search.slice(1));
     for (const part of [u.username, u.password]) {
       try {
         fragments.push(decodeURIComponent(part));
@@ -38,14 +51,22 @@ function logSafe(err: unknown, configUrl: string): string {
         // not decodable: the encoded form is already listed
       }
     }
-    for (const value of u.searchParams.values()) fragments.push(value, encodeURIComponent(value));
+    for (const value of u.searchParams.values()) {
+      fragments.push(value, encodeURIComponent(value), new URLSearchParams({ v: value }).toString().slice(2));
+    }
   } catch {
     // an unparsable url never connects; its raw form is already listed
   }
-  for (const fragment of fragments.filter((f) => f.length >= 3).sort((a, b) => b.length - a.length)) {
-    message = message.split(fragment).join('<redacted>');
+  const MARK = '\u0000mcp-url\u0000';
+  for (const whole of wholes.filter(Boolean).sort((a, b) => b.length - a.length)) {
+    message = message.split(whole).join(MARK);
   }
-  return message.replace(/[a-z][a-z0-9+.-]*:\/\/[^\s'"<>]+/gi, (url) => `<url ${safeHost(url)}>`);
+  message = message.split(MARK).map((piece, index) => (index === 0 ? piece : piece.replace(/^[^\s'"<>]*/, ''))).join(`<url ${host}>`);
+  message = message.replace(/[a-z][a-z0-9+.-]*:\/\/[^\s'"<>]+/gi, (url) => `<url ${safeHost(url)}>`);
+  for (const fragment of [...new Set(fragments)].filter((f) => f.length >= 3).sort((a, b) => b.length - a.length)) {
+    message = message.replace(new RegExp(fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '[redacted]');
+  }
+  return message;
 }
 
 interface ServerEntry {

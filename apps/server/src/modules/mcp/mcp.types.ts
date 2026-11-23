@@ -51,11 +51,11 @@ function validBusinessIds(value: unknown): value is string[] {
  * Reads MCP_REMOTE_SERVERS. Unset or empty: no servers, nothing logged. A value
  * that is not a JSON array serves nothing, with an error log (`log`). An entry
  * is dropped with an error log when it lacks a string key or url, when its key
- * is empty or contains "__", when its url does not parse or is not http(s),
- * when an earlier kept entry already uses its key, or when it has no valid
- * `businessIds`. An `enabled: false` entry with a usable
- * key is skipped without a log. The log names the server's key only, never its
- * url or token.
+ * is empty, contains "__" or ends in "_", when its url does not parse or is not
+ * http(s), when an earlier kept entry already uses its key, or when it has no
+ * valid `businessIds`. An `enabled: false` entry with a usable key and url is
+ * skipped without a log. The log names the server's key only, never its url or
+ * token.
  */
 export function loadMcpServerConfigs(log: ConfigLog = () => undefined): McpServerConfig[] {
   const raw = process.env.MCP_REMOTE_SERVERS;
@@ -80,8 +80,8 @@ export function loadMcpServerConfigs(log: ConfigLog = () => undefined): McpServe
       log(`MCP_REMOTE_SERVERS entry ${label} dropped: it needs a string key and url`);
       return;
     }
-    if (c.key.length === 0 || c.key.includes('__')) {
-      log(`MCP server ${label} dropped: a key must be non-empty and may not contain "__"`);
+    if (c.key.length === 0 || c.key.includes('__') || c.key.endsWith('_')) {
+      log(`MCP server ${label} dropped: a key must be non-empty, may not contain "__" and may not end in "_"`);
       return;
     }
     if (!isHttpUrl(c.url)) {
