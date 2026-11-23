@@ -64,6 +64,7 @@ const ID = {
   gone: `${P}gone`, // purged, then its row hard-deleted
   plantedEvent: `${P}plantedEvent`, // an invoice row whose request body carried a planted contactId
   routeEvent: `${P}routeEvent`, // a row naming the person only by the route's :contactId
+  busEvent: `${P}busEvent`, // a KEY cortex bus audit row: subject_type 'Contact' (capitalised), the contact nested in after
 
   forgedEvent: `${P}forgedEvent`,
 };
@@ -418,10 +419,21 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
       },
     });
 
+    // The KEY cortex event bus writes subject_type from the bridge's entityType,
+    // capitalised ('Contact'), with the whole contact nested in its payload.
+    await db.businessEvent.create({
+      data: {
+        id: ID.busEvent, businessId: ID.bizA, eventType: 'contact.updated', subjectType: 'Contact', subjectId,
+        actorType: 'ai', actorId: 'key_cortex', action: 'PUBLISHED', source: 'key_cortex_event_bus',
+        after: { contact: { id: subjectId, email: PII.email, phone: PII.phone }, businessId: ID.bizA },
+        metadata: { importance: 'normal' },
+      },
+    });
+
     const rows = await waitForEvents((r) =>
       r.filter((e) => e.subject_id === subjectId).length >= 2 &&
       r.some((e) => e.subject_id === bystanderId) && r.some((e) => e.subject_id === cancellerId));
-    const own = rows.filter((e) => e.subject_id === subjectId);
+    const own = rows.filter((e) => e.subject_id === subjectId && e.id !== ID.busEvent);
     expect(own.map((e) => e.event_type).sort()).toEqual(['contact.create', 'contact.update']);
     expect(JSON.stringify(own.map(textOf))).toContain(PII.email);
     expect(own.every((e) => typeof e.metadata?.ip === 'string')).toBe(true);
@@ -515,7 +527,7 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
     const rows = await waitForEvents((r) => r.filter((e) => e.subject_id === subjectId && e.event_type === 'contact.update').length === 2);
 
     for (const row of rows) if (row.id !== ID.plantedEvent) holdsNoSecret(row, SECRETS);
-    const subjectRows = rows.filter((e) => e.subject_id === subjectId || e.id === ID.noteEvent || e.subject_id === forgetRequestId);
+    const subjectRows = rows.filter((e) => (e.subject_id === subjectId && e.id !== ID.busEvent) || e.id === ID.noteEvent || e.subject_id === forgetRequestId);
     expect(subjectRows.map((e) => e.event_type).sort()).toEqual(['contact.create', 'contact.create', 'contact.create', 'contact.update', 'contact.update']);
     for (const row of subjectRows) {
       expect(row.before, `${row.event_type} ${row.subject_id} before`).toBeNull();
@@ -526,6 +538,8 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
     const planted = rows.find((e) => e.id === ID.plantedEvent)!;
     expect(planted.before, 'a planted body key does not scrub the row').toEqual({ total: 77, contactId: subjectId });
     expect(planted.metadata?.ip).toBe('203.0.113.78');
+    const bus = rows.find((e) => e.id === ID.busEvent)!;
+    expect(bus).toMatchObject({ before: null, after: null, metadata: {}, subject_type: 'Contact' });
     const routed = rows.find((e) => e.id === ID.routeEvent)!;
     expect(routed).toMatchObject({ before: null, after: null });
     expect(routed.metadata).toEqual({ route: '/crm/businesses/:businessId/contacts/:contactId/messages', httpMethod: 'POST', routeContactId: subjectId });
@@ -557,10 +571,12 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
     // The create, the first PATCH, the note, relationship and refer rows and
     // the duplicate's row. The forget row and the held PATCH were written
     // without snapshots, so there was nothing to scrub.
-    expect(entry.after.erased.businessEventsScrubbed).toBe(7); // and the route-param row
+    expect(entry.after.erased.businessEventsScrubbed).toBe(8); // and the route-param and bus rows
     // Honest scope: rows that name the person only inside a nested structure
     // (a duplicate check, an import) are not reached by id.
     expect(entry.after.notSwept).toMatch(/nested/);
+    // SEC-1: the request body is never read, so a row naming the person only there is not reached.
+    expect(entry.after.notSwept).toMatch(/request body/);
   });
 
   it('a write after the purge that names the merged duplicate holds no personal data', async () => {

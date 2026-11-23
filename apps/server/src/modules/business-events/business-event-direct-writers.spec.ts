@@ -46,6 +46,25 @@ describe('direct business_events writers drop a forgotten person (V1-72 review, 
     expect(data.correlationId).toBe('corr_1');
   });
 
+  it('the event bus audit in the bridge\'s real shape (entityType \'Contact\', the contact nested) of a forgotten contact writes no payload', async () => {
+    const p = prisma(true);
+    const bus = new KeyCortexEventBusService(p as never);
+    await (bus as any).persistAudit({
+      id: 'e3', type: 'contact.updated', businessId: 'biz_1', source: 'system',
+      payload: { contact: { id: 'c_forgotten', email: SECRET }, businessId: 'biz_1' },
+      metadata: { entityType: 'Contact', entityId: 'c_forgotten' },
+    });
+    expect(p.client.$queryRaw).toHaveBeenCalled();
+    expect(JSON.stringify(p.create.mock.calls[0][0].data)).not.toContain(SECRET);
+  });
+
+  it('KEY analytics properties cannot set routeContactId (it names a contact only when the interceptor records it)', async () => {
+    const p = prisma(false);
+    const svc = new AnalyticsAdapterService({} as never, {} as never, p as never);
+    await (svc as any).trackEvent({ businessId: 'biz_1', eventName: 'viewed', contactId: 'c_live', properties: { url: '/', routeContactId: 'c_other' }, actorId: 'key' });
+    expect(p.create.mock.calls[0][0].data.metadata).toEqual({ url: '/' });
+  });
+
   it('the event bus audit of a contact that is not forgotten keeps its payload', async () => {
     const p = prisma(false);
     const bus = new KeyCortexEventBusService(p as never);

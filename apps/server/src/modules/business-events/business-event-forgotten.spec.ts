@@ -92,6 +92,10 @@ describe('contactIdsOfEvent: only server-derived data names a contact (V1-72 rev
     }).sort()).toEqual(['c_1', 'c_from', 'c_route', 'c_target', 'c_to', 'rel_1']);
   });
 
+  it('a contact subject is recognised whatever its casing (the KEY cortex bus writes \'Contact\')', () => {
+    expect(contactIdsOfEvent({ subjectType: 'Contact', subjectId: 'c_1', after: { contact: { id: 'c_1' } } })).toEqual(['c_1']);
+  });
+
   it('never reads the request body (before): a planted key names no one', () => {
     expect(contactIdsOfEvent({ subjectType: 'invoice', subjectId: 'inv_1', before: { contactId: 'c_planted' }, after: { id: 'inv_1' } })).toEqual([]);
   });
