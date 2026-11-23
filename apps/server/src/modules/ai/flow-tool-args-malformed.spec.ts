@@ -158,8 +158,10 @@ describe('Flow chat: a tool call with malformed arguments never runs (RR-TOOL-AR
     expect(t.executeTool.mock.calls[0][1]).toBe('crm_list_contacts');
     expect(t.governance.evaluate).toHaveBeenCalledTimes(1);
 
+    // review round 1: the refused call is announced too, so the member's plan card shows a step that then reads "Failed: not run ..."
     const announced = chunks.find((c) => c.type === 'tool_calls');
-    expect(announced.toolCalls.map((tc: any) => tc.id)).toEqual(['call_ok']);
+    expect(announced.toolCalls.map((tc: any) => tc.id)).toEqual(['call_bad', 'call_ok']);
+    expect(announced.toolCalls[0]).toMatchObject({ name: 'crm_create_contact', arguments: {}, description: NOT_RUN('crm_create_contact') });
     const results = chunks.find((c) => c.type === 'tool_results').toolResults as FlowToolResult[];
     expect(results.map((r) => r.toolCallId)).toEqual(['call_bad', 'call_ok']);
     expect(results[0]).toMatchObject({ success: false, error: NOT_RUN('crm_create_contact'), notExecuted: true });
@@ -199,6 +201,57 @@ describe('Flow chat: a tool call with malformed arguments never runs (RR-TOOL-AR
     expect(chunks.some((ch) => ch.type === 'error')).toBe(false);
     expect(s.executeTool).toHaveBeenCalledTimes(2);
     expect(chunks.find((ch) => ch.type === 'tool_calls').toolCalls.map((tc: any) => tc.id)).toEqual(['call_1', 'call_2']);
+  });
+
+  it('review round 1: results keep the model\'s call order when refused and parsed calls interleave, one result per call, even with a duplicated id', async () => {
+    const t = makeOrchestrator([
+      { id: 'c1', name: 'crm_create_contact', arguments: '{bad' },
+      { id: 'c2', name: 'crm_list_contacts', arguments: '{"query":"A"}' },
+      { id: 'c3', name: 'crm_create_contact', arguments: '[]' },
+      { id: 'c2', name: 'crm_list_contacts', arguments: '{"query":"B"}' },
+    ]);
+    const result = await t.orchestrator.chat(BIZ, 'go', [], undefined, undefined, undefined, undefined, undefined, USER);
+    expect(t.executeTool).toHaveBeenCalledTimes(2);
+    const results = result.toolResults ?? [];
+    expect(results).toHaveLength(4);
+    expect(results.map((r) => [r.toolCallId, r.success])).toEqual([['c1', false], ['c2', true], ['c3', false], ['c2', true]]);
+    const followUp = t.trackAndComplete.mock.calls[1][3].messages as Array<Record<string, any>>;
+    expect(followUp.filter((m) => m.role === 'tool')).toHaveLength(4);
+  });
+
+  it('review round 1: whitespace-only arguments are not "no arguments"; they are refused like any text that is not a JSON object', async () => {
+    const t = makeOrchestrator([{ id: 'call_bad', name: 'crm_create_contact', arguments: '   ' }, MALFORMED_THEN_VALID[1]]);
+    await t.orchestrator.chat(BIZ, 'go', [], undefined, undefined, undefined, undefined, undefined, USER);
+    expect(t.executeTool).toHaveBeenCalledTimes(1);
+    expect(t.executeTool.mock.calls[0][1]).toBe('crm_list_contacts');
+  });
+
+  it('review round 1: when governance blocks a sibling call, the refusal is still in the turn\'s tool results and the saved session (complete path)', async () => {
+    const t = makeOrchestrator(MALFORMED_THEN_VALID);
+    t.governance.evaluate.mockResolvedValue({ allowed: false, tier: 3, reason: 'pinned block', requiresQuickConfirm: false, requiresFormalApproval: false, requiresAdminApproval: false });
+    const result = await t.orchestrator.chat(BIZ, 'go', [], undefined, undefined, undefined, undefined, undefined, USER);
+    expect(result.reply).toMatch(/can't execute that action right now: pinned block/);
+    expect(t.executeTool).not.toHaveBeenCalled();
+    expect(result.toolResults?.map((r) => r.toolCallId)).toEqual(['call_bad']);
+    expect(result.toolResults?.[0]).toMatchObject({ notExecuted: true, error: NOT_RUN('crm_create_contact') });
+    const saved = t.saveConversationHistory.mock.calls[0][2] as Array<Record<string, any>>;
+    expect(saved.at(-1).toolResults.map((r: any) => r.toolCallId)).toEqual(['call_bad']);
+  });
+
+  it('review round 1: when a sibling call needs quick confirmation, the refusal is still reported and never becomes a pending confirmation (stream path)', async () => {
+    const t = makeOrchestrator(MALFORMED_THEN_VALID);
+    t.governance.evaluate.mockResolvedValue({ allowed: true, tier: 2, reason: 'confirm', requiresQuickConfirm: true, requiresFormalApproval: false, requiresAdminApproval: false });
+    (t.orchestrator as any).issuePendingConfirmations = vi.fn(async (_biz: string, checks: any[]) =>
+      checks.map(({ tc }) => ({ toolCallId: tc.id, toolName: tc.name, description: tc.name, confirmationId: `conf_${tc.id}` })),
+    );
+    const chunks = await streamAll(t.orchestrator);
+    expect(t.executeTool).not.toHaveBeenCalled();
+    const confirm = chunks.find((c) => c.type === 'confirmation_required');
+    expect(confirm.pendingConfirmations.map((p: any) => p.toolCallId)).toEqual(['call_ok']);
+    const results = chunks.find((c) => c.type === 'tool_results');
+    expect(results.toolResults.map((r: any) => r.toolCallId)).toEqual(['call_bad']);
+    // finalizeStreamSession(biz, session, history, message, enriched, attachments, content, toolCalls, toolResults, pending, usage, user)
+    expect(t.finalizeStreamSession.mock.calls[0][8].map((r: any) => r.toolCallId)).toEqual(['call_bad']);
   });
 
   it('every call malformed: nothing runs, nothing is put to governance, the model still gets the turn back with each refusal', async () => {

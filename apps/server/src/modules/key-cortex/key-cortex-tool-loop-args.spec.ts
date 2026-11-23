@@ -79,7 +79,7 @@ describe('KeyCortexToolLoopService: malformed tool arguments never run (RR-TOOL-
   });
 
   it("arguments that are valid JSON but not an object ('[]', '\"x\"', 'null', '3') are refused the same way", async () => {
-    for (const bad of ['[]', '"x"', 'null', '3']) {
+    for (const bad of ['[]', '"x"', 'null', '3', '   ']) {
       toolRegistry.execute.mockClear();
       safety.check.mockClear();
       autonomyOrchestrator.evaluate.mockClear();
