@@ -6,6 +6,8 @@
  * shape that the reasoning engine can consume.
  */
 
+import type { SemanticMemory } from '../ai/semantic-memory.service';
+
 export type MemorySourceType =
   | 'ai_memory'
   | 'ai_memory_embedding'
@@ -25,6 +27,34 @@ export type MemorySourceType =
  * (readersOwnPromptMemory) reads it to withhold the genome's money memory events from a reader without revenue read.
  */
 export const GENOME_ROW_METADATA_KEY = 'genomeRow';
+
+/**
+ * MEM-UNIFIED-SEMANTIC-SIGHT (D-257, D-234): the key under which an ai_memory_embedding fragment's metadata carries the
+ * source its semantic copy was resolved to (SemanticSource). UnifiedMemoryRetrievalService writes it after the copy's own
+ * metadata, so a writer's metadata cannot stand in for it.
+ */
+export const SEMANTIC_SOURCE_METADATA_KEY = 'semanticSource';
+
+/** MEM-UNIFIED-SEMANTIC-SIGHT: the source of a semantic copy (ai_memory_embeddings' source_type and source_id). */
+export interface SemanticSource {
+  sourceType: string;
+  sourceId: string;
+}
+
+/** MEM-UNIFIED-SEMANTIC-SIGHT (delta A2): a type-only brand; it exists at compile time alone. */
+declare const SEMANTIC_SIGHT_BRAND: unique symbol;
+
+/**
+ * MEM-UNIFIED-SEMANTIC-SIGHT (D-257, D-234): what makes a semantic read one reader's: MEM-SEMANTIC-SIGHT's
+ * readerSearchOptions (semantic-memory-sight.ts), passed to SemanticMemoryService.search as is. Branded (delta A2): only
+ * readerSearchOptions makes one, so no caller hands the read an admit-all object literal by accident (tests build theirs
+ * through test/helpers/semantic-sight.js).
+ */
+export interface SemanticSight {
+  readonly [SEMANTIC_SIGHT_BRAND]: true;
+  includeDocumentExtractionCopies: boolean;
+  visibleTo: (hits: SemanticMemory[]) => Promise<boolean[]>;
+}
 
 /** FU-KEY-MEMORY-MONEY-SIGHT: the GenomeMemoryEvent columns a genome fragment carries (GENOME_ROW_METADATA_KEY). */
 export interface GenomeRowColumns {
@@ -98,4 +128,10 @@ export interface MemoryRetrievalOptions {
    * place in its limits). A prompt's read passes the reader's revenue sight (readsDocumentExtractions).
    */
   documentExtractions?: boolean;
+  /**
+   * MEM-UNIFIED-SEMANTIC-SIGHT (D-257, D-234, D-100): the reader's semantic sight (readerSearchOptions for the prompt's
+   * reader and module sight). With a query, every semantic hit passes it before the limit is cut. A read with a query and
+   * no sight keeps no semantic hit (fail closed): a hit's text is whatever its source holds, an invoice amount included.
+   */
+  semanticSight?: SemanticSight;
 }
