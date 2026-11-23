@@ -39,6 +39,9 @@
  *     `node`. Residual limit of a line-based reader: a `node --test` line on a
  *     line of its own inside a here-doc or inside `if false; then ... fi`, or
  *     after `true ||`, is credited;
+ *   - `time` anywhere but the first word of a pipeline (`CI=1 time node`,
+ *     `timeout 5 time node`, `true | time node`): there it is the external
+ *     program, present on some runners and not others, so it is refused;
  *   - a Node flag with its value in a separate token before `--test`
  *     (`node --import ./setup.mjs --test f`): names nothing, so CI fails
  *     loudly; write `--import=./setup.mjs`;
@@ -172,9 +175,14 @@ export function nodeTestPatterns(shell) {
     .map((line) => line.replace(/(^|[\s;&|()])#.*$/, '$1'))
     .join('\n');
   const patterns = [];
-  for (const segment of uncommented.split(/\r?\n|;|&&|\|\||\|/)) {
-    let tokens = segment.trim().split(/\s+/).filter(Boolean);
-    let head = true; // still at the first word of the pipeline: nothing but the keyword `time` read so far
+  // A pipeline ends at `;`, `&&`, `||` or a newline; `|` joins commands inside one. Only the first command of
+  // a pipeline is its head, where bash reads `time` as the keyword.
+  const commands = uncommented
+    .split(/\r?\n|;|&&|\|\|/)
+    .flatMap((pipeline) => pipeline.split('|').map((command, k) => ({ command, head: k === 0 })));
+  for (const { command, head: atHead } of commands) {
+    let tokens = command.trim().split(/\s+/).filter(Boolean);
+    let head = atHead; // still at the first word of the pipeline: nothing but the keyword `time` read so far
     const stripEnv = () => {
       while (tokens.length && ENV_ASSIGNMENT.test(tokens[0])) {
         tokens.shift();
