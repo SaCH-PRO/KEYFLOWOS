@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable, Logger, Inject } from '@nestjs/common';
 import { genomeReaderReadsRevenue, financialProposalsWithProvenance, isMoneyLabel, PROPOSAL_CLASSIFY_SELECT, proposalTextStatesMoney, structuredValueStatesMoney, type GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
+import { dnaSectionViewForReader, isDnaSectionEvent, isGenomeEvolutionEvent, readableGenomeEvolutionEvents, redactedDnaSectionEvent } from '../key-autonomy/key-action-genome-projection';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { LEVEL_RANK, memberModuleLevel, rankOf } from '../../core/authority/module-vocabulary';
@@ -43,6 +44,28 @@ function eventTextStatesMoney(e: { payload?: unknown; metadata?: unknown }): boo
     if (structuredValueStatesMoney(result)) return true;
   }
   return false;
+}
+
+/**
+ * Round 9 (security MAJOR-1): a lifecycle row's payload with every autonomy rule-trace entry's `metadata` left out. The
+ * orchestrator's metadata holds its counts and scores; the genome gate's scores average the affected domains' health,
+ * revenue quality and finance among them (D-233), and a rule may record an amount. A reader without revenue read is
+ * served the row this way, and the row is classified as served. Each entry's rule, source, result and reason stay; a
+ * trace that is not a list is left as it is (and read whole). Returns the payload itself when there is nothing to drop.
+ */
+function ruleTraceWithoutMetadata(payload: unknown): unknown {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !('ruleTrace' in payload)) return payload;
+  const { ruleTrace, ...rest } = payload as Record<string, unknown>;
+  if (!Array.isArray(ruleTrace)) return payload;
+  if (!ruleTrace.some((entry) => entry && typeof entry === 'object' && !Array.isArray(entry) && 'metadata' in entry)) return payload;
+  return {
+    ...rest,
+    ruleTrace: ruleTrace.map((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
+      const { metadata: _metadata, ...kept } = entry as Record<string, unknown>;
+      return kept;
+    }),
+  };
 }
 
 /** The most rows a reader may ask one timeline read for, and the most rows that read scans before it answers what it has. */
@@ -319,7 +342,7 @@ export class TemporalFlowService {
    * with no `reader` argument (the scheduler, KEY tools applying their own authority) is unchanged; a request with no
    * user passes `null` and reads none.
    */
-  private async forReader<E extends { entityType?: string | null; entityId?: string | null; title?: string | null; description?: string | null; payload?: unknown; metadata?: unknown }>(
+  private async forReader<E extends { entityType?: string | null; entityId?: string | null; type?: string | null; title?: string | null; summary?: string | null; description?: string | null; payload?: unknown; metadata?: unknown; signals?: unknown }>(
     businessId: string,
     events: E[],
     reader: GenomeReader | null | undefined,
@@ -328,8 +351,24 @@ export class TemporalFlowService {
   ): Promise<E[]> {
     if (reader === undefined) return events;
     const proposals = events.filter((e) => e.entityType === 'key_action_proposal');
-    if (proposals.length === 0) return events;
+    const evolutions = events.filter((e) => isGenomeEvolutionEvent(e));
+    const dnaSections = events.filter((e) => isDnaSectionEvent(e));
+    if (proposals.length === 0 && evolutions.length === 0 && dnaSections.length === 0) return events;
     if (readsRevenue ?? (await genomeReaderReadsRevenue(this.prisma, businessId, reader ?? undefined))) return events;
+    // FU-KEY-ACTION-GENOME-PROJECTION (D-233, D-238): a genome-evolution decision row is served only when its proposal
+    // is read in this business, is of a non-money DNA section and nothing in it or the row states money (fail closed).
+    const evolutionFlags = await readableGenomeEvolutionEvents(this.prisma, businessId, evolutions);
+    const withheld = new Set<E>(evolutions.filter((_e, i) => !evolutionFlags[i]));
+    // Round 6: the DNA section row an approval (or a DNA edit) writes carries the same patch. Round 7: a non-money
+    // section's row whose data holds a figure or money is served with its data left out.
+    const redacted = new Map<E, E>();
+    for (const e of dnaSections) {
+      const view = dnaSectionViewForReader(e);
+      if (view === 'withhold') withheld.add(e);
+      else if (view === 'redact') redacted.set(e, redactedDnaSectionEvent(e));
+    }
+    if (withheld.size || redacted.size) events = events.filter((e) => !withheld.has(e)).map((e) => redacted.get(e) ?? e);
+    if (proposals.length === 0) return events;
     const ids = [...new Set(proposals.map((e) => e.entityId).filter((id): id is string => typeof id === 'string' && !!id))];
     let rows: Map<string, Record<string, unknown>>;
     try {
@@ -347,11 +386,26 @@ export class TemporalFlowService {
     const entries = [...rows.entries()];
     const flags = await financialProposalsWithProvenance(this.prisma, businessId, entries.map(([, row]) => row as never));
     const financial = new Map<string, boolean>(entries.map(([id], i) => [id, flags[i]]));
-    return events.filter((e) => {
-      if (e.entityType !== 'key_action_proposal') return true;
+    const served: E[] = [];
+    for (const e of events) {
+      if (e.entityType !== 'key_action_proposal') {
+        served.push(e);
+        continue;
+      }
       const known = e.entityId ? financial.get(e.entityId) : undefined;
-      return known === false && !isMoneyLabel(e.title) && !isMoneyLabel(e.description) && !eventTextStatesMoney(e);
-    });
+      // Round 9: the row as it is served (its rule-trace metadata left out) is the row that is classified.
+      const payload = ruleTraceWithoutMetadata(e.payload);
+      const view = payload === e.payload ? e : ({ ...e, payload } as E);
+      // The row's summary too (FU-KEY-ACTION-GENOME-PROJECTION: key.action.create_task copies the proposal's rationale there).
+      // Round 3 (security MINOR-1): the row's whole payload and signals are read, not only their named keys.
+      // Round 6 (correctness MINOR-2): the title and description are read as the summary is.
+      const readable = known === false && !isMoneyLabel(e.title) && !isMoneyLabel(e.description) && !isMoneyLabel(e.summary)
+        && !proposalTextStatesMoney(e.title) && !proposalTextStatesMoney(e.description)
+        && !proposalTextStatesMoney(e.summary) && !eventTextStatesMoney(view)
+        && !structuredValueStatesMoney(payload) && !structuredValueStatesMoney(e.signals);
+      if (readable) served.push(view);
+    }
+    return served;
   }
 
   /**

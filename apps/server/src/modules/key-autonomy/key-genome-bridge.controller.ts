@@ -5,11 +5,14 @@ import {
   Inject,
   Param,
   Post,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { PrismaService } from '../../core/prisma/prisma.service';
 import { GenomeRecommendationActionBridgeService } from './genome-recommendation-action-bridge.service';
+import { requireBridgeRevenue } from './key-action-genome-projection';
 import type {
   BridgeGenomeRecommendationResult,
   GenomeRecommendationActionKind,
@@ -22,13 +25,22 @@ export class KeyGenomeBridgeController {
   constructor(
     @Inject(GenomeRecommendationActionBridgeService)
     private readonly bridgeService: GenomeRecommendationActionBridgeService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
+
+  /** The request's reader ({ id, role } as AuthMiddleware attaches it); none reads no revenue. */
+  private reader(req?: { user?: { id?: string; role?: string } }) {
+    return req?.user?.id ? { id: req.user.id, role: req.user.role } : undefined;
+  }
 
   @Get('action-preview')
   async previewRecommendationAction(
     @Param('businessId') businessId: string,
     @Param('recommendationId') recommendationId: string,
+    @Req() req?: { user?: { id?: string; role?: string } },
   ): Promise<GenomeRecommendationActionPreview> {
+    // FU-KEY-ACTION-GENOME-PROJECTION (D-128, D-233): the preview carries a FINANCIAL recommendation's text.
+    await requireBridgeRevenue(this.prisma, businessId, recommendationId, this.reader(req), 'read');
     return this.bridgeService.previewRecommendationAction(businessId, recommendationId);
   }
 
@@ -37,7 +49,10 @@ export class KeyGenomeBridgeController {
     @Param('businessId') businessId: string,
     @Param('recommendationId') recommendationId: string,
     @Body() body: { actionKind?: GenomeRecommendationActionKind; confirmBridge?: boolean },
+    @Req() req?: { user?: { id?: string; role?: string } },
   ): Promise<BridgeGenomeRecommendationResult> {
+    // D-128's acting clause: acting on a FINANCIAL recommendation needs revenue write.
+    await requireBridgeRevenue(this.prisma, businessId, recommendationId, this.reader(req), 'write');
     return this.bridgeService.bridgeRecommendation({
       businessId,
       recommendationId,
