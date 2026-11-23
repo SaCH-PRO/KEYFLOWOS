@@ -38,10 +38,18 @@ function knowledgeSourceIdOf(sourceId: string): string {
 interface TemporalRow {
   id: string;
   entityType: string;
+  entityId?: string | null;
+  type?: string;
+  metadata?: unknown;
   sourceModule: string;
   sourceEventIds: string[];
   content: string;
 }
+/** The copy TemporalFlowMemoryService.createMemory embeds of a row: `<entityType>:<type> — <content>`. */
+function temporalCopyOf(row: TemporalRow): string {
+  return `${row.entityType}:${row.type} — ${row.content}`;
+}
+
 interface SourceEvent {
   id: string;
   type: string;
@@ -58,11 +66,17 @@ interface SourceEvent {
  * its entity type and source module name, the union of those every source event names (its module, type, source and
  * entity type), and revenue when a source event is money (a KEY proposal's event, or money in its title, summary or
  * description) or the summary's own text (or its copy's) states money. A source event that is gone, or that names no
- * module, needs every module (D-227: unclassified fails closed); so does a summary that names none at all.
+ * module, needs every module (D-227: unclassified fails closed); so does a summary that names none at all, and (review)
+ * one that counts more events than it records as its source (metadata.eventCount above sourceEventIds: summarizeChannel
+ * records 20 of up to 200), whose provenance is incomplete. The summarised entity's id (a channel's name) names modules
+ * too.
  */
 export function temporalMemoryModulesOf(row: TemporalRow, events: ReadonlyMap<string, SourceEvent>, copyContent?: string): CanonicalModule[] {
-  const modules = new Set<CanonicalModule>(modulesNamedBy(row.entityType, row.sourceModule));
+  const modules = new Set<CanonicalModule>(modulesNamedBy(row.entityType, row.sourceModule, row.entityId));
   const add = (list: readonly CanonicalModule[]) => list.forEach((module) => modules.add(module));
+  const meta = row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata) ? (row.metadata as Record<string, unknown>) : {};
+  const counted = meta.eventCount;
+  if (counted !== undefined && counted !== null && !(typeof counted === 'number' && counted <= (row.sourceEventIds ?? []).length)) add(EVENT_MODULES);
   for (const id of row.sourceEventIds ?? []) {
     const event = events.get(id);
     if (!event) {
@@ -83,9 +97,12 @@ export function temporalMemoryModulesOf(row: TemporalRow, events: ReadonlyMap<st
  * - an AiMemory copy ('memory') as its row: a document extraction (DOCUMENT_EXTRACTION_CATEGORY) only to a member reader
  *   with revenue read (readsDocumentExtractions, MEM-DOC-EXTRACTION-SIGHT); any other row as readersOwnPromptMemory
  *   serves AiMemory rows (business-wide);
- * - a temporal-memory summary ('temporal_memory') when the reader may read every module temporalMemoryModulesOf names;
- * - a knowledge-source chunk ('document'): its KnowledgeSource carries no classification (a statement or a menu alike),
- *   so only a member reader with revenue read (D-234 fail closed, as a document extraction);
+ * - a temporal-memory summary ('temporal_memory') when the copy holds what the row holds now (its writer's form,
+ *   `<entityType>:<type> — <content>`; a row is rewritten in place and keeps its old copies, whose provenance the row no
+ *   longer records: review) and the reader may read every module temporalMemoryModulesOf names;
+ * - a knowledge-source chunk ('document'): its KnowledgeSource carries no classification (a statement, a vendor bill or
+ *   a menu alike), so only a member reader with revenue and expenses read, as an unclassified document event needs
+ *   (MONEY_DOCUMENT_WORDS; D-234 fail closed);
  * - any other source type, or a source not found in the business: nobody (an unresolvable source fails closed).
  * A read that fails withholds every hit of the page (fail closed).
  */
@@ -109,7 +126,7 @@ export async function semanticHitsVisibleTo(
       temporalIds.length
         ? prisma.client.temporalFlowMemory.findMany({
             where: { businessId, id: { in: temporalIds } },
-            select: { id: true, entityType: true, sourceModule: true, sourceEventIds: true, content: true },
+            select: { id: true, entityType: true, entityId: true, type: true, metadata: true, sourceModule: true, sourceEventIds: true, content: true },
           })
         : [],
       knowledgeIds.length
@@ -139,10 +156,11 @@ export async function semanticHitsVisibleTo(
         }
         case TEMPORAL_MEMORY_SOURCE_TYPE: {
           const row = temporal.get(hit.sourceId);
-          return row ? temporalMemoryModulesOf(row, events, hit.content).every(who.sight) : false;
+          if (!row || hit.content !== temporalCopyOf(row)) return false;
+          return temporalMemoryModulesOf(row, events, hit.content).every(who.sight);
         }
         case KNOWLEDGE_CHUNK_SOURCE_TYPE:
-          return knowledge.has(knowledgeSourceIdOf(hit.sourceId)) && memberWithRevenue;
+          return knowledge.has(knowledgeSourceIdOf(hit.sourceId)) && memberWithRevenue && who.sight('expenses');
         default:
           return false;
       }

@@ -26,8 +26,8 @@ function triggerWriter(req: AuthenticatedRequest): string {
   return id;
 }
 
-/** MEM-SEMANTIC-SIGHT: the most hits GET .../agent/memory/search answers. */
-const MAX_SEARCH_LIMIT = 50;
+/** MEM-SEMANTIC-SIGHT: the most hits GET .../agent/memory/search answers (as a reader's timeline read, MAX_READER_LIMIT). */
+const MAX_SEARCH_LIMIT = 500;
 
 @Controller('ai')
 export class AgentController {

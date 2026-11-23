@@ -433,15 +433,21 @@ export class SemanticMemoryService {
       if (!params.visibleTo) return await page(limit, 0);
 
       // MEM-SEMANTIC-SIGHT: filtered before the limit is cut (see visibleTo).
+      // Review: each page doubles (fewer round trips past many withheld hits), and a hit is kept once (a copy written
+      // between two pages shifts the offset).
       const want = Math.max(0, Math.trunc(limit) || 0);
       const visible: SemanticMemory[] = [];
-      const batch = Math.max(want * 4, SEMANTIC_PAGE);
-      for (let skip = 0; visible.length < want && skip < MAX_SEMANTIC_SCAN; ) {
+      const seen = new Set<string>();
+      let batch = Math.max(want * 4, SEMANTIC_PAGE);
+      for (let skip = 0; visible.length < want && skip < MAX_SEMANTIC_SCAN; batch *= 2) {
         const take = Math.min(batch, MAX_SEMANTIC_SCAN - skip);
         const hits = await page(take, skip);
         const keep = await params.visibleTo(hits);
         hits.forEach((hit, i) => {
-          if (keep[i] === true) visible.push(hit);
+          if (keep[i] === true && !seen.has(hit.id)) {
+            seen.add(hit.id);
+            visible.push(hit);
+          }
         });
         skip += hits.length;
         if (hits.length < take) break;

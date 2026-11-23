@@ -2580,8 +2580,8 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
       });
       const asking = { question: QUESTION, semantic: http.semantic };
 
-      // The STAFF member backfills the business's semantic memory: one copy of every AiMemory row.
-      expect(await http.backfill(ID.member)).toBe(await db.aiMemory.count({ where: { businessId: ID.memBiz } }));
+      // The owner backfills (MEM-SEMANTIC-SIGHT: the backfill needs settings admin) the business's semantic memory: one copy of every AiMemory row.
+      expect(await http.backfill(ID.owner)).toBe(await db.aiMemory.count({ where: { businessId: ID.memBiz } }));
       expect(await memoryCopies()).toEqual(
         [
           FACT_COPY,
@@ -2623,7 +2623,7 @@ describe('a call whose caller names no actor (SEC-V19c-2)', () => {
       // row's copy only after the run has withdrawn the row.
       await db.aiMemory.create({ data: promotion('v19c_mps_emb_race', EMB.RACE) });
       holdRace = true;
-      const racing = http.backfill(ID.member);
+      const racing = http.backfill(ID.owner);
       await raceReached;
       await consolidation.run(ID.memBiz);
       expect(await db.aiMemory.count({ where: { businessId: ID.memBiz, key: 'learned:v19c_mps_emb_race' } })).toBe(0);

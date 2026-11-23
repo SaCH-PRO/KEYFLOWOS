@@ -2113,6 +2113,9 @@ export class FlowOrchestratorService {
     userId?: string,
     server?: FlowServerContext,
   ): Promise<string> {
+    // MEM-SEMANTIC-SIGHT review (D-203): a turn that names no member and no position (the support desk) sees only the
+    // conversation in front of it, as its perception block reads nothing: no semantic memory at all.
+    if (!userId && !server) return '';
     try {
       // MEM-DOC-EXTRACTION-SIGHT (D-234; orchestrator review COR-MDX-1): the copies of document extractions only for a
       // turn whose reader may read revenue (turnMemorySight, as the perception block reads), else none: the search
