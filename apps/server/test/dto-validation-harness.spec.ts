@@ -21,9 +21,10 @@
  * request) and the service is a stub that records what it was given: this spec
  * is about the pipe, not about who may call the route.
  *
- * Runs under the default config and vitest.e2e.config.ts, and is the proof for
- * every apps/server vitest config, since all of them use one transform (see
- * vitest.transform.config.ts).
+ * Runs under the default config and vitest.e2e.config.ts. Every apps/server
+ * vitest config uses the same transform (vitest.transform.config.ts);
+ * src/core/config/vitest-transform-coverage.spec.ts pins that wiring for each
+ * config file.
  */
 import 'reflect-metadata';
 import { INestApplication } from '@nestjs/common';

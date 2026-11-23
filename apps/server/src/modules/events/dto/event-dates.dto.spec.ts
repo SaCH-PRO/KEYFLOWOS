@@ -59,6 +59,14 @@ describe('CreateEventDto dates', () => {
     expect(r?.messages.join(' ')).toContain('startsAt');
   });
 
+  // isISO8601 accepts these, but Date cannot parse them: refused rather than
+  // stored as an Invalid Date (see iso-date.decorator.ts).
+  it.each(['20261201T100000Z', '2026-W49-2', '2026-335'])('refuses the ISO form %j that Date cannot parse', async (value) => {
+    const r = await refusal(CreateEventDto, { name: 'Launch', startsAt: value });
+    expect(r?.status).toBe(400);
+    expect(r?.messages.join(' ')).toContain('startsAt');
+  });
+
   it('still requires startsAt', async () => {
     const r = await refusal(CreateEventDto, { name: 'Launch' });
     expect(r?.status).toBe(400);

@@ -112,7 +112,7 @@ describe('KeyCortexReflectionService', () => {
   describe('honesty about missing capability', () => {
     it('never queries KeyCortexInsight — no such table exists', () => {
       const src = codeOf(KeyCortexReflectionService.prototype.constructor);
-      expect(src).toContain('class KeyCortexReflectionService');
+      expect(src).toContain('getLastReflectionSession');
       expect(src).not.toContain('KeyCortexInsight');
     });
 
@@ -120,7 +120,7 @@ describe('KeyCortexReflectionService', () => {
       // validateHypothesisAgainstSource was never implemented; the organ must
       // contribute no evidence rather than inventing supporting facts.
       const src = codeOf(KeyCortexReflectionService.prototype.constructor);
-      expect(src).toContain('class KeyCortexReflectionService');
+      expect(src).toContain('getLastReflectionSession');
       expect(src).not.toContain('validateHypothesisAgainstSource');
     });
   });

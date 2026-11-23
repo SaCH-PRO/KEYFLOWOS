@@ -4,13 +4,30 @@
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { vi } from 'vitest';
+import { afterAll, vi } from 'vitest';
 import { KeystoreService } from '../keystore.service';
 import { db } from '@keyflow/db';
 import { isValidStatusTransition } from '../types/keystore.types';
 import type { CreateOrderDto, CreateListingDto, UpdateOrderStatusDto } from '../dto';
 
 // Mock Prisma client
+/**
+ * FU-UNIT-MOCK-ISOLATION (vitest.unit.config.ts, isolate:false): this file's
+ * vi.mock must reach a module that other spec files also import. Without a
+ * registry reset, a copy evaluated by an earlier file in the worker is reused,
+ * bound to the real dependency, and the mock never applies (seen under
+ * --sequence.seed=12345 once FU-VITEST-DECORATOR-METADATA's swc transform kept
+ * constructor-type imports as runtime values, and on main at that seed for
+ * some of these files). Reset before this file's imports (hoisted with the
+ * mocks) and after its last test.
+ */
+vi.hoisted(() => {
+  vi.resetModules();
+});
+afterAll(() => {
+  vi.resetModules();
+});
+
 vi.mock('@keyflow/db', () => ({
   db: {
     keystoreServiceCategory: {

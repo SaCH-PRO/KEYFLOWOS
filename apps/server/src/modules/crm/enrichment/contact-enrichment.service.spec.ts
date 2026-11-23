@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
+import { afterAll, describe, it, expect, beforeEach, vi, type Mock } from 'vitest';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { ContactEnrichmentService } from './contact-enrichment.service';
 import type { EnrichmentProvider, ProviderOutcome } from './enrichment-provider';
@@ -6,6 +6,23 @@ import { CrmService } from '../crm.service';
 import { resolveCrmAccess } from '../crm-permissions.helper';
 
 // The member's access is stubbed; the visibility clause built from it is the real one.
+/**
+ * FU-UNIT-MOCK-ISOLATION (vitest.unit.config.ts, isolate:false): this file's
+ * vi.mock must reach a module that other spec files also import. Without a
+ * registry reset, a copy evaluated by an earlier file in the worker is reused,
+ * bound to the real dependency, and the mock never applies (seen under
+ * --sequence.seed=12345 once FU-VITEST-DECORATOR-METADATA's swc transform kept
+ * constructor-type imports as runtime values, and on main at that seed for
+ * some of these files). Reset before this file's imports (hoisted with the
+ * mocks) and after its last test.
+ */
+vi.hoisted(() => {
+  vi.resetModules();
+});
+afterAll(() => {
+  vi.resetModules();
+});
+
 vi.mock('../crm-permissions.helper', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../crm-permissions.helper')>()),
   resolveCrmAccess: vi.fn(),

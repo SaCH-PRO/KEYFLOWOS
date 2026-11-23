@@ -16,10 +16,14 @@ import swc from 'unplugin-swc';
  * WHAT IT MATCHES. The decorator settings of .swcrc and tsconfig.json:
  * legacy (experimentalDecorators) decorators, decoratorMetadata, class names
  * kept, target es2022 with define semantics for class fields (tsc's default
- * for that target, which is what the production build emits). Two things
- * differ from .swcrc on purpose: modules stay ES (vite runs ES modules; .swcrc
- * says commonjs for a standalone swc build), and .swcrc is not read
+ * for that target, which is what the production build emits; .swcrc leaves it
+ * to swc's default). Three things differ from .swcrc on purpose: modules stay
+ * ES (vite runs ES modules; .swcrc says commonjs for a standalone swc build);
+ * `loose` is off, since production is tsc, which has no loose mode, and at
+ * es2022 there is little left for it to loosen; and .swcrc is not read
  * (swcrc: false), so a change to it cannot silently change the test transform.
+ * src/core/config/vitest-transform-coverage.spec.ts checks every config uses
+ * this transform.
  *
  * ONE KNOWN DIFFERENCE FROM tsc. swc compiles a file at a time, without type
  * information, so a parameter typed as an enum gets the enum object in its
