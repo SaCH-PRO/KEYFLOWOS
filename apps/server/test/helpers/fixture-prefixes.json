@@ -1166,6 +1166,11 @@
       "prefix": "v71u_",
       "owner": "apps/server/test/memory-semantic-sight.integration.test.ts",
       "packet": "V1-71 (MEM-SEMANTIC-SIGHT)"
+    },
+    {
+      "prefix": "v74u_",
+      "owner": "apps/server/test/memory-unified-semantic-sight.integration.test.ts",
+      "packet": "V1-74 (MEM-UNIFIED-SEMANTIC-SIGHT)"
     }
   ],
   "pendingRenames": [],
