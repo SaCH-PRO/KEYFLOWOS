@@ -49,6 +49,7 @@
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import fs from "node:fs";
+import ts from "typescript";
 import path from "node:path";
 import { createElement, type ReactNode } from "react";
 import { render, screen, within, cleanup, renderHook, waitFor, fireEvent, act } from "@testing-library/react";
@@ -356,87 +357,71 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
 
   it("NMS-18 every row is a checked claim: each module justified, each citation true", () => {
     /**
-     * The decorator block of the handler whose @Get is at `at` (0-based): from the end of the previous member (a blank
-     * line, a lone "}", a line ending in ";" or a class opening "{") down to the method signature, so multi-line
-     * decorators and comment lines inside the stack are read whole (review round 2).
+     * Server code is read through the TypeScript parser (wave 3f closing reviews: a hand-rolled comment lexer kept
+     * misreading regex literals and template strings). Comments are not in the syntax tree, so a commented-out route,
+     * class, decorator or identifier never counts, and nothing the parser reads as code can be hidden.
      */
-    const decorators = (lines: string[], at: number) => {
-      let top = at;
-      while (top > 0) {
-        const prev = lines[top - 1].trim();
-        // A comment line inside a decorator stack is read through (review round 3); code that is not a decorator ends it.
-        if (prev.startsWith("//") || prev.startsWith("*") || prev.startsWith("/*")) {
-          top--;
-          continue;
-        }
-        if (prev === "" || prev === "}" || prev.endsWith(";") || prev.endsWith("{") && !prev.startsWith("@")) break;
-        top--;
+    const parsed = new Map<string, ts.SourceFile>();
+    const parse = (file: string) => {
+      let sf = parsed.get(file);
+      if (!sf) {
+        sf = ts.createSourceFile(file, fs.readFileSync(path.join(SERVER_SRC, file), "utf8"), ts.ScriptTarget.Latest, true);
+        parsed.set(file, sf);
       }
-      const SIGNATURE = /^\s*(?:(?:public|private|protected)\s+)?(?:async\s+)?\w+\s*\(/;
-      let bottom = at;
-      while (bottom + 1 < lines.length && bottom - at < 40) {
-        const next = lines[bottom + 1];
-        if (!/^\s*@/.test(next) && SIGNATURE.test(next)) break;
-        bottom++;
-      }
-      // Comments set the block's extent only: their text, a block comment of any shape or a trailing "//", is never
-      // read as a scope (closing reviews).
-      return lines
-        .slice(top, bottom + 1)
-        .join("\n")
-        // One leftmost pass: string literals are kept whole (a "//" or "/*" inside one is not a comment), and only
-        // real comments are removed (final security review).
-        .replace(/('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`)|\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, (_m, str: string | undefined) => str ?? "");
+      return sf;
     };
-    const source = (file: string) => fs.readFileSync(path.join(SERVER_SRC, file), "utf8");
+    /** A decorator's name and its first argument when that is a plain string ('' for no argument; null otherwise). */
+    const decoratorCall = (d: ts.Decorator): { name: string; arg: string | null } | null => {
+      const e = d.expression;
+      if (!ts.isCallExpression(e) || !ts.isIdentifier(e.expression)) return null;
+      const first = e.arguments[0];
+      const arg = !first ? "" : ts.isStringLiteral(first) || ts.isNoSubstitutionTemplateLiteral(first) ? first.text : null;
+      return { name: e.expression.text, arg };
+    };
     /**
-     * The file with its comments blanked (string literals kept whole, newlines kept so line numbers still line up):
-     * a commented-out route, class or identifier never counts (delta review, wave 3f).
-     */
-    const code = (file: string) =>
-      source(file).replace(
-        /('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`)|\/\*[\s\S]*?\*\/|\/\/[^\n]*/g,
-        (whole, str: string | undefined) => str ?? whole.replace(/[^\n]/g, " "),
-      );
-    /**
-     * Locates a route by what it declares, not by line (wave 3f: merged packets moved the lines): the @Get whose
-     * argument is exactly `route` (an empty route is @Get()), inside the controller class `cls` when one is named.
-     * Exactly one must exist: a missing or an ambiguous route is a failure.
+     * The route a claim names: the method decorated @Get('<route>') (an empty route is @Get() or @Get('')), inside
+     * the class `cls` when one is named. Exactly one must exist: a missing or ambiguous route is a failure.
      */
     const ROUTE = /^((?:modules|core)\/[^#]+\.ts)#(?:([A-Za-z0-9_]+) )?GET (.*)$/;
-    const findRoute = (file: string, cls: string | undefined, route: string): { lines: string[]; i: number } | string => {
-      const lines = source(file).split("\n");
-      const live = code(file).split("\n");
-      const CLASS = /^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+([A-Za-z0-9_]+)\b/;
-      // The blanker does not lex regex literals: if it ever blanks a line that starts with a decorator @Get( or a
-      // class declaration, it misread the file, and nothing found in it can be trusted (closing review).
-      const hidden = lines.findIndex((l, i) => (/^\s*@Get\(/.test(l) || CLASS.test(l)) && !live[i].trim());
-      if (hidden >= 0) return `comment blanking hid line ${hidden + 1} (a regex literal?): check by hand`;
-      let from = 0;
-      let to = lines.length;
-      if (cls) {
-        from = live.findIndex((l) => CLASS.exec(l)?.[1] === cls);
-        if (from < 0) return `no class ${cls}`;
-        const next = live.findIndex((l, i) => i > from && CLASS.test(l));
-        to = next < 0 ? lines.length : next;
-      }
-      const q = route.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const get = route === "" ? /@Get\(\s*\)/ : new RegExp(`@Get\\(\\s*(['"\`])${q}\\1\\s*\\)`);
-      const hits: number[] = [];
-      for (let i = from; i < to; i++) if (get.test(live[i])) hits.push(i);
+    const findRoute = (file: string, cls: string | undefined, route: string): ts.ClassElement | string => {
+      const classes = parse(file).statements.filter(ts.isClassDeclaration);
+      const inScope = cls ? classes.filter((c) => c.name?.text === cls) : classes;
+      if (cls && inScope.length === 0) return `no class ${cls}`;
+      const hits = inScope.flatMap((c) =>
+        c.members.filter((m) => (ts.canHaveDecorators(m) ? ts.getDecorators(m) ?? [] : []).some((d) => {
+          const call = decoratorCall(d);
+          return call?.name === "Get" && call.arg === route;
+        })),
+      );
       if (hits.length === 0) return "no such route";
       if (hits.length > 1) return `ambiguous route (${hits.length} @Get) — name its controller class`;
-      return { lines, i: hits[0] };
+      return hits[0];
     };
-    /** The module scopes on the route's own decorator block. */
-    const scopesOf = (lines: string[], i: number) =>
-      [...decorators(lines, i).matchAll(/RequireModuleScope\(\s*'([a-z]+)'/g)].map((x) => x[1]);
+    /** The modules a handler's own @RequireModuleScope decorators name. */
+    const scopesOf = (member: ts.ClassElement) =>
+      (ts.canHaveDecorators(member) ? ts.getDecorators(member) ?? [] : [])
+        .map(decoratorCall)
+        .filter((c): c is { name: string; arg: string } => c?.name === "RequireModuleScope" && c.arg !== null)
+        .map((c) => c.arg);
+    /** Whether a handler carries any @RequireModuleScope at all (a non-literal argument included). */
+    const anyScope = (member: ts.ClassElement) =>
+      (ts.canHaveDecorators(member) ? ts.getDecorators(member) ?? [] : []).some((d) => decoratorCall(d)?.name === "RequireModuleScope");
     /**
-     * An identifier the claim names must occur in the file outside comments, as a whole word. String contents count
-     * (the tracked timeline claim's "Analysis:" is a template-literal title).
+     * An identifier the claim names must be in the file's code: an identifier of that name, or (for a title such as
+     * the timeline's "Analysis:") whole-word text in a string or template literal. Comments never count.
      */
-    const hasIdentifier = (file: string, id: string) =>
-      new RegExp(`(^|[^A-Za-z0-9_$])${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^A-Za-z0-9_$]|$)`).test(code(file));
+    const hasIdentifier = (file: string, id: string) => {
+      const word = new RegExp(`(^|[^A-Za-z0-9_$])${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^A-Za-z0-9_$]|$)`);
+      let found = false;
+      const visit = (node: ts.Node) => {
+        if (found) return;
+        if (ts.isIdentifier(node) || ts.isPrivateIdentifier(node)) found = node.text === id;
+        else if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) found = word.test(node.text);
+        if (!found) ts.forEachChild(node, visit);
+      };
+      visit(parse(file));
+      return found;
+    };
     const bad: string[] = [];
     for (const [href, row] of Object.entries(MODULE_TABLE)) {
       if (row.cite.length === 0) bad.push(`${href}: no reason`);
@@ -449,13 +434,13 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
             bad.push(`${href}: ${cite}: ${found}`);
             continue;
           }
-          const scoped = scopesOf(found.lines, found.i);
+          const scoped = scopesOf(found);
           if (scoped.length === 0 || !scoped.every((mod) => row.modules.includes(mod))) bad.push(`${href}: ${cite} scopes ${JSON.stringify(scoped)}`);
           scoped.forEach((mod) => justified.add(mod));
         } else if (cite.startsWith("unscoped:") && (m = ROUTE.exec(cite.slice("unscoped:".length)))) {
           const found = findRoute(m[1], m[2], m[3]);
           if (typeof found === "string") bad.push(`${href}: ${cite}: ${found}`);
-          else if (/RequireModuleScope\(/.test(decorators(found.lines, found.i))) bad.push(`${href}: ${cite} is scoped`);
+          else if (anyScope(found)) bad.push(`${href}: ${cite} is scoped`);
         } else if ((m = /^hub:([a-z]+)$/.exec(cite))) {
           const hub = hubNav.find((h) => h.id === m![1]);
           if (!hub || !hub.items.some((item) => item.href === href)) bad.push(`${href}: not in hub ${m[1]}`);
