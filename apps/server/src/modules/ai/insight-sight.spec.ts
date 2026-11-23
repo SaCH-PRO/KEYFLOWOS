@@ -1,6 +1,6 @@
 /** FU-INSIGHTS-SIGHT (security review round 1, OOS-2): dashboardFor keeps named fields only, so a field added later fails closed. */
 import { describe, it, expect } from 'vitest';
-import { dashboardFor, fieldsSightNeeds, insightNeeds, keepWithinBudget } from './insight-sight';
+import { classificationCost, dashboardFor, fieldsSightNeeds, insightNeeds, keepWithinBudget } from './insight-sight';
 
 const blind = { reader: 'u1', sight: (m: string) => m !== 'revenue' && m !== 'expenses' } as any;
 const full = { reader: 'u0', sight: () => true } as any;
@@ -70,5 +70,22 @@ describe('keepWithinBudget bounds what one request classifies (security review r
     const classified: string[] = [];
     expect(keepWithinBudget(['huge', 'small'], (i) => (i === 'huge' ? 500 : 1), (i) => { classified.push(i); return true; }, 100)).toEqual([]);
     expect(classified).toEqual([]);
+  });
+});
+
+describe('classificationCost charges what fieldsSightNeeds reads (FU-INSIGHTS-SIGHT review round 7, ISS-R7-1)', () => {
+  it('escape-dense text costs its readings, well over its serialized length', () => {
+    const fields = ['\\n'.repeat(1_000) + 'x', '\\u0041'.repeat(500)];
+    expect(classificationCost(fields)).toBeGreaterThan(2 * JSON.stringify(fields).length);
+  });
+  it('plain text costs at least its serialized length, and at most a small multiple of it', () => {
+    const fields = ['printer jams', { note: 'printer jams' }];
+    const raw = JSON.stringify(fields).length;
+    expect(classificationCost(fields)).toBeGreaterThanOrEqual(raw);
+    expect(classificationCost(fields)).toBeLessThanOrEqual(4 * raw);
+  });
+  it('fields past the classifier bound cost only their serialization (they are not read)', () => {
+    const big = ['printer jams '.repeat(5_000)];
+    expect(classificationCost(big)).toBe(JSON.stringify(big).length);
   });
 });

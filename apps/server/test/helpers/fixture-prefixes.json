@@ -1181,6 +1181,11 @@
       "prefix": "v72q_",
       "owner": "apps/server/test/insights-sight.integration.test.ts",
       "packet": "V1-72 (FU-INSIGHTS-SIGHT)"
+    },
+    {
+      "prefix": "v72s_",
+      "owner": "apps/server/test/strategic-routes-sight.integration.test.ts",
+      "packet": "V1-72 (FU-STRATEGIC-ROUTES-SIGHT)"
     }
   ],
   "pendingRenames": [],
