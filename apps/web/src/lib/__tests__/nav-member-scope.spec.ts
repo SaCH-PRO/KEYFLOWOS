@@ -408,6 +408,10 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
       const lines = source(file).split("\n");
       const live = code(file).split("\n");
       const CLASS = /^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?class\s+([A-Za-z0-9_]+)\b/;
+      // The blanker does not lex regex literals: if it ever blanks a line that starts with a decorator @Get( or a
+      // class declaration, it misread the file, and nothing found in it can be trusted (closing review).
+      const hidden = lines.findIndex((l, i) => (/^\s*@Get\(/.test(l) || CLASS.test(l)) && !live[i].trim());
+      if (hidden >= 0) return `comment blanking hid line ${hidden + 1} (a regex literal?): check by hand`;
       let from = 0;
       let to = lines.length;
       if (cls) {
@@ -427,7 +431,10 @@ describe("NAV-A1 acceptance M1: every nav entry needs what its page's server rea
     /** The module scopes on the route's own decorator block. */
     const scopesOf = (lines: string[], i: number) =>
       [...decorators(lines, i).matchAll(/RequireModuleScope\(\s*'([a-z]+)'/g)].map((x) => x[1]);
-    /** An identifier the claim names must occur in the file as code (a whole word). */
+    /**
+     * An identifier the claim names must occur in the file outside comments, as a whole word. String contents count
+     * (the tracked timeline claim's "Analysis:" is a template-literal title).
+     */
     const hasIdentifier = (file: string, id: string) =>
       new RegExp(`(^|[^A-Za-z0-9_$])${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^A-Za-z0-9_$]|$)`).test(code(file));
     const bad: string[] = [];
