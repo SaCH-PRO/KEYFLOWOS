@@ -75,7 +75,12 @@ describe('UnifiedMemoryRetrievalService', () => {
     });
 
     service = new UnifiedMemoryRetrievalService(makePrisma() as any, semanticMemory as any);
-    const fragments = await service.retrieveContext('biz_1', { query: 'invoice' });
+    // MEM-UNIFIED-SEMANTIC-SIGHT: a semantic read carries the reader's sight (without one it reads nothing: fail closed).
+    const visibleTo = vi.fn(async (hits: unknown[]) => hits.map(() => true));
+    const fragments = await service.retrieveContext('biz_1', {
+      query: 'invoice',
+      semanticSight: { includeDocumentExtractionCopies: false, visibleTo },
+    });
 
     expect(fragments).toHaveLength(1);
     expect(fragments[0]).toMatchObject({
@@ -84,7 +89,7 @@ describe('UnifiedMemoryRetrievalService', () => {
       content: 'Previous invoice discussion',
     });
     expect(semanticMemory.search).toHaveBeenCalledWith(
-      expect.objectContaining({ businessId: 'biz_1', query: 'invoice' }),
+      expect.objectContaining({ businessId: 'biz_1', query: 'invoice', visibleTo }),
     );
   });
 
