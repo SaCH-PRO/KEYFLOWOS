@@ -812,8 +812,8 @@ describe('ci-verdict: negative controls', () => {
       '        run: node --test scripts/ci/runtime-pin.spec.mjs\n        env:\n          NODE_TEST_CONTEXT: child',
     );
     assert.ok(censusStepProblems(pinWithEnv).some((p) => /'Check the Node runtime pin' .*may not set env/.test(p)), censusStepProblems(pinWithEnv).join('\n'));
-    const checkoutWith = fixture().replace('      - uses: actions/checkout@v7', '      - uses: actions/checkout@v7\n        with:\n          fetch-depth: 0');
-    assert.deepEqual(censusStepProblems(checkoutWith), []);
+    const setupNodeWith = fixture().replace('      - uses: actions/setup-node@v4', '      - uses: actions/setup-node@v4\n        with:\n          node-version: 22');
+    assert.deepEqual(censusStepProblems(setupNodeWith), []);
   });
 
   it('duplicate keys are reported, not resolved first- or last-wins', () => {
@@ -831,6 +831,50 @@ describe('ci-verdict: negative controls', () => {
   it('a job head with a trailing comment is read as that job', () => {
     const commented = fixture().replace(`  ${VERDICT_JOB}:`, `  ${VERDICT_JOB}: # the last word`);
     assert.deepEqual(verdictProblems(commented), []);
+  });
+
+  it('a job head this spec cannot read (quoted, anchored) is reported, first in the region or between jobs', () => {
+    // Confirmation round 2, N1/M3: GitHub accepts `"fresh":` as a job id; a reader that only
+    // knows bare ids would never ask the verdict to need it.
+    const quotedFirst = fixture().replace('jobs:\n', 'jobs:\n  "fresh":\n    runs-on: ubuntu-latest\n    steps:\n      - run: exit 1\n');
+    assert.deepEqual(verdictProblems(quotedFirst), ['jobs: region line this spec cannot read as a job id: "fresh":']);
+    const anchoredBetween = fixture().replace('  build:\n', '  fresh: &fresh\n    runs-on: ubuntu-latest\n    steps:\n      - run: exit 1\n  build:\n');
+    const problems = verdictProblems(anchoredBetween);
+    assert.ok(problems.some((p) => p === 'jobs: region line this spec cannot read as a job id: fresh: &fresh'), problems.join('\n'));
+  });
+
+  it("a gating job's lines this spec cannot read are reported by the verdict check, not only by the repository test", () => {
+    const quotedKey = fixture({ testJobKeys: '    "continue-on-error": true' });
+    assert.deepEqual(verdictProblems(quotedKey), ['gating job test line this spec cannot read: "continue-on-error": true']);
+  });
+
+  it('a quoted "|" is a string, not a block scalar indicator', () => {
+    // Confirmation round 2, N2: PyYAML rejects the document; the spec must not read it as the script.
+    const quoted = fixture().replace('        run: |', '        run: "|"');
+    const problems = verdictProblems(quoted);
+    assert.ok(problems.some((p) => /must be a literal block scalar \(run: \|\), found '"\|"'/.test(p)), problems.join('\n'));
+  });
+
+  it('a less-indented comment ends the run block; script lines after it are unreadable, not appended', () => {
+    // Confirmation round 2, M2.
+    const broken = fixture().replace("done <<'RESULTS'", "done <<'RESULTS'\n# a column-zero comment ends the block scalar");
+    const problems = verdictProblems(broken);
+    assert.ok(problems.some((p) => /^ci-verdict line this spec cannot read: lint-and-typecheck=/.test(p)), problems.join('\n'));
+  });
+
+  it('A1: before the census step, checkout carries no `with` and pnpm setup no run_install (parity with runtime-pin.spec.mjs)', () => {
+    // Confirmation round 2, M1 and M4a.
+    const checkoutWith = fixture().replace('      - uses: actions/checkout@v7', '      - uses: actions/checkout@v7\n        with:\n          repository: other/repo');
+    assert.deepEqual(censusStepProblems(checkoutWith), ["'actions/checkout@v7' before the census step may not set with"]);
+    const pnpmInstall = fixture().replace(
+      '      - uses: actions/setup-node@v4',
+      '      - uses: pnpm/action-setup@v3\n        with:\n          version: 9\n          run_install: true\n      - uses: actions/setup-node@v4',
+    );
+    assert.deepEqual(censusStepProblems(pnpmInstall), [
+      "'pnpm/action-setup@v3' before the census step may not set with.run_install (it would run pnpm install before the pin and census checks)",
+    ]);
+    const pnpmPlain = fixture().replace('      - uses: actions/setup-node@v4', '      - uses: pnpm/action-setup@v3\n        with:\n          version: 9\n      - uses: actions/setup-node@v4');
+    assert.deepEqual(censusStepProblems(pnpmPlain), []);
   });
 
   it('a verdict job with needs written as block lines passes', () => {
