@@ -104,7 +104,8 @@ const PURGE_NOT_SWEPT =
   'swept when their subject is the contact or their snapshot names it at the top level (contactId, ' +
   'fromContactId, toContactId, targetContactId); events ' +
   'of the retained records (invoices, quotes, bookings) whose snapshot names the person otherwise are kept ' +
-  'under the retained basis.';
+  'under the retained basis, and events whose snapshot names the person only inside a nested structure ' +
+  '(for example duplicate-check and import requests) are not reached and not swept.';
 
 /**
  * V1-72 review round 2: the purge transaction scrubs the business's event log,

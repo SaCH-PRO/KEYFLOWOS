@@ -68,7 +68,7 @@ export class BusinessEventService {
   async emit(event: CreateBusinessEventInput): Promise<void> {
     // Scrubbed before anything else, so the failure log below never holds
     // what the row may not (V1-72 review).
-    let input = event;
+    let input: CreateBusinessEventInput;
     try {
       input = await this.withoutForgottenPersonalData(event);
     } catch {
