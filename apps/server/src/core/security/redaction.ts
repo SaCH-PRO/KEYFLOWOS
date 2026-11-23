@@ -19,9 +19,14 @@
  *
  * NOTE: patterns must be specific enough not to over-match ordinary fields —
  * hence `apikey`/`accesskey`/`privatekey` rather than a bare `key`; and the
- * value patterns are shaped (a Luhn check, a key prefix plus 20 key
- * characters, a PEM header), so an invoice number, a phone number, a UUID or a
- * 16-digit number that fails Luhn is untouched.
+ * value patterns are shaped (a Luhn check over card-shaped groups, a key
+ * prefix plus 20 key characters, a PEM header), so an invoice number, a phone
+ * number, a date, a UUID or a 16-digit number that fails Luhn is untouched.
+ * Residual over-redaction, by design: about one in ten 14 to 19 digit numeric
+ * identifiers passes Luhn (every IMEI does) and becomes <card>; a card-shaped
+ * digit group that completes a valid window with a card is redacted with it;
+ * a cut-off PEM block takes the rest of its string leaf. See
+ * redactCardWindows for the card rules.
  */
 export const SENSITIVE_FIELD_PATTERNS = [
   'password',
@@ -92,49 +97,57 @@ const CARD_MAX_DIGITS = 19;
 
 /**
  * A card number is a window of 13 to 19 digits, made of whole groups of a
- * digit run (groups are split by one to three spaces or dashes), that passes
- * Luhn; a 13-digit window must start with 4 (legacy Visa is the only 13-digit
- * scheme, and that rule keeps every 13-digit epoch-millisecond id intact). The
- * run is scanned left to right, longest window first, so a card followed or
- * preceded by a CVV, an expiry month or a quantity is still found inside the
- * run, and the neighbours stay. An unbroken group longer than 19 digits is not
- * a card (longer than any scheme) and is left whole.
+ * digit run (groups are split by one to three spaces, tabs, no-break spaces
+ * or dashes), that passes Luhn, and is card-shaped: a single unbroken group,
+ * or a multi-group window whose first group has 4+ digits and every group
+ * 3+ (4-4-4-4, 4-6-5, 4-4-4-4-3), so a date's parts or a phone's 3-3-4 never
+ * join a window; a 13-digit window must start with 4 (legacy Visa is the
+ * only 13-digit scheme, and that rule keeps every 13-digit epoch-millisecond
+ * id intact). EVERY valid window in the run is redacted (their union), so a
+ * neighbouring group that happens to complete a valid window with the head
+ * of a card can never leave the card's tail visible; the neighbours outside
+ * every valid window stay. An unbroken group longer than 19 digits is not a
+ * card (longer than any scheme) and is left whole.
  *
  * Residual, by design: about one in ten 14 to 19 digit numeric identifiers
- * passes Luhn (an IMEI always does), so such an id in a note becomes <card>.
+ * passes Luhn (an IMEI always does), so such an id in a note becomes <card>;
+ * and a card-shaped neighbour that completes a valid window with a card is
+ * redacted with it. A card broken across lines, or joined by dots, slashes or
+ * four or more spaces, is not covered.
  */
+const CARD_SEPARATOR = /([ \t\u00a0-]{1,3})/;
+
+function cardShaped(groupLengths: readonly number[]): boolean {
+  if (groupLengths.length === 1) return true;
+  return groupLengths[0] >= 4 && groupLengths.every((len) => len >= 3);
+}
+
 function redactCardWindows(run: string): string {
-  const groups = run.split(/([ -]{1,3})/); // digit group, separator, digit group, ...
-  const out: string[] = [];
-  let i = 0;
-  while (i < groups.length) {
-    // Windows from group i, each the digits so far: windows[k] covers groups i .. i + 2k.
-    const windows: string[] = [];
+  const parts = run.split(CARD_SEPARATOR); // digit group, separator, digit group, ...
+  const groups: string[] = [];
+  const separators: string[] = [];
+  for (let k = 0; k < parts.length; k += 1) (k % 2 === 0 ? groups : separators).push(parts[k]);
+  const covered: boolean[] = new Array<boolean>(groups.length).fill(false);
+
+  for (let i = 0; i < groups.length; i += 1) {
     let digits = '';
-    for (let j = i; j < groups.length && digits.length + groups[j].length <= CARD_MAX_DIGITS; j += 2) {
+    const lengths: number[] = [];
+    for (let j = i; j < groups.length && digits.length + groups[j].length <= CARD_MAX_DIGITS; j += 1) {
       digits += groups[j];
-      windows.push(digits);
+      lengths.push(groups[j].length);
+      if (digits.length < CARD_MIN_DIGITS) continue;
+      if (digits.length === CARD_MIN_DIGITS && digits[0] !== '4') continue;
+      if (!cardShaped(lengths)) break; // a longer window from i cannot become card-shaped again
+      if (luhnValid(digits)) for (let g = i; g <= j; g += 1) covered[g] = true;
     }
-    let redacted = false;
-    for (let k = windows.length - 1; k >= 0; k -= 1) {
-      const candidate = windows[k];
-      if (candidate.length < CARD_MIN_DIGITS) break;
-      if (candidate.length === CARD_MIN_DIGITS && candidate[0] !== '4') continue;
-      if (luhnValid(candidate)) {
-        out.push(CARD_MARKER);
-        i += 2 * k + 1;
-        redacted = true;
-        break;
-      }
-    }
-    if (!redacted) {
-      out.push(groups[i]);
-      i += 1;
-    }
-    if (i < groups.length) {
-      out.push(groups[i]); // the separator after the group or window
-      i += 1;
-    }
+  }
+
+  const out: string[] = [];
+  for (let g = 0; g < groups.length; g += 1) {
+    const joinsPrevious = g > 0 && covered[g - 1] && covered[g];
+    if (g > 0 && !joinsPrevious) out.push(separators[g - 1]);
+    if (!covered[g]) out.push(groups[g]);
+    else if (!joinsPrevious) out.push(CARD_MARKER);
   }
   return out.join('');
 }
@@ -169,12 +182,13 @@ export const SENSITIVE_VALUE_PATTERNS: readonly Readonly<SensitiveValuePattern>[
   }),
   freeze({
     // The scheme word is kept (named group `lead`); the token goes. A token is 8 or more token characters
-    // holding at least one digit or one of . _ ~ + / = -, or 20 or more letters, so "bearer instruments"
-    // in prose stays. An optional colon after the word covers an echoed "Authorization: Bearer: <t>".
+    // holding at least one digit or one of _ ~ + / = -, or a dot followed by more token text, or 20 or
+    // more letters, and does not end in a period: so "bearer instruments" and "the bearer payment." in
+    // prose stay. An optional colon after the word covers an echoed "Authorization: Bearer: <t>".
     name: 'bearer-token',
     marker: SECRET_MARKER,
     pattern: new RegExp(
-      String.raw`(?<lead>\bBearer:?\s+)(?:(?=[A-Za-z]*[0-9._~+/=-])${TOKEN_CHARS}{8,}|[A-Za-z]{20,})`,
+      String.raw`(?<lead>\bBearer:?\s+)(?:(?=[A-Za-z]*(?:[0-9_~+/=-]|\.${TOKEN_CHARS}))${TOKEN_CHARS}{7,}[A-Za-z0-9_~+/=-]|[A-Za-z]{20,})`,
       'gi',
     ),
   }),
@@ -190,11 +204,12 @@ export const SENSITIVE_VALUE_PATTERNS: readonly Readonly<SensitiveValuePattern>[
     pattern: new RegExp(String.raw`\b(?:sk-ant-|sk-|xoxb-|ghp_|github_pat_)${KEY_CHARS}{20,}`, 'g'),
   }),
   freeze({
-    // A maximal run of digit groups joined by one to three spaces or dashes, not preceded by a digit or a
-    // plus sign (an E.164 phone number is never a card). The windows inside it are found by redactCardWindows.
+    // A maximal run of digit groups joined by one to three spaces, tabs, no-break spaces or dashes, not
+    // preceded by a digit or a plus sign (an E.164 phone number is never a card). The windows inside it are
+    // found by redactCardWindows.
     name: 'card-number-luhn',
     marker: CARD_MARKER,
-    pattern: /(?<![\d+])\d+(?:[ -]{1,3}\d+)*(?!\d)/g,
+    pattern: /(?<![\d+])\d+(?:[ \t\u00a0-]{1,3}\d+)*(?!\d)/g,
     rewrite: redactCardWindows,
   }),
 ]);
