@@ -26,10 +26,15 @@ function safeHost(url: string): string {
  *    and whatever url text follows it, becomes `<url host>`;
  * 2. any other url becomes `<url host>` (its user, path and query go);
  * 3. the url's user, password and query values of 3 or more characters, raw,
- *    decoded and form-encoded, are removed wherever they still appear, in any
- *    letter case. Shorter values are left: they would erase ordinary words.
+ *    decoded, percent- and form-encoded, are removed wherever they still
+ *    appear, in any letter case, in one pass. Shorter values are left: they
+ *    would erase ordinary words.
+ * Every step is linear in the message, and the result is capped at
+ * LOG_SAFE_MAX characters, so a huge error body cannot stall the event loop.
  * A thrown value that cannot be printed is logged as `<unprintable error>`.
  */
+const LOG_SAFE_MAX = 1000;
+
 function logSafe(err: unknown, configUrl: string): string {
   let message: string;
   try {
@@ -44,6 +49,7 @@ function logSafe(err: unknown, configUrl: string): string {
     const u = new URL(configUrl);
     wholes.push(u.href);
     fragments.push(u.username, u.password, u.search.slice(1));
+    for (const pair of u.search.slice(1).split('&')) fragments.push(pair.slice(pair.indexOf('=') + 1));
     for (const part of [u.username, u.password]) {
       try {
         fragments.push(decodeURIComponent(part));
@@ -62,11 +68,15 @@ function logSafe(err: unknown, configUrl: string): string {
     message = message.split(whole).join(MARK);
   }
   message = message.split(MARK).map((piece, index) => (index === 0 ? piece : piece.replace(/^[^\s'"<>]*/, ''))).join(`<url ${host}>`);
-  message = message.replace(/[a-z][a-z0-9+.-]*:\/\/[^\s'"<>]+/gi, (url) => `<url ${safeHost(url)}>`);
-  for (const fragment of [...new Set(fragments)].filter((f) => f.length >= 3).sort((a, b) => b.length - a.length)) {
-    message = message.replace(new RegExp(fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '[redacted]');
-  }
-  return message;
+  // The lookbehind makes a scheme start only where a letter run starts, so a long run of letters is
+  // scanned once, not once per position.
+  message = message.replace(/(?<![a-z0-9+.-])[a-z][a-z0-9+.-]*:\/\/[^\s'"<>]+/gi, (url) => `<url ${safeHost(url)}>`);
+  const escaped = [...new Set(fragments)]
+    .filter((f) => f.length >= 3)
+    .sort((a, b) => b.length - a.length)
+    .map((f) => f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  if (escaped.length) message = message.replace(new RegExp(escaped.join('|'), 'gi'), '[redacted]');
+  return message.length > LOG_SAFE_MAX ? `${message.slice(0, LOG_SAFE_MAX)}…(truncated)` : message;
 }
 
 interface ServerEntry {
@@ -140,12 +150,20 @@ export class McpClientManagerService implements OnModuleDestroy {
     const entry = await this.ensureEntry(config);
     if (!entry?.client) throw new Error(`MCP server ${config.name} is unavailable`);
 
-    const result = await Promise.race([
-      entry.client.callTool({ name: parsed.toolName, arguments: args }),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`MCP tool call timed out after ${CALL_TIMEOUT_MS}ms`)), CALL_TIMEOUT_MS),
-      ),
-    ]);
+    let result: unknown;
+    try {
+      result = await Promise.race([
+        entry.client.callTool({ name: parsed.toolName, arguments: args }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error(`MCP tool call timed out after ${CALL_TIMEOUT_MS}ms`)), CALL_TIMEOUT_MS),
+        ),
+      ]);
+    } catch (err) {
+      // The error goes to the caller and the execution log: the same redaction as the warnings.
+      // No `cause`: the caught error is the unredacted one this replaces.
+      // eslint-disable-next-line preserve-caught-error
+      throw new Error(logSafe(err, config.url));
+    }
 
     // Tool output is untrusted content: cap it before it reaches prompts.
     const text = JSON.stringify(result ?? null);
