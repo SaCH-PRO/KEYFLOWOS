@@ -61,7 +61,9 @@ import { KeyCortexLearningService } from './key-cortex-learning.service';
 import { KeyCortexSessionService } from './key-cortex-session.service';
 import {
   KeyCortexPromptContextService,
+  readersModuleSight,
   readersOwnPromptMemory,
+  readsDocumentExtractions,
 } from './key-cortex-prompt-context.service';
 import { userCanAccessBusiness } from '../../core/auth/business.guard';
 import { LEVEL_RANK, memberScopeMap, rankOf } from '../../core/authority/module-vocabulary';
@@ -2108,12 +2110,16 @@ export class KeyCortexQueryPipelineService {
   private async chatMemoryFragments(query: CortexQuery): Promise<MemoryFragment[]> {
     if (!this.memoryRetrieval) return [];
     const reader = await this.episodicMemoryReader(query.businessId, query.userId);
+    // MEM-DOC-EXTRACTION-SIGHT (D-234): the reader's module sight first: the read takes document extractions only for a
+    // reader with revenue read.
+    const sight = await readersModuleSight(this.prisma, query.businessId, reader, this.logger, 'chatMemory');
     const fragments = await this.memoryRetrieval.retrieveContext(query.businessId, {
       query: query.text,
       limit: CHAT_MEMORY_FRAGMENTS + CHAT_MEMORY_HEADROOM,
       ...(reader ? { userId: reader } : { includeEpisodic: false }),
+      documentExtractions: readsDocumentExtractions(sight),
     });
-    return readersOwnPromptMemory(this.prisma, query.businessId, reader, fragments, CHAT_MEMORY_FRAGMENTS, this.logger, 'chatMemory');
+    return readersOwnPromptMemory(this.prisma, query.businessId, reader, fragments, CHAT_MEMORY_FRAGMENTS, this.logger, 'chatMemory', sight);
   }
 
   /**

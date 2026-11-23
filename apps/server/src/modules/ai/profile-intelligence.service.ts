@@ -1,6 +1,6 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { AiMemoryService, MemoryCategory } from './ai-memory.service';
+import { AiMemoryService, MemoryCategory, withoutDocumentExtractions } from './ai-memory.service';
 import { BusinessGraphService } from './business-graph.service';
 import { ModelGatewayService, GatewayMessage } from './model-gateway.service';
 import { AiUsageService } from './ai-usage.service';
@@ -89,7 +89,11 @@ export class ProfileIntelligenceService {
     return state;
   }
 
-  async chat(businessId: string, userMessage: string): Promise<{
+  /**
+   * MEM-DOC-EXTRACTION-SIGHT (D-234): `opts.documentExtractions` true only for a reader with revenue read (the
+   * controller decides); otherwise the prompt's known info carries no document extraction (withoutDocumentExtractions).
+   */
+  async chat(businessId: string, userMessage: string, opts: { documentExtractions?: boolean } = {}): Promise<{
     reply: string;
     state: ProfileInterviewState;
     pendingExtractions: ProfileExtraction[];
@@ -107,7 +111,8 @@ export class ProfileIntelligenceService {
       businessContext = 'Business context unavailable.';
     }
 
-    const existingMemories = await this.memory.getAll(businessId);
+    const allMemories = await this.memory.getAll(businessId);
+    const existingMemories = opts.documentExtractions === true ? allMemories : withoutDocumentExtractions(allMemories);
     const memoryContext = existingMemories.length > 0
       ? `Known info: ${existingMemories.map(m => `${m.category}/${m.key}: ${m.value}`).join('; ')}`
       : 'No prior information known about this business.';
@@ -226,7 +231,7 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
     }
   }
 
-  async getCompletionSummary(businessId: string): Promise<{
+  async getCompletionSummary(businessId: string, opts: { documentExtractions?: boolean } = {}): Promise<{
     completedTopics: string[];
     remainingTopics: string[];
     totalTopics: number;
@@ -238,7 +243,9 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
       .filter(t => !state.completedTopics.includes(t.topic))
       .map(t => t.label);
 
-    const memories = await this.memory.getAll(businessId);
+    // MEM-DOC-EXTRACTION-SIGHT (D-234): the document extractions only for a reader with revenue read.
+    const all = await this.memory.getAll(businessId);
+    const memories = opts.documentExtractions === true ? all : withoutDocumentExtractions(all);
 
     return {
       completedTopics: state.completedTopics,

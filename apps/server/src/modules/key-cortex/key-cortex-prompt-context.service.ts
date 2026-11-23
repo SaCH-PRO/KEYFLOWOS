@@ -6,6 +6,7 @@ import { KeyCortexContextService } from './key-cortex-context.service';
 import { UnifiedMemoryRetrievalService } from './unified-memory-retrieval.service';
 import { KeyCortexLearningService } from './key-cortex-learning.service';
 import { GENOME_ROW_METADATA_KEY } from './unified-memory.types';
+import { DOCUMENT_EXTRACTION_CATEGORY } from '../ai/ai-memory.service';
 import type { MemoryFragment, MemorySourceType } from './unified-memory.types';
 import { financialProposalsWithProvenance, isFinancialProposal, isMoneyLabel, isMoneyMemoryEvent, PROPOSAL_CLASSIFY_SELECT, proposalTextStatesMoney, type ProposalFields } from '../business-genome/key-genome/genome-finance-scope';
 import {
@@ -420,10 +421,43 @@ export function genomeModulesOf(fragment: RecordFragment): CanonicalModule[] {
 }
 
 /**
+ * MEM-DOC-EXTRACTION-SIGHT (D-234 fail closed, D-257): whether a fragment renders a document extraction (an AiMemory row
+ * of DOCUMENT_EXTRACTION_CATEGORY, whose provenance is unknown): the row itself (UnifiedMemoryRetrievalService titles an
+ * AiMemory fragment with its category and starts its content with `<category>.`), or a semantic copy of one (the
+ * backfill's entry form, `<category>: <key> = <value>` with the row's category in its metadata, or the writer's value
+ * form, with the row's category as its metadata's `type`).
+ */
+export function isDocumentExtractionFragment(fragment: Pick<MemoryFragment, 'sourceType' | 'title' | 'metadata'> & Partial<Pick<MemoryFragment, 'content'>>): boolean {
+  const content = typeof fragment.content === 'string' ? fragment.content : '';
+  if (fragment.sourceType === 'ai_memory') {
+    return fragment.title === DOCUMENT_EXTRACTION_CATEGORY || content.startsWith(`${DOCUMENT_EXTRACTION_CATEGORY}.`);
+  }
+  if (fragment.sourceType === 'ai_memory_embedding') {
+    const meta = fragment.metadata;
+    return (
+      meta?.category === DOCUMENT_EXTRACTION_CATEGORY ||
+      meta?.type === DOCUMENT_EXTRACTION_CATEGORY ||
+      content.startsWith(`${DOCUMENT_EXTRACTION_CATEGORY}: `)
+    );
+  }
+  return false;
+}
+
+/**
+ * MEM-DOC-EXTRACTION-SIGHT (D-234): whether a prompt's memory read may take the document extractions
+ * (MemoryRetrievalOptions.documentExtractions): only for a reader who may read revenue.
+ */
+export function readsDocumentExtractions(sight: ModuleSight): boolean {
+  return sight('revenue');
+}
+
+/**
  * FU-KEY-MEMORY-MONEY-SIGHT: the modules a reader needs to see any memory record a prompt renders: a business-wide
  * event's (eventModulesOf) or a genome record's (genomeModulesOf); [] for the other stores.
+ * MEM-DOC-EXTRACTION-SIGHT (D-234): a document extraction, or a copy of one, needs revenue read (fail closed).
  */
 export function recordModulesOf(fragment: RecordFragment): CanonicalModule[] {
+  if (isDocumentExtractionFragment(fragment)) return ['revenue'];
   return fragment.sourceType === 'genome_memory_event' ? genomeModulesOf(fragment) : eventModulesOf(fragment);
 }
 
@@ -877,10 +911,14 @@ export class KeyCortexPromptContextService {
         //
         // W11-FLOW-PERCEPTION-SCOPE (SEC-W11MC-3): both rules and the headroom are readersOwnPromptMemory and
         // PROMPT_MEMORY_HEADROOM, which the /ai flow chat's perception block keeps too.
+        // MEM-DOC-EXTRACTION-SIGHT (D-234): the reader's module sight, read first, so the read takes document
+        // extractions only for a reader with revenue read (no reader, none); readersOwnPromptMemory keeps that sight.
+        const sight = await readersModuleSight(this.prisma, businessId, reader, this.logger, 'buildMemoryContext');
         const fragments = await this.unifiedMemory.retrieveContext(businessId, {
           query: currentQuery,
           limit: PROMPT_MEMORY_FRAGMENTS + PROMPT_MEMORY_HEADROOM,
           ...(reader ? { userId: reader } : { includeEpisodic: false }),
+          documentExtractions: readsDocumentExtractions(sight),
         });
         const kept = await readersOwnPromptMemory(
           this.prisma,
@@ -890,6 +928,7 @@ export class KeyCortexPromptContextService {
           PROMPT_MEMORY_FRAGMENTS,
           this.logger,
           'buildMemoryContext',
+          sight,
         );
 
         if (kept.length > 0) {

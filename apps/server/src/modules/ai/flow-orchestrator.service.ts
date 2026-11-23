@@ -116,7 +116,9 @@ import {
   PROMPT_MEMORY_HEADROOM,
   moduleSightOf,
   promptMemoryReader,
+  readersModuleSight,
   readersOwnPromptMemory,
+  readsDocumentExtractions,
   type ModuleSight,
 } from '../key-cortex/key-cortex-prompt-context.service';
 import { KeyCortexConsciousnessService } from '../key-cortex/key-cortex-consciousness.service';
@@ -1424,6 +1426,13 @@ export class FlowOrchestratorService {
       }
       const perceive = async () => {
         const reader = await promptMemoryReader(this.prisma, businessId, candidate, this.logger, 'perception');
+        // A position's turn sees its position's modules; when the reader it names is not found a member (removed since),
+        // none (fail closed). Any other turn sees by its reader's membership. MEM-DOC-EXTRACTION-SIGHT (D-234): read
+        // before the memory, which takes document extractions only for a sight with revenue read.
+        const sight: ModuleSight =
+          positionModules === undefined
+            ? await readersModuleSight(this.prisma, businessId, reader, this.logger, 'perception')
+            : candidate && reader !== candidate ? NO_MODULE_SIGHT : moduleSightOf(positionModules);
         const read = await memory.retrieveContext(businessId, {
           // `query` is deliberately NOT passed.
           //
@@ -1470,11 +1479,8 @@ export class FlowOrchestratorService {
           // 0.5 sits inside the real 0.375–1.0 range, so it drops the stale
           // low-confidence band while keeping anything recent or well-evidenced.
           minRankScore: 0.5,
+          documentExtractions: readsDocumentExtractions(sight),
         });
-        // A position's turn sees its position's modules; when the reader it names is not found a member (removed since),
-        // none (fail closed). Any other turn sees by its reader's membership (readersOwnPromptMemory's own read).
-        const sight: ModuleSight | undefined =
-          positionModules === undefined ? undefined : candidate && reader !== candidate ? NO_MODULE_SIGHT : moduleSightOf(positionModules);
         return readersOwnPromptMemory(this.prisma, businessId, reader, read, window, this.logger, 'perception', sight);
       };
 

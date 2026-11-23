@@ -40,6 +40,21 @@ export type MemoryCategory =
 
 export type MemorySource = 'user' | 'inferred' | 'approval_signal' | 'pattern_analysis' | 'feedback_loop' | 'role_engine';
 
+/**
+ * MEM-DOC-EXTRACTION-SIGHT (D-234, D-257): the category KeyCortexDocumentService.extractData stores an uploaded document's
+ * extracted data under (key = the document's id). The document carries no classification (KeyDocument has only its file
+ * type), so an extraction may be an invoice or a statement: its provenance is unknown and it fails closed. Only a reader
+ * who may read revenue is handed one (the owner, a revenue reader); a member without revenue read and a turn with no
+ * member reader are not, on any surface (KEY's prompts, GET .../ai/memory, the profile interview). Classifying documents
+ * so that non-financial extractions reach more readers is a later packet (design open question Q4c).
+ */
+export const DOCUMENT_EXTRACTION_CATEGORY = 'document_extraction';
+
+/** MEM-DOC-EXTRACTION-SIGHT: `entries` without the document extractions (DOCUMENT_EXTRACTION_CATEGORY), in order. */
+export function withoutDocumentExtractions<T extends { category: string }>(entries: readonly T[]): T[] {
+  return entries.filter((entry) => entry.category !== DOCUMENT_EXTRACTION_CATEGORY);
+}
+
 export interface MemoryEntry {
   id: string;
   category: string;

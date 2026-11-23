@@ -18,7 +18,8 @@ import {
   visiblePlans,
   type GraphPlanReadScope,
 } from './graph-actions.controller';
-import { AiMemoryService, MemoryCategory } from './ai-memory.service';
+import { AiMemoryService, MemoryCategory, withoutDocumentExtractions } from './ai-memory.service';
+import { readersModuleSight, readsDocumentExtractions } from '../key-cortex/key-cortex-prompt-context.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
 import { ProAutoMonitorService } from './pro-auto-monitor.service';
 import { ProfileIntelligenceService } from './profile-intelligence.service';
@@ -1003,18 +1004,30 @@ export class AiController {
     return this.governance.updateAutonomySettings(businessId, body, userId);
   }
 
+  /**
+   * MEM-DOC-EXTRACTION-SIGHT (D-234 fail closed, D-257): whether the caller may be handed the business's document
+   * extractions (AiMemory DOCUMENT_EXTRACTION_CATEGORY rows, whose provenance is unknown): only a member with revenue
+   * read, by their membership's module levels (readersModuleSight, the rule KEY's prompts read them by). No user, a
+   * SUPER_ADMIN who is no member, or a membership read that fails: no.
+   */
+  private async readsDocumentExtractions(businessId: string, req: AuthenticatedRequest | undefined): Promise<boolean> {
+    const sight = await readersModuleSight(this.prisma, businessId, req?.user?.id ?? null, undefined, 'aiMemory');
+    return readsDocumentExtractions(sight);
+  }
+
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/memory')
   async getMemory(
     @Param('businessId') businessId: string,
     @Query('category') category?: string,
+    @Req() req?: AuthenticatedRequest,
   ) {
-    if (category) {
-      const entries = await this.memory.getByCategory(businessId, category as MemoryCategory);
-      return { memories: entries };
-    }
-    const entries = await this.memory.getAll(businessId);
-    return { memories: entries };
+    // MEM-DOC-EXTRACTION-SIGHT: a reader without revenue read is handed no document extraction (none by category either).
+    const sees = await this.readsDocumentExtractions(businessId, req);
+    const entries = category
+      ? await this.memory.getByCategory(businessId, category as MemoryCategory)
+      : await this.memory.getAll(businessId);
+    return { memories: sees ? entries : withoutDocumentExtractions(entries) };
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -1433,15 +1446,19 @@ export class AiController {
   async profileChat(
     @Param('businessId') businessId: string,
     @Body() body: { message: string },
+    @Req() req?: AuthenticatedRequest,
   ) {
     if (!body.message?.trim()) throw new BadRequestException('Message is required');
-    return this.profileIntelligence.chat(businessId, body.message.trim());
+    // MEM-DOC-EXTRACTION-SIGHT: the interview's prompt carries the document extractions only for a revenue reader.
+    const documentExtractions = await this.readsDocumentExtractions(businessId, req);
+    return this.profileIntelligence.chat(businessId, body.message.trim(), { documentExtractions });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/profile/status')
-  async profileStatus(@Param('businessId') businessId: string) {
-    return this.profileIntelligence.getCompletionSummary(businessId);
+  async profileStatus(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    const documentExtractions = await this.readsDocumentExtractions(businessId, req);
+    return this.profileIntelligence.getCompletionSummary(businessId, { documentExtractions });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
