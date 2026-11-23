@@ -34,6 +34,15 @@ export interface McpServerConfig {
 
 type ConfigLog = (message: string) => void;
 
+function isHttpUrl(url: string): boolean {
+  try {
+    const { protocol } = new URL(url);
+    return protocol === 'https:' || protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
 function validBusinessIds(value: unknown): value is string[] {
   return Array.isArray(value) && value.length > 0 && value.every((id) => typeof id === 'string' && id.length > 0);
 }
@@ -42,8 +51,9 @@ function validBusinessIds(value: unknown): value is string[] {
  * Reads MCP_REMOTE_SERVERS. Unset or empty: no servers, nothing logged. A value
  * that is not a JSON array serves nothing, with an error log (`log`). An entry
  * is dropped with an error log when it lacks a string key or url, when its key
- * is empty or contains "__", when an earlier entry already uses its key, or
- * when it has no valid `businessIds`. An `enabled: false` entry with a usable
+ * is empty or contains "__", when its url does not parse or is not http(s),
+ * when an earlier kept entry already uses its key, or when it has no valid
+ * `businessIds`. An `enabled: false` entry with a usable
  * key is skipped without a log. The log names the server's key only, never its
  * url or token.
  */
@@ -72,6 +82,10 @@ export function loadMcpServerConfigs(log: ConfigLog = () => undefined): McpServe
     }
     if (c.key.length === 0 || c.key.includes('__')) {
       log(`MCP server ${label} dropped: a key must be non-empty and may not contain "__"`);
+      return;
+    }
+    if (!isHttpUrl(c.url)) {
+      log(`MCP server ${label} dropped: its url must be an http(s) url`);
       return;
     }
     if (c.enabled === false) return;

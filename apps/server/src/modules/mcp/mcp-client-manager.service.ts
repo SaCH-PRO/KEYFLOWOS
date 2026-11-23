@@ -19,6 +19,35 @@ function safeHost(url: string): string {
   }
 }
 
+/**
+ * An error message fit for the log: the server's url, in the form it was
+ * configured and in the normalized form fetch quotes, any other url (cut to
+ * its host), and the url's user, password and query are all removed. A url may
+ * carry credentials (user:pw@, ?token=), and errors quote it.
+ */
+function logSafe(err: unknown, configUrl: string): string {
+  let message = String((err as Error)?.message ?? err);
+  const fragments = [configUrl];
+  try {
+    const u = new URL(configUrl);
+    fragments.push(u.href, u.username, u.password, u.search, u.search.slice(1));
+    for (const part of [u.username, u.password]) {
+      try {
+        fragments.push(decodeURIComponent(part));
+      } catch {
+        // not decodable: the encoded form is already listed
+      }
+    }
+    for (const value of u.searchParams.values()) fragments.push(value, encodeURIComponent(value));
+  } catch {
+    // an unparsable url never connects; its raw form is already listed
+  }
+  for (const fragment of fragments.filter((f) => f.length >= 3).sort((a, b) => b.length - a.length)) {
+    message = message.split(fragment).join('<redacted>');
+  }
+  return message.replace(/[a-z][a-z0-9+.-]*:\/\/[^\s'"<>]+/gi, (url) => `<url ${safeHost(url)}>`);
+}
+
 interface ServerEntry {
   config: McpServerConfig;
   client: Client | null;
@@ -130,7 +159,7 @@ export class McpClientManagerService implements OnModuleDestroy {
       entry.toolsLoadedAt = Date.now();
       this.logger.log(`MCP server ${config.name}: ${entry.tools.length} tool(s) bridged`);
     } catch (err) {
-      this.logger.warn(`MCP listTools failed for ${config.name}: ${(err as Error).message}`);
+      this.logger.warn(`MCP listTools failed for server ${JSON.stringify(config.key)}: ${logSafe(err, config.url)}`);
     }
     return entry;
   }
@@ -153,10 +182,8 @@ export class McpClientManagerService implements OnModuleDestroy {
       ]);
       return client;
     } catch (err) {
-      // Host only: a url may carry credentials (user:pw@, ?token=), so neither the url nor an error
-      // message that quotes it reaches the log.
-      const message = String((err as Error)?.message ?? err).split(config.url).join('<url>');
-      this.logger.warn(`MCP connect failed for ${config.name} (${safeHost(config.url)}): ${message}`);
+      // Key and host only: a url may carry credentials (user:pw@, ?token=), and the error quotes it.
+      this.logger.warn(`MCP connect failed for server ${JSON.stringify(config.key)} (${safeHost(config.url)}): ${logSafe(err, config.url)}`);
       return null;
     }
   }
