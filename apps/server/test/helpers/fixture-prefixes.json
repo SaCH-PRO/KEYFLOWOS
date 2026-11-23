@@ -1175,6 +1175,11 @@
       "prefix": "v57p_",
       "owner": "apps/server/test/pay-link-status-gate.integration.test.ts",
       "packet": "V1-57 (FU-PAY-LINK-STATUS-GATE)"
+    },
+    {
+      "prefix": "v72w_",
+      "owner": "apps/server/test/contact-privacy-business-events.integration.test.ts",
+      "packet": "V1-72 (RR-ERASURE-BUSINESS-EVENTS)"
     }
   ],
   "pendingRenames": [],
