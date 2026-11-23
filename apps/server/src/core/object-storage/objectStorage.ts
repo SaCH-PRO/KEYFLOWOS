@@ -175,6 +175,42 @@ function makeFileRef(bucket: string, key: string, client: S3Client): S3FileRef {
   };
 }
 
+/** Bucket sub-directory (under PRIVATE_OBJECT_DIR) of client uploads, one folder per business. */
+export const BUSINESS_UPLOAD_NAMESPACE = "uploads";
+
+const SAFE_KEY_SEGMENT = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,199}$/;
+
+/** One key segment: no slash, no dot or empty segment, no encoding tricks. */
+function isSafeKeySegment(segment: unknown): segment is string {
+  return (
+    typeof segment === "string" &&
+    SAFE_KEY_SEGMENT.test(segment) &&
+    segment !== "." &&
+    segment !== ".."
+  );
+}
+
+/**
+ * True only for `/objects/uploads/<businessId>/<id>`, exactly: three safe
+ * segments, the second equal to `businessId`.
+ */
+export function isObjectPathOfBusiness(
+  objectPath: unknown,
+  businessId: unknown,
+): boolean {
+  if (typeof objectPath !== "string" || !isSafeKeySegment(businessId)) {
+    return false;
+  }
+  if (!objectPath.startsWith("/objects/")) return false;
+  const segments = objectPath.slice("/objects/".length).split("/");
+  return (
+    segments.length === 3 &&
+    segments[0] === BUSINESS_UPLOAD_NAMESPACE &&
+    segments[1] === businessId &&
+    isSafeKeySegment(segments[2])
+  );
+}
+
 function trimSlashes(s: string): string {
   return s.replace(/^\/+/, "").replace(/\/+$/, "");
 }
@@ -275,11 +311,16 @@ export class ObjectStorageService {
    * Returns a presigned PUT URL good for 15 minutes. The client uploads the
    * file directly to this URL.
    */
-  async getObjectEntityUploadURL(): Promise<string> {
+  async getObjectEntityUploadURL(businessId: string): Promise<string> {
+    // FU-ATTACHMENT-OBJECT-TENANCY: the key names the business that asked for
+    // it, so resolveObjectForBusiness can tell whose an object is.
+    if (!isSafeKeySegment(businessId)) {
+      throw new Error("A business id is required to issue an upload URL");
+    }
     const { client, bucket } = getClient();
     const privateDir = this.getPrivateObjectDir();
     const objectId = randomUUID();
-    const key = `${privateDir}/uploads/${objectId}`;
+    const key = `${privateDir}/${BUSINESS_UPLOAD_NAMESPACE}/${businessId}/${objectId}`;
 
     return await getSignedUrl(
       client,
@@ -367,15 +408,38 @@ export class ObjectStorageService {
   }
 
   /**
-   * Read an object uploaded via the canonical `/objects/<id>` path into memory.
-   * Falls back to the public/presigned URL if the object is not found locally.
+   * FU-ATTACHMENT-OBJECT-TENANCY: resolve an object path that came from a
+   * client (a request body, a chat history, a stored field) for `businessId`.
+   *
+   * Honoured only for a canonical `/objects/uploads/<businessId>/<id>` path
+   * issued to that business by getObjectEntityUploadURL. Anything else (another
+   * business's object, an upload issued before uploads were bound to a business,
+   * a server-side namespace such as accountant exports, a dot or empty segment,
+   * a non-canonical form) throws the same ObjectNotFoundError as an object that
+   * does not exist, before the bucket is asked, so a refusal does not reveal
+   * whether the object exists. No owner or visibility rule exists for uploads
+   * (no caller sets an ACL policy), so business is the boundary.
    */
-  async getObjectEntityBuffer(objectPath: string): Promise<{
+  async resolveObjectForBusiness(
+    objectPath: string,
+    businessId: string,
+  ): Promise<S3FileRef> {
+    if (!isObjectPathOfBusiness(objectPath, businessId)) {
+      throw new ObjectNotFoundError();
+    }
+    return this.getObjectEntityFile(objectPath);
+  }
+
+  /**
+   * Read a client-supplied `/objects/<id>` path into memory for `businessId`
+   * (resolveObjectForBusiness): an object of another business reads as absent.
+   */
+  async getObjectEntityBuffer(objectPath: string, businessId: string): Promise<{
     buffer: Buffer;
     contentType?: string;
     contentLength?: number;
   }> {
-    const ref = await this.getObjectEntityFile(objectPath);
+    const ref = await this.resolveObjectForBusiness(objectPath, businessId);
     const { body, contentType, contentLength } = await ref.read();
     const chunks: Buffer[] = [];
     for await (const chunk of body) {

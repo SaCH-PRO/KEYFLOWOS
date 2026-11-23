@@ -9,8 +9,9 @@ export class UploadsService {
     this.objectStorage = new ObjectStorageService();
   }
 
-  async getUploadUrl(): Promise<{ uploadURL: string; objectPath: string }> {
-    const uploadURL = await this.objectStorage.getObjectEntityUploadURL();
+  /** FU-ATTACHMENT-OBJECT-TENANCY: the issued path is bound to `businessId`. */
+  async getUploadUrl(businessId: string): Promise<{ uploadURL: string; objectPath: string }> {
+    const uploadURL = await this.objectStorage.getObjectEntityUploadURL(businessId);
     const objectPath = this.objectStorage.normalizeObjectEntityPath(uploadURL);
     return { uploadURL, objectPath };
   }
