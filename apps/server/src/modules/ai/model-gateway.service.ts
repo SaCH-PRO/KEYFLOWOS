@@ -979,8 +979,9 @@ export class ModelGatewayService {
                 this.logger.warn(`Failed to record LLM cost: ${err instanceof Error ? err.message : String(err)}`);
               },
             );
-            // A violation is the model's answer, not the provider's health: it never counts toward a circuit.
-            this.recordProviderError(candidate.provider, preferences, 'contract_violation');
+            // A violation is the model's answer, not the provider's health: it never counts toward a circuit,
+            // and the call was already counted by recordProviderSuccess inside executeWithRetries.
+            this.recordContractViolation(candidate.provider, preferences);
             violations.push({ provider: candidate.provider, model: response.model, errors });
             continue;
           }
@@ -1006,10 +1007,13 @@ export class ModelGatewayService {
       // Nothing valid came back and at least one candidate answered badly: a
       // typed 502, not the last provider's error, so the caller can tell a
       // model that answered wrongly from a provider that did not answer.
+      // The detail names the other candidate's failure class only: the body is
+      // client-facing, and a provider's message can carry hosts, response
+      // bodies or key fragments (the full text is in the error log above).
       throw new AiContractViolationError(
         request.expectedContract,
         violations,
-        lastError ? `a later candidate also failed: ${lastError.message}` : undefined,
+        lastError ? `another candidate failed with a provider error (${classifyProviderFailure(lastError)})` : undefined,
       );
     }
     throw lastError || this.noProviderAvailable(effectiveCandidates, preferences);
@@ -3336,6 +3340,21 @@ export class ModelGatewayService {
    * the platform key must not take the provider away from every business for
    * the cooldown.
    */
+  /**
+   * RR-STRUCTURED-PARSE-INVALID-STATE: the provider answered (that call is
+   * already in totalCalls through recordProviderSuccess) but the answer
+   * violated the expected contract. Health shows it as an error with class
+   * 'contract_violation'; no circuit is touched and no second call is counted.
+   */
+  private recordContractViolation(provider: AiProvider, preferences?: AiPreferences): void {
+    const metrics = this.providerMetrics.get(provider);
+    if (!metrics) return;
+    metrics.totalErrors++;
+    metrics.lastErrorAt = new Date();
+    // As in recordProviderError: only the platform credential's failures set the class every business sees.
+    if (!this.byokCircuitId(provider, preferences)) metrics.lastFailureClass = 'contract_violation';
+  }
+
   private recordProviderError(
     provider: AiProvider,
     preferences?: AiPreferences,
