@@ -133,6 +133,7 @@ import {
   type ModuleSight,
 } from '../key-cortex/key-cortex-prompt-context.service';
 import { KeyCortexConsciousnessService } from '../key-cortex/key-cortex-consciousness.service';
+import { readerSearchOptions } from './semantic-memory-sight';
 import { ProcurementService } from '../procurement/procurement.service';
 import {
   ActionNotClearedError,
@@ -2153,6 +2154,9 @@ export class FlowOrchestratorService {
    * section, as TemporalFlowService and UnifiedMemoryRetrievalService already
    * do. Only the memory lookup is caught: a missing chat provider still fails
    * the turn from the gateway dispatch with its own 503.
+   *
+   * MEM-SEMANTIC-SIGHT (D-234, D-257): the turn's hits only, by each hit's source (semanticHitsVisibleTo), filtered
+   * before the top 5 are cut, for the perception block's reader and sight (turnMemorySight).
    */
   private async buildSemanticMemorySection(
     businessId: string,
@@ -2160,6 +2164,9 @@ export class FlowOrchestratorService {
     userId?: string,
     server?: FlowServerContext,
   ): Promise<string> {
+    // MEM-SEMANTIC-SIGHT review (D-203): a turn that names no member and no position (the support desk) sees only the
+    // conversation in front of it, as its perception block reads nothing: no semantic memory at all.
+    if (!userId && !server) return '';
     try {
       // MEM-DOC-EXTRACTION-SIGHT (D-234; orchestrator review COR-MDX-1): the copies of document extractions only for a
       // turn whose reader may read revenue (turnMemorySight, as the perception block reads), else none: the search
@@ -2170,7 +2177,7 @@ export class FlowOrchestratorService {
         query,
         limit: 5,
         minSimilarity: 0.65,
-        includeDocumentExtractionCopies: readsDocumentExtractions(sight, reader),
+        ...readerSearchOptions(this.prisma, businessId, { reader, sight }, this.logger),
       });
       if (relevant.length === 0) return '';
       return '\n\nRELEVANT CONTEXT FROM MEMORY:\n' +
