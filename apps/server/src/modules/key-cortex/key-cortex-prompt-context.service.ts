@@ -6,6 +6,7 @@ import { KeyCortexContextService } from './key-cortex-context.service';
 import { UnifiedMemoryRetrievalService } from './unified-memory-retrieval.service';
 import { KeyCortexLearningService } from './key-cortex-learning.service';
 import { GENOME_ROW_METADATA_KEY } from './unified-memory.types';
+import { DOCUMENT_EXTRACTION_CATEGORY } from '../ai/ai-memory.service';
 import type { MemoryFragment, MemorySourceType } from './unified-memory.types';
 import { financialProposalsWithProvenance, isFinancialProposal, isMoneyLabel, isMoneyMemoryEvent, PROPOSAL_CLASSIFY_SELECT, proposalTextStatesMoney, type ProposalFields } from '../business-genome/key-genome/genome-finance-scope';
 import {
@@ -339,6 +340,20 @@ export function eventModulesOf(fragment: RecordFragment): CanonicalModule[] {
   return modules.size ? [...modules] : [...EVENT_MODULES];
 }
 
+/**
+ * MEM-SEMANTIC-SIGHT (D-234, D-257): the modules the names `values` name (an entity type, a source module, an event's
+ * type, source or module column), by the same words and families eventModulesOf reads an event record by. [] when they
+ * name none: the caller decides what an unclassified source needs (a semantic hit's fails closed).
+ */
+export function modulesNamedBy(...values: unknown[]): CanonicalModule[] {
+  const modules = new Set<CanonicalModule>();
+  for (const value of values) {
+    for (const family of familiesOf(value)) for (const module of FAMILY_MODULES.get(family) ?? []) modules.add(module);
+    for (const word of wordsOf(value)) for (const module of WORD_MODULES.get(word) ?? []) modules.add(module);
+  }
+  return [...modules];
+}
+
 /** W1F-PERCEPTION-MODULE-SCOPE: whether a reader may read a module (at least 'read'). */
 export type ModuleSight = (module: CanonicalModule) => boolean;
 /** No member, no module (as KEY's standing context gives a turn with no member no figure, PR195-KEY-GATES). */
@@ -366,7 +381,13 @@ export async function readersModuleSight(
   logger: Pick<Logger, 'warn'> = cognitionMemoryLogger,
   logTag = 'promptMemory',
 ): Promise<ModuleSight> {
-  if (!reader || !prisma) return NO_MODULE_SIGHT;
+  if (!reader) return NO_MODULE_SIGHT;
+  if (!prisma) {
+    // MEM-DOC-EXTRACTION-SIGHT orchestrator review (COR-MDX-2): a service built without its database client reads no
+    // membership, so its reader sees no module (fail closed). Said loudly: it is a wiring fault, not a member's scope.
+    logger.warn(`[${logTag}][${businessId}] no database client: no membership read, the reader sees no module (wiring fault)`);
+    return NO_MODULE_SIGHT;
+  }
   try {
     const membership = await prisma.client.membership.findUnique({
       where: { userId_businessId: { userId: reader, businessId } },
@@ -420,10 +441,44 @@ export function genomeModulesOf(fragment: RecordFragment): CanonicalModule[] {
 }
 
 /**
+ * MEM-DOC-EXTRACTION-SIGHT (D-234 fail closed, D-257): whether a fragment renders a document extraction (an AiMemory row
+ * of DOCUMENT_EXTRACTION_CATEGORY, whose provenance is unknown): the row itself (UnifiedMemoryRetrievalService titles an
+ * AiMemory fragment with its category and starts its content with `<category>.`), or a semantic copy of one (the
+ * backfill's entry form, `<category>: <key> = <value>` with the row's category in its metadata, or the writer's value
+ * form, with the row's category as its metadata's `type`).
+ */
+export function isDocumentExtractionFragment(fragment: Pick<MemoryFragment, 'sourceType' | 'title' | 'metadata'> & Partial<Pick<MemoryFragment, 'content'>>): boolean {
+  const content = typeof fragment.content === 'string' ? fragment.content : '';
+  if (fragment.sourceType === 'ai_memory') {
+    return fragment.title === DOCUMENT_EXTRACTION_CATEGORY || content.startsWith(`${DOCUMENT_EXTRACTION_CATEGORY}.`);
+  }
+  if (fragment.sourceType === 'ai_memory_embedding') {
+    const meta = fragment.metadata;
+    return (
+      meta?.category === DOCUMENT_EXTRACTION_CATEGORY ||
+      meta?.type === DOCUMENT_EXTRACTION_CATEGORY ||
+      content.startsWith(`${DOCUMENT_EXTRACTION_CATEGORY}: `)
+    );
+  }
+  return false;
+}
+
+/**
+ * MEM-DOC-EXTRACTION-SIGHT (D-234): whether a prompt's memory read may take the document extractions
+ * (MemoryRetrievalOptions.documentExtractions): only for a member reader who may read revenue; never a turn with no
+ * member reader (a contact-only position, a SUPER_ADMIN who is no member), whatever its sight.
+ */
+export function readsDocumentExtractions(sight: ModuleSight, reader: string | null): boolean {
+  return reader !== null && sight('revenue');
+}
+
+/**
  * FU-KEY-MEMORY-MONEY-SIGHT: the modules a reader needs to see any memory record a prompt renders: a business-wide
  * event's (eventModulesOf) or a genome record's (genomeModulesOf); [] for the other stores.
+ * MEM-DOC-EXTRACTION-SIGHT (D-234): a document extraction, or a copy of one, needs revenue read (fail closed).
  */
 export function recordModulesOf(fragment: RecordFragment): CanonicalModule[] {
+  if (isDocumentExtractionFragment(fragment)) return ['revenue'];
   return fragment.sourceType === 'genome_memory_event' ? genomeModulesOf(fragment) : eventModulesOf(fragment);
 }
 
@@ -704,7 +759,9 @@ export async function readersOwnPromptMemory<
   // D-238: a reader without revenue read is handed a proposal record only when its proposal is non-financial (a memberless
   // turn then sees its action, status and risk level only, D-226).
   const readsRevenue = sight('revenue');
+  // MEM-DOC-EXTRACTION-SIGHT (D-234): a turn with no member reader sees no document extraction, whatever its sight.
   return withoutKeyRecords
+    .filter((fragment) => reader !== null || !isDocumentExtractionFragment(fragment))
     .filter((fragment) => readsRevenue || !financialProposals.has(fragment.id))
     .filter((fragment) => withinModuleSight(fragment, sight))
     .filter((fragment) => fragment.sourceType !== 'cognition_memory' || own.has(fragment.id))
@@ -724,6 +781,9 @@ export class KeyCortexPromptContextService {
   private readonly logger = new Logger(KeyCortexPromptContextService.name);
 
   constructor(
+    // MEM-DOC-EXTRACTION-SIGHT orchestrator review (COR-MDX-2): every dependency named by token, so Nest resolves the
+    // service, PrismaService included, even where no type metadata is emitted (this first one had no token).
+    @Inject(KeyCortexContextService)
     private readonly contextService: KeyCortexContextService,
     @Optional()
     @Inject(UnifiedMemoryRetrievalService)
@@ -736,7 +796,10 @@ export class KeyCortexPromptContextService {
     @Optional()
     @Inject(PrismaService)
     private readonly prisma?: PrismaService,
-  ) {}
+  ) {
+    // COR-MDX-2: without it no member reads memory, so no owner sees an extraction: said at construction, not silently.
+    if (!prisma) this.logger.error('KeyCortexPromptContextService built without PrismaService: prompt memory reads fail closed for every reader');
+  }
 
   /**
    * Build the message array for the model gateway.
@@ -877,10 +940,14 @@ export class KeyCortexPromptContextService {
         //
         // W11-FLOW-PERCEPTION-SCOPE (SEC-W11MC-3): both rules and the headroom are readersOwnPromptMemory and
         // PROMPT_MEMORY_HEADROOM, which the /ai flow chat's perception block keeps too.
+        // MEM-DOC-EXTRACTION-SIGHT (D-234): the reader's module sight, read first, so the read takes document
+        // extractions only for a reader with revenue read (no reader, none); readersOwnPromptMemory keeps that sight.
+        const sight = await readersModuleSight(this.prisma, businessId, reader, this.logger, 'buildMemoryContext');
         const fragments = await this.unifiedMemory.retrieveContext(businessId, {
           query: currentQuery,
           limit: PROMPT_MEMORY_FRAGMENTS + PROMPT_MEMORY_HEADROOM,
           ...(reader ? { userId: reader } : { includeEpisodic: false }),
+          documentExtractions: readsDocumentExtractions(sight, reader),
         });
         const kept = await readersOwnPromptMemory(
           this.prisma,
@@ -890,6 +957,7 @@ export class KeyCortexPromptContextService {
           PROMPT_MEMORY_FRAGMENTS,
           this.logger,
           'buildMemoryContext',
+          sight,
         );
 
         if (kept.length > 0) {

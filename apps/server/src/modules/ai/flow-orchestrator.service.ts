@@ -129,9 +129,11 @@ import {
   promptMemoryReader,
   readersModuleSight,
   readersOwnPromptMemory,
+  readsDocumentExtractions,
   type ModuleSight,
 } from '../key-cortex/key-cortex-prompt-context.service';
 import { KeyCortexConsciousnessService } from '../key-cortex/key-cortex-consciousness.service';
+import { readerSearchOptions } from './semantic-memory-sight';
 import { ProcurementService } from '../procurement/procurement.service';
 import {
   ActionNotClearedError,
@@ -365,6 +367,48 @@ export interface FlowPageContext {
  * passes (StaffChatBridgeService does), and only one JobRolePolicyService issued; a
  * jobRoleEnvelope inside pageContext is dropped.
  */
+/**
+ * W1F-PERCEPTION-MODULE-SCOPE (D-202, review SEC-W1FPMS-2 / COR-W1FPMS-2) and MEM-DOC-EXTRACTION-SIGHT (COR-MDX-1): the
+ * member a flow turn's memory reads are read for, and the modules they may see. A member in the app: themselves while
+ * they are a member (promptMemoryReader), by their membership. The staff bridge's turn (no member, the position's
+ * envelope): the reader and modules JobRolePolicyService resolved for the position (perceptionOf, on an envelope it
+ * issued); when the reader it names is not found a member (removed since), no module (fail closed). A turn with
+ * neither (the support desk) and any other turn with no reader: nobody, and no module. Shared by the perception block
+ * and the semantic memory section; `self` is the orchestrator (its client, logger and job-role policy).
+ */
+async function turnMemorySight(
+  self: {
+    prisma: PrismaService;
+    logger: Pick<Logger, 'warn'>;
+    getJobRolePolicy(): Pick<JobRolePolicyService, 'isIssued' | 'perceptionOf'>;
+  },
+  businessId: string,
+  userId?: string,
+  server?: FlowServerContext,
+  logTag = 'perception',
+): Promise<{ reader: string | null; sight: ModuleSight }> {
+  let candidate: string | undefined = userId;
+  let positionModules: readonly string[] | undefined;
+  if (!userId && server) {
+    const perception = (() => {
+      try {
+        const policy = self.getJobRolePolicy();
+        return policy.isIssued(server.jobRoleEnvelope) ? policy.perceptionOf(server.jobRoleEnvelope) : null;
+      } catch {
+        return null;
+      }
+    })();
+    candidate = perception?.readerUserId ?? undefined;
+    positionModules = perception?.modules ?? [];
+  }
+  const reader = await promptMemoryReader(self.prisma, businessId, candidate, self.logger, logTag);
+  const sight: ModuleSight =
+    positionModules === undefined
+      ? await readersModuleSight(self.prisma, businessId, reader, self.logger, logTag)
+      : candidate && reader !== candidate ? NO_MODULE_SIGHT : moduleSightOf(positionModules);
+  return { reader, sight };
+}
+
 export interface FlowServerContext {
   /** The staff position's envelope, as JobRolePolicyService.envelopeForPosition issued it. */
   jobRoleEnvelope: JobRoleEnvelope;
@@ -1467,22 +1511,12 @@ export class FlowOrchestratorService {
       // (D-73/D-93), and otherwise what its map grants, where it saw no module-named event at all. It is the reader and
       // nothing else (D-73/D-88): chat() still runs the turn with no principal, no standing-context viewer and no
       // conversation owner, and chatToolAction still reads the holder for call_create_task alone.
-      let candidate: string | undefined = userId;
-      let positionModules: readonly string[] | undefined;
-      if (!userId && server) {
-        const perception = (() => {
-          try {
-            const policy = this.getJobRolePolicy();
-            return policy.isIssued(server.jobRoleEnvelope) ? policy.perceptionOf(server.jobRoleEnvelope) : null;
-          } catch {
-            return null;
-          }
-        })();
-        candidate = perception?.readerUserId ?? undefined;
-        positionModules = perception?.modules ?? [];
-      }
+      // The reader and the modules are resolved by turnMemorySight (MEM-DOC-EXTRACTION-SIGHT: shared with the semantic
+      // memory section).
       const perceive = async () => {
-        const reader = await promptMemoryReader(this.prisma, businessId, candidate, this.logger, 'perception');
+        // MEM-DOC-EXTRACTION-SIGHT (D-234): read before the memory, which takes document extractions only for a sight
+        // with revenue read.
+        const { reader, sight } = await turnMemorySight({ prisma: this.prisma, logger: this.logger, getJobRolePolicy: () => this.getJobRolePolicy() }, businessId, userId, server);
         const read = await memory.retrieveContext(businessId, {
           // `query` is deliberately NOT passed.
           //
@@ -1529,11 +1563,8 @@ export class FlowOrchestratorService {
           // 0.5 sits inside the real 0.375–1.0 range, so it drops the stale
           // low-confidence band while keeping anything recent or well-evidenced.
           minRankScore: 0.5,
+          documentExtractions: readsDocumentExtractions(sight, reader),
         });
-        // A position's turn sees its position's modules; when the reader it names is not found a member (removed since),
-        // none (fail closed). Any other turn sees by its reader's membership (readersOwnPromptMemory's own read).
-        const sight: ModuleSight | undefined =
-          positionModules === undefined ? undefined : candidate && reader !== candidate ? NO_MODULE_SIGHT : moduleSightOf(positionModules);
         return readersOwnPromptMemory(this.prisma, businessId, reader, read, window, this.logger, 'perception', sight);
       };
 
@@ -2143,14 +2174,30 @@ export class FlowOrchestratorService {
    * section, as TemporalFlowService and UnifiedMemoryRetrievalService already
    * do. Only the memory lookup is caught: a missing chat provider still fails
    * the turn from the gateway dispatch with its own 503.
+   *
+   * MEM-SEMANTIC-SIGHT (D-234, D-257): the turn's hits only, by each hit's source (semanticHitsVisibleTo), filtered
+   * before the top 5 are cut, for the perception block's reader and sight (turnMemorySight).
    */
-  private async buildSemanticMemorySection(businessId: string, query: string): Promise<string> {
+  private async buildSemanticMemorySection(
+    businessId: string,
+    query: string,
+    userId?: string,
+    server?: FlowServerContext,
+  ): Promise<string> {
+    // MEM-SEMANTIC-SIGHT review (D-203): a turn that names no member and no position (the support desk) sees only the
+    // conversation in front of it, as its perception block reads nothing: no semantic memory at all.
+    if (!userId && !server) return '';
     try {
+      // MEM-DOC-EXTRACTION-SIGHT (D-234; orchestrator review COR-MDX-1): the copies of document extractions only for a
+      // turn whose reader may read revenue (turnMemorySight, as the perception block reads), else none: the search
+      // leaves them out before its limit.
+      const { reader, sight } = await turnMemorySight({ prisma: this.prisma, logger: this.logger, getJobRolePolicy: () => this.getJobRolePolicy() }, businessId, userId, server, 'semanticMemory');
       const relevant = await this.semanticMemory.search({
         businessId,
         query,
         limit: 5,
         minSimilarity: 0.65,
+        ...readerSearchOptions(this.prisma, businessId, { reader, sight }, this.logger),
       });
       if (relevant.length === 0) return '';
       return '\n\nRELEVANT CONTEXT FROM MEMORY:\n' +
@@ -2247,7 +2294,7 @@ export class FlowOrchestratorService {
     // see buildSemanticMemorySection, W7-AI-SERVICES-503 review SEC503-1 / CR-503-1)
     const lastUserMessage = conversationHistory.slice().reverse().find((m) => m.role === 'user');
     const semanticMemorySection = lastUserMessage?.content
-      ? await this.buildSemanticMemorySection(businessId, lastUserMessage.content)
+      ? await this.buildSemanticMemorySection(businessId, lastUserMessage.content, userId, server)
       : '';
 
     const pageContextSection = formatPageContextSection(pageContext);
@@ -2715,7 +2762,7 @@ ${triage.standingContext}`;
     // Semantic memory search based on current message (optional enrichment:
     // see buildSemanticMemorySection, W7-AI-SERVICES-503 review SEC503-1 / CR-503-1)
     const semanticMemorySection = enrichedMessage
-      ? await this.buildSemanticMemorySection(businessId, enrichedMessage)
+      ? await this.buildSemanticMemorySection(businessId, enrichedMessage, userId, server)
       : '';
 
     const pageContextSection = formatPageContextSection(pageContext);
@@ -4078,9 +4125,10 @@ ${triage.standingContext}`;
     // that passes nothing arrives there undeclared and is refused.
     action?: KeyDispatchAction,
   ): Promise<any> {
-    // Bridged MCP tools route to the allowlisted remote server.
+    // Bridged MCP tools route to the allowlisted remote server, for this business only
+    // (RR-MCP-TENANT-BOUND): a server not bound to it refuses before connecting.
     if (isMcpToolName(toolName)) {
-      return this.getMcp().callTool(toolName, args);
+      return this.getMcp().callTool(businessId, toolName, args);
     }
     switch (toolName) {
       case 'update_business_blueprint': {

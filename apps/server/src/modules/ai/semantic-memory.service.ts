@@ -58,6 +58,12 @@ export function copyHoldsRowValue(content: Prisma.Sql): Prisma.Sql {
  */
 export const AI_MEMORY_SETTINGS_CATEGORIES: readonly string[] = ['settings'];
 
+/**
+ * MEM-DOC-EXTRACTION-SIGHT (D-234): the AiMemory category of an uploaded document's extracted data (provenance unknown:
+ * it fails closed for a reader without revenue read). AiMemoryService re-exports it with its rule.
+ */
+export const DOCUMENT_EXTRACTION_CATEGORY = 'document_extraction';
+
 /** Whether an AiMemory category holds configuration, not memory (AI_MEMORY_SETTINGS_CATEGORIES). */
 export function isAiMemorySettingsCategory(category: string): boolean {
   return AI_MEMORY_SETTINGS_CATEGORIES.includes(category);
@@ -72,6 +78,14 @@ export function aiMemoryWithoutSettings(): { notIn: string[] } {
 function rowIsMemory(): Prisma.Sql {
   return Prisma.sql`m.category NOT IN (${Prisma.join([...AI_MEMORY_SETTINGS_CATEGORIES])})`;
 }
+
+/**
+ * MEM-SEMANTIC-SIGHT: a reader's semantic read (search with visibleTo) reads pages of at least SEMANTIC_PAGE rows and at
+ * most MAX_SEMANTIC_SCAN rows in all, as the reader's temporal timeline read does (TemporalFlowService.list): past that
+ * the answer may be short.
+ */
+const SEMANTIC_PAGE = 50;
+const MAX_SEMANTIC_SCAN = 5_000;
 
 /** How many times a re-copy refused because its row was rewritten again meanwhile tries with what the row holds now. */
 const RECOPY_ATTEMPTS = 3;
@@ -335,6 +349,23 @@ export class SemanticMemoryService {
     limit?: number;
     sourceTypes?: string[];
     minSimilarity?: number;
+    /**
+     * MEM-DOC-EXTRACTION-SIGHT (D-234; orchestrator review COR-MDX-1): serve the copies of document extractions too (a
+     * copy whose AiMemory row's category is DOCUMENT_EXTRACTION_CATEGORY, whatever its own metadata says). Only when
+     * true: by default every such copy is left out before the limit, so a search for a reader without revenue read never
+     * takes one and none takes a place in its limit. A caller passes true only for a reader whose sight reads revenue
+     * (readsDocumentExtractions).
+     */
+    includeDocumentExtractionCopies?: boolean;
+    /**
+     * MEM-SEMANTIC-SIGHT (D-234, D-257): the reader projection (semanticHitsVisibleTo in semantic-memory-sight.ts):
+     * whether each hit of a page, in rank order, may be handed to the reader. When given, the limit counts only the hits
+     * it keeps: the read pages on, in a stable order (similarity, then id), past every hit it withholds, until the limit
+     * is met, the matches end or MAX_SEMANTIC_SCAN rows have been read. A withheld hit takes no place and changes nothing
+     * returned. Without it the read is as before (one page of `limit`). When it raises, the search answers as for any
+     * other failure (nothing), never the hits of later pages.
+     */
+    visibleTo?: (hits: SemanticMemory[]) => Promise<boolean[]>;
   }): Promise<SemanticMemory[]> {
     try {
       const embedding = await this.generateEmbedding(params.businessId, params.query);
@@ -351,7 +382,8 @@ export class SemanticMemoryService {
       // (AI_MEMORY_SETTINGS_CATEGORIES); only a backfill run before the review repair made one.
       let query = Prisma.sql`
         SELECT id, content, source_type, source_id, metadata,
-               1 - (embedding <=> ${vectorLiteral}::vector) as similarity
+               1 - (embedding <=> ${vectorLiteral}::vector) as similarity,
+               (embedding <=> ${vectorLiteral}::vector)::text as distance
         FROM "ai_memory_embeddings" e
         WHERE business_id = ${params.businessId}
           AND 1 - (embedding <=> ${vectorLiteral}::vector) >= ${minSim}
@@ -371,25 +403,73 @@ export class SemanticMemoryService {
         query = Prisma.sql`${query} AND source_type IN (${Prisma.join(params.sourceTypes)})`;
       }
 
-      query = Prisma.sql`${query} ORDER BY embedding <=> ${vectorLiteral}::vector LIMIT ${limit}`;
+      if (params.includeDocumentExtractionCopies !== true) {
+        query = Prisma.sql`${query} AND NOT (
+          e.source_type = ${AI_MEMORY_COPY_SOURCE_TYPE}
+          AND EXISTS (
+            SELECT 1 FROM "ai_memories" dx
+            WHERE dx.id = e.source_id AND dx.business_id = e.business_id AND dx.category = ${DOCUMENT_EXTRACTION_CATEGORY}
+          )
+        )`;
+      }
 
-      const results = await this.prisma.client.$queryRaw<Array<{
-        id: string;
-        content: string;
-        source_type: string;
-        source_id: string;
-        metadata: any;
-        similarity: number;
-      }>>(query);
+      // Codex P2 on #226: a reader's read pages by keyset (similarity, then id), never by row offset: a copy written or
+      // deleted ahead of the read position between two pages can neither shift a hit past the next page nor repeat one.
+      // The cursor is the last row's distance as float8 text (exact: Postgres prints the shortest exact form) and its id.
+      type Cursor = { distance: string; id: string };
+      const distance = Prisma.sql`(embedding <=> ${vectorLiteral}::vector)`;
+      const page = async (take: number, after?: Cursor): Promise<Array<SemanticMemory & { distance: string }>> => {
+        const keyset = after
+          ? Prisma.sql` AND (${distance} > ${after.distance}::float8 OR (${distance} = ${after.distance}::float8 AND e.id > ${after.id}))`
+          : Prisma.empty;
+        const results = await this.prisma.client.$queryRaw<Array<{
+          id: string;
+          content: string;
+          source_type: string;
+          source_id: string;
+          metadata: any;
+          similarity: number;
+          distance: string;
+        }>>(Prisma.sql`${query}${keyset} ORDER BY ${distance}, e.id LIMIT ${take}`);
+        return results.map((r) => ({
+          id: r.id,
+          content: r.content,
+          sourceType: r.source_type,
+          sourceId: r.source_id,
+          metadata: typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata,
+          similarity: Number(r.similarity),
+          distance: r.distance,
+        }));
+      };
+      const strip = ({ distance: _distance, ...hit }: SemanticMemory & { distance: string }): SemanticMemory => hit;
 
-      return results.map((r) => ({
-        id: r.id,
-        content: r.content,
-        sourceType: r.source_type,
-        sourceId: r.source_id,
-        metadata: typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata,
-        similarity: Number(r.similarity),
-      }));
+      if (!params.visibleTo) return (await page(limit)).map(strip);
+
+      // MEM-SEMANTIC-SIGHT: filtered before the limit is cut (see visibleTo). Each page doubles (fewer round trips past
+      // many withheld hits); a hit is kept once.
+      const want = Math.max(0, Math.trunc(limit) || 0);
+      const visible: SemanticMemory[] = [];
+      const seen = new Set<string>();
+      let batch = Math.max(want * 4, SEMANTIC_PAGE);
+      let after: Cursor | undefined;
+      for (let scanned = 0; visible.length < want && scanned < MAX_SEMANTIC_SCAN; batch *= 2) {
+        const take = Math.min(batch, MAX_SEMANTIC_SCAN - scanned);
+        const rows = await page(take, after);
+        if (rows.length === 0) break;
+        const hits = rows.map(strip);
+        const keep = await params.visibleTo(hits);
+        hits.forEach((hit, i) => {
+          if (keep[i] === true && !seen.has(hit.id)) {
+            seen.add(hit.id);
+            visible.push(hit);
+          }
+        });
+        scanned += rows.length;
+        const last = rows[rows.length - 1];
+        after = { distance: last.distance, id: last.id };
+        if (rows.length < take) break;
+      }
+      return visible.slice(0, want);
     } catch (err: any) {
       // W7-AI-SERVICES-503 (R0-07a rule): embeddings not configured fails visibly.
       // TemporalFlowService, UnifiedMemoryRetrievalService and (since the

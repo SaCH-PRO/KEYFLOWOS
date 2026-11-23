@@ -242,6 +242,13 @@ export class BusinessEventInterceptor implements NestInterceptor {
               route: routePath,
               httpMethod: method,
               ip: req.ip,
+              // V1-72 review (SEC-1): the route's :contactId, resolved by the
+              // router and checked by the guards, is the server-derived name of
+              // the person a contacts/:contactId route acts on. The forget
+              // purge and the write-time check read it; never the body.
+              ...(typeof req.params?.contactId === 'string' && req.params.contactId
+                ? { routeContactId: req.params.contactId }
+                : {}),
             },
           });
         } catch {
