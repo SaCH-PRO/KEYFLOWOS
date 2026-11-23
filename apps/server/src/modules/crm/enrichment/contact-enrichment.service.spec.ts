@@ -5,7 +5,6 @@ import type { EnrichmentProvider, ProviderOutcome } from './enrichment-provider'
 import { CrmService } from '../crm.service';
 import { resolveCrmAccess } from '../crm-permissions.helper';
 
-// The member's access is stubbed; the visibility clause built from it is the real one.
 /**
  * FU-UNIT-MOCK-ISOLATION (vitest.unit.config.ts, isolate:false): this file's
  * vi.mock must reach a module that other spec files also import. Without a
@@ -23,6 +22,7 @@ afterAll(() => {
   vi.resetModules();
 });
 
+// The member's access is stubbed; the visibility clause built from it is the real one.
 vi.mock('../crm-permissions.helper', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../crm-permissions.helper')>()),
   resolveCrmAccess: vi.fn(),

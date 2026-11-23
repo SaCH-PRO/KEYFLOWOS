@@ -25,12 +25,21 @@ import swc from 'unplugin-swc';
  * src/core/config/vitest-transform-coverage.spec.ts checks every config uses
  * this transform.
  *
- * ONE KNOWN DIFFERENCE FROM tsc. swc compiles a file at a time, without type
- * information, so a parameter typed as an enum gets the enum object in its
- * metadata where tsc writes String or Number. The ValidationPipe then treats
- * it as Object (not validated, not converted), where tsc's String/Number would
- * convert a route or query parameter. Interfaces, type aliases and type-only
- * imports resolve to Object in both.
+ * KNOWN DIFFERENCES FROM tsc. swc compiles a file at a time, without type
+ * information:
+ *  - A parameter typed as an enum, or as an alias of a primitive or of a
+ *    literal union (type Mode = 'a' | 'b'), gets Object (or the enum object)
+ *    in its metadata where tsc writes String, Number or Boolean. The
+ *    ValidationPipe then treats it as Object (not validated, not converted),
+ *    where tsc's String/Number would convert a route or query parameter.
+ *    Interfaces, object-type aliases and `import type` names are Object in
+ *    both.
+ *  - An import used only as a parameter's type is kept as a runtime import
+ *    (its metadata reads `typeof X === "undefined" ? Object : X`), where tsc
+ *    drops it when X is only a type. The metadata is still Object, but the
+ *    module is evaluated, which can change load order; under the unit config's
+ *    shared registry (isolate:false) that is why some specs reset modules
+ *    before their imports (FU-UNIT-MOCK-ISOLATION).
  */
 export function serverTransform() {
   return swc.vite({
