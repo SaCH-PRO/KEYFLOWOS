@@ -175,6 +175,12 @@ function makeFileRef(bucket: string, key: string, client: S3Client): S3FileRef {
   };
 }
 
+/**
+ * FU-OUTBOUND-ATTACHMENT-URL review round 1 (S1-1): the most getObjectEntityBuffer
+ * reads into memory (twice the 10 MB upload limit POST /uploads/request-url states).
+ */
+export const MAX_OBJECT_READ_BYTES = 20 * 1024 * 1024;
+
 /** Bucket sub-directory (under PRIVATE_OBJECT_DIR) of client uploads, one folder per business. */
 export const BUSINESS_UPLOAD_NAMESPACE = "uploads";
 
@@ -209,6 +215,16 @@ export function isObjectPathOfBusiness(
     segments[1] === businessId &&
     isSafeKeySegment(segments[2])
   );
+}
+
+/** The path of an S3 endpoint URL without its slashes ("" for none or an unparsable endpoint). */
+function endpointPathPrefix(endpoint: string | undefined): string {
+  if (!endpoint) return "";
+  try {
+    return decodeURIComponent(new URL(endpoint).pathname).replace(/^\/+/, "").replace(/\/+$/, "");
+  } catch {
+    return "";
+  }
 }
 
 function trimSlashes(s: string): string {
@@ -461,9 +477,24 @@ export class ObjectStorageService {
   }> {
     const ref = await this.resolveObjectForBusiness(objectPath, businessId);
     const { body, contentType, contentLength } = await ref.read();
+    // FU-OUTBOUND-ATTACHMENT-URL review round 1 (S1-1): the presigned PUT does
+    // not bound an upload's size, so an object over MAX_OBJECT_READ_BYTES is not
+    // buffered: by its reported length, or once the stream passes the cap. It
+    // reads as absent (the caller's own object; nothing to hide, nothing read).
+    if (typeof contentLength === "number" && contentLength > MAX_OBJECT_READ_BYTES) {
+      body.destroy();
+      throw new ObjectNotFoundError();
+    }
     const chunks: Buffer[] = [];
+    let total = 0;
     for await (const chunk of body) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      total += buf.length;
+      if (total > MAX_OBJECT_READ_BYTES) {
+        body.destroy();
+        throw new ObjectNotFoundError();
+      }
+      chunks.push(buf);
     }
     return { buffer: Buffer.concat(chunks), contentType, contentLength };
   }
@@ -493,7 +524,7 @@ export class ObjectStorageService {
       const path = this.normalizeObjectEntityPath(`${url.origin}${url.pathname}`);
       return path.startsWith("/objects/") ? path : null;
     } catch {
-      // Storage not configured: nothing can be ours.
+      // Storage not configured, or a malformed %-escape: not ours.
       return null;
     }
   }
@@ -517,9 +548,17 @@ export class ObjectStorageService {
     const privateDir = this.getPrivateObjectDir();
     let pathname = decodeURIComponent(url.pathname).replace(/^\/+/, "");
 
+    // FU-OUTBOUND-ATTACHMENT-URL review round 1 (C1-3): an endpoint with a path
+    // (Supabase Storage: https://<proj>.supabase.co/storage/v1/s3) prefixes every
+    // path-style URL with it — strip it first.
+    const { bucket, config } = getClient();
+    const endpointPath = endpointPathPrefix(config.endpoint);
+    if (endpointPath && pathname.startsWith(`${endpointPath}/`)) {
+      pathname = pathname.slice(endpointPath.length + 1);
+    }
+
     // Path-style URLs (MinIO, R2 with custom endpoint) include the bucket
     // name as the first segment — strip it.
-    const { bucket } = getClient();
     if (pathname.startsWith(`${bucket}/`)) {
       pathname = pathname.slice(bucket.length + 1);
     }
