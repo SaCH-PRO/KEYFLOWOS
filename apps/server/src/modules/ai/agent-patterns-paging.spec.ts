@@ -27,15 +27,17 @@ function table(rows: Row[], onRead?: (call: number) => void) {
     const field: 'createdAt' | 'updatedAt' = Object.keys(args.orderBy?.[0] ?? { createdAt: 'desc' })[0] as any;
     const time = (r: Row, f: 'createdAt' | 'updatedAt') => (f === 'updatedAt' ? r.updatedAt ?? r.createdAt : r.createdAt).getTime();
     let out = rows.filter((r) => r.businessId === args.where.businessId && r.category === args.where.category);
-    for (const f of ['createdAt', 'updatedAt'] as const) {
-      if (args.where[f]?.gte) out = out.filter((r) => time(r, f) >= args.where[f].gte.getTime());
-    }
-    const or = args.where.OR as Array<any> | undefined;
-    if (or) {
-      out = out.filter((r) =>
-        or.some((c) => (c[field]?.lt !== undefined ? time(r, field) < c[field].lt.getTime() : time(r, field) === c[field].getTime() && r.id < c.id.lt)),
-      );
-    }
+    // Every where clause as Prisma reads it: a field's { gte, lte, lt } or equality, OR as any of its clauses.
+    const n = (x: any) => (x instanceof Date ? x.getTime() : x);
+    const valueOf = (r: Row, k: string) => (k === 'updatedAt' ? r.updatedAt ?? r.createdAt : (r as any)[k]);
+    const holds = (r: Row, k: string, c: any): boolean => {
+      const v = n(valueOf(r, k));
+      if (c instanceof Date || typeof c !== 'object' || c === null) return v === n(c);
+      return (c.gte === undefined || v >= n(c.gte)) && (c.lte === undefined || v <= n(c.lte)) && (c.lt === undefined || v < n(c.lt));
+    };
+    const matches = (r: Row, w: Record<string, any>): boolean =>
+      Object.entries(w).every(([k, c]) => (k === 'OR' ? (c as any[]).some((o) => matches(r, o)) : holds(r, k, c)));
+    out = out.filter((r) => matches(r, args.where));
     out.sort((a, b) => time(b, field) - time(a, field) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
     // As Prisma returns it: updatedAt is never null (@updatedAt; a row never rewritten has its creation time).
     return out.slice(args.skip ?? 0, (args.skip ?? 0) + (args.take ?? out.length)).map((r) => ({ ...r, updatedAt: r.updatedAt ?? r.createdAt }));
@@ -71,6 +73,16 @@ describe('GET .../agent/patterns pages by keyset, bounded (FU-PATTERNS-ROUTES-SI
     expect(t.calls.length).toBeGreaterThan(1);
     for (const call of t.calls) expect(call.skip ?? 0, JSON.stringify(call)).toBe(0);
     for (const call of t.calls.slice(1)) expect(call.where.OR, 'keyset cursor').toBeDefined();
+    // Orchestrator ruling (A), measured: an OR keyset alone is a filter, not an index range (a deep page of 100k rows
+    // removed 80,000 by filter); each later page also bounds updatedAt by the last row read, so Postgres reads it as a
+    // range of ai_memories (business_id, category, updated_at DESC, id DESC).
+    const byId = new Map(rows.map((r) => [r.id, r.updatedAt ?? r.createdAt]));
+    for (const call of t.calls.slice(1)) {
+      const lte = call.where.updatedAt?.lte as Date | undefined;
+      expect(lte, JSON.stringify(call.where)).toBeInstanceOf(Date);
+      const lastId = (call.where.OR as any[]).map((c) => c.id?.lt).find(Boolean);
+      expect(lte!.getTime(), 'lte is the last row read').toBe(byId.get(lastId)!.getTime());
+    }
   });
 
   it('a pattern written between two pages neither repeats nor drops a row the reader may read', async () => {
