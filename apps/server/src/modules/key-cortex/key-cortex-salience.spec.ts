@@ -537,7 +537,8 @@ describe('it is wired to the chat, not merely written', () => {
   it('reaches the system prompt through standingContext', () => {
     const block = triage.slice(triage.indexOf('private standingContext('));
     const body = block.slice(0, block.indexOf('\n  private '));
-    expect(body).toMatch(/this\.salience\?\.describeForPrompt\(businessId\)/);
+    // MEM-SALIENCE-SIGHT: with the viewer's module sight, so the counts are projected for the reader.
+    expect(body).toMatch(/this\.salience\?\.describeForPrompt\(businessId, now, sight\)/);
   });
 
   it('outranks style and team distribution under the budget', () => {
