@@ -589,9 +589,10 @@ describe('MEM-PATTERNS-SIGHT (D-257, D-100, D-234, D-203): flow-chat behavioural
         desk: [await deskPrompt(false), await deskPrompt(true)],
         revnoexp: [await chatPromptFor('revnoexp'), await streamPromptFor('revnoexp')],
       });
+      // Control: the perception block is live in this harness (it renders AiMemory rows as ai_memory fragments).
+      await memory.upsert(ID.biz, { category: 'fact', key: `${P}fact`, value: 'V71V-FACT we open at nine', source: 'user' });
       const before = await all();
-      // Control: the perception block is live in this harness (it renders the non-money patterns as ai_memory fragments).
-      expect(before.blind[0], 'control: perception block').toContain('[ai_memory] patterns');
+      expect(before.blind[0], 'control: perception block').toContain('[ai_memory] fact');
       await seedMoneyPattern();
       await seedMoreMoneyPatterns(4);
       await memory.upsert(ID.biz, { category: 'patterns', key: 'expense_cycle', value: EXPENSE, confidence: 0.8, source: 'pattern_analysis' });
@@ -599,12 +600,15 @@ describe('MEM-PATTERNS-SIGHT (D-257, D-100, D-234, D-203): flow-chat behavioural
       const revenue = await chatPromptFor('revenue');
       expect(promptStatesMoney(revenue).length, 'control: money reaches the revenue reader').toBeGreaterThan(0);
       expect(revenue, 'control: the expense reaches the revenue-and-expenses reader').toContain(EXPENSE);
+      expect(revenue, "control: the revenue-and-expenses reader's perception block still reads patterns").toContain('[ai_memory] patterns');
       const after = await all();
       for (const [who, prompts] of Object.entries(after)) {
         prompts.forEach((prompt, i) => {
           const label = `${who} ${i ? 'stream' : 'chat'}`;
-          if (who !== 'revnoexp') expect(promptStatesMoney(prompt), label).toEqual([]);
           expect(prompt, `${label}: expense`).not.toContain(EXPENSE);
+          // The revenue-only member may read the money patterns (D-100), so only the expense is withheld from them.
+          if (who === 'revnoexp') return;
+          expect(promptStatesMoney(prompt), label).toEqual([]);
           expect(masked(prompt), `${label}: differential`).toBe(masked((before as any)[who][i]));
         });
       }
