@@ -101,6 +101,28 @@ describe('contactIdsOfEvent: only server-derived data names a contact (V1-72 rev
     expect(contactIdsOfEvent({ subjectType: 'invoice', subjectId: 'inv_1', after: { id: 'inv_1', contactId: 'c_forgotten' } })).toEqual([]);
   });
 
+  it('reads the after snapshot of a CRM note or task edit (server-derived route; the row\'s contactId is read from the database)', () => {
+    expect(contactIdsOfEvent({ subjectType: 'unknown', subjectId: 'n1', after: { id: 'n1', contactId: 'c_1' }, metadata: { route: '/crm/businesses/:businessId/notes/:noteId' } })).toEqual(['c_1']);
+    expect(contactIdsOfEvent({ subjectType: 'task', subjectId: 't1', after: { id: 't1', contactId: 'c_1' }, metadata: { route: '/crm/businesses/:businessId/tasks/:taskId/complete' } })).toEqual(['c_1']);
+    expect(contactIdsOfEvent({ subjectType: 'task', subjectId: 't1', after: { id: 't1', contactId: 'c_1' }, metadata: { route: '/crm/businesses/:businessId/contacts/:contactId/tasks' } })).toEqual(['c_1']);
+    expect(contactIdsOfEvent({ subjectType: 'unknown', subjectId: 'tc1', after: { id: 'tc1', contactId: 'c_1' }, metadata: { route: '/commerce/businesses/:businessId/time-cost/:id' } })).toEqual([]);
+  });
+
+  it('a KEY cortex bus copy of a business event is read through the event it copies, never its before', () => {
+    const ids = contactIdsOfEvent({
+      source: 'key_cortex_event_bus', subjectType: 'Contact', subjectId: 'note_1',
+      after: {
+        subjectType: 'contact', subjectId: 'note_1',
+        before: { contactId: 'c_planted' },
+        after: { id: 'note_1', contactId: 'c_1' },
+        metadata: { routeContactId: 'c_route' },
+      },
+    });
+    expect(ids.sort()).toEqual(['c_1', 'c_route', 'note_1']);
+    // The same shape from another writer is not read as a copy.
+    expect(contactIdsOfEvent({ subjectType: 'Unknown', subjectId: 'x', after: { subjectType: 'contact', subjectId: 'c_1' } })).toEqual([]);
+  });
+
   it('never reads the request body (before): a planted key names no one', () => {
     expect(contactIdsOfEvent({ subjectType: 'invoice', subjectId: 'inv_1', before: { contactId: 'c_planted' }, after: { id: 'inv_1' } })).toEqual([]);
   });

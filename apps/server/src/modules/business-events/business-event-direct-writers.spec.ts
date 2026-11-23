@@ -65,6 +65,29 @@ describe('direct business_events writers drop a forgotten person (V1-72 review, 
     expect(p.create.mock.calls[0][0].data.metadata).toEqual({ url: '/' });
   });
 
+  it('KEY analytics properties cannot set the keys a scrubbed row keeps (route, httpMethod)', async () => {
+    const p = prisma(true);
+    const svc = new AnalyticsAdapterService({} as never, {} as never, p as never);
+    await (svc as any).trackEvent({ businessId: 'biz_1', eventName: 'viewed', contactId: 'c_forgotten', properties: { route: SECRET, httpMethod: SECRET }, actorId: 'key' });
+    expect(JSON.stringify(p.create.mock.calls[0][0].data)).not.toContain(SECRET);
+  });
+
+  it('the event bus copy of a business event (any subject type) about a forgotten contact writes no payload', async () => {
+    const p = prisma(true);
+    const bus = new KeyCortexEventBusService(p as never);
+    await (bus as any).persistAudit({
+      id: 'e4', type: 'task.update', businessId: 'biz_1', source: 'web',
+      payload: {
+        businessId: 'biz_1', eventType: 'task.update', subjectType: 'task', subjectId: 't_1',
+        before: { title: SECRET }, after: { id: 't_1', contactId: 'c_forgotten', title: SECRET },
+        metadata: { route: '/crm/businesses/:businessId/tasks/:taskId', httpMethod: 'PATCH', ip: '203.0.113.9' },
+      },
+      metadata: { entityType: 'Task', entityId: 't_1' },
+    });
+    expect(p.client.$queryRaw).toHaveBeenCalled();
+    expect(JSON.stringify(p.create.mock.calls[0][0].data)).not.toContain(SECRET);
+  });
+
   it('the event bus audit of a contact that is not forgotten keeps its payload', async () => {
     const p = prisma(false);
     const bus = new KeyCortexEventBusService(p as never);

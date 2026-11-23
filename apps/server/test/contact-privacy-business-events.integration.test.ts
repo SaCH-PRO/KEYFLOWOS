@@ -65,7 +65,10 @@ const ID = {
   plantedEvent: `${P}plantedEvent`, // an invoice row whose request body carried a planted contactId
   routeEvent: `${P}routeEvent`, // a row naming the person only by the route's :contactId
   timeCostEvent: `${P}timeCostEvent`, // a time-cost row whose caller-chosen contactId the response echoes
-  busEvent: `${P}busEvent`, // a KEY cortex bus audit row: subject_type 'Contact' (capitalised), the contact nested in after
+  busEvent: `${P}busEvent`,
+  notePatchEvent: `${P}notePatchEvent`, // PATCH notes/:noteId: subject 'unknown', the note (with its contactId) in after
+  taskPatchEvent: `${P}taskPatchEvent`, // PATCH tasks/:taskId: subject 'task'
+  busCopyEvent: `${P}busCopyEvent`, // the KEY cortex bus copy of an interceptor row // a KEY cortex bus audit row: subject_type 'Contact' (capitalised), the contact nested in after
 
   forgedEvent: `${P}forgedEvent`,
 };
@@ -82,6 +85,9 @@ const PII_HELD = { companyName: 'V72W-Engines-Ltd' };
 const NOTE_SECRET = 'V72W note: Ada prefers evenings';
 const DUP_PII = { firstName: 'V72W-Dup-Ada', email: `${P}ada.dup@test.local` };
 const REL_SECRET = 'V72W relationship note: Ada is the sister';
+const NOTE_EDIT_SECRET = 'V72W edited note: Ada moved to Tobago';
+const TASK_SECRET = 'V72W task: call Ada about the will';
+const COPY_SECRET = 'V72W copied message to Ada';
 const REASON = `V72W-Ada asked to be forgotten by email from ${P}ada@test.local`;
 const SECRETS = [
   ...Object.values(PII),
@@ -92,6 +98,9 @@ const SECRETS = [
   REASON,
   ...Object.values(DUP_PII),
   REL_SECRET,
+  NOTE_EDIT_SECRET,
+  TASK_SECRET,
+  COPY_SECRET,
 ];
 const BYSTANDER = { firstName: 'V72W-Bystander', email: `${P}bystander@test.local`, phone: '+1 868 555 0173' };
 const CANCELLER = { firstName: 'V72W-Canceller', email: `${P}canceller@test.local`, phone: '+1 868 555 0174' };
@@ -431,6 +440,40 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
         metadata: { route: '/commerce/businesses/:businessId/time-cost/:id', httpMethod: 'PATCH', ip: '203.0.113.81' },
       },
     });
+    // CRM note and task edits: the interceptor labels them 'unknown' / 'task'
+    // (the note or task is the subject) and the response, read from the
+    // database, carries the person's contactId.
+    await db.businessEvent.create({
+      data: {
+        id: ID.notePatchEvent, businessId: ID.bizA, eventType: 'unknown.update', subjectType: 'unknown', subjectId: `${P}note1`,
+        actorType: 'human', actorId: ID.owner, action: 'update', source: 'web',
+        before: { body: NOTE_EDIT_SECRET }, after: { id: `${P}note1`, contactId: subjectId, body: NOTE_EDIT_SECRET },
+        metadata: { route: '/crm/businesses/:businessId/notes/:noteId', httpMethod: 'PATCH', ip: '203.0.113.83' },
+      },
+    });
+    await db.businessEvent.create({
+      data: {
+        id: ID.taskPatchEvent, businessId: ID.bizA, eventType: 'task.update', subjectType: 'task', subjectId: `${P}task1`,
+        actorType: 'human', actorId: ID.owner, action: 'update', source: 'web',
+        before: { title: TASK_SECRET }, after: { id: `${P}task1`, contactId: subjectId, title: TASK_SECRET },
+        metadata: { route: '/crm/businesses/:businessId/tasks/:taskId', httpMethod: 'PATCH', ip: '203.0.113.84' },
+      },
+    });
+    // The flow bridge republishes every business event onto the KEY cortex
+    // bus, which writes a second row: subject_type capitalised, the whole
+    // original event (before, after, metadata with ip) in after.
+    await db.businessEvent.create({
+      data: {
+        id: ID.busCopyEvent, businessId: ID.bizA, eventType: 'contact.create', subjectType: 'Contact', subjectId: `${P}msg3`,
+        actorType: 'web', actorId: ID.owner, action: 'PUBLISHED', source: 'key_cortex_event_bus',
+        after: {
+          businessId: ID.bizA, eventType: 'contact.create', subjectType: 'contact', subjectId: `${P}msg3`,
+          before: { body: COPY_SECRET }, after: { id: `${P}msg3`, body: COPY_SECRET },
+          metadata: { route: '/crm/businesses/:businessId/contacts/:contactId/messages', httpMethod: 'POST', ip: '203.0.113.85', routeContactId: subjectId },
+        },
+        metadata: { importance: 'normal' },
+      },
+    });
     // The KEY cortex event bus writes subject_type from the bridge's entityType,
     // capitalised ('Contact'), with the whole contact nested in its payload.
     await db.businessEvent.create({
@@ -553,6 +596,11 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
     const timeCost = rows.find((e) => e.id === ID.timeCostEvent)!;
     expect(timeCost.after, 'a non-contact subject is not reached through after.contactId').toEqual({ id: `${P}tc1`, minutes: 6000, costRate: 500, contactId: subjectId });
     expect(timeCost.metadata?.ip).toBe('203.0.113.81');
+    for (const id of [ID.notePatchEvent, ID.taskPatchEvent, ID.busCopyEvent]) {
+      const row = rows.find((e) => e.id === id)!;
+      expect(row, id).toMatchObject({ before: null, after: null });
+      expect(row.metadata?.ip, id).toBeUndefined();
+    }
     const bus = rows.find((e) => e.id === ID.busEvent)!;
     expect(bus).toMatchObject({ before: null, after: null, metadata: {}, subject_type: 'Contact' });
     const routed = rows.find((e) => e.id === ID.routeEvent)!;
@@ -586,7 +634,7 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
     // The create, the first PATCH, the note, relationship and refer rows and
     // the duplicate's row. The forget row and the held PATCH were written
     // without snapshots, so there was nothing to scrub.
-    expect(entry.after.erased.businessEventsScrubbed).toBe(8); // and the route-param and bus rows
+    expect(entry.after.erased.businessEventsScrubbed).toBe(11); // and the route-param, bus, note-edit, task-edit and bus-copy rows
     // Honest scope: rows that name the person only inside a nested structure
     // (a duplicate check, an import) are not reached by id.
     expect(entry.after.notSwept).toMatch(/nested/);
@@ -594,6 +642,9 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
     expect(entry.after.notSwept).toMatch(/request body/);
     // Option B: retained-record events are kept even when they carry its contactId.
     expect(entry.after.notSwept).toMatch(/even when they carry its contactId/);
+    // Rows written before routeContactId was recorded, and the cognitive_events copies, are named.
+    expect(entry.after.notSwept).toMatch(/before routeContactId was recorded/);
+    expect(entry.after.notSwept).toMatch(/cognitive_events/);
   });
 
   it('a write after the purge that names the merged duplicate holds no personal data', async () => {
