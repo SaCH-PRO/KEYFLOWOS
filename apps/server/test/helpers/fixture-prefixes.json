@@ -1156,6 +1156,11 @@
       "prefix": "v57r_",
       "owner": "apps/server/test/send-reminder-status-gate.integration.test.ts",
       "packet": "V1-57 (FU-SEND-REMINDER-SERVER-GATE)"
+    },
+    {
+      "prefix": "v57p_",
+      "owner": "apps/server/test/pay-link-status-gate.integration.test.ts",
+      "packet": "FU-PAY-LINK-STATUS-GATE"
     }
   ],
   "pendingRenames": [],
