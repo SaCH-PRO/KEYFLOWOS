@@ -6,8 +6,10 @@
  *
  * Dry run by default: counts bank connections, classifies each row's stored
  * access_token as plaintext (non-empty and not in the extension's ciphertext
- * form), already encrypted, or no token (null or empty), prints the counts and
- * one `<connection_id>  plaintext` line per plaintext row, and writes nothing.
+ * form), already encrypted (decrypts with the loaded key), undecryptable (in
+ * the ciphertext form but does not decrypt), or no token (null or empty),
+ * prints the counts and one `<connection_id>  plaintext|undecryptable` line
+ * per such row, and writes nothing.
  * It never prints a token, a ciphertext, a business id or the database URL.
  *
  * --apply rewrites each plaintext row through the @keyflow/db client, whose
@@ -28,8 +30,9 @@
  *   pnpm encrypt:bank-tokens --business=<id>       # dry run, scoped to business(es)
  *   pnpm encrypt:bank-tokens --apply               # encrypt the plaintext rows
  *
- * --apply refuses (exit 2, nothing written) when no key variable is set, and
- * when the @keyflow/db build it loads does not encrypt the column.
+ * --apply refuses (exit 2, nothing written) when no key variable is set, when
+ * the @keyflow/db build it loads does not encrypt the column, and when stored
+ * ciphertext exists in scope but none of it decrypts with the loaded key.
  *
  * Exit status: 0 done, 1 database read/update failure, 2 bad arguments or a refused --apply.
  */
@@ -40,6 +43,7 @@ const CIPHER_PREFIX = 'enc:v1:';
 
 interface BankConnectionDelegate {
   update(args: { where: { id: string; accessToken: string }; data: { accessToken: string }; select: { id: true } }): Promise<unknown>;
+  findUnique(args: { where: { id: string }; select: { id: true; accessToken: true } }): Promise<unknown>;
 }
 type Db = Pick<typeof db, '$queryRawUnsafe'> & { bankConnection: BankConnectionDelegate };
 type Log = (...args: unknown[]) => void;
@@ -60,7 +64,8 @@ export function parseArgs(argv: string[]): Args {
       if (!businessIds.includes(id)) businessIds.push(id);
       continue;
     }
-    return { error: `unknown argument ${JSON.stringify(arg.slice(0, 40))}` };
+    // Not echoed: a token or a database URL pasted by mistake would land in the terminal and its logs.
+    return { error: `unknown argument (${arg.length} characters)` };
   }
   return { apply, businessIds };
 }
@@ -133,18 +138,46 @@ export async function main(
   }
 
   const plaintext = scanned.filter((r) => tokenState(r.access_token) === 'plaintext');
-  const encrypted = scanned.filter((r) => tokenState(r.access_token) === 'encrypted');
+  const prefixed = scanned.filter((r) => tokenState(r.access_token) === 'encrypted');
   const none = scanned.filter((r) => tokenState(r.access_token) === 'none');
+
+  // A value in the ciphertext form is only encrypted if the loaded key decrypts it: read each through the
+  // extension (which decrypts) and count a failure as undecryptable. Such a row is sealed under another key, or
+  // is a plaintext that happens to start with the prefix; the API's reads of it fail the same way. It is never
+  // rewritten here: it needs an operator's decision.
+  const undecryptable: string[] = [];
+  let decrypted = 0;
+  for (const item of prefixed) {
+    try {
+      await database.bankConnection.findUnique({ where: { id: item.id }, select: { id: true, accessToken: true } });
+      decrypted += 1;
+    } catch {
+      undecryptable.push(item.id);
+    }
+  }
 
   log(row('connections_scanned', scanned.length));
   log(row('plaintext_tokens', plaintext.length));
-  log(row('already_encrypted', encrypted.length));
+  log(row('already_encrypted', decrypted));
+  log(row('undecryptable', undecryptable.length));
   log(row('no_token', none.length));
 
   if (!args.apply) {
     log(row('would_encrypt', plaintext.length));
     for (const item of plaintext) log(`  ${item.id}  plaintext`);
+    for (const id of undecryptable) log(`  ${id}  undecryptable`);
     return 0;
+  }
+
+  // SEC-V72S-R2-1: a key variable being set does not prove it is the API's key. When stored ciphertext exists and
+  // none of it decrypts, the loaded key is almost certainly not the one the API used: refuse rather than seal the
+  // plaintext rows under it. (With no stored ciphertext in scope there is nothing to check against.)
+  if (undecryptable.length > 0 && decrypted === 0) {
+    error(
+      `Refusing --apply: ${undecryptable.length} stored ciphertext value(s) and none decrypts with the loaded key ` +
+        `(${keySource}); it is likely not the key the API runs with. Nothing was written.`,
+    );
+    return 2;
   }
 
   let done = 0;
