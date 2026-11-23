@@ -128,6 +128,10 @@ describe('EvalHarnessService: no vacuous pass (RR-EVAL-HARNESS-NO-VACUOUS)', () 
       evaluateAction: async () => ({ ...(await mockAutonomyOrchestrator.evaluateAction()), ruleTrace: [{ note: 'x' }] }),
     };
     expect((await wired({ autonomy: shapeless }).runSuite('explanation-quality')).assertions[0].status).toBe('FAIL');
+    const emptySource = {
+      evaluateAction: async () => ({ ...(await mockAutonomyOrchestrator.evaluateAction()), ruleTrace: [{ source: '', rule: 'r', result: 'allow' }] }),
+    };
+    expect((await wired({ autonomy: emptySource }).runSuite('explanation-quality')).assertions[0].status).toBe('FAIL');
     expect((await wired().runSuite('explanation-quality')).assertions[0].status).toBe('PASS');
   });
 
@@ -144,13 +148,25 @@ describe('EvalHarnessService: no vacuous pass (RR-EVAL-HARNESS-NO-VACUOUS)', () 
     for (const steps of [
       [{ order: 1, action: 'list_contacts', module: 'crm' }, { order: 2, action: 'create_invoice', module: 'commerce' }, { order: 3, action: 'send_invoice', module: 'commerce' }],
       [{ order: 1, action: 'commerce.send_invoice' }],
+      [{ order: 1, action: 'commerce_send_invoice' }], // the flow tool registry's spelling
+      [{ order: 1, action: 'sendInvoice', module: 'commerce' }],
+      [{ order: 1, action: 'resend_invoice', module: 'commerce' }], // a resend is a send
       [{ order: 1, action: 'invoice.email', module: 'commerce' }],
     ]) {
       const planner = { generatePlan: async () => ({ goal: { objective: 'send invoice to customer' }, steps, confidence: 0.9 }) };
       expect((await wired({ planner }).runSuite('planning-correctness')).assertions[0].status, JSON.stringify(steps)).toBe('PASS');
     }
-    // create_invoice alone is not a send; an empty plan is not either.
-    for (const steps of [[{ order: 1, action: 'create_invoice', module: 'commerce' }], []]) {
+    // create_invoice alone is not a send; an empty plan is not either; nor is a step that only mentions
+    // sending and invoices somewhere in a longer name (a reminder about an invoice, a report of sends).
+    for (const steps of [
+      [{ order: 1, action: 'create_invoice', module: 'commerce' }],
+      [],
+      [{ order: 1, action: 'send_invoice_reminder', module: 'commerce' }],
+      [{ order: 1, action: 'send_invoices_report', module: 'commerce' }],
+      [{ order: 1, action: 'unsend_invoice', module: 'commerce' }],
+      [{ order: 1, action: 'go', module: 'invoice-sender' }],
+      [{ order: 1, action: 'send_message', module: 'communications' }],
+    ]) {
       const planner = { generatePlan: async () => ({ goal: { objective: 'send invoice to customer' }, steps, confidence: 0.9 }) };
       expect((await wired({ planner }).runSuite('planning-correctness')).assertions[0].status, JSON.stringify(steps)).toBe('FAIL');
     }
@@ -190,6 +206,28 @@ describe('EvalHarnessService: no vacuous pass (RR-EVAL-HARNESS-NO-VACUOUS)', () 
     const result = await harness.runSuite('throws');
     expect(result.assertions[0]).toMatchObject({ status: 'ERROR', passed: false, error: 'boom' });
     expect(result.errors).toBe(1);
+    expect(result.failed).toBe(0); // failed counts FAIL only: the five counters partition total
+    expect(result.passed + result.failed + result.notRun + result.indeterminate + result.errors).toBe(result.total);
+    expect(result.green).toBe(false);
+  });
+
+  it('a check that does not return exactly true is FAIL: a truthy non-boolean or a promise never passes', async () => {
+    const harness = wired();
+    harness.registerSuite({
+      name: 'loose-checks',
+      description: 'checks that return something other than a boolean',
+      assertions: [
+        { name: 'one', run: () => 1, check: (() => 1) as unknown as (r: unknown) => boolean },
+        { name: 'promise', run: () => 1, check: (async () => false) as unknown as (r: unknown) => boolean },
+        { name: 'true', run: () => 1, check: () => true },
+      ],
+    });
+    const result = await harness.runSuite('loose-checks');
+    expect(result.assertions.map((a) => [a.name, a.status, a.passed])).toEqual([
+      ['one', 'FAIL', false],
+      ['promise', 'FAIL', false],
+      ['true', 'PASS', true],
+    ]);
     expect(result.green).toBe(false);
   });
 
