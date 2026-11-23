@@ -180,12 +180,12 @@ describe('a transfer moves whole units (W11-KEY-TRANSFER-INTEGER)', () => {
     expect(q.description.toLowerCase()).toContain('whole');
   });
 
-  it('accepts a whole number, coerces a numeric string, and refuses a fraction or text in the validator\'s own words', () => {
+  it('accepts a whole number, coerces a numeric string, and refuses a fraction, text, a boolean or a blank string in the validator\'s own words', () => {
     expect(() => validate('inventory_transfer_stock', transfer(2))).not.toThrow();
     const coerced = transfer('2');
     validate('inventory_transfer_stock', coerced);
     expect(coerced.quantity).toBe(2);
-    for (const bad of [1.5, '1.5', 'abc', '']) {
+    for (const bad of [1.5, '1.5', 'abc', true, '  ', '']) {
       expect(() => validate('inventory_transfer_stock', transfer(bad)), String(bad)).toThrow(
         bad === '' ? /Missing required fields for inventory_transfer_stock: quantity/ : /^Field "quantity" for inventory_transfer_stock must be a whole number$/,
       );
