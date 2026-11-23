@@ -233,9 +233,10 @@ export const SENSITIVE_VALUE_PATTERNS: readonly Readonly<SensitiveValuePattern>[
   }),
   freeze({
     // Provider keys, in any letter case and also after an underscore (`x_ghp_...`). Two shapes:
-    //   - a prefix that is never a product slug (sk-ant- Anthropic, sk-proj- OpenAI project keys, xoxb- Slack,
-    //     ghp_ and github_pat_ GitHub) followed by 20 or more key characters, dashes included: real key bodies
-    //     are base64url-like and may start with or contain a dash;
+    //   - a prefix that is never a product slug (sk-ant- Anthropic; sk-proj-, sk-svcacct- and sk-admin- OpenAI
+    //     project, service-account and admin keys; xoxb- Slack; ghp_ and github_pat_ GitHub) followed by 20 or
+    //     more key characters, dashes included: real key bodies are base64url-like and may start with or
+    //     contain a dash;
     //   - bare sk- (legacy OpenAI), whose body must have, past at most four short dashed segments (an empty
     //     one allowed), a run of 20 or more key characters WITHOUT a dash: a product slug such as
     //     `sk-classic-fit-cotton-shirt-blue` has none and is left alone. Residual: a slug with one 20+ letter
@@ -245,7 +246,7 @@ export const SENSITIVE_VALUE_PATTERNS: readonly Readonly<SensitiveValuePattern>[
     name: 'provider-key-prefix',
     marker: SECRET_MARKER,
     pattern: new RegExp(
-      String.raw`(?<![A-Za-z0-9])(?:(?:sk-ant-|sk-proj-|xoxb-|ghp_|github_pat_)${KEY_CHARS}{20,}|sk-(?:[A-Za-z0-9_]{0,32}-){0,4}[A-Za-z0-9_]{20,}${KEY_CHARS}*)`,
+      String.raw`(?<![A-Za-z0-9])(?:(?:sk-ant-|sk-proj-|sk-svcacct-|sk-admin-|xoxb-|ghp_|github_pat_)${KEY_CHARS}{20,}|sk-(?:[A-Za-z0-9_]{0,32}-){0,4}[A-Za-z0-9_]{20,}${KEY_CHARS}*)`,
       'gi',
     ),
   }),
@@ -281,7 +282,9 @@ export interface RedactSensitiveTextOptions {
  * as given. When something matched, every such character in that string leaf
  * is dropped, not only the ones inside the match: an emoji joiner sequence or
  * a script that uses the zero-width non-joiner loses them in a leaf that also
- * held a secret (readable, not a leak). A digit glued to a card number by an
+ * held a secret, and a Latin or numeric token embedded in an Arabic or Hebrew
+ * note may display in a different order once its directional marks are gone
+ * (readable, not a leak). A digit glued to a card number by an
  * invisible character joins the run and can make it not a card (a 17-digit
  * unbroken run is left whole). Idempotent: a marker matches no pattern.
  */
