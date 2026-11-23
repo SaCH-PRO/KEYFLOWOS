@@ -182,7 +182,11 @@ async function seedRevenue(perKind: number) {
 
     await knowledge.ingestText({ businessId: ID.biz, title: `${REV} statement ${i}`, sourceType: 'document', content: `Balance owed TTD ${AMOUNT}` });
   }
+  // The backfill copies every row again: the fact's copy is dropped first, so the fact keeps exactly one (the blind
+  // readers' hits then differ only if a withheld hit changed them).
+  await db.aiMemoryEmbedding.deleteMany({ where: { businessId: ID.biz, sourceType: 'memory' } });
   await semantic.backfillFromAiMemory(ID.biz);
+  expect(await db.aiMemoryEmbedding.count({ where: { businessId: ID.biz, content: { contains: 'V71T-OK-0' } } })).toBe(1);
 
   // Unresolvable sources.
   const orphanEvents = `${P}th_orphan`;
