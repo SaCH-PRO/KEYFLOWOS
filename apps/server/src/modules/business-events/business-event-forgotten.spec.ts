@@ -6,7 +6,7 @@
  * is pinned against Postgres in test/contact-privacy-business-events.integration.test.ts.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { BusinessEventService } from './business-event.service';
+import { BusinessEventService, contactIdsOfEvent } from './business-event.service';
 
 const SECRET = 'v72w_ada@test.local';
 const event = () => ({
@@ -62,5 +62,32 @@ describe('BusinessEventService: a forgotten person is dropped on every write pat
     const error = vi.spyOn((svc as any).logger, 'error').mockImplementation(() => undefined);
     await svc.emitBatch([event()]);
     expect(JSON.stringify(error.mock.calls)).not.toContain(SECRET);
+  });
+
+  it('emitBatch keeps the snapshots of a contact that is not forgotten', async () => {
+    const p = prisma(async (args) => args);
+    p.client.$queryRaw = vi.fn(async () => [{ forgotten: false }]);
+    const svc = new BusinessEventService(p as any);
+    await svc.emitBatch([event()]);
+    const data = p.client.businessEvent.create.mock.calls[0][0].data;
+    expect(data.before).toEqual({ email: SECRET });
+    expect(data.metadata.ip).toBe('203.0.113.9');
+  });
+
+  it('emit never throws, even on an input it cannot read', async () => {
+    const p = prisma(async (args) => args);
+    const svc = new BusinessEventService(p as any);
+    vi.spyOn((svc as any).logger, 'error').mockImplementation(() => undefined);
+    await expect(svc.emit(undefined as any)).resolves.toBeUndefined();
+  });
+});
+
+describe('contactIdsOfEvent: the keys that name a contact (V1-72 review round 2)', () => {
+  it('reads contactId, fromContactId, toContactId and targetContactId at the top level of before and after', () => {
+    expect(contactIdsOfEvent({
+      subjectType: 'contact', subjectId: 'rel_1',
+      before: { toContactId: 'c_to' },
+      after: { contactId: 'c_1', fromContactId: 'c_from', targetContactId: 'c_target' },
+    }).sort()).toEqual(['c_1', 'c_from', 'c_target', 'c_to', 'rel_1']);
   });
 });

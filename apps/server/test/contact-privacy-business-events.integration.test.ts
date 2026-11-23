@@ -57,6 +57,10 @@ const ID = {
   noteEvent: `${P}noteEvent`,
   dup: `${P}dup`, // a duplicate merged into the subject: the same person
   dupEvent: `${P}dupEvent`,
+  relEvent: `${P}relEvent`, // a relationship row: the person is its toContactId
+  referEvent: `${P}referEvent`, // a refer row: the person is its targetContactId
+  gone: `${P}gone`, // purged, then its row hard-deleted
+
   forgedEvent: `${P}forgedEvent`,
 };
 
@@ -71,6 +75,7 @@ const PII_PATCH = { jobTitle: 'V72W-Countess', secondaryEmail: `${P}ada.alt@test
 const PII_HELD = { companyName: 'V72W-Engines-Ltd' };
 const NOTE_SECRET = 'V72W note: Ada prefers evenings';
 const DUP_PII = { firstName: 'V72W-Dup-Ada', email: `${P}ada.dup@test.local` };
+const REL_SECRET = 'V72W relationship note: Ada is the sister';
 const REASON = `V72W-Ada asked to be forgotten by email from ${P}ada@test.local`;
 const SECRETS = [
   ...Object.values(PII),
@@ -80,6 +85,7 @@ const SECRETS = [
   NOTE_SECRET,
   REASON,
   ...Object.values(DUP_PII),
+  REL_SECRET,
 ];
 const BYSTANDER = { firstName: 'V72W-Bystander', email: `${P}bystander@test.local`, phone: '+1 868 555 0173' };
 const CANCELLER = { firstName: 'V72W-Canceller', email: `${P}canceller@test.local`, phone: '+1 868 555 0174' };
@@ -351,6 +357,29 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
       },
     });
 
+    // POST contacts/:contactId/relationships logs the relationship (its
+    // toContactId the person); POST contacts/:contactId/refer logs the
+    // referrer as subject, the new target's values in before and its id as
+    // targetContactId in after.
+    await db.businessEvent.create({
+      data: {
+        id: ID.relEvent, businessId: ID.bizA, eventType: 'contact.create', subjectType: 'contact', subjectId: `${P}rel1`,
+        actorType: 'human', actorId: ID.owner, action: 'create', source: 'web',
+        before: { toContactId: subjectId, type: 'family', note: REL_SECRET },
+        after: { id: `${P}rel1`, fromContactId: `${P}referrer`, toContactId: subjectId, note: REL_SECRET },
+        metadata: { route: '/crm/businesses/:businessId/contacts/:contactId/relationships', httpMethod: 'POST', ip: '203.0.113.75' },
+      },
+    });
+    await db.businessEvent.create({
+      data: {
+        id: ID.referEvent, businessId: ID.bizA, eventType: 'contact.create', subjectType: 'contact', subjectId: `${P}referrer`,
+        actorType: 'human', actorId: ID.owner, action: 'create', source: 'web',
+        before: { firstName: PII.firstName, email: PII.email, phone: PII.phone },
+        after: { relationship: { id: `${P}rel2` }, targetContactId: subjectId },
+        metadata: { route: '/crm/businesses/:businessId/contacts/:contactId/refer', httpMethod: 'POST', ip: '203.0.113.76' },
+      },
+    });
+
     const rows = await waitForEvents((r) =>
       r.filter((e) => e.subject_id === subjectId).length >= 2 &&
       r.some((e) => e.subject_id === bystanderId) && r.some((e) => e.subject_id === cancellerId));
@@ -421,8 +450,20 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
   });
 
   it('after the purge no event row of the business holds the subject\'s personal data; the rows, their types and actors stay', async () => {
-    await privacy.runPurgeCycle();
+    // The real service over a client that records the transaction options.
+    const txOptions: any[] = [];
+    const recording = new Proxy(db, {
+      get(target, prop, receiver) {
+        if (prop !== '$transaction') return Reflect.get(target, prop, receiver);
+        return (fn: any, opts?: any) => { txOptions.push(opts); return target.$transaction(fn, opts); };
+      },
+    });
+    await new ContactPrivacyServiceCtor({ client: recording } as any, audit).runPurgeCycle();
     expect((await db.contactForgetRequest.findUnique({ where: { id: forgetRequestId } }))?.status).toBe('purged');
+    // The scrub reads the business's whole event log: the purge transaction
+    // may not run under Prisma's 5 s interactive default.
+    expect(txOptions.length).toBeGreaterThan(0);
+    for (const opts of txOptions) expect(opts?.timeout, 'purge transaction timeout').toBeGreaterThanOrEqual(60_000);
 
     // The held write lands only now, after the purge committed.
     gate.release!();
@@ -436,6 +477,11 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
       expect(row.after, `${row.event_type} ${row.subject_id} after`).toBeNull();
       expect(row.metadata?.ip, `${row.event_type} ${row.subject_id} ip`).toBeUndefined();
       expect(row.actor_id).toBe(ID.owner);
+    }
+    for (const id of [ID.relEvent, ID.referEvent]) {
+      const row = rows.find((e) => e.id === id)!;
+      expect(row, id).toMatchObject({ before: null, after: null });
+      expect(row.metadata?.ip, id).toBeUndefined();
     }
     const dup = rows.find((e) => e.id === ID.dupEvent)!;
     expect(dup).toMatchObject({ before: null, after: null, metadata: {}, event_type: 'contact.update', actor_id: ID.owner });
@@ -457,10 +503,10 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
       where: { businessId: ID.bizA, contactHash: audit.hashContact(ID.bizA, subjectId), action: 'forget_purged' },
     });
     expect(entry, 'one forget_purged entry').toBeDefined();
-    // The create, the first PATCH, the note row and the duplicate's row. The
-    // forget row and the held PATCH were written without snapshots, so there
-    // was nothing to scrub.
-    expect(entry.after.erased.businessEventsScrubbed).toBe(4);
+    // The create, the first PATCH, the note, relationship and refer rows and
+    // the duplicate's row. The forget row and the held PATCH were written
+    // without snapshots, so there was nothing to scrub.
+    expect(entry.after.erased.businessEventsScrubbed).toBe(6);
   });
 
   it('a write after the purge that names the merged duplicate holds no personal data', async () => {
@@ -475,6 +521,23 @@ describe('the GDPR forget purge scrubs the business event log (V1-72, D-25)', ()
     const late = rows.find((e) => e.id !== ID.dupEvent)!;
     expect(late).toMatchObject({ before: null, after: null });
     expect(late.metadata).toEqual({ route: '/crm/businesses/:businessId/contacts/:contactId', httpMethod: 'PATCH' });
+  });
+
+  it('a write naming a purged contact whose row was later hard-deleted holds no personal data', async () => {
+    await db.contact.create({ data: { id: ID.gone, businessId: ID.bizA, firstName: 'V72W-Gone', email: `${P}gone@test.local` } });
+    await db.contactForgetRequest.create({
+      data: { id: `${P}goneReq`, businessId: ID.bizA, contactId: null, contactHash: audit.hashContact(ID.bizA, ID.gone), status: 'purged', purgeAt: new Date(), purgedAt: new Date() },
+    });
+    await db.$executeRawUnsafe(`DELETE FROM contacts WHERE id = $1`, ID.gone);
+    await realEmit({
+      businessId: ID.bizA, eventType: 'contact.update', subjectType: 'contact', subjectId: ID.gone,
+      actorType: 'human', actorId: ID.owner, action: 'update', source: 'web',
+      before: { email: `${P}gone@test.local` }, after: { id: ID.gone, firstName: 'V72W-Gone' },
+      metadata: { route: '/crm/businesses/:businessId/contacts/:contactId', httpMethod: 'PATCH', ip: '203.0.113.77' },
+    });
+    const [row] = (await events(ID.bizA)).filter((e) => e.subject_id === ID.gone);
+    expect(row).toMatchObject({ before: null, after: null });
+    expect(row.metadata).toEqual({ route: '/crm/businesses/:businessId/contacts/:contactId', httpMethod: 'PATCH' });
   });
 
   it('a PATCH on the bystander after the purge keeps its snapshot as today', async () => {
