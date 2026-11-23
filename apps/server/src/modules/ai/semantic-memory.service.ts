@@ -79,6 +79,14 @@ function rowIsMemory(): Prisma.Sql {
   return Prisma.sql`m.category NOT IN (${Prisma.join([...AI_MEMORY_SETTINGS_CATEGORIES])})`;
 }
 
+/**
+ * MEM-SEMANTIC-SIGHT: a reader's semantic read (search with visibleTo) reads pages of at least SEMANTIC_PAGE rows and at
+ * most MAX_SEMANTIC_SCAN rows in all, as the reader's temporal timeline read does (TemporalFlowService.list): past that
+ * the answer may be short.
+ */
+const SEMANTIC_PAGE = 50;
+const MAX_SEMANTIC_SCAN = 5_000;
+
 /** How many times a re-copy refused because its row was rewritten again meanwhile tries with what the row holds now. */
 const RECOPY_ATTEMPTS = 3;
 
@@ -347,6 +355,14 @@ export class SemanticMemoryService {
      * read never takes one and none takes a place in its limit.
      */
     withoutDocumentExtractionCopies?: boolean;
+    /**
+     * MEM-SEMANTIC-SIGHT (D-234, D-257): the reader projection (semanticHitsVisibleTo in semantic-memory-sight.ts):
+     * whether each hit of a page, in rank order, may be handed to the reader. When given, the limit counts only the hits
+     * it keeps: the read pages on, in a stable order (similarity, then id), past every hit it withholds, until the limit
+     * is met, the matches end or MAX_SEMANTIC_SCAN rows have been read. A withheld hit takes no place and changes nothing
+     * returned. Without it the read is as before (one page of `limit`).
+     */
+    visibleTo?: (hits: SemanticMemory[]) => Promise<boolean[]>;
   }): Promise<SemanticMemory[]> {
     try {
       const embedding = await this.generateEmbedding(params.businessId, params.query);
@@ -393,25 +409,42 @@ export class SemanticMemoryService {
         )`;
       }
 
-      query = Prisma.sql`${query} ORDER BY embedding <=> ${vectorLiteral}::vector LIMIT ${limit}`;
+      const page = async (take: number, skip: number): Promise<SemanticMemory[]> => {
+        const results = await this.prisma.client.$queryRaw<Array<{
+          id: string;
+          content: string;
+          source_type: string;
+          source_id: string;
+          metadata: any;
+          similarity: number;
+        }>>(Prisma.sql`${query} ORDER BY embedding <=> ${vectorLiteral}::vector, e.id LIMIT ${take} OFFSET ${skip}`);
+        return results.map((r) => ({
+          id: r.id,
+          content: r.content,
+          sourceType: r.source_type,
+          sourceId: r.source_id,
+          metadata: typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata,
+          similarity: Number(r.similarity),
+        }));
+      };
 
-      const results = await this.prisma.client.$queryRaw<Array<{
-        id: string;
-        content: string;
-        source_type: string;
-        source_id: string;
-        metadata: any;
-        similarity: number;
-      }>>(query);
+      if (!params.visibleTo) return await page(limit, 0);
 
-      return results.map((r) => ({
-        id: r.id,
-        content: r.content,
-        sourceType: r.source_type,
-        sourceId: r.source_id,
-        metadata: typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata,
-        similarity: Number(r.similarity),
-      }));
+      // MEM-SEMANTIC-SIGHT: filtered before the limit is cut (see visibleTo).
+      const want = Math.max(0, Math.trunc(limit) || 0);
+      const visible: SemanticMemory[] = [];
+      const batch = Math.max(want * 4, SEMANTIC_PAGE);
+      for (let skip = 0; visible.length < want && skip < MAX_SEMANTIC_SCAN; ) {
+        const take = Math.min(batch, MAX_SEMANTIC_SCAN - skip);
+        const hits = await page(take, skip);
+        const keep = await params.visibleTo(hits);
+        hits.forEach((hit, i) => {
+          if (keep[i] === true) visible.push(hit);
+        });
+        skip += hits.length;
+        if (hits.length < take) break;
+      }
+      return visible.slice(0, want);
     } catch (err: any) {
       // W7-AI-SERVICES-503 (R0-07a rule): embeddings not configured fails visibly.
       // TemporalFlowService, UnifiedMemoryRetrievalService and (since the

@@ -497,9 +497,9 @@ describe('FU-MEMORY-COPIES-REWRITE: a row rewritten in place drops the copies of
       const row = await app.api.put(ID.owner, { category: 'goals', key: KEY, value: OLD });
       const keep = await app.api.put(ID.owner, { category: 'priorities', key: `${P}keep`, value: KEEP });
       const other = await app.api.put(ID.owner, { category: 'goals', key: KEY, value: OLD }, ID.other);
-      // The row's two copies: KEY's writer indexes it (its copy is the value), and the STAFF member backfills.
+      // The row's two copies: KEY's writer indexes it (its copy is the value), and the owner backfills (MEM-SEMANTIC-SIGHT: settings admin).
       await app.writer.store(ID.biz, 'goals' as any, KEY, OLD, { indexSemantic: true, source: 'explicit' });
-      expect(await app.api.backfill(ID.member)).toBe(2);
+      expect(await app.api.backfill(ID.owner)).toBe(2);
       expect(await app.api.backfill(ID.owner, ID.other)).toBe(1);
       expect(await copiesOf(row.id)).toEqual([backfillCopy('goals', KEY, OLD), OLD].sort());
       expect(await atRest('V71I-01-OLD-SECRET'), 'before the rewrite: both copies, and the other business\'s').toBe(3);
@@ -552,7 +552,7 @@ describe('FU-MEMORY-COPIES-REWRITE: a row rewritten in place drops the copies of
       const b = await app.api.put(ID.owner, { category: 'bottlenecks', key: `${P}b`, value: 'V71I-02-OLD-B: one van for three crews' });
       const SAME = 'V71I-02-SAME: quotes go out within a day';
       const c = await app.api.put(ID.owner, { category: 'priorities', key: `${P}c`, value: SAME, confidence: 0.9 });
-      expect(await app.api.backfill(ID.member)).toBe(3);
+      expect(await app.api.backfill(ID.owner)).toBe(3);
       const cIds = await copyIdsOf(c.id);
       expect(cIds).toHaveLength(1);
 
@@ -595,7 +595,7 @@ describe('FU-MEMORY-COPIES-REWRITE: a row rewritten in place drops the copies of
         const NEW = `${MARK}-NEW: the owner draws a salary`;
         const KEY = `${P}draw_${mode}`;
         const row = await app.api.put(ID.owner, { category: 'goals', key: KEY, value: OLD });
-        expect(await app.api.backfill(ID.member)).toBe(1);
+        expect(await app.api.backfill(ID.owner)).toBe(1);
         expect(await atRest(`${MARK}-OLD`)).toBe(1);
 
         app.embeddingPath.current = mode;
@@ -618,7 +618,7 @@ describe('FU-MEMORY-COPIES-REWRITE: a row rewritten in place drops the copies of
         expect(await app.api.memories(ID.member)).not.toContain(`${MARK}-OLD`);
 
         app.embeddingPath.current = 'on';
-        expect(await app.api.backfill(ID.member)).toBe(1);
+        expect(await app.api.backfill(ID.owner)).toBe(1);
         expect(await copiesOf(row.id)).toEqual([backfillCopy('goals', KEY, NEW)]);
         const search = await app.api.search(ID.member);
         expect(search).toContain(`${MARK}-NEW`);
@@ -639,7 +639,7 @@ describe('FU-MEMORY-COPIES-REWRITE: a row rewritten in place drops the copies of
       const NEWER = 'V71I-04-NEWER-EXTRACT: payroll reviewed by the accountant';
       await app.writer.storeDocumentExtraction(ID.biz, DOC, OLD, { indexSemantic: true });
       const row = await db.aiMemory.findFirstOrThrow({ where: { businessId: ID.biz, category: 'document_extraction', key: DOC } });
-      expect(await app.api.backfill(ID.member)).toBe(1);
+      expect(await app.api.backfill(ID.owner)).toBe(1);
       expect(await copiesOf(row.id)).toEqual([backfillCopy('document_extraction', DOC, OLD), OLD].sort());
 
       let embeddedBefore = app.embedded.length;
@@ -681,13 +681,13 @@ describe('FU-MEMORY-COPIES-REWRITE: a row rewritten in place drops the copies of
       const NEW = 'V71I-05-NEW: the partnership continues';
       const KEY = `${P}race`;
       const row = await app.api.put(ID.owner, { category: 'goals', key: KEY, value: OLD });
-      expect(await app.api.backfill(ID.member)).toBe(1);
+      expect(await app.api.backfill(ID.owner)).toBe(1);
       const [existing] = await copyIdsOf(row.id);
       expect(existing).toBeDefined();
 
       // A second backfill reads the row and is held before it writes the copy.
       const held = app.holdEmbedding('V71I-05-OLD');
-      const backfill = track(app.api.backfill(ID.member));
+      const backfill = track(app.api.backfill(ID.owner));
       await held.reached;
 
       let locked: (pid: number) => void = () => undefined;
@@ -759,7 +759,7 @@ describe('FU-MEMORY-COPIES-REWRITE: a row rewritten in place drops the copies of
       const evolution = new (KeyCortexEvolutionService as any)(prisma, {} as any, {} as any, {} as any, undefined, undefined, app.semantic);
       await (evolution as any).applyTuningAdjustment(ID.biz, { parameter: 'personality_tone', newValue: 'V71I-06-OLD-TONE: formal' });
       const tuning = await db.aiMemory.findFirstOrThrow({ where: { businessId: ID.biz, category: 'evolution_tuning', key: 'personality_tone' } });
-      expect(await app.api.backfill(ID.member)).toBe(2);
+      expect(await app.api.backfill(ID.owner)).toBe(2);
       expect(await atRest('V71I-06-OLD')).toBe(2);
 
       // The same recommendation promoted again: the value does not change, the copy stays, nothing is embedded.
@@ -809,7 +809,7 @@ describe('FU-MEMORY-COPIES-REWRITE review repair: the re-copy of a rewritten row
       const V1 = 'V71I-10-V1: the owner opens on Saturdays';
       const V2 = 'V71I-10-V2: the owner closes on weekends';
       const row = await app.api.put(ID.owner, { category: 'goals', key: KEY, value: V0 });
-      expect(await app.api.backfill(ID.member)).toBe(1);
+      expect(await app.api.backfill(ID.owner)).toBe(1);
 
       // The first rewrite's re-copy is held while it embeds its copy of V1.
       held = app.holdEmbedding('V71I-10-V1');
@@ -849,7 +849,7 @@ describe('FU-MEMORY-COPIES-REWRITE review repair: the re-copy of a rewritten row
       const NEW = 'V71I-11-NEW: the van is owned';
       const row = await app.api.put(ID.owner, { category: 'goals', key: KEY, value: OLD });
       await app.writer.store(ID.biz, 'goals' as any, KEY, OLD, { indexSemantic: true, source: 'explicit' });
-      expect(await app.api.backfill(ID.member)).toBe(1);
+      expect(await app.api.backfill(ID.owner)).toBe(1);
       expect(await copiesOf(row.id)).toEqual([backfillCopy('goals', KEY, OLD), OLD].sort());
 
       // The re-copy's first embedding (a form of the new value) is held: a slow provider.
@@ -948,7 +948,7 @@ describe('FU-MEMORY-COPIES-REWRITE review repair: a settings row is configuratio
     }
   }, 60_000);
 
-  it("V71I-13 (SEC-FUMCR-1, SEC-FUMCR-2, COR-V71I-2) no copy of a settings row is made or served: the STAFF member's backfill copies the memory rows and not the preferences row (the embedding provider is never sent its ciphertext); SemanticMemoryService.store of it embeds and writes nothing; a copy of it a backfill made before this repair, holding what the row holds, is not served by search or KEY's memory block", async () => {
+  it("V71I-13 (SEC-FUMCR-1, SEC-FUMCR-2, COR-V71I-2) no copy of a settings row is made or served: the owner's backfill copies the memory rows and not the preferences row (the embedding provider is never sent its ciphertext); SemanticMemoryService.store of it embeds and writes nothing; a copy of it a backfill made before this repair, holding what the row holds, is not served by search or KEY's memory block", async () => {
     const app = await memoryApp();
     try {
       const gateway = await byokGateway();
@@ -958,7 +958,7 @@ describe('FU-MEMORY-COPIES-REWRITE review repair: a settings row is configuratio
       const goal = await app.api.put(ID.owner, { category: 'goals', key: `${P}goal13`, value: GOAL });
 
       let embeddedBefore = app.embedded.length;
-      expect(await app.api.backfill(ID.member), 'the backfill copies the memory row only').toBe(1);
+      expect(await app.api.backfill(ID.owner), 'the backfill copies the memory row only').toBe(1);
       expect(app.embedded.slice(embeddedBefore), 'what the backfill sent the embedding provider').toEqual([backfillCopy('goals', `${P}goal13`, GOAL)]);
       expect(await copiesOf(settings.id), 'no copy of the settings row').toEqual([]);
       expect(await copiesOf(goal.id)).toEqual([backfillCopy('goals', `${P}goal13`, GOAL)]);

@@ -10,6 +10,8 @@ import { UndoService } from './undo.service';
 import { CalendarIntelligenceService } from './calendar-intelligence.service';
 import { DocumentIntelligenceService } from './document-intelligence.service';
 import { SemanticMemoryService } from './semantic-memory.service';
+import { readerSearchOptions } from './semantic-memory-sight';
+import { promptMemoryReader, readersModuleSight } from '../key-cortex/key-cortex-prompt-context.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { createAgentTrigger, updateAgentTrigger } from './agent-trigger.service';
 
@@ -23,6 +25,9 @@ function triggerWriter(req: AuthenticatedRequest): string {
   if (!id) throw new UnauthorizedException('Authentication required');
   return id;
 }
+
+/** MEM-SEMANTIC-SIGHT: the most hits GET .../agent/memory/search answers. */
+const MAX_SEARCH_LIMIT = 50;
 
 @Controller('ai')
 export class AgentController {
@@ -324,25 +329,43 @@ export class AgentController {
     return result;
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * MEM-SEMANTIC-SIGHT: the backfill copies every AiMemory row of the business (document extractions included) into the
+   * semantic store, through the embedding provider, on the business's AI credits: a business-wide AI setting, so it
+   * needs settings admin (owners and admins by role defaults), as the connectors' backfills and PUT .../ai/preferences
+   * do. It ran for any member.
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('settings', 'admin')
   @Post('businesses/:businessId/agent/memory/backfill')
   async backfillSemanticMemory(@Param('businessId') businessId: string) {
     const count = await this.semanticMemory.backfillFromAiMemory(businessId);
     return { backfilled: count };
   }
 
+  /**
+   * MEM-SEMANTIC-SIGHT (D-234, D-257): the caller's hits only, by each hit's source (semanticHitsVisibleTo): the reader
+   * is the caller while a member of the business (promptMemoryReader; a SUPER_ADMIN who is no member reads as nobody)
+   * with their membership's module sight. Withheld hits are dropped before the limit is cut. The limit is at most
+   * MAX_SEARCH_LIMIT (default 5).
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/agent/memory/search')
   async searchSemanticMemory(
     @Param('businessId') businessId: string,
     @Query('q') query: string,
     @Query('limit') limit?: string,
+    @Req() req?: AuthenticatedRequest,
   ) {
     if (!query) return { results: [] };
+    const reader = await promptMemoryReader(this.prisma, businessId, req?.user?.id ?? null, undefined, 'memorySearch');
+    const sight = await readersModuleSight(this.prisma, businessId, reader, undefined, 'memorySearch');
+    const asked = limit ? parseInt(limit, 10) : 5;
     const results = await this.semanticMemory.search({
       businessId,
       query,
-      limit: limit ? parseInt(limit, 10) : 5,
+      limit: Number.isFinite(asked) ? Math.min(Math.max(asked, 0), MAX_SEARCH_LIMIT) : 5,
+      ...readerSearchOptions(this.prisma, businessId, { reader, sight }),
     });
     return { results };
   }

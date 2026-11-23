@@ -122,6 +122,7 @@ import {
   type ModuleSight,
 } from '../key-cortex/key-cortex-prompt-context.service';
 import { KeyCortexConsciousnessService } from '../key-cortex/key-cortex-consciousness.service';
+import { readerSearchOptions } from './semantic-memory-sight';
 import { ProcurementService } from '../procurement/procurement.service';
 import {
   ActionNotClearedError,
@@ -2079,13 +2080,37 @@ export class FlowOrchestratorService {
    * do. Only the memory lookup is caught: a missing chat provider still fails
    * the turn from the gateway dispatch with its own 503.
    */
-  private async buildSemanticMemorySection(businessId: string, query: string): Promise<string> {
+  //
+  // MEM-SEMANTIC-SIGHT (D-234, D-257): the turn's hits only, by each hit's source (semanticHitsVisibleTo), filtered
+  // before the top 5 are cut. The reader and their module sight are the perception block's (buildPerceptionSection):
+  // the caller while a member, by their membership; a staff position's turn, its position's resolved reader and
+  // modules (none when that reader is not found a member); a turn that names no member, nobody and no module.
+  private async buildSemanticMemorySection(businessId: string, query: string, userId?: string, server?: FlowServerContext): Promise<string> {
     try {
+      let candidate: string | undefined = userId;
+      let positionModules: readonly string[] | undefined;
+      if (!userId && server) {
+        let perception: { readerUserId?: string | null; modules?: readonly string[] } | null = null;
+        try {
+          const policy = this.getJobRolePolicy();
+          perception = policy.isIssued(server.jobRoleEnvelope) ? policy.perceptionOf(server.jobRoleEnvelope) : null;
+        } catch {
+          perception = null;
+        }
+        candidate = perception?.readerUserId ?? undefined;
+        positionModules = perception?.modules ?? [];
+      }
+      const reader = await promptMemoryReader(this.prisma, businessId, candidate, this.logger, 'semanticMemory');
+      const sight: ModuleSight =
+        positionModules === undefined
+          ? await readersModuleSight(this.prisma, businessId, reader, this.logger, 'semanticMemory')
+          : candidate && reader !== candidate ? NO_MODULE_SIGHT : moduleSightOf(positionModules);
       const relevant = await this.semanticMemory.search({
         businessId,
         query,
         limit: 5,
         minSimilarity: 0.65,
+        ...readerSearchOptions(this.prisma, businessId, { reader, sight }, this.logger),
       });
       if (relevant.length === 0) return '';
       return '\n\nRELEVANT CONTEXT FROM MEMORY:\n' +
@@ -2155,7 +2180,7 @@ export class FlowOrchestratorService {
     // see buildSemanticMemorySection, W7-AI-SERVICES-503 review SEC503-1 / CR-503-1)
     const lastUserMessage = conversationHistory.slice().reverse().find((m) => m.role === 'user');
     const semanticMemorySection = lastUserMessage?.content
-      ? await this.buildSemanticMemorySection(businessId, lastUserMessage.content)
+      ? await this.buildSemanticMemorySection(businessId, lastUserMessage.content, userId, server)
       : '';
 
     const pageContextSection = formatPageContextSection(pageContext);
@@ -2605,7 +2630,7 @@ ${triage.standingContext}`;
     // Semantic memory search based on current message (optional enrichment:
     // see buildSemanticMemorySection, W7-AI-SERVICES-503 review SEC503-1 / CR-503-1)
     const semanticMemorySection = enrichedMessage
-      ? await this.buildSemanticMemorySection(businessId, enrichedMessage)
+      ? await this.buildSemanticMemorySection(businessId, enrichedMessage, userId, server)
       : '';
 
     const pageContextSection = formatPageContextSection(pageContext);
