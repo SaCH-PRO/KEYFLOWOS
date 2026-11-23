@@ -18,7 +18,8 @@ import {
   visiblePlans,
   type GraphPlanReadScope,
 } from './graph-actions.controller';
-import { AiMemoryService, MemoryCategory, withoutDocumentExtractions } from './ai-memory.service';
+import { AiMemoryService, MemoryCategory } from './ai-memory.service';
+import { aiMemoryRowVisibleTo, type SemanticReader } from './semantic-memory-sight';
 import { readersModuleSight, readsDocumentExtractions } from '../key-cortex/key-cortex-prompt-context.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
 import { ProAutoMonitorService } from './pro-auto-monitor.service';
@@ -1026,6 +1027,16 @@ export class AiController {
     return readsDocumentExtractions(sight, reader);
   }
 
+  /**
+   * FU-PATTERNS-ROUTES-SIGHT (D-100, D-234, D-146): who an AiMemory read over REST is for: the caller, with their
+   * membership's module sight (readersModuleSight: a SUPER_ADMIN who is no member, or a membership read that fails, has
+   * none). Each row is then kept by aiMemoryRowVisibleTo, the rule the flow chat and the semantic store read it by.
+   */
+  private async memoryReaderOf(businessId: string, req: AuthenticatedRequest | undefined): Promise<SemanticReader> {
+    const reader = req?.user?.id ?? null;
+    return { reader, sight: await readersModuleSight(this.prisma, businessId, reader, undefined, 'aiMemory') };
+  }
+
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/memory')
   async getMemory(
@@ -1034,11 +1045,13 @@ export class AiController {
     @Req() req?: AuthenticatedRequest,
   ) {
     // MEM-DOC-EXTRACTION-SIGHT: a reader without revenue read is handed no document extraction (none by category either).
-    const sees = await this.readsDocumentExtractions(businessId, req);
+    // FU-PATTERNS-ROUTES-SIGHT: nor any row stating money (a pattern totalling overdue invoices, a revenue goal); a row
+    // stating an expense only with expenses read (aiMemoryRowVisibleTo, which holds the document-extraction rule too).
+    const who = await this.memoryReaderOf(businessId, req);
     const entries = category
       ? await this.memory.getByCategory(businessId, category as MemoryCategory)
       : await this.memory.getAll(businessId);
-    return { memories: sees ? entries : withoutDocumentExtractions(entries) };
+    return { memories: entries.filter((row) => aiMemoryRowVisibleTo(row, who)) };
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -1086,11 +1099,12 @@ export class AiController {
     return { deleted };
   }
 
+  /** FU-PATTERNS-ROUTES-SIGHT (D-100, D-146): the context block of the AiMemory rows the caller may read (memoryReaderOf). */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/memory/context')
-  async getMemoryContext(@Param('businessId') businessId: string) {
-    const ctx = await this.memory.buildContextBlock(businessId);
-    return ctx;
+  async getMemoryContext(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    const who = await this.memoryReaderOf(businessId, req);
+    return this.memory.buildContextBlock(businessId, { rowVisible: (row) => aiMemoryRowVisibleTo(row, who) });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

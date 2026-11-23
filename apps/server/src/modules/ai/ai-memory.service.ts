@@ -345,10 +345,16 @@ export class AiMemoryService {
    * (PatternDetectorService stores "N overdue invoices totaling X"), and a row it refuses is left out of the block. A
    * caller that renders the block into a reader's prompt passes the reader's rule (the flow chat: turnPatternVisibility);
    * with none every pattern is kept, as before.
+   * FU-PATTERNS-ROUTES-SIGHT (D-100, D-146): `opts.rowVisible`, when given, is asked of every AiMemory row of any category
+   * (GET .../ai/memory/context: aiMemoryRowVisibleTo for the caller); a row it refuses is left out. The Business
+   * Blueprint's fields are not AiMemory rows and are not asked.
    */
   async buildContextBlock(
     businessId: string,
-    opts: { patternVisible?: (row: Pick<MemoryEntry, 'category' | 'key' | 'value'>) => boolean } = {},
+    opts: {
+      patternVisible?: (row: Pick<MemoryEntry, 'category' | 'key' | 'value'>) => boolean;
+      rowVisible?: (row: Pick<MemoryEntry, 'category' | 'key' | 'value'>) => boolean;
+    } = {},
   ): Promise<MemoryContextBlock> {
     const [memories, blueprint] = await Promise.all([
       this.getAll(businessId),
@@ -384,6 +390,7 @@ export class AiMemoryService {
     }
 
     for (const mem of memories) {
+      if (opts.rowVisible && !opts.rowVisible(mem)) continue;
       switch (mem.category) {
         case 'goals':
           if (!block.goals.includes(mem.value)) block.goals.push(mem.value);
