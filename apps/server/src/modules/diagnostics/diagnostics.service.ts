@@ -45,7 +45,16 @@ function worstStatus(statuses: CheckStatus[]): CheckStatus {
 /** One read-only bucket call, as it came back. */
 export type PostureProbe =
   | { call: string; ok: true; value: unknown }
-  | { call: string; ok: false; kind: 'absent' | 'denied' | 'not-implemented' | 'error'; code: string; message: string };
+  | { call: string; ok: false; kind: 'absent' | 'denied' | 'not-implemented' | 'error'; code: string; message: string; http?: number };
+
+/** 400-class codes that mean the credentials, not the call, were refused. */
+const POSTURE_CREDENTIAL_CODES = new Set([
+  'ExpiredToken',
+  'InvalidToken',
+  'TokenRefreshRequired',
+  'InvalidAccessKeyId',
+  'SignatureDoesNotMatch',
+]);
 
 /** Error codes that mean "the bucket has none of this", not "the call is unsupported". */
 const POSTURE_ABSENT_CODES = new Set([
@@ -64,18 +73,29 @@ export function classifyPostureError(err: unknown): {
   kind: 'absent' | 'denied' | 'not-implemented' | 'error';
   code: string;
   message: string;
+  http?: number;
 } {
   const e = (err ?? {}) as { name?: unknown; Code?: unknown; message?: unknown; $metadata?: { httpStatusCode?: unknown } };
   const code = String(e.name || e.Code || 'Error');
   const message = typeof e.message === 'string' && e.message ? e.message : code;
   const http = typeof e.$metadata?.httpStatusCode === 'number' ? e.$metadata.httpStatusCode : undefined;
   if (POSTURE_ABSENT_CODES.has(code)) return { kind: 'absent', code, message };
-  if (code === 'AccessDenied' || http === 403) return { kind: 'denied', code, message };
+  if (code === 'AccessDenied' || POSTURE_CREDENTIAL_CODES.has(code) || http === 403) {
+    return { kind: 'denied', code, message };
+  }
+  if (code === 'NoSuchBucket') return { kind: 'error', code, message };
   if (code === 'NotImplemented' || http === 501 || (http !== undefined && http >= 400 && http < 500)) {
-    return { kind: 'not-implemented', code, message };
+    return { kind: 'not-implemented', code, message, http };
   }
   return { kind: 'error', code, message };
 }
+
+/** The IAM action behind each read-only call, for the access-denied hint. */
+const POSTURE_IAM_ACTION: Record<string, string> = {
+  GetPublicAccessBlock: 's3:GetBucketPublicAccessBlock',
+  GetBucketPolicyStatus: 's3:GetBucketPolicyStatus',
+  GetBucketEncryption: 's3:GetEncryptionConfiguration',
+};
 
 const PUBLIC_ACCESS_BLOCK_FLAGS = ['BlockPublicAcls', 'IgnorePublicAcls', 'BlockPublicPolicy', 'RestrictPublicBuckets'] as const;
 
@@ -98,9 +118,11 @@ export function evaluateStoragePosture(probes: {
   const unjudged = (p: Extract<PostureProbe, { ok: false }>): string => {
     switch (p.kind) {
       case 'denied':
-        return `${p.call}: access denied (grant the diagnostics credentials s3:${p.call})`;
+        return `${p.call}: access denied (${p.code}; grant the diagnostics credentials ${POSTURE_IAM_ACTION[p.call] ?? p.call})`;
       case 'not-implemented':
-        return `${p.call}: not implemented by this provider (${p.code}); verify in the provider console`;
+        return p.code === 'NotImplemented' || p.http === 501
+          ? `${p.call}: not implemented by this provider (${p.code}); verify in the provider console`
+          : `${p.call}: rejected (${p.code}, HTTP ${p.http}): possibly not implemented by this provider; verify in the provider console`;
       default:
         return `${p.call}: ${p.code}: ${p.message}`;
     }
@@ -125,12 +147,16 @@ export function evaluateStoragePosture(probes: {
   const policy = probes.policyStatus;
   let policyKnownNotPublic = false;
   if (policy.ok) {
-    if ((policy.value as { PolicyStatus?: { IsPublic?: unknown } } | undefined)?.PolicyStatus?.IsPublic === true) {
+    const reported = (policy.value as { PolicyStatus?: { IsPublic?: unknown } } | undefined)?.PolicyStatus?.IsPublic;
+    if (reported === true) {
       isPublic = true;
       lines.push('GetBucketPolicyStatus: the bucket policy makes the bucket PUBLIC');
-    } else {
+    } else if (reported === false) {
       policyKnownNotPublic = true;
       lines.push('GetBucketPolicyStatus: bucket policy is not public');
+    } else {
+      // A 200 with no boolean is a provider stub, not a verdict.
+      lines.push('GetBucketPolicyStatus: policy status not reported by this provider; verify in the provider console');
     }
   } else if (policy.kind === 'absent') {
     policyKnownNotPublic = true;
@@ -143,11 +169,20 @@ export function evaluateStoragePosture(probes: {
   if (enc.ok) {
     const rules = (enc.value as { ServerSideEncryptionConfiguration?: { Rules?: unknown } } | undefined)
       ?.ServerSideEncryptionConfiguration?.Rules;
-    if (Array.isArray(rules) && rules.length > 0) {
+    const algo = Array.isArray(rules)
+      ? rules
+          .map(
+            (r) =>
+              (r as { ApplyServerSideEncryptionByDefault?: { SSEAlgorithm?: unknown } } | undefined)
+                ?.ApplyServerSideEncryptionByDefault?.SSEAlgorithm,
+          )
+          .find((a) => typeof a === 'string' && a.length > 0)
+      : undefined;
+    if (algo) {
       encrypted = true;
-      const algo = (rules[0] as { ApplyServerSideEncryptionByDefault?: { SSEAlgorithm?: unknown } } | undefined)
-        ?.ApplyServerSideEncryptionByDefault?.SSEAlgorithm;
-      lines.push(`GetBucketEncryption: default encryption on${algo ? ` (${algo})` : ''}`);
+      lines.push(`GetBucketEncryption: default encryption on (${algo})`);
+    } else if (Array.isArray(rules) && rules.length > 0) {
+      lines.push('GetBucketEncryption: rule present but no default algorithm; verify in the provider console');
     } else {
       lines.push('GetBucketEncryption: no default encryption rule');
     }
