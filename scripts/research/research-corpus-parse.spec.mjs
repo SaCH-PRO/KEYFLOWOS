@@ -28,8 +28,11 @@
 // for the known failure classes, not a YAML validator. Known misses, by design:
 // a continuation line of a multi-line plain scalar that looks like `key: value`;
 // text after a quoted scalar (`"a" b`); flow collections (`{a: b}`, `[a, b]`);
-// anchors, aliases and tags; a `key: value` written with a tab. PyYAML catches
-// those when it runs.
+// anchored, aliased and tagged values (an anchor or tag alone makes a bare key);
+// a `key: value` written with a tab. PyYAML catches those when it runs. One
+// intentional over-approximation: an item deeper than a `key: value` entry
+// (`a: 1` then `  - x`) is a finding although YAML folds it into the plain
+// scalar `1 - x`; in a ledger that silent fold is the mistake, not the intent.
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -74,8 +77,14 @@ export function researchYamlFiles(root = ROOT) {
 }
 
 const indentOf = (line) => line.length - line.trimStart().length;
-/** A plain scalar starts with none of the YAML indicators that make a value safe to hold ': '. */
-const PLAIN_START = /^[^"'|>[{&*!%@`#-]/;
+/**
+ * A plain scalar starts with none of the YAML indicators that make a value safe
+ * to hold ': ' (quotes, block and flow indicators, anchors, aliases, tags,
+ * directives); a '-' followed by text (`-a`, `-3`) is still plain.
+ */
+const PLAIN_START = /^(?:[^"'|>[{&*!%@`#-]|-(?=\S))/;
+/** A value that is only a comment, an anchor or a tag gives the key no value: it is a bare key. */
+const NO_VALUE = /^(?:#.*|[&!]\S*)$/;
 /** `key:` or `key: value`, optionally as a `- ` item; the key may be quoted or any plain text without ':' or '#'. */
 const MAPPING_ENTRY = /^(\s*)(- +)?("[^"]*"|'[^']*'|[^\s"'#:[\]{}-][^:#]*?):(?:\s+(.*))?$/;
 const SEQUENCE_ITEM = /^(\s*)- /;
@@ -115,9 +124,12 @@ export function lintYamlText(text) {
     const entry = MAPPING_ENTRY.exec(line);
     const item = SEQUENCE_ITEM.exec(line);
     const keyColumn = entry ? indent + (entry[2] ? entry[2].length : 0) : indent;
-    const hasValue = Boolean(entry) && entry[4] !== undefined && entry[4].trim() !== '';
-    if (hasValue) {
-      const value = entry[4].replace(/\s+#.*$/, '').trim();
+    const value = entry && entry[4] !== undefined ? entry[4].replace(/\s+#.*$/, '').trim() : '';
+    const hasValue = value !== '' && !NO_VALUE.test(value);
+    if (item && !entry && /^- +[|>]/.test(trimmed)) {
+      // a bare block-scalar item: its content lines are deeper than the dash
+      blockScalarIndent = indent;
+    } else if (hasValue) {
       if (/^[|>]/.test(value)) {
         blockScalarIndent = keyColumn;
       } else if (PLAIN_START.test(value) && (/:\s/.test(value) || /:$/.test(value))) {
