@@ -80,3 +80,72 @@ describe('strategicItemNeeds: a deterministic item (a strategic action, a worksp
     expect(strategicItemNeeds({ title: 'Re-engage 5 stale leads', description: 'Send a check-in message.' })).toEqual([]);
   });
 });
+
+describe('sightedStrategic review round 1 (FU-STRATEGIC-ROUTES-SIGHT)', () => {
+  it('SR1-1: without revenue read, a string stating a figure is withheld (the scans are written from revenue totals); a date and a lone small count are kept', () => {
+    const out = sightedStrategic(
+      {
+        notes: [
+          'December averages 18,500 versus 9,200 in February',
+          'Goal: bring in 20000 this week',
+          'Weekly target: close 12k',
+          'Up 35% on last month',
+          'Acme brought in about 1.2M',
+          'plain 4 000 here',
+          'fullwidth ４０００ too',
+          'Chase Acme for the 3,200 they still owe',
+          'SAFEMARK call 2 leads',
+        ],
+        weekOf: '2026-11-23',
+      },
+      blind,
+    ) as any;
+    expect(out.notes).toEqual(['SAFEMARK call 2 leads']);
+    expect(out.weekOf).toBe('2026-11-23');
+    // Control: a revenue reader keeps the figures.
+    expect((sightedStrategic({ notes: ['Up 35% on last month'] }, revnoexp) as any).notes).toEqual(['Up 35% on last month']);
+  });
+
+  it('SR1-2: without revenue read, a key naming money or stating a figure is withheld with its value; the scans\' own list keys are kept', () => {
+    const out = sightedStrategic(
+      {
+        revenueTrend: 'declining',
+        salesTrend: 'up',
+        topClientsByRevenue: ['Acme Ltd'],
+        revenueGrowing: true,
+        'TTD 40,000 overdue': 'critical',
+        $12k: 'x',
+        opportunities: ['SAFEMARK re-engage'],
+        quickWins: ['SAFEMARK post'],
+      },
+      blind,
+    );
+    expect(out).toEqual({ opportunities: ['SAFEMARK re-engage'], quickWins: ['SAFEMARK post'] });
+  });
+
+  it('SR1-3 / CR1-1: net position (a loss, a deficit, the red, P&L, overspending, unprofitable, a cash-flow verdict however spelt) needs expenses read too', () => {
+    const lines = [
+      'The business is unprofitable',
+      'nonprofitable line',
+      'Operating at a loss',
+      'losing money on deliveries',
+      'In the red this quarter',
+      'a deficit is likely',
+      'P&L negative',
+      'Overspending on supplies',
+      'Cash-flow negative next month',
+      'cash_flow',
+      'break-even by June',
+      'opex is climbing',
+      'Outflows will exceed collections',
+    ];
+    const out = sightedStrategic({ notes: [...lines, 'SAFEMARK keep going'], outflow: 1200, opex: 3000, risks: [{ category: 'cash_flow', title: 'Squeeze in March' }] }, revnoexp) as any;
+    expect(out).toEqual({ notes: ['SAFEMARK keep going'], risks: [] });
+  });
+
+  it('SR1-4: keys every object has (constructor, toString, __proto__) are read as plain keys, not answered with a 500', () => {
+    const answer = JSON.parse('{"constructor":"SAFEMARK a","toString":"SAFEMARK b","hasOwnProperty":"SAFEMARK c","__proto__":"SAFEMARK d","valueOf":"SAFEMARK e"}');
+    expect(() => sightedStrategic(answer, blind)).not.toThrow();
+    expect(JSON.stringify(sightedStrategic(answer, blind))).toContain('SAFEMARK a');
+  });
+});

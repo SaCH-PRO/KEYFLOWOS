@@ -460,4 +460,33 @@ describe('FU-STRATEGIC-ROUTES-SIGHT (D-100, D-234, D-146): the strategic routes 
     }
     expect(modelCalls.length).toBeGreaterThan(0);
   }, 300_000);
+
+  it('V72S-10 RED (review round 1: CR1-1, CR1-6, SR1-1): the risk scan in its prompt\'s own shape (category cash_flow, figures without a currency sign) answers no cash-flow verdict to a revenue reader without expenses read, and no figure to a caller without revenue read', async () => {
+    const saved = MODEL.strategic_risk_scan;
+    MODEL.strategic_risk_scan = {
+      summary: 'Collections are slipping',
+      riskLevel: 'high',
+      riskScore: 64,
+      risks: [
+        { category: 'cash_flow', title: 'Squeeze in March', description: 'Outflows will exceed collections', severity: 'high', likelihood: 'likely' },
+        { category: 'overdue', title: 'Acme owes 4,000', description: 'Two invoices past due', severity: 'high', likelihood: 'likely' },
+        { category: 'churn', title: 'SAFEMARK quiet clients', description: 'SAFEMARK three regulars have not booked', severity: 'medium', likelihood: 'possible' },
+      ],
+      mitigations: ['SAFEMARK confirm bookings a day ahead'],
+      urgentActions: ['Chase the 7341 still owed'],
+    };
+    try {
+      const revnoexp = await ok('revnoexp', '/ai/strategic/risks');
+      expect(text(revnoexp)).not.toContain('Squeeze in March');
+      expect(text(revnoexp)).toContain('Acme owes 4,000');
+      for (const reader of NO_REVENUE) {
+        const body = await ok(reader, '/ai/strategic/risks');
+        for (const marker of ['4,000', '7341', 'Squeeze in March', 'riskScore']) expect(text(body), `${reader} ${marker}`).not.toContain(marker);
+        expect(text(body), reader).toContain('SAFEMARK quiet clients');
+      }
+      expect(await ok('owner', '/ai/strategic/risks')).toEqual(MODEL.strategic_risk_scan);
+    } finally {
+      MODEL.strategic_risk_scan = saved;
+    }
+  }, 300_000);
 });
