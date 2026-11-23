@@ -5664,7 +5664,10 @@ export class CommerceService {
    */
   async publicInvoiceUrl(invoiceId: string, businessId: string): Promise<string | null> {
     try {
-      const link = await this.createPaymentLink(invoiceId, businessId);
+      // FU-PAY-LINK-STATUS-GATE: every caller hands this link to the customer
+      // as the invoice goes out, so a DRAFT is admitted (issuing); a status
+      // nobody owes on (PENDING, FAILED, FULLY_CREDITED) is a 409 thrown here.
+      const link = await this.issuePaymentLink(invoiceId, businessId, undefined, true);
       return `${appUrl()}/public/invoice/${link.token}`;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -5736,6 +5739,11 @@ export class CommerceService {
       select: { status: true },
     });
     const mintable = !!invoice && invoice.status !== 'PAID' && invoice.status !== 'VOID';
+    // FU-PAY-LINK-STATUS-GATE: an invoice no one owes on (PENDING, FAILED,
+    // FULLY_CREDITED, any status added later) is refused before a link row is
+    // read, written or rotated and before the message is sent. A DRAFT is
+    // admitted: this send issues it (the controller then moves it to SENT).
+    if (mintable) CommerceService.assertPayLinkStatus(invoice.status, true);
     const live = mintable
       ? await this.prisma.client.paymentLink.findFirst({
           where: { invoiceId, businessId, ...CommerceService.liveLinkWhere() },
@@ -5858,6 +5866,24 @@ export class CommerceService {
    * that token is a pre-V1-48 cuid, which is rotated (reissueLink, ST-V48-1).
    */
   async createPaymentLink(invoiceId: string, businessId: string, expiresInDays?: number) {
+    return this.issuePaymentLink(invoiceId, businessId, expiresInDays, false);
+  }
+
+  /**
+   * FU-PAY-LINK-STATUS-GATE (D-256, D-248): a pay link is minted, or a live one
+   * handed out again (and rotated or given a new expiry), only for an invoice
+   * the customer owes: INTENT_PAYABLE_STATUSES, the statuses the token pay page
+   * shows and takes money for. `issuing` also admits a DRAFT, for the callers
+   * that hand the link to the customer as the invoice is issued
+   * (publicInvoiceUrl: the operator's send-email, which then moves it to SENT,
+   * KEY's commerce_send_invoice, the public booking create). POST
+   * .../payment-link is not one of them. Every other status, including one
+   * added later, is refused here before a link row is read, written or
+   * rotated; the 409 names the status only. PAID and VOID keep their own
+   * refusal and text, which three callers match on (R0-D3). Another tenant's
+   * id is the 404 of an unknown one, whatever its status.
+   */
+  private async issuePaymentLink(invoiceId: string, businessId: string, expiresInDays: number | undefined, issuing: boolean) {
     const expiresAt = CommerceService.paymentLinkExpiry(expiresInDays);
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: invoiceId, businessId, deletedAt: null },
@@ -5868,6 +5894,7 @@ export class CommerceService {
       // swallow this refusal match on the message text, which is unchanged.
       throw new ConflictException('Cannot create payment link for a paid or voided invoice');
     }
+    CommerceService.assertPayLinkStatus(invoice.status, issuing);
 
     const existing = await this.prisma.client.paymentLink.findFirst({
       where: { invoiceId, businessId, ...CommerceService.liveLinkWhere() },
@@ -6039,6 +6066,20 @@ export class CommerceService {
    * not shown, so it answers the 404.
    */
   private static readonly INTENT_PAYABLE_STATUSES: ReadonlySet<string> = new Set(['SENT', 'OVERDUE', 'PARTIALLY_PAID', 'PARTIALLY_CREDITED']);
+
+  /**
+   * FU-PAY-LINK-STATUS-GATE: the pay-link gate (issuePaymentLink,
+   * sendWithPublicInvoiceUrl). A link may be issued for the statuses above, and,
+   * when `issuing` (the invoice is handed to the customer as it is issued), a
+   * DRAFT. PAID and VOID are refused by the callers before this, with their
+   * own text.
+   */
+  private static assertPayLinkStatus(status: string, issuing: boolean): void {
+    if (CommerceService.INTENT_PAYABLE_STATUSES.has(status) || (issuing && status === 'DRAFT')) return;
+    throw new ConflictException(
+      `A pay link can only be issued for a SENT, OVERDUE, PARTIALLY_PAID or PARTIALLY_CREDITED invoice; this invoice is ${status}`,
+    );
+  }
 
   /**
    * A customer's anonymous "I will pay by <method>" from the public pay page.
