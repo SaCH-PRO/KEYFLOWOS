@@ -78,6 +78,8 @@ let db: any;
 let http: any;
 let memory: any;
 let detector: any;
+/** The profile interview's model: the prompts it was handed, and the reply it gives next. */
+const profileModel = { prompts: [] as string[], reply: 'v71y: tell me more.' };
 
 async function cleanup() {
   const byBiz = (table: string) => `DELETE FROM ${table} WHERE business_id LIKE ${sqlLikePrefix(P)}`;
@@ -208,17 +210,26 @@ beforeAll(async () => {
   const { AiMemoryService } = await import('../src/modules/ai/ai-memory.service');
   const { PatternDetectorService } = await import('../src/modules/ai/pattern-detector.service');
   const { SemanticMemoryService } = await import('../src/modules/ai/semantic-memory.service');
+  const { ProfileIntelligenceService } = await import('../src/modules/ai/profile-intelligence.service');
+  const { BusinessGraphService } = await import('../src/modules/ai/business-graph.service');
 
   const prisma = new PrismaService();
   memory = new AiMemoryService(prisma, {} as any, { getBlueprint: async () => null } as any);
   // The model gateway and usage are never reached: detectAiPatterns needs two tickets or bookings, and none exist.
   detector = new PatternDetectorService(prisma, new EventEmitter2(), {} as any, memory, {} as any);
+  const profileUsage = {
+    async trackAndComplete(_b: string, _u: unknown, _t: string, req: { messages: Array<{ role: string; content: unknown }> }) {
+      profileModel.prompts.push(req.messages.map((x) => `[${x.role}] ${String(x.content ?? '')}`).join('\n'));
+      return { content: profileModel.reply, toolCalls: [], usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2, estimatedCost: 0 } };
+    },
+  };
+  const profile = new ProfileIntelligenceService(prisma, memory, new BusinessGraphService(prisma), {} as any, profileUsage as any);
 
   const OFF_ROUTE = new Set([
     // AiController's collaborators no case calls.
     'AiAdvisorService', 'AiUsageService', 'AiExecutionLogService', 'AiOversightService', 'BusinessGraphService',
     'IntentParserService', 'PlannerService', 'StrategicIntelligenceService', 'ProAutoMonitorService',
-    'ProfileIntelligenceService', 'WorkspaceRecommendationsService', 'ModelGatewayService', 'KeyCommandService',
+    'WorkspaceRecommendationsService', 'ModelGatewayService', 'KeyCommandService',
     'AutopilotRulesService', 'AgentHealthService', 'JourneyOrchestratorService', 'MorningBriefingService',
     'UnifiedInboxService', 'GoalTrackerService', 'WorkloadAggregatorService', 'TaskPrioritizerService',
     'CapacityInsightService', 'TaskRebalancerService', 'KeyAgentConfigService', 'UndoService',
@@ -239,6 +250,7 @@ beforeAll(async () => {
       { provide: EventEmitter2, useValue: new EventEmitter2() },
       { provide: AiMemoryService, useValue: memory },
       { provide: PatternDetectorService, useValue: detector },
+      { provide: ProfileIntelligenceService, useValue: profile },
       { provide: SemanticMemoryService, useValue: {} },
     ],
   })
@@ -632,6 +644,62 @@ describe('FU-PATTERNS-ROUTES-SIGHT (D-257, D-100, D-234, D-146): the memory and 
       }
       expect(await db.aiMemory.count({ where: { businessId: ID.biz } })).toBe(0);
     } finally {
+      await clearMemory();
+    }
+  }, 240_000);
+
+  it("V71Y-17 RED (security review round 6, F-1): GET .../ai/profile/status and the profile interview's prompt hand the revenue-none member and the memberless SUPER_ADMIN no money or expense row; the owner gets them (control)", async () => {
+    await clearMemory();
+    try {
+      await seedPlain();
+      await seedMoney(1);
+      const leaks: Record<string, string[]> = {};
+      const statusFor = async (reader: Reader) => ok(reader, '/ai/profile/status');
+      const promptFor = async (reader: Reader) => {
+        profileModel.prompts.length = 0;
+        profileModel.reply = 'v71y: tell me more.';
+        const res = await agent().post(`/ai/businesses/${ID.biz}/ai/profile/chat`).set(HEADER, ID[reader]).set('x-forwarded-for', nextIp()).send({ message: 'V71Y hello' });
+        expect(res.status, `${reader}: ${text(res.body).slice(0, 300)}`).toBe(201);
+        expect(profileModel.prompts, reader).toHaveLength(1);
+        return profileModel.prompts[0];
+      };
+      for (const reader of BLIND) {
+        const status = await statusFor(reader);
+        const prompt = await promptFor(reader);
+        for (const [where, body] of [['status', status], ['prompt', prompt]] as const) {
+          const found = [...moneyIn(body), ...(text(body).includes(EXPENSE) ? ['expense'] : [])];
+          if (found.length) leaks[`${reader} ${where}`] = found;
+        }
+        expect(text(status), `${reader} control`).toContain(PLAIN_GOAL);
+      }
+      expect(leaks).toEqual({});
+      expect(text(await statusFor('owner')), 'owner control').toContain(MONEY_GOAL);
+      expect(await promptFor('owner'), 'owner control').toContain(MONEY_GOAL);
+    } finally {
+      await clearMemory();
+    }
+  }, 240_000);
+
+  it("V71Y-18 RED (security review round 6, F-2): the profile interview stores no 'patterns' row and no key over 200 or value over 2,000 characters (or not text): only the bounded goal of the model's extractions is confirmed", async () => {
+    await clearMemory();
+    try {
+      const extractions = [
+        { topic: 'goals', category: 'goals', key: 'v71y_goal', value: 'Open a second location', confidence: 0.9 },
+        { topic: 'goals', category: 'patterns', key: 'v71y_pattern', value: 'Most active day: Monday', confidence: 0.9 },
+        { topic: 'goals', category: 'goals', key: `v71y_${'k'.repeat(200)}`, value: 'Long key', confidence: 0.9 },
+        { topic: 'goals', category: 'goals', key: 'v71y_long_value', value: 'v'.repeat(2_001), confidence: 0.9 },
+        { topic: 'goals', category: 'goals', key: 'v71y_object_value', value: { nested: true }, confidence: 0.9 },
+      ];
+      // The interview's own block format (ProfileIntelligenceService: a fenced `extract` block at the reply's end).
+      profileModel.reply = 'Noted.\n```extract\n' + JSON.stringify(extractions) + '\n```';
+      const chat = await agent().post(`/ai/businesses/${ID.biz}/ai/profile/chat`).set(HEADER, ID.blind).set('x-forwarded-for', nextIp()).send({ message: 'V71Y my goals' });
+      expect(chat.status, text(chat.body).slice(0, 300)).toBe(201);
+      const confirm = await agent().post(`/ai/businesses/${ID.biz}/ai/profile/confirm`).set(HEADER, ID.blind).set('x-forwarded-for', nextIp()).send({});
+      expect(confirm.status, text(confirm.body)).toBe(201);
+      const rows = await db.aiMemory.findMany({ where: { businessId: ID.biz }, select: { category: true, key: true } });
+      expect(rows).toEqual([{ category: 'goals', key: 'v71y_goal' }]);
+    } finally {
+      profileModel.reply = 'v71y: tell me more.';
       await clearMemory();
     }
   }, 240_000);

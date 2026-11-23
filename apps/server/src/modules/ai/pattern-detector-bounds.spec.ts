@@ -8,6 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { PatternDetectorService } from './pattern-detector.service';
+import { aiMemoryRowVisibleTo } from './semantic-memory-sight';
 
 const MAX = 2_000;
 
@@ -53,5 +54,56 @@ describe('PatternDetectorService stores no pattern over 2,000 characters (FU-PAT
     await detector.scanBusiness('biz');
     expect(stored.length).toBeGreaterThan(0);
     for (const row of stored) expect(row.value.length, row.key).toBeLessThanOrEqual(MAX);
+  });
+
+  // Correctness review round 6 (COR-R5-1): clipping cut the words or figure that made a pattern money or an expense,
+  // so a stored row withheld before became visible (sometimes with the figure still in it). The class is decided on
+  // the pattern before it is clipped and kept.
+  const noRevenue = { reader: 'u1', sight: (m: string) => m !== 'revenue' } as any;
+  const noExpenses = { reader: 'u1', sight: (m: string) => m !== 'expenses' } as any;
+  const owner = { reader: 'u0', sight: () => true } as any;
+  const visibleTo = (row: { key: string; value: string }, who: any) => aiMemoryRowVisibleTo({ category: 'patterns', key: row.key, value: row.value }, who);
+
+  it.each([
+    ['figure past the clip', `${'a'.repeat(265)} 900 outstanding`, noRevenue],
+    ['currency code past the clip', `${'a'.repeat(268)} 4000 TTD`, noRevenue],
+    ['refund past the clip', `${'a'.repeat(300)} refund $4,000`, noRevenue],
+    ['expense past the clip', `${'a'.repeat(300)} rent`, noExpenses],
+    ['over the classifier bound (99 KB)', `revenue ${'x'.repeat(99_000)}`, noRevenue],
+  ])('a support cluster whose money or expense is %s stays withheld once stored bounded; the owner reads it', async (_label, title, reader) => {
+    const tickets = [0, 1, 2].map((i) => ({ id: `t${i}`, title, status: 'OPEN', priority: 'LOW', orgUnitId: null, createdAt: new Date() }));
+    const { detector, stored } = detectorOver(tickets, '{"patterns": []}');
+    const scan = await detector.scanBusiness('biz');
+    const row = stored.find((r) => r.key.startsWith('pattern_support_cluster_'))!;
+    expect(row.value.length).toBeLessThanOrEqual(MAX);
+    expect(visibleTo(row, reader), row.value.slice(0, 400)).toBe(false);
+    expect(visibleTo(row, owner)).toBe(true);
+    const answered = scan.patterns.find((p: any) => p.category === 'support_cluster');
+    expect(visibleTo({ key: 'pattern_support_cluster', value: JSON.stringify(answered) }, reader)).toBe(false);
+  });
+
+  it('a model pattern whose money is only past the clip (its category) stays withheld once stored bounded', async () => {
+    const tickets = [0, 1].map((i) => ({ id: `t${i}`, title: `ticket ${i}`, status: 'OPEN', priority: 'LOW', orgUnitId: null, createdAt: new Date() }));
+    const model = JSON.stringify({ patterns: [{ category: `${'q'.repeat(80)}_revenue_risk`, severity: 'warning', title: 'A theme', description: 'Something to look at', confidence: 0.7, suggestedAction: 'Look' }] });
+    const { detector, stored } = detectorOver(tickets, model);
+    await detector.scanBusiness('biz');
+    expect(stored).toHaveLength(1);
+    expect(visibleTo(stored[0], noRevenue), stored[0].value).toBe(false);
+  });
+
+  // Correctness COR-R5-2 / security F-3 (round 6): the bound holds after JSON escaping, and the model's severity and
+  // category are not carried unbounded.
+  it('control characters, quotes and a 3,000-character model severity still store at most 2,000 characters', async () => {
+    const control = '\u0001'.repeat(5_000);
+    const tickets = [0, 1, 2].map((i) => ({ id: `t${i}`, title: control, status: 'OPEN', priority: 'LOW', orgUnitId: null, createdAt: new Date() }));
+    const model = JSON.stringify({ patterns: [{ category: 'x', severity: 's'.repeat(3_000), title: '\u0001'.repeat(400), description: '"'.repeat(400), confidence: 0.5, suggestedAction: '\\'.repeat(400) }] });
+    const { detector, stored } = detectorOver(tickets, model);
+    const scan = await detector.scanBusiness('biz');
+    expect(stored.length).toBe(2);
+    for (const row of stored) expect(row.value.length, row.key).toBeLessThanOrEqual(MAX);
+    for (const p of scan.patterns) {
+      expect(JSON.stringify(p).length).toBeLessThanOrEqual(MAX);
+      expect(['critical', 'warning', 'info']).toContain(p.severity);
+    }
   });
 });
