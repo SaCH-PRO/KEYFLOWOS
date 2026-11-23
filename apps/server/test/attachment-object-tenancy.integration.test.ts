@@ -192,6 +192,27 @@ describe('FU-ATTACHMENT-OBJECT-TENANCY: upload paths are bound to the issuing bu
   });
 });
 
+describe('FU-ATTACHMENT-OBJECT-TENANCY: the client upload namespace is written only by request-url (review round 3)', () => {
+  it("a server-side write can not land in a business's client upload namespace", async () => {
+    const storage = new ObjectStorageService();
+    for (const subdir of [`uploads/${BIZ_A}`, `/uploads/${BIZ_A}/`, 'uploads/x', 'uploads']) {
+      const res = await storage.uploadBuffer(Buffer.from(B_SECRET), { subdir }).catch((e: unknown) => e);
+      if (res instanceof Error) continue;
+      // Written: it must not be reachable as a client upload of any business.
+      const path = (res as { objectPath: string }).objectPath;
+      const r = await attachAs(BIZ_A, path);
+      expect(sawBytes(r.calls, B_SECRET), `${subdir} -> ${path}`).toBe(false);
+      expect(path.split('/').length, `${subdir} -> ${path}`).not.toBe(5);
+    }
+  });
+
+  it('the default and the existing server namespaces still write', async () => {
+    const storage = new ObjectStorageService();
+    await expect(storage.uploadBuffer(Buffer.from('x'))).resolves.toHaveProperty('objectPath');
+    await expect(storage.uploadBuffer(Buffer.from('x'), { subdir: `accountant-exports/${BIZ_A}`, filename: 'r.csv' })).resolves.toHaveProperty('objectPath');
+  });
+});
+
 describe("FU-ATTACHMENT-OBJECT-TENANCY: flow chat never reads another business's object", () => {
   it("A's member attaching B's uploaded object gets none of B's bytes", async () => {
     const bPath = await uploadAs(BIZ_B, B_SECRET);
