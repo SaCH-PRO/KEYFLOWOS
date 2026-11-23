@@ -15,7 +15,11 @@
  *      secret-shaped tokens (<secret>) inside free text. A note that says
  *      "card 4111 1111 1111 1111" or "use key sk-..." no longer reaches an
  *      audit snapshot or a log payload intact. Numbers are not text: a numeric
- *      leaf is left alone.
+ *      leaf is left alone. A field whose key names an identifier (`id`,
+ *      `platform_id`, `externalPostId`) keeps its digit runs: ids are not
+ *      cards (owner question 1 default); its secrets are still redacted.
+ *      Every pattern is anchored so its scan is linear in the input (200 kB of
+ *      its worst input in tens of milliseconds); the spec holds each to that.
  *
  * NOTE: patterns must be specific enough not to over-match ordinary fields —
  * hence `apikey`/`accesskey`/`privatekey` rather than a bare `key`; and the
@@ -201,10 +205,13 @@ export const SENSITIVE_VALUE_PATTERNS: readonly Readonly<SensitiveValuePattern>[
     pattern: /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----|[\s\S]*$)/g,
   }),
   freeze({
-    // Header and claims segments, then any signature, empty included (alg none).
+    // Header and claims segments, then any signature, empty included (alg none). The token must not be
+    // glued to a letter, digit, dash or underscore: `\b` would restart the scan at every dash of an
+    // 'eyJ-eyJ-eyJ-' text and backtrack to its end (quadratic: 12 s for 200 kB); the lookbehind keeps it
+    // linear. A JWT written as `token-eyJ...` is therefore not covered (documented).
     name: 'jwt',
     marker: SECRET_MARKER,
-    pattern: /\beyJ[A-Za-z0-9_-]{6,}\.eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*/g,
+    pattern: /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{6,}\.eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*/g,
   }),
   freeze({
     // The scheme word is kept (named group `lead`); the token goes. A token is 8 or more token characters
@@ -219,15 +226,23 @@ export const SENSITIVE_VALUE_PATTERNS: readonly Readonly<SensitiveValuePattern>[
     ),
   }),
   freeze({
+    // Anchored on "not after a letter or digit" rather than `\b`, so `x_AKIA...` is still a key id.
     name: 'aws-access-key-id',
     marker: SECRET_MARKER,
-    pattern: /\bAKIA[A-Z0-9]{16}\b/g,
+    pattern: /(?<![A-Za-z0-9])AKIA[A-Z0-9]{16}(?![A-Za-z0-9])/g,
   }),
   freeze({
-    // sk- (OpenAI, sk-proj-...), sk-ant- (Anthropic), xoxb- (Slack), ghp_ and github_pat_ (GitHub), then 20+ key characters.
+    // sk- (OpenAI, sk-proj-...), sk-ant- (Anthropic), xoxb- (Slack), ghp_ and github_pat_ (GitHub), in any
+    // letter case and also after an underscore (`x_ghp_...`). A real key has, after the prefix and at most
+    // four short dashed segments (proj-, api03-, Slack's two numeric ids), a run of 20 or more key characters
+    // WITHOUT a dash; a product slug such as `sk-classic-fit-cotton-shirt-blue` has none and is left alone.
+    // The dashed segments are bounded, so the scan stays linear on 'sk-a-a-a-' texts.
     name: 'provider-key-prefix',
     marker: SECRET_MARKER,
-    pattern: new RegExp(String.raw`\b(?:sk-ant-|sk-|xoxb-|ghp_|github_pat_)${KEY_CHARS}{20,}`, 'g'),
+    pattern: new RegExp(
+      String.raw`(?<![A-Za-z0-9])(?:sk-ant-|sk-|xoxb-|ghp_|github_pat_)(?:[A-Za-z0-9_]{1,32}-){0,4}[A-Za-z0-9_]{20,}${KEY_CHARS}*`,
+      'gi',
+    ),
   }),
   freeze({
     // A maximal run of digit groups joined by one to three spaces, tabs, no-break, thin or narrow no-break
@@ -240,23 +255,44 @@ export const SENSITIVE_VALUE_PATTERNS: readonly Readonly<SensitiveValuePattern>[
   }),
 ]);
 
+/** Zero-width characters (space, non-joiner, joiner, word joiner, BOM): invisible, and able to split a card number for a scanner. */
+const ZERO_WIDTH = /\u200b|\u200c|\u200d|\u2060|\ufeff/g; // an alternation, not a class: no-misleading-character-class
+
+export interface RedactSensitiveTextOptions {
+  /** Apply the card-number pattern (default true). Off for identifier fields, whose digit runs are ids, not cards. */
+  readonly cards?: boolean;
+}
+
 /**
  * Replace every card number and secret-shaped token in free text with its
  * marker, keeping the rest of the text (what an operator or an audit reader
  * needs). The Bearer pattern keeps the scheme word and replaces the token.
+ * Zero-width characters are removed before matching so they cannot split a
+ * number; when nothing matched, the text is returned exactly as given.
  * Idempotent: a marker matches no pattern.
  */
-export function redactSensitiveText(text: string): string {
-  let out = text;
+export function redactSensitiveText(text: string, options: RedactSensitiveTextOptions = {}): string {
+  const stripped = text.replace(ZERO_WIDTH, '');
+  let out = stripped;
   for (const { pattern, marker, rewrite } of SENSITIVE_VALUE_PATTERNS) {
+    if (marker === CARD_MARKER && options.cards === false) continue;
     out = out.replace(pattern, (match: string, ...rest: unknown[]) => {
       if (rewrite) return rewrite(match);
       const groups = rest.length && typeof rest[rest.length - 1] === 'object' ? (rest[rest.length - 1] as Record<string, string | undefined>) : undefined;
       return `${groups?.lead ?? ''}${marker}`;
     });
   }
-  return out;
+  return out === stripped ? text : out;
 }
+
+/**
+ * A field whose name says it holds an identifier (`id`, `platform_id`,
+ * `externalPostId`, `contactID`): its digit runs are ids, not cards, so the
+ * card pattern is not applied to it (owner question 1 default, RR-REDACTION-
+ * BY-CONTENT); secret-shaped tokens in it are still redacted. `bid` and `ids`
+ * are not identifier names.
+ */
+const IDENTIFIER_KEY = /(?:^|_)id$|I[dD]$/;
 
 /**
  * Recursively redact sensitive fields in-place across objects and arrays.
@@ -282,6 +318,8 @@ export function deepRedact<T>(value: T): T {
     for (const key of Object.keys(obj)) {
       if (isSensitiveKey(key)) {
         obj[key] = REDACTED;
+      } else if (typeof obj[key] === 'string') {
+        obj[key] = redactSensitiveText(obj[key] as string, { cards: !IDENTIFIER_KEY.test(key) });
       } else {
         obj[key] = deepRedact(obj[key]);
       }
