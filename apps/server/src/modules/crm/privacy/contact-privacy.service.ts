@@ -29,6 +29,7 @@ import { contactWhereBase } from '../crm.helpers';
 import { resolveCrmAccess, visibilityClause } from '../crm-permissions.helper';
 import { safeInterval } from '../../../core/scheduling/safe-interval';
 import { schedulersDisabled } from '../../../core/config/env';
+import { FORGOTTEN_EVENT_METADATA_KEYS } from '../../business-events/business-event.service';
 
 const DEFAULT_PURGE_INTERVAL_MS = 30 * 60_000;
 const DEFAULT_GRACE_DAYS = 7;
@@ -99,7 +100,10 @@ const PURGE_RETAINED_BASIS_DETAIL =
  */
 const PURGE_NOT_SWEPT =
   'Records of other modules that reference the contact id and are not counted under erased or retained ' +
-  '(for example messaging, campaigns, deals and journeys) are not swept by this purge.';
+  '(for example messaging, campaigns, deals and journeys) are not swept by this purge. Business events are ' +
+  'swept when their subject is the contact or their snapshot carries its contactId at the top level; events ' +
+  'of the retained records (invoices, quotes, bookings) whose snapshot names the person otherwise are kept ' +
+  'under the retained basis.';
 
 /** Audit action recording export bundle objects the purge could not delete from storage. */
 const STORAGE_CLEANUP_FAILED_ACTION = 'forget_storage_cleanup_failed';
@@ -752,7 +756,8 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
    *   4. delete the personal child rows of all of them and blank import raw
    *      data;
    *   5. scrub their audit trails down to the hash;
-   *   6. write the forget_purged entry.
+   *   6. scrub the business event log rows naming any of them (V1-72);
+   *   7. write the forget_purged entry.
    *
    * Returns the export bundle object keys to delete once the transaction has
    * committed.
@@ -881,6 +886,46 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
       auditEntriesScrubbed += r.count;
     }
 
+    // 6. The business event log (V1-72, RR-ERASURE-BUSINESS-EVENTS). The
+    //    BusinessEventInterceptor stores the request body and the response of
+    //    every mutation, so a contact create or update holds the person's name,
+    //    email and phone, and its metadata the caller's ip. A row names them
+    //    when its subject is one of them (subject_type 'contact'), or when its
+    //    before/after carries one of their ids as the top-level contactId (a
+    //    note, a task, the forget request itself): the same rule
+    //    BusinessEventService.emit applies to rows written after the request.
+    //    The row is kept (event type, action, actor, subject, timestamps are
+    //    the business's evidence that something happened); before and after
+    //    become NULL and metadata keeps only FORGOTTEN_EVENT_METADATA_KEYS.
+    //    Raw SQL because the JSON paths are not Prisma-filterable in one
+    //    statement. Only rows that still hold something are counted.
+    const keptKeys = [...FORGOTTEN_EVENT_METADATA_KEYS];
+    const businessEventsScrubbed = await tx.$executeRaw`
+      UPDATE business_events
+         SET "before" = NULL,
+             "after" = NULL,
+             metadata = CASE
+               WHEN metadata IS NULL THEN NULL
+               WHEN jsonb_typeof(metadata) = 'object' THEN (
+                 SELECT COALESCE(jsonb_object_agg(e.key, e.value), '{}'::jsonb)
+                   FROM jsonb_each(metadata) e WHERE e.key = ANY(${keptKeys}))
+               ELSE NULL
+             END
+       WHERE business_id = ${businessId}
+         AND (
+           (subject_type = 'contact' AND subject_id = ANY(${ids}))
+           OR "before" ->> 'contactId' = ANY(${ids})
+           OR "after" ->> 'contactId' = ANY(${ids})
+         )
+         AND (
+           "before" IS NOT NULL
+           OR "after" IS NOT NULL
+           OR (metadata IS NOT NULL AND (
+             jsonb_typeof(metadata) <> 'object'
+             OR EXISTS (SELECT 1 FROM jsonb_object_keys(metadata) k WHERE NOT (k = ANY(${keptKeys})))
+           ))
+         )`;
+
     // What stays, and why. aggregate() also counts soft-deleted rows (the
     // soft-delete extension filters count()), so these are every retained row.
     const invoices = await tx.invoice.aggregate({ where: byContact, _count: { _all: true } });
@@ -925,6 +970,7 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
             crmTasks: crmTasks.count,
             relationships: relationships.count,
             auditEntriesScrubbed,
+            businessEventsScrubbed,
           },
           // Deleted from object storage after this transaction commits; a key
           // that cannot be deleted is recorded in a forget_storage_cleanup_failed entry.
