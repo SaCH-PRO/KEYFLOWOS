@@ -51,7 +51,18 @@ const PROFILE_TOPICS = [
 @Injectable()
 export class ProfileIntelligenceService {
   private readonly logger = new Logger(ProfileIntelligenceService.name);
+  /**
+   * MEM-DOC-EXTRACTION-SIGHT orchestrator review (D-130): each member's own interview, keyed by the business AND the
+   * member (interviewKey). It was keyed by the business alone, so every member of a business shared one interview:
+   * the owner's turns and KEY's replies to them (which may restate what the owner's prompt carried) came back to a
+   * STAFF member in their prompt and in the response's state. Every route that reads it is behind BusinessGuard, so
+   * a member removed from the business reaches nothing they left in it.
+   */
   private readonly sessionCache = new Map<string, ProfileInterviewState>();
+
+  private interviewKey(businessId: string, userId: string): string {
+    return JSON.stringify([businessId, userId]);
+  }
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -61,8 +72,8 @@ export class ProfileIntelligenceService {
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
   ) {}
 
-  async getInterviewState(businessId: string): Promise<ProfileInterviewState> {
-    const cached = this.sessionCache.get(businessId);
+  async getInterviewState(businessId: string, userId: string): Promise<ProfileInterviewState> {
+    const cached = this.sessionCache.get(this.interviewKey(businessId, userId));
     if (cached) return cached;
 
     const existingMemories = await this.memory.getAll(businessId);
@@ -85,7 +96,7 @@ export class ProfileIntelligenceService {
       nextTopic,
     };
 
-    this.sessionCache.set(businessId, state);
+    this.sessionCache.set(this.interviewKey(businessId, userId), state);
     return state;
   }
 
@@ -93,20 +104,24 @@ export class ProfileIntelligenceService {
    * MEM-DOC-EXTRACTION-SIGHT (D-234): `opts.documentExtractions` true only for a reader with revenue read (the
    * controller decides); otherwise the prompt's known info carries no document extraction (withoutDocumentExtractions).
    */
-  async chat(businessId: string, userMessage: string, opts: { documentExtractions?: boolean } = {}): Promise<{
+  async chat(businessId: string, userId: string, userMessage: string, opts: { documentExtractions?: boolean } = {}): Promise<{
     reply: string;
     state: ProfileInterviewState;
     pendingExtractions: ProfileExtraction[];
     currentTopicUnlocks: string | null;
   }> {
-    const state = await this.getInterviewState(businessId);
+    const state = await this.getInterviewState(businessId, userId);
 
     state.messages.push({ role: 'user', content: userMessage });
 
     let businessContext: string;
     try {
-      const snapshot = await this.businessGraph.getSnapshot(businessId, false);
-      businessContext = `Business name: ${snapshot.business.name || 'Unknown'}. Currency: ${snapshot.business.currency || 'TTD'}. Clients: ${snapshot.contacts.total}. Products: ${snapshot.storefront.activeProductCount}. Monthly revenue: $${snapshot.revenue.monthlyRevenue.toLocaleString()}.`;
+      // MEM-DOC-EXTRACTION-SIGHT orchestrator review (D-100): the snapshot projected for the member who asks
+      // (keyContextSight): the monthly revenue only at revenue read; a member without it, and anyone who is no member,
+      // gets no revenue section and so no revenue line.
+      const snapshot = await this.businessGraph.getSnapshot(businessId, false, { viewerId: userId });
+      const revenueLine = snapshot.revenue ? ` Monthly revenue: $${snapshot.revenue.monthlyRevenue.toLocaleString()}.` : '';
+      businessContext = `Business name: ${snapshot.business.name || 'Unknown'}. Currency: ${snapshot.business.currency || 'TTD'}. Clients: ${snapshot.contacts.total}. Products: ${snapshot.storefront.activeProductCount}.${revenueLine}`;
     } catch {
       businessContext = 'Business context unavailable.';
     }
@@ -215,7 +230,7 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
 
       state.nextTopic = PROFILE_TOPICS.find(t => !state.completedTopics.includes(t.topic))?.topic || null;
       state.messages.push({ role: 'assistant', content: reply });
-      this.sessionCache.set(businessId, state);
+      this.sessionCache.set(this.interviewKey(businessId, userId), state);
 
       return {
         reply,
@@ -231,14 +246,14 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
     }
   }
 
-  async getCompletionSummary(businessId: string, opts: { documentExtractions?: boolean } = {}): Promise<{
+  async getCompletionSummary(businessId: string, userId: string, opts: { documentExtractions?: boolean } = {}): Promise<{
     completedTopics: string[];
     remainingTopics: string[];
     totalTopics: number;
     completionPercent: number;
     memories: Array<{ category: string; key: string; value: string; confidence: number }>;
   }> {
-    const state = await this.getInterviewState(businessId);
+    const state = await this.getInterviewState(businessId, userId);
     const remainingTopics = PROFILE_TOPICS
       .filter(t => !state.completedTopics.includes(t.topic))
       .map(t => t.label);
@@ -256,8 +271,8 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
     };
   }
 
-  async confirmExtractions(businessId: string, confirmedKeys?: string[]): Promise<{ saved: number; skipped: number; rejected: number }> {
-    const state = this.sessionCache.get(businessId);
+  async confirmExtractions(businessId: string, userId: string, confirmedKeys?: string[]): Promise<{ saved: number; skipped: number; rejected: number }> {
+    const state = this.sessionCache.get(this.interviewKey(businessId, userId));
     if (!state || state.pendingConfirmations.length === 0) {
       return { saved: 0, skipped: 0, rejected: 0 };
     }
@@ -304,12 +319,12 @@ Confidence: 0.6 for inferred, 0.8 for stated, 1.0 for explicitly confirmed.`;
 
     state.pendingConfirmations = state.pendingConfirmations.filter(e => !e.confirmed);
     state.nextTopic = PROFILE_TOPICS.find(t => !state.completedTopics.includes(t.topic))?.topic || null;
-    this.sessionCache.set(businessId, state);
+    this.sessionCache.set(this.interviewKey(businessId, userId), state);
 
     return { saved, skipped, rejected };
   }
 
-  resetSession(businessId: string): void {
-    this.sessionCache.delete(businessId);
+  resetSession(businessId: string, userId: string): void {
+    this.sessionCache.delete(this.interviewKey(businessId, userId));
   }
 }

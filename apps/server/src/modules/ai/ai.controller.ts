@@ -35,6 +35,16 @@ import { KeyCommandService } from './key-command.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
 import { KeyCortexApprovalOrchestratorService } from '../key-cortex/key-cortex-approval-orchestrator.service';
 
+/**
+ * MEM-DOC-EXTRACTION-SIGHT orchestrator review (D-130): the member whose own profile interview a route reads. Behind
+ * AuthGuard there is always one; with none the route refuses rather than reading a shared interview.
+ */
+function profileMember(req: { user?: { id?: string } } | undefined): string {
+  const id = req?.user?.id;
+  if (!id) throw new UnauthorizedException('Authenticated user required for the profile interview');
+  return id;
+}
+
 interface AuthenticatedRequest extends Request {
   user?: { id: string; email?: string; role?: string };
 }
@@ -1450,16 +1460,19 @@ export class AiController {
     @Req() req?: AuthenticatedRequest,
   ) {
     if (!body.message?.trim()) throw new BadRequestException('Message is required');
-    // MEM-DOC-EXTRACTION-SIGHT: the interview's prompt carries the document extractions only for a revenue reader.
+    // MEM-DOC-EXTRACTION-SIGHT: the interview's prompt carries the document extractions only for a revenue reader, and
+    // the interview is the caller's own (D-130).
+    const userId = profileMember(req);
     const documentExtractions = await this.readsDocumentExtractions(businessId, req);
-    return this.profileIntelligence.chat(businessId, body.message.trim(), { documentExtractions });
+    return this.profileIntelligence.chat(businessId, userId, body.message.trim(), { documentExtractions });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/profile/status')
   async profileStatus(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    const userId = profileMember(req);
     const documentExtractions = await this.readsDocumentExtractions(businessId, req);
-    return this.profileIntelligence.getCompletionSummary(businessId, { documentExtractions });
+    return this.profileIntelligence.getCompletionSummary(businessId, userId, { documentExtractions });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -1467,14 +1480,15 @@ export class AiController {
   async profileConfirm(
     @Param('businessId') businessId: string,
     @Body() body: { confirmedKeys?: string[] },
+    @Req() req?: AuthenticatedRequest,
   ) {
-    return this.profileIntelligence.confirmExtractions(businessId, body.confirmedKeys);
+    return this.profileIntelligence.confirmExtractions(businessId, profileMember(req), body.confirmedKeys);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/ai/profile/reset')
-  async profileReset(@Param('businessId') businessId: string) {
-    this.profileIntelligence.resetSession(businessId);
+  async profileReset(@Param('businessId') businessId: string, @Req() req?: AuthenticatedRequest) {
+    this.profileIntelligence.resetSession(businessId, profileMember(req));
     return { success: true };
   }
 

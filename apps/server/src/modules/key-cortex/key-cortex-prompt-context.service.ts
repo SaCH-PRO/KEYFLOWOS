@@ -367,7 +367,13 @@ export async function readersModuleSight(
   logger: Pick<Logger, 'warn'> = cognitionMemoryLogger,
   logTag = 'promptMemory',
 ): Promise<ModuleSight> {
-  if (!reader || !prisma) return NO_MODULE_SIGHT;
+  if (!reader) return NO_MODULE_SIGHT;
+  if (!prisma) {
+    // MEM-DOC-EXTRACTION-SIGHT orchestrator review (COR-MDX-2): a service built without its database client reads no
+    // membership, so its reader sees no module (fail closed). Said loudly: it is a wiring fault, not a member's scope.
+    logger.warn(`[${logTag}][${businessId}] no database client: no membership read, the reader sees no module (wiring fault)`);
+    return NO_MODULE_SIGHT;
+  }
   try {
     const membership = await prisma.client.membership.findUnique({
       where: { userId_businessId: { userId: reader, businessId } },
@@ -761,6 +767,9 @@ export class KeyCortexPromptContextService {
   private readonly logger = new Logger(KeyCortexPromptContextService.name);
 
   constructor(
+    // MEM-DOC-EXTRACTION-SIGHT orchestrator review (COR-MDX-2): every dependency named by token, so the service is built
+    // with its PrismaService wherever Nest builds it (a build without type metadata could not resolve it before).
+    @Inject(KeyCortexContextService)
     private readonly contextService: KeyCortexContextService,
     @Optional()
     @Inject(UnifiedMemoryRetrievalService)
@@ -773,7 +782,10 @@ export class KeyCortexPromptContextService {
     @Optional()
     @Inject(PrismaService)
     private readonly prisma?: PrismaService,
-  ) {}
+  ) {
+    // COR-MDX-2: without it no member reads memory, so no owner sees an extraction: said at construction, not silently.
+    if (!prisma) this.logger.error('KeyCortexPromptContextService built without PrismaService: prompt memory reads fail closed for every reader');
+  }
 
   /**
    * Build the message array for the model gateway.

@@ -44,10 +44,17 @@ export type MemorySource = 'user' | 'inferred' | 'approval_signal' | 'pattern_an
 /**
  * MEM-DOC-EXTRACTION-SIGHT (D-234, D-257): the category KeyCortexDocumentService.extractData stores an uploaded document's
  * extracted data under (key = the document's id). The document carries no classification (KeyDocument has only its file
- * type), so an extraction may be an invoice or a statement: its provenance is unknown and it fails closed. Only a reader
- * who may read revenue is handed one (the owner, a revenue reader); a member without revenue read and a turn with no
- * member reader are not, on any surface (KEY's prompts, GET .../ai/memory, the profile interview). Classifying documents
- * so that non-financial extractions reach more readers is a later packet (design open question Q4c).
+ * type), so an extraction may be an invoice or a statement: its provenance is unknown and it fails closed. Only a member
+ * reader with revenue read is handed one (the owner, a revenue reader); a member without revenue read and a turn with no
+ * member reader are not. The surfaces covered, rows and their semantic copies alike:
+ *  - KEY's prompt memory: the /ai flow chat's perception block and its "RELEVANT CONTEXT FROM MEMORY" section (chat and
+ *    stream, the staff bridge), POST /cortex/chat's buildMemoryContext and the pipeline's chatMemoryFragments
+ *    (UnifiedMemoryRetrievalService.documentExtractions, readersOwnPromptMemory);
+ *  - SemanticMemoryService.search, which leaves every copy out unless asked (includeDocumentExtractionCopies), and
+ *    GET .../agent/memory/search over it;
+ *  - GET .../ai/memory (whole and by category), GET .../ai/profile/status and the profile interview's prompt.
+ * GET .../ai/memory/context renders no extraction for anyone. The owners' digest counts them (it goes to the owners).
+ * Classifying documents so that non-financial extractions reach more readers is a later packet (open question Q4c).
  */
 export { DOCUMENT_EXTRACTION_CATEGORY };
 

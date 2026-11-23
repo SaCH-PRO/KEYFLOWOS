@@ -342,11 +342,13 @@ export class SemanticMemoryService {
     sourceTypes?: string[];
     minSimilarity?: number;
     /**
-     * MEM-DOC-EXTRACTION-SIGHT (D-234): leave out every copy of a document extraction (a copy whose AiMemory row's
-     * category is DOCUMENT_EXTRACTION_CATEGORY, whatever its own metadata says), so a read for a reader without revenue
-     * read never takes one and none takes a place in its limit.
+     * MEM-DOC-EXTRACTION-SIGHT (D-234; orchestrator review COR-MDX-1): serve the copies of document extractions too (a
+     * copy whose AiMemory row's category is DOCUMENT_EXTRACTION_CATEGORY, whatever its own metadata says). Only when
+     * true: by default every such copy is left out before the limit, so a search for a reader without revenue read never
+     * takes one and none takes a place in its limit. A caller passes true only for a reader whose sight reads revenue
+     * (readsDocumentExtractions).
      */
-    withoutDocumentExtractionCopies?: boolean;
+    includeDocumentExtractionCopies?: boolean;
   }): Promise<SemanticMemory[]> {
     try {
       const embedding = await this.generateEmbedding(params.businessId, params.query);
@@ -383,7 +385,7 @@ export class SemanticMemoryService {
         query = Prisma.sql`${query} AND source_type IN (${Prisma.join(params.sourceTypes)})`;
       }
 
-      if (params.withoutDocumentExtractionCopies) {
+      if (params.includeDocumentExtractionCopies !== true) {
         query = Prisma.sql`${query} AND NOT (
           e.source_type = ${AI_MEMORY_COPY_SOURCE_TYPE}
           AND EXISTS (
