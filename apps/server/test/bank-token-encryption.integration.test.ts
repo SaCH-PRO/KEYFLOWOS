@@ -35,10 +35,9 @@
  *   V72S-11  (review repairs SEC-V72S-1, COR-V72S-1) --apply refuses (exit 2, nothing written) when no key
  *            variable is set (it would encrypt with the in-repo dev key) and when the @keyflow/db build it
  *            loads does not encrypt BankConnection.accessToken (a stale build would write the plaintext back).
- *   V72S-12  (review round 2: SEC-V72S-R2-1/2/3) a stored value in the ciphertext form that does not decrypt
- *            with the loaded key is counted as undecryptable (not already_encrypted) and listed by id; --apply
- *            refuses when rows fail to decrypt and none decrypt (the loaded key is likely not the API's), and
- *            runs once one row proves the key; an unknown argument is not echoed back.
+ *   V72S-12  (review round 2: SEC-V72S-R2-2/3) a stored value in the ciphertext form that does not decrypt
+ *            with the loaded key is counted as undecryptable (not already_encrypted), listed by id and never
+ *            rewritten; an unknown argument is not echoed back.
  *   V72S-13  (review round 3: SEC-V72S-R3-1, COR-V72S-R3-1/2) the decrypt probe counts only a decrypt failure as
  *            undecryptable: a database error exits 1 with nothing written, a row deleted after the scan is
  *            neither decrypted nor undecryptable; and --apply with nothing to encrypt exits 0 even when every
@@ -48,6 +47,10 @@
  *            a raw driver error included, exits 1; the dry run refuses too with a @keyflow/db build that does not
  *            encrypt the column (its counts would be wrong); and deleting a row that does not decrypt succeeds
  *            (the delete result is not decrypted).
+ *   V72S-15  (orchestrator A1) --apply refuses (exit 2, nothing written) unless the loaded key decrypts at least
+ *            one stored ciphertext of any encrypted model, searched across the whole database and not only the
+ *            --business scope: a wrong key (JWT_SECRET while the API ran on CONNECTOR_CREDENTIALS_KEY) no longer
+ *            seals every row under itself. The dry run still reports the key variable it would use.
  *
  * Owner question OQ-4 (does production hold plaintext bank tokens today) is open; nothing here reads production.
  */
@@ -161,7 +164,7 @@ function expectNoToken(body: unknown) {
 interface Run { code: number | null; out: string; err: string }
 
 /** The operator's run: tsx with the scripts tsconfig, from apps/server, DATABASE_URL only. */
-function runScript(args: string[], dropKeys = false): Promise<Run> {
+function runScript(args: string[], dropKeys = false, extraEnv: Record<string, string> = {}): Promise<Run> {
   return new Promise((ok, fail) => {
     const withKeys: NodeJS.ProcessEnv = {
       PATH: [path.join(SERVER_DIR, 'node_modules', '.bin'), path.join(REPO_ROOT, 'node_modules', '.bin'), process.env.PATH ?? ''].join(':'),
@@ -173,6 +176,7 @@ function runScript(args: string[], dropKeys = false): Promise<Run> {
     };
     const env: NodeJS.ProcessEnv = { ...withKeys };
     if (dropKeys) for (const k of ['CONNECTOR_CREDENTIALS_KEY', 'CREDENTIALS_ENCRYPTION_KEY', 'JWT_SECRET']) delete env[k];
+    Object.assign(env, extraEnv);
     const child = spawn('tsx', ['--tsconfig', 'scripts/tsconfig.json', SCRIPT, ...args], {
       cwd: SERVER_DIR,
       env,
@@ -601,7 +605,7 @@ describe('BankConnection.accessToken is encrypted at rest (RR-BANK-TOKEN-ENCRYPT
     expect(lines.join('\n')).toMatch(/does not encrypt BankConnection\.accessToken/);
     expect(await stored(id), 'nothing written').toBe(plain);
   }, 3 * SCRIPT_TIMEOUT_MS);
-  it('[V72S-12] undecryptable rows are reported, --apply refuses when no stored ciphertext proves the key, and bad arguments are not echoed', async () => {
+  it('[V72S-12] undecryptable rows are reported and never rewritten, and bad arguments are not echoed', async () => {
     const fa = await account(ID.bizScript2, 'V72S undecryptable bank');
     const garbage = [CIPHER_PREFIX, Buffer.from('v72s-not-a-real-ciphertext-value-000000000000').toString('base64')].join('');
     const badId = await rawRow(ID.bizScript2, fa, `${P}s2_bad`, garbage);
@@ -618,15 +622,9 @@ describe('BankConnection.accessToken is encrypted at rest (RR-BANK-TOKEN-ENCRYPT
     expect(listedIds(dry.out)).toEqual([plainId]);
     expect(dryAll).not.toContain(garbage.slice(CIPHER_PREFIX.length));
 
-    const refused = await runScript(['--apply', `--business=${ID.bizScript2}`]);
-    const refusedAll = `${refused.out}\n${refused.err}`;
-    expect(refused.code, refusedAll).toBe(2);
-    expect(refusedAll).toMatch(/none decrypts with the loaded key/);
-    expect(await stored(plainId), 'nothing written').toBe(plain);
-    expect(await stored(badId)).toBe(garbage);
-
-    // One row the loaded key decrypts proves it: --apply then encrypts the plaintext and leaves the bad row as stored.
-    await service.create(ID.bizScript2, { financialAccountId: await account(ID.bizScript2, 'V72S proof bank'), provider: 'plaid', accessToken: token('proof') });
+    // The loaded key is proven by ciphertext elsewhere in the database (a row of another business sealed under the
+    // test key: A1's unscoped proof), so --apply encrypts the plaintext and leaves the undecryptable row as stored.
+    await service.create(ID.biz, { financialAccountId: await account(ID.biz, 'V72S proof bank'), provider: 'plaid', accessToken: token('proof') });
     const applied = await runScript(['--apply', `--business=${ID.bizScript2}`]);
     expect(applied.code, `${applied.out}\n${applied.err}`).toBe(0);
     expect(countOf(applied.out, 'encrypted')).toBe(1);
@@ -739,4 +737,33 @@ describe('BankConnection.accessToken is encrypted at rest (RR-BANK-TOKEN-ENCRYPT
     expect(await db.$queryRawUnsafe('SELECT id FROM bank_connections WHERE id = $1', badId)).toEqual([]);
     expect(await stored(sealed.id)).toMatch(new RegExp(`^${CIPHER_PREFIX}`));
   });
+  it('[V72S-15] --apply refuses unless the loaded key decrypts a stored ciphertext somewhere in the database', async () => {
+    const fa = await account(ID.bizScript3, 'V72S wrong key bank');
+    const plain = token('wrongkey');
+    const id = await rawRow(ID.bizScript3, fa, `${P}s3_wrongkey`, plain);
+    const scope = `--business=${ID.bizScript3}`;
+    const wrong = [P, 'not', 'the', 'api', 'key', String(Date.now())].join('-');
+
+    // A1's case: the operator's shell has JWT_SECRET, the API ran on CONNECTOR_CREDENTIALS_KEY.
+    const dry = await runScript([scope], true, { JWT_SECRET: wrong });
+    expect(dry.code, `${dry.out}\n${dry.err}`).toBe(0);
+    expect(dry.out).toMatch(/key source\s+JWT_SECRET/);
+    expect(dry.out).not.toContain(wrong);
+    for (const env of [{ JWT_SECRET: wrong }, { CONNECTOR_CREDENTIALS_KEY: wrong }]) {
+      const run = await runScript(['--apply', scope], true, env);
+      const all = `${run.out}\n${run.err}`;
+      expect(run.code, all).toBe(2);
+      expect(all).toMatch(/no stored ciphertext decrypts with the loaded key/);
+      expect(all).not.toContain(wrong);
+      expect(await stored(id), 'nothing written').toBe(plain);
+    }
+
+    // With the key the suite's ciphertext is sealed under (a row of another business), the proof holds.
+    await service.create(ID.biz, { financialAccountId: await account(ID.biz, 'V72S proof bank 2'), provider: 'plaid', accessToken: token('proof2') });
+    const ok = await runScript(['--apply', scope]);
+    expect(ok.code, `${ok.out}\n${ok.err}`).toBe(0);
+    expect(ok.out).toMatch(/key proven by\s+\w+/);
+    expect((await stored(id))?.startsWith(CIPHER_PREFIX)).toBe(true);
+    expect((await db.bankConnection.findFirst({ where: { id } })).accessToken).toBe(plain);
+  }, 4 * SCRIPT_TIMEOUT_MS);
 });
