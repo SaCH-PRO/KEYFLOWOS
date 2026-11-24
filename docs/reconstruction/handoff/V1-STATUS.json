@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "85b5dc911e4f7ac379064d1154d971c27b1edaab",
-  "main_commit_date": "2026-11-23T09:17:01+00:00",
+  "main_sha": "7c7cd324e84003539d4e707b3c34ce994317eb11",
+  "main_commit_date": "2026-11-24T00:23:30+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -27,13 +27,13 @@
   ]
  },
  "summary": {
-  "packets": 361,
-  "points": 527.5,
+  "packets": 364,
+  "points": 532.5,
   "by_status": {
    "done": {
     "packets": 84,
     "points": 125.5,
-    "pct_by_points": 23.8
+    "pct_by_points": 23.6
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 277,
-    "points": 402,
-    "pct_by_points": 76.2
+    "packets": 280,
+    "points": 407,
+    "pct_by_points": 76.4
    }
   },
   "by_step": {
@@ -74,8 +74,8 @@
    "4": {
     "done": 2,
     "in-progress": 0,
-    "todo": 50,
-    "total": 52
+    "todo": 51,
+    "total": 53
    },
    "5": {
     "done": 7,
@@ -92,14 +92,14 @@
    "7": {
     "done": 0,
     "in-progress": 0,
-    "todo": 33,
-    "total": 33
+    "todo": 34,
+    "total": 34
    },
    "8": {
     "done": 0,
     "in-progress": 0,
-    "todo": 4,
-    "total": 4
+    "todo": 5,
+    "total": 5
    }
   },
   "by_derivation": {
@@ -107,7 +107,7 @@
    "prior-status-file+wave-2b-commit": 28,
    "code-commit-subject": 9,
    "compacted-commit": 28,
-   "no-evidence": 146
+   "no-evidence": 149
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -188,7 +188,7 @@
    "size": "L",
    "lane": "web",
    "on_critical_path": true,
-   "unblocks": 55
+   "unblocks": 57
   },
   {
    "id": "W11-KEY-TRANSFER-INTEGER",
@@ -197,7 +197,7 @@
    "size": "S",
    "lane": "server",
    "on_critical_path": false,
-   "unblocks": 57
+   "unblocks": 58
   },
   {
    "id": "SWP-STORE-LISTING-SERVER",
@@ -206,7 +206,7 @@
    "size": "M",
    "lane": "server",
    "on_critical_path": false,
-   "unblocks": 50
+   "unblocks": 51
   },
   {
    "id": "SWP-INV-PUBLIC-LINK",
@@ -215,16 +215,7 @@
    "size": "M",
    "lane": "both",
    "on_critical_path": false,
-   "unblocks": 47
-  },
-  {
-   "id": "NAV-A3",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "web",
-   "on_critical_path": false,
-   "unblocks": 32
+   "unblocks": 48
   },
   {
    "id": "SWP-KEY-CHAT-WEB",
@@ -233,7 +224,16 @@
    "size": "M",
    "lane": "web",
    "on_critical_path": false,
-   "unblocks": 31
+   "unblocks": 33
+  },
+  {
+   "id": "NAV-A3",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "on_critical_path": false,
+   "unblocks": 33
   },
   {
    "id": "W11-GENOME-RECS-DOMAIN",
@@ -242,7 +242,7 @@
    "size": "M",
    "lane": "server",
    "on_critical_path": false,
-   "unblocks": 27
+   "unblocks": 28
   },
   {
    "id": "W11-RUNWAY-BURN-CURRENCY",
@@ -251,7 +251,7 @@
    "size": "M",
    "lane": "server",
    "on_critical_path": false,
-   "unblocks": 25
+   "unblocks": 26
   },
   {
    "id": "SWP-CONTACT-DETAIL",
@@ -260,7 +260,7 @@
    "size": "M",
    "lane": "web",
    "on_critical_path": false,
-   "unblocks": 21
+   "unblocks": 22
   },
   {
    "id": "W11-SHIP-STOCK-DECREMENT",
@@ -269,7 +269,7 @@
    "size": "M",
    "lane": "server",
    "on_critical_path": false,
-   "unblocks": 21
+   "unblocks": 22
   },
   {
    "id": "NAV-A2",
@@ -278,7 +278,7 @@
    "size": "M",
    "lane": "web",
    "on_critical_path": false,
-   "unblocks": 13
+   "unblocks": 14
   },
   {
    "id": "SWP-CENSUS-OPEN-WRITES",
@@ -287,7 +287,7 @@
    "size": "S",
    "lane": "server",
    "on_critical_path": false,
-   "unblocks": 10
+   "unblocks": 11
   },
   {
    "id": "SWEEP-RERUN-S2",
@@ -296,10 +296,19 @@
    "size": "S",
    "lane": "gate",
    "on_critical_path": false,
-   "unblocks": 9
+   "unblocks": 10
   },
   {
    "id": "SWP-CENSUS-GENOME",
+   "step": 4,
+   "priority": "P1",
+   "size": "L",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 10
+  },
+  {
+   "id": "SWP-CENSUS-KEY-B",
    "step": 4,
    "priority": "P1",
    "size": "L",
@@ -317,11 +326,11 @@
    "unblocks": 8
   },
   {
-   "id": "SWP-CENSUS-KEY-B",
-   "step": 4,
-   "priority": "P1",
-   "size": "L",
-   "lane": "server",
+   "id": "TOF-STALE-GATES-PKT",
+   "step": 1,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
    "on_critical_path": false,
    "unblocks": 8
   },
@@ -331,15 +340,6 @@
    "priority": "P2",
    "size": "XS",
    "lane": "docs",
-   "on_critical_path": false,
-   "unblocks": 7
-  },
-  {
-   "id": "TOF-STALE-GATES-PKT",
-   "step": 1,
-   "priority": "P3",
-   "size": "S",
-   "lane": "gate",
    "on_critical_path": false,
    "unblocks": 7
   },
@@ -359,7 +359,7 @@
    "size": "M",
    "lane": "gate",
    "on_critical_path": false,
-   "unblocks": 4
+   "unblocks": 5
   },
   {
    "id": "S0-DEPENDABOT-FREEZE",
@@ -368,7 +368,7 @@
    "size": "S",
    "lane": "gate",
    "on_critical_path": false,
-   "unblocks": 4
+   "unblocks": 5
   },
   {
    "id": "FU-KEY-GENOME-READS-RESIDUAL",
@@ -560,6 +560,33 @@
    "unblocks": 0
   },
   {
+   "id": "FU-PENDING-OWED-SERVER",
+   "step": 5,
+   "priority": "P0",
+   "size": "L",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-PENDING-OWED-WEB",
+   "step": 5,
+   "priority": "P0",
+   "size": "M",
+   "lane": "web",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-WEB-PAYLINK-STATUS-BUTTONS",
+   "step": 5,
+   "priority": "P0",
+   "size": "S",
+   "lane": "web",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "MEM-PATTERNS-SIGHT",
    "step": 5,
    "priority": "P0",
@@ -691,24 +718,6 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-PENDING-OWED-SERVER",
-   "step": 5,
-   "priority": "P1",
-   "size": "L",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-PENDING-OWED-WEB",
-   "step": 5,
-   "priority": "P1",
-   "size": "M",
-   "lane": "web",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -943,15 +952,6 @@
    "priority": "P2",
    "size": "S",
    "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-WEB-PAYLINK-STATUS-BUTTONS",
-   "step": 5,
-   "priority": "P2",
-   "size": "S",
-   "lane": "web",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -2280,7 +2280,7 @@
   {
    "id": "SWP-INV-MATH",
    "step": 4,
-   "priority": "P1",
+   "priority": "P0",
    "size": "M",
    "lane": "web",
    "status": "todo",
@@ -2347,7 +2347,7 @@
   {
    "id": "SWP-INV-LIST",
    "step": 4,
-   "priority": "P1",
+   "priority": "P0",
    "size": "M",
    "lane": "web",
    "status": "todo",
@@ -2732,7 +2732,7 @@
   {
    "id": "SWP-SERVICE-DEPOSIT",
    "step": 4,
-   "priority": "P2",
+   "priority": "P0",
    "size": "M",
    "lane": "both",
    "status": "todo",
@@ -2868,8 +2868,6 @@
     "EXPENSES-HUB-3",
     "SEND-TO-ACCOUNTANT",
     "CATALOG-1",
-    "SWP-STORE-FRAME",
-    "SWP-STORE-OPS-WEB",
     "SWP-INV-MONEY-TOTALS",
     "SWP-INV-PUBLIC-LINK",
     "DECIMALS-SERVER",
@@ -2877,7 +2875,6 @@
     "SWP-STORE-LISTING-SERVER",
     "SWP-STORE-OVERSELL",
     "SWP-SERVICE-DEPOSIT",
-    "SALES-ORDERS-TAB",
     "NAV-A2",
     "NAV-A3",
     "SWP-CENSUS-KEY-A",
@@ -3049,7 +3046,7 @@
   {
    "id": "READY-TO-SEND",
    "step": 5,
-   "priority": "P1",
+   "priority": "P0",
    "size": "M",
    "lane": "server",
    "status": "todo",
@@ -3333,9 +3330,7 @@
     "SWP-TEAM-WEB",
     "SWP-FIN-WEB-CRASHES",
     "SWP-UI-COPY",
-    "W11-WEB-INVENTORY-REFUSALS",
     "SWP-CALENDAR-TRUTH",
-    "W11-WEB-ACTION-DETAIL-WRAP",
     "SWP-SHELL-MINOR",
     "BIZ-SWITCHER",
     "TOF-PAYROLL-DISCARD",
@@ -3347,7 +3342,7 @@
   {
    "id": "SWP-QUOTE-PUBLIC-PAGE",
    "step": 6,
-   "priority": "P1",
+   "priority": "P0",
    "size": "S",
    "lane": "web",
    "status": "todo",
@@ -3444,7 +3439,6 @@
    "uncertain": false,
    "evidence": [],
    "depends_on": [
-    "SWP-STORE-PUBLIC-POLISH",
     "TODAY-4BLOCK"
    ],
    "title": "Remove the developer harness and fake-data pages customers and crawlers can reach, and the KF Store drawer",
@@ -3858,25 +3852,19 @@
     "VAT-BASICS",
     "CUSTOMER-PAGE-HONESTY",
     "W11-STOREFRONT-PAYPAL-LIST",
-    "SWP-STORE-PUBLIC-POLISH",
     "HARNESS-REMOVAL",
     "W11-INV-SET-MOVEMENT",
     "W11-SHIP-STOCK-DECREMENT",
     "W11-STOREFRONT-ROUTE-DECREMENTED",
-    "W11-STOREFRONT-FULFIL-STEPS",
     "W11-PLANTED-STOCK-CENSUS",
     "SWP-INV-SKU-COUNT",
-    "QUICK-SALE-SERVER",
-    "QUICK-SALE-WEB",
     "PLAN-TABLE",
     "SWP-PUBLIC-SITE-MINOR",
     "SWP-FIN-LEDGER",
     "SWP-CENSUS-OPEN-WRITES",
     "SWP-READ-SCOPE-CENSUS",
-    "W11-CALLS-LIST-PAGING",
     "W11-QUERY-DTO-COERCION",
     "SWP-QUERY-CORS-HEADERS",
-    "W11-ORDER-METADATA-WRITERS",
     "TOF-TIER-PRICING-WEB",
     "SWP-CENSUS-V1-A",
     "SWP-CENSUS-V1-B",
@@ -4155,12 +4143,9 @@
     "NAV-B-HIDE",
     "HIDE-DEV-WEBHOOKS",
     "NAV-B-LINKS",
-    "W11-TRANSIENT-CONFLICT",
-    "W11-LOAD-SENSITIVE-TESTS",
     "W11-PAGING-TOTAL-ORDER-A",
     "W11-PAGING-TOTAL-ORDER-B",
     "W11-PAGING-TOTAL-ORDER-C",
-    "W11-RELEASE0-INDEX-STALE",
     "NAV-B-LEGACY-SERVER",
     "NAV-B-HIDE-2",
     "KEY-TOOL-DOMAIN-HIDE",
@@ -4234,7 +4219,8 @@
    "uncertain": false,
    "evidence": [],
    "depends_on": [
-    "GATE-STAGING-RUN"
+    "GATE-STAGING-RUN",
+    "GATE-PILOT-10"
    ],
    "title": "Gate part 4: owner-test protocol with five Trinidad and Tobago owners on their own phones, unassisted",
    "deps_met": false
@@ -4961,7 +4947,7 @@
   {
    "id": "FU-PENDING-OWED-SERVER",
    "step": 5,
-   "priority": "P1",
+   "priority": "P0",
    "size": "L",
    "lane": "server",
    "status": "todo",
@@ -4977,7 +4963,7 @@
   {
    "id": "FU-PENDING-OWED-WEB",
    "step": 5,
-   "priority": "P1",
+   "priority": "P0",
    "size": "M",
    "lane": "web",
    "status": "todo",
@@ -7269,7 +7255,7 @@
   {
    "id": "FU-WEB-PAYLINK-STATUS-BUTTONS",
    "step": 5,
-   "priority": "P2",
+   "priority": "P0",
    "size": "S",
    "lane": "web",
    "status": "todo",
@@ -7297,6 +7283,57 @@
    ],
    "title": "KEY's send-invoice refuses a PAID or deleted invoice before emailing",
    "deps_met": true
+  },
+  {
+   "id": "WEDGE-WA-INBOUND-CAPTURE",
+   "step": 4,
+   "priority": "P0",
+   "size": "M",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "WA-E164-SERVER",
+    "WA-HELPER",
+    "MOUNT-QUOTES"
+   ],
+   "title": "New from WhatsApp: paste a customer's WhatsApp message and number; KEYFLOWOS finds or creates the customer by E.164, keeps the message on their timeline, and opens New quote or New booking for them",
+   "deps_met": false
+  },
+  {
+   "id": "WEDGE-HIDE-STORE",
+   "step": 7,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "NAV-B-LEGACY-SERVER"
+   ],
+   "title": "Store checkout, Sales > Orders and Quick sale are offered at launch only to a business that already sells online; everyone else gets the booking page and invoices",
+   "deps_met": false
+  },
+  {
+   "id": "GATE-PILOT-10",
+   "step": 8,
+   "priority": "P0",
+   "size": "M",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S0-SEC-LANE-DEPLOY",
+    "GATE-JOURNEY-RUN"
+   ],
+   "title": "Ten real Trinidad and Tobago businesses run on the launch build for two weeks; the owner decides go or no-go on what they measure",
+   "deps_met": false
   }
  ]
 }
