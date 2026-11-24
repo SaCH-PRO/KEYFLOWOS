@@ -27,9 +27,9 @@
  *                           at stage 'reset' and its proof never runs. (The first fixture, a smudge filter with no
  *                           matching clean, is reported not pristine only when git's status re-reads the file, which
  *                           depends on timing: not a deterministic test. The repository has no filter attribute.)
- *   (was)  ...              a commit that no checkout can make pristine (a CRLF file
- *                           committed under `* text=auto`, which shows modified even freshly checked out): the control
- *                           fails at stage 'reset' and its proof never runs
+ *   (was)  ...              a commit that no checkout can make pristine (first stated as a CRLF file under
+ *                           `* text=auto`, then built as a smudge filter with no matching clean): the control fails at
+ *                           stage 'reset' and its proof never runs
  *
  * C1 repair review (42d8df6d): the runner's own git calls must never reach outside its worktree.
  *   PM-11  RED-AT-42d8df6d  a proof that points the worktree's .git at the main repository: the reset does not follow
@@ -70,6 +70,12 @@
  *   PM-26  RED-AT-621c779c  (A3) modes a proof sets (a read-only directory and file) do not survive
  *   PM-27  RED-AT-621c779c  (A4) a proof that rewrites .git to a relative path that still leads to the worktree: the
  *                           next control sees the .git a fresh worktree has
+ *
+ * Confirmation review (7aa2ef0c), MINOR-1:
+ *   PM-28  pin              a worktree that is not pristine even when freshly recreated (a post-checkout hook writes an
+ *                           untracked file at every checkout, which the reset removes): the control fails at stage
+ *                           'reset' and its proof never runs. Kills the mutant that trusts a recreated worktree
+ *                           unchecked, which PM-10 (whose recreate itself fails) does not reach.
  * PM-05 now resets a worktree the runner made (addWorktree), as the runner does: resetToPristine takes the worktree
  * record ({ dir, gitDir, ... }) and no longer accepts a bare directory.
  */
@@ -591,4 +597,28 @@ test('PM-27 RED-AT-621c779c: a .git a proof rewrote to a relative path does not 
   for (const r of afterFirst(control('relgit', { proof_command: 'node check.mjs relgit' }), ref, dir, ref)) {
     assert.equal(r.ok, true, JSON.stringify(r));
   }
+});
+
+test('PM-28 pin: a worktree that is not pristine even when freshly recreated fails its control at the reset, and the proof never runs', () => {
+  const { dir, ref } = fixtureRepo();
+  // Every checkout (worktree add included) runs this hook, which leaves an untracked file; the reset removes it, so no
+  // reset ever matches what a fresh checkout recorded, and the recreated worktree must be checked like the first.
+  const hooks = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-pm-hooks-'));
+  made.push(hooks);
+  fs.writeFileSync(path.join(hooks, 'post-checkout'), '#!/bin/sh\necho hooked > hooked.txt\n');
+  fs.chmodSync(path.join(hooks, 'post-checkout'), 0o755);
+  git(dir, 'config', 'core.hooksPath', hooks.split(path.sep).join('/'));
+  const markerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-pm-marker-'));
+  made.push(markerDir);
+  const marker = path.join(markerDir, 'ran.txt');
+  const probe = control('never-runs', { proof_command: `node -e "require('fs').writeFileSync(process.argv[1], 'ran')" "${marker}"` });
+  const summary = withEnv({ KF_PM_LOG: undefined, KF_PM_REF: ref }, () =>
+    runner.runManifest({ negative_controls: [probe] }, { repoRoot: dir, ref }),
+  );
+  const [only] = summary.results;
+  assert.equal(only.ok, false, JSON.stringify(only));
+  assert.equal(only.stage, 'reset', JSON.stringify(only));
+  assert.equal(fs.existsSync(marker), false, 'the proof did not run on a tree that is not what a fresh checkout gives');
+  const listed = git(dir, 'worktree', 'list', '--porcelain').split('\n').filter((l) => l.startsWith('worktree '));
+  assert.equal(listed.length, 1, 'no worktree left behind');
 });
