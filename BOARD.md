@@ -60,6 +60,7 @@
 | P11 | SWP-KEY-CHAT-WEB (P0, unblocks 33) | — | todo | — | Any lane may claim |
 | P12 | SWP-STORE-LISTING-SERVER (unblocks 51, including DECIMALS-SERVER and CLAIM-LOOP) | — | todo | — | Any lane may claim |
 | P13 | Follow-up: guard `res.data.templates` in `billing-form-modal.tsx:200` (an empty answer throws) | — | todo | M3 | A small web packet; any lane |
+| P16 | Follow-up rulings docs commit (after M2): (a) SECOND-ACCOUNT-SETUP and `status.mjs` pick `track: launch` packets only (Codex on #230); (b) CHECKLISTS B1 makes claims atomic (`--force-with-lease=refs/heads/pkt/V1-<ID>:`, and an earlier #80 CLAIM wins; Codex on #230); (c) plan text: SWP-INV-MATH's "2.5" line and SWP-INV-PUBLIC-LINK's INVOICE_NOT_SHAREABLE | claude | todo | M2 merged | A small docs PR with a status.mjs test for (a) |
 | P14 | Owner: "Batch 2 safe defaults #5–#10" (not approved in D-272) | owner | blocked | the owner's review | The owner reviews the list |
 | P15 | Owner: redeploy production (D-266) | owner | blocked | M1–M4 | The owner deploys from main |
 
