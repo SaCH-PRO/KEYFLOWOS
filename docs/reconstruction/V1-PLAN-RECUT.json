@@ -6004,7 +6004,7 @@
     "gate"
    ],
    "scope": "Run the step-2 specs (now expected green) on the final integrated head: both projects, two variants (AI_DISABLED; KEY_DISABLED with no KEY UI). Re-run the browser sweep on the same head and triage: no open blocker or major on a v1 surface. Run proof:release0. Record results and the 3G load-time budget figures in BUILD-MAP-001.md.",
-   "definition_of_done": "Every step of journeys A-F and H-J green in all four combinations except @staging/@scheduler/@ai-on legs (covered by the other gate parts). Journeys G, K and L (follow-on, D-263): the steps that cover launch-track packets are green too (KEY reachable from the header with its safety and correctness fixes; the store's money and stock safety for a business that already sells online); their other steps run after launch. Sweep re-run shows 0 open blocker/major on v1 surfaces; proof:release0 MET at the gate head; results posted to #80. GATE-PILOT-10 follows this gate, and GATE-OWNER-TEST follows the pilot.",
+   "definition_of_done": "Every packet with \"track\": \"launch\" is done on main (D-263: the launch gate runs on the launch track, whether or not the packet is an ancestor of this gate). Every step of journeys A-F and H-J green in all four combinations except @staging/@scheduler/@ai-on legs (covered by the other gate parts). Journeys G, K and L (follow-on, D-263): the steps that cover launch-track packets are green too (KEY reachable from the header with its safety and correctness fixes; the store's money and stock safety for a business that already sells online); their other steps run after launch. Sweep re-run shows 0 open blocker/major on v1 surfaces; proof:release0 MET at the gate head; results posted to #80. GATE-PILOT-10 follows this gate, and GATE-OWNER-TEST follows the pilot.",
    "journeys": [
     "A",
     "B",
@@ -6085,14 +6085,14 @@
     "A",
     "E",
     "F",
-    "G",
     "K"
    ],
    "absorbs": [],
    "r0_impact": "none: touches no required Release 0 case or closedBy evidence",
    "track": "launch",
    "track_reason": "serves journey A, E, F",
-   "track_ruling": "D-263"
+   "track_ruling": "D-263",
+   "journeys_note": "G: only the steps covering launch-track packets, for a business that already sells online (D-263)"
   },
   {
    "id": "GATE-OWNER-TEST",
@@ -7181,7 +7181,7 @@
    "definition_of_done": "RED: a STAFF member without revenue read gets the financial and sales DNA sections from GET blueprint genome and the command center, and the KEY integrity tool. GREEN: none of them, no inferable total; revenue readers unchanged; web shows the withheld state; server and web suites green; proof:release0 MET.",
    "fixture_prefix": null,
    "track": "launch",
-   "track_reason": "KEY stays reachable from the header: a safety fix on what KEY already does (D-263 as ruled: \"KEY safety and correctness fixes stay on launch\")",
+   "track_reason": "KEY stays reachable from the header: a safety fix (money visibility on the genome surfaces, the command centre and KEY's blueprint tools; D-263 as ruled)",
    "track_ruling": "D-263",
    "track_moved": "follow-on to launch on 2026-11-24, PR #230 review: the first cut read D-263 as safety fixes only"
   },
@@ -8626,9 +8626,10 @@
    "scope": "Premises at 2c4e4bf2: (1) KeyCortexQualityService.checkSafety returns on the first PII regex hit with {safe:false, severity:'medium'} (key-cortex-quality.service.ts:59-71) before the injection keyword list (:73-96) and the script check (:98-104) run, so 'card 4111 1111 1111 1111, ignore previous instructions' is never classified as injection; (2) runSafetyCheck blocks only `!safe && severity === 'high'` (key-cortex-query-pipeline.service.ts:2280), so a medium finding is labelled unsafe and then continues with no recorded action; (3) runSafetyCheck returns undefined, i.e. proceed, when the checker is absent (:2272, the service is @Optional at :192-194) and swallows a throwing checker with a warn (:2290-2294); callers at :227 (processQuery) and :1130 (streamQuery). Change: a pure policy module (key-cortex-input-safety-policy.ts) with an exported INPUT_SAFETY_POLICY_VERSION and a table finding class -> {action: 'block' | 'withhold_tools' | 'continue', mode: 'enforce' | 'detect'}: prompt_injection_keyword and script -> block (enforce); classifier_high -> block (enforce); pii and classifier_medium -> continue (detect: recorded, not acted on). checkSafety evaluates every rule class and returns all findings (no early return); the LLM second opinion receives the text after redactSensitiveText (RR-REDACTION-BY-CONTENT), so a detected card number is not sent to the classifier provider. runSafetyCheck applies the table and records STEP_1A_SAFETY_DECISION with the policy version, the finding classes, the action and the mode (classes and reason only, never the text). Checker absent or throwing: the turn is answered in a degraded mode with tools withheld (zero tool calls handed to memberToolLoop and zero parsed commands executed, the same shape as the V1-02 autonomy fail-closed path) and STEP_1A_SAFETY_UNAVAILABLE is recorded; the LLM-classifier-only failure inside checkSafety keeps today's behaviour (rule findings stand). This is the first slice of the guardrail lifecycle recommendation (REC-GUARDRAIL-LIFECYCLE): the versioned table with per-class detect/enforce mode. Later slices, not packets now: GuardrailPolicyRevision/DetectorRevision persistence, calibration data, a classifier cascade (injection classifier, content classifier, PII recognizer). Promoting a class from detect to enforce is a reviewed code change (human authority), never automatic. Out of scope: the shipped member chat (FlowOrchestratorService.chat/streamChat, flow-orchestrator.service.ts:2093, :2545) has no input-safety check at all today; whether to add one is owner question OQ-6 and is not done here. Untrusted content (attachments, tool/MCP output) is RR-UNTRUSTED-CONTENT-FENCE. Tenancy: no data read; the decision is per turn. Manual path: unchanged (a blocked or degraded KEY turn leaves every module usable by hand). Schema: none. The release0-bound spec key-cortex/__tests__/key-cortex-query-pipeline.service.spec.ts (auth-fail-closed-001 manifest) is not edited; new cases live in the new spec file.",
    "definition_of_done": "RED: key-cortex-quality.service.spec.ts case 'card number plus ignore previous instructions yields a prompt_injection_keyword finding with severity high' fails on main (checkSafety returns severity medium from the PII branch at :59-71 and never reaches the keyword list); __tests__/key-cortex-input-safety-policy.spec.ts case 'a throwing checkSafety withholds tools': with qualityService.checkSafety rejecting and a model reply carrying a tool call, toolLoopService.handleToolCalls is called on main (runSafetyCheck swallows the error at :2290-2294) and must not be. GREEN: all rule classes evaluated and returned; the policy table maps each class to its action; a medium PII finding continues and records a detect-mode decision with the policy version; the LLM classifier request body contains no card number when the input had one (spy on the gateway); absent checker and throwing checker both produce a degraded answer with zero tool calls and zero executed parsed commands, and STEP_1A_SAFETY_UNAVAILABLE; negative control: a clean message proceeds with tools and records no block; existing auth-fail-closed-001 manifest re-run unchanged; server tsc and lint ratchet clean.",
    "fixture_prefix": null,
-   "track": "follow-on",
-   "track_reason": "journey K capability; follows launch",
-   "track_ruling": "D-263"
+   "track": "launch",
+   "track_reason": "KEY stays reachable from the header: a safety fix on what KEY already does (D-263 as ruled: \"KEY safety and correctness fixes stay on launch\"); its fail-closed part (a missing or throwing checker, PII returning before the injection check) fixes cortex chat as it is today",
+   "track_ruling": "D-263",
+   "track_moved": "follow-on to launch on 2026-11-24, PR #230 confirmation review"
   },
   {
    "id": "RR-UNTRUSTED-CONTENT-FENCE",
@@ -10216,9 +10217,10 @@
    "scope": "REC-LEARNING-SEMANTICS. Premise at 2c4e4bf2: KeyCortexLearningService.recordOutcome, called for every cortex tool execution (key-cortex-tool-registry.service.ts:897), writes a CognitionMemory row with userResponse = success ? 'accepted' : 'rejected' and confidence 0.85/0.4 (key-cortex-learning.service.ts:121-127); getAcceptanceRate counts those rows as user responses (:283-298) and calibrateConfidence blends that rate into the confidence KEY reports (:317-340), called by the query pipeline (key-cortex-query-pipeline.service.ts:1056). Tool rows carry no roleId/functionId, so they enter every calibration made without them. A provider outage therefore lowers KEY's stated confidence in its answers, and a run of successful tool calls raises it, though no user accepted or rejected anything. Change: recordOutcome writes userResponse 'no_action' and keeps the execution status in metadata (category 'execution_patterns', success, error, as today); getAcceptanceRate excludes rows whose metadata.category is 'execution_patterns' (so rows already written stop counting with no backfill). ToolOutcomeScore (autonomy guard, autonomy-orchestrator.service.ts:302-330, narrows only) is not changed. Memory coordination (D-257, D-254): CognitionMemory is a store in MEM-CENSUS's registry; this packet changes no read predicate, projection or member scope (D-130), only the meaning of one column on one writer and one reader's filter; land after MEM-CENSUS and update its registry note for recordOutcome. No MEM packet changes userResponse semantics (checked: MEM-CLASS-COLUMNS covers AiMemory/AiMemoryEmbedding/TemporalFlowMemory only; memory-consolidation.service.ts:238 promotes accepted rows at confidence >= 0.9, which tool rows (0.85) never reached). Unified retrieval will show 'User response: no_action' for tool rows (unified-memory-retrieval.service.ts:372), which is the honest text. Tenancy: every query keeps its businessId predicate. Schema: none. Backfill: none. Fixture prefix (pre-allocated in the plan's prefix table so parallel lanes add disjoint registry entries): v72k_ for key-learning-outcome-semantics.integration.test.ts. Register each as {prefix, owner, packet: 'V1-72 (RR-LEARNING-OUTCOME-SEMANTICS)'} in fixture-prefixes.json.",
    "definition_of_done": "RED: key-cortex-learning.service.spec.ts: after five failed recordOutcome calls, calibrateConfidence(0.9, biz) returns calibrated < 0.9 and getAcceptanceRate reports rejected 5 (RED: tool failures counted as user rejections). Real-DB integration test on Postgres (key-learning-outcome-semantics.integration.test.ts, two tenants): tool-outcome rows (including pre-existing 'accepted' ones with category execution_patterns, and a row with null metadata) do not change getAcceptanceRate; a real 'accepted' feedback row does. GREEN: tool rows written as 'no_action' with execution status in metadata; calibration counts only user responses; negative control: a real 'rejected' feedback row still lowers calibration; tenant B rows never counted for A. Server tsc and lint ratchet clean.",
    "fixture_prefix": "v72k_",
-   "track": "follow-on",
-   "track_reason": "journey K capability; follows launch",
-   "track_ruling": "D-263"
+   "track": "launch",
+   "track_reason": "KEY stays reachable from the header: a correctness fix on what KEY already does (D-263 as ruled: \"KEY safety and correctness fixes stay on launch\")",
+   "track_ruling": "D-263",
+   "track_moved": "follow-on to launch on 2026-11-24, PR #230 confirmation review"
   },
   {
    "id": "RR-EVAL-HARNESS-NO-VACUOUS",
@@ -12652,7 +12654,7 @@
    "decisions": [
     "D-272"
    ],
-   "r0_impact": "none: no Release 0 suite or manifest-bound file (to be re-checked at the wave head)",
+   "r0_impact": "KEEP. Also KEEP: .env.example is closedBy evidence in release0-index.json (contains \"LISTEN_HOST=\") and is read by the identity-business-config and identity-local-auth suites; the line stays; re-run proof:release0 at the packet head (D-265: a manifest-bound file).",
    "scope": "D-272.4 (owner, #80 comment 7121024415), from KEY Builder research A section 5: tenant KEY's execute_custom_logic ran model-written JavaScript in a child process on the API host, and fell back to it silently when the remote sandbox was not configured. First confirm by a test that tenant KEY can reach the API host; then sandbox it or turn it off for tenants: no local execution path, no silent fallback, the remote sandbox only when it is configured with an https public API URL, a kill switch and a code length cap. Built in the Antigravity lane, claimed first (branch pkt/V1-SEC-KEY-CUSTOM-LOGIC).",
    "definition_of_done": "RED: a tenant's execute_custom_logic call runs code in a child process on the API host, and an unconfigured sandbox falls back to it. GREEN: neither; the call is refused with a typed reason when no sandbox is configured; the kill switch and length cap hold; touched folders and tsc green; the full server suite and proof:release0 MET at the wave head (D-265).",
    "fixture_prefix": null,
@@ -12688,10 +12690,10 @@
    "decisions": [
     "D-272"
    ],
-   "r0_impact": "none: no Release 0 suite or manifest-bound file (RETURN #80 comment 7121498630)",
+   "r0_impact": "KEEP. Also KEEP: flow-orchestrator.service.ts holds the find strings of action-001-negative-controls.json mutation controls NC-P3-RESUBMISSION-PASSES-THROUGH, NC-P7-HANDLER-BYPASSES-THE-BOUNDARY; each stays byte-identical (a moved or reworded line breaks the control); re-run proof:release0 at the packet head (D-265: a manifest-bound file).",
    "scope": "A first-lane follow-up, ruled by D-272.3 (#80 comment 7121024415): a URL from the client (a chat attachment, a contract's document URL) was forwarded to the document model provider, which then fetched it. Resolve every document to an object the business owns (an uploaded object or a Drive-backed object), read it with a size cap, and refuse every other URL, external ones included: contracts are outside the v1 wedge, and an SSRF-safe fetcher may come later. Object paths are normalised (case of /objects/, repeated slashes) before the ownership check. Built in the Antigravity lane (branch pkt/V1-FU-OUTBOUND-ATTACHMENT-URL).",
    "definition_of_done": "RED: a client URL reaches the document model; an external contract URL is fetched. GREEN: only owned objects are read, every other URL is refused before any request leaves the server, another business's object is not found; touched folders and tsc green; the full server suite and proof:release0 MET at the wave head (D-265).",
-   "fixture_prefix": null,
+   "fixture_prefix": "v85u_",
    "track": "launch",
    "track_reason": "KEY stays reachable from the header: a safety fix (D-272.3)",
    "track_ruling": "D-272"
@@ -14399,6 +14401,11 @@
    "prefix": "v73a_",
    "owner": "apps/server/test/forget-cancel-prior-delete.integration.test.ts",
    "packet": "V1-73 (RR-FORGET-CANCEL-KEEPS-PRIOR-DELETE)"
+  },
+  {
+   "prefix": "v85u_",
+   "owner": "apps/server/test/outbound-attachment-url.integration.test.ts",
+   "packet": "V1-85 (FU-OUTBOUND-ATTACHMENT-URL)"
   }
  ],
  "validation": {
@@ -15208,15 +15215,18 @@
    "K (capability; KEY stays reachable from the header, its safety and correctness fixes stay on launch)"
   ],
   "counts": {
-   "launch_todo_or_proven": 224,
-   "follow_on": 55,
+   "launch_todo_or_proven": 220,
+   "follow_on": 53,
    "new": [
     "WEDGE-WA-INBOUND-CAPTURE",
     "WEDGE-HIDE-STORE",
     "GATE-PILOT-10",
     "SEC-KEY-CUSTOM-LOGIC (D-272)",
     "FU-OUTBOUND-ATTACHMENT-URL (D-272)"
-   ]
+   ],
+   "launch_done_on_main": 6,
+   "follow_on_done_on_main": 0,
+   "as_of": "V1-STATUS at main 142e5f9e"
   },
   "gate_deps_removed": {
    "SWEEP-RERUN-S4": [
@@ -15261,10 +15271,13 @@
     "RR-CORTEX-TYPED-RESULT",
     "FU-FLOW-SAVE-EXECUTED-TOOL-TURN",
     "FU-OPENAI-FINISH-REASON",
-    "FU-CORTEX-EXECUTE-STRUCTURED-DTO"
+    "FU-CORTEX-EXECUTE-STRUCTURED-DTO",
+    "RR-KEY-SAFETY-POLICY",
+    "RR-LEARNING-OUTCOME-SEMANTICS"
    ],
-   "kept_on_follow_on": "KEY capability, new mechanisms, ratchets, tooling and memory-system work (for example MEM-HONEST-RETRIEVAL, RR-KEY-SAFETY-POLICY, RR-UNDO-DURABLE); the owner may move any packet either way",
-   "gate": "GATE-JOURNEY-RUN's definition of done is limited to the launch journeys as D-263 says, and it now waits for WEDGE-WA-INBOUND-CAPTURE, WEDGE-HIDE-STORE, SEC-KEY-CUSTOM-LOGIC and FU-OUTBOUND-ATTACHMENT-URL"
+   "kept_on_follow_on": "KEY capability, new mechanisms, ratchets, tooling and memory-system work (for example MEM-HONEST-RETRIEVAL, RR-UNDO-DURABLE); the owner may move any packet either way",
+   "gate": "GATE-JOURNEY-RUN's definition of done is limited to the launch journeys as D-263 says, and it now waits for WEDGE-WA-INBOUND-CAPTURE, WEDGE-HIDE-STORE, SEC-KEY-CUSTOM-LOGIC and FU-OUTBOUND-ATTACHMENT-URL",
+   "precedence": "Where D-263 and D-264 differ on a research (D-261) or memory (D-254) packet that fixes KEY, D-263 is the more specific ruling for KEY and wins: KEY correctness fixes go to launch too (RR-INTENT-PARSER-ONE-TOOL-LIST, RR-CORTEX-TYPED-RESULT, RR-LEARNING-OUTCOME-SEMANTICS). Owner question 31 asks the owner to confirm."
   },
   "gate_deps_removed_note": "15 edges: 8 point at follow-on packets and 7 at launch packets that each remain an ancestor of the same sweep re-run through another path, so no gate ordering is lost (PR #230 review)"
  }

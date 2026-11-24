@@ -1,6 +1,6 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-24 ~07:30 UTC by the acting orchestrator (second-lane account, Claude Code), after both reviews of PR #230 (the rulings) were closed. Rewrite in place on every merge, packet return
+Last written: 2026-11-24 ~06:40 UTC by the acting orchestrator (second-lane account, Claude Code), after both reviews of PR #230 (the rulings) were closed. Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -176,7 +176,9 @@ Format: `docs/development/agent-memory/OWNER-QUESTION-FORMAT.md`. Safe defaults 
 30. MOUNT-QUOTES: FinancePipeline and the payment-record modal screen are now mounted by no route. Remove them, or
     remount the modal? (Default: remove in a follow-up.)
 31. D-264: should the launch wait for the research (D-261) and memory (D-254) packets after all? (Default: no; they
-    follow launch.)
+    follow launch.) And confirm the precedence used in PR #230: where D-263 and D-264 differ on a research or
+    memory packet that fixes KEY, D-263 wins, so KEY correctness fixes are on launch (16 packets moved; the plan's
+    `wedge.correction_2026_11_24`). (Default: as applied.)
 
 ## 5. How to work here (learned the hard way)
 
