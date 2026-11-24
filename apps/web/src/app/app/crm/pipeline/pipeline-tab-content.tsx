@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { X, List, Heart, ChevronDown, Zap, Bot, AlertTriangle, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { createContact, fetchContactLists, fetchContacts } from "@/lib/client";
+import { answerFromThrown, refusalMessage, showRefusal } from "@/lib/failure-kit";
 import { clearCachedContacts } from "@/lib/contacts-db";
 import { STATUS_COLORS } from "@/lib/crm-utils";
 import { getCachedUser } from "@/lib/workspace";
@@ -210,27 +211,38 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
 
   const listRef = useRef<HTMLDivElement>(null);
 
-  const handleQuickCreate = useCallback(async (data: { firstName: string; lastName?: string; email?: string; phone?: string; status?: string; source?: string; ageGroup?: string }) => {
-    if (!businessId) return;
+  // SWP-CONTACT-QUICKADD (BUG-009, BUG-034): answers the refusal's reason (also shown as the one refusal toast), or
+  // null when the customer was saved; the dialog stays open with what was typed on a refusal. createContact answers
+  // { data: null, error } rather than throwing, so the answer is read, not only a thrown error.
+  const handleQuickCreate = useCallback(async (data: { firstName: string; lastName?: string; email?: string; phone?: string; companyName?: string; status?: string; source?: string; ageGroup?: string }): Promise<string | null> => {
+    const ctx = { what: "add customers" };
+    if (!businessId) return "Choose a business first.";
+    let res: Awaited<ReturnType<typeof createContact>> | { data: null; error: string };
     try {
-      const { data: result } = await createContact({
+      res = await createContact({
         businessId,
         firstName: data.firstName,
         lastName: data.lastName,
         email: data.email,
         phone: data.phone,
+        companyName: data.companyName,
         source: data.source ?? "manual",
         status: data.status ?? "LEAD",
         ageGroup: data.ageGroup,
       });
-      if (result) {
-        toast.success(`${data.firstName} added`);
-        void loadContacts();
-        void loadFlowData();
-      }
-    } catch {
-      toast.error("Failed to create contact");
+    } catch (err) {
+      res = answerFromThrown(err);
     }
+    const reason = refusalMessage(res, ctx);
+    if (reason !== null || !res.data) {
+      const said = reason ?? "Couldn't add customers.";
+      if (!showRefusal(res, ctx)) toast.error(said);
+      return said;
+    }
+    toast.success(`${data.firstName} added`);
+    void loadContacts();
+    void loadFlowData();
+    return null;
   }, [businessId, loadContacts, loadFlowData]);
 
   const handleRefresh = useCallback(() => { setTableDeniedFor(null); void loadContacts(); void loadFlowData(); }, [loadContacts, loadFlowData]);

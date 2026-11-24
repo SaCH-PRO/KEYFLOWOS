@@ -879,7 +879,8 @@ export async function createContact(input: {
   const businessId = input.businessId ?? selectedBusinessId();
   const body = {
     firstName: input.firstName ?? "Guest",
-    lastName: input.lastName ?? "User",
+    // SWP-CONTACT-QUICKADD (BUG-035): no invented last name; the server stores none when none is sent.
+    lastName: input.lastName,
     email: input.email?.trim() || undefined,
     phone: input.phone?.trim() || undefined,
     status: input.status ?? "LEAD",
