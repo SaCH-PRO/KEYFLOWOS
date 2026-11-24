@@ -2,7 +2,12 @@ import { Injectable, Logger, Inject, ServiceUnavailableException } from '@nestjs
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from 'crypto';
 import OpenAI from 'openai';
-import { validateOutputContract, type ContractType } from './ai-output-contracts';
+import {
+  AiContractViolationError,
+  validateOutputContract,
+  type ContractType,
+  type ContractViolationAttempt,
+} from './ai-output-contracts';
 import { LLMCostService } from './llm-cost.service';
 import { LangfuseService } from './langfuse.service';
 import {
@@ -84,6 +89,17 @@ export interface ContractValidationResult {
   contractType: ContractType;
 }
 
+/**
+ * RR-STRUCTURED-PARSE-INVALID-STATE: what complete() knows about the output it
+ * returns. 'valid': the expected contract held on the answer returned;
+ * 'valid_after_fallback': it held, but only after at least one candidate's
+ * answer violated it (that answer was paid for and is recorded as 'invalid');
+ * 'unchecked': the request named no contract. An invalid answer is never
+ * returned: it is recorded and the next candidate runs, or
+ * AiContractViolationError is thrown.
+ */
+export type GatewayOutputState = 'valid' | 'valid_after_fallback' | 'unchecked';
+
 export interface GatewayResponse {
   content: string | null;
   toolCalls?: Array<{
@@ -103,6 +119,7 @@ export interface GatewayResponse {
   fallbackUsed: boolean;
   fallbackProvider?: AiProvider;
   contractValidation?: ContractValidationResult;
+  outputState?: GatewayOutputState;
 }
 
 /**
@@ -895,6 +912,10 @@ export class ModelGatewayService {
     let fallbackUsed = false;
     let fallbackProvider: AiProvider | undefined;
     let budgetDegraded = false;
+    // RR-STRUCTURED-PARSE-INVALID-STATE: every candidate whose answer violated
+    // the expected contract. Each was paid for and is costed as 'invalid'; if
+    // nothing valid follows, the caller gets them all in one typed 502.
+    const violations: ContractViolationAttempt[] = [];
 
     const effectiveCandidates = budgetFilteredCandidates.length > 0
       ? budgetFilteredCandidates
@@ -941,25 +962,35 @@ export class ModelGatewayService {
             ? response.toolCalls[0]?.function?.arguments
             : response.content;
 
-          if (contentToValidate) {
-            response.contractValidation = this.validateContract(
-              contentToValidate,
-              request.expectedContract,
-            );
+          // Empty output is a violation too: a request that named a contract
+          // never returns nothing as success.
+          response.contractValidation = contentToValidate
+            ? this.validateContract(contentToValidate, request.expectedContract)
+            : { valid: false, errors: ['Response is empty'], contractType: request.expectedContract };
 
-            if (!response.contractValidation.valid) {
-              const errors = response.contractValidation.errors.join('; ');
-              this.logger.error(
-                `Contract [${request.expectedContract}] enforcement failed for ${request.taskCategory}: ${errors}`,
-              );
-              throw new Error(
-                `AI output contract violation [${request.expectedContract}]: ${errors}`,
-              );
-            }
+          if (!response.contractValidation.valid) {
+            const errors = response.contractValidation.errors;
+            this.logger.error(
+              `Contract [${request.expectedContract}] enforcement failed for ${request.taskCategory} (${candidate.provider}/${response.model}): ${errors.join('; ')}`,
+            );
+            // The call was made and paid for: record it as invalid before moving on.
+            this.recordCostFromResponse(request, response, { outputState: 'invalid', contractErrors: errors }).catch(
+              (err: unknown) => {
+                this.logger.warn(`Failed to record LLM cost: ${err instanceof Error ? err.message : String(err)}`);
+              },
+            );
+            // A violation is the model's answer, not the provider's health: it never counts toward a circuit,
+            // and the call was already counted by recordProviderSuccess inside executeWithRetries.
+            this.recordContractViolation(candidate.provider, preferences);
+            violations.push({ provider: candidate.provider, model: response.model, errors });
+            continue;
           }
+          response.outputState = violations.length > 0 ? 'valid_after_fallback' : 'valid';
+        } else {
+          response.outputState = 'unchecked';
         }
 
-        this.recordCostFromResponse(request, response).catch((err: unknown) => {
+        this.recordCostFromResponse(request, response, { outputState: response.outputState }).catch((err: unknown) => {
           this.logger.warn(`Failed to record LLM cost: ${err instanceof Error ? err.message : String(err)}`);
         });
 
@@ -972,6 +1003,19 @@ export class ModelGatewayService {
       }
     }
 
+    if (violations.length > 0 && request.expectedContract) {
+      // Nothing valid came back and at least one candidate answered badly: a
+      // typed 502, not the last provider's error, so the caller can tell a
+      // model that answered wrongly from a provider that did not answer.
+      // The detail names the other candidate's failure class only: the body is
+      // client-facing, and a provider's message can carry hosts, response
+      // bodies or key fragments (the full text is in the error log above).
+      throw new AiContractViolationError(
+        request.expectedContract,
+        violations,
+        lastError ? `another candidate failed with a provider error (${classifyProviderFailure(lastError)})` : undefined,
+      );
+    }
     throw lastError || this.noProviderAvailable(effectiveCandidates, preferences);
   }
 
@@ -1005,6 +1049,7 @@ export class ModelGatewayService {
   private async recordCostFromResponse(
     request: GatewayRequest,
     response: GatewayResponse,
+    outcome: { outputState: GatewayOutputState | 'invalid'; contractErrors?: string[] } = { outputState: 'unchecked' },
   ): Promise<void> {
     // Trace FIRST, then cost. recordCost() awaits a DB write that can reject
     // (e.g. a database outage) — and that is precisely when we most want the
@@ -1039,7 +1084,11 @@ export class ModelGatewayService {
       totalCost: response.usage.estimatedCost,
       latencyMs: response.latencyMs,
       fallbackUsed: response.fallbackUsed,
-      metadata: { contractType: request.expectedContract },
+      metadata: {
+        contractType: request.expectedContract,
+        outputState: outcome.outputState,
+        ...(outcome.contractErrors ? { contractErrors: outcome.contractErrors } : {}),
+      },
     });
   }
 
@@ -3291,6 +3340,21 @@ export class ModelGatewayService {
    * the platform key must not take the provider away from every business for
    * the cooldown.
    */
+  /**
+   * RR-STRUCTURED-PARSE-INVALID-STATE: the provider answered (that call is
+   * already in totalCalls through recordProviderSuccess) but the answer
+   * violated the expected contract. Health shows it as an error with class
+   * 'contract_violation'; no circuit is touched and no second call is counted.
+   */
+  private recordContractViolation(provider: AiProvider, preferences?: AiPreferences): void {
+    const metrics = this.providerMetrics.get(provider);
+    if (!metrics) return;
+    metrics.totalErrors++;
+    metrics.lastErrorAt = new Date();
+    // As in recordProviderError: only the platform credential's failures set the class every business sees.
+    if (!this.byokCircuitId(provider, preferences)) metrics.lastFailureClass = 'contract_violation';
+  }
+
   private recordProviderError(
     provider: AiProvider,
     preferences?: AiPreferences,

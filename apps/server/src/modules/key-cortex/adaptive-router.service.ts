@@ -2,6 +2,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { TaskCategory } from '../ai/model-gateway.service';
 import { CortexQuery, CortexSession, CortexMessage } from './key-cortex.types';
 import type { ModuleName } from './key-cortex-connector.types';
+import { classifyActionIntent } from './action-intent';
 import { KeyCortexLearningService } from './key-cortex-learning.service';
 
 export type QueryComplexity = 'simple' | 'moderate' | 'complex';
@@ -239,10 +240,7 @@ export class AdaptiveRouterService {
     dimensions: QueryDimensions,
   ): TaskCategory {
     // Action/tool-calling takes precedence when enabled
-    if (
-      query?.enableActions &&
-      /\b(create|make|schedule|send|update|delete|run|execute|build|generate|draft)\b/.test(text)
-    ) {
+    if (query?.enableActions && classifyActionIntent(text).isAction) {
       return 'tool-calling';
     }
 
@@ -315,12 +313,7 @@ export class AdaptiveRouterService {
     }
 
     // Actions layer when actions are enabled and query implies action
-    if (
-      query?.enableActions &&
-      /\b(create|make|schedule|send|update|delete|run|execute|build|generate|draft)\b/.test(
-        query?.text.toLowerCase() ?? '',
-      )
-    ) {
+    if (query?.enableActions && classifyActionIntent(query?.text ?? '').isAction) {
       layers.add('actions');
     }
 

@@ -65,7 +65,7 @@ jobs:
       # Explicit files or `<dir>/*.spec.mjs` globs, never a bare directory,
       # and no env (see the step above).
       - name: Check every script spec runs in CI
-        run: node --test scripts/ci/script-specs-in-ci.spec.mjs scripts/agent-memory/tests/*.spec.mjs scripts/intelligence/open_pr_inventory.spec.mjs scripts/agent-control/research/tests/*.spec.mjs
+        run: node --test scripts/ci/script-specs-in-ci.spec.mjs scripts/ci/ci-verdict.spec.mjs scripts/agent-memory/tests/*.spec.mjs scripts/intelligence/open_pr_inventory.spec.mjs scripts/agent-control/research/tests/*.spec.mjs
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -898,3 +898,43 @@ jobs:
   #         vercel-token: ${{ secrets.VERCEL_TOKEN }}
   #         vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
   #         vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+
+  # RR-CI-REQUIRED-JOBS-AGGREGATE (REC-ANTI-FAKE-GREEN, D-239): the one check
+  # that is red when any gating job failed, was skipped or was cancelled.
+  # main has no branch protection, so "CI is green at the exact head" (the
+  # D-239 merge condition) had no single check to read: build-server,
+  # build-web, e2e-mocked and test all need lint-and-typecheck, and a Type
+  # Check failure turns them grey "skipped", which GitHub does not render as
+  # red (the 2026-08-08 failure recorded above). This job needs every job in
+  # this file except `lint` (the debt ratchet that blocks nothing by design),
+  # runs always, and exits 1 unless every need's result is exactly success.
+  # scripts/ci/ci-verdict.spec.mjs pins the shape (a job added to this file
+  # must join `needs` here or NON_GATING there) and proves the step by
+  # running it. Only name/run on the step and name/runs-on/needs/if/steps on
+  # the job: anything else can make it pass without judging.
+  ci-verdict:
+    name: CI verdict (gating jobs)
+    runs-on: ubuntu-latest
+    needs: [lint-and-typecheck, security-scan, build-server, build-web, e2e-mocked, test]
+    if: always()
+    steps:
+      - name: Red unless every gating job succeeded
+        run: |
+          verdict=0
+          {
+            echo '| Gating job | Result |'
+            echo '| --- | --- |'
+          } >> "$GITHUB_STEP_SUMMARY"
+          while IFS='=' read -r job result; do
+            echo "| $job | $result |" >> "$GITHUB_STEP_SUMMARY"
+            echo "$job: $result"
+            if [ "$result" != success ]; then verdict=1; fi
+          done <<'RESULTS'
+          lint-and-typecheck=${{ needs.lint-and-typecheck.result }}
+          security-scan=${{ needs.security-scan.result }}
+          build-server=${{ needs.build-server.result }}
+          build-web=${{ needs.build-web.result }}
+          e2e-mocked=${{ needs.e2e-mocked.result }}
+          test=${{ needs.test.result }}
+          RESULTS
+          exit "$verdict"

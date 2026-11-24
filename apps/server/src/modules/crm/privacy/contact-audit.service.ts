@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { PrismaService } from '../../../core/prisma/prisma.service';
+import { safeRedactedSnapshot } from '../../../core/security/redaction';
 
 /**
  * Per-contact audit log writer (M7).
@@ -198,8 +199,12 @@ export class ContactAuditService {
         entityType: opts.entityType ?? 'contact',
         entityId: opts.entityId ?? null,
         actor: (opts.actor ?? null) as never,
-        before: (diffed.before ?? null) as never,
-        after: (diffed.after ?? null) as never,
+        // RR-BUSINESS-EVENT-REDACT: a secret-named field in the diff is stored
+        // as the marker. Redacted on a clone (review round 1): the diff holds
+        // the caller's nested objects by reference, and the row a caller
+        // returns must keep its values.
+        before: (safeRedactedSnapshot(diffed.before) ?? null) as never,
+        after: (safeRedactedSnapshot(diffed.after) ?? null) as never,
         changedFields: diffed.changed,
         reason: opts.reason?.slice(0, 500) ?? null,
         ip: opts.ip?.slice(0, 64) ?? null,
