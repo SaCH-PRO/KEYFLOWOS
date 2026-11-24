@@ -24,7 +24,7 @@ import { useState } from "react";
 import { act, renderHook, cleanup } from "@testing-library/react";
 import type { Contact } from "@/lib/client";
 
-const client = vi.hoisted(() => ({ deleteContact: vi.fn(async () => ({ data: null, error: null })) }));
+const client = vi.hoisted(() => ({ deleteContact: vi.fn(async (_contactId: string, _businessId?: string) => ({ data: null, error: null })) }));
 vi.mock("@/lib/client", async (importOriginal) => ({ ...(await importOriginal<typeof import("@/lib/client")>()), deleteContact: client.deleteContact }));
 
 /** Every toast shown: its message, options and id, so a test can press its Undo. */
