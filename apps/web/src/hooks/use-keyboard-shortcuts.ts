@@ -157,9 +157,10 @@ export function useKeyboardShortcuts(legacyGroups?: LegacyShortcutGroup[], _enab
         const isQuestionMark = shortcut.key === "?" && e.key === "?";
 
         if ((keyMatch || isQuestionMark) && modifierMatch) {
-          // Its owner answers it; nor is it a page's shortcut.
-          if (shortcut.ownedBy) return;
           e.preventDefault();
+          // Its owner answers it (kept from the browser here too, so a route without the owner, such as onboarding,
+          // does not hand Ctrl+K to the browser); nor is it a page's shortcut.
+          if (shortcut.ownedBy) return;
           const now = Date.now();
           if (shortcut.category === "Navigation" && now - lastNavTime.current < 100) continue;
           lastNavTime.current = now;
