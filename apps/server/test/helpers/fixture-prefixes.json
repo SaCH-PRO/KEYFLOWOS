@@ -1250,6 +1250,11 @@
       "prefix": "v75r_",
       "owner": "apps/server/test/memory-temporal-routes-sight.integration.test.ts",
       "packet": "V1-75 (MEM-TEMPORAL-MEMORY-ROUTES-SIGHT)"
+    },
+    {
+      "prefix": "v90n_",
+      "owner": "apps/server/test/notifications-prefs-guard.integration.test.ts",
+      "packet": "V1-90 (FU-NOTIFICATIONS-PREFS-GUARD)"
     }
   ],
   "pendingRenames": [],
