@@ -1,12 +1,12 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-23 01:50 UTC by the orchestrator (Claude Code). Rewrite in place on every merge, packet return
+Last written: 2026-11-24 02:45 UTC by the acting orchestrator (second-lane account, Claude Code), with SWP-QUOTE-COMPOSER-CONTACT returned. Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
 conversation that produced it. Read `docs/development/agent-memory/README.md` first.
 
-**This file holds only what cannot be generated.**
+**This file holds only what cannot be generated.** Who does what next lives on the live board: `BOARD.md` on branch `coord/board`, one owner per row. The checklists every lane ticks are in `docs/development/agent-memory/CHECKLISTS.md`.
 
 | Fact | Where it lives |
 |---|---|
@@ -18,7 +18,26 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 
 ## 1. Standing instructions from the owner
 
+- **D-271 (2026-11-24): v1 is the priority. D-268's pause is lifted, and packet work resumes in the D-263 wedge
+  order.**
+  - The KEY Builder design and plan (D-268 to D-270) are parked until v1 is completed. They stay on branch
+    `ccr-1eadc8f4-aqfqne`: `docs/key-builder/KEY-BUILDER-DESIGN-001.md`, `KEY-BUILDER-PLAN-001.md` and `research/`.
+  - Open for v1, as recommendations to the owner:
+    - the Q4 wave (MOUNT-QUOTES + SWP-INV-MATH + SWP-INV-PUBLIC-LINK, built from 8ae6abfa);
+    - a P0 security packet, SEC-KEY-CUSTOM-LOGIC: tenant KEY's `execute_custom_logic` runs model-written JavaScript
+      in a child process on the API host (research A §5);
+    - switching off the agent-control autopilot's #80 posting.
+  - Sessions in other tools (Antigravity) claim through `git ls-remote` and a CLAIM on #80, like every lane.
 - Finish v1 (plan of record: `docs/reconstruction/V1-PLAN-RECUT.json`). Keep going until it is done.
+- **v1 is re-cut to one wedge (D-263, 2026-11-24, #80 comment 7118009265):** a Trinidad and Tobago service business
+  gets paid faster from WhatsApp, in TTD. The launch gate runs on packets with `track: launch` only; `track:
+  follow-on` packets (research D-261, memory D-254, store, quick sale, KEY capability) stay in v1 and ship after launch
+  (D-264, reversible). Money truth first: packets with `wedge_first` go first. Store and quick sale are hidden for new
+  businesses at launch (WEDGE-HIDE-STORE). Ten real businesses run the launch build before the gate (GATE-PILOT-10,
+  D-267). Production is redeployed by the owner (D-266).
+- **Proof per wave (D-265):** each packet gets tests-first commits, two reviews, touched-folder tests and the type
+  check; the full server suite and Release 0 run once at each wave head before its PR (per packet only when it edits a
+  Release 0 bound suite or a manifest-bound file).
 - Tests first. Two independent reviews per packet (security-tenancy, correctness-regression), no cap on rounds: every
   real finding is fixed in the pass that finds it (the owner declined a round cap).
 - Release 0 stays MET. No production deploy, no staging change, no real provider traffic, no test against a
@@ -40,43 +59,35 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 
 ## 2. Rulings not yet on main
 
-D-255 to D-260, seven follow-up packets, the 13 memory packets and three ruling packets (plan now 346) are recorded on `pkt/V1-RULINGS-3E` (main merged in): it
-joins wave 3e. D-249 to D-254 are on main (wave 3d, #221).
+D-263 to D-267 (the wedge re-cut: plan tracks, three new packets, proof per wave, redeploy, pilot) are on
+`pkt/V1-WEDGE-RECUT` (based on `pkt/V1-RULINGS-3E`), recorded on #80 (comment 7118009265). D-255 to D-262 and the
+rulings packets are on `pkt/V1-RULINGS-3E` (it joins wave 3e). D-249 to D-254 are on main (wave 3d, #221).
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `c97f42dd` (wave 3h, #226, merged 2026-11-23 08:05 UTC). Plan 361 + new follow-ups (this branch); see V1-STATUS.
-Workers run on Opus (Fable spent until 2026-11-25 19:00 UTC); hold four. A second Claude account works the RR-* P2/P3
-lane (`docs/development/agent-memory/SECOND-ACCOUNT-SETUP.md`); it claims by pushing `pkt/V1-<ID>` and posts RETURN on
-#80; scan #80 every ~2 h and give each RETURN the two acceptance reviews. Its first claim: RR-SCRIPT-SPECS-IN-CI.
+Main is at `9a7b5011` (wave 3i, #227). Production runs `f5d58ef7` (16 Nov), 596 commits behind main: the owner
+redeploys (D-266). Since 2026-11-23 the first orchestrator account is out of usage; the second-lane account acts as
+orchestrator and posts on #80. Its Fable limit is spent until 2026-11-30; it runs on Opus.
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
-| Wave 3i: PR #227 | `wave/v1-wave-3i` @ 1d6f71fa (7 pkts: ATTACHMENT-OBJECT-TENANCY, MEM-UNIFIED, MEM-PATTERNS, KEY-ACTION-GENOME, GATEWAY-TYPED-FAILURES, BANK-TOKEN, NAV-CODEX-224) | Proven 820/820, R0 MET, web clean. Codex: 1 finding (architecture map refresh) answered -> owner Q27 | Merge under D-239 when CI green (check-in 09:26) |
-| Wave 3j | `wave/v1-wave-3j` @ a2e9f3f0 (on 3i): RR-REDACTION-BY-CONTENT, FU-KEY-GENOME-READS-RESIDUAL, MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (own delta) | Proven 832/832, R0 MET; assembly CLEAN | PR after 3i merges |
-| Wave 3k | `wave/v1-wave-3k` @ 88268a01 (on 3j, 48 files): FU-PATTERNS-ROUTES-SIGHT (+integration fix 12205636), FU-CORTEX-PATTERNS-SIGHT, FU-GENOME-EVOLUTION-SURFACES; migration 20261123070000 (ai_memories index) | Proven at 3233fc68 (837/837); re-proof at 88268a01 running | PR after 3j |
-| Wave 3l (next) | FU-INSIGHTS-SIGHT @ 28cdbccb (ACCEPTED; stacked on PATTERNS-ROUTES: apply own delta) + next returns | Accepted | Build after 3k |
-| FU-STRATEGIC-ROUTES-SIGHT (P0) | session_017o9EBeafoWPQry9ggXEDDK (on INSIGHTS) | Building | Review |
-| FU-GENOME-DNA-WRITES-AND-INTEGRITY (P0) | session_017o9EBfKdTMK1cKeLRzg5q6 (on GENOME-EVOLUTION) | Building (write-gate design approved) | Review |
-| FU-GENOME-SURFACES-REVENUE (P0, scope +3 routes) | session_017o9EBf78ski7zSK9HWPYHX (on GENOME-EVOLUTION) | Building | Review |
-| FU-OUTBOUND-ATTACHMENT-URL (P1) | session_017o9EBhe1oanHeGuPsPEcQv (on 3i) | Building | Review |
-| FU-AI-APPROVALS-MONEY-SIGHT (P0) | session_017o9EBffRpw8j5YyzyGjCMC (on main) | Building | Review |
-| FU-VITEST-DECORATOR-METADATA | @ 83b6dfc8 | STOPPED on owner Q20 | Owner ruling |
-| Second lane | other account | Reviewing: RR-CI-REQUIRED-JOBS-AGGREGATE 6e690d18, RR-EVAL-HARNESS repair 17d8802e, RR-LANGFUSE-INGESTION-CUTOVER afece460; building RR-OBJECT-STORAGE-POSTURE-CHECK. RR-REDACTION-BY-CONTENT ACCEPTED (in 3j); RR-GATEWAY in 3i | Post verdicts on #80 |
+| Wedge re-cut | `pkt/V1-WEDGE-RECUT` @ this commit | Plan, BUILD-MAP rows, worker brief, status, this file | Joins the next wave PR with the rulings branch |
+| Wave 3j (second lane) | `wave/3j-second-lane` @ a1e6a649: 16 packets | Proven: suite 831/831, R0 MET at a1e6a649; summary #80 7117144941 | Owner's go: "open the wave PR" or "merge under D-239" |
+| MOUNT-QUOTES (P0, critical path) | `pkt/V1-MOUNT-QUOTES` @ 78567330 | Proven: suite 820/820, R0 MET; live journey D: D1, D2, D3, D6, D9 green at both widths; RETURN #80 7117999068 | Joins wave 3j or the next wave |
+| SWP-INV-MATH (P0, critical path; BUG-018, BUG-019) | `pkt/V1-SWP-INV-MATH` @ 6ea50c09, stacked on MOUNT-QUOTES | Done and RETURNed (#80 7118763435). Both reviews accept, after one MAJOR (missing browser spec) was closed. Web suite 191/1745; live sweep RED at base, green at head | Run journeys D and E live at the wave head (my run was cut off). Plan text: drop the stale "2.5 whole-number error" line (D-166) |
+| SWP-INV-PUBLIC-LINK (P0; BUG-053, 087, 091) | `pkt/V1-SWP-INV-PUBLIC-LINK` @ 8ae6abfa, stacked on SWP-INV-MATH | Done and RETURNed (#80, after D-270). Both reviews plus the confirmation accept. Suite 820/15287 passed, R0 MET 39/39 with an exact-head receipt at 8ae6abfa | Joins the next wave (build it from 8ae6abfa); run journey E live at the wave head. Plan text: drop INVOICE_NOT_SHAREABLE |
+| SWP-QUOTE-PUBLIC-PAGE (P0; BUG-046, D4) | `pkt/V1-SWP-QUOTE-PUBLIC-PAGE` @ 0ab56399, stacked on SWP-INV-PUBLIC-LINK | Done and RETURNed (#80 7119917222). Both reviews accept. Mocked browser sweep RED at base, 7/7 green at head | Joins the stacked wave |
+| SWP-INV-FORM-UX (P2, critical path; BUG-052, 090, 092, 093) | `pkt/V1-SWP-INV-FORM-UX` @ d7981a75, stacked on SWP-QUOTE-PUBLIC-PAGE | Done and RETURNed (#80, after 7120253245). Security ACCEPT WITH MINORS; correctness REJECT on F1, which is closed; confirmation ACCEPT WITH MINORS. Live: the sweep at 1440/1024/768/375, E1, sweep-invoice-amounts and release0-live (desktop) all green. Open minors: F2, security MINOR-2, N1 (the sidebar drawer open over the form) and N2 | Joins the stacked wave (now five packets, top at d7981a75) |
+| SWP-QUOTE-COMPOSER-CONTACT (P2, critical path; BUG-095, 096, 097) | `pkt/V1-SWP-QUOTE-COMPOSER-CONTACT` @ d690bc41, stacked on SWP-INV-FORM-UX | Done and RETURNed (#80, after the 7120518541 claim). Security REJECT (SEC-QCC-1) and correctness REJECT (MAJOR-1 and MAJOR-2) both closed; confirmation ACCEPT WITH MINORS. Whole web suite exit 0 (197 / 1783); journey D live 12/18 unchanged; sweep-quote-to-invoice green | Joins the stacked wave, now six packets with its top at d690bc41 |
+| **Wave 3m (money-first; D-272 go)** | `wave/v1-wave-3m` @ 7bd2f445, cut from main 9a7b5011 | Compacted: MOUNT-QUOTES, SWP-INV-MATH, SWP-INV-PUBLIC-LINK, SWP-QUOTE-PUBLIC-PAGE, SWP-INV-FORM-UX, SWP-QUOTE-COMPOSER-CONTACT, two commits each (12). The tree is identical to the stack top d690bc41; divergence gate OK (12 commits, 46 files); `.agent-control` is main's. The wave-head proof (server tsc, build, suite, Release 0; web typegen, tsc, vitest, lint cap 26) was running | **D-272 merge order:** (1) PR #228 (Antigravity), (2) `pkt/V1-RULINGS-3E` + `pkt/V1-WEDGE-RECUT`, (3) this wave, (4) wave/3j-second-lane after its split (Antigravity). Next: open the wave PR with the proof totals; after (1) and (2) merge, merge main into the wave, re-prove its head, wait for CI green at the exact head, then merge under D-239 (a merge commit with the head pinned) |
+| **Lanes since D-271 (2026-11-24, owner-relayed split)** | - | Two operators. Each claims through `git ls-remote` plus a CLAIM on #80 | **Claude lane:** the stacked wave (MOUNT-QUOTES, SWP-INV-MATH, SWP-INV-PUBLIC-LINK, SWP-QUOTE-PUBLIC-PAGE, SWP-INV-FORM-UX, SWP-QUOTE-COMPOSER-CONTACT; top d690bc41; journeys D and E live at 0ab56399, #80 7120146322) on the owner's go; the next critical-path packets (SWP-CONTACT-QUICKADD, SWP-INV-LIST); **D-272 (#80 7121024415): the merge go is given, in order. Claude: the money-first wave 3m. Antigravity: PR #228, the wave/3j-second-lane split, and SEC-KEY-CUSTOM-LOGIC**; then the TODAY-AGGREGATE chain and WEDGE-WA-INBOUND-CAPTURE. **Antigravity lane:** PR #228 repair (merge main in; the Codex P1 fix on `pkt/V1-FU-KEY-GENOME-READS-RESIDUAL-CODEX-228` @ bf9278f9 through reviews, compaction and proof); the four launch-track WIP branches (FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-OUTBOUND-ATTACHMENT-URL, FU-AI-APPROVALS-MONEY-SIGHT); then FU-PENDING-OWED-SERVER and FU-PENDING-OWED-WEB. **Unassigned (claim first):** FU-WEB-PAYLINK-STATUS-BUTTONS, NAV-A2, NAV-A3, SWP-KEY-CHAT-WEB, SWP-STORE-LISTING-SERVER |
+| Next v1 packets | - | Resumed by D-271 | See the lanes row. SEC-KEY-CUSTOM-LOGIC if the owner adds it |
+| First lane, as it left them (2026-11-23 ~09:30 UTC) | `wave/v1-wave-3j` a2e9f3f0, `wave/v1-wave-3k` 88268a01; FU-INSIGHTS-SIGHT 28cdbccb; child sessions for FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-GENOME-SURFACES-REVENUE, FU-OUTBOUND-ATTACHMENT-URL, FU-AI-APPROVALS-MONEY-SIGHT | Proven or building when the account stopped; not re-verified since | Re-verify each head before it enters a wave |
+| FU-VITEST-DECORATOR-METADATA | @ 83b6dfc8 | Stopped on owner question 20 | Owner ruling |
 
-To add to the plan next: FU-CORTEX-PATTERNS-SIGHT, FU-PATTERNS-ROUTES-SIGHT, FU-INSIGHTS-SIGHT, FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-EVOLUTION-SURFACES, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-AI-APPROVALS-MONEY-SIGHT, FU-OUTBOUND-ATTACHMENT-URL, FU-EVAL-HARNESS-TENANT, FU-ARCH-MAP-REFRESH (Q27); FU-GATEWAY-STREAM-ERROR-CLASS, FU-CORTEX-PATTERNS-SIGHT (O-2, after UNIFIED lands), FU-PLANNER-INTENT-PATTERNS-SIGHT (O-3), FU-AI-MEMORY-WRITE-INTEGRITY (O-6), FU-SEMANTIC-HITS-FENCE (semantic hits enter the prompt unfenced), FU-PROVIDER-ERROR-TEXT-REDACT, FU-ATTACHMENT-OBJECT-TENANCY (row). Added to the plan 05:10 UTC: FU-NAV-A1-CODEX-224, FU-CORTEX-EXECUTE-STRUCTURED-DTO, FU-UNIT-MOCK-ISOLATION-2, FU-BARE-400-AUDIT, FU-SETTINGS-MANUAL-STEP-FENCE, FU-WEB-PAYLINK-STATUS-BUTTONS, FU-KEY-SEND-INVOICE-PAID-REFUSE. Still to do: label v86s_ in fixture-prefixes.json; MEM-TEMPORAL-MEMORY-ROUTES-SIGHT must also cover temporal-adapter searchMemories/getRecentMemories. From FU-PAY-LINK-STATUS-GATE review: web hides
-"Copy payment link" / WhatsApp share unless status is payable; KEY commerce_send_invoice refuses PAID up front (today it
-emails then fails the PAID->SENT move); KEY invoice findFirst lacks `deletedAt: null`. Recorded deviation: the
-pay-link packet touched flow-orchestrator.service.ts (+7, D-248) and invoice-send-delivery.spec.ts mock outside its write set.
-
-Next to start, in order, when a slot frees: the P1 follow-ups (FU-UNTRUSTED-INBOUND-FENCE, FU-STORE-ORDERS-MONEY-SCOPE,
-FU-TIMELINE-CALLERS-SCOPE, FU-FLOW-SAVE-EXECUTED-TOOL-TURN, FU-CONTACTID-WRITER-VALIDATION: each after its dependency merges), MEM-CENSUS, RR P1 packets
-(RR-WEBHOOK-INGRESS-CENSUS, RR-ADMIN-LOGOUT, ...), then the ready list.
-Not yet in the plan (add with the next rulings commit): FU-FLOW-SAVE-EXECUTED-TOOL-TURN (P1: a failed flow follow-up
-does not save the tool turn that already ran), finish-reason checks for the six OpenAI-compatible adapters,
-FU-PHONE-VOICE-TAMPER-TEST (1/4096 collision), FU-PROFILE-INTERVIEW (if not closed in MEM-DOC-EXTRACTION-SIGHT).
-Vercel previews: free-tier quota of 100 deployments/day was hit on 2026-11-23; not an admission gate.
-Container restarts happen; every proof run checks Postgres/Redis and a run with real ECONNREFUSED does not count.
+How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
+`keyflowos_e2e`, browser RED at the base, and reviews in detached worktrees) is written down step by step in
+`docs/development/agent-memory/LIVE-PROOF-RUNBOOK.md`. Any tool can repeat it.
 
 ## 4. Open questions waiting for the owner (ask together)
 
@@ -151,6 +162,14 @@ Format: `docs/development/agent-memory/OWNER-QUESTION-FORMAT.md`. Safe defaults 
 27. Codex on #227: AGENTS.md asks architecture/ maps to be regenerated after architecture changes; CLAUDE.md forbids a
     programme-map refresh without authority. Approve one reviewed packet FU-ARCH-MAP-REFRESH for waves 3a-3k? (Default: yes, after 3k lands.)
 
+27. MOUNT-QUOTES: Money's "Invoice" buttons and the hub's "Invoices & Pipeline" push a bare `?tab=pipeline`, which now
+    opens Quotes. Repoint them to `/app/commerce/invoices`? (Default: a small follow-up packet repoints them.)
+28. MOUNT-QUOTES: keep the explicit, confirmed bulk Delete on the Quotes list? (Default: keep; no status option deletes.)
+29. MOUNT-QUOTES: FinancePipeline and the payment-record modal screen are now mounted by no route. Remove them, or
+    remount the modal? (Default: remove in a follow-up.)
+30. D-264: should the launch wait for the research (D-261) and memory (D-254) packets after all? (Default: no; they
+    follow launch.)
+
 ## 5. How to work here (learned the hard way)
 
 The procedures themselves are in `docs/development/agent-memory/WAVE-RUNBOOK.md`. Kept here: what is specific to
@@ -176,3 +195,14 @@ this machine and this week.
 - The account's usage limits are shared by all sessions: hold three child sessions at most while on Opus, and keep
   reviews to the diff.
 - The v1 packet list with status, for the owner: https://claude.ai/artifact/3jRzGxzXvPXtVZeRoJuraK
+
+- Release 0 and the server suite need `.env` loaded in the shell that runs them (`set -a; . ../../.env; set +a`);
+  without it a database suite fails to start and R0 is REJECTED for no product reason.
+- Never chain proof runs with a waiter that greps a log for words a previous run also printed ("chain finished at"
+  matched "previous chain finished at"): another run checked out a different head mid-suite. Run heads in one strict
+  sequential script that checks the head before and after each step.
+- A container restart stops Postgres and Redis. Check `pg_isready` and `redis-cli ping` before every proof run.
+- jsdom cannot show React event timing between the capture and bubble listeners: a menu closed in the capture phase
+  passed its unit test and broke every menu item in a browser. Menu, focus and animation changes need the live run.
+
+
