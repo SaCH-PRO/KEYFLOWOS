@@ -170,6 +170,20 @@ export function ContactCustomFields({ businessId, values = NO_VALUES, onChange, 
   );
 }
 
+/** A SELECT / MULTI_SELECT definition's options, as the settings page stores them: { options: [{ label, value }] }. */
+function optionsOf(definition: CustomFieldDefinition): Array<{ label: string; value: string }> {
+  const raw = definition.options && typeof definition.options === "object"
+    ? (definition.options as Record<string, unknown>).options
+    : undefined;
+  return Array.isArray(raw) ? (raw as Array<{ label: string; value: string }>) : [];
+}
+
+/** A stored option value in the owner's words: its option's label, or the value as stored when no option names it. */
+function optionLabel(definition: CustomFieldDefinition, value: unknown): string {
+  const option = optionsOf(definition).find((o) => o && String(o.value) === String(value));
+  return option && typeof option.label === "string" && option.label !== "" ? option.label : String(value);
+}
+
 function renderReadOnlyValue(def: CustomFieldDefinition, value: unknown): React.ReactNode {
   if (value === undefined || value === null || value === "") {
     return <span className="text-muted-foreground italic">—</span>;
@@ -198,6 +212,10 @@ function renderReadOnlyValue(def: CustomFieldDefinition, value: unknown): React.
       return String(value);
     }
   }
+  if (def.type === "SELECT" || def.type === "MULTI_SELECT") {
+    // BUG-127: the option's label, not the stored value ("Gold member", not "gold").
+    return (Array.isArray(value) ? value : [value]).map((v) => optionLabel(def, v)).join(", ");
+  }
   if (Array.isArray(value)) {
     return value.join(", ");
   }
@@ -214,12 +232,7 @@ function CustomFieldInput({
   onChange: (value: unknown) => void;
 }) {
   const placeholder = definition.placeholder || undefined;
-  const rawOptions = definition.options && typeof definition.options === "object"
-    ? (definition.options as Record<string, unknown>).options
-    : undefined;
-  const opts = Array.isArray(rawOptions)
-    ? (rawOptions as Array<{ label: string; value: string }>)
-    : [];
+  const opts = optionsOf(definition);
 
   switch (definition.type) {
     case "TEXT":

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { fetchContactEvents } from "@/lib/client";
+import { eventLabel } from "@/lib/status-labels";
 import { Card } from "@keyflow/ui";
 import { Clock, Mail, Phone, MessageSquare, Calendar, DollarSign, FileText, Star, User, Zap, AlertTriangle, CheckCircle, Info } from "lucide-react";
 
@@ -134,7 +135,8 @@ export default function ContactTimelinePage() {
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium capitalize">{ev.type.replace(/_/g, " ")}</span>
+                            {/* BUG-129: the event in plain words ("Note added"), never its code ("Note.Created"). */}
+                            <span className="text-sm font-medium">{eventLabel(ev.type)}</span>
                             {ev.source && (
                               <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
                                 {ev.source}
