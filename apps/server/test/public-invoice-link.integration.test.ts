@@ -44,6 +44,12 @@
  *                               total - the ledger cash net
  *   read-only                -> viewing writes no FinancialTransaction, LedgerEntry or Payment
  *                               and leaves the invoice row as it was
+ *   SWP-INV-PUBLIC-LINK      -> POST .../payment-link on a DRAFT is a 409 and writes no link (the
+ *                               D-256 status gate); a live link of a VOID invoice answers exactly
+ *                               { ok: false, reason: 'voided' }, no figures and no view event; an
+ *                               expired one stays neutral; every open payload carries a sibling
+ *                               `totals` block { subtotal, taxRate, taxAmount, discountAmount, total,
+ *                               currency } of the stored figures, the invoice block keeping its eleven keys
  *   TENANT (M31)             -> Payment sits outside the tenant extension: a Payment row
  *                               carrying another tenant's businessId is not counted, and
  *                               another tenant's token never returns this invoice's figures
@@ -116,6 +122,11 @@ const ID = {
   invLegacyPaid: `${P}invLegacyPaid`,
   invLegacyDead: `${P}invLegacyDead`,
   invLegacyRace: `${P}invLegacyRace`,
+  // SWP-INV-PUBLIC-LINK: a draft (no link may be issued), a voided invoice with a live
+  // link, and an invoice with tax and a discount (journey D's figures)
+  invDraftLink: `${P}invDraftLink`,
+  invVoided: `${P}invVoided`,
+  invTaxed: `${P}invTaxed`,
   // tenant B
   invB: `${P}invB`,
 };
@@ -127,7 +138,12 @@ const LINK = {
   stale: { id: `${P}link_stale`, token: `${P}tok_stale` },
   // A link row of tenant B pointing at tenant A's invoice (M31: no FK ties the two).
   foreign: { id: `${P}link_foreign`, token: `${P}tok_foreign` },
+  // SWP-INV-PUBLIC-LINK: an expired link of the voided invoice (it must stay neutral).
+  voidedExpired: { id: `${P}link_voided_expired`, token: `${P}tok_voided_expired` },
 };
+
+/** Journey D's figures, stored as the server computes them (tax on the subtotal before the 10% discount). */
+const TAXED = { subtotal: 1040, taxRate: 12.5, taxAmount: 130, discountType: 'PERCENT', discountValue: 10, discountAmount: 104, total: 1066 };
 const UNKNOWN_TOKEN = `${P}tok_nosuchlink`;
 
 const TOTAL = 250;
@@ -153,6 +169,8 @@ const TOKEN: Record<string, string> = {};
 /** Operator payments: invoice -> Payment ids, in the order recorded. */
 const PAYMENT_IDS: Record<string, string[]> = {};
 let unknownBody: Record<string, unknown>;
+/** SWP-INV-PUBLIC-LINK: the route-minted link of the invoice that is then voided. */
+let voidedToken = '';
 
 async function cleanup() {
   for (const sql of [
@@ -469,8 +487,12 @@ beforeAll(async () => {
     });
   }
 
+  // ---- SWP-INV-PUBLIC-LINK: a draft, and journey D's tax and discount ------------
+  await db.invoice.update({ where: { id: ID.invDraftLink }, data: { status: 'DRAFT' } });
+  await db.invoice.update({ where: { id: ID.invTaxed }, data: TAXED });
+
   // ---- links minted by the real route while the invoices are payable ------
-  for (const inv of [ID.invPartial, ID.invPaid, ID.invTokens, ID.invLedger, ID.invRefund, ID.invTenantA, ID.invB]) {
+  for (const inv of [ID.invPartial, ID.invPaid, ID.invTokens, ID.invLedger, ID.invRefund, ID.invTenantA, ID.invB, ID.invTaxed]) {
     await mintLink(inv);
   }
 
@@ -490,7 +512,20 @@ beforeAll(async () => {
   await pay(ID.invTenantA, 50, 'cash', 'slip_tenant_a');
   await pay(ID.invB, 30, 'cash', 'slip_b');
 
+  // ---- SWP-INV-PUBLIC-LINK: the voided invoice gets a route-minted link while SENT (kept out of TOKEN:
+  // it also carries a seeded expired link, so the one-link-per-invoice sanity count does not apply),
+  // then is voided through the real status route, its link still live
+  const voidedLink = await createLink(ID.invVoided);
+  if (voidedLink.status !== 201 || !voidedLink.body?.token) throw new Error(`link on ${ID.invVoided} failed: ${voidedLink.status}`);
+  voidedToken = voidedLink.body.token;
+  const voided = await agent()
+    .patch(`/commerce/invoices/${ID.invVoided}/status/void`)
+    .set(HEADER, ID.ownerA)
+    .send({ businessId: ID.bizA, status: 'VOID' });
+  if (voided.status !== 200) throw new Error(`void failed: ${voided.status} ${JSON.stringify(voided.body)}`);
+
   // ---- seeded rows the routes cannot make -----------------------------------
+  await db.paymentLink.create({ data: { id: LINK.voidedExpired.id, token: LINK.voidedExpired.token, invoiceId: ID.invVoided, businessId: ID.bizA, active: true, expiresAt: new Date(Date.now() - DAY_MS) } });
   await db.paymentLink.create({ data: { id: LINK.expired.id, token: `${P}tok_expired`, invoiceId: ID.invDead, businessId: ID.bizA, active: true, expiresAt: new Date(Date.now() - DAY_MS) } });
   await db.paymentLink.create({ data: { id: LINK.inactive.id, token: `${P}tok_inactive`, invoiceId: ID.invDead, businessId: ID.bizA, active: false } });
   await db.paymentLink.create({ data: { id: LINK.stale.id, token: `${P}tok_stale`, invoiceId: ID.invStale, businessId: ID.bizA, active: true, expiresAt: new Date(Date.now() - DAY_MS) } });
@@ -862,5 +897,51 @@ describe('ST-V48-1: a live link still carrying a cuid() token is rotated the nex
     expect(a.body.token).toMatch(RANDOM_TOKEN);
     expect(b.body.token).toBe(a.body.token);
     expect((await linksOf(ID.invLegacyRace)).map((l: any) => [l.id, l.token])).toEqual([[legacy.id, a.body.token]]);
+  });
+});
+
+describe('SWP-INV-PUBLIC-LINK: no link for a draft; a voided link says voided; the payload states tax and discount', () => {
+  it('L-24: POST .../payment-link on a DRAFT answers 409 and writes no PaymentLink row', async () => {
+    const res = await createLink(ID.invDraftLink);
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(await linksOf(ID.invDraftLink)).toHaveLength(0);
+  });
+
+  it("L-25: a live link of a VOID invoice answers exactly { ok: false, reason: 'voided' }: no figures, no view event", async () => {
+    expect((await invoiceRow(ID.invVoided)).status).toBe('VOID');
+    const live = (await linksOf(ID.invVoided)).filter((l: any) => l.token === voidedToken);
+    expect(live.map((l: any) => l.active), 'the route-minted link is still live').toEqual([true]);
+    const { CommerceService } = await import('../src/modules/commerce/commerce.service');
+    const recordView = vi.spyOn(app.get(CommerceService), 'recordInvoiceView');
+    const res = await view(voidedToken);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: false, reason: 'voided' });
+    expect(recordView, 'no invoice.viewed event for a voided invoice').not.toHaveBeenCalled();
+    // control: the same spy sees an open invoice's view
+    await view(TOKEN[ID.invTaxed]);
+    expect(recordView).toHaveBeenCalledWith(ID.invTaxed, ID.bizA, ID.contactA);
+  });
+
+  it('L-26 control: an expired link of the voided invoice stays neutral (the unknown-token body)', async () => {
+    expect((await view(LINK.voidedExpired.token)).body).toEqual(unknownBody);
+  });
+
+  it('L-27: the payload carries a sibling totals block with the stored subtotal, tax and discount; the invoice block keeps its eleven keys', async () => {
+    const res = await view(TOKEN[ID.invTaxed]);
+    expect(res.status).toBe(200);
+    expect(Object.keys(res.body).sort()).toEqual(['balance', 'invoice', 'ok', 'token', 'totals']);
+    expect(Object.keys(res.body.invoice).sort()).toEqual([...INVOICE_BLOCK_KEYS].sort());
+    expect(res.body.totals).toEqual({
+      subtotal: TAXED.subtotal, taxRate: TAXED.taxRate, taxAmount: TAXED.taxAmount,
+      discountAmount: TAXED.discountAmount, total: TAXED.total, currency: 'TTD',
+    });
+    expect(res.body.invoice.total).toBe(TAXED.total);
+    expect(res.body.balance).toEqual({ amountPaid: 0, amountDue: TAXED.total, paidAt: null });
+    expectNoPaymentRowsOrEmail(res.body);
+  });
+
+  it('L-28: an invoice with no tax or discount states zeros in its totals block, not nulls', async () => {
+    const res = await view(TOKEN[ID.invPartial]);
+    expect(res.body.totals).toEqual({ subtotal: TOTAL, taxRate: 0, taxAmount: 0, discountAmount: 0, total: TOTAL, currency: 'TTD' });
   });
 });
