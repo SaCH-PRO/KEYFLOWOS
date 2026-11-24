@@ -53,12 +53,16 @@ describe('CI runs every test that exists', () => {
 
   it('the workflow provides a database, because a third of the suite needs one', () => {
     const wf = fs.readFileSync(path.join(REPO, '.github', 'workflows', 'ci-cd.yml'), 'utf8');
-    const job = wf.slice(wf.indexOf('  test:'), wf.indexOf('  # Production deployment'));
+    const start = wf.indexOf('  test-server:');
+    const end = wf.indexOf('\n  test:\n', start);
+    expect(start, 'test-server job must exist in ci-cd.yml').toBeGreaterThan(-1);
+    expect(end, 'test aggregate job must follow test-server in ci-cd.yml').toBeGreaterThan(start);
+    const job = wf.slice(start, end);
 
-    expect(job, 'the test job has no postgres service — every real-database test will fail').toMatch(
+    expect(job, 'the test-server job has no postgres service — every real-database test will fail').toMatch(
       /services:[\s\S]*postgres:/,
     );
-    expect(job, 'no DATABASE_URL for the test job').toMatch(/DATABASE_URL:/);
+    expect(job, 'no DATABASE_URL for the test-server job').toMatch(/DATABASE_URL:/);
     expect(job, 'schema is never applied, so the database is empty').toMatch(/db:deploy/);
   });
 

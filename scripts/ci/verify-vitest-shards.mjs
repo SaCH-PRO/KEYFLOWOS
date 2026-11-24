@@ -155,6 +155,9 @@ function main() {
       if (report?.numFailedTests !== 0) {
         problems.push(`${fileName}: numFailedTests is ${JSON.stringify(report?.numFailedTests)}, expected 0`);
       }
+      if (report?.numPendingTestSuites !== 0) {
+        problems.push(`${fileName}: numPendingTestSuites is ${JSON.stringify(report?.numPendingTestSuites)}, expected 0`);
+      }
       if (!Array.isArray(report?.testResults)) {
         problems.push(`${fileName}: missing testResults array`);
         continue;
@@ -168,6 +171,21 @@ function main() {
         }
         if (suite?.status !== 'passed') {
           problems.push(`${fileName}: suite ${rel} status is ${JSON.stringify(suite?.status)}, expected "passed"`);
+        }
+        if (!Array.isArray(suite?.assertionResults)) {
+          problems.push(`${fileName}: suite ${rel} missing assertionResults array`);
+        } else {
+          for (const assertion of suite.assertionResults) {
+            if (!assertion || typeof assertion !== 'object') {
+              problems.push(`${fileName}: suite ${rel} has non-object entry in assertionResults`);
+              continue;
+            }
+            if (assertion.status === 'failed' || assertion.status === 'pending') {
+              problems.push(
+                `${fileName}: suite ${rel} assertion ${JSON.stringify(assertion.fullName ?? assertion.title ?? 'unknown')} has status ${JSON.stringify(assertion.status)}`,
+              );
+            }
+          }
         }
         if (seenByFile.has(rel)) {
           problems.push(`Duplicate test file across shards: ${rel} (shard ${seenByFile.get(rel)} and shard ${shard})`);
