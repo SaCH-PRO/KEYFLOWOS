@@ -58,7 +58,8 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 const STORED = {
-  id: "inv_math_1", invoiceNumber: "INV-0001", status: "DRAFT", currency: "TTD", contactId: "", dueDate: null,
+  // SWP-INV-FORM-UX: an invoice is to someone (a save with no client is refused), so the stored draft names one.
+  id: "inv_math_1", invoiceNumber: "INV-0001", status: "DRAFT", currency: "TTD", contactId: "ct_math", dueDate: null,
   items: [
     { id: "it1", description: "Wedding cake, 3 tier", quantity: 1, unitPrice: 800, total: 800 },
     { id: "it2", description: "Cupcakes", quantity: 24, unitPrice: 10, total: 240 },
