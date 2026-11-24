@@ -54,7 +54,7 @@
 | P5 | First-lane WIP: FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-AI-APPROVALS-MONEY-SIGHT | antigravity | returned | — | 3/3 returned: `AI-APPROVALS` (#80 7121845152 @ `a0c650a6`), `STRATEGIC-SIGHT` (#80 7122456412 @ `b474ec39`), `DNA-WRITES` (@ `f616cf67`, both reviews CONFIRMED 0 findings; `SEC-DW-3a` flagged for R0 AMEND on `D11G-G04`). P6 unblocked |
 | P6 | FU-PENDING-OWED-SERVER, then FU-PENDING-OWED-WEB (money-first) | antigravity | claimed | — | Claimed `FU-PENDING-OWED-SERVER` (`pkt/V1-FU-PENDING-OWED-SERVER` from `main`); 27-site server census + 13-site web census complete; writing RED suite now |
 | P7 | SWP-CONTACT-QUICKADD (BUG-009, 034, 035; journey C1's New > Contact): `pkt/V1-SWP-CONTACT-QUICKADD` @ d859ba0f, stacked on wave 3m. Two reviews + confirmation ACCEPT WITH MINORS. Live at d859ba0f: sweep 2/2, C1 and C3 green both widths (red at the base), release0-live green; C4/C6/C8 red at the base too | claude | returned | M3 | Enters the next wave after M3 (main merged in, wave-head proof) |
-| P8 | SWP-INV-LIST (critical path) | claude | todo | — | CLAIM (stack on P7 or the wave); CHECKLISTS B |
+| P8 | SWP-INV-LIST (P0, critical path; BUG-007, 050, 070, 089, 131, 047): `pkt/V1-SWP-INV-LIST` @ 35a47153, stacked on P7 (d859ba0f). RED 2103a852 (unit: 7 RED + 2 controls) and 1d8ea32a (sweep); fix 35a47153; commerce+finance+lib 93 files / 928 tests exit 0 | claude | in-review | — | Live run (sweep RED at 1d8ea32a, green at 35a47153; journeys D, E) and two reviews running |
 | P9 | FU-WEB-PAYLINK-STATUS-BUTTONS | — | todo | — | Any lane may claim |
 | P10 | NAV-A2 (P0), NAV-A3 (unblocks 33) | — | todo | — | Any lane may claim; NAV-A3 first |
 | P11 | SWP-KEY-CHAT-WEB (P0, unblocks 33) | — | todo | — | Any lane may claim |
@@ -65,4 +65,4 @@
 | P14 | Owner: "Batch 2 safe defaults #5–#10" (not approved in D-272) | owner | blocked | the owner's review | The owner reviews the list |
 | P15 | Owner: redeploy production (D-266) | owner | blocked | M1–M4 | The owner deploys from main |
 
-Last updated: 2026-11-24 by the claude lane (P7 returned @ d859ba0f; M3 blocked on GitGuardian 40952282; P16 is PR #231; P8 next).
+Last updated: 2026-11-24 by the claude lane (P7 returned; P8 in review @ 35a47153; M3 blocked on GitGuardian 40952282; P16 is PR #231).
