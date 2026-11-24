@@ -141,13 +141,18 @@ export function useKeyChatActions() {
 
   // ─── Session Management (declared before sendMessage to avoid TDZ) ───
 
+  // SWP-KEY-CHAT-WEB (BUG-042): loadSessions depends only on the store's stable setSessions and the chat mode, never
+  // on the whole chat object (new on every provider render). Every caller loads sessions in an effect keyed on it (the
+  // drawer's history, /app/key/chat and the other shells), and loading the sessions changes the chat, so a callback
+  // rebuilt per render made each of them read GET flow/sessions in a loop.
+  const { setSessions } = chat;
   const loadSessions = useCallback(async () => {
     const businessId = getStoredBusinessId();
     if (!businessId) return;
 
     // Genome mode doesn't use flow sessions
     if (chatMode === "genome_onboarding") {
-      chat.setSessions([]);
+      setSessions([]);
       return;
     }
 
@@ -167,8 +172,8 @@ export function useKeyChatActions() {
     });
     // The pinned genome conversation always sorts first.
     sessions.sort((a, b) => (a.id === "onboarding" ? -1 : b.id === "onboarding" ? 1 : 0));
-    chat.setSessions(sessions);
-  }, [chat, chatMode]);
+    setSessions(sessions);
+  }, [setSessions, chatMode]);
 
   const selectSession = useCallback(
     async (sessionId: string) => {
