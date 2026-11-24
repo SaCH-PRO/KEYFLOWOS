@@ -7,6 +7,7 @@ import { motion } from "framer-motion";
 import { CheckCircle, Loader2, Mail, Phone, FileText, AlertCircle, Receipt } from "lucide-react";
 import { getPayLinkStatus, getPublicInvoiceByToken, type PayLinkStatus, type PublicInvoicePayload } from "@/lib/client";
 import { API_BASE } from "@/lib/api";
+import { statusLabel as sharedStatusLabel } from "@/lib/status-labels";
 
 /**
  * V1-49-PUBLIC-RECEIPT: the server's receipt projection for this link
@@ -51,23 +52,27 @@ function formatCurrency(amount: number, currency: string) {
   }
 }
 
-/** SWP-INV-PUBLIC-LINK (BUG-087): the status in words a customer reads, never the enum. */
-const STATUS_LABELS: Record<string, string> = {
-  DRAFT: "Draft",
+/**
+ * SWP-INV-PUBLIC-LINK (BUG-091): the status in words, never the enum: the shared words of lib/status-labels
+ * (Part-paid, Part-credited...), with the customer's own words for the three states a customer acts on.
+ */
+const CUSTOMER_STATUS_WORDS: Record<string, string> = {
   SENT: "Awaiting payment",
-  OVERDUE: "Overdue",
   PENDING: "Payment pending",
   FAILED: "Payment failed",
-  PARTIAL: "Part paid",
-  PARTIALLY_PAID: "Part paid",
-  PAID: "Paid",
-  VOID: "Voided",
-  PARTIALLY_CREDITED: "Part credited",
-  FULLY_CREDITED: "Credited",
 };
 
 function statusLabel(status: string): string {
-  return STATUS_LABELS[status] ?? status.charAt(0) + status.slice(1).toLowerCase().replace(/_/g, " ");
+  return CUSTOMER_STATUS_WORDS[status] ?? sharedStatusLabel(status, "invoice");
+}
+
+/**
+ * The breakdown is shown only when it is the whole story: subtotal + tax - discount is the total to the cent. A
+ * legacy row with no stored tax, or a fee the breakdown has no row for (shipping, a setup fee), shows the Total only.
+ */
+function breakdownAddsUp(totals: PublicInvoiceTotals, total: number): boolean {
+  const cents = (n: number) => Math.round(Number(n) * 100);
+  return cents(totals.subtotal) + cents(totals.taxAmount) - cents(totals.discountAmount) === cents(total);
 }
 
 function formatDate(value?: string | null) {
@@ -166,7 +171,8 @@ export default function PublicInvoicePage() {
   // given. Without a balance block (an older server) the page shows the
   // total as due and no paid figure, rather than inventing one.
   const balance = state.payload.balance ?? null;
-  const totals = (state.payload as typeof state.payload & { totals?: PublicInvoiceTotals | null }).totals ?? null;
+  const servedTotals = (state.payload as typeof state.payload & { totals?: PublicInvoiceTotals | null }).totals ?? null;
+  const totals = servedTotals && breakdownAddsUp(servedTotals, Number(invoice.total)) ? servedTotals : null;
   const amountDue = balance ? Number(balance.amountDue) : Number(invoice.total);
   const business = invoice.business;
   const accent = business?.primaryColor || "#F97316";
