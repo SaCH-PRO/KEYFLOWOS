@@ -81,6 +81,9 @@ const DOMAIN_STATUS_LABELS: Readonly<Record<StatusDomain, Readonly<Record<string
 const EVENT_SUBJECTS: Readonly<Record<string, string>> = Object.freeze({
   contact: "Customer",
   contacts: "Customer",
+  // A brand keeps its spelling, a compound its hyphen (SWP-CONTACT-DETAIL review: "WhatsApp sent", "Follow-up set").
+  whatsapp: "WhatsApp",
+  followup: "Follow-up",
 });
 
 /** How an event's action is said, where the plain word differs from the code. */
