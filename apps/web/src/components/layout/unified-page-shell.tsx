@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
 import { type LucideIcon } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
-import { OriginAwareBreadcrumbs } from "@/components/ui/origin-aware-breadcrumbs";
 import { cn } from "@/lib/utils";
 
 export interface TabDef {
@@ -21,7 +20,6 @@ export interface UnifiedPageShellProps {
   maxWidth?: "4xl" | "5xl" | "6xl" | "full";
   headerActions?: React.ReactNode;
   tabs?: TabDef[];
-  showBreadcrumbs?: boolean;
   children: React.ReactNode;
   className?: string;
   innerClassName?: string;
@@ -34,6 +32,9 @@ const MAX_WIDTH_MAP = {
   full: "max-w-none",
 };
 
+/**
+ * NAV-A3 (BUG-123): the app layout draws the one breadcrumb trail for every /app page, so this shell draws none.
+ */
 export function UnifiedPageShell({
   title,
   subtitle,
@@ -41,7 +42,6 @@ export function UnifiedPageShell({
   maxWidth = "5xl",
   headerActions,
   tabs,
-  showBreadcrumbs = true,
   children,
   className,
   innerClassName,
@@ -52,11 +52,6 @@ export function UnifiedPageShell({
   return (
     <div className={cn("min-h-[calc(100vh-4rem)]", className)}>
       <div className={cn("mx-auto px-4 py-6", widthClass, innerClassName)}>
-        {showBreadcrumbs && (
-          <div className="mb-4">
-            <OriginAwareBreadcrumbs />
-          </div>
-        )}
 
         <motion.div
           initial={{ opacity: 0, y: -8 }}

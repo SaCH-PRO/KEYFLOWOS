@@ -33,8 +33,6 @@ const APP_DIR = path.join(WEB_SRC, 'app');
 const STATIC_BY_DESIGN: Record<string, string> = {
   '/app/finance': 'redirect shim',
   '/app/notifications': 'redirect shim',
-  '/app/settings': 'redirect shim',
-  '/app/settings/profile': 'redirect shim',
   '/app/workflows': 'redirect shim',
 };
 

@@ -37,6 +37,9 @@ export function KeyChatHistory() {
   const { loadSessions, selectSession, createNewSession, deleteSession, sendMessage } = useKeyChatActions();
   const [genome, setGenome] = useState<GenomeIntegrityResult | null>(null);
 
+  // SWP-KEY-CHAT-WEB (BUG-042): loadSessions is stable now (it changes only with the chat mode), so this reads the
+  // sessions when the history opens and when the mode changes, not in a loop. Other reloads come from the actions that
+  // change the list (delete, a finished turn).
   useEffect(() => {
     void loadSessions();
   }, [loadSessions]);
