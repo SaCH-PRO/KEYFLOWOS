@@ -18,6 +18,7 @@ import {
   GenomeCrossDomainDomainKey,
   GenomeRankedRecommendation,
 } from '../business-genome/key-genome/key-genome.types';
+import { isFinanceSignal } from '../business-genome/key-genome/genome-finance-scope';
 
 export interface GenomeIntelligence {
   businessId: string;
@@ -746,6 +747,10 @@ export class KeyCortexGenomeBridgeService {
       // FU-KEY-CHAT-GENOME-MONEY-SIGHT (BLOCKING-1): the finance rule (isFinanceSignal) reads these too.
       section: signal.section ?? null,
       domain: signal.domain ?? null,
+      // CODEX-228 MAJOR-2: classify on the full stored row (field, evidence, proposedValue, sourceEntityType)
+      // before projecting to the compact bridge shape, so money beyond truncated reason or in evidence/proposedValue
+      // is withheld consistently with REST projections.
+      isFinance: isFinanceSignal(signal),
       severity: this.signalSeverity(signal),
       createdAt: signal.createdAt,
     };

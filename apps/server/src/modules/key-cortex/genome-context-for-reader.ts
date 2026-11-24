@@ -54,9 +54,11 @@ export function genomeContextForReader(context: GenomeEnrichedContext, readsReve
     // Round 8 (security MINOR-1): projected from the pool (the newest signals), then limited to what a context serves,
     // so how many are handed does not tell how many of the newest twenty were finance or sales.
     signals: (signalPool ?? context.signals ?? [])
-      // Codex P1 on #228: the message (the signal's reason, an inbox customer's own text) is read too.
-      .filter((s) => !isFinanceSignal({ sourceModule: s.module, section: s.section, domain: s.domain, signalType: s.type, message: s.message }))
-      .slice(0, GENOME_SIGNALS_SERVED),
+      // Codex P1 on #228 (+ review MAJOR-2): withhold signals classified as finance on the full stored row (field,
+      // evidence, proposedValue, sourceEntityType) as well as by labels and message text; strip the internal flag.
+      .filter((s) => s.isFinance !== true && !isFinanceSignal({ sourceModule: s.module, section: s.section, domain: s.domain, signalType: s.type, message: s.message }))
+      .slice(0, GENOME_SIGNALS_SERVED)
+      .map(({ isFinance: _f, ...sig }) => sig),
     // Round 9 (correctness MINOR-1): projected from the ranked pool the cached context carries, then limited, so the
     // headroom costs no ranking per turn.
     recommendations: genomeRecommendationsForReader(recommendationPool ?? context.recommendations ?? [], false).slice(0, GENOME_RECOMMENDATIONS_SERVED),

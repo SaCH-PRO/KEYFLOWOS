@@ -46,6 +46,8 @@ export interface GenomeSignal {
   /** The signal row's section and domain (FU-KEY-CHAT-GENOME-MONEY-SIGHT): the finance rule reads them. */
   section?: string | null;
   domain?: string | null;
+  /** Pre-evaluated full-row finance classification (CODEX-228 MAJOR-2: covers field, evidence, proposedValue, sourceEntityType). */
+  isFinance?: boolean;
   severity: 'low' | 'medium' | 'high' | 'critical';
   createdAt: Date;
 }
