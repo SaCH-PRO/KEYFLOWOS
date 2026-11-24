@@ -253,6 +253,36 @@ async function seed() {
         issueDate: tenDaysAgo,
         dueDate: fiveDaysAgo,
       },
+      // Historical paid invoices (>50d ago, inside SlowPayerDetector 180d window, outside PO-10 40d window):
+      // 3 fast-paid (2d) for contactDraft + 2 slow-paid (25d) for contactPending -> allDays >= 5, penny > 1.5x median.
+      ...[1, 2, 3].map((n) => ({
+        id: `${P}inv_hist_fast_${n}`,
+        businessId: ID.biz,
+        contactId: ID.contactDraft,
+        invoiceNumber: `${P}HIST-F${n}`,
+        status: 'PAID' as const,
+        subtotal: 100,
+        total: 100,
+        currency: 'TTD',
+        createdAt: new Date(now.getTime() - (70 + n) * 86400000),
+        issueDate: new Date(now.getTime() - (70 + n) * 86400000),
+        dueDate: new Date(now.getTime() - (68 + n) * 86400000),
+        paidAt: new Date(now.getTime() - (68 + n) * 86400000),
+      })),
+      ...[1, 2].map((n) => ({
+        id: `${P}inv_hist_slow_${n}`,
+        businessId: ID.biz,
+        contactId: ID.contactPending,
+        invoiceNumber: `${P}HIST-S${n}`,
+        status: 'PAID' as const,
+        subtotal: 100,
+        total: 100,
+        currency: 'TTD',
+        createdAt: new Date(now.getTime() - (85 + n) * 86400000),
+        issueDate: new Date(now.getTime() - (85 + n) * 86400000),
+        dueDate: new Date(now.getTime() - (75 + n) * 86400000),
+        paidAt: new Date(now.getTime() - (55 + n) * 86400000),
+      })),
     ],
   });
 
@@ -448,7 +478,7 @@ describe('V1-86 (FU-PENDING-OWED-SERVER; D-256): every server owed figure counts
       const slow = await slowSvc.detect(ID.biz);
       const penny = slow.slowPayers.find((s: any) => s.contactId === ID.contactPending);
       expect(penny).toBeDefined();
-      expect(penny!.outstandingAmount).toBe(750);
+      expect(penny!.outstandingTotal).toBe(750);
     });
 
     it('PO-05: RevenueBriefingService + RevenueIntelligenceController HTTP gate counts PENDING & enforces revenue:read + cross-tenant 403', async () => {
@@ -610,7 +640,7 @@ describe('V1-86 (FU-PENDING-OWED-SERVER; D-256): every server owed figure counts
 
       const copilot = new mods.FinancialCopilotService(prisma, stubAi);
       const pulse = await copilot.getFinancialPulse(ID.biz);
-      expect(pulse.outstandingAmount).toBe(750);
+      expect(pulse.outstandingReceivables).toBe(750);
       expect(pulse.overdueCount).toBe(1);
 
       const adapter = new mods.CommerceAdapterService({
@@ -626,7 +656,9 @@ describe('V1-86 (FU-PENDING-OWED-SERVER; D-256): every server owed figure counts
   // ── Site class 3: CRM figures & sales team ────────────────────────────────
   describe('Class 3 — CRM figures & sales team', () => {
     it('PO-15: CrmStatsService (raw SQL attachContactStats, contactDetail, segmentSummary, flowHighlights) counts PENDING and excludes DRAFT', async () => {
-      const statsSvc = new mods.CrmStatsService(prisma);
+      const cacheStub = { get: () => null, set: () => {}, invalidate: () => {} };
+      const timelineStub = { buildTimeline: async () => [] };
+      const statsSvc = new mods.CrmStatsService(prisma, timelineStub as any, cacheStub as any);
       const contacts = await prisma.client.contact.findMany({
         where: { id: { in: [ID.contactPending, ID.contactDraft] } },
       });
@@ -650,7 +682,7 @@ describe('V1-86 (FU-PENDING-OWED-SERVER; D-256): every server owed figure counts
         readsRevenue: true,
         viewerUserId: ID.owner,
       });
-      const unpaidGroup = highlights.groups.find((g: any) => g.key === 'unpaid');
+      const unpaidGroup = highlights.segments.find((g: any) => g.key === 'cold-with-unpaid');
       expect(unpaidGroup?.count).toBe(1);
     });
 
@@ -769,7 +801,8 @@ describe('V1-86 (FU-PENDING-OWED-SERVER; D-256): every server owed figure counts
         /WHERE\s+status\s+IN\s*\(\s*'SENT'\s*,\s*'OVERDUE'\s*\)/i,
       ];
 
-      // RevenueActionService.ts:310 is FOLLOW3-A9 refund reopen (documented non-owed check); allow only that single line.
+      // RevenueActionService.ts:310 is FOLLOW3-A9 refund reopen (documented non-owed check)
+      // and line 917 is a quote.aggregate (QuoteStatus, not InvoiceStatus).
       for (const rel of migratedFiles) {
         const src = fs.readFileSync(path.join(SRC_ROOT, rel), 'utf8');
         expect(src, `${rel} must import OPEN_RECEIVABLE_STATUSES or OPEN_RECEIVABLE_STATUS_LIST`).toMatch(
@@ -778,7 +811,12 @@ describe('V1-86 (FU-PENDING-OWED-SERVER; D-256): every server owed figure counts
 
         const filteredSrc =
           rel === 'commerce/revenue-action.service.ts'
-            ? src.replace(/status:\s*\{\s*in:\s*\['SENT',\s*'OVERDUE'\],\s*\},/g, '// allowed-refund-reopen')
+            ? src
+                .replace(/status:\s*\{\s*in:\s*\['SENT',\s*'OVERDUE'\]\s*\},/g, '// allowed-refund-reopen')
+                .replace(
+                  /quote\.aggregate\(\{\s*where:\s*\{\s*businessId,\s*deletedAt:\s*null,\s*status:\s*\{\s*in:\s*\['SENT',\s*'DRAFT'\]\s*\}\s*\}/g,
+                  'quote.aggregate({ // allowed-quote-pipeline',
+                )
             : src;
 
         for (const pat of forbiddenPatterns) {

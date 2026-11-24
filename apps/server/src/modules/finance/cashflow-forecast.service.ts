@@ -1,4 +1,5 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
+import { OPEN_RECEIVABLE_STATUS_LIST } from '../commerce/commerce-stats.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CashPositionService, otherCurrencyCash, type OtherCurrencyCash } from './cash-position.service';
 
@@ -74,7 +75,7 @@ export class CashflowForecastService {
         where: {
           businessId,
           deletedAt: null,
-          status: { in: ['SENT', 'OVERDUE', 'PARTIALLY_PAID'] },
+          status: { in: OPEN_RECEIVABLE_STATUS_LIST },
           dueDate: { gte: now, lte: horizonEnd },
         },
         select: { id: true, total: true, dueDate: true, status: true },

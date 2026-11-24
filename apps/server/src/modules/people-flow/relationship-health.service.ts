@@ -1,4 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
+import { OPEN_RECEIVABLE_STATUSES } from '../commerce/commerce-stats.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 // V1-38b (CR-1): a customer is Contact.status CLIENT, the one vocabulary; a
 // row holding a legacy CLIENT spelling reads the same. V1-38c: those
@@ -53,6 +54,7 @@ export class RelationshipHealthService {
       where: { id: contactId },
       select: {
         id: true,
+        businessId: true,
         firstName: true,
         lastName: true,
         email: true,
@@ -100,9 +102,9 @@ export class RelationshipHealthService {
       .filter((i: any) => i.status === 'PAID')
       .reduce((s: number, i: any) => s + Number(i.total ?? 0), 0);
     const outstandingBalance = invoices
-      .filter((i: any) => ['SENT', 'OVERDUE'].includes(i.status))
+      .filter((i: any) => OPEN_RECEIVABLE_STATUSES.has(i.status))
       .reduce((s: number, i: any) => s + Number(i.total ?? 0), 0);
-    const openInvoiceCount = invoices.filter((i: any) => ['SENT', 'OVERDUE'].includes(i.status)).length;
+    const openInvoiceCount = invoices.filter((i: any) => OPEN_RECEIVABLE_STATUSES.has(i.status)).length;
     const overdueInvoiceCount = invoices.filter((i: any) => i.status === 'OVERDUE').length;
 
     // Recency score: 100 if interacted today, decays over 90 days

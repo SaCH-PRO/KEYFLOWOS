@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
-import { CommerceStatsService } from './commerce-stats.service';
+import { CommerceStatsService, OPEN_RECEIVABLE_STATUSES, OPEN_RECEIVABLE_STATUS_LIST } from './commerce-stats.service';
 import { CommerceService } from './commerce.service';
 import { readStoredPayments } from './invoice-workflow.service';
 import { CatalogService } from '../catalog/catalog.service';
@@ -746,7 +746,7 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
     const paidInvoices = invoices.filter(i => i.status === 'PAID');
     const overdueInvoices = invoices.filter(i => i.status === 'OVERDUE');
     const totalRevenue = paidInvoices.reduce((s, i) => s + Number(i.total), 0);
-    const outstandingBalance = invoices.filter(i => ['SENT', 'OVERDUE'].includes(i.status)).reduce((s, i) => s + Number(i.total), 0);
+    const outstandingBalance = invoices.filter(i => OPEN_RECEIVABLE_STATUSES.has(i.status)).reduce((s, i) => s + Number(i.total), 0);
 
     const paymentDelays = paidInvoices
       .filter(i => i.dueDate && i.paidAt)
@@ -795,7 +795,7 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
         total: invoices.length,
         paid: paidInvoices.length,
         overdue: overdueInvoices.length,
-        outstanding: invoices.filter(i => ['SENT', 'OVERDUE'].includes(i.status)).length,
+        outstanding: invoices.filter(i => OPEN_RECEIVABLE_STATUSES.has(i.status)).length,
         void: invoices.filter(i => i.status === 'VOID').length,
       },
       quoteSummary: {
@@ -1066,7 +1066,7 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
     const now = new Date();
 
     const overdueInvoices = await this.db.invoice.findMany({
-      where: { businessId, deletedAt: null, status: { in: ['OVERDUE', 'SENT'] }, dueDate: { lt: now } },
+      where: { businessId, deletedAt: null, status: { in: OPEN_RECEIVABLE_STATUS_LIST }, dueDate: { lt: now } },
       include: {
         contact: { select: { id: true, firstName: true, lastName: true, email: true } },
       },

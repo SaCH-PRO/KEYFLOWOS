@@ -4,6 +4,7 @@ import type { Request, Response } from 'express';
 import { InvoiceFromTimeDto } from './dto/invoice-from-time.dto';
 import { TimeEntryService } from '../time-tracking/time-entry.service';
 import { CommerceService, OPERATOR_INVOICE_CONTACT_SELECT, OPERATOR_QUOTE_CONTACT_SELECT, createEventClaim } from './commerce.service';
+import { OPEN_RECEIVABLE_STATUS_LIST } from './commerce-stats.service';
 import { CommerceVisionService } from './commerce-vision.service';
 import { StoreReadinessService } from './store-readiness.service';
 import { PaymentEvidenceService } from './payment-evidence.service';
@@ -1967,7 +1968,8 @@ export class CommerceController {
     const invoices = await this.prisma.client.invoice.findMany({
       where: {
         businessId,
-        status: { in: ['SENT', 'OVERDUE', 'PARTIALLY_PAID'] },
+        deletedAt: null,
+        status: { in: OPEN_RECEIVABLE_STATUS_LIST },
       },
       include: {
         contact: true,

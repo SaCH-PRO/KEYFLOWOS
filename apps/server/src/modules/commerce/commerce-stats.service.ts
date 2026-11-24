@@ -1,4 +1,5 @@
 import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
+import type { InvoiceStatus } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { D13_CURRENCIES, normalizeCurrency } from '../finance/posting.service';
 import { balanceOfStoredRows, creditAwareBalance } from './invoice-workflow.service';
@@ -17,6 +18,9 @@ import { fromCents, roundMoney, sumMoney, toCents } from './money';
  * mirror is OWED_STATUSES in apps/web/.../payments/payments-tab.tsx.
  */
 export const OPEN_RECEIVABLE_STATUSES: ReadonlySet<string> = new Set(['PENDING', 'SENT', 'OVERDUE', 'PARTIALLY_PAID', 'PARTIALLY_CREDITED']);
+
+/** Array form of OPEN_RECEIVABLE_STATUSES for Prisma `{ status: { in: ... } }` and raw SQL `IN (...)` filters (D-256). */
+export const OPEN_RECEIVABLE_STATUS_LIST: InvoiceStatus[] = [...OPEN_RECEIVABLE_STATUSES] as InvoiceStatus[];
 
 /** One invoice's money as the totals read it (readInvoiceMoney). */
 export interface InvoiceMoney {

@@ -1,4 +1,5 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { OPEN_RECEIVABLE_STATUS_LIST } from '../commerce/commerce-stats.service';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { buildPdf, type PdfLine } from './pdf-builder';
@@ -356,7 +357,7 @@ export class AccountantExportService {
       where: {
         businessId,
         deletedAt: null,
-        status: { in: ['SENT', 'OVERDUE', 'PARTIALLY_PAID'] },
+        status: { in: OPEN_RECEIVABLE_STATUS_LIST },
       },
       select: {
         id: true, invoiceNumber: true, total: true, dueDate: true, issueDate: true, currency: true,
