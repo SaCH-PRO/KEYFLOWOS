@@ -1202,9 +1202,34 @@
       "packet": "V1-71 (FU-TEMPORAL-FLOW-INBOX-SCOPE, Codex P1 #226)"
     },
     {
-      "prefix": "v72a_",
+      "prefix": "v73k_",
+      "owner": "apps/server/test/key-action-genome-projection.integration.test.ts",
+      "packet": "V1-73 (FU-KEY-ACTION-GENOME-PROJECTION)"
+    },
+    {
+      "prefix": "v72s_",
+      "owner": "apps/server/test/bank-token-encryption.integration.test.ts",
+      "packet": "V1-72 (RR-BANK-TOKEN-ENCRYPT)"
+    },
+    {
+      "prefix": "v74u_",
+      "owner": "apps/server/test/memory-unified-semantic-sight.integration.test.ts",
+      "packet": "V1-74 (MEM-UNIFIED-SEMANTIC-SIGHT)"
+    },
+    {
+      "prefix": "v71v_",
+      "owner": "apps/server/test/memory-patterns-sight.integration.test.ts",
+      "packet": "V1-71 (MEM-PATTERNS-SIGHT)"
+    },
+    {
+      "prefix": "v77o_",
+      "owner": "apps/server/test/attachment-object-tenancy.integration.test.ts",
+      "packet": "V1-77 (FU-ATTACHMENT-OBJECT-TENANCY)"
+    },
+    {
+      "prefix": "v85a_",
       "owner": "apps/server/test/ai-approvals-money-sight.integration.test.ts",
-      "packet": "V1-72 (FU-AI-APPROVALS-MONEY-SIGHT)"
+      "packet": "FU-AI-APPROVALS-MONEY-SIGHT"
     }
   ],
   "pendingRenames": [],

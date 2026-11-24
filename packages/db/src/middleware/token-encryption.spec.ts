@@ -115,9 +115,11 @@ describe('decryptNestedRecord: the decrypt step for a nested row', () => {
   };
   const key = () => ['nested', 'row', 'key'].join('-');
 
-  it('the field map names the four encrypted models and their columns', () => {
+  it('the field map names the five encrypted models and their columns', () => {
     expect(ENCRYPTED_FIELDS).toBeDefined();
-    expect(Object.keys(ENCRYPTED_FIELDS).sort()).toEqual(['Business', 'ChannelConnection', 'SocialConnection', 'Webhook']);
+    // RR-BANK-TOKEN-ENCRYPT (V1-72) added BankConnection.accessToken.
+    expect(Object.keys(ENCRYPTED_FIELDS).sort()).toEqual(['BankConnection', 'Business', 'ChannelConnection', 'SocialConnection', 'Webhook']);
+    expect(ENCRYPTED_FIELDS.BankConnection).toEqual(['accessToken']);
     expect(ENCRYPTED_FIELDS.ChannelConnection).toEqual(['token', 'refreshToken']);
     expect(ENCRYPTED_FIELDS.SocialConnection).toEqual(['token', 'refreshToken']);
     expect(ENCRYPTED_FIELDS.Webhook).toEqual(['secret']);

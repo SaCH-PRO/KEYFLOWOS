@@ -2,6 +2,8 @@ import { BadRequestException, Body, Controller, Inject, Post, UseGuards } from '
 import { UploadsService } from './uploads.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { GuardedBusinessId } from '../../core/auth/request-business-id';
+import { isSafeKeySegment } from '../../core/object-storage/objectStorage';
 
 const ALLOWED_CONTENT_TYPES = new Set([
   'image/jpeg',
@@ -25,7 +27,9 @@ export class UploadsController {
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('request-url')
   async requestUploadUrl(
-    @Body('businessId') businessId: string,
+    // FU-ATTACHMENT-OBJECT-TENANCY: the tenant BusinessGuard checked (params, body, query), which
+    // the issued object path is bound to.
+    @GuardedBusinessId() businessId: string | undefined,
     @Body() body: { name?: string; size?: number; contentType?: string },
   ) {
     if (body.contentType && !ALLOWED_CONTENT_TYPES.has(body.contentType)) {
@@ -38,7 +42,10 @@ export class UploadsController {
       const sanitized = body.name.replace(/[^a-zA-Z0-9._-]/g, '_');
       body.name = sanitized;
     }
-    const result = await this.uploads.getUploadUrl();
+    if (!businessId || !isSafeKeySegment(businessId)) {
+      throw new BadRequestException('businessId is required');
+    }
+    const result = await this.uploads.getUploadUrl(businessId);
     return {
       ...result,
       metadata: {
