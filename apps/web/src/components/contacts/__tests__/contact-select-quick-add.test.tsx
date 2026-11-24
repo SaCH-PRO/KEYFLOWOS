@@ -14,6 +14,13 @@
  *   CSQ-03  RED-BEFORE  the composer's Create Quote with no client says "Choose a client" at the client field and
  *                       sends nothing
  *   CSQ-04  control     choosing an existing contact from the list shows it as chosen
+ *
+ * Review round 1 (correctness MINOR-4, MINOR-5):
+ *   CSQ-05  hardening   the composer's Create Invoice with no client says "Choose a client for this invoice." and
+ *                       sends nothing; choosing a client clears the message
+ *   CSQ-06  hardening   the remembered pick shows only for its own id: after a quick add, a parent that sets another
+ *                       contact shows that one, and an id in no list shows no chip
+ *   CSQ-07  RED-BEFORE  a refused quick add's message does not come back when Quick Add is reopened after Escape
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { useState } from "react";
@@ -153,5 +160,67 @@ describe("SWP-QUOTE-COMPOSER-CONTACT: the client field", () => {
     fireEvent.click(await within(await screen.findByRole("listbox")).findByText("Ada Customer"));
     expect(await screen.findByText("Ada Customer")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /change/i })).toBeInTheDocument();
+  });
+
+  it("CSQ-05 hardening: Create Invoice with no client says so at the field, sends nothing, and a choice clears it", async () => {
+    const server = installServer();
+    const composer = (trigger: number) => (
+      <RevenueComposer
+        businessId={BIZ} contacts={[EXISTING] as never} products={[]} currency="TTD"
+        setQuotes={vi.fn()} setInvoices={vi.fn()} setProducts={vi.fn()} triggerNewInvoice={trigger}
+      />
+    );
+    const view = render(composer(0));
+    view.rerender(composer(1));
+    fireEvent.change(await screen.findByPlaceholderText("Item description"), { target: { value: "Consulting" } });
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "100" } });
+    fireEvent.click(screen.getByRole("button", { name: /create invoice/i }));
+    const alert = await screen.findByText("Choose a client for this invoice.");
+    const field = screen.getByText(/^Client/, { selector: "label" }).closest("div.relative") as HTMLElement;
+    expect(field.contains(alert)).toBe(true);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(server.writes()).toEqual([]);
+    fireEvent.focus(within(field).getByRole("combobox"));
+    fireEvent.click(await within(field).findByText("Ada Customer"));
+    await waitFor(() => expect(screen.queryByText("Choose a client for this invoice.")).toBeNull());
+  });
+
+  it("CSQ-06 hardening: the remembered pick shows only for its own id", async () => {
+    installServer();
+    function Parent() {
+      const [value, setValue] = useState("");
+      return (
+        <>
+          <ContactSelect value={value} onChange={(id) => setValue(id)} contacts={[EXISTING]} label="Client" />
+          <button type="button" onClick={() => setValue("ct_old")}>set old</button>
+          <button type="button" onClick={() => setValue("ct_nowhere")}>set unknown</button>
+        </>
+      );
+    }
+    render(<Parent />);
+    await openQuickAdd();
+    fireEvent.click(screen.getByRole("button", { name: /add & select/i }));
+    expect(await screen.findByText("Kezia Baptiste")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "set old" }));
+    expect(await screen.findByText("Ada Customer")).toBeInTheDocument();
+    expect(screen.queryByText("Kezia Baptiste")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "set unknown" }));
+    await waitFor(() => expect(screen.queryByText("Ada Customer")).toBeNull());
+    expect(screen.queryByText("Kezia Baptiste")).toBeNull();
+    expect(screen.getByRole("combobox")).toBeInTheDocument();
+  });
+
+  it("CSQ-07 RED-BEFORE: a refused quick add's message does not come back after Escape and reopening Quick Add", async () => {
+    installServer({ createStatus: 409 });
+    render(<Harness />);
+    await openQuickAdd();
+    fireEvent.click(screen.getByRole("button", { name: /add & select/i }));
+    expect(await screen.findByText(DUPLICATE)).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByText(DUPLICATE)).toBeNull());
+    fireEvent.focus(screen.getByRole("combobox"));
+    fireEvent.click(await screen.findByRole("button", { name: /quick add contact/i }));
+    expect(screen.getByPlaceholderText("First name *")).toBeInTheDocument();
+    expect(screen.queryByText(DUPLICATE)).toBeNull();
   });
 });
