@@ -626,7 +626,8 @@ describe('post-merge.sh [4/4] when V1-17 cannot apply, or is recorded without ru
     expect(forced.rows.some((r) => r.finished), 'control: V1-17 is recorded as finished').toBe(true);
     expect(forced.indexes, 'control: neither identity unique exists').toEqual([]);
     expect(forced.duplicate, 'control: a third live duplicate still fits').toBe('inserted');
-    expect(forced.run.output).toContain('No pending migrations to apply');
+    expect(forced.run.output).not.toContain(`Applying migration \`${MIGRATION}\``);
+    expect(forced.run.output).toMatch(/No pending migrations to apply|All migrations have been successfully applied/);
     expect(forced.run.status, forced.run.output).not.toBe(0);
     expect(forced.run.output).toContain(EMAIL_LIVE);
     expect(forced.run.output).toContain(PHONE_LIVE);

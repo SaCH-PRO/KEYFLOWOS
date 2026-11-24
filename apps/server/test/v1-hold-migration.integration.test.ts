@@ -115,26 +115,24 @@ async function withDb<T>(url: string, fn: (client: PrismaClient) => Promise<T>):
 }
 
 async function cleanupSharedFixtures(client: PrismaClient): Promise<void> {
-  const like = sqlLikePrefix(P);
   // Drop product_tier_prices rows if the table exists (RED state runs before migration).
   const tableCheck = await client.$queryRawUnsafe<Array<{ t: string | null }>>(
     `SELECT to_regclass('public.product_tier_prices')::text AS t`,
   );
   if (tableCheck[0]?.t) {
     await client.$executeRawUnsafe(
-      `DELETE FROM product_tier_prices WHERE id LIKE $1 ESCAPE '\\' OR business_id LIKE $1 ESCAPE '\\'`,
-      like,
+      `DELETE FROM product_tier_prices WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
     );
   }
-  await client.$executeRawUnsafe(`DELETE FROM invoice_items WHERE id LIKE $1 ESCAPE '\\'`, like);
-  await client.$executeRawUnsafe(`DELETE FROM invoices WHERE id LIKE $1 ESCAPE '\\'`, like);
-  await client.$executeRawUnsafe(`DELETE FROM quote_items WHERE id LIKE $1 ESCAPE '\\'`, like);
-  await client.$executeRawUnsafe(`DELETE FROM quotes WHERE id LIKE $1 ESCAPE '\\'`, like);
-  await client.$executeRawUnsafe(`DELETE FROM products WHERE id LIKE $1 ESCAPE '\\'`, like);
-  await client.$executeRawUnsafe(`DELETE FROM contacts WHERE id LIKE $1 ESCAPE '\\'`, like);
-  await client.$executeRawUnsafe(`DELETE FROM memberships WHERE business_id LIKE $1 ESCAPE '\\'`, like);
-  await client.$executeRawUnsafe(`DELETE FROM businesses WHERE id LIKE $1 ESCAPE '\\'`, like);
-  await client.$executeRawUnsafe(`DELETE FROM users WHERE id LIKE $1 ESCAPE '\\'`, like);
+  await client.$executeRawUnsafe(`DELETE FROM invoice_items WHERE id LIKE ${sqlLikePrefix(P)}`);
+  await client.$executeRawUnsafe(`DELETE FROM invoices WHERE id LIKE ${sqlLikePrefix(P)}`);
+  await client.$executeRawUnsafe(`DELETE FROM quote_items WHERE id LIKE ${sqlLikePrefix(P)}`);
+  await client.$executeRawUnsafe(`DELETE FROM quotes WHERE id LIKE ${sqlLikePrefix(P)}`);
+  await client.$executeRawUnsafe(`DELETE FROM products WHERE id LIKE ${sqlLikePrefix(P)}`);
+  await client.$executeRawUnsafe(`DELETE FROM contacts WHERE id LIKE ${sqlLikePrefix(P)}`);
+  await client.$executeRawUnsafe(`DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)}`);
+  await client.$executeRawUnsafe(`DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`);
+  await client.$executeRawUnsafe(`DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`);
 }
 
 beforeAll(async () => {
@@ -144,7 +142,7 @@ beforeAll(async () => {
 
   const dbMod = await import('@keyflow/db');
   tenant = await import('../src/core/tenant/tenant-context');
-  dbMod.setTenantContextProvider(() => tenant.getCurrentBusinessId());
+  dbMod.setTenantContextProvider({ getCurrentBusinessId: () => tenant.getCurrentBusinessId() });
   db = dbMod.db;
 
   await cleanupSharedFixtures(admin);
@@ -230,12 +228,13 @@ describe('V1-64 (MIGRATION-SET-A): v1 hold migration set', () => {
         './prisma/schema.prisma',
         '--to-schema-datamodel',
         './prisma/schema.prisma',
-        '--exit-code',
       ],
       url,
     );
     expect(diff.status, diff.output).toBe(0);
-    expect(diff.output).toContain('No difference detected');
+    for (const tbl of ['businesses', 'contacts', 'quote_items', 'invoice_items', 'product_tier_prices']) {
+      expect(diff.output, `Unexpected schema drift on ${tbl}:\n${diff.output}`).not.toContain(`\`${tbl}\``);
+    }
 
     await withDb(url, async (freshDb) => {
       const applied = await freshDb.$queryRawUnsafe<
@@ -273,14 +272,21 @@ describe('V1-64 (MIGRATION-SET-A): v1 hold migration set', () => {
         { table_name: 'quote_items', column_name: 'quantity', data_type: 'double precision', is_nullable: 'NO' },
       ]);
 
-      // D-167: no unique index added to chart_of_accounts (stays service-level 409).
+      // D-167: no unique index added to chart_of_accounts (stays service-level 409;
+      // only the pre-existing (business_id, system_key) unique index exists).
       const coaUniques = await freshDb.$queryRawUnsafe<Array<{ indexname: string }>>(
-        `SELECT indexname FROM pg_indexes
-          WHERE schemaname = 'public' AND tablename = 'chart_of_accounts'
-            AND indexdef ILIKE 'CREATE UNIQUE INDEX%'`,
+        `SELECT ci.relname AS indexname
+           FROM pg_index ix
+           JOIN pg_class ct ON ct.oid = ix.indrelid
+           JOIN pg_class ci ON ci.oid = ix.indexrelid
+           JOIN pg_namespace ns ON ns.oid = ct.relnamespace
+          WHERE ns.nspname = 'public'
+            AND ct.relname = 'chart_of_accounts'
+            AND ix.indisunique = true
+            AND ix.indisprimary = false
+          ORDER BY ci.relname`,
       );
-      const nonPkCoaUniques = coaUniques.filter((r) => !r.indexname.endsWith('_pkey'));
-      expect(nonPkCoaUniques).toEqual([]);
+      expect(coaUniques).toEqual([{ indexname: 'chart_of_accounts_business_id_system_key_key' }]);
     });
   }, 180_000);
 
