@@ -1,19 +1,22 @@
 import type { Page, Request } from "@playwright/test";
-import { test, expect, settle } from "./journeys/journey-helpers";
+import { test, expect, settle, VARIANT } from "./journeys/journey-helpers";
 
 /**
  * SWP-KEY-CHAT-WEB (sweep BUG-040, BUG-042, BUG-043), live, at both widths, in the KEY-on variants.
  *
  *   - BUG-040: the drawer's Send button posts the typed text (it passed its click event, and .trim() threw).
  *   - BUG-042: an open drawer reads GET flow/sessions once, not in a loop.
- *   - BUG-043: keeping the chat at its newest message scrolls only the messages, never the app's own scroll root
- *     ([data-scroll-root="app"], app/app/layout.tsx): on onboarding that scroll hid "Set up manually" (D-03).
+ *   - BUG-043 (guard here, not the repro): the drawer is a fixed panel outside the app's scroll root, so on Today the
+ *     root could not move even at the base; this step only guards that sending leaves the page where it was. The
+ *     browser repro is journey A3 (onboarding, where the messages sit inside the scroll root and pushed "Set up
+ *     manually" off screen, D-03), run at base and head with this packet; the unit test pins the container scroll.
+ *   - At 375 px the store collapses the history, so KeyChatHistory is not mounted and the BUG-042 step reads 0 there
+ *     at base too; the 1440 px run is the one that shows BUG-042 (the unit test holds every width).
  *
  * The answer itself is not under test (AI is off in the ai-disabled variant; the reply may be a refusal): what the
  * button sends, how often the history reads, and what scrolls.
  */
 
-const VARIANT = process.env.E2E_VARIANT ?? "ai-disabled";
 const isChatPost = (r: Request) => r.method() === "POST" && /\/ai\/businesses\/[^/]+\/(flow\/)?chat(\/stream)?$/.test(new URL(r.url()).pathname);
 const isSessionsRead = (r: Request) => r.method() === "GET" && /\/flow\/sessions$/.test(new URL(r.url()).pathname);
 
@@ -77,7 +80,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 375, height: 812 
         expect(pageErrors.filter((m) => /trim is not a function|TypeError/.test(m)), "no TypeError on Send").toEqual([]);
       });
 
-      await test.step("BUG-043: the reply's arrival does not scroll the app's own scroll root", async () => {
+      await test.step("BUG-043 guard: the reply's arrival does not scroll the app's own scroll root", async () => {
         await page.waitForTimeout(2_000);
         const rootTopAfter = await root.evaluate((el) => el.scrollTop).catch(() => 0);
         expect.soft(rootTopAfter, "the app root did not move while the chat kept to its newest message").toBe(rootTopBefore);
