@@ -20,6 +20,15 @@
  *   PS-05  RED-BEFORE  no tax and no discount: no Tax or Discount row, Subtotal and Total only
  *   PS-06  control     an older payload without totals shows no Subtotal, Tax or Discount row and invents none
  *   PS-07  control     an invalid or expired link keeps the neutral message
+ *
+ * Review round 1 (correctness MINOR-2, MINOR-3, MINOR-6):
+ *   PS-04  now reads the shared status words (lib/status-labels: Part-paid, Part-credited), with customer words for
+ *          the three states a customer acts on (SENT "Awaiting payment", PENDING "Payment pending", FAILED
+ *          "Payment failed")
+ *   PS-08  a breakdown that does not add up to the total (a legacy row: subtotal 1,040 at 12.5% with no stored tax,
+ *          total 1,170; or a fee the breakdown has no row for) is not shown: the Total only
+ *   PS-09  totals without a balance block still show the breakdown and the Total
+ *   PS-10  a tax amount stored with no rate reads "Tax", not "Tax (0%)"
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
@@ -122,8 +131,8 @@ describe("SWP-INV-PUBLIC-LINK: the customer's invoice page", () => {
 
   it("PS-04 RED-BEFORE: the status reads as words, never the enum", async () => {
     const cases: Array<[string, string]> = [
-      ["SENT", "Awaiting payment"], ["OVERDUE", "Overdue"], ["PARTIALLY_PAID", "Part paid"], ["PAID", "Paid"],
-      ["PENDING", "Payment pending"], ["FAILED", "Payment failed"], ["PARTIALLY_CREDITED", "Part credited"],
+      ["SENT", "Awaiting payment"], ["OVERDUE", "Overdue"], ["PARTIALLY_PAID", "Part-paid"], ["PAID", "Paid"],
+      ["PENDING", "Payment pending"], ["FAILED", "Payment failed"], ["PARTIALLY_CREDITED", "Part-credited"],
     ];
     for (const [status, label] of cases) {
       const paid = status === "PAID" ? 1066 : status === "PARTIALLY_PAID" ? 400 : 0;
@@ -164,5 +173,48 @@ describe("SWP-INV-PUBLIC-LINK: the customer's invoice page", () => {
     render(<PublicInvoicePage />);
     expect(await screen.findByText(/expired or is invalid/i)).toBeInTheDocument();
     expect(screen.queryByText(/voided/i)).toBeNull();
+  });
+
+  it("PS-08 (review MINOR-3): a breakdown that does not add up to the total is not shown; the Total is", async () => {
+    // A legacy row: subtotal 1,040 at 12.5% with no tax stored, total 1,170.
+    serve(payload({
+      invoice: { total: 1170 },
+      totals: { subtotal: 1040, taxRate: 12.5, taxAmount: 0, discountAmount: 0, total: 1170 },
+    }));
+    render(<PublicInvoicePage />);
+    expect(await screen.findByTestId("public-invoice-total")).toBeInTheDocument();
+    expect(row(/^Total$/)).toBe("Total TTD 1,170.00");
+    expect(screen.queryByText(/^Subtotal$/, { selector: "dt" })).toBeNull();
+    expect(screen.queryByText(/^Tax/, { selector: "dt" })).toBeNull();
+    cleanup();
+    vi.unstubAllGlobals();
+    // A shipping fee the breakdown has no row for: 100 + 15 shipping = 115.
+    serve(payload({
+      invoice: { total: 115 },
+      totals: { subtotal: 100, taxRate: 0, taxAmount: 0, discountAmount: 0, total: 115 },
+    }));
+    render(<PublicInvoicePage />);
+    expect(await screen.findByTestId("public-invoice-total")).toBeInTheDocument();
+    expect(screen.queryByText(/^Subtotal$/, { selector: "dt" })).toBeNull();
+  });
+
+  it("PS-09 (review MINOR-6): totals without a balance block still show the breakdown and the Total", async () => {
+    const body = payload() as Record<string, unknown>;
+    delete body.balance;
+    serve(body);
+    render(<PublicInvoicePage />);
+    expect(await screen.findByText(/^Subtotal$/, { selector: "dt" })).toBeInTheDocument();
+    expect(row(/^Total$/)).toBe("Total TTD 1,066.00");
+    expect(screen.queryByText(/^Paid$/, { selector: "dt" })).toBeNull();
+  });
+
+  it("PS-10 (review MINOR-6): a tax amount stored with no rate reads Tax", async () => {
+    serve(payload({
+      invoice: { total: 110 },
+      totals: { subtotal: 100, taxRate: 0, taxAmount: 10, discountAmount: 0, total: 110 },
+    }));
+    render(<PublicInvoicePage />);
+    expect(await screen.findByText(/^Tax$/, { selector: "dt" })).toBeInTheDocument();
+    expect(row(/^Tax$/)).toBe("Tax TTD 10.00");
   });
 });

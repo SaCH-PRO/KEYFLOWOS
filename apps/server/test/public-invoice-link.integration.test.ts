@@ -126,6 +126,8 @@ const ID = {
   // link, and an invoice with tax and a discount (journey D's figures)
   invDraftLink: `${P}invDraftLink`,
   invVoided: `${P}invVoided`,
+  // review MINOR-1: voided, then deleted (soft delete), its link still live
+  invVoidedDeleted: `${P}invVoidedDeleted`,
   invTaxed: `${P}invTaxed`,
   // tenant B
   invB: `${P}invB`,
@@ -171,6 +173,8 @@ const PAYMENT_IDS: Record<string, string[]> = {};
 let unknownBody: Record<string, unknown>;
 /** SWP-INV-PUBLIC-LINK: the route-minted link of the invoice that is then voided. */
 let voidedToken = '';
+/** The route-minted link of the invoice that is voided and then deleted. */
+let voidedDeletedToken = '';
 
 async function cleanup() {
   for (const sql of [
@@ -523,6 +527,17 @@ beforeAll(async () => {
     .set(HEADER, ID.ownerA)
     .send({ businessId: ID.bizA, status: 'VOID' });
   if (voided.status !== 200) throw new Error(`void failed: ${voided.status} ${JSON.stringify(voided.body)}`);
+  // review MINOR-1: another invoice gets a link while SENT, is voided, then deleted through the real routes
+  const vdLink = await createLink(ID.invVoidedDeleted);
+  if (vdLink.status !== 201 || !vdLink.body?.token) throw new Error(`link on ${ID.invVoidedDeleted} failed: ${vdLink.status}`);
+  voidedDeletedToken = vdLink.body.token;
+  const vdVoid = await agent()
+    .patch(`/commerce/invoices/${ID.invVoidedDeleted}/status/void`)
+    .set(HEADER, ID.ownerA)
+    .send({ businessId: ID.bizA, status: 'VOID' });
+  if (vdVoid.status !== 200) throw new Error(`void failed: ${vdVoid.status} ${JSON.stringify(vdVoid.body)}`);
+  const vdDelete = await agent().delete(`/commerce/businesses/${ID.bizA}/invoices/${ID.invVoidedDeleted}`).set(HEADER, ID.ownerA);
+  if (vdDelete.status !== 200) throw new Error(`delete failed: ${vdDelete.status} ${JSON.stringify(vdDelete.body)}`);
 
   // ---- seeded rows the routes cannot make -----------------------------------
   await db.paymentLink.create({ data: { id: LINK.voidedExpired.id, token: LINK.voidedExpired.token, invoiceId: ID.invVoided, businessId: ID.bizA, active: true, expiresAt: new Date(Date.now() - DAY_MS) } });
@@ -943,5 +958,13 @@ describe('SWP-INV-PUBLIC-LINK: no link for a draft; a voided link says voided; t
   it('L-28: an invoice with no tax or discount states zeros in its totals block, not nulls', async () => {
     const res = await view(TOKEN[ID.invPartial]);
     expect(res.body.totals).toEqual({ subtotal: TOTAL, taxRate: 0, taxAmount: 0, discountAmount: 0, total: TOTAL, currency: 'TTD' });
+  });
+
+  it("L-29 (review MINOR-1): a voided invoice that was then deleted reads as absent on its live link, as every deleted invoice does, not 'voided'", async () => {
+    expect((await invoiceRow(ID.invVoidedDeleted)).deletedAt, 'soft-deleted through the route').toBeTruthy();
+    expect((await linksOf(ID.invVoidedDeleted)).filter((l: any) => l.token === voidedDeletedToken).map((l: any) => l.active)).toEqual([true]);
+    const res = await view(voidedDeletedToken);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: false, reason: 'not_found' });
   });
 });
