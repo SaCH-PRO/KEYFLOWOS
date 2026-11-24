@@ -1250,6 +1250,11 @@
       "prefix": "v75r_",
       "owner": "apps/server/test/memory-temporal-routes-sight.integration.test.ts",
       "packet": "V1-75 (MEM-TEMPORAL-MEMORY-ROUTES-SIGHT)"
+    },
+    {
+      "prefix": "v91r_",
+      "owner": "apps/server/test/trash-bulk-restore.integration.test.ts",
+      "packet": "V1-P37 (FU-BULK-DELETE-UNDO)"
     }
   ],
   "pendingRenames": [],
