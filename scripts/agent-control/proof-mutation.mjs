@@ -124,7 +124,22 @@ function gitDirState(gitDir) {
 }
 
 /**
- * Resets a worktree the runner made (addWorktree's record: { dir, gitDir, state, index }) to exactly `commit` (a full
+ * The repository-wide files that decide how a checkout is written (its config: core.autocrlf, filters; and its
+ * info/attributes and info/exclude), each with a hash of its content, or "absent". A proof may change them; main's
+ * fresh worktree per control was then checked out under the new ones, so a change means a new worktree.
+ */
+function sharedState(commonDir) {
+  return ['config', 'info/attributes', 'info/exclude']
+    .map((name) => {
+      const full = path.join(commonDir, name);
+      return `${name} ${fs.existsSync(full) ? createHash('sha256').update(fs.readFileSync(full)).digest('hex') : 'absent'}`;
+    })
+    .join('\n');
+}
+
+/**
+ * Resets a worktree the runner made (addWorktree's record: { dir, gitDir, commonDir, state, shared, index, indexSecond })
+ * to exactly `commit` (a full
  * commit id, resolved once by the caller) and checks it is what a fresh worktree at that commit is. Returns
  * { ok: true } or { ok: false, detail }; on { ok: false } the caller makes a new worktree.
  *
@@ -134,10 +149,13 @@ function gitDirState(gitDir) {
  *  - its git dir holds what it held when the worktree was made (HEAD detached at the commit, no per-worktree config,
  *    ref, bisect, lock or rebase): compared with the record; any difference is not pristine. The runner never writes
  *    a ref: an attached HEAD a proof made can never move a branch;
+ *  - the repository's config and info/attributes, info/exclude are as they were (else a new worktree, checked out
+ *    under the new ones, as main's fresh worktree per control was);
  *  - every tracked file as committed, written as this checkout writes it (core.autocrlf included): the index made
- *    with the worktree is put back, then `read-tree -u --reset` rewrites every file whose stat differs from it; a
- *    file a proof rewrote and staged is rewritten from its blob, and no skip-worktree or assume-unchanged flag and no
- *    sparse checkout survive;
+ *    with the worktree is put back, with its own mtime second, then `read-tree -u --reset` rewrites every file whose
+ *    stat differs from it; a file a proof rewrote and staged is rewritten from its blob, and no skip-worktree or
+ *    assume-unchanged flag and no sparse checkout survive. Keeping the index's mtime keeps git re-reading the
+ *    entries checked out in that second ("racy" entries), so a same-size rewrite in that second is caught too;
  *  - no untracked or ignored file: `clean -ffdx`, then `status --porcelain --ignored` must be empty.
  * Every git call that changes anything is pinned to the recorded git dir and the directory, and nothing here writes
  * the repository's config or any ref.
@@ -149,10 +167,12 @@ function gitDirState(gitDir) {
  *    fresh worktree would have run the proof: the control fails, it is never run on a wrong tree;
  *  - a process a proof starts and leaves running after the proof itself exits normally can still write into the next
  *    control's tree; a proof that is stopped (timeout, signal) is handled below (runManifest). No proof in
- *    negative-controls.yaml starts a detached process.
+ *    negative-controls.yaml starts a detached process;
+ *  - on a case-insensitive filesystem (Windows), a case-only rename of a tracked file keeps its stat, so the reset
+ *    keeps the new spelling; no manifest proof renames a file.
  */
 export function resetToPristine(worktree, commit) {
-  if (!worktree || !worktree.dir || !worktree.gitDir || worktree.state === undefined || !worktree.index) {
+  if (!worktree || !worktree.dir || !worktree.gitDir || !worktree.commonDir || worktree.state === undefined || worktree.shared === undefined || !worktree.index || worktree.indexSecond === undefined) {
     return { ok: false, detail: 'not a worktree the runner made' };
   }
   // 1. The directory must still be this worktree (read only, by discovery, as the proof will see it).
@@ -173,6 +193,13 @@ export function resetToPristine(worktree, commit) {
     const changed = state.split('\n').filter((line) => !made.has(line)).map((line) => line.split(' ')[0]);
     return { ok: false, detail: `the worktree's git dir differs from a fresh one: ${changed.slice(0, 5).join(', ') || 'entries removed'}` };
   }
+  let shared;
+  try {
+    shared = sharedState(worktree.commonDir);
+  } catch (error) {
+    return { ok: false, detail: `cannot read the repository's config: ${error.message}` };
+  }
+  if (shared !== worktree.shared) return { ok: false, detail: "the repository's config or info files changed since the worktree was made" };
   const target = pinned(worktree, 'rev-parse', '--verify', '--quiet', `${commit}^{commit}`);
   if (target.status !== 0) return { ok: false, detail: `cannot resolve ${commit}` };
   const resolved = target.stdout.trim();
@@ -180,7 +207,9 @@ export function resetToPristine(worktree, commit) {
   if (sparse.stdout.trim() === 'true') return { ok: false, detail: 'sparse checkout is on' };
   // 3. The fresh index back, then the tree from it: neither moves HEAD nor writes a ref.
   try {
-    fs.writeFileSync(path.join(worktree.gitDir, 'index'), worktree.index);
+    const index = path.join(worktree.gitDir, 'index');
+    fs.writeFileSync(index, worktree.index);
+    fs.utimesSync(index, worktree.indexSecond, worktree.indexSecond);
   } catch (error) {
     return { ok: false, detail: `cannot restore the index: ${error.message}` };
   }
@@ -205,8 +234,9 @@ export function resetToPristine(worktree, commit) {
 
 /**
  * Makes a worktree detached at `commit` and records what a fresh one is: its own git dir (read once, before any proof
- * runs; every later git call is pinned to it), that git dir's files, and its index. Returns the record
- * { dir, gitDir, state, index } or { dir: null, detail }.
+ * runs; every later git call is pinned to it), that git dir's files, the repository's config and info files, and its
+ * index with the second it was written. Returns the record { dir, gitDir, commonDir, state, shared, index,
+ * indexSecond } or { dir: null, detail }.
  */
 export function addWorktree(repoRoot, commit) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-proof-'));
@@ -222,9 +252,19 @@ export function addWorktree(repoRoot, commit) {
     return { dir: null, detail: `cannot read the new worktree's git dir: ${gitDir.stderr.trim()}` };
   }
   const record = { dir, gitDir: gitDir.stdout.trim() };
+  const commonDir = run('git', [`--git-dir=${record.gitDir}`, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: dir, env: gitEnv() });
+  if (commonDir.status !== 0) {
+    removeWorktree(repoRoot, dir);
+    return { dir: null, detail: `cannot read the repository's git dir: ${commonDir.stderr.trim()}` };
+  }
+  record.commonDir = commonDir.stdout.trim();
   try {
-    record.index = fs.readFileSync(path.join(record.gitDir, 'index'));
+    const index = path.join(record.gitDir, 'index');
+    record.index = fs.readFileSync(index);
+    // The second the index was written, rounded down: put back with it, git re-reads the entries of that second.
+    record.indexSecond = Math.floor(fs.statSync(index).mtimeMs / 1000);
     record.state = gitDirState(record.gitDir);
+    record.shared = sharedState(record.commonDir);
   } catch (error) {
     removeWorktree(repoRoot, dir);
     return { dir: null, detail: `cannot record the new worktree: ${error.message}` };
