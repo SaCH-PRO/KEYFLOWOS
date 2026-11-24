@@ -2,7 +2,7 @@
 
 import type { ReactNode, ElementType } from "react";
 import { MoreHorizontal } from "lucide-react";
-import { useState, useRef, useEffect, useMemo } from "react";
+import { createContext, useContext, useState, useRef, useEffect, useMemo } from "react";
 import { useMounted } from "@/hooks/use-mounted";
 import { getStatusBadge } from "./commerce-types";
 import { formatAmount, formatRelativeDate, getStatusAccentColor, getItemsSummary } from "../utils/commerce-utils";
@@ -10,6 +10,16 @@ import { formatAmount, formatRelativeDate, getStatusAccentColor, getItemsSummary
 interface OverflowMenuProps {
   children: ReactNode;
 }
+
+/**
+ * Closes the open OverflowMenu. An item calls it after its own handler has run:
+ * the item stops its click from bubbling (so the row behind it does not open),
+ * so the panel cannot close on the click's way up; and closing it in the
+ * capture phase removed the item before its handler ran in a browser (React
+ * flushes the discrete update in a microtask between the capture and bubble
+ * listeners), so Edit and Share did nothing (MOUNT-QUOTES, live journey D).
+ */
+const CloseOverflowMenu = createContext<(() => void) | null>(null);
 
 export function OverflowMenu({ children }: OverflowMenuProps) {
   const [open, setOpen] = useState(false);
@@ -43,7 +53,7 @@ export function OverflowMenu({ children }: OverflowMenuProps) {
           className="absolute right-0 top-full mt-1 z-50 min-w-[180px] rounded-xl border border-border/60 bg-popover shadow-xl py-1 animate-in fade-in-0 zoom-in-95"
           onClick={() => setOpen(false)}
         >
-          {children}
+          <CloseOverflowMenu.Provider value={() => setOpen(false)}>{children}</CloseOverflowMenu.Provider>
         </div>
       )}
     </div>
@@ -65,11 +75,15 @@ export function OverflowMenuItem({
   disabled?: boolean;
   loading?: boolean;
 }) {
+  const close = useContext(CloseOverflowMenu);
   return (
     <button
       onClick={(e) => {
         e.stopPropagation();
-        if (!disabled) onClick();
+        if (disabled) return;
+        onClick();
+        // After the handler: the choice closes the menu (it no longer lies over what the choice opened).
+        close?.();
       }}
       disabled={disabled}
       className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs transition-colors disabled:opacity-50 ${

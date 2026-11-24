@@ -186,6 +186,10 @@ export const BillingFormModal = React.memo(function BillingFormModal({
       setTemplateRefusal(null);
       return;
     }
+    // MOUNT-QUOTES (journey D2): the Notes section opens with the sheet when
+    // the notes matter, editing an existing document or one that already has
+    // notes (a duplicate); a new, empty document keeps it collapsed.
+    if (isEditing || notes.trim()) setSections((s) => (s.notes ? s : { ...s, notes: true }));
     fetchDocumentTemplates(businessId ?? undefined).then((res) => {
       if (res.data) {
         const type = docType === "invoice" ? "invoice" : "quote";
@@ -197,6 +201,7 @@ export const BillingFormModal = React.memo(function BillingFormModal({
         setPreviewTemplate(defaultId as TemplateId);
       }
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- isEditing and notes are read once, when the sheet opens
   }, [open, docType, businessId]);
 
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
@@ -337,8 +342,9 @@ export const BillingFormModal = React.memo(function BillingFormModal({
           </div>
         }
         footer={
-          <div className="space-y-3">
-            <div className="flex items-center justify-between text-sm">
+          // The footer fills the sheet and its buttons wrap, so on a phone Create / Update stays on screen (journey D1, D2).
+          <div className="w-full min-w-0 space-y-3">
+            <div className="flex items-center justify-between gap-3 text-sm">
               <div className="space-y-1 text-muted-foreground">
                 <div className="flex justify-between gap-8">
                   <span>Subtotal</span>
@@ -364,7 +370,7 @@ export const BillingFormModal = React.memo(function BillingFormModal({
                 </p>
               </div>
             </div>
-            <div className="flex items-center justify-end gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={handleClose}
