@@ -32,9 +32,7 @@ function makePlanner(prismaClient: Record<string, unknown>, plannerStub?: Record
   const noop = new Proxy({}, { get: () => vi.fn() });
   return new KeyCortexPlannerService(
     { client: prismaClient } as never,
-    noop as never,
     (plannerStub ?? noop) as never,
-    noop as never,
     noop as never,
     noop as never,
     noop as never,
@@ -74,7 +72,7 @@ describe('FU-PLANNER-STEP-ORDER: every aiPlan include.steps query orders by orde
       plannerStub,
     );
     vi.spyOn(service, 'generatePlan').mockResolvedValue({
-      objective: 'Grow revenue',
+      goal: { objective: 'Grow revenue', successCriteria: [] },
       horizon: 'tactical',
       steps: [],
       confidence: 0.9,
@@ -135,6 +133,8 @@ describe('FU-PLANNER-STEP-ORDER: every aiPlan include.steps query orders by orde
     };
     const memberFindFirst = vi.fn().mockResolvedValue(claimedPlan);
     const service2 = makePlanner({
+      business: { findUnique: vi.fn().mockResolvedValue({ ownerId: 'user_1' }) },
+      membership: { findUnique: vi.fn().mockResolvedValue({ role: 'OWNER', permissionScopes: null }) },
       aiPlan: {
         findFirst: memberFindFirst,
         findUnique: reloadFindUnique,
