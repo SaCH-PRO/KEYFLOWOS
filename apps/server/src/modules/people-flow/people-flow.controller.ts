@@ -3,6 +3,7 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { assertContactVisible, contactVisibilityFilter, resolveCrmAccess } from '../crm/crm-permissions.helper';
+import { resolveTimelineViewer } from '../timeline/timeline-visibility';
 import { PeopleOverviewService } from './people-overview.service';
 import { RelationshipHealthService } from './relationship-health.service';
 
@@ -24,6 +25,8 @@ export class PeopleFlowController {
   // caller may open by the GET crm contacts/:contactId rule (V1-08
   // assertContactVisible): a hidden contact gets the same 404 'Contact not
   // found' as an unknown id, before the service runs.
+  // V1-86 (D-100 / D-234): invoice/revenue fields are projected out when the
+  // caller does not hold revenue:read.
   @Get('contacts/:contactId/health')
   async getContactHealth(
     @Param('businessId') businessId: string,
@@ -31,7 +34,10 @@ export class PeopleFlowController {
     @Req() req: { user: { id: string } },
   ) {
     await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
-    return this.health.computeHealth(businessId, contactId);
+    const viewer = await resolveTimelineViewer(this.prisma, businessId, req.user.id);
+    return this.health.computeHealth(businessId, contactId, {
+      readsRevenue: viewer.readable.has('revenue'),
+    });
   }
 
   /**

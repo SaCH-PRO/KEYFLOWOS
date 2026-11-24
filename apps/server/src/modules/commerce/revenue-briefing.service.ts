@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OPEN_RECEIVABLE_STATUS_LIST } from './commerce-stats.service';
+import { REMINDABLE_INVOICE_STATUSES } from './invoice-workflow.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { RevenueForecastService, RevenueForecast } from './revenue-forecast.service';
@@ -100,6 +101,9 @@ export class RevenueBriefingService {
     const overdueInv = openInvoices.filter(
       (i) => i.status === 'OVERDUE' || (i.dueDate && new Date(i.dueDate) < now),
     );
+    // D-256 / D-260: PENDING (never sent) and PARTIALLY_CREDITED (409 on send-reminder)
+    // count in overdue totals and whatsAtRisk, but MUST NOT become payment-reminder chases.
+    const chaseableOverdue = overdueInv.filter((i) => REMINDABLE_INVOICE_STATUSES.has(i.status));
     const overdueTotal = overdueInv.reduce((s, i) => s + Number(i.total ?? 0), 0);
     const pendingQuoteTotal = pendingQuotes.reduce((s, q) => s + Number(q.total ?? 0), 0);
     const currency = biz?.currency ?? 'TTD';
@@ -112,12 +116,13 @@ export class RevenueBriefingService {
         forecast,
         slowPayers,
         pricingSignals,
-        overdueInv,
+        overdueCount: overdueInv.length,
+        overdueInv: chaseableOverdue,
         pendingQuotes,
       });
     } catch (e) {
       this.logger.warn(`AI briefing failed: ${(e as Error).message}; using fallback`);
-      briefing = this.buildFallback(forecast, slowPayers, pricingSignals, overdueInv, pendingQuotes, currency);
+      briefing = this.buildFallback(forecast, slowPayers, pricingSignals, overdueInv, chaseableOverdue, pendingQuotes, currency);
     }
 
     const snapshot: RevenueBriefingSnapshot = {
@@ -147,6 +152,7 @@ export class RevenueBriefingService {
       forecast: RevenueForecast;
       slowPayers: SlowPayerReport;
       pricingSignals: PricingSignalsReport;
+      overdueCount: number;
       overdueInv: Array<{ id: string; invoiceNumber: string; total: number; contact: { id: string; firstName: string | null; lastName: string | null; email: string | null } | null }>;
       pendingQuotes: Array<{ id: string; quoteNumber: string; total: number; contact: { id: string; firstName: string | null; lastName: string | null; email: string | null } | null }>;
     },
@@ -165,7 +171,7 @@ export class RevenueBriefingService {
         totalWorst: ctx.forecast.totalWorst,
         confidence: ctx.forecast.confidence,
       },
-      overdue: { count: ctx.overdueInv.length, top: top(ctx.overdueInv) },
+      overdue: { count: ctx.overdueCount, top: top(ctx.overdueInv) },
       pendingQuotes: { count: ctx.pendingQuotes.length, top: top(ctx.pendingQuotes) },
       slowPayers: ctx.slowPayers.slowPayers.slice(0, 5).map((s) => ({
         name: s.contactName, avgDays: s.avgDaysToPay, owed: s.outstandingTotal,
@@ -311,6 +317,7 @@ export class RevenueBriefingService {
     slowPayers: SlowPayerReport,
     pricingSignals: PricingSignalsReport,
     overdueInv: Array<{ id: string; invoiceNumber: string; total: number; contact: { id: string; firstName: string | null; lastName: string | null; email: string | null } | null }>,
+    chaseableOverdue: Array<{ id: string; invoiceNumber: string; total: number; contact: { id: string; firstName: string | null; lastName: string | null; email: string | null } | null }>,
     pendingQuotes: Array<{ id: string; quoteNumber: string; total: number; contact: { id: string; firstName: string | null; lastName: string | null; email: string | null } | null }>,
     currency: string,
   ): RevenueBriefing {
@@ -333,7 +340,7 @@ export class RevenueBriefingService {
     }
 
     const chases: RevenueBriefingChase[] = [];
-    overdueInv.slice(0, 3).forEach((inv) => {
+    chaseableOverdue.slice(0, 3).forEach((inv) => {
       const c = inv.contact;
       const name = c ? `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() || c.email || 'customer' : 'customer';
       chases.push({

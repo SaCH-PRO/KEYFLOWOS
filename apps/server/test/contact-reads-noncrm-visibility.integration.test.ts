@@ -410,14 +410,12 @@ describe('fixture sanity (real rows)', () => {
     expect(snaps.map((s: any) => s.score)).toEqual([71]);
   });
 
-  it('characterization: RelationshipHealthService.computeHealth answers null for every contact at bb6b86d4', async () => {
-    // Its findUnique selects no businessId, so `contact.businessId !== businessId`
-    // holds for every row (relationship-health.service.ts:38-51, outside this
-    // packet's write set). people-flow health therefore answers an empty 200
-    // even for a visible contact with health inputs; NC-03's defect is that the
-    // service runs on a contact the caller may not open, not what it returns.
-    expect(await serviceAnswer(route('NC-03'), ID.cPriv)).toBeNull();
-    expect(await serviceAnswer(route('NC-03'), ID.cTeam)).toBeNull();
+  it('NC-03: RelationshipHealthService.computeHealth returns live contact health after V1-86 fixed the missing businessId select', async () => {
+    // Previously computeHealth omitted businessId from findUnique.select so it
+    // returned null for every contact at bb6b86d4; V1-86 (FU-PENDING-OWED-SERVER)
+    // fixed the select and added deletedAt: null + revenue:read projection.
+    expect(await serviceAnswer(route('NC-03'), ID.cPriv)).toMatchObject({ contactId: ID.cPriv });
+    expect(await serviceAnswer(route('NC-03'), ID.cTeam)).toMatchObject({ contactId: ID.cTeam });
   });
 });
 

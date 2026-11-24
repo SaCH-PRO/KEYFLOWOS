@@ -115,6 +115,7 @@ export class SalesTeamService {
     const contacts = await this.prisma.client.contact.findMany({
       where: {
         businessId,
+        deletedAt: null,
         custom: { path: ['salesRepId'], equals: repId },
       },
       select: {
@@ -134,7 +135,7 @@ export class SalesTeamService {
         where: { businessId, contactId: c.id, deletedAt: null, status: { in: OPEN_RECEIVABLE_STATUS_LIST } },
       });
       const paidDeals = await this.prisma.client.invoice.count({
-        where: { businessId, contactId: c.id, status: 'PAID' },
+        where: { businessId, contactId: c.id, deletedAt: null, status: 'PAID' },
       });
       const custom = (c.custom as Record<string, any>) ?? {};
       result.push({
