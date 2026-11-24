@@ -14,9 +14,11 @@ import {
 import {
   BUSINESS_SELLS,
   actingMemberNow,
+  beginBusinessWrite,
   confirmedBusinessSettings,
   isBusinessSells,
   noteBusinessSettings,
+  noteBusinessWriteFailed,
   type BusinessSells,
 } from "@/lib/business-settings";
 import { fetchMe } from "@/lib/client";
@@ -211,17 +213,25 @@ async function completeManualSetup(
     // One owner-only PATCH: the profile, and the answer when one was given.
     const body: MinimalBusinessProfile & { sells?: BusinessSells } = sells ? { ...profile, sells } : profile;
     const sentAs = actingMemberNow();
+    // FU-SETTINGS-MANUAL-STEP-FENCE: numbered like the settings store's own writes, so an older write that answers
+    // after this one cannot overwrite what it saved (business-settings.ts `recorded`).
+    const sequence = beginBusinessWrite(businessId);
     const saved = await saveBusinessMinimalProfile(businessId, body);
-    if (saved.error !== null) return saved.error.trim() || "Could not save your business profile. Please try again.";
+    if (saved.error !== null) {
+      // An unknown outcome (no status, a 5xx) may have been applied: older answers are fenced, and the business is read
+      // again, as for the store's own writes (FU-SETTINGS-MANUAL-STEP-FENCE review round 1).
+      noteBusinessWriteFailed(businessId, saved.status, sequence);
+      return saved.error.trim() || "Could not save your business profile. Please try again.";
+    }
     if (actingMemberNow() !== sentAs) {
       // Answered after someone else signed in to this browser (review OBS4-1): nothing is recorded for them and
       // setup does not go on in their name.
-      noteBusinessSettings(businessId, saved.data, sentAs);
+      noteBusinessSettings(businessId, saved.data, sentAs, sequence);
       return "Someone else has signed in to this browser since you pressed Finish setup. Sign in again to check your business.";
     }
     // The nav and the hubs read what the business sells from here on. An answer that is not this business's
     // is not a save anyone can vouch for (review SEC-2).
-    if (!noteBusinessSettings(businessId, saved.data, sentAs)) {
+    if (!noteBusinessSettings(businessId, saved.data, sentAs, sequence)) {
       return "Your business profile was sent, but the answer could not be read. Please try again.";
     }
     // An answer given must be the answer the business now holds (review SEC2-1).
