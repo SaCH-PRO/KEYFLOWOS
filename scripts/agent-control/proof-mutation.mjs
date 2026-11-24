@@ -27,6 +27,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { parseYaml } from './lib/yaml.mjs';
 
@@ -40,7 +41,10 @@ function run(cmd, args, options = {}) {
 }
 
 /** Variables that tell git which repository, index or tree to use: the runner's own git calls never inherit them. */
-const GIT_LOCATION_VARS = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY', 'GIT_NAMESPACE'];
+const GIT_LOCATION_VARS = [
+  'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_NAMESPACE',
+];
 const gitEnv = () => {
   const env = { ...process.env };
   for (const name of GIT_LOCATION_VARS) delete env[name];
@@ -65,8 +69,9 @@ const samePath = (a, b) => {
   }
 };
 
+/** A proof, run in its worktree. It inherits no git location variable: git in the proof finds the worktree. */
 function runShell(command, cwd, timeout) {
-  return spawnSync(command, { shell: true, cwd, encoding: 'utf8', timeout: timeout || 900_000, maxBuffer: 32 * 1024 * 1024 });
+  return spawnSync(command, { shell: true, cwd, env: gitEnv(), encoding: 'utf8', timeout: timeout || 900_000, maxBuffer: 32 * 1024 * 1024 });
 }
 
 export function applyMutation(root, mutation) {
@@ -99,23 +104,56 @@ export function applyMutation(root, mutation) {
 }
 
 /**
- * Resets a worktree ({ dir, gitDir }: the git dir recorded when it was added) to exactly `commit` (a full commit id,
- * resolved once by the caller) and checks it is pristine. Returns { ok: true } or { ok: false, detail }.
+ * Every file in a worktree's own git dir (HEAD, ORIG_HEAD, commondir, gitdir, logs/HEAD, and anything a proof adds:
+ * config.worktree, refs/worktree/*, BISECT_*, a lock, a rebase), each with a hash of its content; the index is left
+ * out (the runner restores it). Two worktrees in the same state have the same string.
+ */
+function gitDirState(gitDir) {
+  const entries = [];
+  const walk = (rel) => {
+    for (const entry of fs.readdirSync(path.join(gitDir, rel), { withFileTypes: true })) {
+      const name = rel ? `${rel}/${entry.name}` : entry.name;
+      const full = path.join(gitDir, name);
+      if (entry.isDirectory()) walk(name);
+      else if (entry.isSymbolicLink()) entries.push(`${name} -> ${fs.readlinkSync(full)}`);
+      else if (name !== 'index') entries.push(`${name} ${createHash('sha256').update(fs.readFileSync(full)).digest('hex')}`);
+    }
+  };
+  walk('');
+  return entries.sort().join('\n');
+}
+
+/**
+ * Resets a worktree the runner made (addWorktree's record: { dir, gitDir, state, index }) to exactly `commit` (a full
+ * commit id, resolved once by the caller) and checks it is what a fresh worktree at that commit is. Returns
+ * { ok: true } or { ok: false, detail }; on { ok: false } the caller makes a new worktree.
  *
- * Pristine is what a fresh worktree is: git in the directory finds this worktree's own git dir (a proof may have
- * rewritten `.git` to point anywhere, the main repository included); no sparse checkout and no index entry flagged
- * skip-worktree or assume-unchanged; every tracked file as committed; no untracked or ignored file; HEAD at the commit.
- * Every git call that changes anything is pinned to the recorded git dir and the directory, so it never follows a
- * rewritten `.git`; and nothing here writes the repository's config. State a reset cannot undo (sparse checkout, a
- * flagged entry, a redirected `.git`) is reported as not pristine, and the caller recreates the worktree.
+ * What a fresh worktree is, and how each part is held:
+ *  - git in the directory finds this worktree's own git dir (a proof may rewrite `.git` to point anywhere, the main
+ *    repository included): checked by discovery, as the proof will see it;
+ *  - its git dir holds what it held when the worktree was made (HEAD detached at the commit, no per-worktree config,
+ *    ref, bisect, lock or rebase): compared with the record; any difference is not pristine. The runner never writes
+ *    a ref: an attached HEAD a proof made can never move a branch;
+ *  - every tracked file as committed, written as this checkout writes it (core.autocrlf included): the index made
+ *    with the worktree is put back, then `read-tree -u --reset` rewrites every file whose stat differs from it; a
+ *    file a proof rewrote and staged is rewritten from its blob, and no skip-worktree or assume-unchanged flag and no
+ *    sparse checkout survive;
+ *  - no untracked or ignored file: `clean -ffdx`, then `status --porcelain --ignored` must be empty.
+ * Every git call that changes anything is pinned to the recorded git dir and the directory, and nothing here writes
+ * the repository's config or any ref.
  *
- * `worktree` may be a bare directory (a checkout whose own git dir is found from it): its git dir is then read once.
+ * Known limits, each failing closed or outside what any manifest proof does:
+ *  - a file is rewritten when its stat (size, mtime, inode) differs from the fresh index; a proof that rewrites a
+ *    tracked file and then forges its stat back is not seen (main's fresh worktree per control was);
+ *  - a checkout that does not round-trip (a smudge filter with no matching clean) may be reported not pristine where a
+ *    fresh worktree would have run the proof: the control fails, it is never run on a wrong tree;
+ *  - a process a proof starts and leaves running after the proof itself exits normally can still write into the next
+ *    control's tree; a proof that is stopped (timeout, signal) is handled below (runManifest). No proof in
+ *    negative-controls.yaml starts a detached process.
  */
 export function resetToPristine(worktree, commit) {
-  if (typeof worktree === 'string') {
-    const found = git(worktree, 'rev-parse', '--absolute-git-dir');
-    if (found.status !== 0) return { ok: false, detail: `not a git checkout: ${worktree}` };
-    worktree = { dir: worktree, gitDir: found.stdout.trim() };
+  if (!worktree || !worktree.dir || !worktree.gitDir || worktree.state === undefined || !worktree.index) {
+    return { ok: false, detail: 'not a worktree the runner made' };
   }
   // 1. The directory must still be this worktree (read only, by discovery, as the proof will see it).
   const gitDir = git(worktree.dir, 'rev-parse', '--absolute-git-dir');
@@ -123,22 +161,31 @@ export function resetToPristine(worktree, commit) {
   if (gitDir.status !== 0 || top.status !== 0 || !samePath(gitDir.stdout.trim(), worktree.gitDir) || !samePath(top.stdout.trim(), worktree.dir)) {
     return { ok: false, detail: `the worktree's .git no longer leads to its own git dir (${(gitDir.stdout || gitDir.stderr).trim()})` };
   }
+  // 2. Its git dir is as it was made.
+  let state;
+  try {
+    state = gitDirState(worktree.gitDir);
+  } catch (error) {
+    return { ok: false, detail: `cannot read the worktree's git dir: ${error.message}` };
+  }
+  if (state !== worktree.state) {
+    const made = new Set(worktree.state.split('\n'));
+    const changed = state.split('\n').filter((line) => !made.has(line)).map((line) => line.split(' ')[0]);
+    return { ok: false, detail: `the worktree's git dir differs from a fresh one: ${changed.slice(0, 5).join(', ') || 'entries removed'}` };
+  }
   const target = pinned(worktree, 'rev-parse', '--verify', '--quiet', `${commit}^{commit}`);
   if (target.status !== 0) return { ok: false, detail: `cannot resolve ${commit}` };
   const resolved = target.stdout.trim();
-  // 2. State a reset keeps: sparse checkout, flagged index entries. Read only; a tree with either is not pristine.
   const sparse = pinned(worktree, 'config', '--bool', 'core.sparseCheckout');
   if (sparse.stdout.trim() === 'true') return { ok: false, detail: 'sparse checkout is on' };
-  const flagged = () => {
-    const listed = pinned(worktree, 'ls-files', '-v', '-z');
-    if (listed.status !== 0) return [`(git ls-files failed: ${listed.stderr.trim()})`];
-    return listed.stdout.split('\0').filter((entry) => entry && !entry.startsWith('H '));
-  };
-  const before = flagged();
-  if (before.length > 0) return { ok: false, detail: `index entries not in normal state: ${before.slice(0, 5).join(', ')}` };
-  // 3. Reset and clean, pinned.
-  const reset = pinned(worktree, 'reset', '--quiet', '--hard', resolved);
-  if (reset.status !== 0) return { ok: false, detail: `git reset failed: ${reset.stderr.trim()}` };
+  // 3. The fresh index back, then the tree from it: neither moves HEAD nor writes a ref.
+  try {
+    fs.writeFileSync(path.join(worktree.gitDir, 'index'), worktree.index);
+  } catch (error) {
+    return { ok: false, detail: `cannot restore the index: ${error.message}` };
+  }
+  const reset = pinned(worktree, 'read-tree', '-u', '--reset', resolved);
+  if (reset.status !== 0) return { ok: false, detail: `git read-tree failed: ${reset.stderr.trim()}` };
   const clean = pinned(worktree, 'clean', '-q', '-ffdx');
   if (clean.status !== 0) return { ok: false, detail: `git clean failed: ${clean.stderr.trim()}` };
   // 4. Check the result.
@@ -146,34 +193,53 @@ export function resetToPristine(worktree, commit) {
   if (status.status !== 0 || status.stdout.trim() !== '') {
     return { ok: false, detail: `not pristine after reset: ${(status.stdout || status.stderr).trim().slice(0, 400)}` };
   }
-  const after = flagged();
-  if (after.length > 0) return { ok: false, detail: `index not in normal state after reset: ${after.slice(0, 5).join(', ')}` };
+  const listed = pinned(worktree, 'ls-files', '-v', '-z');
+  const flagged = listed.status !== 0 ? ['(git ls-files failed)'] : listed.stdout.split('\0').filter((entry) => entry && !entry.startsWith('H '));
+  if (flagged.length > 0) return { ok: false, detail: `index not in normal state after reset: ${flagged.slice(0, 5).join(', ')}` };
+  const attached = pinned(worktree, 'symbolic-ref', '-q', 'HEAD');
+  if (attached.status === 0) return { ok: false, detail: `HEAD is attached to ${attached.stdout.trim()}` };
   const head = pinned(worktree, 'rev-parse', 'HEAD');
   if (head.status !== 0 || head.stdout.trim() !== resolved) return { ok: false, detail: `HEAD is not ${resolved} after reset` };
   return { ok: true };
 }
 
-function addWorktree(repoRoot, commit) {
+/**
+ * Makes a worktree detached at `commit` and records what a fresh one is: its own git dir (read once, before any proof
+ * runs; every later git call is pinned to it), that git dir's files, and its index. Returns the record
+ * { dir, gitDir, state, index } or { dir: null, detail }.
+ */
+export function addWorktree(repoRoot, commit) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-proof-'));
   const added = git(repoRoot, 'worktree', 'add', '--detach', dir, commit);
-  if (added.status !== 0) return { dir: null, detail: added.stderr.trim() };
-  // Its own git dir, recorded before any proof runs: every later git call is pinned to it.
+  if (added.status !== 0) {
+    // A checkout that failed part way may leave the directory and git's record of it: remove both.
+    removeWorktree(repoRoot, dir);
+    return { dir: null, detail: added.stderr.trim() };
+  }
   const gitDir = git(dir, 'rev-parse', '--absolute-git-dir');
   if (gitDir.status !== 0) {
     removeWorktree(repoRoot, dir);
     return { dir: null, detail: `cannot read the new worktree's git dir: ${gitDir.stderr.trim()}` };
   }
-  return { dir, gitDir: gitDir.stdout.trim() };
+  const record = { dir, gitDir: gitDir.stdout.trim() };
+  try {
+    record.index = fs.readFileSync(path.join(record.gitDir, 'index'));
+    record.state = gitDirState(record.gitDir);
+  } catch (error) {
+    removeWorktree(repoRoot, dir);
+    return { dir: null, detail: `cannot record the new worktree: ${error.message}` };
+  }
+  return record;
 }
 
 /**
- * Removes a worktree. One a proof broke (its .git rewritten) cannot be removed by git: it is deleted and its record
- * pruned. A delete that fails (EBUSY or EPERM on Windows, for a file another process holds) is reported, never thrown,
- * so the run still ends with its summary. Returns { ok: true } or { ok: false, detail }.
+ * Removes a worktree, locked or not (`--force` twice). One a proof broke (its .git rewritten) cannot be removed by git:
+ * it is deleted and its record pruned. A delete that fails (EBUSY or EPERM on Windows, for a file another process
+ * holds) is reported, never thrown, so the run still ends with its summary. Returns { ok: true } or { ok: false, detail }.
  */
 export function removeWorktree(repoRoot, dir, rm = fs.rmSync) {
   if (!dir) return { ok: true };
-  const removed = git(repoRoot, 'worktree', 'remove', '--force', dir);
+  const removed = git(repoRoot, 'worktree', 'remove', '--force', '--force', dir);
   if (removed.status === 0) return { ok: true };
   try {
     rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
@@ -202,9 +268,15 @@ export function runManifest(manifest, options = {}) {
     return { total: results.length, live: 0, vacuous: results.length, results };
   }
 
+  // A proof that timed out or was killed may leave processes that keep writing where it ran: the next control then
+  // runs in a new worktree at a new path, out of their reach (spawnSync's timeout kills the shell, not its children).
+  let stale = null;
+  const outlived = (run) => Boolean(run.error || run.signal);
+
   try {
     for (const entry of controls) {
-      let pristine = resetToPristine(worktree, commit);
+      let pristine = stale ? { ok: false, detail: stale } : resetToPristine(worktree, commit);
+      stale = null;
       if (!pristine.ok) {
         // Whatever the last proof left, the next control gets what the per-control design gave it: a fresh worktree
         // at the commit, checked the same way. Only if that too cannot be made pristine does this control fail.
@@ -223,6 +295,7 @@ export function runManifest(manifest, options = {}) {
       // 1. Baseline: the proof must pass before the defect is restored.
       const baseline = runShell(entry.proof_command, worktree.dir, entry.timeout_ms);
       const baselinePassed = baseline.status === 0;
+      if (outlived(baseline)) stale = `the last proof was stopped (${baseline.signal || baseline.error?.code || 'error'})`;
 
       // 2. Restore the defect.
       const mutated = applyMutation(worktree.dir, entry.mutation);
@@ -234,6 +307,7 @@ export function runManifest(manifest, options = {}) {
       // 3. The proof must now fail. If it still passes, it never tested the claim.
       const after = runShell(entry.proof_command, worktree.dir, entry.timeout_ms);
       const failedAsRequired = after.status !== 0;
+      if (outlived(after)) stale = `the last proof was stopped (${after.signal || after.error?.code || 'error'})`;
 
       results.push({
         id: entry.id,

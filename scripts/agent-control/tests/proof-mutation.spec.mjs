@@ -22,7 +22,12 @@
  *   PM-08  RED-AT-a4f85f72  sparse-checkout a proof turns on does not survive into the next control
  *   PM-09  RED-AT-a4f85f72  a proof that breaks the worktree fails only its own control: the next one runs on a fresh,
  *                           exact tree (one fresh worktree, then a second reset), as before
- *   PM-10  control          (confirmation review finding 2) a commit that no checkout can make pristine (a CRLF file
+ *   PM-10  control          (confirmation review finding 2; restated at the second repair) a tree the reset cannot make
+ *                           (a required smudge filter that fails once a proof has changed the file): that control fails
+ *                           at stage 'reset' and its proof never runs. (The first fixture, a smudge filter with no
+ *                           matching clean, is reported not pristine only when git's status re-reads the file, which
+ *                           depends on timing: not a deterministic test. The repository has no filter attribute.)
+ *   (was)  ...              a commit that no checkout can make pristine (a CRLF file
  *                           committed under `* text=auto`, which shows modified even freshly checked out): the control
  *                           fails at stage 'reset' and its proof never runs
  *
@@ -296,25 +301,46 @@ test('PM-09 RED-AT-a4f85f72: a proof that breaks the worktree fails only its own
   assert.equal(listed.length, 1, 'no worktree left behind, broken or not: ' + listed.join(' | '));
 });
 
-test('PM-10 control: a commit no checkout can make pristine fails its control at the reset, and the proof never runs', () => {
+/** A smudge filter run by node (portable to the Windows runner): `node <script>` with its own state file. */
+function nodeFilter(dir, name, body) {
+  const scriptDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-pm-filter-'));
+  made.push(scriptDir);
+  const script = path.join(scriptDir, `${name}.cjs`);
+  fs.writeFileSync(script, body.replace('STATE', JSON.stringify(path.join(scriptDir, 'count.txt'))));
+  git(dir, 'config', `filter.${name}.smudge`, `node "${script.split(path.sep).join('/')}"`);
+  git(dir, 'config', `filter.${name}.clean`, 'cat');
+  return scriptDir;
+}
+
+test('PM-10 control: a tree the reset cannot make (its checkout cannot be repeated) fails that control at the reset, and its proof never runs', () => {
   const { dir } = fixtureRepo();
-  // A smudge filter that rewrites claim.txt on checkout: every checkout of this commit shows the file modified, so
-  // neither the reset nor a fresh worktree can make the tree pristine.
-  fs.writeFileSync(path.join(dir, '.gitattributes'), 'claim.txt filter=dirty\n');
+  // A required smudge filter that works once, then fails: the worktree is made, but once a proof has changed
+  // claim.txt neither the reset nor a new worktree can check it out again.
+  fs.writeFileSync(path.join(dir, '.gitattributes'), 'claim.txt filter=once\n');
   git(dir, 'add', '.gitattributes');
   git(dir, 'commit', '-qm', 'filter');
-  git(dir, 'config', 'filter.dirty.smudge', 'sed s/good/changed/');
+  nodeFilter(dir, 'once', [
+    "const fs = require('fs');",
+    'const state = STATE;',
+    "const n = (fs.existsSync(state) ? Number(fs.readFileSync(state, 'utf8')) : 0) + 1;",
+    'fs.writeFileSync(state, String(n));',
+    'if (n > 1) process.exit(1);',
+    'process.stdin.pipe(process.stdout);',
+    '',
+  ].join('\n'));
+  git(dir, 'config', 'filter.once.required', 'true');
   const ref = git(dir, 'rev-parse', 'HEAD');
   const markerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-pm-marker-'));
   made.push(markerDir);
   const marker = path.join(markerDir, 'ran.txt');
+  const edits = control('edits', { proof_command: `node -e "require('fs').writeFileSync('claim.txt', 'edited')"` });
   const probe = control('never-runs', { proof_command: `node -e "require('fs').writeFileSync(process.argv[1], 'ran')" "${marker}"` });
   const summary = withEnv({ KF_PM_LOG: undefined, KF_PM_REF: ref }, () =>
-    runner.runManifest({ negative_controls: [probe] }, { repoRoot: dir, ref }),
+    runner.runManifest({ negative_controls: [edits, probe] }, { repoRoot: dir, ref }),
   );
-  const [only] = summary.results;
-  assert.equal(only.ok, false, JSON.stringify(only));
-  assert.equal(only.stage, 'reset', JSON.stringify(only));
+  const byId = Object.fromEntries(summary.results.map((r) => [r.id, r]));
+  assert.equal(byId['never-runs'].ok, false, JSON.stringify(byId['never-runs']));
+  assert.equal(byId['never-runs'].stage, 'reset', JSON.stringify(byId['never-runs']));
   assert.equal(fs.existsSync(marker), false, 'the proof did not run on a tree that is not the commit');
   const listed = git(dir, 'worktree', 'list', '--porcelain').split('\n').filter((l) => l.startsWith('worktree '));
   assert.equal(listed.length, 1, 'no worktree left behind');
