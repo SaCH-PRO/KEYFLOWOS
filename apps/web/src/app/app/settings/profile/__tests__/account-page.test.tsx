@@ -41,7 +41,8 @@ const ME = { id: "usr_staff", email: "shanice.staff@example.com", name: "Shanice
 function dtoRefusal(body: Record<string, unknown>): string | null {
   if ("phone" in body && body.phone !== undefined) {
     if (body.phone === null) return "phone null (the service trims it: 500)";
-    if (!/^\+\d{8,15}$/.test(String(body.phone))) return "phone must be a valid phone number";
+    // Close to @IsPhoneNumber with no region: an international number, digits with single inner spaces; nothing around it.
+    if (!/^\+\d[\d ]{6,18}\d$/.test(String(body.phone)) || /  /.test(String(body.phone))) return "phone must be a valid phone number";
   }
   if ("avatarUrl" in body && body.avatarUrl !== undefined && !/^https?:\/\//.test(String(body.avatarUrl))) return "avatarUrl must be a valid URL";
   for (const k of Object.keys(body)) if (!["firstName", "lastName", "name", "phone", "avatarUrl"].includes(k)) return `property ${k} should not exist`;
@@ -144,6 +145,41 @@ describe("NAV-A3: /app/settings/profile is the member's own account", () => {
     fireEvent.click(screen.getByRole("button", { name: /save/i }));
     expect((await screen.findByRole("alert")).textContent).toMatch(/phone/i);
     expect(sent.find((r) => r.method === "PATCH")!.body).toEqual({ phone: "868-620-1234" });
+  });
+
+  describe("a member who already has a phone (repair confirmation, finding 1 and 2)", () => {
+    const WITH_PHONE = { status: 200, body: { ...ME, phone: "+18686201234" } };
+    const phoneInput = async () => (await screen.findByLabelText(/phone/i)) as HTMLInputElement;
+
+    it("CONTROL (pins 4b9cca29): clearing the phone alone sends nothing and says it cannot be removed here", async () => {
+      const sent = serve(WITH_PHONE);
+      await renderAccountPage();
+      fireEvent.change(await phoneInput(), { target: { value: "" } });
+      fireEvent.click(screen.getByRole("button", { name: /save/i }));
+      expect((await screen.findByRole("alert")).textContent).toMatch(/cannot be removed/i);
+      expect(sent.filter((r) => r.method === "PATCH")).toHaveLength(0);
+    });
+
+    it("RED-BEFORE: clearing the phone with a name change saves the name, says the phone stays, and shows the stored phone", async () => {
+      const sent = serve(WITH_PHONE);
+      await renderAccountPage();
+      fireEvent.change(await phoneInput(), { target: { value: "" } });
+      fireEvent.change(screen.getByLabelText(/display name/i), { target: { value: "Shan" } });
+      fireEvent.click(screen.getByRole("button", { name: /save/i }));
+      await waitFor(() => expect(sent.filter((r) => r.method === "PATCH")).toHaveLength(1));
+      expect(sent.find((r) => r.method === "PATCH")!.body).toEqual({ name: "Shan" });
+      expect((await screen.findByRole("alert")).textContent).toMatch(/cannot be removed/i);
+      expect((await phoneInput()).value).toBe("+18686201234");
+    });
+
+    it("CONTROL (pins 4b9cca29): a phone typed with a trailing space is sent trimmed (the server refuses the space)", async () => {
+      const sent = serve(WITH_PHONE);
+      await renderAccountPage();
+      fireEvent.change(await phoneInput(), { target: { value: "+18686209999 " } });
+      fireEvent.click(screen.getByRole("button", { name: /save/i }));
+      expect(await screen.findByText(/profile updated/i)).toBeTruthy();
+      expect(sent.find((r) => r.method === "PATCH")!.body).toEqual({ phone: "+18686209999" });
+    });
   });
 
   it("RED-BEFORE (review MINOR-3): a photo the server refuses says so", async () => {
