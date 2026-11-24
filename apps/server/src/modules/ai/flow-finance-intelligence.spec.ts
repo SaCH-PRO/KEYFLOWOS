@@ -93,6 +93,10 @@ function makeOrchestrator(members: Record<string, { role: string; permissionScop
   const svc = Object.assign(Object.create(FlowOrchestratorService.prototype), {
     logger: quiet,
     prisma,
+    governance: { getToolTier: () => 1 },
+    executionLog: { logToolExecution: async () => 'log_1' },
+    businessGraph: { invalidateCache() {} },
+    attributeExecutionLog: async () => undefined,
     moduleRef: {
       get: (token: unknown) => {
         if (token === SafeToSpendService) return safeToSpend;
@@ -118,13 +122,14 @@ function executeAsMember(
   opts: { surface: 'CHAT' | 'BACKGROUND_SWEEP'; principalUserId?: string; args?: Record<string, unknown> },
 ) {
   return (svc as unknown as {
-    executeToolByName: (
+    executeToolDirectly: (
       b: string,
       t: string,
       a: Record<string, unknown>,
+      envelope?: unknown,
       ctx?: { surface?: string; principalUserId?: string },
     ) => Promise<unknown>;
-  }).executeToolByName(BIZ, tool, opts.args ?? {}, {
+  }).executeToolDirectly(BIZ, tool, opts.args ?? {}, undefined, {
     surface: opts.surface,
     principalUserId: opts.principalUserId,
   });
@@ -197,7 +202,7 @@ describe('P44 (TOF-FINANCE-CANONICAL-TOOLS): canonical finance intelligence tool
       expect(keyMemberToolScopes(name)).toEqual([{ module: 'revenue', minLevel: 'read' }]);
       expect(keyMemberMenuScopes(name)).toEqual([{ module: 'revenue', minLevel: 'read' }]);
       expect(KEY_BOOKS_MEMBERSHIP_READ_TOOLS.has(name)).toBe(true);
-      expect(MEMBERLESS_KEY_TOOLS.has(name)).toBe(false);
+      expect(Object.prototype.hasOwnProperty.call(MEMBERLESS_KEY_TOOLS, name)).toBe(false);
     }
 
     const { svc, safeToSpend, cashflowForecast, moneyMoves } = makeOrchestrator(
