@@ -6,7 +6,7 @@ or owner ruling; never append. What you remove stays in git history and on issue
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
 conversation that produced it. Read `docs/development/agent-memory/README.md` first.
 
-**This file holds only what cannot be generated.**
+**This file holds only what cannot be generated.** Who does what next lives on the live board: `BOARD.md` on branch `coord/board`, one owner per row. The checklists every lane ticks are in `docs/development/agent-memory/CHECKLISTS.md`.
 
 | Fact | Where it lives |
 |---|---|
