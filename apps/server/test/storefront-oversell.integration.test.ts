@@ -57,6 +57,7 @@ let db: any;
 let app: INestApplication;
 let redis: IORedis;
 let storeOrders: any;
+const PREV_RATE_LIMIT_NS = process.env.RATE_LIMIT_KEY_NAMESPACE;
 
 async function cleanup() {
   for (const sql of [
@@ -87,7 +88,7 @@ async function cleanup() {
 async function clearRateLimits() {
   if (!redis) return;
   try {
-    const keys = await redis.keys('pub_rl:*');
+    const keys = await redis.keys(`pub_rate_limit:${P}:*`);
     if (keys.length > 0) await redis.del(...keys);
   } catch {
     /* ignore */
@@ -108,6 +109,7 @@ async function resetStocks() {
 }
 
 beforeAll(async () => {
+  process.env.RATE_LIMIT_KEY_NAMESPACE = P;
   const { PrismaClient } = await import('@prisma/client');
   db = new PrismaClient();
   await cleanup();
@@ -249,6 +251,9 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
+  await clearRateLimits();
+  if (PREV_RATE_LIMIT_NS === undefined) delete process.env.RATE_LIMIT_KEY_NAMESPACE;
+  else process.env.RATE_LIMIT_KEY_NAMESPACE = PREV_RATE_LIMIT_NS;
   if (app) await app.close();
   if (redis) await redis.quit();
   if (db) {
