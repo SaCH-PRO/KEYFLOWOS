@@ -306,10 +306,14 @@ describe('POST /crm/businesses/:businessId/contacts — email already held in th
     expect(await liveCount(ID.bizA)).toBe(1);
   });
 
-  it('a whitespace-padded email passes the DTO (observed: @IsEmail accepts surrounding whitespace) and the service trims it to the same identity: 409 contact_email_taken with the existing id, still one contact', async () => {
+  // D-273 AMEND (FU-VITEST-DECORATOR-METADATA, Q20): with decorator metadata emitted
+  // under vitest as in production, ValidationPipe runs @IsEmail() and refuses
+  // surrounding whitespace with 400 before the service runs; the next case keeps
+  // proving service-level trim -> 409 contact_email_taken.
+  it('a whitespace-padded email is refused at the DTO (@IsEmail rejects surrounding whitespace): 400, still one contact', async () => {
     const res = await post(ID.owner, ID.bizA, { firstName: `${P}Ada4`, email: `  ${EMAIL}  ` });
-    expect(res.status).toBe(409);
-    expectTaken(res.body, 'contact_email_taken', adaId);
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body)).toMatch(/email/i);
     expect(await liveCount(ID.bizA)).toBe(1);
   });
 
