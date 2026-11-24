@@ -237,7 +237,7 @@ describe('sightedStrategic review round 4 RED (SEC-SRS-3, SEC-SRS-4, SEC-SRS-5, 
   });
 
   it('SEC-SRS-5: currentPrice, suggestedPrice and pricingPrinciples require revenue read (not exempted for blind readers)', () => {
-    const sample = { currentPrice: 'free', suggestedPrice: 'premium', pricingPrinciples: ['SAFEMARK value-based'] };
+    const sample = { currentPrice: 'free', suggestedPrice: 'standard', pricingPrinciples: ['SAFEMARK value-based'] };
     expect(sightedStrategic(sample, blind)).toEqual({});
     expect(sightedStrategic(sample, revnoexp)).toEqual(sample);
   });
