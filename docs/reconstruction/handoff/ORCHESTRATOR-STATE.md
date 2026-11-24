@@ -1,6 +1,6 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-24 ~12:30 UTC by the acting orchestrator (second-lane account, Claude Code), after PR #231 (P16) merged as 04730333. Rewrite in place on every merge, packet return
+Last written: 2026-11-24 ~17:40 UTC by the acting orchestrator (second-lane account, Claude Code), after M5 (PR #233, f664a411) and M6 (PR #235, c7fb73eb) merged and wave 3p opened as PR #236. Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -69,29 +69,30 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 
 ## 2. Rulings not yet on main
 
-None: every ruling to D-272 is on main (PR #230, merged 2026-11-24 as 05f04f2c). Rulings given after it go here until
-the next rulings commit.
+Every ruling to D-272 is on main (PR #230, merged 2026-11-24 as 05f04f2c). Given since, not yet in BUILD-MAP-001:
+- **D-274** (2026-11-24, owner in chat): "Just do all you can to speed up. Record decisions that enhance our
+  operations. As we are improving the workflow we should be doing R&D to implement the best strategies." Read with
+  "speed up without any compromise": every gate stays. Recorded with its adopted rules in
+  `docs/development/agent-memory/WORKFLOW-IMPROVEMENTS.md` (this branch).
+- **P12 setup-only Release 0 AMEND approved** (owner, relayed on #80 7136747457): SWP-STORE-LISTING-SERVER may amend
+  its Release 0 suite's setup only; assertions unchanged.
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `04730333` (PR #231, the P16 docs follow-up, merged 2026-11-24 by the Claude lane under D-272; before it PR #229 as f6764f4c, PR #230 as 05f04f2c and PR #228 as 142e5f9e). Production runs `f5d58ef7` (16 Nov), 620 commits behind main: the owner
-redeploys (D-266). Since 2026-11-23 the first orchestrator account is out of usage; the second-lane account acts as
-orchestrator and posts on #80. It runs on Opus (section 1).
+Main is at `c7fb73eb` (2026-11-24): M6 PR #235 (wave 3o) after M5 PR #233 (wave 3n, f664a411), M4b PR #234 (edd2fa15,
+Antigravity) and M4a PR #232 (054cac4b). M6 was the first merge under A8 (stacked heads): its head carried wave 3n, and
+`git merge-tree` of the new main and the head gave the head's own tree, so its CI ran alongside M5's. Production runs
+`f5d58ef7` (16 Nov), far behind main: the owner redeploys (D-266). The second-lane account acts as orchestrator and
+posts on #80. How we work faster (D-274: adopted rules A1-A10, owner proposals P1-P2, R&D, experiments):
+`docs/development/agent-memory/WORKFLOW-IMPROVEMENTS.md`.
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
-| Rulings and wedge re-cut (M2), then its follow-up (P16) | PR #230, PR #231 | **Merged** as 05f04f2c and 04730333. #231's open wording minors (runbook §2's `packages/` rule against the commit dist was built at; the KEY fix tiebreak wording; §3's `curl -f` nit) ride `wave/v1-docs-p19` | `wave/v1-docs-p19` (Claude lane), with this file |
-| Wave 3j (second lane) (M4) | `wave/3j-second-lane` @ a1e6a649: 16 packets | Proven at a1e6a649 (#80 7117144941); fails the 25/50 divergence gate and duplicates RR-REDACTION-BY-CONTENT with #228 | Antigravity splits it after M3 (board M4) |
-| MOUNT-QUOTES (P0, critical path) | `pkt/V1-MOUNT-QUOTES` @ 78567330 | Proven: suite 820/820, R0 MET; live journey D: D1, D2, D3, D6, D9 green at both widths; RETURN #80 7117999068 | On main (wave 3m, f6764f4c) |
-| SWP-INV-MATH (P0, critical path; BUG-018, BUG-019) | `pkt/V1-SWP-INV-MATH` @ 6ea50c09, stacked on MOUNT-QUOTES | Done and RETURNed (#80 7118763435). Both reviews accept, after one MAJOR (missing browser spec) was closed. Web suite 191/1745; live sweep RED at base, green at head | On main (wave 3m, f6764f4c) |
-| SWP-INV-PUBLIC-LINK (P0; BUG-053, 087, 091) | `pkt/V1-SWP-INV-PUBLIC-LINK` @ 8ae6abfa, stacked on SWP-INV-MATH | Done and RETURNed (#80, after D-270). Both reviews plus the confirmation accept. Suite 820/15287 passed, R0 MET 39/39 with an exact-head receipt at 8ae6abfa | On main (wave 3m, f6764f4c) |
-| SWP-QUOTE-PUBLIC-PAGE (P0; BUG-046, D4) | `pkt/V1-SWP-QUOTE-PUBLIC-PAGE` @ 0ab56399, stacked on SWP-INV-PUBLIC-LINK | Done and RETURNed (#80 7119917222). Both reviews accept. Mocked browser sweep RED at base, 7/7 green at head | On main (wave 3m, f6764f4c) |
-| SWP-INV-FORM-UX (P2, critical path; BUG-052, 090, 092, 093) | `pkt/V1-SWP-INV-FORM-UX` @ d7981a75, stacked on SWP-QUOTE-PUBLIC-PAGE | Done and RETURNed (#80, after 7120253245). Security ACCEPT WITH MINORS; correctness REJECT on F1, which is closed; confirmation ACCEPT WITH MINORS. Live: the sweep at 1440/1024/768/375, E1, sweep-invoice-amounts and release0-live (desktop) all green. Open minors: F2, security MINOR-2, N1 (the sidebar drawer open over the form) and N2 | On main (wave 3m, f6764f4c) |
-| SWP-QUOTE-COMPOSER-CONTACT (P2, critical path; BUG-095, 096, 097) | `pkt/V1-SWP-QUOTE-COMPOSER-CONTACT` @ d690bc41, stacked on SWP-INV-FORM-UX | Done and RETURNed (#80, after the 7120518541 claim). Security REJECT (SEC-QCC-1) and correctness REJECT (MAJOR-1 and MAJOR-2) both closed; confirmation ACCEPT WITH MINORS. Whole web suite exit 0 (197 / 1783); journey D live 12/18 unchanged; sweep-quote-to-invoice green | On main (wave 3m, f6764f4c) |
-| **Wave 3m (money-first; M3)** | PR #229 | **Merged** as f6764f4c (#80 7129816643): MOUNT-QUOTES, SWP-INV-MATH, SWP-INV-PUBLIC-LINK, SWP-QUOTE-PUBLIC-PAGE, SWP-INV-FORM-UX, SWP-QUOTE-COMPOSER-CONTACT | - |
-| **Lanes since D-271 (2026-11-24, owner-relayed split)** | - | Two operators, `claude` and `antigravity`. Each claims atomically (CHECKLISTS B1) plus a CLAIM on #80 | Who owns what next: `BOARD.md` on `coord/board`, one owner per row. Claude (done: M2, M3, P7, P8, P16): wave 3n (M5), NAV-A3, NAV-A2, then SWP-KEY-CHAT-WEB (plan on #80 7130344208). Antigravity: SEC-KEY-CUSTOM-LOGIC, the autopilot switch-off, FU-VITEST-DECORATOR-METADATA's before/after, the first-lane WIP, FU-PENDING-OWED-SERVER and -WEB, and M4 |
-| **Wave 3n (M5)** | PR #233, `wave/v1-wave-3n` @ 2aaf028e: SWP-CONTACT-QUICKADD, SWP-INV-LIST (RETURNs #80 7127632516, 7129398775) | Proven at bfcf4d4c: server 833 files / 15419 tests, R0 MET, web 199/1808, tsc 0. Codex P2 (Duplicate carried an unknown discount's value) fixed at 2aaf028e (RED d0cc17db), web-only; reviews of the repair running with NAV-A3's | Merge after M4a and M4b (D-272 order), with main merged in and CI green at the exact head |
-| NAV-A3 (P1; BUG-067, 123, 118, 078, 108) | `pkt/V1-NAV-A3` @ 21fccca9 (RED b01a10e7) on f6764f4c | Built: breadcrumbs link only pages (`lib/app-page-routes.ts`), no ids, no doubles, one trail; `/app/settings/profile` is My account; store tab links; Launch Pad tile. Web tsc 0, web suite 201/1810. Two reviews running | Close review findings, live journeys C and J, RETURN; then NAV-A2 (P0), then SWP-KEY-CHAT-WEB unless Antigravity counters #80 7130344208 |
+| **Wave 3p (M7, Claude lane)** | PR #236, `wave/v1-wave-3p` @ 0b9a4d65 on main c7fb73eb: FU-BILLING-TEMPLATES-GUARD (P13), FU-SETTINGS-MANUAL-STEP-FENCE (P19), FU-CI-NC-WORKTREE-REUSE (P23, C1), SWP-CONTACT-DETAIL (P20), FU-NAV-A3-CODEX-235. RETURNs #80 7135012909, 7135564507, 7138157579, 7138884562, 7137156301 | All five returned with two reviews accepted. Opened early (A2); CI running. Wave-head proof running (`scratchpad/chain-w3p.sh`, see LIVE-PROOF-RUNBOOK): server suite, R0, web, agent-control, then live sweep-contact-detail, journey C (C4, C6, C7) and release0-live. C6 should be green now that NAV-A3 is on main; C4's list step is pre-existing (FU-C4-FOCUS-OPEN). The PR's Windows job is C1's first real timing (expected about 20-30 min, was about 61) | Post the proof on #236; merge under D-239/D-272 when CI is green at the exact head |
+| `wave/v1-docs-p19` (Claude lane) | @ 463e862e | Plan corrections (pre-flight, A3), new follow-up rows, WORKFLOW-IMPROVEMENTS, this file; status regenerated | Open as a docs PR after M7, or ride the next wave |
+| **Antigravity lane** | see #80 | P12 SWP-STORE-LISTING-SERVER (owner approved the setup-only Release 0 AMEND); P25 FU-PLANNER-STEP-ORDER claimed (#80 7136855479); P17(d) FU-KEY-CONTACT-NAME and W1F-STORE-PAYPAL accepted from the split (#80 7135441240) | Their wave after M7 |
+| **Claude lane, next** | - | Proposed on #80 7136931971 (Antigravity to confirm): FU-CONTACT-DELETE-LEAVE, FU-CONTACT-PAGES-RAW-STATUS. Also: FU-C4-FOCUS-OPEN, FU-ESCAPE-OVERLAYS (P18a), FU-CONTACT-REFUSED-WRITES (P17a-c), C2 (shard the Windows controls) once C1 is on main. Pre-flight each before claiming (A3) | Claim atomically (CHECKLISTS B1) |
+| Server follow-up for the Antigravity lane | FU-NOTIFICATIONS-PREFS-GUARD (plan row) | Found in the FU-NAV-A3-CODEX-235 review: `customer-preferences` and `customer-log` have no module guard (any member can change the business's customer-email settings) | Antigravity to claim (server, P1) |
 | First lane, as it left them (2026-11-23 ~09:30 UTC) | `wave/v1-wave-3j` a2e9f3f0, `wave/v1-wave-3k` 88268a01; FU-INSIGHTS-SIGHT 28cdbccb; child sessions for FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-GENOME-SURFACES-REVENUE, FU-OUTBOUND-ATTACHMENT-URL, FU-AI-APPROVALS-MONEY-SIGHT | Proven or building when the account stopped; not re-verified since | Re-verify each head before it enters a wave |
 | FU-VITEST-DECORATOR-METADATA | @ 83b6dfc8 | Question 20 ruled by D-272.2: the AMEND only if the before/after shows a tightening | Antigravity shows the before/after (board P3) |
 
@@ -186,6 +187,17 @@ Format: `docs/development/agent-memory/OWNER-QUESTION-FORMAT.md`. Safe defaults 
     moves: the plan's `wedge.correction_2026_11_24`). Under the same rule's tiebreak MEM-HONEST-RETRIEVAL,
     MEM-TEMPORAL-EMBED-DEDUP, MEM-CONSOLIDATION-CHECKPOINT and RR-UNDO-DURABLE stay on follow-on; say if any should
     be on launch. (Default: as applied.)
+32. SWP-CONTACT-DETAIL retired the list side panel's tabs (BUG-062). The full contact route has no page for the panel's
+    Conversations thread, Deals list, per-contact Audit log or Network graph, nor the rich timeline (health, journey
+    CTAs, conversation context, suggested message). Re-home them, or let them go? (Default: let them go for v1; files
+    kept until FU-CONTACT-PANEL-PRUNE.) Bulk contact delete has no Undo (its dialog says Trash only): add one?
+    (Default: no.)
+33. Invite & Earn (the member's own referral link) is every member's in the settings tab strip; Notifications (the
+    business's customer emails) is offered to every member in the Me menu while the settings index gates it on
+    settings, and its server endpoints have no module guard (FU-NOTIFICATIONS-PREFS-GUARD). Should Notifications be
+    settings-only? (Default: yes, with the server guard.)
+34. P1 (WORKFLOW-IMPROVEMENTS): move the repository into a free GitHub organization to get the merge queue. P2: run the
+    Windows worker proof only when its paths change. (Default: neither until ruled; with C1 and A8, P1 matters less.)
 
 ## 5. How to work here (learned the hard way)
 
