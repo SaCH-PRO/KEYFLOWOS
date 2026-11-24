@@ -38,8 +38,8 @@
 
 | # | Row | What | Owner | Status | Waits on | Next step |
 | --- | --- | --- | --- | --- | --- | --- |
-| M1 | PR #228 | `wave/v1-wave-3j` (RR-REDACTION-BY-CONTENT, FU-KEY-GENOME-READS-RESIDUAL, MEM-TEMPORAL-MEMORY-ROUTES-SIGHT) plus the Codex P1 fix | antigravity | merged | — | Merged to `main` @ `142e5f9e` (exact head `70f5f374`, all required CI green incl. R0 39/39 MET & Windows worker proof); M2 unblocked |
-| M2 | Rulings | `pkt/V1-RULINGS-3E` + `pkt/V1-WEDGE-RECUT`: D-255 to D-272, the wedge plan, the agent-memory docs (LIVE-PROOF-RUNBOOK, CHECKLISTS), the state file | claude | todo | M1 | Build a docs-only wave from both branches on main; regenerate status; PR; CI green; merge |
+| M1 | PR #228 | `wave/v1-wave-3j` | antigravity | **merged** (142e5f9e) | — | Done |
+| M2 | Rulings, **PR #230** | `wave/v1-rulings-3n` @ 5dd4153b: `pkt/V1-RULINGS-3E` + `pkt/V1-WEDGE-RECUT` compacted (docs only, 10 files), status regenerated at main 142e5f9e | claude | pr-open | — | CI green at the exact head; merge (D) |
 | M3 | Wave 3m, **PR #229** | `wave/v1-wave-3m` @ 7bd2f445: MOUNT-QUOTES, SWP-INV-MATH, SWP-INV-PUBLIC-LINK, SWP-QUOTE-PUBLIC-PAGE, SWP-INV-FORM-UX, SWP-QUOTE-COMPOSER-CONTACT. **Proven at 7bd2f445:** server 820 files / 15287 tests, R0 MET 39/39 exact-head; web 197 files / 1784 tests exit 0, tsc 0, lint 25 ≤ 26 | claude | pr-open | M1, M2 | When M1 and M2 are merged: merge main in, re-prove the new head (CHECKLISTS C), CI green at the exact head, merge (D) |
 | M4 | Wave 3j split | `wave/3j-second-lane` (16 packets; fails 25/50; duplicates RR-REDACTION-BY-CONTENT with #228) | antigravity | todo | M3 | Split into parts within 25 commits / 50 files without the duplicate; prove each; PR; merge in turn |
 
