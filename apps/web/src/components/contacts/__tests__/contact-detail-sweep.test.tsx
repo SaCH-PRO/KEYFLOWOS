@@ -16,6 +16,10 @@
  *   CDS-129a  RED-BEFORE  the side panel's Recent Activity shows "Note added" for a Note.Created event (eventLabel,
  *                         lib/status-labels.ts), not the code
  *   CDS-129b  RED-BEFORE  the contact's Timeline page shows "Note added", not "Note.Created"
+ *   CDS-129c  RED-BEFORE  (reviews CDC-3, m2) Recent Activity reads a code its old word list lacks in plain words
+ *                         ("Payment.Received" -> "Payment received"), as the Timeline page does
+ *   CDS-129d  RED-BEFORE  (review CDC-4) the Timeline page shows an event's status and actor in plain words, not the
+ *                         stored PARTIALLY_PAID or SYSTEM
  *   CDS-062a  RED-BEFORE  the side panel has no tab strip; it opens the contact's page ("Open") and keeps Edit
  *   CDS-062b  RED-BEFORE  Recent Activity's "View all" opens the contact's Timeline page (no tab to switch to)
  *
@@ -72,12 +76,15 @@ const DEFINITIONS = [
 
 const NOW = new Date().toISOString();
 const EVENTS = [{ id: "ev_1", contactId: CONTACT_ID, type: "Note.Created", createdAt: NOW, data: { body: "Prefers mornings" } }];
+/** What the stubbed events read answers (CDS-129d swaps in an invoice event). */
+let served: unknown[] = EVENTS;
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
 beforeEach(() => {
+  served = EVENTS;
   window.localStorage.clear();
   window.localStorage.setItem("kf_business_id", BIZ);
   vi.stubGlobal(
@@ -86,7 +93,7 @@ beforeEach(() => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       const { pathname } = new URL(url, "http://localhost");
       if (pathname.endsWith(`/crm/businesses/${BIZ}/custom-field-definitions`)) return json(200, DEFINITIONS);
-      if (pathname.endsWith(`/contacts/${CONTACT_ID}/events`)) return json(200, EVENTS);
+      if (pathname.endsWith(`/contacts/${CONTACT_ID}/events`)) return json(200, served);
       return json(404, { message: "Not stubbed" });
     }),
   );
@@ -183,6 +190,25 @@ describe("BUG-129: events read in plain words", () => {
     render(<ContactTimelinePage />);
     expect(await screen.findByText("Note added")).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(/Note\.Created/i);
+  });
+});
+
+describe("BUG-129: every code reads in plain words (reviews)", () => {
+  it("CDS-129c RED-BEFORE: Recent Activity reads a code it has no word for through eventLabel", () => {
+    const payment = [{ id: "ev_p", type: "Payment.Received", createdAt: NOW }];
+    render(<ContactDetailStats contact={contact} events={payment} businessId={BIZ} />);
+    expect(screen.getByRole("button", { name: /recent activity/i })).toHaveTextContent("Payment received");
+    expect(document.body).not.toHaveTextContent("Payment.Received");
+  });
+
+  it("CDS-129d RED-BEFORE: the Timeline page shows an event's status and actor in plain words", async () => {
+    served = [
+      { id: "ev_i", contactId: CONTACT_ID, type: "invoice.updated", createdAt: NOW, actorType: "SYSTEM", data: { status: "PARTIALLY_PAID" } },
+    ];
+    render(<ContactTimelinePage />);
+    expect(await screen.findByText("Invoice updated")).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent("PARTIALLY_PAID");
+    expect(document.body).not.toHaveTextContent("SYSTEM");
   });
 });
 
