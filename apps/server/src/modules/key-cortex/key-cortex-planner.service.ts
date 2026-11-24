@@ -1133,7 +1133,7 @@ export class KeyCortexPlannerService {
       result.push(step);
     };
 
-    for (const step of [...steps].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))) {
+    for (const step of [...steps].sort((a, b) => a.order - b.order || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
       visit(step);
     }
     return result;

@@ -312,6 +312,7 @@ export class MorningBriefingService implements OnModuleInit {
     }
     const steps = await this.prisma.client.aiPlanStep.findMany({
       where: { planId, status: 'pending' },
+      orderBy: [{ order: 'asc' }, { id: 'asc' }],
     });
 
     let executed = 0;
