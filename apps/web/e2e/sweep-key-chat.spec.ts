@@ -17,18 +17,25 @@ const VARIANT = process.env.E2E_VARIANT ?? "ai-disabled";
 const isChatPost = (r: Request) => r.method() === "POST" && /\/ai\/businesses\/[^/]+\/(flow\/)?chat(\/stream)?$/.test(new URL(r.url()).pathname);
 const isSessionsRead = (r: Request) => r.method() === "GET" && /\/flow\/sessions$/.test(new URL(r.url()).pathname);
 
-const drawer = (page: Page) => page.getByRole("dialog").filter({ has: page.getByRole("button", { name: "Send" }) }).filter({ visible: true }).last();
+/** The KEY drawer: the panel headed "KEY" (key-chat-panel.tsx; journey K's drawerHeading), holding the composer. */
+const drawerHeading = (page: Page) => page.getByRole("heading", { name: /^KEY$/ }).filter({ visible: true });
+const drawer = (page: Page) =>
+  page.locator("div").filter({ has: drawerHeading(page) }).filter({ has: page.getByPlaceholder("Message KEY...") }).last();
 
-/** Today with the KEY drawer open (header button, else Ctrl+J), and its composer visible. */
+/**
+ * Today with the KEY drawer open and its composer visible. The drawer may already be open (it opens by itself for a
+ * new owner, SWP-KEY-SHELL-SMOKE's bug): then it is used as it is. Otherwise the header button, else Ctrl+J.
+ */
 async function openDrawer(page: Page): Promise<void> {
   await page.goto("/app/command-center");
   await settle(page, 1_500);
-  if (!(await drawer(page).count())) {
+  await drawerHeading(page).first().waitFor({ state: "visible", timeout: 5_000 }).catch(() => {});
+  if (!(await drawerHeading(page).count())) {
     const door = page.locator("header, [role=banner]").getByRole("button", { name: /ask key|^key\b/i }).filter({ visible: true });
     if (await door.count()) await door.first().click();
     else await page.keyboard.press("Control+j");
   }
-  await expect(drawer(page).getByRole("textbox").first(), "the KEY drawer's composer").toBeVisible({ timeout: 15_000 });
+  await expect(drawer(page).getByPlaceholder("Message KEY...").first(), "the KEY drawer's composer").toBeVisible({ timeout: 15_000 });
 }
 
 for (const viewport of [{ width: 1440, height: 900 }, { width: 375, height: 812 }]) {
@@ -59,7 +66,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 375, height: 812 
 
       await test.step("BUG-040: Send posts exactly the typed text, with no page error", async () => {
         const text = `Who owes me money? ${Date.now().toString(36)}`;
-        await drawer(page).getByRole("textbox").first().fill(text);
+        await drawer(page).getByPlaceholder("Message KEY...").first().fill(text);
         const posted = page.waitForRequest(isChatPost, { timeout: 15_000 }).catch(() => null);
         await drawer(page).getByRole("button", { name: "Send" }).click();
         const req = await posted;
