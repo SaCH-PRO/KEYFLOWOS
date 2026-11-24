@@ -462,6 +462,9 @@ describe("app shell notifications across a business switch", () => {
  *   WS-OMR-1  RED-BEFORE  the refusal forgets the stored business and keeps the session
  *   WS-OMR-2  pin         concurrent callers still bootstrap exactly once on that path
  *   WS-OMR-3  pin         a non-empty membership list never bootstraps and never clears
+ * Review round (security review M2):
+ *   WS-OMR-4  RED-AT-38160278  a business written by another tab while the refused bootstrap was in flight is not
+ *                       wiped: the resolution hands over and resolves that choice
  */
 describe("W11-WEB-OWNER-MEMBERSHIP-REFUSAL: bootstrap refuses an owner with no membership", () => {
   const REFUSAL = {
@@ -525,5 +528,24 @@ describe("W11-WEB-OWNER-MEMBERSHIP-REFUSAL: bootstrap refuses an owner with no m
     expect(window.localStorage.getItem("kf_business_id")).toBe(SECOND.id);
     expect(window.localStorage.getItem("kf_token")).toBe(TOKEN);
     expect(window.localStorage.getItem("kf_refresh_token")).toBe("refresh-token-1");
+  });
+
+  it("WS-OMR-4 RED-AT-38160278: a choice written by another tab during the refused bootstrap is kept", async () => {
+    storeSession();
+    let listed = 0;
+    // The first list is empty; by the second the other tab's business is a membership again.
+    serve({ businesses: () => (listed++ === 0 ? [] : [SECOND]) });
+    bootstrapIdentity.mockImplementation(async () => {
+      // Another tab (same localStorage) picks a business while this bootstrap is in flight.
+      window.localStorage.setItem("kf_business_id", SECOND.id);
+      return REFUSAL;
+    });
+    const { refreshWorkspace } = await import("../workspace");
+
+    await expect(refreshWorkspace()).resolves.toBe(SECOND.id);
+
+    expect(window.localStorage.getItem("kf_business_id"), "the other tab's choice is not wiped").toBe(SECOND.id);
+    expect(bootstrapIdentity).toHaveBeenCalledTimes(1);
+    expect(window.localStorage.getItem("kf_token")).toBe(TOKEN);
   });
 });
