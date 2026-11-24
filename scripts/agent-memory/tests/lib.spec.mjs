@@ -197,3 +197,32 @@ test('statusFilesCurrent requires both files and compares the Markdown too', asy
   assert.equal(statusFilesCurrent({ jsonText: json, mdText: '# edited by hand\n', status, md }).current, false);
   assert.equal(statusFilesCurrent({ jsonText: null, mdText: md, status, md }).current, false);
 });
+
+// D-263 (Codex on #230, board P16): lanes take launch-track packets only, so the status names them apart.
+test('buildStatus: each row carries its track, and ready_launch holds only launch-track ready packets', () => {
+  const plan = {
+    packets: [
+      pk('L1', [], { track: 'launch', priority: 'P0' }), pk('L2', ['L1'], { track: 'launch' }), pk('F1', [], { track: 'follow-on', priority: 'P0' }),
+      pk('F2', [], { track: 'follow-on' }), pk('U'),
+    ],
+    validation: { critical_path: [] },
+  };
+  const s = buildStatus({ plan, prior: null, commits: [], branches: null, mainSha: 'f'.repeat(40), mainDate: '2026-11-24', baseSha: null });
+  // L1 unblocks L2, so it ranks first.
+  assert.deepEqual(s.ready.map((r) => [r.id, r.track]), [['L1', 'launch'], ['F1', 'follow-on'], ['F2', 'follow-on'], ['U', null]]);
+  assert.deepEqual(s.ready_launch.map((r) => r.id), ['L1']);
+  assert.equal(s.summary.todo_with_dependencies_met_launch, 1);
+  assert.deepEqual(s.summary.by_track, {
+    launch: { done: 0, 'in-progress': 0, todo: 2, total: 2 },
+    'follow-on': { done: 0, 'in-progress': 0, todo: 2, total: 2 },
+    none: { done: 0, 'in-progress': 0, todo: 1, total: 1 },
+  });
+  assert.equal(s.packets.find((p) => p.id === 'F1').track, 'follow-on');
+  const md = renderStatusMd(s);
+  assert.match(md, /## Ready to start, launch track \(1; D-263\)/);
+  assert.match(md, /\| 1 \| L1 \|/);
+  // the follow-on packets are counted, not listed as ready for a lane
+  assert.doesNotMatch(md.split('## Ready to start, launch track')[1].split('\n## ')[0], /F1/);
+  assert.match(md, /Follow-on packets ready \(D-263; only on the owner's assignment\): 2/);
+  assert.match(md, /\| launch \| 0 \| 0 \| 2 \| 2 \|/);
+});
