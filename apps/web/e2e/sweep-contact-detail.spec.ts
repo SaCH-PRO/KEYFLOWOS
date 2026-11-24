@@ -29,7 +29,8 @@ import { test, expect, API_URL, settle, type Tenant } from "./journeys/journey-h
  *
  * RED at the SWP-CONTACT-DETAIL base (main 054cac4b): the panel draws a tab strip and has no Open link; the field
  * reads "gold"; the Delete dialog says "cannot be undone"; the Timeline page prints the event's code; the bulk
- * dialog says "cannot be undone".
+ * dialog says "cannot be undone". Each check is a soft assertion (D-274 A7), so the base run shows every step's own
+ * RED, not only the first; the actions between them work at the base too.
  */
 
 const auth = (t: Tenant) => ({ Authorization: `Bearer ${t.token}` });
@@ -101,7 +102,7 @@ async function openPanel(page: Page, c: Seeded): Promise<Locator> {
 /** No event code (Note.Created, note.created) on screen: the plain words only. */
 async function expectNoEventCode(page: Page, where: string) {
   const text = await page.locator("body").innerText();
-  expect(text.match(/\b[A-Za-z]+\.(created|updated|added|completed|sent)\b/gi) ?? [], `${where}: event codes on screen`).toEqual([]);
+  expect.soft(text.match(/\b[A-Za-z]+\.(created|updated|added|completed|sent)\b/gi) ?? [], `${where}: event codes on screen`).toEqual([]);
 }
 
 test.describe("SWP-CONTACT-DETAIL the contact pages say what the owner sees (desktop 1440x900)", () => {
@@ -115,17 +116,17 @@ test.describe("SWP-CONTACT-DETAIL the contact pages say what the owner sees (des
       const panel = await openPanel(page, c);
       await expect(panel.getByRole("heading", { name: new RegExp(`${c.first} ${c.last}`) }).first()).toBeVisible();
       const open = panel.getByRole("link", { name: /^open .*page$/i });
-      await expect(open).toHaveAttribute("href", `/app/crm/contacts/${c.id}/overview`);
-      await expect(panel.getByRole("tablist")).toHaveCount(0);
-      await expect(panel.getByRole("tab")).toHaveCount(0);
+      await expect.soft(open).toHaveAttribute("href", `/app/crm/contacts/${c.id}/overview`);
+      await expect.soft(panel.getByRole("tablist")).toHaveCount(0);
+      await expect.soft(panel.getByRole("tab")).toHaveCount(0);
     });
 
     await test.step("BUG-127: the panel's dropdown field reads its label, 'Gold member'", async () => {
       const panel = page.getByRole("region", { name: "Contact details" });
       const more = panel.getByRole("button", { name: /more details/i });
       if (await more.count()) await more.first().click();
-      await expect(panel.getByText("Gold member")).toBeVisible();
-      await expect(panel.getByText("gold", { exact: true })).toHaveCount(0);
+      await expect.soft(panel.getByText("Gold member")).toBeVisible();
+      await expect.soft(panel.getByText("gold", { exact: true })).toHaveCount(0);
     });
 
     await test.step("BUG-128: Delete says Trash and Undo; Forget says erased for good and never Trash; both cancelled", async () => {
@@ -133,17 +134,17 @@ test.describe("SWP-CONTACT-DETAIL the contact pages say what the owner sees (des
       await panel.getByTitle("Delete client").click();
       const deleting = page.getByRole("dialog").filter({ hasText: /delete/i });
       await expect(deleting).toBeVisible();
-      await expect(deleting).toContainText(/trash/i);
-      await expect(deleting).toContainText(/undo/i);
-      await expect(deleting).not.toContainText(/cannot be undone/i);
+      await expect.soft(deleting).toContainText(/trash/i);
+      await expect.soft(deleting).toContainText(/undo/i);
+      await expect.soft(deleting).not.toContainText(/cannot be undone/i);
       await deleting.getByRole("button", { name: /^cancel$/i }).click();
       await expect(deleting).toHaveCount(0);
 
       await panel.getByTitle("Forget contact (GDPR right-to-be-forgotten)").click();
       const forgetting = page.getByRole("dialog").filter({ hasText: /forget/i });
       await expect(forgetting).toBeVisible();
-      await expect(forgetting).toContainText(/for good/i);
-      await expect(forgetting).not.toContainText(/trash/i);
+      await expect.soft(forgetting).toContainText(/for good/i);
+      await expect.soft(forgetting).not.toContainText(/trash/i);
       await forgetting.getByRole("button", { name: /^cancel$/i }).click();
       await expect(forgetting).toHaveCount(0);
       await api(request, owner, "GET", `/crm/businesses/${owner.businessId}/contacts/${c.id}`);
@@ -152,11 +153,14 @@ test.describe("SWP-CONTACT-DETAIL the contact pages say what the owner sees (des
     await test.step("BUG-129: Recent Activity reads the note in plain words; 'View all' opens the Timeline page, which does too", async () => {
       const panel = page.getByRole("region", { name: "Contact details" });
       const recent = panel.getByRole("button", { name: /recent activity/i });
-      await expect(recent).toContainText(/note added/i);
+      await expect.soft(recent).toContainText(/note added/i);
       await recent.click();
-      await panel.getByRole("link", { name: /view all/i }).click();
+      const viewAll = panel.getByRole("link", { name: /view all/i });
+      await expect.soft(viewAll, "'View all' is a link to the Timeline page").toHaveCount(1);
+      if (await viewAll.count()) await viewAll.click();
+      else await page.goto(`/app/crm/contacts/${c.id}/timeline`);
       await expect(page).toHaveURL(new RegExp(`/app/crm/contacts/${c.id}/timeline`));
-      await expect(page.getByText("Note added").first()).toBeVisible({ timeout: 30_000 });
+      await expect.soft(page.getByText("Note added").first()).toBeVisible({ timeout: 30_000 });
       await settle(page, 1_000);
       await expectNoEventCode(page, "the Timeline page");
     });
@@ -169,8 +173,8 @@ test.describe("SWP-CONTACT-DETAIL the contact pages say what the owner sees (des
       await page.getByRole("button", { name: /^delete 1 selected contacts$/i }).first().click();
       const bulk = page.locator("#db-bulk-delete-desc");
       await expect(bulk).toBeVisible();
-      await expect(bulk).toContainText(/trash/i);
-      await expect(bulk).not.toContainText(/cannot be undone/i);
+      await expect.soft(bulk).toContainText(/trash/i);
+      await expect.soft(bulk).not.toContainText(/cannot be undone/i);
       await page.getByRole("dialog").filter({ has: bulk }).getByRole("button", { name: /^cancel$/i }).click();
       await expect(bulk).toHaveCount(0);
       await api(request, owner, "GET", `/crm/businesses/${owner.businessId}/contacts/${c.id}`);
