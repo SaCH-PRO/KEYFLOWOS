@@ -67,9 +67,9 @@ export function useContactsPipeline() {
    * call/task actions (FU-C4-FOCUS-OPEN).
    */
   const openContactPage = useCallback(
-    (contactId: string) => {
+    (contactId: string, page?: "tasks") => {
       trackRecent(contactId);
-      router.push(`/app/crm/contacts/${encodeURIComponent(contactId)}`);
+      router.push(`/app/crm/contacts/${encodeURIComponent(contactId)}${page ? `/${page}` : ""}`);
     },
     [trackRecent, router],
   );
@@ -110,7 +110,7 @@ export function useContactsPipeline() {
         toast.info(`Opening ${action.contactName} — ready to call`);
         break;
       case "task":
-        openContactPage(action.contactId);
+        openContactPage(action.contactId, "tasks");
         toast.info(`Opening ${action.contactName} — task details`);
         break;
       default:
