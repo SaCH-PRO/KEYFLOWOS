@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "ce91a911b244bf7e17d9ebdc492722543aebe18e",
-  "main_commit_date": "2026-11-24T04:51:32+00:00",
+  "main_sha": "b64f21bef3a112f0b67eacc00c79fe4448dcfa3f",
+  "main_commit_date": "2026-11-24T06:24:28+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -27,13 +27,13 @@
   ]
  },
  "summary": {
-  "packets": 364,
-  "points": 532.5,
+  "packets": 366,
+  "points": 536.5,
   "by_status": {
    "done": {
     "packets": 93,
     "points": 136.5,
-    "pct_by_points": 25.6
+    "pct_by_points": 25.4
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 271,
-    "points": 396,
-    "pct_by_points": 74.4
+    "packets": 273,
+    "points": 400,
+    "pct_by_points": 74.6
    }
   },
   "by_step": {
@@ -68,8 +68,8 @@
    "3": {
     "done": 61,
     "in-progress": 0,
-    "todo": 86,
-    "total": 147
+    "todo": 88,
+    "total": 149
    },
    "4": {
     "done": 2,
@@ -107,7 +107,7 @@
    "prior-status-file+wave-2b-commit": 28,
    "code-commit-subject": 9,
    "compacted-commit": 37,
-   "no-evidence": 140
+   "no-evidence": 142
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -120,7 +120,7 @@
    "FU-WA-ESCAPE-RACE",
    "FU-PROPOSAL-REVENUE-SIGHT"
   ],
-  "todo_with_dependencies_met": 120
+  "todo_with_dependencies_met": 122
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -358,6 +358,24 @@
    "priority": "P0",
    "size": "M",
    "lane": "gate",
+   "on_critical_path": false,
+   "unblocks": 5
+  },
+  {
+   "id": "SEC-KEY-CUSTOM-LOGIC",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 5
+  },
+  {
+   "id": "FU-OUTBOUND-ATTACHMENT-URL",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
    "on_critical_path": false,
    "unblocks": 5
   },
@@ -4134,9 +4152,13 @@
     "S0-SEC-LANE-DEPLOY",
     "S0-DEPENDABOT-FREEZE",
     "TOF-CI-PYTHON-HARVESTER",
-    "SWEEP-RERUN-S7"
+    "SWEEP-RERUN-S7",
+    "WEDGE-WA-INBOUND-CAPTURE",
+    "WEDGE-HIDE-STORE",
+    "SEC-KEY-CUSTOM-LOGIC",
+    "FU-OUTBOUND-ATTACHMENT-URL"
    ],
-   "title": "Gate part 1: journeys A-L green at 375x812 and 1440x900 under AI_DISABLED and KEY_DISABLED against a production build; zero open blocker/major on v1 surfaces; proof:release0 MET",
+   "title": "Gate part 1: the launch journeys (A-F, H-J; D-263) green at 375x812 and 1440x900 under AI_DISABLED and KEY_DISABLED against a production build; zero open blocker/major on v1 surfaces; proof:release0 MET",
    "deps_met": false
   },
   {
@@ -7316,6 +7338,36 @@
    ],
    "title": "Ten real Trinidad and Tobago businesses run on the launch build for two weeks; the owner decides go or no-go on what they measure",
    "deps_met": false
+  },
+  {
+   "id": "SEC-KEY-CUSTOM-LOGIC",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Tenant KEY's execute_custom_logic never runs model-written code on the API host: local child-process execution and the silent fallback to it are removed",
+   "deps_met": true
+  },
+  {
+   "id": "FU-OUTBOUND-ATTACHMENT-URL",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-CONTRACT-FETCH-OUTBOUND-GUARD"
+   ],
+   "title": "No client-supplied URL reaches the document model: chat attachments and contract term extraction read only the business's own uploaded or Drive objects",
+   "deps_met": true
   }
  ]
 }
