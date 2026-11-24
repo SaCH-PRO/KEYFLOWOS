@@ -1,5 +1,6 @@
 import { ForbiddenException, Inject, Injectable, Logger, Optional, forwardRef } from '@nestjs/common';
 import { OPEN_RECEIVABLE_STATUS_LIST } from '../commerce/commerce-stats.service';
+import { REMINDABLE_INVOICE_STATUSES } from '../commerce/invoice-workflow.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TimelineService } from '../timeline/timeline.service';
 import { ToolResult } from './key-tool-registry.service';
@@ -959,8 +960,10 @@ export class KeyCommandService {
         where: {
           businessId,
           deletedAt: null,
-          status: { in: OPEN_RECEIVABLE_STATUS_LIST },
-          dueDate: { lt: now },
+          OR: [
+            { status: 'OVERDUE' },
+            { status: { in: OPEN_RECEIVABLE_STATUS_LIST }, dueDate: { lt: now } },
+          ],
           ...ofVisibleContact,
         },
         select: {
@@ -1074,9 +1077,9 @@ export class KeyCommandService {
       }
     }
 
-    // D-256 / D-260: PENDING invoices count in overdue owed totals above,
-    // but reminder drafts never target a never-sent PENDING invoice.
-    const remindableOverdue = overdueInvoices.filter((inv: any) => inv.status !== 'PENDING');
+    // D-256 / D-260: PENDING and PARTIALLY_CREDITED count in overdue owed totals above,
+    // but invoice_reminder drafts fail-closed to REMINDABLE_INVOICE_STATUSES (SENT/OVERDUE/PARTIALLY_PAID).
+    const remindableOverdue = overdueInvoices.filter((inv: any) => REMINDABLE_INVOICE_STATUSES.has(inv.status));
     if ((isInvoice || isAll) && remindableOverdue.length > 0 && mayBuild('invoice_reminder')) {
       for (const inv of remindableOverdue.slice(0, 5)) {
         const daysOverdue = inv.dueDate

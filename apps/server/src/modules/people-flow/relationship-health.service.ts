@@ -49,9 +49,14 @@ export interface PeopleSegment {
 export class RelationshipHealthService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async computeHealth(businessId: string, contactId: string): Promise<RelationshipHealth | null> {
-    const contact = await (this.prisma.client as any).contact.findUnique({
-      where: { id: contactId },
+  async computeHealth(
+    businessId: string,
+    contactId: string,
+    opts?: { readsRevenue?: boolean },
+  ): Promise<RelationshipHealth | null> {
+    const readsRevenue = opts?.readsRevenue !== false;
+    const contact = await (this.prisma.client as any).contact.findFirst({
+      where: { id: contactId, businessId, deletedAt: null },
       select: {
         id: true,
         businessId: true,
@@ -63,7 +68,7 @@ export class RelationshipHealthService {
         createdAt: true,
       },
     });
-    if (!contact || contact.businessId !== businessId) return null;
+    if (!contact) return null;
 
     const now = new Date();
     const [
@@ -73,10 +78,12 @@ export class RelationshipHealthService {
       notes,
       deals,
     ] = await Promise.all([
-      (this.prisma.client as any).invoice.findMany({
-        where: { businessId, contactId, deletedAt: null },
-        select: { status: true, total: true, currency: true, dueDate: true, paidAt: true, createdAt: true },
-      }),
+      readsRevenue
+        ? (this.prisma.client as any).invoice.findMany({
+            where: { businessId, contactId, deletedAt: null },
+            select: { status: true, total: true, currency: true, dueDate: true, paidAt: true, createdAt: true },
+          })
+        : Promise.resolve([]),
       (this.prisma.client as any).booking.findMany({
         where: { businessId, contactId, deletedAt: null },
         select: { status: true, startTime: true, createdAt: true },
@@ -98,14 +105,22 @@ export class RelationshipHealthService {
     ]);
 
     const currency = invoices[0]?.currency ?? 'TTD';
-    const totalRevenue = invoices
-      .filter((i: any) => i.status === 'PAID')
-      .reduce((s: number, i: any) => s + Number(i.total ?? 0), 0);
-    const outstandingBalance = invoices
-      .filter((i: any) => OPEN_RECEIVABLE_STATUSES.has(i.status))
-      .reduce((s: number, i: any) => s + Number(i.total ?? 0), 0);
-    const openInvoiceCount = invoices.filter((i: any) => OPEN_RECEIVABLE_STATUSES.has(i.status)).length;
-    const overdueInvoiceCount = invoices.filter((i: any) => i.status === 'OVERDUE').length;
+    const totalRevenue = readsRevenue
+      ? invoices
+          .filter((i: any) => i.status === 'PAID')
+          .reduce((s: number, i: any) => s + Number(i.total ?? 0), 0)
+      : 0;
+    const outstandingBalance = readsRevenue
+      ? invoices
+          .filter((i: any) => OPEN_RECEIVABLE_STATUSES.has(i.status))
+          .reduce((s: number, i: any) => s + Number(i.total ?? 0), 0)
+      : 0;
+    const openInvoiceCount = readsRevenue
+      ? invoices.filter((i: any) => OPEN_RECEIVABLE_STATUSES.has(i.status)).length
+      : 0;
+    const overdueInvoiceCount = readsRevenue
+      ? invoices.filter((i: any) => i.status === 'OVERDUE').length
+      : 0;
 
     // Recency score: 100 if interacted today, decays over 90 days
     const lastInteraction = contact.lastInteractionAt ? new Date(contact.lastInteractionAt) : null;
@@ -118,11 +133,13 @@ export class RelationshipHealthService {
       : 999;
     const recency = Math.max(0, 100 - (daysSinceInteraction / 90) * 100);
 
-    // Payment score: 100 if no outstanding, penalized by overdue ratio
-    const totalInvoiceAmount = invoices.reduce((s: number, i: any) => s + Number(i.total ?? 0), 0);
-    const payment = totalInvoiceAmount > 0
+    // Payment score: neutral 75 when caller lacks revenue:read or contact has no invoice history
+    const totalInvoiceAmount = readsRevenue
+      ? invoices.reduce((s: number, i: any) => s + Number(i.total ?? 0), 0)
+      : 0;
+    const payment = readsRevenue && totalInvoiceAmount > 0
       ? Math.max(0, 100 - (outstandingBalance / totalInvoiceAmount) * 100 - overdueInvoiceCount * 15)
-      : 75; // neutral if no invoice history
+      : 75;
 
     // Engagement score: based on booking and task frequency
     const bookingsLast90 = bookings.filter((b: any) => b.createdAt && new Date(b.createdAt) > new Date(now.getTime() - 90 * 86400000)).length;
@@ -142,11 +159,11 @@ export class RelationshipHealthService {
     const grade = overallScore >= 80 ? 'A' : overallScore >= 60 ? 'B' : overallScore >= 40 ? 'C' : overallScore >= 20 ? 'D' : 'F';
     const label = overallScore >= 80 ? 'Excellent' : overallScore >= 60 ? 'Healthy' : overallScore >= 40 ? 'Needs Attention' : overallScore >= 20 ? 'At Risk' : 'Dormant';
 
-    // Signals
+    // Signals (money-bearing signals withheld when caller lacks revenue:read)
     const signals: string[] = [];
     if (daysSinceInteraction > 30) signals.push(`No interaction in ${daysSinceInteraction} days`);
-    if (overdueInvoiceCount > 0) signals.push(`${overdueInvoiceCount} overdue invoice${overdueInvoiceCount > 1 ? 's' : ''}`);
-    if (outstandingBalance > 0) signals.push(`${currency} ${outstandingBalance.toLocaleString()} outstanding`);
+    if (readsRevenue && overdueInvoiceCount > 0) signals.push(`${overdueInvoiceCount} overdue invoice${overdueInvoiceCount > 1 ? 's' : ''}`);
+    if (readsRevenue && outstandingBalance > 0) signals.push(`${currency} ${outstandingBalance.toLocaleString()} outstanding`);
     if (bookingsLast90 === 0 && isClientStatus(contact.status)) signals.push('No bookings in 90 days');
     if (deals.some((d: any) => d.status === 'OPEN')) signals.push('Active deal in pipeline');
 
@@ -164,7 +181,7 @@ export class RelationshipHealthService {
       lastInteractionDays: daysSinceInteraction,
       openInvoiceCount,
       totalBookingCount: bookings.length,
-      totalInvoiceCount: invoices.length,
+      totalInvoiceCount: readsRevenue ? invoices.length : 0,
     };
   }
 

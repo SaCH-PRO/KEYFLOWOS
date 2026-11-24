@@ -405,7 +405,7 @@ ${tasks.slice(0, 20).map(t => `- "${t.title}" for ${t.contact.firstName ?? ''} $
         select: { type: true, createdAt: true, data: true },
       }),
       this.db.invoice.findMany({
-        where: { contactId, businessId },
+        where: { contactId, businessId, deletedAt: null },
         take: 20,
         orderBy: { createdAt: 'desc' },
         select: { total: true, status: true, createdAt: true, dueDate: true },
@@ -1048,7 +1048,7 @@ Respond in valid JSON:
         select: { type: true, createdAt: true, data: true },
       }),
       this.db.invoice.findMany({
-        where: { contactId, businessId },
+        where: { contactId, businessId, deletedAt: null },
         take: 20,
         orderBy: { createdAt: 'desc' },
         select: { total: true, status: true, createdAt: true, dueDate: true, invoiceNumber: true },
@@ -1773,7 +1773,7 @@ Status: ${contact.status} | Company: ${contact.companyName ?? 'N/A'} | Score: ${
 Channel: ${contact.preferredChannel ?? 'email'}
 Recent Notes: ${notes.map(n => n.body.substring(0, 100)).join('; ') || 'None'}
 Recent Events: ${events.map(e => e.type).join(', ') || 'None'}
-Outstanding Invoices: ${invoices.length > 0 ? invoices.map(i => `TTD ${Number(i.total).toFixed(0)} (${i.status})`).join(', ') : 'None'}`;
+Outstanding Invoices: ${invoices.length > 0 ? invoices.map(i => `TTD ${Number(i.total).toFixed(0)} (${i.status === 'PENDING' ? 'PENDING — not yet sent; do not send a payment reminder' : i.status})`).join(', ') : 'None'}`;
 
     const systemPrompt = `You are a Caribbean business communication specialist writing follow-up messages for a Trinidad & Tobago service business.
 Write in a warm, professional Caribbean style. Use TTD for currency. Be concise and actionable.

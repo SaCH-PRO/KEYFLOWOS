@@ -1066,7 +1066,14 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
     const now = new Date();
 
     const overdueInvoices = await this.db.invoice.findMany({
-      where: { businessId, deletedAt: null, status: { in: OPEN_RECEIVABLE_STATUS_LIST }, dueDate: { lt: now } },
+      where: {
+        businessId,
+        deletedAt: null,
+        OR: [
+          { status: 'OVERDUE' },
+          { status: { in: OPEN_RECEIVABLE_STATUS_LIST }, dueDate: { lt: now } },
+        ],
+      },
       include: {
         contact: { select: { id: true, firstName: true, lastName: true, email: true } },
       },
@@ -1139,7 +1146,7 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
           recommendedChannel: 'email',
           recommendedTone: 'firm',
           reasoning: result.content,
-          nextAction: 'Send a follow-up reminder',
+          nextAction: inv.status === 'PENDING' ? 'Review and send invoice' : 'Send a follow-up reminder',
         })),
         summary: { totalOverdue, estimatedRecovery: totalOverdue * 0.6, highPriorityCount: 0, averageRecoveryScore: 50 },
         strategy: result.content,
