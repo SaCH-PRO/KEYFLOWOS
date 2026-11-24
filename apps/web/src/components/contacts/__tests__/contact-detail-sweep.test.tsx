@@ -19,7 +19,9 @@
  *   CDS-129c  RED-BEFORE  (reviews CDC-3, m2) Recent Activity reads a code its old word list lacks in plain words
  *                         ("Payment.Received" -> "Payment received"), as the Timeline page does
  *   CDS-129d  RED-BEFORE  (review CDC-4) the Timeline page shows an event's status and actor in plain words, not the
- *                         stored PARTIALLY_PAID or SYSTEM
+ *                         stored PARTIALLY_PAID or SYSTEM ("Part-paid", "System"; review round m-a)
+ *   CDS-129e  RED-AT-6071b088  (review round m-b) the event words keep the brand's and the plain spelling: "WhatsApp
+ *                         sent" and "Follow-up scheduled", in Recent Activity as on the Timeline page (eventLabel)
  *   CDS-062a  RED-BEFORE  the side panel has no tab strip; it opens the contact's page ("Open") and keeps Edit
  *   CDS-062b  RED-BEFORE  Recent Activity's "View all" opens the contact's Timeline page (no tab to switch to)
  *
@@ -54,6 +56,7 @@ import { ContactCustomFields } from "../contact-custom-fields";
 import { ContactDetail, type ContactDetailData } from "../contact-detail";
 import { ContactDetailStats } from "../contact-detail-stats";
 import ContactTimelinePage from "@/app/app/crm/contacts/[contactId]/timeline/page";
+import { eventLabel } from "@/lib/status-labels";
 
 const BIZ = "biz_sweep";
 const CONTACT_ID = params.contactId;
@@ -209,6 +212,15 @@ describe("BUG-129: every code reads in plain words (reviews)", () => {
     expect(await screen.findByText("Invoice updated")).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent("PARTIALLY_PAID");
     expect(document.body).not.toHaveTextContent("SYSTEM");
+    expect(screen.getByText("Part-paid")).toBeInTheDocument();
+    expect(screen.getByText("System")).toBeInTheDocument();
+  });
+
+  it("CDS-129e RED-AT-6071b088: WhatsApp and Follow-up keep their spelling", () => {
+    expect(eventLabel("whatsapp.sent")).toBe("WhatsApp sent");
+    expect(eventLabel("followup.scheduled")).toBe("Follow-up scheduled");
+    render(<ContactDetailStats contact={contact} events={[{ id: "ev_w", type: "whatsapp.sent", createdAt: NOW }]} businessId={BIZ} />);
+    expect(screen.getByRole("button", { name: /recent activity/i })).toHaveTextContent("WhatsApp sent");
   });
 });
 
