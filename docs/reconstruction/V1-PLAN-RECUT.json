@@ -12934,6 +12934,36 @@
    "definition_of_done": "RED: journey C4 'from Cmd/Ctrl+K' fails at the base (as recorded). GREEN: on phone and desktop, Ctrl/Cmd+K opens the palette, the customer's last name lists them, and the result opens /app/crm/contacts/<id>; C4 green end to end; web unit test for whatever the root cause was; tsc, lint green."
   },
   {
+   "id": "FU-KEY-CTRLJ-OWNERS",
+   "title": "Cmd/Ctrl+J, KEY's drawer, has one owner",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 5,
+   "lane": "web",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [
+    "FU-C4-CMDK-SEARCH"
+   ],
+   "files": [
+    "apps/web/src/hooks/use-keyboard-shortcuts.ts",
+    "apps/web/src/components/key/key-agent.tsx",
+    "apps/web/src/components/__tests__/command-palette-open.test.tsx (extend) or a new key-shortcut test"
+   ],
+   "decisions": [],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "launch",
+   "track_reason": "serves journey K (KEY opens only from the header or Cmd/Ctrl+J)",
+   "track_ruling": "D-263",
+   "scope": "Found by FU-C4-CMDK-SEARCH (2026-11-24; its acceptance review MINOR-4). Cmd/Ctrl+J has the two owners Cmd/Ctrl+K had: the layout's useKeyboardShortcuts (hooks/use-keyboard-shortcuts.ts, the 'j' meta entry) dispatches kf:open-key {mode:'chat'}, which KeyAgent answers by opening its drawer, and KeyAgent's own keydown (components/key/key-agent.tsx ~103-110) toggles the drawer. In the app the layout's listener is added first (KeyAgent mounts after the Business Genome check), so one keypress can open the drawer and shut it again; in jsdom with the gate deferred (command-palette-open.test.tsx harness) Ctrl+J does not open KEY's drawer. Confirm live first (journey K opens KEY from the header button before trying Ctrl+J). Fix as FU-C4-CMDK-SEARCH did for K: ownedBy KeyAgent on the 'j' entry (preventDefault kept). CAUTION: the KEY_DISABLED smoke check (e2e/journeys journey-helpers keyUiFindings, smoke.spec.ts, k-key.spec.ts) counts a Ctrl+J that opens KEY's drawer, and nothing in the web hides KEY under KEY_DISABLED; that check may be passing today only because Ctrl+J is broken. Settle with the owner, or in the same packet, how KEY is hidden under KEY_DISABLED before Ctrl+J is fixed; never weaken the smoke check.",
+   "definition_of_done": "RED: in the app shell with the Genome gate deferred, Ctrl+J opens KEY's drawer and it stays open (fails at the base); live: journey K's Ctrl+J door. GREEN: one owner for Cmd/Ctrl+J, Ctrl+J toggles the drawer, preventDefault kept where KeyAgent is not mounted, Cmd/Ctrl+K unchanged; the KEY_DISABLED variant's smoke check still finds no KEY UI (by KEY being hidden there, not by Ctrl+J being broken); web suite and tsc green."
+  },
+  {
    "kind": "new",
    "absorbs": [],
    "bugs": [],
