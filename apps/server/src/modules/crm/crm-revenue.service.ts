@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { OPEN_RECEIVABLE_STATUSES } from '../commerce/commerce-stats.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CASH_NET_PAYMENT_WHERE, balanceOfStoredRows, roundMoney } from '../commerce/invoice-workflow.service';
 import { resolveTimelineViewer } from '../timeline/timeline-visibility';
@@ -270,7 +271,7 @@ export class CrmRevenueService {
     );
     const failedPayments = payments.filter((p) => p.status === 'FAILED');
     const lifetimeRevenue = roundMoney(Number(cashNet._sum.amount ?? 0));
-    const openInvoices = invoices.filter((i) => ['SENT', 'OVERDUE', 'DRAFT'].includes(i.status));
+    const openInvoices = invoices.filter((i) => OPEN_RECEIVABLE_STATUSES.has(i.status));
     const outstandingBalance = openInvoices.reduce((s, i) => s + this.toNum(i.total), 0);
     const openQuotes = quotes.filter((q) => ['SENT', 'DRAFT'].includes(q.status));
     const last = received[0] ?? null;

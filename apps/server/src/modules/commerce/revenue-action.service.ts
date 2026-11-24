@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { OPEN_RECEIVABLE_STATUS_LIST } from './commerce-stats.service';
 import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -213,7 +214,7 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
       where: {
         deletedAt: null,
         OR: [
-          { invoices: { some: { deletedAt: null, status: { in: ['SENT', 'OVERDUE', 'PAID', 'PARTIALLY_PAID'] } } } },
+          { invoices: { some: { deletedAt: null, status: { in: ['PAID', ...OPEN_RECEIVABLE_STATUS_LIST] } } } },
           { quotes: { some: { deletedAt: null, status: { in: ['SENT', 'ACCEPTED'] } } } },
           { recurringInvoices: { some: { status: 'ACTIVE' } } },
         ],
@@ -905,7 +906,7 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
         _sum: { amount: true },
       }),
       this.prisma.client.invoice.aggregate({
-        where: { businessId, deletedAt: null, status: { in: ['SENT', 'OVERDUE', 'PARTIALLY_PAID'] } },
+        where: { businessId, deletedAt: null, status: { in: OPEN_RECEIVABLE_STATUS_LIST } },
         _sum: { total: true },
         _count: true,
       }),
