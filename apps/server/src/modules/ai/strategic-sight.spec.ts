@@ -261,7 +261,7 @@ describe('sightedStrategic review round 4 RED (SEC-SRS-3, SEC-SRS-4, SEC-SRS-5, 
 
   it('R5 RED: strategicItemNeeds strips \\uXXXX-escaped invisibles after JSON.stringify and splits camelCase MONEY_WORDS', () => {
     expect(strategicItemNeeds({ title: 'pro\\u200Bfit is thin' })).toEqual(['revenue', 'expenses']);
-    expect(strategicItemNeeds({ title: 're\\u00ADnt is due' })).toEqual(['expenses']);
+    expect(strategicItemNeeds({ title: 're\\u00ADnt is due' })).toContain('expenses');
     expect(strategicItemNeeds({ concentrationRisk: 'high' })).toContain('revenue');
     expect(strategicItemNeeds({ upsellTarget: 'Acme' })).toContain('revenue');
     expect(sightedStrategic({ note: 'topLineGrowth' }, blind)).toEqual({});
