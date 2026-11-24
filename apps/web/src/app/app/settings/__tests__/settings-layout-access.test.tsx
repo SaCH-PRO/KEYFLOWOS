@@ -8,16 +8,17 @@
  * them (useMemberModuleLevels, canOpenModule): the settings hub's pages need settings, Team needs team, KEY (AI)
  * needs operations; unknown (no answer yet, a failed read) hides nothing, and the server refuses what is not allowed.
  *
- *   SLA-01  RED-BEFORE  a member with no settings, team or operations access sees no business settings tab (only the
- *                       personal Invite & Earn, SLA-07) on My
- *                       account; the page itself still renders
- *   SLA-02  RED-BEFORE  a member with team access only sees the Team tab alone
+ *   SLA-01  RED-BEFORE  a member with no settings, team or operations access sees no business settings tab on My
+ *                       account, only the personal Invite & Earn (SLA-07); the page itself still renders
+ *   SLA-02  RED-BEFORE  a member with team access only sees the Team tab (and Invite & Earn)
  *   SLA-03  control     an owner (every module) sees every tab, as before
  *   SLA-04  control     an access read that fails hides nothing (the server decides)
  *
  * Acceptance review (034cf943):
- *   SLA-05  control     MINOR-1: a member with operations but no settings sees exactly the KEY (AI) tab
- *   SLA-06  control     MINOR-1: a member with settings but no operations does not see the KEY (AI) tab
+ *   SLA-05  pin         MINOR-1: a member with operations but no settings sees exactly the KEY (AI) tab (and Invite &
+ *                       Earn); fails at the base (every tab drawn) and if AI loses its operations mapping
+ *   SLA-06  pin         MINOR-1: a member with settings but no operations does not see the KEY (AI) tab; fails at
+ *                       the base and if AI loses its operations mapping
  *   SLA-07  RED-AT-034cf943  MINOR-3: Invite & Earn (the member's own referral link; /identity/referral is
  *                       AuthGuard only) is every member's, as it was before this packet
  *   SLA-08  RED-BEFORE  (reviewer's note) on /app/settings/ai-control only "AI Control" is the selected tab, not
@@ -109,13 +110,13 @@ describe("FU-NAV-A3-CODEX-235 (b): the settings tab strip follows the member's m
     expect(tabs().length).toBeGreaterThanOrEqual(19);
   });
 
-  it("SLA-05 control: a member with operations but no settings sees exactly the KEY (AI) tab beside the personal one", async () => {
+  it("SLA-05 pin: a member with operations but no settings sees exactly the KEY (AI) tab beside the personal one", async () => {
     serve({ ...every("none"), operations: "write" });
     renderLayout();
     await waitFor(() => expect(tabs()).toEqual(["/app/settings/invite", "/app/settings/ai"]));
   });
 
-  it("SLA-06 control: a member with settings but no operations does not see the KEY (AI) tab", async () => {
+  it("SLA-06 pin: a member with settings but no operations does not see the KEY (AI) tab", async () => {
     serve({ ...every("write"), operations: "none" });
     renderLayout();
     await waitFor(() => expect(tabs()).not.toContain("/app/settings/ai"));
