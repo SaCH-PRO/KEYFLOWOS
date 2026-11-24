@@ -9,7 +9,7 @@
  * are hidden by HIDE-DEV-WEBHOOKS). KEY hides under KEY_DISABLED once SWP-KEY-SHELL-SMOKE gives the web that switch.
  *
  * Entries follow the member's modules as the nav reads them (my-access); My account is every member's.
- * Cases tagged RED-BEFORE fail on the packet's base (04730333); CONTROL cases pass on both.
+ * Every case is tagged RED-BEFORE (each fails on the packet's base, 04730333), except the review case marked CONTROL.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
@@ -104,6 +104,14 @@ describe("NAV-A2: /app/settings is the v1 Settings index", () => {
     await renderSettings();
     const hrefs = entries().map((e) => e.href ?? "");
     expect(hrefs.filter((h) => /developers|webhooks/.test(h))).toEqual([]);
+  });
+
+  it("CONTROL (review M4): a member with settings but no team or operations access is offered neither Team nor KEY", async () => {
+    // Team's page reads need team, KEY's need operations (the nav's rows); settings alone opens the rest.
+    serve({ settings: "write", team: "none", operations: "none" });
+    await renderSettings();
+    await waitFor(() => expect(entries().map((e) => e.name)).not.toContain("Team"));
+    expect(entries().map((e) => e.name)).toEqual(["Business profile", "Getting paid", "Documents & messages", "Notifications", "Plan & billing", "My account"]);
   });
 
   it("RED-BEFORE: a member without the team module is not offered Team; My account is every member's", async () => {

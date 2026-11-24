@@ -3,12 +3,12 @@
  *
  * Before: money/page.tsx re-exported finance/page.tsx, which only redirects to /app/financial-flow (and in the sweep's
  * build rendered the error page, BUG-114). Journey H opens Money and takes its entries: Overview, Money in, Expenses
- * & bills, Reports and Books. /app/finance itself forwards to /app/money (middleware), so Books opens the books' own
- * first page, the general ledger, not /app/finance (which would land back here).
+ * & bills, Reports and Books. /app/finance is itself a next.config redirect (to /app/financial-flow), so Books opens the
+ * books' own first page, the general ledger. Every entry names its final URL, never a redirect source.
  *
  * The page offers only the entries the member's modules open (GET identity/businesses/:b/my-access, read as the nav
  * reads it): unknown hides nothing and the server still refuses. Only `fetch` and the router are stubbed.
- * Cases tagged RED-BEFORE fail on the packet's base (04730333); CONTROL cases pass on both.
+ * Every case is tagged RED-BEFORE: each fails on the packet's base (04730333).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
@@ -88,7 +88,8 @@ describe("NAV-A2: /app/money is an index (BUG-114, journey H)", () => {
     expect(entries()).toEqual([
       { name: "Overview", href: "/app/financial-flow" },
       { name: "Money in", href: "/app/payments" },
-      { name: "Expenses & bills", href: "/app/expenses" },
+      // The final URL: /app/expenses is a next.config 308 source (review M1); the nav names /app/money/expenses too.
+      { name: "Expenses & bills", href: "/app/money/expenses" },
       { name: "Reports", href: "/app/reports" },
       { name: "Books", href: "/app/finance/ledger" },
     ]);
