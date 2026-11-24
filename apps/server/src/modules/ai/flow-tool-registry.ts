@@ -1163,7 +1163,7 @@ export const FLOW_TOOLS: FlowTool[] = [
         productId: { type: 'string', description: 'Product to move' },
         fromWarehouseId: { type: 'string', description: 'Source warehouse id' },
         toWarehouseId: { type: 'string', description: 'Destination warehouse id — must differ from the source' },
-        quantity: { type: 'number', description: 'Units to move; must be positive' },
+        quantity: { type: 'integer', description: 'Whole units to move (a positive whole number)' },
         note: { type: 'string', description: 'Why the stock is moving' },
       },
       required: ['productId', 'fromWarehouseId', 'toWarehouseId', 'quantity'],
