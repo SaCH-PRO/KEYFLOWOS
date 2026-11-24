@@ -4,6 +4,7 @@ import { NotificationsService } from './notifications.service';
 import { TransactionalEmailService, NotificationPreferences } from './transactional-email.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { resolveTimelineViewer, type TimelineViewer } from '../timeline/timeline-visibility';
 import { briefingContactRule, type BriefingContactRule } from '../commerce/revenue-intelligence.controller';
@@ -41,7 +42,7 @@ function weeklyBriefingFor(notification: Notification, rule: BriefingContactRule
 }
 
 @Controller('notifications')
-@UseGuards(AuthGuard, BusinessGuard)
+@UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
 export class NotificationsController {
   constructor(
     @Inject(NotificationsService)
@@ -113,12 +114,16 @@ export class NotificationsController {
     return this.notifications.markAllRead(businessId, { excludeTypes: this.withheldTypes(viewer) });
   }
 
+  // FU-NOTIFICATIONS-PREFS-GUARD (P30): customer-email settings and log belong
+  // to Settings -> Notifications and require settings read/write authority.
   @Get('businesses/:businessId/customer-preferences')
+  @RequireModuleScope('settings', 'read')
   getPreferences(@Param('businessId') businessId: string) {
     return this.transactionalEmail.getPreferences(businessId);
   }
 
   @Patch('businesses/:businessId/customer-preferences')
+  @RequireModuleScope('settings', 'write')
   updatePreferences(
     @Param('businessId') businessId: string,
     @Body() body: Partial<NotificationPreferences>,
@@ -127,13 +132,15 @@ export class NotificationsController {
   }
 
   @Get('businesses/:businessId/customer-log')
+  @RequireModuleScope('settings', 'read')
   getCustomerLog(
     @Param('businessId') businessId: string,
     @Query('limit') limit?: string,
     @Query('type') type?: string,
   ) {
+    const parsedLimit = limit ? Number.parseInt(limit, 10) : Number.NaN;
     return this.transactionalEmail.getNotificationLog(businessId, {
-      limit: limit ? parseInt(limit, 10) : undefined,
+      limit: Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : undefined,
       type: type || undefined,
     });
   }
