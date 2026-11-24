@@ -220,6 +220,9 @@ describe("FU-WEB-PAYLINK-STATUS-BUTTONS: InvoiceMobileActions bottom sheet", () 
       );
       expect(screen.queryByText("Copy payment link"), `${status} mobile Copy payment link`).toBeNull();
       expect(screen.queryByText("Share via WhatsApp"), `${status} mobile Share via WhatsApp`).toBeNull();
+      if (status === "VOID") {
+        expect(screen.getByText("No actions available for this invoice.")).toBeTruthy();
+      }
       cleanup();
     }
 
@@ -243,12 +246,12 @@ describe("FU-WEB-PAYLINK-STATUS-BUTTONS: InvoiceMobileActions bottom sheet", () 
 });
 
 describe("FU-WEB-PAYLINK-STATUS-BUTTONS: InvoicesHubPage, InvoiceDetailPage, and InvoiceList", () => {
-  it("PLB-05 RED-BEFORE: InvoicesHubPage hides Share WhatsApp on DRAFT/PENDING and shows it on SENT/PARTIALLY_CREDITED", async () => {
-    const draft = makeInvoice("inv_hub_draft", "DRAFT");
-    const pending = makeInvoice("inv_hub_pending", "PENDING");
-    const sent = makeInvoice("inv_hub_sent", "SENT");
-    const partCred = makeInvoice("inv_hub_pcred", "PARTIALLY_CREDITED");
-    fetchInvoices.mockResolvedValue({ data: [draft, pending, sent, partCred], error: null });
+  it("PLB-05 RED-BEFORE: InvoicesHubPage hides Share WhatsApp across all 6 non-payable statuses and shows it across all 4 payable statuses", async () => {
+    const allInvoices = [
+      ...NON_PAYABLE.map((s) => makeInvoice(`inv_hub_${s.toLowerCase()}`, s)),
+      ...PAYABLE.map((s) => makeInvoice(`inv_hub_${s.toLowerCase()}`, s)),
+    ];
+    fetchInvoices.mockResolvedValue({ data: allInvoices, error: null });
 
     render(<InvoicesHubPage />);
     await waitFor(() => expect(screen.getByText("INV_HUB_DRAFT")).toBeTruthy());
@@ -259,21 +262,21 @@ describe("FU-WEB-PAYLINK-STATUS-BUTTONS: InvoicesHubPage, InvoiceDetailPage, and
       fireEvent.click(btns[btns.length - 1]);
     };
 
-    openRowMenu("INV_HUB_DRAFT");
-    expect(screen.queryByText("Share WhatsApp")).toBeNull();
+    for (const s of NON_PAYABLE) {
+      openRowMenu(`INV_HUB_${s}`);
+      expect(screen.queryByText("Share WhatsApp"), `${s} hub row menu`).toBeNull();
+    }
 
-    openRowMenu("INV_HUB_PENDING");
-    expect(screen.queryByText("Share WhatsApp")).toBeNull();
+    for (const s of PAYABLE) {
+      openRowMenu(`INV_HUB_${s}`);
+      expect(screen.getByText("Share WhatsApp"), `${s} hub row menu`).toBeTruthy();
+    }
 
-    openRowMenu("INV_HUB_SENT");
-    expect(screen.getByText("Share WhatsApp")).toBeTruthy();
-
-    openRowMenu("INV_HUB_PCRED");
-    expect(screen.getByText("Share WhatsApp")).toBeTruthy();
+    expect(createInvoicePaymentLink).not.toHaveBeenCalled();
   });
 
-  it("PLB-06 RED-BEFORE: InvoiceDetailPage ([id]/page.tsx) hides Copy payment link for DRAFT/PENDING/PAID/VOID and shows it for SENT/PARTIALLY_CREDITED", async () => {
-    for (const status of ["DRAFT", "PENDING", "PAID", "VOID", "FAILED", "FULLY_CREDITED"]) {
+  it("PLB-06 RED-BEFORE: InvoiceDetailPage ([id]/page.tsx) hides Copy payment link for all 6 non-payable statuses and renders both header dropdown and sidebar controls for all 4 payable statuses", async () => {
+    for (const status of NON_PAYABLE) {
       getInvoice.mockResolvedValue({ data: makeInvoice("inv_detail", status), error: null });
       render(<InvoiceDetailPage />);
       await waitFor(() => expect(screen.getByText(/INV_DETAIL/)).toBeTruthy());
@@ -285,18 +288,22 @@ describe("FU-WEB-PAYLINK-STATUS-BUTTONS: InvoicesHubPage, InvoiceDetailPage, and
       getInvoice.mockResolvedValue({ data: makeInvoice("inv_detail", status), error: null });
       render(<InvoiceDetailPage />);
       await waitFor(() => expect(screen.getByText(/INV_DETAIL/)).toBeTruthy());
-      expect(screen.getAllByText("Copy payment link").length, `${status} detail page`).toBeGreaterThan(0);
+      expect(screen.getAllByText("Copy payment link"), `${status} detail page header + sidebar`).toHaveLength(2);
       cleanup();
     }
+
+    expect(createInvoicePaymentLink).not.toHaveBeenCalled();
   });
 
-  it("PLB-07 RED-BEFORE: InvoiceList hides Share via WhatsApp on DRAFT/PENDING and shows it on SENT", () => {
-    const draft = makeInvoice("inv_list_draft", "DRAFT");
-    const sent = makeInvoice("inv_list_sent", "SENT");
+  it("PLB-07 RED-BEFORE: InvoiceList hides Share via WhatsApp across all 6 non-payable statuses and shows it across all 4 payable statuses", () => {
+    const allInvoices = [
+      ...NON_PAYABLE.map((s) => makeInvoice(`inv_list_${s.toLowerCase()}`, s)),
+      ...PAYABLE.map((s) => makeInvoice(`inv_list_${s.toLowerCase()}`, s)),
+    ];
 
     render(
       <InvoiceList
-        invoices={[draft, sent]}
+        invoices={allInvoices}
         contacts={[]}
         products={[]}
         businessId="biz_plb"
@@ -323,10 +330,16 @@ describe("FU-WEB-PAYLINK-STATUS-BUTTONS: InvoicesHubPage, InvoiceDetailPage, and
       fireEvent.click(btns[btns.length - 1]);
     };
 
-    openRowMenu("INV_LIST_DRAFT");
-    expect(screen.queryByText("Share via WhatsApp")).toBeNull();
+    for (const s of NON_PAYABLE) {
+      openRowMenu(`INV_LIST_${s}`);
+      expect(screen.queryByText("Share via WhatsApp"), `${s} invoice-list row menu`).toBeNull();
+    }
 
-    openRowMenu("INV_LIST_SENT");
-    expect(screen.getByText("Share via WhatsApp")).toBeTruthy();
+    for (const s of PAYABLE) {
+      openRowMenu(`INV_LIST_${s}`);
+      expect(screen.getByText("Share via WhatsApp"), `${s} invoice-list row menu`).toBeTruthy();
+    }
+
+    expect(createInvoicePaymentLink).not.toHaveBeenCalled();
   });
 });
