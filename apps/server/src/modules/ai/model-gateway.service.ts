@@ -2,8 +2,13 @@ import { Injectable, Logger, Inject, ServiceUnavailableException } from '@nestjs
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from 'crypto';
 import OpenAI from 'openai';
-import { validateOutputContract, type ContractType } from './ai-output-contracts';
-import { LLMCostService } from './llm-cost.service';
+import {
+  AiContractViolationError,
+  validateOutputContract,
+  type ContractType,
+  type ContractViolationAttempt,
+} from './ai-output-contracts';
+import { LLMCostService, priceFor, costStatusFor, type CostStatus } from './llm-cost.service';
 import { LangfuseService } from './langfuse.service';
 import {
   classifyProviderFailure,
@@ -84,6 +89,17 @@ export interface ContractValidationResult {
   contractType: ContractType;
 }
 
+/**
+ * RR-STRUCTURED-PARSE-INVALID-STATE: what complete() knows about the output it
+ * returns. 'valid': the expected contract held on the answer returned;
+ * 'valid_after_fallback': it held, but only after at least one candidate's
+ * answer violated it (that answer was paid for and is recorded as 'invalid');
+ * 'unchecked': the request named no contract. An invalid answer is never
+ * returned: it is recorded and the next candidate runs, or
+ * AiContractViolationError is thrown.
+ */
+export type GatewayOutputState = 'valid' | 'valid_after_fallback' | 'unchecked';
+
 export interface GatewayResponse {
   content: string | null;
   toolCalls?: Array<{
@@ -98,11 +114,14 @@ export interface GatewayResponse {
     completionTokens: number;
     totalTokens: number;
     estimatedCost: number;
+    /** How estimatedCost was priced: from the table, or at the fallback rate for an unknown model (RR-UNKNOWN-COST-NOT-ZERO). */
+    costStatus?: CostStatus;
   };
   latencyMs: number;
   fallbackUsed: boolean;
   fallbackProvider?: AiProvider;
   contractValidation?: ContractValidationResult;
+  outputState?: GatewayOutputState;
 }
 
 /**
@@ -137,6 +156,7 @@ export interface StreamChunk {
     completionTokens: number;
     totalTokens: number;
     estimatedCost: number;
+    costStatus?: CostStatus;
   };
   provider?: AiProvider;
   model?: string;
@@ -277,6 +297,8 @@ export interface ProviderBudgetStatus {
 export interface BudgetStatus {
   overall: { budgetCap: number | null; spent: number; remaining: number | null; utilizationPct: number | null; isOverBudget: boolean; isNearLimit: boolean };
   byProvider: ProviderBudgetStatus[];
+  /** Calls this month whose cost is an estimate at the fallback rate because the model has no price (RR-UNKNOWN-COST-NOT-ZERO). */
+  unpricedCalls: number;
   periodStart: Date;
   periodEnd: Date;
 }
@@ -362,58 +384,8 @@ const DEFAULT_PREFERENCES: AiPreferences = {
 
 const BUDGET_NEAR_LIMIT_THRESHOLD = 0.85;
 
-/**
- * Cost per 1,000 tokens, in USD.
- *
- * LAST VERIFIED AGAINST PROVIDER PRICING: 2026-08-04.
- *
- * This is not decoration — it is the instrument. filterCandidatesByBudget cuts
- * providers off using these numbers, getBudgetStatus and the admin spend view
- * report them, and every "is this worth it" judgement about model routing is
- * made against them.
- *
- * The gpt-4o entries were the May-2024 launch prices and had not been touched
- * since: gpt-4o was carrying $5/$15 per 1M against an actual $2.50/$10, and
- * gpt-4o-mini $0.40/$1.60 against an actual $0.15/$0.60. So budget caps fired at
- * roughly half the real spend and pushed traffic onto fallbacks nothing needed.
- *
- * Worse for decision-making: the mini overstatement (2.7x) was LARGER than the
- * gpt-4o one (2x), so the table understated how much cheaper the cheap tier is —
- * biasing exactly the routing choices this table exists to inform.
- *
- * Provider prices move. Re-check them when this comment gets stale, and treat a
- * missing entry as a bug rather than as free — see recordCost below.
- */
-const TOKEN_COST_PER_1K: Record<string, { input: number; output: number }> = {
-  'gpt-4o': { input: 0.0025, output: 0.010 },
-  'gpt-4o-mini': { input: 0.00015, output: 0.0006 },
-  'claude-3-5-sonnet-20241022': { input: 0.003, output: 0.015 },
-  'claude-3-5-haiku-20241022': { input: 0.0008, output: 0.004 },
-  'gemini-2.0-flash': { input: 0.0001, output: 0.0004 },
-  'gemini-2.5-pro': { input: 0.00125, output: 0.010 },
-  'grok-2': { input: 0.005, output: 0.015 },
-  'grok-2-mini': { input: 0.001, output: 0.005 },
-  'moonshot-v1-8k': { input: 0.003, output: 0.003 },
-  'moonshot-v1-32k': { input: 0.006, output: 0.006 },
-  'moonshot-v1-128k': { input: 0.012, output: 0.012 },
-};
-
-/**
- * Price for a model, never zero.
- *
- * The call sites used `TOKEN_COST_PER_1K[model]?.input ?? 0`, so any model
- * reached through a modelOverride and absent from the table recorded as FREE —
- * while the estimate path fell back to gpt-4o pricing, producing two different
- * numbers for the same call in the same row. A missing price is a bug, and the
- * safe direction for a cost figure is to overstate rather than to vanish.
- */
-function priceFor(model: string): { input: number; output: number } {
-  const known = TOKEN_COST_PER_1K[model];
-  if (known) return known;
-  // eslint-disable-next-line no-console
-  console.warn(`[model-gateway] no price for "${model}"; billing it as gpt-4o`);
-  return TOKEN_COST_PER_1K['gpt-4o'];
-}
+// The price table and priceFor live in llm-cost.service.ts (RR-UNKNOWN-COST-NOT-ZERO):
+// one table, imported above, never a zero for an unknown model.
 
 const DEFAULT_ROUTING_TABLE: Record<AiMode, Record<TaskCategory, ModelStrategy>> = {
   balanced: {
@@ -895,6 +867,10 @@ export class ModelGatewayService {
     let fallbackUsed = false;
     let fallbackProvider: AiProvider | undefined;
     let budgetDegraded = false;
+    // RR-STRUCTURED-PARSE-INVALID-STATE: every candidate whose answer violated
+    // the expected contract. Each was paid for and is costed as 'invalid'; if
+    // nothing valid follows, the caller gets them all in one typed 502.
+    const violations: ContractViolationAttempt[] = [];
 
     const effectiveCandidates = budgetFilteredCandidates.length > 0
       ? budgetFilteredCandidates
@@ -941,25 +917,35 @@ export class ModelGatewayService {
             ? response.toolCalls[0]?.function?.arguments
             : response.content;
 
-          if (contentToValidate) {
-            response.contractValidation = this.validateContract(
-              contentToValidate,
-              request.expectedContract,
-            );
+          // Empty output is a violation too: a request that named a contract
+          // never returns nothing as success.
+          response.contractValidation = contentToValidate
+            ? this.validateContract(contentToValidate, request.expectedContract)
+            : { valid: false, errors: ['Response is empty'], contractType: request.expectedContract };
 
-            if (!response.contractValidation.valid) {
-              const errors = response.contractValidation.errors.join('; ');
-              this.logger.error(
-                `Contract [${request.expectedContract}] enforcement failed for ${request.taskCategory}: ${errors}`,
-              );
-              throw new Error(
-                `AI output contract violation [${request.expectedContract}]: ${errors}`,
-              );
-            }
+          if (!response.contractValidation.valid) {
+            const errors = response.contractValidation.errors;
+            this.logger.error(
+              `Contract [${request.expectedContract}] enforcement failed for ${request.taskCategory} (${candidate.provider}/${response.model}): ${errors.join('; ')}`,
+            );
+            // The call was made and paid for: record it as invalid before moving on.
+            this.recordCostFromResponse(request, response, { outputState: 'invalid', contractErrors: errors }).catch(
+              (err: unknown) => {
+                this.logger.warn(`Failed to record LLM cost: ${err instanceof Error ? err.message : String(err)}`);
+              },
+            );
+            // A violation is the model's answer, not the provider's health: it never counts toward a circuit,
+            // and the call was already counted by recordProviderSuccess inside executeWithRetries.
+            this.recordContractViolation(candidate.provider, preferences);
+            violations.push({ provider: candidate.provider, model: response.model, errors });
+            continue;
           }
+          response.outputState = violations.length > 0 ? 'valid_after_fallback' : 'valid';
+        } else {
+          response.outputState = 'unchecked';
         }
 
-        this.recordCostFromResponse(request, response).catch((err: unknown) => {
+        this.recordCostFromResponse(request, response, { outputState: response.outputState }).catch((err: unknown) => {
           this.logger.warn(`Failed to record LLM cost: ${err instanceof Error ? err.message : String(err)}`);
         });
 
@@ -972,6 +958,19 @@ export class ModelGatewayService {
       }
     }
 
+    if (violations.length > 0 && request.expectedContract) {
+      // Nothing valid came back and at least one candidate answered badly: a
+      // typed 502, not the last provider's error, so the caller can tell a
+      // model that answered wrongly from a provider that did not answer.
+      // The detail names the other candidate's failure class only: the body is
+      // client-facing, and a provider's message can carry hosts, response
+      // bodies or key fragments (the full text is in the error log above).
+      throw new AiContractViolationError(
+        request.expectedContract,
+        violations,
+        lastError ? `another candidate failed with a provider error (${classifyProviderFailure(lastError)})` : undefined,
+      );
+    }
     throw lastError || this.noProviderAvailable(effectiveCandidates, preferences);
   }
 
@@ -1005,6 +1004,7 @@ export class ModelGatewayService {
   private async recordCostFromResponse(
     request: GatewayRequest,
     response: GatewayResponse,
+    outcome: { outputState: GatewayOutputState | 'invalid'; contractErrors?: string[] } = { outputState: 'unchecked' },
   ): Promise<void> {
     // Trace FIRST, then cost. recordCost() awaits a DB write that can reject
     // (e.g. a database outage) — and that is precisely when we most want the
@@ -1039,7 +1039,11 @@ export class ModelGatewayService {
       totalCost: response.usage.estimatedCost,
       latencyMs: response.latencyMs,
       fallbackUsed: response.fallbackUsed,
-      metadata: { contractType: request.expectedContract },
+      metadata: {
+        contractType: request.expectedContract,
+        outputState: outcome.outputState,
+        ...(outcome.contractErrors ? { contractErrors: outcome.contractErrors } : {}),
+      },
     });
   }
 
@@ -1328,7 +1332,7 @@ export class ModelGatewayService {
       if (chunk.usage) {
         const promptTokens = chunk.usage.prompt_tokens ?? 0;
         const completionTokens = chunk.usage.completion_tokens ?? 0;
-        const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['gpt-4o'];
+        const costs = priceFor(model);
         const estimatedCost =
           (promptTokens / 1000) * costs.input +
           (completionTokens / 1000) * costs.output;
@@ -1340,6 +1344,7 @@ export class ModelGatewayService {
             completionTokens,
             totalTokens: promptTokens + completionTokens,
             estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+            costStatus: costStatusFor(model),
           },
         };
       }
@@ -1552,7 +1557,7 @@ export class ModelGatewayService {
     }
 
     const totalTokens = inputTokens + outputTokens;
-    const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['claude-3-5-sonnet-20241022'];
+    const costs = priceFor(model);
     const estimatedCost =
       (inputTokens / 1000) * costs.input +
       (outputTokens / 1000) * costs.output;
@@ -1564,6 +1569,7 @@ export class ModelGatewayService {
         completionTokens: outputTokens,
         totalTokens,
         estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+        costStatus: costStatusFor(model),
       },
     };
 
@@ -1626,7 +1632,7 @@ export class ModelGatewayService {
       if (chunk.usage) {
         const promptTokens = chunk.usage.prompt_tokens ?? 0;
         const completionTokens = chunk.usage.completion_tokens ?? 0;
-        const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['grok-2'];
+        const costs = priceFor(model);
         const estimatedCost =
           (promptTokens / 1000) * costs.input +
           (completionTokens / 1000) * costs.output;
@@ -1638,6 +1644,7 @@ export class ModelGatewayService {
             completionTokens,
             totalTokens: promptTokens + completionTokens,
             estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+            costStatus: costStatusFor(model),
           },
         };
       }
@@ -1702,7 +1709,7 @@ export class ModelGatewayService {
       if (chunk.usage) {
         const promptTokens = chunk.usage.prompt_tokens ?? 0;
         const completionTokens = chunk.usage.completion_tokens ?? 0;
-        const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['moonshot-v1-8k'];
+        const costs = priceFor(model);
         const estimatedCost =
           (promptTokens / 1000) * costs.input +
           (completionTokens / 1000) * costs.output;
@@ -1714,6 +1721,7 @@ export class ModelGatewayService {
             completionTokens,
             totalTokens: promptTokens + completionTokens,
             estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+            costStatus: costStatusFor(model),
           },
         };
       }
@@ -1788,7 +1796,7 @@ export class ModelGatewayService {
       if (chunk.usage) {
         const promptTokens = chunk.usage.prompt_tokens ?? 0;
         const completionTokens = chunk.usage.completion_tokens ?? 0;
-        const costs = TOKEN_COST_PER_1K[model] || { input: 0, output: 0 };
+        const costs = priceFor(model);
         const estimatedCost =
           (promptTokens / 1000) * costs.input +
           (completionTokens / 1000) * costs.output;
@@ -1800,6 +1808,7 @@ export class ModelGatewayService {
             completionTokens,
             totalTokens: promptTokens + completionTokens,
             estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+            costStatus: costStatusFor(model),
           },
         };
       }
@@ -1869,7 +1878,7 @@ export class ModelGatewayService {
       if (chunk.usage) {
         const promptTokens = chunk.usage.prompt_tokens ?? 0;
         const completionTokens = chunk.usage.completion_tokens ?? 0;
-        const costs = TOKEN_COST_PER_1K[model] || { input: 0, output: 0 };
+        const costs = priceFor(model);
         const estimatedCost =
           (promptTokens / 1000) * costs.input +
           (completionTokens / 1000) * costs.output;
@@ -1881,6 +1890,7 @@ export class ModelGatewayService {
             completionTokens,
             totalTokens: promptTokens + completionTokens,
             estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+            costStatus: costStatusFor(model),
           },
         };
       }
@@ -1969,6 +1979,10 @@ export class ModelGatewayService {
 
     const now = new Date();
     const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    // Rows priced at the fallback rate this month: shown beside the total, never folded into it silently.
+    const unpricedCalls = await this.prisma.client.aiUsageLog.count({
+      where: { businessId, createdAt: { gte: periodStart }, metadata: { path: ['costStatus'], equals: 'unpriced_estimate' } },
+    });
     const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
 
     const overallCap = budgetCaps?.monthlyOverall ?? null;
@@ -2001,6 +2015,7 @@ export class ModelGatewayService {
         isNearLimit: overallCap !== null && overallUtilization !== null && overallUtilization >= BUDGET_NEAR_LIMIT_THRESHOLD * 100,
       },
       byProvider,
+      unpricedCalls,
       periodStart,
       periodEnd,
     };
@@ -2305,7 +2320,7 @@ export class ModelGatewayService {
     const promptTokens = response.usage?.prompt_tokens ?? 0;
     const completionTokens = response.usage?.completion_tokens ?? 0;
     const totalTokens = promptTokens + completionTokens;
-    const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['gpt-4o'];
+    const costs = priceFor(model);
     const estimatedCost =
       (promptTokens / 1000) * costs.input +
       (completionTokens / 1000) * costs.output;
@@ -2329,6 +2344,7 @@ export class ModelGatewayService {
         completionTokens,
         totalTokens,
         estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+        costStatus: costStatusFor(model),
       },
     };
   }
@@ -2447,7 +2463,7 @@ export class ModelGatewayService {
     const promptTokens = data.usage?.input_tokens ?? 0;
     const completionTokens = data.usage?.output_tokens ?? 0;
     const totalTokens = promptTokens + completionTokens;
-    const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['claude-3-5-sonnet-20241022'];
+    const costs = priceFor(model);
     const estimatedCost =
       (promptTokens / 1000) * costs.input +
       (completionTokens / 1000) * costs.output;
@@ -2460,6 +2476,7 @@ export class ModelGatewayService {
         completionTokens,
         totalTokens,
         estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+        costStatus: costStatusFor(model),
       },
     };
   }
@@ -2498,7 +2515,7 @@ export class ModelGatewayService {
     const promptTokens = response.usage?.prompt_tokens ?? 0;
     const completionTokens = response.usage?.completion_tokens ?? 0;
     const totalTokens = promptTokens + completionTokens;
-    const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['grok-2'];
+    const costs = priceFor(model);
     const estimatedCost =
       (promptTokens / 1000) * costs.input +
       (completionTokens / 1000) * costs.output;
@@ -2522,6 +2539,7 @@ export class ModelGatewayService {
         completionTokens,
         totalTokens,
         estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+        costStatus: costStatusFor(model),
       },
     };
   }
@@ -2560,7 +2578,7 @@ export class ModelGatewayService {
     const promptTokens = response.usage?.prompt_tokens ?? 0;
     const completionTokens = response.usage?.completion_tokens ?? 0;
     const totalTokens = promptTokens + completionTokens;
-    const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['moonshot-v1-8k'];
+    const costs = priceFor(model);
     const estimatedCost =
       (promptTokens / 1000) * costs.input +
       (completionTokens / 1000) * costs.output;
@@ -2584,6 +2602,7 @@ export class ModelGatewayService {
         completionTokens,
         totalTokens,
         estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+        costStatus: costStatusFor(model),
       },
     };
   }
@@ -2656,6 +2675,7 @@ export class ModelGatewayService {
         completionTokens,
         totalTokens,
         estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+        costStatus: costStatusFor(model),
       },
     };
   }
@@ -2720,17 +2740,17 @@ export class ModelGatewayService {
         const promptTokens = chunk.usage.prompt_tokens ?? 0;
         const completionTokens = chunk.usage.completion_tokens ?? 0;
         const costs = priceFor(model);
+        const estimatedCost =
+          (promptTokens / 1000) * costs.input +
+          (completionTokens / 1000) * costs.output;
         yield {
           type: 'usage',
           usage: {
             promptTokens,
             completionTokens,
             totalTokens: promptTokens + completionTokens,
-            estimatedCost:
-              Math.round(
-                ((promptTokens / 1000) * costs.input +
-                  (completionTokens / 1000) * costs.output) * 10000,
-              ) / 10000,
+            estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+            costStatus: costStatusFor(model),
           },
         };
       }
@@ -2783,7 +2803,7 @@ export class ModelGatewayService {
     const promptTokens = response.usage?.prompt_tokens ?? 0;
     const completionTokens = response.usage?.completion_tokens ?? 0;
     const totalTokens = promptTokens + completionTokens;
-    const costs = TOKEN_COST_PER_1K[model] || { input: 0, output: 0 };
+    const costs = priceFor(model);
     const estimatedCost =
       (promptTokens / 1000) * costs.input +
       (completionTokens / 1000) * costs.output;
@@ -2807,6 +2827,7 @@ export class ModelGatewayService {
         completionTokens,
         totalTokens,
         estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+        costStatus: costStatusFor(model),
       },
     };
   }
@@ -2850,7 +2871,7 @@ export class ModelGatewayService {
     const promptTokens = response.usage?.prompt_tokens ?? 0;
     const completionTokens = response.usage?.completion_tokens ?? 0;
     const totalTokens = promptTokens + completionTokens;
-    const costs = TOKEN_COST_PER_1K[model] || { input: 0, output: 0 };
+    const costs = priceFor(model);
     const estimatedCost =
       (promptTokens / 1000) * costs.input +
       (completionTokens / 1000) * costs.output;
@@ -2874,6 +2895,7 @@ export class ModelGatewayService {
         completionTokens,
         totalTokens,
         estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+        costStatus: costStatusFor(model),
       },
     };
   }
@@ -3291,6 +3313,21 @@ export class ModelGatewayService {
    * the platform key must not take the provider away from every business for
    * the cooldown.
    */
+  /**
+   * RR-STRUCTURED-PARSE-INVALID-STATE: the provider answered (that call is
+   * already in totalCalls through recordProviderSuccess) but the answer
+   * violated the expected contract. Health shows it as an error with class
+   * 'contract_violation'; no circuit is touched and no second call is counted.
+   */
+  private recordContractViolation(provider: AiProvider, preferences?: AiPreferences): void {
+    const metrics = this.providerMetrics.get(provider);
+    if (!metrics) return;
+    metrics.totalErrors++;
+    metrics.lastErrorAt = new Date();
+    // As in recordProviderError: only the platform credential's failures set the class every business sees.
+    if (!this.byokCircuitId(provider, preferences)) metrics.lastFailureClass = 'contract_violation';
+  }
+
   private recordProviderError(
     provider: AiProvider,
     preferences?: AiPreferences,

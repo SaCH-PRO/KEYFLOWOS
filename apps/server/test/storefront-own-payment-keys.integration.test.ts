@@ -310,6 +310,7 @@ async function cleanup() {
     `DELETE FROM fulfillment_routes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM marketplace_order_items WHERE order_id IN (SELECT id FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM services WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
@@ -906,6 +907,7 @@ beforeAll(async () => {
     [ID.prodOwn, ID.bizOwn],
   ] as const) {
     await db.product.create({ data: { id, businessId, name: 'V61B Widget', price: UNIT_PRICE, currency: 'USD', category: 'PRODUCT', isActive: true } });
+    await db.service.create({ data: { id: `${id}_listing`, businessId, name: 'V61B Widget', duration: 30, price: UNIT_PRICE, sourceProductId: id } });
   }
   // OPK-05: the business with no keys of its own sends USD invoices; one has an active pay link.
   await db.contact.create({

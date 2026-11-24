@@ -107,22 +107,15 @@ const ORPHANED_BY_DESIGN: Record<string, Reason> = {
   "/app/inbox":                          'deliberately-unlinked',
   "/app/inbox/intake":                   'todo-connect',
   "/app/keyflow-command":                'deliberately-unlinked',
-  // The expanded finance action list, reached from the "See all" link on the
-  // money hub's panel — which truncates to five. Not in nav on purpose: it is
-  // the panel's overflow, not a destination of its own.
-  "/app/money/actions":                  'detail-route-of:/app/money',
-  "/app/money/revenue":                  'deliberately-unlinked',
-  // NAV-A1: /app/notifications and /app/settings/profile forward on mount (to /app/settings/notifications and
-  // /app/profile). /app/settings/conversion was counted only through the /app/settings prefix (a page that forwards
-  // to billing); no menu names it, and NAV-B-HIDE's census decides it (D-152).
+  // NAV-A1: /app/notifications forwards on mount (to /app/settings/notifications). NAV-A2: /app/money and
+  // /app/settings are real indexes now, so the pages under them (money/actions, money/revenue, settings/conversion,
+  // settings/profile) are counted through their prefixes and need no entry here.
   "/app/notifications":                  'deliberately-unlinked',
   "/app/onboarding":                     'todo-connect',
   "/app/onboarding/business-os":         'deliberately-unlinked',
   "/app/plans/[planId]":                 'todo-connect',
   "/app/projects":                       'deliberately-unlinked',
   "/app/projects/plans/[planId]":        'detail-route-of:/app/work/projects',
-  "/app/settings/conversion":            'todo-connect',
-  "/app/settings/profile":               'deliberately-unlinked',
   "/app/workflows":                      'deliberately-unlinked',
 };
 
@@ -149,10 +142,10 @@ function navHrefs(): string[] {
 
 /**
  * NAV-A1: the Settings screens' own menu (app/app/settings/layout.tsx navItems), shown beside every settings page.
- * Before NAV-A1 the nav named /app/settings, and the generous prefix rule counted every settings screen through it;
- * /app/settings only forwards (to /app/settings/billing), so the Settings hub names /app/settings/business, and the
- * screens are reached through the layout's menu. An explicit edge, read exactly: only when a nav href opens a
- * settings page.
+ * Before NAV-A1 the nav named /app/settings, and the generous prefix rule counted every settings screen through it
+ * while /app/settings only forwarded (to /app/settings/billing). Since NAV-A2 /app/settings is a real index and the
+ * Settings hub names it again, so the prefix rule counts the settings screens once more (a follow-up may match hub
+ * indexes exactly); this edge still adds the layout's menu, read exactly: only when a nav href opens a settings page.
  */
 function settingsMenuHrefs(hrefs: string[]): string[] {
   if (!hrefs.some((h) => h.startsWith('/app/settings/'))) return [];
@@ -257,7 +250,7 @@ describe('NAV-A1: every nav href is the final URL, and the redirect table only g
     expect(hops, 'name the destination in the nav instead').toEqual([]);
   });
 
-  /** The page file a route renders, following one-line re-exports (/app/money re-exports the finance page). */
+  /** The page file a route renders, following one-line re-exports (/app/money/revenue re-exports the Sales page). */
   const pageFile = (route: string, hops = 0): string | null => {
     const page = path.join(APP, ...route.replace(/^\/app\/?/, '').split('/').filter(Boolean), 'page.tsx');
     if (!fs.existsSync(page)) return null;
@@ -275,8 +268,9 @@ describe('NAV-A1: every nav href is the final URL, and the redirect table only g
     expect(stubs).toEqual([]);
   });
 
-  it('the re-export reader sees /app/money forward (the check is not vacuous)', () => {
-    expect(pageFile('/app/money')).toMatch(/finance[\\/]page\.tsx$/);
+  // NAV-A2: /app/money is a real index now; /app/money/revenue still re-exports the Sales page.
+  it('the re-export reader sees /app/money/revenue forward (the check is not vacuous)', () => {
+    expect(pageFile('/app/money/revenue')).toMatch(/commerce[\\/]page\.tsx$/);
   });
 
   // The permanent redirects at NAV-A1's base (79ed2a57), except /app/control-tower's pair, which NAV-A1 changed to a

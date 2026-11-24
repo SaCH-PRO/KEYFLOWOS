@@ -43,6 +43,7 @@ import {
   InvoiceTimelineEntry,
 } from "@/lib/client";
 import { apiDelete, providerUnavailableOf } from "@/lib/api";
+import { canShareInvoicePayLink } from "@/lib/commerce-status";
 import { invoiceBalanceOfStoredRows } from "@keyflow/shared";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { useCompose } from "@/components/email/compose-context";
@@ -328,7 +329,7 @@ export default function InvoiceDetailPage() {
   // or an error. The fallback was the retired bare-id /pay/:id page, so a
   // paid or void invoice copied a dead link.
   const copyPaymentLink = async () => {
-    if (!businessId || !invoice) return;
+    if (!businessId || !invoice || !canShareInvoicePayLink(invoice.status)) return;
     const { data, error: linkError } = await createInvoicePaymentLink(businessId, invoice.id);
     if (!data?.token) {
       toast.error(linkError ?? "Could not create a payment link for this invoice");
@@ -354,6 +355,7 @@ export default function InvoiceDetailPage() {
   const canEmail = invoice.status !== "VOID" && invoice.status !== "PAID";
   const canRemind = invoice.status === "SENT" || invoice.status === "OVERDUE" || invoice.status === "PARTIALLY_PAID";
   const canRecordPayment = invoice.status === "SENT" || invoice.status === "OVERDUE" || invoice.status === "PARTIALLY_PAID";
+  const canSharePayLink = canShareInvoicePayLink(invoice.status);
   const canVoid = invoice.status !== "VOID" && invoice.status !== "PAID";
   const canDelete = invoice.status === "DRAFT" || invoice.status === "VOID";
   const meta = STATUS_META[invoice.status] ?? STATUS_META.DRAFT;
@@ -391,7 +393,7 @@ export default function InvoiceDetailPage() {
           <div className="relative group">
             <button className="inline-flex items-center gap-1.5 px-3 h-9 text-xs font-medium rounded-lg border border-border hover:bg-muted transition-colors"><MoreHorizontal className="w-3.5 h-3.5" /></button>
             <div className="absolute right-0 top-full mt-1 z-50 min-w-[180px] rounded-xl border border-border bg-popover shadow-lg py-1 hidden group-hover:block">
-              <DropdownItem icon={LinkIcon} label="Copy payment link" show onClick={copyPaymentLink} />
+              <DropdownItem icon={LinkIcon} label="Copy payment link" show={canSharePayLink} onClick={copyPaymentLink} />
               <DropdownItem icon={Printer} label="Print / PDF" show onClick={() => window.print()} />
               {invoice.status === "PAID" && <DropdownItem icon={Receipt} label="Resend receipt" show onClick={() => resendInvoiceReceipt(businessId!, invoice.id, {}).then(r => r.data?.success ? toast.success("Resent") : toast.error(r.error ?? "Failed"))} />}
               {canEdit && <DropdownItem icon={CheckCircle} label="Mark paid" show onClick={handleMarkPaid} loading={actionLoading.paid} />}
@@ -579,7 +581,7 @@ export default function InvoiceDetailPage() {
             {canEmail && <ActionButton icon={Send} label="Email invoice" onClick={handleEmailInvoice} loading={actionLoading.email} />}
             {canRemind && <ActionButton icon={Bell} label="Send reminder" onClick={handleSendReminder} />}
             {canRecordPayment && <ActionButton icon={DollarSign} label="Record payment" onClick={() => setShowPaymentForm(true)} />}
-            <ActionButton icon={LinkIcon} label="Copy payment link" onClick={copyPaymentLink} />
+            {canSharePayLink && <ActionButton icon={LinkIcon} label="Copy payment link" onClick={copyPaymentLink} />}
             <ActionButton icon={Printer} label="Print / PDF" onClick={() => window.print()} />
             {canEdit && <ActionButton icon={CheckCircle} label="Mark paid" onClick={handleMarkPaid} loading={actionLoading.paid} />}
             {canVoid && <ActionButton icon={Ban} label="Void invoice" onClick={handleVoid} loading={actionLoading.void} />}

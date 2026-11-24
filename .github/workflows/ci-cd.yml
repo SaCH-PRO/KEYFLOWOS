@@ -25,10 +25,9 @@ env:
   PNPM_VERSION: '9.15.0'
 
 jobs:
-  # The job id stays `lint-and-typecheck` because `test`, `build-server` and
-  # `build-web` all reference it in `needs:`; renaming the id would silently
-  # decouple them, which is the failure this whole change is about. The display
-  # name is corrected — lint moved out to its own job below.
+  # The job id stays `lint-and-typecheck` because `ci-verdict` and the CI gate
+  # specs (`ci-verdict.spec.mjs`, `runtime-pin.spec.mjs`, `script-specs-in-ci.spec.mjs`)
+  # reference it by id. The display name is corrected — lint runs in its own job below.
   lint-and-typecheck:
     name: Type Check
     runs-on: ubuntu-latest
@@ -65,7 +64,7 @@ jobs:
       # Explicit files or `<dir>/*.spec.mjs` globs, never a bare directory,
       # and no env (see the step above).
       - name: Check every script spec runs in CI
-        run: node --test scripts/ci/script-specs-in-ci.spec.mjs scripts/agent-memory/tests/*.spec.mjs scripts/intelligence/open_pr_inventory.spec.mjs scripts/agent-control/research/tests/*.spec.mjs
+        run: node --test scripts/ci/script-specs-in-ci.spec.mjs scripts/ci/ci-verdict.spec.mjs scripts/ci/verify-vitest-shards.spec.mjs scripts/research/research-corpus-parse.spec.mjs scripts/agent-memory/tests/*.spec.mjs scripts/intelligence/open_pr_inventory.spec.mjs scripts/agent-control/research/tests/*.spec.mjs
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -397,7 +396,6 @@ jobs:
   build-server:
     name: Build Server
     runs-on: ubuntu-latest
-    needs: [lint-and-typecheck]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -536,7 +534,6 @@ jobs:
   build-web:
     name: Build Web
     runs-on: ubuntu-latest
-    needs: [lint-and-typecheck]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -600,7 +597,6 @@ jobs:
     # Pinned: ubuntu-latest moved to 26.04, where Playwright 1.59.1 cannot install its browser
     # ("Playwright does not support chromium on ubuntu26.04-x64"). Unpin once Playwright supports it.
     runs-on: ubuntu-24.04
-    needs: [lint-and-typecheck]
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -656,24 +652,19 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  test:
-    name: Run Tests
+  # FU-CI-SHARD-PARALLEL (P24, C3): 4-way sharded server Vitest run. Each shard
+  # brings up its own Postgres + Redis, runs its deterministic 1/4 slice with
+  # JSON reporting, and uploads its report. The `test` aggregate job below
+  # verifies fail-closed that all 4 shards passed and every tracked server test
+  # file ran exactly once (0 missing, 0 duplicates).
+  test-server:
+    name: Run Server Tests (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
-    needs: [lint-and-typecheck]
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
-    # Postgres, because a third of the suite is not mocked.
-    #
-    # test:ci used to be `test:unit && test:smoke`, which ran src/**/*.spec.ts
-    # and four smoke files. That left 41 files in apps/server/test/ gated by
-    # nothing -- including tenant-membership-boundary, the connector-credentials
-    # and form-webhook tenancy attack suites, business-token-disclosure and
-    # webhook-ingress-secret-redaction. The tests most worth running were the
-    # ones CI never ran.
-    #
-    # 14 of them exercise a REAL database on purpose ("Nothing on the isolation
-    # boundary is mocked: Prisma, membership rows, the guard, and DB constraints
-    # are all real"), so gating them needs a server, not just a script change.
-    # pgvector/pg16 matches docker-compose so local and CI agree.
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -689,23 +680,6 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
-      # Redis, because the boot test starts the real server and the real server
-      # wants BullMQ. Without it, app-module-boots sat for its full 90 seconds
-      # and reported "no decisive signal" while the log filled with connection
-      # attempts to 127.0.0.1:6379 — a diagnosis about missing infrastructure
-      # where a dependency-injection answer was wanted.
-      #
-      # This is CI matching the deployed topology, not a workaround: redis is a
-      # first-class service in docker-compose.production.yml (REDIS_URL:
-      # redis://redis:6379) exactly as postgres is, and a boot test is worth
-      # little if it boots into an environment production never has.
-      #
-      # It does NOT settle the separate question below. env.ts:66 declares
-      # REDIS_URL optional and :168 warns "not set — BullMQ background jobs will
-      # fail to start", so the stated contract is that the server degrades
-      # without Redis. It does not; it hangs. That is a real defect of the same
-      # shape as the OpenAI key one, and giving CI a Redis does not fix it — it
-      # just stops that bug standing in front of this gate.
       redis:
         image: redis:7-alpine
         ports:
@@ -719,10 +693,6 @@ jobs:
     env:
       DATABASE_URL: postgresql://keyflow:keyflow@localhost:5432/keyflowos
       DIRECT_URL: postgresql://keyflow:keyflow@localhost:5432/keyflowos
-      # Named explicitly rather than left to a default. Something was already
-      # reaching 127.0.0.1:6379 with REDIS_URL unset, which is how the hang was
-      # found; being explicit means the boot test fails for reasons about the
-      # application rather than about what an unset variable falls back to.
       REDIS_URL: redis://localhost:6379
 
     steps:
@@ -746,27 +716,15 @@ jobs:
       - name: Generate Prisma client
         run: pnpm db:generate
 
-      # Each job checks out fresh, so the workspace packages must be built here
-      # too — see the note in lint-and-typecheck. Every server spec that imports
-      # @keyflow/shared or @keyflow/db fails to collect without this.
       - name: Build workspace packages
         run: pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build
 
-      # K12 resource admission runs before the first write-capable database
-      # operation. It verifies exact CI identity plus local-only Postgres/Redis
-      # endpoints and emits only redacted resource identities.
       - name: Admit K12 test resources
         run: node scripts/proof-admission/admit-resources.mjs --manifest scripts/proof-admission/manifests/ci-resources.json
 
       - name: Apply migrations to the test database
         run: pnpm db:deploy
 
-      # The suites make Postgres refuse statements on purpose (unique, foreign-key
-      # and check violations they assert on), and the service logs each one with its
-      # statement. GitHub prints the whole service log when the job stops, after the
-      # test output, so a failing run's vitest summary sits under tens of thousands of
-      # Postgres lines and cannot be read from the end of the log. Fatal-only logging
-      # keeps the summary at the end; it changes nothing a test sees.
       - name: Quiet the Postgres service log
         run: >-
           docker exec ${{ job.services.postgres.id }}
@@ -775,56 +733,132 @@ jobs:
           -c "ALTER SYSTEM SET log_min_error_statement = 'panic'"
           -c "SELECT pg_reload_conf()"
 
-      # app-module-boots.integration.test.ts spawns apps/server/dist/main.js to
-      # prove the application actually starts — the class of failure where tsc is
-      # clean, 3300 tests pass, and Nest still cannot resolve a provider. dist/ is
-      # gitignored, this job does not declare needs: [build-server], and the
-      # workflow passes no artifacts, so without this step that gate fails in
-      # ~0.4s on a missing file and reports a build-order complaint where a
-      # dependency-injection diagnosis should be.
-      #
-      # Not merged into "Build workspace packages" above: that builds the three
-      # library packages so specs can COLLECT. This builds the application so one
-      # spec can RUN it. Different reasons, and conflating them is how the next
-      # person deletes the wrong one.
       - name: Build server
-        # The server type-check needs ~4.1 GB of heap on main itself (measured
-        # with --incremental false); the runner's Node default is ~4 GB, so tsc
-        # died mid-build. This raises the ceiling only; no check is skipped.
         env:
           NODE_OPTIONS: --max-old-space-size=6144
         run: cd apps/server && pnpm run build
 
-      - name: Run server tests
-        run: cd apps/server && pnpm test:ci
+      - name: Run server tests (shard ${{ matrix.shard }}/4)
+        run: |
+          mkdir -p apps/server/.proof/server-shards
+          cd apps/server && pnpm exec vitest run --shard=${{ matrix.shard }}/4 --reporter=default --reporter=json --outputFile=.proof/server-shards/shard-${{ matrix.shard }}.json
 
-      # R0-16-PROOF-BINDING. A green `test:ci` cannot show that a required case
-      # ran: a skipped, renamed or deleted case leaves the aggregate green.
-      # This step judges EVERY case manifest under
-      # scripts/proof-admission/manifests/ against one vitest JSON report of the
-      # suites those manifests bind (their `suites` field), at this exact head
-      # (--expect-head = HEAD). Resource manifests (ci-resources.json,
-      # local-worktree-resources.json) are skipped by type. A packet binds its
-      # suites by adding one manifest; nobody edits this workflow to add a
-      # proof. --skip-build: "Build server" above built dist/main.js at this
-      # head, and the runner refuses a dist older than apps/server/src. Same
-      # Postgres and Redis services as the server tests.
+      - name: Upload server shard report
+        uses: actions/upload-artifact@v7
+        with:
+          name: server-test-shard-${{ matrix.shard }}
+          path: apps/server/.proof/server-shards/shard-${{ matrix.shard }}.json
+          retention-days: 1
+          if-no-files-found: error
+
+  # Retains the `test` job id (required by ci-verdict.spec.mjs) and display name
+  # `Run Tests` (queried by scripts/deploy.sh). Fails closed unless all 4 shards
+  # passed and every tracked server test file appears exactly once.
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    needs: [test-server]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download server shard reports
+        uses: actions/download-artifact@v8
+        with:
+          pattern: server-test-shard-*
+          path: .proof/server-shards
+          merge-multiple: true
+
+      - name: Verify disjoint exhaustive server shard coverage
+        run: node scripts/ci/verify-vitest-shards.mjs --shards-dir .proof/server-shards --total-shards 4 --subdir apps/server
+
+  # FU-CI-SHARD-PARALLEL (P24, C4): R0-16-PROOF-BINDING and R0-35-EXIT-PROOF
+  # run in their own parallel gating job (keeping proof:release0 immediately
+  # after run-manifests.mjs as required by R0-bound [R035-13]).
+  test-proofs:
+    name: Proof Manifests & Release 0
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: keyflow
+          POSTGRES_PASSWORD: keyflow
+          POSTGRES_DB: keyflowos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U keyflow"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://keyflow:keyflow@localhost:5432/keyflowos
+      DIRECT_URL: postgresql://keyflow:keyflow@localhost:5432/keyflowos
+      REDIS_URL: redis://localhost:6379
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Build workspace packages
+        run: pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build
+
+      - name: Admit K12 test resources
+        run: node scripts/proof-admission/admit-resources.mjs --manifest scripts/proof-admission/manifests/ci-resources.json
+
+      - name: Apply migrations to the test database
+        run: pnpm db:deploy
+
+      - name: Quiet the Postgres service log
+        run: >-
+          docker exec ${{ job.services.postgres.id }}
+          psql -U keyflow -d keyflowos
+          -c "ALTER SYSTEM SET log_min_messages = 'fatal'"
+          -c "ALTER SYSTEM SET log_min_error_statement = 'panic'"
+          -c "SELECT pg_reload_conf()"
+
+      - name: Build server
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+        run: cd apps/server && pnpm run build
+
       - name: Evaluate every proof manifest at this head
         run: node scripts/proof-admission/run-manifests.mjs --skip-build
 
-      # R0-35-EXIT-PROOF. The Release 0 exit gate (BUILD-MAP-001 section (d)),
-      # scripts/proof-admission/release0.mjs: run-manifests over exactly the
-      # Release 0 manifests that scripts/proof-admission/release0-index.json
-      # lists (each SATISFIED at this head), then release0-proof-coverage.spec.ts
-      # (every Release 0 server suite bound, no manifest naming a missing
-      # suite, every skip or todo in the source explained), then the runtime
-      # skip check on that run's report (a case the run skipped, left todo or
-      # pending fails unless the index explains it). Exit 2 (REJECTED) fails
-      # this job. Exit 3 is NOT MET: everything is proven and OPEN Release 0
-      # items remain (listed in this step's log); it is annotated for the
-      # owner, not failed, so a regression stays distinguishable from the
-      # standing R0 exit. The R0 exit gate itself needs exit 0.
-      # --skip-build: "Build server" built dist/.
       - name: Release 0 exit proof (proof:release0)
         run: |
           set +e
@@ -836,52 +870,53 @@ jobs:
           fi
           exit "$code"
 
-      # The one-command local runner (scripts/test-local.sh) runs in a sandbox
-      # with stand-ins for docker and pnpm: plan order, resource admission
-      # refusals, step selection. It touches no database.
+  # FU-CI-SHARD-PARALLEL (P24, C4): non-DB web, @keyflow/api, K12 evaluator,
+  # and local-runner self-tests run in parallel without waiting for Postgres.
+  test-web-api:
+    name: Run Web, API & Harness Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Build workspace packages
+        run: pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build
+
       - name: Self-test the local test runner
         run: bash scripts/ci/test-local.selftest.sh
 
-      # K12 proof admission is deliberately separate from the main Vitest exit
-      # code. It consumes a native JSON report and an accepted case manifest so
-      # missing/skipped/duplicated required cases cannot hide behind a green
-      # aggregate run.
       - name: Admit K12 proof evaluator self-test
         run: pnpm --filter server proof:k12
 
-      # THE WEB SUITE HAD NEVER RUN IN CI. Not once, on any branch.
-      #
-      # 16 files, and 12 of them are structural gates rather than unit tests:
-      # nav-reachability, no-fabricated-screens, disclosure-mode, tool-routes,
-      # the newly-reachable-screens mount smoke test, see-all-goes-somewhere,
-      # middleware-redirect-targets. The fan-out chain to reach them already
-      # existed and was simply never called — root package.json `test:unit` ->
-      # turbo.json -> apps/web. The only mention of it anywhere under .github/
-      # was inside a comment.
-      #
-      # tool-routes.spec.ts is the sharpest case: it was converted from a
-      # standalone script INTO a spec precisely because twelve tools pointing at
-      # non-existent routes had reached a green pipeline while the script sat
-      # outside CI. The remedy landed in a suite that also was not run.
-      #
-      # apps/web has no `test` script, so `pnpm -r test` would no-op here; the
-      # filter names test:unit explicitly.
       - name: Run web tests
         run: pnpm --filter web test:unit
 
       # KF-HARNESS-PKG-TESTS-001 (V1-26). packages/api carries specs
       # (vitest.config.ts: src/**/*.spec.ts) -- the no-raw-records gate and
-      # the crm.contactDetail visibility cases -- and no step ran them: the
-      # server step runs apps/server only and the step above runs apps/web.
-      # No procedure is served: since D-68 the server serves /trpc only when
-      # TRPC_ENABLED=1 (trpcModuleImports in apps/server/src/trpc.module.ts),
-      # and even then the Nest exact-path mount answers 404 for
-      # /trpc/<procedure> (apps/server/src/trpc.module.spec.ts), so these
-      # specs gate the routers for the day tRPC is re-enabled with fixes.
-      # The three crm.contactDetail visibility refusals are `it.fails` (RED,
-      # blocked on a shared visibility helper): they fail this step the day
-      # the rule lands, until they are turned back into `it`. Pure unit
-      # specs: no database, no Redis; "Build workspace packages" is enough.
+      # the crm.contactDetail visibility cases. No procedure is served: since
+      # D-68 the server serves /trpc only when TRPC_ENABLED=1
+      # (trpcModuleImports in apps/server/src/trpc.module.ts), and even then
+      # the Nest exact-path mount answers 404 for /trpc/<procedure>
+      # (apps/server/src/trpc.module.spec.ts), so these specs gate the routers
+      # for the day tRPC is re-enabled with fixes. Pure unit specs: no database,
+      # no Redis; "Build workspace packages" is enough.
       - name: Run packages/api tests
         run: pnpm --filter @keyflow/api test:unit
 
@@ -898,3 +933,39 @@ jobs:
   #         vercel-token: ${{ secrets.VERCEL_TOKEN }}
   #         vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
   #         vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+
+  # RR-CI-REQUIRED-JOBS-AGGREGATE (REC-ANTI-FAKE-GREEN, D-239): the one check
+  # that is red when any gating job failed, was skipped or was cancelled.
+  # scripts/ci/ci-verdict.spec.mjs pins the shape (a job added to this file
+  # must join `needs` here or NON_GATING there) and proves the step by
+  # running it. Only name/run on the step and name/runs-on/needs/if/steps on
+  # the job: anything else can make it pass without judging.
+  ci-verdict:
+    name: CI verdict (gating jobs)
+    runs-on: ubuntu-latest
+    needs: [lint-and-typecheck, security-scan, build-server, build-web, e2e-mocked, test-server, test, test-proofs, test-web-api]
+    if: always()
+    steps:
+      - name: Red unless every gating job succeeded
+        run: |
+          verdict=0
+          {
+            echo '| Gating job | Result |'
+            echo '| --- | --- |'
+          } >> "$GITHUB_STEP_SUMMARY"
+          while IFS='=' read -r job result; do
+            echo "| $job | $result |" >> "$GITHUB_STEP_SUMMARY"
+            echo "$job: $result"
+            if [ "$result" != success ]; then verdict=1; fi
+          done <<'RESULTS'
+          lint-and-typecheck=${{ needs.lint-and-typecheck.result }}
+          security-scan=${{ needs.security-scan.result }}
+          build-server=${{ needs.build-server.result }}
+          build-web=${{ needs.build-web.result }}
+          e2e-mocked=${{ needs.e2e-mocked.result }}
+          test-server=${{ needs.test-server.result }}
+          test=${{ needs.test.result }}
+          test-proofs=${{ needs.test-proofs.result }}
+          test-web-api=${{ needs.test-web-api.result }}
+          RESULTS
+          exit "$verdict"

@@ -31,7 +31,8 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock("@/components/email/compose-context", () => ({ useCompose: () => ({ open: vi.fn() }) }));
-vi.mock("@/lib/workspace", () => ({ refreshWorkspace: async () => "biz_v29b", getStoredBusinessId: () => "biz_v29b" }));
+// SWP-INV-LIST: the hub now reads the business's currency from the cached business; these invoices are a TTD business's.
+vi.mock("@/lib/workspace", () => ({ refreshWorkspace: async () => "biz_v29b", getStoredBusinessId: () => "biz_v29b", getCachedBusiness: () => ({ id: "biz_v29b", name: "V29b", currency: "TTD" }) }));
 vi.mock("@/lib/api", () => ({ apiDelete: vi.fn(async () => ({ data: null, error: null })) }));
 vi.mock("@/lib/client", () => ({
   fetchInvoices: (...args: unknown[]) => fetchInvoices(...args),

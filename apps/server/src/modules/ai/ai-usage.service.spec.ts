@@ -426,6 +426,8 @@ describe('AiUsageService', () => {
         maxTokens: 500,
         temperature: 0.7,
         outputCategory: 'general',
+        // RR-UNKNOWN-COST-NOT-ZERO: every usage row says how its cost was priced
+        costStatus: 'priced',
       });
     });
 

@@ -16,9 +16,23 @@ export interface EvalSuite {
   assertions: EvalAssertion[];
 }
 
+/**
+ * What one assertion's run established (RR-EVAL-HARNESS-NO-VACUOUS):
+ *   PASS           the check measured its claim and it held;
+ *   FAIL           the check measured its claim and it did not hold;
+ *   NOT_RUN        the dependency the check needs is not wired (fail-closed);
+ *   INDETERMINATE  the check cannot measure its claim here and says why;
+ *   ERROR          the harness or the service under test threw.
+ * Only PASS is green. `passed` is kept for readers of the old shape and is
+ * true only for PASS.
+ */
+export type EvalAssertionStatus = 'PASS' | 'FAIL' | 'NOT_RUN' | 'INDETERMINATE' | 'ERROR';
+
 export interface EvalAssertionResult {
   name: string;
+  status: EvalAssertionStatus;
   passed: boolean;
+  /** Why the assertion is not PASS: the missing dependency, the reason it cannot measure, or the thrown message. */
   error?: string;
   durationMs: number;
 }
@@ -27,22 +41,93 @@ export interface EvalSuiteResult {
   name: string;
   description: string;
   passed: number;
+  /** Assertions that measured their claim and it did not hold (FAIL). */
   failed: number;
+  notRun: number;
+  indeterminate: number;
+  /** Assertions whose run or check threw an ordinary error (ERROR). */
+  errors: number;
+  /** passed + failed + notRun + indeterminate + errors: the five statuses partition the assertions. */
   total: number;
+  /** At least one assertion, and every one PASS. An empty suite is not green. */
+  green: boolean;
   durationMs: number;
   assertions: EvalAssertionResult[];
+}
+
+/** Thrown by an assertion's run() when the service it checks is not wired: the assertion is NOT_RUN. */
+export class EvalNotRunError extends Error {
+  constructor(readonly dependency: string) {
+    super(`fail-closed: ${dependency} not wired`);
+    this.name = 'EvalNotRunError';
+  }
+}
+
+/** Thrown by an assertion's run() when it cannot measure its claim here: the assertion is INDETERMINATE. */
+export class EvalIndeterminateError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = 'EvalIndeterminateError';
+  }
+}
+
+/**
+ * A run is green only when every suite in it has at least one assertion and
+ * every assertion is PASS. Derived from the assertions themselves, never from
+ * a flag a caller could set; an empty run is not green.
+ */
+export function runIsGreen(results: readonly EvalSuiteResult[]): boolean {
+  return results.length > 0 && results.every((r) => r.assertions.length > 0 && r.assertions.every((a) => a.status === 'PASS'));
+}
+
+/** A rule-trace entry that explains something: it names its source and its result. */
+function isExplainedTraceEntry(entry: unknown): boolean {
+  if (!entry || typeof entry !== 'object') return false;
+  const e = entry as { source?: unknown; result?: unknown };
+  return typeof e.source === 'string' && e.source.length > 0 && typeof e.result === 'string' && e.result.length > 0;
+}
+
+const SEND_VERBS: ReadonlySet<string> = new Set(['send', 'resend', 'email', 'deliver']);
+
+/**
+ * A plan step whose capability is an invoice send: its name, split into
+ * tokens (module and action, on dots, underscores, dashes, slashes and
+ * camelCase), ends in `send invoice` or `invoice send` (also resend, email,
+ * deliver). That covers the planner's fallback (`send_invoice` under module
+ * commerce), the canonical `commerce.send_invoice`, the flow tool registry's
+ * `commerce_send_invoice` and `sendInvoice`. `create_invoice` is not a send,
+ * and neither is a longer name that only mentions both words
+ * (`send_invoice_reminder`, `send_invoices_report`).
+ */
+function isInvoiceSendStep(step: unknown): boolean {
+  if (!step || typeof step !== 'object') return false;
+  const { action, module } = step as { action?: unknown; module?: unknown };
+  const tokens = [module, action]
+    .filter((part): part is string => typeof part === 'string')
+    .join('.')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  if (tokens.length < 2) return false;
+  const [before, last] = [tokens[tokens.length - 2], tokens[tokens.length - 1]];
+  return (SEND_VERBS.has(before) && last === 'invoice') || (before === 'invoice' && SEND_VERBS.has(last));
 }
 
 /**
  * Automated evaluation harness for the Mind / Soul / Evolution layer.
  *
  * Runs deterministic, versioned test suites that measure autonomy consistency,
- * memory retrieval precision, explanation quality, planning correctness, and
- * value alignment.
+ * explanation quality, planning correctness, and value alignment; the memory
+ * retrieval suite only checks the shape of what comes back and reports
+ * INDETERMINATE (precision is MEM-EVAL-SUITE's measurement, D-257).
  *
- * Fail-closed: the services under test are @Optional() at the DI boundary. When
- * one is not wired, its assertions FAIL (throw) rather than silently passing —
- * a quality gate must never green-light on the absence of the thing it checks.
+ * Fail-closed, and never vacuous (RR-EVAL-HARNESS-NO-VACUOUS): the services
+ * under test are @Optional() at the DI boundary. When one is not wired, its
+ * assertions are NOT_RUN rather than silently passing, and a suite or a run is
+ * green only when it has at least one assertion and every one is PASS. A
+ * quality gate must never green-light on the absence of the thing it checks,
+ * nor on a check that accepts anything.
  */
 @Injectable()
 export class EvalHarnessService {
@@ -79,15 +164,20 @@ export class EvalHarnessService {
       const start = Date.now();
       try {
         const result = await assertion.run();
-        const passed = assertion.check(result);
+        // Exactly `true` passes: a truthy non-boolean or a promise from check() is FAIL, never PASS.
+        const held = assertion.check(result) === true;
         assertionResults.push({
           name: assertion.name,
-          passed,
+          status: held ? 'PASS' : 'FAIL',
+          passed: held,
           durationMs: Date.now() - start,
         });
-      } catch (err: any) {
+      } catch (err: unknown) {
+        const status: EvalAssertionStatus =
+          err instanceof EvalNotRunError ? 'NOT_RUN' : err instanceof EvalIndeterminateError ? 'INDETERMINATE' : 'ERROR';
         assertionResults.push({
           name: assertion.name,
+          status,
           passed: false,
           error: err instanceof Error ? err.message : String(err),
           durationMs: Date.now() - start,
@@ -95,21 +185,23 @@ export class EvalHarnessService {
       }
     }
 
-    const passed = assertionResults.filter((a) => a.passed).length;
-    const failed = assertionResults.length - passed;
-
+    const count = (status: EvalAssertionStatus) => assertionResults.filter((a) => a.status === status).length;
     const result: EvalSuiteResult = {
       name: suite.name,
       description: suite.description,
-      passed,
-      failed,
+      passed: count('PASS'),
+      failed: count('FAIL'),
+      notRun: count('NOT_RUN'),
+      indeterminate: count('INDETERMINATE'),
+      errors: count('ERROR'),
       total: assertionResults.length,
+      green: assertionResults.length > 0 && assertionResults.every((a) => a.status === 'PASS'),
       durationMs: Date.now() - suiteStart,
       assertions: assertionResults,
     };
 
     this.logger.log(
-      `[runSuite] ${result.name}: ${result.passed}/${result.total} passed (${result.failed} failed) in ${result.durationMs}ms`,
+      `[runSuite] ${result.name}: ${result.green ? 'GREEN' : 'NOT GREEN'} ${result.passed}/${result.total} passed, ${result.failed} failed, ${result.notRun} not run, ${result.indeterminate} indeterminate, ${result.errors} errors, in ${result.durationMs}ms`,
     );
 
     return result;
@@ -123,9 +215,9 @@ export class EvalHarnessService {
     return results;
   }
 
+  /** Green only when every suite has at least one assertion and every assertion is PASS (see runIsGreen). */
   async allPass(): Promise<boolean> {
-    const results = await this.runAll();
-    return results.every((r) => r.failed === 0);
+    return runIsGreen(await this.runAll());
   }
 
   private registerBuiltInSuites(): void {
@@ -137,7 +229,7 @@ export class EvalHarnessService {
         {
           name: 'identical inputs yield identical allowed/requiresApproval values',
           run: async () => {
-            if (!this.autonomyOrchestrator) throw new Error('fail-closed: AutonomyOrchestratorService not wired');
+            if (!this.autonomyOrchestrator) throw new EvalNotRunError('AutonomyOrchestratorService');
             const businessId = 'eval_biz';
             const actionKey = 'crm.create_lead';
             const params = { name: 'Test' };
@@ -155,7 +247,7 @@ export class EvalHarnessService {
         {
           name: 'verdict contains a non-empty reason',
           run: async () => {
-            if (!this.autonomyOrchestrator) throw new Error('fail-closed: AutonomyOrchestratorService not wired');
+            if (!this.autonomyOrchestrator) throw new EvalNotRunError('AutonomyOrchestratorService');
             const verdict = await this.autonomyOrchestrator.evaluateAction(
               'eval_biz',
               'workflow.create_task',
@@ -171,21 +263,28 @@ export class EvalHarnessService {
     this.registerSuite({
       name: 'memory-retrieval-precision',
       description:
-        'Verifies that UnifiedMemoryRetrievalService returns a ranked list and surfaces semantic hits when available.',
+        'Shape only: UnifiedMemoryRetrievalService returns a ranked list. A malformed list FAILS; a well-formed or empty one is INDETERMINATE, never PASS, because precision itself is measured by MEM-EVAL-SUITE (D-257).',
       assertions: [
         {
-          name: 'retrieval returns an array with rank scores',
+          name: 'retrieval returns an array with rank scores (shape only; precision is measured by MEM-EVAL-SUITE)',
           run: async () => {
-            if (!this.unifiedMemory) throw new Error('fail-closed: UnifiedMemoryRetrievalService not wired');
-            const fragments = await this.unifiedMemory.retrieveContext('eval_biz', {
+            if (!this.unifiedMemory) throw new EvalNotRunError('UnifiedMemoryRetrievalService');
+            const fragments: unknown = await this.unifiedMemory.retrieveContext('eval_biz', {
               query: 'quarterly revenue',
               limit: 5,
             });
-            return {
-              ok: Array.isArray(fragments) && fragments.every((f) => typeof f.rankScore === 'number'),
-            };
+            // A broken shape is a broken result, not missing data: FAIL through check().
+            if (!Array.isArray(fragments)) return { wellFormed: false, reason: 'not an array' };
+            const malformed = fragments.findIndex(
+              (f) => typeof f !== 'object' || f === null || typeof (f as { rankScore?: unknown }).rankScore !== 'number',
+            );
+            if (malformed >= 0) return { wellFormed: false, reason: `entry ${malformed} has no numeric rankScore` };
+            // The shape holds (empty lists included): precision cannot be judged here.
+            throw new EvalIndeterminateError(
+              `shape only (well-formed ranked list of ${fragments.length}); precision is measured by MEM-EVAL-SUITE`,
+            );
           },
-          check: (r: any) => r.ok,
+          check: (r: any) => r.wellFormed,
         },
       ],
     });
@@ -193,22 +292,23 @@ export class EvalHarnessService {
     this.registerSuite({
       name: 'explanation-quality',
       description:
-        'Verifies that autonomy verdicts include a rule trace for transparency.',
+        'Verifies that autonomy verdicts carry a non-empty rule trace whose entries name a source and a result.',
       assertions: [
         {
-          name: 'verdict includes a rule trace array',
+          name: 'verdict includes a non-empty rule trace whose entries name a source and a result',
           run: async () => {
-            if (!this.autonomyOrchestrator) throw new Error('fail-closed: AutonomyOrchestratorService not wired');
+            if (!this.autonomyOrchestrator) throw new EvalNotRunError('AutonomyOrchestratorService');
             const verdict = await this.autonomyOrchestrator.evaluateAction(
               'eval_biz',
               'workflow.create_task',
               { title: 'Eval' },
             );
+            const trace: unknown = verdict.ruleTrace;
             return {
-              hasTrace: Array.isArray(verdict.ruleTrace) && verdict.ruleTrace.length >= 0,
+              explained: Array.isArray(trace) && trace.length > 0 && trace.every(isExplainedTraceEntry),
             };
           },
-          check: (r: any) => r.hasTrace,
+          check: (r: any) => r.explained,
         },
       ],
     });
@@ -221,7 +321,7 @@ export class EvalHarnessService {
         {
           name: 'dealbreaker action is flagged as a conflict',
           run: async () => {
-            if (!this.constitutionValues) throw new Error('fail-closed: ConstitutionValuesService not wired');
+            if (!this.constitutionValues) throw new EvalNotRunError('ConstitutionValuesService');
             const check = await this.constitutionValues.checkAction(
               'eval_biz',
               'send_email',
@@ -237,18 +337,19 @@ export class EvalHarnessService {
     this.registerSuite({
       name: 'planning-correctness',
       description:
-        'Verifies that KeyCortexPlannerService decomposes a goal into one or more steps.',
+        'Verifies that KeyCortexPlannerService decomposes "send invoice to customer" into steps one of which is an invoice send (send_invoice, not create_invoice or a reminder).',
       assertions: [
         {
-          name: 'goal decomposition produces at least one step',
+          name: '"send invoice to customer" yields a step whose capability is an invoice send',
           run: async () => {
-            if (!this.planner) throw new Error('fail-closed: KeyCortexPlannerService not wired');
+            if (!this.planner) throw new EvalNotRunError('KeyCortexPlannerService');
             const plan = await this.planner.generatePlan('eval_biz', {
               objective: 'send invoice to customer',
             });
-            return { hasSteps: Array.isArray(plan.steps) && plan.steps.length > 0 };
+            const steps: unknown[] = Array.isArray(plan.steps) ? plan.steps : [];
+            return { sendsInvoice: steps.some(isInvoiceSendStep) };
           },
-          check: (r: any) => r.hasSteps,
+          check: (r: any) => r.sendsInvoice,
         },
       ],
     });

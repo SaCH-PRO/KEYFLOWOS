@@ -1,9 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { spawn, ChildProcess } from 'child_process';
 import { randomBytes } from 'crypto';
-import path from 'path';
-import fs from 'fs';
-import os from 'os';
 import { getToolByName } from './flow-tool-registry';
 
 export interface CodeExecutionResult {
@@ -16,10 +12,11 @@ export interface CodeExecutionResult {
 
 const MAX_TOOL_CALLS = 10;
 const MAX_OUTPUT_CHARS = 4000;
-const HARD_TIMEOUT_MS = 15_000;
 const E2B_TIMEOUT_MS = 30_000;
 const BLOCKED_TOOLS = new Set(['execute_custom_logic']);
 const RESULT_MARKER = '__KF_RESULT__';
+const DISABLED_ERROR =
+  'Custom logic execution is disabled: an isolated E2B sandbox (E2B_API_KEY and PUBLIC_API_URL) is required; local API-host execution is not permitted.';
 
 export type InnerToolExecutor = (
   businessId: string,
@@ -27,7 +24,7 @@ export type InnerToolExecutor = (
   args: Record<string, unknown>,
 ) => Promise<unknown>;
 
-type ExecutorBackend = 'local' | 'e2b';
+type ExecutorBackend = 'e2b' | 'disabled';
 
 interface ActiveExecution {
   businessId: string;
@@ -37,48 +34,8 @@ interface ActiveExecution {
 }
 
 /**
- * The child-process harness source. Lives here (not as a .cjs file) because
- * tsc does not copy non-TS assets into dist — it is written to the OS temp
- * dir on first use and spawned from there.
- */
-const HARNESS_SOURCE = `'use strict';
-const send = (msg) => { if (process.send) process.send(msg); };
-const logs = [];
-const log = (...args) => { logs.push(args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ')); };
-let toolSeq = 0;
-const pending = new Map();
-process.on('message', (msg) => {
-  if (msg && msg.type === 'toolResult' && pending.has(msg.id)) {
-    const { resolve, reject } = pending.get(msg.id);
-    pending.delete(msg.id);
-    if (msg.error) reject(new Error(msg.error)); else resolve(msg.result);
-  }
-});
-const api = {
-  log,
-  callTool: (name, args) => new Promise((resolve, reject) => {
-    const id = ++toolSeq;
-    pending.set(id, { resolve, reject });
-    send({ type: 'tool', id, name, args: args ?? {} });
-  }),
-};
-process.on('message', async (msg) => {
-  if (!msg || msg.type !== 'run') return;
-  try {
-    const fn = new Function('api','inputs','require','process','global','globalThis','module','exports','setTimeout','setInterval','setImmediate',
-      'return (async () => { ' + msg.code + ' })();');
-    const value = await fn(api, msg.inputs ?? {});
-    send({ type: 'done', value: value === undefined ? null : value, logs });
-  } catch (err) {
-    send({ type: 'error', message: err && err.message ? err.message : String(err), logs });
-  }
-});
-send({ type: 'ready' });
-`;
-
-/**
  * The E2B-side harness: same snippet contract (api.callTool / api.log /
- * inputs), but tool calls are bridged over HTTPS to the tool-bridge endpoint
+ * inputs), with tool calls bridged over HTTPS to the tool-bridge endpoint
  * on our own API, authenticated by a one-time execution token. Emits one
  * RESULT_MARKER JSON line on stdout for the parent to parse.
  */
@@ -108,29 +65,18 @@ const api = {
 })();
 `;
 
-function harnessPath(): string {
-  const p = path.join(os.tmpdir(), 'kf-code-harness.cjs');
-  try {
-    if (!fs.existsSync(p)) fs.writeFileSync(p, HARNESS_SOURCE, { mode: 0o600 });
-  } catch {
-    // fall through — spawn will surface the error
-  }
-  return p;
-}
-
 /**
- * The fallback executor's runtime: evaluates an LLM-written JS snippet in a
- * sandbox with a hard timeout. The only capability the snippet gets is
+ * Isolated custom-logic executor (SEC-KEY-CUSTOM-LOGIC, P0, D-272.4):
+ * Evaluates an LLM-written JS snippet ONLY inside an isolated E2B cloud microVM
+ * with a hard timeout. The only capability the snippet gets is
  * `api.callTool(name, args)`, brokered back through KEY's existing tool
  * executor — restricted to tier ≤ 2 tools so custom code can never escalate
  * into tier-3 actions.
  *
- * Two backends:
- *  - `local` (default): spawned, env-less, memory-capped child process.
- *    Honest v1 boundary, works everywhere.
- *  - `e2b`: E2B cloud microVM (real isolation). Activated when E2B_API_KEY
- *    AND PUBLIC_API_URL are set (the VM must reach our tool bridge), or when
- *    CODE_EXECUTOR_BACKEND=e2b forces it.
+ * Local API-host execution (`child_process` / `new Function`) is permanently
+ * disabled: shadowing `process`/`require` in JS is trivially bypassed via the
+ * Function constructor and grants full RCE on the API host. When E2B is not
+ * configured or unavailable, execution fails closed.
  */
 @Injectable()
 export class CodeExecutorService {
@@ -139,9 +85,13 @@ export class CodeExecutorService {
 
   /** Which backend will handle executions under the current env. */
   backend(): ExecutorBackend {
-    const forced = (process.env.CODE_EXECUTOR_BACKEND ?? '').toLowerCase();
-    if (forced === 'e2b' || forced === 'local') return forced;
-    return process.env.E2B_API_KEY && process.env.PUBLIC_API_URL ? 'e2b' : 'local';
+    const forced = (process.env.CODE_EXECUTOR_BACKEND ?? '').trim().toLowerCase();
+    if (forced === 'e2b') return 'e2b';
+    if (forced) {
+      // Never honor `local`, `disabled`, or unknown backend values — fail closed.
+      return 'disabled';
+    }
+    return process.env.E2B_API_KEY?.trim() && process.env.PUBLIC_API_URL?.trim() ? 'e2b' : 'disabled';
   }
 
   async execute(opts: {
@@ -156,10 +106,10 @@ export class CodeExecutorService {
     if (this.backend() === 'e2b') {
       return this.executeE2b(opts);
     }
-    return this.executeLocal(opts);
+    return { ok: false, error: DISABLED_ERROR, logs: [], toolCalls: 0 };
   }
 
-  // ── Shared tool-call validation (local IPC + E2B bridge) ───────────────
+  // ── Tool-call validation (E2B bridge) ──────────────────────────────────
 
   private validateToolCall(toolCalls: number, name: string): string | null {
     if (toolCalls >= MAX_TOOL_CALLS) return `Tool call budget exceeded (max ${MAX_TOOL_CALLS})`;
@@ -200,29 +150,47 @@ export class CodeExecutorService {
 
   // ── E2B backend ────────────────────────────────────────────────────────
 
+  /** Lazy-load the ESM-only E2B SDK from CJS (overrideable in unit tests for offline determinism). */
+  protected async loadE2bSdk(): Promise<{ Sandbox: { create: (opts?: Record<string, unknown>) => Promise<E2bSandboxLike> } }> {
+    const importEsm = new Function('specifier', 'return import(specifier)') as (s: string) => Promise<never>;
+    return importEsm('@e2b/code-interpreter');
+  }
+
   private async executeE2b(opts: {
     businessId: string;
     code: string;
     inputs?: Record<string, unknown>;
     innerToolExecutor: InnerToolExecutor;
   }): Promise<CodeExecutionResult> {
-    const apiKey = process.env.E2B_API_KEY;
-    const publicUrl = (process.env.PUBLIC_API_URL ?? '').replace(/\/$/, '');
+    const apiKey = (process.env.E2B_API_KEY ?? '').trim();
+    const publicUrl = (process.env.PUBLIC_API_URL ?? '').trim().replace(/\/$/, '');
     if (!apiKey) return { ok: false, error: 'E2B_API_KEY is not configured', logs: [], toolCalls: 0 };
     if (!publicUrl) {
       return { ok: false, error: 'PUBLIC_API_URL is required for the E2B backend (the sandbox must reach our tool bridge)', logs: [], toolCalls: 0 };
     }
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(publicUrl);
+    } catch {
+      return { ok: false, error: 'PUBLIC_API_URL must be a valid https URL for the E2B tool bridge', logs: [], toolCalls: 0 };
+    }
+    if (parsedUrl.protocol !== 'https:') {
+      return { ok: false, error: 'PUBLIC_API_URL must use https: for the E2B tool bridge', logs: [], toolCalls: 0 };
+    }
 
-    // Lazy-load the ESM-only SDK from CJS (tsc would downlevel a normal
-    // dynamic import() into require(), which crashes on ESM-only deps).
     let Sandbox: { create: (opts?: Record<string, unknown>) => Promise<E2bSandboxLike> };
     try {
-      const importEsm = new Function('specifier', 'return import(specifier)') as (s: string) => Promise<never>;
-      const mod = await importEsm('@e2b/code-interpreter') as { Sandbox: typeof Sandbox };
+      const mod = await this.loadE2bSdk();
       Sandbox = mod.Sandbox;
     } catch (err) {
-      this.logger.error(`E2B SDK load failed: ${(err as Error).message} — falling back to local backend`);
-      return this.executeLocal(opts);
+      // SEC-KEY-CUSTOM-LOGIC (D-272.4): fail closed; never fall back to local API-host execution.
+      this.logger.error(`E2B SDK load failed: ${(err as Error).message} — refusing execution (local fallback disabled)`);
+      return {
+        ok: false,
+        error: 'Isolated E2B sandbox is unavailable (SDK load failed); local host execution is disabled.',
+        logs: [],
+        toolCalls: 0,
+      };
     }
 
     const token = randomBytes(24).toString('hex');
@@ -275,101 +243,6 @@ export class CodeExecutorService {
       this.activeExecutions.delete(token);
       try { await sandbox?.kill?.(); } catch { /* best effort */ }
     }
-  }
-
-  // ── Local backend ──────────────────────────────────────────────────────
-
-  private executeLocal(opts: {
-    businessId: string;
-    code: string;
-    inputs?: Record<string, unknown>;
-    innerToolExecutor: InnerToolExecutor;
-  }): Promise<CodeExecutionResult> {
-    const child: ChildProcess = spawn(
-      process.execPath,
-      ['--max-old-space-size=128', harnessPath()],
-      { stdio: ['ignore', 'ignore', 'ignore', 'ipc'], env: {}, timeout: HARD_TIMEOUT_MS },
-    );
-
-    let toolCalls = 0;
-    let settled = false;
-
-    return new Promise<CodeExecutionResult>((resolve) => {
-      const finish = (result: CodeExecutionResult) => {
-        if (settled) return;
-        settled = true;
-        try { child.kill('SIGKILL'); } catch { /* already dead */ }
-        resolve(result);
-      };
-
-      const timer = setTimeout(() => {
-        this.logger.warn(`Custom logic timed out after ${HARD_TIMEOUT_MS}ms (business ${opts.businessId})`);
-        finish({ ok: false, error: `Execution timed out after ${HARD_TIMEOUT_MS}ms`, logs: [], toolCalls });
-      }, HARD_TIMEOUT_MS);
-
-      child.on('error', (err) => {
-        clearTimeout(timer);
-        finish({ ok: false, error: `Sandbox failed: ${err.message}`, logs: [], toolCalls });
-      });
-
-      child.on('exit', (code, signal) => {
-        clearTimeout(timer);
-        if (!settled && code !== 0 && signal !== 'SIGKILL') {
-          finish({ ok: false, error: `Sandbox exited unexpectedly (code ${code}, signal ${signal})`, logs: [], toolCalls });
-        }
-      });
-
-      child.on('message', async (msg: Record<string, unknown>) => {
-        if (!msg || typeof msg.type !== 'string') return;
-
-        if (msg.type === 'ready') {
-          child.send({ type: 'run', code: opts.code, inputs: opts.inputs ?? {} });
-          return;
-        }
-
-        if (msg.type === 'tool') {
-          const id = msg.id as number;
-          const name = String(msg.name ?? '');
-          const args = (msg.args ?? {}) as Record<string, unknown>;
-
-          const invalid = this.validateToolCall(toolCalls, name);
-          if (invalid) {
-            child.send({ type: 'toolResult', id, error: invalid });
-            return;
-          }
-
-          toolCalls++;
-          try {
-            const result = await opts.innerToolExecutor(opts.businessId, name, args);
-            child.send({ type: 'toolResult', id, result });
-          } catch (err) {
-            child.send({ type: 'toolResult', id, error: (err as Error).message });
-          }
-          return;
-        }
-
-        if (msg.type === 'done') {
-          clearTimeout(timer);
-          finish({
-            ok: true,
-            value: capOutput(msg.value),
-            logs: capLogs((msg.logs as string[]) ?? []),
-            toolCalls,
-          });
-          return;
-        }
-
-        if (msg.type === 'error') {
-          clearTimeout(timer);
-          finish({
-            ok: false,
-            error: String(msg.message ?? 'Unknown error'),
-            logs: capLogs((msg.logs as string[]) ?? []),
-            toolCalls,
-          });
-        }
-      });
-    });
   }
 }
 

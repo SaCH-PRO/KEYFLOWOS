@@ -224,8 +224,9 @@ export function MobileDrawer({
         </div>
 
         {displayName && (
+          // NAV-A3 (BUG-118): the name opens the member's own account, not the business's profile.
           <Link
-            href="/app/profile"
+            href="/app/settings/profile"
             onClick={closeDrawer}
             className="px-3 py-2.5 border-b border-border flex items-center gap-2.5 hover:bg-muted transition-colors min-h-[44px]"
           >
@@ -241,7 +242,8 @@ export function MobileDrawer({
             )}
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium truncate">{displayName}</p>
-              <p className="text-[10px] text-muted-foreground truncate">View profile</p>
+              {/* NAV-A3 review MAJOR-1: on a phone the header's account menu is hidden; this is "My account". */}
+              <p className="text-[10px] text-muted-foreground truncate">My account</p>
             </div>
             <ChevronDown className="w-3 h-3 text-muted-foreground -rotate-90" />
           </Link>

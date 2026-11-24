@@ -26,6 +26,7 @@ import {
   addContactsToList,
 } from "@/lib/client";
 import { moduleEvents } from "@/lib/module-events";
+import { showRefusal } from "@/lib/failure-kit";
 
 interface UseContactActionsParams {
   businessId: string | null;
@@ -74,7 +75,7 @@ export function useContactActions({
   const editingContactIdRef = useRef(editingContactId);
   editingContactIdRef.current = editingContactId;
 
-  const handleSubmitContact = useCallback(async (formData: ContactFormData, typedCustomFieldValues?: Record<string, unknown>) => {
+  const handleSubmitContact = useCallback(async (formData: ContactFormData, typedCustomFieldValues?: Record<string, unknown>): Promise<boolean | void> => {
     if (!businessId) return;
     const tagsArray = formData.tags.split(",").map((t) => t.trim()).filter(Boolean);
 
@@ -125,10 +126,13 @@ export function useContactActions({
         void loadDetail(cid);
         toast.success("Contact updated");
       } else {
-        const { data } = await createContact({
+        const res = await createContact({
           businessId, ...shared,
           source: formData.source || "manual",
         });
+        // SWP-CONTACT-QUICKADD (BUG-009, the full form's door): a refused save says why; the form stays open.
+        if (showRefusal(res, { what: "add customers" })) return false;
+        const { data } = res;
         if (data) {
           if (formData.initialNote.trim()) await addContactNote(data.id, formData.initialNote.trim(), businessId);
           setShowAddForm(false);

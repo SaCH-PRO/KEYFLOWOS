@@ -186,4 +186,17 @@ describe('AdaptiveRouterService', () => {
       expect(decision.includeMemoryContext).toBe(false);
     });
   });
+  it('RR-ACTION-INTENT-ONE-CLASSIFIER: "cancel the booking for Ada" with actions enabled gets the actions layer (RED on main: the router vocabulary had no cancel)', async () => {
+    const decision = await router.route(query('cancel the booking for Ada', { enableActions: true }));
+    expect(decision.includeActions).toBe(true);
+    expect(decision.layers).toContain('actions');
+    expect(decision.taskCategory).toBe('tool-calling');
+  });
+
+  it('RR-ACTION-INTENT-ONE-CLASSIFIER negative control: the same phrase with actions disabled gets no actions layer', async () => {
+    const decision = await router.route(query('cancel the booking for Ada'));
+    expect(decision.includeActions).toBe(false);
+    expect(decision.layers).not.toContain('actions');
+    expect(decision.taskCategory).not.toBe('tool-calling');
+  });
 });

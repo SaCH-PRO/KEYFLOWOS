@@ -130,11 +130,10 @@ describe("NAV-A1: the hubs a member is shown", () => {
       "/app/crm/contacts",
       "/app/commerce",
       "/app/schedule/calendar",
-      // /app/money and /app/settings only forward today (to /app/financial-flow and /app/settings/billing); the hubs
-      // name final URLs until NAV-A2 makes both real indexes.
-      "/app/financial-flow",
+      // NAV-A2: /app/money and /app/settings are real indexes (they only forwarded before).
+      "/app/money",
       "/app/store",
-      "/app/settings/business",
+      "/app/settings",
     ]);
   });
 
@@ -178,7 +177,7 @@ describe("NAV-A1: the hubs a member is shown", () => {
     expect(settingsHub?.items.map((i) => i.label)).toEqual(["Team", "Org chart"]);
     expect(settingsHub?.href).toBeUndefined();
     // A hub the member may open keeps its heading door.
-    expect(menuSectionsFor("both", OWNER).hubSections.find((s) => s.id === "money")?.href).toBe("/app/financial-flow");
+    expect(menuSectionsFor("both", OWNER).hubSections.find((s) => s.id === "money")?.href).toBe("/app/money");
   });
 
   it("NMS-12 while sells is loading no sells-dependent hub shows", () => {
@@ -227,6 +226,10 @@ const MODULE_TABLE: Record<string, { modules: string[]; cite: string[] }> = {
   "/app/crm/contacts": { modules: ["crm"], cite: [SRV("crm/crm.controller.ts", "GET businesses/:businessId/contacts")] },
   "/app/commerce": { modules: ["revenue"], cite: [SRV("commerce/commerce.controller.ts", "GET businesses/:businessId/invoices")] },
   "/app/schedule/calendar": { modules: ["bookings"], cite: [SRV("calendar/calendar.controller.ts", "GET businesses/:businessId/events")] },
+  // NAV-A2: the hubs' own pages are indexes. Each reads only the member's my-access (to offer the entries their modules
+  // open); the hub's module is its rule (D-150, J5), and each entry's page carries its own row.
+  "/app/money": { modules: ["revenue"], cite: ["unscoped:modules/identity/identity.controller.ts#GET businesses/:businessId/my-access", "D-150:revenue money hub rule (J5); the index offers each entry only when its own module is open"] },
+  "/app/settings": { modules: ["settings"], cite: ["unscoped:modules/identity/identity.controller.ts#GET businesses/:businessId/my-access", "D-150:settings hub rule (J5); the index offers each entry only when its own module is open"] },
   "/app/financial-flow": { modules: ["revenue"], cite: [SRV("finance/finance.controller.ts", "GET overview")] },
   // The store's analytics read withholds revenue below revenue read (FU-SITE-ANALYTICS-REVENUE-SCOPE, in wave 3f).
   "/app/store": { modules: ["storefront"], cite: ["unscoped:modules/bookings/bookings.controller.ts#GET businesses/:businessId/services", "D-150:storefront hub rule: no read route checks storefront; the hub follows the scope (J5)", "service-check:modules/site/site.controller.ts#GET businesses/:businessId/analytics"] },

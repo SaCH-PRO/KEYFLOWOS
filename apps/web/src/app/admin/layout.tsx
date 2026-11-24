@@ -14,10 +14,11 @@ import {
   LayoutTemplate,
   Home,
   ExternalLink,
+  LogOut,
   Brain,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { isSuperAdmin, refreshWorkspace } from "@/lib/workspace";
+import { adminSignOut, isSuperAdmin, refreshWorkspace } from "@/lib/workspace";
 import { toast } from "sonner";
 
 const navItems = [
@@ -36,6 +37,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
   const [checked, setChecked] = useState(false);
   const [allowed, setAllowed] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     const check = async () => {
@@ -128,6 +130,21 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               <span className="inline-flex items-center gap-1 rounded-full border border-primary/50 bg-primary/10 px-2 py-1 text-primary">
                 Electric Blue Mode
               </span>
+              {/* RR-ADMIN-LOGOUT: the admin bearer outranks every user token, so the admin area signs out explicitly. */}
+              <button
+                type="button"
+                disabled={signingOut}
+                onClick={async () => {
+                  if (signingOut) return;
+                  setSigningOut(true);
+                  await adminSignOut();
+                  router.replace("/admin/login");
+                }}
+                className="inline-flex items-center gap-1 rounded-full border border-border/70 px-2 py-1 hover:border-primary/50 hover:text-foreground"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                Sign out
+              </button>
             </div>
           </header>
           <div className="p-4 md:p-6">{children}</div>

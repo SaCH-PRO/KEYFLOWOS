@@ -424,6 +424,7 @@ async function cleanup() {
     `DELETE FROM marketplace_listings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM inventory_stocks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM warehouses WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM services WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
@@ -570,6 +571,27 @@ beforeAll(async () => {
   await db.inventoryStock.create({
     data: { id: ID.stockXB, businessId: ID.bizB, productId: ID.productXB, warehouseId: ID.warehouseB, quantity: IN_STOCK, reserved: 0, costPerUnit: 5 },
   });
+
+  // SWP-STORE-LISTING-SERVER (P12): live storefront listing Services for products ordered via StoreOrderService.
+  for (const [bizId, prodId, name] of [
+    [ID.biz, ID.productA, 'V18R Tracked A'],
+    [ID.biz, ID.productB, 'V18R Tracked B'],
+    [ID.biz, ID.productU, 'V18R Untracked'],
+    [ID.biz, ID.productM, 'V18R Two Warehouses'],
+    [ID.bizB, ID.productXB, 'V18R Other Stocked'],
+    [ID.bizB, ID.productXB2, 'V18R Other Unstocked'],
+  ] as const) {
+    await db.service.create({
+      data: {
+        id: `${prodId}_listing`,
+        businessId: bizId,
+        name,
+        duration: 0,
+        price: PRICE,
+        sourceProductId: prodId,
+      },
+    });
+  }
 }, 60_000);
 
 afterAll(async () => {

@@ -276,6 +276,7 @@ async function cleanup() {
     `DELETE FROM recurring_invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM inventory_stocks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM warehouses WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM services WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
@@ -2118,6 +2119,9 @@ describe('V1-37d review: only money that follows a legacy invoice keeps its curr
     for (const cur of ['JMD', 'zzz']) {
       const product = await db.product.create({
         data: { id: `${P}prod_${cur}`, businessId: ID.bizNew, name: `v37d ${cur} widget`, price: 25, currency: cur, category: 'PRODUCT', inventoryMode: 'untracked' },
+      });
+      await db.service.create({
+        data: { id: `${P}svc_${cur}`, businessId: ID.bizNew, name: `v37d ${cur} widget`, duration: 30, price: 25, sourceProductId: product.id },
       });
       const store = new StoreOrderService(
         prismaRef,

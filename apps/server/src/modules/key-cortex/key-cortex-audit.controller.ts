@@ -11,7 +11,7 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { GuardedBusinessId } from '../../core/auth/request-business-id';
 import { getTenantContext, runWithTenant } from '../../core/tenant/tenant-context';
-import { EvalHarnessService } from './eval-harness.service';
+import { EvalHarnessService, runIsGreen } from './eval-harness.service';
 import { SelfAssessmentService } from './self-assessment.service';
 import { DigitalEmployeeAcceptanceService } from './digital-employee-acceptance.service';
 import { ValueLearningService } from './value-learning.service';
@@ -127,7 +127,11 @@ export class KeyCortexAuditController {
     return {
       scope: 'synthetic' as const,
       results,
-      allPass: results.every((r) => r.failed === 0),
+      // Green only when every suite in `results` has at least one assertion and every assertion is PASS
+      // (RR-EVAL-HARNESS-NO-VACUOUS): NOT_RUN, INDETERMINATE, ERROR and an empty suite are not green.
+      // It speaks for the suites returned, so with `suite` named it is that one suite's verdict only;
+      // a caller wanting the harness verdict runs them all.
+      allPass: runIsGreen(results),
     };
   }
 

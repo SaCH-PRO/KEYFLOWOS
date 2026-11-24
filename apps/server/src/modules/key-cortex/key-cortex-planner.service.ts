@@ -257,7 +257,7 @@ export class KeyCortexPlannerService {
 
     return this.prisma.client.aiPlan.findUnique({
       where: { id: planResult.id },
-      include: { steps: true },
+      include: { steps: { orderBy: [{ order: 'asc' }, { id: 'asc' }] } },
     });
   }
 
@@ -398,7 +398,7 @@ export class KeyCortexPlannerService {
   async replanIfNeeded(planId: string): Promise<GeneratedPlan | null> {
     const plan = await this.prisma.client.aiPlan.findUnique({
       where: { id: planId },
-      include: { steps: true },
+      include: { steps: { orderBy: [{ order: 'asc' }, { id: 'asc' }] } },
     });
     if (!plan) return null;
 
@@ -482,11 +482,11 @@ export class KeyCortexPlannerService {
     const plan = member
       ? await this.prisma.client.aiPlan.findFirst({
           where: { id: planId, businessId: member.businessId },
-          include: { steps: true },
+          include: { steps: { orderBy: [{ order: 'asc' }, { id: 'asc' }] } },
         })
       : await this.prisma.client.aiPlan.findUnique({
           where: { id: planId },
-          include: { steps: true },
+          include: { steps: { orderBy: [{ order: 'asc' }, { id: 'asc' }] } },
         });
     if (!plan) throw new NotFoundException('Plan not found');
     if (member) await this.assertMayExecutePlan(plan, member);
@@ -557,7 +557,7 @@ export class KeyCortexPlannerService {
     // execute may have run the plan to an approval pause in between.
     const current = await this.prisma.client.aiPlan.findUnique({
       where: { id: planId },
-      include: { steps: true },
+      include: { steps: { orderBy: [{ order: 'asc' }, { id: 'asc' }] } },
     });
     const sorted = this.topologicalSort(current?.steps ?? plan.steps);
 
@@ -744,7 +744,7 @@ export class KeyCortexPlannerService {
   async getPlan(planId: string, businessId: string) {
     return this.prisma.client.aiPlan.findFirst({
       where: { id: planId, businessId },
-      include: { steps: true, result: true, goal: true },
+      include: { steps: { orderBy: [{ order: 'asc' }, { id: 'asc' }] }, result: true, goal: true },
     });
   }
 
@@ -1133,7 +1133,7 @@ export class KeyCortexPlannerService {
       result.push(step);
     };
 
-    for (const step of [...steps].sort((a, b) => a.order - b.order)) {
+    for (const step of [...steps].sort((a, b) => a.order - b.order || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
       visit(step);
     }
     return result;

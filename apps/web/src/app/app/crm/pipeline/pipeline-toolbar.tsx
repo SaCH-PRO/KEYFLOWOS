@@ -88,7 +88,7 @@ export interface PipelineToolbarProps {
   onToggleSelectMode: () => void;
   onRefresh: () => void;
   onAddContact: () => void;
-  onQuickCreate?: (data: { firstName: string; lastName?: string; email?: string; phone?: string; ageGroup?: string }) => Promise<void>;
+  onQuickCreate?: (data: { firstName: string; lastName?: string; email?: string; phone?: string; companyName?: string; ageGroup?: string }) => Promise<string | null>;
   onImport?: () => void;
   onScanSuccess?: () => void;
   businessId?: string;
@@ -482,11 +482,26 @@ function AddContactButton({
   );
 }
 
+/**
+ * "Open Add contact" requests (kf:open-quick-add-contact) that arrive before the dialog is mounted. contacts/page.tsx
+ * turns ?action=new (the header New menu's Contact, the mobile button, the checklist) into that event on its first
+ * effect, before the contact list has loaded and this control is on screen, so a listener inside the component alone
+ * missed it (journey C1). This module listener is registered when the page imports the toolbar; the control takes a
+ * pending request when it mounts, and clears it when it handles a request itself.
+ */
+const QUICK_ADD_EVENT = "kf:open-quick-add-contact";
+let quickAddPending = false;
+if (typeof window !== "undefined") {
+  window.addEventListener(QUICK_ADD_EVENT, () => {
+    quickAddPending = true;
+  });
+}
+
 function AddContactControl({
   onQuickCreate,
   onOpenFullForm,
 }: {
-  onQuickCreate?: (data: { firstName: string; lastName?: string; email?: string; phone?: string; ageGroup?: string }) => Promise<void>;
+  onQuickCreate?: (data: { firstName: string; lastName?: string; email?: string; phone?: string; companyName?: string; ageGroup?: string }) => Promise<string | null>;
   onOpenFullForm: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -498,10 +513,18 @@ function AddContactControl({
   const [ageGroup, setAgeGroup] = useState<string>("");
   const [showMore, setShowMore] = useState(false);
   const [saving, setSaving] = useState(false);
+  // SWP-CONTACT-QUICKADD (BUG-009): the reason a save was refused, shown in the dialog; what was typed stays.
+  const [refusal, setRefusal] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const firstRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => setMounted(true), []);
+
+  // A refusal's reason belongs to what was typed when it was refused: it clears when a field changes or the dialog
+  // is opened again (the draft itself is kept on close, as before). SWP-CONTACT-QUICKADD review MINOR-1, M4.
+  useEffect(() => {
+    setRefusal(null);
+  }, [open, firstName, lastName, email, phone, company, ageGroup]);
 
   useEffect(() => {
     if (!open) return;
@@ -528,26 +551,35 @@ function AddContactControl({
     setCompany("");
     setAgeGroup("");
     setShowMore(false);
+    setRefusal(null);
   }, []);
 
   const handleQuick = useCallback(async () => {
     if (!onQuickCreate || saving) return;
     if (!firstName.trim() && !lastName.trim() && !email.trim() && !phone.trim()) return;
     setSaving(true);
+    setRefusal(null);
     try {
-      await onQuickCreate({
+      // onQuickCreate answers the refusal's reason, or null when the customer was saved (SWP-CONTACT-QUICKADD:
+      // a refused save keeps the dialog open with what was typed, BUG-009; Company is sent, BUG-034).
+      const refused = await onQuickCreate({
         firstName: firstName.trim() || lastName.trim() || email.trim() || phone.trim(),
         lastName: lastName.trim() || undefined,
         email: email.trim() || undefined,
         phone: phone.trim() || undefined,
+        companyName: company.trim() || undefined,
         ageGroup: ageGroup || undefined,
       });
+      if (refused) {
+        setRefusal(refused);
+        return;
+      }
       reset();
       setOpen(false);
     } finally {
       setSaving(false);
     }
-  }, [onQuickCreate, saving, firstName, lastName, email, phone, ageGroup, reset]);
+  }, [onQuickCreate, saving, firstName, lastName, email, phone, company, ageGroup, reset]);
 
   const onFieldKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -557,9 +589,17 @@ function AddContactControl({
   };
 
   useEffect(() => {
-    const onOpen = () => setOpen(true);
-    window.addEventListener("kf:open-quick-add-contact", onOpen as EventListener);
-    return () => window.removeEventListener("kf:open-quick-add-contact", onOpen as EventListener);
+    // Mounted after the request was made (the module listener above kept it): open now.
+    if (quickAddPending) {
+      quickAddPending = false;
+      setOpen(true);
+    }
+    const onOpen = () => {
+      quickAddPending = false;
+      setOpen(true);
+    };
+    window.addEventListener(QUICK_ADD_EVENT, onOpen as EventListener);
+    return () => window.removeEventListener(QUICK_ADD_EVENT, onOpen as EventListener);
   }, []);
 
   if (!onQuickCreate) {
@@ -733,6 +773,11 @@ function AddContactControl({
               )}
             </AnimatePresence>
 
+            {refusal && (
+              <p role="alert" className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-500">
+                {refusal}
+              </p>
+            )}
             <button
               onClick={() => setShowMore((v) => !v)}
               className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground/70 hover:text-foreground transition-colors"
