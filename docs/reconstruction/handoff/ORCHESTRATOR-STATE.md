@@ -1,6 +1,6 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-24 02:00 UTC by the acting orchestrator (second-lane account, Claude Code), at D-271 (v1 resumes). Rewrite in place on every merge, packet return
+Last written: 2026-11-24 02:45 UTC by the acting orchestrator (second-lane account, Claude Code), with SWP-INV-FORM-UX in flight. Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -77,14 +77,15 @@ orchestrator and posts on #80. Its Fable limit is spent until 2026-11-30; it run
 | SWP-INV-MATH (P0, critical path; BUG-018, BUG-019) | `pkt/V1-SWP-INV-MATH` @ 6ea50c09, stacked on MOUNT-QUOTES | Done and RETURNed (#80 7118763435). Both reviews accept, after one MAJOR (missing browser spec) was closed. Web suite 191/1745; live sweep RED at base, green at head | Run journeys D and E live at the wave head (my run was cut off). Plan text: drop the stale "2.5 whole-number error" line (D-166) |
 | SWP-INV-PUBLIC-LINK (P0; BUG-053, 087, 091) | `pkt/V1-SWP-INV-PUBLIC-LINK` @ 8ae6abfa, stacked on SWP-INV-MATH | Done and RETURNed (#80, after D-270). Both reviews plus the confirmation accept. Suite 820/15287 passed, R0 MET 39/39 with an exact-head receipt at 8ae6abfa | Joins the next wave (build it from 8ae6abfa); run journey E live at the wave head. Plan text: drop INVOICE_NOT_SHAREABLE |
 | SWP-QUOTE-PUBLIC-PAGE (P0; BUG-046, D4) | `pkt/V1-SWP-QUOTE-PUBLIC-PAGE` @ 0ab56399, stacked on SWP-INV-PUBLIC-LINK | Done and RETURNed (#80 7119917222). Both reviews accept. Mocked browser sweep RED at base, 7/7 green at head | Joins the stacked wave |
+| SWP-INV-FORM-UX (P2, critical path; BUG-052, 090, 092, 093) | `pkt/V1-SWP-INV-FORM-UX` @ c52823a9, stacked on SWP-QUOTE-PUBLIC-PAGE (Claude lane; CLAIM #80 7120151414) | **In flight (2026-11-24 ~02:45 UTC).** Built tests first: 102fb223 RED (FUX-01..04 red at base for the stated reasons), e547bb80 tests-only fixtures (two existing tests now name a client, outside the write set), c52823a9 fix. Green: `src/app/app/commerce` + `release0-journey` 36 files / 258 tests, web tsc and eslint clean. Two acceptance reviews (security/process and correctness/regression) and a live browser run (`e2e/sweep-invoice-form.spec.ts` at the base build 0ab56399 and at c52823a9, a BUG-052 layout probe, and journey E1) were running when this was written | **If the session that started it is gone:** (1) get two fresh acceptance reviews of `0ab56399..c52823a9` (LIVE-PROOF-RUNBOOK §4; the correctness reviewer must check the duplicate flow, that the client check runs before `createProduct`, network-error vs 404 on the edit page, the grid at 1440 px, and every e2e spec that drives `/app/commerce/invoices/new`); (2) run `sweep-invoice-form.spec.ts` live at base and head (§3); (3) close findings tests-first; (4) post the RETURN, reporting the two fixture files outside the write set |
 | **Lanes since D-271 (2026-11-24, owner-relayed split)** | - | Two operators. Each claims through `git ls-remote` plus a CLAIM on #80 | **Claude lane:** journeys D and E live at 0ab56399; the stacked wave (MOUNT-QUOTES, SWP-INV-MATH, SWP-INV-PUBLIC-LINK, SWP-QUOTE-PUBLIC-PAGE) on the owner's go; then the TODAY-AGGREGATE chain and WEDGE-WA-INBOUND-CAPTURE. **Antigravity lane:** PR #228 repair (merge main in; the Codex P1 fix on `pkt/V1-FU-KEY-GENOME-READS-RESIDUAL-CODEX-228` @ bf9278f9 through reviews, compaction and proof); the four launch-track WIP branches (FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-OUTBOUND-ATTACHMENT-URL, FU-AI-APPROVALS-MONEY-SIGHT); then FU-PENDING-OWED-SERVER and FU-PENDING-OWED-WEB. **Unassigned (claim first):** FU-WEB-PAYLINK-STATUS-BUTTONS, NAV-A2, NAV-A3, SWP-KEY-CHAT-WEB, SWP-STORE-LISTING-SERVER |
 | Next v1 packets | - | Resumed by D-271 | See the lanes row. SEC-KEY-CUSTOM-LOGIC if the owner adds it |
 | First lane, as it left them (2026-11-23 ~09:30 UTC) | `wave/v1-wave-3j` a2e9f3f0, `wave/v1-wave-3k` 88268a01; FU-INSIGHTS-SIGHT 28cdbccb; child sessions for FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-GENOME-SURFACES-REVENUE, FU-OUTBOUND-ATTACHMENT-URL, FU-AI-APPROVALS-MONEY-SIGHT | Proven or building when the account stopped; not re-verified since | Re-verify each head before it enters a wave |
 | FU-VITEST-DECORATOR-METADATA | @ 83b6dfc8 | Stopped on owner question 20 | Owner ruling |
 
-Live journey runs need a production web build from a real `pnpm install` in the worktree (Turbopack refuses
-node_modules symlinks), the API on a separate database (`keyflowos_e2e`), and Playwright 1.59's browser names aliased to
-the installed Chromium (`/opt/pw-browsers/chromium*-1217 -> *-1243`).
+How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
+`keyflowos_e2e`, browser RED at the base, and reviews in detached worktrees) is written down step by step in
+`docs/development/agent-memory/LIVE-PROOF-RUNBOOK.md`. Any tool can repeat it.
 
 ## 4. Open questions waiting for the owner (ask together)
 
