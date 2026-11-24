@@ -18,7 +18,8 @@ import { getTenantContext } from '../../core/tenant/tenant-context';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
 import { buildContactWhere } from '../crm/contact-filters.helper';
-import type { BusinessAsset, InvoiceStatus, Prisma } from '@prisma/client';
+import { OPEN_RECEIVABLE_STATUS_LIST } from '../commerce/commerce-stats.service';
+import type { BusinessAsset, Prisma } from '@prisma/client';
 import type { KeyGenomeScore, ModuleReadinessData } from '../business-genome/key-genome/key-genome.types';
 import type { KeyExecutiveMode, KeyExecutiveModeBrief } from '../intelligence/key-executive-mode.types';
 import type { BusinessExecutiveBrief } from '../intelligence/business-intelligence.types';
@@ -58,7 +59,6 @@ const RESULT_META: Record<keyof CommandCenterResults, { label: string; href: str
   openInvoices: { label: 'Open invoices', href: '/app/commerce/invoices' },
   payments: { label: 'Payments', href: '/app/payments' },
 };
-const OPEN_INVOICE_STATUSES: InvoiceStatus[] = ['SENT', 'OVERDUE', 'PARTIALLY_PAID'];
 
 /** What the caller may read of the Release 0 lists, by the same rules their routes enforce. */
 interface ResultsAccess {
@@ -228,7 +228,7 @@ export class BusinessCommandCenterService {
         return this.prisma.client.contact.count({ where });
       }),
       count('openInvoices', (a) => a.revenueRead, () =>
-        this.prisma.client.invoice.count({ where: { businessId, deletedAt: null, status: { in: OPEN_INVOICE_STATUSES } } }),
+        this.prisma.client.invoice.count({ where: { businessId, deletedAt: null, status: { in: OPEN_RECEIVABLE_STATUS_LIST } } }),
       ),
       count('payments', (a) => a.revenueRead, () => this.prisma.client.payment.count({ where: { businessId } })),
     ]);

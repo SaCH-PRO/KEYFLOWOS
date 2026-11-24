@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import { OPEN_RECEIVABLE_STATUS_LIST } from '../commerce/commerce-stats.service';
 import type { PrismaService } from '../../core/prisma/prisma.service';
 import { contactWhereBase } from './crm.helpers';
 import { normalizeEmail, phoneSearchKeys } from './crm-duplicate.util';
@@ -142,7 +143,7 @@ export function buildContactWhere(
   }
   if (filters.hasUnpaidInvoices) {
     where.invoices = {
-      some: { status: { in: ['SENT', 'OVERDUE'] }, deletedAt: null },
+      some: { status: { in: OPEN_RECEIVABLE_STATUS_LIST }, deletedAt: null },
     };
   }
   if (filters.hasUpcomingBookings) {

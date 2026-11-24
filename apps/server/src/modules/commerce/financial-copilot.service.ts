@@ -1,4 +1,5 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
+import { OPEN_RECEIVABLE_STATUS_LIST } from './commerce-stats.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { Prisma } from '@prisma/client';
@@ -121,7 +122,7 @@ export class FinancialCopilotService {
         _sum: { amount: true },
       }),
       this.db.invoice.findMany({
-        where: { ...baseWhere, status: { in: ['SENT', 'OVERDUE'] } },
+        where: { ...baseWhere, status: { in: OPEN_RECEIVABLE_STATUS_LIST } },
         select: { total: true, status: true, dueDate: true },
       }),
       this.db.expense.aggregate({
@@ -138,7 +139,7 @@ export class FinancialCopilotService {
         _sum: { amount: true },
       }),
       this.db.invoice.findMany({
-        where: { ...baseWhere, status: { in: ['SENT', 'OVERDUE'] } },
+        where: { ...baseWhere, status: { in: OPEN_RECEIVABLE_STATUS_LIST } },
         select: {
           id: true,
           invoiceNumber: true,
@@ -400,7 +401,7 @@ export class FinancialCopilotService {
         orderBy: { date: 'asc' },
       }),
       this.db.invoice.findMany({
-        where: { businessId, deletedAt: null, status: { in: ['SENT', 'OVERDUE'] } },
+        where: { businessId, deletedAt: null, status: { in: OPEN_RECEIVABLE_STATUS_LIST } },
         select: {
           invoiceNumber: true,
           total: true,
@@ -559,7 +560,7 @@ export class FinancialCopilotService {
         _count: true,
       }),
       this.db.invoice.aggregate({
-        where: { businessId, deletedAt: null, status: { in: ['SENT', 'OVERDUE'] } },
+        where: { businessId, deletedAt: null, status: { in: OPEN_RECEIVABLE_STATUS_LIST } },
         _sum: { total: true },
         _count: true,
       }),

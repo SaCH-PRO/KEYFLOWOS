@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import { OPEN_RECEIVABLE_STATUS_LIST } from './commerce-stats.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { RevenueForecastService, RevenueForecast } from './revenue-forecast.service';
@@ -76,7 +77,7 @@ export class RevenueBriefingService {
       this.pricingSvc.detect(businessId),
       this.db.business.findUnique({ where: { id: businessId }, select: { name: true, currency: true, industry: true } }),
       this.db.invoice.findMany({
-        where: { businessId, deletedAt: null, status: { in: ['SENT', 'OVERDUE', 'PARTIALLY_PAID'] } },
+        where: { businessId, deletedAt: null, status: { in: OPEN_RECEIVABLE_STATUS_LIST } },
         select: {
           id: true, invoiceNumber: true, total: true, dueDate: true, status: true,
           contact: { select: { id: true, firstName: true, lastName: true, email: true } },
