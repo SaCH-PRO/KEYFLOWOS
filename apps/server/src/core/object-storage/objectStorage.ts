@@ -510,7 +510,7 @@ export class ObjectStorageService {
    */
   objectPathFromClientUrl(raw: unknown): string | null {
     if (typeof raw !== "string" || raw.length === 0) return null;
-    if (raw.startsWith("/objects/")) return raw;
+    if (/^\/objects\//i.test(raw)) return `/objects/${raw.slice("/objects/".length)}`;
     let url: URL;
     try {
       url = new URL(raw);
@@ -518,8 +518,8 @@ export class ObjectStorageService {
       return null;
     }
     if (url.protocol !== "http:" && url.protocol !== "https:") return null;
-    const at = url.pathname.indexOf("/objects/");
-    if (at >= 0) return url.pathname.slice(at);
+    const objectsMatch = /\/objects\//i.exec(url.pathname);
+    if (objectsMatch) return `/objects/${url.pathname.slice(objectsMatch.index + objectsMatch[0].length)}`;
     try {
       const path = this.normalizeObjectEntityPath(`${url.origin}${url.pathname}`);
       return path.startsWith("/objects/") ? path : null;
@@ -530,7 +530,7 @@ export class ObjectStorageService {
   }
 
   /**
-   * Convert a presigned/public S3 URL (or already-canonical `/objects/...`
+   * Convert a presigned/public S3 URL (or already-canonical `/objects/<id>`
    * path) into the canonical `/objects/<id>` path used everywhere in the app.
    */
   normalizeObjectEntityPath(rawPath: string): string {
@@ -548,19 +548,19 @@ export class ObjectStorageService {
     const privateDir = this.getPrivateObjectDir();
     let pathname = decodeURIComponent(url.pathname).replace(/^\/+/, "");
 
-    // FU-OUTBOUND-ATTACHMENT-URL review round 1 (C1-3): an endpoint with a path
-    // (Supabase Storage: https://<proj>.supabase.co/storage/v1/s3) prefixes every
-    // path-style URL with it — strip it first.
+    // FU-OUTBOUND-ATTACHMENT-URL review round 1 (C1-3) & round 2 (SEC-FUOAU-2):
+    // an endpoint with a path (Supabase Storage: https://<proj>.supabase.co/storage/v1/s3)
+    // prefixes every path-style URL with it — strip it and any repeated slashes first.
     const { bucket, config } = getClient();
     const endpointPath = endpointPathPrefix(config.endpoint);
     if (endpointPath && pathname.startsWith(`${endpointPath}/`)) {
-      pathname = pathname.slice(endpointPath.length + 1);
+      pathname = pathname.slice(endpointPath.length + 1).replace(/^\/+/, "");
     }
 
     // Path-style URLs (MinIO, R2 with custom endpoint) include the bucket
-    // name as the first segment — strip it.
+    // name as the first segment — strip it and any repeated slashes.
     if (pathname.startsWith(`${bucket}/`)) {
-      pathname = pathname.slice(bucket.length + 1);
+      pathname = pathname.slice(bucket.length + 1).replace(/^\/+/, "");
     }
 
     if (!pathname.startsWith(`${privateDir}/`)) {
@@ -568,7 +568,7 @@ export class ObjectStorageService {
       return `/${pathname}`;
     }
 
-    const entityId = pathname.slice(privateDir.length + 1);
+    const entityId = pathname.slice(privateDir.length + 1).replace(/^\/+/, "");
     return `/objects/${entityId}`;
   }
 
