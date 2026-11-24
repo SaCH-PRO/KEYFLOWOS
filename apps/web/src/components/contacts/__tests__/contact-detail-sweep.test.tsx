@@ -22,6 +22,9 @@
  *                         stored PARTIALLY_PAID or SYSTEM ("Part-paid", "System"; review round m-a)
  *   CDS-129e  RED-AT-6071b088  (review round m-b) the event words keep the brand's and the plain spelling: "WhatsApp
  *                         sent" and "Follow-up scheduled", in Recent Activity as on the Timeline page (eventLabel)
+ *   CDS-129f  pin         (confirmation m-a) Recent Activity says what the Timeline page says: contact.created is
+ *                         "Customer added" in both (the card's own word list, which said "Contact created", is gone)
+ *   CDS-129g  RED-AT-3191d4f1  (confirmation m-b) the Timeline page names the AI actor "AI", not "Ai"
  *   CDS-062a  RED-BEFORE  the side panel has no tab strip; it opens the contact's page ("Open") and keeps Edit
  *   CDS-062b  RED-BEFORE  Recent Activity's "View all" opens the contact's Timeline page (no tab to switch to)
  *
@@ -214,6 +217,20 @@ describe("BUG-129: every code reads in plain words (reviews)", () => {
     expect(document.body).not.toHaveTextContent("SYSTEM");
     expect(screen.getByText("Part-paid")).toBeInTheDocument();
     expect(screen.getByText("System")).toBeInTheDocument();
+  });
+
+  it("CDS-129f pin: Recent Activity says what the Timeline page says (contact.created is 'Customer added')", () => {
+    render(<ContactDetailStats contact={contact} events={[{ id: "ev_c", type: "contact.created", createdAt: NOW }]} businessId={BIZ} />);
+    expect(screen.getByRole("button", { name: /recent activity/i })).toHaveTextContent("Customer added");
+    expect(eventLabel("contact.created")).toBe("Customer added");
+  });
+
+  it("CDS-129g RED-AT-3191d4f1: the Timeline page names the AI actor 'AI'", async () => {
+    served = [{ id: "ev_a", contactId: CONTACT_ID, type: "note.created", createdAt: NOW, actorType: "AI", data: { body: "Drafted by KEY" } }];
+    render(<ContactTimelinePage />);
+    expect(await screen.findByText("Note added")).toBeInTheDocument();
+    expect(screen.getByText("AI")).toBeInTheDocument();
+    expect(screen.queryByText("Ai")).not.toBeInTheDocument();
   });
 
   it("CDS-129e RED-AT-6071b088: WhatsApp and Follow-up keep their spelling", () => {
