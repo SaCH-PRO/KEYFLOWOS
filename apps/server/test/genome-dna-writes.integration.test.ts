@@ -774,15 +774,15 @@ describe('FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128, D-233, D-238)', () => {
         genomeIntegrity: 57,
         genomeStage: 'SCALE',
         readinessScore: 74,
-        genomeDnaScores: { identity: 80, FINANCIAL: 60, Sales: 50 },
-        dnaSections: [{ key: 'identity' }, { key: 'FINANCIAL' }],
+        genomeDnaScores: { operations: 80, FINANCIAL: 60, Sales: 50 },
+        dnaSections: [{ key: 'operations' }, { key: 'FINANCIAL' }],
       },
       false,
     ) as any;
     expect(projectedGenome.genomeStage).toBeUndefined();
     expect(projectedGenome.readinessScore).toBeUndefined();
-    expect(projectedGenome.genomeDnaScores).toEqual({ identity: 80 });
-    expect(projectedGenome.dnaSections).toEqual([{ key: 'identity' }]);
+    expect(projectedGenome.genomeDnaScores).toEqual({ operations: 80 });
+    expect(projectedGenome.dnaSections).toEqual([{ key: 'operations' }]);
 
     const ownerFinApply = await request(app.getHttpServer())
       .post(`/genome-chat/businesses/${ID.biz}/apply-updates`)
