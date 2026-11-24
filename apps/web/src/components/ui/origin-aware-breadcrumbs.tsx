@@ -31,6 +31,9 @@ function isId(s: string) {
   return s.length >= 16 && /^[a-z0-9_-]+$/i.test(s) && /\d/.test(s) && /[a-z]/i.test(s);
 }
 
+/** Pages whose crumb is not their segment's registry label (NAV-A3 NIT-7: the account page is not "Profile"). */
+const PAGE_LABELS: Record<string, string> = { "/app/settings/profile": "My account" };
+
 /** NAV-A3 (BUG-123): a segment the registry does not name reads as words ("data-quality" -> "Data quality"). */
 function labelFor(segment: string) {
   const label = getLabel(segment);
@@ -119,10 +122,12 @@ export function OriginAwareBreadcrumbs() {
     if (isId(segment)) return;
     const rawHref = "/app/" + crumbs.slice(0, idx + 1).join("/");
     const href = getAlias(rawHref) ?? rawHref;
-    const label = labelFor(segment);
+    const label = PAGE_LABELS[rawHref] ?? labelFor(segment);
     const isLast = idx === lastIdx;
 
-    getParentOverride(segment)?.forEach((parent, pIdx) => {
+    // A module's parent (Money above Books, Expenses, Reports) belongs only where the module is the top level: under
+    // /app/money it is already on the trail, and /app/intelligence/reports is not Money's (review MINOR-6).
+    if (idx === 0) getParentOverride(segment)?.forEach((parent, pIdx) => {
       built.push({ key: `parent-${segment}-${pIdx}`, label: parent.label, href: linkIfPage(parent.href) });
     });
 
@@ -131,7 +136,7 @@ export function OriginAwareBreadcrumbs() {
       built.push({ key: segment + idx, label, href: linkIfPage(href) ?? linkIfPage(`/app/${segment}`) });
       const tabBase = `/app/${segment}`;
       built.push({ key: `tab-${tabParam}`, label: tabLabel, href: isAppPage(tabBase) ? `${tabBase}?tab=${tabParam}` : undefined });
-      if (viewLabel) built.push({ key: `view-${viewParam}`, label: viewLabel, current: true });
+      if (viewLabel) built.push({ key: `view-${viewParam}`, label: viewLabel, current: true, underline: true });
       return;
     }
 
@@ -150,10 +155,16 @@ export function OriginAwareBreadcrumbs() {
     built.push({ key: segment + idx, label, href: isNoLinkSegment(segment) ? undefined : linkIfPage(href) });
   });
 
-  // No doubles: a label already on the trail (Home included) is dropped; the current crumb always stays.
+  // No doubles: a label already on the trail (Home included), or a link to a page an earlier crumb already opens
+  // (Customers and Contacts both open /app/crm/contacts), is dropped; the current crumb always stays.
   const trail: Crumb[] = [];
   const seen = new Set<string>(["Home"]);
+  const seenHrefs = new Set<string>(["/app"]);
   for (const c of built) {
+    if (c.href && !c.current) {
+      if (seenHrefs.has(c.href)) continue;
+      seenHrefs.add(c.href);
+    }
     if (seen.has(c.label)) {
       if (!c.current) continue;
       const earlier = trail.findIndex((t) => t.label === c.label);

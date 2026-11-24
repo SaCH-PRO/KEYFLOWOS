@@ -25,10 +25,13 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(nav.search),
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), prefetch: vi.fn() }),
 }));
-vi.mock("@/lib/navigation-context", () => ({ useNavigationContext: () => ({ getOriginContext: () => null }) }));
+vi.mock("@/lib/navigation-context", () => ({ useNavigationContext: () => ({ getOriginContext: () => null, setCurrentMeta: () => {} }) }));
+// WorkspaceShell (inside StandardModuleLayout) restores scroll on return; not under test here.
+vi.mock("@/lib/use-return-navigation", () => ({ useReturnNavigation: () => undefined }));
 
 import { OriginAwareBreadcrumbs } from "../origin-aware-breadcrumbs";
 import { UnifiedPageShell } from "@/components/layout/unified-page-shell";
+import { StandardModuleLayout } from "@/components/ui/standard-module-layout";
 import { APP_PAGE_ROUTES, isAppPage } from "@/lib/app-page-routes";
 
 /* ── The oracle: every page.tsx under src/app/app, as a matcher ── */
@@ -121,10 +124,11 @@ describe("NAV-A3: every crumb that is a link opens a page", () => {
 describe("NAV-A3: labels, not slugs or ids", () => {
   it("RED-BEFORE (BUG-123): a contact's pages never show the contact's id", () => {
     const id = "cmwujpiuf00n57dx4navng6ud";
+    // Compared case-insensitively: an unnamed segment is capitalised, so a leaked id would read "Cmwuj..." (review F1).
     for (const tab of ["overview", "money", "bookings", "notes", "timeline"]) {
-      expect(trail(`/app/crm/contacts/${id}/${tab}`).text, tab).not.toContain(id);
+      expect(trail(`/app/crm/contacts/${id}/${tab}`).text.toLowerCase(), tab).not.toContain(id);
     }
-    expect(trail(`/app/crm/contacts/${id}`).text).not.toContain(id);
+    expect(trail(`/app/crm/contacts/${id}`).text.toLowerCase()).not.toContain(id);
   });
 
   it("CONTROL: a uuid is hidden too", () => {
@@ -166,6 +170,18 @@ describe("NAV-A3: no doubles", () => {
         <p>body</p>
       </UnifiedPageShell>,
     );
+    expect(screen.queryAllByRole("navigation", { name: "Breadcrumb" })).toHaveLength(0);
+  });
+
+  it("CONTROL (review F2): StandardModuleLayout draws no second trail either", () => {
+    cleanup();
+    nav.pathname = "/app/finance/ledger";
+    render(
+      <StandardModuleLayout workspace="finance" icon={FileText} title="Ledger" tabs={[]} activeTab="" onTabChange={() => {}}>
+        <p>body</p>
+      </StandardModuleLayout>,
+    );
+    expect(screen.getByText("body")).toBeTruthy();
     expect(screen.queryAllByRole("navigation", { name: "Breadcrumb" })).toHaveLength(0);
   });
 });
