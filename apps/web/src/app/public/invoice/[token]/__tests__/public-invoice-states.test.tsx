@@ -68,10 +68,11 @@ function payload(overrides: { invoice?: Record<string, unknown>; totals?: Record
   };
 }
 
-/** The text of the row a label opens (dt + dd), whitespace collapsed. */
+/** The text of the row a label opens: the dt, a space, its dd; whitespace collapsed. */
 function row(label: RegExp): string {
   const dt = screen.getByText(label, { selector: "dt" });
-  return (dt.parentElement?.textContent ?? "").replace(/\s+/g, " ").trim();
+  const dd = dt.nextElementSibling;
+  return `${dt.textContent ?? ""} ${dd?.textContent ?? ""}`.replace(/\s+/g, " ").trim();
 }
 
 beforeEach(() => {
@@ -128,7 +129,9 @@ describe("SWP-INV-PUBLIC-LINK: the customer's invoice page", () => {
       const paid = status === "PAID" ? 1066 : status === "PARTIALLY_PAID" ? 400 : 0;
       serve(payload({ invoice: { status }, balance: { amountPaid: paid, amountDue: 1066 - paid } }));
       render(<PublicInvoicePage />);
-      expect(await screen.findByText(label, { exact: true }), status).toBeInTheDocument();
+      // The badge; "Paid" is also the label of the Paid row (a dt), which does not count.
+      const found = await screen.findAllByText(label, { exact: true });
+      expect(found.filter((el) => el.tagName !== "DT"), status).toHaveLength(1);
       expect(screen.queryByText(status, { exact: true }), status).toBeNull();
       cleanup();
       vi.unstubAllGlobals();
