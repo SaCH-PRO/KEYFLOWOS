@@ -61,6 +61,8 @@ interface BillingFormModalProps {
   saving?: boolean;
   formError?: string | null;
   contacts: Contact[];
+  /** SWP-QUOTE-COMPOSER-CONTACT: said under the client field when a save has no client. */
+  contactError?: string | null;
   products: Product[];
   currency?: string;
   contactId: string;
@@ -139,6 +141,7 @@ export const BillingFormModal = React.memo(function BillingFormModal({
   currency = "TTD",
   contactId,
   onContactChange,
+  contactError = null,
   dateValue,
   onDateChange,
   items,
@@ -428,6 +431,7 @@ export const BillingFormModal = React.memo(function BillingFormModal({
                   contactId={contactId}
                   onContactChange={onContactChange}
                   contacts={contacts}
+                  contactError={contactError}
                   dateValue={dateValue}
                   onDateChange={onDateChange}
                   dateLabel={theme.dateLabel}
