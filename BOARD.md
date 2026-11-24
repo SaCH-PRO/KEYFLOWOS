@@ -39,7 +39,7 @@
 | # | Row | What | Owner | Status | Waits on | Next step |
 | --- | --- | --- | --- | --- | --- | --- |
 | M1 | PR #228 | `wave/v1-wave-3j` | antigravity | **merged** (142e5f9e) | — | Done |
-| M2 | Rulings, **PR #230** | `wave/v1-rulings-3n` @ 5dd4153b: `pkt/V1-RULINGS-3E` + `pkt/V1-WEDGE-RECUT` compacted (docs only, 10 files), status regenerated at main 142e5f9e | claude | pr-open | — | CI green at the exact head; merge (D) |
+| M2 | Rulings, **PR #230** | `wave/v1-rulings-3n` @ 8295bbad: the rulings D-263..D-272, the wedge re-cut and the agent-memory checklists (docs only). Both first reviews REJECTED 5dd4153b; every finding fixed at 8295bbad (14 KEY safety/correctness packets back on launch, the gate re-cut to the launch journeys, SEC-KEY-CUSTOM-LOGIC and FU-OUTBOUND-ATTACHMENT-URL in the plan, checklists and runbook hardened) | claude | in-review | — | Two confirmation reviews running; then CI green at the exact head; merge (D) |
 | M3 | Wave 3m, **PR #229** | `wave/v1-wave-3m` @ 7bd2f445: MOUNT-QUOTES, SWP-INV-MATH, SWP-INV-PUBLIC-LINK, SWP-QUOTE-PUBLIC-PAGE, SWP-INV-FORM-UX, SWP-QUOTE-COMPOSER-CONTACT. **Proven at 7bd2f445:** server 820 files / 15287 tests, R0 MET 39/39 exact-head; web 197 files / 1784 tests exit 0, tsc 0, lint 25 ≤ 26 | claude | pr-open | M1, M2 | When M1 and M2 are merged: merge main in, re-prove the new head (CHECKLISTS C), CI green at the exact head, merge (D) |
 | M4 | Wave 3j split | `wave/3j-second-lane` (16 packets; fails 25/50; duplicates RR-REDACTION-BY-CONTENT with #228) | antigravity | todo | M3 | Split into parts within 25 commits / 50 files without the duplicate; prove each; PR; merge in turn |
 
@@ -64,4 +64,4 @@
 | P14 | Owner: "Batch 2 safe defaults #5–#10" (not approved in D-272) | owner | blocked | the owner's review | The owner reviews the list |
 | P15 | Owner: redeploy production (D-266) | owner | blocked | M1–M4 | The owner deploys from main |
 
-Last updated: 2026-11-24 by the antigravity lane (M1 merged @ 142e5f9e; P2 returned; P4 returned; P5 3/3 returned @ f616cf67; P1 proving full suite+R0 @ d136d090; P6 queued next).
+Last updated: 2026-11-24 by the claude lane (M2 fixes pushed @ 8295bbad; confirmation reviews running).
