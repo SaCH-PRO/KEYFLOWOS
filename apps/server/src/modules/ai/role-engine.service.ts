@@ -362,11 +362,12 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     //
     // Deliberately NOT taking integration's list. Two entries in it are the
     // reason: `mcp__*` (a wildcard over remote MCP tools) and
-    // `execute_custom_logic` — model-authored JavaScript that runs in an E2B
-    // microVM only when E2B_API_KEY and PUBLIC_API_URL are set, and otherwise
-    // falls back to a LOCAL spawned child process. Granting that to the default
-    // role for every user is not a tradeoff worth making silently. If it is
-    // wanted, it should arrive as its own reviewed change.
+    // `execute_custom_logic` — model-authored JavaScript that runs only in an
+    // isolated E2B microVM when E2B_API_KEY and an https PUBLIC_API_URL are set
+    // (failing closed otherwise; local host fallback was removed under
+    // SEC-KEY-CUSTOM-LOGIC). Granting that to the default role for every user
+    // is not a tradeoff worth making silently. If it is wanted, it should
+    // arrive as its own reviewed change.
     approvedTools: ['inbox_brief', 'inbox_mark_resolved', 'people_assign_task', 'update_business_blueprint', 'present_onboarding_card', 'save_onboarding_step', 'fetch_*', 'crm_*', 'deals_*', 'inventory_*', 'payments_*', 'reconcile_*', 'contracts_*', 'reports_generate', 'goals_*', 'commerce_*', 'bookings_*', 'projects_*', 'expenses_*', 'calendar_*', 'time_*', 'helpdesk_*', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'documents_*', 'finance_*', 'marketing_*', 'social_*', 'store_*', 'marketplace_*', 'automations_*', 'delegation_*', 'draft_*', 'create_task', 'create_followup_queue', 'tag_contact', 'segment_contacts', 'send_message_with_approval', 'queue_campaign', 'keyflow_create_note', 'sync_seo_pages', 'generate_content_brief', 'apply_storefront_recommendation', 'enable_flow_with_approval', 'update_status_with_confirmation', 'community_list_posts', 'assets_*', 'suppliers_*', 'governance_*', 'retainers_*', 'portal_*'],
     // assets_delete joins the other deletes below. `general` is the role the
     // web pins on EVERY chat request, so it is the widest blast radius in this

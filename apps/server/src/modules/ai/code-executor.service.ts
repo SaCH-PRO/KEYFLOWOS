@@ -86,13 +86,12 @@ export class CodeExecutorService {
   /** Which backend will handle executions under the current env. */
   backend(): ExecutorBackend {
     const forced = (process.env.CODE_EXECUTOR_BACKEND ?? '').trim().toLowerCase();
-    if (forced === 'disabled') return 'disabled';
     if (forced === 'e2b') return 'e2b';
-    if (forced && forced !== 'e2b') {
-      // Never honor `local` or unknown backend values — fail closed.
+    if (forced) {
+      // Never honor `local`, `disabled`, or unknown backend values — fail closed.
       return 'disabled';
     }
-    return process.env.E2B_API_KEY && process.env.PUBLIC_API_URL ? 'e2b' : 'disabled';
+    return process.env.E2B_API_KEY?.trim() && process.env.PUBLIC_API_URL?.trim() ? 'e2b' : 'disabled';
   }
 
   async execute(opts: {
@@ -151,25 +150,37 @@ export class CodeExecutorService {
 
   // ── E2B backend ────────────────────────────────────────────────────────
 
+  /** Lazy-load the ESM-only E2B SDK from CJS (overrideable in unit tests for offline determinism). */
+  protected async loadE2bSdk(): Promise<{ Sandbox: { create: (opts?: Record<string, unknown>) => Promise<E2bSandboxLike> } }> {
+    const importEsm = new Function('specifier', 'return import(specifier)') as (s: string) => Promise<never>;
+    return importEsm('@e2b/code-interpreter');
+  }
+
   private async executeE2b(opts: {
     businessId: string;
     code: string;
     inputs?: Record<string, unknown>;
     innerToolExecutor: InnerToolExecutor;
   }): Promise<CodeExecutionResult> {
-    const apiKey = process.env.E2B_API_KEY;
-    const publicUrl = (process.env.PUBLIC_API_URL ?? '').replace(/\/$/, '');
+    const apiKey = (process.env.E2B_API_KEY ?? '').trim();
+    const publicUrl = (process.env.PUBLIC_API_URL ?? '').trim().replace(/\/$/, '');
     if (!apiKey) return { ok: false, error: 'E2B_API_KEY is not configured', logs: [], toolCalls: 0 };
     if (!publicUrl) {
       return { ok: false, error: 'PUBLIC_API_URL is required for the E2B backend (the sandbox must reach our tool bridge)', logs: [], toolCalls: 0 };
     }
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(publicUrl);
+    } catch {
+      return { ok: false, error: 'PUBLIC_API_URL must be a valid https URL for the E2B tool bridge', logs: [], toolCalls: 0 };
+    }
+    if (parsedUrl.protocol !== 'https:') {
+      return { ok: false, error: 'PUBLIC_API_URL must use https: for the E2B tool bridge', logs: [], toolCalls: 0 };
+    }
 
-    // Lazy-load the ESM-only SDK from CJS (tsc would downlevel a normal
-    // dynamic import() into require(), which crashes on ESM-only deps).
     let Sandbox: { create: (opts?: Record<string, unknown>) => Promise<E2bSandboxLike> };
     try {
-      const importEsm = new Function('specifier', 'return import(specifier)') as (s: string) => Promise<never>;
-      const mod = await importEsm('@e2b/code-interpreter') as { Sandbox: typeof Sandbox };
+      const mod = await this.loadE2bSdk();
       Sandbox = mod.Sandbox;
     } catch (err) {
       // SEC-KEY-CUSTOM-LOGIC (D-272.4): fail closed; never fall back to local API-host execution.
