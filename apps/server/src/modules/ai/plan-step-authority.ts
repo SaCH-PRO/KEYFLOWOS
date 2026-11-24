@@ -439,6 +439,9 @@ export const KEY_BOOKS_REVENUE_TOOLS: ReadonlySet<string> = new Set([
   'finance_auto_match_bank',
   'reconcile_run_auto_match',
   'reconcile_match_line',
+  // SWP-CENSUS-OPEN-WRITES (D-146, coawrite): POST chart-of-accounts is a finance.controller door now (ModuleScopeGuard
+  // revenue write and ensureAccess), so the chart tool admits a SUPER_ADMIN member as its route does
+  'finance_create_coa_account',
 ]);
 
 /**

@@ -8,7 +8,7 @@ import {
   type ContractType,
   type ContractViolationAttempt,
 } from './ai-output-contracts';
-import { LLMCostService } from './llm-cost.service';
+import { LLMCostService, priceFor, costStatusFor, type CostStatus } from './llm-cost.service';
 import { LangfuseService } from './langfuse.service';
 import {
   classifyProviderFailure,
@@ -114,6 +114,8 @@ export interface GatewayResponse {
     completionTokens: number;
     totalTokens: number;
     estimatedCost: number;
+    /** How estimatedCost was priced: from the table, or at the fallback rate for an unknown model (RR-UNKNOWN-COST-NOT-ZERO). */
+    costStatus?: CostStatus;
   };
   latencyMs: number;
   fallbackUsed: boolean;
@@ -154,6 +156,7 @@ export interface StreamChunk {
     completionTokens: number;
     totalTokens: number;
     estimatedCost: number;
+    costStatus?: CostStatus;
   };
   provider?: AiProvider;
   model?: string;
@@ -294,6 +297,8 @@ export interface ProviderBudgetStatus {
 export interface BudgetStatus {
   overall: { budgetCap: number | null; spent: number; remaining: number | null; utilizationPct: number | null; isOverBudget: boolean; isNearLimit: boolean };
   byProvider: ProviderBudgetStatus[];
+  /** Calls this month whose cost is an estimate at the fallback rate because the model has no price (RR-UNKNOWN-COST-NOT-ZERO). */
+  unpricedCalls: number;
   periodStart: Date;
   periodEnd: Date;
 }
@@ -379,58 +384,8 @@ const DEFAULT_PREFERENCES: AiPreferences = {
 
 const BUDGET_NEAR_LIMIT_THRESHOLD = 0.85;
 
-/**
- * Cost per 1,000 tokens, in USD.
- *
- * LAST VERIFIED AGAINST PROVIDER PRICING: 2026-08-04.
- *
- * This is not decoration — it is the instrument. filterCandidatesByBudget cuts
- * providers off using these numbers, getBudgetStatus and the admin spend view
- * report them, and every "is this worth it" judgement about model routing is
- * made against them.
- *
- * The gpt-4o entries were the May-2024 launch prices and had not been touched
- * since: gpt-4o was carrying $5/$15 per 1M against an actual $2.50/$10, and
- * gpt-4o-mini $0.40/$1.60 against an actual $0.15/$0.60. So budget caps fired at
- * roughly half the real spend and pushed traffic onto fallbacks nothing needed.
- *
- * Worse for decision-making: the mini overstatement (2.7x) was LARGER than the
- * gpt-4o one (2x), so the table understated how much cheaper the cheap tier is —
- * biasing exactly the routing choices this table exists to inform.
- *
- * Provider prices move. Re-check them when this comment gets stale, and treat a
- * missing entry as a bug rather than as free — see recordCost below.
- */
-const TOKEN_COST_PER_1K: Record<string, { input: number; output: number }> = {
-  'gpt-4o': { input: 0.0025, output: 0.010 },
-  'gpt-4o-mini': { input: 0.00015, output: 0.0006 },
-  'claude-3-5-sonnet-20241022': { input: 0.003, output: 0.015 },
-  'claude-3-5-haiku-20241022': { input: 0.0008, output: 0.004 },
-  'gemini-2.0-flash': { input: 0.0001, output: 0.0004 },
-  'gemini-2.5-pro': { input: 0.00125, output: 0.010 },
-  'grok-2': { input: 0.005, output: 0.015 },
-  'grok-2-mini': { input: 0.001, output: 0.005 },
-  'moonshot-v1-8k': { input: 0.003, output: 0.003 },
-  'moonshot-v1-32k': { input: 0.006, output: 0.006 },
-  'moonshot-v1-128k': { input: 0.012, output: 0.012 },
-};
-
-/**
- * Price for a model, never zero.
- *
- * The call sites used `TOKEN_COST_PER_1K[model]?.input ?? 0`, so any model
- * reached through a modelOverride and absent from the table recorded as FREE —
- * while the estimate path fell back to gpt-4o pricing, producing two different
- * numbers for the same call in the same row. A missing price is a bug, and the
- * safe direction for a cost figure is to overstate rather than to vanish.
- */
-function priceFor(model: string): { input: number; output: number } {
-  const known = TOKEN_COST_PER_1K[model];
-  if (known) return known;
-  // eslint-disable-next-line no-console
-  console.warn(`[model-gateway] no price for "${model}"; billing it as gpt-4o`);
-  return TOKEN_COST_PER_1K['gpt-4o'];
-}
+// The price table and priceFor live in llm-cost.service.ts (RR-UNKNOWN-COST-NOT-ZERO):
+// one table, imported above, never a zero for an unknown model.
 
 const DEFAULT_ROUTING_TABLE: Record<AiMode, Record<TaskCategory, ModelStrategy>> = {
   balanced: {
@@ -1377,7 +1332,7 @@ export class ModelGatewayService {
       if (chunk.usage) {
         const promptTokens = chunk.usage.prompt_tokens ?? 0;
         const completionTokens = chunk.usage.completion_tokens ?? 0;
-        const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['gpt-4o'];
+        const costs = priceFor(model);
         const estimatedCost =
           (promptTokens / 1000) * costs.input +
           (completionTokens / 1000) * costs.output;
@@ -1389,6 +1344,7 @@ export class ModelGatewayService {
             completionTokens,
             totalTokens: promptTokens + completionTokens,
             estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+            costStatus: costStatusFor(model),
           },
         };
       }
@@ -1601,7 +1557,7 @@ export class ModelGatewayService {
     }
 
     const totalTokens = inputTokens + outputTokens;
-    const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['claude-3-5-sonnet-20241022'];
+    const costs = priceFor(model);
     const estimatedCost =
       (inputTokens / 1000) * costs.input +
       (outputTokens / 1000) * costs.output;
@@ -1613,6 +1569,7 @@ export class ModelGatewayService {
         completionTokens: outputTokens,
         totalTokens,
         estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+        costStatus: costStatusFor(model),
       },
     };
 
@@ -1675,7 +1632,7 @@ export class ModelGatewayService {
       if (chunk.usage) {
         const promptTokens = chunk.usage.prompt_tokens ?? 0;
         const completionTokens = chunk.usage.completion_tokens ?? 0;
-        const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['grok-2'];
+        const costs = priceFor(model);
         const estimatedCost =
           (promptTokens / 1000) * costs.input +
           (completionTokens / 1000) * costs.output;
@@ -1687,6 +1644,7 @@ export class ModelGatewayService {
             completionTokens,
             totalTokens: promptTokens + completionTokens,
             estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+            costStatus: costStatusFor(model),
           },
         };
       }
@@ -1751,7 +1709,7 @@ export class ModelGatewayService {
       if (chunk.usage) {
         const promptTokens = chunk.usage.prompt_tokens ?? 0;
         const completionTokens = chunk.usage.completion_tokens ?? 0;
-        const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['moonshot-v1-8k'];
+        const costs = priceFor(model);
         const estimatedCost =
           (promptTokens / 1000) * costs.input +
           (completionTokens / 1000) * costs.output;
@@ -1763,6 +1721,7 @@ export class ModelGatewayService {
             completionTokens,
             totalTokens: promptTokens + completionTokens,
             estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+            costStatus: costStatusFor(model),
           },
         };
       }
@@ -1837,7 +1796,7 @@ export class ModelGatewayService {
       if (chunk.usage) {
         const promptTokens = chunk.usage.prompt_tokens ?? 0;
         const completionTokens = chunk.usage.completion_tokens ?? 0;
-        const costs = TOKEN_COST_PER_1K[model] || { input: 0, output: 0 };
+        const costs = priceFor(model);
         const estimatedCost =
           (promptTokens / 1000) * costs.input +
           (completionTokens / 1000) * costs.output;
@@ -1849,6 +1808,7 @@ export class ModelGatewayService {
             completionTokens,
             totalTokens: promptTokens + completionTokens,
             estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+            costStatus: costStatusFor(model),
           },
         };
       }
@@ -1918,7 +1878,7 @@ export class ModelGatewayService {
       if (chunk.usage) {
         const promptTokens = chunk.usage.prompt_tokens ?? 0;
         const completionTokens = chunk.usage.completion_tokens ?? 0;
-        const costs = TOKEN_COST_PER_1K[model] || { input: 0, output: 0 };
+        const costs = priceFor(model);
         const estimatedCost =
           (promptTokens / 1000) * costs.input +
           (completionTokens / 1000) * costs.output;
@@ -1930,6 +1890,7 @@ export class ModelGatewayService {
             completionTokens,
             totalTokens: promptTokens + completionTokens,
             estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+            costStatus: costStatusFor(model),
           },
         };
       }
@@ -2018,6 +1979,10 @@ export class ModelGatewayService {
 
     const now = new Date();
     const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    // Rows priced at the fallback rate this month: shown beside the total, never folded into it silently.
+    const unpricedCalls = await this.prisma.client.aiUsageLog.count({
+      where: { businessId, createdAt: { gte: periodStart }, metadata: { path: ['costStatus'], equals: 'unpriced_estimate' } },
+    });
     const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
 
     const overallCap = budgetCaps?.monthlyOverall ?? null;
@@ -2050,6 +2015,7 @@ export class ModelGatewayService {
         isNearLimit: overallCap !== null && overallUtilization !== null && overallUtilization >= BUDGET_NEAR_LIMIT_THRESHOLD * 100,
       },
       byProvider,
+      unpricedCalls,
       periodStart,
       periodEnd,
     };
@@ -2354,7 +2320,7 @@ export class ModelGatewayService {
     const promptTokens = response.usage?.prompt_tokens ?? 0;
     const completionTokens = response.usage?.completion_tokens ?? 0;
     const totalTokens = promptTokens + completionTokens;
-    const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['gpt-4o'];
+    const costs = priceFor(model);
     const estimatedCost =
       (promptTokens / 1000) * costs.input +
       (completionTokens / 1000) * costs.output;
@@ -2378,6 +2344,7 @@ export class ModelGatewayService {
         completionTokens,
         totalTokens,
         estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+        costStatus: costStatusFor(model),
       },
     };
   }
@@ -2496,7 +2463,7 @@ export class ModelGatewayService {
     const promptTokens = data.usage?.input_tokens ?? 0;
     const completionTokens = data.usage?.output_tokens ?? 0;
     const totalTokens = promptTokens + completionTokens;
-    const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['claude-3-5-sonnet-20241022'];
+    const costs = priceFor(model);
     const estimatedCost =
       (promptTokens / 1000) * costs.input +
       (completionTokens / 1000) * costs.output;
@@ -2509,6 +2476,7 @@ export class ModelGatewayService {
         completionTokens,
         totalTokens,
         estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+        costStatus: costStatusFor(model),
       },
     };
   }
@@ -2547,7 +2515,7 @@ export class ModelGatewayService {
     const promptTokens = response.usage?.prompt_tokens ?? 0;
     const completionTokens = response.usage?.completion_tokens ?? 0;
     const totalTokens = promptTokens + completionTokens;
-    const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['grok-2'];
+    const costs = priceFor(model);
     const estimatedCost =
       (promptTokens / 1000) * costs.input +
       (completionTokens / 1000) * costs.output;
@@ -2571,6 +2539,7 @@ export class ModelGatewayService {
         completionTokens,
         totalTokens,
         estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+        costStatus: costStatusFor(model),
       },
     };
   }
@@ -2609,7 +2578,7 @@ export class ModelGatewayService {
     const promptTokens = response.usage?.prompt_tokens ?? 0;
     const completionTokens = response.usage?.completion_tokens ?? 0;
     const totalTokens = promptTokens + completionTokens;
-    const costs = TOKEN_COST_PER_1K[model] || TOKEN_COST_PER_1K['moonshot-v1-8k'];
+    const costs = priceFor(model);
     const estimatedCost =
       (promptTokens / 1000) * costs.input +
       (completionTokens / 1000) * costs.output;
@@ -2633,6 +2602,7 @@ export class ModelGatewayService {
         completionTokens,
         totalTokens,
         estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+        costStatus: costStatusFor(model),
       },
     };
   }
@@ -2705,6 +2675,7 @@ export class ModelGatewayService {
         completionTokens,
         totalTokens,
         estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+        costStatus: costStatusFor(model),
       },
     };
   }
@@ -2769,17 +2740,17 @@ export class ModelGatewayService {
         const promptTokens = chunk.usage.prompt_tokens ?? 0;
         const completionTokens = chunk.usage.completion_tokens ?? 0;
         const costs = priceFor(model);
+        const estimatedCost =
+          (promptTokens / 1000) * costs.input +
+          (completionTokens / 1000) * costs.output;
         yield {
           type: 'usage',
           usage: {
             promptTokens,
             completionTokens,
             totalTokens: promptTokens + completionTokens,
-            estimatedCost:
-              Math.round(
-                ((promptTokens / 1000) * costs.input +
-                  (completionTokens / 1000) * costs.output) * 10000,
-              ) / 10000,
+            estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+            costStatus: costStatusFor(model),
           },
         };
       }
@@ -2832,7 +2803,7 @@ export class ModelGatewayService {
     const promptTokens = response.usage?.prompt_tokens ?? 0;
     const completionTokens = response.usage?.completion_tokens ?? 0;
     const totalTokens = promptTokens + completionTokens;
-    const costs = TOKEN_COST_PER_1K[model] || { input: 0, output: 0 };
+    const costs = priceFor(model);
     const estimatedCost =
       (promptTokens / 1000) * costs.input +
       (completionTokens / 1000) * costs.output;
@@ -2856,6 +2827,7 @@ export class ModelGatewayService {
         completionTokens,
         totalTokens,
         estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+        costStatus: costStatusFor(model),
       },
     };
   }
@@ -2899,7 +2871,7 @@ export class ModelGatewayService {
     const promptTokens = response.usage?.prompt_tokens ?? 0;
     const completionTokens = response.usage?.completion_tokens ?? 0;
     const totalTokens = promptTokens + completionTokens;
-    const costs = TOKEN_COST_PER_1K[model] || { input: 0, output: 0 };
+    const costs = priceFor(model);
     const estimatedCost =
       (promptTokens / 1000) * costs.input +
       (completionTokens / 1000) * costs.output;
@@ -2923,6 +2895,7 @@ export class ModelGatewayService {
         completionTokens,
         totalTokens,
         estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+        costStatus: costStatusFor(model),
       },
     };
   }

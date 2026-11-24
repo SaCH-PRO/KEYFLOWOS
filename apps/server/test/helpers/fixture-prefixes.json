@@ -1148,6 +1148,11 @@
       "packet": "V1-66 (SWP-FIN-LEDGER)"
     },
     {
+      "prefix": "v66h_",
+      "owner": "apps/server/test/census-open-writes.integration.test.ts",
+      "packet": "V1-66 (SWP-CENSUS-OPEN-WRITES)"
+    },
+    {
       "prefix": "v63h_",
       "owner": "apps/server/test/coa-unique-code.integration.test.ts",
       "packet": "V1-63 (SWP-COA-UNIQUE-CODE)"
@@ -1185,6 +1190,11 @@
       "prefix": "v72v_",
       "owner": "apps/server/test/business-event-redaction.integration.test.ts",
       "packet": "V1-72 (RR-BUSINESS-EVENT-REDACT)"
+    },
+    {
+      "prefix": "v72x_",
+      "owner": "apps/server/test/contact-export-retention.integration.test.ts",
+      "packet": "V1-72 (RR-RETENTION-EXPIRED-EXPORTS)"
     },
     {
       "prefix": "v71w_",

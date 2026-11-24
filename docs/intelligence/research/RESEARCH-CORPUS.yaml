@@ -81,7 +81,7 @@ sources:
     status: TARGETED_TRANSLATION_PASS_1
 
   - id: BOOK-PEOPLEWARE
-    title: Peopleware: Productive Projects and Teams
+    title: "Peopleware: Productive Projects and Teams"
     authors:
       - Tom DeMarco
       - Timothy Lister
@@ -280,13 +280,6 @@ sources:
       - How do we prevent green tests from becoming fake evidence?
     caution: TDD can improve feedback and design discipline but does not guarantee correctness, completeness, or production safety.
 
-expansion_protocol:
-  default_status: QUEUED
-  duplicate_rule: Search existing lenses, dossiers, kernels, findings and recommendations before allocating a new concept.
-  source_rule: Prefer primary text or authoritative edition metadata for claims about a book.
-  citation_rule: Record chapter/page/section provenance when extracting source claims.
-
-
   - id: RND-FICTIONAL-INTELLIGENCE-GENOME
     title: KEY Fictional Intelligence Genome Programme
     lens: fictional_speculative_intelligence_architecture
@@ -302,3 +295,9 @@ expansion_protocol:
       - Which failure modes belong in KEY's anti-genome?
       - Which candidates survive repository pressure testing without duplicating existing primitives?
     caution: Fictional canon is evidence only of the fictional mechanism. Engineering adoption requires independent real-world evidence, repository pressure testing, anti-duplication review, and canonical promotion.
+
+expansion_protocol:
+  default_status: QUEUED
+  duplicate_rule: Search existing lenses, dossiers, kernels, findings and recommendations before allocating a new concept.
+  source_rule: Prefer primary text or authoritative edition metadata for claims about a book.
+  citation_rule: Record chapter/page/section provenance when extracting source claims.
