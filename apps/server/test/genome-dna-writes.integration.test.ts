@@ -708,4 +708,145 @@ describe('FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128, D-233, D-238)', () => {
     expect(isFinancialDnaWrite('operations', deep)).toBe(true);
     expect(isFinancialBlueprintPatch({ identity: deep })).toBe(true);
   });
+
+  it('DW-19 RED (R4 SEC-DW-4): FINANCE_DERIVED_READINESS catches module readiness/automation and is enforced by autonomyVerdictForReader', async () => {
+    const { autonomyReasonStatesMoney, autonomyVerdictForReader } = await import('../src/modules/key-autonomy/key-action-genome-projection');
+    expect(autonomyReasonStatesMoney('reports module readiness risk is CRITICAL.')).toBe(true);
+    expect(autonomyReasonStatesMoney('KEY cannot execute this action because key_autonomy automation is blocked by missing Genome facts.')).toBe(true);
+    expect(autonomyReasonStatesMoney('bookings module readiness risk is HIGH.')).toBe(false);
+
+    expect(
+      autonomyVerdictForReader({
+        actionKey: 'bookings_sync',
+        reason: 'KEY cannot execute this action because reports readiness is only 20%.',
+        ruleTrace: [],
+      }),
+    ).toBeNull();
+    expect(
+      autonomyVerdictForReader({
+        actionKey: 'bookings_sync',
+        reason: 'crm module readiness risk is CRITICAL.',
+        ruleTrace: [],
+      }),
+    ).toBeNull();
+    expect(
+      autonomyVerdictForReader({
+        actionKey: 'bookings_sync',
+        reason: 'Blocked',
+        ruleTrace: [{ rule: 'genome', detail: 'key_autonomy automation is blocked by missing Genome facts.' }],
+      }),
+    ).toBeNull();
+  });
+
+  it('DW-20 RED (R4 SEC-DW-6): FINANCIAL_ORDER is linear (no ReDoS) and catches suffixed, periodic, colon and underscore/hyphen order phrases', async () => {
+    const { isFinancialDnaWrite } = await import('../src/modules/blueprint/genome-write-scope');
+    const t0 = Date.now();
+    expect(isFinancialDnaWrite('operations', { coreWorkflows: ['1' + ' '.repeat(35_000) + 'x'] })).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(150);
+
+    for (const phrase of ['500k orders', '1.5M orders', '500+ orders', '200 monthly orders', 'orders: 500', 'orders per month: 500', 'average_order_value', 'order-total']) {
+      expect(isFinancialDnaWrite('operations', { coreWorkflows: [phrase] }), phrase).toBe(true);
+    }
+    expect(isFinancialDnaWrite('operations', { coreWorkflows: ['take orders and pack orders'] })).toBe(false);
+  });
+
+  it('DW-21 RED (R4 SEC-DW-5): blueprintForReader/genomeIntegrityForReader strip genomeStage, readinessScore and money-stating strings while preserving Date; financial GenomeChat apply never persists raw appliedData', async () => {
+    const { blueprintForReader, genomeIntegrityForReader } = await import('../src/modules/blueprint/genome-write-scope');
+    const stamp = new Date('2026-11-24T00:00:00.000Z');
+    const projectedBp = blueprintForReader(
+      {
+        identity: { name: 'Studio Nova' },
+        goals: { northStar: 'Hit $500k ARR', mission: 'Delight clients' },
+        genomeStage: 'SCALE',
+        readinessScore: 74,
+        updatedAt: stamp,
+      },
+      false,
+    ) as any;
+    expect(projectedBp.genomeStage).toBeUndefined();
+    expect(projectedBp.readinessScore).toBeUndefined();
+    expect(projectedBp.goals?.northStar).toBeUndefined();
+    expect(projectedBp.goals?.mission).toBe('Delight clients');
+    expect(projectedBp.updatedAt).toBe(stamp);
+
+    const projectedGenome = genomeIntegrityForReader(
+      {
+        genomeIntegrity: 57,
+        genomeStage: 'SCALE',
+        readinessScore: 74,
+        genomeDnaScores: { identity: 80, FINANCIAL: 60, Sales: 50 },
+        dnaSections: [{ key: 'identity' }, { key: 'FINANCIAL' }],
+      },
+      false,
+    ) as any;
+    expect(projectedGenome.genomeStage).toBeUndefined();
+    expect(projectedGenome.readinessScore).toBeUndefined();
+    expect(projectedGenome.genomeDnaScores).toEqual({ identity: 80 });
+    expect(projectedGenome.dnaSections).toEqual([{ key: 'identity' }]);
+
+    const ownerFinApply = await request(app.getHttpServer())
+      .post(`/genome-chat/businesses/${ID.biz}/apply-updates`)
+      .set(HEADER, ID.owner)
+      .send({ section: 'financial', data: { pricingModel: 'retainer', avgTicket: 4500 } });
+    expect(ownerFinApply.status).toBe(201);
+    const finMsg = await db.genomeChatMessage.findFirst({ where: { businessId: ID.biz, role: 'system' }, orderBy: { createdAt: 'desc' } });
+    expect(JSON.stringify(finMsg)).not.toContain('4500');
+    expect(JSON.stringify(finMsg)).not.toContain('retainer');
+  });
+
+  it('DW-22 RED (R4 SEC-DW-3b): BlueprintOnboardingService fails closed without membership table; staffRead/owner controls and 403 transcript rollback hold', async () => {
+    const { BlueprintOnboardingService } = await import('../src/modules/ai/blueprint-onboarding.service');
+    const noPrismaWrites: unknown[] = [];
+    const noPrismaSvc = new BlueprintOnboardingService(
+      {
+        getBlueprint: async () => ({ ...BLUEPRINT_OUT, completeness: 57 }),
+        updateBlueprint: async (_b: string, p: unknown) => { noPrismaWrites.push(p); return BLUEPRINT_OUT; },
+        checkThreePillarMinimum: () => true,
+      } as any,
+      {} as any,
+      { trackAndComplete: async () => ({ content: 'Captured!\n```extract\n[{"section":"financials","field":"avgTicket","value":4500}]\n```' }) } as any,
+    );
+    await expect(noPrismaSvc.chat(ID.biz, ID.staffNone, 'Ticket is 4500')).rejects.toThrow(WRITE_DENIED('none'));
+    expect(noPrismaWrites).toEqual([]);
+
+    // staffRead: 403 on financial onboarding-chat (with transcript rolled back), 201 with completeness on non-financial
+    blueprintWrites.length = 0;
+    nextOnboardingReply = 'Captured!\n```extract\n[{"section":"financials","field":"avgTicket","value":4500}]\n```';
+    const staffReadRefused = await request(app.getHttpServer())
+      .post(`${blueprintUrl()}/onboarding-chat`)
+      .set(HEADER, ID.staffRead)
+      .send({ message: 'SECRET_TURN_SHOULD_ROLL_BACK' });
+    expect(staffReadRefused.status).toBe(403);
+    expect(JSON.stringify(staffReadRefused.body)).toContain(WRITE_DENIED('read'));
+    const histAfterRefusal = await request(app.getHttpServer())
+      .get(`${blueprintUrl()}/onboarding-history`)
+      .set(HEADER, ID.staffRead);
+    expect(histAfterRefusal.status).toBe(200);
+    expect(JSON.stringify(histAfterRefusal.body)).not.toContain('SECRET_TURN_SHOULD_ROLL_BACK');
+
+    nextOnboardingReply = 'Nice!\n```extract\n[{"section":"identity","field":"name","value":"Studio Nova"}]\n```';
+    const staffReadOk = await request(app.getHttpServer())
+      .post(`${blueprintUrl()}/onboarding-chat`)
+      .set(HEADER, ID.staffRead)
+      .send({ message: 'We are Studio Nova' });
+    expect(staffReadOk.status).toBe(201);
+    expect(staffReadOk.body.completeness).toBe(72);
+
+    // owner positive control on both onboarding-chat and FlowOrchestrator financial writes
+    nextOnboardingReply = 'Captured!\n```extract\n[{"section":"financials","field":"avgTicket","value":4500}]\n```';
+    const ownerChat = await request(app.getHttpServer())
+      .post(`${blueprintUrl()}/onboarding-chat`)
+      .set(HEADER, ID.owner)
+      .send({ message: 'Ticket is 4500' });
+    expect(ownerChat.status).toBe(201);
+    expect(ownerChat.body.completeness).toBe(72);
+
+    const ownerFlow = await flowOrchestrator.executeToolAction(
+      ID.biz,
+      'update_business_blueprint',
+      { patch: { financials: { avgTicket: 4500 } } },
+      { surface: 'FLOW_CHAT', principalUserId: ID.owner },
+    );
+    expect(ownerFlow.completeness).toBe(72);
+  });
 });
