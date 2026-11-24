@@ -58,7 +58,8 @@ function git(cwd, ...args) {
 
 /** git pinned to one worktree: never discovered through its `.git` file, which a proof may have rewritten. */
 function pinned(worktree, ...args) {
-  return run('git', [`--git-dir=${worktree.gitDir}`, `--work-tree=${worktree.dir}`, ...args], { cwd: worktree.dir, env: gitEnv() });
+  // No filesystem monitor: the reset's view of the tree must be git's own, never a monitor's token (review I2).
+  return run('git', ['-c', 'core.fsmonitor=false', `--git-dir=${worktree.gitDir}`, `--work-tree=${worktree.dir}`, ...args], { cwd: worktree.dir, env: gitEnv() });
 }
 
 const samePath = (a, b) => {
@@ -114,8 +115,11 @@ function gitDirState(gitDir) {
     for (const entry of fs.readdirSync(path.join(gitDir, rel), { withFileTypes: true })) {
       const name = rel ? `${rel}/${entry.name}` : entry.name;
       const full = path.join(gitDir, name);
-      if (entry.isDirectory()) walk(name);
-      else if (entry.isSymbolicLink()) entries.push(`${name} -> ${fs.readlinkSync(full)}`);
+      if (entry.isDirectory()) {
+        // An empty directory counts too: git reads a bare rebase-merge/ as a rebase in progress (review A2).
+        entries.push(`${name}/`);
+        walk(name);
+      } else if (entry.isSymbolicLink()) entries.push(`${name} -> ${fs.readlinkSync(full)}`);
       else if (name !== 'index') entries.push(`${name} ${createHash('sha256').update(fs.readFileSync(full)).digest('hex')}`);
     }
   };
@@ -123,18 +127,76 @@ function gitDirState(gitDir) {
   return entries.sort().join('\n');
 }
 
+const hashOf = (file) => (fs.existsSync(file) && fs.statSync(file).isFile() ? createHash('sha256').update(fs.readFileSync(file)).digest('hex') : 'absent');
+
+/** Every file under `dir` (none if it is absent), each with a hash of its content. */
+function filesState(dir) {
+  if (!dir || !fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return 'absent';
+  const entries = [];
+  const walk = (rel) => {
+    for (const entry of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
+      const name = rel ? `${rel}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) walk(name);
+      else entries.push(`${name} ${hashOf(path.join(dir, name))}`);
+    }
+  };
+  walk('');
+  return entries.sort().join(',');
+}
+
 /**
- * The repository-wide files that decide how a checkout is written (its config: core.autocrlf, filters; and its
- * info/attributes and info/exclude), each with a hash of its content, or "absent". A proof may change them; main's
- * fresh worktree per control was then checked out under the new ones, so a change means a new worktree.
+ * Everything outside the worktree that decides how a checkout is written, as git in this worktree reads it: the
+ * effective config at every scope with its origin (repository, global, XDG, system and included files: core.autocrlf,
+ * filters, core.attributesFile, core.hooksPath), the repository's info/attributes and info/exclude, the global and
+ * system attributes files, and the hooks (main's fresh `worktree add` per control ran post-checkout). A proof may
+ * change any of them; main's next fresh worktree was then checked out under the new ones, so a change means a new
+ * worktree (reviews PM-22, A1).
  */
-function sharedState(commonDir) {
-  return ['config', 'info/attributes', 'info/exclude']
-    .map((name) => {
-      const full = path.join(commonDir, name);
-      return `${name} ${fs.existsSync(full) ? createHash('sha256').update(fs.readFileSync(full)).digest('hex') : 'absent'}`;
-    })
-    .join('\n');
+function sharedState(worktree) {
+  const config = pinned(worktree, 'config', '--list', '--show-origin', '--show-scope', '-z');
+  const varOf = (name) => {
+    const got = pinned(worktree, 'var', name);
+    return got.status === 0 ? got.stdout.trim() : '';
+  };
+  const hooks = pinned(worktree, 'rev-parse', '--path-format=absolute', '--git-path', 'hooks');
+  return [
+    `config ${createHash('sha256').update(config.status === 0 ? config.stdout : `unreadable ${config.stderr}`).digest('hex')}`,
+    `info/attributes ${hashOf(path.join(worktree.commonDir, 'info', 'attributes'))}`,
+    `info/exclude ${hashOf(path.join(worktree.commonDir, 'info', 'exclude'))}`,
+    `attributes (global) ${hashOf(varOf('GIT_ATTR_GLOBAL'))}`,
+    `attributes (system) ${hashOf(varOf('GIT_ATTR_SYSTEM'))}`,
+    `hooks ${hooks.status === 0 ? filesState(hooks.stdout.trim()) : 'unreadable'}`,
+  ].join('\n');
+}
+
+/**
+ * Every path in the worktree but `.git`, with its type and mode (and a file's link count): what a fresh checkout makes.
+ * `read-tree` rewrites a file whose stat changed, but never a directory's mode nor a mode git does not track (a
+ * read-only file on Windows), so these are compared after the reset (review A3).
+ */
+function treeState(dir) {
+  const entries = [];
+  const walk = (rel) => {
+    for (const entry of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
+      const name = rel ? `${rel}/${entry.name}` : entry.name;
+      if (name === '.git') continue;
+      const st = fs.lstatSync(path.join(dir, name));
+      const kind = st.isDirectory() ? 'd' : st.isSymbolicLink() ? 'l' : 'f';
+      entries.push(`${kind} ${(st.mode & 0o7777).toString(8)} ${kind === 'f' ? st.nlink : ''} ${name}`);
+      if (kind === 'd') walk(name);
+    }
+  };
+  walk('');
+  return entries.sort().join('\n');
+}
+
+/** The worktree's own `.git` file, as `worktree add` wrote it (review A4); null if it cannot be read. */
+function dotGitOf(dir) {
+  try {
+    return fs.readFileSync(path.join(dir, '.git'), 'utf8');
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -172,7 +234,10 @@ function sharedState(commonDir) {
  *    keeps the new spelling; no manifest proof renames a file.
  */
 export function resetToPristine(worktree, commit) {
-  if (!worktree || !worktree.dir || !worktree.gitDir || !worktree.commonDir || worktree.state === undefined || worktree.shared === undefined || !worktree.index || worktree.indexSecond === undefined) {
+  if (
+    !worktree || !worktree.dir || !worktree.gitDir || !worktree.commonDir || worktree.state === undefined || worktree.shared === undefined
+    || worktree.tree === undefined || worktree.dotGit === undefined || !worktree.index || worktree.indexSecond === undefined
+  ) {
     return { ok: false, detail: 'not a worktree the runner made' };
   }
   // 1. The directory must still be this worktree (read only, by discovery, as the proof will see it).
@@ -181,6 +246,7 @@ export function resetToPristine(worktree, commit) {
   if (gitDir.status !== 0 || top.status !== 0 || !samePath(gitDir.stdout.trim(), worktree.gitDir) || !samePath(top.stdout.trim(), worktree.dir)) {
     return { ok: false, detail: `the worktree's .git no longer leads to its own git dir (${(gitDir.stdout || gitDir.stderr).trim()})` };
   }
+  if (dotGitOf(worktree.dir) !== worktree.dotGit) return { ok: false, detail: "the worktree's .git file differs from the one git wrote" };
   // 2. Its git dir is as it was made.
   let state;
   try {
@@ -195,11 +261,11 @@ export function resetToPristine(worktree, commit) {
   }
   let shared;
   try {
-    shared = sharedState(worktree.commonDir);
+    shared = sharedState(worktree);
   } catch (error) {
     return { ok: false, detail: `cannot read the repository's config: ${error.message}` };
   }
-  if (shared !== worktree.shared) return { ok: false, detail: "the repository's config or info files changed since the worktree was made" };
+  if (shared !== worktree.shared) return { ok: false, detail: 'the git config, attributes or hooks changed since the worktree was made' };
   const target = pinned(worktree, 'rev-parse', '--verify', '--quiet', `${commit}^{commit}`);
   if (target.status !== 0) return { ok: false, detail: `cannot resolve ${commit}` };
   const resolved = target.stdout.trim();
@@ -218,7 +284,7 @@ export function resetToPristine(worktree, commit) {
   const clean = pinned(worktree, 'clean', '-q', '-ffdx');
   if (clean.status !== 0) return { ok: false, detail: `git clean failed: ${clean.stderr.trim()}` };
   // 4. Check the result.
-  const status = pinned(worktree, 'status', '--porcelain', '--ignored');
+  const status = pinned(worktree, 'status', '--porcelain', '--ignored', '--untracked-files=all');
   if (status.status !== 0 || status.stdout.trim() !== '') {
     return { ok: false, detail: `not pristine after reset: ${(status.stdout || status.stderr).trim().slice(0, 400)}` };
   }
@@ -229,14 +295,21 @@ export function resetToPristine(worktree, commit) {
   if (attached.status === 0) return { ok: false, detail: `HEAD is attached to ${attached.stdout.trim()}` };
   const head = pinned(worktree, 'rev-parse', 'HEAD');
   if (head.status !== 0 || head.stdout.trim() !== resolved) return { ok: false, detail: `HEAD is not ${resolved} after reset` };
+  let tree;
+  try {
+    tree = treeState(worktree.dir);
+  } catch (error) {
+    return { ok: false, detail: `cannot read the worktree: ${error.message}` };
+  }
+  if (tree !== worktree.tree) return { ok: false, detail: 'a path in the worktree has a type or mode a fresh checkout does not give it' };
   return { ok: true };
 }
 
 /**
  * Makes a worktree detached at `commit` and records what a fresh one is: its own git dir (read once, before any proof
- * runs; every later git call is pinned to it), that git dir's files, the repository's config and info files, and its
- * index with the second it was written. Returns the record { dir, gitDir, commonDir, state, shared, index,
- * indexSecond } or { dir: null, detail }.
+ * runs; every later git call is pinned to it), that git dir's files and directories, the config, attributes and hooks
+ * a checkout reads, every path's type and mode, the `.git` file, and its index with the second it was written. Returns
+ * the record { dir, gitDir, commonDir, state, shared, tree, dotGit, index, indexSecond } or { dir: null, detail }.
  */
 export function addWorktree(repoRoot, commit) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-proof-'));
@@ -261,10 +334,14 @@ export function addWorktree(repoRoot, commit) {
   try {
     const index = path.join(record.gitDir, 'index');
     record.index = fs.readFileSync(index);
-    // The second the index was written, rounded down: put back with it, git re-reads the entries of that second.
-    record.indexSecond = Math.floor(fs.statSync(index).mtimeMs / 1000);
+    // The second the index was written, rounded down (from nanoseconds: a float in milliseconds can round up into
+    // the next second, review I1): put back with it, git re-reads the entries of that second.
+    record.indexSecond = Number(fs.statSync(index, { bigint: true }).mtimeNs / 1_000_000_000n);
     record.state = gitDirState(record.gitDir);
-    record.shared = sharedState(record.commonDir);
+    record.shared = sharedState(record);
+    record.tree = treeState(dir);
+    record.dotGit = dotGitOf(dir);
+    if (record.dotGit === null) throw new Error('no .git file');
   } catch (error) {
     removeWorktree(repoRoot, dir);
     return { dir: null, detail: `cannot record the new worktree: ${error.message}` };
@@ -273,20 +350,39 @@ export function addWorktree(repoRoot, commit) {
 }
 
 /**
+ * The runner's own record of `dir` in the repository (`<common dir>/worktrees/<name>`), only if that record's `gitdir`
+ * file names `dir`'s `.git`: never another worktree's.
+ */
+function ownAdminDir(repoRoot, dir) {
+  const common = git(repoRoot, 'rev-parse', '--path-format=absolute', '--git-common-dir');
+  if (common.status !== 0) return null;
+  const candidate = path.join(common.stdout.trim(), 'worktrees', path.basename(dir));
+  try {
+    const named = fs.readFileSync(path.join(candidate, 'gitdir'), 'utf8').trim();
+    // Compared by real path: on Windows git writes forward slashes and the temp dir may be an 8.3 short name.
+    return path.basename(named) === '.git' && samePath(path.dirname(path.resolve(named)), dir) ? candidate : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Removes a worktree, locked or not (`--force` twice). One a proof broke (its .git rewritten) cannot be removed by git:
- * it is deleted and its record pruned. A delete that fails (EBUSY or EPERM on Windows, for a file another process
- * holds) is reported, never thrown, so the run still ends with its summary. Returns { ok: true } or { ok: false, detail }.
+ * its directory is deleted and then its own record in the repository, and nothing else (no repository-wide
+ * `git worktree prune`, which would drop other worktrees' records too: review A5). A delete that fails (EBUSY or
+ * EPERM on Windows, for a file another process holds) is reported, never thrown, so the run still ends with its
+ * summary. Returns { ok: true } or { ok: false, detail }.
  */
 export function removeWorktree(repoRoot, dir, rm = fs.rmSync) {
   if (!dir) return { ok: true };
   const removed = git(repoRoot, 'worktree', 'remove', '--force', '--force', dir);
   if (removed.status === 0) return { ok: true };
+  const admin = ownAdminDir(repoRoot, dir);
   try {
     rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    if (admin) rm(admin, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   } catch (error) {
     return { ok: false, detail: `could not delete ${dir}: ${error.message}` };
-  } finally {
-    git(repoRoot, 'worktree', 'prune');
   }
   return { ok: true };
 }
