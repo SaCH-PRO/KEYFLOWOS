@@ -52,6 +52,11 @@ function formatEventData(data: unknown): string {
   return "";
 }
 
+/** Who did it, in plain words: "System", "User"; "AI" keeps its capitals (statusLabel would say "Ai"). */
+function actorLabel(actor: string): string {
+  return actor.trim().toUpperCase() === "AI" ? "AI" : statusLabel(actor);
+}
+
 function fmtDate(d: string) {
   return new Date(d).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 }
@@ -150,7 +155,7 @@ export default function ContactTimelinePage() {
                             {ev.actorType && (
                               <span className="flex items-center gap-1">
                                 <User className="h-3 w-3" />
-                                {statusLabel(ev.actorType)}
+                                {actorLabel(ev.actorType)}
                               </span>
                             )}
                           </div>
