@@ -20,7 +20,7 @@
  *                       opens /app/crm/contacts/<id>
  *   CPO-05  RED-BEFORE  ArrowDown and Enter choose a result as before (that part passes at the base); the option under
  *                       the cursor is the selected one (aria-selected)
- * Review round (confirmation MINOR-1):
+ * Review round (confirmation MINOR-1; acceptance MINOR-1 pins CPO-05's aria-activedescendant and aria-controls):
  *   CPO-06  RED-AT-daa64373  where KeyAgent is not mounted (onboarding, the Genome check), Ctrl+K is still kept from
  *                       the browser, as before this packet: the hook leaves the key to KeyAgent but prevents its default
  *
@@ -196,6 +196,10 @@ describe("FU-C4-CMDK-SEARCH: Cmd/Ctrl+K opens the palette, and the customer it f
     fireEvent.keyDown(input, { key: "ArrowDown" });
     const selected = within(dialog).queryAllByRole("option").filter((o) => o.getAttribute("aria-selected") === "true");
     expect(selected.map((o) => o.textContent ?? ""), "one option is selected: the one under the cursor").toEqual([expect.stringContaining("Ben Links42b")]);
+    // The search box names that option to assistive technology, and the list it controls (acceptance MINOR-1).
+    expect(input.getAttribute("role")).toBe("combobox");
+    expect(input.getAttribute("aria-activedescendant"), "aria-activedescendant names the selected option").toBe(selected[0].id);
+    expect(document.getElementById(input.getAttribute("aria-controls") ?? "")?.getAttribute("role")).toBe("listbox");
     fireEvent.keyDown(input, { key: "Enter" });
     expect(nav.router.push).toHaveBeenCalledWith(`/app/crm/contacts/${BEN.id}`);
   });
