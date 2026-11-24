@@ -482,6 +482,21 @@ function AddContactButton({
   );
 }
 
+/**
+ * "Open Add contact" requests (kf:open-quick-add-contact) that arrive before the dialog is mounted. contacts/page.tsx
+ * turns ?action=new (the header New menu's Contact, the mobile button, the checklist) into that event on its first
+ * effect, before the contact list has loaded and this control is on screen, so a listener inside the component alone
+ * missed it (journey C1). This module listener is registered when the page imports the toolbar; the control takes a
+ * pending request when it mounts, and clears it when it handles a request itself.
+ */
+const QUICK_ADD_EVENT = "kf:open-quick-add-contact";
+let quickAddPending = false;
+if (typeof window !== "undefined") {
+  window.addEventListener(QUICK_ADD_EVENT, () => {
+    quickAddPending = true;
+  });
+}
+
 function AddContactControl({
   onQuickCreate,
   onOpenFullForm,
@@ -574,9 +589,17 @@ function AddContactControl({
   };
 
   useEffect(() => {
-    const onOpen = () => setOpen(true);
-    window.addEventListener("kf:open-quick-add-contact", onOpen as EventListener);
-    return () => window.removeEventListener("kf:open-quick-add-contact", onOpen as EventListener);
+    // Mounted after the request was made (the module listener above kept it): open now.
+    if (quickAddPending) {
+      quickAddPending = false;
+      setOpen(true);
+    }
+    const onOpen = () => {
+      quickAddPending = false;
+      setOpen(true);
+    };
+    window.addEventListener(QUICK_ADD_EVENT, onOpen as EventListener);
+    return () => window.removeEventListener(QUICK_ADD_EVENT, onOpen as EventListener);
   }, []);
 
   if (!onQuickCreate) {
