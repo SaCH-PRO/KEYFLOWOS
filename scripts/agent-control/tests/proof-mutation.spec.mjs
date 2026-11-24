@@ -1,0 +1,153 @@
+/**
+ * FU-CI-NC-WORKTREE-REUSE (D-274, R&D-1 C1): the negative-control runner reuses one worktree, and every control still
+ * starts from the exact commit.
+ *
+ * The Windows worker proof spent 61 of its 65 minutes in proof-mutation.mjs, and 89% of that creating and removing a
+ * full `git worktree` (6,222 files) for each of the 323 controls. The runner now creates one worktree and, before
+ * each control, resets it to the ref (`reset --hard`, `clean -ffdx`) and requires it pristine
+ * (`status --porcelain --ignored` empty, HEAD at the ref); a control whose tree cannot be made pristine fails. The
+ * proofs, mutations and verdicts are unchanged.
+ *
+ *   PM-01  RED-BEFORE  the controls of one run share one worktree
+ *   PM-02  control     whatever a control leaves (an edited tracked file, an untracked file, an ignored file, a commit),
+ *                      the next control's baseline sees the exact commit
+ *   PM-03  control     live and vacuous verdicts are as before
+ *   PM-04  control     no worktree is left behind
+ *   PM-05  RED-BEFORE  resetToPristine reports a tree it cannot reset, and a control on such a tree fails (never runs)
+ */
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import * as runner from '../proof-mutation.mjs';
+
+const git = (cwd, ...args) => {
+  const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
+  if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+  return r.stdout.trim();
+};
+
+/** A throwaway repository: claim.txt holds "good"; check.mjs is the proof; .gitignore ignores *.log. */
+function fixtureRepo() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-pm-fixture-'));
+  git(dir, 'init', '-q');
+  git(dir, 'config', 'user.email', 'fixture@example.test');
+  git(dir, 'config', 'user.name', 'Fixture');
+  git(dir, 'config', 'core.autocrlf', 'false');
+  fs.writeFileSync(path.join(dir, 'claim.txt'), 'good\n');
+  fs.writeFileSync(path.join(dir, '.gitignore'), '*.log\n');
+  // The proof: logs where it ran (KF_PM_LOG, outside the repository), then passes only on a pristine exact tree whose
+  // claim is good. Run as `node check.mjs litter` it also leaves every kind of debris behind it (an argument, not an
+// environment variable, so the command is the same under cmd.exe on the Windows runner).
+  fs.writeFileSync(
+    path.join(dir, 'check.mjs'),
+    [
+      "import fs from 'node:fs';",
+      "import { execSync } from 'node:child_process';",
+      "const top = execSync('git rev-parse --show-toplevel', { encoding: 'utf8' }).trim();",
+      "if (process.env.KF_PM_LOG) fs.appendFileSync(process.env.KF_PM_LOG, top + '\\n');",
+      "const head = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();",
+      "const dirty = execSync('git status --porcelain --ignored', { encoding: 'utf8' }).trim();",
+      "const ok = fs.readFileSync('claim.txt', 'utf8').includes('good') && head === process.env.KF_PM_REF && dirty === '';",
+      "if (process.argv[2] === 'litter') {",
+      "  fs.writeFileSync('stray.txt', 'untracked');",
+      "  fs.writeFileSync('noise.log', 'ignored');",
+      "  fs.writeFileSync('claim.txt', 'good but edited\\n');",
+      "  execSync('git -c user.email=x@example.test -c user.name=x commit -qam litter');",
+      "}",
+      'process.exit(ok ? 0 : 1);',
+      '',
+    ].join('\n'),
+  );
+  git(dir, 'add', '-A');
+  git(dir, 'commit', '-qm', 'fixture');
+  return { dir, ref: git(dir, 'rev-parse', 'HEAD') };
+}
+
+const control = (id, extra = {}) => ({
+  id,
+  claim: `claim ${id}`,
+  proof_command: 'node check.mjs',
+  mutation: { file: 'claim.txt', find: 'good', replace: 'bad' },
+  ...extra,
+});
+
+function withEnv(vars, fn) {
+  const before = {};
+  for (const [k, v] of Object.entries(vars)) {
+    before[k] = process.env[k];
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+  try {
+    return fn();
+  } finally {
+    for (const [k, v] of Object.entries(before)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+}
+
+test('PM-01 RED-BEFORE: the controls of one run share one worktree', () => {
+  const { dir, ref } = fixtureRepo();
+  const log = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'kf-pm-log-')), 'where.txt');
+  const summary = withEnv({ KF_PM_LOG: log, KF_PM_REF: ref }, () =>
+    runner.runManifest({ negative_controls: [control('a'), control('b'), control('c')] }, { repoRoot: dir, ref }),
+  );
+  assert.equal(summary.live, 3, JSON.stringify(summary.results));
+  const places = new Set(fs.readFileSync(log, 'utf8').trim().split('\n'));
+  assert.equal(places.size, 1, `one worktree for the run, saw ${places.size}: ${[...places].join(', ')}`);
+});
+
+test('PM-02 control: whatever a control leaves behind, the next control starts from the exact commit', () => {
+  const { dir, ref } = fixtureRepo();
+  // Control 1 litters (edits a tracked file, adds an untracked and an ignored file, commits); control 2 must still
+  // see the exact, pristine ref, or its baseline fails and it is reported as not live.
+  const litter = control('litter', { proof_command: 'node check.mjs litter' });
+  const summary = withEnv({ KF_PM_LOG: undefined, KF_PM_REF: ref }, () =>
+    runner.runManifest({ negative_controls: [litter, control('after-litter'), control('again')] }, { repoRoot: dir, ref }),
+  );
+  const byId = Object.fromEntries(summary.results.map((r) => [r.id, r]));
+  assert.equal(byId['after-litter'].baseline_passed, true, JSON.stringify(byId['after-litter']));
+  assert.equal(byId['after-litter'].ok, true);
+  assert.equal(byId.again.ok, true);
+});
+
+test('PM-03 control: live and vacuous verdicts are as before', () => {
+  const { dir, ref } = fixtureRepo();
+  // A proof that ignores the claim cannot fail: vacuous. A mutation that finds nothing: not live.
+  const vacuous = control('vacuous', { proof_command: 'node -e "process.exit(0)"' });
+  const missing = control('missing', { mutation: { file: 'claim.txt', find: 'nowhere', replace: 'x' } });
+  const summary = withEnv({ KF_PM_LOG: undefined, KF_PM_REF: ref }, () =>
+    runner.runManifest({ negative_controls: [control('live'), vacuous, missing] }, { repoRoot: dir, ref }),
+  );
+  const byId = Object.fromEntries(summary.results.map((r) => [r.id, r]));
+  assert.equal(summary.total, 3);
+  assert.equal(byId.live.ok, true);
+  assert.equal(byId.vacuous.ok, false);
+  assert.match(byId.vacuous.detail, /VACUOUS/);
+  assert.equal(byId.missing.ok, false);
+  assert.equal(byId.missing.stage, 'mutation');
+});
+
+test('PM-04 control: no worktree is left behind', () => {
+  const { dir, ref } = fixtureRepo();
+  withEnv({ KF_PM_LOG: undefined, KF_PM_REF: ref }, () =>
+    runner.runManifest({ negative_controls: [control('a'), control('b')] }, { repoRoot: dir, ref }),
+  );
+  const listed = git(dir, 'worktree', 'list', '--porcelain').split('\n').filter((l) => l.startsWith('worktree '));
+  assert.equal(listed.length, 1, listed.join('\n'));
+});
+
+test('PM-05 RED-BEFORE: a tree that cannot be reset to the ref is reported, and its control fails without running', () => {
+  assert.equal(typeof runner.resetToPristine, 'function', 'resetToPristine is exported');
+  const { dir, ref } = fixtureRepo();
+  // A pristine reset of the repository itself succeeds; a reset to a ref that does not exist does not.
+  assert.deepEqual(runner.resetToPristine(dir, ref), { ok: true });
+  const bad = runner.resetToPristine(dir, '0000000000000000000000000000000000000000');
+  assert.equal(bad.ok, false);
+  assert.ok(bad.detail.length > 0);
+});
