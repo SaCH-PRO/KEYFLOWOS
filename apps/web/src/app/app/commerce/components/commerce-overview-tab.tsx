@@ -239,7 +239,7 @@ function RevenueActionCards({
   const cards: { id: string; icon: React.ElementType; title: string; desc: string; cta: string; onClick: () => void; urgent: boolean; color: string; bg: string }[] = [];
 
   const overdue = invoices.filter((i) => i.status === InvoiceStatus.OVERDUE);
-  const overdueAmount = overdue.reduce((s, i) => s + (Number(i.total) ?? 0), 0);
+  const overdueAmount = overdue.reduce((s, i) => s + invoiceRemainingOwed(i), 0);
   if (overdue.length > 0) {
     cards.push({
       id: "overdue",

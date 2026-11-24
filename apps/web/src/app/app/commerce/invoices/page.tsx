@@ -48,7 +48,7 @@ import { ownBusinessCountry, readWhatsAppShareNumber } from "@/lib/whatsapp";
 import { useWhatsAppDocumentShare } from "@/components/whatsapp/whatsapp-document-share";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { formatAmount, getDaysUntilDue } from "../utils/commerce-utils";
-import { OWED_STATUSES, canRemindInvoice } from "@/lib/commerce-status";
+import { OWED_STATUSES, canRemindInvoice, invoiceRemainingOwed, safeInvoiceAmount } from "@/lib/commerce-status";
 import { INVOICE_STATUS_FILTERS, BILLING_SORT_OPTIONS, BillingSortKey } from "../components/commerce-types";
 import { useCommerceSearch } from "../hooks/use-commerce-search";
 import { DateRangeFilter, filterByDateRange, DEFAULT_DATE_RANGE } from "../components/date-range-filter";
@@ -158,11 +158,11 @@ export default function InvoicesHubPage() {
     const cents = (amount: number) => Math.round(amount * 100);
     let unpaidCents = 0, unpaidCount = 0, overdueCents = 0, overdueCount = 0, paidMonthCents = 0, paidMonthCount = 0, draftsCents = 0, draftsCount = 0;
     for (const inv of invoices) {
-      const { total, remaining } = invoiceBalanceOfStoredRows(Number(inv.total), inv.payments ?? [], inv.currency);
+      const total = safeInvoiceAmount(inv.total);
       if (inv.status === "DRAFT") { draftsCents += cents(total); draftsCount++; }
       else if (inv.status === "PAID" && inv.paidAt && new Date(inv.paidAt) >= startOfMonth) { paidMonthCents += cents(total); paidMonthCount++; }
-      else if (inv.status === "OVERDUE") { overdueCents += cents(remaining); overdueCount++; }
-      else if (OWED_STATUSES.has(inv.status)) { unpaidCents += cents(remaining); unpaidCount++; }
+      else if (inv.status === "OVERDUE") { overdueCents += cents(invoiceRemainingOwed(inv)); overdueCount++; }
+      else if (OWED_STATUSES.has(inv.status)) { unpaidCents += cents(invoiceRemainingOwed(inv)); unpaidCount++; }
     }
     return {
       unpaid: { total: unpaidCents / 100, count: unpaidCount },

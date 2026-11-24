@@ -61,7 +61,7 @@ interface OverdueItem {
 }
 
 function computePriority(inv: Invoice, daysOverdue: number): RecoveryPriority {
-  const amount = Number(inv.total ?? 0);
+  const amount = invoiceRemainingOwed(inv);
   if (daysOverdue > 60 || amount > 5000) return "critical";
   if (daysOverdue > 30 || amount > 2000) return "high";
   if (daysOverdue > 14 || amount > 500) return "medium";
@@ -282,7 +282,7 @@ export default function CollectionsPanel({
             <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-medium">Est. Recoverable</span>
           </div>
           <p className="text-lg font-bold text-emerald-400">{formatCurrency(summaryStats.totalRecoverable, currency)}</p>
-          <p className="text-[10px] text-muted-foreground/50">{Math.round((summaryStats.totalRecoverable / summaryStats.totalOverdue) * 100)}% recovery rate</p>
+          <p className="text-[10px] text-muted-foreground/50">{summaryStats.totalOverdue > 0 ? Math.round((summaryStats.totalRecoverable / summaryStats.totalOverdue) * 100) : 0}% recovery rate</p>
         </div>
         <div className="rounded-xl border border-orange-500/20 bg-orange-500/5 p-3">
           <div className="flex items-center gap-1.5 mb-1">
@@ -430,8 +430,8 @@ export default function CollectionsPanel({
                               <span className="text-[10px] uppercase tracking-wider text-muted-foreground/50 font-semibold">Suggested Payment Plans</span>
                               <div className="grid grid-cols-3 gap-2 mt-2">
                                 {PAYMENT_PLAN_SUGGESTIONS.map((plan) => {
-                                  const total = Number(inv.total ?? 0);
-                                  const perInstallment = plan.months > 1 ? total / plan.months : total * 0.5;
+                                  const remaining = invoiceRemainingOwed(inv);
+                                  const perInstallment = plan.months > 1 ? remaining / plan.months : remaining * 0.5;
                                   return (
                                     <button
                                       key={plan.label}

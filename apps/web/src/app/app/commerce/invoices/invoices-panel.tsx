@@ -1254,7 +1254,7 @@ export default function InvoicesPanel({
             discountType={selectedInvoice.discountType}
             discountValue={selectedInvoice.discountValue ? Number(selectedInvoice.discountValue) : undefined}
             notes={selectedInvoice.notes}
-            allInvoices={invoices.map((inv) => ({ id: inv.id, contactId: inv.contactId, status: inv.status, total: Number(inv.total), invoiceNumber: inv.invoiceNumber, dueDate: inv.dueDate }))}
+            allInvoices={invoices.map((inv) => ({ id: inv.id, contactId: inv.contactId, status: inv.status, total: inv.total, currency: inv.currency, payments: inv.payments, invoiceNumber: inv.invoiceNumber, dueDate: inv.dueDate }))}
             itemId={selectedInvoice.id}
             businessIdForTimeline={businessId}
             timelineRefreshKey={timelineRefreshTick}
