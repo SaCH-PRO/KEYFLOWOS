@@ -11,7 +11,7 @@ import { test, expect, API_URL, settle, type Tenant } from "./journeys/journey-h
  *   1. BUG-007: the Unpaid card is the TTD invoices' figure and never adds the USD one; a line says one invoice in
  *      another currency is listed and not added in;
  *   2. BUG-070: each card is readable: its amount and label have a contrast of at least 4.5:1 against the card, in
- *      the dark and the light colour scheme (the cards kept their light-mode pastel backgrounds in dark mode, so the
+ *      the app's dark and light themes (each stored as next-themes' choice and reloaded) (the cards kept their light-mode pastel backgrounds in dark mode, so the
  *      amounts were near-white on near-white), and the amount stays inside the card;
  *   3. BUG-089: the Unpaid card lists the part-paid invoice it counts;
  *   4. BUG-131: the voided invoice's row says nothing is due;
@@ -114,9 +114,14 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 375, height: 812 
           const name = card.querySelector("span")!;
           return { value: ratio(value), label: ratio(name), fits: card.scrollWidth <= card.clientWidth + 1 };
         });
+        // The app's theme is next-themes' stored choice (attribute "class", default "dark"); the media query alone does
+        // not switch it. Each pass stores the theme, reloads, and checks <html> carries it before measuring.
         for (const scheme of ["dark", "light"] as const) {
-          await page.emulateMedia({ colorScheme: scheme });
-          await page.waitForTimeout(300);
+          await page.evaluate((t) => window.localStorage.setItem("theme", t), scheme);
+          await page.reload();
+          await expect(page.getByRole("heading", { name: "Invoices", exact: true })).toBeVisible();
+          await settle(page, 800);
+          expect(await page.evaluate(() => document.documentElement.classList.contains("dark")), `the page is in ${scheme} mode`).toBe(scheme === "dark");
           for (const label of ["Unpaid", "Overdue", "Paid this month", "Drafts"]) {
             const c = await contrastOf(label);
             expect(c.value, `${label} amount contrast (${scheme})`).toBeGreaterThanOrEqual(4.5);
@@ -124,7 +129,10 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 375, height: 812 
             expect(c.fits, `${label} card fits (${scheme})`).toBe(true);
           }
         }
-        await page.emulateMedia({ colorScheme: null });
+        await page.evaluate(() => window.localStorage.setItem("theme", "dark"));
+        await page.reload();
+        await expect(page.getByRole("heading", { name: "Invoices", exact: true })).toBeVisible();
+        await settle(page, 800);
       });
 
       await test.step("BUG-131: the voided invoice's row says nothing is due", async () => {
