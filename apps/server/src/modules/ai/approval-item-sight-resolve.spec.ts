@@ -13,13 +13,16 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { AiController } from './ai.controller';
 import { AiOversightService } from './ai-oversight.service';
 import { StaffChatBridgeService } from '../structure/staff-chat-bridge.service';
+import { approvalItemNeeds } from './approval-item-sight';
+import { AgentHealthService } from './agent-health.service';
+import { CommandGeneratorService } from '../command/command-generator.service';
 
 const MONEY_ITEM = {
-  id: 'item_m', businessId: 'b1', status: 'pending', riskTier: 1, toolName: 'crm_add_note', module: 'crm',
+  id: 'item_m', businessId: 'b1', status: 'pending', riskTier: 4, toolName: 'crm_add_note', module: 'crm',
   title: 'Follow up with Acme', description: 'Acme owes TTD 4,000 on invoice INV-7', rationale: null, expectedBenefit: null,
   risks: null, inputPayload: { amount: 4000 }, affectedEntities: null, resolution: null, planStepId: null, approverAssignmentId: 'asg_1',
 };
-const PLAIN_ITEM = { ...MONEY_ITEM, id: 'item_p', title: 'Call Jane about the meeting', description: 'Schedule a call', inputPayload: { contact: 'Jane' } };
+const PLAIN_ITEM = { ...MONEY_ITEM, id: 'item_p', riskTier: 1, title: 'Call Jane about the meeting', description: 'Schedule a call', inputPayload: { contact: 'Jane' } };
 
 const member = (permissionScopes: Record<string, string> | null, role = 'STAFF') => ({ role, permissionScopes, maxApprovalTier: 4 });
 
@@ -69,13 +72,17 @@ describe('legacy aiApprovalItem resolve (AiController.resolveLegacyApproval)', (
   });
 });
 
-function oversightWith(item: any, assignment: any, phoneMembers: any[] = []) {
+function oversightWith(item: any, assignment: any, phoneMembers: any[] = [], extraMembership: Record<string, any> = {}) {
   const updates: any[] = [];
   const prisma = {
     client: {
       aiApprovalItem: { findFirst: vi.fn(async ({ where }: any) => (where.id === item.id ? item : null)), update: vi.fn(async (a: any) => { updates.push(a); return item; }) },
       orgAssignment: { findFirst: vi.fn(async () => assignment) },
-      membership: { findUnique: vi.fn(async () => assignment.membership), findMany: vi.fn(async () => phoneMembers) },
+      membership: {
+        findFirst: vi.fn(async () => extraMembership.findFirst ?? assignment?.membership ?? null),
+        findUnique: vi.fn(async () => extraMembership.findUnique ?? assignment?.membership ?? null),
+        findMany: vi.fn(async () => extraMembership.findMany ?? phoneMembers),
+      },
       teamActivityLog: { create: vi.fn(async () => ({})) },
       aiPlanStep: { update: vi.fn(async () => ({})) },
     },
@@ -84,13 +91,16 @@ function oversightWith(item: any, assignment: any, phoneMembers: any[] = []) {
   return { svc, updates };
 }
 
-const holder = (scopes: Record<string, string>) => ({
+const holder = (scopes: Record<string, string>, userOverrides: Record<string, unknown> = {}) => ({
   id: 'asg_1', businessId: 'b1', userId: 'u_h', membershipId: 'm_h', autoApprovalViaReply: true, contactPhone: null,
   jobRole: { id: 'jr', name: 'Manager', permissions: {}, defaultApprovalTier: 4 },
-  membership: { id: 'm_h', userId: 'u_h', businessId: 'b1', role: 'STAFF', permissionScopes: scopes, maxApprovalTier: 4, user: { deletedAt: null, bannedAt: null } },
+  membership: {
+    id: 'm_h', userId: 'u_h', businessId: 'b1', role: 'STAFF', permissionScopes: scopes, maxApprovalTier: 4,
+    user: { deletedAt: null, bannedAt: null, email: 'holder@biz.local', ...userOverrides },
+  },
 });
 
-describe('reply-based approval (AiOversightService.resolveApprovalByAssignment)', () => {
+describe('reply-based approval (AiOversightService.resolveApprovalByAssignment & approvalVisibleToPosition)', () => {
   it('BY-01: a position whose holder has no revenue read: the money item is answered as not found, nothing resolved', async () => {
     const { svc, updates } = oversightWith(MONEY_ITEM, holder({ operations: 'write' }));
     await expect(svc.resolveApprovalByAssignment(MONEY_ITEM.id, 'b1', 'asg_1', 'approved')).rejects.toBeInstanceOf(NotFoundException);
@@ -115,19 +125,87 @@ describe('reply-based approval (AiOversightService.resolveApprovalByAssignment)'
     await svc.resolveApprovalByAssignment(MONEY_ITEM.id, 'b1', 'asg_1', 'approved');
     expect(updates.some((u) => u.data?.status === 'approved')).toBe(true);
   });
+
+  it('RED-BEFORE (SEC-1 / CR-3 / CR-5): banned/deleted holders and missing-in-business holders have zero sight on position & route notifications', async () => {
+    const bannedHolder = holder({ operations: 'write', revenue: 'admin' }, { bannedAt: new Date() });
+    const deletedHolder = holder({ operations: 'write', revenue: 'admin' }, { deletedAt: new Date() });
+    const activeHolder = holder({ operations: 'write', revenue: 'read' });
+
+    const { svc: bannedSvc } = oversightWith(MONEY_ITEM, bannedHolder);
+    expect(await bannedSvc.approvalVisibleToPosition('b1', 'asg_1', MONEY_ITEM)).toBe(false);
+    await expect(bannedSvc.resolveApprovalByAssignment(MONEY_ITEM.id, 'b1', 'asg_1', 'approved')).rejects.toBeInstanceOf(NotFoundException);
+
+    const { svc: deletedSvc } = oversightWith(MONEY_ITEM, deletedHolder);
+    expect(await deletedSvc.approvalVisibleToPosition('b1', 'asg_1', MONEY_ITEM)).toBe(false);
+
+    // Control: active revenue reader can see MONEY_ITEM via approvalVisibleToPosition (CR-5)
+    const { svc: activeSvc } = oversightWith(MONEY_ITEM, activeHolder);
+    expect(await activeSvc.approvalVisibleToPosition('b1', 'asg_1', MONEY_ITEM)).toBe(true);
+
+    // Holder-backed assignment whose membership is NOT in businessId fails closed even when phoneMembers has an OWNER
+    const foreignHolder = { ...holder({}), membership: null, contactPhone: '+15550009999' };
+    const ownerPhoneMember = { role: 'OWNER', permissionScopes: null, user: { deletedAt: null, bannedAt: null } };
+    const { svc: foreignSvc } = oversightWith(MONEY_ITEM, foreignHolder, [ownerPhoneMember]);
+    expect(await foreignSvc.approvalVisibleToPosition('b1', 'asg_1', MONEY_ITEM)).toBe(false);
+
+    // routeActor: banned member on email route gets redacted notification
+    const bannedRouteNotif = await (bannedSvc as any).notificationFor('b1', {
+      approverAssignmentId: 'asg_1', approverMembershipId: 'm_h', approverUserId: 'u_h',
+      displayName: 'Alice', channel: 'email', contactPhone: null, contactEmail: 'holder@biz.local', method: 'delegation_rule', reason: 'test',
+    }, MONEY_ITEM, 4);
+    expect(JSON.stringify(bannedRouteNotif)).not.toContain('4,000');
+
+    // routeActor: email channel where contactEmail points to a different/non-member address fails closed
+    const mismatchedEmailNotif = await (activeSvc as any).notificationFor('b1', {
+      approverAssignmentId: 'asg_1', approverMembershipId: 'm_h', approverUserId: 'u_h',
+      displayName: 'Owner', channel: 'email', contactPhone: null, contactEmail: 'assistant@biz.local', method: 'delegation_rule', reason: 'test',
+    }, MONEY_ITEM, 4);
+    expect(JSON.stringify(mismatchedEmailNotif)).not.toContain('4,000');
+  });
+
+  it('RED-BEFORE (SEC-6): resolveApprovalByAssignment answers 404 (not 403) when a hidden item has a different approverAssignmentId', async () => {
+    const otherAssigned = { ...MONEY_ITEM, approverAssignmentId: 'asg_other' };
+    const { svc } = oversightWith(otherAssigned, holder({ operations: 'write' }));
+    await expect(svc.resolveApprovalByAssignment(otherAssigned.id, 'b1', 'asg_1', 'approved')).rejects.toBeInstanceOf(NotFoundException);
+  });
 });
 
-describe('the staff chat bridge names a pending item only to a position that may read it', () => {
-  function bridge(item: any, visible: boolean) {
+describe('SEC-2 & CR-6: approvalItemNeeds Unicode/escape folding and non-double-counted content cap', () => {
+  it('RED-BEFORE (SEC-2): catches ZWSP, fullwidth, combining-mark, and JSON-escaped expense terms', () => {
+    const base = { toolName: 'crm_add_note', module: 'crm', description: null, rationale: null, expectedBenefit: null, risks: null, inputPayload: null, affectedEntities: null, resolution: null };
+    expect(approvalItemNeeds({ ...base, title: 'Call the l\u200Bandlord' })).toContain('expenses');
+    expect(approvalItemNeeds({ ...base, title: 'Check \uFF56\uFF45\uFF4E\uFF44\uFF4F\uFF52 status' })).toContain('expenses');
+    expect(approvalItemNeeds({ ...base, title: 'Call the landlo\u0301rd' })).toContain('expenses');
+    expect(approvalItemNeeds({ ...base, title: 'Check note', inputPayload: { note: 'Call ven\\u0064or about le\\u0061se' } })).toContain('expenses');
+    expect(approvalItemNeeds({ ...base, title: 'Pay r\u200Bent 500' })).toEqual(['revenue', 'expenses']);
+  });
+
+  it('RED-BEFORE (CR-6): 30 KB clean description stays under MAX_ITEM_CLASSIFIED (not double-counted), and pure expense item needs expenses only', () => {
+    const base = { toolName: 'crm_add_note', module: 'crm', rationale: null, expectedBenefit: null, risks: null, inputPayload: null, affectedEntities: null, resolution: null };
+    expect(approvalItemNeeds({ ...base, title: 'Plain follow-up', description: 'a'.repeat(30_000) })).toEqual([]);
+    expect(approvalItemNeeds({ ...base, title: 'Call the landlord about the lease', description: 'Confirm signing date' })).toEqual(['expenses']);
+  });
+});
+
+describe('the staff chat bridge names a pending item only to a position that may read it (SEC-4 / CR-2)', () => {
+  function bridge(items: any[], visibilityById: Record<string, boolean>, resolveImpl?: (...args: any[]) => Promise<any>) {
     const chats: any[] = [];
     const structure = {
       resolveStaffByPhone: vi.fn(async () => ({ id: 'asg_1', autoApprovalViaReply: true, contactName: 'Pat', activeFlowSessionId: 's1', jobRole: null })),
       setActiveFlowSession: vi.fn(async () => undefined),
     };
-    const prisma = { client: { webhookEvent: { create: vi.fn(async () => ({})) }, aiApprovalItem: { findFirst: vi.fn(async () => item) } } };
+    const prisma = {
+      client: {
+        webhookEvent: { create: vi.fn(async () => ({})) },
+        aiApprovalItem: {
+          findFirst: vi.fn(async () => items[0] ?? null),
+          findMany: vi.fn(async () => items),
+        },
+      },
+    };
     const oversight = {
-      approvalVisibleToPosition: vi.fn(async () => visible),
-      resolveApprovalByAssignment: vi.fn(async () => { throw new ForbiddenException('refused'); }),
+      approvalVisibleToPosition: vi.fn(async (_b: string, _a: string, it: any) => Boolean(visibilityById[it.id])),
+      resolveApprovalByAssignment: vi.fn(resolveImpl ?? (async () => ({ status: 'approved' }))),
     };
     const orchestrator = {
       getConversationHistory: vi.fn(async () => []),
@@ -146,23 +224,72 @@ describe('the staff chat bridge names a pending item only to a position that may
     return { svc, chats, oversight };
   }
 
-  it('BRIDGE-01: a hidden item is not named in KEY\'s hint', async () => {
-    const { svc, chats } = bridge(MONEY_ITEM, false);
+  it('BRIDGE-01 & RED-BEFORE (SEC-4): a hidden-only item injects NO pendingApprovalHint and discloses NO riskTier', async () => {
+    const { svc, chats } = bridge([MONEY_ITEM], { [MONEY_ITEM.id]: false });
     await svc.routeInboundMessage('b1', '+15550001111', 'what is on today?', 'whatsapp', 'ext_1');
     const hints = JSON.stringify(chats[0]?.[4]?.hints ?? []);
     expect(hints).not.toContain('Acme');
     expect(hints).not.toContain('4,000');
+    expect(hints).not.toContain('Tier 4');
+    expect(hints).not.toContain('pending approval');
   });
 
-  it('BRIDGE-02: a hidden item is not named in the reply to a decision', async () => {
-    const { svc } = bridge(MONEY_ITEM, false);
+  it('BRIDGE-02 & RED-BEFORE (SEC-4 / CR-2): an older hidden money item does not head-of-line block a newer visible item or leak its ID on YES', async () => {
+    const { svc, oversight } = bridge([MONEY_ITEM, PLAIN_ITEM], { [MONEY_ITEM.id]: false, [PLAIN_ITEM.id]: true });
     const out = await svc.routeInboundMessage('b1', '+15550001111', 'YES', 'whatsapp', 'ext_2');
+    expect(oversight.resolveApprovalByAssignment).toHaveBeenCalledWith(PLAIN_ITEM.id, 'b1', 'asg_1', 'approved');
+    expect(JSON.stringify(out)).toContain('Call Jane about the meeting');
+    expect(JSON.stringify(out)).not.toContain(MONEY_ITEM.id);
+    expect(JSON.stringify(out)).not.toContain('Acme');
+  });
+
+  it('BRIDGE-02b & RED-BEFORE (SEC-4): replying YES when only a hidden item is pending does not call resolve or leak item ID', async () => {
+    const { svc, oversight } = bridge([MONEY_ITEM], { [MONEY_ITEM.id]: false });
+    const out = await svc.routeInboundMessage('b1', '+15550001111', 'YES', 'whatsapp', 'ext_2b');
+    expect(oversight.resolveApprovalByAssignment).not.toHaveBeenCalled();
+    expect(JSON.stringify(out)).not.toContain(MONEY_ITEM.id);
     expect(JSON.stringify(out)).not.toContain('Acme');
   });
 
   it('BRIDGE-03: an item the position may read is named as before', async () => {
-    const { svc, chats } = bridge(PLAIN_ITEM, true);
+    const { svc, chats } = bridge([PLAIN_ITEM], { [PLAIN_ITEM.id]: true });
     await svc.routeInboundMessage('b1', '+15550001111', 'what is on today?', 'whatsapp', 'ext_3');
     expect(JSON.stringify(chats[0]?.[4]?.hints ?? [])).toContain('Call Jane about the meeting');
+  });
+});
+
+describe('SEC-5: untouched AiApprovalItem readers filter by sight', () => {
+  it('RED-BEFORE (SEC-5b): AgentHealthService.getHealthDashboard counts only approvals visible to viewerId', async () => {
+    const prisma = {
+      client: {
+        aiPlan: { groupBy: vi.fn(async () => []), findMany: vi.fn(async () => []), update: vi.fn(async () => ({})) },
+        aiPlanStep: { findMany: vi.fn(async () => []) },
+        delegationLoop: { findMany: vi.fn(async () => []) },
+        aiApprovalItem: {
+          groupBy: vi.fn(async () => [{ status: 'pending', _count: 2 }]),
+          findMany: vi.fn(async () => [MONEY_ITEM, PLAIN_ITEM]),
+        },
+        aiExecutionLog: { groupBy: vi.fn(async () => []) },
+        membership: { findUnique: vi.fn(async ({ where }: any) => where.userId_businessId.userId === 'u_owner' ? { role: 'OWNER', permissionScopes: null } : { role: 'STAFF', permissionScopes: { operations: 'read' } }) },
+      },
+    };
+    const svc = new (AgentHealthService as any)(prisma);
+    const opsHealth = await svc.getHealthDashboard('b1', 'u_ops');
+    expect(opsHealth.approvals.pending).toBe(1);
+    const ownerHealth = await svc.getHealthDashboard('b1', 'u_owner');
+    expect(ownerHealth.approvals.pending).toBe(2);
+  });
+
+  it('RED-BEFORE (SEC-5c): CommandGeneratorService.seedFromPendingApprovals skips financial/expense approval items', async () => {
+    const prisma = {
+      client: {
+        aiApprovalItem: { findMany: vi.fn(async () => [MONEY_ITEM, PLAIN_ITEM]) },
+      },
+    };
+    const svc = Object.assign(Object.create(CommandGeneratorService.prototype), { prisma });
+    const seeds: any[] = [];
+    await (svc as any).seedFromPendingApprovals('b1', seeds);
+    expect(seeds.map((s) => s.sourceId)).toEqual([PLAIN_ITEM.id]);
+    expect(JSON.stringify(seeds)).not.toContain('4,000');
   });
 });

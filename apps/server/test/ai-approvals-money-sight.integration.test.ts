@@ -14,12 +14,12 @@
  * CrmRateLimitGuard, AiApprovalsController, AiApprovalsService, AiOversightService (resolveApproval,
  * resolveApprovalsBatch, createApprovalItem and its routing tail, getPendingApprovals), GraphActionsController and the
  * PlannerService and AiExecutionLogService reads it makes; the users, businesses, memberships and ai_approval_items
- * rows. Identity attachment is a test middleware (x-test-user, seeded v72a_ users only). Stand-ins: the approval
+ * rows. Identity attachment is a test middleware (x-test-user, seeded v85a_ users only). Stand-ins: the approval
  * router (resolveApprover answers the route the case names; notifyApprover records what would be sent, no provider is
  * reached), the execution log and memory signal sinks of AiOversightService, and the graph controller's other
  * collaborators.
  *
- * Every seeded row carries the `v72a_` prefix (or a v72a_ business id) and is hard-deleted by raw SQL with
+ * Every seeded row carries the `v85a_` prefix (or a v85a_ business id) and is hard-deleted by raw SQL with
  * sqlLikePrefix() in beforeAll and afterAll; no $transaction wrapping.
  */
 import 'reflect-metadata';
@@ -31,7 +31,7 @@ import { sqlLikePrefix } from './helpers/sql-like.js';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
-const P = 'v72a_';
+const P = 'v85a_';
 
 const ID = {
   owner: `${P}owner`, // OWNER of bizA (role defaults: admin everywhere)
@@ -52,6 +52,9 @@ const ID = {
   iUnknown: `${P}iUnknown`,
   iPayload: `${P}iPayload`,
   iApprovedMoney: `${P}iApprovedMoney`, // approved today
+  iApprovedStepMoney: `${P}iApprovedStepMoney`, // approved money item linked to pending plan step (CR-5)
+  planA: `${P}planA`,
+  stepA: `${P}stepA`,
   iForeign: `${P}iForeign`, // bizB
   // resolve items
   rMoney1: `${P}rMoney1`,
@@ -83,10 +86,12 @@ let db: any;
 let oversight: any;
 const notified: Array<{ route: any; item: any }> = [];
 let routeFor: (businessId: string) => Promise<any> = async () => ({ method: 'unresolved' });
+let ownerRouteFor: (businessId: string) => Promise<any> = async () => null;
 
 async function cleanup() {
   for (const sql of [
     `DELETE FROM ai_approval_items WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM ai_plan_steps WHERE plan_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ai_execution_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ai_plans WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -112,6 +117,7 @@ const resolve = (actor: string, id: string, resolution = 'approved', biz: string
 const bulk = (actor: string, ids: string[], resolution = 'approved') =>
   as(actor, http().post(`/ai-approvals/businesses/${ID.bizA}/items/bulk-resolve`).send({ ids, resolution }));
 const queue = (actor: string) => as(actor, http().get(`/actions/businesses/${ID.bizA}/queue`));
+const coverage = (actor: string) => as(actor, http().get(`/autopilot/businesses/${ID.bizA}/coverage`));
 
 async function statusOf(id: string): Promise<string | null> {
   const row = await db.aiApprovalItem.findUnique({ where: { id }, select: { status: true } });
@@ -148,7 +154,7 @@ beforeAll(async () => {
 
   const routing = {
     resolveApprover: async (businessId: string) => routeFor(businessId),
-    resolveOwner: async () => null,
+    resolveOwner: async (businessId: string) => ownerRouteFor(businessId),
     notifyApprover: async (_b: string, route: any, item: any) => {
       notified.push({ route, item });
       return { sent: true };
@@ -178,7 +184,7 @@ beforeAll(async () => {
           ),
       },
       AiApprovalsService,
-      { provide: BusinessGraphService, useValue: { getSnapshot: async () => ({}) } },
+      { provide: BusinessGraphService, useValue: { getSnapshot: async () => ({ automations: { activeCount: 0, disabledCount: 0 } }) } },
       { provide: IntentParserService, useValue: {} },
       {
         provide: PlannerService,
@@ -187,7 +193,7 @@ beforeAll(async () => {
       },
       { provide: FlowOrchestratorService, useValue: {} },
       AiExecutionLogService,
-      { provide: WorkspaceRecommendationsService, useValue: {} },
+      { provide: WorkspaceRecommendationsService, useValue: { getAutomationCoverage: async () => ({ overallPct: 50, modules: [] }) } },
     ],
   }).compile();
 
@@ -210,8 +216,8 @@ beforeAll(async () => {
     await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role: 'USER' } });
   }
   await db.user.create({ data: { id: ID.superNM, email: `${P}superNM@test.local`, role: 'SUPER_ADMIN' } });
-  await db.business.create({ data: { id: ID.bizA, name: 'V72a Biz A', ownerId: ID.owner } });
-  await db.business.create({ data: { id: ID.bizB, name: 'V72a Biz B', ownerId: ID.other } });
+  await db.business.create({ data: { id: ID.bizA, name: 'V85a Biz A', ownerId: ID.owner } });
+  await db.business.create({ data: { id: ID.bizB, name: 'V85a Biz B', ownerId: ID.other } });
   const m = (userId: string, businessId: string, role: string, permissionScopes?: Record<string, string>) =>
     db.membership.create({ data: { id: `${P}m_${userId.slice(P.length)}_${businessId.slice(P.length)}`, userId, businessId, role, permissionScopes, maxApprovalTier: 4 } });
   const ops = { operations: 'write', crm: 'write' };
@@ -231,6 +237,9 @@ beforeAll(async () => {
   await seedItem(ID.iUnknown, UNKNOWN, { riskTier: 3 });
   await seedItem(ID.iPayload, PAYLOAD, { riskTier: 3 });
   await seedItem(ID.iApprovedMoney, MONEY, { status: 'approved', resolution: 'approved', resolvedAt: new Date() });
+  await db.aiPlan.create({ data: { id: ID.planA, businessId: ID.bizA, userId: ID.opsOnly, objective: 'Follow up with contacts', status: 'pending', maxRiskTier: 2, modules: ['crm'] } });
+  await db.aiPlanStep.create({ data: { id: ID.stepA, planId: ID.planA, order: 1, action: 'crm_add_note', toolName: 'crm_add_note', module: 'crm', description: 'Follow up', status: 'pending', riskTier: 1, inputPayload: { contact: 'Acme' } } });
+  await seedItem(ID.iApprovedStepMoney, { ...MONEY, toolName: 'crm_add_note' }, { status: 'approved', resolution: 'approved', resolvedAt: new Date(), userId: ID.opsOnly, planId: ID.planA, planStepId: ID.stepA });
   await seedItem(ID.iForeign, MONEY, {}, ID.bizB);
   for (const id of [ID.rMoney1, ID.rMoney2, ID.rMoney3, ID.rOwner, ID.rOwnerMap, ID.rSuper, ID.bMoney]) await seedItem(id, MONEY, { riskTier: 0 });
   for (const id of [ID.rRent1, ID.rRent2, ID.rRent3]) await seedItem(id, RENT, { riskTier: 0 });
@@ -305,6 +314,22 @@ describe('FU-AI-APPROVALS-MONEY-SIGHT: the approval list (GET .../items)', () =>
     expect(seen).toEqual(whole);
     expect(seen).not.toContain(ID.iMoney);
   });
+
+  it('SIGHT-08 & RED-BEFORE (SEC-3 / CR-4): cursor never leaks a hidden item id, and probing a hidden cursor matches an unknown cursor', async () => {
+    const visible = ids(await list(ID.opsOnly, '&limit=100'));
+    const allVisible = await list(ID.opsOnly, `&limit=${visible.length}`);
+    expect(allVisible.status).toBe(200);
+    expect(ids(allVisible)).toEqual(visible);
+    expect(allVisible.body.hasMore).toBe(false);
+    expect(allVisible.body.nextCursor).toBeNull();
+
+    const hiddenProbe = await list(ID.opsOnly, `&limit=10&cursor=${ID.iMoney}`);
+    const foreignProbe = await list(ID.opsOnly, `&limit=10&cursor=${ID.iForeign}`);
+    expect(hiddenProbe.status).toBe(200);
+    expect(foreignProbe.status).toBe(200);
+    expect(hiddenProbe.body).toEqual(foreignProbe.body);
+    expect(hiddenProbe.body).toEqual({ items: [], nextCursor: null, hasMore: false });
+  });
 });
 
 describe('FU-AI-APPROVALS-MONEY-SIGHT: the item by id (GET .../items/:id)', () => {
@@ -340,6 +365,16 @@ describe('FU-AI-APPROVALS-MONEY-SIGHT: the stats (GET .../stats)', () => {
     expect(res.status).toBe(200);
     expect(res.body.approvedToday).toBeGreaterThanOrEqual(1);
     expect(res.body.pending).toBeGreaterThan((await stats(ID.opsOnly)).body.pending);
+  });
+
+  it('STATS-03 & RED-BEFORE (SEC-5a): GET /autopilot/businesses/:b/coverage counts only visible pending approvals', async () => {
+    const visiblePending = ids(await list(ID.opsOnly, '&limit=100')).length;
+    const opsCov = await coverage(ID.opsOnly);
+    const ownerCov = await coverage(ID.owner);
+    expect(opsCov.status).toBe(200);
+    expect(ownerCov.status).toBe(200);
+    expect(opsCov.body.activity.pendingApprovals).toBe(visiblePending);
+    expect(ownerCov.body.activity.pendingApprovals).toBeGreaterThan(visiblePending);
   });
 });
 
@@ -421,19 +456,36 @@ describe('FU-AI-APPROVALS-MONEY-SIGHT: the action queue (GET actions/businesses/
     expect(res.status).toBe(200);
     expect(JSON.stringify(res.body)).toContain(ID.iMoney);
   });
+
+  it('QUEUE-03 (CR-5): an approved money item linked to a pending plan step is withheld from opsOnly and shown to OWNER', async () => {
+    const opsRes = await queue(ID.opsOnly);
+    expect(opsRes.status).toBe(200);
+    expect(JSON.stringify(opsRes.body)).not.toContain(ID.iApprovedStepMoney);
+    const ownerRes = await queue(ID.owner);
+    expect(ownerRes.status).toBe(200);
+    expect(JSON.stringify(ownerRes.body)).toContain(ID.iApprovedStepMoney);
+  });
 });
 
 describe('FU-AI-APPROVALS-MONEY-SIGHT: the approver notification (createApprovalItem -> notifyApprover)', () => {
-  async function notifiedFor(approverUserId: string, membershipId: string) {
+  async function notifiedFor(approverUserId: string, membershipId: string, opts?: { toolName?: string; ownerUserId?: string; ownerMembershipId?: string }) {
     routeFor = async () => ({
       approverAssignmentId: null, approverMembershipId: membershipId, approverUserId, displayName: 'x', channel: 'email',
-      contactPhone: null, contactEmail: `${approverUserId}@test.local`, method: 'delegation_rule', reason: 'v72a',
+      contactPhone: null, contactEmail: `${approverUserId}@test.local`, method: 'delegation_rule', reason: 'v85a',
     });
+    ownerRouteFor = opts?.ownerUserId
+      ? async () => ({
+          approverAssignmentId: null, approverMembershipId: opts.ownerMembershipId ?? null, approverUserId: opts.ownerUserId,
+          displayName: 'owner', channel: 'email', contactPhone: null, contactEmail: `${opts.ownerUserId}@test.local`,
+          method: 'owner_fallback', reason: 'v85a',
+        })
+      : async () => null;
+    const expectedCount = opts?.ownerUserId ? 2 : 1;
     const before = notified.length;
-    const item = await oversight.createApprovalItem(ID.bizA, { ...MONEY, toolName: 'crm_add_note' });
-    for (let i = 0; i < 100 && notified.length === before; i++) await new Promise((r) => setTimeout(r, 20));
-    expect(notified.length).toBe(before + 1);
-    return { item, sent: notified[notified.length - 1].item };
+    const item = await oversight.createApprovalItem(ID.bizA, { ...MONEY, toolName: opts?.toolName ?? 'crm_add_note' });
+    for (let i = 0; i < 100 && notified.length < before + expectedCount; i++) await new Promise((r) => setTimeout(r, 20));
+    expect(notified.length).toBe(before + expectedCount);
+    return { item, sent: notified[before].item, ownerSent: opts?.ownerUserId ? notified[before + 1].item : null };
   }
 
   it('NOTIFY-01: an approver without revenue read is sent no figure and no title', async () => {
@@ -447,5 +499,17 @@ describe('FU-AI-APPROVALS-MONEY-SIGHT: the approver notification (createApproval
     const { sent } = await notifiedFor(ID.revRead, `${P}m_revRead_bizA`);
     expect(sent.title).toBe(MONEY.title);
     expect(sent.description).toBe(MONEY.description);
+  });
+
+  it('NOTIFY-03 (CR-5): tier-4 owner CC is also redacted when the owner membership lacks revenue read', async () => {
+    const { sent, ownerSent } = await notifiedFor(ID.revRead, `${P}m_revRead_bizA`, {
+      toolName: 'enable_flow_with_approval',
+      ownerUserId: ID.ownerMap,
+      ownerMembershipId: `${P}m_ownerMap_bizA`,
+    });
+    expect(sent.title).toBe(MONEY.title);
+    const ownerText = JSON.stringify(ownerSent);
+    expect(ownerText).not.toContain('4,000');
+    expect(ownerText).not.toContain('Acme');
   });
 });
