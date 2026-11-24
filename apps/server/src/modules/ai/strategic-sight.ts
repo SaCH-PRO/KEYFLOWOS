@@ -36,26 +36,31 @@ function digitValue(ch: string): string {
 function folded(text: string): string {
   return text.normalize('NFKC').replace(INVISIBLE, '').replace(/\p{Nd}/gu, (ch) => (/[0-9]/.test(ch) ? ch : digitValue(ch)));
 }
-/** Decode escapes BEFORE folding so JSON-escaped invisibles (\u200B, \u00AD) are stripped too (SEC-SRS-4). */
+/** Decode escapes (including JSON.stringify-doubled \\uXXXX) BEFORE folding so escaped invisibles (\u200B, \u00AD) are stripped too (SEC-SRS-4). */
+function decodeEscapes(text: string): string {
+  return text.replace(/\\+u([0-9a-fA-F]{4})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+}
 function allReadings(text: string): string[] {
   const out = new Set<string>();
-  for (const reading of readingsOf(text)) {
-    out.add(reading);
-    out.add(folded(reading));
+  const add = (candidate: string) => {
+    for (const reading of readingsOf(candidate)) {
+      out.add(reading);
+      out.add(folded(reading));
+    }
+  };
+  add(text);
+  const decoded = decodeEscapes(text);
+  if (decoded !== text) {
+    out.add(decoded);
+    out.add(folded(decoded));
+    add(decoded);
   }
   const f = folded(text);
   out.add(f);
-  for (const reading of readingsOf(f)) {
-    out.add(reading);
-    out.add(folded(reading));
-  }
+  add(f);
   return [...out];
 }
 const camelSplit = (text: string) => text.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
-function statesNet(text: string): boolean {
-  if (text.length > MAX_FIELDS_CLASSIFIED) return true;
-  return allReadings(text).some((reading) => NET_WORDS.test(reading) || NET_WORDS.test(camelSplit(reading)));
-}
 
 /**
  * Review round 1 (SR1-1): a figure, written as a string. The scans are written from revenue totals ("Avg Revenue $X" a
@@ -83,7 +88,9 @@ function textNeeds(text: string): readonly InsightSight[] {
   if (readings.some((reading) => NET_WORDS.test(reading) || NET_WORDS.test(camelSplit(reading)))) return BOTH;
   const needs = new Set<InsightSight>(fieldsSightNeeds(readings));
   if (needs.size === 2) return BOTH;
-  if (statesFigure(text) || readings.some((reading) => MONEY_WORDS.test(reading))) needs.add('revenue');
+  if (statesFigure(text) || readings.some((reading) => MONEY_WORDS.test(reading) || MONEY_WORDS.test(camelSplit(reading)))) {
+    needs.add('revenue');
+  }
   return (['revenue', 'expenses'] as const).filter((sight) => needs.has(sight));
 }
 
@@ -208,10 +215,11 @@ export function strategicItemNeeds(item: unknown): InsightSight[] {
   } catch {
     return [...BOTH];
   }
+  if (json.length > MAX_FIELDS_CLASSIFIED) return [...BOTH];
   const readings = allReadings(json);
   const needs = new Set<InsightSight>(fieldsSightNeeds([item, ...readings]));
   if (needs.size === 2 || readings.some((r) => NET_WORDS.test(r) || NET_WORDS.test(camelSplit(r)))) return [...BOTH];
-  if (readings.some((r) => MONEY_WORDS.test(r))) needs.add('revenue');
+  if (readings.some((r) => MONEY_WORDS.test(r) || MONEY_WORDS.test(camelSplit(r)))) needs.add('revenue');
   return (['revenue', 'expenses'] as const).filter((sight) => needs.has(sight));
 }
 
