@@ -12901,6 +12901,36 @@
    ],
    "scope": "From the FU-NAV-A3-CODEX-235 acceptance review: GET and PATCH /notifications/businesses/:b/customer-preferences (and GET customer-log, the customer email log) have AuthGuard and BusinessGuard only, so any member of a business, whatever their modules, can read and change its customer-email settings and read the log. Add the settings module guard (read for GET, write for PATCH) as the other settings endpoints have it. Owner question attached: meNav offers /app/settings/notifications to every member while the settings index gates it on settings.",
    "definition_of_done": "RED (real DB): a STAFF member with settings none gets 200 on PATCH customer-preferences. GREEN: 403 for settings none, 200 for settings write; owner unchanged; Release 0 still MET."
+  },
+  {
+   "id": "FU-C4-CMDK-SEARCH",
+   "title": "Cmd/Ctrl+K finds a customer and opens their page (journey C4)",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "C"
+   ],
+   "step": 5,
+   "lane": "web",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [
+    "FU-C4-FOCUS-OPEN"
+   ],
+   "files": [
+    "apps/web/src/components/command-palette.tsx",
+    "apps/web/src/components/key/key-agent.tsx",
+    "apps/web/e2e/journeys/c-customer.spec.ts (read only unless the locator is wrong)"
+   ],
+   "decisions": [],
+   "r0_impact": "KEEP",
+   "fixture_prefix": null,
+   "track": "launch",
+   "track_reason": "serves journey C",
+   "track_ruling": "D-263",
+   "scope": "Found live by FU-C4-FOCUS-OPEN (2026-11-24): once C4's 'from the Customers list' step passes, its next step 'from Cmd/Ctrl+K' fails on both widths, a step no earlier run reached. Desktop: after Escape then Ctrl+K on /app/command-center, no visible input with a 'search' placeholder appears (the palette is mounted by KeyAgent, components/key/key-agent.tsx, whose window keydown toggles it). Phone: a search input is found and filled with the customer's last name, the API answers GET /api/flows/businesses/:b/search 200 in 12 ms, but no option or link names the customer. Root cause to establish first (palette not opening on desktop; results not labelled or not returned on phone); the unit cases in contact-detail-route.test.tsx (FIX-CONTACT-PARAMS) cover the result's href only.",
+   "definition_of_done": "RED: journey C4 'from Cmd/Ctrl+K' fails at the base (as recorded). GREEN: on phone and desktop, Ctrl/Cmd+K opens the palette, the customer's last name lists them, and the result opens /app/crm/contacts/<id>; C4 green end to end; web unit test for whatever the root cause was; tsc, lint green."
   }
  ],
  "moot": [
