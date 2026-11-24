@@ -19,11 +19,11 @@
  *
  * Every row is written on the real database and every read goes through the real route behind its real guards, over the
  * real StrategicIntelligenceService, WorkspaceRecommendationsService and BusinessGraphService. Stand-ins: identity
- * attachment (a middleware reads `x-v72s-user`), the model call (AiUsageService.callAi answers a fixed JSON per feature:
+ * attachment (a middleware reads `x-v85b-user`), the model call (AiUsageService.callAi answers a fixed JSON per feature:
  * no provider is called), and the controller's collaborators no case calls. globalThis.fetch refuses and records every
  * outbound request: none is made.
  *
- * Fixture prefix v72s_ (FU-STRATEGIC-ROUTES-SIGHT), cleaned with sqlLikePrefix().
+ * Fixture prefix v85b_ (V1-85, FU-STRATEGIC-ROUTES-SIGHT), cleaned with sqlLikePrefix().
  */
 import 'reflect-metadata';
 import path from 'path';
@@ -34,13 +34,15 @@ import { sqlLikePrefix } from './helpers/sql-like.js';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
-const P = 'v72s_';
-const HEADER = 'x-v72s-user';
+const P = 'v85b_';
+const HEADER = 'x-v85b-user';
 
 const ID = {
   owner: `${P}owner`,
-  /** STAFF: crm and operations read, revenue and expenses 'none'. */
+  /** STAFF: crm, bookings, projects, content, automations, operations read; revenue and expenses 'none'. */
   blind: `${P}blind`,
+  /** STAFF: crm and operations read only; bookings, projects, revenue, expenses 'none' (SEC-SRS-2). */
+  crmOnly: `${P}crmOnly`,
   /** STAFF: revenue and expenses read. */
   revenue: `${P}revenue`,
   /** STAFF: revenue read, expenses 'none'. */
@@ -59,11 +61,15 @@ const BLIND_SCOPES = {
   crm: 'read', bookings: 'read', projects: 'read', content: 'read', automations: 'read', storefront: 'read',
   analytics: 'read', operations: 'read', ai: 'read', team: 'read', expenses: 'none', revenue: 'none',
 };
+const CRM_ONLY_SCOPES = {
+  crm: 'read', operations: 'read', bookings: 'none', projects: 'none', content: 'none', automations: 'none',
+  expenses: 'none', revenue: 'none',
+};
 const REVENUE_SCOPES = { ...BLIND_SCOPES, revenue: 'read', expenses: 'read' };
 const REVENUE_NO_EXPENSES_SCOPES = { ...BLIND_SCOPES, revenue: 'read' };
 const EXPENSES_NO_REVENUE_SCOPES = { ...BLIND_SCOPES, expenses: 'read' };
 
-type Reader = 'owner' | 'blind' | 'revenue' | 'revnoexp' | 'expnorev' | 'root';
+type Reader = 'owner' | 'blind' | 'crmOnly' | 'revenue' | 'revnoexp' | 'expnorev' | 'root';
 /** Readers without revenue read. */
 const NO_REVENUE: Reader[] = ['blind', 'expnorev', 'root'];
 
@@ -243,7 +249,7 @@ const MODEL_OF: Record<string, string> = {
 beforeAll(async () => {
   globalThis.fetch = (async (input: unknown) => {
     outbound.push(String(input));
-    throw new Error('v72s: no outbound traffic in this suite');
+    throw new Error('v85b: no outbound traffic in this suite');
   }) as typeof fetch;
 
   const dbMod = await import('@keyflow/db');
@@ -271,7 +277,7 @@ beforeAll(async () => {
     callAi: async (opts: { feature: string }) => {
       modelCalls.push(opts.feature);
       const answer = MODEL[opts.feature];
-      if (!answer) throw new Error(`v72s: no model answer for ${opts.feature}`);
+      if (!answer) throw new Error(`v85b: no model answer for ${opts.feature}`);
       return { content: JSON.stringify(answer) };
     },
   };
@@ -321,16 +327,17 @@ beforeAll(async () => {
 
   await cleanup();
   for (const [id, role] of [
-    [ID.owner, 'USER'], [ID.blind, 'USER'], [ID.revenue, 'USER'], [ID.revnoexp, 'USER'], [ID.expnorev, 'USER'],
+    [ID.owner, 'USER'], [ID.blind, 'USER'], [ID.crmOnly, 'USER'], [ID.revenue, 'USER'], [ID.revnoexp, 'USER'], [ID.expnorev, 'USER'],
     [ID.root, 'SUPER_ADMIN'], [ID.other, 'USER'],
   ] as const) {
     await db.user.create({ data: { id, email: `${id}@${P}test.local`, role } });
   }
-  await db.business.create({ data: { id: ID.biz, name: 'V72S Biz', slug: `${P}biz`, ownerId: ID.owner, currency: 'TTD' } });
-  await db.business.create({ data: { id: ID.otherBiz, name: 'V72S Other', slug: `${P}biz2`, ownerId: ID.other, currency: 'TTD' } });
+  await db.business.create({ data: { id: ID.biz, name: 'V85B Biz', slug: `${P}biz`, ownerId: ID.owner, currency: 'TTD' } });
+  await db.business.create({ data: { id: ID.otherBiz, name: 'V85B Other', slug: `${P}biz2`, ownerId: ID.other, currency: 'TTD' } });
   for (const [userId, businessId, role, extra] of [
     [ID.owner, ID.biz, 'OWNER', { maxApprovalTier: 4 }],
     [ID.blind, ID.biz, 'STAFF', { permissionScopes: BLIND_SCOPES, maxApprovalTier: 0 }],
+    [ID.crmOnly, ID.biz, 'STAFF', { permissionScopes: CRM_ONLY_SCOPES, maxApprovalTier: 0 }],
     [ID.revenue, ID.biz, 'STAFF', { permissionScopes: REVENUE_SCOPES, maxApprovalTier: 0 }],
     [ID.revnoexp, ID.biz, 'STAFF', { permissionScopes: REVENUE_NO_EXPENSES_SCOPES, maxApprovalTier: 0 }],
     [ID.expnorev, ID.biz, 'STAFF', { permissionScopes: EXPENSES_NO_REVENUE_SCOPES, maxApprovalTier: 0 }],
@@ -338,7 +345,7 @@ beforeAll(async () => {
   ] as const) {
     await db.membership.create({ data: { id: m(userId), userId, businessId, role, ...extra } });
   }
-  await db.contact.create({ data: { id: ID.payer, businessId: ID.biz, firstName: 'V72S', lastName: 'Payer', status: 'CUSTOMER' } });
+  await db.contact.create({ data: { id: ID.payer, businessId: ID.biz, firstName: 'V85B', lastName: 'Payer', status: 'CUSTOMER' } });
 }, 180_000);
 
 afterAll(async () => {
@@ -436,17 +443,25 @@ describe('FU-STRATEGIC-ROUTES-SIGHT (D-100, D-234, D-146): the strategic routes 
     }
   }, 300_000);
 
-  it('V72S-08 RED: workspace recommendations: revenue needs revenue read and expenses needs expenses read (403, ModuleScopeGuard\'s words); in any module a recommendation stating money (the top client\'s takings) reaches only revenue readers', async () => {
+  it('V72S-08 RED: workspace recommendations: every workspace module needs its own read scope (403, ModuleScopeGuard\'s words; non-member SUPER_ADMIN refused); in any module a recommendation stating money reaches only revenue readers', async () => {
     await clearData();
     try {
       await seed();
       for (const reader of NO_REVENUE) await refused(reader, '/ai/workspace-recommendations?module=revenue', 'revenue');
       for (const reader of ['blind', 'revnoexp', 'root'] as Reader[]) await refused(reader, '/ai/workspace-recommendations?module=expenses', 'expenses');
+      // SEC-SRS-2: non-money workspaces enforce their own module read scope and refuse non-member SUPER_ADMIN.
+      await refused('root', '/ai/workspace-recommendations?module=crm', 'crm');
+      for (const reader of ['crmOnly', 'root'] as Reader[]) {
+        await refused(reader, '/ai/workspace-recommendations?module=bookings', 'bookings');
+        await refused(reader, '/ai/workspace-recommendations?module=projects', 'projects');
+        await refused(reader, '/ai/workspace-recommendations?module=marketing', 'content');
+        await refused(reader, '/ai/workspace-recommendations?module=automations', 'automations');
+      }
       await ok('owner', '/ai/workspace-recommendations?module=revenue');
       await ok('expnorev', '/ai/workspace-recommendations?module=expenses');
       const ownerCrm = await ok('owner', '/ai/workspace-recommendations?module=crm');
       expect(ownerCrm.map((r: any) => r.id), 'control').toContain('crm-top-client');
-      for (const reader of NO_REVENUE) {
+      for (const reader of ['blind', 'expnorev', 'crmOnly'] as Reader[]) {
         const recs = await ok(reader, '/ai/workspace-recommendations?module=crm');
         expect(recs.map((r: any) => r.id), reader).not.toContain('crm-top-client');
         expect(text(recs), reader).not.toContain('4,000');
@@ -494,15 +509,15 @@ describe('FU-STRATEGIC-ROUTES-SIGHT (D-100, D-234, D-146): the strategic routes 
     }
   }, 300_000);
 
-  it('V72S-11 RED (security review round 1, OOS-1, folded in by the orchestrator): GET .../ai/cross-module-links answers a contact\'s invoices (number, status, amount) only to revenue readers; their bookings and projects (no money) reach every member', async () => {
+  it('V72S-11 RED (OOS-1 & SEC-SRS-2): GET .../ai/cross-module-links enforces per-module sight (invoices at revenue, bookings at bookings, projects at projects; non-member SUPER_ADMIN gets none)', async () => {
     await clearData();
     try {
       await seed();
       // Review round 3 (CR3-3): a booking and a project for the contact, so the other links are proven kept.
-      await db.service.create({ data: { id: `${P}svc`, businessId: ID.biz, name: 'V72S Cut', price: 100, duration: 60 } });
+      await db.service.create({ data: { id: `${P}svc`, businessId: ID.biz, name: 'V85B Cut', price: 100, duration: 60 } });
       const start = new Date(Date.now() + 2 * DAY);
       await db.booking.create({ data: { id: `${P}bk`, businessId: ID.biz, contactId: ID.payer, serviceId: `${P}svc`, startTime: start, endTime: new Date(start.getTime() + 3_600_000) } });
-      await db.project.create({ data: { id: `${P}prj`, businessId: ID.biz, name: 'V72S fit-out', contactId: ID.payer } });
+      await db.project.create({ data: { id: `${P}prj`, businessId: ID.biz, name: 'V85B fit-out', contactId: ID.payer } });
       const route = `/ai/cross-module-links?entityType=contact&entityId=${ID.payer}`;
       const ownerLinks = await ok('owner', route);
       expect(ownerLinks.bookings.map((b: any) => b.id), 'control').toEqual([`${P}bk`]);
@@ -512,12 +527,17 @@ describe('FU-STRATEGIC-ROUTES-SIGHT (D-100, D-234, D-146): the strategic routes 
         expect(body.invoices.length, `${reader} control`).toBe(3);
         expect(body.invoices.map((i: any) => i.amount).sort(), reader).toEqual([3341, 4000, 4000]);
       }
-      for (const reader of NO_REVENUE) {
+      for (const reader of ['blind', 'expnorev'] as Reader[]) {
         const body = await ok(reader, route);
         expect(body.invoices, reader).toEqual([]);
         expect(body.bookings, `${reader} keeps the bookings`).toEqual(ownerLinks.bookings);
         expect(body.projects, `${reader} keeps the projects`).toEqual(ownerLinks.projects);
         for (const marker of ['3341', '4000', `${ID.payer}-od1`, 'SENT', 'PAID']) expect(text(body), `${reader} ${marker}`).not.toContain(marker);
+      }
+      // SEC-SRS-2: crmOnly (no bookings/projects/revenue read) and root (non-member SUPER_ADMIN) receive no links.
+      for (const reader of ['crmOnly', 'root'] as Reader[]) {
+        const body = await ok(reader, route);
+        expect(body, reader).toEqual({ invoices: [], bookings: [], projects: [] });
       }
       const other = await agent().get(`/ai/businesses/${ID.biz}${route}`).set(HEADER, ID.other).set('x-forwarded-for', nextIp());
       expect(other.status, 'cross-tenant').toBe(403);

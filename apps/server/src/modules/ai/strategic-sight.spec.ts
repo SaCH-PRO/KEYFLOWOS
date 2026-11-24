@@ -199,3 +199,62 @@ describe('sightedStrategic review round 3 (FU-STRATEGIC-ROUTES-SIGHT)', () => {
     expect(strategicItemNeeds({ title: 'ｐｒｏｆｉｔ is thin' })).toEqual(['revenue', 'expenses']);
   });
 });
+
+describe('sightedStrategic review round 4 RED (SEC-SRS-3, SEC-SRS-4, SEC-SRS-5, SEC-SRS-6, CR-3)', () => {
+  it('SEC-SRS-3: nested objects with all keys dropped or non-droppable money keys are withheld whole (no {} ghosts)', () => {
+    const out = sightedStrategic(
+      {
+        items: [{ amount: 500 }, { total: 900 }],
+        entries: [{ client: 'Acme', overdueTotal: 5000 }, { client: 'SAFEMARK Beta', note: 'call back' }],
+      },
+      blind,
+    ) as any;
+    expect(out.items).toEqual([]);
+    expect(out.entries).toEqual([{ client: 'SAFEMARK Beta', note: 'call back' }]);
+  });
+
+  it('SEC-SRS-4: \\uXXXX invisibles decoded before folding, \\p{Cc}/non-default-ignorable \\p{Cf} stripped, and en/em-dash / P/L / EBIT / capex caught', () => {
+    const rev = sightedStrategic(
+      {
+        notes: [
+          'pro\\u200Bfit is thin',
+          'pro\u0001fit is thin',
+          'pro\u0600fit is thin',
+          'cash\u2013flow is tight',
+          'break\u2014even by May',
+          'P/L looks weak',
+          'EBIT dropped',
+          'capex is high',
+          'SAFEMARK steady week',
+        ],
+      },
+      revnoexp,
+    ) as any;
+    expect(rev.notes).toEqual(['SAFEMARK steady week']);
+
+    const bl = sightedStrategic({ notes: ['re\\u00ADnt is due', 're\u0600nt is due', 'SAFEMARK steady week'] }, blind) as any;
+    expect(bl.notes).toEqual(['SAFEMARK steady week']);
+  });
+
+  it('SEC-SRS-5: currentPrice, suggestedPrice and pricingPrinciples require revenue read (not exempted for blind readers)', () => {
+    const sample = { currentPrice: 'free', suggestedPrice: 'premium', pricingPrinciples: ['SAFEMARK value-based'] };
+    expect(sightedStrategic(sample, blind)).toEqual({});
+    expect(sightedStrategic(sample, revnoexp)).toEqual(sample);
+  });
+
+  it('SEC-SRS-6: strategicItemNeeds catches turnover/takings/top line and concentration/upsell', () => {
+    expect(strategicItemNeeds({ title: 'Grow turnover this month' })).toContain('revenue');
+    expect(strategicItemNeeds({ title: 'Takings fell in August' })).toContain('revenue');
+    expect(strategicItemNeeds({ title: 'Protect top line growth' })).toContain('revenue');
+    expect(strategicItemNeeds({ title: 'High client concentration risk' })).toContain('revenue');
+    expect(strategicItemNeeds({ title: 'Upsell opportunity for regulars' })).toContain('revenue');
+  });
+
+  it('CR-3: BigInt values fail closed without throwing', () => {
+    const withBigInt = { total: 4000n, summary: 'SAFEMARK ok' };
+    expect(() => sightedStrategic(withBigInt, blind)).not.toThrow();
+    expect(sightedStrategic(withBigInt, blind)).toEqual({});
+    expect(() => strategicItemNeeds(withBigInt)).not.toThrow();
+    expect(strategicItemNeeds(withBigInt)).toEqual(['revenue', 'expenses']);
+  });
+});
