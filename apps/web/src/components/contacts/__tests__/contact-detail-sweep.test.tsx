@@ -25,7 +25,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 
 const params = vi.hoisted(() => ({ contactId: "c_sweep" }));
 vi.mock("next/navigation", () => ({
@@ -171,8 +171,11 @@ describe("BUG-128: a delete dialog says the contact goes to Trash", () => {
 describe("BUG-129: events read in plain words", () => {
   it("CDS-129a RED-BEFORE: Recent Activity shows 'Note added' for a Note.Created event", () => {
     render(<ContactDetailStats contact={contact} events={EVENTS} businessId={BIZ} />);
-    const card = screen.getByText("Recent Activity").closest("div")!.parentElement!;
-    expect(within(card).getAllByText(/Note added/).length).toBeGreaterThan(0);
+    // Folded, the card's preview names the latest event; opened, its rows name each one.
+    const header = screen.getByRole("button", { name: /recent activity/i });
+    expect(header).toHaveTextContent(/Note added/);
+    fireEvent.click(header);
+    expect(screen.getAllByText(/Note added/).length).toBeGreaterThanOrEqual(1);
     expect(document.body).not.toHaveTextContent("Note.Created");
   });
 
@@ -195,6 +198,8 @@ describe("BUG-062: the side panel is a summary that opens the contact's page", (
 
   it("CDS-062b RED-BEFORE: Recent Activity's 'View all' opens the contact's Timeline page", () => {
     render(<ContactDetailStats contact={contact} events={EVENTS} businessId={BIZ} />);
+    fireEvent.click(screen.getByRole("button", { name: /recent activity/i }));
+    expect(screen.getByText("View all")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /view all/i })).toHaveAttribute("href", `/app/crm/contacts/${CONTACT_ID}/timeline`);
   });
 });
