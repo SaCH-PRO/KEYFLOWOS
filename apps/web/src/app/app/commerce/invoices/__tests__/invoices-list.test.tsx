@@ -292,6 +292,17 @@ describe("SWP-INV-LIST: the Invoices list", () => {
     expect((await screen.findAllByText("INV-0070")).length).toBeGreaterThan(0);
   });
 
+  it("RED-BEFORE (PR #233 Codex P2): Duplicate of a row whose discount type is unknown carries no discount", async () => {
+    // fetchInvoices reads an unknown type (a legacy 'PERCENTAGE') as none but keeps its value; Duplicate must not
+    // turn that value into a real 10% discount on the new invoice.
+    rows = [row({ id: "inv_legacy", invoiceNumber: "INV-0071", discountType: "PERCENTAGE", discountValue: 10 })];
+    render(<InvoicesHubPage />);
+    await openRowMenu("INV-0071");
+    fireEvent.click(await screen.findByText("Duplicate"));
+    const dup = JSON.parse(sessionStorage.getItem("invoice_duplicate") ?? "{}") as Record<string, unknown>;
+    expect(dup.discountValue).toBe(0);
+  });
+
   it("RED-BEFORE (journey D8): Escape closes a row's menu and goes nowhere (the app's global Escape is 'go back')", async () => {
     rows = [row({ id: "inv_part", invoiceNumber: "INV-0080", status: "PARTIALLY_PAID", total: 300, subtotal: 300 })];
     // A stand-in for the app's global shortcut (hooks/use-keyboard-shortcuts.ts: Escape -> kf:escape -> the parent route),
