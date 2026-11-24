@@ -48,7 +48,7 @@ queue needs an organization-owned repository.
 
 | # | Question | Owner | State |
 |---|---|---|---|
-| R&D-1 | Cut CI wall time with no check dropped. | claude lane | **done** (see §6). |
+| R&D-1 | Cut CI wall time with no check dropped. | claude lane | **done** (see §6). C1 shipped in wave 3p: Windows proof 61-65 min to 19 min. C2 (shard the Windows controls) next; C3-C5 by the Antigravity lane (P24, M7a). |
 | R&D-2 | Pre-flight audit of the Claude lane's next rows (P13, P17, P18 and the next ready web launch packets). | claude lane | **done**: 4 of 7 had false premises (wrong paths, already-green REDs, a write set missing the real rule, a size M that is L); P17 was one bug at 16 call sites, P18's fix location was wrong; 8 packets cited lost scratch files. Plan corrected (21806719); split posted (#80 7134656316). |
 
 Results land here as findings with evidence, then as ADOPTED rules or owner proposals.
@@ -84,4 +84,6 @@ The path-scoped Windows proof (P2) stays an owner decision; the path list it nee
 | 2026-11-24 | First pre-flight audit (A3), one read-only agent, about 11 minutes. | Caught 4 bad plans before anyone built them; at about 1 h per review bounce, it repays itself on the first catch. Run it before each claim batch. |
 | 2026-11-24 | Wave 3n took main as soon as M4a merged (A2). | Its CI ran alongside M4b's instead of after it. |
 | 2026-11-24 | C1 (one reused worktree for the 323 negative controls): equivalence over the real manifest, old runner vs new at the same ref. | 0 differences (277 live, 46 not live on Linux in both: the PowerShell proofs); 1,125 s to 169 s locally, repository config untouched, no worktree left. Four adversarial review rounds hardened the reset (A10). |
+| 2026-11-24 | C1 on the real runner: PR #236 (wave 3p, first wave carrying C1), Windows worker proof. | **19 min 22 s, was 61-65 min** (CI at 771bfc3c, all checks green). Run Tests (37 min) is now the long pole: P24's 4-way server sharding (C3-C5, in M7a #237) targets it. |
+| 2026-11-24 | A8 stacked heads, first use: M6 (#235) carried M5 (#233); after M5 merged, `git merge-tree` of main and M6's head equalled the head's tree. | M6 merged on its existing green CI with no re-run: one CI cycle saved. |
 | 2026-11-24 | Codex P2 findings on a wave PR (#235) filed as a stacked follow-up packet (FU-NAV-A3-CODEX-235) instead of a new head on the PR. | The wave's CI run was kept; the fix is built on the wave head (A8) and joins the next wave. |
