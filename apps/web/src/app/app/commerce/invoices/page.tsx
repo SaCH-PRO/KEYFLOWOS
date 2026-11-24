@@ -42,7 +42,7 @@ import {
 } from "@/lib/client";
 import { apiDelete } from "@/lib/api";
 import { invoiceBalanceOfStoredRows, invoicePaidPercent } from "@keyflow/shared";
-import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
+import { refreshWorkspace, getStoredBusinessId, getCachedBusiness } from "@/lib/workspace";
 import { useCompose } from "@/components/email/compose-context";
 import { ownBusinessCountry, readWhatsAppShareNumber } from "@/lib/whatsapp";
 import { useWhatsAppDocumentShare } from "@/components/whatsapp/whatsapp-document-share";
@@ -54,13 +54,17 @@ import { DateRangeFilter, filterByDateRange, DEFAULT_DATE_RANGE } from "../compo
 import type { DateRange } from "../components/date-range-filter";
 
 const PAGE_SIZE = 10;
+/** The Unpaid card's filter: the invoices it counts (SWP-INV-LIST, BUG-089). */
+const UNPAID_FILTER = "UNPAID";
+const UNPAID_STATUSES = ["SENT", "PARTIALLY_PAID"];
 
 export default function InvoicesHubPage() {
   const router = useRouter();
   const { open: openComposer } = useCompose();
   const whatsApp = useWhatsAppDocumentShare();
   const [businessId, setBusinessId] = useState<string | null>(null);
-  const [businessCurrency, _setBusinessCurrency] = useState<string>("TTD");
+  // SWP-INV-LIST (BUG-007): the business's own currency (it was a hard-coded "TTD"); the cards add only its invoices.
+  const [businessCurrency, setBusinessCurrency] = useState<string>("TTD");
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [_contacts, setContacts] = useState<Contact[]>([]);
   const [_products, setProducts] = useState<Product[]>([]);
@@ -76,6 +80,19 @@ export default function InvoicesHubPage() {
   const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
 
+  // A row's menu closes on Escape, and that Escape is the menu's: the app's global Escape ("go back",
+  // hooks/use-keyboard-shortcuts.ts, on window in the bubble phase) would otherwise leave the list (journey D8).
+  useEffect(() => {
+    if (!menuOpenId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      setMenuOpenId(null);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [menuOpenId]);
+
   const mountedRef = useRef(true);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
@@ -83,6 +100,9 @@ export default function InvoicesHubPage() {
     const init = async () => {
       const fresh = await refreshWorkspace();
       const id = fresh ?? getStoredBusinessId();
+      // The cached business is read only when it is the business on screen (as the new-invoice page does).
+      const cached = getCachedBusiness();
+      if (id && cached?.id === id && cached.currency) setBusinessCurrency(cached.currency.trim().toUpperCase());
       if (id) setBusinessId(id);
     };
     void init();
@@ -134,10 +154,13 @@ export default function InvoicesHubPage() {
   });
 
   const dateFiltered = filterByDateRange(sorted, (inv) => inv.issueDate, dateRange);
-  const statusFiltered = statusFilter === "ALL" ? dateFiltered : dateFiltered.filter((inv) => inv.status === statusFilter);
+  // SWP-INV-LIST (BUG-089): "UNPAID" is the Unpaid card's own filter, the invoices it counts (sent and part-paid).
+  const statusFiltered = statusFilter === "ALL" ? dateFiltered
+    : statusFilter === UNPAID_FILTER ? dateFiltered.filter((inv) => UNPAID_STATUSES.includes(inv.status))
+    : dateFiltered.filter((inv) => inv.status === statusFilter);
   const { filtered: searchFiltered } = useCommerceSearch(
     statusFiltered,
-    (inv) => `${inv.invoiceNumber ?? ""} ${inv.contact?.firstName ?? ""} ${inv.contact?.lastName ?? ""} ${inv.contact?.email ?? ""} ${(inv.items ?? []).map((i) => `${i.description ?? ""}`).join(" ")} ${inv.notes ?? ""} ${Number(inv.total).toFixed(2)}`,
+    (inv) => `${inv.invoiceNumber ?? ""} ${inv.contact?.firstName ?? ""} ${inv.contact?.lastName ?? ""} ${inv.contact?.email ?? ""} ${(inv.contact as { companyName?: string | null } | null | undefined)?.companyName ?? ""} ${(inv.items ?? []).map((i) => `${i.description ?? ""}`).join(" ")} ${inv.notes ?? ""} ${Number(inv.total).toFixed(2)}`,
     search,
   );
 
@@ -155,8 +178,11 @@ export default function InvoicesHubPage() {
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const stats = (() => {
     const cents = (amount: number) => Math.round(amount * 100);
-    let unpaidCents = 0, unpaidCount = 0, overdueCents = 0, overdueCount = 0, paidMonthCents = 0, paidMonthCount = 0, draftsCents = 0, draftsCount = 0;
+    let unpaidCents = 0, unpaidCount = 0, overdueCents = 0, overdueCount = 0, paidMonthCents = 0, paidMonthCount = 0, draftsCents = 0, draftsCount = 0, otherCurrency = 0;
     for (const inv of invoices) {
+      // SWP-INV-LIST (BUG-007): one figure per currency is never a sum of two currencies; the cards are the
+      // business currency's, and an invoice in another currency is counted apart (said under the cards).
+      if ((inv.currency ?? businessCurrency).toUpperCase() !== businessCurrency) { otherCurrency++; continue; }
       const { total, remaining } = invoiceBalanceOfStoredRows(Number(inv.total), inv.payments ?? [], inv.currency);
       if (inv.status === "DRAFT") { draftsCents += cents(total); draftsCount++; }
       else if (inv.status === "PAID" && inv.paidAt && new Date(inv.paidAt) >= startOfMonth) { paidMonthCents += cents(total); paidMonthCount++; }
@@ -168,6 +194,7 @@ export default function InvoicesHubPage() {
       overdue: { total: overdueCents / 100, count: overdueCount },
       paid: { total: paidMonthCents / 100, count: paidMonthCount },
       drafts: { total: draftsCents / 100, count: draftsCount },
+      otherCurrency,
     };
   })();
 
@@ -219,7 +246,9 @@ export default function InvoicesHubPage() {
   };
 
   const handleDuplicate = (inv: Invoice) => {
-    const dup = { contactId: inv.contactId || "", items: (inv.items ?? []).map(it => ({ description: it.description, quantity: it.quantity, unitPrice: it.unitPrice, productId: it.productId ?? "" })), taxRate: inv.taxRate ?? 0, discountType: inv.discountType || "PERCENT", discountValue: inv.discountValue ?? 0, notes: inv.notes || "" };
+    // SWP-INV-LIST (BUG-050): the row now carries the tax, discount and notes (fetchInvoices keeps them); Decimals may
+    // arrive as strings, and the new-invoice form reads numbers.
+    const dup = { contactId: inv.contactId || "", items: (inv.items ?? []).map(it => ({ description: it.description, quantity: Number(it.quantity), unitPrice: Number(it.unitPrice), productId: it.productId ?? "" })), taxRate: Number(inv.taxRate ?? 0) || 0, discountType: inv.discountType || "PERCENT", discountValue: Number(inv.discountValue ?? 0) || 0, notes: inv.notes || "" };
     if (typeof window !== "undefined") sessionStorage.setItem("invoice_duplicate", JSON.stringify(dup));
     router.push("/app/commerce/invoices/new");
   };
@@ -238,12 +267,20 @@ export default function InvoicesHubPage() {
   // The share carries the invoice's bearer link: the WhatsApp number the business saved (read by id
   // alongside the link, not from the loaded list); a phone only once the member confirms it as that
   // number (FU-WA-CONTACT-PHONE); else the chooser.
-  const shareWhatsApp = async (inv: Invoice) => {
+  const shareWhatsApp = async (inv: Invoice, text = "Your invoice:") => {
     const country = ownBusinessCountry();
     const number = readWhatsAppShareNumber(businessId, inv.contactId, country);
     const url = await buildPublicUrl(inv);
     if (!url) return;
-    whatsApp.share({ number: await number, businessId, contactId: inv.contactId, text: "Your invoice:", link: url, country, what: "invoice" });
+    whatsApp.share({ number: await number, businessId, contactId: inv.contactId, text, link: url, country, what: "invoice" });
+  };
+
+  // SWP-INV-LIST (BUG-047): a part-paid invoice's reminder names what is still due (net of refunds, the shared
+  // contract) and carries the pay link, by WhatsApp (WA-HELPER's share: the saved number, the confirm step, or the chooser).
+  const remindWhatsApp = (inv: Invoice) => {
+    const { remaining } = invoiceBalanceOfStoredRows(Number(inv.total), inv.payments ?? [], inv.currency);
+    const label = inv.invoiceNumber ? `invoice ${inv.invoiceNumber}` : "your invoice";
+    void shareWhatsApp(inv, `A friendly reminder: ${formatAmount(remaining, inv.currency)} is still due on ${label}. You can pay here:`);
   };
 
   return (
@@ -272,21 +309,29 @@ export default function InvoicesHubPage() {
           {/* Stat Cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
             {[
-              { key: "unpaid", label: "Unpaid", value: formatAmount(stats.unpaid.total, businessCurrency), count: stats.unpaid.count, icon: Clock, color: "text-amber-600", bg: "bg-amber-50", border: "border-amber-100", filter: "SENT" },
-              { key: "overdue", label: "Overdue", value: formatAmount(stats.overdue.total, businessCurrency), count: stats.overdue.count, icon: AlertCircle, color: "text-red-600", bg: "bg-red-50", border: "border-red-100", filter: "OVERDUE" },
-              { key: "paid", label: "Paid this month", value: formatAmount(stats.paid.total, businessCurrency), count: stats.paid.count, icon: CheckCircle, color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-100", filter: "PAID" },
-              { key: "drafts", label: "Drafts", value: formatAmount(stats.drafts.total, businessCurrency), count: stats.drafts.count, icon: FileText, color: "text-slate-600", bg: "bg-slate-50", border: "border-slate-100", filter: "DRAFT" },
+              { key: "unpaid", label: "Unpaid", value: formatAmount(stats.unpaid.total, businessCurrency), count: stats.unpaid.count, icon: Clock, color: "text-amber-600", bg: "bg-amber-50 dark:bg-amber-500/10", border: "border-amber-100 dark:border-amber-500/25", filter: UNPAID_FILTER },
+              { key: "overdue", label: "Overdue", value: formatAmount(stats.overdue.total, businessCurrency), count: stats.overdue.count, icon: AlertCircle, color: "text-red-600", bg: "bg-red-50 dark:bg-red-500/10", border: "border-red-100 dark:border-red-500/25", filter: "OVERDUE" },
+              { key: "paid", label: "Paid this month", value: formatAmount(stats.paid.total, businessCurrency), count: stats.paid.count, icon: CheckCircle, color: "text-emerald-600", bg: "bg-emerald-50 dark:bg-emerald-500/10", border: "border-emerald-100 dark:border-emerald-500/25", filter: "PAID" },
+              { key: "drafts", label: "Drafts", value: formatAmount(stats.drafts.total, businessCurrency), count: stats.drafts.count, icon: FileText, color: "text-slate-600", bg: "bg-slate-50 dark:bg-slate-500/10", border: "border-slate-100 dark:border-slate-500/25", filter: "DRAFT" },
             ].map(card => (
               <button key={card.key} onClick={() => { setStatusFilter(card.filter); setPage(1); }} className={`text-left rounded-xl border ${card.border} ${card.bg} p-5 hover:shadow-md transition-all`}>
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm font-medium text-muted-foreground">{card.label}</span>
+                  <span className="text-sm font-medium text-foreground/80">{card.label}</span>
                   <card.icon className={`w-5 h-5 ${card.color}`} />
                 </div>
-                <p className="text-2xl font-bold tracking-tight">{card.value}</p>
-                <p className="text-xs text-muted-foreground mt-1">{card.count} invoice{card.count !== 1 ? "s" : ""}</p>
+                {/* SWP-INV-LIST (BUG-070): readable in both themes (the card's dark variant above, the text the theme's
+                    foreground), and a long amount wraps inside its card at phone width. */}
+                <p className="text-2xl font-bold tracking-tight break-words text-foreground"><span className="text-lg sm:text-2xl">{card.value}</span></p>
+                <p className="text-xs text-foreground/70 mt-1">{card.count} invoice{card.count !== 1 ? "s" : ""}</p>
               </button>
             ))}
           </div>
+
+          {stats.otherCurrency > 0 && (
+            <p className="-mt-6 mb-6 text-xs text-muted-foreground">
+              The cards show {businessCurrency} invoices; {stats.otherCurrency} invoice{stats.otherCurrency !== 1 ? "s" : ""} in other currencies {stats.otherCurrency !== 1 ? "are" : "is"} listed below and not added in.
+            </p>
+          )}
 
           {/* Toolbar */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-4">
@@ -336,7 +381,8 @@ export default function InvoicesHubPage() {
                 </thead>
                 <tbody className="divide-y divide-border/60">
                   {paginated.map(inv => {
-                    const due = getDaysUntilDue(inv.dueDate);
+                    // SWP-INV-LIST (BUG-131): nothing is due on a voided or paid invoice.
+                    const due = inv.status === "VOID" || inv.status === "PAID" ? null : getDaysUntilDue(inv.dueDate);
                     // V1-29b-REFUND-READERS: the share actually paid, net of refunds (the shared contract).
                     const pct = invoicePaidPercent(invoiceBalanceOfStoredRows(Number(inv.total), inv.payments ?? [], inv.currency));
                     return (
@@ -375,7 +421,8 @@ export default function InvoicesHubPage() {
                             {menuOpenId === inv.id && (
                               <div className="absolute right-0 top-full mt-1 z-50 min-w-[180px] rounded-xl border border-border bg-popover shadow-lg py-1" onClick={() => setMenuOpenId(null)}>
                                 <DropdownItem icon={Send} label="Send" onClick={() => handleSend(inv.id)} show={inv.status === "DRAFT"} loading={actionLoading[inv.id] === "send"} />
-                                <DropdownItem icon={DollarSign} label="Record payment" onClick={() => router.push(`/app/commerce/invoices/${inv.id}?action=record-payment`)} show={inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID"} />
+                                <DropdownItem icon={DollarSign} label={inv.status === "PARTIALLY_PAID" ? "Record balance" : "Record payment"} onClick={() => router.push(`/app/commerce/invoices/${inv.id}?action=record-payment`)} show={inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID"} />
+                                <DropdownItem icon={MessageCircle} label="Remind" onClick={() => remindWhatsApp(inv)} show={inv.status === "PARTIALLY_PAID" && invoiceBalanceOfStoredRows(Number(inv.total), inv.payments ?? [], inv.currency).remaining > 0} />
                                 <DropdownItem icon={Bell} label="Send reminder" onClick={() => openComposer({ to: inv.contact?.email ?? "", subject: `Friendly reminder: invoice ${inv.invoiceNumber ?? ""}`, body: "", context: { type: "follow_up", recordNumber: inv.invoiceNumber ?? inv.id, contactName: inv.contact?.firstName ? `${inv.contact.firstName} ${inv.contact.lastName ?? ""}`.trim() : undefined }, onSent: () => toast.success("Reminder sent") })} show={!!(inv.status === "SENT" || inv.status === "OVERDUE")} />
                                 <DropdownItem icon={CheckCircle2} label="Mark paid" onClick={() => handleMarkPaid(inv.id)} show={inv.status === "DRAFT" || inv.status === "SENT"} loading={actionLoading[inv.id] === "paid"} />
                                 <DropdownItem icon={Receipt} label="Resend receipt" onClick={() => resendInvoiceReceipt(businessId!, inv.id, {}).then(r => r.data?.success ? toast.success("Resent") : toast.error(r.error ?? "Failed"))} show={!!(inv.status === "PAID" && gmailStatus?.connected)} />

@@ -129,7 +129,9 @@ export default function NewInvoicePage() {
     }
     try {
       const { data, error } = await createInvoice({
-        businessId, contactId: contactId || undefined,
+        // SWP-INV-LIST (BUG-007): the invoice is in the business currency the form shows (lib/client.ts no longer
+        // fills in "TTD"; the server would apply the same currency, this names it).
+        businessId, contactId: contactId || undefined, currency: businessCurrency,
         items: validItems.map(item => ({ description: item.isNewItem ? (item.newItemName || item.description) : item.description, quantity: parseInt(item.quantity) || 1, unitPrice: parseFloat(item.unitPrice) })),
         dueDate: dueDate || undefined, taxRate: formNumber(taxRate),
         discountType: discountValue ? discountType : undefined, discountValue: discountValue ? parseFloat(discountValue) : undefined,
