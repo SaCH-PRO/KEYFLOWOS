@@ -185,3 +185,66 @@ describe("NAV-A3: lib/app-page-routes.ts is the app's page list", () => {
     expect(isAppPage("/app/does-not-exist")).toBe(false);
   });
 });
+
+/*
+ * Review repairs (NAV-A3 acceptance review, 21fccca9): the branches the rewrite kept, pinned, and two doubles the
+ * label rule missed.
+ */
+function currentCrumb() {
+  return screen.getByRole("navigation", { name: "Breadcrumb" }).querySelector('[aria-current="page"]');
+}
+const underlined = () => !!currentCrumb()?.querySelector(".origin-left");
+
+describe("NAV-A3 review repairs: the trail's other branches", () => {
+  it("CONTROL (MINOR-5): Sales with a tab shows the tab as a link, and the view as the current crumb", () => {
+    const { links } = trail("/app/commerce", "tab=pipeline&view=board");
+    expect(links).toContainEqual({ text: "Sales", href: "/app/commerce" });
+    expect(links).toContainEqual({ text: "Pipeline", href: "/app/commerce?tab=pipeline" });
+    expect(currentCrumb()?.textContent).toBe("Board");
+  });
+
+  it("RED-BEFORE (MINOR-5): the view crumb keeps its underline, as on the base", () => {
+    trail("/app/commerce", "tab=pipeline&view=board");
+    expect(underlined()).toBe(true);
+  });
+
+  it("CONTROL (MINOR-5): a Books tab on Reports reads Books; another tab is a suffix", () => {
+    trail("/app/reports", "tab=books-pnl");
+    expect(currentCrumb()?.textContent).toBe("Books");
+    trail("/app/reports", "tab=pnl");
+    expect(currentCrumb()?.textContent?.replace(/\s+/g, " ").trim()).toBe("Reports › Profit & Loss");
+  });
+
+  it("CONTROL (MINOR-5): a detail page underlines its current crumb; a plain page does not", () => {
+    trail("/app/documents/cmwujpiuf00n57dx4navng6ud");
+    expect(underlined()).toBe(true);
+    trail("/app/settings/team");
+    expect(underlined()).toBe(false);
+  });
+
+  it("CONTROL (MINOR-5): when the current crumb repeats an earlier label, the current one stays", () => {
+    const { labels } = trail("/app/money/expenses");
+    expect(labels[labels.length - 1]).toBe("Expenses");
+    expect(currentCrumb()?.textContent).toBe("Expenses");
+  });
+
+  it("RED-BEFORE (MINOR-6): two crumbs never open the same page (Customers and Contacts on a contact)", () => {
+    const { links } = trail("/app/crm/contacts/cmwujpiuf00n57dx4navng6ud/overview");
+    const hrefs = links.map((l) => l.href);
+    expect(new Set(hrefs).size, hrefs.join(", ")).toBe(hrefs.length);
+  });
+
+  it("RED-BEFORE (MINOR-6): a module's parent is added only where the module is the top level", () => {
+    const { labels } = trail("/app/intelligence/reports");
+    expect(labels).not.toContain("Money");
+    expect(trail("/app/reports").labels).toContain("Money");
+  });
+
+  it("RED-BEFORE (NIT-7): the account page's crumb names My account", () => {
+    trail("/app/settings/profile");
+    expect(currentCrumb()?.textContent).toBe("My account");
+    trail("/app/profile");
+    expect(currentCrumb()?.textContent).toBe("Profile");
+  });
+});
+

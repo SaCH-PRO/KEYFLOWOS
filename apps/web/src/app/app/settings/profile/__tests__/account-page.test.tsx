@@ -7,7 +7,7 @@
  *
  * After: /app/settings/profile is the account page. It reads GET /identity/me, shows the member's own name and email,
  * and saves the member's own details with PATCH /identity/me (the server's UpdateUserDto: firstName, lastName, name,
- * phone). Every "my account" link opens it. Only `fetch` and the router are stubbed.
+ * phone; the stub refuses what that DTO refuses). Every "my account" link opens it. Only `fetch` and the router are stubbed.
  * Cases tagged RED-BEFORE fail on the packet's base (f6764f4c); CONTROL cases pass on both.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -22,6 +22,8 @@ vi.mock("next/navigation", () => ({
   useParams: () => ({}),
 }));
 vi.mock("@/components/key/key-agent", () => ({ openKey: vi.fn() }));
+// The upload itself is not under test: it hands back a storage path, as lib uploads do ("/objects/...").
+vi.mock("@/hooks/use-upload", () => ({ useUpload: () => ({ uploadFile: async () => ({ objectPath: "/objects/uploads/me.png" }), isUploading: false }) }));
 vi.mock("@/components/layout/new-entity-menu", () => ({ NewEntityMenu: () => null }));
 vi.mock("@/components/layout/operations-nav", () => ({
   navItemsForOperationsAccess: (items: unknown[]) => items,
@@ -30,6 +32,21 @@ vi.mock("@/components/layout/operations-nav", () => ({
 }));
 
 const ME = { id: "usr_staff", email: "shanice.staff@example.com", name: "Shanice", firstName: "Shanice", lastName: "Ali", phone: null, avatarUrl: null, role: "USER" };
+
+/**
+ * What the server's UpdateUserDto and ValidationPipe refuse (apps/server/src/modules/identity/dto/update-user.dto.ts):
+ * @IsOptional skips only null and undefined, so an empty phone meets @IsPhoneNumber and is refused; avatarUrl must be a
+ * full URL (@IsUrl); null phone passes validation but IdentityService.updateUser trims it and fails (500).
+ */
+function dtoRefusal(body: Record<string, unknown>): string | null {
+  if ("phone" in body && body.phone !== undefined) {
+    if (body.phone === null) return "phone null (the service trims it: 500)";
+    if (!/^\+\d{8,15}$/.test(String(body.phone))) return "phone must be a valid phone number";
+  }
+  if ("avatarUrl" in body && body.avatarUrl !== undefined && !/^https?:\/\//.test(String(body.avatarUrl))) return "avatarUrl must be a valid URL";
+  for (const k of Object.keys(body)) if (!["firstName", "lastName", "name", "phone", "avatarUrl"].includes(k)) return `property ${k} should not exist`;
+  return null;
+}
 
 interface Sent { method: string; path: string; body: unknown }
 function jsonResponse(status: number, body: unknown): Response {
@@ -53,7 +70,11 @@ function serve(me: { status: number; body: unknown } = { status: 200, body: ME }
     const body = typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : undefined;
     sent.push({ method, path: pathname, body });
     if (pathname.endsWith("/identity/me") && method === "GET") return jsonResponse(me.status, me.body);
-    if (pathname.endsWith("/identity/me") && method === "PATCH") return jsonResponse(200, { ...ME, ...(body as object) });
+    if (pathname.endsWith("/identity/me") && method === "PATCH") {
+      const refusal = dtoRefusal(body as Record<string, unknown>);
+      if (refusal) return jsonResponse(400, { statusCode: 400, message: [refusal], error: "Bad Request" });
+      return jsonResponse(200, { ...ME, ...(body as object) });
+    }
     return jsonResponse(404, { message: "Not Found" });
   }));
   return sent;
@@ -101,8 +122,36 @@ describe("NAV-A3: /app/settings/profile is the member's own account", () => {
     await waitFor(() => expect(sent.filter((r) => r.method === "PATCH")).toHaveLength(1));
     const patch = sent.find((r) => r.method === "PATCH")!;
     expect(patch.path).toMatch(/\/identity\/me$/);
-    expect(patch.body).toMatchObject({ name: "Shan", firstName: "Shanice", lastName: "Ali" });
-    expect(Object.keys(patch.body as object).sort()).toEqual(["firstName", "lastName", "name", "phone"]);
+    // Review MAJOR-2: only what changed is sent; an empty phone is never sent (the server refuses "" with a 400).
+    expect(patch.body).toEqual({ name: "Shan" });
+    expect(await screen.findByText(/profile updated/i)).toBeTruthy();
+  });
+
+  it("RED-BEFORE (review MAJOR-2): a member with no phone can save a new name; the server accepts the body", async () => {
+    const sent = serve();
+    await renderAccountPage();
+    fireEvent.change(await screen.findByLabelText(/last name/i), { target: { value: "Ali-Mohammed" } });
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    expect(await screen.findByText(/profile updated/i)).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(sent.find((r) => r.method === "PATCH")!.body).toEqual({ lastName: "Ali-Mohammed" });
+  });
+
+  it("RED-BEFORE (review MAJOR-2): a phone the member types is sent alone, and a refusal is shown, not swallowed", async () => {
+    const sent = serve();
+    await renderAccountPage();
+    fireEvent.change(await screen.findByLabelText(/phone/i), { target: { value: "868-620-1234" } });
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    expect((await screen.findByRole("alert")).textContent).toMatch(/phone/i);
+    expect(sent.find((r) => r.method === "PATCH")!.body).toEqual({ phone: "868-620-1234" });
+  });
+
+  it("RED-BEFORE (review MINOR-3): a photo the server refuses says so", async () => {
+    serve();
+    await renderAccountPage();
+    const input = await screen.findByLabelText(/upload profile picture/i);
+    fireEvent.change(input, { target: { files: [new File(["x"], "me.png", { type: "image/png" })] } });
+    expect((await screen.findByRole("alert")).textContent).toMatch(/photo|avatar|url/i);
   });
 
   it("RED-BEFORE (BUG-118): a read that fails says so; it is not shown as an empty account", { timeout: 10_000 }, async () => {
@@ -183,5 +232,7 @@ describe("NAV-A3: every 'my account' link opens the account page", () => {
     );
     const nameLink = screen.getAllByRole("link").find((a) => (a.textContent ?? "").includes("Shanice"));
     expect(nameLink?.getAttribute("href")).toBe("/app/settings/profile");
+    // Review MAJOR-1: on a phone the header's account menu is hidden, so this link is how J9 finds "My account".
+    expect(screen.getByRole("link", { name: /my account/i }).getAttribute("href")).toBe("/app/settings/profile");
   });
 });
