@@ -151,6 +151,7 @@ export function readyList(packets, statusById, criticalPath) {
       priority: p.priority,
       size: p.size,
       lane: p.lane,
+      track: p.track ?? null,
       on_critical_path: crit.has(p.id),
       unblocks: [...(dependents.get(p.id) ?? [])].filter((d) => statusById[d] !== 'done').length,
     }))
@@ -175,6 +176,7 @@ export function buildStatus({ plan, prior, commits, branches, mainSha, mainDate,
       priority: p.priority,
       size: p.size,
       lane: p.lane,
+      track: p.track ?? null,
       status: d.status,
       derived_from: d.derived_from,
       uncertain: d.uncertain,
@@ -202,10 +204,18 @@ export function buildStatus({ plan, prior, commits, branches, mainSha, mainDate,
     s[r.status] += 1;
     s.total += 1;
   }
+  // D-263: the launch gate runs on the launch track; follow-on packets ship after launch.
+  const by_track = {};
+  for (const r of rows) {
+    const t = (by_track[r.track ?? 'none'] ??= { done: 0, 'in-progress': 0, todo: 0, total: 0 });
+    t[r.status] += 1;
+    t.total += 1;
+  }
   const by_derivation = {};
   for (const r of rows) by_derivation[r.derived_from] = (by_derivation[r.derived_from] ?? 0) + 1;
   const planCritical = plan.validation?.critical_path ?? [];
   const ready = readyList(plan.packets, statusById, planCritical);
+  const readyLaunch = ready.filter((r) => r.track === 'launch');
   return {
     _generated: {
       by: 'scripts/agent-memory/status.mjs',
@@ -235,9 +245,11 @@ export function buildStatus({ plan, prior, commits, branches, mainSha, mainDate,
       points: totalPoints,
       by_status,
       by_step,
+      by_track,
       by_derivation,
       uncertain: rows.filter((r) => r.uncertain).map((r) => r.id),
       todo_with_dependencies_met: ready.length,
+      todo_with_dependencies_met_launch: readyLaunch.length,
     },
     critical_path: {
       plan_recorded_remaining: planCritical.filter((id) => statusById[id] !== 'done'),
@@ -245,6 +257,7 @@ export function buildStatus({ plan, prior, commits, branches, mainSha, mainDate,
       longest_remaining_depends_on_chain: longestRemainingChain(plan.packets, statusById),
     },
     ready,
+    ready_launch: readyLaunch,
     packets: rows,
   };
 }
@@ -262,6 +275,10 @@ export function renderStatusMd(status, { readyLimit = 25 } = {}) {
   L.push(`| total | ${s.packets} | ${s.points} | |`, '');
   L.push('| Step | Done | In progress | Todo | Total |', '|---|---|---|---|---|');
   for (const [k, v] of Object.entries(s.by_step)) L.push(`| ${k} | ${v.done} | ${v['in-progress']} | ${v.todo} | ${v.total} |`);
+  if (s.by_track) {
+    L.push('', '| Track (D-263) | Done | In progress | Todo | Total |', '|---|---|---|---|---|');
+    for (const [k, v] of Object.entries(s.by_track)) L.push(`| ${k} | ${v.done} | ${v['in-progress']} | ${v.todo} | ${v.total} |`);
+  }
   L.push('', '## How each status was derived', '', '| Derivation | Packets |', '|---|---|');
   for (const [k, v] of Object.entries(s.by_derivation)) L.push(`| ${k} | ${v} |`);
   const unc = status.packets.filter((p) => p.uncertain);
@@ -274,14 +291,20 @@ export function renderStatusMd(status, { readyLimit = 25 } = {}) {
   L.push(cp.plan_recorded_remaining.join(' > ') || '(none left)', '');
   const lc = cp.longest_remaining_depends_on_chain;
   L.push(`Longest remaining depends_on chain today (${lc.weight} points):`, '', lc.chain.join(' > ') || '(none)', '');
-  L.push(`## Ready to start (${status.ready.length}; todo with every dependency done)`, '');
-  L.push('Ranked: critical path first, then unblocks most, then priority.', '');
-  L.push('"Ready" is judged from main alone. A packet here may already be in a wave PR or a child session: check `ORCHESTRATOR-STATE.md` section 3 before starting one.', '');
+  const launch = status.ready_launch ?? status.ready;
+  L.push(`## Ready to start, launch track (${launch.length}; D-263)`, '');
+  L.push('Todo, every dependency done, `"track": "launch"`. Ranked: critical path first, then unblocks most, then priority.', '');
+  L.push('"Ready" is judged from main alone. A packet here may already be claimed, in a wave PR or in a child session: check the board (`BOARD.md` on `coord/board`), `ORCHESTRATOR-STATE.md` section 3 and `git ls-remote origin refs/heads/pkt/V1-<ID>` before starting one.', '');
   L.push('| # | Packet | Step | Pri | Size | Lane | Critical | Unblocks |', '|---|---|---|---|---|---|---|---|');
-  status.ready.slice(0, readyLimit).forEach((r, i) => {
+  launch.slice(0, readyLimit).forEach((r, i) => {
     L.push(`| ${i + 1} | ${r.id} | ${r.step} | ${r.priority} | ${r.size} | ${r.lane} | ${r.on_critical_path ? 'yes' : ''} | ${r.unblocks} |`);
   });
-  if (status.ready.length > readyLimit) L.push('', `(${status.ready.length - readyLimit} more in the JSON file.)`);
+  if (launch.length > readyLimit) L.push('', `(${launch.length - readyLimit} more in the JSON file, \`ready_launch\`.)`);
+  if (status.ready_launch) {
+    const followOn = status.ready.filter((r) => r.track === 'follow-on').length;
+    const untracked = status.ready.length - launch.length - followOn;
+    L.push('', `Follow-on packets ready (D-263; only on the owner's assignment): ${followOn}.${untracked ? ` Ready with no track: ${untracked}.` : ''} All ${status.ready.length} are in the JSON file, \`ready\`.`);
+  }
   const inprog = status.packets.filter((p) => p.status === 'in-progress');
   if (inprog.length) {
     L.push('', '## In progress (as far as git shows)', '');

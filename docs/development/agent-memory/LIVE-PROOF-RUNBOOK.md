@@ -36,6 +36,8 @@ written here. The local JWT secret is a random string you generate once.
   ln -s /opt/pw-browsers/chromium-1243 /opt/pw-browsers/chromium-1217
   ln -s /opt/pw-browsers/chromium_headless_shell-1243 /opt/pw-browsers/chromium_headless_shell-1217
   ```
+- **`lsof`**, which section 3 uses to check who listens on ports 3001 and 5000: `command -v lsof` (on Debian or
+  Ubuntu, `apt-get install -y lsof`). Without it section 3 stops before any run.
 - **The local JWT secret** for the live harness. Generate it once:
   `openssl rand -hex 32 > ~/.kf-e2e-jwt-secret`.
 
@@ -57,7 +59,8 @@ set -euo pipefail                      # a failed step stops the chain; the run 
 H=<sha>; cd /path/to/dedicated/worktree
 git rev-parse --verify -q "$H^{commit}" >/dev/null             # a real commit, and we are inside a repository
 test "$(git rev-parse HEAD)" = "$(git rev-parse "$H^{commit}")" # the worktree is at the head
-test -z "$(git status --porcelain --untracked-files=no)"      # no tracked change (symlinked node_modules are fine)
+# no change and no untracked file, except the symlinked node_modules and packages/*/dist of section 2
+test -z "$(git status --porcelain --untracked-files=all | { grep -vE '^\?\? (((apps|packages)/[^/]+/)?node_modules|packages/[^/]+/dist)$' || true; })"
 set +e                                 # from here each step reports its own exit code
 (cd apps/server && NODE_OPTIONS=--max-old-space-size=6144 npx tsc --noEmit -p tsconfig.json); echo TSC=$?
 pnpm --filter server build; echo BUILD=$?
@@ -78,30 +81,45 @@ test "$(git rev-parse HEAD)" = "$(git rev-parse $H)" || echo "HEAD MOVED: the ru
 cd $WT/apps/web
 npx vitest run <the packet's touched folders>
 npx eslint <changed files>
-NODE_OPTIONS=--max-old-space-size=6144 npx tsc --noEmit -p tsconfig.json   # one pre-existing error is allowed: "Cannot find type definition file for 'next'" in symlinked worktrees
+NODE_OPTIONS=--max-old-space-size=6144 npx tsc --noEmit -p tsconfig.json --types node   # must print no error at all
+# With symlinked node_modules, plain `tsc` stops at TS2688 ("Cannot find type definition file for 'next'") and checks
+# nothing (it hid four real errors on 2026-11-24); `--types node` makes it check. In a real install, plain tsc is fine.
 npx vitest run                                                              # the whole web suite, about 2 minutes
 ```
 
 A worktree may symlink `node_modules`, `apps/*/node_modules` and `packages/*/dist` from the main checkout for unit
-tests. A production web build needs a real install (section 3).
+tests, and for section 1, **only when the symlinked `packages/*/src` matches the head's**: the server resolves
+`@keyflow/db`, `@keyflow/api` and `@keyflow/shared` to `packages/*/dist`, so a dist built at another head would prove
+the head against that head's packages. Check it against the commit the main checkout's dist was built at (its
+`git rev-parse HEAD` when it last built): `git diff --quiet <that commit> $H -- packages/`. When it exits 1 (a
+difference), or you do not know the commit, use a real install in the worktree and
+`pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build` there. A production web build needs a real install (section 3).
 
 ## 3. Live browser runs (journeys and sweeps)
 
-**Needs:**
-- a worktree with a **real** `pnpm install --frozen-lockfile --offline` (Turbopack refuses symlinked `node_modules`);
-- `pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build`;
-- the server built at the same head.
+**Needs:** a worktree with a **real** `pnpm install --frozen-lockfile --offline` (Turbopack refuses symlinked
+`node_modules`), `lsof`, and the e2e database migrated (section 0). The block builds everything it serves at the head.
 
 ```bash
-cd $WT && pnpm --filter server build
+set -euo pipefail                      # a failed step stops here: an older dist/ or .next must never be served
+command -v lsof >/dev/null || { echo "install lsof first (section 0)"; exit 1; }
+H=<sha>; cd $WT
+test "$(git rev-parse HEAD)" = "$(git rev-parse "$H^{commit}")"   # the worktree is at the head under test
+test -z "$(git status --porcelain --untracked-files=all)"         # and clean: a real install leaves nothing untracked
+pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build   # the server loads packages/*/dist
+pnpm --filter server build
 cd $WT/apps/web && rm -rf .next && NEXT_PUBLIC_API_BASE_URL=http://localhost:3001 NEXT_PUBLIC_SUPABASE_URL= \
   NEXT_PUBLIC_SUPABASE_ANON_KEY= NEXT_PUBLIC_SITE_URL= pnpm run build
 
-# The API on the e2e database (a clean environment; AI and schedulers off). Port 3001 must be free first: an API
-# left from an older head would answer the health check and the runs would test the wrong head.
-if curl -fsS --max-time 5 http://localhost:3001/healthz >/dev/null 2>&1; then
-  echo "port 3001 already serves an API: stop it (its PID is in that run's e2e-api.pid) and start again"; exit 1
-fi
+# Ports 3001 (API) and 5000 (web) must be free first. An API left from an older head would answer the health check,
+# and Playwright reuses a web server already on 5000 (reuseExistingServer): either would test the wrong head.
+for PORT in 3001 5000; do
+  if lsof -t -iTCP:$PORT -sTCP:LISTEN >/dev/null || curl -sS --max-time 5 -o /dev/null http://localhost:$PORT/ 2>/dev/null; then   # any answer at all
+    echo "port $PORT is in use. Your own earlier API: stop it only if \$(lsof -t -iTCP:3001 -sTCP:LISTEN) equals the"
+    echo "PID in that run's e2e-api.pid. Anything else (another lane's run, a leftover web server): wait, or ask"
+    echo "whoever started it; never stop another lane's process"; exit 1
+  fi
+done
 (cd $WT/apps/server && exec env -i PATH="$PATH" HOME="$HOME" \
   DATABASE_URL=postgresql://keyflow:keyflow@127.0.0.1:5432/keyflowos_e2e DIRECT_URL=postgresql://keyflow:keyflow@127.0.0.1:5432/keyflowos_e2e \
   REDIS_URL=redis://127.0.0.1:6379 NODE_ENV=test PORT=3001 AI_DISABLED=1 DISABLE_SCHEDULERS=1 HIBP_DISABLED=true \
@@ -109,9 +127,13 @@ fi
   NEXT_PUBLIC_APP_URL=http://127.0.0.1:5000 node dist/main.js > $OUT/e2e-api.log 2>&1) &
 echo $! > $OUT/e2e-api.pid             # `exec` makes this node's own PID, not a wrapper shell's
 for i in $(seq 1 90); do curl -fsS --max-time 5 http://localhost:3001/healthz >/dev/null && break; sleep 2; done
-if ! curl -fsS --max-time 5 http://localhost:3001/healthz >/dev/null || ! kill -0 "$(cat $OUT/e2e-api.pid)"; then
-  echo "API did not start: read $OUT/e2e-api.log"; kill "$(cat $OUT/e2e-api.pid)" 2>/dev/null; exit 1   # no browser run
+# Healthy, alive, and the process listening on 3001 is ours (not a leftover that came back on the port)
+if ! curl -fsS --max-time 5 http://localhost:3001/healthz >/dev/null || ! kill -0 "$(cat $OUT/e2e-api.pid)" \
+   || [ "$(lsof -t -iTCP:3001 -sTCP:LISTEN)" != "$(cat $OUT/e2e-api.pid)" ]; then
+  echo "API did not start as ours: read $OUT/e2e-api.log"; kill "$(cat $OUT/e2e-api.pid)" 2>/dev/null; exit 1   # no browser run
 fi
+set +e                                 # from here each browser run reports its own exit code, and any failure fails the block
+FAILED=0
 
 # The browser runs (the harness starts the standalone web server on 5000)
 cd $WT/apps/web
@@ -119,7 +141,11 @@ export E2E_LIVE=1 E2E_VARIANT=ai-disabled E2E_API_URL=http://localhost:3001 E2E_
   E2E_BASE_URL=http://127.0.0.1:5000 E2E_PORT=5000 E2E_JWT_SECRET="$(cat ~/.kf-e2e-jwt-secret)"
 pnpm exec playwright test e2e/journeys/d-quote-deposit.spec.ts e2e/journeys/e-invoice-paid.spec.ts \
   --project=phone --project=desktop --trace off
+RC=$?; echo "JOURNEYS EXIT=$RC"; [ $RC -eq 0 ] || FAILED=1
 pnpm exec playwright test e2e/sweep-<name>.spec.ts --project=chromium --trace off      # sweeps hold both widths inside
+RC=$?; echo "SWEEP EXIT=$RC"; [ $RC -eq 0 ] || FAILED=1
+cd $WT; test "$(git rev-parse HEAD)" = "$(git rev-parse "$H^{commit}")" || { echo "HEAD MOVED: these runs do not count"; FAILED=1; }
+[ $FAILED -eq 0 ] || { echo "BROWSER PROOF FAILED: read the runs above"; exit 1; }   # a red run never ends the block with 0
 ```
 
 **Mocked sweeps** (the mocked CI job): build with `NEXT_PUBLIC_API_BASE_URL=http://api.test.local` and run
@@ -133,8 +159,9 @@ needed; the spec answers `api.test.local` with `page.route`.
 - Where the base cannot run the spec (a selector that only exists at the head), add a throwaway probe with
   structural selectors to show the bug, and do not commit the probe.
 
-**Stop the API when finished:** `kill "$(cat $OUT/e2e-api.pid)"`, from any later shell: only the API you started.
-Never `pkill`, which also stops another lane's API or proof run on the same machine. Do not stop it while a run is using it: that turns every case
+**Stop the API when finished**, from any later shell, and only if it is still yours:
+`[ "$(lsof -t -iTCP:3001 -sTCP:LISTEN)" = "$(cat $OUT/e2e-api.pid)" ] && kill "$(cat $OUT/e2e-api.pid)"`. Never
+`pkill`, which also stops another lane's API or proof run on the same machine. Do not stop it while a run is using it: that turns every case
 into a connection failure.
 
 ## 4. Reviews
