@@ -1,6 +1,6 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-24 01:40 UTC by the acting orchestrator (second-lane account, Claude Code), handing over to the next tool (the account reaches its usage limit). Rewrite in place on every merge, packet return
+Last written: 2026-11-24 02:00 UTC by the acting orchestrator (second-lane account, Claude Code), at the D-268 pause. Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -18,6 +18,14 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 
 ## 1. Standing instructions from the owner
 
+- **D-268 (2026-11-24, #80 comment 7118970946): packet work is paused.** The owner's focus is now building KEY, as
+  versions of KEY that help produce v1, write code themselves and tend the product to its final version. In practice,
+  a builder KEY ("KEY Foreman", working name) orchestrates this programme the way the owner and the acting
+  orchestrator do now.
+  - Recommended to the owner, as the design starting point: internal tooling separate from the customer-facing KEY;
+    models called through APIs with spend limits, not by rotating consumer accounts; this section's rules turned into
+    hard gates in code.
+  - **Do not claim new v1 packets.** Finish only what section 3 lists, the same way.
 - Finish v1 (plan of record: `docs/reconstruction/V1-PLAN-RECUT.json`). Keep going until it is done.
 - **v1 is re-cut to one wedge (D-263, 2026-11-24, #80 comment 7118009265):** a Trinidad and Tobago service business
   gets paid faster from WhatsApp, in TTD. The launch gate runs on packets with `track: launch` only; `track:
