@@ -505,6 +505,12 @@ function AddContactControl({
 
   useEffect(() => setMounted(true), []);
 
+  // A refusal's reason belongs to what was typed when it was refused: it clears when a field changes or the dialog
+  // is opened again (the draft itself is kept on close, as before). SWP-CONTACT-QUICKADD review MINOR-1, M4.
+  useEffect(() => {
+    setRefusal(null);
+  }, [open, firstName, lastName, email, phone, company, ageGroup]);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {

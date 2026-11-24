@@ -133,7 +133,12 @@ async function settle() {
 
 /** Open the quick-add dialog through the toolbar door and return it. */
 async function openQuickAdd(): Promise<HTMLElement> {
-  fireEvent.click(await screen.findByRole("button", { name: "Add contact" }));
+  // The toolbar door is the "Add contact" button with aria-expanded (a closing dialog's own submit button of the same
+  // name can still be in the DOM during its exit animation).
+  await screen.findAllByRole("button", { name: "Add contact" });
+  const door = screen.getAllByRole("button", { name: "Add contact" }).find((b) => b.hasAttribute("aria-expanded"));
+  if (!door) throw new Error("no toolbar 'Add contact' door");
+  fireEvent.click(door);
   return screen.findByRole("dialog", { name: "Add contact" });
 }
 
