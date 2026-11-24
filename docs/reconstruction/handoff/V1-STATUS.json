@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "03cfc83cb03ee993193dac313838fed8491e4a16",
-  "main_commit_date": "2026-11-24T18:08:04+00:00",
+  "main_sha": "c6a6a78a7ac0aa285fd21270ee7d2c11a6629f5d",
+  "main_commit_date": "2026-11-24T18:47:08+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -27,8 +27,8 @@
   ]
  },
  "summary": {
-  "packets": 372,
-  "points": 544.5,
+  "packets": 373,
+  "points": 545.5,
   "by_status": {
    "done": {
     "packets": 99,
@@ -41,8 +41,8 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 273,
-    "points": 398,
+    "packets": 274,
+    "points": 399,
     "pct_by_points": 73.1
    }
   },
@@ -80,8 +80,8 @@
    "5": {
     "done": 12,
     "in-progress": 0,
-    "todo": 65,
-    "total": 77
+    "todo": 66,
+    "total": 78
    },
    "6": {
     "done": 3,
@@ -112,8 +112,8 @@
    "launch": {
     "done": 12,
     "in-progress": 0,
-    "todo": 221,
-    "total": 233
+    "todo": 222,
+    "total": 234
    },
    "follow-on": {
     "done": 0,
@@ -127,7 +127,7 @@
    "prior-status-file+wave-2b-commit": 28,
    "code-commit-subject": 9,
    "compacted-commit": 43,
-   "no-evidence": 148
+   "no-evidence": 149
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -273,7 +273,7 @@
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 26
+   "unblocks": 27
   },
   {
    "id": "W11-RUNWAY-BURN-CURRENCY",
@@ -1515,7 +1515,7 @@
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 26
+   "unblocks": 27
   },
   {
    "id": "W11-RUNWAY-BURN-CURRENCY",
@@ -9014,6 +9014,23 @@
    "depends_on": [],
    "title": "Only members with settings access read or change the customer-email settings",
    "deps_met": true
+  },
+  {
+   "id": "FU-C4-CMDK-SEARCH",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-C4-FOCUS-OPEN"
+   ],
+   "title": "Cmd/Ctrl+K finds a customer and opens their page (journey C4)",
+   "deps_met": false
   }
  ]
 }
