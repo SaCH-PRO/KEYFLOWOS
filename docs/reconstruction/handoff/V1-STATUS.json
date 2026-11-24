@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "218067194f14d295ae1da44862739aaee7533b6b",
-  "main_commit_date": "2026-11-24T14:29:20+00:00",
+  "main_sha": "a9e59c96d47f52cfb1cd6e66138ec922d0d7c21e",
+  "main_commit_date": "2026-11-24T15:57:13+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -27,13 +27,13 @@
   ]
  },
  "summary": {
-  "packets": 366,
-  "points": 537.5,
+  "packets": 370,
+  "points": 542.5,
   "by_status": {
    "done": {
     "packets": 99,
     "points": 146.5,
-    "pct_by_points": 27.3
+    "pct_by_points": 27
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 267,
-    "points": 391,
-    "pct_by_points": 72.7
+    "packets": 271,
+    "points": 396,
+    "pct_by_points": 73
    }
   },
   "by_step": {
@@ -80,8 +80,8 @@
    "5": {
     "done": 12,
     "in-progress": 0,
-    "todo": 59,
-    "total": 71
+    "todo": 63,
+    "total": 75
    },
    "6": {
     "done": 3,
@@ -112,8 +112,8 @@
    "launch": {
     "done": 12,
     "in-progress": 0,
-    "todo": 215,
-    "total": 227
+    "todo": 219,
+    "total": 231
    },
    "follow-on": {
     "done": 0,
@@ -127,7 +127,7 @@
    "prior-status-file+wave-2b-commit": 28,
    "code-commit-subject": 9,
    "compacted-commit": 43,
-   "no-evidence": 142
+   "no-evidence": 146
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -236,19 +236,19 @@
    "unblocks": 44
   },
   {
-   "id": "SWP-KEY-CHAT-WEB",
-   "step": 3,
-   "priority": "P0",
+   "id": "NAV-A3",
+   "step": 4,
+   "priority": "P1",
    "size": "M",
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 33
+   "unblocks": 34
   },
   {
-   "id": "NAV-A3",
-   "step": 4,
-   "priority": "P1",
+   "id": "SWP-KEY-CHAT-WEB",
+   "step": 3,
+   "priority": "P0",
    "size": "M",
    "lane": "web",
    "track": "launch",
@@ -283,7 +283,7 @@
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 22
+   "unblocks": 25
   },
   {
    "id": "W11-SHIP-STOCK-DECREMENT",
@@ -1468,19 +1468,19 @@
    "unblocks": 44
   },
   {
-   "id": "SWP-KEY-CHAT-WEB",
-   "step": 3,
-   "priority": "P0",
+   "id": "NAV-A3",
+   "step": 4,
+   "priority": "P1",
    "size": "M",
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 33
+   "unblocks": 34
   },
   {
-   "id": "NAV-A3",
-   "step": 4,
-   "priority": "P1",
+   "id": "SWP-KEY-CHAT-WEB",
+   "step": 3,
+   "priority": "P0",
    "size": "M",
    "lane": "web",
    "track": "launch",
@@ -1515,7 +1515,7 @@
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 22
+   "unblocks": 25
   },
   {
    "id": "W11-SHIP-STOCK-DECREMENT",
@@ -8894,6 +8894,74 @@
    ],
    "title": "No client-supplied URL reaches the document model: chat attachments and contract term extraction read only the business's own uploaded or Drive objects",
    "deps_met": true
+  },
+  {
+   "id": "FU-NAV-A3-CODEX-235",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "NAV-A3"
+   ],
+   "title": "A slug with a digit is a crumb; the settings tab strip follows the member's modules",
+   "deps_met": false
+  },
+  {
+   "id": "FU-CONTACT-PAGES-RAW-STATUS",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-CONTACT-DETAIL"
+   ],
+   "title": "The contact route's pages show statuses in plain words",
+   "deps_met": false
+  },
+  {
+   "id": "FU-CONTACT-DELETE-LEAVE",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-CONTACT-DETAIL"
+   ],
+   "title": "A contact delete is not lost when the owner leaves during its Undo window",
+   "deps_met": false
+  },
+  {
+   "id": "FU-CONTACT-PANEL-PRUNE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "SWP-CONTACT-DETAIL"
+   ],
+   "title": "The list side panel stops loading what it no longer shows",
+   "deps_met": false
   }
  ]
 }
