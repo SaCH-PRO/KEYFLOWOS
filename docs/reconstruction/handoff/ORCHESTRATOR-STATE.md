@@ -1,6 +1,6 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-24 ~11:30 UTC by the acting orchestrator (second-lane account, Claude Code), after PR #229 (M3) merged as f6764f4c. Rewrite in place on every merge, packet return
+Last written: 2026-11-24 ~12:30 UTC by the acting orchestrator (second-lane account, Claude Code), after PR #231 (P16) merged as 04730333. Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -70,13 +70,13 @@ the next rulings commit.
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `f6764f4c` (PR #229, wave 3m, money first, merged 2026-11-24 by the Claude lane under D-272; before it PR #230 as 05f04f2c and PR #228 as 142e5f9e). Production runs `f5d58ef7` (16 Nov), 596 commits behind main: the owner
+Main is at `04730333` (PR #231, the P16 docs follow-up, merged 2026-11-24 by the Claude lane under D-272; before it PR #229 as f6764f4c, PR #230 as 05f04f2c and PR #228 as 142e5f9e). Production runs `f5d58ef7` (16 Nov), 620 commits behind main: the owner
 redeploys (D-266). Since 2026-11-23 the first orchestrator account is out of usage; the second-lane account acts as
 orchestrator and posts on #80. It runs on Opus (section 1).
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
-| Rulings and wedge re-cut (M2) | PR #230 | **Merged** as 05f04f2c (#80 7125117999). The reviewers' remaining minors are board row P16 | P16: a follow-up docs PR (Claude lane) |
+| Rulings and wedge re-cut (M2), then its follow-up (P16) | PR #230, PR #231 | **Merged** as 05f04f2c and 04730333. #231's open wording minors (runbook §2's `packages/` rule against the commit dist was built at; the KEY fix tiebreak wording; §3's `curl -f` nit) ride `wave/v1-docs-p19` | `wave/v1-docs-p19` (Claude lane), with this file |
 | Wave 3j (second lane) (M4) | `wave/3j-second-lane` @ a1e6a649: 16 packets | Proven at a1e6a649 (#80 7117144941); fails the 25/50 divergence gate and duplicates RR-REDACTION-BY-CONTENT with #228 | Antigravity splits it after M3 (board M4) |
 | MOUNT-QUOTES (P0, critical path) | `pkt/V1-MOUNT-QUOTES` @ 78567330 | Proven: suite 820/820, R0 MET; live journey D: D1, D2, D3, D6, D9 green at both widths; RETURN #80 7117999068 | On main (wave 3m, f6764f4c) |
 | SWP-INV-MATH (P0, critical path; BUG-018, BUG-019) | `pkt/V1-SWP-INV-MATH` @ 6ea50c09, stacked on MOUNT-QUOTES | Done and RETURNed (#80 7118763435). Both reviews accept, after one MAJOR (missing browser spec) was closed. Web suite 191/1745; live sweep RED at base, green at head | On main (wave 3m, f6764f4c) |
@@ -85,8 +85,9 @@ orchestrator and posts on #80. It runs on Opus (section 1).
 | SWP-INV-FORM-UX (P2, critical path; BUG-052, 090, 092, 093) | `pkt/V1-SWP-INV-FORM-UX` @ d7981a75, stacked on SWP-QUOTE-PUBLIC-PAGE | Done and RETURNed (#80, after 7120253245). Security ACCEPT WITH MINORS; correctness REJECT on F1, which is closed; confirmation ACCEPT WITH MINORS. Live: the sweep at 1440/1024/768/375, E1, sweep-invoice-amounts and release0-live (desktop) all green. Open minors: F2, security MINOR-2, N1 (the sidebar drawer open over the form) and N2 | On main (wave 3m, f6764f4c) |
 | SWP-QUOTE-COMPOSER-CONTACT (P2, critical path; BUG-095, 096, 097) | `pkt/V1-SWP-QUOTE-COMPOSER-CONTACT` @ d690bc41, stacked on SWP-INV-FORM-UX | Done and RETURNed (#80, after the 7120518541 claim). Security REJECT (SEC-QCC-1) and correctness REJECT (MAJOR-1 and MAJOR-2) both closed; confirmation ACCEPT WITH MINORS. Whole web suite exit 0 (197 / 1783); journey D live 12/18 unchanged; sweep-quote-to-invoice green | On main (wave 3m, f6764f4c) |
 | **Wave 3m (money-first; M3)** | PR #229 | **Merged** as f6764f4c (#80 7129816643): MOUNT-QUOTES, SWP-INV-MATH, SWP-INV-PUBLIC-LINK, SWP-QUOTE-PUBLIC-PAGE, SWP-INV-FORM-UX, SWP-QUOTE-COMPOSER-CONTACT | - |
-| **Lanes since D-271 (2026-11-24, owner-relayed split)** | - | Two operators, `claude` and `antigravity`. Each claims atomically (CHECKLISTS B1) plus a CLAIM on #80 | Who owns what next: `BOARD.md` on `coord/board`, one owner per row. Claude: M2, M3, then P7, P8 and the P16 docs follow-up. Antigravity: SEC-KEY-CUSTOM-LOGIC, the autopilot switch-off, FU-VITEST-DECORATOR-METADATA's before/after, the first-lane WIP, FU-PENDING-OWED-SERVER and -WEB, and M4 |
-| Next v1 packets | `pkt/V1-SWP-CONTACT-QUICKADD` @ d859ba0f, `pkt/V1-SWP-INV-LIST` @ 388925d9 | Both RETURNed (#80 7127632516, 7129398775): reviews and confirmations closed; live sweeps and journeys C1, C3, D8, E3, E11 green at their heads | Wave 3n: compact both onto main, wave-head proof (CHECKLISTS C), PR, merge. Then the board's next rows (P9 to P13, P17, P18) |
+| **Lanes since D-271 (2026-11-24, owner-relayed split)** | - | Two operators, `claude` and `antigravity`. Each claims atomically (CHECKLISTS B1) plus a CLAIM on #80 | Who owns what next: `BOARD.md` on `coord/board`, one owner per row. Claude (done: M2, M3, P7, P8, P16): wave 3n (M5), NAV-A3, NAV-A2, then SWP-KEY-CHAT-WEB (plan on #80 7130344208). Antigravity: SEC-KEY-CUSTOM-LOGIC, the autopilot switch-off, FU-VITEST-DECORATOR-METADATA's before/after, the first-lane WIP, FU-PENDING-OWED-SERVER and -WEB, and M4 |
+| **Wave 3n (M5)** | PR #233, `wave/v1-wave-3n` @ 2aaf028e: SWP-CONTACT-QUICKADD, SWP-INV-LIST (RETURNs #80 7127632516, 7129398775) | Proven at bfcf4d4c: server 833 files / 15419 tests, R0 MET, web 199/1808, tsc 0. Codex P2 (Duplicate carried an unknown discount's value) fixed at 2aaf028e (RED d0cc17db), web-only; reviews of the repair running with NAV-A3's | Merge after M4a and M4b (D-272 order), with main merged in and CI green at the exact head |
+| NAV-A3 (P1; BUG-067, 123, 118, 078, 108) | `pkt/V1-NAV-A3` @ 21fccca9 (RED b01a10e7) on f6764f4c | Built: breadcrumbs link only pages (`lib/app-page-routes.ts`), no ids, no doubles, one trail; `/app/settings/profile` is My account; store tab links; Launch Pad tile. Web tsc 0, web suite 201/1810. Two reviews running | Close review findings, live journeys C and J, RETURN; then NAV-A2 (P0), then SWP-KEY-CHAT-WEB unless Antigravity counters #80 7130344208 |
 | First lane, as it left them (2026-11-23 ~09:30 UTC) | `wave/v1-wave-3j` a2e9f3f0, `wave/v1-wave-3k` 88268a01; FU-INSIGHTS-SIGHT 28cdbccb; child sessions for FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-GENOME-SURFACES-REVENUE, FU-OUTBOUND-ATTACHMENT-URL, FU-AI-APPROVALS-MONEY-SIGHT | Proven or building when the account stopped; not re-verified since | Re-verify each head before it enters a wave |
 | FU-VITEST-DECORATOR-METADATA | @ 83b6dfc8 | Question 20 ruled by D-272.2: the AMEND only if the before/after shows a tightening | Antigravity shows the before/after (board P3) |
 
