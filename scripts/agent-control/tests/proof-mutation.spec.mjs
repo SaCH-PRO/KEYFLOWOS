@@ -14,6 +14,14 @@
  *   PM-03  control     live and vacuous verdicts are as before
  *   PM-04  control     no worktree is left behind
  *   PM-05  RED-BEFORE  resetToPristine reports a tree it cannot reset, and a control on such a tree fails (never runs)
+ *
+ * C1 acceptance review (a4f85f72): the reused worktree must isolate as the fresh one did.
+ *   PM-06  RED-AT-a4f85f72  ref 'HEAD' (what CI passes) is resolved once, in the repository: a proof that commits in the
+ *                           worktree does not move the commit the next control starts from
+ *   PM-07  RED-AT-a4f85f72  a skip-worktree flag a proof sets does not survive into the next control
+ *   PM-08  RED-AT-a4f85f72  sparse-checkout a proof turns on does not survive into the next control
+ *   PM-09  RED-AT-a4f85f72  a proof that breaks the worktree fails only its own control: the next one runs on a fresh,
+ *                           exact tree (one fresh worktree, then a second reset), as before
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -56,6 +64,18 @@ function fixtureRepo() {
       "  fs.writeFileSync('noise.log', 'ignored');",
       "  fs.writeFileSync('claim.txt', 'good but edited\\n');",
       "  execSync('git -c user.email=x@example.test -c user.name=x commit -qam litter');",
+      "}",
+      // Index and checkout state a fresh worktree never had (C1 acceptance review finding 2).
+      "if (process.argv[2] === 'skip') {",
+      "  execSync('git update-index --skip-worktree claim.txt');",
+      "  fs.writeFileSync('claim.txt', 'xxxx\\n');",
+      "}",
+      "if (process.argv[2] === 'sparse') {",
+      "  execSync('git sparse-checkout set --no-cone /check.mjs /.gitignore');",
+      "}",
+      // A worktree the proof broke outright (finding 3): git cannot work in it any more.
+      "if (process.argv[2] === 'corrupt') {",
+      "  fs.writeFileSync('.git', 'gitdir: /nonexistent/broken\\n');",
       "}",
       'process.exit(ok ? 0 : 1);',
       '',
@@ -151,3 +171,43 @@ test('PM-05 RED-BEFORE: a tree that cannot be reset to the ref is reported, and 
   assert.equal(bad.ok, false);
   assert.ok(bad.detail.length > 0);
 });
+
+/** Runs [first, plain, plain] at `ref` and returns the two plain controls' results. */
+function afterFirst(first, ref, dir, refSha) {
+  const summary = withEnv({ KF_PM_LOG: undefined, KF_PM_REF: refSha }, () =>
+    runner.runManifest({ negative_controls: [first, control('second'), control('third')] }, { repoRoot: dir, ref }),
+  );
+  const byId = Object.fromEntries(summary.results.map((r) => [r.id, r]));
+  return [byId.second, byId.third];
+}
+
+test("PM-06 RED-AT-a4f85f72: with ref 'HEAD', a proof's own commit does not move where the next control starts", () => {
+  const { dir, ref } = fixtureRepo();
+  for (const r of afterFirst(control('litter', { proof_command: 'node check.mjs litter' }), 'HEAD', dir, ref)) {
+    assert.equal(r.ok, true, JSON.stringify(r));
+  }
+});
+
+test('PM-07 RED-AT-a4f85f72: a skip-worktree flag does not survive into the next control', () => {
+  const { dir, ref } = fixtureRepo();
+  for (const r of afterFirst(control('skip', { proof_command: 'node check.mjs skip' }), ref, dir, ref)) {
+    assert.equal(r.ok, true, JSON.stringify(r));
+  }
+});
+
+test('PM-08 RED-AT-a4f85f72: sparse-checkout does not survive into the next control', () => {
+  const { dir, ref } = fixtureRepo();
+  for (const r of afterFirst(control('sparse', { proof_command: 'node check.mjs sparse' }), ref, dir, ref)) {
+    assert.equal(r.ok, true, JSON.stringify(r));
+  }
+});
+
+test('PM-09 RED-AT-a4f85f72: a proof that breaks the worktree fails only its own control', () => {
+  const { dir, ref } = fixtureRepo();
+  for (const r of afterFirst(control('corrupt', { proof_command: 'node check.mjs corrupt' }), ref, dir, ref)) {
+    assert.equal(r.ok, true, JSON.stringify(r));
+  }
+  const listed = git(dir, 'worktree', 'list', '--porcelain').split('\n').filter((l) => l.startsWith('worktree '));
+  assert.equal(listed.length, 1, 'no worktree left behind, broken or not: ' + listed.join(' | '));
+});
+
