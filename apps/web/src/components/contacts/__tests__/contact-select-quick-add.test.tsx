@@ -65,6 +65,9 @@ function installServer(opts: { createStatus?: number } = {}) {
       return jsonResponse(201, { id: "ct_new", firstName: body?.firstName, lastName: body?.lastName, phone: body?.phone, status: "LEAD" });
     }
     if (method === "GET" && url.pathname === `/crm/businesses/${BIZ}/contacts`) return jsonResponse(200, { contacts: [EXISTING] });
+    // The builder loads the business's document templates when it opens (review SEC-QCC-1: answered `{}`, the
+    // builder's effect threw outside the test and `vitest run` exited 1 with every case passing).
+    if (method === "GET" && url.pathname === `/commerce/businesses/${BIZ}/document-templates`) return jsonResponse(200, { templates: [], branding: {} });
     return jsonResponse(200, {});
   }));
   return { calls, writes: () => calls.filter((c) => c.method !== "GET") };
