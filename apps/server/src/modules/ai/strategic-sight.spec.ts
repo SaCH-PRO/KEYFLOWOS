@@ -266,4 +266,11 @@ describe('sightedStrategic review round 4 RED (SEC-SRS-3, SEC-SRS-4, SEC-SRS-5, 
     expect(strategicItemNeeds({ upsellTarget: 'Acme' })).toContain('revenue');
     expect(sightedStrategic({ note: 'topLineGrowth' }, blind)).toEqual({});
   });
+
+  it('R6 RED: decodeEscapes is linear on long backslash runs (no polynomial ReDoS) and handles invisible between \\\\ and uXXXX', () => {
+    const start = Date.now();
+    strategicItemNeeds({ a: '\\'.repeat(18_000) + 'u000' });
+    expect(Date.now() - start).toBeLessThan(150);
+    expect(strategicItemNeeds({ title: 'pro\\\u200Bu200Bfit is thin' })).toEqual(['revenue', 'expenses']);
+  });
 });
