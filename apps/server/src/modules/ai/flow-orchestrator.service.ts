@@ -209,6 +209,54 @@ export interface FlowToolResult {
    * executed; `actionId` is the server-issued id to confirm or approve.
    */
   notCleared?: { actionId: string | null; disposition: string; code: string };
+  /**
+   * RR-TOOL-ARGS-MALFORMED-NEVER-RUN: set when the call was refused before any
+   * tool ran because its arguments did not parse to a JSON object. `error`
+   * carries the one visible text, 'not run: the arguments for <tool> were not
+   * valid JSON'; nothing from the arguments themselves.
+   */
+  notExecuted?: true;
+}
+
+/**
+ * RR-TOOL-ARGS-MALFORMED-NEVER-RUN: the one parse step for a tool call's
+ * arguments. A missing or empty string means no arguments ({}), as the
+ * model's SDKs send it. Anything else that is not a JSON object (unparseable
+ * text, whitespace alone, an array, a string, a number, null) is refused: the
+ * call is never executed and never reaches governance, the boundary or
+ * confirmation.
+ */
+export function parseToolArguments(raw: string | null | undefined): { ok: true; args: Record<string, unknown> } | { ok: false } {
+  if (raw === undefined || raw === null || raw === '') return { ok: true, args: {} };
+  if (typeof raw !== 'string') return { ok: false };
+  try {
+    // JSON.parse tolerates whitespace around a value; whitespace alone is not a value and is refused.
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return { ok: true, args: parsed as Record<string, unknown> };
+    }
+  } catch {
+    // fall through: refused
+  }
+  return { ok: false };
+}
+
+/** The visible result of a refused call. Names the tool only: the broken arguments are never echoed. */
+export function toolArgumentsRefusal(toolName: string): string {
+  return `not run: the arguments for ${toolName} were not valid JSON`;
+}
+
+/**
+ * The turn's tool results in the order the model made its calls: each refused
+ * call already sits in its slot, each empty slot takes the next executed
+ * result (executed in the same order). Positional, so a duplicated tool-call
+ * id cannot duplicate or drop a result. One result per call, always.
+ */
+export function fillToolResultSlots(slots: Array<FlowToolResult | null>, executed: FlowToolResult[]): FlowToolResult[] {
+  const queue = [...executed];
+  const results = slots.map((slot) => slot ?? queue.shift() ?? null).filter((r): r is FlowToolResult => r !== null);
+  // anything executed beyond the slots (never today) is kept rather than dropped
+  return [...results, ...queue];
 }
 
 /**
@@ -2572,15 +2620,47 @@ ${triage.standingContext}`;
         };
       }
 
-      const toolCalls: FlowToolCall[] = assistantMessage.tool_calls.map((tc) => {
+      // RR-TOOL-ARGS-MALFORMED-NEVER-RUN: a call whose arguments do not parse to
+      // a JSON object is refused here, before governance, the boundary,
+      // confirmation or execution; it answers the model as a tool result and
+      // the other calls of the same response run as before.
+      // `slots` keeps the model's call order: a refused call's result sits in
+      // its own position, a parsed call's position is filled once it ran.
+      const slots: Array<FlowToolResult | null> = [];
+      const toolCalls: FlowToolCall[] = [];
+      // Every call the model made, for the turn's result and the saved session:
+      // a refused call appears with no arguments and the refusal as its
+      // description, so the saved calls pair with the saved results (the next
+      // turn's history rebuild gives every tool message a tool_call to answer).
+      const announcedCalls: FlowToolCall[] = [];
+      const refusedCalls: FlowToolCall[] = [];
+      for (const tc of assistantMessage.tool_calls) {
         const tool = getToolByName(tc.function.name);
-        return {
+        const parsed = parseToolArguments(tc.function.arguments);
+        if (!parsed.ok) {
+          this.logger.warn(`Flow chat: tool call ${tc.function.name} refused, arguments were not valid JSON`);
+          slots.push(this.refusedToolResult(tc.id, tc.function.name));
+          const refused: FlowToolCall = { id: tc.id, name: tc.function.name, arguments: {}, riskLevel: tool?.riskLevel ?? 'low', description: toolArgumentsRefusal(tc.function.name) };
+          announcedCalls.push(refused);
+          refusedCalls.push(refused);
+          continue;
+        }
+        slots.push(null);
+        const call: FlowToolCall = {
           id: tc.id,
           name: tc.function.name,
-          arguments: JSON.parse(tc.function.arguments || '{}'),
+          arguments: parsed.args,
           riskLevel: tool?.riskLevel ?? 'low',
         };
-      });
+        toolCalls.push(call);
+        announcedCalls.push(call);
+      }
+      // The refusals alone, for the branches that stop before execution: nothing
+      // ran on either count, and the member and the saved session still see them,
+      // each paired with its call; the parsed calls those branches stop are not
+      // saved, as before.
+      const refusedOnly = slots.filter((r): r is FlowToolResult => r !== null);
+      const refusedTurn = refusedOnly.length ? { toolCalls: refusedCalls, toolResults: refusedOnly } : {};
 
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
@@ -2608,6 +2688,7 @@ ${triage.standingContext}`;
       if (blocked.length > 0) {
         return {
           reply: `I can't execute that action right now: ${blocked.map(b => b.decision.reason).join('; ')}`,
+          ...refusedTurn,
           usage,
         };
       }
@@ -2633,6 +2714,7 @@ ${triage.standingContext}`;
 
         return {
           reply: `These actions require formal approval and have been added to your approval queue:\n${approvalMessages}`,
+          ...refusedTurn,
           usage,
         };
       }
@@ -2648,16 +2730,18 @@ ${triage.standingContext}`;
 
         return {
           reply: assistantMessage.content || 'I need your quick confirmation before proceeding with this action.',
-          toolCalls,
+          toolCalls: announcedCalls,
+          ...(refusedOnly.length ? { toolResults: refusedOnly } : {}),
           pendingConfirmations,
           requiresConfirmation: true,
           usage,
         };
       }
 
-      const toolResults: FlowToolResult[] = await Promise.all(
+      const executedResults: FlowToolResult[] = await Promise.all(
         governanceChecks.map(({ tc, action }) => this.executeTool(businessId, tc.name, tc.arguments, tc.id, { planId: '', planStepId: '', role: detectedRole ?? undefined }, action)),
       );
+      const toolResults = fillToolResultSlots(slots, executedResults);
 
       const followUpMessages: GatewayMessage[] = [
         ...messages,
@@ -2691,7 +2775,7 @@ ${triage.standingContext}`;
 
       return {
         reply: finalReply,
-        toolCalls,
+        toolCalls: announcedCalls,
         toolResults,
         card: onboardingCard,
         usage,
@@ -3077,19 +3161,42 @@ ${triage.standingContext}`;
         return;
       }
 
+      // RR-TOOL-ARGS-MALFORMED-NEVER-RUN: as on the complete path, a call whose
+      // arguments do not parse to a JSON object is refused before governance,
+      // the boundary, confirmation or execution. The assistant turn the model
+      // sees next still lists every call it made, with its raw arguments, so the
+      // refusal's tool message has a tool_call to answer.
+      const slots: Array<FlowToolResult | null> = [];
+      const rawToolCalls: NonNullable<GatewayMessage['tool_calls']> = [];
       const toolCalls: FlowToolCall[] = [];
+      // Every call the model made, for the member's plan card: a refused call is
+      // announced with no arguments and the refusal as its description, so the
+      // card shows a step that then reads "Failed: not run ...".
+      const announcedCalls: FlowToolCall[] = [];
       for (const [, acc] of toolCallAccumulator) {
+        rawToolCalls.push({ id: acc.id, type: 'function' as const, function: { name: acc.name, arguments: acc.arguments } });
         const tool = getToolByName(acc.name);
-        toolCalls.push({
+        const parsed = parseToolArguments(acc.arguments);
+        if (!parsed.ok) {
+          this.logger.warn(`Flow stream chat: tool call ${acc.name} refused, arguments were not valid JSON`);
+          slots.push(this.refusedToolResult(acc.id, acc.name));
+          announcedCalls.push({ id: acc.id, name: acc.name, arguments: {}, riskLevel: tool?.riskLevel ?? 'low', description: toolArgumentsRefusal(acc.name) });
+          continue;
+        }
+        slots.push(null);
+        const call: FlowToolCall = {
           id: acc.id,
           name: acc.name,
-          arguments: JSON.parse(acc.arguments || '{}'),
+          arguments: parsed.args,
           riskLevel: tool?.riskLevel ?? 'low',
-          description: this.describeToolCall(acc.name, JSON.parse(acc.arguments || '{}')),
-        });
+          description: this.describeToolCall(acc.name, parsed.args),
+        };
+        toolCalls.push(call);
+        announcedCalls.push(call);
       }
+      const refusedOnly = slots.filter((r): r is FlowToolResult => r !== null);
 
-      yield { type: 'tool_calls', toolCalls };
+      yield { type: 'tool_calls', toolCalls: announcedCalls };
 
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
@@ -3110,6 +3217,7 @@ ${triage.standingContext}`;
 
       if (blocked.length > 0) {
         const blockMessage = `I can't execute that action right now: ${blocked.map(b => b.decision.reason).join('; ')}`;
+        if (refusedOnly.length) yield { type: 'tool_results', toolResults: refusedOnly };
         yield { type: 'content_delta', content: shown(blockMessage) };
         yield* this.finalizeStreamSession(
           businessId,
@@ -3119,8 +3227,8 @@ ${triage.standingContext}`;
           enrichedMessage,
           attachments,
           shown(blockMessage),
-          toolCalls,
-          undefined,
+          announcedCalls,
+          refusedOnly.length ? refusedOnly : undefined,
           undefined,
           usage,
           userId,
@@ -3148,6 +3256,7 @@ ${triage.standingContext}`;
         ).join('\n');
 
         const formalMessage = `These actions require formal approval and have been added to your approval queue:\n${approvalMessages}`;
+        if (refusedOnly.length) yield { type: 'tool_results', toolResults: refusedOnly };
         yield { type: 'content_delta', content: shown(formalMessage) };
         yield* this.finalizeStreamSession(
           businessId,
@@ -3157,8 +3266,8 @@ ${triage.standingContext}`;
           enrichedMessage,
           attachments,
           shown(formalMessage),
-          toolCalls,
-          undefined,
+          announcedCalls,
+          refusedOnly.length ? refusedOnly : undefined,
           undefined,
           usage,
           userId,
@@ -3175,6 +3284,7 @@ ${triage.standingContext}`;
           sessionId: effectiveSessionId,
         });
 
+        if (refusedOnly.length) yield { type: 'tool_results', toolResults: refusedOnly };
         yield {
           type: 'confirmation_required',
           pendingConfirmations,
@@ -3188,8 +3298,8 @@ ${triage.standingContext}`;
           enrichedMessage,
           attachments,
           shown(fullContent),
-          toolCalls,
-          undefined,
+          announcedCalls,
+          refusedOnly.length ? refusedOnly : undefined,
           pendingConfirmations,
           usage,
           userId,
@@ -3197,9 +3307,10 @@ ${triage.standingContext}`;
         return;
       }
 
-      const toolResults: FlowToolResult[] = await Promise.all(
+      const executedResults: FlowToolResult[] = await Promise.all(
         governanceChecks.map(({ tc, action }) => this.executeTool(businessId, tc.name, tc.arguments, tc.id, { planId: '', planStepId: '', role: detectedRole ?? undefined }, action)),
       );
+      const toolResults = fillToolResultSlots(slots, executedResults);
 
       yield { type: 'tool_results', toolResults };
 
@@ -3213,11 +3324,7 @@ ${triage.standingContext}`;
         {
           role: 'assistant' as const,
           content: fullContent || null,
-          tool_calls: toolCalls.map(tc => ({
-            id: tc.id,
-            type: 'function' as const,
-            function: { name: tc.name, arguments: JSON.stringify(tc.arguments) },
-          })),
+          tool_calls: rawToolCalls,
         },
         ...toolResults.map((result) => ({
           role: 'tool' as const,
@@ -3261,7 +3368,7 @@ ${triage.standingContext}`;
         enrichedMessage,
         attachments,
         shown(followUpContent),
-        toolCalls,
+        announcedCalls,
         toolResults,
         undefined,
         usage,
@@ -3271,6 +3378,28 @@ ${triage.standingContext}`;
       this.logger.error(`Flow stream chat error: ${(error as Error).message}`);
       yield { type: 'error', error: (error as Error).message };
     }
+  }
+
+  /**
+   * RR-TOOL-ARGS-MALFORMED-NEVER-RUN: the tool result of a call refused for
+   * malformed arguments. It is shaped like any failed FlowToolResult (so the
+   * turn's results, the saved session and the follow-up messages carry it), it
+   * names the tool only, and `notExecuted` says that nothing ran.
+   */
+  private refusedToolResult(toolCallId: string, toolName: string): FlowToolResult {
+    const tool = getToolByName(toolName);
+    return {
+      toolCallId,
+      name: toolName,
+      result: null,
+      changedEntities: [],
+      followOnSuggestions: [],
+      family: tool?.family ?? 'crud',
+      riskTier: tool?.riskTier ?? 1,
+      success: false,
+      error: toolArgumentsRefusal(toolName),
+      notExecuted: true,
+    };
   }
 
   /**
