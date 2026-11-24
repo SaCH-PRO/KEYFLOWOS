@@ -1260,6 +1260,11 @@
       "prefix": "v85u_",
       "owner": "apps/server/test/outbound-attachment-url.integration.test.ts",
       "packet": "V1-85 (FU-OUTBOUND-ATTACHMENT-URL)"
+    },
+    {
+"prefix": "v90n_",
+      "owner": "apps/server/test/notifications-prefs-guard.integration.test.ts",
+      "packet": "V1-90 (FU-NOTIFICATIONS-PREFS-GUARD)"
     }
   ],
   "pendingRenames": [],
