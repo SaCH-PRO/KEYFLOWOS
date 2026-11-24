@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "05f04f2c7666e3f410cb7573d12ffff4a47512ce",
-  "main_commit_date": "2026-11-24T03:32:18-04:00",
+  "main_sha": "6e7c2c586e0c69cbd0b2909145206f4cd2f77971",
+  "main_commit_date": "2026-11-24T08:40:04+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -112,14 +112,14 @@
    "launch": {
     "done": 6,
     "in-progress": 0,
-    "todo": 220,
-    "total": 226
+    "todo": 221,
+    "total": 227
    },
    "follow-on": {
     "done": 0,
     "in-progress": 0,
-    "todo": 53,
-    "total": 53
+    "todo": 52,
+    "total": 52
    }
   },
   "by_derivation": {
@@ -7718,7 +7718,7 @@
    "priority": "P3",
    "size": "S",
    "lane": "server",
-   "track": "follow-on",
+   "track": "launch",
    "status": "todo",
    "derived_from": "no-evidence",
    "uncertain": false,
