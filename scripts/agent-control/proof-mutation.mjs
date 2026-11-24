@@ -14,6 +14,11 @@
  *
  * Isolation: mutations are applied inside a throwaway `git worktree` built
  * from a commit-ish. The working tree, the branch and main are never touched.
+ * One worktree serves the whole run (FU-CI-NC-WORKTREE-REUSE, D-274): before
+ * each control it is reset to the exact commit and must then be pristine (no
+ * change, untracked or ignored file, HEAD at the commit), or that control fails
+ * without running. Creating and removing a full worktree per control was 89% of
+ * the Windows worker proof's hour.
  *
  * Usage:
  *   node scripts/agent-control/proof-mutation.mjs --manifest <path> [--ref HEAD] [--json]
@@ -67,20 +72,51 @@ export function applyMutation(root, mutation) {
   return { ok: true, occurrences };
 }
 
+/**
+ * Resets `worktree` to exactly `ref` and checks it is pristine: every tracked file as committed, no untracked or ignored
+ * file, HEAD at the ref (a proof may have committed). Returns { ok: true } or { ok: false, detail }.
+ */
+export function resetToPristine(worktree, ref) {
+  const target = run('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: worktree });
+  if (target.status !== 0) return { ok: false, detail: `cannot resolve ${ref}` };
+  const commit = target.stdout.trim();
+  const reset = run('git', ['reset', '--quiet', '--hard', commit], { cwd: worktree });
+  if (reset.status !== 0) return { ok: false, detail: `git reset failed: ${reset.stderr.trim()}` };
+  const clean = run('git', ['clean', '-q', '-ffdx'], { cwd: worktree });
+  if (clean.status !== 0) return { ok: false, detail: `git clean failed: ${clean.stderr.trim()}` };
+  const status = run('git', ['status', '--porcelain', '--ignored'], { cwd: worktree });
+  if (status.status !== 0 || status.stdout.trim() !== '') {
+    return { ok: false, detail: `not pristine after reset: ${(status.stdout || status.stderr).trim().slice(0, 400)}` };
+  }
+  const head = run('git', ['rev-parse', 'HEAD'], { cwd: worktree });
+  if (head.status !== 0 || head.stdout.trim() !== commit) return { ok: false, detail: `HEAD is not ${commit} after reset` };
+  return { ok: true };
+}
+
 export function runManifest(manifest, options = {}) {
   const repoRoot = options.repoRoot || process.cwd();
   const ref = options.ref || 'HEAD';
   const results = [];
+  const controls = manifest.negative_controls || [];
+  if (controls.length === 0) return { total: 0, live: 0, vacuous: 0, results };
 
-  for (const entry of manifest.negative_controls || []) {
-    const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-proof-'));
-    const added = run('git', ['worktree', 'add', '--detach', worktree, ref], { cwd: repoRoot });
-    if (added.status !== 0) {
-      results.push({ id: entry.id, ok: false, stage: 'worktree', detail: added.stderr.trim() });
-      continue;
-    }
+  // One worktree for the run, reset to the exact commit before every control.
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-proof-'));
+  const added = run('git', ['worktree', 'add', '--detach', worktree, ref], { cwd: repoRoot });
+  if (added.status !== 0) {
+    for (const entry of controls) results.push({ id: entry.id, ok: false, stage: 'worktree', detail: added.stderr.trim() });
+    return { total: results.length, live: 0, vacuous: results.length, results };
+  }
 
-    try {
+  try {
+    for (const entry of controls) {
+      const pristine = resetToPristine(worktree, ref);
+      if (!pristine.ok) {
+        // Never run a control on a tree that is not exactly the commit: its verdict would prove nothing.
+        results.push({ id: entry.id, ok: false, stage: 'reset', detail: pristine.detail });
+        continue;
+      }
+
       // 1. Baseline: the proof must pass before the defect is restored.
       const baseline = runShell(entry.proof_command, worktree, entry.timeout_ms);
       const baselinePassed = baseline.status === 0;
@@ -108,9 +144,9 @@ export function runManifest(manifest, options = {}) {
             : 'VACUOUS: proof still passes with the defect restored'
           : 'proof does not pass on the clean tree',
       });
-    } finally {
-      run('git', ['worktree', 'remove', '--force', worktree], { cwd: repoRoot });
     }
+  } finally {
+    run('git', ['worktree', 'remove', '--force', worktree], { cwd: repoRoot });
   }
 
   return {
