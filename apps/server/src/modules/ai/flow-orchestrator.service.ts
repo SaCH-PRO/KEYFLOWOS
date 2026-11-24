@@ -954,6 +954,21 @@ export function toKeyBookingResult(booking: object, links: KeyBookingLinks): Rec
 }
 
 /**
+ * FU-KEY-CONTACT-NAME (P17(d)): null-safe contact display name for KEY booking
+ * and waitlist tool responses/messages (never interpolates "null"/"undefined").
+ */
+function contactDisplayName(
+  c: { displayName?: string | null; firstName?: string | null; lastName?: string | null; email?: string | null } | null | undefined,
+): string {
+  if (!c) return 'Unknown';
+  const explicit = c.displayName?.trim();
+  if (explicit) return explicit;
+  const composed = `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim();
+  if (composed) return composed;
+  return c.email?.trim() || 'Unknown';
+}
+
+/**
  * The tenant models whose model-supplied ids the dispatcher resolves itself (V1-21d), because the
  * service it hands them to looks them up by id alone.
  */
@@ -5020,7 +5035,7 @@ ${triage.standingContext}`;
         // Validate contact exists
         const contact = await this.prisma.client.contact.findFirst({
           where: { id: args.contactId, businessId, deletedAt: null },
-          select: { id: true, firstName: true, lastName: true, displayName: true },
+          select: { id: true, firstName: true, lastName: true, displayName: true, email: true },
         });
         if (!contact) {
           throw new BadRequestException('Contact not found. Please search for the contact first.');
@@ -5042,7 +5057,7 @@ ${triage.standingContext}`;
           take: 5,
         });
         if (similarContacts.length > 0) {
-          const names = similarContacts.map(c => c.displayName || `${c.firstName} ${c.lastName}`).filter(Boolean).join(', ');
+          const names = similarContacts.map(c => contactDisplayName(c)).join(', ');
           throw new BadRequestException(
             `Multiple contacts with similar names found (${names}). Please confirm which contact you want to book for.`
           );
@@ -5080,7 +5095,7 @@ ${triage.standingContext}`;
           endTime,
           notes: args.notes ?? undefined,
         });
-        return { booking, id: booking.id, contactName: contact.displayName || `${contact.firstName} ${contact.lastName}` };
+        return { booking, id: booking.id, contactName: contactDisplayName(contact) };
       }
 
       case 'bookings_reschedule_booking': {
@@ -5109,7 +5124,7 @@ ${triage.standingContext}`;
           preferredTimeOfDay: args.preferredTimeOfDay,
           notes: args.notes,
         });
-        return { entry, id: entry.id, contactName: entry.contact.displayName || `${entry.contact.firstName} ${entry.contact.lastName}` };
+        return { entry, id: entry.id, contactName: contactDisplayName(entry?.contact) };
       }
 
       case 'bookings_list_waitlist': {
