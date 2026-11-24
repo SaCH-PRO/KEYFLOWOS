@@ -20,7 +20,6 @@ export function useContactsPipeline() {
     isPending, startTransition,
     selectedIds, setSelectedIds, setSelectMode,
     loadContacts, trackRecent,
-    setCrmViewTab,
     search: contactsDataSearch,
     statusFilter: contactsDataStatusFilter,
   } = contactsData;
@@ -62,6 +61,18 @@ export function useContactsPipeline() {
     },
     [detailSelectContact, trackRecent, selectedContactId, setSelectedContactId],
   );
+  /**
+   * Opens a customer's page (journey C4: every door to a customer opens /app/crm/contacts/<id>), and records them as
+   * recent as selecting them did. For the views with no side panel: the focus view, the next-action queues and the
+   * call/task actions (FU-C4-FOCUS-OPEN).
+   */
+  const openContactPage = useCallback(
+    (contactId: string) => {
+      trackRecent(contactId);
+      router.push(`/app/crm/contacts/${encodeURIComponent(contactId)}`);
+    },
+    [trackRecent, router],
+  );
   const clearSelectedContact = useCallback(() => {
     setSelectedContactId(null);
   }, [setSelectedContactId]);
@@ -95,21 +106,18 @@ export function useContactsPipeline() {
         break;
       }
       case "call":
-        selectContact(action.contactId);
-        setCrmViewTab("contacts");
+        openContactPage(action.contactId);
         toast.info(`Opening ${action.contactName} — ready to call`);
         break;
       case "task":
-        selectContact(action.contactId);
-        setCrmViewTab("contacts");
+        openContactPage(action.contactId);
         toast.info(`Opening ${action.contactName} — task details`);
         break;
       default:
-        selectContact(action.contactId);
-        setCrmViewTab("contacts");
+        openContactPage(action.contactId);
         break;
     }
-  }, [selectContact, router, setCrmViewTab, openComposer]);
+  }, [openContactPage, router, openComposer]);
 
   useEffect(() => {
     if (businessId) {
@@ -215,6 +223,7 @@ export function useContactsPipeline() {
     smartFilter: contactsData.smartFilter, setSmartFilter: contactsData.setSmartFilter,
     activeListTab: contactsData.activeListTab, setActiveListTab: contactsData.setActiveListTab,
     selectedContactId, selectedContact: detail.selectedContact, detailLoading: detail.detailLoading,
+    openContactPage,
     detailEvents: detail.detailEvents, detailNotes: detail.detailNotes,
     detailTasks: detail.detailTasks, detailCustomFieldValues: detail.detailCustomFieldValues, contactName: detail.contactName,
     showAddForm: actions.showAddForm, setShowAddForm: actions.setShowAddForm,

@@ -72,7 +72,7 @@ export default function ContactsPage() {
     setAutopilotPaused,
     handleCompleteNextAction, handleDoAction,
     handleApproveAutopilot, handleDenyAutopilot,
-    loadFlowData,
+    loadFlowData, openContactPage,
   } = state;
 
   const crmShortcuts = useMemo<ShortcutGroup[]>(() => [
@@ -132,9 +132,7 @@ export default function ContactsPage() {
   const handleCancelConfirm = useCallback(() => setConfirmState({ open: false, action: () => {} }), [setConfirmState]);
   // A customer opened from the focus view's cards or the next-action queue opens their page (journey C4): those
   // views have no side panel, so selecting alone showed nothing (FU-C4-FOCUS-OPEN).
-  const handleViewEngageContact = useCallback((id: string) => {
-    router.push(`/app/crm/contacts/${encodeURIComponent(id)}`);
-  }, [router]);
+  const handleViewEngageContact = useCallback((id: string) => openContactPage(id), [openContactPage]);
   const handleToggleAutopilotPause = useCallback(() => setAutopilotPaused((prev: boolean) => !prev), [setAutopilotPaused]);
   const _handleTabChange = useCallback((t: string) => {
     if (t === crmViewTab) return;
