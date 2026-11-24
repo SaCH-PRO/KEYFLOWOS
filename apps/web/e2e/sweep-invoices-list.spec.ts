@@ -10,7 +10,9 @@ import { test, expect, API_URL, settle, type Tenant } from "./journeys/journey-h
  * routes, at 1440x900 and 375x812, on /app/commerce/invoices:
  *   1. BUG-007: the Unpaid card is the TTD invoices' figure and never adds the USD one; a line says one invoice in
  *      another currency is listed and not added in;
- *   2. BUG-070: each card's amount stays inside its card (no horizontal overflow) at both widths;
+ *   2. BUG-070: each card is readable: its amount and label have a contrast of at least 4.5:1 against the card, in
+ *      the dark and the light colour scheme (the cards kept their light-mode pastel backgrounds in dark mode, so the
+ *      amounts were near-white on near-white), and the amount stays inside the card;
  *   3. BUG-089: the Unpaid card lists the part-paid invoice it counts;
  *   4. BUG-131: the voided invoice's row says nothing is due;
  *   5. BUG-047: the part-paid row offers Record balance and Remind; Remind opens WhatsApp with the balance and the link;
@@ -30,7 +32,7 @@ async function api<T = Record<string, unknown>>(request: APIRequestContext, owne
   return (text ? JSON.parse(text) : null) as T;
 }
 
-interface Seeded { contactName: string; usd: string; sent: string; part: string; voided: string; dup: string; dupNotes: string }
+interface Seeded { contactId: string; contactName: string; usd: string; sent: string; part: string; voided: string; dup: string; dupNotes: string }
 
 async function seed(request: APIRequestContext, owner: Tenant): Promise<Seeded> {
   const biz = owner.businessId;
@@ -56,7 +58,7 @@ async function seed(request: APIRequestContext, owner: Tenant): Promise<Seeded> 
   await api(request, owner, "PATCH", `/commerce/invoices/${voided.id}/status/void`, { businessId: biz, status: "VOID" });
   const dupNotes = `Deposit 50% to confirm ${stamp()}`;
   const dup = await make({ currency: "TTD", taxRate: 12.5, discountType: "FIXED", discountValue: 20, notes: dupNotes });
-  return { contactName: `Rena ${last}`, usd: usd.invoiceNumber, sent: sent.invoiceNumber, part: part.invoiceNumber, voided: voided.invoiceNumber, dup: dup.invoiceNumber, dupNotes };
+  return { contactId: contact.id, contactName: `Rena ${last}`, usd: usd.invoiceNumber, sent: sent.invoiceNumber, part: part.invoiceNumber, voided: voided.invoiceNumber, dup: dup.invoiceNumber, dupNotes };
 }
 
 const statCard = (page: Page, label: string): Locator => page.locator("button").filter({ has: page.getByText(label, { exact: true }) }).first();
@@ -91,11 +93,38 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 375, height: 812 
         await expect(page.getByText(/1 invoice in other currencies is listed below and not added in/)).toBeVisible();
       });
 
-      await test.step("BUG-070: each card's amount stays inside its card", async () => {
-        for (const label of ["Unpaid", "Overdue", "Paid this month", "Drafts"]) {
-          const fits = await statCard(page, label).evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
-          expect(fits, `${label} card fits`).toBe(true);
+      await test.step("BUG-070: each card is readable (amount and label contrast at least 4.5:1, in dark and light) and its amount stays inside it", async () => {
+        const contrastOf = async (label: string) => statCard(page, label).evaluate((card) => {
+          const rgb = (c: string) => (c.match(/[\d.]+/g) ?? ["0", "0", "0", "1"]).map(Number);
+          const lum = ([r, g, b]: number[]) => {
+            const ch = (v: number) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; };
+            return 0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b);
+          };
+          // The card's own background, composited over the page behind it when it is translucent.
+          const page = rgb(getComputedStyle(document.body).backgroundColor);
+          const bgRaw = rgb(getComputedStyle(card).backgroundColor);
+          const a = bgRaw[3] ?? 1;
+          const bg = [0, 1, 2].map((i) => bgRaw[i]! * a + page[i]! * (1 - a));
+          const ratio = (el: Element) => {
+            const fg = rgb(getComputedStyle(el).color);
+            const [l1, l2] = [lum(fg), lum(bg)].sort((x, y) => y - x);
+            return (l1! + 0.05) / (l2! + 0.05);
+          };
+          const value = card.querySelector("p span") ?? card.querySelector("p")!;
+          const name = card.querySelector("span")!;
+          return { value: ratio(value), label: ratio(name), fits: card.scrollWidth <= card.clientWidth + 1 };
+        });
+        for (const scheme of ["dark", "light"] as const) {
+          await page.emulateMedia({ colorScheme: scheme });
+          await page.waitForTimeout(300);
+          for (const label of ["Unpaid", "Overdue", "Paid this month", "Drafts"]) {
+            const c = await contrastOf(label);
+            expect(c.value, `${label} amount contrast (${scheme})`).toBeGreaterThanOrEqual(4.5);
+            expect(c.label, `${label} label contrast (${scheme})`).toBeGreaterThanOrEqual(4.5);
+            expect(c.fits, `${label} card fits (${scheme})`).toBe(true);
+          }
         }
+        await page.emulateMedia({ colorScheme: null });
       });
 
       await test.step("BUG-131: the voided invoice's row says nothing is due", async () => {
@@ -131,7 +160,9 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 375, height: 812 
         await page.getByRole("button", { name: "Duplicate" }).click();
         await expect(page.getByRole("heading", { name: "New Invoice" })).toBeVisible();
         await settle(page, 1_000);
-        await expect(page.getByText(s.contactName).first()).toBeVisible();
+        // The client is the form's customer select, set to the duplicated invoice's customer (as journey E11 reads it).
+        const client = page.locator("select").filter({ has: page.locator(`option[value="${s.contactId}"]`) }).first();
+        await expect(client, "the client").toHaveValue(s.contactId);
         // The Tax & Discount section's fields, found by their labels; the notes are the notes textarea.
         const tax = page.locator("label", { hasText: "Tax Rate (%)" }).locator("xpath=following-sibling::input[1]");
         const discount = page.locator("label", { hasText: /^Discount$/ }).locator("xpath=following-sibling::*[1]//input[@type='number']");

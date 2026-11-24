@@ -292,6 +292,28 @@ describe("SWP-INV-LIST: the Invoices list", () => {
     expect((await screen.findAllByText("INV-0070")).length).toBeGreaterThan(0);
   });
 
+  it("RED-BEFORE (journey D8): Escape closes a row's menu and goes nowhere (the app's global Escape is 'go back')", async () => {
+    rows = [row({ id: "inv_part", invoiceNumber: "INV-0080", status: "PARTIALLY_PAID", total: 300, subtotal: 300 })];
+    // A stand-in for the app's global shortcut (hooks/use-keyboard-shortcuts.ts: Escape -> kf:escape -> the parent route),
+    // which listens on window in the bubble phase.
+    const globalEscape = vi.fn();
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") globalEscape(); };
+    window.addEventListener("keydown", onKey);
+    try {
+      render(<InvoicesHubPage />);
+      await openRowMenu("INV-0080");
+      expect(await screen.findByText("Duplicate")).toBeTruthy();
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+      await waitFor(() => expect(screen.queryByText("Duplicate")).toBeNull());
+      expect(globalEscape, "the menu's Escape does not also go back").not.toHaveBeenCalled();
+      // With no menu open, Escape is the app's again.
+      fireEvent.keyDown(document.body, { key: "Escape" });
+      expect(globalEscape).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener("keydown", onKey);
+    }
+  });
+
   it("CONTROL: a part-paid row's Record balance opens the invoice's record-payment step", async () => {
     rows = [row({ id: "inv_part", invoiceNumber: "INV-0041", status: "PARTIALLY_PAID", total: 300, subtotal: 300 })];
     render(<InvoicesHubPage />);
