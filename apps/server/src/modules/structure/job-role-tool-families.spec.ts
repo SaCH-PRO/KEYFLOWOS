@@ -1282,6 +1282,9 @@ const EVIDENCE: Array<{ tool: string; service: string; route: string; scope: str
   { tool: 'finance_auto_match_bank', service: 'BankMatchingService', route: 'POST /finance/businesses/:businessId/accounts/:accountId/bank-transactions/auto-match', scope: 'revenue:write', file: 'modules/finance/finance.controller.ts' },
   { tool: 'reconcile_run_auto_match', service: 'BankMatchingService', route: 'POST /finance/businesses/:businessId/accounts/:accountId/bank-transactions/auto-match', scope: 'revenue:write', file: 'modules/finance/finance.controller.ts' },
   { tool: 'reconcile_match_line', service: 'BankMatchingService', route: 'POST /finance/businesses/:businessId/bank-transactions/:bankTransactionId/match', scope: 'revenue:write', file: 'modules/finance/finance.controller.ts' },
+  // SWP-CENSUS-OPEN-WRITES (owner ruling D-146, coawrite): POST chart-of-accounts, the member route to
+  // FinanceCoaService.create, needs revenue write (only Money write changes the chart every posting names)
+  { tool: 'finance_create_coa_account', service: 'FinanceCoaService', route: 'POST /finance/businesses/:businessId/chart-of-accounts', scope: 'revenue:write', file: 'modules/finance/finance.controller.ts' },
   // PR195-BOOKS-DOORS (SEC-P195JS-1): a purchase order's advance (its receipt posts the purchase) needs
   // expenses write, the scope a payment out needs (bills/:id/pay)
   { tool: 'inventory_advance_purchase_order', service: 'MarketplaceService', route: 'POST /marketplace/businesses/:businessId/purchase-orders/:poId/advance', scope: 'expenses:write', file: 'modules/marketplace/marketplace.controller.ts' },
@@ -1375,7 +1378,8 @@ const UNGRANTED: Record<string, string> = {
   contract_extract_clauses: 'ContractClauseService.extractClauses backs no route',
   // finance_auto_match_bank: granted (revenue write) since PR195-BOOKS-DOORS (SEC-P195JS-1) gated the statement
   // import and the auto-match, the member routes to BankMatchingService.autoMatch
-  finance_create_coa_account: 'FinanceCoaService is reached by finance.controller, which is unscoped',
+  // finance_create_coa_account: granted (revenue write) since SWP-CENSUS-OPEN-WRITES (D-146, coawrite) gated POST
+  // chart-of-accounts, the member route to FinanceCoaService.create; finance_list_coa stays ungranted (GET unchanged)
   finance_expense_breakdown: 'LedgerReportingService.getExpenseBy is reached by GET reports/expense-by, which is unscoped (it carries no revenue; V1-81 D-57)',
   // finance_customer_balance, finance_list_action_items, finance_list_bank_accounts: granted (revenue read) since
   // PR195-KEY-GATES (SEC-P195BW-4/5) gated the FinanceController reads they stand in for (D-57, D-146)
@@ -1560,6 +1564,8 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         finance_cashflow: 'read',
         // PR195-BOOKS-DOORS (SEC-P195JS-1): the statement import and the auto-match need revenue write
         finance_auto_match_bank: 'write',
+        // SWP-CENSUS-OPEN-WRITES (D-146, coawrite): POST chart-of-accounts needs revenue write
+        finance_create_coa_account: 'write',
         // PR195-KEY-GATES (SEC-P195BW-4/5; D-57, D-146): the FinanceController Books reads they stand in for need revenue read
         finance_customer_balance: 'read',
         finance_list_action_items: 'read',
