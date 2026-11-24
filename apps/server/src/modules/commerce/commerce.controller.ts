@@ -1789,12 +1789,19 @@ export class CommerceController {
   // page shows what has been paid and what remains. Still no payment rows,
   // references or customer email. An unknown, expired, inactive or
   // foreign-tenant link answers the same body.
+  //
+  // SWP-INV-PUBLIC-LINK (BUG-053, BUG-087, BUG-091): a live link of a VOID
+  // invoice answers { ok: false, reason: 'voided' } and nothing else (no
+  // figures, no view event; a dead link of one stays neutral, as above). Beside
+  // the invoice block (still the eleven keys) the payload carries `totals`, the
+  // stored subtotal, tax and discount, so the page shows how the total is made.
   @UseGuards(PublicRateLimitGuard)
   @PublicRateLimit(60, 60_000)
   @Get('public/invoice-link/:token')
   async getPublicInvoiceByToken(@Param('token') token: string) {
     const link = await this.commerce.getPaymentLinkByToken(token);
     if (!link) return { ok: false, reason: 'invalid_or_expired' };
+    if (link.invoice.status === 'VOID') return { ok: false, reason: 'voided' };
     const invoice = (await this.commerce.getInvoiceWithBusiness(link.invoiceId, true)) as
       | InvoiceForEmail
       | null;
@@ -1825,6 +1832,14 @@ export class CommerceController {
         business: invoice.business ? { name: invoice.business.name, logoUrl: invoice.business.logoUrl, primaryColor: invoice.business.primaryColor, email: invoice.business.email, phone: invoice.business.phone } : null,
       },
       balance,
+      totals: {
+        subtotal: Number(invoice.subtotal ?? 0),
+        taxRate: Number(invoice.taxRate ?? 0),
+        taxAmount: Number(invoice.taxAmount ?? 0),
+        discountAmount: Number(invoice.discountAmount ?? 0),
+        total: Number(invoice.total),
+        currency: invoice.currency,
+      },
     };
   }
 
