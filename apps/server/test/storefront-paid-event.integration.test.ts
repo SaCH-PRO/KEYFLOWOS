@@ -3659,13 +3659,48 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
     const completeOffline = (orderId: string, actor = ID.owner) =>
       request(http.getHttpServer()).post(`/site/businesses/${ID.biz}/orders/${orderId}/complete-offline`).set('x-test-user', actor).send({});
 
-    /** A storefront order of A placed through the public checkout path (server-side pricing). */
+    /** A pending storefront order of A (seeded directly so V18-T4/V18-T4c can test completeCheckout when stock is missing or held by another business's planted row, now that createOrder refuses zero-stock tracked products under SWP-STORE-OVERSELL). */
+    let cpsOrderSeq = 0;
     async function orderOf(lines: Array<{ productId: string; quantity: number }>, paymentMethod = 'CASH') {
-      const order = await storeOrders.createOrder({
-        businessId: ID.biz,
-        cartItems: lines,
-        customerInfo: { name: 'Vee Eighteen', email: CUSTOMER_EMAIL },
-        paymentMethod,
+      cpsOrderSeq += 1;
+      const prodRows = await db.product.findMany({
+        where: { id: { in: lines.map((l) => l.productId) }, businessId: ID.biz },
+        select: { id: true, name: true, price: true, currency: true, sku: true },
+      });
+      const byId = new Map<string, any>(prodRows.map((p: any) => [p.id, p]));
+      const items = lines.map((l) => {
+        const prod = byId.get(l.productId)!;
+        const unitPrice = Number(prod.price);
+        return {
+          productId: prod.id,
+          name: prod.name,
+          sku: prod.sku ?? null,
+          quantity: l.quantity,
+          unitPrice,
+          total: unitPrice * l.quantity,
+          currency: prod.currency ?? 'TTD',
+        };
+      });
+      const subtotal = items.reduce((s, i) => s + i.total, 0);
+      const order = await db.marketplaceOrder.create({
+        data: {
+          businessId: ID.biz,
+          orderNumber: `${P}ORD-CPS-${Date.now()}-${cpsOrderSeq}`,
+          status: 'PENDING',
+          type: 'STOREFRONT',
+          customerName: 'Vee Eighteen',
+          customerEmail: CUSTOMER_EMAIL,
+          subtotal,
+          shippingFee: 0,
+          taxAmount: 0,
+          discountAmount: 0,
+          total: subtotal,
+          currency: 'TTD',
+          paymentMethod,
+          paymentStatus: paymentMethod === 'CASH' ? 'PENDING' : 'UNPAID',
+          items: { create: items },
+        },
+        include: { items: true },
       });
       await settle();
       return order;
@@ -3677,7 +3712,7 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
       (
         await db.stockMovement.findMany({ where: { productId: { in: productIds } }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] })
       ).map((m: any) => `${m.businessId}:${m.warehouseId}:${m.productId}:${m.quantityChange}:${m.type}:${m.referenceId}`);
-    const noStockRow = (productId: string) => `Cannot finalize checkout: tracked product ${productId} has no stock row in the default warehouse.`;
+    const noStockRow = (productName: string) => `Cannot finalize checkout: tracked product "${productName}" has no stock row in the default warehouse.`;
     /** One cogs posting of the order: Dr COGS / Cr INVENTORY_ASSET of `amount`. */
     async function expectCogs(orderId: string, amount: number) {
       const cogs = await cogsOf(orderId);
@@ -3707,7 +3742,7 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
       seen = [];
       const twinRes = await completeOffline(twin.id);
       await settle();
-      expect(`${twinRes.status} ${twinRes.body?.message}`, 'the own missing stock is refused').toBe(`400 ${noStockRow(CPS.missing)}`);
+      expect(`${twinRes.status} ${twinRes.body?.message}`, 'the own missing stock is refused').toBe(`400 ${noStockRow('V18A No Stock Row')}`);
       await expectNothingWritten(twin, twinShape, twinBefore);
 
       // The pair held by B's planted row: the same path. At 9831c217: 201, B's row 10 -> 8 and A's 'sale' movement.
@@ -3717,7 +3752,7 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
       seen = [];
       const res = await completeOffline(order.id);
       await settle();
-      expect(`${res.status} ${res.body?.message}`, 'the pair held by another business is the own missing stock').toBe(`400 ${noStockRow(CPS.tracked)}`);
+      expect(`${res.status} ${res.body?.message}`, 'the pair held by another business is the own missing stock').toBe(`400 ${noStockRow('V18A Pair Held')}`);
       await expectNothingWritten(order, shape, before);
       expect(await stockRow(CPS.plantedTracked), 'B\'s planted row untouched').toEqual(planted);
       expect(await movementsOf([CPS.tracked, CPS.missing]), 'no movement for the product in any business').toEqual([]);
