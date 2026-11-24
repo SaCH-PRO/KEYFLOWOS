@@ -510,6 +510,110 @@ describe("FU-PENDING-OWED-WEB (D-256): every web owed figure counts PENDING rema
     expect(getPipelineStage("PENDING")).not.toBe("draft");
     expect(getPipelineStage("PENDING")).toBe("sent");
   });
+
+  it("PO-W20 (R3): invoiceRemainingOwed handles refunds, over-refund D-250 clamping, string totals, NaN totals, and non-owed statuses", () => {
+    expect(commerceStatus.invoiceRemainingOwed({ status: "PENDING", total: "500", currency: "TTD", payments: [payment("r1", 200), payment("r1", -50, "REFUNDED")] })).toBe(350);
+    // D-250 upper clamp: orphan refund exceeding paid never exceeds invoice total
+    expect(commerceStatus.invoiceRemainingOwed({ status: "PENDING", total: 500, currency: "TTD", payments: [payment("r2", -100, "REFUNDED")] })).toBe(500);
+    // Malformed totals stay 0 (never NaN)
+    expect(commerceStatus.invoiceRemainingOwed({ status: "PENDING", total: undefined, currency: "TTD", payments: [] })).toBe(0);
+    expect(commerceStatus.invoiceRemainingOwed({ status: "PENDING", total: "not-a-number", currency: "TTD", payments: [] })).toBe(0);
+    // Non-owed statuses always return 0
+    expect(commerceStatus.invoiceRemainingOwed({ status: "DRAFT", total: 500, currency: "TTD", payments: [] })).toBe(0);
+    expect(commerceStatus.invoiceRemainingOwed({ status: "PAID", total: 500, currency: "TTD", payments: [] })).toBe(0);
+  });
+
+  it("PO-W21 RED-BEFORE (R3): InvoicesPanel forwards payments and currency in allInvoices so BillingDetailModal Client Intelligence nets remaining balance", async () => {
+    const contactId = "ct_pow_wire";
+    const pending = invoice("inv_pend_wire", "PENDING", 500, [payment("inv_pend_wire", 100)], { contactId });
+    const partial = invoice("inv_part_wire", "PARTIALLY_PAID", 250, [payment("inv_part_wire", 50)], { contactId });
+
+    render(
+      <InvoicesPanel
+        invoices={[pending, partial]}
+        contacts={[]}
+        products={[]}
+        businessId="biz_pow"
+        currency="TTD"
+        loading={false}
+        setInvoices={() => {}}
+        setProducts={() => {}}
+        gmailStatus={null}
+      />,
+    );
+
+    // Click the pending invoice row to open BillingDetailModal
+    fireEvent.click(screen.getByText("INV_PEND_WIRE"));
+    const outLabel = await screen.findByText("Outstanding");
+    const outBox = outLabel.closest("div.rounded-lg") as HTMLElement;
+    expect(outBox.textContent).toContain(formatAmount(600, "TTD"));
+    expect(outBox.textContent).not.toContain(formatAmount(750, "TTD"));
+  });
+
+  it("PO-W22 RED-BEFORE (R3): invoices/page.tsx and InvoiceStatCards stay NaN-safe and enforce D-250 upper clamp on over-refunded rows", async () => {
+    const overRefunded = invoice("inv_overref_r3", "PENDING", 500, [payment("inv_overref_r3", -100, "REFUNDED")]);
+    const malformed = invoice("inv_nan_r3", "PENDING", undefined as unknown as number);
+
+    render(<InvoiceStatCards invoices={[overRefunded, malformed]} currency="TTD" />);
+    const cardBtn = screen
+      .getAllByText("Unpaid")
+      .map((el) => el.closest("button"))
+      .find((b) => b?.querySelector("p.text-xl")) as HTMLElement;
+    expect(cardBtn.textContent).toContain(formatAmount(500, "TTD"));
+    expect(cardBtn.textContent).not.toContain("NaN");
+    cleanup();
+
+    fetchInvoices.mockResolvedValue({ data: [overRefunded, malformed], error: null });
+    render(<InvoicesHubPage />);
+    await waitFor(() => expect(screen.getByText("INV_OVERREF_R3")).toBeTruthy());
+    const pageUnpaidBtn = screen
+      .getAllByText("Unpaid")
+      .map((el) => el.closest("button"))
+      .find((b) => b?.querySelector("p.text-2xl")) as HTMLElement;
+    expect(pageUnpaidBtn.textContent).toContain(formatAmount(500, "TTD"));
+    expect(pageUnpaidBtn.textContent).not.toContain("NaN");
+  });
+
+  it("PO-W23 RED-BEFORE (R3): CommerceOverviewTab RevenueActionCards overdue card nets partial payments and guards NaN totals", () => {
+    const overduePartial = invoice("inv_over_act", "OVERDUE", 500, [payment("inv_over_act", 100)], { dueDate: PAST_DUE });
+    const overdueNan = invoice("inv_over_nan", "OVERDUE", undefined as unknown as number, [], { dueDate: PAST_DUE });
+
+    render(
+      <CommerceOverviewTab
+        businessId="biz_pow"
+        invoices={[overduePartial, overdueNan]}
+        quotes={[]}
+        recurring={[]}
+        currency="TTD"
+        loading={false}
+        onNavigate={() => {}}
+        onNewItem={() => {}}
+      />,
+    );
+
+    const overdueCardText = screen.getByText("2 overdue invoices").parentElement?.textContent ?? "";
+    expect(overdueCardText).toContain("400");
+    expect(overdueCardText).not.toContain("500");
+    expect(overdueCardText).not.toContain("NaN");
+  });
+
+  it("PO-W24 RED-BEFORE (R3): CollectionsPanel renders 0% recovery rate (never NaN%) when overdue queue nets to 0", () => {
+    const settledOverdue = invoice("inv_zero_col", "OVERDUE", 500, [payment("inv_zero_col", 500)], { dueDate: PAST_DUE });
+
+    render(
+      <CollectionsPanel
+        invoices={[settledOverdue]}
+        quotes={[]}
+        currency="TTD"
+        businessId="biz_pow"
+        contacts={[]}
+        setInvoices={() => {}}
+      />,
+    );
+
+    expect(screen.getByText(/0% recovery rate/)).toBeTruthy();
+    expect(screen.queryByText(/NaN%/)).toBeNull();
+  });
 });
 
 describe("FU-PENDING-OWED-WEB (D-256): static single-source-of-truth guard", () => {
