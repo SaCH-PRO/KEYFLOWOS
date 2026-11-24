@@ -322,8 +322,22 @@ export function actingMemberNow(): string {
  * business is read again. `sentAs` is who sent the write (actingMemberNow() taken before it was sent): an answer that
  * lands after the member changed is recorded for nobody.
  */
-export function noteBusinessSettings(businessId: string, answer: unknown, sentAs: string = actingMember()): boolean {
+export function noteBusinessSettings(businessId: string, answer: unknown, sentAs: string = actingMember(), sequence?: number): boolean {
   if (!businessId) return false;
+  // FU-SETTINGS-MANUAL-STEP-FENCE: a caller that sends its own write takes a number for it before sending
+  // (beginBusinessWrite) and passes it here, so its answer is fenced like the store's own writes (`recorded`): an answer
+  // older than one already recorded records nothing and the business is read again; a newer one raises the mark.
+  if (sequence !== undefined && sentAs === actingMember()) {
+    if ((newestWriteRecorded.get(businessId) ?? 0) > sequence) {
+      answerRecorded(businessId);
+      if (watched.has(businessId)) void loadBusinessSettings(businessId, { force: true });
+      else if (entries.delete(businessId)) emit();
+      return isPlainObject(answer) && answer.id === businessId;
+    }
+    if (isPlainObject(answer) && answer.id === businessId) {
+      newestWriteRecorded.set(businessId, Math.max(newestWriteRecorded.get(businessId) ?? 0, sequence));
+    }
+  }
   answerRecorded(businessId);
   const own = isPlainObject(answer) && answer.id === businessId;
   if (sentAs !== actingMember()) {
@@ -366,6 +380,14 @@ function nextWrite(businessId: string): number {
   const sequence = (writesSent.get(businessId) ?? 0) + 1;
   writesSent.set(businessId, sequence);
   return sequence;
+}
+
+/**
+ * FU-SETTINGS-MANUAL-STEP-FENCE: the number of a settings write a caller sends itself (the manual onboarding step's
+ * profile PATCH), taken just before sending; pass it to noteBusinessSettings with the answer.
+ */
+export function beginBusinessWrite(businessId: string): number {
+  return nextWrite(businessId);
 }
 
 type WriteAnswer = Awaited<ReturnType<typeof apiPatch<Record<string, unknown>>>>;
