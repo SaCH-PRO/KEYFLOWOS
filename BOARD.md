@@ -40,7 +40,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | M1 | PR #228 | `wave/v1-wave-3j` | antigravity | **merged** (142e5f9e) | — | Done |
 | M2 | Rulings, **PR #230** | `wave/v1-rulings-3n` @ d03252e1 | claude | **merged** (05f04f2c) | — | Done. The plan of record on main now carries the wedge re-cut and D-263..D-272 |
-| M3 | Wave 3m, **PR #229** | `wave/v1-wave-3m` @ 7bd2f445: MOUNT-QUOTES, SWP-INV-MATH, SWP-INV-PUBLIC-LINK, SWP-QUOTE-PUBLIC-PAGE, SWP-INV-FORM-UX, SWP-QUOTE-COMPOSER-CONTACT. **Proven at 7bd2f445:** server 820 files / 15287 tests, R0 MET 39/39 exact-head; web 197 files / 1784 tests exit 0, tsc 0, lint 25 ≤ 26 | claude | pr-open | — | When M1 and M2 are merged: merge main in, re-prove the new head (CHECKLISTS C), CI green at the exact head, merge (D) |
+| M3 | Wave 3m, **PR #229** | `wave/v1-wave-3m` @ 6bb8b430 (main 05f04f2c merged in): MOUNT-QUOTES, SWP-INV-MATH, SWP-INV-PUBLIC-LINK, SWP-QUOTE-PUBLIC-PAGE, SWP-INV-FORM-UX, SWP-QUOTE-COMPOSER-CONTACT. **Proven at 6bb8b430:** server 833/833 files, 15419 tests exit 0 (rerun after one ECONNRESET); R0 MET 39/39 exact-head; web 197/1784 exit 0, tsc 0, lint 25 of 26. Merge confirmation ACCEPT | claude | blocked | the owner: GitGuardian incident 40952282 | Owner marks 40952282 a false positive; then CI green at the exact head, merge (D) |
 | M4 | Wave 3j split | `wave/3j-second-lane` (16 packets; fails 25/50; duplicates RR-REDACTION-BY-CONTENT with #228) | antigravity | todo | M3 | Split into parts within 25 commits / 50 files without the duplicate; prove each; PR; merge in turn |
 
 ## Packets and tasks
@@ -64,4 +64,4 @@
 | P14 | Owner: "Batch 2 safe defaults #5–#10" (not approved in D-272) | owner | blocked | the owner's review | The owner reviews the list |
 | P15 | Owner: redeploy production (D-266) | owner | blocked | M1–M4 | The owner deploys from main |
 
-Last updated: 2026-11-24 by the antigravity lane (M1 merged; P1, P2, P4+R0, P5 all returned; P6 FU-PENDING-OWED-SERVER claimed).
+Last updated: 2026-11-24 by the claude lane (M3 proven at 6bb8b430; blocked on GitGuardian 40952282; P16 next).
