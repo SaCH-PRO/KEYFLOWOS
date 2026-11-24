@@ -74,7 +74,7 @@ let presenceService: any;
 
 async function cleanup() {
   for (const sql of [
-    `DELETE FROM site_page_published WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM site_pages_published WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM bookings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM marketplace_order_items WHERE order_id IN (SELECT id FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -200,7 +200,7 @@ beforeAll(async () => {
       { provide: CaseStudyService, useValue: noop },
       { provide: PaymentsService, useValue: noop },
       { provide: AiUsageService, useValue: noop },
-      { provide: SubscriptionsService, useValue: noop },
+      { provide: SubscriptionsService, useValue: { checkLimit: async () => ({ allowed: true, current: 0, limit: -1 }) } },
     ],
   })
     .overrideGuard(AuthGuard).useValue(allowAll)
@@ -533,7 +533,7 @@ describe('SWP-STORE-LISTING-SERVER (BUG-055, ruling storelisting): public store 
       });
     expect(mixedRes.status).toBe(400);
     expect(mixedRes.body.code).toBe('PRODUCT_NOT_IN_STORE');
-    expect(mixedRes.body.productIds).toEqual([ID.prodUnlisted]);
+    expect(mixedRes.body.details?.productIds).toEqual([ID.prodUnlisted]);
 
     const dupRes = await agent()
       .post(`/site/storefront/public/${SLUG.a}/checkout`)
@@ -547,7 +547,7 @@ describe('SWP-STORE-LISTING-SERVER (BUG-055, ruling storelisting): public store 
       });
     expect(dupRes.status).toBe(400);
     expect(dupRes.body.code).toBe('PRODUCT_NOT_IN_STORE');
-    expect(dupRes.body.productIds).toEqual([ID.prodUnlisted]);
+    expect(dupRes.body.details?.productIds).toEqual([ID.prodUnlisted]);
 
     expect(await db.marketplaceOrder.count({ where: { businessId: ID.bizA } })).toBe(beforeCount);
   });
@@ -601,7 +601,7 @@ describe('SWP-STORE-LISTING-SERVER (BUG-055, ruling storelisting): public store 
     expect(siteRes.body.products ?? []).toEqual([]);
   });
 
-  it('SLM-12 (R1 MAJOR #2): public booking slots and booking creation refuse a product-backed listing Service (sourceProductId != null) and write zero bookings', async () => {
+  it('SLM-12 (R1 MAJOR #2): public booking slots and booking creation refuse a product-backed listing Service (sourceProductId != null) with 404 and write zero bookings', async () => {
     const beforeBookings = await db.booking.count({ where: { businessId: ID.bizA } });
     const futureDate = new Date(Date.now() + 14 * 86400_000).toISOString().slice(0, 10);
 
@@ -616,8 +616,10 @@ describe('SWP-STORE-LISTING-SERVER (BUG-055, ruling storelisting): public store 
         firstName: 'Should',
         lastName: 'Fail',
         email: `${P}booking-fail@test.local`,
+        phone: '+18685550100',
       });
-    expect([400, 404]).toContain(bookRes.status);
+    expect(bookRes.status).toBe(404);
+    expect(String(bookRes.body?.message ?? '')).toMatch(/Service not found/i);
     expect(await db.booking.count({ where: { businessId: ID.bizA } })).toBe(beforeBookings);
   });
 
