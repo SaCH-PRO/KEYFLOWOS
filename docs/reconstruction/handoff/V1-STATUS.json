@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "023a23510070097ce6d664563896aac79770518d",
-  "main_commit_date": "2026-11-24T19:10:22+00:00",
+  "main_sha": "3ca954dfec25166e07c37488fe83794333a7c08e",
+  "main_commit_date": "2026-11-24T20:22:36+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -27,13 +27,13 @@
   ]
  },
  "summary": {
-  "packets": 375,
-  "points": 547.5,
+  "packets": 376,
+  "points": 548.5,
   "by_status": {
    "done": {
     "packets": 99,
     "points": 146.5,
-    "pct_by_points": 26.8
+    "pct_by_points": 26.7
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 276,
-    "points": 401,
-    "pct_by_points": 73.2
+    "packets": 277,
+    "points": 402,
+    "pct_by_points": 73.3
    }
   },
   "by_step": {
@@ -80,8 +80,8 @@
    "5": {
     "done": 12,
     "in-progress": 0,
-    "todo": 68,
-    "total": 80
+    "todo": 69,
+    "total": 81
    },
    "6": {
     "done": 3,
@@ -112,8 +112,8 @@
    "launch": {
     "done": 12,
     "in-progress": 0,
-    "todo": 224,
-    "total": 236
+    "todo": 225,
+    "total": 237
    },
    "follow-on": {
     "done": 0,
@@ -127,7 +127,7 @@
    "prior-status-file+wave-2b-commit": 28,
    "code-commit-subject": 9,
    "compacted-commit": 43,
-   "no-evidence": 151
+   "no-evidence": 152
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -263,7 +263,7 @@
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 28
+   "unblocks": 29
   },
   {
    "id": "W11-GENOME-RECS-DOMAIN",
@@ -1515,7 +1515,7 @@
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 28
+   "unblocks": 29
   },
   {
    "id": "W11-GENOME-RECS-DOMAIN",
@@ -9050,6 +9050,23 @@
     "FU-C4-FOCUS-OPEN"
    ],
    "title": "Cmd/Ctrl+K finds a customer and opens their page (journey C4)",
+   "deps_met": false
+  },
+  {
+   "id": "FU-KEY-CTRLJ-OWNERS",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "track": "launch",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-C4-CMDK-SEARCH"
+   ],
+   "title": "Cmd/Ctrl+J, KEY's drawer, has one owner",
    "deps_met": false
   },
   {
