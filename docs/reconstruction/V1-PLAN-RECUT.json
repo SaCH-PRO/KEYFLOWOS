@@ -12777,10 +12777,12 @@
     "apps/web/src/app/app/crm/contacts/[contactId]/quotes-invoices/page.tsx",
     "apps/web/src/app/app/crm/contacts/[contactId]/recommendations/page.tsx",
     "apps/web/src/app/app/crm/contacts/[contactId]/tasks/page.tsx",
-    "apps/web/src/app/app/crm/contacts/[contactId]/contact-header.tsx"
+    "apps/web/src/app/app/crm/contacts/[contactId]/contact-header.tsx",
+    "apps/web/e2e/journeys/c-customer.spec.ts (C6 must be able to fail at the base, A7/A9)",
+    "apps/web/src/app/app/crm/contacts/[contactId]/__tests__/*-plain-status.test.tsx (new)"
    ],
-   "scope": "From the SWP-CONTACT-DETAIL acceptance review (CDC-4): stored statuses are printed raw on the pages journey C6 walks (bookings/page.tsx:78, money/page.tsx:174/197/220, quotes-invoices/page.tsx:122/166, recommendations :268, tasks :219, contact-header.tsx:119). C6's seed (one note) does not reach them; a customer with an invoice or booking does. Use statusLabel(code, domain) from lib/status-labels.ts.",
-   "definition_of_done": "RED per page: a seeded status (PARTIALLY_PAID, NO_SHOW, ...) shows as its code; GREEN: its plain word. Browser: C6 extended with an invoice and a booking stays green."
+   "scope": "From the SWP-CONTACT-DETAIL acceptance review (CDC-4): stored statuses are printed raw on the pages journey C6 walks (bookings/page.tsx:78, money/page.tsx:174/197/220, quotes-invoices/page.tsx:122/166, recommendations :268, tasks :219, contact-header.tsx:119). C6's seed (one note) does not reach them; a customer with an invoice or booking does. Use statusLabel(code, domain) from lib/status-labels.ts. Corrections: also contact-header.tsx:130 (the status menu options) and :85 (the 'Status updated to' toast); money/page.tsx:174 prints an event code (invoice.paid) beside its label, so it takes eventLabel or goes, not statusLabel; statusLabel's only domain is 'invoice' (PARTIAL), the rest use the global map. Decide whether note/event `source` and ai-insights' bestChannel/trend count. C6's detectors (two-word dotted codes and UPPER_SNAKE) cannot see single-word codes (LEAD, SENT, HIGH) or lower-case event codes: as written, 'C6 extended with an invoice and a booking' passes at the base too; seed PARTIALLY_PAID and NO_SHOW and add a whole-word status detector. (Pre-flight 2026-11-24 against 771bfc3c, D-274 A3.)",
+   "definition_of_done": "RED per page (jsdom): a seeded PARTIALLY_PAID, NO_SHOW, HIGH or LEAD shows its code; GREEN: its plain word. Browser: C6 extended (seeded part payment and no-show, whole-word detector) red at the base, green at the head on phone and desktop; tsc, lint green."
   },
   {
    "kind": "new",
@@ -12805,10 +12807,11 @@
     "SWP-CONTACT-DETAIL"
    ],
    "files": [
-    "apps/web/src/app/app/crm/pipeline/hooks/use-contact-actions.ts"
+    "apps/web/src/app/app/crm/pipeline/hooks/use-contact-actions.ts",
+    "apps/web/src/app/app/crm/pipeline/hooks/__tests__/use-contact-actions.delete-leave.test.tsx (new)"
    ],
-   "scope": "From the SWP-CONTACT-DETAIL acceptance review: a single delete shows 'Contact deleted' with Undo and sends the DELETE after 5.5 s; the timer is cleared on unmount, so leaving the page in that window silently cancels the delete (the customer comes back). Send the pending delete on unmount (or on navigation) instead of dropping it; Undo still cancels it.",
-   "definition_of_done": "RED: delete, unmount within 5.5 s, no DELETE is sent. GREEN: the DELETE is sent once; Undo before leaving sends none."
+   "scope": "From the SWP-CONTACT-DETAIL acceptance review: a single delete shows 'Contact deleted' with Undo and sends the DELETE after 5.5 s; the timer is cleared on unmount, so leaving the page in that window silently cancels the delete (the customer comes back). Send the pending delete on unmount (or on navigation) instead of dropping it; Undo still cancels it. Same function, same root (A4): a second single delete within 5.5 s clears the first one's timer (line ~355), so the first DELETE is dropped too; and the first toast's Undo then clears the second delete's timer, restoring the first customer and silently cancelling the second. Fix: pending deletes in a map by id (timer and toast id each); on unmount flush every pending DELETE and dismiss its toast; Undo cancels only its own. A hard reload or tab close is out of scope (would need keepalive/pagehide). (Pre-flight 2026-11-24 against 771bfc3c, D-274 A3.)",
+   "definition_of_done": "RED (fake timers): delete then unmount within 5.5 s sends no DELETE; delete A then B sends only B; delete A, delete B, Undo A cancels B. GREEN: each DELETE is sent exactly once (on time or on unmount, toast dismissed); Undo before leaving sends none. Journey C7 stays green; web tsc, unit, lint green."
   },
   {
    "kind": "new",
@@ -12834,13 +12837,13 @@
    ],
    "files": [
     "apps/web/src/app/app/crm/pipeline/hooks/use-contact-detail.ts",
-    "apps/web/src/components/contacts/contact-detail.tsx",
+    "apps/web/src/app/app/crm/pipeline/use-contacts-pipeline.ts",
     "apps/web/src/app/app/crm/pipeline/pipeline-detail-panel.tsx",
-    "apps/web/src/components/contacts/*-tab-panel.tsx",
-    "apps/web/src/components/contacts/tab-constants.ts"
+    "apps/web/src/components/contacts/contact-detail.tsx",
+    "apps/web/src/app/app/crm/pipeline/hooks/__tests__/use-contact-detail-reads.test.tsx (new)"
    ],
-   "scope": "SWP-CONTACT-DETAIL retired the side panel's tabs (BUG-062); the panel still fetches health metrics, journey, conversation context and cross-journey for every selection (use-contact-detail.ts:72-75) and ContactDetail still accepts the tab-only props; audit, conversations, deals, network, notes and tasks *-tab-panel.tsx are unmounted. Drop the fetches and props; delete or re-home the panels per the owner's answer to the open question on the retired tabs' features.",
-   "definition_of_done": "RED: selecting a contact sends the four tab-only reads. GREEN: none sent; web tsc, unit, lint green; panels deleted or re-homed as ruled."
+   "scope": "SWP-CONTACT-DETAIL retired the side panel's tabs (BUG-062); the panel still fetches health metrics, journey, conversation context and cross-journey for every selection (use-contact-detail.ts:72-75) and ContactDetail still accepts the tab-only props; audit, conversations, deals, network, notes and tasks *-tab-panel.tsx are unmounted. Drop the fetches and props; delete or re-home the panels per the owner's answer to the open question on the retired tabs' features. Read removal first (does not wait on the owner question; Codex P2 on #236): use-contact-detail.ts:72-75 (and the refresh at 173-182) plus pass-through in use-contacts-pipeline.ts (159-162, 182, 191-192, 241-243), pipeline-detail-panel.tsx and ContactDetail's dead props; keep insightSnapshot, revenueSummary, aiInsight and the auto-select (release0-live relies on it). Panel deletion later covers all seven *-tab-panel.tsx (timeline-tab-panel included) and checks architecture/*.json. (Pre-flight 2026-11-24 against 771bfc3c, D-274 A3.)",
+   "definition_of_done": "RED: selecting a contact sends GET health-metrics, journey, conversation-context and cross-journey. GREEN: none sent; the detail, revenue and insight reads and the auto-select remain; release0-live green; tsc, lint green."
   },
   {
    "kind": "new",
@@ -12865,11 +12868,12 @@
     "SWP-CONTACT-DETAIL"
    ],
    "files": [
-    "apps/web/src/app/app/crm/pipeline/focus-view.tsx",
-    "apps/web/src/app/app/crm/pipeline/pipeline-tab-content.tsx"
+    "apps/web/src/app/app/crm/contacts/page.tsx",
+    "apps/web/src/app/app/crm/pipeline/use-contacts-pipeline.ts (only if handleDoAction is widened)",
+    "apps/web/src/app/app/crm/pipeline/__tests__/focus-view-open.test.tsx (new)"
    ],
-   "scope": "Journey C4's 'from the Customers list' step fails at main 054cac4b and at SWP-CONTACT-DETAIL's head alike (live runs 2026-11-24): /app/crm/contacts opens in the focus view (the default), whose cards call onViewContact (onViewEngageContact) and leave the page at /app/crm/contacts with no link to /app/crm/contacts/<id>. SWP-CONTACT-DETAIL's Open link is in the list view's side panel only. Make a focus-view card (or a visible link on it) open the customer's page; the journey locator stays as written.",
-   "definition_of_done": "RED: journey C4 'from the Customers list' fails at the base (URL stays /app/crm/contacts). GREEN: C4 passes on phone and desktop; web unit test for the card's link; tsc, lint green."
+   "scope": "Journey C4's 'from the Customers list' step fails at main and at wave 3p alike: /app/crm/contacts opens in the focus view (the default, pipeline-tab-content.tsx:99-110), whose cards and NextActionQueue 'view' call handleViewEngageContact (contacts/page.tsx:133), which selects the contact and switches a tab but opens nothing (the side panel and its Open link render only in the list view). Fix at that one function: navigate to /app/crm/contacts/<id>. Not a link in ContactCard (shared with the list view, whose row click release0-live relies on). Declared widening if taken: handleDoAction's call/task/default cases (use-contacts-pipeline.ts:96-110) toast 'Opening <name>' and open nothing either. (Pre-flight 2026-11-24 against 771bfc3c, D-274 A3.)",
+   "definition_of_done": "RED: journey C4 'from the Customers list' fails at the base (URL stays /app/crm/contacts); unit: a focus card click and a NextActionQueue view do not navigate. GREEN: both push /app/crm/contacts/<id>; C4 green on phone and desktop; release0-live and release0-journey unchanged; tsc, lint green."
   },
   {
    "kind": "new",
