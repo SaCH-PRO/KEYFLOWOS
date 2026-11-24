@@ -1981,7 +1981,7 @@ Every other route is applied (above).
 | --- | --- | --- | --- | --- |
 | `NotificationsController.markAllRead` | PATCH | `/notifications/businesses/:businessId/read-all` | exempt-check | check:resolveTimelineViewer (the member's own view of the business notifications, D-63) |
 | `NotificationsController.markRead` | PATCH | `/notifications/businesses/:businessId/:id/read` | exempt-check | check:resolveTimelineViewer (the member's own view of the business notifications, D-63) |
-| `NotificationsController.updatePreferences` | PATCH | `/notifications/businesses/:businessId/customer-preferences` | open | membership only; follow-up SWEEP-CENSUS: settings write; business-wide customer notification preferences |
+| `NotificationsController.updatePreferences` | PATCH | `/notifications/businesses/:businessId/customer-preferences` | applied | `settings:write` (FU-NOTIFICATIONS-PREFS-GUARD, P30) |
 
 ### OnboardingConciergeController (`onboarding-concierge/onboarding-concierge.controller.ts`)
 
