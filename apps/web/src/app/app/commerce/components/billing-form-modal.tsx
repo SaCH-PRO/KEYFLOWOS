@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import { FormDetailsSection } from "./form-sections/form-details-section";
 import { FormLineItemsSection } from "./form-sections/form-line-items-section";
 import { FormTaxDiscountSection } from "./form-sections/form-tax-discount-section";
+import { documentAmountsFromForm, formNumber, lineAmount } from "@/lib/finance/document-amounts";
 import { FormNotesSection } from "./form-sections/form-notes-section";
 import { FormTemplateSection } from "./form-sections/form-template-section";
 import { useBusinessPreview } from "../hooks/use-business-preview";
@@ -220,19 +221,9 @@ export const BillingFormModal = React.memo(function BillingFormModal({
   }, [isDirty, isEditing, onClose]);
 
   const totals = useMemo(() => {
-    const subtotal = items.reduce((sum, item) => {
-      const qty = parseFloat(item.quantity) || 0;
-      const price = parseFloat(item.unitPrice) || 0;
-      return sum + qty * price;
-    }, 0);
-    const tax = taxRate ? subtotal * (parseFloat(taxRate) / 100) : 0;
-    let discount = 0;
-    if (discountValue) {
-      const dv = parseFloat(discountValue);
-      discount = discountType === "PERCENT" ? subtotal * (dv / 100) : dv;
-    }
-    const total = subtotal + tax - discount;
-    return { subtotal, tax, discount, total };
+    // SWP-INV-MATH: the server's amounts, in cents (D-164 order), for the quote and composer builder too.
+    const a = documentAmountsFromForm({ items, taxRate, discountType, discountValue });
+    return { subtotal: a.subtotal, tax: a.taxAmount, discount: a.discountAmount, total: a.total };
   }, [items, taxRate, discountType, discountValue]);
 
   const activeProducts = useMemo(
@@ -293,7 +284,7 @@ export const BillingFormModal = React.memo(function BillingFormModal({
           description: i.description,
           quantity: parseFloat(i.quantity) || 0,
           unitPrice: parseFloat(i.unitPrice) || 0,
-          total: (parseFloat(i.quantity) || 0) * (parseFloat(i.unitPrice) || 0),
+          total: lineAmount(formNumber(i.quantity), formNumber(i.unitPrice)),
         })),
       subtotal,
       taxRate: parseFloat(taxRate) || 0,

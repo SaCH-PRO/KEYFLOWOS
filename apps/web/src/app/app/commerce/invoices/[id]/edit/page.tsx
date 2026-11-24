@@ -27,6 +27,7 @@ import {
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { formatAmount } from "../../../utils/commerce-utils";
+import { documentAmountsFromForm, formNumber, lineAmount } from "@/lib/finance/document-amounts";
 import { InvoiceLineItem, generateItemId } from "../../../components/commerce-types";
 import { useLineItemHandlers } from "../../../hooks/use-line-item-handlers";
 
@@ -85,12 +86,8 @@ export default function EditInvoicePage() {
   const { addItem, removeItem, updateItem, selectProduct } = useLineItemHandlers((updater) => setItems(prev => updater(prev)), products);
 
   const computed = useMemo(() => {
-    const subtotal = items.reduce((sum, item) => { const qty = parseFloat(item.quantity) || 0; const price = parseFloat(item.unitPrice) || 0; return sum + qty * price; }, 0);
-    const discVal = parseFloat(discountValue) || 0;
-    const discountAmount = discountType === "PERCENT" ? subtotal * (discVal / 100) : discVal;
-    const afterDiscount = Math.max(0, subtotal - discountAmount);
-    const tax = parseFloat(taxRate) || 0;
-    return { subtotal, discountAmount, taxAmount: afterDiscount * (tax / 100), total: afterDiscount + afterDiscount * (tax / 100) };
+    // SWP-INV-MATH: the server's amounts, in cents, tax on the subtotal before the discount (D-164).
+    return documentAmountsFromForm({ items, taxRate, discountType, discountValue });
   }, [items, taxRate, discountType, discountValue]);
 
   const selectedContact = contacts.find(c => c.id === contactId);
@@ -113,7 +110,9 @@ export default function EditInvoicePage() {
       const { data, error } = await updateInvoice({
         businessId, invoiceId, contactId: contactId || undefined,
         items: validItems.map(item => ({ description: item.isNewItem ? (item.newItemName || item.description) : item.description, quantity: parseInt(item.quantity) || 1, unitPrice: parseFloat(item.unitPrice) })),
-        dueDate: dueDate || null, taxRate: taxRate ? parseFloat(taxRate) : undefined,
+        dueDate: dueDate || null,
+        // BUG-019: a cleared rate is sent as 0, so the server removes the tax (undefined kept the old rate).
+        taxRate: formNumber(taxRate),
         discountType: discountValue ? discountType : null, discountValue: discountValue ? parseFloat(discountValue) : null,
         notes: notes || null,
       });
@@ -172,9 +171,7 @@ export default function EditInvoicePage() {
             </div>
             <div className="p-5 space-y-3">
               {items.map((item) => {
-                const qty = parseFloat(item.quantity) || 0;
-                const price = parseFloat(item.unitPrice) || 0;
-                const total = qty * price;
+                const total = lineAmount(formNumber(item.quantity), formNumber(item.unitPrice));
                 return (
                   <div key={item.id} className="grid grid-cols-1 sm:grid-cols-[1fr_80px_120px_100px_40px] gap-3 items-start p-3 rounded-lg bg-muted/20 border border-border/60">
                     <div className="space-y-1">
