@@ -996,3 +996,31 @@ describe("FU-SETTINGS-MANUAL-STEP-FENCE: a write a caller sends itself joins the
     expect(reader.result.current.sells).toBe("services");
   });
 });
+
+describe("FU-SETTINGS-MANUAL-STEP-FENCE review round 1: a numbered answer fences as the store's own writes do", () => {
+  it("RED-AT-df0b5d0c (MINOR-2): a numbered 2xx answer that cannot be read still raises the mark, so an older write's late answer is not recorded", async () => {
+    let releaseOlder: (() => void) | null = null;
+    stubRoutes({
+      [`GET /identity/businesses/${BIZ_A}`]: { status: 200, body: business(BIZ_A, { sells: "services" }) },
+      [`PATCH /identity/businesses/${BIZ_A}`]: () =>
+        new Promise<Answer>((resolve) => {
+          releaseOlder = () => resolve({ status: 200, body: business(BIZ_A, { sells: "products" }) });
+        }),
+    });
+    const reader = renderHook(() => lib.useBusinessSettings(BIZ_A));
+    await waitFor(() => expect(reader.result.current.status).toBe("ready"));
+    const older = lib.saveBusinessSells(BIZ_A, "products");
+    await waitFor(() => expect(releaseOlder).not.toBeNull());
+    const mine = lib.beginBusinessWrite(BIZ_A);
+    // The caller's own write answered a 2xx with a body that cannot be read (as `recorded` meets one).
+    act(() => {
+      expect(lib.noteBusinessSettings(BIZ_A, null, lib.actingMemberNow(), mine)).toBe(false);
+    });
+    releaseOlder!();
+    await older;
+    await waitFor(() => expect(reader.result.current.status).toBe("ready"));
+    // The older answer is fenced: the store shows what the server holds (the read), not the older snapshot.
+    expect(reader.result.current.sells).toBe("services");
+  });
+});
+

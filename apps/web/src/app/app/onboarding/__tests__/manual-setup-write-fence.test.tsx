@@ -10,6 +10,9 @@
  *
  *   MSF-01  RED-BEFORE  an older sequenced write's late answer does not overwrite the manual step's newer save
  *   MSF-02  control     with no write in flight, the manual step's answer is what the store holds
+ *   MSF-03  RED-AT-df0b5d0c  the manual save fails with a 500 (it may have been applied): an older write answering
+ *                       last is not recorded, and the store shows what the server holds (acceptance review MINOR-1,
+ *                       as the store's own writes do: business-settings.ts `recorded`, SEC5-1/SEC6-2)
  *
  * Through the real component, store and api client; only fetch and the router are stubbed.
  */
@@ -33,6 +36,8 @@ let held: Record<string, unknown> = { ...STORED };
 /** A PATCH whose body has only `sells` waits for `releaseOlder` (the older write still in flight). */
 let releaseOlder: (() => void) | null = null;
 let holdOlder = false;
+/** When set, the manual step's PATCH is applied by the server but answered with this status (an outcome unknown). */
+let manualStatus: number | null = null;
 
 function json(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, statusText: status < 400 ? "OK" : "Error", headers: { "content-type": "application/json" } });
@@ -42,6 +47,7 @@ beforeEach(() => {
   held = { ...STORED };
   releaseOlder = null;
   holdOlder = false;
+  manualStatus = null;
   window.localStorage.clear();
   window.localStorage.setItem("kf_business_id", BIZ);
   router.replace.mockReset();
@@ -68,6 +74,7 @@ beforeEach(() => {
           return json(200, snapshot);
         }
         held = { ...held, ...(body ?? {}) };
+        if (manualStatus !== null) return json(manualStatus, { statusCode: manualStatus, message: "Internal server error" });
         return json(200, { ...held });
       }
       return json(500, { message: `no route ${method} ${pathname}` });
@@ -126,5 +133,31 @@ describe("FU-SETTINGS-MANUAL-STEP-FENCE: the manual step's save is fenced like e
     await waitFor(() => expect(reader.result.current.status).toBe("ready"));
     await finishWith("Products");
     await waitFor(() => expect(reader.result.current.sells).toBe("products"));
+  });
+
+  it("MSF-03 RED-AT-df0b5d0c: a manual save that fails with a 500 still fences an older write that answers last", async () => {
+    const reader = renderHook(() => settings.useBusinessSettings(BIZ));
+    await waitFor(() => expect(reader.result.current.status).toBe("ready"));
+    holdOlder = true;
+    const older = settings.saveBusinessSells(BIZ, "products");
+    await waitFor(() => expect(releaseOlder).not.toBeNull());
+    // The server applies the manual save (services) but its answer is a 500: the outcome is unknown to the browser.
+    manualStatus = 500;
+    render(<Harness />);
+    await waitFor(() => expect(within(form()).getByLabelText("Business name")).toBeInTheDocument());
+    await new Promise((r) => setTimeout(r, 0));
+    fireEvent.change(within(form()).getByLabelText("Business name"), { target: { value: "Point Fortin Pastries" } });
+    fireEvent.change(within(form()).getByLabelText("Currency"), { target: { value: "TTD" } });
+    fireEvent.change(within(form()).getByLabelText("Timezone"), { target: { value: "America/Port_of_Spain" } });
+    fireEvent.click(choice("Services"));
+    fireEvent.click(within(form()).getByRole("button", { name: /finish setup/i }));
+    await waitFor(() => expect(held.sells).toBe("services"));
+    await new Promise((r) => setTimeout(r, 20));
+    // The older write's answer (a snapshot from before the manual save) lands last.
+    releaseOlder!();
+    await older;
+    await new Promise((r) => setTimeout(r, 20));
+    await waitFor(() => expect(reader.result.current.status).toBe("ready"));
+    expect(reader.result.current.sells, "an older answer does not replace what the server holds").toBe("services");
   });
 });
