@@ -20,7 +20,9 @@ import { fromCents, roundMoney, sumMoney, toCents } from './money';
 export const OPEN_RECEIVABLE_STATUSES: ReadonlySet<string> = new Set(['PENDING', 'SENT', 'OVERDUE', 'PARTIALLY_PAID', 'PARTIALLY_CREDITED']);
 
 /** Array form of OPEN_RECEIVABLE_STATUSES for Prisma `{ status: { in: ... } }` and raw SQL `IN (...)` filters (D-256). */
-export const OPEN_RECEIVABLE_STATUS_LIST: InvoiceStatus[] = [...OPEN_RECEIVABLE_STATUSES] as InvoiceStatus[];
+export const OPEN_RECEIVABLE_STATUS_LIST: InvoiceStatus[] = Object.freeze([
+  ...OPEN_RECEIVABLE_STATUSES,
+] as InvoiceStatus[]) as InvoiceStatus[];
 
 /** One invoice's money as the totals read it (readInvoiceMoney). */
 export interface InvoiceMoney {

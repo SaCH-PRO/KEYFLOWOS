@@ -430,7 +430,18 @@ export class BusinessGraphService {
       db.contact.count({ where: { businessId, deletedAt: null, status: 'LEAD', updatedAt: { lt: sevenDaysAgo } } }),
       db.invoice.aggregate({ where: { businessId, deletedAt: null, status: 'PAID' }, _sum: { total: true } }),
       db.invoice.aggregate({ where: { businessId, deletedAt: null, status: { in: OPEN_RECEIVABLE_STATUS_LIST } }, _sum: { total: true }, _count: true }),
-      db.invoice.aggregate({ where: { businessId, deletedAt: null, status: { in: OPEN_RECEIVABLE_STATUS_LIST }, dueDate: { lt: now } }, _sum: { total: true }, _count: true }),
+      db.invoice.aggregate({
+        where: {
+          businessId,
+          deletedAt: null,
+          OR: [
+            { status: 'OVERDUE' },
+            { status: { in: OPEN_RECEIVABLE_STATUS_LIST }, dueDate: { lt: now } },
+          ],
+        },
+        _sum: { total: true },
+        _count: true,
+      }),
       db.invoice.aggregate({ where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: startOfMonth } }, _sum: { total: true } }),
       db.invoice.count({ where: { businessId, deletedAt: null, status: 'PAID' } }),
       db.booking.count({ where: { businessId, deletedAt: null, startTime: { gte: now }, status: { in: ['PENDING', 'CONFIRMED'] } } }),
@@ -611,7 +622,14 @@ export class BusinessGraphService {
         take: 25,
       }),
       db.invoice.findMany({
-        where: { businessId, deletedAt: null, status: { in: OPEN_RECEIVABLE_STATUS_LIST }, dueDate: { lt: now } },
+        where: {
+          businessId,
+          deletedAt: null,
+          OR: [
+            { status: 'OVERDUE' },
+            { status: { in: OPEN_RECEIVABLE_STATUS_LIST }, dueDate: { lt: now } },
+          ],
+        },
         select: {
           id: true,
           invoiceNumber: true,

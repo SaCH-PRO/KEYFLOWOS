@@ -274,7 +274,7 @@ export class CommerceAdapterService {
     }
     if (input.overdueOnly) {
       const now = new Date();
-      rows = rows.filter((inv) => inv.dueDate && new Date(inv.dueDate) < now);
+      rows = rows.filter((inv) => inv.status === 'OVERDUE' || (inv.dueDate && new Date(inv.dueDate) < now));
     }
     return rows;
   }
