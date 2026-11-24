@@ -798,6 +798,11 @@
       "packet": "V1-93 (W7-RECENT-CONTACTS-VISIBILITY)"
     },
     {
+      "prefix": "v93w_",
+      "owner": "apps/server/test/wa-inbound-capture.integration.test.ts",
+      "packet": "V1-93 (WEDGE-WA-INBOUND-CAPTURE)"
+    },
+    {
       "prefix": "v94a_",
       "owner": "apps/server/test/risc-signin-cutoff.integration.test.ts",
       "packet": "V1-94 (W8-RISC-SIGNIN-CUTOFF)"
