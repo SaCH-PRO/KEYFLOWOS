@@ -23,17 +23,50 @@ import { PresenceTracker } from "@/app/_lib/PresenceTracker";
 
 type RespondState = "idle" | "submitting" | "done" | "error";
 
+/**
+ * SWP-QUOTE-PUBLIC-PAGE (BUG-046): every amount carries the currency code ("TTD 1,066.00"), never a bare "$", in the
+ * same form as the invoice public page.
+ */
 function formatMoney(amount: number, currency: string) {
   try {
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency,
-      maximumFractionDigits: 2,
-    }).format(amount);
+    return new Intl.NumberFormat("en-TT", { style: "currency", currency, currencyDisplay: "code" })
+      .format(amount)
+      .replace(/\u00a0/g, " ");
   } catch {
-    return `${currency} ${amount.toFixed(2)}`;
+    return `${currency} ${Number(amount).toFixed(2)}`;
   }
 }
+
+/** The stored figures the total is made of (CommerceService.getQuoteByToken returns the quote's scalars). */
+interface QuoteTotals {
+  subtotal: number;
+  taxRate: number;
+  taxAmount: number;
+  discountAmount: number;
+  total: number;
+}
+
+/**
+ * The breakdown is shown only when it is the whole story: subtotal + tax - discount is the total to the cent.
+ * A legacy row whose figures do not add up shows the Total only, as the invoice public page does; an all-zero quote
+ * shows the Total only too (a Subtotal of 0.00 says nothing).
+ */
+function breakdownOf(quote: Quote): QuoteTotals | null {
+  const figures: QuoteTotals = {
+    subtotal: Number(quote.subtotal ?? 0),
+    taxRate: Number(quote.taxRate ?? 0),
+    taxAmount: Number(quote.taxAmount ?? 0),
+    discountAmount: Number(quote.discountAmount ?? 0),
+    total: Number(quote.total),
+  };
+  if (!Object.values(figures).every(Number.isFinite)) return null;
+  const cents = (n: number) => Math.round(n * 100);
+  const addsUp = cents(figures.subtotal) + cents(figures.taxAmount) - cents(figures.discountAmount) === cents(figures.total);
+  return addsUp && figures.subtotal > 0 ? figures : null;
+}
+
+/** The public payload's business block (CommerceService.getQuoteByToken). */
+type QuoteBusiness = { name?: string | null; logoUrl?: string | null; primaryColor?: string | null };
 
 function formatDate(iso: string | null | undefined) {
   if (!iso) return "—";
@@ -195,11 +228,38 @@ export default function PublicQuotePage() {
   const expired = !!quote.isExpired;
   const converted = !!quote.invoiceId;
   const canRespond = !decided && !expired && !converted;
+  const business = (quote as Quote & { business?: QuoteBusiness | null }).business ?? null;
+  const breakdown = breakdownOf(quote);
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-950 via-black to-slate-950 text-white px-4 py-10">
       <PresenceTracker businessId={pickBusinessId(quote) ?? null} />
       <div className="mx-auto max-w-3xl space-y-6">
+        {business?.name && (
+          <div className="flex items-center gap-3 min-w-0">
+            {business.logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={business.logoUrl}
+                alt={business.name}
+                className="w-10 h-10 rounded-xl object-cover border border-white/10"
+              />
+            ) : (
+              <div
+                aria-hidden="true"
+                className="w-10 h-10 rounded-xl flex items-center justify-center font-semibold"
+                style={{ backgroundColor: `${business.primaryColor || "#8B5CF6"}22`, color: business.primaryColor || "#8B5CF6" }}
+              >
+                {business.name[0]}
+              </div>
+            )}
+            <div className="min-w-0">
+              <p className="text-xs uppercase tracking-wider text-slate-400">Quote from</p>
+              <p className="text-sm font-semibold truncate">{business.name}</p>
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-col gap-2">
           <Badge tone="info">Quote</Badge>
           <h1 className="text-3xl font-semibold flex items-center gap-2">
@@ -297,12 +357,38 @@ export default function PublicQuotePage() {
             </div>
           </div>
 
-          <div className="mt-5 border-t border-white/5 pt-4 flex items-center justify-between">
-            <span className="text-sm text-slate-300">Total</span>
-            <span className="text-2xl font-bold text-white">
-              {formatMoney(Number(quote.total), quote.currency)}
-            </span>
-          </div>
+          <dl className="mt-5 border-t border-white/5 pt-4 space-y-1.5 text-sm">
+            {breakdown && (
+              <div className="flex items-center justify-between">
+                <dt className="text-slate-300">Subtotal</dt>
+                <dd className="font-medium" data-testid="public-quote-subtotal">
+                  {formatMoney(breakdown.subtotal, quote.currency)}
+                </dd>
+              </div>
+            )}
+            {breakdown && breakdown.discountAmount > 0 && (
+              <div className="flex items-center justify-between">
+                <dt className="text-slate-300">Discount</dt>
+                <dd className="font-medium" data-testid="public-quote-discount">
+                  -{formatMoney(breakdown.discountAmount, quote.currency)}
+                </dd>
+              </div>
+            )}
+            {breakdown && breakdown.taxAmount > 0 && (
+              <div className="flex items-center justify-between">
+                <dt className="text-slate-300">{breakdown.taxRate > 0 ? `Tax (${breakdown.taxRate}%)` : "Tax"}</dt>
+                <dd className="font-medium" data-testid="public-quote-tax">
+                  {formatMoney(breakdown.taxAmount, quote.currency)}
+                </dd>
+              </div>
+            )}
+            <div className="flex items-center justify-between pt-1">
+              <dt className="text-sm text-slate-300">Total</dt>
+              <dd className="text-2xl font-bold text-white" data-testid="public-quote-total">
+                {formatMoney(Number(quote.total), quote.currency)}
+              </dd>
+            </div>
+          </dl>
 
           {quote.notes && (
             <div className="mt-4 rounded-xl bg-white/[0.03] border border-white/5 px-3 py-2 text-sm text-slate-300 whitespace-pre-wrap">
