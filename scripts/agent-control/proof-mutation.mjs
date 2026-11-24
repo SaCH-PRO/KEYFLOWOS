@@ -231,7 +231,15 @@ function dotGitOf(dir) {
  *    control's tree; a proof that is stopped (timeout, signal) is handled below (runManifest). No proof in
  *    negative-controls.yaml starts a detached process;
  *  - on a case-insensitive filesystem (Windows), a case-only rename of a tracked file keeps its stat, so the reset
- *    keeps the new spelling; no manifest proof renames a file.
+ *    keeps the new spelling; no manifest proof renames a file;
+ *  - an untracked .gitattributes a proof leaves is applied to the files read-tree rewrites (clean runs after it): the
+ *    rewrite then shows modified and the reset reports not pristine, except in a write that straddles a second;
+ *    no manifest proof writes a .gitattributes;
+ *  - the global and system attributes files are watched through `git var GIT_ATTR_GLOBAL` / `GIT_ATTR_SYSTEM`, which
+ *    need git 2.42 or later (windows-latest has it); older git leaves them unwatched;
+ *  - the worktree root's own mode is not compared (its children are); no manifest proof changes modes;
+ *  - removeWorktree's fallback finds the runner's own record by the directory's name; a record git named with a
+ *    suffix (a clash with a stale one) is left behind, never another worktree's removed.
  */
 export function resetToPristine(worktree, commit) {
   if (
