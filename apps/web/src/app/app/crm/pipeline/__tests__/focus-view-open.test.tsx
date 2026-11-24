@@ -8,8 +8,14 @@
  * /app/crm/contacts and journey C4's "from the Customers list" step failed.
  *
  *   FVO-01  RED-BEFORE  clicking a customer's card in the focus view opens /app/crm/contacts/<id>
- *   FVO-02  control     in the list view, clicking a row still selects it in place (the side panel Release 0 edits
- *                       through), with no navigation
+ *   FVO-02  control     in the list view, clicking another customer's row selects that row in place (the side
+ *                       panel Release 0 edits through), with no navigation (reviews: two customers, so the click
+ *                       selects rather than toggles the auto-selected first one off)
+ * Review round:
+ *   FVO-03  RED-BEFORE  the next-action queue's "view" (the customer's name) opens their page too
+ *   FVO-04  RED-AT-4b40a2a7  a customer opened from the focus view is still recorded as recent (selectContact did it)
+ *   FVO-05  RED-AT-4b40a2a7  a "call" next action in the focus view opens the customer's page (it toasted "Opening …"
+ *                       and opened nothing; handleDoAction's call/task/default cases, D-274 A4)
  *
  * ContactsPage renders for real inside the app's providers (as release0-journey.test.tsx mounts it); only fetch, the
  * Next router and the email composer are stubbed.
@@ -45,6 +51,9 @@ import { GenomeProvider } from "@/contexts/genome-context";
 
 const BIZ = "biz_fvo";
 const ADA = { id: "c_fvo_ada", firstName: "Ada", lastName: "Byron", status: "CLIENT" };
+const BEN = { id: "c_fvo_ben", firstName: "Ben", lastName: "Baker", status: "LEAD" };
+/** What GET next-actions answers (FVO-03/05); empty by default. */
+let nextActions: unknown[] = [];
 
 function AppProviders({ children }: { children: ReactNode }) {
   return (
@@ -66,6 +75,7 @@ function AppProviders({ children }: { children: ReactNode }) {
 
 beforeEach(() => {
   nav.router.push.mockClear();
+  nextActions = [];
   nav.router.replace.mockClear();
   window.localStorage.clear();
   window.localStorage.setItem("kf_token", "fvo-token");
@@ -80,7 +90,8 @@ beforeEach(() => {
       const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
       if (pathname === "/identity/businesses") return json(200, [{ id: BIZ }]);
       if (pathname === "/identity/me") return json(200, { id: "u_fvo", email: "owner@fvo.test" });
-      if (pathname === `/crm/businesses/${BIZ}/contacts`) return json(200, { contacts: [ADA] });
+      if (pathname === `/crm/businesses/${BIZ}/contacts`) return json(200, { contacts: [ADA, BEN] });
+      if (pathname === `/crm/businesses/${BIZ}/next-actions`) return json(200, nextActions);
       return json(404, { statusCode: 404, message: `not stubbed: ${pathname}` });
     }),
   );
@@ -103,13 +114,41 @@ describe("FU-C4-FOCUS-OPEN: a customer clicked on the Customers page opens their
     await waitFor(() => expect(nav.router.push).toHaveBeenCalledWith(`/app/crm/contacts/${ADA.id}`));
   });
 
-  it("FVO-02 control: in the list view, clicking a row selects it in place, with no navigation", async () => {
+  it("FVO-02 control: in the list view, clicking another customer's row selects it in place, with no navigation", async () => {
     window.localStorage.setItem("kf_pipeline_view", "list");
     render(<AppProviders><ContactsPage /></AppProviders>);
-    const row = await screen.findByRole("option", { name: /byron/i }, { timeout: 4000 }).catch(() => null);
-    const target = row ?? (await screen.findByText(/byron/i, {}, { timeout: 4000 }));
-    fireEvent.click(target);
-    await new Promise((r) => setTimeout(r, 50));
+    fireEvent.click(await screen.findByText(/baker/i, {}, { timeout: 4000 }));
+    await waitFor(() =>
+      expect(screen.getAllByRole("option", { name: /baker/i }).some((o) => o.getAttribute("aria-selected") === "true")).toBe(true),
+    );
     expect(nav.router.push.mock.calls.filter(([to]) => String(to).startsWith("/app/crm/contacts/"))).toEqual([]);
+  });
+
+  const callAda = { id: "na_fvo", type: "call", contactId: ADA.id, contactName: "Ada Byron", description: "Call Ada about her order", estimatedTime: 5, priority: "urgent" };
+
+  it("FVO-03 RED-BEFORE: the next-action queue's view (the customer's name) opens their page", async () => {
+    nextActions = [callAda];
+    window.localStorage.setItem("kf_pipeline_view", "list");
+    render(<AppProviders><ContactsPage /></AppProviders>);
+    const name = await screen.findAllByRole("button", { name: /^ada byron$/i }, { timeout: 4000 });
+    fireEvent.click(name[0]);
+    await waitFor(() => expect(nav.router.push).toHaveBeenCalledWith(`/app/crm/contacts/${ADA.id}`));
+  });
+
+  it("FVO-04 RED-AT-4b40a2a7: a customer opened from the focus view is recorded as recent", async () => {
+    window.localStorage.setItem("kf_pipeline_view", "focus");
+    render(<AppProviders><ContactsPage /></AppProviders>);
+    fireEvent.click(await screen.findByText(/byron/i, {}, { timeout: 4000 }));
+    await waitFor(() => expect(nav.router.push).toHaveBeenCalledWith(`/app/crm/contacts/${ADA.id}`));
+    expect(JSON.parse(window.localStorage.getItem("kf_recent_contacts") ?? "[]")).toContain(ADA.id);
+  });
+
+  it("FVO-05 RED-AT-4b40a2a7: a call next action in the focus view opens the customer's page", async () => {
+    nextActions = [callAda];
+    window.localStorage.setItem("kf_pipeline_view", "focus");
+    render(<AppProviders><ContactsPage /></AppProviders>);
+    const rows = await screen.findAllByText("Call Ada about her order", {}, { timeout: 4000 });
+    fireEvent.click(rows[0]);
+    await waitFor(() => expect(nav.router.push).toHaveBeenCalledWith(`/app/crm/contacts/${ADA.id}`));
   });
 });
