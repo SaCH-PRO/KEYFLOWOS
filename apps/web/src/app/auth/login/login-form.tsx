@@ -23,6 +23,7 @@ import {
 import { bootstrapIdentity, identityLogin, identityResendVerification } from "@/lib/client";
 import {
   setStoredToken,
+  clearAdminSession,
   setStoredBusinessId,
   setStoredRefreshToken,
   getStoredBusinessId,
@@ -161,6 +162,8 @@ export default function LoginForm() {
         applyLoginError(result.error);
         return;
       }
+      // RR-ADMIN-LOGOUT: a user sign-in on a browser an admin used never inherits the admin bearer.
+      clearAdminSession();
       setStoredToken(result.data.accessToken);
       if (result.data.refreshToken) {
         setStoredRefreshToken(result.data.refreshToken);

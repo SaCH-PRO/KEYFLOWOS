@@ -20,7 +20,17 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const src = readFileSync(join(__dirname, 'model-gateway.service.ts'), 'utf8');
+/**
+ * RR-UNKNOWN-COST-NOT-ZERO: the one price table and its priceFor live in
+ * llm-cost.service.ts (the gateway imports them); every assertion below is
+ * kept and reads that file. The gateway's own source is read only to prove it
+ * no longer prices anything by itself.
+ */
+const src = readFileSync(join(__dirname, 'llm-cost.service.ts'), 'utf8');
+const gatewaySrc = readFileSync(join(__dirname, 'model-gateway.service.ts'), 'utf8');
+
+/** Priced per input token only (embeddings, transcription, plain speech): an output of 0 is by nature, not by omission. */
+const INPUT_ONLY = new Set(['text-embedding-3-small', 'text-embedding-3-large', 'tts-1', 'whisper-1']);
 
 /**
  * Source with comment lines removed.
@@ -80,6 +90,7 @@ describe('the cheap tier is priced as cheaper than the expensive one', () => {
     // transposed pair.
     for (const [model, price] of Object.entries(table)) {
       if (model.startsWith('moonshot')) continue; // flat-rate by design
+      if (INPUT_ONLY.has(model)) continue; // no completion tokens exist for these
       expect(price.output, `${model} output should exceed input`).toBeGreaterThan(price.input);
     }
   });
@@ -87,7 +98,7 @@ describe('the cheap tier is priced as cheaper than the expensive one', () => {
   it('no model is free', () => {
     for (const [model, price] of Object.entries(table)) {
       expect(price.input, `${model} input is zero`).toBeGreaterThan(0);
-      expect(price.output, `${model} output is zero`).toBeGreaterThan(0);
+      if (!INPUT_ONLY.has(model)) expect(price.output, `${model} output is zero`).toBeGreaterThan(0);
     }
   });
 });
@@ -98,6 +109,9 @@ describe('an unpriced model is a bug, not a freebie', () => {
     // absent from the table recorded as FREE — while the estimate path fell
     // back to gpt-4o pricing, giving two different numbers for one call.
     expect(code).not.toMatch(/TOKEN_COST_PER_1K\[[^\]]+\]\?\.\w+ \?\? 0/);
+    // and the gateway holds no table and no zero fallback of its own any more
+    expect(gatewaySrc).not.toMatch(/const TOKEN_COST_PER_1K/);
+    expect(gatewaySrc).not.toMatch(/\|\| \{ input: 0, output: 0 \}/);
   });
 
   it('routes every lookup through a fallback that warns', () => {
