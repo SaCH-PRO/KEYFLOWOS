@@ -12717,6 +12717,130 @@
    "track": "launch",
    "track_reason": "KEY stays reachable from the header: a safety fix (D-272.3)",
    "track_ruling": "D-272"
+  },
+  {
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "decisions": [],
+   "fixture_prefix": null,
+   "r0_impact": "KEEP",
+   "track": "launch",
+   "track_reason": "serves journey F",
+   "track_ruling": "D-263",
+   "step": 5,
+   "lane": "web",
+   "id": "FU-NAV-A3-CODEX-235",
+   "title": "A slug with a digit is a crumb; the settings tab strip follows the member's modules",
+   "journeys": [
+    "F"
+   ],
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [
+    "NAV-A3"
+   ],
+   "files": [
+    "apps/web/src/components/ui/origin-aware-breadcrumbs.tsx",
+    "apps/web/src/app/app/settings/layout.tsx",
+    "apps/web/src/app/app/settings/__tests__/settings-layout-access.test.tsx (new)",
+    "apps/web/src/components/ui/__tests__/origin-aware-breadcrumbs.test.tsx"
+   ],
+   "scope": "Two Codex P2 findings on PR #235 (wave 3o), verified real: (a) origin-aware-breadcrumbs isId took the KEY FLOWS role slug l1_l2_customer_support_agent for an id, so /app/key-flows/<role> lost its crumb; (b) NAV-A3 made My account (/app/settings/profile) every member's, and that page's settings layout drew every business settings tab for everyone. Stacked on wave 3o (A8). Built by the Claude lane, claim 531bb341.",
+   "definition_of_done": "RED: the role page's last crumb reads 'Key flows'; a member with no settings, team or operations access sees all 19 settings tabs on My account. GREEN: ids are uuids, 20+ hex or 16+ letters and digits only; the tab strip follows useMemberModuleLevels/canOpenModule (settings, Team: team, AI: operations; unknown hides nothing). Web tsc, unit, lint green."
+  },
+  {
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "decisions": [],
+   "fixture_prefix": null,
+   "r0_impact": "KEEP",
+   "track": "launch",
+   "track_reason": "serves journey C",
+   "track_ruling": "D-263",
+   "step": 5,
+   "lane": "web",
+   "id": "FU-CONTACT-PAGES-RAW-STATUS",
+   "title": "The contact route's pages show statuses in plain words",
+   "journeys": [
+    "C"
+   ],
+   "size": "M",
+   "priority": "P1",
+   "depends_on": [
+    "SWP-CONTACT-DETAIL"
+   ],
+   "files": [
+    "apps/web/src/app/app/crm/contacts/[contactId]/bookings/page.tsx",
+    "apps/web/src/app/app/crm/contacts/[contactId]/money/page.tsx",
+    "apps/web/src/app/app/crm/contacts/[contactId]/quotes-invoices/page.tsx",
+    "apps/web/src/app/app/crm/contacts/[contactId]/recommendations/page.tsx",
+    "apps/web/src/app/app/crm/contacts/[contactId]/tasks/page.tsx",
+    "apps/web/src/app/app/crm/contacts/[contactId]/contact-header.tsx"
+   ],
+   "scope": "From the SWP-CONTACT-DETAIL acceptance review (CDC-4): stored statuses are printed raw on the pages journey C6 walks (bookings/page.tsx:78, money/page.tsx:174/197/220, quotes-invoices/page.tsx:122/166, recommendations :268, tasks :219, contact-header.tsx:119). C6's seed (one note) does not reach them; a customer with an invoice or booking does. Use statusLabel(code, domain) from lib/status-labels.ts.",
+   "definition_of_done": "RED per page: a seeded status (PARTIALLY_PAID, NO_SHOW, ...) shows as its code; GREEN: its plain word. Browser: C6 extended with an invoice and a booking stays green."
+  },
+  {
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "decisions": [],
+   "fixture_prefix": null,
+   "r0_impact": "KEEP",
+   "track": "launch",
+   "track_reason": "serves journey C",
+   "track_ruling": "D-263",
+   "step": 5,
+   "lane": "web",
+   "id": "FU-CONTACT-DELETE-LEAVE",
+   "title": "A contact delete is not lost when the owner leaves during its Undo window",
+   "journeys": [
+    "C"
+   ],
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [
+    "SWP-CONTACT-DETAIL"
+   ],
+   "files": [
+    "apps/web/src/app/app/crm/pipeline/hooks/use-contact-actions.ts"
+   ],
+   "scope": "From the SWP-CONTACT-DETAIL acceptance review: a single delete shows 'Contact deleted' with Undo and sends the DELETE after 5.5 s; the timer is cleared on unmount, so leaving the page in that window silently cancels the delete (the customer comes back). Send the pending delete on unmount (or on navigation) instead of dropping it; Undo still cancels it.",
+   "definition_of_done": "RED: delete, unmount within 5.5 s, no DELETE is sent. GREEN: the DELETE is sent once; Undo before leaving sends none."
+  },
+  {
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "decisions": [],
+   "fixture_prefix": null,
+   "r0_impact": "KEEP",
+   "track": "launch",
+   "track_reason": "serves journey C",
+   "track_ruling": "D-263",
+   "step": 5,
+   "lane": "web",
+   "id": "FU-CONTACT-PANEL-PRUNE",
+   "title": "The list side panel stops loading what it no longer shows",
+   "journeys": [
+    "C"
+   ],
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [
+    "SWP-CONTACT-DETAIL"
+   ],
+   "files": [
+    "apps/web/src/app/app/crm/pipeline/hooks/use-contact-detail.ts",
+    "apps/web/src/components/contacts/contact-detail.tsx",
+    "apps/web/src/app/app/crm/pipeline/pipeline-detail-panel.tsx",
+    "apps/web/src/components/contacts/*-tab-panel.tsx",
+    "apps/web/src/components/contacts/tab-constants.ts"
+   ],
+   "scope": "SWP-CONTACT-DETAIL retired the side panel's tabs (BUG-062); the panel still fetches health metrics, journey, conversation context and cross-journey for every selection (use-contact-detail.ts:72-75) and ContactDetail still accepts the tab-only props; audit, conversations, deals, network, notes and tasks *-tab-panel.tsx are unmounted. Drop the fetches and props; delete or re-home the panels per the owner's answer to the open question on the retired tabs' features.",
+   "definition_of_done": "RED: selecting a contact sends the four tab-only reads. GREEN: none sent; web tsc, unit, lint green; panels deleted or re-homed as ruled."
   }
  ],
  "moot": [
@@ -13879,7 +14003,8 @@
   "PR195-JOURNAL-SCOPE's local head moved to b3335bb7 (review repair tests first, SEC-P195KG-1..5 and CRR-P195KG-1..2) after the draft; its fix commit is not yet on the branch. The admission DoD now requires it; confirm the head PR #208 and both packet branches will be admitted at.",
   "Wave-11b fixture prefixes are stale: SWEEP-P0 registered v99c_, v99f_, v99i_, v99j_, v99k_ and v99w_, which six wave-11b packets were assigned, and the x01*_ heads fail the registry's NEW_PREFIX rule. The plan supersedes them with the pre-allocated v6<step><letter>_ table; ChatGPT should confirm the 'V1-6<step> (<packet>)' packet labels the registry's NN check expects.",
   "Rejected or narrowed from the critique: none rejected. Item 8 took the Money > Overview Discard option (KEY keeps no payroll write tool). Item 10's per-business list is a live server read (NAV-B-LEGACY-SERVER), not an owner-written metaData key seeded from the count, because seeding it would need a production write the plan may not make. Item 12's hidden-module batch uses one class-level decorator per controller rather than a global guard, because a global guard runs before AuthGuard and BusinessGuard. Item 22's kf_auto_convert_quote is recorded as a deviation rather than moved, because it only chooses between two client dialogs. Item 28 takes the recorded-exception option (link construction only).",
-  "decisions.py now holds 37 rulings (five 'Team permissions' rulings were added after the draft): S1-RULINGS-RECORD records all 37 and the five are mapped to S0-LAND-INFLIGHT, SWP-TEAM-WEB, NAV-A1, HIDE-DEV-WEBHOOKS, NAV-B-HIDE-2 and the census batches."
+  "decisions.py now holds 37 rulings (five 'Team permissions' rulings were added after the draft): S1-RULINGS-RECORD records all 37 and the five are mapped to S0-LAND-INFLIGHT, SWP-TEAM-WEB, NAV-A1, HIDE-DEV-WEBHOOKS, NAV-B-HIDE-2 and the census batches.",
+  "SWP-CONTACT-DETAIL retired the list side panel's tabs (BUG-062, fixed by removal). The full contact route has Timeline, Notes and Tasks, but no page for the panel's Conversations thread, Deals list, per-contact Audit log or Network graph, nor the rich timeline's health metrics, journey milestones, cross-journey CTAs, conversation context and suggested message. Re-home them as full-route pages in a follow-up, or let them go? (Default: let them go for v1; keep the files until FU-CONTACT-PANEL-PRUNE.) Also: bulk contact delete has no Undo (its dialog now says Trash only, which is true); add one? (Default: no, Trash restores.)"
  ],
  "fixture_prefix_table": [
   {
