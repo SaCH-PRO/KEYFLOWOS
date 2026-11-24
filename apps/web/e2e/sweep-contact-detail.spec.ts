@@ -132,7 +132,7 @@ test.describe("SWP-CONTACT-DETAIL the contact pages say what the owner sees (des
     await test.step("BUG-128: Delete says Trash and Undo; Forget says erased for good and never Trash; both cancelled", async () => {
       const panel = page.getByRole("region", { name: "Contact details" });
       await panel.getByTitle("Delete client").click();
-      const deleting = page.getByRole("dialog").filter({ hasText: /delete/i });
+      const deleting = page.getByRole("dialog");
       await expect(deleting).toBeVisible();
       await expect.soft(deleting).toContainText(/trash/i);
       await expect.soft(deleting).toContainText(/undo/i);
@@ -141,7 +141,8 @@ test.describe("SWP-CONTACT-DETAIL the contact pages say what the owner sees (des
       await expect(deleting).toHaveCount(0);
 
       await panel.getByTitle("Forget contact (GDPR right-to-be-forgotten)").click();
-      const forgetting = page.getByRole("dialog").filter({ hasText: /forget/i });
+      // The dialog that opened, whatever its words (at the base the panel had one dialog text for every action).
+      const forgetting = page.getByRole("dialog");
       await expect(forgetting).toBeVisible();
       await expect.soft(forgetting).toContainText(/for good/i);
       await expect.soft(forgetting).not.toContainText(/trash/i);
