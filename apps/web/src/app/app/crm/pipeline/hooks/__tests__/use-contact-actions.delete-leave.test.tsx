@@ -16,6 +16,11 @@
  *   DL-04  RED-BEFORE  leaving dismisses the pending delete's toast (its Undo can no longer act on a sent delete)
  *   DL-05  control     delete, Undo: nothing is sent and the customer is back
  *   DL-06  control     delete, wait out the window: sent once; leaving afterwards sends nothing more
+ * Review round (acceptance MINOR-2/3, confirmation M1):
+ *   DL-07  pin         the same customer deleted twice in one go: one toast, one DELETE
+ *   DL-08  pin         Undo pressed after leaving (the delete was sent): nothing is restored, nothing more is sent
+ *   DL-09  RED-AT-23d25b88  an old toast's Undo never cancels a newer delete of the same customer
+ *   DL-10  RED-AT-23d25b88  Undo pressed after the delete was sent says so: restore it from Trash
  *
  * The hook runs for real; the client's deleteContact, the toasts and the router are stubbed; timers are fake.
  */
@@ -142,5 +147,47 @@ describe("FU-CONTACT-DELETE-LEAVE: a single delete is sent once, whatever happen
     unmount();
     await vi.advanceTimersByTimeAsync(10_000);
     expect(sent()).toEqual(["c_a"]);
+  });
+
+  it("DL-07 pin: the same customer deleted twice in one go: one toast, one DELETE", async () => {
+    const { result } = renderHook(() => useHarness());
+    await act(async () => {
+      await result.current.actions.handleDeleteContact(A);
+      await result.current.actions.handleDeleteContact(A);
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(toasts.shown.filter((t) => t.message === "Contact deleted")).toHaveLength(1);
+    expect(sent()).toEqual(["c_a"]);
+  });
+
+  it("DL-08 pin: Undo pressed after leaving restores nothing and sends nothing more", async () => {
+    const { result, unmount } = renderHook(() => useHarness());
+    await act(async () => { await result.current.actions.handleDeleteContact(A); });
+    unmount();
+    undoFor(0)();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(sent()).toEqual(["c_a"]);
+  });
+
+  it("DL-09 RED-AT-23d25b88: an old toast's Undo never cancels a newer delete of the same customer", async () => {
+    const { result } = renderHook(() => useHarness());
+    await act(async () => { await result.current.actions.handleDeleteContact(A); });
+    act(() => { undoFor(0)(); });
+    await act(async () => { await result.current.actions.handleDeleteContact(A); });
+    // The first toast's Undo, pressed again (sonner closes a toast on its action, but nothing here relies on it).
+    act(() => { undoFor(0)(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(sent()).toEqual(["c_a"]);
+  });
+
+  it("DL-10 RED-AT-23d25b88: Undo pressed after the delete was sent says to restore it from Trash", async () => {
+    const { toast } = await import("sonner");
+    const { result } = renderHook(() => useHarness());
+    await act(async () => { await result.current.actions.handleDeleteContact(A); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+    expect(sent()).toEqual(["c_a"]);
+    act(() => { undoFor(0)(); });
+    expect(result.current.contacts.map((c) => c.id)).toEqual(["c_b"]);
+    expect(vi.mocked(toast.info).mock.calls.map((c) => String(c[0]))).toEqual([expect.stringMatching(/trash/i)]);
   });
 });
