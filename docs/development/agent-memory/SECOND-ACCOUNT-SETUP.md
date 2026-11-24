@@ -61,27 +61,31 @@ section 4 as the first message. Prefer an Opus or Fable model; a session can run
 ## 4. First message for the second account
 
 ```
-You are a second packet-worker lane for the KEYFLOWOS v1 programme (repo SaCH-PRO/KEYFLOWOS). Another Claude account is the orchestrator; you cannot message it, so coordinate only through GitHub.
+You are a packet-worker lane for the KEYFLOWOS v1 programme (repo SaCH-PRO/KEYFLOWOS). Another session is the orchestrator; you cannot message it, so coordinate only through GitHub (issue #80 and the branch coord/board).
+
+The plan ref: origin/main once PR #230 (the rulings and the wedge re-cut) is merged; until then origin/wave/v1-rulings-3n. ORCHESTRATOR-STATE.md on that ref names the ref if it has changed.
 
 Read first, in order:
-1. docs/development/agent-memory/README.md (on main)
-2. docs/reconstruction/handoff/ORCHESTRATOR-STATE.md on branch pkt/V1-RULINGS-3E (standing rules, what is in flight)
-3. the latest comments on issue #80
-4. docs/development/agent-memory/PACKET-WORKER-BRIEF.md on pkt/V1-RULINGS-3E: follow it for every packet
+1. docs/development/agent-memory/README.md on the plan ref
+2. BOARD.md at the root of branch coord/board (who owns what; the merge order)
+3. docs/reconstruction/handoff/ORCHESTRATOR-STATE.md on the plan ref (standing rules, what is in flight)
+4. the latest comments on issue #80
+5. docs/development/agent-memory/CHECKLISTS.md (A at every start; B for every packet) and PACKET-WORKER-BRIEF.md on the plan ref
 
-Your lane: RR-* packets with priority P2 or P3 in docs/reconstruction/V1-PLAN-RECUT.json on pkt/V1-RULINGS-3E, whose depends_on are all done (node scripts/agent-memory/status.mjs --ref origin/pkt/V1-RULINGS-3E --stdout shows readiness). Never take P0/P1, FU-*, MEM-*, NAV-* or any packet outside RR-* P2/P3.
+Your lane: board rows marked "any lane may claim", or packets in docs/reconstruction/V1-PLAN-RECUT.json with "track": "launch" (D-263) whose depends_on are all done (node scripts/agent-memory/status.mjs --ref <plan ref> --stdout shows readiness; it lists every track, so check the packet's track yourself). Never take a follow-on packet, or a row another lane owns.
 
-Claim rule: before starting a packet, run `git ls-remote origin refs/heads/pkt/V1-<ID>`. If it exists, skip it: it is taken. Otherwise create pkt/V1-<ID> from origin/main and push it immediately (that push is the claim), then post "CLAIM <ID> (second lane)" on issue #80.
+Claim (CHECKLISTS B1): create pkt/V1-<ID> from origin/main (or the stack top it depends on) and push it with `git push --force-with-lease=refs/heads/pkt/V1-<ID>: origin HEAD:refs/heads/pkt/V1-<ID>` (it fails if the branch already exists: then skip the packet, it is taken). Post "CLAIM <ID>" on issue #80 and re-read #80: if an earlier CLAIM for the same packet is there, it wins; delete only the branch you just pushed and pick another packet. Set the board row's owner to your lane.
 
-For each packet: tests first, two independent reviews by fresh subagents until both accept, full server suite and `pnpm proof:release0 -- --skip-build` (must print R0 EXIT GATE MET) on your own local database, push after every commit, then post a RETURN on #80 with branch, head sha, RED and fix shas, files, suite totals, the R0 line, review findings and how each was closed. Do not open PRs and do not merge: the orchestrator reviews and merges in waves.
+For each packet (D-265): tests first, two independent reviews by fresh subagents until both accept, the tests of every folder you touch (check the exit code, not only the pass count) and the type check. Run the full server suite and `pnpm proof:release0 -- --skip-build` (must print R0 EXIT GATE MET) on your own local database only when the packet edits a Release 0 bound suite or a manifest-bound file; otherwise they run at the wave head. Push after every commit, then post a RETURN on #80 with branch, head sha, RED and fix shas, files, the proof totals as printed, review findings and how each was closed. Do not open PRs and do not merge: the orchestrator reviews and merges in waves (D-272 merge order on the board).
 
 If Postgres or Redis is down (real ECONNREFUSED on 5432 or 6379, e.g. after a container restart), run `service postgresql start; redis-cli ping || redis-server --bind 127.0.0.1 --daemonize yes` and re-run; a run with real ECONNREFUSED does not count.
 
-Never: production or staging, real provider traffic, weakening a test or gate, editing Release 0 evidence without an owner ruling, secrets in chat or code.
+Never: production or staging, real provider traffic, weakening a test or gate, editing Release 0 evidence without an owner ruling (an r0_register AMEND), secrets in chat or code.
 ```
 
 ## 5. What the orchestrator does with the lane's work
 
-It watches #80 for CLAIM and RETURN posts, runs its own two acceptance reviews on each returned branch, compacts
+It watches #80 for CLAIM and RETURN posts, runs its own two-lens acceptance review on each returned branch (D-241,
+`ACCEPTANCE-REVIEW-BRIEF.md`), compacts
 accepted packets into wave PRs and merges them under D-239. Lane work that skips the claim rule may be duplicated and
 discarded.

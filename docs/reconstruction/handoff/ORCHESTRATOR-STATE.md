@@ -1,6 +1,6 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-24 02:45 UTC by the acting orchestrator (second-lane account, Claude Code), with SWP-QUOTE-COMPOSER-CONTACT returned. Rewrite in place on every merge, packet return
+Last written: 2026-11-24 ~07:30 UTC by the acting orchestrator (second-lane account, Claude Code), after both reviews of PR #230 (the rulings) were closed. Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -22,12 +22,17 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
   order.**
   - The KEY Builder design and plan (D-268 to D-270) are parked until v1 is completed. They stay on branch
     `ccr-1eadc8f4-aqfqne`: `docs/key-builder/KEY-BUILDER-DESIGN-001.md`, `KEY-BUILDER-PLAN-001.md` and `research/`.
-  - Open for v1, as recommendations to the owner:
-    - the Q4 wave (MOUNT-QUOTES + SWP-INV-MATH + SWP-INV-PUBLIC-LINK, built from 8ae6abfa);
-    - a P0 security packet, SEC-KEY-CUSTOM-LOGIC: tenant KEY's `execute_custom_logic` runs model-written JavaScript
-      in a child process on the API host (research A §5);
-    - switching off the agent-control autopilot's #80 posting.
   - Sessions in other tools (Antigravity) claim through `git ls-remote` and a CLAIM on #80, like every lane.
+- **D-272 (2026-11-24, #80 comment 7121024415): the owner's merge go and four answers.**
+  - Merge under D-239, one at a time, in this order: (1) PR #228, merged as 142e5f9e; (2) PR #230, the rulings and the
+    wedge re-cut (`wave/v1-rulings-3n`); (3) PR #229, wave 3m (money first); (4) `wave/3j-second-lane` after it is
+    split. Each needs main merged in, CI green at the exact head, both reviews accepted, head, mergeability and scope
+    re-verified, and a merge commit with the head pinned. Only an owner ruling changes the order. The production deploy
+    stays the owner's (D-266).
+  - The Release 0 AMEND for FU-VITEST-DECORATOR-METADATA only if the before/after shows a tightening (question 20).
+  - Contract term extraction refuses external URLs (FU-OUTBOUND-ATTACHMENT-URL, now in the plan).
+  - SEC-KEY-CUSTOM-LOGIC (P0, now in the plan) and switching off the autopilot's #80 posting: approved, Antigravity
+    lane. "Batch 2 safe defaults #5-#10": held for the owner.
 - Finish v1 (plan of record: `docs/reconstruction/V1-PLAN-RECUT.json`). Keep going until it is done.
 - **v1 is re-cut to one wedge (D-263, 2026-11-24, #80 comment 7118009265):** a Trinidad and Tobago service business
   gets paid faster from WhatsApp, in TTD. The launch gate runs on packets with `track: launch` only; `track:
@@ -48,7 +53,8 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 - Parallel sessions (D-241): independent packets are built in child sessions; the orchestrator re-verifies each return
   with its own acceptance review before it enters a wave PR. Hold at most four at once: nine at once hit the
   account's 5-hour usage limit on 2026-11-22 and stopped every session for two hours. From 20:00 UTC hold three: the
-  seven-day Fable limit is spent until 2026-11-25 19:00 UTC, so every session runs on Opus (`model:
+  seven-day Fable limit is spent (it was due to reset 2026-11-25 19:00 UTC; check before relying on it), so every
+  session runs on Opus (`model:
   claude-opus-5-5` in create_session), which shares the 5-hour limit with the orchestrator.
 - Owner decisions are asked in batches with a recommendation first. Record each ruling on issue #80 as D-nnn at once.
 - Agent memory layer (D-253, "Both, in parallel"): Track 1 is `docs/development/agent-memory/` and
@@ -59,31 +65,32 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 
 ## 2. Rulings not yet on main
 
-D-263 to D-267 (the wedge re-cut: plan tracks, three new packets, proof per wave, redeploy, pilot) are on
-`pkt/V1-WEDGE-RECUT` (based on `pkt/V1-RULINGS-3E`), recorded on #80 (comment 7118009265). D-255 to D-262 and the
-rulings packets are on `pkt/V1-RULINGS-3E` (it joins wave 3e). D-249 to D-254 are on main (wave 3d, #221).
+D-263 to D-272 (the wedge re-cut, proof per wave, redeploy, pilot, the KEY Builder pause and its lifting, the merge
+order) are in PR #230 (`wave/v1-rulings-3n`), with the plan, the BUILD-MAP rows and the agent-memory checklists. They
+are recorded on #80 (comments 7118009265, 7118970946, 7119075149, 7119158082, 7119729668 and 7121024415). D-255 to
+D-262 and everything before them are on main. Until PR #230 merges, read the plan from `origin/wave/v1-rulings-3n`.
 
 ## 3. Work in flight (what git on main cannot show)
 
 Main is at `142e5f9e` (wave 3j of the first lane, PR #228, merged 2026-11-24 by the antigravity lane under D-272). Production runs `f5d58ef7` (16 Nov), 596 commits behind main: the owner
 redeploys (D-266). Since 2026-11-23 the first orchestrator account is out of usage; the second-lane account acts as
-orchestrator and posts on #80. Its Fable limit is spent until 2026-11-30; it runs on Opus.
+orchestrator and posts on #80. It runs on Opus (section 1).
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
-| Wedge re-cut | `pkt/V1-WEDGE-RECUT` @ this commit | Plan, BUILD-MAP rows, worker brief, status, this file | Joins the next wave PR with the rulings branch |
-| Wave 3j (second lane) | `wave/3j-second-lane` @ a1e6a649: 16 packets | Proven: suite 831/831, R0 MET at a1e6a649; summary #80 7117144941 | Owner's go: "open the wave PR" or "merge under D-239" |
-| MOUNT-QUOTES (P0, critical path) | `pkt/V1-MOUNT-QUOTES` @ 78567330 | Proven: suite 820/820, R0 MET; live journey D: D1, D2, D3, D6, D9 green at both widths; RETURN #80 7117999068 | Joins wave 3j or the next wave |
-| SWP-INV-MATH (P0, critical path; BUG-018, BUG-019) | `pkt/V1-SWP-INV-MATH` @ 6ea50c09, stacked on MOUNT-QUOTES | Done and RETURNed (#80 7118763435). Both reviews accept, after one MAJOR (missing browser spec) was closed. Web suite 191/1745; live sweep RED at base, green at head | Run journeys D and E live at the wave head (my run was cut off). Plan text: drop the stale "2.5 whole-number error" line (D-166) |
-| SWP-INV-PUBLIC-LINK (P0; BUG-053, 087, 091) | `pkt/V1-SWP-INV-PUBLIC-LINK` @ 8ae6abfa, stacked on SWP-INV-MATH | Done and RETURNed (#80, after D-270). Both reviews plus the confirmation accept. Suite 820/15287 passed, R0 MET 39/39 with an exact-head receipt at 8ae6abfa | Joins the next wave (build it from 8ae6abfa); run journey E live at the wave head. Plan text: drop INVOICE_NOT_SHAREABLE |
-| SWP-QUOTE-PUBLIC-PAGE (P0; BUG-046, D4) | `pkt/V1-SWP-QUOTE-PUBLIC-PAGE` @ 0ab56399, stacked on SWP-INV-PUBLIC-LINK | Done and RETURNed (#80 7119917222). Both reviews accept. Mocked browser sweep RED at base, 7/7 green at head | Joins the stacked wave |
-| SWP-INV-FORM-UX (P2, critical path; BUG-052, 090, 092, 093) | `pkt/V1-SWP-INV-FORM-UX` @ d7981a75, stacked on SWP-QUOTE-PUBLIC-PAGE | Done and RETURNed (#80, after 7120253245). Security ACCEPT WITH MINORS; correctness REJECT on F1, which is closed; confirmation ACCEPT WITH MINORS. Live: the sweep at 1440/1024/768/375, E1, sweep-invoice-amounts and release0-live (desktop) all green. Open minors: F2, security MINOR-2, N1 (the sidebar drawer open over the form) and N2 | Joins the stacked wave (now five packets, top at d7981a75) |
-| SWP-QUOTE-COMPOSER-CONTACT (P2, critical path; BUG-095, 096, 097) | `pkt/V1-SWP-QUOTE-COMPOSER-CONTACT` @ d690bc41, stacked on SWP-INV-FORM-UX | Done and RETURNed (#80, after the 7120518541 claim). Security REJECT (SEC-QCC-1) and correctness REJECT (MAJOR-1 and MAJOR-2) both closed; confirmation ACCEPT WITH MINORS. Whole web suite exit 0 (197 / 1783); journey D live 12/18 unchanged; sweep-quote-to-invoice green | Joins the stacked wave, now six packets with its top at d690bc41 |
-| **Wave 3m (money-first; D-272 go)** | `wave/v1-wave-3m` @ 7bd2f445, cut from main 9a7b5011 | Compacted: MOUNT-QUOTES, SWP-INV-MATH, SWP-INV-PUBLIC-LINK, SWP-QUOTE-PUBLIC-PAGE, SWP-INV-FORM-UX, SWP-QUOTE-COMPOSER-CONTACT, two commits each (12). The tree is identical to the stack top d690bc41; divergence gate OK (12 commits, 46 files); `.agent-control` is main's. The wave-head proof (server tsc, build, suite, Release 0; web typegen, tsc, vitest, lint cap 26) was running | **D-272 merge order:** (1) PR #228 (Antigravity), (2) `pkt/V1-RULINGS-3E` + `pkt/V1-WEDGE-RECUT`, (3) this wave, (4) wave/3j-second-lane after its split (Antigravity). Next: open the wave PR with the proof totals; after (1) and (2) merge, merge main into the wave, re-prove its head, wait for CI green at the exact head, then merge under D-239 (a merge commit with the head pinned) |
-| **Lanes since D-271 (2026-11-24, owner-relayed split)** | - | Two operators. Each claims through `git ls-remote` plus a CLAIM on #80 | **Claude lane:** the stacked wave (MOUNT-QUOTES, SWP-INV-MATH, SWP-INV-PUBLIC-LINK, SWP-QUOTE-PUBLIC-PAGE, SWP-INV-FORM-UX, SWP-QUOTE-COMPOSER-CONTACT; top d690bc41; journeys D and E live at 0ab56399, #80 7120146322) on the owner's go; the next critical-path packets (SWP-CONTACT-QUICKADD, SWP-INV-LIST); **D-272 (#80 7121024415): the merge go is given, in order. Claude: the money-first wave 3m. Antigravity: PR #228, the wave/3j-second-lane split, and SEC-KEY-CUSTOM-LOGIC**; then the TODAY-AGGREGATE chain and WEDGE-WA-INBOUND-CAPTURE. **Antigravity lane:** PR #228 repair (merge main in; the Codex P1 fix on `pkt/V1-FU-KEY-GENOME-READS-RESIDUAL-CODEX-228` @ bf9278f9 through reviews, compaction and proof); the four launch-track WIP branches (FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-OUTBOUND-ATTACHMENT-URL, FU-AI-APPROVALS-MONEY-SIGHT); then FU-PENDING-OWED-SERVER and FU-PENDING-OWED-WEB. **Unassigned (claim first):** FU-WEB-PAYLINK-STATUS-BUTTONS, NAV-A2, NAV-A3, SWP-KEY-CHAT-WEB, SWP-STORE-LISTING-SERVER |
-| Next v1 packets | - | Resumed by D-271 | See the lanes row. SEC-KEY-CUSTOM-LOGIC if the owner adds it |
+| Rulings and wedge re-cut (M2) | PR #230, `wave/v1-rulings-3n` | Both reviews REJECTED the first head (5dd4153b); every finding fixed in the next push: KEY correctness fixes back on launch, the gate re-cut to the launch journeys, SEC-KEY-CUSTOM-LOGIC and FU-OUTBOUND-ATTACHMENT-URL added, the checklists and runbook hardened | Confirmation review, CI green at the exact head, then merge (CHECKLISTS D) |
+| Wave 3j (second lane) (M4) | `wave/3j-second-lane` @ a1e6a649: 16 packets | Proven at a1e6a649 (#80 7117144941); fails the 25/50 divergence gate and duplicates RR-REDACTION-BY-CONTENT with #228 | Antigravity splits it after M3 (board M4) |
+| MOUNT-QUOTES (P0, critical path) | `pkt/V1-MOUNT-QUOTES` @ 78567330 | Proven: suite 820/820, R0 MET; live journey D: D1, D2, D3, D6, D9 green at both widths; RETURN #80 7117999068 | In wave 3m, PR #229 (its open minors are listed there) |
+| SWP-INV-MATH (P0, critical path; BUG-018, BUG-019) | `pkt/V1-SWP-INV-MATH` @ 6ea50c09, stacked on MOUNT-QUOTES | Done and RETURNed (#80 7118763435). Both reviews accept, after one MAJOR (missing browser spec) was closed. Web suite 191/1745; live sweep RED at base, green at head | In wave 3m, PR #229 (its open minors are listed there) |
+| SWP-INV-PUBLIC-LINK (P0; BUG-053, 087, 091) | `pkt/V1-SWP-INV-PUBLIC-LINK` @ 8ae6abfa, stacked on SWP-INV-MATH | Done and RETURNed (#80, after D-270). Both reviews plus the confirmation accept. Suite 820/15287 passed, R0 MET 39/39 with an exact-head receipt at 8ae6abfa | In wave 3m, PR #229 (its open minors are listed there) |
+| SWP-QUOTE-PUBLIC-PAGE (P0; BUG-046, D4) | `pkt/V1-SWP-QUOTE-PUBLIC-PAGE` @ 0ab56399, stacked on SWP-INV-PUBLIC-LINK | Done and RETURNed (#80 7119917222). Both reviews accept. Mocked browser sweep RED at base, 7/7 green at head | In wave 3m, PR #229 (its open minors are listed there) |
+| SWP-INV-FORM-UX (P2, critical path; BUG-052, 090, 092, 093) | `pkt/V1-SWP-INV-FORM-UX` @ d7981a75, stacked on SWP-QUOTE-PUBLIC-PAGE | Done and RETURNed (#80, after 7120253245). Security ACCEPT WITH MINORS; correctness REJECT on F1, which is closed; confirmation ACCEPT WITH MINORS. Live: the sweep at 1440/1024/768/375, E1, sweep-invoice-amounts and release0-live (desktop) all green. Open minors: F2, security MINOR-2, N1 (the sidebar drawer open over the form) and N2 | In wave 3m, PR #229 (its open minors are listed there) |
+| SWP-QUOTE-COMPOSER-CONTACT (P2, critical path; BUG-095, 096, 097) | `pkt/V1-SWP-QUOTE-COMPOSER-CONTACT` @ d690bc41, stacked on SWP-INV-FORM-UX | Done and RETURNed (#80, after the 7120518541 claim). Security REJECT (SEC-QCC-1) and correctness REJECT (MAJOR-1 and MAJOR-2) both closed; confirmation ACCEPT WITH MINORS. Whole web suite exit 0 (197 / 1783); journey D live 12/18 unchanged; sweep-quote-to-invoice green | In wave 3m, PR #229 (its open minors are listed there) |
+| **Wave 3m (money-first; M3)** | PR #229, `wave/v1-wave-3m` @ d2958d88 (7bd2f445 plus a fixture-token rename for GitGuardian) | Proven at 7bd2f445: server 820 files / 15287 tests, R0 MET 39/39 exact-head; web 197 files / 1784 tests exit 0, tsc 0, lint 25 of 26. GitGuardian incident 40952282 is a fake test token: the owner marks it a false positive | After M2 merges: merge main in, re-prove the new head (CHECKLISTS C), CI green at the exact head, merge (CHECKLISTS D) |
+| **Lanes since D-271 (2026-11-24, owner-relayed split)** | - | Two operators, `claude` and `antigravity`. Each claims atomically (CHECKLISTS B1) plus a CLAIM on #80 | Who owns what next: `BOARD.md` on `coord/board`, one owner per row. Claude: M2, M3, then P7, P8 and the P16 docs follow-up. Antigravity: SEC-KEY-CUSTOM-LOGIC, the autopilot switch-off, FU-VITEST-DECORATOR-METADATA's before/after, the first-lane WIP, FU-PENDING-OWED-SERVER and -WEB, and M4 |
+| Next v1 packets | - | Resumed by D-271 | The board (`coord/board`): P7 SWP-CONTACT-QUICKADD and P8 SWP-INV-LIST for the Claude lane after M3; unowned rows for any lane |
 | First lane, as it left them (2026-11-23 ~09:30 UTC) | `wave/v1-wave-3j` a2e9f3f0, `wave/v1-wave-3k` 88268a01; FU-INSIGHTS-SIGHT 28cdbccb; child sessions for FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-GENOME-SURFACES-REVENUE, FU-OUTBOUND-ATTACHMENT-URL, FU-AI-APPROVALS-MONEY-SIGHT | Proven or building when the account stopped; not re-verified since | Re-verify each head before it enters a wave |
-| FU-VITEST-DECORATOR-METADATA | @ 83b6dfc8 | Stopped on owner question 20 | Owner ruling |
+| FU-VITEST-DECORATOR-METADATA | @ 83b6dfc8 | Question 20 ruled by D-272.2: the AMEND only if the before/after shows a tightening | Antigravity shows the before/after (board P3) |
 
 How every proof was run (the server proof at an exact head, the web proof, live journeys and sweeps with the API on
 `keyflowos_e2e`, browser RED at the base, and reviews in detached worktrees) is written down step by step in
@@ -91,7 +98,7 @@ How every proof was run (the server proof at an exact head, the web proof, live 
 
 ## 4. Open questions waiting for the owner (ask together)
 
-Format: `docs/development/agent-memory/OWNER-QUESTION-FORMAT.md`. Safe defaults apply until ruled.
+Format: `docs/development/agent-memory/OWNER-QUESTION-FORMAT.md`. Safe defaults apply until ruled, but never to Release 0 evidence: that changes only by an owner ruling.
 
 1. FIN8 command-item mirrors show cash, burn and runway to operations readers; D-100 reads as no money signals without
    revenue read. Proposed packet: strip figures from the mirrors.
@@ -138,7 +145,9 @@ Format: `docs/development/agent-memory/OWNER-QUESTION-FORMAT.md`. Safe defaults 
 19. Production facts that set two RR priorities: is MCP_REMOTE_SERVERS set in production (RR-MCP-TENANT-BOUND -> P0)?
     Are there BankConnection rows with access tokens (RR-BANK-TOKEN-ENCRYPT -> P0)?
 
-20. **Release 0 ruling needed (blocks FU-VITEST-DECORATOR-METADATA, R0 REJECTED without it).** Turning DTO validation
+20. **Ruled by D-272.2: the AMEND goes ahead only if the before/after shows a tightening; otherwise it holds.** (a)
+    reads as a tightening (a bad email now gets its 400); (b) widens an expected message, so it holds unless the diff
+    shows otherwise. Background: Turning DTO validation
     on in vitest broke two bound cases whose premise came from unvalidated tests: (a) crm-contact-duplicate "whitespace-
     padded email passes the DTO ... 409" (release0-landed.json): production answers 400 at @IsEmail. Default: restate
     as 400 (service trim still proven by the next case). (b) key-cortex-tenant-binding "SUPER_ADMIN naming no tenant is
@@ -161,13 +170,12 @@ Format: `docs/development/agent-memory/OWNER-QUESTION-FORMAT.md`. Safe defaults 
     patterns (plans are readable business-wide). Plan as the turn's member instead? (Default: keep as built.)
 27. Codex on #227: AGENTS.md asks architecture/ maps to be regenerated after architecture changes; CLAUDE.md forbids a
     programme-map refresh without authority. Approve one reviewed packet FU-ARCH-MAP-REFRESH for waves 3a-3k? (Default: yes, after 3k lands.)
-
-27. MOUNT-QUOTES: Money's "Invoice" buttons and the hub's "Invoices & Pipeline" push a bare `?tab=pipeline`, which now
+28. MOUNT-QUOTES: Money's "Invoice" buttons and the hub's "Invoices & Pipeline" push a bare `?tab=pipeline`, which now
     opens Quotes. Repoint them to `/app/commerce/invoices`? (Default: a small follow-up packet repoints them.)
-28. MOUNT-QUOTES: keep the explicit, confirmed bulk Delete on the Quotes list? (Default: keep; no status option deletes.)
-29. MOUNT-QUOTES: FinancePipeline and the payment-record modal screen are now mounted by no route. Remove them, or
+29. MOUNT-QUOTES: keep the explicit, confirmed bulk Delete on the Quotes list? (Default: keep; no status option deletes.)
+30. MOUNT-QUOTES: FinancePipeline and the payment-record modal screen are now mounted by no route. Remove them, or
     remount the modal? (Default: remove in a follow-up.)
-30. D-264: should the launch wait for the research (D-261) and memory (D-254) packets after all? (Default: no; they
+31. D-264: should the launch wait for the research (D-261) and memory (D-254) packets after all? (Default: no; they
     follow launch.)
 
 ## 5. How to work here (learned the hard way)

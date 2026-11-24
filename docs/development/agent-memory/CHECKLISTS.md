@@ -7,11 +7,11 @@ Every recurring task, broken into steps. Each step is one action with a check yo
 - The checks come from what went wrong in this programme (B-programme-tooling-and-lessons, the November lessons in
   `ORCHESTRATOR-STATE.md` section 5).
 
-How each step is done is in `LIVE-PROOF-RUNBOOK.md` and `WAVE-RUNBOOK.md`. This file says what must be true.
+How each step is done is in `LIVE-PROOF-RUNBOOK.md` ("runbook") and `WAVE-RUNBOOK.md`. This file says what must be true.
 
 ## A. Start of any session (every tool, every time)
 
-- [ ] Read `docs/reconstruction/handoff/BOARD.md`, the latest `ORCHESTRATOR-STATE.md`, and #80 since your last
+- [ ] Read `BOARD.md` at the root of branch `coord/board`, the latest `ORCHESTRATOR-STATE.md`, and #80 since your last
       visit.
 - [ ] Find your lane's rows on the board. Work only on items your lane owns, or unowned items you claim (step B1).
 - [ ] Check the services: `pg_isready` and `redis-cli ping` (restart them if down). Check `node -v` matches `.nvmrc`.
@@ -20,9 +20,13 @@ How each step is done is in `LIVE-PROOF-RUNBOOK.md` and `WAVE-RUNBOOK.md`. This 
 ## B. Packet (one P0–P3 item of the v1 plan)
 
 1. **Claim.**
+   - [ ] The packet has `"track": "launch"` in the plan (D-263), or the owner or the board gives it to you.
    - [ ] `git ls-remote origin refs/heads/pkt/V1-<ID>` prints nothing.
-   - [ ] Create the branch on the right base (main, or the stack top it depends on) and push it.
-   - [ ] Post a CLAIM on #80. Set the board row to your lane and `claimed`.
+   - [ ] Create the branch on the right base (main, or the stack top it depends on) and push it so that the push
+         fails if the branch exists: `git push --force-with-lease=refs/heads/pkt/V1-<ID>: origin
+         HEAD:refs/heads/pkt/V1-<ID>`.
+   - [ ] Post a CLAIM on #80, then re-read #80. An earlier CLAIM for the same packet wins: the later lane deletes
+         only the branch it just pushed. Set the board row to your lane and `claimed`.
 2. **Read.**
    - [ ] Run `node scripts/agent-memory/bundle.mjs <ID> --ref <plan ref>`: scope, definition of done, write set,
          Release 0 rows.
@@ -41,17 +45,22 @@ How each step is done is in `LIVE-PROOF-RUNBOOK.md` and `WAVE-RUNBOOK.md`. This 
    - [ ] Web: `tsc --noEmit` (only the known 'next' type error allowed) and eslint 0 on changed files. Server: tsc.
    - [ ] Commit the fix and push.
 5. **Prove (D-265).**
+   - [ ] Every packet: the tests of every folder it touched (exit code 0) and the type check, at the final head.
    - [ ] UI change: a live or mocked browser run, RED at the base build and green at the head, at every width the
          layout changes. Check 375, 768, 1024 and 1440, not only two.
-   - [ ] Server, a Release 0 bound suite, or a manifest-bound file changed: the full server suite plus
-         `proof:release0` at the head (runbook §1).
-   - [ ] Otherwise these run at the wave head (checklist C).
+   - [ ] A Release 0 bound suite (`release0-edited-suites.json`) or a manifest-bound file changed: `proof:release0`
+         at the packet head as well (runbook §1).
+   - [ ] The full server suite and `proof:release0` otherwise run at the wave head (checklist C).
 6. **Review.**
    - [ ] Two fresh reviewers (security/tenancy/process; correctness/regression), each in a detached worktree.
    - [ ] Each reviewer gets the bundle, the diff range and your claims, never your conclusions.
-   - [ ] Every MAJOR is closed tests-first (a tests-only commit, then the fix), or ruled out of scope by the owner.
+   - [ ] Every CRITICAL and MAJOR is closed tests-first (a tests-only commit, then the fix), or ruled out of scope by
+         the owner. Every other real finding is fixed, or listed as open in the RETURN.
    - [ ] A confirmation review of the repair delta. No commits after the last review.
-7. **Return.**
+7. **Never**, at any step: production or staging, real provider traffic, a weakened or skipped test or gate, a
+   Release 0 evidence edit without an owner ruling (an `r0_register` AMEND), fabricated evidence, secrets in chat or
+   code.
+8. **Return.**
    - [ ] Post a RETURN on #80: branch, head, RED and fix shas, files, departures, the proof totals as printed,
          review verdicts and how each finding closed, and what is open.
    - [ ] Set the board row to `returned`. Update `ORCHESTRATOR-STATE.md` section 3. Push both.
@@ -59,10 +68,12 @@ How each step is done is in `LIVE-PROOF-RUNBOOK.md` and `WAVE-RUNBOOK.md`. This 
 ## C. Wave (packets that are returned, to one PR)
 
 - [ ] Every packet in the wave is `returned`, with both reviews and a confirmation accepted at its head.
+- [ ] Packets built by another session or lane: your own two-lens acceptance review at the packet head (D-241,
+      `ACCEPTANCE-REVIEW-BRIEF.md`), with its findings closed, before the packet enters the wave.
 - [ ] Cut the wave branch from current `origin/main` in a **new, empty** worktree. Check the path does not exist
       first.
-- [ ] Compact two commits per packet (runbook §1). For stacked packets, take each packet's delta over the previous
-      tip.
+- [ ] Compact two commits per packet (WAVE-RUNBOOK §1). For stacked packets, take each packet's delta over the
+      previous tip.
 - [ ] `git diff <stack top> HEAD` prints nothing. `.agent-control` matches main.
 - [ ] `scripts/check-branch-divergence.sh origin/main HEAD --max-commits 25 --max-files 50` says OK, or split the
       wave.
@@ -73,7 +84,8 @@ How each step is done is in `LIVE-PROOF-RUNBOOK.md` and `WAVE-RUNBOOK.md`. This 
 
 ## D. Merge (D-239; one at a time, in the board's merge order)
 
-- [ ] The board's merge order says it is this PR's turn, and every PR before it is merged.
+- [ ] The board's merge order says it is this PR's turn, and every PR before it is merged. The order is the owner's
+      (D-272); only an owner ruling changes it.
 - [ ] Merge current main into the wave if main moved. Re-run checklist C's proof at the new head.
 - [ ] CI is green at the **exact** head sha: every required check finished, none pending.
 - [ ] Both reviews accept at that head (a confirmation review if anything changed since).

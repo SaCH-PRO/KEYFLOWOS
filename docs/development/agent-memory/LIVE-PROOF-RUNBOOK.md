@@ -45,13 +45,18 @@ written here. The local JWT secret is a random string you generate once.
 manifest-bound file.
 
 **Rules:**
-- Run it in one checkout, strictly one head at a time.
+- Run it in a dedicated detached worktree of the head (`git worktree add --detach <new path> $H`), never in a
+  checkout someone else is using, strictly one head at a time.
 - Check the head before and after each step.
 - Never run two proof runs, or a reviewer's server integration tests, against the same database at once. Fixtures
   collide.
 
 ```bash
-H=<sha>; cd /path/to/checkout && git checkout -q $H && test "$(git rev-parse HEAD)" = "$(git rev-parse $H)"
+set -euo pipefail                      # a failed step stops the chain; the run does not count
+H=<sha>; cd /path/to/dedicated/worktree
+test "$(git rev-parse HEAD)" = "$(git rev-parse $H)"          # the worktree is at the head
+test -z "$(git status --porcelain)"                           # and clean
+set +e                                 # from here each step reports its own exit code
 (cd apps/server && NODE_OPTIONS=--max-old-space-size=6144 npx tsc --noEmit -p tsconfig.json); echo TSC=$?
 pnpm --filter server build; echo BUILD=$?
 (cd apps/server && set -a && . ../../.env && set +a && pnpm vitest run) > $OUT/vitest-$H.log 2>&1; echo SUITE=$?
@@ -96,7 +101,9 @@ cd $WT/apps/server && env -i PATH="$PATH" HOME="$HOME" \
   REDIS_URL=redis://127.0.0.1:6379 NODE_ENV=test PORT=3001 AI_DISABLED=1 DISABLE_SCHEDULERS=1 HIBP_DISABLED=true \
   SUPABASE_JWT_SECRET="$(cat ~/.kf-e2e-jwt-secret)" RATE_LIMIT_MAX_REQUESTS=100000 KEY_DISABLED= \
   NEXT_PUBLIC_APP_URL=http://127.0.0.1:5000 node dist/main.js > $OUT/e2e-api.log 2>&1 &
-until curl -fsS http://localhost:3001/healthz >/dev/null; do sleep 2; done
+API_PID=$!
+for i in $(seq 1 90); do curl -fsS http://localhost:3001/healthz >/dev/null && break; sleep 2; done
+curl -fsS http://localhost:3001/healthz >/dev/null || { echo "API did not start: read $OUT/e2e-api.log"; kill $API_PID; }
 
 # The browser runs (the harness starts the standalone web server on 5000)
 cd $WT/apps/web
@@ -118,8 +125,9 @@ needed; the spec answers `api.test.local` with `page.route`.
 - Where the base cannot run the spec (a selector that only exists at the head), add a throwaway probe with
   structural selectors to show the bug, and do not commit the probe.
 
-**Stop the API when finished:** `pkill -f dist/main.js`. Do not stop it while a run is using it: that turns every
-case into a connection failure.
+**Stop the API when finished:** `kill $API_PID` (only the API you started; never `pkill`, which also stops
+another lane's API or proof run on the same machine). Do not stop it while a run is using it: that turns every case
+into a connection failure.
 
 ## 4. Reviews
 
@@ -128,7 +136,7 @@ symlinked dependencies. They never check out, stash or commit in anyone else's w
 
 - One reads with the security / tenancy / process lens, the other with the correctness / regression lens.
 - Each gets `docs/development/agent-memory/ACCEPTANCE-REVIEW-BRIEF.md`, the bundle
-  (`node scripts/agent-memory/bundle.mjs <ID> --ref origin/pkt/V1-WEDGE-RECUT`), the diff range, and the worker's
+  (`node scripts/agent-memory/bundle.mjs <ID> --ref origin/main`; before PR #230 merges, `--ref origin/wave/v1-rulings-3n`), the diff range, and the worker's
   claims and deviations. Never give them the worker's conclusions as facts.
 - Close every real finding tests-first, then get a confirmation review of the delta
   (`CONFIRMATION-REVIEW-BRIEF.md`).
