@@ -18,9 +18,9 @@
  *
  * WHAT IS REAL: PrismaService and the database, TemporalFlowMemoryService, TemporalAdapterService and
  * KeyCortexConnectorService.execute (the KEY connector's command path). Stand-ins: the connector's other
- * adapters and its registry (not reached by module 'temporal'), SemanticMemoryService behind
- * TemporalFlowMemoryService (update and tag never reach it; a call is recorded and fails the case) and
- * TemporalFlowService (not reached). No tenant context is installed, so the Prisma tenant extension is inert
+ * adapters and its registry (not reached by module 'temporal'), and SemanticMemoryService behind
+ * TemporalFlowMemoryService and TemporalFlowService (update and tag never reach it; a call is recorded and fails the
+ * case). TemporalFlowService is real: since MEM-TEMPORAL-MEMORY-ROUTES-SIGHT it resolves the actor's memory sight. No tenant context is installed, so the Prisma tenant extension is inert
  * and the services' own predicates are the only control, as on KEY's background paths.
  *
  * Every seeded row carries the `v71t_` prefix and is hard-deleted with sqlLikePrefix() in beforeAll and
@@ -61,6 +61,7 @@ async function cleanup() {
   for (const sql of [
     `DELETE FROM temporal_flow_memories WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM temporal_flow_memories WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
   ]) {
@@ -123,8 +124,11 @@ beforeAll(async () => {
       throw new Error(`v71t: SemanticMemoryService.${String(prop)} reached with ${JSON.stringify(args).slice(0, 120)}`);
     },
   });
-  const flow = new Proxy({}, { get: (_t, prop) => () => { throw new Error(`v71t: TemporalFlowService.${String(prop)} reached`); } });
+  // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT: recall, tag and update read for the command's actor, through the real
+  // TemporalFlowService's memory sight (its semantic store is the recording stand-in: never reached by these commands).
+  const { TemporalFlowService } = await import('../src/modules/temporal-flow/temporal-flow.service');
   const memory = new TemporalFlowMemoryService(new PrismaService() as any, semantic as any);
+  const flow = new TemporalFlowService(new PrismaService() as any, memory, semantic as any);
   memoryService = memory;
   const temporal = new TemporalAdapterService(memory, flow as any);
   // Constructor order: registry, contextAssembly, crm, commerce, bookings, content, communications, flow,
@@ -139,6 +143,9 @@ beforeAll(async () => {
   await db.user.create({ data: { id: ID.userB, email: `${P}b@t.local`, role: 'USER' } });
   await db.business.create({ data: { id: ID.bizA, name: 'A', ownerId: ID.userA } });
   await db.business.create({ data: { id: ID.bizB, name: 'B', ownerId: ID.userB } });
+  // D-104: an owner is a member (MEM-TEMPORAL-MEMORY-ROUTES-SIGHT reads the actor's membership).
+  await db.membership.create({ data: { id: `${P}m_a`, userId: ID.userA, businessId: ID.bizA, role: 'OWNER', maxApprovalTier: 4 } });
+  await db.membership.create({ data: { id: `${P}m_b`, userId: ID.userB, businessId: ID.bizB, role: 'OWNER', maxApprovalTier: 4 } });
 }, 60_000);
 
 beforeEach(async () => {

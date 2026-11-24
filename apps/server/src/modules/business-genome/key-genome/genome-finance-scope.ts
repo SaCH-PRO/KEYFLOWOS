@@ -72,7 +72,7 @@ const MONEY_AMOUNT = /[$€£¥₹]\s?\d|(?<![a-z0-9])(ttd|usd|eur|gbp|jmd|bbd|x
  * above, where "rate" would take every response or completion rate.
  */
 const PROPOSAL_MONEY_WORDS =
-  /(?<![a-z])(amounts?|subtotals?|balances?|owed|owes|owing|paid|unpaid|dollars?|euros?|cents?|rent|income|earnings?|funds?|rate\s+cards?)(?![a-z])|(?<![a-z])(pay|pays|paying)(?![a-z])(?!\s+(?:a\s+|close\s+)?(?:visit|attention|heed|respects?|tribute|homage|mind)(?![a-z]))|(?<![a-z])(?:cards?|payments?|transactions?|charges?)\s+(?:was\s+|were\s+|got\s+)?declined|(?<![a-z])declined\s+(?:card|payment|transaction|charge)/i;
+  /(?<![a-z])(amounts?|subtotals?|balances?|owed|owes|owing|paid|unpaid|dollars?|euros?|cents?|rent|income|earnings?|funds?|rate[\s_-]+cards?)(?![a-z])|(?<![a-z])(pay|pays|paying)(?![a-z])(?!\s+(?:a\s+|close\s+)?(?:visit|attention|heed|respects?|tribute|homage|mind)(?![a-z]))|(?<![a-z])(?:cards?|payments?|transactions?|charges?)\s+(?:was\s+|were\s+|got\s+)?declined|(?<![a-z])declined\s+(?:card|payment|transaction|charge)/i;
 /**
  * Money beside a figure (rounds 4-6): a word followed within three words by a figure, a quoted figure or a percentage
  * ("Total due 900", "the total came to 1200", "Rates will rise 10%", "Wire 900 to the vendor", {"bookingTotal":900}).
@@ -144,6 +144,7 @@ const MONEY_SECTIONS = new Set(['BUSINESS_MODEL']);
 export type GenomeRowFields = {
   sourceModule?: string | null;
   sourceType?: string | null;
+  sourceEntityType?: string | null;
   section?: string | null;
   domain?: string | null;
   eventType?: string | null;
@@ -153,6 +154,11 @@ export type GenomeRowFields = {
   diagnosis?: string | null;
   /** A memory event's own metadata (a KEY_ACTION_PROPOSAL outcome carries its proposal's actionType, module, toolName). */
   metadata?: unknown;
+  /** A genome signal's own text (Codex P1 on #228): its reason (served by the KEY bridge as `message`), evidence, proposed value. */
+  reason?: unknown;
+  message?: unknown;
+  evidence?: unknown;
+  proposedValue?: unknown;
 };
 
 function mentionsMoney(...values: Array<string | null | undefined>): boolean {
@@ -185,7 +191,25 @@ export function isMoneyLabel(value: string | null | undefined): boolean {
 
 /** A genome signal with money or sales provenance, or with nothing to classify it by: D-128, D-234. */
 export function isFinanceSignal(row: GenomeRowFields): boolean {
-  return mentionsMoney(row.sourceModule, row.section, row.domain, row.signalType, row.field) || unclassified(row.section, row.domain);
+  if (
+    mentionsMoney(row.sourceModule, row.section, row.domain, row.signalType, row.field, row.sourceEntityType) ||
+    unclassified(row.section, row.domain)
+  ) {
+    return true;
+  }
+  // Codex P1 on #228 (D-234: authorization follows the data's meaning, not only its labels): a signal made from an inbox
+  // thread keeps the customer's text as its reason, so a signal with non-money labels can state money in its field,
+  // sourceEntityType, reason/message, evidence or proposed value (including figure-word field + scalar proposedValue).
+  // Read with the proposal vocabulary under one shared reading budget; unreadable fails closed.
+  const budget: ReadingBudget = { left: READING_BUDGET };
+  const fieldName = typeof row.field === 'string' && row.field.trim() !== '' ? row.field : null;
+  const proposed =
+    fieldName && !ID_KEY.test(fieldName) && row.proposedValue !== undefined && row.proposedValue !== null
+      ? Object.defineProperty(Object.create(null), fieldName, { value: row.proposedValue, enumerable: true })
+      : row.proposedValue;
+  return [row.field, row.sourceEntityType, row.reason, row.message, row.evidence, proposed].some((value) =>
+    typeof value === 'string' ? textStatesMoney(value, budget) : structuredValueStatesMoney(value, budget),
+  );
 }
 
 /** A genome recommendation in a money or sales domain (FINANCIAL, SALES, ...), titled for a money figure, made from a money signal, or with no domain: D-128, D-234. */

@@ -7,11 +7,14 @@ const READER = { id: 'user_1', role: 'USER' };
 const REQ = { user: READER };
 const FILTER = { NOT: { OR: [{ module: 'key_inbox' }] } };
 const MEMORY_FILTER = { sourceModule: { in: [] } };
+// MEM-TEMPORAL-MEMORY-ROUTES-SIGHT: the analysis is handed the reader's memory sight (readerMemoryFilter and the reader).
+const MEMORY_SIGHT = { filter: MEMORY_FILTER, who: { reader: 'user_1', sight: () => false } };
 
 function makeController() {
   const temporal = {
     readerFilter: vi.fn().mockResolvedValue(FILTER),
     readerMemoryFilter: vi.fn().mockResolvedValue(MEMORY_FILTER),
+    memorySight: vi.fn().mockResolvedValue(MEMORY_SIGHT),
     list: vi.fn().mockResolvedValue([{ id: 'tf_1' }]),
     calendarRange: vi.fn().mockResolvedValue([{ id: 'tf_2' }]),
     remindersDue: vi.fn().mockResolvedValue([{ id: 'tf_3' }]),
@@ -71,8 +74,8 @@ describe('TemporalFlowController', () => {
     const { controller, temporal } = makeController();
     await controller.analyze('biz_1');
     expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', undefined);
-    expect(temporal.readerMemoryFilter).toHaveBeenCalledWith('biz_1', undefined);
-    expect(temporal.analyze).toHaveBeenCalledWith('biz_1', FILTER, MEMORY_FILTER, null);
+    expect(temporal.memorySight).toHaveBeenCalledWith('biz_1', undefined);
+    expect(temporal.analyze).toHaveBeenCalledWith('biz_1', FILTER, MEMORY_SIGHT, null);
   });
 
   it('GET /calendar returns calendar range', async () => {
@@ -116,8 +119,8 @@ describe('TemporalFlowController', () => {
     const { controller, temporal } = makeController();
     const result = await controller.analyze('biz_1', REQ);
     expect(temporal.readerFilter).toHaveBeenCalledWith('biz_1', READER);
-    expect(temporal.readerMemoryFilter).toHaveBeenCalledWith('biz_1', READER);
-    expect(temporal.analyze).toHaveBeenCalledWith('biz_1', FILTER, MEMORY_FILTER, READER);
+    expect(temporal.memorySight).toHaveBeenCalledWith('biz_1', READER);
+    expect(temporal.analyze).toHaveBeenCalledWith('biz_1', FILTER, MEMORY_SIGHT, READER);
     expect(result.summary).toBe('Analysis complete.');
   });
 });

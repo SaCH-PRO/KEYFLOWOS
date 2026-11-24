@@ -547,7 +547,7 @@ Signature phrases you may occasionally use: ${config.signaturePhrases.join(', ')
 
     switch (config.greetingStyle) {
       case 'formal_warm':
-        return `Good ${this.getTimeOfDay()}. ${phrase} Your business genome stage is "${context.genomeStage}" — executive readiness at ${context.executiveReadiness}%. How may I assist you today?`;
+        return `Good ${this.getTimeOfDay()}. ${phrase} ${context.genomeStage ? `Your business genome stage is "${context.genomeStage}" — executive` : 'Executive'} readiness at ${context.executiveReadiness}%. How may I assist you today?`;
 
       case 'warm_personal':
         return `Hey there! ${phrase} I've already reviewed what's happening across your business — ${context.activeProjects.length} active projects, ${context.pendingInvoices} pending invoices. What would you like to tackle first?`;
@@ -573,7 +573,7 @@ Signature phrases you may occasionally use: ${config.signaturePhrases.join(', ')
           : 'Ready.';
 
       case 'encouraging':
-        return `Welcome back! ${phrase} Your business is at the "${context.genomeStage}" stage with ${context.executiveReadiness}% executive readiness. Every step forward counts — what shall we learn today?`;
+        return `Welcome back! ${phrase} ${context.genomeStage ? `Your business is at the "${context.genomeStage}" stage with` : 'Your business has'} ${context.executiveReadiness}% executive readiness. Every step forward counts — what shall we learn today?`;
 
       case 'high_energy':
         return `Let's make money! ${phrase} I see ${context.pendingInvoices} invoices pending — that's cash on the table. Readiness at ${context.executiveReadiness}%. Time to hustle!`;
@@ -686,8 +686,7 @@ Signature phrases you may occasionally use: ${config.signaturePhrases.join(', ')
       .join(', ');
 
     return `=== BUSINESS CONTEXT ===
-Genome Stage: ${context.genomeStage}
-Executive Readiness: ${context.executiveReadiness}%
+${context.genomeStage ? `Genome Stage: ${context.genomeStage}\n` : ''}Executive Readiness: ${context.executiveReadiness}%
 DNA Scores: ${dnaSummary}
 Active: ${context.recentTasks.length} tasks, ${context.recentEvents.length} events, ${context.activeProjects.length} projects
 Pending: ${typeof context.pendingInvoices === 'number' ? `${context.pendingInvoices} invoices, ` : ''}${context.unreadMessages} unread messages
