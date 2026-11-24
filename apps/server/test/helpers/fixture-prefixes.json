@@ -1265,6 +1265,11 @@
 "prefix": "v90n_",
       "owner": "apps/server/test/notifications-prefs-guard.integration.test.ts",
       "packet": "V1-90 (FU-NOTIFICATIONS-PREFS-GUARD)"
+    },
+    {
+"prefix": "v64i_",
+      "owner": "apps/server/test/storefront-oversell.integration.test.ts",
+      "packet": "V1-64 (SWP-STORE-OVERSELL)"
     }
   ],
   "pendingRenames": [],
