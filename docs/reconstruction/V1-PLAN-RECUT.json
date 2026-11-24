@@ -1805,6 +1805,7 @@
     "apps/web/src/hooks/use-key-enabled.ts",
     "apps/web/src/components/layout/app-header.tsx",
     "apps/web/src/app/app/settings/ai/page.tsx",
+    "apps/web/src/app/app/settings/page.tsx",
     "apps/server/test/helpers/fixture-prefixes.json"
    ],
    "decisions": [
@@ -1812,7 +1813,7 @@
     "hubs"
    ],
    "scope": "Kept scope (Command Center awareness panel 401 on every load; KEY drawer opens by itself for a new owner) plus the KEY off switch in the web. No web code reads the server's KEY_DISABLED today (keyDisabled() at env.ts:305 is server-only and apps/web/src has no flag or response field for it). Server: GET /identity/me (identity.controller.ts ~827, authenticated, already read by the web shell at client.ts ~3234) gains keyDisabled: boolean from keyDisabled(). Web: useKeyEnabled() (hooks/use-key-enabled.ts) reads it through apiGet without editing lib/client.ts (web-sales owns that file); under KEY_DISABLED the header 'Ask KEY' button (app-header.tsx), Cmd/Ctrl+J (key-agent.tsx ~108), the drawer, the in-form paste boxes (KEY-PASTE-BOX) and Settings > KEY (settings/ai/page.tsx) do not render. No new route. Fixture prefix (pre-allocated in the plan's prefix table so parallel lanes add disjoint registry entries): v63n_ for identity-me-key-disabled.integration.test.ts. Register each as {prefix, owner, packet: 'V1-63 (SWP-KEY-SHELL-SMOKE)'} in fixture-prefixes.json.",
-   "definition_of_done": "Tests first. RED: identity-me-key-disabled (real DB) expects keyDisabled true under KEY_DISABLED=1 and false without it (field absent today); key-shell-smoke expects no header button, no Cmd+J opening and no Settings > KEY under keyDisabled, and no 401 from the awareness panel. GREEN on Postgres and in the web suite; the /identity/me response shape is checked against identity-boundary.json (route list) and release0-journey.json (status-only reads), both unchanged; journey K 'KEY-off' and journey A steps green under KEY_DISABLED.",
+   "definition_of_done": "Tests first. RED: identity-me-key-disabled (real DB) expects keyDisabled true under KEY_DISABLED=1 and false without it (field absent today); key-shell-smoke expects no header button, no Cmd+J opening and no Settings > KEY under keyDisabled (neither the settings/ai page nor its entry on the Settings index, settings/page.tsx, which NAV-A2 added: journey K1's key-disabled step 'Settings > KEY is not offered'), and no 401 from the awareness panel. GREEN on Postgres and in the web suite; the /identity/me response shape is checked against identity-boundary.json (route list) and release0-journey.json (status-only reads), both unchanged; journey K 'KEY-off' and journey A steps green under KEY_DISABLED.",
    "journeys": [
     "A",
     "K"
