@@ -305,6 +305,16 @@ describe("Customers > Add contact (SWP-CONTACT-QUICKADD: BUG-009, BUG-034, BUG-0
     expect(within(again).queryByRole("alert"), "no stale reason on a fresh open").not.toBeInTheDocument();
   });
 
+  it("RED-BEFORE (journey C1, the header's New > Contact): an open request made before the toolbar mounts (the page's ?action=new) still opens the dialog", async () => {
+    // contacts/page.tsx turns ?action=new (the header New menu's Contact, the mobile button, the checklist) into this
+    // request on its first effect, before the contact list has loaded and the toolbar that listens for it has mounted.
+    stubContactsApi();
+    // What the page does today: window.dispatchEvent(new Event("kf:open-quick-add-contact")) in a setTimeout(0).
+    await act(async () => { window.dispatchEvent(new Event("kf:open-quick-add-contact")); });
+    render(<ContactsScreenHarness />);
+    expect(await screen.findByRole("dialog", { name: "Add contact" })).toBeInTheDocument();
+  });
+
   it("CONTROL: a saved contact closes the dialog, says it was added, and sends what was typed", async () => {
     const api = stubContactsApi();
     render(<ContactsScreenHarness />);
