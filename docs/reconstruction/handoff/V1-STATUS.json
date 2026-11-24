@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "c8afd062f66d9d5512a29b1c84fbc177880e235c",
-  "main_commit_date": "2026-11-24T13:23:41+00:00",
+  "main_sha": "218067194f14d295ae1da44862739aaee7533b6b",
+  "main_commit_date": "2026-11-24T14:29:20+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -28,7 +28,7 @@
  },
  "summary": {
   "packets": 366,
-  "points": 536.5,
+  "points": 537.5,
   "by_status": {
    "done": {
     "packets": 99,
@@ -42,7 +42,7 @@
    },
    "todo": {
     "packets": 267,
-    "points": 390,
+    "points": 391,
     "pct_by_points": 72.7
    }
   },
@@ -820,7 +820,7 @@
    "step": 5,
    "priority": "P1",
    "size": "S",
-   "lane": "web",
+   "lane": "both",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -939,7 +939,7 @@
    "id": "FU-OVERLAY-LAYER-TABLE",
    "step": 3,
    "priority": "P2",
-   "size": "M",
+   "size": "L",
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
@@ -2042,7 +2042,7 @@
    "step": 5,
    "priority": "P1",
    "size": "S",
-   "lane": "web",
+   "lane": "both",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 0
@@ -2161,7 +2161,7 @@
    "id": "FU-OVERLAY-LAYER-TABLE",
    "step": 3,
    "priority": "P2",
-   "size": "M",
+   "size": "L",
    "lane": "web",
    "track": "launch",
    "on_critical_path": false,
@@ -5662,7 +5662,7 @@
    "step": 5,
    "priority": "P1",
    "size": "S",
-   "lane": "web",
+   "lane": "both",
    "track": "launch",
    "status": "todo",
    "derived_from": "prior-status-file",
@@ -5933,7 +5933,7 @@
    "id": "FU-OVERLAY-LAYER-TABLE",
    "step": 3,
    "priority": "P2",
-   "size": "M",
+   "size": "L",
    "lane": "web",
    "track": "launch",
    "status": "todo",
