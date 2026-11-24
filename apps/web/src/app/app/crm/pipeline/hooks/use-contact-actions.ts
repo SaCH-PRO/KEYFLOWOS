@@ -369,7 +369,7 @@ export function useContactActions({
     };
 
     // This delete's own state: its Undo reads only this, never another delete of the same customer.
-    let state: "pending" | "undone" | "sent" = "pending";
+    let state: "pending" | "undone" | "sent" | "failed" = "pending";
 
     // Sent at most once: whichever comes first (the window ends, or the page is left) takes the entry.
     const send = () => {
@@ -381,6 +381,8 @@ export function useContactActions({
           await deleteContact(id, businessId);
           void loadFlowData();
         } catch {
+          // Not deleted: the row is back, so a later Undo has nothing to do (and nothing is in Trash).
+          state = "failed";
           restore();
           toast.error("Failed to delete contact — restored");
         }
