@@ -3,7 +3,7 @@
  */
 
 import type { Invoice, Quote } from "@/lib/client";
-import { OWED_STATUSES } from "@/lib/commerce-status";
+import { OWED_STATUSES, invoiceRemainingOwed, safeInvoiceAmount } from "@/lib/commerce-status";
 import type { FinancialRecord, PipelineMetrics, CashPosition } from "./types";
 
 export function normalizeInvoice(inv: Invoice): FinancialRecord {
@@ -63,6 +63,7 @@ export function normalizeQuote(q: Quote): FinancialRecord {
 export function getPipelineStage(status: string): string {
   const map: Record<string, string> = {
     DRAFT: "draft",
+    PENDING: "sent",
     SENT: "sent",
     VIEWED: "viewed",
     OVERDUE: "action_needed",
@@ -112,22 +113,22 @@ export function computeCashPosition(
 ): CashPosition {
   const collected = invoices
     .filter((i) => i.status === "PAID")
-    .reduce((s, i) => s + Number(i.total), 0);
+    .reduce((s, i) => s + safeInvoiceAmount(i.total), 0);
 
   const outstanding = invoices
     .filter((i) => OWED_STATUSES.has(i.status))
-    .reduce((s, i) => s + Number(i.total), 0);
+    .reduce((s, i) => s + invoiceRemainingOwed(i), 0);
 
   const overdue = invoices
     .filter((i) => i.status === "OVERDUE")
-    .reduce((s, i) => s + Number(i.total), 0);
+    .reduce((s, i) => s + invoiceRemainingOwed(i), 0);
 
   const pipeline = quotes
     .filter((q) => q.status === "ACCEPTED")
-    .reduce((s, q) => s + (q.total ?? 0), 0);
+    .reduce((s, q) => s + safeInvoiceAmount(q.total), 0);
 
   // Simple burn rate: average monthly outgoing (approximate from overdue + void as proxy)
-  const voidTotal = invoices.filter((i) => i.status === "VOID").reduce((s, i) => s + Number(i.total), 0);
+  const voidTotal = invoices.filter((i) => i.status === "VOID").reduce((s, i) => s + safeInvoiceAmount(i.total), 0);
   const burnRate = (outstanding + voidTotal) / 12;
   const runwayMonths = burnRate > 0 ? collected / burnRate : 999;
 

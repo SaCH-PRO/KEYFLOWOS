@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { Invoice, Quote } from "@/lib/client";
-import { OWED_STATUSES } from "@/lib/commerce-status";
+import { OWED_STATUSES, invoiceRemainingOwed, safeInvoiceAmount } from "@/lib/commerce-status";
 
 export interface FinancialSummary {
   outstanding: number;
@@ -21,16 +21,16 @@ export function useFinancialSummary(invoices: Invoice[], quotes: Quote[]): Finan
     let draftCount = 0;
     let pendingQuotes = 0;
     for (const inv of invoices) {
-      const amount = Number(inv.total ?? 0);
       if (inv.status === "PAID") {
         const paidDate = inv.paidAt ? new Date(inv.paidAt) : null;
         if (paidDate && paidDate.getMonth() === thisMonth && paidDate.getFullYear() === thisYear) {
-          collectedThisMonth += amount;
+          collectedThisMonth += safeInvoiceAmount(inv.total);
         }
       } else if (OWED_STATUSES.has(inv.status)) {
-        outstanding += amount;
+        const owed = invoiceRemainingOwed(inv);
+        outstanding += owed;
         if (inv.status === "OVERDUE" || (inv.dueDate && new Date(inv.dueDate) < now)) {
-          overdue += amount;
+          overdue += owed;
         }
       } else if (inv.status === "DRAFT") {
         draftCount += 1;

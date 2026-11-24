@@ -8,7 +8,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { Invoice, Quote, Product, fetchCommerceStats, type CommerceStats } from "@/lib/client";
-import { OWED_STATUSES } from "@/lib/commerce-status";
+import { OWED_STATUSES, invoiceRemainingOwed, safeInvoiceAmount } from "@/lib/commerce-status";
 import { formatCurrencyCompact } from "@/lib/currency";
 
 interface CommerceKpiStripProps {
@@ -21,11 +21,11 @@ interface CommerceKpiStripProps {
 
 function computeStats(invoices: Invoice[], quotes: Quote[]) {
   const paidInvoices = invoices.filter((inv) => inv.status === "PAID");
-  const totalRevenue = paidInvoices.reduce((sum, inv) => sum + Number(inv.total), 0);
+  const totalRevenue = paidInvoices.reduce((sum, inv) => sum + safeInvoiceAmount(inv.total), 0);
   const outstandingInvoices = invoices.filter((inv) => OWED_STATUSES.has(inv.status));
-  const outstanding = outstandingInvoices.reduce((sum, inv) => sum + Number(inv.total), 0);
+  const outstanding = outstandingInvoices.reduce((sum, inv) => sum + invoiceRemainingOwed(inv), 0);
   const overdueInvoices = invoices.filter((inv) => inv.status === "OVERDUE");
-  const overdueAmount = overdueInvoices.reduce((sum, inv) => sum + Number(inv.total), 0);
+  const overdueAmount = overdueInvoices.reduce((sum, inv) => sum + invoiceRemainingOwed(inv), 0);
   const acceptedQuotes = quotes.filter((q) => q.status === "ACCEPTED").length;
   const conversionRate = quotes.length > 0 ? Math.round((acceptedQuotes / quotes.length) * 100) : 0;
 

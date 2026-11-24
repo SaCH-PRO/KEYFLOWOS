@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { invoiceBalanceOfStoredRows, invoicePaidPercent } from "@keyflow/shared";
 import { Invoice, Contact, Product } from "@/lib/client";
+import { canRemindInvoice } from "@/lib/commerce-status";
 import { formatAmount, getDaysUntilDue, formatRelativeDate } from "../../utils/commerce-utils";
 import { getStatusBadge, BILLING_SORT_OPTIONS, BillingSortKey, INVOICE_STATUS_FILTERS } from "../../components/commerce-types";
 import { useCommerceSearch } from "../../hooks/use-commerce-search";
@@ -275,7 +276,7 @@ export function InvoiceList({
                             {gmailStatus?.connected && (
                               <MenuItem icon={Mail} label="Send via email" onClick={() => { setOpenMenuId(null); /* open send email */ }} />
                             )}
-                            {(inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID") && gmailStatus?.connected && (
+                            {canRemindInvoice(inv.status) && gmailStatus?.connected && (
                               <MenuItem icon={Bell} label="Send reminder" onClick={() => { setOpenMenuId(null); onReminder(inv); }} />
                             )}
                             {inv.status === "PAID" && gmailStatus?.connected && inv.contact?.email && (

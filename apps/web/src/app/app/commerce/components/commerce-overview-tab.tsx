@@ -17,7 +17,7 @@ import { CommerceHub } from "./commerce-hub";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatCurrency, formatCurrencyCompact } from "@/lib/currency";
 import { parseDate } from "@/lib/date-safe";
-import { InvoiceStatus, OWED_STATUSES, QuoteStatus } from "@/lib/commerce-status";
+import { InvoiceStatus, OWED_STATUSES, QuoteStatus, invoiceRemainingOwed, safeInvoiceAmount } from "@/lib/commerce-status";
 import type { Invoice, Quote, RecurringInvoice } from "@/lib/client";
 import { invoiceMoney } from "../payments/payments-tab";
 
@@ -154,10 +154,10 @@ function RevenueAtAGlance({
   recurring?: RecurringInvoice[];
   currency: string;
 }) {
-  const quoteTotal = quotes.reduce((s, q) => s + (q.total ?? 0), 0);
+  const quoteTotal = quotes.reduce((s, q) => s + safeInvoiceAmount(q.total), 0);
   const openInvoices = invoices.filter((i) => OWED_STATUSES.has(i.status));
-  const invoiceTotal = openInvoices.reduce((s, i) => s + (Number(i.total) ?? 0), 0);
-  const paidTotal = invoices.filter((i) => i.status === InvoiceStatus.PAID).reduce((s, i) => s + (Number(i.total) ?? 0), 0);
+  const invoiceTotal = openInvoices.reduce((s, i) => s + invoiceRemainingOwed(i), 0);
+  const paidTotal = invoices.filter((i) => i.status === InvoiceStatus.PAID).reduce((s, i) => s + safeInvoiceAmount(i.total), 0);
 
   const activeRecurring = (recurring ?? []).filter((r) => r.status === "ACTIVE");
   const mrr = activeRecurring.reduce((s, r) => s + Number(r.amount ?? 0), 0);

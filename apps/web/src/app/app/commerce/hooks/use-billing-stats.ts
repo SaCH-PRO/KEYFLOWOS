@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { parseDate } from "@/lib/date-safe";
 import type { Invoice, Quote } from "@/lib/client";
-import { OWED_STATUSES } from "@/lib/commerce-status";
+import { OWED_STATUSES, invoiceRemainingOwed, safeInvoiceAmount } from "@/lib/commerce-status";
 
 export interface AgingBucket {
   label: string;
@@ -20,19 +20,14 @@ export interface BillingStats {
   aging: AgingBucket[];
 }
 
-function safeNumber(v: number | string | null | undefined): number {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-}
-
 export function useBillingStats(invoices: Invoice[], quotes: Quote[]): BillingStats {
   return useMemo(() => {
     const paidInvoices = invoices.filter((inv) => inv.status === "PAID");
-    const totalRevenue = paidInvoices.reduce((sum, inv) => sum + safeNumber(inv.total), 0);
+    const totalRevenue = paidInvoices.reduce((sum, inv) => sum + safeInvoiceAmount(inv.total), 0);
     const outstandingInvoices = invoices.filter((inv) => OWED_STATUSES.has(inv.status));
-    const outstanding = outstandingInvoices.reduce((sum, inv) => sum + safeNumber(inv.total), 0);
+    const outstanding = outstandingInvoices.reduce((sum, inv) => sum + invoiceRemainingOwed(inv), 0);
     const overdueInvoices = invoices.filter((inv) => inv.status === "OVERDUE");
-    const overdueAmount = overdueInvoices.reduce((sum, inv) => sum + safeNumber(inv.total), 0);
+    const overdueAmount = overdueInvoices.reduce((sum, inv) => sum + invoiceRemainingOwed(inv), 0);
     const acceptedQuotes = quotes.filter((q) => q.status === "ACCEPTED").length;
     const conversionRate = quotes.length > 0 ? Math.round((acceptedQuotes / quotes.length) * 100) : 0;
 
@@ -45,29 +40,29 @@ export function useBillingStats(invoices: Invoice[], quotes: Quote[]): BillingSt
     ];
 
     for (const inv of outstandingInvoices) {
-      const total = safeNumber(inv.total);
+      const owed = invoiceRemainingOwed(inv);
       const due = parseDate(inv.dueDate);
       if (!due) {
         buckets[0].count++;
-        buckets[0].amount += total;
+        buckets[0].amount += owed;
         continue;
       }
       const daysOverdue = Math.floor((now.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
       if (Number.isNaN(daysOverdue)) {
         buckets[0].count++;
-        buckets[0].amount += total;
+        buckets[0].amount += owed;
       } else if (daysOverdue <= 0) {
         buckets[0].count++;
-        buckets[0].amount += total;
+        buckets[0].amount += owed;
       } else if (daysOverdue <= 30) {
         buckets[1].count++;
-        buckets[1].amount += total;
+        buckets[1].amount += owed;
       } else if (daysOverdue <= 60) {
         buckets[2].count++;
-        buckets[2].amount += total;
+        buckets[2].amount += owed;
       } else {
         buckets[3].count++;
-        buckets[3].amount += total;
+        buckets[3].amount += owed;
       }
     }
 

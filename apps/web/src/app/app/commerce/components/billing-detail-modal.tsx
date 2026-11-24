@@ -41,6 +41,7 @@ import { DetailLineItems } from "./detail-parts/detail-line-items";
 import { DetailNotes } from "./detail-parts/detail-notes";
 import { DetailViewPrint } from "./detail-parts/detail-view-print";
 import { buildWhatsAppLink, ownBusinessCountry, readSavedWhatsAppNumber, toE164 } from "@/lib/whatsapp";
+import { OWED_STATUSES, invoiceRemainingOwed, safeInvoiceAmount } from "@/lib/commerce-status";
 
 export interface BusinessDataForPreview {
   name: string;
@@ -109,7 +110,17 @@ interface BillingDetailModalProps {
   onViewClientIntel?: (contactId: string) => void;
   onSelectProduct?: (productId: string) => void;
   onAiDraftReminder?: (invoiceId: string) => void;
-  allInvoices?: Array<{ id: string; contactId?: string | null; status?: string; total?: number; invoiceNumber?: string | null; createdAt?: string | Date | null; dueDate?: string | null }>;
+  allInvoices?: Array<{
+    id: string;
+    contactId?: string | null;
+    status?: string;
+    total?: number | string | null;
+    currency?: string | null;
+    payments?: ReadonlyArray<{ amount?: number | string | null; status?: string | null }> | null;
+    invoiceNumber?: string | null;
+    createdAt?: string | Date | null;
+    dueDate?: string | null;
+  }>;
   // Optional: when both are provided + type is "invoice", the activity
   // timeline section is rendered inside the drawer body.
   itemId?: string;
@@ -558,9 +569,9 @@ export function BillingDetailModal({
               if (cInvs.length === 0) return null;
               const paid = cInvs.filter((i) => i.status === "PAID");
               const overdue = cInvs.filter((i) => i.status === "OVERDUE");
-              const sent = cInvs.filter((i) => i.status === "SENT");
-              const totalRev = paid.reduce((s, i) => s + Number(i.total ?? 0), 0);
-              const outBal = [...overdue, ...sent].reduce((s, i) => s + Number(i.total ?? 0), 0);
+              const open = cInvs.filter((i) => i.status && OWED_STATUSES.has(i.status));
+              const totalRev = paid.reduce((s, i) => s + safeInvoiceAmount(i.total), 0);
+              const outBal = open.reduce((s, i) => s + invoiceRemainingOwed(i), 0);
               const payRate = cInvs.length > 0 ? Math.round((paid.length / cInvs.length) * 100) : 0;
               let cadence = "Monthly";
               if (overdue.length > 0) cadence = "Weekly";

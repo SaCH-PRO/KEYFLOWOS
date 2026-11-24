@@ -436,14 +436,20 @@ describe("FU-PENDING-OWED-WEB (D-256): every web owed figure counts PENDING rema
     render(
       <BillingDetailModal
         type="invoice"
-        id={pending.id}
+        itemId={pending.id}
         number={pending.invoiceNumber!}
         status={pending.status}
         contactId={contactId}
         contact={{ firstName: "Pow", lastName: "Modal", email: "modal@example.test" }}
-        total={pending.total}
+        total={Number(pending.total)}
         currency="TTD"
         items={[]}
+        dateLabel1="Issue Date"
+        dateValue1={NOW}
+        dateLabel2="Due Date"
+        dateValue2={NOT_YET_DUE}
+        taxRate={0}
+        actions={null}
         allInvoices={[pending, partial, draft]}
         onClose={() => {}}
       />,

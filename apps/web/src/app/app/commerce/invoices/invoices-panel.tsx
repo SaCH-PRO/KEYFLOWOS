@@ -882,7 +882,7 @@ export default function InvoicesPanel({
         </div>
 
         <div className="flex items-center gap-1 overflow-x-auto scrollbar-none" role="group" aria-label="Filter by status">
-          <InfoBadge title="Invoice Status Filters" body="Draft: Not yet sent. Sent: Delivered to client. Partially Paid: Some amount received. Paid: Fully settled. Overdue: Past due date. Void: Cancelled." side="bottom" iconSize={11} />
+          <InfoBadge title="Invoice Status Filters" body="Draft: Not yet sent. Pending: Awaiting payment. Sent: Delivered to client. Partially Paid: Some amount received. Paid: Fully settled. Overdue: Past due date. Void: Cancelled." side="bottom" iconSize={11} />
           {INVOICE_STATUS_FILTERS.slice(0, 4).map((f) => {
             const count = statusCounts[f.value] ?? 0;
             const isActive = invoiceStatusFilter === f.value;

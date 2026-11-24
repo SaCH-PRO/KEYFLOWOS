@@ -31,7 +31,7 @@ import {
   type CommerceInvoiceReminder,
 } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
-import { OWED_STATUSES, canRemindInvoice } from "@/lib/commerce-status";
+import { OWED_STATUSES, canRemindInvoice, invoiceRemainingOwed } from "@/lib/commerce-status";
 import { getStatusBadge } from "../components/commerce-types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CustomerBadge } from "../components/customer-badge";
@@ -132,7 +132,7 @@ export default function CollectionsPanel({
       .map((inv) => {
         const days = getDaysOverdue(inv.dueDate);
         const priority = computePriority(inv, days);
-        const amount = Number(inv.total ?? 0);
+        const amount = invoiceRemainingOwed(inv);
         return {
           invoice: inv,
           daysOverdue: days,
@@ -149,7 +149,7 @@ export default function CollectionsPanel({
   }, [invoices]);
 
   const summaryStats = useMemo(() => {
-    const totalOverdue = overdueQueue.reduce((sum, item) => sum + Number(item.invoice.total ?? 0), 0);
+    const totalOverdue = overdueQueue.reduce((sum, item) => sum + invoiceRemainingOwed(item.invoice), 0);
     const totalRecoverable = overdueQueue.reduce((sum, item) => sum + item.estimatedRecovery, 0);
     const criticalCount = overdueQueue.filter((i) => i.priority === "critical").length;
     const avgDaysOverdue = overdueQueue.length > 0
@@ -161,7 +161,7 @@ export default function CollectionsPanel({
   const handleGenerateReminder = useCallback(async (invoiceId: string) => {
     if (!businessId) return;
     const target = invoices.find((i) => i.id === invoiceId);
-    if (target && !canRemindInvoice(target.status)) return;
+    if (!canRemindInvoice(target?.status)) return;
     setSelectedInvoiceId(invoiceId);
     setReminderLoading(true);
     setReminderData(null);
@@ -212,7 +212,7 @@ export default function CollectionsPanel({
   const handleSendReminder = useCallback(async (invoiceId: string) => {
     if (actionLoading[invoiceId]) return;
     const target = invoices.find((i) => i.id === invoiceId);
-    if (target && !canRemindInvoice(target.status)) return;
+    if (!canRemindInvoice(target?.status)) return;
     if (!businessId) {
       toast.error("Select a workspace to send a reminder");
       return;
@@ -371,7 +371,7 @@ export default function CollectionsPanel({
                           )}
                         </div>
                         <div className="text-right shrink-0">
-                          <span className="text-sm font-bold">{formatCurrency(Number(inv.total), currency)}</span>
+                          <span className="text-sm font-bold">{formatCurrency(invoiceRemainingOwed(inv), currency)}</span>
                           <div className="flex items-center gap-1 mt-1.5 justify-end">
                             {canRemindInvoice(inv.status) && (
                               <button
