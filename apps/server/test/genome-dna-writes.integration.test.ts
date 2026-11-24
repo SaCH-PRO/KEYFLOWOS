@@ -75,7 +75,47 @@ const ID = {
 };
 
 const WRITE_DENIED = (has: 'none' | 'read') => `Insufficient permissions: revenue requires write access (you have ${has})`;
-const GENOME = { genomeIntegrity: 57, threePillarMinimumMet: true, genomeStage: 'GROWTH', executiveReadinessScore: 61, genomeDnaScores: { founder: 70, business: 70, market: 70 } };
+const GENOME = {
+  genomeIntegrity: 57,
+  threePillarMinimumMet: true,
+  genomeStage: 'GROWTH',
+  executiveReadinessScore: 61,
+  genomeDnaScores: { founder: 70, business: 70, market: 70, financial: 45, operations: 60 },
+  readinessBreakdown: { financial: 45, operations: 60 },
+  dnaSections: [
+    { key: 'financial', label: 'Financial DNA', integrity: 45 },
+    { key: 'operations', label: 'Operations DNA', integrity: 60 },
+  ],
+};
+const BLUEPRINT_OUT = {
+  id: 'bp_v79d',
+  identity: { name: 'Asha Cleaning' },
+  operatingModel: { deliveryMode: 'on-site' },
+  goals: {},
+  constraints: {},
+  brand: {},
+  customerModel: {},
+  founderProfile: {},
+  legalProfile: {},
+  registrationProfile: {},
+  taxProfile: {},
+  ownershipProfile: {},
+  marketProfile: {},
+  marketingSystem: {},
+  operationsSystem: {},
+  riskProfile: {},
+  complianceProfile: {},
+  executionRoadmap: {},
+  documentProfile: {},
+  financials: { avgTicket: 4500, monthlyFixedCosts: 3000 },
+  projectionProfile: { year1Revenue: 120000 },
+  salesSystem: { channels: ['direct'] },
+  offerArchitecture: { tiers: ['Pro'] },
+  completeness: 72,
+  confidenceScores: { financials: 0.9, identity: 0.8 },
+  genomeIntegrity: 57,
+  executiveReadinessScore: 61,
+};
 
 let db: any;
 let app: any;
@@ -83,9 +123,13 @@ let executor: any;
 let proposals: any;
 /** A KeyActionProposalService whose executor is the real KeyActionExecutorService (DW-06, DW-08). */
 let executing: any;
+let genomeBridge: any;
+let flowOrchestrator: any;
 const onboardingWrites: Array<{ businessId: string; answers: unknown }> = [];
 const dnaWrites: Array<{ businessId: string; section: string; data: unknown }> = [];
 const blueprintWrites: Array<{ businessId: string; patch: unknown }> = [];
+const eventInfers: string[] = [];
+let nextOnboardingReply = 'Got it! ```extracted\n{"identity.name":"Studio"}\n```';
 /** What the autonomy orchestrator and the genome policy stand-ins answer next. */
 const verdicts: { autonomy: any; genome: any } = { autonomy: null, genome: null };
 
@@ -133,6 +177,10 @@ beforeAll(async () => {
   const { GenomeGateGuard } = await import('../src/core/auth/genome-gate.guard');
   const { BlueprintController } = await import('../src/modules/blueprint/blueprint.controller');
   const { BlueprintService } = await import('../src/modules/blueprint/blueprint.service');
+  const { BlueprintOnboardingController } = await import('../src/modules/ai/blueprint-onboarding.controller');
+  const { BlueprintOnboardingService } = await import('../src/modules/ai/blueprint-onboarding.service');
+  const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+  const { KeyCortexGenomeBridgeService } = await import('../src/modules/key-cortex/key-cortex-genome-bridge.service');
   const { GenomeEvolutionService } = await import('../src/modules/business-genome/genome-evolution.service');
   const { TemporalFlowService } = await import('../src/modules/temporal-flow/temporal-flow.service');
   const { KeyActionExecutorService } = await import('../src/modules/key-autonomy/key-action-executor.service');
@@ -148,19 +196,33 @@ beforeAll(async () => {
   });
 
   const blueprintStandIn = {
+    getBlueprint: async () => BLUEPRINT_OUT,
     calculateGenomeIntegrity: async () => GENOME,
-    updateDnaSection: async (businessId: string, section: string, data: unknown) => { dnaWrites.push({ businessId, section, data }); return { ok: true }; },
-    updateBlueprint: async (businessId: string, patchBody: unknown) => { blueprintWrites.push({ businessId, patch: patchBody }); return { ok: true }; },
-    inferFromOnboarding: async (businessId: string, answers: unknown) => { onboardingWrites.push({ businessId, answers }); return { ok: true }; },
+    checkThreePillarMinimum: () => true,
+    determineGenomeStage: () => 'GROWTH',
+    updateDnaSection: async (businessId: string, section: string, data: unknown) => { dnaWrites.push({ businessId, section, data }); return BLUEPRINT_OUT; },
+    updateBlueprint: async (businessId: string, patchBody: unknown) => { blueprintWrites.push({ businessId, patch: patchBody }); return BLUEPRINT_OUT; },
+    inferFromOnboarding: async (businessId: string, answers: unknown) => { onboardingWrites.push({ businessId, answers }); return BLUEPRINT_OUT; },
+    inferFromEvents: async (businessId: string) => { eventInfers.push(businessId); return BLUEPRINT_OUT; },
   };
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [BlueprintController, GenomeChatController],
+    controllers: [BlueprintController, BlueprintOnboardingController, GenomeChatController],
     providers: [
       PrismaService,
       // RateLimitGuard (on genome-chat's send route, off these paths) is built with the Redis client.
       { provide: REDIS_CLIENT, useValue: offRoute('Redis') },
       { provide: GenomeChatService, inject: [PrismaService], useFactory: (prisma: any) => new GenomeChatService(prisma, blueprintStandIn as any, offRoute('ModelGatewayService') as any) },
+      {
+        provide: BlueprintOnboardingService,
+        inject: [PrismaService],
+        useFactory: (prisma: any) => new (BlueprintOnboardingService as any)(
+          blueprintStandIn,
+          { complete: async () => ({ content: nextOnboardingReply }) },
+          { trackAndComplete: async () => ({ content: nextOnboardingReply }), recordUsage: async () => undefined },
+          prisma,
+        ),
+      },
       AuthGuard,
       BusinessGuard,
       { provide: BlueprintService, useValue: blueprintStandIn },
@@ -168,6 +230,8 @@ beforeAll(async () => {
     ],
   }).compile();
   const prisma = moduleRef.get(PrismaService);
+  genomeBridge = new (KeyCortexGenomeBridgeService as any)(prisma, offRoute('KeyCortexEventService'), offRoute('KeyCortexEvidenceService'));
+  flowOrchestrator = Object.assign(Object.create(FlowOrchestratorService.prototype), { prisma, blueprint: blueprintStandIn });
 
   const temporal = new TemporalFlowService(prisma, undefined as any, undefined as any);
   const evolution = new GenomeEvolutionService(prisma, blueprintStandIn as any, temporal);
@@ -485,5 +549,163 @@ describe('FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128, D-233, D-238)', () => {
     expect((await apply(ID.staffNone, 'operations', { coreWorkflows: ['take orders'] })).status).toBe(201);
     expect((await apply(ID.owner, 'financial', { pricingModel: 'retainer' })).status).toBe(201);
     expect(dnaWrites.map((w) => w.section)).toEqual(['operations', 'financial']);
+  });
+
+  it('DW-13 RED (SEC-DW-1 / COR-1 / SEC-DW-6): financial fields in intelligence/workflowModel/taxProfile, unnormalized keys, and financial order phrases need revenue write', async () => {
+    dnaWrites.length = 0;
+    blueprintWrites.length = 0;
+    for (const body of [
+      { intelligence: { expenseRatio: 0.42 } },
+      { intelligence: { quoteConversionRate: 0.35 } },
+      { intelligence: { recentMomentumScore: 81 } },
+      { intelligence: { topProductCategories: ['Consulting'] } },
+      { workflowModel: { retainerCycle: 'monthly' } },
+      { workflowModel: { quoteDrivenSales: true } },
+      { workflowModel: { ecommerceFulfillment: true } },
+      { taxProfile: { vatThresholdWatch: true } },
+      { taxProfile: { payrollExpected: true } },
+      { taxProfile: { contractorPaymentsExpected: true } },
+      { operatingModel: { avg_ticket: 500 } },
+      { constraints: { runway_months: 6 } },
+      { constraints: { cost_structure: 'lean' } },
+      { operatingModel: { revenue_model: 'retainer' } },
+    ]) {
+      const res = await patch(blueprintUrl(), ID.staffNone, body);
+      expect(res.status, JSON.stringify(body)).toBe(403);
+      expect(JSON.stringify(res.body)).toContain(WRITE_DENIED('none'));
+    }
+    for (const [section, data] of [
+      ['operations', { coreWorkflows: ['Average order value 150'] }],
+      ['operations', { coreWorkflows: ['Process 500 orders'] }],
+      ['business', { avg_ticket: 250 }],
+    ] as const) {
+      const res = await patch(dnaUrl(section), ID.staffNone, { data });
+      expect(res.status, `${section} ${JSON.stringify(data)}`).toBe(403);
+      expect(JSON.stringify(res.body)).toContain(WRITE_DENIED('none'));
+    }
+    expect(dnaWrites).toEqual([]);
+    expect(blueprintWrites).toEqual([]);
+  });
+
+  it('DW-14 RED (SEC-DW-2): POST infer/events requires revenue write', async () => {
+    eventInfers.length = 0;
+    const postEvents = (as: string) => request(app.getHttpServer()).post(`${blueprintUrl()}/infer/events`).set(HEADER, as).send({});
+    for (const [as, has] of [[ID.staffNone, 'none'], [ID.staffRead, 'read']] as const) {
+      const res = await postEvents(as);
+      expect(res.status, as).toBe(403);
+      expect(JSON.stringify(res.body)).toContain(WRITE_DENIED(has));
+    }
+    expect(eventInfers).toEqual([]);
+    const ownerRes = await postEvents(ID.owner);
+    expect(ownerRes.status).toBe(201);
+    expect(eventInfers).toEqual([ID.biz]);
+  });
+
+  it('DW-15 RED (SEC-DW-3b / SEC-DW-3c): onboarding-chat and FlowOrchestrator update_business_blueprint enforce genome-write-scope', async () => {
+    blueprintWrites.length = 0;
+    nextOnboardingReply = 'Captured!\n```extract\n[{"section":"financials","field":"avgTicket","value":4500}]\n```';
+    const chatRes = await request(app.getHttpServer())
+      .post(`${blueprintUrl()}/onboarding-chat`)
+      .set(HEADER, ID.staffNone)
+      .send({ message: 'My average ticket is 4500' });
+    expect(chatRes.status).toBe(403);
+    expect(JSON.stringify(chatRes.body)).toContain(WRITE_DENIED('none'));
+    expect(blueprintWrites).toEqual([]);
+
+    // Non-financial onboarding extraction succeeds for staffNone and strips financial columns / composite scores.
+    nextOnboardingReply = 'Nice!\n```extract\n[{"section":"identity","field":"name","value":"Studio Nova"}]\n```';
+    const okChat = await request(app.getHttpServer())
+      .post(`${blueprintUrl()}/onboarding-chat`)
+      .set(HEADER, ID.staffNone)
+      .send({ message: 'We are Studio Nova' });
+    expect(okChat.status).toBe(201);
+    expect(JSON.stringify(okChat.body)).not.toContain('4500');
+    expect(JSON.stringify(okChat.body)).not.toContain('projectionProfile');
+    expect(blueprintWrites.length).toBe(1);
+
+    // FlowOrchestrator update_business_blueprint refuses financial patch for staffNone and omits composite scores on non-financial patch.
+    await expect(
+      flowOrchestrator.executeToolAction(
+        ID.biz,
+        'update_business_blueprint',
+        { patch: { financials: { avgTicket: 4500 } } },
+        { surface: 'FLOW_CHAT', principalUserId: ID.staffNone },
+      ),
+    ).rejects.toThrow(WRITE_DENIED('none'));
+    expect(blueprintWrites.length).toBe(1);
+
+    const flowOk = await flowOrchestrator.executeToolAction(
+      ID.biz,
+      'update_business_blueprint',
+      { patch: { identity: { name: 'Studio Nova' } } },
+      { surface: 'FLOW_CHAT', principalUserId: ID.staffNone },
+    );
+    expect(flowOk.updatedSections).toEqual(['identity']);
+    expect(flowOk.completeness).toBeUndefined();
+    expect(flowOk.confidenceScores).toBeUndefined();
+  });
+
+  it('DW-16 RED (SEC-DW-4): autonomyReasonStatesMoney catches reports, key_inbox, crm, and key_autonomy readiness messages', async () => {
+    const { autonomyReasonStatesMoney } = await import('../src/modules/key-autonomy/key-action-genome-projection');
+    expect(autonomyReasonStatesMoney('KEY cannot execute this action because reports readiness is only 20%.')).toBe(true);
+    expect(autonomyReasonStatesMoney('KEY cannot execute this action because key_inbox readiness risk is critical.')).toBe(true);
+    expect(autonomyReasonStatesMoney('KEY can execute this action, but crm readiness is only 45% and requires confirmation.')).toBe(true);
+    expect(autonomyReasonStatesMoney('KEY cannot execute this action because key_autonomy readiness is only 30%.')).toBe(true);
+    expect(autonomyReasonStatesMoney('KEY cannot execute this action because bookings readiness is only 40%.')).toBe(false);
+  });
+
+  it('DW-17 RED (SEC-DW-5): write responses strip financial/composite fields for non-revenue readers and GenomeChat never persists integrity % into shared chat', async () => {
+    const bpRes = await patch(blueprintUrl(), ID.staffNone, { identity: { name: 'Asha Cleaning' } });
+    expect(bpRes.status).toBe(200);
+    const bpText = JSON.stringify(bpRes.body);
+    for (const leaked of ['4500', '120000', 'projectionProfile', 'salesSystem', 'offerArchitecture', 'genomeIntegrity', 'executiveReadinessScore', 'completeness']) {
+      expect(bpText, `PATCH blueprint leaked ${leaked}`).not.toContain(leaked);
+    }
+    const ownerBp = await patch(blueprintUrl(), ID.owner, { identity: { name: 'Asha Cleaning' } });
+    expect(ownerBp.status).toBe(200);
+    expect(ownerBp.body.financials?.avgTicket).toBe(4500);
+
+    const dnaRes = await patch(dnaUrl('operations'), ID.staffNone, { data: { coreWorkflows: ['walk-ins'] } });
+    expect(dnaRes.status).toBe(200);
+    expect(JSON.stringify(dnaRes.body)).not.toContain('4500');
+    expect(JSON.stringify(dnaRes.body)).not.toContain('genomeIntegrity');
+
+    const chatApply = await request(app.getHttpServer())
+      .post(`/genome-chat/businesses/${ID.biz}/apply-updates`)
+      .set(HEADER, ID.staffNone)
+      .send({ section: 'operations', data: { coreWorkflows: ['walk-ins'] } });
+    expect(chatApply.status).toBe(201);
+    const chatText = JSON.stringify(chatApply.body);
+    expect(chatText).not.toContain('genomeIntegrity');
+    expect(chatText).not.toContain('executiveReadinessScore');
+    expect(chatText).not.toContain('"financial"');
+
+    const msgs = await db.genomeChatMessage.findMany({ where: { businessId: ID.biz, role: 'system' }, orderBy: { createdAt: 'desc' }, take: 1 });
+    expect(msgs.length).toBe(1);
+    expect(msgs[0].content).not.toMatch(/Genome Integrity is now|57%/i);
+  });
+
+  it('DW-18 (COR-2 / COR-3 / COR-4): bridge actor guard, non-financial execute control, and offerArchitecture/non-object/depth>8 checks', async () => {
+    const { isFinancialBlueprintPatch, isFinancialDnaWrite } = await import('../src/modules/blueprint/genome-write-scope');
+    // COR-2: KeyCortexGenomeBridgeService.createEvolutionProposal enforces actor revenue write
+    await expect(
+      genomeBridge.createEvolutionProposal(
+        ID.biz,
+        { section: 'financial', reason: 'Update pricing', proposedPatch: { pricingModel: 'retainer' } },
+        { actor: { id: ID.staffNone } },
+      ),
+    ).rejects.toThrow(WRITE_DENIED('none'));
+
+    // COR-3: non-financial CREATE_GENOME_EVOLUTION_PROPOSAL executes cleanly for staffNone
+    const opsExec = await executing.execute(ID.biz, ID.propEvoOps, ID.staffNone);
+    expect(opsExec.status).toBe('EXECUTED');
+
+    // COR-4: offerArchitecture column, non-object DNA data, and nesting depth > 8 fail closed
+    expect(isFinancialBlueprintPatch({ offerArchitecture: { tiers: ['Basic'] } })).toBe(true);
+    expect(isFinancialDnaWrite('operations', 'not-an-object')).toBe(true);
+    let deep: Record<string, unknown> = { ok: true };
+    for (let i = 0; i < 10; i++) deep = { nested: deep };
+    expect(isFinancialDnaWrite('operations', deep)).toBe(true);
+    expect(isFinancialBlueprintPatch({ identity: deep })).toBe(true);
   });
 });
