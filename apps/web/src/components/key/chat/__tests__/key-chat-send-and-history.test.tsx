@@ -252,17 +252,37 @@ describe("BUG-043: the messages scroll only their own container", () => {
   });
 
   it("RED-BEFORE: it scrolls the messages' own container to its end", async () => {
-    render(<KeyChatProvider><MessagesOnPage messages={[msg(1), msg(2), msg(3)]} /></KeyChatProvider>);
-    await screen.findByText("Message 3");
-    // Where the container ends up, however it gets there (review finding 6): at its end (scrollHeight), whether by
-    // scrollTo or by setting scrollTop; and the page around it does not move.
-    const root = screen.getByTestId("app-root");
-    const container = root.querySelector<HTMLElement>(".overflow-y-auto")!;
-    expect(container, "the messages' own scrolling container").toBeTruthy();
-    await waitFor(() => {
-      const viaScrollTo = scrollTo.mock.calls.some((c, i) => scrollTo.mock.contexts[i] === container && (c[0] as ScrollToOptions)?.top === container.scrollHeight);
-      expect(viaScrollTo || container.scrollTop === container.scrollHeight, "the container is at its end").toBe(true);
+    // jsdom lays nothing out (scrollHeight and scrollTop are both 0), so "at its end" would hold before any scroll
+    // (repair confirmation finding A). The scrolling container gets real geometry here, and scrollTo really moves it:
+    // only a scroll of the container to its end leaves scrollTop at 800.
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.classList.contains("overflow-y-auto") ? 800 : 0;
+      },
     });
-    expect(scrollTo.mock.contexts.filter((c) => c !== container), "nothing else scrolls").toEqual([]);
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.classList.contains("overflow-y-auto") ? 300 : 0;
+      },
+    });
+    scrollTo.mockImplementation(function (this: HTMLElement, opts?: ScrollToOptions) {
+      if (opts && typeof opts.top === "number") this.scrollTop = opts.top;
+    });
+    try {
+      render(<KeyChatProvider><MessagesOnPage messages={[msg(1), msg(2), msg(3)]} /></KeyChatProvider>);
+      await screen.findByText("Message 3");
+      const root = screen.getByTestId("app-root");
+      const container = root.querySelector<HTMLElement>(".overflow-y-auto")!;
+      expect(container, "the messages' own scrolling container").toBeTruthy();
+      // However it gets there (scrollTo or scrollTop), the container ends at its end; the page around it does not move.
+      await waitFor(() => expect(container.scrollTop, "the container is at its end").toBe(800));
+      expect(root.scrollTop, "the page did not move").toBe(0);
+      expect(scrollTo.mock.contexts.filter((c) => c !== container), "nothing else scrolls").toEqual([]);
+    } finally {
+      delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollHeight;
+      delete (HTMLElement.prototype as unknown as Record<string, unknown>).clientHeight;
+    }
   });
 });
