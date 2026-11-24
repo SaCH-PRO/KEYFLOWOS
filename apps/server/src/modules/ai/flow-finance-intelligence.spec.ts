@@ -182,7 +182,7 @@ describe('P44 (TOF-FINANCE-CANONICAL-TOOLS): canonical finance intelligence tool
     expect(fcCustom).toMatchObject({ horizonDays: 30 });
 
     cashflowForecast.forecast.mockClear();
-    for (const bad of [0, -10, 366, 'soon', Number.NaN, Number.POSITIVE_INFINITY]) {
+    for (const bad of [0, -10, 366, 'soon', '', '   ', true, false, Number.NaN, Number.POSITIVE_INFINITY]) {
       await expect(executeRaw(svc, 'finance_cashflow_forecast', { horizonDays: bad })).rejects.toThrow(
         /horizonDays must be between 1 and 365/,
       );
@@ -194,6 +194,41 @@ describe('P44 (TOF-FINANCE-CANONICAL-TOOLS): canonical finance intelligence tool
     expect(mm).toMatchObject({
       moves: [expect.objectContaining({ id: `mm-collect-${BIZ}`, type: 'COLLECT_RECEIVABLE' })],
     });
+  });
+
+  it('rejects boolean, empty, null, non-finite, and out-of-range horizonDays on real executeToolDirectly dispatch (validateToolInput)', async () => {
+    const { svc, cashflowForecast } = makeOrchestrator({
+      revRead: { role: 'STAFF', permissionScopes: { revenue: 'read' } },
+    });
+
+    for (const badType of [true, false, '', '   ', null, 'soon', Number.NaN, Number.POSITIVE_INFINITY]) {
+      await expect(
+        executeAsMember(svc, 'finance_cashflow_forecast', {
+          surface: 'CHAT',
+          principalUserId: 'revRead',
+          args: { horizonDays: badType },
+        }),
+      ).rejects.toThrow(/Field "horizonDays" for finance_cashflow_forecast must be a number/);
+    }
+    for (const outOfRange of [0, -10, 366]) {
+      await expect(
+        executeAsMember(svc, 'finance_cashflow_forecast', {
+          surface: 'CHAT',
+          principalUserId: 'revRead',
+          args: { horizonDays: outOfRange },
+        }),
+      ).rejects.toThrow(/horizonDays must be between 1 and 365/);
+    }
+    expect(cashflowForecast.forecast).not.toHaveBeenCalled();
+
+    await expect(
+      executeAsMember(svc, 'finance_cashflow_forecast', {
+        surface: 'CHAT',
+        principalUserId: 'revRead',
+        args: { horizonDays: '45' },
+      }),
+    ).resolves.toMatchObject({ horizonDays: 45 });
+    expect(cashflowForecast.forecast).toHaveBeenCalledWith(BIZ, 45);
   });
 
   it('gates all three under CANONICAL_MODULE_TOOLS.revenue read, KEY_BOOKS_MEMBERSHIP_READ_TOOLS (D-104), and excludes them from memberless turns', async () => {
