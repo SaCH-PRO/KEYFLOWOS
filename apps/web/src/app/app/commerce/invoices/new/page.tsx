@@ -212,21 +212,13 @@ export default function NewInvoicePage() {
               <button onClick={addItem} className="inline-flex items-center gap-1 text-xs font-medium text-[hsl(var(--kf-accent1))] hover:underline"><Plus className="w-3.5 h-3.5" />Add item</button>
             </div>
             <div className="p-5">
-              <div className="hidden sm:grid grid-cols-[minmax(0,1fr)_72px_104px_88px_104px_40px] gap-3 mb-2 px-1">
-                <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Description</span>
-                <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider text-center">Qty</span>
-                <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider text-right">Unit Price</span>
-                <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider text-right">Tax</span>
-                <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider text-right">Total</span>
-                <span></span>
-              </div>
               <div className="space-y-3">
                 {items.map((item, _idx) => {
                   const total = lineAmount(formNumber(item.quantity), formNumber(item.unitPrice));
                   return (
-                    <div key={item.id} className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_72px_104px_88px_104px_40px] gap-3 items-start p-3 rounded-lg bg-muted/20 border border-border/60">
-                      <div className="space-y-1 min-w-0">
-                        <label className="sm:hidden text-[10px] text-muted-foreground uppercase">Description</label>
+                    <div key={item.id} className="grid grid-cols-1 sm:grid-cols-[72px_112px_88px_minmax(0,1fr)_40px] gap-x-3 gap-y-2 items-end p-3 rounded-lg bg-muted/20 border border-border/60">
+                      <div className="space-y-1 min-w-0 sm:col-span-5">
+                        <label className="text-[10px] text-muted-foreground uppercase">Description</label>
                         <div className="flex gap-2 min-w-0">
                           <select value={item.productId ?? ""} onChange={e => selectProduct(item.id, e.target.value)} className="shrink-0 w-24 h-10 px-2 text-xs bg-background border border-border rounded-md focus:outline-none">
                             <option value="">Product...</option>
@@ -237,19 +229,19 @@ export default function NewInvoicePage() {
                         </div>
                       </div>
                       <div className="space-y-1">
-                        <label className="sm:hidden text-[10px] text-muted-foreground uppercase">Qty</label>
+                        <label className="text-[10px] text-muted-foreground uppercase">Qty</label>
                         <input type="number" min="1" value={item.quantity} onChange={e => updateItem(item.id, "quantity", e.target.value)} className="w-full h-10 px-2 text-sm text-center bg-background border border-border rounded-md focus:outline-none" />
                       </div>
                       <div className="space-y-1">
-                        <label className="sm:hidden text-[10px] text-muted-foreground uppercase">Unit Price</label>
+                        <label className="text-[10px] text-muted-foreground uppercase">Unit Price</label>
                         <input type="number" step="0.01" value={item.unitPrice} onChange={e => updateItem(item.id, "unitPrice", e.target.value)} className="w-full h-10 px-2 text-sm text-right bg-background border border-border rounded-md focus:outline-none" />
                       </div>
                       <div className="space-y-1">
-                        <label className="sm:hidden text-[10px] text-muted-foreground uppercase">Tax</label>
+                        <label className="text-[10px] text-muted-foreground uppercase">Tax</label>
                         <div className="h-10 flex items-center justify-end text-sm text-muted-foreground">{formNumber(taxRate) ? computeDocumentAmounts({ lines: [total], taxRate: formNumber(taxRate) }).taxAmount.toFixed(2) : "—"}</div>
                       </div>
-                      <div className="space-y-1">
-                        <label className="sm:hidden text-[10px] text-muted-foreground uppercase">Total</label>
+                      <div className="space-y-1 min-w-0">
+                        <label className="block text-right text-[10px] text-muted-foreground uppercase">Total</label>
                         <div className="h-10 flex items-center justify-end text-sm font-semibold whitespace-nowrap" data-testid="invoice-line-total">{formatAmount(total, businessCurrency)}</div>
                       </div>
                       <div className="flex justify-end">
