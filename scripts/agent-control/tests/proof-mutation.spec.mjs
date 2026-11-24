@@ -22,6 +22,9 @@
  *   PM-08  RED-AT-a4f85f72  sparse-checkout a proof turns on does not survive into the next control
  *   PM-09  RED-AT-a4f85f72  a proof that breaks the worktree fails only its own control: the next one runs on a fresh,
  *                           exact tree (one fresh worktree, then a second reset), as before
+ *   PM-10  control          (confirmation review finding 2) a commit that no checkout can make pristine (a CRLF file
+ *                           committed under `* text=auto`, which shows modified even freshly checked out): the control
+ *                           fails at stage 'reset' and its proof never runs
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -30,6 +33,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import * as runner from '../proof-mutation.mjs';
+
+/** Every throwaway directory a test made, removed when the file's tests are done. */
+const made = [];
+process.on('exit', () => {
+  for (const dir of made) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 const git = (cwd, ...args) => {
   const r = spawnSync('git', args, { cwd, encoding: 'utf8' });
@@ -40,6 +49,7 @@ const git = (cwd, ...args) => {
 /** A throwaway repository: claim.txt holds "good"; check.mjs is the proof; .gitignore ignores *.log. */
 function fixtureRepo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-pm-fixture-'));
+  made.push(dir);
   git(dir, 'init', '-q');
   git(dir, 'config', 'user.email', 'fixture@example.test');
   git(dir, 'config', 'user.name', 'Fixture');
@@ -113,7 +123,9 @@ function withEnv(vars, fn) {
 
 test('PM-01 RED-BEFORE: the controls of one run share one worktree', () => {
   const { dir, ref } = fixtureRepo();
-  const log = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'kf-pm-log-')), 'where.txt');
+  const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-pm-log-'));
+  made.push(logDir);
+  const log = path.join(logDir, 'where.txt');
   const summary = withEnv({ KF_PM_LOG: log, KF_PM_REF: ref }, () =>
     runner.runManifest({ negative_controls: [control('a'), control('b'), control('c')] }, { repoRoot: dir, ref }),
   );
@@ -211,3 +223,26 @@ test('PM-09 RED-AT-a4f85f72: a proof that breaks the worktree fails only its own
   assert.equal(listed.length, 1, 'no worktree left behind, broken or not: ' + listed.join(' | '));
 });
 
+test('PM-10 control: a commit no checkout can make pristine fails its control at the reset, and the proof never runs', () => {
+  const { dir } = fixtureRepo();
+  // A smudge filter that rewrites claim.txt on checkout: every checkout of this commit shows the file modified, so
+  // neither the reset nor a fresh worktree can make the tree pristine.
+  fs.writeFileSync(path.join(dir, '.gitattributes'), 'claim.txt filter=dirty\n');
+  git(dir, 'add', '.gitattributes');
+  git(dir, 'commit', '-qm', 'filter');
+  git(dir, 'config', 'filter.dirty.smudge', 'sed s/good/changed/');
+  const ref = git(dir, 'rev-parse', 'HEAD');
+  const markerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-pm-marker-'));
+  made.push(markerDir);
+  const marker = path.join(markerDir, 'ran.txt');
+  const probe = control('never-runs', { proof_command: `node -e "require('fs').writeFileSync(process.argv[1], 'ran')" "${marker}"` });
+  const summary = withEnv({ KF_PM_LOG: undefined, KF_PM_REF: ref }, () =>
+    runner.runManifest({ negative_controls: [probe] }, { repoRoot: dir, ref }),
+  );
+  const [only] = summary.results;
+  assert.equal(only.ok, false, JSON.stringify(only));
+  assert.equal(only.stage, 'reset', JSON.stringify(only));
+  assert.equal(fs.existsSync(marker), false, 'the proof did not run on a tree that is not the commit');
+  const listed = git(dir, 'worktree', 'list', '--porcelain').split('\n').filter((l) => l.startsWith('worktree '));
+  assert.equal(listed.length, 1, 'no worktree left behind');
+});
