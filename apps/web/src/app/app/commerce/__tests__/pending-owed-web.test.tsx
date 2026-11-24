@@ -384,6 +384,7 @@ describe("FU-PENDING-OWED-WEB (D-256): every web owed figure counts PENDING invo
         currency="TTD"
         loading={false}
         setInvoices={() => {}}
+        setProducts={() => {}}
         gmailStatus={null}
       />,
     );
@@ -391,6 +392,16 @@ describe("FU-PENDING-OWED-WEB (D-256): every web owed figure counts PENDING invo
     const moreSelect = screen.getByLabelText("More status filters") as HTMLSelectElement;
     const optionTexts = Array.from(moreSelect.options).map((o) => o.textContent ?? "");
     expect(optionTexts.some((t) => /Pending\s*\(1\)/.test(t)), `More options: ${optionTexts.join(", ")}`).toBe(true);
+
+    // PENDING row overflow menu must never show "Send reminder"
+    const actionButtons = screen.getAllByLabelText("More actions");
+    expect(actionButtons.length).toBe(2);
+    fireEvent.click(actionButtons[0]);
+    expect(screen.queryByText("Send reminder")).toBeNull();
+    // Close first menu and open SENT row overflow menu
+    fireEvent.click(actionButtons[0]);
+    fireEvent.click(actionButtons[1]);
+    expect(screen.getByText("Send reminder")).toBeTruthy();
   });
 });
 

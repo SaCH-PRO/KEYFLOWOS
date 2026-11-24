@@ -76,7 +76,7 @@ export function InvoiceList({
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const statusCounts = useMemo(() => {
-    const counts: Record<string, number> = { ALL: invoices.length, DRAFT: 0, SENT: 0, PAID: 0, PARTIALLY_PAID: 0, OVERDUE: 0, VOID: 0 };
+    const counts: Record<string, number> = { ALL: invoices.length, DRAFT: 0, PENDING: 0, SENT: 0, PAID: 0, PARTIALLY_PAID: 0, OVERDUE: 0, VOID: 0 };
     for (const inv of invoices) {
       if (inv.status && counts[inv.status] !== undefined) counts[inv.status]++;
     }

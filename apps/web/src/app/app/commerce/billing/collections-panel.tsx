@@ -31,6 +31,7 @@ import {
   type CommerceInvoiceReminder,
 } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
+import { OWED_STATUSES, canRemindInvoice } from "@/lib/commerce-status";
 import { getStatusBadge } from "../components/commerce-types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { CustomerBadge } from "../components/customer-badge";
@@ -127,7 +128,7 @@ export default function CollectionsPanel({
 
   const overdueQueue = useMemo<OverdueItem[]>(() => {
     return invoices
-      .filter((inv) => inv.status === "OVERDUE" || (inv.status === "SENT" && inv.dueDate && new Date(inv.dueDate) < new Date()))
+      .filter((inv) => inv.status === "OVERDUE" || (OWED_STATUSES.has(inv.status) && inv.dueDate && new Date(inv.dueDate) < new Date()))
       .map((inv) => {
         const days = getDaysOverdue(inv.dueDate);
         const priority = computePriority(inv, days);
@@ -159,6 +160,8 @@ export default function CollectionsPanel({
 
   const handleGenerateReminder = useCallback(async (invoiceId: string) => {
     if (!businessId) return;
+    const target = invoices.find((i) => i.id === invoiceId);
+    if (target && !canRemindInvoice(target.status)) return;
     setSelectedInvoiceId(invoiceId);
     setReminderLoading(true);
     setReminderData(null);
@@ -170,7 +173,7 @@ export default function CollectionsPanel({
     } finally {
       setReminderLoading(false);
     }
-  }, [businessId, selectedTone]);
+  }, [businessId, invoices, selectedTone]);
 
   const handleCopyReminder = useCallback(async (text: string) => {
     try {
@@ -208,6 +211,8 @@ export default function CollectionsPanel({
   // nothing on the invoice, so the row is left as it is.
   const handleSendReminder = useCallback(async (invoiceId: string) => {
     if (actionLoading[invoiceId]) return;
+    const target = invoices.find((i) => i.id === invoiceId);
+    if (target && !canRemindInvoice(target.status)) return;
     if (!businessId) {
       toast.error("Select a workspace to send a reminder");
       return;
@@ -225,7 +230,7 @@ export default function CollectionsPanel({
     } finally {
       setActionLoading((prev) => { const next = { ...prev }; delete next[invoiceId]; return next; });
     }
-  }, [actionLoading, businessId]);
+  }, [actionLoading, businessId, invoices]);
 
   const recordContactAttempt = useCallback((invoiceId: string) => {
     setContactAttempts((prev) => ({
@@ -368,13 +373,15 @@ export default function CollectionsPanel({
                         <div className="text-right shrink-0">
                           <span className="text-sm font-bold">{formatCurrency(Number(inv.total), currency)}</span>
                           <div className="flex items-center gap-1 mt-1.5 justify-end">
-                            <button
-                              onClick={() => handleGenerateReminder(inv.id)}
-                              className="p-1.5 rounded-lg bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/20 transition-colors"
-                              title="AI Reminder"
-                            >
-                              <Bot className="w-3 h-3" />
-                            </button>
+                            {canRemindInvoice(inv.status) && (
+                              <button
+                                onClick={() => handleGenerateReminder(inv.id)}
+                                className="p-1.5 rounded-lg bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/20 transition-colors"
+                                title="AI Reminder"
+                              >
+                                <Bot className="w-3 h-3" />
+                              </button>
+                            )}
                             <button
                               onClick={() => recordContactAttempt(inv.id)}
                               className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors"
@@ -389,14 +396,16 @@ export default function CollectionsPanel({
                             >
                               <CreditCard className="w-3 h-3" />
                             </button>
-                            <button
-                              onClick={() => handleSendReminder(inv.id)}
-                              disabled={!!isLoading}
-                              className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors disabled:opacity-50"
-                              title="Send Reminder"
-                            >
-                              {isLoading === "send" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
-                            </button>
+                            {canRemindInvoice(inv.status) && (
+                              <button
+                                onClick={() => handleSendReminder(inv.id)}
+                                disabled={!!isLoading}
+                                className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-colors disabled:opacity-50"
+                                title="Send Reminder"
+                              >
+                                {isLoading === "send" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                              </button>
+                            )}
                             <button
                               onClick={() => handleMarkPaid(inv.id)}
                               disabled={!!isLoading}

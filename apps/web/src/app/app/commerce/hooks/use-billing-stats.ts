@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { parseDate } from "@/lib/date-safe";
 import type { Invoice, Quote } from "@/lib/client";
+import { OWED_STATUSES } from "@/lib/commerce-status";
 
 export interface AgingBucket {
   label: string;
@@ -28,7 +29,7 @@ export function useBillingStats(invoices: Invoice[], quotes: Quote[]): BillingSt
   return useMemo(() => {
     const paidInvoices = invoices.filter((inv) => inv.status === "PAID");
     const totalRevenue = paidInvoices.reduce((sum, inv) => sum + safeNumber(inv.total), 0);
-    const outstandingInvoices = invoices.filter((inv) => inv.status === "SENT" || inv.status === "OVERDUE");
+    const outstandingInvoices = invoices.filter((inv) => OWED_STATUSES.has(inv.status));
     const outstanding = outstandingInvoices.reduce((sum, inv) => sum + safeNumber(inv.total), 0);
     const overdueInvoices = invoices.filter((inv) => inv.status === "OVERDUE");
     const overdueAmount = overdueInvoices.reduce((sum, inv) => sum + safeNumber(inv.total), 0);

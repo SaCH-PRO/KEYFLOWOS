@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { FileText, Clock, AlertCircle, CheckCircle } from "lucide-react";
 import { invoiceBalanceOfStoredRows } from "@keyflow/shared";
 import { Invoice } from "@/lib/client";
+import { OWED_STATUSES } from "@/lib/commerce-status";
 import { formatAmount } from "../../utils/commerce-utils";
 
 interface InvoiceStatCardsProps {
@@ -42,7 +43,7 @@ export function InvoiceStatCards({ invoices, currency, onFilterClick }: InvoiceS
       } else if (inv.status === "OVERDUE") {
         overdueTotal += remaining;
         overdueCount++;
-      } else if (inv.status === "SENT" || inv.status === "PARTIALLY_PAID") {
+      } else if (OWED_STATUSES.has(inv.status)) {
         unpaidTotal += remaining;
         unpaidCount++;
       }

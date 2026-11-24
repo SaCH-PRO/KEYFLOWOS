@@ -3,6 +3,7 @@
  */
 
 import type { Invoice, Quote } from "@/lib/client";
+import { OWED_STATUSES } from "@/lib/commerce-status";
 import type { FinancialRecord, PipelineMetrics, CashPosition } from "./types";
 
 export function normalizeInvoice(inv: Invoice): FinancialRecord {
@@ -114,7 +115,7 @@ export function computeCashPosition(
     .reduce((s, i) => s + Number(i.total), 0);
 
   const outstanding = invoices
-    .filter((i) => i.status === "SENT" || i.status === "OVERDUE")
+    .filter((i) => OWED_STATUSES.has(i.status))
     .reduce((s, i) => s + Number(i.total), 0);
 
   const overdue = invoices
