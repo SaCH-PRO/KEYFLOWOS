@@ -16,6 +16,7 @@
  *   FVO-04  RED-AT-4b40a2a7  a customer opened from the focus view is still recorded as recent (selectContact did it)
  *   FVO-05  RED-AT-4b40a2a7  a "call" next action in the focus view opens the customer's page (it toasted "Opening …"
  *                       and opened nothing; handleDoAction's call/task/default cases, D-274 A4)
+ *   FVO-06  RED-AT-253766ae  a "task" next action opens the customer's Tasks page (its toast says "task details")
  *
  * ContactsPage renders for real inside the app's providers (as release0-journey.test.tsx mounts it); only fetch, the
  * Next router and the email composer are stubbed.
@@ -117,6 +118,10 @@ describe("FU-C4-FOCUS-OPEN: a customer clicked on the Customers page opens their
   it("FVO-02 control: in the list view, clicking another customer's row selects it in place, with no navigation", async () => {
     window.localStorage.setItem("kf_pipeline_view", "list");
     render(<AppProviders><ContactsPage /></AppProviders>);
+    // The list selects its first customer by itself once loaded: wait for that, so the click below is not raced by it.
+    await waitFor(() =>
+      expect(screen.getAllByRole("option", { name: /byron/i }).some((o) => o.getAttribute("aria-selected") === "true")).toBe(true),
+    { timeout: 4000 });
     fireEvent.click(await screen.findByText(/baker/i, {}, { timeout: 4000 }));
     await waitFor(() =>
       expect(screen.getAllByRole("option", { name: /baker/i }).some((o) => o.getAttribute("aria-selected") === "true")).toBe(true),
@@ -154,5 +159,16 @@ describe("FU-C4-FOCUS-OPEN: a customer clicked on the Customers page opens their
     expect(row, "the focus view lists the call action").toBeTruthy();
     fireEvent.click(row!);
     await waitFor(() => expect(nav.router.push).toHaveBeenCalledWith(`/app/crm/contacts/${ADA.id}`), { timeout: 4000 });
+  });
+
+  it("FVO-06 RED-AT-253766ae: a task next action in the focus view opens the customer's Tasks page", async () => {
+    nextActions = [{ ...callAda, id: "na_fvo_task", type: "task", description: "Send Ada her proof" }];
+    window.localStorage.setItem("kf_pipeline_view", "focus");
+    render(<AppProviders><ContactsPage /></AppProviders>);
+    const matches = await screen.findAllByText("Send Ada her proof", {}, { timeout: 4000 });
+    const row = matches.find((m) => m.closest(".cursor-pointer"));
+    expect(row, "the focus view lists the task action").toBeTruthy();
+    fireEvent.click(row!);
+    await waitFor(() => expect(nav.router.push).toHaveBeenCalledWith(`/app/crm/contacts/${ADA.id}/tasks`), { timeout: 4000 });
   });
 });
