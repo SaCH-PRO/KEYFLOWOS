@@ -414,6 +414,7 @@ async function cleanup() {
     `DELETE FROM stock_movements WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM inventory_stocks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM warehouses WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM services WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
@@ -638,6 +639,9 @@ beforeAll(async () => {
   });
   await db.product.create({
     data: { id: ID.product, businessId: ID.biz, name: 'V18A Widget', price: UNIT_PRICE, currency: 'TTD', category: 'PRODUCT', isActive: true },
+  });
+  await db.service.create({
+    data: { id: `${ID.product}_listing`, businessId: ID.biz, name: 'V18A Widget', duration: 30, price: UNIT_PRICE, sourceProductId: ID.product },
   });
 
   await db.business.create({ data: { id: ID.bizB, name: 'V18A Other Tenant', ownerId: ID.owner, currency: 'TTD', accountingBasis: 'CASH' } });
@@ -2261,10 +2265,12 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
     (t2nFixtures ??= (async () => {
       const { market } = await marketRoutes();
       await db.product.create({ data: { id: T2N.drop, businessId: ID.biz, name: 'V18A Dropship', price: 25, currency: 'TTD', category: 'PRODUCT', isActive: true } });
+      await db.service.create({ data: { id: `${T2N.drop}_listing`, businessId: ID.biz, name: 'V18A Dropship', duration: 30, price: 25, sourceProductId: T2N.drop } });
       await market.createListing(ID.biz, { productId: T2N.drop, fulfillmentStrategy: 'DROPSHIP', supplierName: 'V18A Supplier', supplierEmail: `${P}supplier@test.local` });
       await db.product.create({
         data: { id: T2N.tracked, businessId: ID.biz, name: 'V18A Tracked', price: 10, currency: 'TTD', category: 'PRODUCT', isActive: true, inventoryMode: 'tracked' },
       });
+      await db.service.create({ data: { id: `${T2N.tracked}_listing`, businessId: ID.biz, name: 'V18A Tracked', duration: 30, price: 10, sourceProductId: T2N.tracked } });
       await db.warehouse.create({ data: { id: T2N.warehouse, businessId: ID.biz, name: 'V18A Warehouse' } });
       await db.inventoryStock.create({ data: { id: T2N.stock, businessId: ID.biz, productId: T2N.tracked, warehouseId: T2N.warehouse, quantity: 10, reserved: 0 } });
     })());
@@ -3270,6 +3276,9 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
       await db.product.create({
         data: { id: T2J.product, businessId: ID.biz, name: 'V18A Costed', price: UNIT_PRICE, currency: 'TTD', category: 'PRODUCT', isActive: true, inventoryMode: 'tracked' },
       });
+      await db.service.create({
+        data: { id: `${T2J.product}_listing`, businessId: ID.biz, name: 'V18A Costed', duration: 30, price: UNIT_PRICE, sourceProductId: T2J.product },
+      });
       await db.inventoryStock.create({
         data: { id: T2J.stock, businessId: ID.biz, productId: T2J.product, warehouseId, quantity: 50, reserved: 0, costPerUnit: T2J_UNIT_COST },
       });
@@ -3532,6 +3541,9 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
       ] as const) {
         await db.product.create({
           data: { id, businessId: ID.biz, name, price: UNIT_PRICE, currency: 'TTD', category: 'PRODUCT', isActive: true, inventoryMode },
+        });
+        await db.service.create({
+          data: { id: `${id}_listing`, businessId: ID.biz, name, duration: 30, price: UNIT_PRICE, sourceProductId: id },
         });
       }
       // B's planted rows (D-137): B's business id on the pair of A's product in A's warehouse.

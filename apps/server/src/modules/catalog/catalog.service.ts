@@ -171,8 +171,31 @@ export class CatalogService {
    * pass-through alike.
    */
   async listPublicProducts(businessId: string) {
+    // SWP-STORE-LISTING-SERVER (BUG-055, ruling storelisting): only products
+    // with a live listing Service (sourceProductId, deletedAt: null) for THIS
+    // business appear on the public store. Closed stores still return 404 via
+    // assertPublicStore before returning an empty list.
+    const listings = await this.prisma.client.service.findMany({
+      where: { businessId, deletedAt: null, sourceProductId: { not: null } },
+      select: { sourceProductId: true },
+      distinct: ['sourceProductId'],
+    });
+    const listedProductIds = listings
+      .map((l) => l.sourceProductId)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0);
+    if (listedProductIds.length === 0) {
+      await this.assertPublicStore(businessId);
+      return [];
+    }
+
     const products = await this.prisma.client.product.findMany({
-      where: { businessId, deletedAt: null, isActive: true, business: { deletedAt: null, storeEnabled: true } },
+      where: {
+        businessId,
+        deletedAt: null,
+        isActive: true,
+        id: { in: listedProductIds },
+        business: { deletedAt: null, storeEnabled: true },
+      },
       orderBy: { createdAt: 'desc' },
       select: { ...PUBLIC_PRODUCT_SELECT, inventoryMode: true, outOfStockBehavior: true },
     });
