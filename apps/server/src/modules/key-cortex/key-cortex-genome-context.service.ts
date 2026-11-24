@@ -42,7 +42,9 @@ export class KeyCortexGenomeContextService {
     businessId: string,
   ): Promise<GenomeEnrichedContext> {
     // v2 (FU-KEY-CHAT-GENOME-MONEY-SIGHT): signals carry section and domain; a v1 entry lacks them.
-    const cacheKey = `genome:context:v2:${businessId}`;
+    // v3 (FU-KEY-GENOME-READS-RESIDUAL rounds 8, 9): the entry carries the signal and ranked pools; a v2 entry lacks them.
+    // v4 (CODEX-228 MAJOR-2): bridge signals carry full-row isFinance (field, evidence, proposedValue, sourceEntityType); v3 lacks it.
+    const cacheKey = `genome:context:v4:${businessId}`;
     const cached = await this.redis.getJson<GenomeEnrichedContext>(cacheKey);
     if (cached) {
       this.logger.debug(
@@ -62,31 +64,34 @@ export class KeyCortexGenomeContextService {
     const genomeIntelligence =
       await (this.genomeBridgeService as any).getGenomeIntelligence(businessId);
 
+    const toRecommendation = (rec: any) => ({
+      id: rec.id ?? this.generateId(),
+      title: rec.title ?? 'Untitled recommendation',
+      description: rec.description ?? '',
+      impact: rec.impact ?? 'medium',
+      category: rec.category ?? 'general',
+      confidence: rec.confidence ?? 0.5,
+      genomeScore: rec.genomeScore ?? 0,
+    });
+    const toSignal = (sig: any) => ({
+      id: sig.id ?? this.generateId(),
+      type: sig.type ?? 'info',
+      message: sig.message ?? '',
+      module: sig.module ?? 'general',
+      section: sig.section ?? null,
+      domain: sig.domain ?? null,
+      ...(typeof sig.isFinance === 'boolean' ? { isFinance: sig.isFinance } : {}),
+      severity: sig.severity ?? 'low',
+      createdAt: sig.createdAt ? new Date(sig.createdAt) : new Date(),
+    });
     const enriched: GenomeEnrichedContext = {
       dnaScores: genomeIntelligence.dnaScores ?? {},
       genomeStage: genomeIntelligence.genomeStage ?? 'unknown',
       executiveReadiness: genomeIntelligence.executiveReadiness ?? 0,
-      recommendations: (genomeIntelligence.recommendations ?? []).map(
-        (rec: any) => ({
-          id: rec.id ?? this.generateId(),
-          title: rec.title ?? 'Untitled recommendation',
-          description: rec.description ?? '',
-          impact: rec.impact ?? 'medium',
-          category: rec.category ?? 'general',
-          confidence: rec.confidence ?? 0.5,
-          genomeScore: rec.genomeScore ?? 0,
-        }),
-      ),
-      signals: (genomeIntelligence.signals ?? []).map((sig: any) => ({
-        id: sig.id ?? this.generateId(),
-        type: sig.type ?? 'info',
-        message: sig.message ?? '',
-        module: sig.module ?? 'general',
-        section: sig.section ?? null,
-        domain: sig.domain ?? null,
-        severity: sig.severity ?? 'low',
-        createdAt: sig.createdAt ? new Date(sig.createdAt) : new Date(),
-      })),
+      recommendations: (genomeIntelligence.recommendations ?? []).map(toRecommendation),
+      recommendationPool: (genomeIntelligence.recommendationPool ?? genomeIntelligence.recommendations ?? []).map(toRecommendation),
+      signals: (genomeIntelligence.signals ?? []).map(toSignal),
+      signalPool: (genomeIntelligence.signalPool ?? genomeIntelligence.signals ?? []).map(toSignal),
       opportunities: (genomeIntelligence.opportunities ?? []).map(
         (opp: any) => ({
           id: opp.id ?? this.generateId(),
@@ -139,14 +144,16 @@ export class KeyCortexGenomeContextService {
   /**
    * Determine whether KEY should suggest a proactive action based on genome signals.
    */
-  async shouldSuggestProactiveAction(businessId: string, readsRevenue = true): Promise<boolean> {
+  // D-235: no reader given is a reader without revenue read (fails closed).
+  async shouldSuggestProactiveAction(businessId: string, readsRevenue = false): Promise<boolean> {
     if (!this.genomeBridgeService) {
       return false;
     }
 
     try {
       // FU-KEY-CHAT-GENOME-MONEY-SIGHT (minor 1): decided on the genome the reader may see.
-      const genomeContext = genomeContextForReader(await this.getGenomeEnrichedContext(businessId), readsRevenue);
+      const fullContext = await this.getGenomeEnrichedContext(businessId);
+      const genomeContext = genomeContextForReader(fullContext, readsRevenue);
 
       const hasCriticalSignals = genomeContext.signals.some(
         (s: GenomeSignal) => s.severity === 'critical' || s.severity === 'high',
@@ -175,9 +182,11 @@ export class KeyCortexGenomeContextService {
         }
       }
 
+      // D-235: the business-wide cache holds the whole DNA map (each reader compares only the keys it may see), so one
+      // reader's projection never stands in for another's.
       await this.redis.setJson(
         `genome:dna:previous:${businessId}`,
-        genomeContext.dnaScores,
+        fullContext.dnaScores,
         3600,
       );
 
@@ -206,7 +215,8 @@ export class KeyCortexGenomeContextService {
   async getProactiveSuggestions(
     businessId: string,
     integrationV2Enabled = false,
-    readsRevenue = true,
+    // D-235: no reader given is a reader without revenue read (fails closed).
+    readsRevenue = false,
   ): Promise<Suggestion[]> {
     if (!this.genomeBridgeService) {
       return [];

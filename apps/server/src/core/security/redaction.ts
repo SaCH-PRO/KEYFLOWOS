@@ -4,11 +4,36 @@
  * Used anywhere a structured value is persisted or emitted across a boundary
  * (audit/event snapshots, log payloads). A single policy is safer than an
  * ever-growing per-call-site denylist: extend it here and every consumer
- * benefits. Matching is case-insensitive substring on the field NAME, so a
- * nested `gmailAccessToken` matches the `accesstoken` pattern.
+ * benefits. Two policies apply, in this order:
+ *
+ *   1. By field NAME (SENSITIVE_FIELD_PATTERNS): case-insensitive substring,
+ *      so a nested `gmailAccessToken` matches the `accesstoken` pattern; the
+ *      whole value becomes ***REDACTED***.
+ *   2. By VALUE (SENSITIVE_VALUE_PATTERNS, RR-REDACTION-BY-CONTENT): every
+ *      string leaf under a non-sensitive key is passed through
+ *      redactSensitiveText, which replaces card numbers (<card>) and
+ *      secret-shaped tokens (<secret>) inside free text. A note that says
+ *      "card 4111 1111 1111 1111" or "use key sk-..." no longer reaches an
+ *      audit snapshot or a log payload intact. Numbers are not text: a numeric
+ *      leaf is left alone. A field whose key names an identifier (`id`,
+ *      `platform_id`, `externalPostId`) keeps its digit runs: ids are not
+ *      cards (owner question 1 default); its secrets are still redacted.
+ *      Every pattern is anchored so its scan is linear in the input (200 kB of
+ *      its worst input in tens of milliseconds); the spec holds each to that.
  *
  * NOTE: patterns must be specific enough not to over-match ordinary fields —
- * hence `apikey`/`accesskey`/`privatekey` rather than a bare `key`.
+ * hence `apikey`/`accesskey`/`privatekey` rather than a bare `key`; and the
+ * value patterns are shaped (a Luhn check over card-shaped groups, a key
+ * prefix plus 20 key characters, a PEM header), so an invoice number, a phone
+ * number, a date, a UUID or a 16-digit number that fails Luhn is untouched.
+ * Residual over-redaction, by design: about one in ten 14 to 19 digit numeric
+ * identifiers passes Luhn (every IMEI does) and becomes <card>; a grouped
+ * numeric list (several four- or five-digit groups in a row) is redacted
+ * about one time in ten to one in four, rising with the number of groups; a
+ * card-shaped digit group that completes a valid window with a card is
+ * redacted with it; a cut-off PEM block takes the rest of its string leaf.
+ * See redactCardWindows for the card rules, the measured rates and what is
+ * not covered.
  */
 export const SENSITIVE_FIELD_PATTERNS = [
   'password',
@@ -38,15 +63,274 @@ function isSensitiveKey(key: string): boolean {
   return SENSITIVE_FIELD_PATTERNS.some((p) => lower.includes(p));
 }
 
+const CARD_MARKER = '<card>';
+const SECRET_MARKER = '<secret>';
+
+export interface SensitiveValuePattern {
+  /** A stable name, for tests and for reading a diff of the policy. */
+  readonly name: string;
+  readonly marker: typeof CARD_MARKER | typeof SECRET_MARKER;
+  /**
+   * A global pattern. Use it only through redactSensitiveText: String.replace
+   * resets lastIndex, so calls share no state, but `.test`/`.exec` on a global
+   * RegExp do not, and would answer the second call differently.
+   */
+  readonly pattern: RegExp;
+  /**
+   * Rewrites one match. Absent: the match becomes the marker, after the named
+   * group `lead` when the pattern has one (the Bearer scheme word is kept).
+   */
+  readonly rewrite?: (match: string) => string;
+}
+
+/** Luhn check over a string of digits. */
+function luhnValid(digits: string): boolean {
+  let sum = 0;
+  let double = false;
+  for (let i = digits.length - 1; i >= 0; i -= 1) {
+    let d = digits.charCodeAt(i) - 48;
+    if (double) {
+      d *= 2;
+      if (d > 9) d -= 9;
+    }
+    sum += d;
+    double = !double;
+  }
+  return sum % 10 === 0;
+}
+
+const CARD_MIN_DIGITS = 13;
+const CARD_MAX_DIGITS = 19;
+
+/**
+ * A card number is a window of 13 to 19 digits, made of whole groups of a
+ * digit run (groups are split by one to three spaces, tabs, no-break, thin or
+ * narrow no-break spaces, hyphens or en dashes), that passes Luhn, and is
+ * card-shaped: a single unbroken group; a multi-group window whose first
+ * group has 4+ digits and every group 3+ (4-4-4-4, 4-6-5, 4-4-4-4-3); or a
+ * generic four-digit mask whose last group has 1 or 2 digits after groups of
+ * exactly four (4-4-4-1, 4-4-4-2, 4-4-4-4-1, 4-4-4-4-2: a 13-digit Visa, a
+ * 14-digit Diners, a 17 or 18 digit Maestro typed under a #### mask). So a
+ * date's parts or a phone's 3-3-4 never join a window. A 13-digit window must
+ * start with 4 (legacy Visa is the only 13-digit scheme, and that rule keeps
+ * every 13-digit epoch-millisecond id intact). EVERY valid window in the run
+ * is redacted (their union), so a neighbouring group that happens to complete
+ * a valid window with the head of a card can never leave the card's tail
+ * visible; the neighbours outside every valid window stay, and two adjacent
+ * cards merge into one marker. An unbroken group longer than 19 digits is
+ * not a card (longer than any scheme) and is left whole.
+ *
+ * Residual over-redaction, by design and measured on synthetic notes (the
+ * reviewers' corpora, 3,000 notes per row): about one in ten single 14 to 19
+ * digit numeric identifiers passes Luhn (an IMEI always does) and becomes
+ * <card>; grouped numeric lists pay the union rule, about one in ten for four
+ * four-digit groups, rising by about one in ten per extra group (six groups:
+ * about one in four), and one in five for lists of four five-digit ids; the
+ * short-tail mask rule adds about one in ten more to lists of three or four
+ * four-digit groups followed by a one or two digit token (an IBAN body, a SKU
+ * list and a count); a card-shaped neighbour that completes a valid window
+ * with a card is redacted with it, about one in ten for a 1 or 4 digit
+ * neighbour and one in five for 2 or 3 digits, where two windows can pass.
+ * Not covered, by design: a card broken across lines, or joined by dots,
+ * slashes, underscores, four or more spaces, or any dash or space other than
+ * the ones named above; a card typed in two-digit pairs or with a short
+ * group before the last (4-3-3-3-1); a card written directly after a plus
+ * sign (the E.164 rule); a digit glued to the number; full-width digits.
+ */
+const CARD_SEPARATOR = /([ \t\u00a0\u2009\u202f\u2013-]{1,3})/;
+
+/** Groups of exactly four, then a last group of one or two digits: a number typed under a generic #### mask. */
+function genericMaskWithShortTail(groupLengths: readonly number[]): boolean {
+  const last = groupLengths[groupLengths.length - 1];
+  return last >= 1 && last <= 2 && groupLengths.length >= 4 && groupLengths.slice(0, -1).every((len) => len === 4);
+}
+
+/** Monotone under appending a group: once a window is not card-shaped, no longer window from the same start is. */
+function cardShaped(groupLengths: readonly number[]): boolean {
+  if (groupLengths.length === 1) return true;
+  if (groupLengths[0] >= 4 && groupLengths.every((len) => len >= 3)) return true;
+  return genericMaskWithShortTail(groupLengths);
+}
+
+function redactCardWindows(run: string): string {
+  const parts = run.split(CARD_SEPARATOR); // digit group, separator, digit group, ...
+  const groups: string[] = [];
+  const separators: string[] = [];
+  for (let k = 0; k < parts.length; k += 1) (k % 2 === 0 ? groups : separators).push(parts[k]);
+  const covered: boolean[] = new Array<boolean>(groups.length).fill(false);
+
+  for (let i = 0; i < groups.length; i += 1) {
+    let digits = '';
+    const lengths: number[] = [];
+    for (let j = i; j < groups.length && digits.length + groups[j].length <= CARD_MAX_DIGITS; j += 1) {
+      digits += groups[j];
+      lengths.push(groups[j].length);
+      if (digits.length < CARD_MIN_DIGITS) continue;
+      if (digits.length === CARD_MIN_DIGITS && digits[0] !== '4') continue;
+      if (!cardShaped(lengths)) break; // a longer window from i cannot become card-shaped again
+      if (luhnValid(digits)) for (let g = i; g <= j; g += 1) covered[g] = true;
+    }
+  }
+
+  const out: string[] = [];
+  for (let g = 0; g < groups.length; g += 1) {
+    const joinsPrevious = g > 0 && covered[g - 1] && covered[g];
+    if (g > 0 && !joinsPrevious) out.push(separators[g - 1]);
+    if (!covered[g]) out.push(groups[g]);
+    else if (!joinsPrevious) out.push(CARD_MARKER);
+  }
+  return out.join('');
+}
+
+/** Characters a provider key is made of after its prefix. */
+const KEY_CHARS = String.raw`[A-Za-z0-9_-]`;
+/** Characters a bearer token is made of (RFC 6750 b64token). */
+const TOKEN_CHARS = String.raw`[A-Za-z0-9._~+/=-]`;
+
+const freeze = (entry: SensitiveValuePattern): Readonly<SensitiveValuePattern> => Object.freeze(entry);
+
+/**
+ * The value policy, applied to every string leaf deepRedact reaches and to
+ * any free text a caller passes to redactSensitiveText. Order matters where
+ * patterns could overlap: the PEM block goes first so its body (base64 that
+ * may hold digit runs) is replaced whole.
+ */
+export const SENSITIVE_VALUE_PATTERNS: readonly Readonly<SensitiveValuePattern>[] = Object.freeze([
+  freeze({
+    // To the matching END header, or to the end of the text when the block is cut off (a sliced error
+    // string): the prefix of a key is still a key. Because a cut-off block consumes the rest of the
+    // text, a text with many BEGIN headers and no END is scanned once (linear), not once per header.
+    name: 'pem-private-key-block',
+    marker: SECRET_MARKER,
+    pattern: /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----|[\s\S]*$)/g,
+  }),
+  freeze({
+    // Header and claims segments, then any signature, empty included (alg none). The token must not be
+    // glued to a letter, digit, dash or underscore: `\b` would restart the scan at every dash of an
+    // 'eyJ-eyJ-eyJ-' text and backtrack to its end (quadratic: 12 s for 200 kB); the lookbehind keeps it
+    // linear. A JWT written as `token-eyJ...` is therefore not covered (documented).
+    name: 'jwt',
+    marker: SECRET_MARKER,
+    pattern: /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{6,}\.eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*/g,
+  }),
+  freeze({
+    // The scheme word is kept (named group `lead`); the token goes. A token is 8 or more token characters
+    // holding at least one digit or one of _ ~ + / = -, or a dot followed by more token text, or 20 or
+    // more letters, and does not end in a period: so "bearer instruments" and "the bearer payment." in
+    // prose stay. An optional colon after the word covers an echoed "Authorization: Bearer: <t>".
+    name: 'bearer-token',
+    marker: SECRET_MARKER,
+    pattern: new RegExp(
+      String.raw`(?<lead>\bBearer:?\s+)(?:(?=[A-Za-z]*(?:[0-9_~+/=-]|\.${TOKEN_CHARS}))${TOKEN_CHARS}{7,}[A-Za-z0-9_~+/=-]|[A-Za-z]{20,})`,
+      'gi',
+    ),
+  }),
+  freeze({
+    // Anchored on "not after a letter or digit" rather than `\b`, so `x_AKIA...` is still a key id.
+    name: 'aws-access-key-id',
+    marker: SECRET_MARKER,
+    pattern: /(?<![A-Za-z0-9])AKIA[A-Z0-9]{16}(?![A-Za-z0-9])/g,
+  }),
+  freeze({
+    // Provider keys, in any letter case and also after an underscore (`x_ghp_...`). Two shapes:
+    //   - a prefix that is never a product slug (sk-ant- Anthropic; sk-proj-, sk-svcacct- and sk-admin- OpenAI
+    //     project, service-account and admin keys; xoxb- Slack; ghp_ and github_pat_ GitHub) followed by 20 or
+    //     more key characters, dashes included: real key bodies are base64url-like and may start with or
+    //     contain a dash;
+    //   - bare sk- (legacy OpenAI), whose body must have, past at most four short dashed segments (an empty
+    //     one allowed), a run of 20 or more key characters WITHOUT a dash: a product slug such as
+    //     `sk-classic-fit-cotton-shirt-blue` has none and is left alone. Residual: a slug with one 20+ letter
+    //     word after sk- is redacted; a bare sk- key with no 20-character dashless run in its first five
+    //     pieces, or with five or more dashed segments before that run, is not covered.
+    // The dashed segments are bounded, so the scan stays linear on 'sk-a-a-a-' texts.
+    name: 'provider-key-prefix',
+    marker: SECRET_MARKER,
+    pattern: new RegExp(
+      String.raw`(?<![A-Za-z0-9])(?:(?:sk-ant-|sk-proj-|sk-svcacct-|sk-admin-|xoxb-|ghp_|github_pat_)${KEY_CHARS}{20,}|sk-(?:[A-Za-z0-9_]{0,32}-){0,4}[A-Za-z0-9_]{20,}${KEY_CHARS}*)`,
+      'gi',
+    ),
+  }),
+  freeze({
+    // A maximal run of digit groups joined by one to three spaces, tabs, no-break, thin or narrow no-break
+    // spaces, hyphens or en dashes, not preceded by a digit or a plus sign (an E.164 phone number is never a
+    // card). The windows inside it are found by redactCardWindows.
+    name: 'card-number-luhn',
+    marker: CARD_MARKER,
+    pattern: /(?<![\d+])\d+(?:[ \t\u00a0\u2009\u202f\u2013-]{1,3}\d+)*(?!\d)/g,
+    rewrite: redactCardWindows,
+  }),
+]);
+
+/**
+ * Invisible characters that can split a number or a key for a scanner: zero-width space, non-joiner, joiner
+ * and word joiner, the BOM, the soft hyphen and the left-to-right and right-to-left marks. An alternation,
+ * not a class (no-misleading-character-class). Not stripped: U+2061, U+180E and the other format characters.
+ */
+const INVISIBLE = /\u200b|\u200c|\u200d|\u2060|\ufeff|\u00ad|\u200e|\u200f/g;
+
+export interface RedactSensitiveTextOptions {
+  /** Apply the card-number pattern (default true). Off for identifier fields, whose digit runs are ids, not cards. */
+  readonly cards?: boolean;
+}
+
+/**
+ * Replace every card number and secret-shaped token in free text with its
+ * marker, keeping the rest of the text (what an operator or an audit reader
+ * needs). The Bearer pattern keeps the scheme word and replaces the token.
+ * Invisible characters (INVISIBLE) are removed before matching so they cannot
+ * split a number or a key; when nothing matched, the text is returned exactly
+ * as given. When something matched, every such character in that string leaf
+ * is dropped, not only the ones inside the match: an emoji joiner sequence or
+ * a script that uses the zero-width non-joiner loses them in a leaf that also
+ * held a secret, and a Latin or numeric token embedded in an Arabic or Hebrew
+ * note may display in a different order once its directional marks are gone
+ * (readable, not a leak). A digit glued to a card number by an
+ * invisible character joins the run and can make it not a card (a 17-digit
+ * unbroken run is left whole). Idempotent: a marker matches no pattern.
+ */
+export function redactSensitiveText(text: string, options: RedactSensitiveTextOptions = {}): string {
+  const stripped = text.replace(INVISIBLE, '');
+  let out = stripped;
+  for (const { pattern, marker, rewrite } of SENSITIVE_VALUE_PATTERNS) {
+    if (marker === CARD_MARKER && options.cards === false) continue;
+    out = out.replace(pattern, (match: string, ...rest: unknown[]) => {
+      if (rewrite) return rewrite(match);
+      const groups = rest.length && typeof rest[rest.length - 1] === 'object' ? (rest[rest.length - 1] as Record<string, string | undefined>) : undefined;
+      return `${groups?.lead ?? ''}${marker}`;
+    });
+  }
+  return out === stripped ? text : out;
+}
+
+/**
+ * A field whose name says it holds an identifier (`id`, `platform_id`,
+ * `externalPostId`, `contactID`): its digit runs are ids, not cards, so the
+ * card pattern is not applied to it (owner question 1 default, RR-REDACTION-
+ * BY-CONTENT); secret-shaped tokens in it are still redacted. `bid` and `ids`
+ * are not identifier names. Limits, by that default: a card number stored
+ * under `cardId`-style key is not card-redacted (field-name redaction has no
+ * card entry either); the exemption is per leaf key, so an array under
+ * `platform_ids` or a nested `{ externalId: { value } }` is still card-checked.
+ */
+const IDENTIFIER_KEY = /(?:^|_)id$|I[dD]$/;
+
 /**
  * Recursively redact sensitive fields in-place across objects and arrays.
- * Returns the same reference for convenience. Non-sensitive values are left
- * untouched. Arrays are traversed element-by-element; sensitive keys at any
- * depth are replaced with a marker regardless of casing.
+ * Returns the same reference for convenience. A sensitive key at any depth is
+ * replaced with a marker regardless of casing; every other string leaf is
+ * passed through redactSensitiveText and written back in place (a string
+ * given directly is one leaf, and its redacted copy is returned). Numbers,
+ * booleans and null are left untouched. Arrays are traversed
+ * element-by-element. The input must be a plain, mutable value: pass a copy
+ * (safeRedactedSnapshot clones first); a frozen object or a getter-only
+ * property throws, as a sensitive key on a frozen object always did.
  */
 export function deepRedact<T>(value: T): T {
+  if (typeof value === 'string') {
+    return redactSensitiveText(value) as unknown as T;
+  }
   if (Array.isArray(value)) {
-    for (const item of value) deepRedact(item);
+    for (let i = 0; i < value.length; i += 1) value[i] = deepRedact(value[i]);
     return value;
   }
   if (value && typeof value === 'object') {
@@ -54,8 +338,10 @@ export function deepRedact<T>(value: T): T {
     for (const key of Object.keys(obj)) {
       if (isSensitiveKey(key)) {
         obj[key] = REDACTED;
+      } else if (typeof obj[key] === 'string') {
+        obj[key] = redactSensitiveText(obj[key] as string, { cards: !IDENTIFIER_KEY.test(key) });
       } else {
-        deepRedact(obj[key]);
+        obj[key] = deepRedact(obj[key]);
       }
     }
   }

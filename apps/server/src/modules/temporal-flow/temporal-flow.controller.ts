@@ -39,7 +39,9 @@ const genomeReaderOf = (req?: ReaderRequest) =>
  * KEY Inbox's events need operations read, calendar events bookings read, money events revenue read (D-100). Review
  * repair (SEC N-2, N-3): the writes that name an existing event (resolve, an upsert by external id) do not reach one.
  * Delta (item 1): the memory reads (memory, memory/search, memory/by-entity, the analysis's memory insights) answer
- * only memories the reader may see (TemporalFlowService.readerMemoryFilter), and compaction and pattern detection,
+ * only memories the reader may see (TemporalFlowService.readerMemoryFilter; MEM-TEMPORAL-MEMORY-ROUTES-SIGHT adds
+ * MEM-SEMANTIC-SIGHT's rule for a summary, its text and source events included: TemporalFlowService.memorySight, for
+ * every reader, the owner included), and compaction and pattern detection,
  * which summarise every event of the business, are refused (403) to a reader who misses an event-owning module.
  */
 @HiddenModuleWrites('flow_hubs', 'bookings')
@@ -128,7 +130,7 @@ export class TemporalFlowController {
     return this.temporal.analyze(
       businessId,
       await this.temporal.readerFilter(businessId, req?.user),
-      await this.temporal.readerMemoryFilter(businessId, req?.user),
+      await this.temporal.memorySight(businessId, req?.user),
       genomeReaderOf(req),
     );
   }
@@ -139,14 +141,7 @@ export class TemporalFlowController {
     @Query() query: TemporalFlowMemoryQueryDto,
     @Req() req?: ReaderRequest,
   ) {
-    const memoryFilter = await this.temporal.readerMemoryFilter(businessId, req?.user);
-    if (memoryFilter) return this.temporal.listMemory(businessId, query, memoryFilter);
-    return this.memory.findMany(businessId, {
-      entityType: query.entityType,
-      entityId: query.entityId,
-      type: query.type,
-      limit: query.limit,
-    });
+    return this.temporal.listMemory(businessId, query, await this.temporal.memorySight(businessId, req?.user));
   }
 
   @Get('memory/search')
@@ -156,15 +151,9 @@ export class TemporalFlowController {
     @Req() req?: ReaderRequest,
     @Query('limit') limit?: string,
   ) {
+    // MEM-TEMPORAL-MEMORY-ROUTES-SIGHT: withheld hits are dropped inside the search, before the limit.
     const wanted = limit ? Number(limit) : 10;
-    const memoryFilter = await this.temporal.readerMemoryFilter(businessId, req?.user);
-    if (!memoryFilter) return this.memory.searchMemory(businessId, q, wanted);
-    // Hits of withheld memories are dropped before the limit: the search reads a wider window, then keeps the
-    // visible hits up to the limit asked for.
-    const max = Number.isInteger(wanted) && wanted > 0 ? wanted : 10;
-    const hits = await this.memory.searchMemory(businessId, q, Math.min(max * 5, 100));
-    const visible = await this.temporal.visibleMemoryIds(businessId, hits.map((hit) => hit.sourceId), memoryFilter);
-    return hits.filter((hit) => visible.has(hit.sourceId)).slice(0, max);
+    return this.temporal.searchVisibleMemory(businessId, q, wanted, await this.temporal.memorySight(businessId, req?.user));
   }
 
   @Get('memory/by-entity/:entityType/:entityId')
@@ -174,9 +163,7 @@ export class TemporalFlowController {
     @Param('entityId') entityId: string,
     @Req() req?: ReaderRequest,
   ) {
-    const memoryFilter = await this.temporal.readerMemoryFilter(businessId, req?.user);
-    if (memoryFilter) return this.temporal.listMemory(businessId, { entityType, entityId }, memoryFilter);
-    return this.memory.findByEntity(businessId, entityType, entityId);
+    return this.temporal.listMemory(businessId, { entityType, entityId }, await this.temporal.memorySight(businessId, req?.user));
   }
 
   @Post('memory/compact')

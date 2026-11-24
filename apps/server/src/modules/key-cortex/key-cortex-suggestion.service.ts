@@ -46,8 +46,7 @@ export class KeyCortexSuggestionService {
 Assistant's last message (excerpt): "${lastMessage.slice(0, 500)}"
 
 Business context:
-- Genome Stage: ${contextSnapshot.genomeStage}
-${typeof contextSnapshot.pendingInvoices === 'number' ? `- Pending invoices: ${contextSnapshot.pendingInvoices}` : ''}
+${contextSnapshot.genomeStage ? `- Genome Stage: ${contextSnapshot.genomeStage}\n` : ''}${typeof contextSnapshot.pendingInvoices === 'number' ? `- Pending invoices: ${contextSnapshot.pendingInvoices}` : ''}
 - Active projects: ${contextSnapshot.activeProjects.length}
 - Unread messages: ${contextSnapshot.unreadMessages}${extraContext}
 

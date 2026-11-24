@@ -37,6 +37,7 @@ import { KeyCortexInsightService } from './key-cortex-insight.service';
 // uuidv4() with no arguments, so this is a true drop-in.
 import { randomUUID as uuidv4 } from 'node:crypto';
 import { keyCronsDisabled } from '../../core/config/env';
+import { dnaScoresForReader, isFinanceRecommendation, isMoneyLabel, proposalTextStatesMoney } from '../business-genome/key-genome/genome-finance-scope';
 
 /* ─────────────────────────── Type Definitions ─────────────────────────── */
 
@@ -1226,10 +1227,27 @@ Return JSON:
      PRIVATE — CONTEXT & GENOME
      ═══════════════════════════════════════════════════════════════ */
 
+  // FU-KEY-GENOME-READS-RESIDUAL (D-235): the genome the creative techniques are prompted with has no reader (a daily
+  // cron), and its ideas are served to every member (GET cortex/awareness), so it is projected as for a reader without
+  // revenue read: the non-money DNA dimensions and the non-finance recommendations only; stage, readiness and the
+  // other composite fields are withheld (D-233).
   private async getGenomeInsights(businessId: string): Promise<string[]> {
     try {
-      const genome = await this.contextService.getGenomeContext(businessId);
-      return Object.entries(genome as unknown as Record<string, unknown>).map(([k, v]) => `${k}: ${JSON.stringify(v).slice(0, 200)}`);
+      const genome = (await this.contextService.getGenomeContext(businessId)) as unknown as Record<string, unknown>;
+      const recs = Array.isArray(genome?.recommendations) ? (genome.recommendations as Array<Record<string, unknown>>) : [];
+      const visible: Record<string, unknown> = {
+        dnaScores: dnaScoresForReader((genome?.dnaScores ?? {}) as Record<string, unknown>, false),
+        // Recommendations arrive as strings in production (context-v2 getGenomeContext) or as rows; a string is judged by
+        // its text, a row by its domain and text (round 2, correctness minor 3).
+        recommendations: recs
+          .filter((r: unknown) =>
+            typeof r === 'string'
+              ? !proposalTextStatesMoney(r) && !isMoneyLabel(r)
+              : !isFinanceRecommendation({ domain: ((r as Record<string, unknown>).domain ?? (r as Record<string, unknown>).category ?? null) as string | null, title: ((r as Record<string, unknown>).title ?? null) as string | null }) &&
+                !proposalTextStatesMoney(JSON.stringify(r)),
+          ),
+      };
+      return Object.entries(visible).map(([k, v]) => `${k}: ${JSON.stringify(v).slice(0, 200)}`);
     } catch {
       return [];
     }

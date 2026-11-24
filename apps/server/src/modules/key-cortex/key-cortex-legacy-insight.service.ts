@@ -66,8 +66,7 @@ export class KeyCortexLegacyInsightService {
 Analyze the following business context and user query. Generate 3-5 actionable insights.
 
 === BUSINESS CONTEXT ===
-Genome Stage: ${contextSnapshot.genomeStage}
-Executive Readiness: ${contextSnapshot.executiveReadiness}%
+${contextSnapshot.genomeStage ? `Genome Stage: ${contextSnapshot.genomeStage}\n` : ''}Executive Readiness: ${contextSnapshot.executiveReadiness}%
 DNA Scores: ${JSON.stringify(contextSnapshot.genomeDna)}
 Active Projects: ${contextSnapshot.activeProjects.join(', ')}
 Pending Invoices: ${contextSnapshot.pendingInvoices}
@@ -240,8 +239,7 @@ Analyze the following business data and identify EVERY revenue opportunity, cost
 Think like a ruthless CFO meets growth hacker. Nothing is off-limits.
 
 === BUSINESS DATA ===
-Genome Stage: ${contextSnapshot.genomeStage}
-Executive Readiness: ${contextSnapshot.executiveReadiness}%
+${contextSnapshot.genomeStage ? `Genome Stage: ${contextSnapshot.genomeStage}\n` : ''}Executive Readiness: ${contextSnapshot.executiveReadiness}%
 DNA Scores: ${JSON.stringify(contextSnapshot.genomeDna)}
 
 INVOICES:
