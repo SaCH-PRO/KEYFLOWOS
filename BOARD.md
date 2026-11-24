@@ -79,7 +79,7 @@
 | P28 | FU-CONTACT-PAGES-RAW-STATUS (web, M: raw stored statuses on the contact route pages) | claude (proposed #80 7136931971) | todo | M8 | Pre-flight (A3), claim |
 | P29 | FU-C4-FOCUS-OPEN (web, S: journey C4 list step, the focus view has no link to the customer page; pre-existing) | claude | todo | M8 | Pre-flight, claim |
 | P30 | FU-NOTIFICATIONS-PREFS-GUARD (server, S, P1: customer-preferences and customer-log have no module guard) | antigravity (proposed) | todo | — | Antigravity to claim (server lane) |
-| P31 | FU-CONTACT-PANEL-PRUNE (web, S: tab-only fetches and orphaned panels) | — | blocked | owner question 32 | After the owner answers |
+| P31 | FU-CONTACT-PANEL-PRUNE (web, S: the side panel still reads health, journey, conversation context and cross-journey for the retired tabs; acceptance CDC-5 and Codex P2 on #236) | claude | todo | M8 | The read removal does not wait on owner question 32 (only re-homing the panels does): pre-flight, claim after M8 |
 | P14 | Owner: "Batch 2 safe defaults #5–#10" (not approved in D-272) | owner | blocked | the owner's review | The owner reviews the list |
 | P15 | Owner: redeploy production (D-266) | owner | blocked | M1–M4 | The owner deploys from main |
 
