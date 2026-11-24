@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import { FormDetailsSection } from "./form-sections/form-details-section";
 import { FormLineItemsSection } from "./form-sections/form-line-items-section";
 import { FormTaxDiscountSection } from "./form-sections/form-tax-discount-section";
+import { documentAmountsFromForm, formNumber, lineAmount } from "@/lib/finance/document-amounts";
 import { FormNotesSection } from "./form-sections/form-notes-section";
 import { FormTemplateSection } from "./form-sections/form-template-section";
 import { useBusinessPreview } from "../hooks/use-business-preview";
@@ -60,6 +61,8 @@ interface BillingFormModalProps {
   saving?: boolean;
   formError?: string | null;
   contacts: Contact[];
+  /** SWP-QUOTE-COMPOSER-CONTACT: said under the client field when a save has no client. */
+  contactError?: string | null;
   products: Product[];
   currency?: string;
   contactId: string;
@@ -138,6 +141,7 @@ export const BillingFormModal = React.memo(function BillingFormModal({
   currency = "TTD",
   contactId,
   onContactChange,
+  contactError = null,
   dateValue,
   onDateChange,
   items,
@@ -186,6 +190,10 @@ export const BillingFormModal = React.memo(function BillingFormModal({
       setTemplateRefusal(null);
       return;
     }
+    // MOUNT-QUOTES (journey D2): the Notes section opens with the sheet when
+    // the notes matter, editing an existing document or one that already has
+    // notes (a duplicate); a new, empty document keeps it collapsed.
+    if (isEditing || notes.trim()) setSections((s) => (s.notes ? s : { ...s, notes: true }));
     fetchDocumentTemplates(businessId ?? undefined).then((res) => {
       if (res.data) {
         const type = docType === "invoice" ? "invoice" : "quote";
@@ -197,6 +205,7 @@ export const BillingFormModal = React.memo(function BillingFormModal({
         setPreviewTemplate(defaultId as TemplateId);
       }
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- isEditing and notes are read once, when the sheet opens
   }, [open, docType, businessId]);
 
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
@@ -215,19 +224,9 @@ export const BillingFormModal = React.memo(function BillingFormModal({
   }, [isDirty, isEditing, onClose]);
 
   const totals = useMemo(() => {
-    const subtotal = items.reduce((sum, item) => {
-      const qty = parseFloat(item.quantity) || 0;
-      const price = parseFloat(item.unitPrice) || 0;
-      return sum + qty * price;
-    }, 0);
-    const tax = taxRate ? subtotal * (parseFloat(taxRate) / 100) : 0;
-    let discount = 0;
-    if (discountValue) {
-      const dv = parseFloat(discountValue);
-      discount = discountType === "PERCENT" ? subtotal * (dv / 100) : dv;
-    }
-    const total = subtotal + tax - discount;
-    return { subtotal, tax, discount, total };
+    // SWP-INV-MATH: the server's amounts, in cents (D-164 order), for the quote and composer builder too.
+    const a = documentAmountsFromForm({ items, taxRate, discountType, discountValue });
+    return { subtotal: a.subtotal, tax: a.taxAmount, discount: a.discountAmount, total: a.total };
   }, [items, taxRate, discountType, discountValue]);
 
   const activeProducts = useMemo(
@@ -288,7 +287,7 @@ export const BillingFormModal = React.memo(function BillingFormModal({
           description: i.description,
           quantity: parseFloat(i.quantity) || 0,
           unitPrice: parseFloat(i.unitPrice) || 0,
-          total: (parseFloat(i.quantity) || 0) * (parseFloat(i.unitPrice) || 0),
+          total: lineAmount(formNumber(i.quantity), formNumber(i.unitPrice)),
         })),
       subtotal,
       taxRate: parseFloat(taxRate) || 0,
@@ -337,8 +336,9 @@ export const BillingFormModal = React.memo(function BillingFormModal({
           </div>
         }
         footer={
-          <div className="space-y-3">
-            <div className="flex items-center justify-between text-sm">
+          // The footer fills the sheet and its buttons wrap, so on a phone Create / Update stays on screen (journey D1, D2).
+          <div className="w-full min-w-0 space-y-3">
+            <div className="flex items-center justify-between gap-3 text-sm">
               <div className="space-y-1 text-muted-foreground">
                 <div className="flex justify-between gap-8">
                   <span>Subtotal</span>
@@ -364,7 +364,7 @@ export const BillingFormModal = React.memo(function BillingFormModal({
                 </p>
               </div>
             </div>
-            <div className="flex items-center justify-end gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={handleClose}
@@ -431,6 +431,7 @@ export const BillingFormModal = React.memo(function BillingFormModal({
                   contactId={contactId}
                   onContactChange={onContactChange}
                   contacts={contacts}
+                  contactError={contactError}
                   dateValue={dateValue}
                   onDateChange={onDateChange}
                   dateLabel={theme.dateLabel}

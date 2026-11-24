@@ -50,10 +50,10 @@ function jsonResponse(status: number, body: unknown, statusText = "OK"): Respons
   } as unknown as Response;
 }
 
-/** Same formatter as the page, so the expectations do not depend on the runtime's ICU data. */
+/** Same formatter as the page, so the expectations do not depend on the runtime's ICU data (SWP-INV-PUBLIC-LINK: the code, not "$"). */
 function money(amount: number, currency = "TTD") {
   try {
-    return new Intl.NumberFormat("en-TT", { style: "currency", currency }).format(amount);
+    return new Intl.NumberFormat("en-TT", { style: "currency", currency, currencyDisplay: "code" }).format(amount).replace(/\u00a0/g, " ");
   } catch {
     return `${currency} ${amount.toFixed(2)}`;
   }

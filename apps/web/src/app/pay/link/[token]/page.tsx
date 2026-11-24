@@ -46,6 +46,7 @@ import {
   createPayLinkCheckout,
   getPayLinkGateways,
   getPayLinkStatus,
+  getPublicInvoiceByToken,
   type PayLinkCheckoutBody,
   type PayLinkStatus,
 } from "@/lib/client";
@@ -278,6 +279,9 @@ function TokenPaymentPageInner() {
   const paypalCaptured = useRef(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // SWP-INV-PUBLIC-LINK (BUG-087, journey E13): the pay read answers 404 for a VOID invoice (Release 0 TG-07 keeps
+  // that); the token view says whether the link's invoice was voided, so the page can say so.
+  const [voided, setVoided] = useState(false);
   const [paying, setPaying] = useState(false);
   const [paid, setPaid] = useState(false);
   const [gateways, setGateways] = useState<Gateway[]>([]);
@@ -396,7 +400,12 @@ function TokenPaymentPageInner() {
       if (invoiceRes.error || !invoiceRes.data) {
         setInvoice(null);
         setError(LINK_UNAVAILABLE);
-        if (linkGone(invoiceRes)) setTokenGone(true);
+        if (linkGone(invoiceRes)) {
+          setTokenGone(true);
+          // Only a live link of a VOID invoice answers 'voided'; any other answer keeps the link error.
+          const viewRes = await getPublicInvoiceByToken(token);
+          if (viewRes.data && !viewRes.data.ok && viewRes.data.reason === "voided") setVoided(true);
+        }
         setLoading(false);
         return;
       }
@@ -733,6 +742,17 @@ function TokenPaymentPageInner() {
   // link-error state and never a stale unpaid view.
   if (providerOutcome && tokenGone && !(paid && invoice)) {
     return <PaymentClosedState kind={providerOutcome} />;
+  }
+
+  if (voided && !invoice && !providerOutcome) {
+    return (
+      <PublicPageState
+        variant="error"
+        title="This invoice has been voided"
+        message="The business cancelled this invoice, so there is nothing to pay. Please contact them if you have questions."
+        primaryColor={primaryColor}
+      />
+    );
   }
 
   if (error && !invoice) {

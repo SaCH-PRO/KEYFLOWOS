@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
@@ -27,6 +27,7 @@ import {
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { formatAmount } from "../../../utils/commerce-utils";
+import { documentAmountsFromForm, formNumber, lineAmount } from "@/lib/finance/document-amounts";
 import { InvoiceLineItem, generateItemId } from "../../../components/commerce-types";
 import { useLineItemHandlers } from "../../../hooks/use-line-item-handlers";
 
@@ -42,6 +43,10 @@ export default function EditInvoicePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  // SWP-INV-FORM-UX (BUG-092): a missing or another business's invoice says so; there is nothing to edit.
+  const [notFound, setNotFound] = useState<string | null>(null);
+  // Any other failed load (a 500, a refusal, the network) is not "not found": it can be retried.
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [contactId, setContactId] = useState("");
   const [dueDate, setDueDate] = useState("");
@@ -54,8 +59,10 @@ export default function EditInvoicePage() {
   const mountedRef = useRef(true);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
-  useEffect(() => {
-    const init = async () => {
+  const load = useCallback(async () => {
+      setLoading(true);
+      setNotFound(null);
+      setLoadError(null);
       const fresh = await refreshWorkspace();
       const id = fresh ?? getStoredBusinessId();
       if (!id) { setLoading(false); return; }
@@ -65,7 +72,10 @@ export default function EditInvoicePage() {
         if (!mountedRef.current) return;
         setContacts(contactsRes.data?.contacts ?? []);
         setProducts((productsRes.data ?? []).map(p => p as Product));
-        if (invoiceRes.data) {
+        if (!invoiceRes.data) {
+          if ((invoiceRes as { status?: number }).status === 404) setNotFound(invoiceRes.error ?? "This invoice may have been deleted.");
+          else setLoadError(invoiceRes.error ?? "Please check your connection and try again.");
+        } else {
           const inv = invoiceRes.data;
           setBusinessCurrency(inv.currency || "TTD");
           setContactId(inv.contactId || "");
@@ -78,19 +88,15 @@ export default function EditInvoicePage() {
         }
       } catch { toast.error("Failed to load"); }
       finally { if (mountedRef.current) setLoading(false); }
-    };
-    void init();
   }, [invoiceId]);
+
+  useEffect(() => { void load(); }, [load]);
 
   const { addItem, removeItem, updateItem, selectProduct } = useLineItemHandlers((updater) => setItems(prev => updater(prev)), products);
 
   const computed = useMemo(() => {
-    const subtotal = items.reduce((sum, item) => { const qty = parseFloat(item.quantity) || 0; const price = parseFloat(item.unitPrice) || 0; return sum + qty * price; }, 0);
-    const discVal = parseFloat(discountValue) || 0;
-    const discountAmount = discountType === "PERCENT" ? subtotal * (discVal / 100) : discVal;
-    const afterDiscount = Math.max(0, subtotal - discountAmount);
-    const tax = parseFloat(taxRate) || 0;
-    return { subtotal, discountAmount, taxAmount: afterDiscount * (tax / 100), total: afterDiscount + afterDiscount * (tax / 100) };
+    // SWP-INV-MATH: the server's amounts, in cents, tax on the subtotal before the discount (D-164).
+    return documentAmountsFromForm({ items, taxRate, discountType, discountValue });
   }, [items, taxRate, discountType, discountValue]);
 
   const selectedContact = contacts.find(c => c.id === contactId);
@@ -100,6 +106,8 @@ export default function EditInvoicePage() {
     setFormError(null);
     const validItems = items.filter(item => { const hasName = item.isNewItem ? (item.newItemName?.trim() || item.description.trim()) : item.description.trim(); return hasName && item.unitPrice; });
     if (validItems.length === 0) { setFormError("At least one item required"); return; }
+    // SWP-INV-FORM-UX (BUG-090): an invoice is to someone; say so in plain words and send nothing.
+    if (!contactId) { setFormError("Choose a client for this invoice."); return; }
 
     const toCatalog = validItems.filter(item => item.isNewItem && item.addToCatalog);
     for (const item of toCatalog) {
@@ -113,7 +121,9 @@ export default function EditInvoicePage() {
       const { data, error } = await updateInvoice({
         businessId, invoiceId, contactId: contactId || undefined,
         items: validItems.map(item => ({ description: item.isNewItem ? (item.newItemName || item.description) : item.description, quantity: parseInt(item.quantity) || 1, unitPrice: parseFloat(item.unitPrice) })),
-        dueDate: dueDate || null, taxRate: taxRate ? parseFloat(taxRate) : undefined,
+        dueDate: dueDate || null,
+        // BUG-019: a cleared rate is sent as 0, so the server removes the tax (undefined kept the old rate).
+        taxRate: formNumber(taxRate),
         discountType: discountValue ? discountType : null, discountValue: discountValue ? parseFloat(discountValue) : null,
         notes: notes || null,
       });
@@ -124,6 +134,27 @@ export default function EditInvoicePage() {
   }
 
   if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>;
+
+  if (notFound) return (
+    <div className="max-w-4xl mx-auto py-20 text-center">
+      <FileText className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
+      <h2 className="text-lg font-semibold mb-2">Invoice not found</h2>
+      <p className="text-sm text-muted-foreground mb-4">{notFound}</p>
+      <button onClick={() => router.push("/app/commerce/invoices")} className="px-4 py-2 text-sm font-medium rounded-lg bg-muted hover:bg-muted/80 transition-colors">Back to invoices</button>
+    </div>
+  );
+
+  if (loadError) return (
+    <div className="max-w-4xl mx-auto py-20 text-center">
+      <FileText className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
+      <h2 className="text-lg font-semibold mb-2">Couldn&apos;t load this invoice</h2>
+      <p className="text-sm text-muted-foreground mb-4">{loadError}</p>
+      <div className="flex items-center justify-center gap-2">
+        <button onClick={() => void load()} className="px-4 py-2 text-sm font-medium rounded-lg bg-[hsl(var(--kf-accent1))] text-white hover:opacity-90 transition-opacity">Try again</button>
+        <button onClick={() => router.push("/app/commerce/invoices")} className="px-4 py-2 text-sm font-medium rounded-lg bg-muted hover:bg-muted/80 transition-colors">Back to invoices</button>
+      </div>
+    </div>
+  );
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="max-w-6xl mx-auto pb-12">
@@ -146,7 +177,7 @@ export default function EditInvoicePage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5"><User className="w-3.5 h-3.5" />Bill to</label>
-                <select value={contactId} onChange={e => setContactId(e.target.value)} className="w-full h-11 px-3 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/20">
+                <select value={contactId} onChange={e => setContactId(e.target.value)} aria-invalid={formError === "Choose a client for this invoice." || undefined} className="w-full h-11 px-3 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/20">
                   <option value="">Select a client...</option>
                   {contacts.map(c => <option key={c.id} value={c.id}>{`${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || c.email}</option>)}
                 </select>
@@ -172,25 +203,24 @@ export default function EditInvoicePage() {
             </div>
             <div className="p-5 space-y-3">
               {items.map((item) => {
-                const qty = parseFloat(item.quantity) || 0;
-                const price = parseFloat(item.unitPrice) || 0;
-                const total = qty * price;
+                const total = lineAmount(formNumber(item.quantity), formNumber(item.unitPrice));
                 return (
-                  <div key={item.id} className="grid grid-cols-1 sm:grid-cols-[1fr_80px_120px_100px_40px] gap-3 items-start p-3 rounded-lg bg-muted/20 border border-border/60">
-                    <div className="space-y-1">
-                      <div className="flex gap-2">
-                        <select value={item.productId ?? ""} onChange={e => selectProduct(item.id, e.target.value)} className="shrink-0 h-10 px-2 text-xs bg-background border border-border rounded-md focus:outline-none">
+                  <div key={item.id} className="grid grid-cols-1 sm:grid-cols-[72px_112px_minmax(0,1fr)_40px] gap-x-3 gap-y-2 items-end p-3 rounded-lg bg-muted/20 border border-border/60">
+                    <div className="space-y-1 min-w-0 sm:col-span-4">
+                      <label className="text-[10px] text-muted-foreground uppercase">Description</label>
+                      <div className="flex gap-2 min-w-0">
+                        <select value={item.productId ?? ""} onChange={e => selectProduct(item.id, e.target.value)} className="shrink-0 w-24 h-10 px-2 text-xs bg-background border border-border rounded-md focus:outline-none">
                           <option value="">Product...</option>
                           {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                           <option value="__NEW__">+ New</option>
                         </select>
-                        <input type="text" value={item.description} onChange={e => updateItem(item.id, "description", e.target.value)} placeholder="Description" className="flex-1 h-10 px-3 text-sm bg-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/20" />
+                        <input type="text" value={item.description} onChange={e => updateItem(item.id, "description", e.target.value)} placeholder="Description" className="flex-1 min-w-0 h-10 px-3 text-sm bg-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/20" />
                       </div>
                     </div>
-                    <div><input type="number" min="1" value={item.quantity} onChange={e => updateItem(item.id, "quantity", e.target.value)} className="w-full h-10 px-2 text-sm text-center bg-background border border-border rounded-md focus:outline-none" /></div>
-                    <div><input type="number" step="0.01" value={item.unitPrice} onChange={e => updateItem(item.id, "unitPrice", e.target.value)} className="w-full h-10 px-2 text-sm text-right bg-background border border-border rounded-md focus:outline-none" /></div>
-                    <div className="h-10 flex items-center justify-end text-sm font-semibold">{formatAmount(total, businessCurrency)}</div>
-                    <div className="flex justify-end"><button onClick={() => removeItem(item.id)} disabled={items.length <= 1} className="p-2 rounded-md hover:bg-red-50 text-muted-foreground hover:text-red-500 transition-colors disabled:opacity-30"><Trash2 className="w-4 h-4" /></button></div>
+                    <div className="space-y-1"><label className="text-[10px] text-muted-foreground uppercase">Qty</label><input type="number" min="1" value={item.quantity} onChange={e => updateItem(item.id, "quantity", e.target.value)} className="w-full h-10 px-2 text-sm text-center bg-background border border-border rounded-md focus:outline-none" /></div>
+                    <div className="space-y-1"><label className="text-[10px] text-muted-foreground uppercase">Unit Price</label><input type="number" step="0.01" value={item.unitPrice} onChange={e => updateItem(item.id, "unitPrice", e.target.value)} className="w-full h-10 px-2 text-sm text-right bg-background border border-border rounded-md focus:outline-none" /></div>
+                    <div className="space-y-1 min-w-0"><label className="block text-right text-[10px] text-muted-foreground uppercase">Total</label><div className="h-10 flex items-center justify-end text-sm font-semibold whitespace-nowrap" data-testid="invoice-line-total">{formatAmount(total, businessCurrency)}</div></div>
+                    <div className="flex justify-end"><button onClick={() => removeItem(item.id)} disabled={items.length <= 1} aria-label="Remove line" className="p-2 rounded-md hover:bg-red-50 text-muted-foreground hover:text-red-500 transition-colors disabled:opacity-30"><Trash2 className="w-4 h-4" /></button></div>
                   </div>
                 );
               })}

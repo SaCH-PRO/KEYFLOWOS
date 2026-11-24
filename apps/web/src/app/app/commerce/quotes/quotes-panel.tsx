@@ -45,6 +45,7 @@ import {
   convertQuoteToInvoice,
   bulkUpdateQuotes,
   createQuotePublicLink,
+  sendQuoteEmail,
   Product,
   Quote,
   Contact,
@@ -82,6 +83,7 @@ import { newPaymentAttemptKey } from "../../finance/components/payment-record-mo
 import { ArrowRightLeft, Eye } from "lucide-react";
 import { ownBusinessCountry, readWhatsAppShareNumber } from "@/lib/whatsapp";
 import { useWhatsAppDocumentShare } from "@/components/whatsapp/whatsapp-document-share";
+import type { ComposeSendDraft } from "@/components/email/compose-modal";
 
 type QuoteBulkAction = "send" | "reject" | "delete";
 /** One row the bulk route left as it is (V1-50 / V1-QUOTE-CHAIN-finish bulk contract). */
@@ -260,6 +262,10 @@ export default function QuotesPanel({
   }, [initialStatusFilter]);
   const [sortKey, setSortKey] = useState<BillingSortKey>("date-desc");
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
+  // MOUNT-QUOTES (SWP-PIPELINE-DRAWER-TRUTH): the detail reads the quote from
+  // the list, so an accept, an extension, a refresh of the list or a bulk
+  // change is what it shows, never the snapshot it opened with.
+  const selected = selectedQuote ? (quotes.find((q) => q.id === selectedQuote.id) ?? selectedQuote) : null;
   const [pendingDriveUpload, setPendingDriveUpload] = useState<{
     quoteId: string;
     templateId: string;
@@ -475,8 +481,13 @@ export default function QuotesPanel({
     quoteSearch,
   );
 
+  // SWP-QUOTE-COMPOSER-CONTACT (BUG-095): the client field's error after a save with no client; cleared on a choice.
+  const [quoteContactError, setQuoteContactError] = useState<string | null>(null);
+
   async function handleSaveQuote() {
-    if (!businessId || !quoteForm.contactId) return;
+    if (!businessId) return;
+    // SWP-QUOTE-COMPOSER-CONTACT (BUG-095): a quote is to someone; say so at the client field and send nothing.
+    if (!quoteForm.contactId) { setQuoteContactError("Choose a client for this quote."); return; }
 
     for (const item of quoteForm.items) {
       if (item.isNewItem && item.addToCatalog && item.newItemName) {
@@ -646,6 +657,10 @@ export default function QuotesPanel({
   }
 
   function duplicateQuote(quote: Quote) {
+    // The copy is the builder's; the detail of the original closes (MOUNT-QUOTES).
+    setSelectedQuote(null);
+    setShowConvertModal(false);
+    setShowAcceptPrompt(false);
     setEditingQuoteId(null);
     setQuoteForm({
       contactId: quote.contactId || "",
@@ -734,27 +749,82 @@ export default function QuotesPanel({
     });
   }
 
+  // MOUNT-QUOTES (SWP-QUOTE-LINK-SEND, BUG-101): a quote email goes through the
+  // server's quote send route (POST quotes/:id/send-email), which carries the
+  // customer's /quote/<token> link, reserves the token on a DRAFT and moves it
+  // to SENT only after Gmail took the message (R0-CMF4-SEND-EMAIL-ORDER). The
+  // composer shows the Send Quote template with the business name and, for a
+  // quote already sent, the link itself; the member's text goes as the
+  // message. The composer used to send a raw Gmail message with no link and
+  // never moved the quote, and "Send Quote" flipped a draft to SENT with no
+  // message at all.
+  async function openSendQuoteEmail(quote: Quote) {
+    const contactName = quote.contact
+      ? `${quote.contact.firstName ?? ""} ${quote.contact.lastName ?? ""}`.trim() || undefined
+      : undefined;
+    // A sent quote has its link already (the same route Copy link uses); a
+    // draft's is minted by the send itself.
+    let link: string | null = null;
+    if (quote.status !== "DRAFT" && !quote.invoiceId) {
+      const fetched = await fetchQuoteLink(quote);
+      link = fetched.url;
+      // A refusal other than access (an expired quote, 400) is said now; the
+      // send itself would be refused later. Access (403) is not: the server's
+      // send adds the link, and the member needs no copy of it.
+      if (!link && fetched.error && !fetched.forbidden) toast.error(fetched.error);
+    }
+    setSelectedQuote(quote);
+    openComposer({
+      to: quote.contact?.email || "",
+      context: {
+        type: "quote",
+        recordNumber: quote.quoteNumber || quote.id,
+        amount: Number(quote.total).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        currency: quote.currency ?? currency,
+        contactName,
+        businessName: businessData?.name,
+        ...(link ? { link } : {}),
+      },
+      send: async ({ to, text }: ComposeSendDraft) => {
+        if (!businessId) return { error: "No business selected" };
+        const res = await sendQuoteEmail({ businessId, quoteId: quote.id, recipientEmail: to, message: text || undefined });
+        if (res.error || !res.data) return { error: res.error ?? "Failed to send the quote" };
+        const sent = (res.data as { quote?: Quote }).quote;
+        if (sent) {
+          setQuotes((q) => q.map((qItem) => (qItem.id === quote.id ? { ...qItem, ...sent } : qItem)));
+        } else if (quote.status === "DRAFT") {
+          setQuotes((q) => q.map((qItem) => (qItem.id === quote.id ? { ...qItem, status: "SENT" } : qItem)));
+        }
+        return {};
+      },
+      onSent: () => {
+        toast.success(`Quote sent to ${quote.contact?.email}`);
+      },
+    });
+  }
+
   async function handleConvert() {
-    if (!businessId || !selectedQuote) return;
+    if (!businessId || !selected) return;
+    const converting = selected;
     // V1-51: tax and discount are sent explicitly (a cleared discount as 0);
     // the server carries the quote's own values only when the body names none.
     const res = await convertQuoteToInvoice({
       businessId,
-      quoteId: selectedQuote.id,
+      quoteId: converting.id,
       ...quoteConvertRequest(convertForm),
     });
     if (res.data) {
       setInvoices((inv) => [res.data!, ...inv]);
       setQuotes((q) =>
-        q.map((qItem) => (qItem.id === selectedQuote.id ? { ...qItem, invoiceId: res.data!.id } : qItem))
+        q.map((qItem) => (qItem.id === converting.id ? { ...qItem, invoiceId: res.data!.id } : qItem))
       );
       setShowConvertModal(false);
       setSelectedQuote(null);
       setConvertForm({ taxRate: "", discountType: "PERCENT", discountValue: "", notes: "", dueDate: "" });
       onSwitchToInvoices?.();
       toast.success("Quote converted to invoice");
-      emitEvent("commerce:quote_converted", "commerce", { quoteId: selectedQuote.id, invoiceId: res.data.id });
-      emitEvent("commerce:invoice_created", "commerce", { invoiceId: res.data.id, fromQuote: selectedQuote.id });
+      emitEvent("commerce:quote_converted", "commerce", { quoteId: converting.id, invoiceId: res.data.id });
+      emitEvent("commerce:invoice_created", "commerce", { invoiceId: res.data.id, fromQuote: converting.id });
     } else if (res.error) {
       toast.error("Failed to convert quote");
     }
@@ -772,7 +842,7 @@ export default function QuotesPanel({
     >
       <BillingFormModal
         open={showQuoteBuilder}
-        onClose={() => { setShowQuoteBuilder(false); resetQuoteForm(); }}
+        onClose={() => { setShowQuoteBuilder(false); resetQuoteForm(); setQuoteContactError(null); }}
         onSubmit={handleSaveQuote}
         docType="quote"
         isEditing={!!editingQuoteId}
@@ -780,7 +850,8 @@ export default function QuotesPanel({
         products={products}
         currency={currency}
         contactId={quoteForm.contactId}
-        onContactChange={(id) => setQuoteForm((f) => ({ ...f, contactId: id }))}
+        onContactChange={(id) => { setQuoteContactError(null); setQuoteForm((f) => ({ ...f, contactId: id })); }}
+        contactError={quoteContactError}
         dateValue={quoteForm.expiryDate}
         onDateChange={(v) => setQuoteForm((f) => ({ ...f, expiryDate: v }))}
         items={quoteForm.items}
@@ -860,11 +931,11 @@ export default function QuotesPanel({
                 ? "bg-green-500/20 text-green-400 border-green-500/30"
                 : "bg-white/[0.02] text-muted-foreground/60 border-border/40 hover:bg-white/[0.05]"
             }`}
-            title="When enabled, accepting a quote will automatically open the invoice conversion dialog"
-            aria-label="Toggle auto-convert"
+            title="When enabled, accepting a quote opens the invoice form at once"
+            aria-label="Toggle: open the invoice form when a quote is accepted"
           >
             {autoConvertToInvoice ? <ToggleRight className="w-3.5 h-3.5" /> : <ToggleLeft className="w-3.5 h-3.5" />}
-            <span className="hidden sm:inline">Auto-convert</span>
+            <span className="hidden sm:inline">Invoice on accept</span>
           </button>
         </div>
 
@@ -973,7 +1044,7 @@ export default function QuotesPanel({
           </p>
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-2" role="list" aria-label="Quotes">
           {filteredQuotes.length > 0 && (
             <div className="flex items-center gap-1 px-2 pb-1">
               <label className="min-w-[44px] min-h-[44px] flex items-center justify-center cursor-pointer">
@@ -1004,19 +1075,8 @@ export default function QuotesPanel({
             const handleSmartAction = () => {
               switch (smartCTA.actionKey) {
                 case "send":
-                  handleMarkSent(quote);
-                  break;
                 case "follow_up":
-                  setSelectedQuote(quote);
-                  openComposer({
-                    to: quote.contact?.email || "",
-                    subject: `Quote ${quote.quoteNumber || quote.id}`,
-                    context: { type: "quote", recordNumber: quote.quoteNumber || quote.id },
-                    onSent: () => {
-                      setQuotes((q) => q.map((qItem) => (qItem.id === quote.id ? { ...qItem, status: "SENT" } : qItem)));
-                      toast.success(`Quote sent to ${quote.contact?.email}`);
-                    },
-                  });
+                  void openSendQuoteEmail(quote);
                   break;
                 case "convert":
                   setSelectedQuote(quote);
@@ -1076,7 +1136,11 @@ export default function QuotesPanel({
             );
 
             return (
-              <div key={quote.id} className="flex items-start gap-1">
+              // The row is a list item that holds its own checkbox (journey D9 ticks the row it found by its number).
+              <div key={quote.id} role="listitem" aria-label={`Quote ${quote.quoteNumber}`} className="group flex items-start gap-1">
+                {/* The row names its number ahead of the card, so a reader (or journey D's rowOf) reaching the
+                    number lands on the row, which holds the checkbox, not on the card inside it. */}
+                <span className="sr-only">{quote.quoteNumber}</span>
                 <label className="min-w-[44px] min-h-[44px] flex items-center justify-center shrink-0 cursor-pointer">
                   <input
                     type="checkbox"
@@ -1098,13 +1162,15 @@ export default function QuotesPanel({
                 date={quote.issueDate}
                 dueDate={quote.expiryDate}
                 badges={cardBadges}
-                selected={selectedQuote?.id === quote.id}
+                selected={selected?.id === quote.id}
                 onClick={() => setSelectedQuote(quote)}
                 linkedService={(quote.items ?? []).find((item) => item.description)?.description?.slice(0, 30) || null}
                 onViewContact={onViewContact && quote.contactId ? () => onViewContact(quote.contactId!) : undefined}
                 smartCTA={
                   <button
                     onClick={handleSmartAction}
+                    // The label is hidden under sm:, so the button carries its name (journey D finds "Convert" on a phone).
+                    aria-label={smartCTA.label}
                     disabled={!!actionLoading[quote.id] || (smartCTA.actionKey === "convert" && !!quote.invoiceId)}
                     className={`inline-flex items-center gap-1 px-2.5 min-w-[44px] min-h-[44px] justify-center rounded-lg text-[11px] font-medium transition-all disabled:opacity-50 ${smartCTA.bgColor} ${smartCTA.color} ${smartCTA.hoverBgColor}`}
                   >
@@ -1133,18 +1199,7 @@ export default function QuotesPanel({
                       <OverflowMenuItem
                         icon={Mail}
                         label="Send via email"
-                        onClick={() => {
-                          setSelectedQuote(quote);
-                          openComposer({
-                            to: quote.contact?.email || "",
-                            subject: `Quote ${quote.quoteNumber || quote.id}`,
-                            context: { type: "quote", recordNumber: quote.quoteNumber || quote.id },
-                            onSent: () => {
-                              setQuotes((q) => q.map((qItem) => (qItem.id === quote.id ? { ...qItem, status: "SENT" } : qItem)));
-                              toast.success(`Quote sent to ${quote.contact?.email}`);
-                            },
-                          });
-                        }}
+                        onClick={() => { void openSendQuoteEmail(quote); }}
                       />
                     )}
                     {quote.status === "DRAFT" && (
@@ -1190,16 +1245,19 @@ export default function QuotesPanel({
       />
 
       <AnimatePresence>
-        {showConvertModal && selectedQuote && (
+        {showConvertModal && selected && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
             <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="quote-convert-title"
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               className="bg-card rounded-2xl border border-border shadow-2xl p-6 max-w-md w-full space-y-4"
             >
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold">Convert Quote to Invoice</h3>
+                <h3 id="quote-convert-title" className="text-lg font-semibold">Convert Quote to Invoice</h3>
                 <button
                   onClick={() => {
                     setShowConvertModal(false);
@@ -1211,8 +1269,8 @@ export default function QuotesPanel({
                 </button>
               </div>
               <p className="text-sm text-muted-foreground">
-                Converting <span className="font-mono">{selectedQuote.quoteNumber}</span> for{" "}
-                {formatAmount(selectedQuote.total, selectedQuote.currency)}
+                Converting <span className="font-mono">{selected.quoteNumber}</span> for{" "}
+                {formatAmount(selected.total, selected.currency)}
               </p>
 
               <div className="grid grid-cols-2 gap-4">
@@ -1286,16 +1344,19 @@ export default function QuotesPanel({
           </div>
         )}
 
-        {showAcceptPrompt && selectedQuote && (
+        {showAcceptPrompt && selected && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
             <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="quote-accepted-title"
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               className="bg-card rounded-2xl border border-border shadow-2xl p-6 max-w-md w-full space-y-4"
             >
               <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold">Quote Accepted!</h3>
+                <h3 id="quote-accepted-title" className="text-lg font-semibold">Quote Accepted!</h3>
                 <button
                   onClick={() => {
                     setShowAcceptPrompt(false);
@@ -1311,7 +1372,7 @@ export default function QuotesPanel({
                   <CheckCircle className="w-8 h-8 text-green-500" />
                 </div>
                 <p className="text-muted-foreground mb-4">
-                  Quote <span className="font-mono text-foreground">{selectedQuote.quoteNumber}</span> has been marked
+                  Quote <span className="font-mono text-foreground">{selected.quoteNumber}</span> has been marked
                   as accepted.
                 </p>
                 <p className="text-sm text-muted-foreground">
@@ -1321,7 +1382,7 @@ export default function QuotesPanel({
               <div className="flex flex-col gap-2">
                 <Button
                   onClick={() => {
-                    setConvertForm(quoteConvertDefaults(selectedQuote));
+                    setConvertForm(quoteConvertDefaults(selected));
                     setShowAcceptPrompt(false);
                     setShowConvertModal(true);
                   }}
@@ -1344,37 +1405,37 @@ export default function QuotesPanel({
           </div>
         )}
 
-        {selectedQuote && !showConvertModal && !showAcceptPrompt && (
+        {selected && !showConvertModal && !showAcceptPrompt && (
           <BillingDetailModal
             type="quote"
-            number={selectedQuote.quoteNumber}
-            status={selectedQuote.status}
-            lifecycleStep={selectedQuote.lifecycleStep}
-            contact={selectedQuote.contact ?? null}
-            contactId={selectedQuote.contactId}
+            number={selected.quoteNumber}
+            status={selected.status}
+            lifecycleStep={selected.lifecycleStep}
+            contact={selected.contact ?? null}
+            contactId={selected.contactId}
             businessId={businessId}
-            total={Number(selectedQuote.total)}
-            currency={selectedQuote.currency}
-            items={(selectedQuote.items ?? []) as Array<{ id?: string; description?: string | null; quantity?: number; unitPrice?: number; total?: number; productId?: string | null }>}
+            total={Number(selected.total)}
+            currency={selected.currency}
+            items={(selected.items ?? []) as Array<{ id?: string; description?: string | null; quantity?: number; unitPrice?: number; total?: number; productId?: string | null }>}
             dateLabel1="Issue Date"
-            dateValue1={selectedQuote.issueDate}
-            dateLabel2="Expiry Date"
-            dateValue2={selectedQuote.expiryDate ?? null}
+            dateValue1={selected.issueDate}
+            dateLabel2="Expires"
+            dateValue2={selected.expiryDate ?? null}
             allInvoices={[]}
             dateExtra={
               <>
-                {isQuoteExpired(selectedQuote) && (
+                {isQuoteExpired(selected) && (
                   <p className="text-[10px] text-amber-400 mt-1 font-medium">Expired</p>
                 )}
-                {!isQuoteExpired(selectedQuote) && getDaysRemaining(selectedQuote) && (
-                  <p className={`text-[10px] mt-1 font-medium ${getDaysRemaining(selectedQuote)!.color}`}>{getDaysRemaining(selectedQuote)!.label}</p>
+                {!isQuoteExpired(selected) && getDaysRemaining(selected) && (
+                  <p className={`text-[10px] mt-1 font-medium ${getDaysRemaining(selected)!.color}`}>{getDaysRemaining(selected)!.label}</p>
                 )}
               </>
             }
-            taxRate={selectedQuote.taxRate ?? 0}
-            discountType={selectedQuote.discountType}
-            discountValue={selectedQuote.discountValue ?? undefined}
-            notes={selectedQuote.notes}
+            taxRate={selected.taxRate ?? 0}
+            discountType={selected.discountType}
+            discountValue={selected.discountValue ?? undefined}
+            notes={selected.notes}
             businessData={businessData}
             onSaveBranding={saveBranding}
             savingBranding={savingBranding}
@@ -1382,7 +1443,7 @@ export default function QuotesPanel({
             onViewClientIntel={onViewClientIntel}
             onSelectProduct={onSelectProduct}
             alerts={
-              isQuoteExpired(selectedQuote) && (selectedQuote.status === "DRAFT" || selectedQuote.status === "SENT") ? (
+              isQuoteExpired(selected) && (selected.status === "DRAFT" || selected.status === "SENT") ? (
                 <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-2">
                   <p className="text-sm text-amber-200">This quote has expired. Extend the expiry to re-activate it.</p>
                   <div className="flex items-center gap-2">
@@ -1394,7 +1455,7 @@ export default function QuotesPanel({
                       min={new Date().toISOString().split("T")[0]}
                     />
                     <Button
-                      onClick={() => handleExtendExpiry(selectedQuote, extendDate)}
+                      onClick={() => handleExtendExpiry(selected, extendDate)}
                       disabled={!extendDate}
                       className="gap-1.5 text-sm"
                     >
@@ -1408,54 +1469,49 @@ export default function QuotesPanel({
               <>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-0.5">
-                    <button onClick={() => duplicateQuote(selectedQuote)} className="p-2 rounded-lg hover:bg-white/[0.06] transition-colors" title="Duplicate quote">
+                    <button onClick={() => duplicateQuote(selected)} className="p-2 rounded-lg hover:bg-white/[0.06] transition-colors" title="Duplicate quote">
                       <Files className="w-4 h-4 text-slate-400" />
                     </button>
                     <div className="w-px h-4 bg-border/30 mx-0.5" />
-                    <button onClick={() => shareQuoteViaWhatsApp(selectedQuote)} className="p-2 rounded-lg hover:bg-emerald-500/10 transition-colors" title="Share via WhatsApp">
+                    <button onClick={() => shareQuoteViaWhatsApp(selected)} className="p-2 rounded-lg hover:bg-emerald-500/10 transition-colors" title="Share via WhatsApp">
                       <MessageCircle className="w-4 h-4 text-emerald-400" />
                     </button>
-                    {selectedQuote.status !== "DRAFT" && !selectedQuote.invoiceId && (
-                      <button onClick={() => copyQuoteLink(selectedQuote)} className="p-2 rounded-lg hover:bg-white/[0.06] transition-colors" title="Copy link">
+                    {selected.status !== "DRAFT" && !selected.invoiceId && (
+                      <button onClick={() => copyQuoteLink(selected)} className="p-2 rounded-lg hover:bg-white/[0.06] transition-colors" title="Copy link">
                         <Link2 className="w-4 h-4 text-slate-400" />
                       </button>
                     )}
-                    <button
-                      onClick={() => openComposer({
-                        to: selectedQuote.contact?.email || "",
-                        subject: `Quote ${selectedQuote.quoteNumber || selectedQuote.id}`,
-                        context: { type: "quote", recordNumber: selectedQuote.quoteNumber || selectedQuote.id },
-                        onSent: () => {
-                          setQuotes((q) => q.map((qItem) => (qItem.id === selectedQuote.id ? { ...qItem, status: "SENT" } : qItem)));
-                          toast.success(`Quote sent to ${selectedQuote.contact?.email}`);
-                        },
-                      })}
-                      className="p-2 rounded-lg hover:bg-blue-500/10 transition-colors"
-                      title="Send via email"
-                    >
-                      <Mail className="w-4 h-4 text-blue-400" />
-                    </button>
+                    {/* As the row menu: a draft or sent quote only (review SEC-MQ-3: an accepted quote's accept link is not re-emailed from here). */}
+                    {(selected.status === "DRAFT" || selected.status === "SENT") && !selected.invoiceId && (
+                      <button
+                        onClick={() => { void openSendQuoteEmail(selected); }}
+                        className="p-2 rounded-lg hover:bg-blue-500/10 transition-colors"
+                        title="Send via email"
+                      >
+                        <Mail className="w-4 h-4 text-blue-400" />
+                      </button>
+                    )}
                   </div>
                 </div>
-                {selectedQuote.status === "DRAFT" && (
-                  <Button size="sm" className="gap-1.5 w-full" onClick={() => { handleMarkSent(selectedQuote); setSelectedQuote(null); }} disabled={!!actionLoading[selectedQuote.id]}>
-                    {actionLoading[selectedQuote.id] === "send" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Send Quote
+                {selected.status === "DRAFT" && (
+                  <Button size="sm" className="gap-1.5 w-full" onClick={() => { void openSendQuoteEmail(selected); }} disabled={!!actionLoading[selected.id]}>
+                    {actionLoading[selected.id] === "send" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Send Quote
                   </Button>
                 )}
-                {selectedQuote.status === "SENT" && !isQuoteExpired(selectedQuote) && (
-                  <Button size="sm" className="gap-1.5 w-full bg-emerald-600 hover:bg-emerald-700" onClick={() => handleAcceptQuote(selectedQuote)} disabled={!!actionLoading[selectedQuote.id]}>
-                    {actionLoading[selectedQuote.id] === "accept" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Accept Quote
+                {selected.status === "SENT" && !isQuoteExpired(selected) && (
+                  <Button size="sm" className="gap-1.5 w-full bg-emerald-600 hover:bg-emerald-700" onClick={() => handleAcceptQuote(selected)} disabled={!!actionLoading[selected.id]}>
+                    {actionLoading[selected.id] === "accept" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />} Accept Quote
                   </Button>
                 )}
-                {selectedQuote.status === "ACCEPTED" && !selectedQuote.invoiceId && (
+                {selected.status === "ACCEPTED" && !selected.invoiceId && (
                   <Button size="sm" className="gap-1.5 w-full" onClick={() => {
-                    setConvertForm(quoteConvertDefaults(selectedQuote));
+                    setConvertForm(quoteConvertDefaults(selected));
                     setShowConvertModal(true);
                   }}>
                     Convert to Invoice
                   </Button>
                 )}
-                {selectedQuote.invoiceId && (
+                {selected.invoiceId && (
                   <div className="flex items-center gap-2 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
                     <ArrowRightLeft className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                     <span className="text-[11px] text-emerald-300 font-medium">Converted to invoice</span>

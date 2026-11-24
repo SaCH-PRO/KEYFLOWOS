@@ -13,6 +13,7 @@ import { useContactSearch } from "@/hooks/use-contact-search";
 import { createContact } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { moduleEvents } from "@/lib/module-events";
+import { useRefusal, answerFromThrown } from "@/lib/failure-kit";
 import { ContactChip } from "./contact-chip";
 import { ContactAvatar } from "./contact-avatar";
 
@@ -43,6 +44,8 @@ interface ContactSelectProps {
   allowQuickAdd?: boolean;
   disabled?: boolean;
   className?: string;
+  /** SWP-QUOTE-COMPOSER-CONTACT (BUG-095): a field error from the form (e.g. "Choose a client"), said under the field. */
+  error?: string | null;
 }
 
 export function ContactSelect({
@@ -55,6 +58,7 @@ export function ContactSelect({
   allowQuickAdd = true,
   disabled = false,
   className = "",
+  error = null,
 }: ContactSelectProps) {
   const businessId = getStoredBusinessId();
   const { results, search, setSearch, loading } = useContactSearch({
@@ -72,6 +76,11 @@ export function ContactSelect({
     phone: "",
   });
   const [quickAddLoading, setQuickAddLoading] = useState(false);
+  // BUG-097: a refused quick add (a duplicate phone's 409, a missing scope) is said, and the form keeps what was typed.
+  const { refused, message: quickAddError, clear: clearQuickAddError } = useRefusal();
+  // BUG-096: the contact last chosen here, so a quick-added one (in neither the parent's list nor the search
+  // results) still shows as chosen.
+  const [picked, setPicked] = useState<ContactSelectItem | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -80,19 +89,20 @@ export function ContactSelect({
   const selectedContact = useMemo<ContactSelectItem | null>(() => {
     if (!value) return null;
     const all = (externalContacts ?? results) as ContactSelectItem[];
-    return all.find((c) => c.id === value) ?? null;
-  }, [value, externalContacts, results]);
+    return all.find((c) => c.id === value) ?? (picked?.id === value ? picked : null);
+  }, [value, externalContacts, results, picked]);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setOpen(false);
         setShowQuickAdd(false);
+        clearQuickAddError();
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  }, [clearQuickAddError]);
 
   useEffect(() => {
     setActiveIndex(-1);
@@ -100,12 +110,14 @@ export function ContactSelect({
 
   const handleSelect = useCallback(
     (contact: ContactSelectItem) => {
+      setPicked(contact);
       onChange(contact.id, contact);
       setOpen(false);
       setSearch("");
       setShowQuickAdd(false);
+      clearQuickAddError();
     },
-    [onChange, setSearch],
+    [onChange, setSearch, clearQuickAddError],
   );
 
   const handleClear = useCallback(() => {
@@ -119,6 +131,7 @@ export function ContactSelect({
       if (e.key === "Escape") {
         setOpen(false);
         setShowQuickAdd(false);
+        clearQuickAddError();
         return;
       }
       if (!open) {
@@ -141,7 +154,7 @@ export function ContactSelect({
         }
       }
     },
-    [open, results, activeIndex, handleSelect],
+    [open, results, activeIndex, handleSelect, clearQuickAddError],
   );
 
   useEffect(() => {
@@ -154,6 +167,7 @@ export function ContactSelect({
   const handleQuickAdd = async () => {
     if (!quickAddForm.firstName.trim()) return;
     setQuickAddLoading(true);
+    clearQuickAddError();
     try {
       const res = await createContact({
         businessId: businessId ?? undefined,
@@ -162,6 +176,7 @@ export function ContactSelect({
         email: quickAddForm.email.trim() || undefined,
         phone: quickAddForm.phone.trim() || undefined,
       });
+      if (refused(res, { what: "add this customer" })) return;
       if (res.data) {
         handleSelect(res.data as ContactSelectItem);
         setQuickAddForm({ firstName: "", lastName: "", email: "", phone: "" });
@@ -172,8 +187,8 @@ export function ContactSelect({
           email: res.data.email,
         });
       }
-    } catch {
-      /* silent */
+    } catch (err) {
+      refused(answerFromThrown(err), { what: "add this customer" });
     } finally {
       setQuickAddLoading(false);
     }
@@ -233,6 +248,7 @@ export function ContactSelect({
             onKeyDown={handleKeyDown}
             placeholder={placeholder}
             disabled={disabled}
+            aria-invalid={error ? true : undefined}
             className="kf-input w-full pl-9 pr-8 text-sm"
           />
           <button
@@ -244,6 +260,10 @@ export function ContactSelect({
             <ChevronDown className={`w-4 h-4 transition-transform ${open ? "rotate-180" : ""}`} />
           </button>
         </div>
+      )}
+
+      {error && (
+        <p role="alert" className="mt-1 text-xs text-red-500">{error}</p>
       )}
 
       {open && (
@@ -367,6 +387,7 @@ export function ContactSelect({
                   onClick={() => {
                     setShowQuickAdd(false);
                     setQuickAddForm({ firstName: "", lastName: "", email: "", phone: "" });
+                    clearQuickAddError();
                   }}
                   className="flex-1 text-xs py-1.5 rounded-lg border border-border hover:bg-muted transition-colors"
                 >
@@ -386,6 +407,9 @@ export function ContactSelect({
                   )}
                 </button>
               </div>
+              {quickAddError && (
+                <p role="alert" className="text-xs text-red-500">{quickAddError}</p>
+              )}
             </div>
           )}
         </div>

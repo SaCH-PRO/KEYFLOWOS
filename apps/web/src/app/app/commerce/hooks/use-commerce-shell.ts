@@ -6,7 +6,6 @@ import {
   fetchInvoices,
   fetchContacts,
   listQuotes,
-  getGmailStatus,
   Product,
   Invoice,
   Contact,
@@ -59,12 +58,15 @@ export function useCommerceShell() {
       setLoading(true);
       setError(null);
       try {
-        const [productsRes, invoicesRes, contactsRes, quotesRes, gmailRes, bizRes] = await Promise.all([
+        // MOUNT-QUOTES (D-153): no Gmail probe on load. Nothing on the Sales
+        // page read the status (the invoices list and detail fetch their
+        // own), and a quote shared by WhatsApp or Copy link needs no email
+        // provider, so the page must not ask for one (journey D3).
+        const [productsRes, invoicesRes, contactsRes, quotesRes, bizRes] = await Promise.all([
           fetchProducts(businessId),
           fetchInvoices(businessId),
           fetchContacts(businessId),
           listQuotes(businessId),
-          getGmailStatus(businessId),
           apiGet<{ metaData: Record<string, unknown> }>(`/identity/businesses/${businessId}`),
         ]);
         // Ignore stale responses
@@ -74,7 +76,6 @@ export function useCommerceShell() {
         setInvoices(invoicesRes.data ?? []);
         setContacts(contactsRes.data?.contacts ?? []);
         setQuotes(quotesRes.data ?? []);
-        if (gmailRes.data) integrations.setGmailStatus(gmailRes.data);
         if (bizRes.data) {
           const biz = bizRes.data as Record<string, unknown>;
           if (typeof biz.currency === "string" && biz.currency) {
