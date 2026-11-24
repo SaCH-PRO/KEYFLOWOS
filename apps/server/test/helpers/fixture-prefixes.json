@@ -1290,6 +1290,11 @@
 "prefix": "v65e_",
       "owner": "apps/server/test/ready-to-send.integration.test.ts",
       "packet": "V1-65 (READY-TO-SEND)"
+    },
+    {
+"prefix": "v91r_",
+      "owner": "apps/server/test/trash-bulk-restore.integration.test.ts",
+      "packet": "V1-P37 (FU-BULK-DELETE-UNDO)"
     }
   ],
   "pendingRenames": [],
