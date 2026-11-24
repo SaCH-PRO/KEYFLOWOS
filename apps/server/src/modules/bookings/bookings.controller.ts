@@ -224,8 +224,11 @@ export class BookingsController {
   @Get('public/businesses/:businessId/services')
   async publicListServices(@Param('businessId') businessId: string) {
     await this.catalog.assertPublicStore(businessId);
+    // SWP-STORE-LISTING-SERVER (BUG-055, ruling storelisting): product listing
+    // services (sourceProductId != null) mark products added to the store and
+    // must not appear as standalone bookable services.
     return this.prisma.client.service.findMany({
-      where: { businessId, deletedAt: null },
+      where: { businessId, deletedAt: null, sourceProductId: null },
       orderBy: { name: 'asc' },
       select: PUBLIC_SERVICE_SELECT,
     });

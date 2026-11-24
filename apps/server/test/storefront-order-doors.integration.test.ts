@@ -326,6 +326,7 @@ async function cleanup() {
     `DELETE FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     // V87-16b's promo codes (the business delete cascades them too).
     `DELETE FROM promo_codes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM services WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
@@ -716,6 +717,7 @@ beforeAll(async () => {
   }
   for (const [id, businessId, currency] of [[ID.prodA, ID.bizA, 'TTD'], [ID.prodNoWipay, ID.bizNoWipay, 'TTD'], [ID.prodUsd, ID.bizUsd, 'USD'], [ID.prodR, ID.bizR, 'TTD']] as const) {
     await db.product.create({ data: { id, businessId, name: 'V87C Widget', price: UNIT_PRICE, currency, category: 'PRODUCT', isActive: true } });
+    await db.service.create({ data: { id: `${id}_listing`, businessId, name: 'V87C Widget', duration: 30, price: UNIT_PRICE, sourceProductId: id } });
   }
 }, 90_000);
 

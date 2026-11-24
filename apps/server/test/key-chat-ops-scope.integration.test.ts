@@ -326,9 +326,35 @@ beforeAll(async () => {
   registry.set(JobRolePolicyService, jobRolePolicy);
   registry.set(CommandService, commands);
   registry.set(ProcurementService, procurement);
-  // execute_custom_logic's sandbox (KO-04): the real executor, local child-process backend.
+  // execute_custom_logic's sandbox (KO-04): in-test E2B stand-in after SEC-KEY-CUSTOM-LOGIC removed
+  // local API-host execution from CodeExecutorService. Still exercises FlowOrchestratorService's
+  // real `withinMemberScope` + `executeToolByName` innerToolExecutor wiring verbatim.
   const { CodeExecutorService } = await import('../src/modules/ai/code-executor.service');
-  registry.set(CodeExecutorService, new CodeExecutorService());
+  registry.set(CodeExecutorService, {
+    execute: async (opts: {
+      businessId: string;
+      code: string;
+      inputs?: Record<string, unknown>;
+      innerToolExecutor: (bizId: string, name: string, args: Record<string, unknown>) => Promise<unknown>;
+    }) => {
+      let toolCalls = 0;
+      const logs: string[] = [];
+      const api = {
+        log: (...args: unknown[]) => logs.push(args.map(String).join(' ')),
+        callTool: async (name: string, args?: Record<string, unknown>) => {
+          toolCalls += 1;
+          return opts.innerToolExecutor(opts.businessId, name, args ?? {});
+        },
+      };
+      try {
+        const fn = new Function('api', 'inputs', `return (async () => { ${opts.code} })();`);
+        const value = await fn(api, opts.inputs ?? {});
+        return { ok: true, value: value === undefined ? null : value, logs, toolCalls };
+      } catch (err) {
+        return { ok: false, error: (err as Error)?.message ?? String(err), logs, toolCalls };
+      }
+    },
+  });
 
   const quiet = { log() {}, warn() {}, error() {}, debug() {}, verbose() {} };
   // The real class: chat, streamChat, the confirmation claim, resolveTurnAuthority (the crew),
@@ -613,19 +639,12 @@ describe('KO-03 parity with the routes, and what stays unchanged', () => {
 describe("KO-04 execute_custom_logic: every api.callTool in the snippet is held to the member's operations scope (review SEC-D16-1)", () => {
   /** resolveCrew staffs the operator crew first: its ceiling (3) admits execute_custom_logic. */
   const OPERATOR = 'execute it: run, process, handle and complete the work';
-  let backend: string | undefined;
-
   beforeAll(async () => {
-    // The local child-process sandbox, whatever the environment configures: no provider is called.
-    backend = process.env.CODE_EXECUTOR_BACKEND;
-    process.env.CODE_EXECUTOR_BACKEND = 'local';
     // The business auto-executes up to tier 3 (AutopilotSettings autonomyLevel 3 gives the same).
     await db.aiMemory.update({ where: { id: `${P}autonomy` }, data: { value: JSON.stringify({ mode: 'assisted', maxAutoTier: 3 }) } });
   });
 
   afterAll(async () => {
-    if (backend === undefined) delete process.env.CODE_EXECUTOR_BACKEND;
-    else process.env.CODE_EXECUTOR_BACKEND = backend;
     await db.aiMemory.update({ where: { id: `${P}autonomy` }, data: { value: JSON.stringify({ mode: 'assisted', maxAutoTier: 2 }) } });
   });
 

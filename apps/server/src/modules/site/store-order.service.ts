@@ -282,17 +282,33 @@ export class StoreOrderService {
     }
 
     const productIds = items.map((i) => i.productId);
-    const products = await this.prisma.client.product.findMany({
-      where: {
-        id: { in: productIds },
-        businessId,
-        deletedAt: null,
-        isActive: true,
-      },
-    });
+    const [products, listings] = await Promise.all([
+      this.prisma.client.product.findMany({
+        where: {
+          id: { in: productIds },
+          businessId,
+          deletedAt: null,
+          isActive: true,
+        },
+      }),
+      this.prisma.client.service.findMany({
+        where: {
+          businessId,
+          deletedAt: null,
+          sourceProductId: { in: productIds },
+        },
+        select: { sourceProductId: true },
+      }),
+    ]);
 
     const productMap = new Map(products.map((p) => [p.id, p]));
+    const listedProductIds = new Set(
+      listings
+        .map((l) => l.sourceProductId)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0),
+    );
     const errors: string[] = [];
+    const unlistedProducts = new Map<string, string>();
 
     for (const item of items) {
       const product = productMap.get(item.productId);
@@ -300,9 +316,26 @@ export class StoreOrderService {
         errors.push(`Product ${item.productId} not found or unavailable`);
         continue;
       }
+      if (!listedProductIds.has(product.id)) {
+        if (!unlistedProducts.has(product.id)) {
+          unlistedProducts.set(product.id, product.name);
+        }
+        continue;
+      }
       if (item.quantity < 1) {
         errors.push(`Invalid quantity for ${product.name}`);
       }
+    }
+
+    // SWP-STORE-LISTING-SERVER (BUG-055, ruling storelisting): refuse checkout
+    // of any active product that is not listed in this business's store before
+    // any order, retry slot, or promo usage is written.
+    if (unlistedProducts.size > 0) {
+      throw new BadRequestException({
+        code: 'PRODUCT_NOT_IN_STORE',
+        message: [...unlistedProducts.values()].map((name) => `Product ${name} is not listed in this store`).join('; '),
+        productIds: [...unlistedProducts.keys()],
+      });
     }
 
     if (errors.length > 0) {

@@ -439,3 +439,38 @@ test('wake event, end to end: a stranger\'s RETURN naming a past merge leaves th
   assert.equal(report.clean, true, JSON.stringify(report.entries));
   assert.deepEqual(report.conflicts, []);
 });
+
+test('wake event (D-272.4): under the workflow step shipped env, #80 wake-event posting is switched off', async () => {
+  const workflow = parseYaml(fs.readFileSync(WORKFLOW, 'utf8'));
+  const found = (workflow.jobs['normalize-event'].steps || []).find((s) => s.name === 'Publish actionable wake event');
+  assert.ok(found, 'normalize-event must have a step named "Publish actionable wake event"');
+  assert.equal(
+    String(found.env?.AUTOPILOT_POST_WAKE_EVENTS ?? ''),
+    'false',
+    'workflow step env must set AUTOPILOT_POST_WAKE_EVENTS: "false" (D-272.4)',
+  );
+
+  const event = strangerReturn('KF-EXEC-ACTION-001');
+  assert.equal(event.actionable, true);
+  const posted = [];
+  const logged = [];
+  const github = {
+    paginate: async () => [],
+    rest: {
+      issues: {
+        listComments: () => { throw new Error('must not list #80 comments when posting is disabled'); },
+        createComment: async (args) => { posted.push(args); return { data: { id: 9001 } }; },
+      },
+    },
+  };
+  const context = { repo: { owner: 'o', repo: 'r' } };
+  const core = { info: (msg) => logged.push(String(msg)) };
+  const env = {
+    ...found.env,
+    EVENT_JSON: JSON.stringify(event),
+    DECISION_JSON: JSON.stringify({ decision: { action: 'REPORT_DRIFT', reason: 'stub' } }),
+  };
+  await new AsyncFunction('github', 'context', 'core', 'process', found.with.script)(github, context, core, { env });
+  assert.equal(posted.length, 0, 'shipped workflow must post zero AUTO_EVENT comments to #80');
+  assert.ok(logged.some((m) => /disabled/i.test(m)), `expected disabled log, got: ${JSON.stringify(logged)}`);
+});
