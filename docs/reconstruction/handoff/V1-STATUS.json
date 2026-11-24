@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "f759a85a49941df2c1920a737be36eb63217bb41",
-  "main_commit_date": "2026-11-23T01:10:55+00:00",
+  "main_sha": "020d26be4333de6f8988f94500b928664c5d44f0",
+  "main_commit_date": "2026-11-24T06:32:05+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -27,13 +27,13 @@
   ]
  },
  "summary": {
-  "packets": 346,
-  "points": 510.5,
+  "packets": 366,
+  "points": 536.5,
   "by_status": {
    "done": {
-    "packets": 72,
-    "points": 110.5,
-    "pct_by_points": 21.6
+    "packets": 93,
+    "points": 136.5,
+    "pct_by_points": 25.4
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 274,
+    "packets": 273,
     "points": 400,
-    "pct_by_points": 78.4
+    "pct_by_points": 74.6
    }
   },
   "by_step": {
@@ -66,22 +66,22 @@
     "total": 7
    },
    "3": {
-    "done": 48,
+    "done": 61,
     "in-progress": 0,
-    "todo": 99,
-    "total": 147
+    "todo": 88,
+    "total": 149
    },
    "4": {
     "done": 2,
     "in-progress": 0,
-    "todo": 50,
-    "total": 52
+    "todo": 51,
+    "total": 53
    },
    "5": {
-    "done": 4,
+    "done": 12,
     "in-progress": 0,
-    "todo": 52,
-    "total": 56
+    "todo": 59,
+    "total": 71
    },
    "6": {
     "done": 2,
@@ -92,22 +92,22 @@
    "7": {
     "done": 0,
     "in-progress": 0,
-    "todo": 33,
-    "total": 33
+    "todo": 34,
+    "total": 34
    },
    "8": {
     "done": 0,
     "in-progress": 0,
-    "todo": 4,
-    "total": 4
+    "todo": 5,
+    "total": 5
    }
   },
   "by_derivation": {
    "prior-status-file": 150,
    "prior-status-file+wave-2b-commit": 28,
    "code-commit-subject": 9,
-   "compacted-commit": 16,
-   "no-evidence": 143
+   "compacted-commit": 37,
+   "no-evidence": 142
   },
   "uncertain": [
    "W11-CORTEX-INSIGHT-QUERIES",
@@ -120,7 +120,7 @@
    "FU-WA-ESCAPE-RACE",
    "FU-PROPOSAL-REVENUE-SIGHT"
   ],
-  "todo_with_dependencies_met": 109
+  "todo_with_dependencies_met": 122
  },
  "critical_path": {
   "plan_recorded_remaining": [
@@ -188,7 +188,7 @@
    "size": "L",
    "lane": "web",
    "on_critical_path": true,
-   "unblocks": 55
+   "unblocks": 57
   },
   {
    "id": "W11-KEY-TRANSFER-INTEGER",
@@ -197,7 +197,7 @@
    "size": "S",
    "lane": "server",
    "on_critical_path": false,
-   "unblocks": 57
+   "unblocks": 58
   },
   {
    "id": "SWP-STORE-LISTING-SERVER",
@@ -206,7 +206,7 @@
    "size": "M",
    "lane": "server",
    "on_critical_path": false,
-   "unblocks": 50
+   "unblocks": 51
   },
   {
    "id": "SWP-INV-PUBLIC-LINK",
@@ -215,16 +215,7 @@
    "size": "M",
    "lane": "both",
    "on_critical_path": false,
-   "unblocks": 47
-  },
-  {
-   "id": "NAV-A3",
-   "step": 4,
-   "priority": "P1",
-   "size": "M",
-   "lane": "web",
-   "on_critical_path": false,
-   "unblocks": 32
+   "unblocks": 48
   },
   {
    "id": "SWP-KEY-CHAT-WEB",
@@ -233,7 +224,16 @@
    "size": "M",
    "lane": "web",
    "on_critical_path": false,
-   "unblocks": 31
+   "unblocks": 33
+  },
+  {
+   "id": "NAV-A3",
+   "step": 4,
+   "priority": "P1",
+   "size": "M",
+   "lane": "web",
+   "on_critical_path": false,
+   "unblocks": 33
   },
   {
    "id": "W11-GENOME-RECS-DOMAIN",
@@ -242,7 +242,7 @@
    "size": "M",
    "lane": "server",
    "on_critical_path": false,
-   "unblocks": 27
+   "unblocks": 28
   },
   {
    "id": "W11-RUNWAY-BURN-CURRENCY",
@@ -251,7 +251,7 @@
    "size": "M",
    "lane": "server",
    "on_critical_path": false,
-   "unblocks": 25
+   "unblocks": 26
   },
   {
    "id": "SWP-CONTACT-DETAIL",
@@ -260,7 +260,7 @@
    "size": "M",
    "lane": "web",
    "on_critical_path": false,
-   "unblocks": 21
+   "unblocks": 22
   },
   {
    "id": "W11-SHIP-STOCK-DECREMENT",
@@ -269,7 +269,7 @@
    "size": "M",
    "lane": "server",
    "on_critical_path": false,
-   "unblocks": 21
+   "unblocks": 22
   },
   {
    "id": "NAV-A2",
@@ -278,7 +278,7 @@
    "size": "M",
    "lane": "web",
    "on_critical_path": false,
-   "unblocks": 13
+   "unblocks": 14
   },
   {
    "id": "SWP-CENSUS-OPEN-WRITES",
@@ -287,7 +287,7 @@
    "size": "S",
    "lane": "server",
    "on_critical_path": false,
-   "unblocks": 10
+   "unblocks": 11
   },
   {
    "id": "SWEEP-RERUN-S2",
@@ -296,7 +296,7 @@
    "size": "S",
    "lane": "gate",
    "on_critical_path": false,
-   "unblocks": 9
+   "unblocks": 10
   },
   {
    "id": "SWP-CENSUS-GENOME",
@@ -305,14 +305,14 @@
    "size": "L",
    "lane": "server",
    "on_critical_path": false,
-   "unblocks": 9
+   "unblocks": 10
   },
   {
-   "id": "RR-SCRIPT-SPECS-IN-CI",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "gate",
+   "id": "SWP-CENSUS-KEY-B",
+   "step": 4,
+   "priority": "P1",
+   "size": "L",
+   "lane": "server",
    "on_critical_path": false,
    "unblocks": 9
   },
@@ -326,11 +326,11 @@
    "unblocks": 8
   },
   {
-   "id": "SWP-CENSUS-KEY-B",
-   "step": 4,
-   "priority": "P1",
-   "size": "L",
-   "lane": "server",
+   "id": "TOF-STALE-GATES-PKT",
+   "step": 1,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
    "on_critical_path": false,
    "unblocks": 8
   },
@@ -340,15 +340,6 @@
    "priority": "P2",
    "size": "XS",
    "lane": "docs",
-   "on_critical_path": false,
-   "unblocks": 7
-  },
-  {
-   "id": "TOF-STALE-GATES-PKT",
-   "step": 1,
-   "priority": "P3",
-   "size": "S",
-   "lane": "gate",
    "on_critical_path": false,
    "unblocks": 7
   },
@@ -368,7 +359,25 @@
    "size": "M",
    "lane": "gate",
    "on_critical_path": false,
-   "unblocks": 4
+   "unblocks": 5
+  },
+  {
+   "id": "SEC-KEY-CUSTOM-LOGIC",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 5
+  },
+  {
+   "id": "FU-OUTBOUND-ATTACHMENT-URL",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 5
   },
   {
    "id": "S0-DEPENDABOT-FREEZE",
@@ -377,34 +386,7 @@
    "size": "S",
    "lane": "gate",
    "on_critical_path": false,
-   "unblocks": 4
-  },
-  {
-   "id": "FU-KEY-GENOME-READS-RESIDUAL",
-   "step": 3,
-   "priority": "P0",
-   "size": "M",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 3
-  },
-  {
-   "id": "MEM-DOC-EXTRACTION-SIGHT",
-   "step": 3,
-   "priority": "P0",
-   "size": "M",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 3
-  },
-  {
-   "id": "MEM-SALIENCE-SIGHT",
-   "step": 3,
-   "priority": "P0",
-   "size": "S",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 3
+   "unblocks": 5
   },
   {
    "id": "FU-PROPOSAL-MONEY-TAG",
@@ -416,38 +398,20 @@
    "unblocks": 3
   },
   {
+   "id": "FU-VITEST-DECORATOR-METADATA",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "gate",
+   "on_critical_path": false,
+   "unblocks": 2
+  },
+  {
    "id": "RR-ADMIN-LOGOUT",
    "step": 3,
    "priority": "P1",
    "size": "S",
    "lane": "web",
-   "on_critical_path": false,
-   "unblocks": 2
-  },
-  {
-   "id": "RR-ERASURE-BUSINESS-EVENTS",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 2
-  },
-  {
-   "id": "RR-UNTRUSTED-CONTENT-FENCE",
-   "step": 3,
-   "priority": "P1",
-   "size": "M",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 2
-  },
-  {
-   "id": "RR-GATEWAY-TYPED-FAILURES",
-   "step": 3,
-   "priority": "P2",
-   "size": "S",
-   "lane": "server",
    "on_critical_path": false,
    "unblocks": 2
   },
@@ -468,24 +432,6 @@
    "lane": "server",
    "on_critical_path": false,
    "unblocks": 2
-  },
-  {
-   "id": "MEM-TEMPORAL-SCOPE",
-   "step": 3,
-   "priority": "P0",
-   "size": "S",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 1
-  },
-  {
-   "id": "FU-TEMPORAL-FLOW-INBOX-SCOPE",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 1
   },
   {
    "id": "RR-DB-CRYPTO-KEY-CENSUS",
@@ -542,8 +488,8 @@
    "unblocks": 1
   },
   {
-   "id": "RR-REDACTION-BY-CONTENT",
-   "step": 3,
+   "id": "RR-PRIVACY-DELETED-CONTACT-GATES",
+   "step": 4,
    "priority": "P2",
    "size": "S",
    "lane": "server",
@@ -587,15 +533,6 @@
    "unblocks": 1
   },
   {
-   "id": "FU-FINANCE-INTEL-DOORS",
-   "step": 5,
-   "priority": "P0",
-   "size": "S",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-GENOME-SURFACES-REVENUE",
    "step": 3,
    "priority": "P0",
@@ -605,10 +542,46 @@
    "unblocks": 0
   },
   {
+   "id": "FU-PENDING-OWED-SERVER",
+   "step": 5,
+   "priority": "P0",
+   "size": "L",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-PENDING-OWED-WEB",
+   "step": 5,
+   "priority": "P0",
+   "size": "M",
+   "lane": "web",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-WEB-PAYLINK-STATUS-BUTTONS",
+   "step": 5,
+   "priority": "P0",
+   "size": "S",
+   "lane": "web",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-CONTACT-AUDIT-RESIDUAL",
    "step": 3,
    "priority": "P1",
    "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-CONTACTID-WRITER-VALIDATION",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
    "lane": "server",
    "on_critical_path": false,
    "unblocks": 0
@@ -641,7 +614,7 @@
    "unblocks": 0
   },
   {
-   "id": "FU-HEALTH-MONEY-SCOPE",
+   "id": "FU-FLOW-SAVE-EXECUTED-TOOL-TURN",
    "step": 5,
    "priority": "P1",
    "size": "S",
@@ -650,7 +623,7 @@
    "unblocks": 0
   },
   {
-   "id": "FU-KEY-ACTION-GENOME-PROJECTION",
+   "id": "FU-HEALTH-MONEY-SCOPE",
    "step": 5,
    "priority": "P1",
    "size": "S",
@@ -695,33 +668,6 @@
    "unblocks": 0
   },
   {
-   "id": "FU-PAY-LINK-STATUS-GATE",
-   "step": 5,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-PENDING-OWED-SERVER",
-   "step": 5,
-   "priority": "P1",
-   "size": "L",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "FU-PENDING-OWED-WEB",
-   "step": 5,
-   "priority": "P1",
-   "size": "M",
-   "lane": "web",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
    "id": "FU-PRESENCE-REVENUE-SCOPE",
    "step": 5,
    "priority": "P1",
@@ -740,43 +686,25 @@
    "unblocks": 0
   },
   {
-   "id": "FU-VITEST-DECORATOR-METADATA",
-   "step": 3,
+   "id": "FU-TIMELINE-CALLERS-SCOPE",
+   "step": 5,
    "priority": "P1",
    "size": "M",
-   "lane": "gate",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-UNTRUSTED-INBOUND-FENCE",
+   "step": 5,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
    "on_critical_path": false,
    "unblocks": 0
   },
   {
    "id": "MEM-EXPIRED-NOT-SERVED",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-BANK-TOKEN-ENCRYPT",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-MCP-TENANT-BOUND",
-   "step": 3,
-   "priority": "P1",
-   "size": "S",
-   "lane": "server",
-   "on_critical_path": false,
-   "unblocks": 0
-  },
-  {
-   "id": "RR-STREAM-ERROR-NO-EFFECTS",
    "step": 3,
    "priority": "P1",
    "size": "S",
@@ -821,6 +749,15 @@
    "unblocks": 0
   },
   {
+   "id": "FU-ATTACHMENT-PERSIST-SEPARATE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "both",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-CASE-STUDY-REVENUE",
    "step": 5,
    "priority": "P2",
@@ -857,6 +794,15 @@
    "unblocks": 0
   },
   {
+   "id": "FU-KEY-SEND-INVOICE-PAID-REFUSE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-LEDGER-ZONED-FROM",
    "step": 5,
    "priority": "P2",
@@ -871,6 +817,24 @@
    "priority": "P2",
    "size": "M",
    "lane": "both",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-NMS-SERVER-METADATA",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-OPENAI-FINISH-REASON",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -902,10 +866,37 @@
    "unblocks": 0
   },
   {
+   "id": "FU-SETTINGS-MANUAL-STEP-FENCE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-TEST-FLAKES-2026-11-23",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-UNIT-GUARD-CI",
    "step": 3,
    "priority": "P2",
    "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "FU-UNIT-MOCK-ISOLATION-2",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
    "lane": "server",
    "on_critical_path": false,
    "unblocks": 0
@@ -920,6 +911,24 @@
    "unblocks": 0
   },
   {
+   "id": "MEM-TEMPORAL-EMBED-DEDUP",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "OPS-CONSOLE-READONLY",
+   "step": 7,
+   "priority": "P2",
+   "size": "M",
+   "lane": "both",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "RR-BUSINESS-EVENT-REDACT",
    "step": 3,
    "priority": "P2",
@@ -929,11 +938,29 @@
    "unblocks": 0
   },
   {
+   "id": "RR-CI-REQUIRED-JOBS-AGGREGATE",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "RR-CORTEX-TYPED-RESULT",
    "step": 3,
    "priority": "P2",
    "size": "S",
    "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-GATE-LEDGER-MONOTONIC",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -957,6 +984,24 @@
   },
   {
    "id": "RR-KEY-FAKE-MODEL-TRAJECTORY",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-KEY-SAFETY-POLICY",
+   "step": 3,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-LLM-ADMISSION-CONTROL",
    "step": 3,
    "priority": "P2",
    "size": "M",
@@ -1001,6 +1046,15 @@
    "unblocks": 0
   },
   {
+   "id": "RR-STRUCTURED-PARSE-INVALID-STATE",
+   "step": 3,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "FU-COMMUNITY-LIKE-OWN-ACTION",
    "step": 3,
    "priority": "P3",
@@ -1024,6 +1078,24 @@
    "priority": "P3",
    "size": "M",
    "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-BUNDLE-PROOF-PROFILE",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "docs",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-BUNDLE-RULING-CONFLICTS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "docs",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -1082,11 +1154,38 @@
    "unblocks": 0
   },
   {
+   "id": "RR-GATE-LEDGER-CENSUS",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
    "id": "RR-GOAL-WRITER-CENSUS",
    "step": 3,
    "priority": "P3",
    "size": "S",
    "lane": "server",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-HOOK-PACKET-SCOPE",
+   "step": 3,
+   "priority": "P3",
+   "size": "M",
+   "lane": "gate",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-HOTSPOT-SCANNER",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "docs",
    "on_critical_path": false,
    "unblocks": 0
   },
@@ -1138,6 +1237,24 @@
   {
    "id": "RR-SLO-AVAILABILITY-LEDGER",
    "step": 7,
+   "priority": "P3",
+   "size": "S",
+   "lane": "gate",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-STATUS-REVIEW-CYCLES",
+   "step": 3,
+   "priority": "P3",
+   "size": "S",
+   "lane": "docs",
+   "on_critical_path": false,
+   "unblocks": 0
+  },
+  {
+   "id": "RR-STATUS-STALL-REPORT",
+   "step": 3,
    "priority": "P3",
    "size": "S",
    "lane": "gate",
@@ -2145,7 +2262,7 @@
   {
    "id": "SWP-INV-MATH",
    "step": 4,
-   "priority": "P1",
+   "priority": "P0",
    "size": "M",
    "lane": "web",
    "status": "todo",
@@ -2212,7 +2329,7 @@
   {
    "id": "SWP-INV-LIST",
    "step": 4,
-   "priority": "P1",
+   "priority": "P0",
    "size": "M",
    "lane": "web",
    "status": "todo",
@@ -2597,7 +2714,7 @@
   {
    "id": "SWP-SERVICE-DEPOSIT",
    "step": 4,
-   "priority": "P2",
+   "priority": "P0",
    "size": "M",
    "lane": "both",
    "status": "todo",
@@ -2733,8 +2850,6 @@
     "EXPENSES-HUB-3",
     "SEND-TO-ACCOUNTANT",
     "CATALOG-1",
-    "SWP-STORE-FRAME",
-    "SWP-STORE-OPS-WEB",
     "SWP-INV-MONEY-TOTALS",
     "SWP-INV-PUBLIC-LINK",
     "DECIMALS-SERVER",
@@ -2742,7 +2857,6 @@
     "SWP-STORE-LISTING-SERVER",
     "SWP-STORE-OVERSELL",
     "SWP-SERVICE-DEPOSIT",
-    "SALES-ORDERS-TAB",
     "NAV-A2",
     "NAV-A3",
     "SWP-CENSUS-KEY-A",
@@ -2914,7 +3028,7 @@
   {
    "id": "READY-TO-SEND",
    "step": 5,
-   "priority": "P1",
+   "priority": "P0",
    "size": "M",
    "lane": "server",
    "status": "todo",
@@ -3198,9 +3312,7 @@
     "SWP-TEAM-WEB",
     "SWP-FIN-WEB-CRASHES",
     "SWP-UI-COPY",
-    "W11-WEB-INVENTORY-REFUSALS",
     "SWP-CALENDAR-TRUTH",
-    "W11-WEB-ACTION-DETAIL-WRAP",
     "SWP-SHELL-MINOR",
     "BIZ-SWITCHER",
     "TOF-PAYROLL-DISCARD",
@@ -3212,7 +3324,7 @@
   {
    "id": "SWP-QUOTE-PUBLIC-PAGE",
    "step": 6,
-   "priority": "P1",
+   "priority": "P0",
    "size": "S",
    "lane": "web",
    "status": "todo",
@@ -3309,7 +3421,6 @@
    "uncertain": false,
    "evidence": [],
    "depends_on": [
-    "SWP-STORE-PUBLIC-POLISH",
     "TODAY-4BLOCK"
    ],
    "title": "Remove the developer harness and fake-data pages customers and crawlers can reach, and the KF Store drawer",
@@ -3723,25 +3834,19 @@
     "VAT-BASICS",
     "CUSTOMER-PAGE-HONESTY",
     "W11-STOREFRONT-PAYPAL-LIST",
-    "SWP-STORE-PUBLIC-POLISH",
     "HARNESS-REMOVAL",
     "W11-INV-SET-MOVEMENT",
     "W11-SHIP-STOCK-DECREMENT",
     "W11-STOREFRONT-ROUTE-DECREMENTED",
-    "W11-STOREFRONT-FULFIL-STEPS",
     "W11-PLANTED-STOCK-CENSUS",
     "SWP-INV-SKU-COUNT",
-    "QUICK-SALE-SERVER",
-    "QUICK-SALE-WEB",
     "PLAN-TABLE",
     "SWP-PUBLIC-SITE-MINOR",
     "SWP-FIN-LEDGER",
     "SWP-CENSUS-OPEN-WRITES",
     "SWP-READ-SCOPE-CENSUS",
-    "W11-CALLS-LIST-PAGING",
     "W11-QUERY-DTO-COERCION",
     "SWP-QUERY-CORS-HEADERS",
-    "W11-ORDER-METADATA-WRITERS",
     "TOF-TIER-PRICING-WEB",
     "SWP-CENSUS-V1-A",
     "SWP-CENSUS-V1-B",
@@ -4020,12 +4125,9 @@
     "NAV-B-HIDE",
     "HIDE-DEV-WEBHOOKS",
     "NAV-B-LINKS",
-    "W11-TRANSIENT-CONFLICT",
-    "W11-LOAD-SENSITIVE-TESTS",
     "W11-PAGING-TOTAL-ORDER-A",
     "W11-PAGING-TOTAL-ORDER-B",
     "W11-PAGING-TOTAL-ORDER-C",
-    "W11-RELEASE0-INDEX-STALE",
     "NAV-B-LEGACY-SERVER",
     "NAV-B-HIDE-2",
     "KEY-TOOL-DOMAIN-HIDE",
@@ -4050,9 +4152,13 @@
     "S0-SEC-LANE-DEPLOY",
     "S0-DEPENDABOT-FREEZE",
     "TOF-CI-PYTHON-HARVESTER",
-    "SWEEP-RERUN-S7"
+    "SWEEP-RERUN-S7",
+    "WEDGE-WA-INBOUND-CAPTURE",
+    "WEDGE-HIDE-STORE",
+    "SEC-KEY-CUSTOM-LOGIC",
+    "FU-OUTBOUND-ATTACHMENT-URL"
    ],
-   "title": "Gate part 1: journeys A-L green at 375x812 and 1440x900 under AI_DISABLED and KEY_DISABLED against a production build; zero open blocker/major on v1 surfaces; proof:release0 MET",
+   "title": "Gate part 1: the launch journeys (A-F, H-J; D-263) green at 375x812 and 1440x900 under AI_DISABLED and KEY_DISABLED against a production build; zero open blocker/major on v1 surfaces; proof:release0 MET",
    "deps_met": false
   },
   {
@@ -4099,7 +4205,8 @@
    "uncertain": false,
    "evidence": [],
    "depends_on": [
-    "GATE-STAGING-RUN"
+    "GATE-STAGING-RUN",
+    "GATE-PILOT-10"
    ],
    "title": "Gate part 4: owner-test protocol with five Trinidad and Tobago owners on their own phones, unassisted",
    "deps_met": false
@@ -4652,15 +4759,17 @@
    "priority": "P0",
    "size": "M",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "8e775e6d"
+   ],
    "depends_on": [
     "FU-GENOME-REVENUE-CLASSIFIER"
    ],
    "title": "Every remaining KEY genome read resolves its reader before it reaches a prompt, stream or answer",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "OPS-CONSOLE-READONLY",
@@ -4676,7 +4785,7 @@
     "FU-KEY-GENOME-READS-RESIDUAL"
    ],
    "title": "The owner's read-only engineering console in the platform admin area",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-GENOME-SURFACES-REVENUE",
@@ -4826,7 +4935,7 @@
   {
    "id": "FU-PENDING-OWED-SERVER",
    "step": 5,
-   "priority": "P1",
+   "priority": "P0",
    "size": "L",
    "lane": "server",
    "status": "todo",
@@ -4842,7 +4951,7 @@
   {
    "id": "FU-PENDING-OWED-WEB",
    "step": 5,
-   "priority": "P1",
+   "priority": "P0",
    "size": "M",
    "lane": "web",
    "status": "todo",
@@ -4953,13 +5062,15 @@
    "priority": "P0",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "aa0e3249"
+   ],
    "depends_on": [],
    "title": "Temporal-flow memory updates and tags only touch the caller's business; the unscoped semantic delete is scoped",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "MEM-EXPIRED-NOT-SERVED",
@@ -4981,15 +5092,17 @@
    "priority": "P0",
    "size": "M",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "2922d351"
+   ],
    "depends_on": [
     "FU-PROPOSAL-REVENUE-SIGHT"
    ],
    "title": "Document extractions in AI memory reach prompts and GET /ai/memory only for readers allowed to see that document",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "MEM-SEMANTIC-SIGHT",
@@ -4997,16 +5110,18 @@
    "priority": "P0",
    "size": "M",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "ad0e241d"
+   ],
    "depends_on": [
     "MEM-DOC-EXTRACTION-SIGHT",
     "FU-PROPOSAL-REVENUE-SIGHT"
    ],
    "title": "The flow chat semantic-memory section and agent memory search pass every hit through the reader projection",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "MEM-SALIENCE-SIGHT",
@@ -5014,13 +5129,15 @@
    "priority": "P0",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "6d788425"
+   ],
    "depends_on": [],
    "title": "The salience feed in every chat prompt omits money-derived signals for readers without revenue read",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "MEM-CLASS-COLUMNS",
@@ -5089,7 +5206,7 @@
     "FU-MEMORY-COPIES-REWRITE"
    ],
    "title": "One semantic copy per temporal summary; stale duplicates removed by a dry-run-first command",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "MEM-HONEST-RETRIEVAL",
@@ -5143,13 +5260,15 @@
    "priority": "P0",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "60e9b4a0"
+   ],
    "depends_on": [],
    "title": "Finance intelligence scan, resolve and dismiss require revenue scope (D-258)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-HEALTH-MONEY-SCOPE",
@@ -5219,13 +5338,15 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "cba3c200"
+   ],
    "depends_on": [],
    "title": "The temporal-flow timeline withholds KEY Inbox events from readers without operations read",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-KEY-ACTION-GENOME-PROJECTION",
@@ -5233,15 +5354,17 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "b4b6bcf0"
+   ],
    "depends_on": [
     "FU-PROPOSAL-REVENUE-SIGHT"
    ],
    "title": "KEY action proposals bridged from FINANCIAL genome recommendations go through the revenue projection",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-CONVERSION-REPS-REVENUE",
@@ -5291,15 +5414,17 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "ea7e2ac5"
+   ],
    "depends_on": [
     "FU-SEND-REMINDER-SERVER-GATE"
    ],
    "title": "Public pay links are minted only for invoices someone owes",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "FU-REMINDER-HONESTY",
@@ -5379,7 +5504,7 @@
     "RR-REDACTION-BY-CONTENT"
    ],
    "title": "KEY cortex input-safety check becomes an explicit, versioned policy: every rule class is evaluated, each finding class maps to an action, and a missing or throwing checker withholds tools instead of passing the query",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-UNTRUSTED-CONTENT-FENCE",
@@ -5387,13 +5512,15 @@
    "priority": "P1",
    "size": "M",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "5490f971"
+   ],
    "depends_on": [],
    "title": "Document extractions and MCP tool output enter KEY's prompts inside a fenced untrusted-data block that cannot be closed from inside and carries no authority",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-STREAM-ERROR-NO-EFFECTS",
@@ -5401,13 +5528,15 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "9f7fcfc7"
+   ],
    "depends_on": [],
    "title": "A model stream that failed part-way never splices a fallback answer onto it and never runs the tool calls it collected",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-REDACTION-BY-CONTENT",
@@ -5415,13 +5544,15 @@
    "priority": "P2",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "be1451f8"
+   ],
    "depends_on": [],
    "title": "Redaction detects card numbers and secret-shaped tokens by value, not only by field name",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-KEY-PROMPT-CANARY",
@@ -5457,13 +5588,15 @@
    "priority": "P2",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "ddb74b30"
+   ],
    "depends_on": [],
    "title": "Model gateway classifies provider failures: a rate limit, a caller abort or a bad request does not open the provider circuit",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-LLM-ADMISSION-CONTROL",
@@ -5479,7 +5612,7 @@
     "RR-GATEWAY-TYPED-FAILURES"
    ],
    "title": "Per-business admission control on model calls: a bounded number in flight per business, shared across replicas, with a typed capacity refusal",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-CORTEX-BUS-BACKPRESSURE",
@@ -5644,7 +5777,7 @@
     "RR-GATEWAY-TYPED-FAILURES"
    ],
    "title": "Gateway contract violations are typed and costed, never a silent provider failure or a silent pass on empty output",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-TOOL-ARGS-MALFORMED-NEVER-RUN",
@@ -5781,13 +5914,15 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "5729d3c6"
+   ],
    "depends_on": [],
    "title": "MCP bridge is tenant-bound or off: a bridged call carries the business and runs only for a business the server config names",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-CONNECTOR-STACK-CENSUS",
@@ -6447,13 +6582,15 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "617995c9"
+   ],
    "depends_on": [],
    "title": "BankConnection.accessToken is encrypted at rest like every other provider token column, and the secret-column census can no longer miss an *AccessToken column",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-DB-CRYPTO-KEY-CENSUS",
@@ -6506,13 +6643,15 @@
    "priority": "P1",
    "size": "S",
    "lane": "server",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "47d6fbb6"
+   ],
    "depends_on": [],
    "title": "The GDPR forget purge also scrubs the person's data from business_events (D-25)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-ADMIN-LOGOUT",
@@ -6594,13 +6733,15 @@
    "priority": "P2",
    "size": "S",
    "lane": "gate",
-   "status": "todo",
-   "derived_from": "no-evidence",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "cbb61d04"
+   ],
    "depends_on": [],
    "title": "Every scripts/** node:test spec runs in a workflow, or is exempt with a reason (the agent-memory tests run nowhere today)",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "RR-CI-REQUIRED-JOBS-AGGREGATE",
@@ -6616,7 +6757,7 @@
     "RR-SCRIPT-SPECS-IN-CI"
    ],
    "title": "One 'CI verdict' job that is red when any gating CI job failed, was skipped or was cancelled",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-GATE-LEDGER-MONOTONIC",
@@ -6632,7 +6773,7 @@
     "RR-SCRIPT-SPECS-IN-CI"
    ],
    "title": "CI compares every registered shrink-only ledger and floor ratchet between base and head and goes red when one moves the wrong way",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-GATE-LEDGER-CENSUS",
@@ -6648,7 +6789,7 @@
     "RR-SCRIPT-SPECS-IN-CI"
    ],
    "title": "Every file that declares a shrink-only ledger or ratchet is registered in ledger-sizes.mjs, or exempt with a reason",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-BUNDLE-RULING-CONFLICTS",
@@ -6664,7 +6805,7 @@
     "RR-SCRIPT-SPECS-IN-CI"
    ],
    "title": "The context bundle reports rulings that supersede, refine or widen the rulings a packet cites",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-BUNDLE-PROOF-PROFILE",
@@ -6680,7 +6821,7 @@
     "RR-SCRIPT-SPECS-IN-CI"
    ],
    "title": "The context bundle attaches the matching research proof profile (fastest falsification, adversarial cases) by recorded rules, or says none matched",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-HOTSPOT-SCANNER",
@@ -6696,7 +6837,7 @@
     "RR-SCRIPT-SPECS-IN-CI"
    ],
    "title": "Offline git-history hotspots (churn, fix density, co-change) computed per packet write set and shown in the bundle",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-STATUS-REVIEW-CYCLES",
@@ -6712,7 +6853,7 @@
     "RR-SCRIPT-SPECS-IN-CI"
    ],
    "title": "V1-STATUS counts the review-repair and post-merge fix commits each packet needed, as far as main shows them",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-HOOK-PACKET-SCOPE",
@@ -6728,7 +6869,7 @@
     "RR-SCRIPT-SPECS-IN-CI"
    ],
    "title": "Edits outside a packet's write set are flagged at edit time on pkt/V1-* branches, and a scope report lists them for the merge check",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-INDEX-COVERAGE-REPORT",
@@ -6774,7 +6915,7 @@
     "RR-SCRIPT-SPECS-IN-CI"
    ],
    "title": "V1-STATUS reports packets that have been ready for longer than a budget without landing (stall signal from main alone)",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-OAUTH-PKCE-GOOGLE-MICROSOFT",
@@ -6806,7 +6947,7 @@
     "RR-ERASURE-BUSINESS-EVENTS"
    ],
    "title": "A soft-deleted or forget-pending contact is neither exported nor emailed",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "RR-FORGET-CANCEL-KEEPS-PRIOR-DELETE",
@@ -6852,7 +6993,7 @@
     "FU-TEMPORAL-FLOW-INBOX-SCOPE"
    ],
    "title": "Every member-facing reader of the temporal-flow timeline applies the reader's module filter",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-UNTRUSTED-INBOUND-FENCE",
@@ -6868,7 +7009,7 @@
     "RR-UNTRUSTED-CONTENT-FENCE"
    ],
    "title": "Customer messages (email, WhatsApp, CRM) reach KEY's prompts only inside the untrusted-content fence",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "FU-STORE-ORDERS-MONEY-SCOPE",
@@ -6900,7 +7041,333 @@
     "RR-UNTRUSTED-CONTENT-FENCE"
    ],
    "title": "Chat attachments are saved apart from the member's own text and replayed as their own fenced message",
+   "deps_met": true
+  },
+  {
+   "id": "MEM-PATTERNS-SIGHT",
+   "step": 5,
+   "priority": "P0",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "41786d46"
+   ],
+   "depends_on": [
+    "MEM-SEMANTIC-SIGHT"
+   ],
+   "title": "Flow-chat behavioural patterns never state money to readers without revenue read, and never to the support desk",
+   "deps_met": null
+  },
+  {
+   "id": "MEM-UNIFIED-SEMANTIC-SIGHT",
+   "step": 5,
+   "priority": "P0",
+   "size": "S",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "808719e8"
+   ],
+   "depends_on": [
+    "MEM-SEMANTIC-SIGHT"
+   ],
+   "title": "Unified memory retrieval's semantic load applies the reader projection (cortex chat, buildMemoryContext)",
+   "deps_met": null
+  },
+  {
+   "id": "MEM-TEMPORAL-MEMORY-ROUTES-SIGHT",
+   "step": 5,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "a2e9f3f0"
+   ],
+   "depends_on": [
+    "MEM-SEMANTIC-SIGHT",
+    "FU-TEMPORAL-FLOW-INBOX-SCOPE"
+   ],
+   "title": "Temporal-flow memory routes, KEY recall/search_memories and analyze's memory insights apply the reader projection",
+   "deps_met": null
+  },
+  {
+   "id": "FU-FLOW-SAVE-EXECUTED-TOOL-TURN",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-STREAM-ERROR-NO-EFFECTS"
+   ],
+   "title": "A failed flow follow-up stream still saves the tool turn that already ran",
+   "deps_met": true
+  },
+  {
+   "id": "FU-OPENAI-FINISH-REASON",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-STREAM-ERROR-NO-EFFECTS"
+   ],
+   "title": "OpenAI-compatible stream adapters treat a close without a finish reason as a failure",
+   "deps_met": true
+  },
+  {
+   "id": "FU-CONTACTID-WRITER-VALIDATION",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "RR-ERASURE-BUSINESS-EVENTS"
+   ],
+   "title": "Writers that store a caller-chosen contactId validate it against a live contact of the business",
+   "deps_met": true
+  },
+  {
+   "id": "FU-NMS-SERVER-METADATA",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "NAV-A1"
+   ],
+   "title": "A server spec reads the compiled controllers' module scopes for every NAV-A1 cited route",
+   "deps_met": true
+  },
+  {
+   "id": "FU-TEST-FLAKES-2026-11-23",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Three load-sensitive or random-collision tests become deterministic",
+   "deps_met": true
+  },
+  {
+   "id": "FU-NAV-A1-CODEX-224",
+   "step": 5,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "status": "done",
+   "derived_from": "compacted-commit",
+   "uncertain": false,
+   "evidence": [
+    "625864c3"
+   ],
+   "depends_on": [
+    "NAV-A1"
+   ],
+   "title": "Nav treats unknown sells as unknown; an uncertain settings write fences older answers",
+   "deps_met": null
+  },
+  {
+   "id": "FU-CORTEX-EXECUTE-STRUCTURED-DTO",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-VITEST-DECORATOR-METADATA"
+   ],
+   "title": "KEY execute accepts the structured module+action call its handler documents",
    "deps_met": false
+  },
+  {
+   "id": "FU-UNIT-MOCK-ISOLATION-2",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Seeded order-dependent unit failures under vitest.unit.config.ts are isolated",
+   "deps_met": true
+  },
+  {
+   "id": "FU-BARE-400-AUDIT",
+   "step": 5,
+   "priority": "P2",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-VITEST-DECORATOR-METADATA"
+   ],
+   "title": "HTTP negative tests that assert a bare 400 still prove the check they target",
+   "deps_met": false
+  },
+  {
+   "id": "FU-SETTINGS-MANUAL-STEP-FENCE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-NAV-A1-CODEX-224"
+   ],
+   "title": "The manual setup step's settings PATCH goes through the write sequence",
+   "deps_met": true
+  },
+  {
+   "id": "FU-WEB-PAYLINK-STATUS-BUTTONS",
+   "step": 5,
+   "priority": "P0",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-PAY-LINK-STATUS-GATE"
+   ],
+   "title": "Invoice panel offers pay-link copy and WhatsApp share only for payable invoices",
+   "deps_met": true
+  },
+  {
+   "id": "FU-KEY-SEND-INVOICE-PAID-REFUSE",
+   "step": 5,
+   "priority": "P2",
+   "size": "S",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-PAY-LINK-STATUS-GATE"
+   ],
+   "title": "KEY's send-invoice refuses a PAID or deleted invoice before emailing",
+   "deps_met": true
+  },
+  {
+   "id": "WEDGE-WA-INBOUND-CAPTURE",
+   "step": 4,
+   "priority": "P0",
+   "size": "M",
+   "lane": "both",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "WA-E164-SERVER",
+    "WA-HELPER",
+    "MOUNT-QUOTES"
+   ],
+   "title": "New from WhatsApp: paste a customer's WhatsApp message and number; KEYFLOWOS finds or creates the customer by E.164, keeps the message on their timeline, and opens New quote or New booking for them",
+   "deps_met": false
+  },
+  {
+   "id": "WEDGE-HIDE-STORE",
+   "step": 7,
+   "priority": "P1",
+   "size": "S",
+   "lane": "web",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "NAV-B-LEGACY-SERVER"
+   ],
+   "title": "Store checkout, Sales > Orders and Quick sale are offered at launch only to a business that already sells online; everyone else gets the booking page and invoices",
+   "deps_met": false
+  },
+  {
+   "id": "GATE-PILOT-10",
+   "step": 8,
+   "priority": "P0",
+   "size": "M",
+   "lane": "gate",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "S0-SEC-LANE-DEPLOY",
+    "GATE-JOURNEY-RUN"
+   ],
+   "title": "Ten real Trinidad and Tobago businesses run on the launch build for two weeks; the owner decides go or no-go on what they measure",
+   "deps_met": false
+  },
+  {
+   "id": "SEC-KEY-CUSTOM-LOGIC",
+   "step": 3,
+   "priority": "P0",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [],
+   "title": "Tenant KEY's execute_custom_logic never runs model-written code on the API host: local child-process execution and the silent fallback to it are removed",
+   "deps_met": true
+  },
+  {
+   "id": "FU-OUTBOUND-ATTACHMENT-URL",
+   "step": 3,
+   "priority": "P1",
+   "size": "M",
+   "lane": "server",
+   "status": "todo",
+   "derived_from": "no-evidence",
+   "uncertain": false,
+   "evidence": [],
+   "depends_on": [
+    "FU-CONTRACT-FETCH-OUTBOUND-GUARD"
+   ],
+   "title": "No client-supplied URL reaches the document model: chat attachments and contract term extraction read only the business's own uploaded or Drive objects",
+   "deps_met": true
   }
  ]
 }

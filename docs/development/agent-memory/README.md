@@ -112,6 +112,8 @@ procedure is not permission. Each file below restates rules the owner already ru
 | `ACCEPTANCE-REVIEW-BRIEF.md` | A packet branch returns: two-lens independent review |
 | `CONFIRMATION-REVIEW-BRIEF.md` | A small repair delta needs confirming |
 | `WAVE-RUNBOOK.md` | Compacting packets into a wave, proving it, the PR, merge conditions |
+| `CHECKLISTS.md` | The repeatable checklists every lane ticks: session start, packet, wave, merge, handoff, advisory review |
+| `LIVE-PROOF-RUNBOOK.md` | Exactly how to run the server proof at one head, the web proof, live journeys and browser sweeps (with RED at the base), and reviews in detached worktrees, on any machine |
 | `OWNER-QUESTION-FORMAT.md` | Asking the owner, and recording the answer as D-nnn |
 | `MEASUREMENT.md` | Checking what this layer saves, and the resume test |
 
