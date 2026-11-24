@@ -785,11 +785,22 @@ export async function fetchInvoices(businessId: string = selectedBusinessId()) {
     // the customer by it (the saved WhatsApp number, or the phone for the confirm step); without it
     // every list share went to WhatsApp's chooser.
     contactId: z.string().nullable().optional(),
+    // SWP-INV-LIST (BUG-050, search): the row's tax, discount and notes, kept from the server's row (they were
+    // dropped here, so Duplicate lost them and the list could not search the notes). Decimals may arrive as strings.
+    subtotal: z.union([z.number(), z.string()]).nullable().optional(),
+    taxRate: z.union([z.number(), z.string()]).nullable().optional(),
+    taxAmount: z.union([z.number(), z.string()]).nullable().optional(),
+    discountType: z.string().nullable().optional(),
+    discountValue: z.union([z.number(), z.string()]).nullable().optional(),
+    discountAmount: z.union([z.number(), z.string()]).nullable().optional(),
+    notes: z.string().nullable().optional(),
     contact: z
       .object({
         firstName: z.string().nullable().optional(),
         lastName: z.string().nullable().optional(),
         email: z.string().nullable().optional(),
+        companyName: z.string().nullable().optional(),
+        phone: z.string().nullable().optional(),
       })
       .nullable()
       .optional(),
@@ -2700,7 +2711,9 @@ export async function createInvoice(input: {
     body: {
       contactId: input.contactId,
       items: input.items,
-      currency: input.currency ?? "TTD",
+      // SWP-INV-LIST (BUG-007): no "TTD" default; a caller that names no currency gets the business currency, which
+      // the server applies (V1-37, documentCurrency).
+      currency: input.currency,
       dueDate: input.dueDate,
       taxRate: input.taxRate,
       discountType: input.discountType,
