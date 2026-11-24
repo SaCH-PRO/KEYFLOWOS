@@ -37,6 +37,16 @@ type AppearanceSection = { primaryColor?: string; secondaryColor?: string; accen
 type SeoSection = { metaTitle?: string; metaDescription?: string };
 
 const TAB_KEYS = VIEW_TABS.map((t) => t.key);
+/**
+ * NAV-A3 (BUG-078): the names other pages link by. Schedule and Studio link ?tab=products and Presence > Orders
+ * links ?tab=orders; products live on Catalog and orders on Ops, so those links land there, not on Overview.
+ */
+const TAB_ALIASES: Record<string, TabKey> = { products: "catalog", orders: "operations" };
+function tabFromParam(p: string | null): TabKey | null {
+  if (!p) return null;
+  if (TAB_KEYS.includes(p as TabKey)) return p as TabKey;
+  return TAB_ALIASES[p] ?? null;
+}
 
 const SLIDE = {
   enter: (d: number) => ({ x: d > 0 ? 40 : -40, opacity: 0 }),
@@ -48,7 +58,8 @@ export default function StorePage() {
   const searchParams = useSearchParams();
   const s = useStoreData();
   const ai = useStoreAiHub();
-  const [activeTab, setActiveTab] = useState<TabKey>("overview");
+  // NAV-A3 (BUG-078): a linked tab is the first tab drawn, so the page does not flash Overview and slide over.
+  const [activeTab, setActiveTab] = useState<TabKey>(() => tabFromParam(searchParams.get("tab")) ?? "overview");
   const [dir, setDir] = useState(0);
   const initRef = useRef(false);
   const { setCurrentMeta } = useNavigationContext();
@@ -56,9 +67,9 @@ export default function StorePage() {
 
   useEffect(() => {
     if (initRef.current) return;
-    const p = searchParams.get("tab");
-    if (p && TAB_KEYS.includes(p as TabKey)) {
-      setActiveTab(p as TabKey);
+    const tab = tabFromParam(searchParams.get("tab"));
+    if (tab) {
+      setActiveTab(tab);
       initRef.current = true;
     }
   }, [searchParams]);

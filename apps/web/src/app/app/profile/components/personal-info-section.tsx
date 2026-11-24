@@ -52,7 +52,7 @@ export default function PersonalInfoSection({
   onSaved,
   onStatus,
 }: PersonalInfoSectionProps) {
-  const { form, setForm, setInitialForm, isDirty, saving, setSaving } = useProfileSection<PersonalInfoForm>({
+  const { form, setForm, initialForm, setInitialForm, isDirty, saving, setSaving } = useProfileSection<PersonalInfoForm>({
     initialState: initialData,
     isDirtyFn: isPersonalFormDirty,
     onDirtyChange,
@@ -78,8 +78,11 @@ export default function PersonalInfoSection({
       const uploaded = await uploadFile(file);
       if (!uploaded) throw new Error("Upload failed");
       const { objectPath } = uploaded;
-      const { data } = await apiPatch<IdentityMe>("/identity/me", { avatarUrl: objectPath });
-      if (data) {
+      const { data, error } = await apiPatch<IdentityMe>("/identity/me", { avatarUrl: objectPath });
+      // NAV-A3 review MINOR-3: a refused photo is said, not swallowed.
+      if (error) {
+        onStatus({ type: "error", message: `Your photo was not saved: ${error}` });
+      } else if (data) {
         setCachedUser({ id: data.id, email: data.email, name: data.name, firstName: data.firstName, lastName: data.lastName, avatarUrl: objectPath });
         onSaved(form, objectPath);
         onStatus({ type: "success", message: "Avatar updated" });
@@ -93,18 +96,38 @@ export default function PersonalInfoSection({
     setSaving(true);
     onStatus(null);
     try {
-      const { data, error } = await apiPatch<IdentityMe>("/identity/me", {
-        firstName: form.firstName,
-        lastName: form.lastName,
-        phone: form.phone,
-        name: form.name,
-      });
+      // NAV-A3 review MAJOR-2: send only what changed. The server's UpdateUserDto refuses an empty phone (400) and its
+      // service cannot take a null one, so a blank phone is never sent; the stored number is kept.
+      const changes: Partial<Pick<PersonalInfoForm, "firstName" | "lastName" | "name" | "phone">> = {};
+      if (form.firstName !== initialForm.firstName) changes.firstName = form.firstName;
+      if (form.lastName !== initialForm.lastName) changes.lastName = form.lastName;
+      if (form.name !== initialForm.name) changes.name = form.name;
+      if (form.phone !== initialForm.phone && form.phone.trim() !== "") changes.phone = form.phone.trim();
+      const phoneBlanked = form.phone.trim() === "" && initialForm.phone !== "";
+      const keepPhone = "A phone number cannot be removed here yet; enter a new one instead.";
+      if (Object.keys(changes).length === 0) {
+        if (phoneBlanked) setForm({ ...form, phone: initialForm.phone });
+        onStatus(phoneBlanked ? { type: "error", message: keepPhone } : null);
+        setSaving(false);
+        return;
+      }
+      const { data, error } = await apiPatch<IdentityMe>("/identity/me", changes);
       if (error) {
         onStatus({ type: "error", message: error });
       } else if (data) {
-        onStatus({ type: "success", message: "Profile updated" });
-        setInitialForm({ ...form });
-        onSaved({ ...form }, avatarUrl);
+        // What is saved is what the server now holds (repair confirmation finding 1): a blanked phone was not sent, so
+        // the stored number stays, and the form shows it again rather than a blank that reads as removed.
+        const saved: PersonalInfoForm = {
+          email: form.email,
+          name: data.name ?? "",
+          firstName: data.firstName ?? "",
+          lastName: data.lastName ?? "",
+          phone: data.phone ?? "",
+        };
+        onStatus(phoneBlanked ? { type: "error", message: `Your other changes were saved. ${keepPhone}` } : { type: "success", message: "Profile updated" });
+        setForm(saved);
+        setInitialForm(saved);
+        onSaved(saved, avatarUrl);
         setCachedUser({
           id: data.id, email: data.email, name: data.name,
           firstName: data.firstName, lastName: data.lastName, avatarUrl: data.avatarUrl,

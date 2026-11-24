@@ -104,7 +104,8 @@ function CommandQuickLauncher() {
         { id: "key-chat", label: "KEY Chat", icon: MessageSquare, href: "/app/key/chat", tone: "primary" },
         { id: "commerce", label: "Commerce", icon: TrendingUp, href: "/app/commerce", tone: "orange" },
         { id: "events", label: "Events", icon: Calendar, href: "/app/events", tone: "teal" },
-        { id: "storefront", label: "Storefront", icon: Store, href: "/app/commerce", tone: "violet" },
+        // NAV-A3 (BUG-108): the store, not the Sales hub.
+        { id: "storefront", label: "Storefront", icon: Store, href: "/app/store", tone: "violet" },
         { id: "inbox", label: "Inbox", icon: Inbox, href: "/app/data-inbox", tone: "default" },
       ],
     },
