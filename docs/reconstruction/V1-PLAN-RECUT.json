@@ -11224,6 +11224,437 @@
    "scope": "From the RR-UNTRUSTED-CONTENT-FENCE reviews: the saved member message is still enrichedMessage (member text + fenced block), so a reopened chat shows the fence markup in the member's own bubble and an attachment-only session title starts with the markup; history replays the block inline in the member message. Persist the extraction separately, replay it as its own fenced user message, show attachments in the web as an attachment chip, and fence legacy sessions saved before RR-UNTRUSTED-CONTENT-FENCE (raw 'ATTACHMENT CONTEXT' in the user turn) at replay. Also route the genome extractor's read of saved turns through the same separation (it must not read fenced content as the member's words).",
    "definition_of_done": "RED: a reopened chat shows fence markup in the member bubble; a legacy session replays raw ATTACHMENT CONTEXT unfenced. GREEN: member bubble shows only their text plus an attachment chip; replay fenced; genome extractor reads member text only; full server suite and web checks green; proof:release0 MET.",
    "fixture_prefix": null
+  },
+  {
+   "id": "MEM-PATTERNS-SIGHT",
+   "title": "Flow-chat behavioural patterns never state money to readers without revenue read, and never to the support desk",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "S",
+   "priority": "P0",
+   "depends_on": [
+    "MEM-SEMANTIC-SIGHT"
+   ],
+   "files": [
+    "apps/server/src/modules/ai/ai-memory.service.ts",
+    "apps/server/src/modules/ai/flow-orchestrator.service.ts",
+    "apps/server/test/memory-patterns-sight.integration.test.ts (new)"
+   ],
+   "decisions": [
+    "D-257",
+    "D-100",
+    "D-203",
+    "D-234"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "Found by the MEM-SEMANTIC-SIGHT security review (2026-11-23): AiMemoryService.buildContextBlock / buildPromptSection (flow-orchestrator ~2193, ~2644) puts the patterns pattern-detector.service.ts ~256-261 writes ('N overdue invoices totaling X', 'Overdue: <total>') into every flow-chat prompt, including the customer-facing D-203 support desk and STAFF without revenue read. Withhold money-stating patterns from non-revenue readers and every pattern from the support desk; owner unchanged.",
+   "definition_of_done": "RED: a support-desk turn and a revenue-none STAFF turn carry an overdue-total pattern. GREEN: absent for both (differential 0 vs N patterns identical); owner prompt unchanged. Cross-tenant cases pass; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "MEM-UNIFIED-SEMANTIC-SIGHT",
+   "title": "Unified memory retrieval's semantic load applies the reader projection (cortex chat, buildMemoryContext)",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "S",
+   "priority": "P0",
+   "depends_on": [
+    "MEM-SEMANTIC-SIGHT"
+   ],
+   "files": [
+    "apps/server/src/modules/key-cortex/unified-memory-retrieval.service.ts",
+    "apps/server/src/modules/key-cortex/unified-memory.types.ts",
+    "apps/server/test/memory-unified-semantic-sight.integration.test.ts (new)"
+   ],
+   "decisions": [
+    "D-257",
+    "D-100",
+    "D-234"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "Found by the MEM-SEMANTIC-SIGHT reviews: UnifiedMemoryRetrievalService.loadSemanticMemory (~459-485) searches without visibleTo and re-types every hit 'ai_memory_embedding' (dropping sourceType), so recordModulesOf returns [] and temporal money summaries, chunks and money pattern copies reach POST /cortex/chat (and stream, query-pipeline ~2116) and buildMemoryContext (prompt-context ~946) for a blind STAFF member. Pass readerSearchOptions through MemoryRetrievalOptions and keep sourceType.",
+   "definition_of_done": "RED: a revenue-none STAFF member's cortex chat memory context contains a temporal money summary. GREEN: withheld, filtered before limit (differential); owner unchanged. Cross-tenant cases pass; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "MEM-TEMPORAL-MEMORY-ROUTES-SIGHT",
+   "title": "Temporal-flow memory routes, KEY recall/search_memories and analyze's memory insights apply the reader projection",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "M",
+   "priority": "P0",
+   "depends_on": [
+    "MEM-SEMANTIC-SIGHT",
+    "FU-TEMPORAL-FLOW-INBOX-SCOPE"
+   ],
+   "files": [
+    "apps/server/src/modules/temporal-flow/temporal-flow.controller.ts",
+    "apps/server/src/modules/temporal-flow/temporal-flow.service.ts",
+    "apps/server/src/modules/key-cortex/adapters/temporal-adapter.service.ts",
+    "apps/server/test/memory-temporal-routes-sight.integration.test.ts (new)"
+   ],
+   "decisions": [
+    "D-257",
+    "D-100",
+    "D-179"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "Found by the MEM-SEMANTIC-SIGHT reviews: GET temporal-flow .../memory, memory/search, memory/by-entity (~96-125, membership only) serve every summary raw; KEY tools recall_memory and search_memories (~150, ~189) take no actor and no sight; buildMemoryInsights (~318-352, POST analyze) returns raw summaries plus an unprojected 'overdue invoice' semantic recall. FU-TEMPORAL-FLOW-INBOX-SCOPE added readerMemoryFilter for some of these: reuse it and semanticHitsVisibleTo; the KEY tools get the acting member's sight.",
+   "definition_of_done": "RED: a bookings-only member reads a money summary via each route and each KEY tool. GREEN: withheld on every path; owner unchanged. Cross-tenant cases pass; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-FLOW-SAVE-EXECUTED-TOOL-TURN",
+   "title": "A failed flow follow-up stream still saves the tool turn that already ran",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [
+    "RR-STREAM-ERROR-NO-EFFECTS"
+   ],
+   "files": [
+    "apps/server/src/modules/ai/flow-orchestrator.service.ts",
+    "apps/server/src/modules/ai/flow-orchestrator-stream-tool-turn.spec.ts (new)"
+   ],
+   "decisions": [
+    "D-261"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "From the RR-STREAM-ERROR-NO-EFFECTS return: when the flow follow-up stream fails after tools executed, the return skips saving the tool calls and results, so on retry the model has no record of a write that already ran (e.g. create_invoice) and may repeat it. Save the tool turn (calls + results) without the partial follow-up text, marked failed.",
+   "definition_of_done": "RED: after a mid-follow-up failure, the saved session lacks the executed tool turn. GREEN: the tool turn is saved, the partial text is not; a retry sees the executed write. Cross-tenant cases pass; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-OPENAI-FINISH-REASON",
+   "title": "OpenAI-compatible stream adapters treat a close without a finish reason as a failure",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [
+    "RR-STREAM-ERROR-NO-EFFECTS"
+   ],
+   "files": [
+    "apps/server/src/modules/ai/model-gateway.service.ts",
+    "apps/server/src/modules/ai/model-gateway-finish-reason.spec.ts (new)"
+   ],
+   "decisions": [
+    "D-261"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "From RR-STREAM-ERROR-NO-EFFECTS: the six OpenAI-SDK adapters (openai, xai, kimi, native, opensource, google) yield done after a clean close without a finish_reason chunk, so a truncated stream with an open tool call can run. Flag finish_reason per loop and fail without it, after verifying with recorded fixtures that each provider always sends one (no real traffic).",
+   "definition_of_done": "RED: a scripted stream with a complete tool call then a clean close yields done. GREEN: it ends in an error chunk and no tool runs; normal streams unchanged. Cross-tenant cases pass; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-CONTACTID-WRITER-VALIDATION",
+   "title": "Writers that store a caller-chosen contactId validate it against a live contact of the business",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "C"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [
+    "RR-ERASURE-BUSINESS-EVENTS"
+   ],
+   "files": [
+    "apps/server/src/modules/*/time-cost.service.ts",
+    "apps/server/src/modules/*/revenue-attribution.service.ts",
+    "apps/server/test/contactid-writer-validation.integration.test.ts (new)"
+   ],
+   "decisions": [
+    "D-25",
+    "D-261"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "Option A from the RR-ERASURE-BUSINESS-EVENTS review: time-cost.service ~96/~132 and revenue-attribution ~184 (and the suspected command item, contract, keystore order and signal DTOs: audit them) store a caller-chosen contactId without validation. Validate against a live contact of the business (as call-log.service assertContactInBusiness does), 404 otherwise; once done, a later pass may let the erasure scrub read after.contactId on these events again.",
+   "definition_of_done": "RED: a time-cost entry accepts another business's or a purged contact's id. GREEN: refused; valid ids unchanged. Cross-tenant cases pass; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-NMS-SERVER-METADATA",
+   "title": "A server spec reads the compiled controllers' module scopes for every NAV-A1 cited route",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "A",
+    "J"
+   ],
+   "step": 5,
+   "lane": "gate",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [
+    "NAV-A1"
+   ],
+   "files": [
+    "apps/server/src/core/config/nav-route-scope-metadata.spec.ts (new)",
+    "apps/web/src/lib/__tests__/nav-member-scope.spec.ts"
+   ],
+   "decisions": [
+    "D-179"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "NAV-A1's NMS-18 checks claims from source text; its documented limits (code defined in another file, metadata written at run time, pinned guard subclass bodies) can only be closed by loading the real controllers. Add a server spec that loads them and reads MODULE_SCOPE_KEY and the route table for every route NMS-18 cites, failing on mismatch.",
+   "definition_of_done": "RED: a cited route whose scope is set by an imported decorator differs from its NMS-18 claim and nothing fails. GREEN: the server spec fails; all current claims pass.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-TEST-FLAKES-2026-11-23",
+   "title": "Three load-sensitive or random-collision tests become deterministic",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [],
+   "step": 5,
+   "lane": "gate",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [],
+   "files": [
+    "apps/server/src/modules/phone-voice/phone-voice-stream-auth.spec.ts",
+    "apps/server/test/books-read-doors.integration.test.ts",
+    "apps/server/test/public-payment-intent.integration.test.ts"
+   ],
+   "decisions": [
+    "D-261"
+   ],
+   "r0_impact": "AMEND",
+   "scope": "(1) phone-voice-stream-auth NEGATIVE CONTROL tampers with sig.slice(0,-2)+'AA', identical to the real signature when it already ends in AA (~1/4096): flip a character instead. (2) books-read-doors BRD-01 asserts a 403 body contains no seeded 5-digit figure, but the body echoes path (cuid row ids) and correlationId (UUID), ~1/350 runs: strip path and correlationId before the assertion. (3) public-payment-intent.integration.test.ts hoists a static import (computeBalance) above its loadEnv(), so it fails locally without DATABASE_URL in the shell: move env loading or use a dynamic import. File (3) is Release 0 evidence (manifests/public-payment-intent.json): its change needs an owner ruling (r0_register AMEND) before it lands; (1) and (2) do not.",
+   "definition_of_done": "RED where reproducible (forced signature ending, forced id containing the figure, unset DATABASE_URL). GREEN: each deterministic; what each test proves unchanged; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-NAV-A1-CODEX-224",
+   "title": "Nav treats unknown sells as unknown; an uncertain settings write fences older answers",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "A"
+   ],
+   "step": 5,
+   "lane": "web",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [
+    "NAV-A1"
+   ],
+   "files": [
+    "apps/web/src/hooks/use-app-layout.ts",
+    "apps/web/src/lib/business-settings.ts",
+    "apps/web/src/hooks/__tests__/use-app-layout-sells-*.test.ts (new)",
+    "apps/web/src/lib/__tests__/business-settings-uncertain-fence*.test.ts (new)"
+   ],
+   "decisions": [
+    "D-150",
+    "D-179"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "Two Codex P2 findings on PR #224 (wave 3f), verified real: (a) use-app-layout mapped only 'loading' sells to unknown, so idle (hydration) and failed exposed the default 'both' and a products-only business saw Schedule; (b) business-settings recorded() did not fence an older write's late success after a newer write ended uncertain (no status or 5xx), so settings could revert. Built and accepted before this row was written (in wave 3h).",
+   "definition_of_done": "RED: a products-only business sees Schedule while settings are idle or failed; an older write's success after an uncertain newer write is recorded. GREEN: sells null unless ready; the uncertain write fences older answers and forces a re-read; SEC-3/SEC5-1/SEC6-1/SEC6-2/COR-2 unchanged; web tsc, unit, lint green.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-CORTEX-EXECUTE-STRUCTURED-DTO",
+   "title": "KEY execute accepts the structured module+action call its handler documents",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 5,
+   "lane": "both",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [
+    "FU-VITEST-DECORATOR-METADATA"
+   ],
+   "files": [
+    "apps/server/src/modules/key-cortex/dto/*execute*.ts",
+    "apps/server/src/modules/key-cortex/key-cortex.controller.ts",
+    "apps/web/src/components/**/KeySuggestionCards.tsx"
+   ],
+   "decisions": [
+    "D-261"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "From FU-VITEST-DECORATOR-METADATA: ExecuteCommandDto requires `command`, but the handler (key-cortex.controller.ts ~2486) and the DTO comment document module+action without command, so the structured call is 400 in production. The only web caller (KeySuggestionCards.tsx ~150) sends neither and is 400 either way. Decide the either/or rule (command, or module+action) in the DTO, and fix the web caller.",
+   "definition_of_done": "RED: a module+action execute without command is 400 and the suggestion card's call is 400. GREEN: exactly one of command or module+action is required; the card's call succeeds for a permitted member and is refused per D-140/D-119 otherwise; full suites green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-UNIT-MOCK-ISOLATION-2",
+   "title": "Seeded order-dependent unit failures under vitest.unit.config.ts are isolated",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [],
+   "files": [
+    "apps/server/src/**/*.spec.ts (token-crypto.kdf-cache, key-cortex-tenant-binding, invoice-receipt.listener, proposal-revenue-sight, livekit pair)"
+   ],
+   "decisions": [
+    "D-261"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "From FU-VITEST-DECORATOR-METADATA: under isolate:false + shuffle, token-crypto.kdf-cache, key-cortex-tenant-binding.spec, invoice-receipt.listener, proposal-revenue-sight (timing) and the livekit.service/livekit-voice-session pair (shared livekit-server-sdk mock) fail at some seeds, with or without the swc transform. Apply the FU-UNIT-MOCK-ISOLATION pattern (vi.resetModules / scoped mocks).",
+   "definition_of_done": "RED: each named spec fails at a recorded seed under vitest.unit.config.ts. GREEN: all pass across seeds 1-20; no test weakened.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-BARE-400-AUDIT",
+   "title": "HTTP negative tests that assert a bare 400 still prove the check they target",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "M",
+   "priority": "P2",
+   "depends_on": [
+    "FU-VITEST-DECORATOR-METADATA"
+   ],
+   "files": [
+    "apps/server/test/**/*.test.ts"
+   ],
+   "decisions": [
+    "D-261"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "From FU-VITEST-DECORATOR-METADATA: with DTO validation now running in vitest, ~347 `400` assertions under test/ may now pass because the DTO refuses the body rather than the deeper check they target. Audit: each negative test asserts the refusal's message or reason, or sends a DTO-valid body so the deeper check is what refuses.",
+   "definition_of_done": "Each bare-400 assertion either names its reason or is shown to reach its target check (mutation: removing the target check turns it red). Full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-SETTINGS-MANUAL-STEP-FENCE",
+   "title": "The manual setup step's settings PATCH goes through the write sequence",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "A"
+   ],
+   "step": 5,
+   "lane": "web",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [
+    "FU-NAV-A1-CODEX-224"
+   ],
+   "files": [
+    "apps/web/src/**/manual-setup-step.tsx",
+    "apps/web/src/lib/business-settings.ts"
+   ],
+   "decisions": [
+    "D-150"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "From the FU-NAV-A1-CODEX-224 security review: manual-setup-step.tsx records its PATCH answer through noteBusinessSettings with no write sequence, so the newest-write fence does not cover it.",
+   "definition_of_done": "RED: an older sequenced write's late answer overwrites the manual step's newer PATCH. GREEN: the manual step's write is sequenced and fenced like the others; web suites green.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-WEB-PAYLINK-STATUS-BUTTONS",
+   "title": "Invoice panel offers pay-link copy and WhatsApp share only for payable invoices",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "E"
+   ],
+   "step": 5,
+   "lane": "web",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [
+    "FU-PAY-LINK-STATUS-GATE"
+   ],
+   "files": [
+    "apps/web/src/app/app/commerce/invoices/invoices-panel.tsx"
+   ],
+   "decisions": [
+    "D-256",
+    "D-248"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "From the FU-PAY-LINK-STATUS-GATE review: 'Copy payment link' and 'Share via WhatsApp' show for every status; on DRAFT, PENDING, FAILED and FULLY_CREDITED they now error ('Could not create a payment link'). Show them only for SENT, OVERDUE, PARTIALLY_PAID, PARTIALLY_CREDITED.",
+   "definition_of_done": "RED: the buttons render for a DRAFT invoice. GREEN: rendered only for payable statuses; web suites green.",
+   "fixture_prefix": null
+  },
+  {
+   "id": "FU-KEY-SEND-INVOICE-PAID-REFUSE",
+   "title": "KEY's send-invoice refuses a PAID or deleted invoice before emailing",
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "journeys": [
+    "K"
+   ],
+   "step": 5,
+   "lane": "server",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [
+    "FU-PAY-LINK-STATUS-GATE"
+   ],
+   "files": [
+    "apps/server/src/modules/ai/flow-orchestrator.service.ts"
+   ],
+   "decisions": [
+    "D-248"
+   ],
+   "r0_impact": "KEEP",
+   "scope": "From the FU-PAY-LINK-STATUS-GATE review: KEY commerce_send_invoice emails a PAID invoice and then fails the PAID->SENT move; its invoice findFirst also lacks `deletedAt: null`. Refuse PAID (and soft-deleted invoices) before any side effect.",
+   "definition_of_done": "RED: KEY emails a PAID invoice; KEY finds a soft-deleted invoice. GREEN: both refused before any email or status change; cross-tenant cases pass; full server suite green; proof:release0 MET.",
+   "fixture_prefix": null
   }
  ],
  "moot": [
@@ -12357,7 +12788,7 @@
   }
  ],
  "coverage": "Coverage check (recut2/p8_output.py, and review/cov.py re-run on v1-plan-recut.json): PASS. BUG-001..BUG-135 each appear exactly once: 126 on 58 packets, 3 moot, 6 fixed in flight (BUG-001/013/014/015/030 on pkt/SWEEP-P0-SCOPES, BUG-026 on pkt/PR195-JOURNAL-SCOPE). Missing: none; duplicated: none; unknown: none. All 119 v1-plan packets accounted for: 96 carried (kept or shrunk), 18 folded into consolidation packets (moot list + absorbs), 5 moot (SWP-EVENTS-CREATE, SWP-PO-LINES, SWP-PAYROLL-START, W11-CALLS-WEB-LIST, W11-WEB-CALENDAR-OWNER-CONTROLS); unaccounted: none. The moot list now holds only unreachable surfaces: BUG-002, BUG-079, BUG-113. Bugs fixed by removal sit on the packet that removes the surface, so the sweep re-run verifies them: 062 SWP-CONTACT-DETAIL, 066 and 121 SWP-CALENDAR-TRUTH, 072 EXPENSES-HUB-3, 082 SWP-CRM-WEB-POLISH, 093 SWP-INV-FORM-UX, 119 HARNESS-REMOVAL, 094 DEMO-PREVIEW, 057 W11-WEB-INVENTORY-REFUSALS. Other re-homes: 010 -> TODAY-4BLOCK (web half; server half in TODAY-AGGREGATE), 114 -> NAV-A2, 067/123/118/078/108 -> NAV-A3, 047 -> SWP-INV-LIST, 098 -> MOUNT-QUOTES, 068 -> OWNER-ALERTS-WEB, 077 -> BIZ-SETTINGS-WEB, 038 -> FIX-CONTACT-PARAMS, 008 -> DECIMALS-WEB, 069 -> TODAY-4BLOCK, 074/125 -> TODAY-AGGREGATE. Declared departures from the audit's moot list: BUG-011 stays on W11-QUERY-DTO-COERCION and BUG-065 on SWP-SEC-AUDIT-TRUTH (the audit keeps both packets); W11-WEB-CALENDAR-OWNER-CONTROLS is moot although the audit does not list it (Google Calendar is hidden; recorded in S1). Graph checks (recut2/p5_check.py): 0 dependency problems; the graph (depends_on plus lane order) is acyclic; no dependency points to a later step; 0 file collisions, counting every pair of packets that share a file with no dependency path between them across all steps (there are no wave barriers), with fixture-prefixes.json, the REST census doc, BUILD-MAP-001.md, DEPLOY_RUNBOOK.md and apps/server/package.json treated as append-only or disjoint-row files; 0 packets touch a step-0-changed file without depending on S0-LAND-INFLIGHT (S0-SEC-LANE-DEPLOY's runbook record is merged after #208 by design). Step-0 file sets were recomputed on the current local heads (f5d58ef7..71370250: 794 files, b4a30241..b3335bb7: 88, 0c22ea76..6f4935f1: 54); S0-LAND-INFLIGHT recomputes them on the admitted heads. 55 new integration suites in 55 packets each carry a pre-allocated v6<step><letter>_ prefix and list fixture-prefixes.json. Every decision id is valid and each of the 37 is used by at least one packet besides S1-RULINGS-RECORD.",
- "totals": "166 packets: 13 consolidated, 77 kept, 57 new, 19 shrunk. From the 119 v1 packets: 96 carried, 18 folded, 5 moot. Lanes: both 17, docs 1, gate 21, server 77, web 50. Sizes: L 22, M 73, S 71. Priorities: P0 37, P1 74, P2 38, P3 17. Bugs: 126 on packets, 3 moot, 6 fixed in flight = 135. Waves: 9 (steps 0-8) as labels over an explicit dependency graph; R0 register 61 entries (6 AMEND needing owner and ChatGPT authority, 3 conditional). Size-weighted (S=1, M=2, L=3) critical path 66 over 34 packets: S0-LAND-INFLIGHT -> GATE-HARNESS -> GATE-JOURNEYS-A-F -> SWP-LAYERS -> FIX-CONTACT-PARAMS -> MARKETING-REDIRECT-GATE -> FAILURE-KIT -> SWP-PROFILE-TEAMSIZE -> BIZ-SETTINGS-WEB -> NAV-A1 -> MOUNT-QUOTES -> SWP-INV-MATH -> SWP-INV-FORM-UX -> SWP-QUOTE-COMPOSER-CONTACT -> SWP-CONTACT-QUICKADD -> SWP-INV-LIST -> W11-WEB-OWNER-MEMBERSHIP-REFUSAL -> SWP-REMOVED-MEMBER-NOTICE -> SWP-INV-DETAIL -> SWP-INV-REFUND-UI -> CLAIM-LOOP -> READY-TO-SEND -> TODAY-AGGREGATE -> DEMO-PREVIEW -> TODAY-4BLOCK -> HARNESS-REMOVAL -> NAV-B-HIDE -> NAV-B-HIDE-2 -> NAV-B-LINKS -> NAV-B-LINKS-KEY -> SWEEP-RERUN-S7 -> GATE-JOURNEY-RUN -> GATE-STAGING-RUN -> GATE-OWNER-TEST. Longest lanes: 3:server-key 19, 6:store-sale-plans 19, 4:web-sales 18, 5:server-money-today 15, 5:web-screens 13, 5:loops 12. Growth over the draft (145): NAV-A split in three, NAV-B-HIDE and NAV-B-LINKS split in two, NAV-B-LEGACY-SERVER, KEY-TOOL-DOMAIN-HIDE, seven census batches replacing one M packet, MIGRATION-SET split in two, SALES-ORDERS-TAB and six sweep checkpoints. Calendar: the web lane from NAV-A1 through web-sales to CLAIM-LOOP, Today and the hide census is the critical path, as the audit said; at the reconstruction pace the build is about 3-4 weeks and the hold about 6 weeks with rulings, staging, the accountant, the owner test and fix rounds. Added 2026-11-22 (D-245, D-246, D-248): FU-BOOKING-PAGE-PAYMENT-METHOD, FU-CONTRACT-FETCH-OUTBOUND-GUARD, FU-KEY-INVOICE-EMAIL-PAY-LINK. Added 2026-11-22 (D-249): FU-MARKETPLACE-PAID-PAYMENT-ROW. Added 2026-11-22 (D-256 and acceptance reviews): FU-PENDING-OWED-SERVER, FU-PENDING-OWED-WEB, FU-SEND-REMINDER-SERVER-GATE, FU-LIST-CREDIT-AWARE-REMAINING, FU-CASH-LABEL-SANITISER, FU-DOC-FETCH-BODY-CAP, FU-CONTACTS-AUDIT-FLAKE. Added 2026-11-22 (D-257): the 13 MEM-* memory packets; (D-258 to D-260): FU-FINANCE-INTEL-DOORS, FU-HEALTH-MONEY-SCOPE, FU-KEY-OVERDUE-SENT-ONLY. Added 2026-11-22 (D-261): FU-RESEARCH-CORPUS-YAML; the research-index recommendations follow as RR-* packets once re-derived (D-262). Added 2026-11-22 (acceptance reviews of NAV-A1, FU-SEND-REMINDER-SERVER-GATE, SWP-FIN-LEDGER, SWP-COA-UNIQUE-CODE): FU-SITE-ANALYTICS-REVENUE-SCOPE, FU-TEMPORAL-FLOW-INBOX-SCOPE, FU-KEY-ACTION-GENOME-PROJECTION, FU-CONVERSION-REPS-REVENUE, FU-PRESENCE-REVENUE-SCOPE, FU-CASE-STUDY-REVENUE, FU-PAY-LINK-STATUS-GATE, FU-REMINDER-HONESTY, FU-LEDGER-ZONED-FROM, FU-COA-SEEDER-AND-INPUT. Added 2026-11-22 (D-261, D-262): 97 RR-* packets from the research index re-derived from the repo (docs/reconstruction/research-recommendations/ on branch docs/v1-research-recommendations @ 592ee2d2; P1 14, P2 36, P3 47), with 27 fixture prefixes (v72*, v73a_). Added 2026-11-22: FU-VITEST-DECORATOR-METADATA (P1; vitest runs without decorator metadata so DTO validation is off in every HTTP test), FU-TIMELINE-CALLERS-SCOPE (P1). Added 2026-11-23: FU-UNTRUSTED-INBOUND-FENCE (P1), FU-STORE-ORDERS-MONEY-SCOPE (P1), FU-ATTACHMENT-PERSIST-SEPARATE (P2).",
+ "totals": "166 packets: 13 consolidated, 77 kept, 57 new, 19 shrunk. From the 119 v1 packets: 96 carried, 18 folded, 5 moot. Lanes: both 17, docs 1, gate 21, server 77, web 50. Sizes: L 22, M 73, S 71. Priorities: P0 37, P1 74, P2 38, P3 17. Bugs: 126 on packets, 3 moot, 6 fixed in flight = 135. Waves: 9 (steps 0-8) as labels over an explicit dependency graph; R0 register 61 entries (6 AMEND needing owner and ChatGPT authority, 3 conditional). Size-weighted (S=1, M=2, L=3) critical path 66 over 34 packets: S0-LAND-INFLIGHT -> GATE-HARNESS -> GATE-JOURNEYS-A-F -> SWP-LAYERS -> FIX-CONTACT-PARAMS -> MARKETING-REDIRECT-GATE -> FAILURE-KIT -> SWP-PROFILE-TEAMSIZE -> BIZ-SETTINGS-WEB -> NAV-A1 -> MOUNT-QUOTES -> SWP-INV-MATH -> SWP-INV-FORM-UX -> SWP-QUOTE-COMPOSER-CONTACT -> SWP-CONTACT-QUICKADD -> SWP-INV-LIST -> W11-WEB-OWNER-MEMBERSHIP-REFUSAL -> SWP-REMOVED-MEMBER-NOTICE -> SWP-INV-DETAIL -> SWP-INV-REFUND-UI -> CLAIM-LOOP -> READY-TO-SEND -> TODAY-AGGREGATE -> DEMO-PREVIEW -> TODAY-4BLOCK -> HARNESS-REMOVAL -> NAV-B-HIDE -> NAV-B-HIDE-2 -> NAV-B-LINKS -> NAV-B-LINKS-KEY -> SWEEP-RERUN-S7 -> GATE-JOURNEY-RUN -> GATE-STAGING-RUN -> GATE-OWNER-TEST. Longest lanes: 3:server-key 19, 6:store-sale-plans 19, 4:web-sales 18, 5:server-money-today 15, 5:web-screens 13, 5:loops 12. Growth over the draft (145): NAV-A split in three, NAV-B-HIDE and NAV-B-LINKS split in two, NAV-B-LEGACY-SERVER, KEY-TOOL-DOMAIN-HIDE, seven census batches replacing one M packet, MIGRATION-SET split in two, SALES-ORDERS-TAB and six sweep checkpoints. Calendar: the web lane from NAV-A1 through web-sales to CLAIM-LOOP, Today and the hide census is the critical path, as the audit said; at the reconstruction pace the build is about 3-4 weeks and the hold about 6 weeks with rulings, staging, the accountant, the owner test and fix rounds. Added 2026-11-22 (D-245, D-246, D-248): FU-BOOKING-PAGE-PAYMENT-METHOD, FU-CONTRACT-FETCH-OUTBOUND-GUARD, FU-KEY-INVOICE-EMAIL-PAY-LINK. Added 2026-11-22 (D-249): FU-MARKETPLACE-PAID-PAYMENT-ROW. Added 2026-11-22 (D-256 and acceptance reviews): FU-PENDING-OWED-SERVER, FU-PENDING-OWED-WEB, FU-SEND-REMINDER-SERVER-GATE, FU-LIST-CREDIT-AWARE-REMAINING, FU-CASH-LABEL-SANITISER, FU-DOC-FETCH-BODY-CAP, FU-CONTACTS-AUDIT-FLAKE. Added 2026-11-22 (D-257): the 13 MEM-* memory packets; (D-258 to D-260): FU-FINANCE-INTEL-DOORS, FU-HEALTH-MONEY-SCOPE, FU-KEY-OVERDUE-SENT-ONLY. Added 2026-11-22 (D-261): FU-RESEARCH-CORPUS-YAML; the research-index recommendations follow as RR-* packets once re-derived (D-262). Added 2026-11-22 (acceptance reviews of NAV-A1, FU-SEND-REMINDER-SERVER-GATE, SWP-FIN-LEDGER, SWP-COA-UNIQUE-CODE): FU-SITE-ANALYTICS-REVENUE-SCOPE, FU-TEMPORAL-FLOW-INBOX-SCOPE, FU-KEY-ACTION-GENOME-PROJECTION, FU-CONVERSION-REPS-REVENUE, FU-PRESENCE-REVENUE-SCOPE, FU-CASE-STUDY-REVENUE, FU-PAY-LINK-STATUS-GATE, FU-REMINDER-HONESTY, FU-LEDGER-ZONED-FROM, FU-COA-SEEDER-AND-INPUT. Added 2026-11-22 (D-261, D-262): 97 RR-* packets from the research index re-derived from the repo (docs/reconstruction/research-recommendations/ on branch docs/v1-research-recommendations @ 592ee2d2; P1 14, P2 36, P3 47), with 27 fixture prefixes (v72*, v73a_). Added 2026-11-22: FU-VITEST-DECORATOR-METADATA (P1; vitest runs without decorator metadata so DTO validation is off in every HTTP test), FU-TIMELINE-CALLERS-SCOPE (P1). Added 2026-11-23: FU-UNTRUSTED-INBOUND-FENCE (P1), FU-STORE-ORDERS-MONEY-SCOPE (P1), FU-ATTACHMENT-PERSIST-SEPARATE (P2). Added 2026-11-23: MEM-PATTERNS-SIGHT, MEM-UNIFIED-SEMANTIC-SIGHT, MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (P0, MEM-SEMANTIC-SIGHT review siblings), FU-FLOW-SAVE-EXECUTED-TOOL-TURN, FU-CONTACTID-WRITER-VALIDATION (P1), FU-OPENAI-FINISH-REASON, FU-NMS-SERVER-METADATA, FU-TEST-FLAKES-2026-11-23 (P2).",
  "open_questions": [
   "Authorities for the AMEND entries (owner + ChatGPT), all requested in S1-RULINGS-RECORD: gmail-connect-binding R0-CMF5-I01/R0-CMF6-M01 (needed before SWEEP-P0 is admitted), invoice-create-contract and revenue-auth-001 CC-400 fractional quantity, onboarding-manual-complete demo seed, d11-sibling-writes D11W-04, release0-index explained entries, release0-live 'Customers', and the conditional WOS-C01 re-point.",
   "Production's deployed SHA for sec/v1-hold-1, and whether SWEEP-P0's fix commits cherry-pick onto it cleanly; if not, the owner must choose between an adapted security-only ref and accepting a deploy of main that carries #208 and PR195.",

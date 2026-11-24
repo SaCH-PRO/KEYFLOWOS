@@ -1,6 +1,6 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-23 01:15 UTC by the orchestrator (Claude Code). Rewrite in place on every merge, packet return
+Last written: 2026-11-23 01:50 UTC by the orchestrator (Claude Code). Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -45,27 +45,38 @@ joins wave 3e. D-249 to D-254 are on main (wave 3d, #221).
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `b94477a7` (wave 3e, #223, merged 2026-11-23 01:10 UTC; #218 merged 00:04). 70 packets done on main; live state of every packet is on #80 (latest comment) until this table is next rewritten. Child sessions are on the account that started them; for another account the
-branch is the hand-over: fetch it, read its last commits and the RETURN on #80, and continue. Lesson of 2026-11-22:
-three workers stopped on the Fable limit before pushing and their work was lost; the brief now says push after every
-commit.
+Main is at `c97f42dd` (wave 3h, #226, merged 2026-11-23 08:05 UTC). Plan 361 + new follow-ups (this branch); see V1-STATUS.
+Workers run on Opus (Fable spent until 2026-11-25 19:00 UTC); hold four. A second Claude account works the RR-* P2/P3
+lane (`docs/development/agent-memory/SECOND-ACCOUNT-SETUP.md`); it claims by pushing `pkt/V1-<ID>` and posts RETURN on
+#80; scan #80 every ~2 h and give each RETURN the two acceptance reviews. Its first claim: RR-SCRIPT-SPECS-IN-CI.
 
-| Work | Branch / PR | State | Next action |
+| Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
-| FU-PROPOSAL-REVENUE-SIGHT + Codex fixes | PR #218, `wave/v1-wave-3b-proposal` @ d9284a95 (main 16c37675 merged in) | Both reviews accept; local 775/775 and R0 MET at d9284a95; merges cleanly with 2c4e4bf2 (50 files) | Merge under D-239 when CI is green at d9284a95. The two Codex P1 threads stay open for the owner |
-| FU-KEY-GENOME-READS-RESIDUAL (D-235) | `pkt/V1-FU-KEY-GENOME-READS-RESIDUAL` @ bd95bc84 | Suite 775/775 and R0 MET | After #218: merge main, add the test that kills the `budget.left -= rawCost` mutant, re-prove, wave 3e |
-| SWP-INV-MONEY-TOTALS (D-249..D-252, D-255, D-256) | `pkt/V1-SWP-INV-MONEY-TOTALS` @ 2b7f96de | ACCEPTED (both lenses); server 767/767 + R0 MET at 001e344d, web-tests-only since | Wave 3e |
-| W11-RUNWAY-LEDGER-CASH | `pkt/V1-W11-RUNWAY-LEDGER-CASH` @ e3c4ecc0 | Accepted, repairs proven | Wave 3e with W11-CASH-READERS-LEDGER (owner question 3 default) |
-| W11-CASH-READERS-LEDGER | `pkt/V1-W11-CASH-READERS-LEDGER` @ 117171a3 | ACCEPTED; 768/768 and R0 MET | Wave 3e |
-| FU-CONTRACT-FETCH-OUTBOUND-GUARD (P0) | `pkt/V1-FU-CONTRACT-FETCH-OUTBOUND-GUARD` @ a558bf9e | ACCEPTED; 770/770 and R0 MET (includes ::ffff:0:0:0/96 in outbound-address.ts, authorized) | Wave 3e |
-| NAV-A1 (critical path) | `pkt/V1-NAV-A1`, session_017o9EBfkZtn5ec3BPuoARuf (restarted 19:59) | Building | Acceptance review on return |
-| SWP-FIN-LEDGER | `pkt/V1-SWP-FIN-LEDGER` @ 8fbcfba5, session_017o9EBhDURhxSoPYYpU8c4D | Both lenses accept with minors; worker bounding the page>1 seed (skip when out of range, SQL sums) | Check the delta; wave 3e |
-| SWP-COA-UNIQUE-CODE | `pkt/V1-SWP-COA-UNIQUE-CODE` @ bff63c11, session_017o9EBe9P31PXeeaZhC6Bbo | Both lenses accept with minors; worker adding explicit tx limits + P2028 -> 503 and the seeder lock comment | Check the delta; wave 3e |
-| Memory R&D (D-253 Track 2, D-254) | `docs/kf-memory-rnd-001`, session_017o9EBeh5mV5XyHFgneVdkX (restarted 20:44) | Researching; pushes after each deliverable | Review the report; owner approves the design before product packets |
+| Wave 3i: PR #227 | `wave/v1-wave-3i` @ 1d6f71fa (7 pkts: ATTACHMENT-OBJECT-TENANCY, MEM-UNIFIED, MEM-PATTERNS, KEY-ACTION-GENOME, GATEWAY-TYPED-FAILURES, BANK-TOKEN, NAV-CODEX-224) | Proven 820/820, R0 MET, web clean. Codex: 1 finding (architecture map refresh) answered -> owner Q27 | Merge under D-239 when CI green (check-in 09:26) |
+| Wave 3j | `wave/v1-wave-3j` @ a2e9f3f0 (on 3i): RR-REDACTION-BY-CONTENT, FU-KEY-GENOME-READS-RESIDUAL, MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (own delta) | Proven 832/832, R0 MET; assembly CLEAN | PR after 3i merges |
+| Wave 3k | `wave/v1-wave-3k` @ 88268a01 (on 3j, 48 files): FU-PATTERNS-ROUTES-SIGHT (+integration fix 12205636), FU-CORTEX-PATTERNS-SIGHT, FU-GENOME-EVOLUTION-SURFACES; migration 20261123070000 (ai_memories index) | Proven at 3233fc68 (837/837); re-proof at 88268a01 running | PR after 3j |
+| Wave 3l (next) | FU-INSIGHTS-SIGHT @ 28cdbccb (ACCEPTED; stacked on PATTERNS-ROUTES: apply own delta) + next returns | Accepted | Build after 3k |
+| FU-STRATEGIC-ROUTES-SIGHT (P0) | session_017o9EBeafoWPQry9ggXEDDK (on INSIGHTS) | Building | Review |
+| FU-GENOME-DNA-WRITES-AND-INTEGRITY (P0) | session_017o9EBfKdTMK1cKeLRzg5q6 (on GENOME-EVOLUTION) | Building (write-gate design approved) | Review |
+| FU-GENOME-SURFACES-REVENUE (P0, scope +3 routes) | session_017o9EBf78ski7zSK9HWPYHX (on GENOME-EVOLUTION) | Building | Review |
+| FU-OUTBOUND-ATTACHMENT-URL (P1) | session_017o9EBhe1oanHeGuPsPEcQv (on 3i) | Building | Review |
+| FU-AI-APPROVALS-MONEY-SIGHT (P0) | session_017o9EBffRpw8j5YyzyGjCMC (on main) | Building | Review |
+| FU-VITEST-DECORATOR-METADATA | @ 83b6dfc8 | STOPPED on owner Q20 | Owner ruling |
+| Second lane | other account | Reviewing: RR-CI-REQUIRED-JOBS-AGGREGATE 6e690d18, RR-EVAL-HARNESS repair 17d8802e, RR-LANGFUSE-INGESTION-CUTOVER afece460; building RR-OBJECT-STORAGE-POSTURE-CHECK. RR-REDACTION-BY-CONTENT ACCEPTED (in 3j); RR-GATEWAY in 3i | Post verdicts on #80 |
 
-Next to start, in order, when a slot frees: FU-SEND-REMINDER-SERVER-GATE
-(P1 security), FU-KEY-INVOICE-EMAIL-PAY-LINK, W11-RUNWAY-BURN-CURRENCY, then the ready list in `V1-STATUS.md`
-(critical path first). `V1-STATUS.md` cannot see this table: check a packet is not already in flight.
+To add to the plan next: FU-CORTEX-PATTERNS-SIGHT, FU-PATTERNS-ROUTES-SIGHT, FU-INSIGHTS-SIGHT, FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-EVOLUTION-SURFACES, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-AI-APPROVALS-MONEY-SIGHT, FU-OUTBOUND-ATTACHMENT-URL, FU-EVAL-HARNESS-TENANT, FU-ARCH-MAP-REFRESH (Q27); FU-GATEWAY-STREAM-ERROR-CLASS, FU-CORTEX-PATTERNS-SIGHT (O-2, after UNIFIED lands), FU-PLANNER-INTENT-PATTERNS-SIGHT (O-3), FU-AI-MEMORY-WRITE-INTEGRITY (O-6), FU-SEMANTIC-HITS-FENCE (semantic hits enter the prompt unfenced), FU-PROVIDER-ERROR-TEXT-REDACT, FU-ATTACHMENT-OBJECT-TENANCY (row). Added to the plan 05:10 UTC: FU-NAV-A1-CODEX-224, FU-CORTEX-EXECUTE-STRUCTURED-DTO, FU-UNIT-MOCK-ISOLATION-2, FU-BARE-400-AUDIT, FU-SETTINGS-MANUAL-STEP-FENCE, FU-WEB-PAYLINK-STATUS-BUTTONS, FU-KEY-SEND-INVOICE-PAID-REFUSE. Still to do: label v86s_ in fixture-prefixes.json; MEM-TEMPORAL-MEMORY-ROUTES-SIGHT must also cover temporal-adapter searchMemories/getRecentMemories. From FU-PAY-LINK-STATUS-GATE review: web hides
+"Copy payment link" / WhatsApp share unless status is payable; KEY commerce_send_invoice refuses PAID up front (today it
+emails then fails the PAID->SENT move); KEY invoice findFirst lacks `deletedAt: null`. Recorded deviation: the
+pay-link packet touched flow-orchestrator.service.ts (+7, D-248) and invoice-send-delivery.spec.ts mock outside its write set.
+
+Next to start, in order, when a slot frees: the P1 follow-ups (FU-UNTRUSTED-INBOUND-FENCE, FU-STORE-ORDERS-MONEY-SCOPE,
+FU-TIMELINE-CALLERS-SCOPE, FU-FLOW-SAVE-EXECUTED-TOOL-TURN, FU-CONTACTID-WRITER-VALIDATION: each after its dependency merges), MEM-CENSUS, RR P1 packets
+(RR-WEBHOOK-INGRESS-CENSUS, RR-ADMIN-LOGOUT, ...), then the ready list.
+Not yet in the plan (add with the next rulings commit): FU-FLOW-SAVE-EXECUTED-TOOL-TURN (P1: a failed flow follow-up
+does not save the tool turn that already ran), finish-reason checks for the six OpenAI-compatible adapters,
+FU-PHONE-VOICE-TAMPER-TEST (1/4096 collision), FU-PROFILE-INTERVIEW (if not closed in MEM-DOC-EXTRACTION-SIGHT).
+Vercel previews: free-tier quota of 100 deployments/day was hit on 2026-11-23; not an admission gate.
+Container restarts happen; every proof run checks Postgres/Redis and a run with real ECONNREFUSED does not count.
 
 ## 4. Open questions waiting for the owner (ask together)
 
@@ -110,6 +121,35 @@ Format: `docs/development/agent-memory/OWNER-QUESTION-FORMAT.md`. Safe defaults 
     counts visible.)
 17. Should a failed KEY turn still save the member's question? (Default: no, as built.) Attachment caps 24k per file
     and 96k per turn, with a visible note to the member when truncated: acceptable? (Default: yes.)
+
+18. Hand-written (MANUAL) timeline notes are visible to every member ("client paid $12,000" reaches bookings-only
+    members): treat as revenue-owned? (Default: as built.)
+19. Production facts that set two RR priorities: is MCP_REMOTE_SERVERS set in production (RR-MCP-TENANT-BOUND -> P0)?
+    Are there BankConnection rows with access tokens (RR-BANK-TOKEN-ENCRYPT -> P0)?
+
+20. **Release 0 ruling needed (blocks FU-VITEST-DECORATOR-METADATA, R0 REJECTED without it).** Turning DTO validation
+    on in vitest broke two bound cases whose premise came from unvalidated tests: (a) crm-contact-duplicate "whitespace-
+    padded email passes the DTO ... 409" (release0-landed.json): production answers 400 at @IsEmail. Default: restate
+    as 400 (service trim still proven by the next case). (b) key-cortex-tenant-binding "SUPER_ADMIN naming no tenant is
+    refused" on GET conscious/stream: still refused, no service called, but the message is the pipe's "Bad Request".
+    Default: widen that route's expected message only. The packet also fixed a real production defect: every POST
+    create-event (and ticket types with a sale window) was 400 (@IsISO8601 after @Type(Date)).
+21. MEM-SEMANTIC-SIGHT gated the semantic backfill to settings:admin (STAFF were allowed before). Ratify? (Default: yes.)
+22. With sells unknown (first settings read failed, nothing cached), a services business loses Schedule until refocus
+    (FU-NAV-A1-CODEX-224). Differs from the "unknown hides nothing" rule for member levels. (Default: accept.)
+23. RR-GATEWAY-TYPED-FAILURES: should an Anthropic 400 "credit balance is too low" count as exhausted quota (opens the
+    platform circuit)? (Default as built: bad_request, not counted.)
+24. MEM-TEMPORAL-MEMORY-ROUTES-SIGHT (orchestrator chose B): structured temporal memory rows now also apply the
+    money/expense text taint and provenance rule, so a member with a partial module map (e.g. no crm) loses contact
+    summaries and provenance-less pattern summaries; FU-TEMPORAL-FLOW-INBOX-SCOPE's v71w:515 expectation narrowed.
+    Every-module readers and owners unchanged. (Default: B.)
+25. RR-REDACTION-BY-CONTENT: ~9.6% of random 15-digit ids (and 17-digit platform ids) pass Luhn and become <card>,
+    now also in KEY tool answers (externalPostId, platformId). Exempt *Id/_id keys from card matching? (Asked the lane
+    to exempt them; confirm.) Also: add sk_live_, xoxp-, AIza prefixes?
+26. FU-CORTEX-PATTERNS-SIGHT: KEY goals_create_plan plans as KEY_SYSTEM_ACTOR_ID, so an owner's goal plans lose money
+    patterns (plans are readable business-wide). Plan as the turn's member instead? (Default: keep as built.)
+27. Codex on #227: AGENTS.md asks architecture/ maps to be regenerated after architecture changes; CLAUDE.md forbids a
+    programme-map refresh without authority. Approve one reviewed packet FU-ARCH-MAP-REFRESH for waves 3a-3k? (Default: yes, after 3k lands.)
 
 ## 5. How to work here (learned the hard way)
 
