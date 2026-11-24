@@ -43,7 +43,8 @@ export class KeyCortexGenomeContextService {
   ): Promise<GenomeEnrichedContext> {
     // v2 (FU-KEY-CHAT-GENOME-MONEY-SIGHT): signals carry section and domain; a v1 entry lacks them.
     // v3 (FU-KEY-GENOME-READS-RESIDUAL rounds 8, 9): the entry carries the signal and ranked pools; a v2 entry lacks them.
-    const cacheKey = `genome:context:v3:${businessId}`;
+    // v4 (CODEX-228 MAJOR-2): bridge signals carry full-row isFinance (field, evidence, proposedValue, sourceEntityType); v3 lacks it.
+    const cacheKey = `genome:context:v4:${businessId}`;
     const cached = await this.redis.getJson<GenomeEnrichedContext>(cacheKey);
     if (cached) {
       this.logger.debug(
@@ -79,6 +80,7 @@ export class KeyCortexGenomeContextService {
       module: sig.module ?? 'general',
       section: sig.section ?? null,
       domain: sig.domain ?? null,
+      ...(typeof sig.isFinance === 'boolean' ? { isFinance: sig.isFinance } : {}),
       severity: sig.severity ?? 'low',
       createdAt: sig.createdAt ? new Date(sig.createdAt) : new Date(),
     });
