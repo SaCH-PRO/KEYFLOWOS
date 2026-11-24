@@ -36,9 +36,10 @@ function digitValue(ch: string): string {
 function folded(text: string): string {
   return text.normalize('NFKC').replace(INVISIBLE, '').replace(/\p{Nd}/gu, (ch) => (/[0-9]/.test(ch) ? ch : digitValue(ch)));
 }
-/** Decode escapes (including JSON.stringify-doubled \\uXXXX) BEFORE folding so escaped invisibles (\u200B, \u00AD) are stripped too (SEC-SRS-4). */
+/** Decode escapes (including JSON.stringify-doubled \\uXXXX) in linear time BEFORE folding so escaped invisibles (\u200B, \u00AD) are stripped too (SEC-SRS-4). */
 function decodeEscapes(text: string): string {
-  return text.replace(/\\+u([0-9a-fA-F]{4})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+  if (!text.includes('\\')) return text;
+  return text.replace(/(?<!\\)\\+u([0-9a-fA-F]{4})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
 }
 function allReadings(text: string): string[] {
   const out = new Set<string>();
@@ -50,14 +51,11 @@ function allReadings(text: string): string[] {
   };
   add(text);
   const decoded = decodeEscapes(text);
-  if (decoded !== text) {
-    out.add(decoded);
-    out.add(folded(decoded));
-    add(decoded);
-  }
+  if (decoded !== text) add(decoded);
   const f = folded(text);
-  out.add(f);
   add(f);
+  const foldedDecoded = decodeEscapes(f);
+  if (foldedDecoded !== f) add(foldedDecoded);
   return [...out];
 }
 const camelSplit = (text: string) => text.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
