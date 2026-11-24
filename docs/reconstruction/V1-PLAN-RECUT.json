@@ -12869,11 +12869,11 @@
    ],
    "files": [
     "apps/web/src/app/app/crm/contacts/page.tsx",
-    "apps/web/src/app/app/crm/pipeline/use-contacts-pipeline.ts (only if handleDoAction is widened)",
+    "apps/web/src/app/app/crm/pipeline/use-contacts-pipeline.ts (openContactPage; handleDoAction's call/task/default cases)",
     "apps/web/src/app/app/crm/pipeline/__tests__/focus-view-open.test.tsx (new)"
    ],
    "scope": "Journey C4's 'from the Customers list' step fails at main and at wave 3p alike: /app/crm/contacts opens in the focus view (the default, pipeline-tab-content.tsx:99-110), whose cards and NextActionQueue 'view' call handleViewEngageContact (contacts/page.tsx:133), which selects the contact and switches a tab but opens nothing (the side panel and its Open link render only in the list view). Fix at that one function: navigate to /app/crm/contacts/<id>. Not a link in ContactCard (shared with the list view, whose row click release0-live relies on). Declared widening if taken: handleDoAction's call/task/default cases (use-contacts-pipeline.ts:96-110) toast 'Opening <name>' and open nothing either. (Pre-flight 2026-11-24 against 771bfc3c, D-274 A3.)",
-   "definition_of_done": "RED: journey C4 'from the Customers list' fails at the base (URL stays /app/crm/contacts); unit: a focus card click and a NextActionQueue view do not navigate. GREEN: both push /app/crm/contacts/<id>; C4 green on phone and desktop; release0-live and release0-journey unchanged; tsc, lint green."
+   "definition_of_done": "RED: journey C4 'from the Customers list' fails at the base (URL stays /app/crm/contacts); unit: a focus card click, a next-action queue view and a focus-view call action do not navigate, and opening from the focus view records no recent. GREEN: each opens /app/crm/contacts/<id> and records the customer as recent; C4's 'from the Customers list' step green on phone and desktop (full C4 green belongs to FU-C4-CMDK-SEARCH: the next step, Cmd/K, is a separate pre-existing defect); release0-live and release0-journey unchanged; tsc, lint green. (Amended by the acceptance review, 2026-11-24.)"
   },
   {
    "kind": "new",
@@ -12921,7 +12921,8 @@
    "files": [
     "apps/web/src/components/command-palette.tsx",
     "apps/web/src/components/key/key-agent.tsx",
-    "apps/web/e2e/journeys/c-customer.spec.ts (read only unless the locator is wrong)"
+    "apps/web/src/hooks/use-keyboard-shortcuts.ts",
+    "apps/web/src/components/__tests__/command-palette-c4.test.tsx (new)"
    ],
    "decisions": [],
    "r0_impact": "KEEP",
@@ -12929,8 +12930,69 @@
    "track": "launch",
    "track_reason": "serves journey C",
    "track_ruling": "D-263",
-   "scope": "Found live by FU-C4-FOCUS-OPEN (2026-11-24): once C4's 'from the Customers list' step passes, its next step 'from Cmd/Ctrl+K' fails on both widths, a step no earlier run reached. Desktop: after Escape then Ctrl+K on /app/command-center, no visible input with a 'search' placeholder appears (the palette is mounted by KeyAgent, components/key/key-agent.tsx, whose window keydown toggles it). Phone: a search input is found and filled with the customer's last name, the API answers GET /api/flows/businesses/:b/search 200 in 12 ms, but no option or link names the customer. Root cause to establish first (palette not opening on desktop; results not labelled or not returned on phone); the unit cases in contact-detail-route.test.tsx (FIX-CONTACT-PARAMS) cover the result's href only.",
+   "scope": "Found live by FU-C4-FOCUS-OPEN (2026-11-24): once C4's 'from the Customers list' step passes, its next step 'from Cmd/Ctrl+K' fails on both widths, a step no earlier run reached. Desktop: after Escape then Ctrl+K on /app/command-center, no visible input with a 'search' placeholder appears (the palette is mounted by KeyAgent, components/key/key-agent.tsx, whose window keydown toggles it). Phone: a search input is found and filled with the customer's last name, the API answers GET /api/flows/businesses/:b/search 200 in 12 ms, but no option or link names the customer. Root cause to establish first (palette not opening on desktop; results not labelled or not returned on phone); the unit cases in contact-detail-route.test.tsx (FIX-CONTACT-PARAMS) cover the result's href only. Root causes found by the FU-C4-FOCUS-OPEN acceptance review (to confirm with REDs): (1) the palette lists results as plain <button>s (command-palette.tsx ~411-431), no listbox/option roles and no links, so the step's option/link locator can never match (phone failure); give them the combobox pattern (role=listbox / role=option, fitting the arrow-key selection) or <Link>s. (2) Ctrl+K has two owners in one keypress: the shortcut table (hooks/use-keyboard-shortcuts.ts ~31-38, via AppLayoutInner) dispatches kf:open-key {mode:'palette'} (KeyAgent sets it open) and KeyAgent's own keydown toggles it, so depending on registration order the palette opens and closes at once (desktop failure); give Ctrl+K one owner. C4's later steps ('from Today', 'from the invoice') have never run: expect more.",
    "definition_of_done": "RED: journey C4 'from Cmd/Ctrl+K' fails at the base (as recorded). GREEN: on phone and desktop, Ctrl/Cmd+K opens the palette, the customer's last name lists them, and the result opens /app/crm/contacts/<id>; C4 green end to end; web unit test for whatever the root cause was; tsc, lint green."
+  },
+  {
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "decisions": [],
+   "fixture_prefix": null,
+   "r0_impact": "KEEP",
+   "track": "launch",
+   "track_reason": "serves journey C",
+   "track_ruling": "D-263",
+   "step": 5,
+   "id": "FU-CONTACTS-OPEN-DOORS",
+   "title": "Every remaining door to a customer opens their page",
+   "journeys": [
+    "C"
+   ],
+   "lane": "web",
+   "size": "S",
+   "priority": "P2",
+   "depends_on": [
+    "FU-C4-FOCUS-OPEN"
+   ],
+   "files": [
+    "apps/web/src/app/app/crm/pipeline/pipeline-tab-content.tsx",
+    "apps/web/src/app/app/crm/pipeline/database-table.tsx",
+    "apps/web/src/components/contacts/contact-detail-info.tsx",
+    "apps/web/src/app/app/crm/deals/deals-board-view.tsx",
+    "apps/web/src/app/app/crm/deals/deals-list-view.tsx",
+    "apps/web/src/app/app/crm/accounts/[accountId]/page.tsx",
+    "apps/web/src/components/contacts/contact-card.tsx"
+   ],
+   "scope": "From the FU-C4-FOCUS-OPEN reviews: the favorites strip (pipeline-tab-content.tsx ~396) and the table view's row click (database-table.tsx ~329) select a customer outside the list view and show nothing; 'referred by' (contact-detail-info.tsx ~178), deals board/list (~217, ~163) and accounts (~124) link to /app/crm/contacts?contactId= or /app/crm?contactId=, which nothing reads (the list opens with no one selected); a focus card cannot be opened from the keyboard (contact-card.tsx root, role=option with no tabIndex or key handler). Route each to openContactPage / /app/crm/contacts/<id>.",
+   "definition_of_done": "RED per door (unit): it does not reach /app/crm/contacts/<id>; GREEN: it does (keyboard: Enter/Space on a focus card); journey C unchanged; tsc, lint green."
+  },
+  {
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "decisions": [],
+   "fixture_prefix": null,
+   "r0_impact": "KEEP",
+   "track": "launch",
+   "track_reason": "serves journey F",
+   "track_ruling": "D-263",
+   "step": 5,
+   "id": "FU-SEARCH-MONEY-SCOPE",
+   "title": "Cmd/K search shows no money figure to a member without revenue read",
+   "journeys": [
+    "F"
+   ],
+   "lane": "server",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [],
+   "files": [
+    "apps/server/src/modules/flow/flow.controller.ts",
+    "apps/server/test/flow-search-money-scope.integration.test.ts (new)"
+   ],
+   "scope": "From the FU-C4-FOCUS-OPEN acceptance review (read only): GET /api/flows/businesses/:b/search (flow.controller.ts ~99-137) has AuthGuard and BusinessGuard only and returns invoice totals, so a member without revenue read sees invoice amounts through Cmd/K (D-100). Strip money fields (or invoice results) for members without revenue read, as the other money readers do.",
+   "definition_of_done": "RED (real DB): a member with revenue none gets invoice totals from the search. GREEN: no money figure (shape kept); owner unchanged; Release 0 MET."
   }
  ],
  "moot": [
