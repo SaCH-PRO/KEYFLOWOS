@@ -57,7 +57,8 @@ set -euo pipefail                      # a failed step stops the chain; the run 
 H=<sha>; cd /path/to/dedicated/worktree
 git rev-parse --verify -q "$H^{commit}" >/dev/null             # a real commit, and we are inside a repository
 test "$(git rev-parse HEAD)" = "$(git rev-parse "$H^{commit}")" # the worktree is at the head
-test -z "$(git status --porcelain --untracked-files=no)"      # no tracked change (symlinked node_modules are fine)
+# no change and no untracked file, except the symlinked node_modules and packages/*/dist of section 2
+test -z "$(git status --porcelain --untracked-files=all | { grep -vE '^\?\? (((apps|packages)/[^/]+/)?node_modules|packages/[^/]+/dist)$' || true; })"
 set +e                                 # from here each step reports its own exit code
 (cd apps/server && NODE_OPTIONS=--max-old-space-size=6144 npx tsc --noEmit -p tsconfig.json); echo TSC=$?
 pnpm --filter server build; echo BUILD=$?
@@ -93,14 +94,18 @@ tests. A production web build needs a real install (section 3).
 - the server built at the same head.
 
 ```bash
-cd $WT && pnpm --filter server build
+set -euo pipefail                      # a failed build stops here: an older dist/ or .next must never be served
+H=<sha>; cd $WT
+test "$(git rev-parse HEAD)" = "$(git rev-parse "$H^{commit}")"   # the worktree is at the head under test
+pnpm --filter server build
 cd $WT/apps/web && rm -rf .next && NEXT_PUBLIC_API_BASE_URL=http://localhost:3001 NEXT_PUBLIC_SUPABASE_URL= \
   NEXT_PUBLIC_SUPABASE_ANON_KEY= NEXT_PUBLIC_SITE_URL= pnpm run build
 
 # The API on the e2e database (a clean environment; AI and schedulers off). Port 3001 must be free first: an API
 # left from an older head would answer the health check and the runs would test the wrong head.
-if curl -fsS --max-time 5 http://localhost:3001/healthz >/dev/null 2>&1; then
-  echo "port 3001 already serves an API: stop it (its PID is in that run's e2e-api.pid) and start again"; exit 1
+if curl -fsS --max-time 5 http://localhost:3001/healthz >/dev/null 2>&1 || lsof -t -iTCP:3001 -sTCP:LISTEN >/dev/null; then
+  echo "port 3001 is in use: if it is your own earlier run, stop it with kill \"\$(cat <that run's OUT>/e2e-api.pid)\";"
+  echo "if it is another lane's run, wait for it to finish (never stop another lane's API)"; exit 1
 fi
 (cd $WT/apps/server && exec env -i PATH="$PATH" HOME="$HOME" \
   DATABASE_URL=postgresql://keyflow:keyflow@127.0.0.1:5432/keyflowos_e2e DIRECT_URL=postgresql://keyflow:keyflow@127.0.0.1:5432/keyflowos_e2e \
@@ -109,9 +114,12 @@ fi
   NEXT_PUBLIC_APP_URL=http://127.0.0.1:5000 node dist/main.js > $OUT/e2e-api.log 2>&1) &
 echo $! > $OUT/e2e-api.pid             # `exec` makes this node's own PID, not a wrapper shell's
 for i in $(seq 1 90); do curl -fsS --max-time 5 http://localhost:3001/healthz >/dev/null && break; sleep 2; done
-if ! curl -fsS --max-time 5 http://localhost:3001/healthz >/dev/null || ! kill -0 "$(cat $OUT/e2e-api.pid)"; then
-  echo "API did not start: read $OUT/e2e-api.log"; kill "$(cat $OUT/e2e-api.pid)" 2>/dev/null; exit 1   # no browser run
+# Healthy, alive, and the process listening on 3001 is ours (not a leftover that came back on the port)
+if ! curl -fsS --max-time 5 http://localhost:3001/healthz >/dev/null || ! kill -0 "$(cat $OUT/e2e-api.pid)" \
+   || [ "$(lsof -t -iTCP:3001 -sTCP:LISTEN)" != "$(cat $OUT/e2e-api.pid)" ]; then
+  echo "API did not start as ours: read $OUT/e2e-api.log"; kill "$(cat $OUT/e2e-api.pid)" 2>/dev/null; exit 1   # no browser run
 fi
+set +e                                 # from here each browser run reports its own exit code
 
 # The browser runs (the harness starts the standalone web server on 5000)
 cd $WT/apps/web

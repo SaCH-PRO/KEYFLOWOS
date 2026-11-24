@@ -177,8 +177,10 @@ Format: `docs/development/agent-memory/OWNER-QUESTION-FORMAT.md`. Safe defaults 
     remount the modal? (Default: remove in a follow-up.)
 31. D-264: should the launch wait for the research (D-261) and memory (D-254) packets after all? (Default: no; they
     follow launch.) And confirm the precedence used in PR #230: where D-263 and D-264 differ on a research or
-    memory packet that fixes KEY, D-263 wins, so KEY correctness fixes are on launch (16 packets moved; the plan's
-    `wedge.correction_2026_11_24`). (Default: as applied.)
+    memory packet that fixes KEY, D-263 wins, so KEY correctness fixes are on launch. Seven packets rest on it:
+    RR-INTENT-PARSER-ONE-TOOL-LIST, RR-CORTEX-TYPED-RESULT, RR-LEARNING-OUTCOME-SEMANTICS, RR-REFLECTION-HONEST,
+    FU-FLOW-SAVE-EXECUTED-TOOL-TURN, FU-OPENAI-FINISH-REASON, FU-CORTEX-EXECUTE-STRUCTURED-DTO (the rule and all 17
+    moves: the plan's `wedge.correction_2026_11_24`). (Default: as applied.)
 
 ## 5. How to work here (learned the hard way)
 
