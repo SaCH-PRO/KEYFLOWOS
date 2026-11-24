@@ -2,7 +2,8 @@
  * FU-PENDING-OWED-WEB (owner rulings D-256, D-252): every web owed figure counts
  * PENDING invoices through one shared OWED_STATUSES constant in @/lib/commerce-status
  * pinned against the server's OPEN_RECEIVABLE_STATUSES (less PARTIALLY_CREDITED),
- * while reminder buttons still never appear for PENDING.
+ * nets stored payments via invoiceRemainingOwed (remaining balance, NaN-safe),
+ * and keeps reminder buttons and handlers off PENDING.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
@@ -56,11 +57,16 @@ vi.mock("../components/commerce-hub", () => ({ CommerceHub: () => null }));
 vi.mock("../components/invoice-drive-uploader", () => ({ InvoiceDriveUploader: () => null, buildTemplateData: () => null }));
 vi.mock("../components/tax-summary-panel", () => ({ TaxSummaryPanel: () => null }));
 vi.mock("../components/dunning-rules", () => ({ DunningRulesPanel: () => null }));
-vi.mock("../components/billing-detail-modal", () => ({ BillingDetailModal: () => null }));
 vi.mock("../components/invoice-mobile-actions", () => ({ InvoiceMobileActions: () => null }));
+vi.mock("../components/invoice-templates/template-customizer", () => ({ TemplateCustomizer: () => null }));
+vi.mock("../components/invoice-templates/template-renderer", () => ({ InvoiceTemplateRenderer: () => null }));
+vi.mock("../components/invoice-timeline", () => ({ InvoiceTimeline: () => null }));
+vi.mock("../components/time-log-widget", () => ({ TimeLogWidget: () => null }));
+vi.mock("../components/attribution-editor", () => ({ AttributionEditor: () => null }));
+vi.mock("../components/leverage-metrics-section", () => ({ LeverageMetricsSection: () => null }));
 
 import * as commerceStatus from "@/lib/commerce-status";
-import { computeCashPosition } from "@/lib/finance/utils";
+import { computeCashPosition, getPipelineStage } from "@/lib/finance/utils";
 import PaymentsTab, { OWED_STATUSES as PAYMENTS_TAB_OWED } from "../payments/payments-tab";
 import InvoicesHubPage from "../invoices/page";
 import { InvoiceStatCards } from "../invoices/components/invoice-stat-cards";
@@ -69,6 +75,9 @@ import { useBillingStats } from "../hooks/use-billing-stats";
 import { useActionQueue } from "../hooks/use-action-queue";
 import { CommerceKpiStrip } from "../components/commerce-kpi-strip";
 import { CommerceOverviewTab } from "../components/commerce-overview-tab";
+import { BillingDetailModal } from "../components/billing-detail-modal";
+import { ContactIntelligenceCard } from "../components/contact-intelligence-card";
+import { CommerceInsightsTab } from "../insights/commerce-insights-tab";
 import CollectionsPanel from "../billing/collections-panel";
 import InvoicesPanel from "../invoices/invoices-panel";
 import { formatAmount } from "../utils/commerce-utils";
@@ -153,7 +162,6 @@ describe("FU-PENDING-OWED-WEB (D-256): shared canonical status sets in @/lib/com
     const server = [...match![1].matchAll(/'([A-Z_]+)'/g)].map((m) => m[1]);
     expect(server.filter((s) => s !== "PARTIALLY_CREDITED").sort()).toEqual([...shared!].sort());
     expect(server).toContain("PARTIALLY_CREDITED");
-    // Ensure PaymentsTab import is live and clean
     expect(PaymentsTab).toBeTypeOf("function");
   });
 
@@ -174,7 +182,7 @@ describe("FU-PENDING-OWED-WEB (D-256): shared canonical status sets in @/lib/com
   });
 });
 
-describe("FU-PENDING-OWED-WEB (D-256): every web owed figure counts PENDING invoices", () => {
+describe("FU-PENDING-OWED-WEB (D-256): every web owed figure counts PENDING remaining balance and stays NaN-safe", () => {
   it("PO-W04 RED-BEFORE: invoices/page.tsx counts a PENDING invoice in Unpaid and shows its PENDING status filter count", async () => {
     const pending = invoice("inv_pend_page", "PENDING", 500, [payment("inv_pend_page", 100)]);
     const draft = invoice("inv_draft_page", "DRAFT", 900);
@@ -192,7 +200,6 @@ describe("FU-PENDING-OWED-WEB (D-256): every web owed figure counts PENDING invo
     expect(unpaidValue).toBe(formatAmount(400, "TTD"));
     expect(unpaidCount).toBe("1 invoice");
 
-    // Status tab for Pending must exist and count 1
     const pendingTab = screen
       .getAllByRole("button")
       .find((b) => b.textContent?.includes("Pending") && b.textContent?.includes("1"));
@@ -239,51 +246,54 @@ describe("FU-PENDING-OWED-WEB (D-256): every web owed figure counts PENDING invo
     expect(cardFor("Drafts")).toEqual({ val: formatAmount(900, "TTD"), cnt: "1 invoice" });
   });
 
-  it("PO-W07 RED-BEFORE: useFinancialSummary counts PENDING (and past-due PENDING in overdue) and excludes DRAFT from outstanding", () => {
-    const pendingCurrent = invoice("inv_pend_fs1", "PENDING", 500, [], { dueDate: NOT_YET_DUE });
-    const pendingPastDue = invoice("inv_pend_fs2", "PENDING", 300, [], { dueDate: PAST_DUE });
+  it("PO-W07 RED-BEFORE (R2): useFinancialSummary nets payments on PENDING/PARTIALLY_PAID, counts past-due PENDING in overdue, and excludes DRAFT", () => {
+    const pendingCurrent = invoice("inv_pend_fs1", "PENDING", 500, [payment("inv_pend_fs1", 100)], { dueDate: NOT_YET_DUE });
+    const pendingPastDue = invoice("inv_pend_fs2", "PENDING", 300, [payment("inv_pend_fs2", 50)], { dueDate: PAST_DUE });
     const draft = invoice("inv_draft_fs", "DRAFT", 900);
 
     const { result } = renderHook(() => useFinancialSummary([pendingCurrent, pendingPastDue, draft], [] as Quote[]));
 
-    expect(result.current.outstanding).toBe(800);
-    expect(result.current.overdue).toBe(300);
+    expect(result.current.outstanding).toBe(650);
+    expect(result.current.overdue).toBe(250);
     expect(result.current.draftCount).toBe(1);
   });
 
-  it("PO-W08 RED-BEFORE: useBillingStats counts PENDING and PARTIALLY_PAID in outstanding and aging buckets, excluding DRAFT", () => {
-    const pending = invoice("inv_pend_bs", "PENDING", 500, [], { dueDate: NOT_YET_DUE });
-    const partialPastDue = invoice("inv_part_bs", "PARTIALLY_PAID", 250, [], { dueDate: PAST_DUE });
+  it("PO-W08 RED-BEFORE (R2): useBillingStats counts remaining balance for PENDING and PARTIALLY_PAID in outstanding and aging buckets, excluding DRAFT", () => {
+    const pending = invoice("inv_pend_bs", "PENDING", 500, [payment("inv_pend_bs", 100)], { dueDate: NOT_YET_DUE });
+    const partialPastDue = invoice("inv_part_bs", "PARTIALLY_PAID", 250, [payment("inv_part_bs", 50)], { dueDate: PAST_DUE });
     const draft = invoice("inv_draft_bs", "DRAFT", 900);
 
     const { result } = renderHook(() => useBillingStats([pending, partialPastDue, draft], [] as Quote[]));
 
-    expect(result.current.outstanding).toBe(750);
-    expect(result.current.aging[0]).toEqual({ label: "Current", count: 1, amount: 500 });
-    expect(result.current.aging[1]).toEqual({ label: "1–30 days", count: 1, amount: 250 });
+    expect(result.current.outstanding).toBe(600);
+    expect(result.current.aging[0]).toEqual({ label: "Current", count: 1, amount: 400 });
+    expect(result.current.aging[1]).toEqual({ label: "1–30 days", count: 1, amount: 200 });
   });
 
-  it("PO-W09 RED-BEFORE: CommerceKpiStrip client fallback counts PENDING and PARTIALLY_PAID in Owed", () => {
-    const pending = invoice("inv_pend_kpi", "PENDING", 500);
-    const partial = invoice("inv_part_kpi", "PARTIALLY_PAID", 250);
+  it("PO-W09 RED-BEFORE (R2): CommerceKpiStrip client fallback nets payments for PENDING/PARTIALLY_PAID and guards NaN totals", () => {
+    const pending = invoice("inv_pend_kpi", "PENDING", 500, [payment("inv_pend_kpi", 100)]);
+    const partial = invoice("inv_part_kpi", "PARTIALLY_PAID", 250, [payment("inv_part_kpi", 50)]);
+    const malformed = invoice("inv_nan_kpi", "PENDING", undefined as unknown as number);
     const draft = invoice("inv_draft_kpi", "DRAFT", 900);
 
-    render(<CommerceKpiStrip businessId={null} invoices={[pending, partial, draft]} quotes={[]} products={[]} currency="TTD" />);
+    render(<CommerceKpiStrip businessId={null} invoices={[pending, partial, malformed, draft]} quotes={[]} products={[]} currency="TTD" />);
 
     const owedLabel = screen.getByText("Owed");
     const owedCard = owedLabel.closest("div.rounded-xl") as HTMLElement;
-    expect(owedCard.textContent).toContain("TTD 750");
+    expect(owedCard.textContent).toContain("TTD 600");
+    expect(owedCard.textContent).not.toContain("NaN");
   });
 
-  it("PO-W10 RED-BEFORE: CommerceOverviewTab At a Glance 'Invoiced' stage counts PENDING and PARTIALLY_PAID and excludes DRAFT", () => {
-    const pending = invoice("inv_pend_ov", "PENDING", 500);
-    const partial = invoice("inv_part_ov", "PARTIALLY_PAID", 250);
+  it("PO-W10 RED-BEFORE (R2): CommerceOverviewTab At a Glance 'Invoiced' stage nets payments matching RevenueHero and guards NaN totals", () => {
+    const pending = invoice("inv_pend_ov", "PENDING", 500, [payment("inv_pend_ov", 100)]);
+    const partial = invoice("inv_part_ov", "PARTIALLY_PAID", 250, [payment("inv_part_ov", 50)]);
+    const malformed = invoice("inv_nan_ov", "SENT", undefined as unknown as number);
     const draft = invoice("inv_draft_ov", "DRAFT", 900);
 
     render(
       <CommerceOverviewTab
         businessId="biz_pow"
-        invoices={[pending, partial, draft]}
+        invoices={[pending, partial, malformed, draft]}
         quotes={[]}
         recurring={[]}
         currency="TTD"
@@ -295,26 +305,28 @@ describe("FU-PENDING-OWED-WEB (D-256): every web owed figure counts PENDING invo
 
     const invoicedStage = screen.getByText("Invoiced").closest("div.flex.flex-col") as HTMLElement;
     expect(invoicedStage).toBeTruthy();
-    expect(invoicedStage.textContent).toContain("TTD 750");
-    expect(invoicedStage.textContent).toContain("2");
+    expect(invoicedStage.textContent).toContain("TTD 600");
+    expect(invoicedStage.textContent).not.toContain("NaN");
   });
 
-  it("PO-W11 RED-BEFORE: computeCashPosition counts PENDING and PARTIALLY_PAID in outstanding and excludes DRAFT/VOID/PAID", () => {
+  it("PO-W11 RED-BEFORE (R2): computeCashPosition nets payments on PENDING/PARTIALLY_PAID, excludes DRAFT/VOID/PAID, and guards NaN totals", () => {
     const invoices = [
-      invoice("inv_pend_cp", "PENDING", 500),
-      invoice("inv_part_cp", "PARTIALLY_PAID", 250),
+      invoice("inv_pend_cp", "PENDING", 500, [payment("inv_pend_cp", 100)]),
+      invoice("inv_part_cp", "PARTIALLY_PAID", 250, [payment("inv_part_cp", 50)]),
+      invoice("inv_nan_cp", "PENDING", undefined as unknown as number),
       invoice("inv_draft_cp", "DRAFT", 900),
       invoice("inv_void_cp", "VOID", 400),
       invoice("inv_paid_cp", "PAID", 1000),
     ];
 
     const pos = computeCashPosition(invoices, [], "TTD");
-    expect(pos.outstanding).toBe(750);
+    expect(pos.outstanding).toBe(600);
+    expect(Number.isNaN(pos.outstanding)).toBe(false);
     expect(pos.cashOnHand).toBe(1000);
   });
 
-  it("PO-W12 RED-BEFORE: CollectionsPanel includes past-due PENDING in overdue queue WITH Mark Paid and WITHOUT Send Reminder or AI Reminder", () => {
-    const pendingPastDue = invoice("inv_pend_col", "PENDING", 500, [], { dueDate: PAST_DUE });
+  it("PO-W12 RED-BEFORE (R2): CollectionsPanel includes past-due PENDING remaining balance WITH Mark Paid and WITHOUT Send Reminder or AI Reminder", () => {
+    const pendingPastDue = invoice("inv_pend_col", "PENDING", 500, [payment("inv_pend_col", 100)], { dueDate: PAST_DUE });
     const pendingCurrent = invoice("inv_pend_future", "PENDING", 300, [], { dueDate: NOT_YET_DUE });
 
     render(
@@ -330,12 +342,13 @@ describe("FU-PENDING-OWED-WEB (D-256): every web owed figure counts PENDING invo
 
     expect(screen.getByText("INV_PEND_COL")).toBeTruthy();
     expect(screen.queryByText("INV_PEND_FUTURE")).toBeNull();
+    // Remaining owed (400), not gross total (500)
+    expect(screen.getByText("Total Overdue").closest("div.rounded-xl")?.textContent).toContain("400");
     expect(screen.getAllByTitle("Mark Paid")).toHaveLength(1);
     expect(screen.queryByTitle("Send Reminder")).toBeNull();
     expect(screen.queryByTitle("AI Reminder")).toBeNull();
     cleanup();
 
-    // Positive control: past-due SENT still has Send Reminder and AI Reminder
     const sentPastDue = invoice("inv_sent_col", "SENT", 200, [], { dueDate: PAST_DUE });
     render(
       <CollectionsPanel
@@ -352,9 +365,9 @@ describe("FU-PENDING-OWED-WEB (D-256): every web owed figure counts PENDING invo
     expect(screen.getAllByTitle("AI Reminder")).toHaveLength(1);
   });
 
-  it("PO-W13 RED-BEFORE: useActionQueue includes past-due PENDING in overdue and non-overdue PENDING in awaiting payment", () => {
-    const pendingPastDue = invoice("inv_pend_aq1", "PENDING", 500, [], { dueDate: PAST_DUE });
-    const pendingCurrent = invoice("inv_pend_aq2", "PENDING", 400, [], { dueDate: NOT_YET_DUE });
+  it("PO-W13 RED-BEFORE (R2): useActionQueue includes remaining balance of past-due PENDING in overdue and non-overdue PENDING in awaiting payment", () => {
+    const pendingPastDue = invoice("inv_pend_aq1", "PENDING", 500, [payment("inv_pend_aq1", 100)], { dueDate: PAST_DUE });
+    const pendingCurrent = invoice("inv_pend_aq2", "PENDING", 400, [payment("inv_pend_aq2", 150)], { dueDate: NOT_YET_DUE });
 
     const { result } = renderHook(() =>
       useActionQueue([pendingPastDue, pendingCurrent], [] as Quote[], "TTD", vi.fn(), vi.fn()),
@@ -363,17 +376,17 @@ describe("FU-PENDING-OWED-WEB (D-256): every web owed figure counts PENDING invo
     const overdueItem = result.current.find((i) => i.id === "overdue");
     expect(overdueItem, "overdue action item for past-due PENDING").toBeTruthy();
     expect(overdueItem!.label).toBe("1 overdue invoice");
-    expect(overdueItem!.detail).toBe("TTD 500");
+    expect(overdueItem!.detail).toBe("TTD 400");
 
     const awaitingItem = result.current.find((i) => i.id === "pending");
     expect(awaitingItem, "awaiting payment action item includes PENDING").toBeTruthy();
-    expect(awaitingItem!.label).toContain("TTD 900");
+    expect(awaitingItem!.label).toContain("TTD 650");
     expect(awaitingItem!.detail).toBe("2 invoices");
   });
 
   it("PO-W14 RED-BEFORE: InvoicesPanel counts PENDING in status filters and keeps Send reminder hidden for PENDING", () => {
-    const pending = invoice("inv_pend_panel", "PENDING", 500);
-    const sent = invoice("inv_sent_panel", "SENT", 200);
+    const pending = invoice("inv_pend_panel", "PENDING", 500, [], { issueDate: new Date(Date.now() - DAY).toISOString() });
+    const sent = invoice("inv_sent_panel", "SENT", 200, [], { issueDate: NOW });
 
     render(
       <InvoicesPanel
@@ -393,15 +406,103 @@ describe("FU-PENDING-OWED-WEB (D-256): every web owed figure counts PENDING invo
     const optionTexts = Array.from(moreSelect.options).map((o) => o.textContent ?? "");
     expect(optionTexts.some((t) => /Pending\s*\(1\)/.test(t)), `More options: ${optionTexts.join(", ")}`).toBe(true);
 
-    // PENDING row overflow menu must never show "Send reminder"
-    const actionButtons = screen.getAllByLabelText("More actions");
-    expect(actionButtons.length).toBe(2);
-    fireEvent.click(actionButtons[0]);
+    // Locate each row's menu trigger explicitly from its invoice number
+    const rowMenuTrigger = (num: string) => {
+      let el: HTMLElement | null = screen.getByText(num);
+      while (el) {
+        const trigger = within(el).queryByLabelText("More actions");
+        if (trigger) return trigger;
+        el = el.parentElement;
+      }
+      throw new Error(`More actions button not found for ${num}`);
+    };
+
+    const pendTrigger = rowMenuTrigger("INV_PEND_PANEL");
+    fireEvent.click(pendTrigger);
     expect(screen.queryByText("Send reminder")).toBeNull();
-    // Close first menu and open SENT row overflow menu
-    fireEvent.click(actionButtons[0]);
-    fireEvent.click(actionButtons[1]);
+    fireEvent.click(pendTrigger);
+
+    const sentTrigger = rowMenuTrigger("INV_SENT_PANEL");
+    fireEvent.click(sentTrigger);
     expect(screen.getByText("Send reminder")).toBeTruthy();
+  });
+
+  it("PO-W16 RED-BEFORE (R2): BillingDetailModal Client Intelligence Outstanding counts PENDING and PARTIALLY_PAID remaining balance", () => {
+    const contactId = "ct_pow_modal";
+    const pending = invoice("inv_pend_modal", "PENDING", 500, [payment("inv_pend_modal", 100)], { contactId });
+    const partial = invoice("inv_part_modal", "PARTIALLY_PAID", 250, [payment("inv_part_modal", 50)], { contactId });
+    const draft = invoice("inv_draft_modal", "DRAFT", 900, [], { contactId });
+
+    render(
+      <BillingDetailModal
+        type="invoice"
+        id={pending.id}
+        number={pending.invoiceNumber!}
+        status={pending.status}
+        contactId={contactId}
+        contact={{ firstName: "Pow", lastName: "Modal", email: "modal@example.test" }}
+        total={pending.total}
+        currency="TTD"
+        items={[]}
+        allInvoices={[pending, partial, draft]}
+        onClose={() => {}}
+      />,
+    );
+
+    const outBox = screen.getByText("Outstanding").closest("div.rounded-lg") as HTMLElement;
+    expect(outBox).toBeTruthy();
+    expect(outBox.textContent).toContain(formatAmount(600, "TTD"));
+  });
+
+  it("PO-W17 RED-BEFORE (R2): ContactIntelligenceCard Outstanding counts PENDING and PARTIALLY_PAID remaining balance", () => {
+    const contactId = "ct_pow_card";
+    const pending = invoice("inv_pend_ci", "PENDING", 500, [payment("inv_pend_ci", 100)], { contactId });
+    const partial = invoice("inv_part_ci", "PARTIALLY_PAID", 250, [payment("inv_part_ci", 50)], { contactId });
+    const draft = invoice("inv_draft_ci", "DRAFT", 900, [], { contactId });
+
+    render(
+      <ContactIntelligenceCard
+        contactId={contactId}
+        contactName="Pow Card"
+        invoices={[pending, partial, draft]}
+        currency="TTD"
+      />,
+    );
+
+    const outBox = screen.getByText("Outstanding").closest("div.rounded-lg") as HTMLElement;
+    expect(outBox).toBeTruthy();
+    expect(outBox.textContent).toContain("600");
+  });
+
+  it("PO-W18 RED-BEFORE (R2): CommerceInsightsTab awaiting-payment count sums across OWED_STATUSES (not SENT only)", async () => {
+    fetchCommerceStats.mockResolvedValue({
+      data: {
+        totalRevenue: 0,
+        outstandingAmount: 750,
+        overdueAmount: 0,
+        quoteConversionRate: 0,
+        invoiceStatusBreakdown: {
+          PENDING: { count: 2, total: 500 },
+          PARTIALLY_PAID: { count: 1, total: 250 },
+          SENT: { count: 0, total: 0 },
+          OVERDUE: { count: 0, total: 0 },
+          DRAFT: { count: 0, total: 0 },
+        },
+        revenueTimeline: [],
+        topClients: [],
+        topProducts: [],
+        paymentMethodBreakdown: [],
+      },
+      error: null,
+    });
+
+    render(<CommerceInsightsTab businessId="biz_pow" invoices={[]} quotes={[]} currency="TTD" />);
+    await waitFor(() => expect(screen.getByText(/3 awaiting payment/)).toBeTruthy());
+  });
+
+  it("PO-W19 RED-BEFORE (R2): getPipelineStage does not misclassify PENDING as draft", () => {
+    expect(getPipelineStage("PENDING")).not.toBe("draft");
+    expect(getPipelineStage("PENDING")).toBe("sent");
   });
 });
 
@@ -415,6 +516,9 @@ describe("FU-PENDING-OWED-WEB (D-256): static single-source-of-truth guard", () 
       "../hooks/use-billing-stats.ts",
       "../components/commerce-kpi-strip.tsx",
       "../components/commerce-overview-tab.tsx",
+      "../components/billing-detail-modal.tsx",
+      "../components/contact-intelligence-card.tsx",
+      "../insights/commerce-insights-tab.tsx",
       "../../../../lib/finance/utils.ts",
       "../billing/collections-panel.tsx",
       "../hooks/use-action-queue.ts",
