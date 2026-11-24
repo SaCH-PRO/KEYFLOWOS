@@ -572,6 +572,41 @@ export class StoreOrderService {
       },
     };
 
+    // SWP-STORE-OVERSELL (BUG-017): aggregate requested quantities per product
+    // across cart lines and identify tracked non-backorder products so oversell
+    // is refused BEFORE any order, idempotency slot, promo increment, or event
+    // is written. Uses ownStockRows(businessId) + active own warehouses only.
+    const requestedByProduct = new Map<string, { qty: number; name: string }>();
+    for (const item of totals.items) {
+      const existing = requestedByProduct.get(item.productId);
+      if (existing) {
+        existing.qty += item.quantity;
+      } else {
+        requestedByProduct.set(item.productId, { qty: item.quantity, name: item.name });
+      }
+    }
+    const cartProductIds = [...requestedByProduct.keys()];
+    const cartProducts = cartProductIds.length > 0
+      ? await this.prisma.client.product.findMany({
+          where: { id: { in: cartProductIds }, businessId: input.businessId },
+          select: {
+            id: true,
+            name: true,
+            inventoryMode: true,
+            outOfStockBehavior: true,
+            _count: { select: { inventoryStocks: { where: ownStockRows(input.businessId) } } },
+          },
+        })
+      : [];
+    const productNameById = new Map(cartProducts.map((p) => [p.id, p.name]));
+    const trackedCheckedIds = cartProducts
+      .filter(
+        (p) =>
+          resolveInventoryMode(p.inventoryMode, p._count.inventoryStocks > 0) === 'tracked' &&
+          (p.outOfStockBehavior ?? 'hide') !== 'allow_backorder',
+      )
+      .map((p) => p.id);
+
     // V1-33: with a retry slot, the order and its idempotency_keys row commit
     // together. A concurrent checkout holding the same slot blocks on the
     // unique index and then fails with P2002, rolling its order back; the
@@ -580,24 +615,56 @@ export class StoreOrderService {
     // needs a payment session commits its row 'pending' under this call's
     // claim (the payment step is this call's); one that needs none commits it
     // 'completed' with no session (V1-33 review, V33-CR-1).
-    const order = retryClaim
-      ? await this.prisma.client.$transaction(async (tx) => {
-          const created = await tx.marketplaceOrder.create({ data: orderData, include: { items: true } });
-          const record: CheckoutRetryRecord = retryClaim.claim
-            ? { orderId: created.id, claim: retryClaim.claim }
-            : { orderId: created.id, payment: null };
-          await tx.idempotencyKey.create({
-            data: {
-              businessId: input.businessId,
-              idempotencyKey: retryClaim.slot,
-              status: retryClaim.claim ? 'pending' : 'completed',
-              requestHash: retryClaim.requestHash,
-              response: record as Prisma.InputJsonValue,
-            },
-          });
-          return created;
-        })
-      : await this.prisma.client.marketplaceOrder.create({ data: orderData, include: { items: true } });
+    const order =
+      retryClaim || trackedCheckedIds.length > 0
+        ? await this.prisma.client.$transaction(async (tx) => {
+            if (trackedCheckedIds.length > 0) {
+              await lockStockRowsInOrder(tx, input.businessId, trackedCheckedIds);
+              const stockRows = await tx.inventoryStock.findMany({
+                where: {
+                  businessId: input.businessId,
+                  productId: { in: trackedCheckedIds },
+                  warehouse: { businessId: input.businessId, isActive: true },
+                },
+                select: { productId: true, quantity: true, reserved: true },
+              });
+              const availableByProduct = new Map<string, number>();
+              for (const row of stockRows) {
+                const avail = Math.max(0, row.quantity - row.reserved);
+                availableByProduct.set(row.productId, (availableByProduct.get(row.productId) ?? 0) + avail);
+              }
+              for (const productId of trackedCheckedIds) {
+                const available = availableByProduct.get(productId) ?? 0;
+                const reqEntry = requestedByProduct.get(productId)!;
+                if (available < reqEntry.qty) {
+                  const productName = productNameById.get(productId) || reqEntry.name || 'Product';
+                  throw new ConflictException({
+                    code: 'INSUFFICIENT_STOCK',
+                    message: `Cannot place order: insufficient stock for product "${productName}" (only ${available} available, requested ${reqEntry.qty}).`,
+                    available,
+                    requested: reqEntry.qty,
+                  });
+                }
+              }
+            }
+            const created = await tx.marketplaceOrder.create({ data: orderData, include: { items: true } });
+            if (retryClaim) {
+              const record: CheckoutRetryRecord = retryClaim.claim
+                ? { orderId: created.id, claim: retryClaim.claim }
+                : { orderId: created.id, payment: null };
+              await tx.idempotencyKey.create({
+                data: {
+                  businessId: input.businessId,
+                  idempotencyKey: retryClaim.slot,
+                  status: retryClaim.claim ? 'pending' : 'completed',
+                  requestHash: retryClaim.requestHash,
+                  response: record as Prisma.InputJsonValue,
+                },
+              });
+            }
+            return created;
+          })
+        : await this.prisma.client.marketplaceOrder.create({ data: orderData, include: { items: true } });
 
     if (totals.promo?.id) {
       await this.promoCodeService.incrementUsage(totals.promo.id);
@@ -1369,6 +1436,9 @@ export class StoreOrderService {
     const productOOSBehavior = new Map(
       products.map((p) => [p.id, p.outOfStockBehavior ?? 'hide']),
     );
+    const productNameById = new Map(
+      products.map((p) => [p.id, p.name]),
+    );
 
     // Buffer for invoice events emitted by InvoiceWorkflowService.transition
     // calls inside the transaction. We flush AFTER the tx commits so
@@ -1376,8 +1446,9 @@ export class StoreOrderService {
     // state if a later tx step rolls back.
     const pendingEvents: Array<{ name: string; payload: unknown }> = [];
 
-    // W10-Z4-ROUTE-FIX (seam review SEAMZ4-CR-1): the stock rows this checkout
-    // decrements (each tracked line's product, in the default warehouse).
+    // W10-Z4-ROUTE-FIX (seam review SEAMZ4-CR-1) + SWP-STORE-OVERSELL (BUG-017):
+    // lock every own stock row of each tracked line's product across warehouses
+    // in global id order before decrementing.
     const decrementedStockProducts =
       input.stockMovesOnFulfilment || !defaultWarehouse
         ? []
@@ -1393,7 +1464,7 @@ export class StoreOrderService {
       // settlement, or the routing) was rolled back. The order row (the offline
       // completion's FOR UPDATE below, and the final write) comes after the
       // stock rows, as in routing.
-      await lockStockRowsInOrder(tx, order.businessId, decrementedStockProducts, defaultWarehouse?.id);
+      await lockStockRowsInOrder(tx, order.businessId, decrementedStockProducts);
 
       // The order's status as of this transaction (SEC-V33-5): read under a
       // row lock for the offline completion, which refuses a closed order.
@@ -1501,14 +1572,16 @@ export class StoreOrderService {
           this.logger.debug(`[store-order] skipping stock decrement for ${mode} product ${item.productId}`);
           continue;
         }
-        const stock = await tx.inventoryStock.findFirst({
+        const productName = productNameById.get(item.productId) || item.name || 'Product';
+        const ownRows = await tx.inventoryStock.findMany({
           where: {
             businessId: order.businessId,
             productId: item.productId,
-            warehouseId: defaultWarehouse!.id,
+            warehouse: { businessId: order.businessId, isActive: true },
           },
+          orderBy: [{ warehouse: { createdAt: 'asc' } }, { id: 'asc' }],
         });
-        if (!stock) {
+        if (ownRows.length === 0) {
           if (input.providerSettlement) {
             // Who holds the pair (unique across every business): read only, never written.
             const holder = await tx.inventoryStock.findUnique({
@@ -1521,34 +1594,61 @@ export class StoreOrderService {
             }
           }
           throw new BadRequestException(
-            `Cannot finalize checkout: tracked product ${item.productId} has no stock row in the default warehouse.`,
+            `Cannot finalize checkout: tracked product "${productName}" has no stock row in the default warehouse.`,
           );
         }
-        if (stock.quantity < item.quantity) {
+        // Prefer the default warehouse first, then remaining active warehouses deterministically.
+        const orderedRows = [
+          ...ownRows.filter((r) => r.warehouseId === defaultWarehouse!.id),
+          ...ownRows.filter((r) => r.warehouseId !== defaultWarehouse!.id),
+        ];
+        const totalAvailable = orderedRows.reduce((sum, r) => sum + Math.max(0, r.quantity - r.reserved), 0);
+        if (totalAvailable < item.quantity) {
           // Merchant explicitly opted into backorder for this product —
           // allow the sale through and let stock dip negative so the
           // owed-units delta is still tracked + visible in inventory.
           const allowBackorder = productOOSBehavior.get(item.productId) === 'allow_backorder';
           if (!allowBackorder) {
-            throw new BadRequestException(
-              `Cannot finalize checkout: insufficient stock for product ${item.productId} (have ${stock.quantity}, need ${item.quantity}).`,
-            );
+            throw new ConflictException({
+              code: 'INSUFFICIENT_STOCK',
+              message: `Cannot finalize checkout: insufficient stock for product "${productName}" (have ${totalAvailable}, need ${item.quantity}).`,
+              available: totalAvailable,
+              requested: item.quantity,
+            });
           }
         }
-        await tx.inventoryStock.update({
-          where: { id: stock.id },
-          data: { quantity: stock.quantity - item.quantity },
-        });
-        await tx.stockMovement.create({
-          data: {
-            businessId: order.businessId,
-            warehouseId: defaultWarehouse!.id,
-            productId: item.productId,
-            quantityChange: -item.quantity,
-            type: 'sale',
-            referenceId: order.orderNumber,
-          },
-        });
+        const takenFrom = new Map<string, number>();
+        let remaining = item.quantity;
+        for (const stock of orderedRows) {
+          if (remaining <= 0) break;
+          const availInRow = Math.max(0, stock.quantity - stock.reserved);
+          if (availInRow <= 0) continue;
+          const take = Math.min(availInRow, remaining);
+          takenFrom.set(stock.id, take);
+          remaining -= take;
+        }
+        if (remaining > 0) {
+          const primary = orderedRows[0];
+          takenFrom.set(primary.id, (takenFrom.get(primary.id) ?? 0) + remaining);
+        }
+        for (const stock of orderedRows) {
+          const take = takenFrom.get(stock.id) ?? 0;
+          if (take <= 0) continue;
+          await tx.inventoryStock.update({
+            where: { id: stock.id },
+            data: { quantity: stock.quantity - take },
+          });
+          await tx.stockMovement.create({
+            data: {
+              businessId: order.businessId,
+              warehouseId: stock.warehouseId,
+              productId: item.productId,
+              quantityChange: -take,
+              type: 'sale',
+              referenceId: order.orderNumber,
+            },
+          });
+        }
         decrementedProductIds.push(item.productId);
       }
 
