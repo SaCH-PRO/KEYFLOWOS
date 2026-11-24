@@ -22,7 +22,7 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
   order.**
   - The KEY Builder design and plan (D-268 to D-270) are parked until v1 is completed. They stay on branch
     `ccr-1eadc8f4-aqfqne`: `docs/key-builder/KEY-BUILDER-DESIGN-001.md`, `KEY-BUILDER-PLAN-001.md` and `research/`.
-  - Sessions in other tools (Antigravity) claim through `git ls-remote` and a CLAIM on #80, like every lane.
+  - Sessions in other tools (Antigravity) claim like every lane: an atomic claim push (CHECKLISTS B1) and a CLAIM on #80.
 - **D-272 (2026-11-24, #80 comment 7121024415): the owner's merge go and four answers.**
   - Merge under D-239, one at a time, in this order: (1) PR #228, merged as 142e5f9e; (2) PR #230, the rulings and the
     wedge re-cut (`wave/v1-rulings-3n`); (3) PR #229, wave 3m (money first); (4) `wave/3j-second-lane` after it is

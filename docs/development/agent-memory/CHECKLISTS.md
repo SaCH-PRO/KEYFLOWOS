@@ -20,13 +20,16 @@ How each step is done is in `LIVE-PROOF-RUNBOOK.md` ("runbook") and `WAVE-RUNBOO
 ## B. Packet (one P0–P3 item of the v1 plan)
 
 1. **Claim.**
-   - [ ] The packet has `"track": "launch"` in the plan (D-263), or the owner or the board gives it to you.
+   - [ ] The packet has `"track": "launch"` in the plan (D-263), or the owner assigned it to you on #80 (the board
+         only mirrors an owner's assignment; a lane never gives itself a follow-on packet).
    - [ ] `git ls-remote origin refs/heads/pkt/V1-<ID>` prints nothing.
-   - [ ] Create the branch on the right base (main, or the stack top it depends on) and push it so that the push
-         fails if the branch exists: `git push --force-with-lease=refs/heads/pkt/V1-<ID>: origin
-         HEAD:refs/heads/pkt/V1-<ID>`.
-   - [ ] Post a CLAIM on #80, then re-read #80. An earlier CLAIM for the same packet wins: the later lane deletes
-         only the branch it just pushed. Set the board row to your lane and `claimed`.
+   - [ ] On the right base (main, or the stack top it depends on), make a claim commit no other lane can make:
+         `git commit --allow-empty -m "claim <ID> <lane> $(date -u +%FT%T.%NZ)"`.
+   - [ ] Push it so that it is refused if the branch exists: `git push --force-with-lease=refs/heads/pkt/V1-<ID>:
+         origin HEAD:refs/heads/pkt/V1-<ID>`. Then `git ls-remote origin refs/heads/pkt/V1-<ID>` must print your own
+         `git rev-parse HEAD`. If the push is refused, or the sha is not yours, another lane owns the packet: pick
+         another, and never delete or force-push its branch.
+   - [ ] Post a CLAIM on #80. Set the board row to your lane and `claimed`.
 2. **Read.**
    - [ ] Run `node scripts/agent-memory/bundle.mjs <ID> --ref <plan ref>`: scope, definition of done, write set,
          Release 0 rows.

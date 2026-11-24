@@ -41,8 +41,9 @@ written here. The local JWT secret is a random string you generate once.
 
 ## 1. Server proof at one exact head (D-265)
 
-**When:** per wave head; per packet only when the packet changes a server file, a Release 0 bound suite or a
-manifest-bound file.
+**When:** per wave head; per packet only when the packet changes a Release 0 bound suite
+(`release0-edited-suites.json`) or a manifest-bound file (D-265). Every packet runs its touched folders and the
+type check (CHECKLISTS B5).
 
 **Rules:**
 - Run it in a dedicated detached worktree of the head (`git worktree add --detach <new path> $H`), never in a
@@ -54,8 +55,9 @@ manifest-bound file.
 ```bash
 set -euo pipefail                      # a failed step stops the chain; the run does not count
 H=<sha>; cd /path/to/dedicated/worktree
-test "$(git rev-parse HEAD)" = "$(git rev-parse $H)"          # the worktree is at the head
-test -z "$(git status --porcelain)"                           # and clean
+git rev-parse --verify -q "$H^{commit}" >/dev/null             # a real commit, and we are inside a repository
+test "$(git rev-parse HEAD)" = "$(git rev-parse "$H^{commit}")" # the worktree is at the head
+test -z "$(git status --porcelain --untracked-files=no)"      # no tracked change (symlinked node_modules are fine)
 set +e                                 # from here each step reports its own exit code
 (cd apps/server && NODE_OPTIONS=--max-old-space-size=6144 npx tsc --noEmit -p tsconfig.json); echo TSC=$?
 pnpm --filter server build; echo BUILD=$?
@@ -95,15 +97,21 @@ cd $WT && pnpm --filter server build
 cd $WT/apps/web && rm -rf .next && NEXT_PUBLIC_API_BASE_URL=http://localhost:3001 NEXT_PUBLIC_SUPABASE_URL= \
   NEXT_PUBLIC_SUPABASE_ANON_KEY= NEXT_PUBLIC_SITE_URL= pnpm run build
 
-# The API on the e2e database (a clean environment; AI and schedulers off)
-cd $WT/apps/server && env -i PATH="$PATH" HOME="$HOME" \
+# The API on the e2e database (a clean environment; AI and schedulers off). Port 3001 must be free first: an API
+# left from an older head would answer the health check and the runs would test the wrong head.
+if curl -fsS --max-time 5 http://localhost:3001/healthz >/dev/null 2>&1; then
+  echo "port 3001 already serves an API: stop it (its PID is in that run's e2e-api.pid) and start again"; exit 1
+fi
+(cd $WT/apps/server && exec env -i PATH="$PATH" HOME="$HOME" \
   DATABASE_URL=postgresql://keyflow:keyflow@127.0.0.1:5432/keyflowos_e2e DIRECT_URL=postgresql://keyflow:keyflow@127.0.0.1:5432/keyflowos_e2e \
   REDIS_URL=redis://127.0.0.1:6379 NODE_ENV=test PORT=3001 AI_DISABLED=1 DISABLE_SCHEDULERS=1 HIBP_DISABLED=true \
   SUPABASE_JWT_SECRET="$(cat ~/.kf-e2e-jwt-secret)" RATE_LIMIT_MAX_REQUESTS=100000 KEY_DISABLED= \
-  NEXT_PUBLIC_APP_URL=http://127.0.0.1:5000 node dist/main.js > $OUT/e2e-api.log 2>&1 &
-API_PID=$!
-for i in $(seq 1 90); do curl -fsS http://localhost:3001/healthz >/dev/null && break; sleep 2; done
-curl -fsS http://localhost:3001/healthz >/dev/null || { echo "API did not start: read $OUT/e2e-api.log"; kill $API_PID; }
+  NEXT_PUBLIC_APP_URL=http://127.0.0.1:5000 node dist/main.js > $OUT/e2e-api.log 2>&1) &
+echo $! > $OUT/e2e-api.pid             # `exec` makes this node's own PID, not a wrapper shell's
+for i in $(seq 1 90); do curl -fsS --max-time 5 http://localhost:3001/healthz >/dev/null && break; sleep 2; done
+if ! curl -fsS --max-time 5 http://localhost:3001/healthz >/dev/null || ! kill -0 "$(cat $OUT/e2e-api.pid)"; then
+  echo "API did not start: read $OUT/e2e-api.log"; kill "$(cat $OUT/e2e-api.pid)" 2>/dev/null; exit 1   # no browser run
+fi
 
 # The browser runs (the harness starts the standalone web server on 5000)
 cd $WT/apps/web
@@ -125,8 +133,8 @@ needed; the spec answers `api.test.local` with `page.route`.
 - Where the base cannot run the spec (a selector that only exists at the head), add a throwaway probe with
   structural selectors to show the bug, and do not commit the probe.
 
-**Stop the API when finished:** `kill $API_PID` (only the API you started; never `pkill`, which also stops
-another lane's API or proof run on the same machine). Do not stop it while a run is using it: that turns every case
+**Stop the API when finished:** `kill "$(cat $OUT/e2e-api.pid)"`, from any later shell: only the API you started.
+Never `pkill`, which also stops another lane's API or proof run on the same machine. Do not stop it while a run is using it: that turns every case
 into a connection failure.
 
 ## 4. Reviews
