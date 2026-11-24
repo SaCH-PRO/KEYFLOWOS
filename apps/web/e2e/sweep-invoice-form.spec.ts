@@ -14,9 +14,11 @@ import { test, expect, settle } from "./journeys/journey-helpers";
  *
  * Here, for a fresh owner on a real API and database (live only: E2E_LIVE=1, a production build; the journey
  * harness's fixtures, README in e2e/journeys; without E2E_LIVE every case is skipped, so the mocked CI job is
- * unaffected), at 1440x900 and at 375x812:
+ * unaffected), at 1440x900, 1024x768, 768x1024 and 375x812:
  *   1. after adding a second line with a long description and prices, each line's Total and remove button are inside
- *      the Line Items card and are what the browser hits at their centre (elementFromPoint);
+ *      the Line Items card and are what the browser hits at their centre (elementFromPoint); each line's description
+ *      box is hit too and is at least 120 px wide; a 1,250,000.00 total does not run into the cell before it
+ *      (review F1, F3: at 1024 and 768 the first fix left the description box 0 px wide);
  *   2. Save Draft with no client says "Choose a client" and no invoice is created;
  *   3. no template picker;
  *   4. /app/commerce/invoices/<an id that does not exist>/edit shows "Invoice not found" and no Save Changes.
@@ -40,7 +42,7 @@ async function reachableInside(page: Page, el: Locator, container: Locator): Pro
   return { inside, hit };
 }
 
-for (const viewport of [{ width: 1440, height: 900 }, { width: 375, height: 812 }]) {
+for (const viewport of [{ width: 1440, height: 900 }, { width: 1024, height: 768 }, { width: 768, height: 1024 }, { width: 375, height: 812 }]) {
   test.describe(`SWP-INV-FORM-UX the invoice forms (${viewport.width}x${viewport.height})`, () => {
     test.use(viewport.width < 600 ? { viewport, isMobile: true, hasTouch: true, deviceScaleFactor: 2 } : { viewport });
     test.use({ tenantOptions: { currency: "TTD" } });
@@ -60,7 +62,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 375, height: 812 
       await expect(descriptions).toHaveCount(2);
       const lines = [
         ["Three-tier wedding cake with sugar flowers, delivered and set up at the venue", "1", "1250"],
-        ["Cupcakes", "24", "10"],
+        ["Catering for 400 guests", "1", "1250000"],
       ] as const;
       for (let i = 0; i < lines.length; i++) {
         await descriptions.nth(i).fill(lines[i][0]);
@@ -78,8 +80,21 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 375, height: 812 
           const remove = row.getByRole("button", { name: /remove line/i });
           expect(await reachableInside(page, total, card), `line ${i + 1} Total`).toEqual({ inside: true, hit: true });
           expect(await reachableInside(page, remove, card), `line ${i + 1} remove`).toEqual({ inside: true, hit: true });
+          const description = descriptions.nth(i);
+          expect(await reachableInside(page, description, card), `line ${i + 1} description`).toEqual({ inside: true, hit: true });
+          expect((await description.boundingBox())?.width ?? 0, `line ${i + 1} description width`).toBeGreaterThanOrEqual(120);
+          // The amount's text does not run into the cell before it.
+          const clear = await total.evaluate((node) => {
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            const text = range.getBoundingClientRect();
+            const before = node.parentElement?.previousElementSibling?.getBoundingClientRect();
+            return !before || text.left >= before.right - 0.5 || text.top >= before.bottom - 0.5;
+          });
+          expect(clear, `line ${i + 1} total clear of the cell before it`).toBe(true);
         }
         await expect(page.getByTestId("invoice-line-total").first()).toHaveText(/1,250\.00/);
+        await expect(page.getByTestId("invoice-line-total").nth(1)).toHaveText(/1,250,000\.00/);
       });
 
       await test.step("BUG-093: no template picker", async () => {

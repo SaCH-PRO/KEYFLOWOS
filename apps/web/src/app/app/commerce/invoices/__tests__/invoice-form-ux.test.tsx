@@ -17,6 +17,12 @@
  *   FUX-05  control     Release 0's controls on the new page stay: the heading, 'Select a client...', Add item, the
  *                       'Item description' placeholder, two number inputs per line, Save Draft
  *   FUX-06  control     with a client chosen, Save Draft creates the invoice with that contact
+ *
+ * Review round 1 (security MINOR-1, correctness F4 and F5):
+ *   FUX-07  RED-BEFORE  a load that fails for another reason than 404 (a 500, a refusal, the network) is not "Invoice
+ *                       not found": it says "Couldn't load this invoice", offers Try again, and shows no form; Try
+ *                       again loads the invoice
+ *   FUX-08  hardening   Save & Send alone, with no client, shows the message (FUX-01 saw it from Save Draft first)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
@@ -60,14 +66,17 @@ const STORED = {
 };
 
 type Call = { method: string; path: string; body: Record<string, unknown> | null };
-function installServer(opts: { missing?: boolean } = {}) {
+function installServer(opts: { missing?: boolean; failing?: number[] } = {}) {
   const calls: Call[] = [];
+  const failing = [...(opts.failing ?? [])];
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : (input as Request).url ?? String(input), "http://localhost");
     const method = (init?.method ?? "GET").toUpperCase();
     calls.push({ method, path: url.pathname, body: typeof init?.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : null });
     if (url.pathname === `/commerce/businesses/${BIZ}/invoices/inv_fux_1`) {
       if (opts.missing) return jsonResponse(404, { statusCode: 404, message: "Invoice not found" });
+      const status = failing.shift();
+      if (status) return jsonResponse(status, { statusCode: status, message: "Internal server error" });
       return jsonResponse(200, STORED);
     }
     if (method === "POST" && url.pathname === `/commerce/businesses/${BIZ}/invoices`) return jsonResponse(201, { ...STORED, id: "inv_new" });
@@ -168,5 +177,27 @@ describe("SWP-INV-FORM-UX: the invoice forms", () => {
     await waitFor(() => expect(server.writes()).toHaveLength(1));
     expect(server.writes()[0]!.body).toMatchObject({ contactId: "ct_fux" });
     await waitFor(() => expect(nav.push).toHaveBeenCalledWith("/app/commerce/invoices/inv_new"));
+  });
+
+  it("FUX-07 RED-BEFORE: a failed load that is not a 404 says it could not load, offers Try again, and Try again loads the invoice", async () => {
+    const server = installServer({ failing: [500] });
+    render(<EditInvoicePage />);
+    expect(await screen.findByRole("heading", { name: /couldn.t load this invoice/i })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Invoice not found" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /save changes/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /try again/i }));
+    await waitFor(() => expect(clientSelect().value).toBe("ct_fux"));
+    expect(screen.getAllByRole("button", { name: /save changes/i }).length).toBeGreaterThan(0);
+    expect(server.writes()).toEqual([]);
+  });
+
+  it("FUX-08 hardening: Save & Send alone, with no client, says 'Choose a client' and sends nothing", async () => {
+    const server = installServer();
+    render(<NewInvoicePage />);
+    await fillFirstLine("Consulting", "2", "100");
+    fireEvent.click(screen.getAllByRole("button", { name: /save & send/i })[0]!);
+    expect(await screen.findByText(/choose a client/i)).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(server.writes()).toEqual([]);
   });
 });
