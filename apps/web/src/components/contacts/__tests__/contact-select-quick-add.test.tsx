@@ -21,6 +21,8 @@
  *   CSQ-06  hardening   the remembered pick shows only for its own id: after a quick add, a parent that sets another
  *                       contact shows that one, and an id in no list shows no chip
  *   CSQ-07  RED-BEFORE  a refused quick add's message does not come back when Quick Add is reopened after Escape
+ *   CSQ-08  hardening   (confirmation N1) "+ New Item" with "Add to catalog" ticked and no client: Create Quote creates
+ *                       no catalog product and no quote (the client check runs before the catalog loop)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { useState } from "react";
@@ -222,5 +224,28 @@ describe("SWP-QUOTE-COMPOSER-CONTACT: the client field", () => {
     fireEvent.click(await screen.findByRole("button", { name: /quick add contact/i }));
     expect(screen.getByPlaceholderText("First name *")).toBeInTheDocument();
     expect(screen.queryByText(DUPLICATE)).toBeNull();
+  });
+
+  it("CSQ-08 hardening: a new catalog item with no client creates no product and no quote", async () => {
+    const server = installServer();
+    const composer = (trigger: number) => (
+      <RevenueComposer
+        businessId={BIZ} contacts={[EXISTING] as never} products={[]} currency="TTD"
+        setQuotes={vi.fn()} setInvoices={vi.fn()} setProducts={vi.fn()} triggerNewQuote={trigger}
+      />
+    );
+    const view = render(composer(0));
+    view.rerender(composer(1));
+    await screen.findByPlaceholderText("Item description");
+    const productSelect = document.querySelector('option[value="__NEW__"]')!.closest("select") as HTMLSelectElement;
+    fireEvent.change(productSelect, { target: { value: "__NEW__" } });
+    fireEvent.change(await screen.findByPlaceholderText("New item name"), { target: { value: "Sugar flowers" } });
+    fireEvent.click(screen.getByLabelText(/add to catalog/i));
+    fireEvent.change(screen.getByPlaceholderText("Item description"), { target: { value: "Sugar flowers" } });
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "150" } });
+    fireEvent.click(screen.getByRole("button", { name: /create quote/i }));
+    expect(await screen.findByText("Choose a client for this quote.")).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(server.writes()).toEqual([]);
   });
 });
