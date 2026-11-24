@@ -87,8 +87,9 @@ export default function InvoicesHubPage() {
     const init = async () => {
       const fresh = await refreshWorkspace();
       const id = fresh ?? getStoredBusinessId();
-      const currency = getCachedBusiness()?.currency;
-      if (currency) setBusinessCurrency(currency.toUpperCase());
+      // The cached business is read only when it is the business on screen (as the new-invoice page does).
+      const cached = getCachedBusiness();
+      if (id && cached?.id === id && cached.currency) setBusinessCurrency(cached.currency.trim().toUpperCase());
       if (id) setBusinessId(id);
     };
     void init();
@@ -407,7 +408,7 @@ export default function InvoicesHubPage() {
                               <div className="absolute right-0 top-full mt-1 z-50 min-w-[180px] rounded-xl border border-border bg-popover shadow-lg py-1" onClick={() => setMenuOpenId(null)}>
                                 <DropdownItem icon={Send} label="Send" onClick={() => handleSend(inv.id)} show={inv.status === "DRAFT"} loading={actionLoading[inv.id] === "send"} />
                                 <DropdownItem icon={DollarSign} label={inv.status === "PARTIALLY_PAID" ? "Record balance" : "Record payment"} onClick={() => router.push(`/app/commerce/invoices/${inv.id}?action=record-payment`)} show={inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID"} />
-                                <DropdownItem icon={MessageCircle} label="Remind" onClick={() => remindWhatsApp(inv)} show={inv.status === "PARTIALLY_PAID"} />
+                                <DropdownItem icon={MessageCircle} label="Remind" onClick={() => remindWhatsApp(inv)} show={inv.status === "PARTIALLY_PAID" && invoiceBalanceOfStoredRows(Number(inv.total), inv.payments ?? [], inv.currency).remaining > 0} />
                                 <DropdownItem icon={Bell} label="Send reminder" onClick={() => openComposer({ to: inv.contact?.email ?? "", subject: `Friendly reminder: invoice ${inv.invoiceNumber ?? ""}`, body: "", context: { type: "follow_up", recordNumber: inv.invoiceNumber ?? inv.id, contactName: inv.contact?.firstName ? `${inv.contact.firstName} ${inv.contact.lastName ?? ""}`.trim() : undefined }, onSent: () => toast.success("Reminder sent") })} show={!!(inv.status === "SENT" || inv.status === "OVERDUE")} />
                                 <DropdownItem icon={CheckCircle2} label="Mark paid" onClick={() => handleMarkPaid(inv.id)} show={inv.status === "DRAFT" || inv.status === "SENT"} loading={actionLoading[inv.id] === "paid"} />
                                 <DropdownItem icon={Receipt} label="Resend receipt" onClick={() => resendInvoiceReceipt(businessId!, inv.id, {}).then(r => r.data?.success ? toast.success("Resent") : toast.error(r.error ?? "Failed"))} show={!!(inv.status === "PAID" && gmailStatus?.connected)} />

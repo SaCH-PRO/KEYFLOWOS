@@ -786,13 +786,21 @@ export async function fetchInvoices(businessId: string = selectedBusinessId()) {
     // every list share went to WhatsApp's chooser.
     contactId: z.string().nullable().optional(),
     // SWP-INV-LIST (BUG-050, search): the row's tax, discount and notes, kept from the server's row (they were
-    // dropped here, so Duplicate lost them and the list could not search the notes). Decimals may arrive as strings.
-    subtotal: z.union([z.number(), z.string()]).nullable().optional(),
-    taxRate: z.union([z.number(), z.string()]).nullable().optional(),
-    taxAmount: z.union([z.number(), z.string()]).nullable().optional(),
-    discountType: z.string().nullable().optional(),
-    discountValue: z.union([z.number(), z.string()]).nullable().optional(),
-    discountAmount: z.union([z.number(), z.string()]).nullable().optional(),
+    // dropped here, so Duplicate lost them and the list could not search the notes). The columns are Float (subtotal
+    // not null) and the form knows two discount types; any other stored type reads as none rather than refusing the
+    // whole list.
+    subtotal: z.number().optional(),
+    taxRate: z.number().nullable().optional(),
+    taxAmount: z.number().nullable().optional(),
+    // Tolerant at run time (a legacy value reads as none), typed as the Invoice type's field: apiGet infers a row's
+    // type from the schema's input side, which a transform would leave as string.
+    discountType: z
+      .string()
+      .nullable()
+      .optional()
+      .transform((v) => (v === "PERCENT" || v === "FIXED" ? v : null)) as unknown as z.ZodType<"PERCENT" | "FIXED" | null | undefined>,
+    discountValue: z.number().nullable().optional(),
+    discountAmount: z.number().nullable().optional(),
     notes: z.string().nullable().optional(),
     contact: z
       .object({
@@ -800,7 +808,6 @@ export async function fetchInvoices(businessId: string = selectedBusinessId()) {
         lastName: z.string().nullable().optional(),
         email: z.string().nullable().optional(),
         companyName: z.string().nullable().optional(),
-        phone: z.string().nullable().optional(),
       })
       .nullable()
       .optional(),
