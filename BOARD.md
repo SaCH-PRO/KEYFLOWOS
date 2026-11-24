@@ -43,6 +43,7 @@
 | M3 | Wave 3m, **PR #229** | `wave/v1-wave-3m` @ 6bb8b430 | claude | **merged** (f6764f4c) | — | Done: MOUNT-QUOTES, SWP-INV-MATH, SWP-INV-PUBLIC-LINK, SWP-QUOTE-PUBLIC-PAGE, SWP-INV-FORM-UX, SWP-QUOTE-COMPOSER-CONTACT are on main |
 | M4 | Wave 3j split | **M4a PR #232 MERGED (`054cac4b`)** (8 pkts on main). **M4b PR #234** (`wave/v1-wave-3j-part2` @ `462b0509`, base `054cac4b`; 7 pkts / 14 commits / 33 files, exact `+2464/-176` parity with `2a11fdd7..a1e6a649`). **2 fresh wave reviews CONFIRMED (0 findings)**; local full proof + GitHub CI running | antigravity | pr-open | local proof + CI at `462b0509` | Merge PR #234 (`--merge --match-head-commit 462b0509...`) once local proof & CI green, unblocking M5 (PR #233) |
 | M5 | Wave 3n, **PR #233** | `wave/v1-wave-3n` @ bfcf4d4c: SWP-CONTACT-QUICKADD, SWP-INV-LIST. **Proven at bfcf4d4c:** server 833/833 files, 15419 tests exit 0; R0 MET 39/39 exact-head; web 199/1808 exit 0, tsc 0, lint 25 of 26 | claude | pr-open; Codex P2 (Duplicate kept an unknown discount's value) fixed on the wave: RED d0cc17db, fix 2aaf028e | M4a, M4b (queue order on #80 7130344208) | waits for M4a (PR #232) and M4b to merge (D-272 order); then merge main in, CI at the new head, re-verify, merge. CI green at 2aaf028e (24/24; Vercel quota only), both reviews accept the Codex repair |
+| M6 | Wave 3o (claude) | `wave/v1-wave-3o` @ 705c3ac5 on main 054cac4b: NAV-A3, NAV-A2 compacted (4 commits, 24 files; the two guard-spec exemption lists keep both packets' deletions; combined touched folders 61 files / 722 tests). SWP-KEY-CHAT-WEB joins when returned (A1, full waves) | claude | assembling | — | add SWP-KEY-CHAT-WEB; wave-head proof (server suite + R0, web); open the PR early (A2); merge after M4b and M5 |
 
 ## Packets and tasks
 
@@ -67,4 +68,4 @@
 | P14 | Owner: "Batch 2 safe defaults #5–#10" (not approved in D-272) | owner | blocked | the owner's review | The owner reviews the list |
 | P15 | Owner: redeploy production (D-266) | owner | blocked | M1–M4 | The owner deploys from main |
 
-Last updated: 2026-11-24 by the claude lane (P11 SWP-KEY-CHAT-WEB fix pushed, in review; NAV-A3 and NAV-A2 RETURNed; PR #233 waits for M4a/M4b).
+Last updated: 2026-11-24 by the claude lane (D-274 recorded #80 7134101214 and WORKFLOW-IMPROVEMENTS.md; M4a merged as 054cac4b; wave 3o assembling; P11 in repair review).
