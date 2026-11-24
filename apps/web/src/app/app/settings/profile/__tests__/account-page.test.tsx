@@ -74,7 +74,8 @@ function serve(me: { status: number; body: unknown } = { status: 200, body: ME }
     if (pathname.endsWith("/identity/me") && method === "PATCH") {
       const refusal = dtoRefusal(body as Record<string, unknown>);
       if (refusal) return jsonResponse(400, { statusCode: 400, message: [refusal], error: "Bad Request" });
-      return jsonResponse(200, { ...ME, ...(body as object) });
+      // The server answers with the stored member after the update (IdentityService.updateUser's select).
+      return jsonResponse(200, { ...(me.body as object), ...(body as object) });
     }
     return jsonResponse(404, { message: "Not Found" });
   }));

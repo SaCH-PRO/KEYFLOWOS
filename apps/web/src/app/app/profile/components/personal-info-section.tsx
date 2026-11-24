@@ -103,8 +103,11 @@ export default function PersonalInfoSection({
       if (form.lastName !== initialForm.lastName) changes.lastName = form.lastName;
       if (form.name !== initialForm.name) changes.name = form.name;
       if (form.phone !== initialForm.phone && form.phone.trim() !== "") changes.phone = form.phone.trim();
+      const phoneBlanked = form.phone.trim() === "" && initialForm.phone !== "";
+      const keepPhone = "A phone number cannot be removed here yet; enter a new one instead.";
       if (Object.keys(changes).length === 0) {
-        onStatus(form.phone.trim() === "" && initialForm.phone ? { type: "error", message: "A phone number cannot be removed here yet; enter a new one instead." } : null);
+        if (phoneBlanked) setForm({ ...form, phone: initialForm.phone });
+        onStatus(phoneBlanked ? { type: "error", message: keepPhone } : null);
         setSaving(false);
         return;
       }
@@ -112,9 +115,19 @@ export default function PersonalInfoSection({
       if (error) {
         onStatus({ type: "error", message: error });
       } else if (data) {
-        onStatus({ type: "success", message: "Profile updated" });
-        setInitialForm({ ...form });
-        onSaved({ ...form }, avatarUrl);
+        // What is saved is what the server now holds (repair confirmation finding 1): a blanked phone was not sent, so
+        // the stored number stays, and the form shows it again rather than a blank that reads as removed.
+        const saved: PersonalInfoForm = {
+          email: form.email,
+          name: data.name ?? "",
+          firstName: data.firstName ?? "",
+          lastName: data.lastName ?? "",
+          phone: data.phone ?? "",
+        };
+        onStatus(phoneBlanked ? { type: "error", message: `Your other changes were saved. ${keepPhone}` } : { type: "success", message: "Profile updated" });
+        setForm(saved);
+        setInitialForm(saved);
+        onSaved(saved, avatarUrl);
         setCachedUser({
           id: data.id, email: data.email, name: data.name,
           firstName: data.firstName, lastName: data.lastName, avatarUrl: data.avatarUrl,
