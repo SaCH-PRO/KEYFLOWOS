@@ -53,15 +53,15 @@
 | P4 | FU-OUTBOUND-ATTACHMENT-URL (D-272.3) | antigravity | returned | — | Returned #80 (7121498630) @ `41e1a419` (RED `597b953b`, 7/7 84/84, tsc 0, both confirmation reviews CONFIRMED) + D-265 exact-head `proof:release0` 39/39 SATISFIED — R0 EXIT GATE MET |
 | P5 | First-lane WIP: FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-AI-APPROVALS-MONEY-SIGHT | antigravity | returned | — | 3/3 returned: `AI-APPROVALS` (#80 7121845152 @ `a0c650a6`), `STRATEGIC-SIGHT` (#80 7122456412 @ `b474ec39`), `DNA-WRITES` (@ `f616cf67`, both reviews CONFIRMED 0 findings; `SEC-DW-3a` flagged for R0 AMEND on `D11G-G04`). P6 unblocked |
 | P6 | FU-PENDING-OWED-SERVER, then FU-PENDING-OWED-WEB (money-first) | antigravity | claimed | — | Claimed `FU-PENDING-OWED-SERVER` (`pkt/V1-FU-PENDING-OWED-SERVER` from `main`); 27-site server census + 13-site web census complete; writing RED suite now |
-| P7 | SWP-CONTACT-QUICKADD (critical path, after SWP-QUOTE-COMPOSER-CONTACT) | claude | todo | — | CLAIM, stacked on d690bc41; CHECKLISTS B |
+| P7 | SWP-CONTACT-QUICKADD (critical path, after SWP-QUOTE-COMPOSER-CONTACT) | claude | claimed | — | Stacked on wave 3m (6bb8b430); CHECKLISTS B |
 | P8 | SWP-INV-LIST (critical path) | claude | todo | P7 | CLAIM; CHECKLISTS B |
 | P9 | FU-WEB-PAYLINK-STATUS-BUTTONS | — | todo | — | Any lane may claim |
 | P10 | NAV-A2 (P0), NAV-A3 (unblocks 33) | — | todo | — | Any lane may claim; NAV-A3 first |
 | P11 | SWP-KEY-CHAT-WEB (P0, unblocks 33) | — | todo | — | Any lane may claim |
 | P12 | SWP-STORE-LISTING-SERVER (unblocks 51, including DECIMALS-SERVER and CLAIM-LOOP) | — | todo | — | Any lane may claim |
 | P13 | Follow-up: guard `res.data.templates` in `billing-form-modal.tsx:200` (an empty answer throws) | — | todo | M3 | A small web packet; any lane |
-| P16 | Follow-up rulings docs (after M2): `wave/v1-docs-p16` @ 5bbeb790. (a) status.mjs: `ready_launch`, `by_track`, the launch-only ready table (RED b4dbb40c, fix 30e79aac, 17/17 tests); (b) plan text: SWP-INV-MATH "2.5", SWP-INV-PUBLIC-LINK INVOICE_NOT_SHAREABLE; (c) the KEY fix rule (RR-REFLECTION-HONEST to launch), the precedence note's seven packets, Release 0 at the packet head in two DoDs, runbook §1 clean-tree and §3 API ownership, CHECKLISTS B1 commands | claude | in-review | — | Two reviews running; then a PR, merged after M3 (the D-272 order is not changed) |
+| P16 | Follow-up rulings docs, **PR #231** (`wave/v1-docs-p16` @ 3b2f7011): launch-track status (`ready_launch`, `by_track`), plan text, the KEY fix rule and tiebreak (RR-REFLECTION-HONEST to launch), runbook §1-§3 wrong-head fixes, CHECKLISTS B1. Correctness, process and confirmation reviews: ACCEPT WITH MINORS (wording minors listed open on the PR) | claude | pr-open | M3 merged | After M3: merge main in (regenerate V1-STATUS), CI green at the exact head, merge (D) |
 | P14 | Owner: "Batch 2 safe defaults #5–#10" (not approved in D-272) | owner | blocked | the owner's review | The owner reviews the list |
 | P15 | Owner: redeploy production (D-266) | owner | blocked | M1–M4 | The owner deploys from main |
 
-Last updated: 2026-11-24 by the claude lane (M3 blocked on GitGuardian 40952282; P16 in review @ 5bbeb790).
+Last updated: 2026-11-24 by the claude lane (M3 blocked on GitGuardian 40952282; P16 is PR #231; P7 claimed).
