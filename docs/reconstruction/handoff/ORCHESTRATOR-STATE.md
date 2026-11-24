@@ -26,6 +26,13 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
     models called through APIs with spend limits, not by rotating consumer accounts; this section's rules turned into
     hard gates in code.
   - **Do not claim new v1 packets.** Finish only what section 3 lists, the same way.
+  - **D-269 (#80 comment 7119075149)** shapes it:
+    - Builder KEY is the owner's only; customers get business capability only.
+    - It must be reliable and reproducible, proven in Claude, Antigravity, ChatGPT, Kimi and Gemini, then reached
+      through KEYFLOW.
+    - Its first jobs are one packet end to end, then a parallel wave, then tending the final version.
+  - **The design to build from:** `docs/key-builder/KEY-BUILDER-DESIGN-001.md` on branch `ccr-1eadc8f4-aqfqne`. It
+    covers milestones M0 to M4 and packets KB-001 to KB-012, and its section 10 holds four owner questions.
 - Finish v1 (plan of record: `docs/reconstruction/V1-PLAN-RECUT.json`). Keep going until it is done.
 - **v1 is re-cut to one wedge (D-263, 2026-11-24, #80 comment 7118009265):** a Trinidad and Tobago service business
   gets paid faster from WhatsApp, in TTD. The launch gate runs on packets with `track: launch` only; `track:
