@@ -10,6 +10,13 @@
  * mount, clicking Quotes from the Snapshot tab changed the URL and left the
  * Snapshot on screen (review R0-08b F2).
  *
+ * MOUNT-QUOTES: the pipeline left Sales. The Quotes door lands on the Quotes
+ * tab (quotes-panel.tsx), the invoices doors go to /app/commerce/invoices and
+ * the collections door lands on the Collections tab; the W9-WEB-COMMERCE-NAV
+ * cases about the pipeline following ?view while mounted are now the doors
+ * switching tabs while mounted (the full landing table is pinned by
+ * commerce-no-pipeline-tab.test.tsx).
+ *
  * useSearchParams is read from window.location here, which is what Next does:
  * it patches history.pushState/replaceState so the hook follows both. A
  * navigation is a pushState plus the re-render Next would do; the page's own
@@ -21,11 +28,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, act, fireEvent } from '@testing-library/react';
 
+const nav = vi.hoisted(() => ({
+  router: { push: vi.fn(), replace: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() },
+}));
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({
-    push: vi.fn(), replace: vi.fn(), back: vi.fn(), forward: vi.fn(),
-    refresh: vi.fn(), prefetch: vi.fn(),
-  }),
+  useRouter: () => nav.router,
   usePathname: () => window.location.pathname,
   useSearchParams: () => new URLSearchParams(window.location.search),
 }));
@@ -41,7 +48,7 @@ vi.mock('@/lib/use-return-navigation', () => ({
   useReturnNavigation: () => ({ getReturnLabel: () => 'Back', navigateBack: vi.fn() }),
 }));
 vi.mock('@/hooks/use-keyboard-shortcuts', () => ({ useKeyboardShortcuts: () => {} }));
-// The app shell's composer provider, which the real pipeline's send modal reads.
+// The app shell's composer provider, which the quotes panel's send reads.
 vi.mock('@/components/email/compose-context', () => ({ useCompose: () => ({ open: () => {} }) }));
 vi.mock('@/hooks/use-module-events', () => ({ useModuleEvent: () => {} }));
 vi.mock('@/hooks/use-plan', () => ({ usePlan: () => ({ checkLimit: () => ({ allowed: true }) }) }));
@@ -72,41 +79,26 @@ vi.mock('@/components/ui/workspace-error', () => ({ WorkspaceError: () => <div>e
 vi.mock('@/components/ui/mobile-action-sheet', () => ({ MobileActionSheet: () => null }));
 vi.mock('@/components/layout/flow-quick-launcher', () => ({ FlowQuickLauncher: () => null }));
 
-/**
- * What the shell hands the page. Empty for the tab cases; the pipeline-view
- * case gives it one quote and one invoice, so which of the two the real
- * pipeline lists says which view it is on.
- */
-const shellData = vi.hoisted(() => ({ invoices: [] as unknown[], quotes: [] as unknown[] }));
-/** When set, the Pipeline tab is the real FinancePipeline instead of its marker. */
-const pipelineMode = vi.hoisted(() => ({ real: false }));
-
 vi.mock('../hooks/use-commerce-shell', () => ({
   useCommerceShell: () => ({
     businessId: 'biz_1', businessCurrency: 'TTD',
     workspaceLoading: false, workspaceError: null,
     products: [], setProducts: vi.fn(),
-    invoices: shellData.invoices, setInvoices: vi.fn(),
-    quotes: shellData.quotes, setQuotes: vi.fn(),
+    invoices: [], setInvoices: vi.fn(),
+    quotes: [], setQuotes: vi.fn(),
     contacts: [], loading: false, error: null,
   }),
 }));
 vi.mock('../hooks/use-billing-workspace', () => ({
   useBillingWorkspace: () => ({
-    pendingPrefill: null, prefillForContact: vi.fn(),
+    pendingPrefill: null, prefillForContact: vi.fn(), clearPrefill: vi.fn(),
     triggerNewQuote: 0, triggerNewInvoice: 0, triggerNewSchedule: 0,
     setTriggerNewQuote: vi.fn(), setTriggerNewInvoice: vi.fn(), setTriggerNewSchedule: vi.fn(),
   }),
 }));
 
-vi.mock('../../finance/components/finance-pipeline', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../finance/components/finance-pipeline')>();
-  return {
-    FinancePipeline: (props: React.ComponentProps<typeof actual.FinancePipeline>) => (
-      <div data-testid="tab-pipeline">{pipelineMode.real ? <actual.FinancePipeline {...props} /> : null}</div>
-    ),
-  };
-});
+vi.mock('../quotes/quotes-panel', () => ({ default: () => <div data-testid="tab-quotes" /> }));
+vi.mock('../payments/payments-tab', () => ({ default: () => <div data-testid="tab-collections" /> }));
 vi.mock('../../finance/components/revenue-composer', () => ({ RevenueComposer: () => null }));
 vi.mock('../recurring/recurring-panel', () => ({ default: () => <div data-testid="tab-recurring" /> }));
 vi.mock('../components/commerce-overview-tab', () => ({
@@ -125,7 +117,7 @@ vi.mock('../components/standalone-payment-recorder', () => ({ StandalonePaymentR
 import CommercePage from '../page';
 
 const activeTab = () => screen.getByTestId('shell').getAttribute('data-active-tab');
-const shown = () => ['snapshot', 'pipeline', 'recurring'].filter((t) => screen.queryByTestId(`tab-${t}`));
+const shown = () => ['snapshot', 'quotes', 'collections', 'recurring'].filter((t) => screen.queryByTestId(`tab-${t}`));
 
 /** Open the page at this URL, as a fresh mount. */
 function openAt(url: string) {
@@ -146,33 +138,30 @@ function navigate(rerender: (ui: React.ReactElement) => void, url: string) {
 
 beforeEach(() => {
   window.history.replaceState({}, '', '/app/commerce');
-  pipelineMode.real = false;
-  shellData.invoices = [];
-  shellData.quotes = [];
+  nav.router.replace.mockClear();
 });
 afterEach(cleanup);
 
 describe('the commerce page shows the tab its URL names, while mounted (R0-08b F2)', () => {
   it('mounts on the tab the URL names', () => {
     openAt('/app/commerce?tab=pipeline&view=quotes');
-    expect(activeTab()).toBe('pipeline');
-    expect(shown()).toEqual(['pipeline']);
+    expect(activeTab()).toBe('quotes');
+    expect(shown()).toEqual(['quotes']);
   });
 
-  it('Money > Quotes clicked from the Snapshot tab opens the pipeline', () => {
+  it('Money > Quotes clicked from the Snapshot tab opens the Quotes tab', () => {
     const { rerender } = openAt('/app/commerce');
     expect(activeTab()).toBe('snapshot');
 
     navigate(rerender, '/app/commerce?tab=pipeline&view=quotes');
 
-    expect(activeTab()).toBe('pipeline');
-    // The pipeline mounts fresh here, so it reads ?view=quotes on its mount.
-    expect(shown()).toEqual(['pipeline']);
+    expect(activeTab()).toBe('quotes');
+    expect(shown()).toEqual(['quotes']);
   });
 
-  it('Money > Sales (bare /app/commerce) clicked from the pipeline returns to the Snapshot', () => {
+  it('Money > Sales (bare /app/commerce) clicked from the Quotes tab returns to the Snapshot', () => {
     const { rerender } = openAt('/app/commerce?tab=pipeline&view=quotes');
-    expect(activeTab()).toBe('pipeline');
+    expect(activeTab()).toBe('quotes');
 
     navigate(rerender, '/app/commerce');
 
@@ -180,15 +169,15 @@ describe('the commerce page shows the tab its URL names, while mounted (R0-08b F
     expect(shown()).toEqual(['snapshot']);
   });
 
-  it('a legacy ?tab=quotes arriving after mount lands on the pipeline and is rewritten', () => {
+  it('a legacy ?tab=quotes arriving after mount lands on the Quotes tab and is rewritten', () => {
     const { rerender } = openAt('/app/commerce');
     navigate(rerender, '/app/commerce?tab=quotes');
-    expect(activeTab()).toBe('pipeline');
-    expect(new URLSearchParams(window.location.search).get('tab')).toBe('pipeline');
+    expect(activeTab()).toBe('quotes');
+    expect(new URLSearchParams(window.location.search).get('tab')).toBe('quotes');
   });
 
   it('a tab picked on the page sticks: following the URL does not undo the click', () => {
-    openAt('/app/commerce?tab=pipeline');
+    openAt('/app/commerce?tab=quotes');
     fireEvent.click(screen.getByRole('button', { name: 'Recurring' }));
     expect(activeTab()).toBe('recurring');
     expect(new URLSearchParams(window.location.search).get('tab')).toBe('recurring');
@@ -203,93 +192,48 @@ describe('the commerce page shows the tab its URL names, while mounted (R0-08b F
     expect(activeTab()).toBe('recurring');
   });
 
-  // W9-WEB-COMMERCE-NAV (was it.todo, BLOCKED outside the R0-08b write set):
-  // from the pipeline tab itself (say its Invoices view), Money > Quotes
-  // changes only ?view, and the pipeline is already mounted. It read ?view
-  // once on mount, so the Invoices view stayed on screen under a quotes URL.
-  // The real pipeline is mounted here: it holds one quote and one invoice, so
-  // the record it lists says the view it is on. It must follow ?view without
-  // remounting, so what the owner typed in its search is still there.
-  it("Money > Quotes clicked from the pipeline's Invoices view switches the pipeline to its quotes view (W9-WEB-COMMERCE-NAV, was it.todo)", () => {
-    pipelineMode.real = true;
-    shellData.quotes = [{ id: 'v95q_quote_1', quoteNumber: 'Q-V95Q-1', status: 'SENT', total: 100, currency: 'TTD', items: [], createdAt: '2026-11-01T00:00:00.000Z', issueDate: '2026-11-01T00:00:00.000Z' }];
-    shellData.invoices = [{ id: 'v95q_inv_1', invoiceNumber: 'INV-V95Q-1', status: 'SENT', total: 200, currency: 'TTD', items: [], issueDate: '2026-11-01T00:00:00.000Z' }];
-    const listed = () => ['Q-V95Q-1', 'INV-V95Q-1'].filter((n) => screen.queryAllByText(n).length > 0);
-
-    const { rerender } = openAt('/app/commerce?tab=pipeline&view=invoices');
-    expect(activeTab()).toBe('pipeline');
-    expect(listed()).toEqual(['INV-V95Q-1']);
-    const search = screen.getByPlaceholderText('Search records...') as HTMLInputElement;
-    fireEvent.change(search, { target: { value: 'V95Q' } });
-    expect(listed()).toEqual(['INV-V95Q-1']);
+  // W9-WEB-COMMERCE-NAV, as it reads once the pipeline left Sales (MOUNT-QUOTES):
+  // the Quotes door clicked while another tab is on screen switches to the
+  // Quotes tab; the collections door, to Collections.
+  it("Money > Quotes clicked from the Collections tab switches to the Quotes tab, and the collections door back (W9-WEB-COMMERCE-NAV)", () => {
+    const { rerender } = openAt('/app/commerce?tab=pipeline&view=collections');
+    expect(activeTab()).toBe('collections');
+    expect(shown()).toEqual(['collections']);
 
     navigate(rerender, '/app/commerce?tab=pipeline&view=quotes');
-
-    expect(activeTab()).toBe('pipeline');
-    expect(listed()).toEqual(['Q-V95Q-1']);
-    // The same pipeline, not a remount: the search the owner typed is kept.
-    expect((screen.getByPlaceholderText('Search records...') as HTMLInputElement).value).toBe('V95Q');
-    expect(new URLSearchParams(window.location.search).get('view')).toBe('quotes');
-
-    // A view picked in the pipeline still sticks: following ?view does not undo it.
-    fireEvent.click(screen.getByRole('button', { name: 'Invoices' }));
-    expect(listed()).toEqual(['INV-V95Q-1']);
-    expect(new URLSearchParams(window.location.search).get('view')).toBe('invoices');
-    fireEvent.click(screen.getByRole('button', { name: 'All' }));
-    expect(listed()).toEqual(['Q-V95Q-1', 'INV-V95Q-1']);
+    expect(activeTab()).toBe('quotes');
+    expect(shown()).toEqual(['quotes']);
     expect(new URLSearchParams(window.location.search).get('view')).toBeNull();
+
+    navigate(rerender, '/app/commerce?tab=pipeline&view=collections');
+    expect(activeTab()).toBe('collections');
+    expect(shown()).toEqual(['collections']);
   });
 
-  // CR-W9WCN-1 (W9-WEB-COMMERCE-NAV review): the command palette's Quotes / New
-  // Quote / Invoices, the new-entity menu's Quote and the contact actions still
-  // push the legacy ?tab=quotes / ?tab=invoices. The page rewrote those to
-  // ?tab=pipeline with no ?view, and the pipeline now follows ?view while
-  // mounted (no ?view is its All view), so such a door clicked from the
-  // pipeline's Quotes view switched it to All. The rewrite names the view the
-  // legacy tab meant; ?tab=payments has no pipeline view and keeps All.
-  it("CR-W9WCN-1: a legacy ?tab=quotes / ?tab=invoices door lands on the pipeline's quotes / invoices view, on a fresh mount and while the pipeline is mounted (W9-WEB-COMMERCE-NAV)", () => {
-    pipelineMode.real = true;
-    shellData.quotes = [{ id: 'v95q_quote_1', quoteNumber: 'Q-V95Q-1', status: 'SENT', total: 100, currency: 'TTD', items: [], createdAt: '2026-11-01T00:00:00.000Z', issueDate: '2026-11-01T00:00:00.000Z' }];
-    shellData.invoices = [{ id: 'v95q_inv_1', invoiceNumber: 'INV-V95Q-1', status: 'SENT', total: 200, currency: 'TTD', items: [], issueDate: '2026-11-01T00:00:00.000Z' }];
-    const listed = () => ['Q-V95Q-1', 'INV-V95Q-1'].filter((n) => screen.queryAllByText(n).length > 0);
-    const url = () => {
-      const p = new URLSearchParams(window.location.search);
-      return { tab: p.get('tab'), view: p.get('view') };
-    };
-
-    // A fresh mount at the legacy tab.
+  // CR-W9WCN-1 (W9-WEB-COMMERCE-NAV review), as it reads now: the command
+  // palette's Quotes / New Quote / Invoices, the new-entity menu's Quote and
+  // the contact actions still push the legacy ?tab=quotes / ?tab=invoices.
+  // The quotes door lands on the Quotes tab; the invoices door leaves for the
+  // invoices list, on a fresh mount and while the page is mounted.
+  it("CR-W9WCN-1: a legacy ?tab=quotes door lands on the Quotes tab and ?tab=invoices goes to /app/commerce/invoices, on a fresh mount and while mounted", () => {
     openAt('/app/commerce?tab=quotes');
-    expect(activeTab()).toBe('pipeline');
-    expect(listed()).toEqual(['Q-V95Q-1']);
-    expect(url()).toEqual({ tab: 'pipeline', view: 'quotes' });
+    expect(activeTab()).toBe('quotes');
+    expect(new URLSearchParams(window.location.search).get('tab')).toBe('quotes');
     cleanup();
+
     openAt('/app/commerce?tab=invoices');
-    expect(listed()).toEqual(['INV-V95Q-1']);
-    expect(url()).toEqual({ tab: 'pipeline', view: 'invoices' });
+    expect(nav.router.replace).toHaveBeenCalledWith('/app/commerce/invoices');
+    nav.router.replace.mockClear();
     cleanup();
 
-    // The pipeline is mounted on its Quotes view: the Quotes door keeps it there.
     const { rerender } = openAt('/app/commerce?tab=pipeline&view=quotes');
-    expect(listed()).toEqual(['Q-V95Q-1']);
-    navigate(rerender, '/app/commerce?tab=quotes');
-    expect(activeTab()).toBe('pipeline');
-    expect(listed()).toEqual(['Q-V95Q-1']);
-    expect(url()).toEqual({ tab: 'pipeline', view: 'quotes' });
-
-    // From the Invoices view the Quotes door switches to quotes, and back.
-    navigate(rerender, '/app/commerce?tab=pipeline&view=invoices');
-    expect(listed()).toEqual(['INV-V95Q-1']);
-    navigate(rerender, '/app/commerce?tab=quotes');
-    expect(listed()).toEqual(['Q-V95Q-1']);
-    expect(url()).toEqual({ tab: 'pipeline', view: 'quotes' });
     navigate(rerender, '/app/commerce?tab=invoices');
-    expect(listed()).toEqual(['INV-V95Q-1']);
-    expect(url()).toEqual({ tab: 'pipeline', view: 'invoices' });
+    expect(nav.router.replace).toHaveBeenCalledWith('/app/commerce/invoices');
+    nav.router.replace.mockClear();
 
-    // Control: ?tab=payments has no pipeline view and lands on All, as before.
+    // Control: ?tab=payments lands on Collections (the pipeline's collections view).
     navigate(rerender, '/app/commerce?tab=payments');
-    expect(activeTab()).toBe('pipeline');
-    expect(listed()).toEqual(['Q-V95Q-1', 'INV-V95Q-1']);
-    expect(url()).toEqual({ tab: 'pipeline', view: null });
+    expect(activeTab()).toBe('collections');
+    expect(nav.router.replace).not.toHaveBeenCalled();
   });
 });
