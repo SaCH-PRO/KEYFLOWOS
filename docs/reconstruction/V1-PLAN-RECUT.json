@@ -12841,6 +12841,62 @@
    ],
    "scope": "SWP-CONTACT-DETAIL retired the side panel's tabs (BUG-062); the panel still fetches health metrics, journey, conversation context and cross-journey for every selection (use-contact-detail.ts:72-75) and ContactDetail still accepts the tab-only props; audit, conversations, deals, network, notes and tasks *-tab-panel.tsx are unmounted. Drop the fetches and props; delete or re-home the panels per the owner's answer to the open question on the retired tabs' features.",
    "definition_of_done": "RED: selecting a contact sends the four tab-only reads. GREEN: none sent; web tsc, unit, lint green; panels deleted or re-homed as ruled."
+  },
+  {
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "decisions": [],
+   "fixture_prefix": null,
+   "r0_impact": "KEEP",
+   "track": "launch",
+   "track_reason": "serves journey C",
+   "track_ruling": "D-263",
+   "step": 5,
+   "id": "FU-C4-FOCUS-OPEN",
+   "title": "A customer clicked on the Customers page opens their page (focus view)",
+   "journeys": [
+    "C"
+   ],
+   "lane": "web",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [
+    "SWP-CONTACT-DETAIL"
+   ],
+   "files": [
+    "apps/web/src/app/app/crm/pipeline/focus-view.tsx",
+    "apps/web/src/app/app/crm/pipeline/pipeline-tab-content.tsx"
+   ],
+   "scope": "Journey C4's 'from the Customers list' step fails at main 054cac4b and at SWP-CONTACT-DETAIL's head alike (live runs 2026-11-24): /app/crm/contacts opens in the focus view (the default), whose cards call onViewContact (onViewEngageContact) and leave the page at /app/crm/contacts with no link to /app/crm/contacts/<id>. SWP-CONTACT-DETAIL's Open link is in the list view's side panel only. Make a focus-view card (or a visible link on it) open the customer's page; the journey locator stays as written.",
+   "definition_of_done": "RED: journey C4 'from the Customers list' fails at the base (URL stays /app/crm/contacts). GREEN: C4 passes on phone and desktop; web unit test for the card's link; tsc, lint green."
+  },
+  {
+   "kind": "new",
+   "absorbs": [],
+   "bugs": [],
+   "decisions": [],
+   "fixture_prefix": null,
+   "r0_impact": "KEEP",
+   "track": "launch",
+   "track_reason": "serves journey F",
+   "track_ruling": "D-263",
+   "step": 5,
+   "id": "FU-NOTIFICATIONS-PREFS-GUARD",
+   "title": "Only members with settings access read or change the customer-email settings",
+   "journeys": [
+    "F"
+   ],
+   "lane": "server",
+   "size": "S",
+   "priority": "P1",
+   "depends_on": [],
+   "files": [
+    "apps/server/src/modules/notifications/notifications.controller.ts",
+    "apps/server/test/notifications-prefs-guard.integration.test.ts (new)"
+   ],
+   "scope": "From the FU-NAV-A3-CODEX-235 acceptance review: GET and PATCH /notifications/businesses/:b/customer-preferences (and GET customer-log, the customer email log) have AuthGuard and BusinessGuard only, so any member of a business, whatever their modules, can read and change its customer-email settings and read the log. Add the settings module guard (read for GET, write for PATCH) as the other settings endpoints have it. Owner question attached: meNav offers /app/settings/notifications to every member while the settings index gates it on settings.",
+   "definition_of_done": "RED (real DB): a STAFF member with settings none gets 200 on PATCH customer-preferences. GREEN: 403 for settings none, 200 for settings write; owner unchanged; Release 0 still MET."
   }
  ],
  "moot": [
