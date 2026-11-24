@@ -147,8 +147,12 @@ describe("FU-C4-FOCUS-OPEN: a customer clicked on the Customers page opens their
     nextActions = [callAda];
     window.localStorage.setItem("kf_pipeline_view", "focus");
     render(<AppProviders><ContactsPage /></AppProviders>);
-    const rows = await screen.findAllByText("Call Ada about her order", {}, { timeout: 4000 });
-    fireEvent.click(rows[0]);
+    // The focus view's action row is the clickable card (cursor-pointer) holding the text; the queue card elsewhere on
+    // the page shows the same text in a part that is not clickable.
+    const matches = await screen.findAllByText("Call Ada about her order", {}, { timeout: 4000 });
+    const row = matches.find((m) => m.closest(".cursor-pointer"));
+    expect(row, "the focus view lists the call action").toBeTruthy();
+    fireEvent.click(row!);
     await waitFor(() => expect(nav.router.push).toHaveBeenCalledWith(`/app/crm/contacts/${ADA.id}`));
   });
 });
