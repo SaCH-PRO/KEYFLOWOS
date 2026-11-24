@@ -411,7 +411,7 @@ export function BlueprintOnboardingChat({
           </motion.div>
         )}
 
-        {completeness >= 80 && !loading && (
+        {completeness !== null && completeness >= 80 && !loading && (
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
