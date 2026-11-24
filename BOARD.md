@@ -81,6 +81,7 @@
 | P30 | FU-NOTIFICATIONS-PREFS-GUARD (server, S, P1: customer-preferences and customer-log have no module guard) | antigravity | returned | — | Returned #80 (7142538415) @ `3f027f65` (RED `4a7a5006`, fix `3f027f65`; real-DB `notifications-prefs-guard` 6/6 + `timeline-scope` 46/46 = 52/52, tsc 0, eslint 0, both reviews CONFIRMED) |
 | P31 | FU-CONTACT-PANEL-PRUNE (web, S: the side panel still reads health, journey, conversation context and cross-journey for the retired tabs; acceptance CDC-5 and Codex P2 on #236) | claude | todo | M8 | The read removal does not wait on owner question 32 (only re-homing the panels does): pre-flight, claim after M8 |
 | P32 | FU-C4-CMDK-SEARCH (web, S: journey C4 Cmd/Ctrl+K step: desktop palette not opening, phone results not naming the customer; pre-existing, reached once P29 fixed the list step) | claude | todo | — | Root-cause first (two causes filed), then RED |
+| P33 | SWP-STORE-OVERSELL (BUG-017, server, P1, M, `v64i_`: storefront refuses order above own-warehouse available stock with 409 INSUFFICIENT_STOCK naming product, never id) | antigravity | claimed | — | Claimed #80 (7142556241) `pkt/V1-SWP-STORE-OVERSELL` on `10e3c97e` (unblocked by P12); inspecting `store-order.service.ts` & writing RED tests |
 | P14 | Owner: "Batch 2 safe defaults #5–#10" (not approved in D-272) | owner | blocked | the owner's review | The owner reviews the list |
 | P15 | Owner: redeploy production (D-266) | owner | blocked | M1–M4 | The owner deploys from main |
 
