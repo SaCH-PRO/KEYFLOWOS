@@ -570,14 +570,11 @@ describe("V1-38b (CR-1): the status readers count a CLIENT as a customer, and a 
   });
 
   it('relationship health signals: a CLIENT with no bookings in 90 days is flagged, a legacy CUSTOMER the same, a PROSPECT is not', async () => {
-    // The stand-in row carries businessId. The real findUnique selects none, so
-    // computeHealth answers null for every contact today (characterized in
-    // test/contact-reads-noncrm-visibility.integration.test.ts; not this packet).
     const signalsFor = async (status: string) => {
       const prisma = {
         client: {
           contact: {
-            findUnique: async () => ({
+            findFirst: async () => ({
               id: 'c1', businessId: 'biz', firstName: 'Ada', lastName: null, email: null, status, lastInteractionAt: ago(3), createdAt: ago(400),
             }),
           },
@@ -678,7 +675,7 @@ describe("D-92: a stored legacy 'DORMANT' reads as CLIENT in every status reader
     const prisma = {
       client: {
         contact: {
-          findUnique: async () => ({
+          findFirst: async () => ({
             id: 'c1', businessId: 'biz', firstName: 'Ada', lastName: null, email: null, status: 'DORMANT', lastInteractionAt: ago(3), createdAt: ago(400),
           }),
         },

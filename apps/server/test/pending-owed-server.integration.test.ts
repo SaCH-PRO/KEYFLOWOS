@@ -946,8 +946,17 @@ describe('V1-86 (FU-PENDING-OWED-SERVER; D-256): every server owed figure counts
       // including lists that copy PENDING + SENT/OVERDUE/PARTIALLY_PAID/PARTIALLY_CREDITED in any order.
       const isForbiddenOwedLiteral = (src: string): string | null => {
         if (/const OPEN_INVOICE_STATUSES\b/.test(src)) return 'const OPEN_INVOICE_STATUSES';
-        if (/status\s*===\s*['"]SENT['"]\s*\|\|\s*[a-zA-Z0-9_.]+\.status\s*===\s*['"]DRAFT['"]/.test(src)) {
-          return "chained status === 'SENT' || ...status === 'DRAFT'";
+        const chainedMatches = src.matchAll(
+          /status\s*===\s*['"]([A-Z_]+)['"]\s*\|\|\s*[a-zA-Z0-9_.]+\.status\s*===\s*['"]([A-Z_]+)['"]/g,
+        );
+        for (const m of chainedMatches) {
+          const pair = new Set([m[1], m[2]]);
+          if (
+            (pair.has('PENDING') && (pair.has('SENT') || pair.has('OVERDUE') || pair.has('PARTIALLY_PAID') || pair.has('PARTIALLY_CREDITED'))) ||
+            (pair.has('SENT') && (pair.has('OVERDUE') || pair.has('DRAFT') || pair.has('PARTIALLY_PAID') || pair.has('PARTIALLY_CREDITED')))
+          ) {
+            return `chained status === literal ${m[0]}`;
+          }
         }
         // Any bracketed array literal of >=2 uppercase status strings containing a private invoice owed combination
         const arrayMatches = src.matchAll(/\[(?:\s*['"][A-Z_]+['"]\s*,)+\s*['"][A-Z_]+['"]\s*,?\s*\]/g);
@@ -990,6 +999,8 @@ describe('V1-86 (FU-PENDING-OWED-SERVER; D-256): every server owed figure counts
       expect(isForbiddenOwedLiteral("new Set(['PENDING', 'SENT', 'OVERDUE']).has(i.status)")).not.toBeNull();
       expect(isForbiddenOwedLiteral("WHERE status::text IN ('PENDING', 'SENT', 'OVERDUE')")).not.toBeNull();
       expect(isForbiddenOwedLiteral("i.status === 'SENT' || i.status === 'DRAFT'")).not.toBeNull();
+      expect(isForbiddenOwedLiteral("i.status === 'SENT' || i.status === 'OVERDUE'")).not.toBeNull();
+      expect(isForbiddenOwedLiteral("i.status === 'PENDING' || i.status === 'SENT'")).not.toBeNull();
 
       // Single-site anchored exclusion for the documented FOLLOW3-A9 refund reopen check (non-owed) at L307-313.
       for (const rel of migratedFiles) {
