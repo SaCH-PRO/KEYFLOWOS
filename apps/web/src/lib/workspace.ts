@@ -429,6 +429,7 @@ export async function listMyBusinesses(): Promise<CachedBusiness[] | null> {
 
 async function bootstrapFirstBusiness(
   generation: number,
+  stored: string | null,
   onSuperseded: () => Promise<string | null>,
 ): Promise<string | null> {
   const result = await bootstrapIdentity({});
@@ -440,6 +441,9 @@ async function bootstrapFirstBusiness(
   }
   const business = result.data?.business;
   if (!business?.id) {
+    // bootstrapIdentity writes nothing when it gives no business: a stored id that changed while it ran was written
+    // by someone else (another tab), so it is resolved afresh, not forgotten.
+    if (getStoredBusinessId() !== stored) return onSuperseded();
     // The membership list was authoritative and empty, and bootstrap gave no business (403
     // OWNER_MEMBERSHIP_REQUIRED: recorded as an owner, a member nowhere): a stored id is not the caller's, and every
     // screen would keep addressing a business BusinessGuard refuses. Forget the business only; the session stays
@@ -479,7 +483,7 @@ async function resolveBusinessSelection(
     if (user) setCachedUser(user);
     return stored;
   }
-  if (businesses.length === 0) return bootstrapFirstBusiness(generation, onSuperseded);
+  if (businesses.length === 0) return bootstrapFirstBusiness(generation, stored, onSuperseded);
 
   const chosen =
     preferred.map((id) => businesses.find((b) => b.id === id)).find((b) => b !== undefined) ??

@@ -308,20 +308,21 @@ function AuthCallbackInner() {
             <h1 className="text-2xl font-bold mb-2" style={{ color: "hsl(30 20% 98%)" }}>Your workspace access needs restoring</h1>
             <div className="rounded-2xl p-6 flex flex-col gap-4" style={{ background: "hsl(20 14% 7% / 0.9)", border: "1px solid hsl(20 10% 15%)" }}>
               <p className="text-sm" style={{ color: "hsl(30 10% 75%)" }}>{error}</p>
-              <a
-                href="mailto:support@keyflow.app?subject=Restore%20my%20workspace%20access"
-                className="w-full py-3 rounded-xl font-semibold text-sm text-white transition-all hover:brightness-110"
-                style={{ background: "linear-gradient(135deg, hsl(24 95% 53%), hsl(24 95% 45%))", display: "inline-block" }}
-              >
-                Contact support
-              </a>
               <button
                 onClick={() => router.push("/auth/login")}
-                className="w-full py-3 rounded-xl font-semibold text-sm transition-all hover:brightness-110"
-                style={{ color: "hsl(30 20% 98%)", background: "hsl(20 10% 12%)", border: "1px solid hsl(20 10% 18%)" }}
+                className="w-full py-3 rounded-xl font-semibold text-sm text-white transition-all hover:brightness-110"
+                style={{ background: "linear-gradient(135deg, hsl(24 95% 53%), hsl(24 95% 45%))" }}
               >
                 Back to Sign In
               </button>
+              {/* The same address and style as the account_email_conflict view's link. */}
+              <a
+                href="mailto:support@keyflow.app?subject=Restore%20my%20workspace%20access"
+                className="w-full py-3 rounded-xl font-semibold text-sm transition-all hover:brightness-110"
+                style={{ color: "hsl(30 20% 98%)", background: "hsl(20 10% 12%)", border: "1px solid hsl(20 10% 18%)", display: "inline-block" }}
+              >
+                Contact support
+              </a>
             </div>
           </div>
         </div>
