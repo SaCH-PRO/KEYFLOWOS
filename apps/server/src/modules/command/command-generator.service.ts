@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { approvalItemNeeds, APPROVAL_ITEM_CLASSIFY_SELECT } from '../ai/approval-item-sight';
 
 interface CommandSeed {
   sourceModule: string;
@@ -170,10 +171,13 @@ export class CommandGeneratorService {
       where: { businessId, status: 'pending' },
       orderBy: [{ createdAt: 'desc' }],
       take: 10,
-      select: { id: true, title: true, description: true, riskTier: true, createdAt: true },
+      select: { id: true, riskTier: true, createdAt: true, ...APPROVAL_ITEM_CLASSIFY_SELECT },
     });
 
     for (const a of approvals) {
+      // FU-AI-APPROVALS-MONEY-SIGHT (SEC-5c): shared governance command cards are visible to operations readers without
+      // revenue/expenses sight, so withhold any approval item that requires financial or expense sight.
+      if (approvalItemNeeds(a).length > 0) continue;
       seeds.push({
         sourceModule: 'governance',
         sourceType: 'aiApproval',

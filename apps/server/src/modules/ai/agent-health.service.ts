@@ -4,6 +4,12 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
 import { schedulersDisabled } from '../../core/config/env';
+import {
+  actorReadsEverything,
+  approvalActorOf,
+  approvalItemsVisibleTo,
+  APPROVAL_ITEM_CLASSIFY_SELECT,
+} from './approval-item-sight';
 
 export interface AgentHealthReport {
   businessId: string;
@@ -76,11 +82,14 @@ export class AgentHealthService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  async checkBusinessHealth(businessId: string): Promise<AgentHealthReport> {
+  async checkBusinessHealth(businessId: string, viewerId?: string | null): Promise<AgentHealthReport> {
     const now = new Date();
     const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000);
     const today = new Date(now);
     today.setHours(0, 0, 0, 0);
+
+    const sightActor = viewerId !== undefined ? await approvalActorOf(this.prisma, businessId, viewerId) : null;
+    const filterApprovals = sightActor !== null && !actorReadsEverything(sightActor);
 
     const [
       planStats,
@@ -106,11 +115,13 @@ export class AgentHealthService implements OnModuleInit, OnModuleDestroy {
         where: { businessId },
         select: { id: true, loopType: true, enabled: true, lastRunAt: true },
       }),
-      this.prisma.client.aiApprovalItem.groupBy({
-        by: ['status'],
-        where: { businessId },
-        _count: true,
-      }),
+      filterApprovals
+        ? Promise.resolve([])
+        : this.prisma.client.aiApprovalItem.groupBy({
+            by: ['status'],
+            where: { businessId },
+            _count: true,
+          }),
       this.prisma.client.aiExecutionLog.groupBy({
         by: ['success'],
         where: { businessId, createdAt: { gte: today }, actor: 'ai' },
@@ -124,10 +135,21 @@ export class AgentHealthService implements OnModuleInit, OnModuleDestroy {
       planCounts[s.status] = s._count;
     }
 
-    // Count approvals by status
+    // Count approvals by status (filtered by viewer sight on dashboard calls, SEC-5b)
     const approvalCounts: Record<string, number> = {};
-    for (const s of approvalStats) {
-      approvalCounts[s.status] = s._count;
+    if (filterApprovals && sightActor) {
+      const rows = await this.prisma.client.aiApprovalItem.findMany({
+        where: { businessId, status: { in: ['pending', 'escalated'] } },
+        select: { status: true, ...APPROVAL_ITEM_CLASSIFY_SELECT },
+        take: 1_000,
+      });
+      for (const visible of approvalItemsVisibleTo(sightActor, rows)) {
+        approvalCounts[visible.status] = (approvalCounts[visible.status] ?? 0) + 1;
+      }
+    } else {
+      for (const s of approvalStats) {
+        approvalCounts[s.status] = s._count;
+      }
     }
 
     // Count actions today
@@ -211,7 +233,7 @@ export class AgentHealthService implements OnModuleInit, OnModuleDestroy {
     return report;
   }
 
-  async getHealthDashboard(businessId: string): Promise<AgentHealthReport> {
-    return this.checkBusinessHealth(businessId);
+  async getHealthDashboard(businessId: string, viewerId?: string | null): Promise<AgentHealthReport> {
+    return this.checkBusinessHealth(businessId, viewerId ?? null);
   }
 }

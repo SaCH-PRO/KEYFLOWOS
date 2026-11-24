@@ -74,12 +74,28 @@ function blankControls(value: unknown): unknown {
   return value;
 }
 
+function foldText(text: string): string {
+  return text.normalize('NFKC').normalize('NFD').replace(/[\p{Cf}\p{Mn}\p{Me}]/gu, '').normalize('NFC');
+}
+
 function readingsOf(text: string): string[] {
-  if (!/[\\\p{Cc}]/u.test(text)) return [text];
-  const escapesAsSpaces = text.replace(/\\+(?:u[0-9a-fA-F]{4}|[bfnrt"/])?/g, ' ');
-  const decoded = text.replace(/\\u([0-9a-fA-F]{4})/g, (_m, hex: string) => String.fromCharCode(parseInt(hex, 16)));
-  const blank = (t: string) => t.replace(/\p{Cc}/gu, ' ');
-  return [...new Set([text, escapesAsSpaces, decoded, blank(text), blank(escapesAsSpaces), blank(decoded)])];
+  const folded = /[^\x20-\x7E]/.test(text) ? foldText(text) : text;
+  const base = folded === text ? [text] : [text, folded];
+  if (!/[\\\p{Cc}]/u.test(text) && !/[\\\p{Cc}]/u.test(folded)) return base;
+  const out = new Set<string>(base);
+  for (const candidate of base) {
+    const escapesAsSpaces = candidate.replace(/\\+(?:u[0-9a-fA-F]{4}|[bfnrt"/])?/g, ' ');
+    const decoded = candidate.replace(/\\u([0-9a-fA-F]{4})/g, (_m, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+    const strippedSlashes = decoded.replace(/\\/g, '');
+    for (const variant of [candidate, escapesAsSpaces, decoded, strippedSlashes]) {
+      out.add(variant);
+      out.add(variant.replace(/\p{Cc}/gu, ' '));
+      const vf = foldText(variant);
+      out.add(vf);
+      out.add(vf.replace(/\p{Cc}/gu, ' '));
+    }
+  }
+  return [...out];
 }
 
 /** The most characters of one item's fields the text rule reads; past it the item needs both sights, unread. */
@@ -152,18 +168,19 @@ export function approvalItemNeeds(item: ApprovalItemContent | null | undefined):
   const byText = fieldsSightNeeds(approvalItemFields(item));
   if (byText.length === 2) return byText;
   // The item as the approval proposal it becomes (migrateAiApprovalItemToProposal), every field of it (D-238).
+  // Pass summary/payload as null so description and inputPayload are not double-counted against MAX_PROPOSAL_CLASSIFIED (CR-6).
   const financial = isFinancialProposal({
     actionType: 'EXECUTE_TOOL',
     toolName: item.toolName ?? null,
     module: item.module ?? moduleOfTool(item.toolName),
     title: item.title ?? null,
-    summary: item.description ?? null,
+    summary: null,
     description: item.description ?? null,
     rationale: item.rationale ?? null,
     expectedBenefit: item.expectedBenefit ?? null,
     risks: item.risks ?? null,
     inputPayload: item.inputPayload ?? null,
-    payload: item.inputPayload ?? null,
+    payload: null,
     affectedEntities: item.affectedEntities ?? null,
     rejectionReason: item.resolution ?? null,
   } as Parameters<typeof isFinancialProposal>[0]);

@@ -1,4 +1,4 @@
-import { approvalActorOf, approvalItemsVisibleTo } from './approval-item-sight';
+import { actorReadsEverything, approvalActorOf, approvalItemsVisibleTo, APPROVAL_ITEM_CLASSIFY_SELECT } from './approval-item-sight';
 import {
   Body,
   Controller,
@@ -1426,11 +1426,12 @@ export class GraphActionsController {
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('autopilot/businesses/:businessId/coverage')
-  async getAutopilotCoverage(@Param('businessId') businessId: string) {
-    const [coverage, settings, snapshot] = await Promise.all([
+  async getAutopilotCoverage(@Param('businessId') businessId: string, @Req() req: AuthenticatedRequest) {
+    const [coverage, settings, snapshot, sightActor] = await Promise.all([
       this.workspaceRecs.getAutomationCoverage(businessId),
       this.governance.getAutonomySettings(businessId),
       this.businessGraph.getSnapshot(businessId),
+      approvalActorOf(this.prisma, businessId, req?.user?.id),
     ]);
 
     const recentExecCount = await this.prisma.client.aiExecutionLog.count({
@@ -1440,9 +1441,19 @@ export class GraphActionsController {
       },
     });
 
-    const pendingApprovalCount = await this.prisma.client.aiApprovalItem.count({
-      where: { businessId, status: 'pending' },
-    });
+    let pendingApprovalCount: number;
+    if (actorReadsEverything(sightActor)) {
+      pendingApprovalCount = await this.prisma.client.aiApprovalItem.count({
+        where: { businessId, status: 'pending' },
+      });
+    } else {
+      const pendingRows = await this.prisma.client.aiApprovalItem.findMany({
+        where: { businessId, status: 'pending' },
+        select: APPROVAL_ITEM_CLASSIFY_SELECT,
+        take: 1_000,
+      });
+      pendingApprovalCount = approvalItemsVisibleTo(sightActor, pendingRows).length;
+    }
 
     const moduleGaps: Array<{ module: string; gap: string; severity: 'high' | 'medium' | 'low' }> = [];
     for (const mod of coverage.modules) {

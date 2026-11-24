@@ -69,13 +69,24 @@ export class AiApprovalsService {
     }
 
     const kept: Array<Record<string, unknown> & { id: string }> = [];
+    const everything = actorReadsEverything(actor);
+    if (!everything && cursor) {
+      // Validate cursor belongs to this business/query and is visible to the actor so probing a hidden ID is
+      // indistinguishable from an unknown/foreign cursor (SEC-3).
+      const cursorRow = await this.prisma.client.aiApprovalItem.findFirst({
+        where: { ...where, id: cursor },
+      });
+      if (!cursorRow || !actorMaySee(actor, approvalItemNeeds(cursorRow))) {
+        return { items: [], nextCursor: null, hasMore: false };
+      }
+    }
+
     let after: string | undefined = cursor || undefined;
-    let lastRead: string | null = null;
     let more = true;
     let scanned = 0;
     let spent = 0;
-    const everything = actorReadsEverything(actor);
-    while (kept.length < take && more) {
+    const target = everything ? take : take + 1;
+    while (kept.length < target && more) {
       const rows = await this.prisma.client.aiApprovalItem.findMany({
         where,
         orderBy: [{ riskTier: 'desc' }, { createdAt: 'asc' }],
@@ -84,37 +95,47 @@ export class AiApprovalsService {
         skip: after ? 1 : 0,
       });
       more = rows.length > take;
-      const batch = more ? rows.slice(0, take) : rows;
+      const batch = everything && more ? rows.slice(0, take) : rows;
       if (batch.length === 0) break;
       let stopped = false;
+      let lastScanned: string | null = null;
       for (let i = 0; i < batch.length; i++) {
         const row = batch[i];
         if (!everything) {
-          // Fail closed past the scan bound or the classification budget: the rest of the page is not read.
+          // Fail closed past the scan bound or the classification budget: stop scanning, never emit a hidden ID.
           spent += approvalItemCost(row);
           if (scanned >= LIST_SCAN_MAX || spent > APPROVALS_CLASSIFY_BUDGET) {
-            more = true;
+            more = false;
             stopped = true;
             break;
           }
           scanned++;
         }
-        lastRead = row.id;
+        lastScanned = row.id;
         if (everything || actorMaySee(actor, approvalItemNeeds(row))) kept.push(row);
-        if (kept.length === take) {
-          if (i < batch.length - 1) more = true;
+        if (kept.length === target) {
           stopped = true;
           break;
         }
       }
-      after = lastRead ?? after;
-      if (stopped && kept.length < take) break;
+      if (lastScanned) after = lastScanned;
+      if (stopped) break;
     }
 
-    const hasMore = more && lastRead !== null;
+    if (everything) {
+      const hasMore = more && kept.length > 0;
+      return {
+        items: kept.map((item) => this.serializeItem(item)),
+        nextCursor: hasMore ? kept[kept.length - 1].id : null,
+        hasMore,
+      };
+    }
+
+    const hasMore = kept.length > take;
+    const page = hasMore ? kept.slice(0, take) : kept;
     return {
-      items: kept.map((item) => this.serializeItem(item)),
-      nextCursor: hasMore ? lastRead : null,
+      items: page.map((item) => this.serializeItem(item)),
+      nextCursor: hasMore && page.length > 0 ? page[page.length - 1].id : null,
       hasMore,
     };
   }

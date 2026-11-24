@@ -110,16 +110,23 @@ export class StaffChatBridgeService {
     // pending item routed to them before falling into general chat.
     let pendingApprovalHint: string | undefined;
     if (assignment.autoApprovalViaReply) {
-      const pending = await this.prisma.client.aiApprovalItem.findFirst({
+      const candidates = await this.prisma.client.aiApprovalItem.findMany({
         where: { businessId, status: 'pending', approverAssignmentId: assignment.id },
         orderBy: { createdAt: 'asc' },
+        take: 25,
       });
+      // FU-AI-APPROVALS-MONEY-SIGHT (SEC-4 / CR-2): select the first pending item this position may read. Hidden items
+      // disclose nothing (neither existence, riskTier, nor internal id) and do not head-of-line block newer visible items.
+      const oversight = this.getOversight();
+      let pending: (typeof candidates)[number] | undefined;
+      for (const candidate of candidates) {
+        const visible = await oversight.approvalVisibleToPosition(businessId, assignment.id, candidate).catch(() => false);
+        if (visible) {
+          pending = candidate;
+          break;
+        }
+      }
       if (pending) {
-        // FU-AI-APPROVALS-MONEY-SIGHT (D-100, D-234, D-238): the item is named (in the reply and in KEY's hint) only
-        // to a position that may read it; otherwise it is "a pending approval" (AiOversightService decides, fail closed).
-        const named = await this.getOversight()
-          .approvalVisibleToPosition(businessId, assignment.id, pending)
-          .catch(() => false);
         const decision = this.parseReplyDecision(body);
         if (decision && claim === 'unidentified') {
           // No provider message id: it could be a replay, so it decides nothing (WB-3).
@@ -128,16 +135,16 @@ export class StaffChatBridgeService {
         if (decision) {
           // AiOversightService caps the reply by the tier the holder has over HTTP (review 9 WB-1).
           try {
-            const oversight = this.getOversight();
             await oversight.resolveApprovalByAssignment(pending.id, businessId, assignment.id, decision);
-            return { handled: true, reply: named ? `Got it — I've ${decision} "${pending.title}".` : `Got it — I've ${decision} the pending approval.` };
+            return { handled: true, reply: `Got it — I've ${decision} "${pending.title}".` };
           } catch (err) {
-            return { handled: true, reply: `I couldn't apply that: ${err instanceof Error ? err.message : 'unknown error'}. Open the app to decide instead.` };
+            const safeMsg = err instanceof Error && err.name === 'NotFoundException'
+              ? 'that approval is no longer available'
+              : (err instanceof Error ? err.message : 'unknown error');
+            return { handled: true, reply: `I couldn't apply that: ${safeMsg}. Open the app to decide instead.` };
           }
         }
-        pendingApprovalHint = named
-          ? `${displayName} has a pending approval: "${pending.title}" (Tier ${pending.riskTier}). If this message is a reply to it, gently ask them to say YES or NO; otherwise just help with what they asked.`
-          : `${displayName} has a pending approval (Tier ${pending.riskTier}) whose details are in the app. If this message is a reply to it, gently ask them to say YES or NO or to open the app; otherwise just help with what they asked.`;
+        pendingApprovalHint = `${displayName} has a pending approval: "${pending.title}" (Tier ${pending.riskTier}). If this message is a reply to it, gently ask them to say YES or NO; otherwise just help with what they asked.`;
       }
     }
 

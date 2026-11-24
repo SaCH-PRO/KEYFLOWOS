@@ -611,27 +611,44 @@ export class AiOversightService {
     return { id: item.id, title: 'An AI action is waiting for your approval', description: null, riskTier: tier };
   }
 
-  /** The levels a route's recipient holds: its member's, and every member's whose phone it texts (the weakest). */
+  /** The levels a route's recipient holds: its member's, and every member's whose phone/email it targets (the weakest). */
   private async routeActor(businessId: string, route: ApprovalRouteResult): Promise<ApprovalActor> {
     try {
+      const isActive = (u?: { deletedAt?: Date | null; bannedAt?: Date | null } | null) => !u || (!u.deletedAt && !u.bannedAt);
       const memberships: Array<{ role: string; permissionScopes: unknown }> = [];
+      let resolvedEmail: string | null = null;
       if (route.approverMembershipId) {
         const m = await this.prisma.client.membership.findFirst({
           where: { id: route.approverMembershipId, businessId },
-          select: { role: true, permissionScopes: true },
+          select: { role: true, permissionScopes: true, user: { select: { ...HOLDER_ACCOUNT, email: true } } },
         });
-        if (!m) return NO_APPROVAL_ACTOR;
+        if (!m || !isActive(m.user)) return NO_APPROVAL_ACTOR;
+        resolvedEmail = m.user?.email?.trim().toLowerCase() ?? null;
         memberships.push(m);
       } else if (route.approverUserId) {
         const m = await this.prisma.client.membership.findUnique({
           where: { userId_businessId: { userId: route.approverUserId, businessId } },
-          select: { role: true, permissionScopes: true },
+          select: { role: true, permissionScopes: true, user: { select: { ...HOLDER_ACCOUNT, email: true } } },
         });
-        if (!m) return NO_APPROVAL_ACTOR;
+        if (!m || !isActive(m.user)) return NO_APPROVAL_ACTOR;
+        resolvedEmail = m.user?.email?.trim().toLowerCase() ?? null;
         memberships.push(m);
       }
+      if (route.channel === 'email') {
+        const targetEmail = route.contactEmail?.trim().toLowerCase();
+        if (!targetEmail) return NO_APPROVAL_ACTOR;
+        if (resolvedEmail !== null && resolvedEmail !== targetEmail) return NO_APPROVAL_ACTOR;
+        const emailMembers = await this.prisma.client.membership.findMany({
+          where: { businessId, user: { email: { equals: targetEmail, mode: 'insensitive' } } },
+          select: { role: true, permissionScopes: true, user: { select: { ...HOLDER_ACCOUNT, email: true } } },
+        });
+        if (emailMembers.some((em) => !isActive(em.user))) return NO_APPROVAL_ACTOR;
+        memberships.push(...emailMembers);
+      }
       if ((route.channel === 'whatsapp' || route.channel === 'sms') && route.contactPhone) {
-        memberships.push(...(await membersByPhone(this.prisma, businessId, route.contactPhone)));
+        const phoneMembers = await membersByPhone(this.prisma, businessId, route.contactPhone);
+        if (phoneMembers.some((pm) => !isActive(pm.user))) return NO_APPROVAL_ACTOR;
+        memberships.push(...phoneMembers);
       }
       return approvalActorOfMemberships(memberships);
     } catch {
@@ -642,12 +659,18 @@ export class AiOversightService {
   /**
    * FU-AI-APPROVALS-MONEY-SIGHT: the levels a staff position acts with: the weakest of its holder's membership in this
    * business and of every member who uses its phone (the memberships approvalTierForPosition caps the tier by); a
-   * contact-only position with no such member holds none.
+   * holder-backed position whose membership is missing here or banned/deleted, or a contact-only position with no such
+   * active member, holds none.
    */
   private positionActor(
-    membership: { role: string; permissionScopes: unknown } | null,
-    phoneMembers: ReadonlyArray<{ role: string; permissionScopes: unknown }>,
+    assignment: { userId?: string | null; membershipId?: string | null },
+    membership: { role: string; permissionScopes: unknown; user?: { deletedAt?: Date | null; bannedAt?: Date | null } | null } | null,
+    phoneMembers: ReadonlyArray<{ role: string; permissionScopes: unknown; user?: { deletedAt?: Date | null; bannedAt?: Date | null } | null }>,
   ): ApprovalActor {
+    const isActive = (u?: { deletedAt?: Date | null; bannedAt?: Date | null } | null) => !u || (!u.deletedAt && !u.bannedAt);
+    if ((assignment.userId || assignment.membershipId) && !membership) return NO_APPROVAL_ACTOR;
+    if (membership && !isActive(membership.user)) return NO_APPROVAL_ACTOR;
+    if (phoneMembers.some((pm) => !isActive(pm.user))) return NO_APPROVAL_ACTOR;
     return approvalActorOfMemberships([...(membership ? [membership] : []), ...phoneMembers]);
   }
 
@@ -666,7 +689,7 @@ export class AiOversightService {
         holderMembershipHere(this.prisma, businessId, assignment),
         membersByPhone(this.prisma, businessId, assignment.contactPhone),
       ]);
-      return actorMaySee(this.positionActor(membership, phoneMembers), approvalItemNeeds(item));
+      return actorMaySee(this.positionActor(assignment, membership, phoneMembers), approvalItemNeeds(item));
     } catch {
       return false;
     }
@@ -747,25 +770,26 @@ export class AiOversightService {
       where: { id: approvalId, businessId },
     });
     if (!item) throw notFound();
-    if (item.approverAssignmentId !== assignmentId) {
-      throw new ForbiddenException('This position is not the resolved approver for this item');
-    }
 
     const assignment = await this.prisma.client.orgAssignment.findFirst({
       where: { id: assignmentId, businessId, endedAt: null },
       include: { jobRole: true, membership: { include: { user: { select: HOLDER_ACCOUNT } } } },
     });
-    if (!assignment) throw new NotFoundException('Approver assignment not found or ended');
-
-    const [membership, phoneMembers] = await Promise.all([
-      holderMembershipHere(this.prisma, businessId, assignment),
-      membersByPhone(this.prisma, businessId, assignment.contactPhone),
-    ]);
-    // FU-AI-APPROVALS-MONEY-SIGHT (D-100, D-234, D-238): the position reads and acts with the weakest levels of every
-    // membership that acts through it (a contact-only position with none holds no sight). An item it may not read is
-    // answered as one not in the business.
-    const actor = this.positionActor(membership, phoneMembers);
+    const [membership, phoneMembers] = assignment
+      ? await Promise.all([
+          holderMembershipHere(this.prisma, businessId, assignment),
+          membersByPhone(this.prisma, businessId, assignment.contactPhone),
+        ])
+      : [null, []];
+    // FU-AI-APPROVALS-MONEY-SIGHT (D-100, D-234, D-238): run sight check BEFORE checking approverAssignmentId or
+    // assignment state so hidden items never leak existence via 403/404 differences (SEC-6).
+    const actor = assignment ? this.positionActor(assignment, membership, phoneMembers) : NO_APPROVAL_ACTOR;
     assertMaySeeApprovalItem(actor, item, notFound);
+
+    if (item.approverAssignmentId !== assignmentId) {
+      throw new ForbiddenException('This position is not the resolved approver for this item');
+    }
+    if (!assignment) throw new NotFoundException('Approver assignment not found or ended');
 
     if (item.status !== 'pending') {
       throw new BadRequestException(`Approval item is already resolved (status: "${item.status}") — cannot re-resolve`);

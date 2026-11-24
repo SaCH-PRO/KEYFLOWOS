@@ -1229,7 +1229,7 @@
     {
       "prefix": "v85a_",
       "owner": "apps/server/test/ai-approvals-money-sight.integration.test.ts",
-      "packet": "FU-AI-APPROVALS-MONEY-SIGHT"
+      "packet": "V1-85 (FU-AI-APPROVALS-MONEY-SIGHT)"
     }
   ],
   "pendingRenames": [],

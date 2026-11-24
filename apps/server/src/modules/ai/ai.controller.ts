@@ -999,8 +999,8 @@ export class AiController {
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/health')
-  async getAgentHealth(@Param('businessId') businessId: string) {
-    return this.agentHealth.getHealthDashboard(businessId);
+  async getAgentHealth(@Param('businessId') businessId: string, @Req() req: AuthenticatedRequest) {
+    return this.agentHealth.getHealthDashboard(businessId, req?.user?.id ?? null);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
