@@ -113,6 +113,7 @@ procedure is not permission. Each file below restates rules the owner already ru
 | `CONFIRMATION-REVIEW-BRIEF.md` | A small repair delta needs confirming |
 | `WAVE-RUNBOOK.md` | Compacting packets into a wave, proving it, the PR, merge conditions |
 | `CHECKLISTS.md` | The repeatable checklists every lane ticks: session start, packet, wave, merge, handoff, advisory review |
+| `WORKFLOW-IMPROVEMENTS.md` | D-274: how we speed up with no compromise: the adopted rules every lane follows, owner proposals, research in progress and an experiments log. Read it at session start |
 | `LIVE-PROOF-RUNBOOK.md` | Exactly how to run the server proof at one head, the web proof, live journeys and browser sweeps (with RED at the base), and reviews in detached worktrees, on any machine |
 | `OWNER-QUESTION-FORMAT.md` | Asking the owner, and recording the answer as D-nnn |
 | `MEASUREMENT.md` | Checking what this layer saves, and the resume test |

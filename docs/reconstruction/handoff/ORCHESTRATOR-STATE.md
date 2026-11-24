@@ -18,6 +18,10 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 
 ## 1. Standing instructions from the owner
 
+- **D-274 (2026-11-24): speed up with no compromise, record every operating decision, and do R&D on the best
+  strategies.** The adopted rules (full waves, early wave PRs, plan pre-flight, root fixes, live-run hygiene), the
+  owner proposals (a GitHub organization plus the merge queue; a path-scoped Windows proof) and the research in
+  progress are in `docs/development/agent-memory/WORKFLOW-IMPROVEMENTS.md`. Every lane reads it at session start.
 - **D-271 (2026-11-24): v1 is the priority. D-268's pause is lifted, and packet work resumes in the D-263 wedge
   order.**
   - The KEY Builder design and plan (D-268 to D-270) are parked until v1 is completed. They stay on branch
