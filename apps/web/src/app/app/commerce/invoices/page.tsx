@@ -247,8 +247,9 @@ export default function InvoicesHubPage() {
 
   const handleDuplicate = (inv: Invoice) => {
     // SWP-INV-LIST (BUG-050): the row now carries the tax, discount and notes (fetchInvoices keeps them); Decimals may
-    // arrive as strings, and the new-invoice form reads numbers.
-    const dup = { contactId: inv.contactId || "", items: (inv.items ?? []).map(it => ({ description: it.description, quantity: Number(it.quantity), unitPrice: Number(it.unitPrice), productId: it.productId ?? "" })), taxRate: Number(inv.taxRate ?? 0) || 0, discountType: inv.discountType || "PERCENT", discountValue: Number(inv.discountValue ?? 0) || 0, notes: inv.notes || "" };
+    // arrive as strings, and the new-invoice form reads numbers. A discount type fetchInvoices does not know reads as no
+    // discount (PR #233 Codex P2), so its value is not carried either.
+    const dup = { contactId: inv.contactId || "", items: (inv.items ?? []).map(it => ({ description: it.description, quantity: Number(it.quantity), unitPrice: Number(it.unitPrice), productId: it.productId ?? "" })), taxRate: Number(inv.taxRate ?? 0) || 0, discountType: inv.discountType || "PERCENT", discountValue: inv.discountType ? Number(inv.discountValue ?? 0) || 0 : 0, notes: inv.notes || "" };
     if (typeof window !== "undefined") sessionStorage.setItem("invoice_duplicate", JSON.stringify(dup));
     router.push("/app/commerce/invoices/new");
   };
