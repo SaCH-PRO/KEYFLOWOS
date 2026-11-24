@@ -21,6 +21,8 @@
  *   DL-08  pin         Undo pressed after leaving (the delete was sent): nothing is restored, nothing more is sent
  *   DL-09  RED-AT-23d25b88  an old toast's Undo never cancels a newer delete of the same customer
  *   DL-10  RED-AT-23d25b88  Undo pressed after the delete was sent says so: restore it from Trash
+ *   DL-11  RED-AT-27584c0c  (confirmation N1) a DELETE that failed restored the row: a later Undo does not send the
+ *                       owner to Trash, where the customer is not
  *
  * The hook runs for real; the client's deleteContact, the toasts and the router are stubbed; timers are fake.
  */
@@ -190,5 +192,16 @@ describe("FU-CONTACT-DELETE-LEAVE: a single delete is sent once, whatever happen
     act(() => { undoFor(0)(); });
     expect(result.current.contacts.map((c) => c.id)).toEqual(["c_b"]);
     expect(vi.mocked(toast.info).mock.calls.map((c) => String(c[0]))).toEqual([expect.stringMatching(/trash/i)]);
+  });
+
+  it("DL-11 RED-AT-27584c0c: after a failed DELETE restored the row, Undo does not point to Trash", async () => {
+    client.deleteContact.mockRejectedValueOnce(new Error("refused"));
+    const { result } = renderHook(() => useHarness());
+    await act(async () => { await result.current.actions.handleDeleteContact(A); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
+    expect(result.current.contacts.map((c) => c.id).sort()).toEqual(["c_a", "c_b"]);
+    act(() => { undoFor(0)(); });
+    expect(vi.mocked(toast.info)).not.toHaveBeenCalled();
+    expect(result.current.contacts.map((c) => c.id).sort()).toEqual(["c_a", "c_b"]);
   });
 });
