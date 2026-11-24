@@ -86,9 +86,11 @@ npx vitest run                                                              # th
 ```
 
 A worktree may symlink `node_modules`, `apps/*/node_modules` and `packages/*/dist` from the main checkout for unit
-tests, and for section 1, **unless the head changes `packages/`**: the server resolves `@keyflow/db`, `@keyflow/api`
-and `@keyflow/shared` to `packages/*/dist`, so a symlinked dist would prove the head against another head's packages.
-When `git diff --name-only origin/main...$H -- packages/` prints anything, use a real install in the worktree and
+tests, and for section 1, **only when the symlinked `packages/*/src` matches the head's**: the server resolves
+`@keyflow/db`, `@keyflow/api` and `@keyflow/shared` to `packages/*/dist`, so a dist built at another head would prove
+the head against that head's packages. Check it against the commit the main checkout's dist was built at (its
+`git rev-parse HEAD` when it last built): `git diff --quiet <that commit> $H -- packages/`. When it exits 1 (a
+difference), or you do not know the commit, use a real install in the worktree and
 `pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build` there. A production web build needs a real install (section 3).
 
 ## 3. Live browser runs (journeys and sweeps)
@@ -110,7 +112,7 @@ cd $WT/apps/web && rm -rf .next && NEXT_PUBLIC_API_BASE_URL=http://localhost:300
 # Ports 3001 (API) and 5000 (web) must be free first. An API left from an older head would answer the health check,
 # and Playwright reuses a web server already on 5000 (reuseExistingServer): either would test the wrong head.
 for PORT in 3001 5000; do
-  if lsof -t -iTCP:$PORT -sTCP:LISTEN >/dev/null || curl -fsS --max-time 5 http://localhost:$PORT/ >/dev/null 2>&1; then
+  if lsof -t -iTCP:$PORT -sTCP:LISTEN >/dev/null || curl -sS --max-time 5 -o /dev/null http://localhost:$PORT/ 2>/dev/null; then   # any answer at all
     echo "port $PORT is in use. Your own earlier API: stop it only if \$(lsof -t -iTCP:3001 -sTCP:LISTEN) equals the"
     echo "PID in that run's e2e-api.pid. Anything else (another lane's run, a leftover web server): wait, or ask"
     echo "whoever started it; never stop another lane's process"; exit 1
@@ -128,7 +130,8 @@ if ! curl -fsS --max-time 5 http://localhost:3001/healthz >/dev/null || ! kill -
    || [ "$(lsof -t -iTCP:3001 -sTCP:LISTEN)" != "$(cat $OUT/e2e-api.pid)" ]; then
   echo "API did not start as ours: read $OUT/e2e-api.log"; kill "$(cat $OUT/e2e-api.pid)" 2>/dev/null; exit 1   # no browser run
 fi
-set +e                                 # from here each browser run reports its own exit code
+set +e                                 # from here each browser run reports its own exit code, and any failure fails the block
+FAILED=0
 
 # The browser runs (the harness starts the standalone web server on 5000)
 cd $WT/apps/web
@@ -136,8 +139,11 @@ export E2E_LIVE=1 E2E_VARIANT=ai-disabled E2E_API_URL=http://localhost:3001 E2E_
   E2E_BASE_URL=http://127.0.0.1:5000 E2E_PORT=5000 E2E_JWT_SECRET="$(cat ~/.kf-e2e-jwt-secret)"
 pnpm exec playwright test e2e/journeys/d-quote-deposit.spec.ts e2e/journeys/e-invoice-paid.spec.ts \
   --project=phone --project=desktop --trace off
+RC=$?; echo "JOURNEYS EXIT=$RC"; [ $RC -eq 0 ] || FAILED=1
 pnpm exec playwright test e2e/sweep-<name>.spec.ts --project=chromium --trace off      # sweeps hold both widths inside
-cd $WT; test "$(git rev-parse HEAD)" = "$(git rev-parse "$H^{commit}")" || echo "HEAD MOVED: these runs do not count"
+RC=$?; echo "SWEEP EXIT=$RC"; [ $RC -eq 0 ] || FAILED=1
+cd $WT; test "$(git rev-parse HEAD)" = "$(git rev-parse "$H^{commit}")" || { echo "HEAD MOVED: these runs do not count"; FAILED=1; }
+[ $FAILED -eq 0 ] || { echo "BROWSER PROOF FAILED: read the runs above"; exit 1; }   # a red run never ends the block with 0
 ```
 
 **Mocked sweeps** (the mocked CI job): build with `NEXT_PUBLIC_API_BASE_URL=http://api.test.local` and run
