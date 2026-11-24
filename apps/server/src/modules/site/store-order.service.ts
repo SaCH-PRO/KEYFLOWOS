@@ -308,7 +308,7 @@ export class StoreOrderService {
         .filter((id): id is string => typeof id === 'string' && id.length > 0),
     );
     const errors: string[] = [];
-    const unlistedProducts: { id: string; name: string }[] = [];
+    const unlistedProducts = new Map<string, string>();
 
     for (const item of items) {
       const product = productMap.get(item.productId);
@@ -317,7 +317,9 @@ export class StoreOrderService {
         continue;
       }
       if (!listedProductIds.has(product.id)) {
-        unlistedProducts.push({ id: product.id, name: product.name });
+        if (!unlistedProducts.has(product.id)) {
+          unlistedProducts.set(product.id, product.name);
+        }
         continue;
       }
       if (item.quantity < 1) {
@@ -328,11 +330,11 @@ export class StoreOrderService {
     // SWP-STORE-LISTING-SERVER (BUG-055, ruling storelisting): refuse checkout
     // of any active product that is not listed in this business's store before
     // any order, retry slot, or promo usage is written.
-    if (unlistedProducts.length > 0) {
+    if (unlistedProducts.size > 0) {
       throw new BadRequestException({
         code: 'PRODUCT_NOT_IN_STORE',
-        message: unlistedProducts.map((p) => `Product ${p.name} is not listed in this store`).join('; '),
-        productIds: unlistedProducts.map((p) => p.id),
+        message: [...unlistedProducts.values()].map((name) => `Product ${name} is not listed in this store`).join('; '),
+        productIds: [...unlistedProducts.keys()],
       });
     }
 

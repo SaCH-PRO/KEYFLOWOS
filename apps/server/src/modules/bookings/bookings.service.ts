@@ -1169,7 +1169,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     const interval = params.slotIntervalMins ?? 30;
 
     const service = await this.prisma.client.service.findFirst({
-      where: { id: serviceId, businessId, deletedAt: null },
+      where: { id: serviceId, businessId, deletedAt: null, sourceProductId: null },
       select: { duration: true, bufferMins: true, leadTimeMins: true },
     });
     if (!service) throw new NotFoundException('Service not found');
@@ -2058,7 +2058,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     );
 
     const service = await this.prisma.client.service.findFirstOrThrow({
-      where: { id: input.serviceId, businessId: input.businessId, deletedAt: null },
+      where: { id: input.serviceId, businessId: input.businessId, deletedAt: null, sourceProductId: null },
     });
     await this.assertOwnedRefs(input);
 

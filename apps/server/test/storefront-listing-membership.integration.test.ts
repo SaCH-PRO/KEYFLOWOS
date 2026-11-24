@@ -39,6 +39,14 @@ const ID = {
   prodRemoved: `${P}prod_removed`,
   prodOtherTenantListed: `${P}prod_other_tenant`,
   prodOff: `${P}prod_off`,
+  ownerEmpty: `${P}owner_empty`,
+  bizEmpty: `${P}biz_empty`,
+  prodEmptyUnlisted: `${P}prod_empty_unlisted`,
+  ownerReadded: `${P}owner_readded`,
+  bizReadded: `${P}biz_readded`,
+  prodReadded: `${P}prod_readded`,
+  svcReaddedDeleted: `${P}svc_readded_del`,
+  svcReaddedLive: `${P}svc_readded_live`,
   svcBookable: `${P}svc_bookable`,
   svcListing1: `${P}svc_listing1`,
   svcListingDupA: `${P}svc_listing_dup_a`,
@@ -52,6 +60,8 @@ const SLUG = {
   a: `${P}store-a`,
   b: `${P}store-b`,
   off: `${P}store-off`,
+  empty: `${P}store-empty`,
+  readded: `${P}store-readded`,
 };
 
 const CANARY = 'V64H_SECRET_';
@@ -60,9 +70,12 @@ let db: any;
 let app: any;
 let redis: any;
 let storeOrders: any;
+let presenceService: any;
 
 async function cleanup() {
   for (const sql of [
+    `DELETE FROM site_page_published WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM bookings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM marketplace_order_items WHERE order_id IN (SELECT id FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM services WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -139,6 +152,7 @@ beforeAll(async () => {
   const { AiUsageService } = await import('../src/modules/ai/ai-usage.service');
   const { InventoryRiskService } = await import('../src/modules/commerce/inventory-risk.service');
   const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
+  const { PresenceService } = await import('../src/modules/site/presence/presence.service');
 
   redis = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379');
   const allowAll = { canActivate: () => true };
@@ -157,6 +171,8 @@ beforeAll(async () => {
       CommerceService,
       SiteService,
       StoreOrderService,
+      BookingsService,
+      PresenceService,
       { provide: CommerceStatsService, useValue: noop },
       { provide: InvoiceWorkflowService, useValue: noop },
       { provide: InvoiceReceiptBuilderService, useValue: noop },
@@ -170,7 +186,6 @@ beforeAll(async () => {
       { provide: RevenuePostingService, useValue: noop },
       { provide: ExpensePostingService, useValue: noop },
       { provide: InventoryRiskService, useValue: noop },
-      { provide: BookingsService, useValue: noop },
       { provide: BookingWaitlistService, useValue: noop },
       { provide: CalendarService, useValue: noop },
       { provide: BookingOptimizerService, useValue: noop },
@@ -202,6 +217,7 @@ beforeAll(async () => {
   await app.init();
 
   storeOrders = mod.get(StoreOrderService);
+  presenceService = mod.get(PresenceService);
 
   await cleanup();
   await clearRateLimits();
@@ -210,6 +226,8 @@ beforeAll(async () => {
     [ID.ownerA, `${P}owner-a@test.local`],
     [ID.ownerB, `${P}owner-b@test.local`],
     [ID.ownerOff, `${P}owner-off@test.local`],
+    [ID.ownerEmpty, `${P}owner-empty@test.local`],
+    [ID.ownerReadded, `${P}owner-readded@test.local`],
   ] as const) {
     await db.user.create({ data: { id, email, name: id, role: 'USER' } });
   }
@@ -218,12 +236,23 @@ beforeAll(async () => {
     [ID.bizA, SLUG.a, ID.ownerA, true],
     [ID.bizB, SLUG.b, ID.ownerB, true],
     [ID.bizOff, SLUG.off, ID.ownerOff, false],
+    [ID.bizEmpty, SLUG.empty, ID.ownerEmpty, true],
+    [ID.bizReadded, SLUG.readded, ID.ownerReadded, true],
   ] as const) {
     await db.business.create({
       data: { id, name: `V64H ${slug}`, slug, ownerId, currency: 'TTD', storeEnabled },
     });
     await db.membership.create({ data: { userId: ownerId, businessId: id, role: 'OWNER' } });
   }
+
+  await db.sitePagePublished.create({
+    data: {
+      businessId: ID.bizA,
+      payload: presenceService.defaultPayload(),
+      version: 1,
+      publishedAt: new Date(),
+    },
+  });
 
   const mkProd = (id: string, businessId: string, name: string) =>
     db.product.create({
@@ -246,6 +275,29 @@ beforeAll(async () => {
   await mkProd(ID.prodRemoved, ID.bizA, 'Removed From Store Item');
   await mkProd(ID.prodOtherTenantListed, ID.bizA, 'Cross-Tenant Planted Item');
   await mkProd(ID.prodOff, ID.bizOff, 'Closed Store Listed Item');
+  await mkProd(ID.prodEmptyUnlisted, ID.bizEmpty, 'Empty Store Unlisted Item');
+  await mkProd(ID.prodReadded, ID.bizReadded, 'Re-added Store Item');
+  await db.service.create({
+    data: {
+      id: ID.svcReaddedDeleted,
+      businessId: ID.bizReadded,
+      name: 'Re-added Store Item (old)',
+      duration: 30,
+      price: 100,
+      sourceProductId: ID.prodReadded,
+      deletedAt: new Date(),
+    },
+  });
+  await db.service.create({
+    data: {
+      id: ID.svcReaddedLive,
+      businessId: ID.bizReadded,
+      name: 'Re-added Store Item',
+      duration: 30,
+      price: 100,
+      sourceProductId: ID.prodReadded,
+    },
+  });
 
   // Standalone bookable service (sourceProductId = null): MUST appear on public services.
   await db.service.create({
@@ -464,5 +516,117 @@ describe('SWP-STORE-LISTING-SERVER (BUG-055, ruling storelisting): public store 
     expect(comRes.status).toBe(404);
     expect(svcRes.status).toBe(404);
     expect(siteRes.status).toBe(404);
+  });
+
+  it('SLM-08 (R1 MINOR #5/#6): mixed cart [listed, unlisted] and duplicate unlisted items return 400 PRODUCT_NOT_IN_STORE with deduplicated productIds and zero orders written', async () => {
+    const beforeCount = await db.marketplaceOrder.count({ where: { businessId: ID.bizA } });
+
+    const mixedRes = await agent()
+      .post(`/site/storefront/public/${SLUG.a}/checkout`)
+      .send({
+        items: [
+          { productId: ID.prodListed, quantity: 1 },
+          { productId: ID.prodUnlisted, quantity: 1 },
+        ],
+        customer: { name: 'Buyer Mixed', email: `${P}mixed@test.local` },
+        paymentMethod: 'CASH',
+      });
+    expect(mixedRes.status).toBe(400);
+    expect(mixedRes.body.code).toBe('PRODUCT_NOT_IN_STORE');
+    expect(mixedRes.body.productIds).toEqual([ID.prodUnlisted]);
+
+    const dupRes = await agent()
+      .post(`/site/storefront/public/${SLUG.a}/checkout`)
+      .send({
+        items: [
+          { productId: ID.prodUnlisted, quantity: 1 },
+          { productId: ID.prodUnlisted, quantity: 2 },
+        ],
+        customer: { name: 'Buyer DupUnlisted', email: `${P}dup-unlisted@test.local` },
+        paymentMethod: 'CASH',
+      });
+    expect(dupRes.status).toBe(400);
+    expect(dupRes.body.code).toBe('PRODUCT_NOT_IN_STORE');
+    expect(dupRes.body.productIds).toEqual([ID.prodUnlisted]);
+
+    expect(await db.marketplaceOrder.count({ where: { businessId: ID.bizA } })).toBe(beforeCount);
+  });
+
+  it('SLM-09 (R1 MINOR #5): validate-promo rejects unlisted product with 400 PRODUCT_NOT_IN_STORE', async () => {
+    const res = await agent()
+      .post(`/site/storefront/public/${SLUG.a}/validate-promo`)
+      .send({
+        code: 'SAVE10',
+        items: [{ productId: ID.prodUnlisted, quantity: 1 }],
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('PRODUCT_NOT_IN_STORE');
+  });
+
+  it('SLM-10 (R1 MINOR #5): re-added product (soft-deleted listing + live listing) appears once across all public product routes and checkout succeeds', async () => {
+    const [catRes, comRes, siteRes] = await Promise.all([
+      agent().get(`/catalog/public/businesses/${ID.bizReadded}/products`),
+      agent().get(`/commerce/public/businesses/${ID.bizReadded}/products`),
+      agent().get(`/site/storefront/public/${SLUG.readded}`),
+    ]);
+    expect(catRes.status).toBe(200);
+    expect(comRes.status).toBe(200);
+    expect(siteRes.status).toBe(200);
+    expect(catRes.body.map((p: any) => p.id)).toEqual([ID.prodReadded]);
+    expect(comRes.body.map((p: any) => p.id)).toEqual([ID.prodReadded]);
+    expect((siteRes.body.products ?? []).map((p: any) => p.id)).toEqual([ID.prodReadded]);
+    expect(siteRes.body.services ?? []).toEqual([]);
+
+    const checkoutRes = await agent()
+      .post(`/site/storefront/public/${SLUG.readded}/checkout`)
+      .send({
+        items: [{ productId: ID.prodReadded, quantity: 1 }],
+        customer: { name: 'Buyer Readded', email: `${P}readded@test.local` },
+        paymentMethod: 'CASH',
+      });
+    expect(checkoutRes.status).toBe(201);
+  });
+
+  it('SLM-11 (R1 MINOR #5): open store with active unlisted product and zero live listings returns 200 [] on all three public product routes', async () => {
+    const [catRes, comRes, siteRes] = await Promise.all([
+      agent().get(`/catalog/public/businesses/${ID.bizEmpty}/products`),
+      agent().get(`/commerce/public/businesses/${ID.bizEmpty}/products`),
+      agent().get(`/site/storefront/public/${SLUG.empty}`),
+    ]);
+    expect(catRes.status).toBe(200);
+    expect(comRes.status).toBe(200);
+    expect(siteRes.status).toBe(200);
+    expect(catRes.body).toEqual([]);
+    expect(comRes.body).toEqual([]);
+    expect(siteRes.body.products ?? []).toEqual([]);
+  });
+
+  it('SLM-12 (R1 MAJOR #2): public booking slots and booking creation refuse a product-backed listing Service (sourceProductId != null) and write zero bookings', async () => {
+    const beforeBookings = await db.booking.count({ where: { businessId: ID.bizA } });
+    const futureDate = new Date(Date.now() + 14 * 86400_000).toISOString().slice(0, 10);
+
+    const slotsRes = await agent().get(`/bookings/public/businesses/${ID.bizA}/slots?serviceId=${ID.svcListing1}&date=${futureDate}`);
+    expect(slotsRes.status).toBe(404);
+
+    const bookRes = await agent()
+      .post(`/bookings/public/businesses/${ID.bizA}`)
+      .send({
+        serviceId: ID.svcListing1,
+        startTime: `${futureDate}T14:00:00.000Z`,
+        firstName: 'Should',
+        lastName: 'Fail',
+        email: `${P}booking-fail@test.local`,
+      });
+    expect([400, 404]).toContain(bookRes.status);
+    expect(await db.booking.count({ where: { businessId: ID.bizA } })).toBe(beforeBookings);
+  });
+
+  it('SLM-13 (R1 MAJOR #3): PresenceService.getPublishedBySlug exposes only listed active products and standalone services (no unlisted products, no product listing Services)', async () => {
+    const published = await presenceService.getPublishedBySlug(SLUG.a);
+    expect(published).toBeTruthy();
+    const productIds = (published.catalog?.products ?? published.products ?? []).map((p: any) => p.id).sort();
+    const serviceIds = (published.catalog?.services ?? published.services ?? []).map((s: any) => s.id).sort();
+    expect(productIds).toEqual([ID.prodDupListed, ID.prodListed].sort());
+    expect(serviceIds).toEqual([ID.svcBookable]);
   });
 });
