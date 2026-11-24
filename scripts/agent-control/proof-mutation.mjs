@@ -73,14 +73,25 @@ export function applyMutation(root, mutation) {
 }
 
 /**
- * Resets `worktree` to exactly `ref` and checks it is pristine: every tracked file as committed, no untracked or ignored
- * file, HEAD at the ref (a proof may have committed). Returns { ok: true } or { ok: false, detail }.
+ * Resets `worktree` to exactly `commit` (a full commit id, resolved once by the caller) and checks it is pristine:
+ * every tracked file as committed, in normal index state (no skip-worktree or assume-unchanged flag, no sparse
+ * checkout: state a fresh worktree never has), no untracked or ignored file, HEAD at the commit. Returns { ok: true }
+ * or { ok: false, detail }.
  */
-export function resetToPristine(worktree, ref) {
-  const target = run('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: worktree });
-  if (target.status !== 0) return { ok: false, detail: `cannot resolve ${ref}` };
-  const commit = target.stdout.trim();
-  const reset = run('git', ['reset', '--quiet', '--hard', commit], { cwd: worktree });
+export function resetToPristine(worktree, commit) {
+  const target = run('git', ['rev-parse', '--verify', '--quiet', `${commit}^{commit}`], { cwd: worktree });
+  if (target.status !== 0) return { ok: false, detail: `cannot resolve ${commit}` };
+  const resolved = target.stdout.trim();
+  // A proof may have turned on sparse checkout or flagged index entries; undo both before the reset, which keeps them.
+  run('git', ['sparse-checkout', 'disable'], { cwd: worktree });
+  const flagged = run('git', ['ls-files', '-v'], { cwd: worktree });
+  if (flagged.status !== 0) return { ok: false, detail: `git ls-files failed: ${flagged.stderr.trim()}` };
+  const unusual = flagged.stdout.split('\n').filter((l) => l && !l.startsWith('H ')).map((l) => l.slice(2));
+  if (unusual.length > 0) {
+    const cleared = run('git', ['update-index', '--no-skip-worktree', '--no-assume-unchanged', '--', ...unusual], { cwd: worktree });
+    if (cleared.status !== 0) return { ok: false, detail: `git update-index failed: ${cleared.stderr.trim()}` };
+  }
+  const reset = run('git', ['reset', '--quiet', '--hard', resolved], { cwd: worktree });
   if (reset.status !== 0) return { ok: false, detail: `git reset failed: ${reset.stderr.trim()}` };
   const clean = run('git', ['clean', '-q', '-ffdx'], { cwd: worktree });
   if (clean.status !== 0) return { ok: false, detail: `git clean failed: ${clean.stderr.trim()}` };
@@ -88,9 +99,28 @@ export function resetToPristine(worktree, ref) {
   if (status.status !== 0 || status.stdout.trim() !== '') {
     return { ok: false, detail: `not pristine after reset: ${(status.stdout || status.stderr).trim().slice(0, 400)}` };
   }
+  const after = run('git', ['ls-files', '-v'], { cwd: worktree });
+  const stillUnusual = after.status !== 0 ? ['(ls-files failed)'] : after.stdout.split('\n').filter((l) => l && !l.startsWith('H '));
+  if (stillUnusual.length > 0) return { ok: false, detail: `index not in normal state after reset: ${stillUnusual.slice(0, 5).join(', ')}` };
   const head = run('git', ['rev-parse', 'HEAD'], { cwd: worktree });
-  if (head.status !== 0 || head.stdout.trim() !== commit) return { ok: false, detail: `HEAD is not ${commit} after reset` };
+  if (head.status !== 0 || head.stdout.trim() !== resolved) return { ok: false, detail: `HEAD is not ${resolved} after reset` };
   return { ok: true };
+}
+
+function addWorktree(repoRoot, commit) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-proof-'));
+  const added = run('git', ['worktree', 'add', '--detach', dir, commit], { cwd: repoRoot });
+  return added.status === 0 ? { dir } : { dir: null, detail: added.stderr.trim() };
+}
+
+function removeWorktree(repoRoot, dir) {
+  if (!dir) return;
+  const removed = run('git', ['worktree', 'remove', '--force', dir], { cwd: repoRoot });
+  if (removed.status !== 0) {
+    // A worktree a proof broke (its .git file rewritten) cannot be removed by git: remove it and prune the record.
+    fs.rmSync(dir, { recursive: true, force: true });
+    run('git', ['worktree', 'prune'], { cwd: repoRoot });
+  }
 }
 
 export function runManifest(manifest, options = {}) {
@@ -100,36 +130,46 @@ export function runManifest(manifest, options = {}) {
   const controls = manifest.negative_controls || [];
   if (controls.length === 0) return { total: 0, live: 0, vacuous: 0, results };
 
-  // One worktree for the run, reset to the exact commit before every control.
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-proof-'));
-  const added = run('git', ['worktree', 'add', '--detach', worktree, ref], { cwd: repoRoot });
-  if (added.status !== 0) {
-    for (const entry of controls) results.push({ id: entry.id, ok: false, stage: 'worktree', detail: added.stderr.trim() });
+  // The ref is resolved once, in the repository (never inside the worktree, where a proof's own commit would move
+  // HEAD): every control starts from this exact commit.
+  const resolved = run('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: repoRoot });
+  const commit = resolved.status === 0 ? resolved.stdout.trim() : null;
+  let worktree = commit ? addWorktree(repoRoot, commit) : { dir: null, detail: `cannot resolve ${ref}` };
+  if (!worktree.dir) {
+    for (const entry of controls) results.push({ id: entry.id, ok: false, stage: 'worktree', detail: worktree.detail });
     return { total: results.length, live: 0, vacuous: results.length, results };
   }
 
   try {
     for (const entry of controls) {
-      const pristine = resetToPristine(worktree, ref);
+      let pristine = resetToPristine(worktree.dir, commit);
+      if (!pristine.ok) {
+        // Whatever the last proof left, the next control gets what the per-control design gave it: a fresh worktree
+        // at the commit, checked the same way. Only if that too cannot be made pristine does this control fail.
+        removeWorktree(repoRoot, worktree.dir);
+        worktree = addWorktree(repoRoot, commit);
+        pristine = worktree.dir ? resetToPristine(worktree.dir, commit) : { ok: false, detail: worktree.detail };
+      }
       if (!pristine.ok) {
         // Never run a control on a tree that is not exactly the commit: its verdict would prove nothing.
         results.push({ id: entry.id, ok: false, stage: 'reset', detail: pristine.detail });
+        if (!worktree.dir) break;
         continue;
       }
 
       // 1. Baseline: the proof must pass before the defect is restored.
-      const baseline = runShell(entry.proof_command, worktree, entry.timeout_ms);
+      const baseline = runShell(entry.proof_command, worktree.dir, entry.timeout_ms);
       const baselinePassed = baseline.status === 0;
 
       // 2. Restore the defect.
-      const mutated = applyMutation(worktree, entry.mutation);
+      const mutated = applyMutation(worktree.dir, entry.mutation);
       if (!mutated.ok) {
         results.push({ id: entry.id, ok: false, stage: 'mutation', detail: mutated.reason, baseline_passed: baselinePassed });
         continue;
       }
 
       // 3. The proof must now fail. If it still passes, it never tested the claim.
-      const after = runShell(entry.proof_command, worktree, entry.timeout_ms);
+      const after = runShell(entry.proof_command, worktree.dir, entry.timeout_ms);
       const failedAsRequired = after.status !== 0;
 
       results.push({
@@ -146,8 +186,11 @@ export function runManifest(manifest, options = {}) {
       });
     }
   } finally {
-    run('git', ['worktree', 'remove', '--force', worktree], { cwd: repoRoot });
+    removeWorktree(repoRoot, worktree.dir);
   }
+
+  // Controls never reached (the worktree could not be recreated) are reported, never silently dropped.
+  for (const entry of controls.slice(results.length)) results.push({ id: entry.id, ok: false, stage: 'worktree', detail: 'no worktree' });
 
   return {
     total: results.length,
