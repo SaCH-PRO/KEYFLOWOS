@@ -51,6 +51,14 @@
  *                           that process cannot reach
  *   PM-19  RED-AT-da70c68e  a proof that locks the worktree: no worktree is left behind (also RED on main 054cac4b,
  *                           which left the locked worktree too)
+ *
+ * C1 third repair review (f884ec56):
+ *   PM-20  RED-AT-f884ec56  a tracked file rewritten at the same size in the same second it was checked out is
+ *                           rewritten by the reset (the restored index kept git from re-reading racy entries)
+ *   PM-21  control          (RED at main 054cac4b and da70c68e) a run started with GIT_DIR, GIT_WORK_TREE and GIT_INDEX_FILE pointing at
+ *                           the main checkout: proofs still see their worktree, and the main index is untouched
+ *   PM-22  RED-AT-f884ec56  a proof that changes the repository's config (core.autocrlf) gets the next control a
+ *                           worktree checked out under it, as main's fresh worktree per control did
  * PM-05 now resets a worktree the runner made (addWorktree), as the runner does: resetToPristine takes the worktree
  * record ({ dir, gitDir, ... }) and no longer accepts a bare directory.
  */
@@ -109,7 +117,7 @@ function fixtureRepo() {
       "let marked = true;",
       "try { execSync('git rev-parse -q --verify refs/worktree/mark', { stdio: 'ignore' }); } catch { marked = false; }",
       "const bisecting = fs.existsSync(execSync('git rev-parse --git-path BISECT_LOG', { encoding: 'utf8' }).trim());",
-      "const eolOk = !process.env.KF_PM_EXPECT_CRLF || fs.readFileSync('claim.txt', 'utf8').includes('\\r\\n');",
+      "const eolOk = !process.env.KF_PM_EXPECT_CRLF || fs.readFileSync(process.env.KF_PM_CRLF_FILE || 'claim.txt', 'utf8').includes('\\r\\n');",
       "const ok = fs.readFileSync('claim.txt', 'utf8').includes('good') && head === process.env.KF_PM_REF && dirty === '' && detached && !marked && !bisecting && eolOk;",
       "if (process.argv[2] === 'litter') {",
       "  fs.writeFileSync('stray.txt', 'untracked');",
@@ -150,6 +158,9 @@ function fixtureRepo() {
       "  const writer = \"const fs = require('fs'); const end = Date.now() + 4000; const t = setInterval(() => { try { fs.writeFileSync('late.txt', 'late'); } catch {} if (Date.now() > end) clearInterval(t); }, 50);\";",
       "  spawn(process.execPath, ['-e', writer], { stdio: 'ignore' }).unref();",
       "  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500);",
+      "}",
+      "if (process.argv[2] === 'setcrlf') {",
+      "  execSync('git config core.autocrlf true');",
       "}",
       "if (process.argv[2] === 'lock') {",
       "  execFileSync('git', ['worktree', 'lock', process.cwd()]);",
@@ -454,4 +465,49 @@ test('PM-19 RED-AT-da70c68e and main: a proof that locks the worktree leaves no 
   }
   const listed = git(dir, 'worktree', 'list', '--porcelain').split('\n').filter((l) => l.startsWith('worktree '));
   assert.equal(listed.length, 1, 'no worktree left behind, locked or not: ' + listed.join(' | '));
+});
+
+test('PM-20 RED-AT-f884ec56: a same-size rewrite in the second the file was checked out is undone by the reset', () => {
+  const { dir, ref } = fixtureRepo();
+  const worktree = runner.addWorktree(dir, ref);
+  assert.ok(worktree.dir, worktree.detail);
+  try {
+    // At once (in the checkout's own second), the same size as "good\n".
+    fs.writeFileSync(path.join(worktree.dir, 'claim.txt'), 'evil\n');
+    const second = Math.floor(Date.now() / 1000);
+    while (Math.floor(Date.now() / 1000) === second) {
+      // wait for the next second, so the write is no longer newer than anything git compares it with
+    }
+    const reset = runner.resetToPristine(worktree, ref);
+    if (reset.ok) assert.equal(fs.readFileSync(path.join(worktree.dir, 'claim.txt'), 'utf8'), 'good\n', 'a reset that reports pristine left the rewrite');
+  } finally {
+    runner.removeWorktree(dir, worktree.dir);
+  }
+});
+
+test('PM-21 control (RED at main and da70c68e): git location variables pointing at the main checkout reach neither the proofs nor the runner', () => {
+  const { dir, ref } = fixtureRepo();
+  const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-pm-log-'));
+  made.push(logDir);
+  const log = path.join(logDir, 'where.txt');
+  const indexBefore = fs.readFileSync(path.join(dir, '.git', 'index'));
+  const summary = withEnv(
+    { KF_PM_LOG: log, KF_PM_REF: ref, GIT_DIR: path.join(dir, '.git'), GIT_WORK_TREE: dir, GIT_INDEX_FILE: path.join(dir, '.git', 'index') },
+    () => runner.runManifest({ negative_controls: [control('a'), control('b')] }, { repoRoot: dir, ref }),
+  );
+  assert.equal(summary.live, 2, JSON.stringify(summary.results));
+  for (const top of fs.readFileSync(log, 'utf8').trim().split('\n')) {
+    assert.notEqual(path.resolve(top), path.resolve(dir), 'the proof ran in its worktree');
+    assert.notEqual(path.resolve(top), fs.realpathSync(dir), 'the proof ran in its worktree');
+  }
+  assert.deepEqual(fs.readFileSync(path.join(dir, '.git', 'index')), indexBefore, 'the main index is untouched');
+});
+
+test("PM-22 RED-AT-f884ec56: a proof that changes the repository's config gets the next control a worktree checked out under it", () => {
+  const { dir, ref } = fixtureRepo();
+  // .gitignore: a file no control changes, so only a new checkout gives it the new line endings.
+  const results = withEnv({ KF_PM_EXPECT_CRLF: '1', KF_PM_CRLF_FILE: '.gitignore' }, () =>
+    afterFirst(control('setcrlf', { proof_command: 'node check.mjs setcrlf' }), ref, dir, ref),
+  );
+  for (const r of results) assert.equal(r.ok, true, JSON.stringify(r));
 });
