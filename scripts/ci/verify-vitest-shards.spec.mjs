@@ -185,11 +185,10 @@ describe('FU-CI-SHARD-PARALLEL (P24): ci-cd.yml workflow structure (C3 + C4 + C5
     const serverJob = readJob(blocks.get('test-server'));
     assert.ok(serverJob.steps.some((s) => (s.run ?? '').includes('--shard=${{ matrix.shard }}/4')), 'test-server must run vitest --shard=${{ matrix.shard }}/4');
     const aggJob = readJob(blocks.get('test'));
-    assert.ok(
-      (aggJob.header.needs?.inline ?? '').includes('test-server') ||
-        (aggJob.header.needs?.block ?? []).some((l) => l.includes('test-server')),
-      'test aggregate job must need test-server',
-    );
+    const aggNeeds = typeof aggJob.header.needs === 'string'
+      ? aggJob.header.needs
+      : `${aggJob.header.needs?.inline ?? ''} ${(aggJob.header.needs?.block ?? []).join(' ')}`;
+    assert.ok(aggNeeds.includes('test-server'), `test aggregate job must need test-server, got: ${aggNeeds}`);
     assert.ok(
       aggJob.steps.some((s) => (s.run ?? '').includes('scripts/ci/verify-vitest-shards.mjs')),
       'test aggregate job must run verify-vitest-shards.mjs',
@@ -215,7 +214,9 @@ describe('FU-CI-SHARD-PARALLEL (P24): ci-cd.yml workflow structure (C3 + C4 + C5
     for (const id of ['build-server', 'build-web', 'e2e-mocked', 'test-server', 'test-manifests', 'test-release0', 'test-web-api']) {
       assert.ok(blocks.has(id), `expected job ${id}`);
       const job = readJob(blocks.get(id));
-      const needsText = `${job.header.needs?.inline ?? ''} ${(job.header.needs?.block ?? []).join(' ')}`;
+      const needsText = typeof job.header.needs === 'string'
+        ? job.header.needs
+        : `${job.header.needs?.inline ?? ''} ${(job.header.needs?.block ?? []).join(' ')}`;
       assert.ok(!needsText.includes('lint-and-typecheck'), `${id} must not wait on lint-and-typecheck`);
     }
   });
