@@ -53,7 +53,7 @@
 | P4 | FU-OUTBOUND-ATTACHMENT-URL (D-272.3) | antigravity | returned | — | Returned #80 (7121498630) @ `41e1a419` (RED `597b953b`, 7/7 84/84, tsc 0, both confirmation reviews CONFIRMED) + D-265 exact-head `proof:release0` 39/39 SATISFIED — R0 EXIT GATE MET |
 | P5 | First-lane WIP: FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-AI-APPROVALS-MONEY-SIGHT | antigravity | returned | — | 3/3 returned: `AI-APPROVALS` (#80 7121845152 @ `a0c650a6`), `STRATEGIC-SIGHT` (#80 7122456412 @ `b474ec39`), `DNA-WRITES` (@ `f616cf67`, both reviews CONFIRMED 0 findings; `SEC-DW-3a` flagged for R0 AMEND on `D11G-G04`). P6 unblocked |
 | P6 | FU-PENDING-OWED-SERVER, then FU-PENDING-OWED-WEB (money-first) | antigravity | claimed | — | Claimed `FU-PENDING-OWED-SERVER` (`pkt/V1-FU-PENDING-OWED-SERVER` from `main`); 27-site server census + 13-site web census complete; writing RED suite now |
-| P7 | SWP-CONTACT-QUICKADD (critical path, after SWP-QUOTE-COMPOSER-CONTACT) | claude | claimed | — | Stacked on wave 3m (6bb8b430); CHECKLISTS B |
+| P7 | SWP-CONTACT-QUICKADD (critical path; BUG-009, 034, 035): `pkt/V1-SWP-CONTACT-QUICKADD` @ c98fd56b, stacked on wave 3m (6bb8b430). RED 8e0b34aa (unit, 7 RED + 1 control) and 761a12d3 (browser sweep); fix c98fd56b; touched folders 8 files / 83 tests exit 0 | claude | in-review | — | Live sweep + journey C running (RED at 761a12d3, green at c98fd56b); two reviews running |
 | P8 | SWP-INV-LIST (critical path) | claude | todo | P7 | CLAIM; CHECKLISTS B |
 | P9 | FU-WEB-PAYLINK-STATUS-BUTTONS | — | todo | — | Any lane may claim |
 | P10 | NAV-A2 (P0), NAV-A3 (unblocks 33) | — | todo | — | Any lane may claim; NAV-A3 first |
@@ -64,4 +64,4 @@
 | P14 | Owner: "Batch 2 safe defaults #5–#10" (not approved in D-272) | owner | blocked | the owner's review | The owner reviews the list |
 | P15 | Owner: redeploy production (D-266) | owner | blocked | M1–M4 | The owner deploys from main |
 
-Last updated: 2026-11-24 by the claude lane (M3 blocked on GitGuardian 40952282; P16 is PR #231; P7 claimed).
+Last updated: 2026-11-24 by the claude lane (M3 blocked on GitGuardian 40952282; P16 is PR #231; P7 in review @ c98fd56b).
