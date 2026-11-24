@@ -2,6 +2,7 @@
 
 import { motion, AnimatePresence } from "framer-motion";
 import { Send, Link as LinkIcon, DollarSign, Bell, Receipt, X, MessageCircle, Mail } from "lucide-react";
+import { canShareInvoicePayLink } from "@/lib/commerce-status";
 
 interface Action {
   key: string;
@@ -19,7 +20,7 @@ interface Props {
   status: string;
   hasGmail: boolean;
   onSend?: () => void;
-  onCopyPaymentLink: () => void;
+  onCopyPaymentLink?: () => void;
   onShareWhatsApp?: () => void;
   onRecordPayment?: () => void;
   onSendReminder?: () => void;
@@ -50,9 +51,13 @@ export function InvoiceMobileActions({
   if (status === "DRAFT" && hasGmail && onSend) {
     actions.push({ key: "send", label: "Send invoice", icon: Send, tone: "text-blue-400", onClick: onSend });
   }
-  actions.push({ key: "link", label: "Copy payment link", icon: LinkIcon, tone: "text-slate-300", onClick: onCopyPaymentLink });
-  if (onShareWhatsApp) {
-    actions.push({ key: "wa", label: "Share via WhatsApp", icon: MessageCircle, tone: "text-emerald-400", onClick: onShareWhatsApp });
+  if (canShareInvoicePayLink(status)) {
+    if (onCopyPaymentLink) {
+      actions.push({ key: "link", label: "Copy payment link", icon: LinkIcon, tone: "text-slate-300", onClick: onCopyPaymentLink });
+    }
+    if (onShareWhatsApp) {
+      actions.push({ key: "wa", label: "Share via WhatsApp", icon: MessageCircle, tone: "text-emerald-400", onClick: onShareWhatsApp });
+    }
   }
   if (
     onRecordPayment &&
