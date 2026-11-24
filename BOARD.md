@@ -38,7 +38,7 @@
 
 | # | Row | What | Owner | Status | Waits on | Next step |
 | --- | --- | --- | --- | --- | --- | --- |
-| M1 | PR #228 | `wave/v1-wave-3j` (RR-REDACTION-BY-CONTENT, FU-KEY-GENOME-READS-RESIDUAL, MEM-TEMPORAL-MEMORY-ROUTES-SIGHT) plus the Codex P1 fix | antigravity | pr-open | — | Head `70f5f374` (CODEX-228 confirmed, compacted, main merged, divergence OK); Run Tests rerun in CI (unrelated phone-voice flake); merge once CI green |
+| M1 | PR #228 | `wave/v1-wave-3j` (RR-REDACTION-BY-CONTENT, FU-KEY-GENOME-READS-RESIDUAL, MEM-TEMPORAL-MEMORY-ROUTES-SIGHT) plus the Codex P1 fix | antigravity | merged | — | Merged to `main` @ `142e5f9e` (exact head `70f5f374`, all required CI green incl. R0 39/39 MET & Windows worker proof); M2 unblocked |
 | M2 | Rulings | `pkt/V1-RULINGS-3E` + `pkt/V1-WEDGE-RECUT`: D-255 to D-272, the wedge plan, the agent-memory docs (LIVE-PROOF-RUNBOOK, CHECKLISTS), the state file | claude | todo | M1 | Build a docs-only wave from both branches on main; regenerate status; PR; CI green; merge |
 | M3 | Wave 3m, **PR #229** | `wave/v1-wave-3m` @ 7bd2f445: MOUNT-QUOTES, SWP-INV-MATH, SWP-INV-PUBLIC-LINK, SWP-QUOTE-PUBLIC-PAGE, SWP-INV-FORM-UX, SWP-QUOTE-COMPOSER-CONTACT. **Proven at 7bd2f445:** server 820 files / 15287 tests, R0 MET 39/39 exact-head; web 197 files / 1784 tests exit 0, tsc 0, lint 25 ≤ 26 | claude | pr-open | M1, M2 | When M1 and M2 are merged: merge main in, re-prove the new head (CHECKLISTS C), CI green at the exact head, merge (D) |
 | M4 | Wave 3j split | `wave/3j-second-lane` (16 packets; fails 25/50; duplicates RR-REDACTION-BY-CONTENT with #228) | antigravity | todo | M3 | Split into parts within 25 commits / 50 files without the duplicate; prove each; PR; merge in turn |
@@ -47,11 +47,11 @@
 
 | Row | Item | Owner | Status | Waits on | Next step |
 | --- | --- | --- | --- | --- | --- |
-| P1 | SEC-KEY-CUSTOM-LOGIC (P0, D-272.4): tenant KEY's `execute_custom_logic` runs JS in a child process on the API host | antigravity | todo | — | CLAIM; a RED test that proves the reach; sandbox it or turn it off for tenants; full server suite + R0 |
+| P1 | SEC-KEY-CUSTOM-LOGIC (P0, D-272.4): tenant KEY's `execute_custom_logic` runs JS in a child process on the API host | antigravity | red | — | Claimed #80 (7122211081), branch `pkt/V1-SEC-KEY-CUSTOM-LOGIC`; RED pushed @ `105dd5c0` proving host RCE (`pid`/`ppid`/`/etc/hosts`); implementing fail-closed fix |
 | P2 | Switch off the agent-control autopilot's #80 posting (D-272.4) | antigravity | todo | — | Find the posting workflow and step; turn off its posting (the smallest change); keep the modules and specs green |
 | P3 | FU-VITEST-DECORATOR-METADATA (Q20, D-272.2) | antigravity | blocked | the owner sees the diff | Show the before/after of the two expectations. If it is a tightening, AMEND per D-272.2; else hold |
 | P4 | FU-OUTBOUND-ATTACHMENT-URL (D-272.3) | antigravity | returned | — | Returned #80 (7121498630) @ `41e1a419` (RED `597b953b`, 7/7 84/84, tsc 0, both confirmation reviews CONFIRMED); ready for wave compaction |
-| P5 | First-lane WIP: FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-AI-APPROVALS-MONEY-SIGHT | antigravity | in-review | — | `FU-AI-APPROVALS-MONEY-SIGHT` RETURNed #80 (7121845152) @ `a0c650a6`; `FU-STRATEGIC-ROUTES-SIGHT` round-4 fix verified (4/4 68/68), pushing for confirmation review; `FU-GENOME-DNA-WRITES-AND-INTEGRITY` next |
+| P5 | First-lane WIP: FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-AI-APPROVALS-MONEY-SIGHT | antigravity | in-review | — | `AI-APPROVALS` returned (#80 7121845152 @ `a0c650a6`); `STRATEGIC-SIGHT` R5 @ `371324b2` in confirmation review; `DNA-WRITES` R3 reviewed, R4 polish queued |
 | P6 | FU-PENDING-OWED-SERVER, then FU-PENDING-OWED-WEB (money-first) | antigravity | todo | P5 | CLAIM; CHECKLISTS B |
 | P7 | SWP-CONTACT-QUICKADD (critical path, after SWP-QUOTE-COMPOSER-CONTACT) | claude | todo | — | CLAIM, stacked on d690bc41; CHECKLISTS B |
 | P8 | SWP-INV-LIST (critical path) | claude | todo | P7 | CLAIM; CHECKLISTS B |
@@ -63,4 +63,4 @@
 | P14 | Owner: "Batch 2 safe defaults #5–#10" (not approved in D-272) | owner | blocked | the owner's review | The owner reviews the list |
 | P15 | Owner: redeploy production (D-266) | owner | blocked | M1–M4 | The owner deploys from main |
 
-Last updated: 2026-11-24 by the antigravity lane (P5: APPROVALS-SIGHT returned @ a0c650a6; STRATEGIC-ROUTES-SIGHT fix green; M1 CI running manifests).
+Last updated: 2026-11-24 by the antigravity lane (M1 merged @ 142e5f9e; P1 RED @ 105dd5c0; P4 returned; P5 1/3 returned, 2/3 finishing).
