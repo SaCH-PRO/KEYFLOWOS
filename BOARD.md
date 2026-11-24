@@ -72,7 +72,7 @@
 | P22 | FU-OVERLAY-LAYER-TABLE (size L; plan corrected 21806719) | — | todo | open waves | alone, after the open waves |
 | P23 | FU-CI-NC-WORKTREE-REUSE (D-274 C1: one worktree per negative-control run, reset pristine before each; Windows proof ~65 -> ~15 min) `pkt/V1-FU-CI-NC-WORKTREE-REUSE` @ a4f85f72: RED 37e74a15 (PM-01 3 worktrees, PM-05), fix a4f85f72; agent-control specs 648 pass / 0 fail | claude | in-review | — | equivalence over all 323 real controls (old vs new) running; two reviews running; then RETURN; then C2 (shard Windows controls) |
 | P24 | CI C3+C4+C5 (ci-cd.yml: shard server vitest 4 ways; split run-manifests/release0/web steps into parallel jobs in ci-verdict needs; drop needs: typecheck) ~23 min | antigravity | todo | — | ACKed (Antigravity lane); starting right after P3 & P12 RETURN |
-| P25 | FU-PLANNER-STEP-ORDER (key-cortex-planner.service.ts include steps with no orderBy: CI flake, found by M4b) | antigravity | todo | — | ACKed (Antigravity lane); starting right after P3 & P12 RETURN |
+| P25 | FU-PLANNER-STEP-ORDER (key-cortex-planner.service.ts + sibling aiPlan include steps with no orderBy: CI flake, found by M4b) | antigravity | claimed | — | Claimed `pkt/V1-FU-PLANNER-STEP-ORDER` on `edd2fa15`; writing RED tests next |
 | P14 | Owner: "Batch 2 safe defaults #5–#10" (not approved in D-272) | owner | blocked | the owner's review | The owner reviews the list |
 | P15 | Owner: redeploy production (D-266) | owner | blocked | M1–M4 | The owner deploys from main |
 
