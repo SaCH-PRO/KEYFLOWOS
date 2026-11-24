@@ -15,11 +15,13 @@
  *   DA-02  RED-BEFORE  fixed cases equal the server: tax before discount (1066.00, not 1053.00), cent-exact lines
  *                      (3 x 1.115 = 3.35, 7 x 0.145 = 1.02), FIXED discount, no tax, a cleared tax rate
  *   DA-03  RED-BEFORE  2,000 seeded random documents equal the server field for field
+ *   DA-05  hardening   (review F6) line amounts equal the server's on exponent forms, negatives and sub-cent prices,
+ *                      and the random tax rates include exponent forms and negatives
  *   DA-04  RED-BEFORE  the form reader parses the strings the forms hold: blank or invalid quantity, price, tax rate
  *                      or discount count as 0, a blank discount means none
  */
 import { describe, it, expect } from "vitest";
-import { computeDocumentAmounts as serverAmounts } from "../../../../../server/src/modules/commerce/money";
+import { computeDocumentAmounts as serverAmounts, lineAmount as serverLine } from "../../../../../server/src/modules/commerce/money";
 
 type Amounts = { lineTotals: number[]; subtotal: number; taxAmount: number; discountAmount: number; total: number };
 type Input = { lines: number[]; taxRate?: number | null; discountType?: string | null; discountValue?: number | null };
@@ -88,11 +90,14 @@ describe("SWP-INV-MATH: one document-amounts module, equal to the server", () =>
     const r = rng(20261124);
     const money = () => Math.round(r() * 500000) / 100; // 0.00 .. 5000.00
     const qty = () => (r() < 0.7 ? 1 + Math.floor(r() * 30) : Math.round(r() * 2000) / 100); // whole or two-decimal
-    const rates = [0, 12.5, 15, 7.5, 10, 0.5];
+    const rates = [0, 12.5, 15, 7.5, 10, 0.5, 12.345, 1e-7, 1.5e1, -5];
     for (let i = 0; i < 2000; i++) {
       const n = 1 + Math.floor(r() * 6);
       const lineInputs = Array.from({ length: n }, () => [qty(), money()] as const);
-      const lines = lineInputs.map(([q, p]) => mod.lineAmount!(q, p));
+      const lines = lineInputs.map(([q, p]) => {
+        expect(mod.lineAmount!(q, p), `case ${i}: line ${q} x ${p}`).toBe(serverLine(q, p));
+        return mod.lineAmount!(q, p);
+      });
       const pick = r();
       const input: Input = {
         lines,
@@ -101,6 +106,21 @@ describe("SWP-INV-MATH: one document-amounts module, equal to the server", () =>
         discountValue: pick < 0.4 ? Math.round(r() * 5000) / 100 : pick < 0.7 ? Math.round(r() * 20000) / 100 : null,
       };
       expect(mod.computeDocumentAmounts!(input), `case ${i}: ${JSON.stringify(input)}`).toEqual(serverAmounts(input));
+    }
+  });
+
+  it("DA-05 hardening: line amounts equal the server's on exponent forms, negatives and sub-cent prices", async () => {
+    const mod = await load();
+    const cases: Array<[number, number]> = [
+      [1, 1e-7], [3, 1.5e21], [1e-7, 1e7], [2, -1.005], [-3, 1.115], [1, 0.005], [1, -0.005], [7, 0.145],
+      [0.5, 0.01], [1e3, 1.0049999], [12.5, 0.0375], [1, 5e-324], [1e300, 1], [0, 99.99],
+    ];
+    for (const [q, p] of cases) expect(mod.lineAmount!(q, p), `${q} x ${p}`).toBe(serverLine(q, p));
+    const r = rng(7);
+    for (let i = 0; i < 2000; i++) {
+      const q = (r() < 0.5 ? -1 : 1) * Math.round(r() * 1e5) / 1e3;
+      const p = (r() < 0.5 ? -1 : 1) * Math.round(r() * 1e7) / 1e4;
+      expect(mod.lineAmount!(q, p), `random ${i}: ${q} x ${p}`).toBe(serverLine(q, p));
     }
   });
 

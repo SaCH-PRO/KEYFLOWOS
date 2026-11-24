@@ -13,7 +13,8 @@
  *   IFA-01  RED-BEFORE  new invoice: the summary's Total due is TTD 1,066.00 (was 1,053.00), tax TTD 130.00
  *   IFA-02  RED-BEFORE  new invoice: a line of 3 x 1.115 shows TTD 3.35 (the float product reads 3.34)
  *   IFA-03  RED-BEFORE  edit invoice: the preview total is TTD 1,066.00, and clearing the tax rate saves taxRate 0
- *   IFA-04  RED-BEFORE  the quote and composer builder: 3 x 1.115 totals TTD 3.35
+ *   IFA-04  RED-BEFORE  the quote and composer builder: 3 x 1.115 totals TTD 3.35, and (review F2) its line row
+ *                       reads TTD 3.35 too (the row multiplied floats: TTD 3.34)
  *   IFA-05  control     the builder's tax-before-discount total for journey D's quote is TTD 1,066.00, as before
  *   IFA-06  control     Release 0's case: 2 x 100 + 1 x 50 is TTD 250.00 on the new invoice page
  */
@@ -159,6 +160,9 @@ describe("SWP-INV-MATH: the preview total is the total the server saves", () => 
     installServer();
     render(builder([{ description: "Ribbon", quantity: "3", unitPrice: "1.115" }], "", ""));
     expect(builderTotal()).toContain("TTD 3.35");
+    // The line row's own "Subtotal:" (form-line-items-section) reads the same amount.
+    const row = screen.getAllByText(/^Subtotal:/).map((el) => (el.textContent ?? "").replace(/\s+/g, " "));
+    expect(row).toEqual(["Subtotal: TTD 3.35"]);
   });
 
   it("IFA-05 control: the builder's total for journey D's quote is TTD 1,066.00", async () => {
