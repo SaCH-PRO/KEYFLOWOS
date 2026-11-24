@@ -5,7 +5,8 @@ import { GenomeGateGuard } from '../../core/auth/genome-gate.guard';
 import { BlueprintService, onboardingAnswersPatch } from './blueprint.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { requireRevenueLevel } from '../key-autonomy/key-action-genome-projection';
-import { isFinancialBlueprintPatch, isFinancialDnaWrite, MONEY_BLUEPRINT_COLUMNS, OTHER_BLUEPRINT_COLUMNS } from './genome-write-scope';
+import { genomeReaderReadsRevenue } from '../business-genome/key-genome/genome-finance-scope';
+import { blueprintForReader, isFinancialBlueprintPatch, isFinancialDnaWrite, MONEY_BLUEPRINT_COLUMNS, OTHER_BLUEPRINT_COLUMNS } from './genome-write-scope';
 
 import { BlueprintPatch, DnaSectionKey } from './blueprint.types';
 
@@ -38,6 +39,13 @@ export class BlueprintController {
     await requireRevenueLevel(this.prisma, businessId, reader, 'write');
   }
 
+  /** SEC-DW-5: project write responses so non-revenue callers never receive financial columns or composite scores. */
+  private async projectWriteResponse<T>(businessId: string, req: BlueprintRequest | undefined, result: T): Promise<T> {
+    const reader = req?.user?.id ? { id: req.user.id, role: req.user.role } : undefined;
+    const readsRevenue = reader ? await genomeReaderReadsRevenue(this.prisma, businessId, reader).catch(() => false) : false;
+    return blueprintForReader(result, readsRevenue);
+  }
+
   @Get()
   async get(@Param('businessId') businessId: string) {
     return this.blueprint.getBlueprint(businessId);
@@ -52,7 +60,7 @@ export class BlueprintController {
     // FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128): a money or unknown column, a money field, or a value stating money
     // (genome-write-scope).
     if (isFinancialBlueprintPatch(body)) await this.requireRevenueWrite(businessId, req);
-    return this.blueprint.updateBlueprint(businessId, body);
+    return this.projectWriteResponse(businessId, req, await this.blueprint.updateBlueprint(businessId, body));
   }
 
   @Post('infer/onboarding')
@@ -64,12 +72,14 @@ export class BlueprintController {
     // FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128): the same rule on the patch the answers build.
     const answers = body?.answers || {};
     if (isFinancialOnboardingWrite(answers)) await this.requireRevenueWrite(businessId, req);
-    return this.blueprint.inferFromOnboarding(businessId, answers);
+    return this.projectWriteResponse(businessId, req, await this.blueprint.inferFromOnboarding(businessId, answers));
   }
 
   @Post('infer/events')
-  async inferFromEvents(@Param('businessId') businessId: string) {
-    return this.blueprint.inferFromEvents(businessId);
+  async inferFromEvents(@Param('businessId') businessId: string, @Req() req?: BlueprintRequest) {
+    // SEC-DW-2 (D-128): inferFromEvents computes and writes financial intelligence metrics from invoices/quotes/expenses.
+    await this.requireRevenueWrite(businessId, req);
+    return this.projectWriteResponse(businessId, req, await this.blueprint.inferFromEvents(businessId));
   }
 
   @Get('recommendations')
@@ -139,6 +149,6 @@ export class BlueprintController {
     // stating money (genome-write-scope), so a direct DNA write cannot bypass the evolution approve gate for finance.
     const data = body?.data || {};
     if (isFinancialDnaWrite(section, data)) await this.requireRevenueWrite(businessId, req);
-    return this.blueprint.updateDnaSection(businessId, section, data);
+    return this.projectWriteResponse(businessId, req, await this.blueprint.updateDnaSection(businessId, section, data));
   }
 }

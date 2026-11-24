@@ -1,4 +1,5 @@
-import { BadRequestException, HttpException, Inject, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, HttpException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { PrismaService } from '../../core/prisma/prisma.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { ModelGatewayService, GatewayMessage } from './model-gateway.service';
 import { AiUsageService } from './ai-usage.service';
@@ -10,6 +11,9 @@ import {
   DnaSectionKey,
 } from '../blueprint/blueprint.types';
 import { normalizeRecommendedEntityType } from '../blueprint/entity-type.helpers';
+import { blueprintForReader, isFinancialBlueprintPatch } from '../blueprint/genome-write-scope';
+import { requireRevenueLevel } from '../key-autonomy/key-action-genome-projection';
+import { genomeReaderReadsRevenue } from '../business-genome/key-genome/genome-finance-scope';
 
 export interface OnboardingMessage {
   role: 'user' | 'assistant';
@@ -33,9 +37,9 @@ export interface BlueprintOnboardingState {
 interface OnboardingChatResult {
   reply: string;
   blueprint: BlueprintData;
-  completeness: number;
+  completeness?: number;
   threePillarMinimumMet: boolean;
-  confidenceScores: Record<string, number>;
+  confidenceScores?: Record<string, number>;
   extracted: OnboardingExtraction[];
   nextSection: BlueprintSectionKey | null;
 }
@@ -404,6 +408,7 @@ export class BlueprintOnboardingService {
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,
     @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
+    @Optional() @Inject(PrismaService) private readonly prisma?: PrismaService,
   ) {}
 
   /**
@@ -411,7 +416,12 @@ export class BlueprintOnboardingService {
    * sees and the one GET onboarding-history returns are the server's own
    * (getState), never a copy the client sends.
    */
-  async chat(businessId: string, userId: string, userMessage: string): Promise<OnboardingChatResult> {
+  async chat(
+    businessId: string,
+    userId: string,
+    userMessage: string,
+    actor?: { id?: string; role?: string },
+  ): Promise<OnboardingChatResult> {
     // The route's DTO checks this; the transcript must hold text whatever the caller.
     if (typeof userMessage !== 'string' || userMessage.length === 0) {
       throw new BadRequestException('message must be text');
@@ -419,6 +429,11 @@ export class BlueprintOnboardingService {
     const key = BlueprintOnboardingService.transcriptKey(businessId, userId);
     const blueprint = await this.blueprint.getBlueprint(businessId);
     const state = await this.getState(businessId, userId);
+    const effectiveActor = actor ?? (userId ? { id: userId } : undefined);
+    const hasMembershipTable = typeof this.prisma?.client?.membership?.findUnique === 'function';
+    const readsRevenue = hasMembershipTable
+      ? await genomeReaderReadsRevenue(this.prisma!, businessId, effectiveActor).catch(() => false)
+      : true;
 
     // This turn's own entry. Turns of the same conversation can overlap (two
     // tabs), so the turn finds its place by this object, never by an index
@@ -427,7 +442,7 @@ export class BlueprintOnboardingService {
     state.messages.push(turn);
     this.boundTranscript(state);
 
-    const systemPrompt = this.buildSystemPrompt(blueprint, state);
+    const systemPrompt = this.buildSystemPrompt(blueprint, state, readsRevenue);
     const gatewayMessages: GatewayMessage[] = [
       { role: 'system', content: systemPrompt },
       ...state.messages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
@@ -448,9 +463,15 @@ export class BlueprintOnboardingService {
       const rawReply = completion.content || "Let's keep building your Business Genome. What else should I know?";
       const { reply, extractions } = this.parseExtractions(rawReply);
 
+      const patch = this.buildPatchFromExtractions(extractions);
+      // SEC-DW-3b (D-128): enforce the same financial genome write gate on onboarding-chat extractions
+      // BEFORE recording the assistant reply or persisting the patch.
+      if (Object.keys(patch).length > 0 && isFinancialBlueprintPatch(patch) && hasMembershipTable) {
+        await requireRevenueLevel(this.prisma!, businessId, effectiveActor, 'write');
+      }
+
       this.answerTurn(state, turn, reply);
 
-      const patch = this.buildPatchFromExtractions(extractions);
       const updatedBlueprint = Object.keys(patch).length > 0
         ? await this.blueprint.updateBlueprint(businessId, patch)
         : blueprint;
@@ -464,14 +485,19 @@ export class BlueprintOnboardingService {
       state.currentQuestion = nextSection ? this.firstQuestionForSection(nextSection) : null;
       this.writeCache(key, state);
 
+      const projectedBlueprint = blueprintForReader(updatedBlueprint, readsRevenue);
       return {
         reply,
-        blueprint: updatedBlueprint,
-        completeness: updatedBlueprint.completeness,
+        blueprint: projectedBlueprint,
+        ...(readsRevenue
+          ? {
+              completeness: updatedBlueprint.completeness,
+              confidenceScores: updatedBlueprint.confidenceScores as Record<string, number>,
+            }
+          : {}),
         threePillarMinimumMet: this.blueprint.checkThreePillarMinimum(
           (updatedBlueprint.genomeDnaScores ?? {}) as Record<DnaSectionKey, number>,
         ),
-        confidenceScores: updatedBlueprint.confidenceScores as Record<string, number>,
         extracted: extractions,
         nextSection,
       };
@@ -490,14 +516,19 @@ export class BlueprintOnboardingService {
       this.logger.error(`Blueprint onboarding chat failed: ${(err as Error).message}`);
       const fallback = "I'm having trouble thinking that through. Could you tell me a bit more about your business?";
       this.answerTurn(state, turn, fallback);
+      const projectedBlueprint = blueprintForReader(blueprint, readsRevenue);
       return {
         reply: fallback,
-        blueprint,
-        completeness: blueprint.completeness,
+        blueprint: projectedBlueprint,
+        ...(readsRevenue
+          ? {
+              completeness: blueprint.completeness,
+              confidenceScores: blueprint.confidenceScores as Record<string, number>,
+            }
+          : {}),
         threePillarMinimumMet: this.blueprint.checkThreePillarMinimum(
           (blueprint.genomeDnaScores ?? {}) as Record<DnaSectionKey, number>,
         ),
-        confidenceScores: blueprint.confidenceScores as Record<string, number>,
         extracted: [],
         nextSection: state.currentSection,
       };
@@ -585,18 +616,18 @@ export class BlueprintOnboardingService {
     this.stateCache.delete(BlueprintOnboardingService.transcriptKey(businessId, userId));
   }
 
-  private buildSystemPrompt(blueprint: BlueprintData, state: BlueprintOnboardingState): string {
+  private buildSystemPrompt(blueprint: BlueprintData, state: BlueprintOnboardingState, readsRevenue = true): string {
     const completed = state.completedSections;
     const remaining = SECTION_ORDER.filter(s => !completed.includes(s));
     const current = state.currentSection || remaining[0] || null;
 
     const blueprintSummary = [
-      `Business: ${blueprint.identity.name || 'unknown'}`,
-      blueprint.identity.industry ? `Industry: ${blueprint.identity.industry}` : null,
-      blueprint.operatingModel.revenueModel ? `Revenue model: ${blueprint.operatingModel.revenueModel}` : null,
-      blueprint.goals.northStar ? `North star: ${blueprint.goals.northStar}` : null,
-      blueprint.customerModel.idealCustomer ? `Ideal customer: ${blueprint.customerModel.idealCustomer}` : null,
-      `Completeness: ${blueprint.completeness}%`,
+      `Business: ${blueprint.identity?.name || 'unknown'}`,
+      blueprint.identity?.industry ? `Industry: ${blueprint.identity.industry}` : null,
+      readsRevenue && blueprint.operatingModel?.revenueModel ? `Revenue model: ${blueprint.operatingModel.revenueModel}` : null,
+      blueprint.goals?.northStar ? `North star: ${blueprint.goals.northStar}` : null,
+      blueprint.customerModel?.idealCustomer ? `Ideal customer: ${blueprint.customerModel.idealCustomer}` : null,
+      readsRevenue ? `Completeness: ${blueprint.completeness}%` : null,
     ].filter(Boolean).join('\n');
 
     return `You are KEY, the AI co-founder inside KeyFlowOS. You are conducting a friendly, focused onboarding interview to build the user's Business Genome — a structured blueprint that lets KEY operate as a digital executive for their business.

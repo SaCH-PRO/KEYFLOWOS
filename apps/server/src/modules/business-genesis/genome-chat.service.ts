@@ -6,9 +6,9 @@ import type { DnaSectionKey, GenomeIntegrityResult } from '../blueprint/blueprin
 import { GenomeFactService } from '../business-genome/key-genome/genome-fact.service';
 import { GenomeEvidenceService } from '../business-genome/key-genome/genome-evidence.service';
 import { DNA_TO_KEY_GENOME_SECTION } from '../business-genome/key-genome/key-genome.service';
-import { isFinancialDnaWrite } from '../blueprint/genome-write-scope';
+import { genomeIntegrityForReader, isFinancialDnaWrite } from '../blueprint/genome-write-scope';
 import { requireRevenueLevel } from '../key-autonomy/key-action-genome-projection';
-import type { GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
+import { genomeReaderReadsRevenue, type GenomeReader } from '../business-genome/key-genome/genome-finance-scope';
 
 export interface GenomeChatMessage {
   id: string;
@@ -134,24 +134,29 @@ export class GenomeChatService {
   ): Promise<GenomeIntegrityResult> {
     // FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128): the DNA write's rule (genome-write-scope); a financial update needs
     // the member's revenue write (ModuleScopeGuard's 403 message). No member is no revenue write.
+    const actor = opts?.actor ?? (userId && userId !== 'unknown' ? { id: userId } : undefined);
     if (isFinancialDnaWrite(section, data)) {
-      const actor = opts?.actor ?? (userId && userId !== 'unknown' ? { id: userId } : undefined);
       await requireRevenueLevel(this.prisma, businessId, actor, 'write');
     }
     await this.blueprint.updateDnaSection(businessId, section, data);
     const genome = await this.blueprint.calculateGenomeIntegrity(businessId);
 
     const populatedFields = Object.keys(data).join(', ');
+    // SEC-DW-5 (D-233, D-238): never persist composite Genome Integrity % into shared chat history,
+    // because Genome Integrity incorporates financial/sales DNA scores visible only to revenue readers.
     await this.persistMessage(
       businessId,
       'system',
-      `Updated ${section} DNA: ${populatedFields}. Genome Integrity is now ${genome.genomeIntegrity}%.`,
+      `Updated ${section} DNA: ${populatedFields}.`,
       { appliedSection: section, appliedData: data },
     );
 
     await this.writeEvidenceBackedFacts(businessId, userId, section, data, opts);
 
-    return genome;
+    const readsRevenue = actor
+      ? await genomeReaderReadsRevenue(this.prisma, businessId, actor).catch(() => false)
+      : false;
+    return genomeIntegrityForReader(genome, readsRevenue);
   }
 
   private async writeEvidenceBackedFacts(

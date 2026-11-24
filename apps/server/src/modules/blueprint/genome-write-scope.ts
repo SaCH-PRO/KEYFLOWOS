@@ -39,32 +39,52 @@ export const OTHER_BLUEPRINT_COLUMNS: ReadonlySet<string> = new Set([
  * financial DNA's own fields wherever they appear. Matched by exact name, case-insensitively, at any depth.
  */
 export const MONEY_FIELDS: ReadonlySet<string> = new Set([
-  'revenuemodel', 'budgetrange', 'financialrisks', 'pricingmodel', 'avgticket', 'monthlytarget', 'startupcapital',
-  'startupcosts', 'monthlyfixedcosts', 'variablecostpercent', 'estimatedannualrevenue', 'currency',
+  'revenuemodel', 'budgetrange', 'financialrisks', 'pricingmodel', 'avgticket', 'averageticket', 'monthlytarget',
+  'startupcapital', 'startupcosts', 'monthlyfixedcosts', 'variablecostpercent', 'estimatedannualrevenue', 'currency',
+  // SEC-DW-1 / COR-1: financial fields inside intelligence, workflowModel, taxProfile, and common snake/camel variants.
+  'expenseratio', 'quoteconversionrate', 'recentmomentumscore', 'topproductcategories',
+  'retainercycle', 'quotedrivensales', 'ecommercefulfillment',
+  'vatthresholdwatch', 'payrollexpected', 'contractorpaymentsexpected',
+  'runwaymonths', 'coststructure', 'monthlyrevenue', 'annualrevenue', 'grossmargin', 'netmargin', 'breakeven',
+  'cashflow', 'burnrate', 'debt', 'loan', 'funding', 'valuation', 'profitmargin', 'monthlyexpenses',
+  'fixedcosts', 'variablecosts', 'operatingcosts', 'pricing', 'price', 'rates', 'ratecard',
+  'revenue', 'sales', 'income', 'profit', 'margin', 'budget', 'payroll', 'salary', 'wages',
+  'commission', 'discount', 'refund', 'invoice', 'billing', 'receivables', 'payables',
 ]);
 
 /** Deeper than this fails closed. */
 const MAX_DEPTH = 8;
+
+function normalizeFieldKey(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
 
 function setsMoneyField(value: unknown, depth = 0): boolean {
   if (depth > MAX_DEPTH) return true;
   if (Array.isArray(value)) return value.some((v) => setsMoneyField(v, depth + 1));
   if (!value || typeof value !== 'object') return false;
   return Object.entries(value as Record<string, unknown>).some(
-    ([key, v]) => MONEY_FIELDS.has(key.toLowerCase()) || setsMoneyField(v, depth + 1),
+    ([key, v]) => MONEY_FIELDS.has(normalizeFieldKey(key)) || setsMoneyField(v, depth + 1),
   );
 }
 
 /**
  * An operations step names orders ("take orders", "pack orders"), which the shared vocabulary reads as money for
- * proposals and reads. On a write it is read as the operations word it is; an order's amount is still caught by the
- * amount pattern and every other money word.
+ * proposals and reads. On a write, strip bare operational "orders" ONLY when it is not part of a financial phrase
+ * ("average order value", "order total", "order amount") or paired with a quantity ("500 orders") (SEC-DW-6).
  */
 const ORDER_WORD = /(?<![a-z])orders?(?![a-z])/gi;
+const FINANCIAL_ORDER =
+  /(?:\b(?:average|avg|mean|total|minimum|min|max|median)\s+orders?\b|\borders?\s+(?:value|total|amount|size|revenue|price|volume|count)\b|\d[\d,.\s]*\s*orders?\b)/i;
+
+function sanitizeOperationalOrders(text: string): string {
+  if (FINANCIAL_ORDER.test(text)) return text;
+  return text.replace(ORDER_WORD, ' ');
+}
 
 function valueStatesMoney(value: unknown, depth = 0): boolean {
   if (depth > MAX_DEPTH) return true;
-  if (typeof value === 'string') return structuredValueStatesMoney(value.replace(ORDER_WORD, ' '));
+  if (typeof value === 'string') return structuredValueStatesMoney(sanitizeOperationalOrders(value));
   if (Array.isArray(value)) return value.some((v) => valueStatesMoney(v, depth + 1));
   if (value && typeof value === 'object') return Object.values(value as Record<string, unknown>).some((v) => valueStatesMoney(v, depth + 1));
   return false;
@@ -88,4 +108,55 @@ export function isFinancialBlueprintPatch(patch: unknown): boolean {
   const columns = Object.keys(patch as Record<string, unknown>);
   if (columns.some((c) => MONEY_BLUEPRINT_COLUMNS.has(c) || !OTHER_BLUEPRINT_COLUMNS.has(c))) return true;
   return contentIsFinancial(patch);
+}
+
+/**
+ * SEC-DW-5 (D-233, D-238): strip financial blueprint columns and composite scores derived from financial DNA from
+ * blueprint write responses when the caller does not hold revenue read.
+ */
+const BLUEPRINT_COMPOSITE_KEYS = new Set(['completeness', 'confidenceScores', 'genomeIntegrity', 'executiveReadinessScore', 'genomeDnaScores', 'genomeDnaConfidence', 'readinessBreakdown']);
+function stripMoneyFields(value: unknown, depth = 0): unknown {
+  if (depth > MAX_DEPTH) return undefined;
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map((v) => stripMoneyFields(v, depth + 1)).filter((v) => v !== undefined);
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (MONEY_FIELDS.has(normalizeFieldKey(k))) continue;
+    const cleaned = stripMoneyFields(v, depth + 1);
+    if (cleaned !== undefined) out[k] = cleaned;
+  }
+  return out;
+}
+export function blueprintForReader<T>(blueprint: T, readsRevenue: boolean): T {
+  if (readsRevenue || !blueprint || typeof blueprint !== 'object' || Array.isArray(blueprint)) return blueprint;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(blueprint as Record<string, unknown>)) {
+    if (MONEY_BLUEPRINT_COLUMNS.has(k) || BLUEPRINT_COMPOSITE_KEYS.has(k)) continue;
+    out[k] = stripMoneyFields(v, 1);
+  }
+  return out as T;
+}
+
+/**
+ * SEC-DW-5 (D-233, D-238): strip composite integrity scores and financial/sales DNA entries from a
+ * GenomeIntegrityResult returned to a caller without revenue read.
+ */
+const HIDDEN_DNA_SECTIONS = new Set(['financial', 'sales']);
+export function genomeIntegrityForReader<T>(genome: T, readsRevenue: boolean): T {
+  if (readsRevenue || !genome || typeof genome !== 'object' || Array.isArray(genome)) return genome;
+  const src = genome as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(src)) {
+    if (k === 'genomeIntegrity' || k === 'executiveReadinessScore') continue;
+    if ((k === 'genomeDnaScores' || k === 'genomeDnaConfidence' || k === 'readinessBreakdown') && v && typeof v === 'object' && !Array.isArray(v)) {
+      out[k] = Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([sec]) => !HIDDEN_DNA_SECTIONS.has(sec)));
+      continue;
+    }
+    if (k === 'dnaSections' && Array.isArray(v)) {
+      out[k] = v.filter((sec: any) => !HIDDEN_DNA_SECTIONS.has(String(sec?.key ?? '').toLowerCase()));
+      continue;
+    }
+    out[k] = v;
+  }
+  return out as T;
 }

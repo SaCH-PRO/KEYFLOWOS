@@ -58,6 +58,9 @@ import { TransactionalEmailService } from '../notifications/transactional-email.
 import { AiMemoryService } from './ai-memory.service';
 import { ModelGatewayService, GatewayMessage, StreamChunk } from './model-gateway.service';
 import { DocumentIntelligenceService, DocumentExtractionFailedError } from './document-intelligence.service';
+import { isFinancialBlueprintPatch } from '../blueprint/genome-write-scope';
+import { requireRevenueLevel } from '../key-autonomy/key-action-genome-projection';
+import { genomeReaderReadsRevenue } from '../business-genome/key-genome/genome-finance-scope';
 import { CatalogService } from '../catalog/catalog.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { AiMessageSenderService } from './ai-message-sender.service';
@@ -3961,10 +3964,17 @@ ${triage.standingContext}`;
     switch (toolName) {
       case 'update_business_blueprint': {
         const patch = args.patch as Record<string, Record<string, unknown>>;
+        const actorId = action?.principalUserId ?? action?.onBehalfOfUserId;
+        const actor = actorId ? { id: actorId } : undefined;
+        if (isFinancialBlueprintPatch(patch)) {
+          await requireRevenueLevel(this.prisma, businessId, actor, 'write');
+        }
         const blueprint = await this.blueprint.updateBlueprint(businessId, patch);
+        const readsRevenue = actor
+          ? await genomeReaderReadsRevenue(this.prisma, businessId, actor).catch(() => false)
+          : false;
         return {
-          completeness: blueprint.completeness,
-          confidenceScores: blueprint.confidenceScores,
+          ...(readsRevenue ? { completeness: blueprint.completeness, confidenceScores: blueprint.confidenceScores } : {}),
           updatedSections: Object.keys(patch),
         };
       }

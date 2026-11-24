@@ -52,7 +52,8 @@ export class BlueprintOnboardingController {
     @Body() body: BlueprintOnboardingChatDto,
     @CurrentUser() user: AuthenticatedUser | undefined,
   ) {
-    return this.onboarding.chat(businessId, actorId(user), body.message);
+    const id = actorId(user);
+    return this.onboarding.chat(businessId, id, body.message, { id, role: user?.role });
   }
 
   /** Starts the caller's own conversation over; other members' are untouched. */

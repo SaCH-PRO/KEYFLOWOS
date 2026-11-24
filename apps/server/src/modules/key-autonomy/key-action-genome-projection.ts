@@ -259,13 +259,15 @@ export function withoutCompositeScores(payload: unknown): unknown {
  * (GenomeCrossDomainService), so a verdict naming it can tell a revenue-none reader that finance is at risk (D-233).
  */
 const CROSS_DOMAIN_RISK = /cross[\s_-]?domain/i;
+/** SEC-DW-4: module readiness scores derived from FINANCIAL / BUSINESS_MODEL DNA. */
+const FINANCE_DERIVED_READINESS = /\b(?:reports|key_inbox|crm|key_autonomy)\s+readiness\b/i;
 
 /**
  * FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-233, D-238): whether an autonomy verdict reason or a genome-policy message states
- * money or the cross-domain risk (as autonomyVerdictForReader judges a verdict's reason).
+ * money, the cross-domain risk, or a finance-derived module readiness score (SEC-DW-4).
  */
 export function autonomyReasonStatesMoney(reason: unknown): boolean {
-  return typeof reason === 'string' && (textStatesMoney(reason) || CROSS_DOMAIN_RISK.test(reason));
+  return typeof reason === 'string' && (textStatesMoney(reason) || CROSS_DOMAIN_RISK.test(reason) || FINANCE_DERIVED_READINESS.test(reason));
 }
 
 /** 403 with ModuleScopeGuard's message when the reader's revenue level is below `minLevel` (SUPER_ADMIN passes). */
