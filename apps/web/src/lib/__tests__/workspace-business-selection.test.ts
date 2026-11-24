@@ -488,6 +488,9 @@ describe("W11-WEB-OWNER-MEMBERSHIP-REFUSAL: bootstrap refuses an owner with no m
     bootstrapIdentity.mockImplementation(async () => REFUSAL);
     serve({ businesses: [] });
     const { refreshWorkspace, getCachedBusiness, getStoredBusinessId } = await import("../workspace");
+    // The shell has read the cached business before (the header shows it): the in-memory copy must go too
+    // (correctness review MINOR-1).
+    expect(getCachedBusiness()?.id).toBe(STALE);
 
     await expect(refreshWorkspace()).resolves.toBeNull();
 
