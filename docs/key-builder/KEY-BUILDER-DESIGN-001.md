@@ -204,6 +204,9 @@ Each check is a script with tests, written from a rule the owner has already giv
 
 ## 8. First packets (track `key-builder`)
 
+**Replaced by `KEY-BUILDER-PLAN-001.md` section 4**, which was written after the research. The ids below are kept
+for history only.
+
 | ID | What | Size |
 | --- | --- | --- |
 | KB-001 | Reproducible sandbox: devcontainer or Dockerfile with Node 22, pnpm, Postgres, Redis, Playwright and the aliases; `kf env up/down/reset`; seeds the e2e database | M |
