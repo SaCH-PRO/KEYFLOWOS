@@ -41,6 +41,7 @@ import {
   Product,
 } from "@/lib/client";
 import { apiDelete } from "@/lib/api";
+import { canShareInvoicePayLink } from "@/lib/commerce-status";
 import { invoiceBalanceOfStoredRows, invoicePaidPercent } from "@keyflow/shared";
 import { refreshWorkspace, getStoredBusinessId, getCachedBusiness } from "@/lib/workspace";
 import { useCompose } from "@/components/email/compose-context";
@@ -269,6 +270,7 @@ export default function InvoicesHubPage() {
   // alongside the link, not from the loaded list); a phone only once the member confirms it as that
   // number (FU-WA-CONTACT-PHONE); else the chooser.
   const shareWhatsApp = async (inv: Invoice, text = "Your invoice:") => {
+    if (!canShareInvoicePayLink(inv.status)) return;
     const country = ownBusinessCountry();
     const number = readWhatsAppShareNumber(businessId, inv.contactId, country);
     const url = await buildPublicUrl(inv);
@@ -428,7 +430,7 @@ export default function InvoicesHubPage() {
                                 <DropdownItem icon={CheckCircle2} label="Mark paid" onClick={() => handleMarkPaid(inv.id)} show={inv.status === "DRAFT" || inv.status === "SENT"} loading={actionLoading[inv.id] === "paid"} />
                                 <DropdownItem icon={Receipt} label="Resend receipt" onClick={() => resendInvoiceReceipt(businessId!, inv.id, {}).then(r => r.data?.success ? toast.success("Resent") : toast.error(r.error ?? "Failed"))} show={!!(inv.status === "PAID" && gmailStatus?.connected)} />
                                 <DropdownItem icon={Files} label="Duplicate" onClick={() => handleDuplicate(inv)} show />
-                                <DropdownItem icon={MessageCircle} label="Share WhatsApp" onClick={() => { void shareWhatsApp(inv); }} show />
+                                <DropdownItem icon={MessageCircle} label="Share WhatsApp" onClick={() => { void shareWhatsApp(inv); }} show={canShareInvoicePayLink(inv.status)} />
                                 <DropdownItem icon={Ban} label="Void" onClick={() => handleVoid(inv.id)} show={inv.status !== "VOID" && inv.status !== "PAID"} loading={actionLoading[inv.id] === "void"} />
                                 <div className="border-t border-border my-1" />
                                 <DropdownItem icon={Trash2} label="Delete" destructive onClick={() => handleDelete(inv.id)} show={inv.status === "DRAFT" || inv.status === "VOID"} />
