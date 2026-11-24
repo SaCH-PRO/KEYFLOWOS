@@ -547,6 +547,9 @@ export class FinanceController {
     const items = await this.coa.list(businessId);
     return { items };
   }
+  // SWP-CENSUS-OPEN-WRITES (D-146, coawrite): the chart's rows are what every posting names; only Money write changes them.
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('chart-of-accounts')
   async createCoa(
     @Param('businessId') businessId: string,
@@ -556,6 +559,8 @@ export class FinanceController {
     await this.ensureAccess(req.user.id, businessId);
     return this.coa.create(businessId, body);
   }
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Patch('chart-of-accounts/:id')
   async updateCoa(
     @Param('businessId') businessId: string,
@@ -566,6 +571,8 @@ export class FinanceController {
     await this.ensureAccess(req.user.id, businessId);
     return this.coa.update(businessId, id, body);
   }
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Delete('chart-of-accounts/:id')
   async archiveCoa(
     @Param('businessId') businessId: string,

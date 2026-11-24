@@ -45,7 +45,8 @@ access to a module wrote it because the route ran `AuthGuard` and `BusinessGuard
 
 ## Summary
 
-- Member routes without an enforced scope at this head: **440** (SWP-CENSUS-HIDDEN applied 304, the member write routes
+- Member routes without an enforced scope at this head: **437** (SWP-CENSUS-OPEN-WRITES applied 3: the chart-of-accounts
+  POST, PATCH and DELETE at revenue:write, D-146 coawrite; 440 before. At 440: SWP-CENSUS-HIDDEN applied 304, the member write routes
   of the 42 controllers of modules v1 hides: 291 open and 13 exempt-check rows; its review repair left five to their own
   rule: the three KEY flow-signal status changes moved from open to exempt-check, and TTS and the community like stay
   open; see "SWP-CENSUS-HIDDEN" below; 744 before). At 744: (SWEEP-P0-FOLLOWUP applied 9: the KEY plan
@@ -1656,7 +1657,7 @@ Every other route is applied (above).
 | `FinanceController.applyBankRules` | POST | `/finance/businesses/:businessId/bank-rules/apply` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.applyBankRulesToAccount` | POST | `/finance/businesses/:businessId/accounts/:accountId/bank-rules/apply` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.archiveAccount` | DELETE | `/finance/businesses/:businessId/accounts/:id` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
-| `FinanceController.archiveCoa` | DELETE | `/finance/businesses/:businessId/chart-of-accounts/:id` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
+| `FinanceController.archiveCoa` | DELETE | `/finance/businesses/:businessId/chart-of-accounts/:id` | applied | revenue:write (D-146, coawrite; SWP-CENSUS-OPEN-WRITES) |
 | `FinanceController.bulkCreateExchangeRates` | POST | `/finance/businesses/:businessId/exchange-rates/bulk` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.cancelRecurringJournal` | POST | `/finance/businesses/:businessId/recurring-journal-entries/:id/cancel` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.closeAccountingPeriod` | POST | `/finance/businesses/:businessId/accounting-periods/:id/close` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
@@ -1665,7 +1666,7 @@ Every other route is applied (above).
 | `FinanceController.createAccountingPeriod` | POST | `/finance/businesses/:businessId/accounting-periods` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.createBankConnection` | POST | `/finance/businesses/:businessId/bank-connections` | applied | `settings:admin` (SWEEP-P0-FOLLOWUP, census owner question 12, unblocked by the PR195 merge: it stores a bank connection with its provider access token, BankConnection.accessToken, a provider credential the call graph names, CEN-10b) |
 | `FinanceController.createBankRule` | POST | `/finance/businesses/:businessId/bank-rules` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
-| `FinanceController.createCoa` | POST | `/finance/businesses/:businessId/chart-of-accounts` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
+| `FinanceController.createCoa` | POST | `/finance/businesses/:businessId/chart-of-accounts` | applied | revenue:write (D-146, coawrite; SWP-CENSUS-OPEN-WRITES) |
 | `FinanceController.createExchangeRate` | POST | `/finance/businesses/:businessId/exchange-rates` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.createFixedAsset` | POST | `/finance/businesses/:businessId/fixed-assets` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.createJournalEntry` | POST | `/finance/businesses/:businessId/journal-entries` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
@@ -1709,7 +1710,7 @@ Every other route is applied (above).
 | `FinanceController.updateAccountingPeriod` | PATCH | `/finance/businesses/:businessId/accounting-periods/:id` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.updateBankConnection` | PATCH | `/finance/businesses/:businessId/bank-connections/:id` | applied | `settings:admin` (SWEEP-P0-FOLLOWUP, owner question 12: it replaces a bank connection's provider access token, BankConnection.accessToken) |
 | `FinanceController.updateBankRule` | PATCH | `/finance/businesses/:businessId/bank-rules/:id` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
-| `FinanceController.updateCoa` | PATCH | `/finance/businesses/:businessId/chart-of-accounts/:id` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
+| `FinanceController.updateCoa` | PATCH | `/finance/businesses/:businessId/chart-of-accounts/:id` | applied | revenue:write (D-146, coawrite; SWP-CENSUS-OPEN-WRITES) |
 | `FinanceController.updateFixedAsset` | PATCH | `/finance/businesses/:businessId/fixed-assets/:id` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.updateRecurringJournal` | PATCH | `/finance/businesses/:businessId/recurring-journal-entries/:id` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |
 | `FinanceController.updateReserve` | PATCH | `/finance/businesses/:businessId/reserves/:id` | deferred | pkt/PR195-JOURNAL-SCOPE gates the Books doors (D-146; this packet does not edit finance.controller.ts); ensureAccess checks membership only |

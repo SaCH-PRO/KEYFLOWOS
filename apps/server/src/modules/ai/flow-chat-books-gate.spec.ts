@@ -254,7 +254,10 @@ describe('FB-07: which revenue writes admit a SUPER_ADMIN member (the doors they
       .sort();
     const books = writes.filter((t) => KEY_BOOKS_REVENUE_TOOLS.has(t));
     const doorsHoldingMembers = writes.filter((t) => !KEY_BOOKS_REVENUE_TOOLS.has(t));
-    expect(books).toEqual(['finance_auto_match_bank', 'finance_post_journal_entry', 'reconcile_match_line', 'reconcile_run_auto_match']);
+    // SWP-CENSUS-OPEN-WRITES (D-146, coawrite): finance_create_coa_account joins the Books tools: its door, POST
+    // chart-of-accounts, is a finance.controller door (ModuleScopeGuard revenue write and ensureAccess), which admits a
+    // SUPER_ADMIN member whatever its membership's scopes, so KEY admits them to the tool as the route does
+    expect(books).toEqual(['finance_auto_match_bank', 'finance_create_coa_account', 'finance_post_journal_entry', 'reconcile_match_line', 'reconcile_run_auto_match']);
     expect(doorsHoldingMembers).toEqual([
       'commerce_convert_quote', 'commerce_create_invoice', 'commerce_create_quote', 'commerce_delete_invoice',
       'commerce_mark_invoice_paid', 'commerce_update_invoice', 'payments_create_link', 'payments_refund_charge', 'payments_revoke_link',
