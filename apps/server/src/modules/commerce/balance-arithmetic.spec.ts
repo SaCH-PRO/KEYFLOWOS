@@ -516,18 +516,30 @@ const UNREACHABLE_WRITE_SET_WEB: Record<string, string> = {
 describe('BA-07: which write-set web files a route renders (V36-CR-1)', () => {
   const reachable = routeReachableWebFiles();
 
-  it('the import graph sees the live balance surfaces: the nav "Invoices" hub, the invoice detail page, and Sales -> finance pipeline -> payment-record modal', () => {
+  // MOUNT-QUOTES: the pipeline left Sales (D-150). Sales now renders the quotes
+  // panel, the Collections tab (payments-tab.tsx, the pipeline's collections
+  // view on its own tab) and the revenue composer. finance-pipeline.tsx is no
+  // longer mounted by any route, and with it the <PaymentRecordModal> screen
+  // (the pipeline was its only renderer): payment-record-modal.tsx stays
+  // route-reachable only through the attempt-key helper (newPaymentAttemptKey)
+  // that the composer and the invoice pages import. BA-04 / BA-05 still scan
+  // it through WRITE_SET_SURFACES; the modal screen having no route is recorded
+  // for the owner.
+  it('the import graph sees the live balance surfaces: the nav "Invoices" hub, the invoice detail page, Sales -> Collections tab, and the payment-record module (its attempt-key helper)', () => {
     expect(readFileSync(join(WEB_SRC, 'lib', 'nav-config.ts'), 'utf8'), 'the nav "Invoices" door is /app/commerce/invoices').toMatch(
       /label:\s*"Invoices",\s*href:\s*"\/app\/commerce\/invoices"/,
     );
     for (const f of [
       'apps/web/src/app/app/commerce/invoices/page.tsx',
       'apps/web/src/app/app/commerce/invoices/[id]/page.tsx',
-      'apps/web/src/app/app/finance/components/finance-pipeline.tsx',
+      'apps/web/src/app/app/commerce/payments/payments-tab.tsx',
+      'apps/web/src/app/app/finance/components/revenue-composer.tsx',
       'apps/web/src/app/app/finance/components/payment-record-modal.tsx',
     ]) {
       expect(reachable.has(f), `${f} is rendered by a route`).toBe(true);
     }
+    // The pipeline is mounted by no route since MOUNT-QUOTES; if one mounts it again, revisit this pin.
+    expect(reachable.has('apps/web/src/app/app/finance/components/finance-pipeline.tsx'), 'finance-pipeline.tsx is mounted by no route').toBe(false);
   });
 
   it('the write-set web files no route renders are exactly the known inventory (one wired onto a route lowers it)', () => {

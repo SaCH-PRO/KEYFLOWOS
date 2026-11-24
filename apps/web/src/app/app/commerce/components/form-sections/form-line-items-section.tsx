@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { FileText, Plus, Minus } from "lucide-react";
 import { formatAmount } from "../../utils/commerce-utils";
+import { formNumber, lineAmount } from "@/lib/finance/document-amounts";
 import { Product } from "@/lib/client";
 import { InvoiceLineItem } from "../commerce-types";
 import { CATEGORIES } from "../commerce-types";
@@ -164,7 +165,7 @@ export function FormLineItemsSection({
                     Subtotal:{" "}
                     <span className="text-foreground font-medium">
                       {formatAmount(
-                        (parseFloat(String(lineItem.quantity)) || 0) * (parseFloat(String(lineItem.unitPrice)) || 0),
+                        lineAmount(formNumber(String(lineItem.quantity)), formNumber(String(lineItem.unitPrice))),
                         currency,
                       )}
                     </span>

@@ -32,7 +32,8 @@ vi.mock("@/lib/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/client")>();
   return {
     ...actual,
-    fetchContacts: async () => ({ data: { contacts: [] }, error: null }),
+    // SWP-INV-FORM-UX: a save with no client is refused, so the page offers one and fillOneLine picks it.
+    fetchContacts: async () => ({ data: { contacts: [{ id: "ct_v45b", firstName: "Ada", lastName: "Customer", email: "ada@example.test" }] }, error: null }),
     fetchProducts: async () => ({ data: [], error: null }),
   };
 });
@@ -81,6 +82,8 @@ async function fillOneLine() {
   fireEvent.change(description, { target: { value: "Consultation" } });
   const price = document.querySelector('input[step="0.01"]') as HTMLInputElement;
   fireEvent.change(price, { target: { value: "100" } });
+  const client = screen.getByRole("option", { name: "Select a client..." }).closest("select") as HTMLSelectElement;
+  fireEvent.change(client, { target: { value: "ct_v45b" } });
 }
 
 function saveDraft(): HTMLButtonElement {
