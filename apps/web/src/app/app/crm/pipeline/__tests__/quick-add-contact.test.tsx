@@ -270,6 +270,36 @@ describe("Customers > Add contact (SWP-CONTACT-QUICKADD: BUG-009, BUG-034, BUG-0
     expect(document.getElementById("contact-form-firstName")).toHaveValue("Kavita");
   });
 
+  it("RED-BEFORE (review MINOR-1): after a refusal, changing a field clears the old reason; the next refusal shows again", async () => {
+    stubContactsApi({ status: 409, body: { statusCode: 409, message: DUPLICATE, error: "Conflict" } });
+    render(<ContactsScreenHarness />);
+    const dialog = await openQuickAdd();
+    fill(dialog, "Jane", "Kavita");
+    fill(dialog, "jane@example.com", "kavita@example.test");
+    await pressSave(dialog);
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(DUPLICATE);
+
+    fill(dialog, "jane@example.com", "kavita.p@example.test");
+    expect(within(dialog).queryByRole("alert"), "the reason was for the old email").not.toBeInTheDocument();
+    await pressSave(dialog);
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(DUPLICATE);
+  });
+
+  it("RED-BEFORE (review M4, MINOR-1): a dialog closed after a refusal and opened again keeps the draft but not the old reason", async () => {
+    stubContactsApi({ status: 409, body: { statusCode: 409, message: DUPLICATE, error: "Conflict" } });
+    render(<ContactsScreenHarness />);
+    const dialog = await openQuickAdd();
+    fill(dialog, "Jane", "Kavita");
+    await pressSave(dialog);
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(DUPLICATE);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Add contact" })).not.toBeInTheDocument());
+    const again = await openQuickAdd();
+    expect(within(again).getByPlaceholderText("Jane"), "closing keeps the draft (as before)").toHaveValue("Kavita");
+    expect(within(again).queryByRole("alert"), "no stale reason on a fresh open").not.toBeInTheDocument();
+  });
+
   it("CONTROL: a saved contact closes the dialog, says it was added, and sends what was typed", async () => {
     const api = stubContactsApi();
     render(<ContactsScreenHarness />);
