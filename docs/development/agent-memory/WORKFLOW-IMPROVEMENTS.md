@@ -46,7 +46,7 @@ queue needs an organization-owned repository.
 | # | Question | Owner | State |
 |---|---|---|---|
 | R&D-1 | Cut CI wall time with no check dropped: per-step timings of the Windows worker proof and Run Tests; caching (pnpm store, Turbo, Prisma), sharding with an aggregate job, superseded-run cancellation, slow jobs first; pipelining without a merge queue. | claude lane | running |
-| R&D-2 | Pre-flight audit of the Claude lane's next rows (P13, P17, P18 and the next ready web launch packets). | claude lane | running |
+| R&D-2 | Pre-flight audit of the Claude lane's next rows (P13, P17, P18 and the next ready web launch packets). | claude lane | **done**: 4 of 7 had false premises (wrong paths, already-green REDs, a write set missing the real rule, a size M that is L); P17 was one bug at 16 call sites, P18's fix location was wrong; 8 packets cited lost scratch files. Plan corrected (21806719); split posted (#80 7134656316). |
 
 Results land here as findings with evidence, then as ADOPTED rules or owner proposals.
 
@@ -55,3 +55,5 @@ Results land here as findings with evidence, then as ADOPTED rules or owner prop
 | Date | Change | Result |
 |---|---|---|
 | 2026-11-24 | Two lanes, atomic claims, one owner per board row, a joint plan ACKed by both (#80 7130344208, 7132212972). | No duplicated work, no clashes. Merges, not building, became the limit. |
+| 2026-11-24 | First pre-flight audit (A3), one read-only agent, about 11 minutes. | Caught 4 bad plans before anyone built them; at about 1 h per review bounce, it repays itself on the first catch. Run it before each claim batch. |
+| 2026-11-24 | Wave 3n took main as soon as M4a merged (A2). | Its CI ran alongside M4b's instead of after it. |
