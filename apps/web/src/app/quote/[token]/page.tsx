@@ -48,7 +48,8 @@ interface QuoteTotals {
 
 /**
  * The breakdown is shown only when it is the whole story: subtotal + tax - discount is the total to the cent.
- * A legacy row (subtotal stored as 0) shows the Total only, as the invoice public page does.
+ * A legacy row whose figures do not add up shows the Total only, as the invoice public page does; an all-zero quote
+ * shows the Total only too (a Subtotal of 0.00 says nothing).
  */
 function breakdownOf(quote: Quote): QuoteTotals | null {
   const figures: QuoteTotals = {

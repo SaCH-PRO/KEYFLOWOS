@@ -17,6 +17,8 @@
  *   PQT-04  RED-BEFORE  no tax and no discount: Subtotal and Total rows, no Tax or Discount row
  *   PQT-05  control     a breakdown that does not add up to the total shows the Total only
  *   PQT-06  control     a payload without a business block shows no name row and still renders the quote
+ *   PQT-07  hardening   (review M-1) a breakdown with a subtotal above 0 that does not add up (tax missing from the
+ *                       stored figures) shows the Total only; and an all-zero quote shows the Total only
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
@@ -137,5 +139,20 @@ describe("SWP-QUOTE-PUBLIC-PAGE: the customer's quote page", () => {
     expect(await screen.findByText(/QT-0107/)).toBeInTheDocument();
     expect(screen.queryByRole("img")).toBeNull();
     expect(bodyText()).toContain("1,066.00");
+  });
+
+  it("PQT-07 hardening (review M-1): a subtotal above 0 that does not add up, and an all-zero quote, show the Total only", async () => {
+    // Tax missing from the stored figures: 1,040 + 0 - 0 is not 1,066.
+    serve(journeyDQuote({ subtotal: 1040, taxAmount: 0, discountAmount: 0, total: 1066 }));
+    render(<PublicQuotePage />);
+    expect(await screen.findByText(/^Total$/)).toBeInTheDocument();
+    expect(screen.queryByText(/^Subtotal$/, { selector: "dt" })).toBeNull();
+    cleanup();
+    vi.unstubAllGlobals();
+    // An all-zero quote: the sum holds, but a Subtotal of 0.00 says nothing.
+    serve(journeyDQuote({ subtotal: 0, taxRate: 0, taxAmount: 0, discountAmount: 0, total: 0, items: [] }));
+    render(<PublicQuotePage />);
+    expect(await screen.findByText(/^Total$/)).toBeInTheDocument();
+    expect(screen.queryByText(/^Subtotal$/, { selector: "dt" })).toBeNull();
   });
 });
