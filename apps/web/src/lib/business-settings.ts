@@ -334,9 +334,9 @@ export function noteBusinessSettings(businessId: string, answer: unknown, sentAs
       else if (entries.delete(businessId)) emit();
       return isPlainObject(answer) && answer.id === businessId;
     }
-    if (isPlainObject(answer) && answer.id === businessId) {
-      newestWriteRecorded.set(businessId, Math.max(newestWriteRecorded.get(businessId) ?? 0, sequence));
-    }
+    // Raised for any answer recorded for the member acting, readable or not, as `recorded` does (review round 1,
+    // MINOR-2): the mark only discards older answers, it never records one.
+    newestWriteRecorded.set(businessId, Math.max(newestWriteRecorded.get(businessId) ?? 0, sequence));
   }
   answerRecorded(businessId);
   const own = isPlainObject(answer) && answer.id === businessId;
@@ -402,6 +402,39 @@ const MEMBER_CHANGED = "The change was sent by someone who is no longer signed i
 const UNCONFIRMED_ANSWER = "The change was sent, but the business does not show it. Check what is shown here before trying again.";
 
 /**
+ * A write whose outcome is unknown (no status: a dropped connection, a timeout; or a 5xx: a gateway that gave up while
+ * the server went on, a failure after the write was stored) may have been applied (reviews SEC5-1, SEC6-2).
+ *
+ * It also fences every older write's answer (FU-NAV-A1-CODEX-224): this write may have been applied after theirs, so
+ * an older answer landing from now on is a snapshot from before it. It is taken as the stale-answer check takes an
+ * answer older than one recorded: nothing of it is recorded, and the business is read again. Raised whoever is acting
+ * now (review round 1): the write may have been applied whoever sent it, and the fence records nothing for anyone, it
+ * only discards an older answer (SEC-3 governs recording an answer). What is held meanwhile is no longer taken as
+ * current (SEC6-1).
+ */
+function outcomeUnknown(businessId: string, sequence: number): void {
+  newestWriteRecorded.set(businessId, Math.max(newestWriteRecorded.get(businessId) ?? 0, sequence));
+  answerRecorded(businessId);
+  const held = entries.get(businessId);
+  if (!watched.has(businessId)) {
+    if (entries.delete(businessId)) emit();
+  } else {
+    if (held?.status === "ready") entries.set(businessId, { ...held, readAt: 0 });
+    void loadBusinessSettings(businessId, { force: true });
+  }
+}
+
+/**
+ * FU-SETTINGS-MANUAL-STEP-FENCE (review round 1, MINOR-1): a caller's own numbered write (beginBusinessWrite) that
+ * failed. A failure with no status or a 5xx is an unknown outcome and fences older answers exactly as the store's own
+ * writes do (outcomeUnknown); a 4xx is the server's answer that nothing changed, and changes nothing here.
+ */
+export function noteBusinessWriteFailed(businessId: string, status: number | undefined, sequence: number): void {
+  if (!businessId) return;
+  if (status === undefined || status >= 500) outcomeUnknown(businessId, sequence);
+}
+
+/**
  * The answer of a write as the caller gets it. A 2xx is a success only when it answered for this business and holds
  * what was sent (`holds`); anything less is an error in plain words, and what the business holds is read again.
  * The answer is recorded for the member who sent the write (`sentAs`), never for one who took the browser since.
@@ -434,22 +467,7 @@ function recorded(
     // is, and what the business holds is read again. What is held meanwhile is no longer taken as current (review
     // SEC6-1): if that re-read fails too, the next mount or look at the tab reads again. A 4xx is the server's
     // answer that nothing changed, and changes nothing here.
-    if (res.status === undefined || res.status >= 500) {
-      // It also fences every older write's answer (FU-NAV-A1-CODEX-224): this write may have been applied after
-      // theirs, so an older answer landing from now on is a snapshot from before it. It is taken as the stale-answer
-      // check above takes an answer older than one recorded: nothing of it is recorded, and the business is read
-      // again. Raised whoever is acting now (review round 1): the write may have been applied whoever sent it, and
-      // the fence records nothing for anyone, it only discards an older answer (SEC-3 governs recording an answer).
-      newestWriteRecorded.set(businessId, Math.max(newestWriteRecorded.get(businessId) ?? 0, sequence));
-      answerRecorded(businessId);
-      const held = entries.get(businessId);
-      if (!watched.has(businessId)) {
-        if (entries.delete(businessId)) emit();
-      } else {
-        if (held?.status === "ready") entries.set(businessId, { ...held, readAt: 0 });
-        void loadBusinessSettings(businessId, { force: true });
-      }
-    }
+    if (res.status === undefined || res.status >= 500) outcomeUnknown(businessId, sequence);
     return res;
   }
   if (sentAs !== actingMember()) {

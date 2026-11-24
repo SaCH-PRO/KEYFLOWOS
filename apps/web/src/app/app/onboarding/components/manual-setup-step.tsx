@@ -18,6 +18,7 @@ import {
   confirmedBusinessSettings,
   isBusinessSells,
   noteBusinessSettings,
+  noteBusinessWriteFailed,
   type BusinessSells,
 } from "@/lib/business-settings";
 import { fetchMe } from "@/lib/client";
@@ -216,7 +217,12 @@ async function completeManualSetup(
     // after this one cannot overwrite what it saved (business-settings.ts `recorded`).
     const sequence = beginBusinessWrite(businessId);
     const saved = await saveBusinessMinimalProfile(businessId, body);
-    if (saved.error !== null) return saved.error.trim() || "Could not save your business profile. Please try again.";
+    if (saved.error !== null) {
+      // An unknown outcome (no status, a 5xx) may have been applied: older answers are fenced, and the business is read
+      // again, as for the store's own writes (FU-SETTINGS-MANUAL-STEP-FENCE review round 1).
+      noteBusinessWriteFailed(businessId, saved.status, sequence);
+      return saved.error.trim() || "Could not save your business profile. Please try again.";
+    }
     if (actingMemberNow() !== sentAs) {
       // Answered after someone else signed in to this browser (review OBS4-1): nothing is recorded for them and
       // setup does not go on in their name.
