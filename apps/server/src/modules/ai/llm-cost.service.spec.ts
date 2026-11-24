@@ -25,9 +25,11 @@ describe('LLMCostService', () => {
   describe('computeCost', () => {
     it('calculates cost for gpt-4o-mini', () => {
       const cost = service.computeCost('gpt-4o-mini', 1000, 1000);
-      expect(cost.inputCost).toBe(0.0004);
-      expect(cost.outputCost).toBe(0.0016);
-      expect(cost.totalCost).toBe(0.002);
+      // the one table's verified price (2026-08-04): 0.00015 / 0.0006 per 1k, rounded to four decimals as computeCost
+      // rounds (0.00015 lands on 0.0001 in floating point; the sub-cent loss is pre-existing and noted for the owner)
+      expect(cost.inputCost).toBe(0.0001);
+      expect(cost.outputCost).toBe(0.0006);
+      expect(cost.totalCost).toBe(0.0007);
     });
 
     it('calculates cost for claude-3-5-sonnet', () => {
@@ -37,11 +39,15 @@ describe('LLMCostService', () => {
       expect(cost.totalCost).toBe(0.021);
     });
 
-    it('uses zero cost for unknown models', () => {
+    it('bills an unknown model at the gpt-4o rate and says it is an estimate, never $0 (RR-UNKNOWN-COST-NOT-ZERO)', () => {
       const cost = service.computeCost('unknown-model', 1000, 1000);
-      expect(cost.inputCost).toBe(0);
-      expect(cost.outputCost).toBe(0);
-      expect(cost.totalCost).toBe(0);
+      const gpt4o = service.computeCost('gpt-4o', 1000, 1000);
+      expect(cost.inputCost).toBe(gpt4o.inputCost);
+      expect(cost.outputCost).toBe(gpt4o.outputCost);
+      expect(cost.totalCost).toBe(gpt4o.totalCost);
+      expect(cost.totalCost).toBeGreaterThan(0);
+      expect(cost.priced).toBe(false);
+      expect(gpt4o.priced).toBe(true);
     });
   });
 
@@ -76,12 +82,13 @@ describe('LLMCostService', () => {
           promptTokens: 1000,
           completionTokens: 500,
           totalTokens: 1500,
-          inputCost: 0.0004,
-          outputCost: 0.0008,
-          totalCost: 0.0012,
+          // the one table's verified gpt-4o-mini price (0.00015 / 0.0006 per 1k), rounded as computeCost rounds
+          inputCost: 0.0001,
+          outputCost: 0.0003,
+          totalCost: 0.0005,
           latencyMs: 120,
           fallbackUsed: false,
-          metadata: {},
+          metadata: { costStatus: 'priced' },
         }),
       });
     });
