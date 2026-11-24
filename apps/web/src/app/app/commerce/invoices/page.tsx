@@ -80,6 +80,19 @@ export default function InvoicesHubPage() {
   const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
 
+  // A row's menu closes on Escape, and that Escape is the menu's: the app's global Escape ("go back",
+  // hooks/use-keyboard-shortcuts.ts, on window in the bubble phase) would otherwise leave the list (journey D8).
+  useEffect(() => {
+    if (!menuOpenId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      setMenuOpenId(null);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [menuOpenId]);
+
   const mountedRef = useRef(true);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
 
@@ -296,18 +309,19 @@ export default function InvoicesHubPage() {
           {/* Stat Cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
             {[
-              { key: "unpaid", label: "Unpaid", value: formatAmount(stats.unpaid.total, businessCurrency), count: stats.unpaid.count, icon: Clock, color: "text-amber-600", bg: "bg-amber-50", border: "border-amber-100", filter: UNPAID_FILTER },
-              { key: "overdue", label: "Overdue", value: formatAmount(stats.overdue.total, businessCurrency), count: stats.overdue.count, icon: AlertCircle, color: "text-red-600", bg: "bg-red-50", border: "border-red-100", filter: "OVERDUE" },
-              { key: "paid", label: "Paid this month", value: formatAmount(stats.paid.total, businessCurrency), count: stats.paid.count, icon: CheckCircle, color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-100", filter: "PAID" },
-              { key: "drafts", label: "Drafts", value: formatAmount(stats.drafts.total, businessCurrency), count: stats.drafts.count, icon: FileText, color: "text-slate-600", bg: "bg-slate-50", border: "border-slate-100", filter: "DRAFT" },
+              { key: "unpaid", label: "Unpaid", value: formatAmount(stats.unpaid.total, businessCurrency), count: stats.unpaid.count, icon: Clock, color: "text-amber-600", bg: "bg-amber-50 dark:bg-amber-500/10", border: "border-amber-100 dark:border-amber-500/25", filter: UNPAID_FILTER },
+              { key: "overdue", label: "Overdue", value: formatAmount(stats.overdue.total, businessCurrency), count: stats.overdue.count, icon: AlertCircle, color: "text-red-600", bg: "bg-red-50 dark:bg-red-500/10", border: "border-red-100 dark:border-red-500/25", filter: "OVERDUE" },
+              { key: "paid", label: "Paid this month", value: formatAmount(stats.paid.total, businessCurrency), count: stats.paid.count, icon: CheckCircle, color: "text-emerald-600", bg: "bg-emerald-50 dark:bg-emerald-500/10", border: "border-emerald-100 dark:border-emerald-500/25", filter: "PAID" },
+              { key: "drafts", label: "Drafts", value: formatAmount(stats.drafts.total, businessCurrency), count: stats.drafts.count, icon: FileText, color: "text-slate-600", bg: "bg-slate-50 dark:bg-slate-500/10", border: "border-slate-100 dark:border-slate-500/25", filter: "DRAFT" },
             ].map(card => (
               <button key={card.key} onClick={() => { setStatusFilter(card.filter); setPage(1); }} className={`text-left rounded-xl border ${card.border} ${card.bg} p-5 hover:shadow-md transition-all`}>
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-sm font-medium text-muted-foreground">{card.label}</span>
                   <card.icon className={`w-5 h-5 ${card.color}`} />
                 </div>
-                {/* SWP-INV-LIST (BUG-070): a long amount wraps inside its card at phone width instead of running out of it. */}
-                <p className="text-2xl font-bold tracking-tight break-words"><span className="text-lg sm:text-2xl">{card.value}</span></p>
+                {/* SWP-INV-LIST (BUG-070): readable in both themes (the card's dark variant above, the text the theme's
+                    foreground), and a long amount wraps inside its card at phone width. */}
+                <p className="text-2xl font-bold tracking-tight break-words text-foreground"><span className="text-lg sm:text-2xl">{card.value}</span></p>
                 <p className="text-xs text-muted-foreground mt-1">{card.count} invoice{card.count !== 1 ? "s" : ""}</p>
               </button>
             ))}
