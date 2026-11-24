@@ -428,7 +428,7 @@ beforeAll(async () => {
   await product(ID.prodInactive, ID.bizA, { isActive: false });
   await product(ID.prodOff, ID.bizOff);
 
-  const service = (id: string, businessId: string) =>
+  const service = (id: string, businessId: string, sourceProductId: string | null = null) =>
     db.service.create({
       data: {
         id,
@@ -443,11 +443,15 @@ beforeAll(async () => {
         depositRequired: true,
         depositType: 'FIXED',
         depositValue: 20,
-        sourceProductId: `${CANARY}source-product`,
+        sourceProductId,
       },
     });
   await service(ID.svcA, ID.bizA);
   await service(ID.svcOff, ID.bizOff);
+  // Owner-approved setup-only AMEND (P12 SWP-STORE-LISTING-SERVER): each seeded product has a live storefront listing Service; standalone bookable services keep sourceProductId: null.
+  await service(`${P}listingProdA`, ID.bizA, ID.prodA);
+  await service(`${P}listingProdInactive`, ID.bizA, ID.prodInactive);
+  await service(`${P}listingProdOff`, ID.bizOff, ID.prodOff);
 
   // Staff pay and capacity: internal (L4 manager), never public.
   await db.staffMember.create({ data: { id: ID.staffA, businessId: ID.bizA, name: 'V23A Stylist', hourlyRate: 87.5, maxHoursPerWeek: 31 } });
