@@ -75,12 +75,13 @@
 | P24 | CI C3+C4+C5 (ci-cd.yml: shard server vitest 4 ways; split run-manifests/release0/web steps into parallel jobs in ci-verdict needs; drop needs: typecheck) ~23 min | antigravity | returned | — | Returned #80 (7137945535) @ `4789127c` (RED `77256d4e`, fix `ad2ea08c`, R1 repair `4789127c`; 220/220 CI+security+deploy specs pass, 0 R0 edits, `[R035-13]` & `Run Tests` preserved, both R2 reviews CONFIRMED); ready for M7a |
 | P25 | FU-PLANNER-STEP-ORDER (key-cortex-planner.service.ts + sibling aiPlan include steps with no orderBy: CI flake, found by M4b) | antigravity | returned | — | Returned #80 (7138280313) @ `49c2a4b3` (RED `99330ac4`, fix `7b0e6a76`, R1 repair `49c2a4b3`; `owner-role-key` + AST/behavioral specs 82/82 passed, tsc 0, eslint 0 errors, both R2 reviews CONFIRMED); ready for M7a |
 | P26 | FU-NAV-A3-CODEX-235 (Codex P2s on #235: a slug taken for an id in breadcrumbs; the settings tab strip shown to every member) `pkt/V1-FU-NAV-A3-CODEX-235` @ 7ef3b70c **RETURNed** (#80 7137156301); both reviews ACCEPT | claude | returned | — | In M8 (PR #236) |
-| P27 | FU-CONTACT-DELETE-LEAVE (web, S: a pending single delete is dropped when the owner leaves within 5.5 s) | claude (proposed #80 7136931971) | todo | M8 | Pre-flight (A3), claim |
+| P27 | FU-CONTACT-DELETE-LEAVE `pkt/V1-FU-CONTACT-DELETE-LEAVE` @ 6f2cf8df **RETURNed** (#80 7140922048): each single delete keeps its own timer, toast and state; both reviews ACCEPT; C7 live green | claude | returned | — | Next Claude wave |
 | P28 | FU-CONTACT-PAGES-RAW-STATUS (web, M: raw stored statuses on the contact route pages) | claude (proposed #80 7136931971) | todo | M8 | Pre-flight (A3), claim |
-| P29 | FU-C4-FOCUS-OPEN (web, S: journey C4 list step, the focus view has no link to the customer page; pre-existing) | claude | todo | M8 | Pre-flight, claim |
+| P29 | FU-C4-FOCUS-OPEN `pkt/V1-FU-C4-FOCUS-OPEN` @ 4b40a2a7: a focus-view card opens the customer page; C4 list step live green (the next step, Cmd/K, is P32) | claude | in-review | — | Two reviews running; RETURN |
 | P30 | FU-NOTIFICATIONS-PREFS-GUARD (server, S, P1: customer-preferences and customer-log have no module guard) | antigravity (proposed) | todo | — | Antigravity to claim (server lane) |
 | P31 | FU-CONTACT-PANEL-PRUNE (web, S: the side panel still reads health, journey, conversation context and cross-journey for the retired tabs; acceptance CDC-5 and Codex P2 on #236) | claude | todo | M8 | The read removal does not wait on owner question 32 (only re-homing the panels does): pre-flight, claim after M8 |
+| P32 | FU-C4-CMDK-SEARCH (web, S: journey C4 Cmd/Ctrl+K step: desktop palette not opening, phone results not naming the customer; pre-existing, reached once P29 fixed the list step) | claude | todo | P29 | Root-cause first, then RED |
 | P14 | Owner: "Batch 2 safe defaults #5–#10" (not approved in D-272) | owner | blocked | the owner's review | The owner reviews the list |
 | P15 | Owner: redeploy production (D-266) | owner | blocked | M1–M4 | The owner deploys from main |
 
-Last updated: 2026-11-24 ~17:45 UTC by the claude lane (M5 and M6 merged; M8 = wave 3p PR #236 open; P13, P19, P20, P23, P26 in M8; P27-P31 added).
+Last updated: 2026-11-24 ~18:55 UTC by the claude lane (M8 #236 green and held for the M7a order; P27 returned; P29 in review; P32 added).
