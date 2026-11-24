@@ -76,7 +76,7 @@ function setsMoneyField(value: unknown, depth = 0): boolean {
  */
 const ORDER_WORD = /(?<![a-z])orders?(?![a-z])/gi;
 const FINANCIAL_ORDER =
-  /(?:(?<![a-z])(?:average|avg|mean|total|minimum|min|max|median)[\s_-]+orders?(?![a-z])|(?<![a-z])orders?(?:[\s_-]+(?:value|total|amount|size|revenue|price|volume|count)(?![a-z])|(?:\s+per\s+(?:day|week|month|quarter|year))?\s*(?:[:=]\s*)?\d)|(?<![\d,.])\d[\d,.]*(?:\s*(?:k|m|mm|mn|bn|\+))?(?:\s+(?:daily|weekly|monthly|quarterly|annual|yearly))?\s+orders?(?![a-z]))/i;
+  /(?:(?<![a-z])(?:average|avg|mean|total|minimum|min|max|median)[\s_-]+orders?(?![a-z])|(?<![a-z])orders?(?:[\s_-]+(?:value|total|amount|size|revenue|price|volume|count)(?![a-z])|(?:\s+per\s+(?:day|week|month|quarter|year))?\s*(?:[:=]\s*)?\d)|(?<![\d,.])[.,]*\d[\d,.]*(?:\s*(?:k|m|mm|mn|bn|\+))?(?:\s+(?:daily|weekly|monthly|quarterly|annual|yearly))?\s+orders?(?![a-z]))/i;
 
 function sanitizeOperationalOrders(text: string): string {
   if (FINANCIAL_ORDER.test(text)) return text;
