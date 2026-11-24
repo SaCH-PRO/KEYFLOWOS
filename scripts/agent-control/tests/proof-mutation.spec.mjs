@@ -59,6 +59,17 @@
  *                           the main checkout: proofs still see their worktree, and the main index is untouched
  *   PM-22  RED-AT-f884ec56  a proof that changes the repository's config (core.autocrlf) gets the next control a
  *                           worktree checked out under it, as main's fresh worktree per control did
+ *
+ * C1 fourth repair review (621c779c):
+ *   PM-23  RED-AT-621c779c  (A5) a broken worktree's removal does not prune another worktree's record (the runner's
+ *                           fallback ran a repository-wide `git worktree prune`; main never pruned)
+ *   PM-24  RED-AT-621c779c  (A1) a proof that changes the user's global git config (core.autocrlf) gets the next
+ *                           control a worktree checked out under it, as main's fresh worktree per control did
+ *   PM-25  RED-AT-621c779c  (A2) an empty directory a proof leaves in the worktree's git dir (rebase-merge) does not
+ *                           survive
+ *   PM-26  RED-AT-621c779c  (A3) modes a proof sets (a read-only directory and file) do not survive
+ *   PM-27  RED-AT-621c779c  (A4) a proof that rewrites .git to a relative path that still leads to the worktree: the
+ *                           next control sees the .git a fresh worktree has
  * PM-05 now resets a worktree the runner made (addWorktree), as the runner does: resetToPristine takes the worktree
  * record ({ dir, gitDir, ... }) and no longer accepts a bare directory.
  */
@@ -99,6 +110,8 @@ function fixtureRepo() {
   fs.writeFileSync(path.join(dir, 'claim.txt'), 'good\n');
   fs.writeFileSync(path.join(dir, '.gitignore'), '*.log\n');
   fs.writeFileSync(path.join(dir, '\u00e9t\u00e9.txt'), 'summer\n');
+  fs.mkdirSync(path.join(dir, 'sub'));
+  fs.writeFileSync(path.join(dir, 'sub', 'inner.txt'), 'inner\n');
   // The proof: logs where it ran (KF_PM_LOG, outside the repository), then passes only on a pristine exact tree whose
   // claim is good. Run as `node check.mjs litter` it also leaves every kind of debris behind it (an argument, not an
 // environment variable, so the command is the same under cmd.exe on the Windows runner).
@@ -117,8 +130,13 @@ function fixtureRepo() {
       "let marked = true;",
       "try { execSync('git rev-parse -q --verify refs/worktree/mark', { stdio: 'ignore' }); } catch { marked = false; }",
       "const bisecting = fs.existsSync(execSync('git rev-parse --git-path BISECT_LOG', { encoding: 'utf8' }).trim());",
+      // Fourth repair review: no rebase state, owner-writable tracked paths, an absolute .git as a fresh worktree has.
+      "const rebasing = fs.existsSync(execSync('git rev-parse --git-path rebase-merge', { encoding: 'utf8' }).trim());",
+      "const writable = ['sub', 'claim.txt'].every((p) => (fs.statSync(p).mode & 0o200) !== 0);",
+      "const dotGit = fs.readFileSync('.git', 'utf8').trim();",
+      "const absoluteGit = dotGit.startsWith('gitdir: ') && (dotGit.slice(8).startsWith('/') || /^[A-Za-z]:[\\\\/]/.test(dotGit.slice(8)));",
       "const eolOk = !process.env.KF_PM_EXPECT_CRLF || fs.readFileSync(process.env.KF_PM_CRLF_FILE || 'claim.txt', 'utf8').includes('\\r\\n');",
-      "const ok = fs.readFileSync('claim.txt', 'utf8').includes('good') && head === process.env.KF_PM_REF && dirty === '' && detached && !marked && !bisecting && eolOk;",
+      "const ok = fs.readFileSync('claim.txt', 'utf8').includes('good') && head === process.env.KF_PM_REF && dirty === '' && detached && !marked && !bisecting && eolOk && !rebasing && writable && absoluteGit;",
       "if (process.argv[2] === 'litter') {",
       "  fs.writeFileSync('stray.txt', 'untracked');",
       "  fs.writeFileSync('noise.log', 'ignored');",
@@ -161,6 +179,21 @@ function fixtureRepo() {
       "}",
       "if (process.argv[2] === 'setcrlf') {",
       "  execSync('git config core.autocrlf true');",
+      "}",
+      "if (process.argv[2] === 'globalcrlf') {",
+      "  execSync('git config --global core.autocrlf true');",
+      "}",
+      "if (process.argv[2] === 'emptydir') {",
+      "  fs.mkdirSync(execSync('git rev-parse --git-path rebase-merge', { encoding: 'utf8' }).trim());",
+      "}",
+      "if (process.argv[2] === 'chmod') {",
+      "  fs.chmodSync('sub', 0o555);",
+      "  fs.chmodSync('claim.txt', 0o444);",
+      "}",
+      "if (process.argv[2] === 'relgit') {",
+      "  const target = fs.readFileSync('.git', 'utf8').trim().slice(8);",
+      "  const { relative } = await import('node:path');",
+      "  fs.writeFileSync('.git', 'gitdir: ' + relative(process.cwd(), target).split('\\\\').join('/') + '\\n');",
       "}",
       "if (process.argv[2] === 'lock') {",
       "  execFileSync('git', ['worktree', 'lock', process.cwd()]);",
@@ -510,4 +543,52 @@ test("PM-22 RED-AT-f884ec56: a proof that changes the repository's config gets t
     afterFirst(control('setcrlf', { proof_command: 'node check.mjs setcrlf' }), ref, dir, ref),
   );
   for (const r of results) assert.equal(r.ok, true, JSON.stringify(r));
+});
+
+test('PM-23 RED-AT-621c779c: removing a broken worktree prunes no other worktree\'s record', () => {
+  const { dir, ref } = fixtureRepo();
+  // Another worktree whose directory is gone for now (a cleared scratch dir): its record is not the runner's to drop.
+  const other = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-pm-other-'));
+  made.push(other);
+  git(dir, 'worktree', 'add', '--detach', path.join(other, 'wt'), ref);
+  fs.rmSync(path.join(other, 'wt'), { recursive: true, force: true });
+  const listed = () => git(dir, 'worktree', 'list', '--porcelain').split('\n').filter((l) => l.startsWith('worktree '));
+  const otherRecorded = () => listed().some((l) => l.endsWith(`${path.sep}wt`) || l.endsWith('/wt'));
+  assert.ok(otherRecorded());
+  afterFirst(control('corrupt', { proof_command: 'node check.mjs corrupt' }), ref, dir, ref);
+  assert.ok(otherRecorded(), 'the other worktree is still recorded: ' + listed().join(' | '));
+});
+
+test("PM-24 RED-AT-621c779c: a proof that changes the global git config gets the next control a worktree checked out under it", () => {
+  const { dir, ref } = fixtureRepo();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-pm-home-'));
+  made.push(home);
+  // The fixture sets core.autocrlf in its own config, which would hide the global one.
+  git(dir, 'config', '--unset', 'core.autocrlf');
+  const results = withEnv(
+    { GIT_CONFIG_GLOBAL: path.join(home, 'gitconfig'), GIT_CONFIG_NOSYSTEM: '1', KF_PM_EXPECT_CRLF: '1', KF_PM_CRLF_FILE: '.gitignore' },
+    () => afterFirst(control('globalcrlf', { proof_command: 'node check.mjs globalcrlf' }), ref, dir, ref),
+  );
+  for (const r of results) assert.equal(r.ok, true, JSON.stringify(r));
+});
+
+test('PM-25 RED-AT-621c779c: an empty directory a proof leaves in the worktree\'s git dir does not survive', () => {
+  const { dir, ref } = fixtureRepo();
+  for (const r of afterFirst(control('emptydir', { proof_command: 'node check.mjs emptydir' }), ref, dir, ref)) {
+    assert.equal(r.ok, true, JSON.stringify(r));
+  }
+});
+
+test('PM-26 RED-AT-621c779c: modes a proof sets on tracked paths do not survive', () => {
+  const { dir, ref } = fixtureRepo();
+  for (const r of afterFirst(control('chmod', { proof_command: 'node check.mjs chmod' }), ref, dir, ref)) {
+    assert.equal(r.ok, true, JSON.stringify(r));
+  }
+});
+
+test('PM-27 RED-AT-621c779c: a .git a proof rewrote to a relative path does not survive', () => {
+  const { dir, ref } = fixtureRepo();
+  for (const r of afterFirst(control('relgit', { proof_command: 'node check.mjs relgit' }), ref, dir, ref)) {
+    assert.equal(r.ok, true, JSON.stringify(r));
+  }
 });
