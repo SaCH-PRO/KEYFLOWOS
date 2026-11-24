@@ -333,6 +333,14 @@ export async function adminSignOut(): Promise<void> {
   }
 }
 
+/** Forget the stored business (its id, cookie and cache) and keep the session: tokens and the cached user stay. */
+function forgetStoredBusiness() {
+  window.localStorage.removeItem(BUSINESS_ID_KEY);
+  window.localStorage.removeItem(BUSINESS_CACHE_KEY);
+  clearBusinessIdCookie();
+  businessCache = null;
+}
+
 export function clearStoredBusinessId() {
   if (typeof window === "undefined") return;
   purgeOnboardingTranscripts();
@@ -431,7 +439,14 @@ async function bootstrapFirstBusiness(
     return onSuperseded();
   }
   const business = result.data?.business;
-  if (!business?.id) return null;
+  if (!business?.id) {
+    // The membership list was authoritative and empty, and bootstrap gave no business (403
+    // OWNER_MEMBERSHIP_REQUIRED: recorded as an owner, a member nowhere): a stored id is not the caller's, and every
+    // screen would keep addressing a business BusinessGuard refuses. Forget the business only; the session stays
+    // (not clearStoredBusinessId, which is the sign-out wipe and removes the tokens).
+    forgetStoredBusiness();
+    return null;
+  }
   setStoredBusinessId(business.id);
   setCachedBusiness(business as CachedBusiness);
   if (result.data?.user) setCachedUser(result.data.user as CachedUser);
