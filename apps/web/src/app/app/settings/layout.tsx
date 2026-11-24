@@ -14,9 +14,10 @@ import { canOpenModule, type NavModule } from "@/lib/nav-config";
  * the hub needs settings, Team needs team, AI needs operations). FU-NAV-A3-CODEX-235 (b): My account is every
  * member's and lives under this layout, so the strip shows only what the member's modules open.
  */
-const navItems: Array<{ href: string; label: string; icon: React.ElementType; description: string; module?: NavModule }> = [
+const navItems: Array<{ href: string; label: string; icon: React.ElementType; description: string; module?: NavModule | "personal" }> = [
   { href: "/app/settings/billing", label: "Billing", icon: Crown, description: "Subscription & usage" },
-  { href: "/app/settings/invite", label: "Invite & Earn", icon: Gift, description: "Refer friends, earn credits" },
+  // The member's own referral link (/identity/referral needs only sign-in): every member's.
+  { href: "/app/settings/invite", label: "Invite & Earn", icon: Gift, description: "Refer friends, earn credits", module: "personal" },
   { href: "/app/settings/business", label: "Payment Gateways", icon: CreditCard, description: "Customer payment methods" },
   { href: "/app/settings/catalog", label: "Catalog", icon: Layers, description: "Products & services" },
   { href: "/app/settings/team", label: "Team", icon: Users, description: "Staff & roles", module: "team" },
@@ -42,13 +43,13 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   const { getOriginContext } = useNavigationContext();
   // Read the way the nav reads them: unknown (no answer yet, a failed read) hides nothing; the server decides.
   const levels = useMemberModuleLevels();
-  const shown = navItems.filter((item) => canOpenModule(levels, item.module ?? "settings"));
+  const shown = navItems.filter((item) => item.module === "personal" || canOpenModule(levels, item.module ?? "settings"));
   const origin = getOriginContext();
 
   const showContinuityHeader = !!origin && origin.workspace !== "Studio";
 
   const getTaskLabel = () => {
-    const item = navItems.find((n) => pathname === n.href || pathname.startsWith(n.href));
+    const item = navItems.find((n) => pathname === n.href || pathname.startsWith(`${n.href}/`));
     return item ? `Configure ${item.label}` : `Studio`;
   };
 
@@ -83,7 +84,8 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
         role="tablist"
       >
         {shown.map((item) => {
-          const isActive = pathname === item.href || (item.href !== "/app/settings" && pathname.startsWith(item.href));
+          // Its own page or a page under it ("/app/settings/ai" is not selected on "/app/settings/ai-control").
+          const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
             <Link
               key={item.href}
