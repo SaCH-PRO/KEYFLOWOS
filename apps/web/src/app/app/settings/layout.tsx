@@ -6,13 +6,21 @@ import { motion } from "framer-motion";
 import { Users, Link2, Settings, Webhook, Bell, Code2, Palette, Sparkles, CreditCard, Brain, Crown, Shield, ShieldCheck, FileCheck, Layers, Zap, Gift, BarChart3, FormInput, Bot } from "lucide-react";
 import { TaskContinuityHeader } from "@/components/ui/task-continuity-header";
 import { useNavigationContext } from "@/lib/navigation-context";
+import { useMemberModuleLevels } from "@/hooks/use-app-layout";
+import { canOpenModule, type NavModule } from "@/lib/nav-config";
 
-const navItems = [
+/**
+ * The business settings pages, each with the module its reads need, as the nav's Settings hub has them (nav-config.ts:
+ * the hub needs settings, Team needs team, AI needs operations). FU-NAV-A3-CODEX-235 (b): My account is every
+ * member's and lives under this layout, so the strip shows only what the member's modules open.
+ */
+const navItems: Array<{ href: string; label: string; icon: React.ElementType; description: string; module?: NavModule | "personal" }> = [
   { href: "/app/settings/billing", label: "Billing", icon: Crown, description: "Subscription & usage" },
-  { href: "/app/settings/invite", label: "Invite & Earn", icon: Gift, description: "Refer friends, earn credits" },
+  // The member's own referral link (/identity/referral needs only sign-in): every member's.
+  { href: "/app/settings/invite", label: "Invite & Earn", icon: Gift, description: "Refer friends, earn credits", module: "personal" },
   { href: "/app/settings/business", label: "Payment Gateways", icon: CreditCard, description: "Customer payment methods" },
   { href: "/app/settings/catalog", label: "Catalog", icon: Layers, description: "Products & services" },
-  { href: "/app/settings/team", label: "Team", icon: Users, description: "Staff & roles" },
+  { href: "/app/settings/team", label: "Team", icon: Users, description: "Staff & roles", module: "team" },
   { href: "/app/key-connect", label: "Connect", icon: Link2, description: "Integrations hub" },
 
   { href: "/app/settings/custom-fields", label: "Custom Fields", icon: FormInput, description: "Structured contact attributes" },
@@ -23,7 +31,7 @@ const navItems = [
   { href: "/app/settings/developers", label: "Developers", icon: Code2, description: "API & extensions" },
   { href: "/app/settings/ai-control", label: "AI Control", icon: Brain, description: "AI governance" },
   { href: "/app/settings/autonomy", label: "Autonomy", icon: Bot, description: "KEY autonomy & kill switch" },
-  { href: "/app/settings/ai", label: "L4 AI", icon: Zap, description: "Capacity & authority" },
+  { href: "/app/settings/ai", label: "L4 AI", icon: Zap, description: "Capacity & authority", module: "operations" },
   { href: "/app/settings/privacy", label: "Privacy", icon: Shield, description: "GDPR & forget" },
   { href: "/app/settings/compliance", label: "Compliance", icon: FileCheck, description: "Consent & records" },
   { href: "/app/settings/security", label: "Security", icon: ShieldCheck, description: "Audit & checks" },
@@ -33,12 +41,15 @@ const navItems = [
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { getOriginContext } = useNavigationContext();
+  // Read the way the nav reads them: unknown (no answer yet, a failed read) hides nothing; the server decides.
+  const levels = useMemberModuleLevels();
+  const shown = navItems.filter((item) => item.module === "personal" || canOpenModule(levels, item.module ?? "settings"));
   const origin = getOriginContext();
 
   const showContinuityHeader = !!origin && origin.workspace !== "Studio";
 
   const getTaskLabel = () => {
-    const item = navItems.find((n) => pathname === n.href || pathname.startsWith(n.href));
+    const item = navItems.find((n) => pathname === n.href || pathname.startsWith(`${n.href}/`));
     return item ? `Configure ${item.label}` : `Studio`;
   };
 
@@ -64,6 +75,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
         </div>
       </motion.div>
 
+      {shown.length > 0 && (
       <motion.nav
         initial={{ opacity: 0, y: 5 }}
         animate={{ opacity: 1, y: 0 }}
@@ -71,8 +83,9 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
         className="flex gap-1 p-1 rounded-2xl bg-muted/30 backdrop-blur-sm border border-border/40 overflow-x-auto scrollbar-none"
         role="tablist"
       >
-        {navItems.map((item) => {
-          const isActive = pathname === item.href || (item.href !== "/app/settings" && pathname.startsWith(item.href));
+        {shown.map((item) => {
+          // Its own page or a page under it ("/app/settings/ai" is not selected on "/app/settings/ai-control").
+          const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
             <Link
               key={item.href}
@@ -100,6 +113,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
           );
         })}
       </motion.nav>
+      )}
 
       <motion.div
         initial={{ opacity: 0, y: 10 }}
