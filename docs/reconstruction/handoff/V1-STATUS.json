@@ -2,8 +2,8 @@
  "_generated": {
   "by": "scripts/agent-memory/status.mjs",
   "do_not_edit": "Generated file. Change the inputs and re-run the script.",
-  "main_sha": "6e7c2c586e0c69cbd0b2909145206f4cd2f77971",
-  "main_commit_date": "2026-11-24T08:40:04+00:00",
+  "main_sha": "173481cdefd518199556c53bc1c6d1af4cc4f9e2",
+  "main_commit_date": "2026-11-24T11:13:46+00:00",
   "inputs": [
    "docs/reconstruction/V1-PLAN-RECUT.json",
    "docs/reconstruction/handoff/V1-STATUS-2026-11-20.json",
@@ -31,9 +31,9 @@
   "points": 536.5,
   "by_status": {
    "done": {
-    "packets": 93,
-    "points": 136.5,
-    "pct_by_points": 25.4
+    "packets": 99,
+    "points": 146.5,
+    "pct_by_points": 27.3
    },
    "in-progress": {
     "packets": 0,
@@ -41,9 +41,9 @@
     "pct_by_points": 0
    },
    "todo": {
-    "packets": 273,
-    "points": 400,
-    "pct_by_points": 74.6
+    "packets": 267,
+    "points": 390,
+    "pct_by_points": 72.7
    }
   },
   "by_step": {
@@ -72,9 +72,9 @@
     "total": 149
    },
    "4": {
-    "done": 2,
+    "done": 7,
     "in-progress": 0,
-    "todo": 51,
+    "todo": 46,
     "total": 53
    },
    "5": {
@@ -84,9 +84,9 @@
     "total": 71
    },
    "6": {
-    "done": 2,
+    "done": 3,
     "in-progress": 0,
-    "todo": 29,
+    "todo": 28,
     "total": 31
    },
    "7": {
@@ -110,9 +110,9 @@
     "total": 87
    },
    "launch": {
-    "done": 6,
+    "done": 12,
     "in-progress": 0,
-    "todo": 221,
+    "todo": 215,
     "total": 227
    },
    "follow-on": {
@@ -123,10 +123,10 @@
    }
   },
   "by_derivation": {
-   "prior-status-file": 150,
+   "prior-status-file": 144,
    "prior-status-file+wave-2b-commit": 28,
    "code-commit-subject": 9,
-   "compacted-commit": 37,
+   "compacted-commit": 43,
    "no-evidence": 142
   },
   "uncertain": [
@@ -140,15 +140,11 @@
    "FU-WA-ESCAPE-RACE",
    "FU-PROPOSAL-REVENUE-SIGHT"
   ],
-  "todo_with_dependencies_met": 122,
-  "todo_with_dependencies_met_launch": 99
+  "todo_with_dependencies_met": 123,
+  "todo_with_dependencies_met_launch": 100
  },
  "critical_path": {
   "plan_recorded_remaining": [
-   "MOUNT-QUOTES",
-   "SWP-INV-MATH",
-   "SWP-INV-FORM-UX",
-   "SWP-QUOTE-COMPOSER-CONTACT",
    "SWP-CONTACT-QUICKADD",
    "SWP-INV-LIST",
    "W11-WEB-OWNER-MEMBERSHIP-REFUSAL",
@@ -172,18 +168,15 @@
   ],
   "plan_recorded_total": 34,
   "longest_remaining_depends_on_chain": {
-   "weight": 48,
+   "weight": 45,
    "chain": [
-    "MOUNT-QUOTES",
-    "SWP-INV-MATH",
-    "SWP-INV-FORM-UX",
-    "SWP-QUOTE-COMPOSER-CONTACT",
-    "SWP-CONTACT-QUICKADD",
-    "SWP-INV-LIST",
-    "W11-WEB-OWNER-MEMBERSHIP-REFUSAL",
-    "SWP-REMOVED-MEMBER-NOTICE",
-    "SWP-INV-DETAIL",
-    "SWP-INV-REFUND-UI",
+    "W11-KEY-TRANSFER-INTEGER",
+    "TOF-FINANCE-CANONICAL-TOOLS",
+    "W11-OWNER-HELPER-REST",
+    "TOF-KEY-SELF-MODEL",
+    "TOF-KNOWLEDGE-UPLOAD",
+    "KEY-TOOL-ALLOWLIST",
+    "DECIMALS-SERVER",
     "CLAIM-LOOP",
     "READY-TO-SEND",
     "TODAY-AGGREGATE",
@@ -203,14 +196,14 @@
  },
  "ready": [
   {
-   "id": "MOUNT-QUOTES",
+   "id": "SWP-CONTACT-QUICKADD",
    "step": 4,
-   "priority": "P0",
-   "size": "L",
+   "priority": "P1",
+   "size": "M",
    "lane": "web",
    "track": "launch",
    "on_critical_path": true,
-   "unblocks": 57
+   "unblocks": 49
   },
   {
    "id": "W11-KEY-TRANSFER-INTEGER",
@@ -233,14 +226,14 @@
    "unblocks": 51
   },
   {
-   "id": "SWP-INV-PUBLIC-LINK",
+   "id": "MIGRATION-SET-A",
    "step": 4,
    "priority": "P0",
    "size": "M",
-   "lane": "both",
+   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 48
+   "unblocks": 44
   },
   {
    "id": "SWP-KEY-CHAT-WEB",
@@ -408,6 +401,16 @@
    "priority": "P0",
    "size": "M",
    "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 5
+  },
+  {
+   "id": "WEDGE-WA-INBOUND-CAPTURE",
+   "step": 4,
+   "priority": "P0",
+   "size": "M",
+   "lane": "both",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 5
@@ -1425,14 +1428,14 @@
  ],
  "ready_launch": [
   {
-   "id": "MOUNT-QUOTES",
+   "id": "SWP-CONTACT-QUICKADD",
    "step": 4,
-   "priority": "P0",
-   "size": "L",
+   "priority": "P1",
+   "size": "M",
    "lane": "web",
    "track": "launch",
    "on_critical_path": true,
-   "unblocks": 57
+   "unblocks": 49
   },
   {
    "id": "W11-KEY-TRANSFER-INTEGER",
@@ -1455,14 +1458,14 @@
    "unblocks": 51
   },
   {
-   "id": "SWP-INV-PUBLIC-LINK",
+   "id": "MIGRATION-SET-A",
    "step": 4,
    "priority": "P0",
    "size": "M",
-   "lane": "both",
+   "lane": "server",
    "track": "launch",
    "on_critical_path": false,
-   "unblocks": 48
+   "unblocks": 44
   },
   {
    "id": "SWP-KEY-CHAT-WEB",
@@ -1630,6 +1633,16 @@
    "priority": "P0",
    "size": "M",
    "lane": "server",
+   "track": "launch",
+   "on_critical_path": false,
+   "unblocks": 5
+  },
+  {
+   "id": "WEDGE-WA-INBOUND-CAPTURE",
+   "step": 4,
+   "priority": "P0",
+   "size": "M",
+   "lane": "both",
    "track": "launch",
    "on_critical_path": false,
    "unblocks": 5
@@ -3439,17 +3452,19 @@
    "size": "L",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "ce4e35a5"
+   ],
    "depends_on": [
     "NAV-A1",
     "WA-HELPER",
     "FAILURE-KIT"
    ],
    "title": "Sales > Quotes mounts quotes-panel.tsx: edit a draft, WhatsApp and Copy link, Send carries the link, Convert on accepted quotes keeps notes, bulk bar never deletes",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "SWP-INV-MATH",
@@ -3458,15 +3473,17 @@
    "size": "M",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "799fb9b1"
+   ],
    "depends_on": [
     "MOUNT-QUOTES"
    ],
    "title": "Invoice and quote forms: the preview equals the saved total under the server's tax order; clearing the tax rate removes the tax",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "SWP-INV-FORM-UX",
@@ -3475,15 +3492,17 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "52b0383a"
+   ],
    "depends_on": [
     "SWP-INV-MATH"
    ],
    "title": "Invoice forms: line totals visible, client required with a plain message, not-found edit page, no dead template picker",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "SWP-QUOTE-COMPOSER-CONTACT",
@@ -3492,16 +3511,18 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "7bd2f445"
+   ],
    "depends_on": [
     "SWP-INV-FORM-UX",
     "FAILURE-KIT"
    ],
    "title": "Quote composer: missing client is said; a quick-added contact shows as chosen; a duplicate phone is explained",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "SWP-CONTACT-QUICKADD",
@@ -3520,7 +3541,7 @@
     "FIX-CONTACT-PARAMS"
    ],
    "title": "Contacts quick add: refusals are shown and the form is kept; Company is sent; no invented 'User' last name",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "SWP-INV-LIST",
@@ -3829,15 +3850,17 @@
    "size": "M",
    "lane": "both",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "a24a0abc"
+   ],
    "depends_on": [
     "SWP-INV-MONEY-TOTALS"
    ],
    "title": "Invoice links: no customer link for a draft; a voided link says voided; the customer page shows tax, discount and the currency code",
-   "deps_met": true
+   "deps_met": null
   },
   {
    "id": "MIGRATION-SET-A",
@@ -3855,7 +3878,7 @@
     "S1-RULINGS-RECORD"
    ],
    "title": "The v1 hold migration set, authored once and proven on a fresh database: part quantities, Business VAT number, tier pricing tables",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "DECIMALS-SERVER",
@@ -4580,16 +4603,18 @@
    "size": "S",
    "lane": "web",
    "track": "launch",
-   "status": "todo",
-   "derived_from": "prior-status-file",
+   "status": "done",
+   "derived_from": "compacted-commit",
    "uncertain": false,
-   "evidence": [],
+   "evidence": [
+    "cf29e249"
+   ],
    "depends_on": [
     "SWP-INV-PUBLIC-LINK",
     "MOUNT-QUOTES"
    ],
    "title": "Public quote page shows the business, subtotal, tax and discount",
-   "deps_met": false
+   "deps_met": null
   },
   {
    "id": "VAT-BASICS",
@@ -8801,7 +8826,7 @@
     "MOUNT-QUOTES"
    ],
    "title": "New from WhatsApp: paste a customer's WhatsApp message and number; KEYFLOWOS finds or creates the customer by E.164, keeps the message on their timeline, and opens New quote or New booking for them",
-   "deps_met": false
+   "deps_met": true
   },
   {
    "id": "WEDGE-HIDE-STORE",
