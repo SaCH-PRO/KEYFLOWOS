@@ -223,7 +223,11 @@ export function GenomeChatPanel({ genome, onGenomeUpdate }: GenomeChatPanelProps
       return;
     }
 
-    toast.success(`Saved to ${sectionLabel(genome, proposal.section)} — Genome Integrity is now ${result.genomeIntegrity}%`);
+    toast.success(
+      typeof result.genomeIntegrity === "number"
+        ? `Saved to ${sectionLabel(genome, proposal.section)} — Genome Integrity is now ${result.genomeIntegrity}%`
+        : `Saved to ${sectionLabel(genome, proposal.section)}`,
+    );
     onGenomeUpdate(result);
     setIgnoredProposalIds((prev) => new Set(prev).add(messageId));
     setPendingProposal(null);

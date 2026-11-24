@@ -18,7 +18,7 @@
  * (isFinancialGenomeEvolution, the DNA projections).
  */
 import { nonMoneySection } from '../key-autonomy/key-action-genome-projection';
-import { structuredValueStatesMoney } from '../business-genome/key-genome/genome-finance-scope';
+import { dnaScoresForReader, structuredValueStatesMoney } from '../business-genome/key-genome/genome-finance-scope';
 
 /**
  * The blueprint columns behind the financial and sales DNA sections (DNA_SECTION_CONFIG: financials and
@@ -71,11 +71,12 @@ function setsMoneyField(value: unknown, depth = 0): boolean {
 /**
  * An operations step names orders ("take orders", "pack orders"), which the shared vocabulary reads as money for
  * proposals and reads. On a write, strip bare operational "orders" ONLY when it is not part of a financial phrase
- * ("average order value", "order total", "order amount") or paired with a quantity ("500 orders") (SEC-DW-6).
+ * ("average order value", "average_order_value", "order-total", "orders: 500") or paired with a quantity
+ * ("500 orders", "500k orders", "200 monthly orders") (SEC-DW-6). Strictly linear O(N) — no overlapping quantifiers.
  */
 const ORDER_WORD = /(?<![a-z])orders?(?![a-z])/gi;
 const FINANCIAL_ORDER =
-  /(?:\b(?:average|avg|mean|total|minimum|min|max|median)\s+orders?\b|\borders?\s+(?:value|total|amount|size|revenue|price|volume|count)\b|\d[\d,.\s]*\s*orders?\b)/i;
+  /(?:(?<![a-z])(?:average|avg|mean|total|minimum|min|max|median)[\s_-]+orders?(?![a-z])|(?<![a-z])orders?(?:[\s_-]+(?:value|total|amount|size|revenue|price|volume|count)(?![a-z])|(?:\s+per\s+(?:day|week|month|quarter|year))?\s*[:=]?\s*\d)|(?<!\d)\d[\d,.]*(?:\s*(?:k|m|mm|mn|bn|\+))?(?:\s+(?:daily|weekly|monthly|quarterly|annual|yearly))?\s+orders?(?![a-z]))/i;
 
 function sanitizeOperationalOrders(text: string): string {
   if (FINANCIAL_ORDER.test(text)) return text;
@@ -111,12 +112,18 @@ export function isFinancialBlueprintPatch(patch: unknown): boolean {
 }
 
 /**
- * SEC-DW-5 (D-233, D-238): strip financial blueprint columns and composite scores derived from financial DNA from
- * blueprint write responses when the caller does not hold revenue read.
+ * SEC-DW-5 (D-233, D-238): strip financial blueprint columns, composite scores derived from financial DNA
+ * (including genomeStage and readinessScore), nested money fields, and money-stating strings in non-money columns
+ * from blueprint write responses when the caller does not hold revenue read. Preserves Date instances.
  */
-const BLUEPRINT_COMPOSITE_KEYS = new Set(['completeness', 'confidenceScores', 'genomeIntegrity', 'executiveReadinessScore', 'genomeDnaScores', 'genomeDnaConfidence', 'readinessBreakdown']);
+const BLUEPRINT_COMPOSITE_KEYS = new Set([
+  'completeness', 'confidenceScores', 'genomeIntegrity', 'executiveReadinessScore', 'genomeStage', 'readinessScore',
+  'genomeDnaScores', 'genomeDnaConfidence', 'readinessBreakdown',
+]);
 function stripMoneyFields(value: unknown, depth = 0): unknown {
   if (depth > MAX_DEPTH) return undefined;
+  if (value instanceof Date) return value;
+  if (typeof value === 'string') return structuredValueStatesMoney(value) ? undefined : value;
   if (value === null || typeof value !== 'object') return value;
   if (Array.isArray(value)) return value.map((v) => stripMoneyFields(v, depth + 1)).filter((v) => v !== undefined);
   const out: Record<string, unknown> = {};
@@ -132,28 +139,30 @@ export function blueprintForReader<T>(blueprint: T, readsRevenue: boolean): T {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(blueprint as Record<string, unknown>)) {
     if (MONEY_BLUEPRINT_COLUMNS.has(k) || BLUEPRINT_COMPOSITE_KEYS.has(k)) continue;
-    out[k] = stripMoneyFields(v, 1);
+    const cleaned = stripMoneyFields(v, 1);
+    if (cleaned !== undefined) out[k] = cleaned;
   }
   return out as T;
 }
 
 /**
- * SEC-DW-5 (D-233, D-238): strip composite integrity scores and financial/sales DNA entries from a
- * GenomeIntegrityResult returned to a caller without revenue read.
+ * SEC-DW-5 (D-233, D-238): strip composite integrity scores (including genomeStage and readinessScore) and
+ * financial/sales DNA entries from a GenomeIntegrityResult returned to a caller without revenue read, using the
+ * canonical case-insensitive allowlists (dnaScoresForReader, nonMoneySection).
  */
-const HIDDEN_DNA_SECTIONS = new Set(['financial', 'sales']);
+const HIDDEN_GENOME_COMPOSITE_KEYS = new Set(['genomeIntegrity', 'executiveReadinessScore', 'genomeStage', 'readinessScore']);
 export function genomeIntegrityForReader<T>(genome: T, readsRevenue: boolean): T {
   if (readsRevenue || !genome || typeof genome !== 'object' || Array.isArray(genome)) return genome;
   const src = genome as Record<string, unknown>;
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(src)) {
-    if (k === 'genomeIntegrity' || k === 'executiveReadinessScore') continue;
+    if (HIDDEN_GENOME_COMPOSITE_KEYS.has(k)) continue;
     if ((k === 'genomeDnaScores' || k === 'genomeDnaConfidence' || k === 'readinessBreakdown') && v && typeof v === 'object' && !Array.isArray(v)) {
-      out[k] = Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([sec]) => !HIDDEN_DNA_SECTIONS.has(sec)));
+      out[k] = dnaScoresForReader(v as Record<string, unknown>, false);
       continue;
     }
     if (k === 'dnaSections' && Array.isArray(v)) {
-      out[k] = v.filter((sec: any) => !HIDDEN_DNA_SECTIONS.has(String(sec?.key ?? '').toLowerCase()));
+      out[k] = v.filter((sec: any) => nonMoneySection(sec?.key));
       continue;
     }
     out[k] = v;

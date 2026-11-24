@@ -259,12 +259,12 @@ export function withoutCompositeScores(payload: unknown): unknown {
  * (GenomeCrossDomainService), so a verdict naming it can tell a revenue-none reader that finance is at risk (D-233).
  */
 const CROSS_DOMAIN_RISK = /cross[\s_-]?domain/i;
-/** SEC-DW-4: module readiness scores derived from FINANCIAL / BUSINESS_MODEL DNA. */
-const FINANCE_DERIVED_READINESS = /\b(?:reports|key_inbox|crm|key_autonomy)\s+readiness\b/i;
+/** SEC-DW-4: module readiness / automation messages derived from FINANCIAL / BUSINESS_MODEL DNA. */
+const FINANCE_DERIVED_READINESS = /\b(?:reports|key_inbox|crm|key_autonomy)\s+(?:(?:module\s+)?readiness|automation)\b/i;
 
 /**
  * FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-233, D-238): whether an autonomy verdict reason or a genome-policy message states
- * money, the cross-domain risk, or a finance-derived module readiness score (SEC-DW-4).
+ * money, the cross-domain risk, or a finance-derived module readiness/automation score (SEC-DW-4).
  */
 export function autonomyReasonStatesMoney(reason: unknown): boolean {
   return typeof reason === 'string' && (textStatesMoney(reason) || CROSS_DOMAIN_RISK.test(reason) || FINANCE_DERIVED_READINESS.test(reason));
@@ -298,9 +298,12 @@ export function autonomyVerdictForReader<V extends { actionKey?: unknown; reason
   actionKeyIsMoney: (actionKey: string) => boolean = () => false,
 ): Omit<V, 'confidence'> | null {
   if (typeof verdict.actionKey !== 'string' || textStatesMoney(verdict.actionKey) || actionKeyIsMoney(verdict.actionKey)) return null;
-  if (textStatesMoney(verdict.reason) || CROSS_DOMAIN_RISK.test(String(verdict.reason ?? ''))) return null;
+  if (autonomyReasonStatesMoney(verdict.reason)) return null;
   const trace = ruleTraceWithoutMetadata({ ruleTrace: verdict.ruleTrace }) as { ruleTrace?: unknown };
-  if (structuredValueStatesMoney(trace.ruleTrace) || CROSS_DOMAIN_RISK.test(JSON.stringify(trace.ruleTrace ?? null))) return null;
+  const traceJson = JSON.stringify(trace.ruleTrace ?? null);
+  if (structuredValueStatesMoney(trace.ruleTrace) || CROSS_DOMAIN_RISK.test(traceJson) || FINANCE_DERIVED_READINESS.test(traceJson)) {
+    return null;
+  }
   // Round 2 (security MAJOR-3a): the verdict's confidence is the genome gate's confidence score (min(1, score/100)).
   const { confidence: _confidence, ...rest } = verdict;
   return { ...rest, ruleTrace: trace.ruleTrace };

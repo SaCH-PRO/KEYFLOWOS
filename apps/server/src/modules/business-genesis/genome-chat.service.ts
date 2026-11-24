@@ -135,20 +135,21 @@ export class GenomeChatService {
     // FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128): the DNA write's rule (genome-write-scope); a financial update needs
     // the member's revenue write (ModuleScopeGuard's 403 message). No member is no revenue write.
     const actor = opts?.actor ?? (userId && userId !== 'unknown' ? { id: userId } : undefined);
-    if (isFinancialDnaWrite(section, data)) {
+    const financialWrite = isFinancialDnaWrite(section, data);
+    if (financialWrite) {
       await requireRevenueLevel(this.prisma, businessId, actor, 'write');
     }
     await this.blueprint.updateDnaSection(businessId, section, data);
     const genome = await this.blueprint.calculateGenomeIntegrity(businessId);
 
     const populatedFields = Object.keys(data).join(', ');
-    // SEC-DW-5 (D-233, D-238): never persist composite Genome Integrity % into shared chat history,
-    // because Genome Integrity incorporates financial/sales DNA scores visible only to revenue readers.
+    // SEC-DW-5 (D-233, D-238): never persist composite Genome Integrity % or raw financial appliedData
+    // into shared tenant chat history readable by non-revenue members.
     await this.persistMessage(
       businessId,
       'system',
-      `Updated ${section} DNA: ${populatedFields}.`,
-      { appliedSection: section, appliedData: data },
+      financialWrite ? `Updated ${section} DNA.` : `Updated ${section} DNA: ${populatedFields}.`,
+      financialWrite ? { appliedSection: section } : { appliedSection: section, appliedData: data },
     );
 
     await this.writeEvidenceBackedFacts(businessId, userId, section, data, opts);

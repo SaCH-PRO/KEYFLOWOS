@@ -1,4 +1,4 @@
-import { BadRequestException, HttpException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, HttpException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { ModelGatewayService, GatewayMessage } from './model-gateway.service';
@@ -13,7 +13,7 @@ import {
 import { normalizeRecommendedEntityType } from '../blueprint/entity-type.helpers';
 import { blueprintForReader, isFinancialBlueprintPatch } from '../blueprint/genome-write-scope';
 import { requireRevenueLevel } from '../key-autonomy/key-action-genome-projection';
-import { genomeReaderReadsRevenue } from '../business-genome/key-genome/genome-finance-scope';
+import { genomeReaderReadsRevenue, structuredValueStatesMoney } from '../business-genome/key-genome/genome-finance-scope';
 
 export interface OnboardingMessage {
   role: 'user' | 'assistant';
@@ -431,9 +431,10 @@ export class BlueprintOnboardingService {
     const state = await this.getState(businessId, userId);
     const effectiveActor = actor ?? (userId ? { id: userId } : undefined);
     const hasMembershipTable = typeof this.prisma?.client?.membership?.findUnique === 'function';
+    // SEC-DW-3b / SEC-DW-5: fail closed when membership lookup is unavailable.
     const readsRevenue = hasMembershipTable
       ? await genomeReaderReadsRevenue(this.prisma!, businessId, effectiveActor).catch(() => false)
-      : true;
+      : false;
 
     // This turn's own entry. Turns of the same conversation can overlap (two
     // tabs), so the turn finds its place by this object, never by an index
@@ -465,8 +466,11 @@ export class BlueprintOnboardingService {
 
       const patch = this.buildPatchFromExtractions(extractions);
       // SEC-DW-3b (D-128): enforce the same financial genome write gate on onboarding-chat extractions
-      // BEFORE recording the assistant reply or persisting the patch.
-      if (Object.keys(patch).length > 0 && isFinancialBlueprintPatch(patch) && hasMembershipTable) {
+      // BEFORE recording the assistant reply or persisting the patch. Fail closed if membership lookup is absent.
+      if (Object.keys(patch).length > 0 && isFinancialBlueprintPatch(patch)) {
+        if (!hasMembershipTable) {
+          throw new ForbiddenException('Insufficient permissions: revenue requires write access (you have none)');
+        }
         await requireRevenueLevel(this.prisma!, businessId, effectiveActor, 'write');
       }
 
@@ -617,18 +621,26 @@ export class BlueprintOnboardingService {
   }
 
   private buildSystemPrompt(blueprint: BlueprintData, state: BlueprintOnboardingState, readsRevenue = true): string {
-    const completed = state.completedSections;
-    const remaining = SECTION_ORDER.filter(s => !completed.includes(s));
-    const current = state.currentSection || remaining[0] || null;
+    const visibleOrder = readsRevenue ? SECTION_ORDER : SECTION_ORDER.filter(s => s !== 'financials');
+    const completed = readsRevenue ? state.completedSections : state.completedSections.filter(s => s !== 'financials');
+    const remaining = visibleOrder.filter(s => !completed.includes(s));
+    const current = (state.currentSection && (readsRevenue || state.currentSection !== 'financials') ? state.currentSection : null) || remaining[0] || null;
+    const northStar = blueprint.goals?.northStar;
+    const safeNorthStar = northStar && (readsRevenue || !structuredValueStatesMoney(northStar)) ? northStar : null;
 
     const blueprintSummary = [
       `Business: ${blueprint.identity?.name || 'unknown'}`,
       blueprint.identity?.industry ? `Industry: ${blueprint.identity.industry}` : null,
       readsRevenue && blueprint.operatingModel?.revenueModel ? `Revenue model: ${blueprint.operatingModel.revenueModel}` : null,
-      blueprint.goals?.northStar ? `North star: ${blueprint.goals.northStar}` : null,
+      safeNorthStar ? `North star: ${safeNorthStar}` : null,
       blueprint.customerModel?.idealCustomer ? `Ideal customer: ${blueprint.customerModel.idealCustomer}` : null,
       readsRevenue ? `Completeness: ${blueprint.completeness}%` : null,
     ].filter(Boolean).join('\n');
+
+    const validSectionsText = Object.entries(SECTION_FOCUS)
+      .filter(([key]) => readsRevenue || key !== 'financials')
+      .map(([key, meta]) => `- ${key}: ${meta.fields.join(', ')}`)
+      .join('\n');
 
     return `You are KEY, the AI co-founder inside KeyFlowOS. You are conducting a friendly, focused onboarding interview to build the user's Business Genome — a structured blueprint that lets KEY operate as a digital executive for their business.
 
@@ -663,7 +675,7 @@ When you extract structured facts, include them in a JSON block at the END of yo
 \`\`\`
 
 Valid sections and fields:
-${Object.entries(SECTION_FOCUS).map(([key, meta]) => `- ${key}: ${meta.fields.join(', ')}`).join('\n')}
+${validSectionsText}
 
 For array fields (e.g., channels, ninetyDayGoals, segments, painPoints, valueProps), return value as a JSON array of strings.
 For autonomyLevel, return an integer 1-5 where 1 = always ask first, 5 = act autonomously.

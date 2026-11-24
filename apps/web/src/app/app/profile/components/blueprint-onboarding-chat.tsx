@@ -17,9 +17,9 @@ export interface OnboardingMessage {
 export interface OnboardingChatResult {
   reply: string;
   blueprint: BlueprintData;
-  completeness: number;
+  completeness?: number;
   threePillarMinimumMet: boolean;
-  confidenceScores: Record<string, number>;
+  confidenceScores?: Record<string, number>;
   extracted: Array<{
     section: BlueprintSectionKey;
     field: string;
@@ -35,7 +35,7 @@ interface OnboardingHistoryResponse {
   messages: unknown;
   completedSections: BlueprintSectionKey[];
   nextSection: BlueprintSectionKey | null;
-  completeness: number;
+  completeness?: number;
 }
 
 /** The line the client sends to open a conversation; it is not something the member typed. */
@@ -121,7 +121,7 @@ export function BlueprintOnboardingChat({
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(() => !!businessId);
   const [_blueprint, setBlueprint] = useState<BlueprintData | null>(null);
-  const [completeness, setCompleteness] = useState(0);
+  const [completeness, setCompleteness] = useState<number | null>(null);
   const [currentSection, setCurrentSection] = useState<BlueprintSectionKey | null>("identity");
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -163,7 +163,7 @@ export function BlueprintOnboardingChat({
       activeBusinessRef.current = next;
       setMessages([]);
       setBlueprint(null);
-      setCompleteness(0);
+      setCompleteness(null);
       setCurrentSection("identity");
       setLoading(false);
     };
@@ -179,7 +179,7 @@ export function BlueprintOnboardingChat({
     setTranscriptBusinessId(businessId);
     setMessages([]);
     setBlueprint(null);
-    setCompleteness(0);
+    setCompleteness(null);
     setCurrentSection("identity");
     setLoading(!!businessId);
   }
@@ -205,7 +205,7 @@ export function BlueprintOnboardingChat({
         .filter((m, i) => !(i === 0 && m.role === "user" && m.content === OPENING_LINE));
       if (restored.length > 0) {
         setMessages(restored);
-        setCompleteness(history.data.completeness);
+        setCompleteness(typeof history.data.completeness === "number" ? history.data.completeness : null);
         setCurrentSection(history.data.nextSection);
         setLoading(false);
         return;
@@ -226,7 +226,7 @@ export function BlueprintOnboardingChat({
       }
       setMessages([{ role: "assistant", content: data.reply }]);
       setBlueprint(data.blueprint);
-      setCompleteness(data.completeness);
+      setCompleteness(typeof data.completeness === "number" ? data.completeness : null);
       setCurrentSection(data.nextSection);
     };
 
@@ -257,7 +257,7 @@ export function BlueprintOnboardingChat({
 
     setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
     setBlueprint(data.blueprint);
-    setCompleteness(data.completeness);
+    setCompleteness(typeof data.completeness === "number" ? data.completeness : null);
     setCurrentSection(data.nextSection);
 
     if (data.threePillarMinimumMet && onComplete) {
@@ -270,7 +270,7 @@ export function BlueprintOnboardingChat({
     setLoading(true);
     await apiPost(`/blueprint/businesses/${businessId}/onboarding-reset`, {});
     setMessages([]);
-    setCompleteness(0);
+    setCompleteness(null);
     setCurrentSection("identity");
     setBlueprint(null);
     const { data, error } = await apiPost<OnboardingChatResult>(
@@ -285,7 +285,7 @@ export function BlueprintOnboardingChat({
     }
     setMessages([{ role: "assistant", content: data.reply }]);
     setBlueprint(data.blueprint);
-    setCompleteness(data.completeness);
+    setCompleteness(typeof data.completeness === "number" ? data.completeness : null);
     setCurrentSection(data.nextSection);
   }, [businessId]);
 
@@ -305,25 +305,27 @@ export function BlueprintOnboardingChat({
           <div>
             <h2 className="font-semibold text-sm">Build your Business Genome</h2>
             <p className="text-xs text-muted-foreground">
-              {completeness < 80
-                ? `Currently exploring: ${sectionLabel}`
-                : "Business Genome nearly complete"}
+              {completeness !== null && completeness >= 80
+                ? "Business Genome nearly complete"
+                : `Currently exploring: ${sectionLabel}`}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <div className="hidden sm:flex flex-col items-end gap-1">
-            <span className="text-xs font-medium">{completeness}% complete</span>
-            <div className="w-24 h-1.5 rounded-full bg-muted overflow-hidden">
-              <motion.div
-                className="h-full rounded-full"
-                style={{ background: "hsl(var(--kf-accent1))" }}
-                initial={{ width: 0 }}
-                animate={{ width: `${completeness}%` }}
-                transition={{ duration: 0.4 }}
-              />
+          {completeness !== null && (
+            <div className="hidden sm:flex flex-col items-end gap-1">
+              <span className="text-xs font-medium">{completeness}% complete</span>
+              <div className="w-24 h-1.5 rounded-full bg-muted overflow-hidden">
+                <motion.div
+                  className="h-full rounded-full"
+                  style={{ background: "hsl(var(--kf-accent1))" }}
+                  initial={{ width: 0 }}
+                  animate={{ width: `${completeness}%` }}
+                  transition={{ duration: 0.4 }}
+                />
+              </div>
             </div>
-          </div>
+          )}
           <button
             onClick={handleReset}
             disabled={loading}
