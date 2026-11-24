@@ -65,7 +65,7 @@ rulings packets are on `pkt/V1-RULINGS-3E` (it joins wave 3e). D-249 to D-254 ar
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `9a7b5011` (wave 3i, #227). Production runs `f5d58ef7` (16 Nov), 596 commits behind main: the owner
+Main is at `142e5f9e` (wave 3j of the first lane, PR #228, merged 2026-11-24 by the antigravity lane under D-272). Production runs `f5d58ef7` (16 Nov), 596 commits behind main: the owner
 redeploys (D-266). Since 2026-11-23 the first orchestrator account is out of usage; the second-lane account acts as
 orchestrator and posts on #80. Its Fable limit is spent until 2026-11-30; it runs on Opus.
 
