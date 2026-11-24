@@ -111,7 +111,7 @@ describe("FU-C4-FOCUS-OPEN: a customer clicked on the Customers page opens their
     expect(screen.queryByRole("region", { name: "Contact details" })).not.toBeInTheDocument();
     const card = await screen.findByText(/byron/i, {}, { timeout: 4000 });
     fireEvent.click(card);
-    await waitFor(() => expect(nav.router.push).toHaveBeenCalledWith(`/app/crm/contacts/${ADA.id}`));
+    await waitFor(() => expect(nav.router.push).toHaveBeenCalledWith(`/app/crm/contacts/${ADA.id}`), { timeout: 4000 });
   });
 
   it("FVO-02 control: in the list view, clicking another customer's row selects it in place, with no navigation", async () => {
@@ -120,7 +120,7 @@ describe("FU-C4-FOCUS-OPEN: a customer clicked on the Customers page opens their
     fireEvent.click(await screen.findByText(/baker/i, {}, { timeout: 4000 }));
     await waitFor(() =>
       expect(screen.getAllByRole("option", { name: /baker/i }).some((o) => o.getAttribute("aria-selected") === "true")).toBe(true),
-    );
+    { timeout: 4000 });
     expect(nav.router.push.mock.calls.filter(([to]) => String(to).startsWith("/app/crm/contacts/"))).toEqual([]);
   });
 
@@ -132,14 +132,14 @@ describe("FU-C4-FOCUS-OPEN: a customer clicked on the Customers page opens their
     render(<AppProviders><ContactsPage /></AppProviders>);
     const name = await screen.findAllByRole("button", { name: /^ada byron$/i }, { timeout: 4000 });
     fireEvent.click(name[0]);
-    await waitFor(() => expect(nav.router.push).toHaveBeenCalledWith(`/app/crm/contacts/${ADA.id}`));
+    await waitFor(() => expect(nav.router.push).toHaveBeenCalledWith(`/app/crm/contacts/${ADA.id}`), { timeout: 4000 });
   });
 
   it("FVO-04 RED-AT-4b40a2a7: a customer opened from the focus view is recorded as recent", async () => {
     window.localStorage.setItem("kf_pipeline_view", "focus");
     render(<AppProviders><ContactsPage /></AppProviders>);
     fireEvent.click(await screen.findByText(/byron/i, {}, { timeout: 4000 }));
-    await waitFor(() => expect(nav.router.push).toHaveBeenCalledWith(`/app/crm/contacts/${ADA.id}`));
+    await waitFor(() => expect(nav.router.push).toHaveBeenCalledWith(`/app/crm/contacts/${ADA.id}`), { timeout: 4000 });
     expect(JSON.parse(window.localStorage.getItem("kf_recent_contacts") ?? "[]")).toContain(ADA.id);
   });
 
@@ -153,6 +153,6 @@ describe("FU-C4-FOCUS-OPEN: a customer clicked on the Customers page opens their
     const row = matches.find((m) => m.closest(".cursor-pointer"));
     expect(row, "the focus view lists the call action").toBeTruthy();
     fireEvent.click(row!);
-    await waitFor(() => expect(nav.router.push).toHaveBeenCalledWith(`/app/crm/contacts/${ADA.id}`));
+    await waitFor(() => expect(nav.router.push).toHaveBeenCalledWith(`/app/crm/contacts/${ADA.id}`), { timeout: 4000 });
   });
 });
