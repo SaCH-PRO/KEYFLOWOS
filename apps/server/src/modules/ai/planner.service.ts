@@ -324,7 +324,7 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
   async approvePlan(planId: string, businessId: string, userId: string) {
     const plan = await this.prisma.client.aiPlan.findFirst({
       where: { id: planId, businessId },
-      include: { steps: true },
+      include: { steps: { orderBy: [{ order: 'asc' }, { id: 'asc' }] } },
     });
     if (!plan) throw new NotFoundException(`Plan ${planId} not found for business ${businessId}`);
     if (plan.status !== 'draft') {

@@ -101,7 +101,7 @@ export class MorningBriefingService implements OnModuleInit {
     const todaysBriefing = { businessId, objective: { startsWith: `Daily Briefing — ${today}` } };
     const existing = await this.prisma.client.aiPlan.findFirst({
       where: todaysBriefing,
-      include: { steps: true },
+      include: { steps: { orderBy: [{ order: 'asc' }, { id: 'asc' }] } },
     });
     if (existing) {
       return this.forViewer(this.formatBriefingResult(existing), viewer);
@@ -147,7 +147,7 @@ export class MorningBriefingService implements OnModuleInit {
     const lockKey = `${BRIEFING_WRITE_LOCK_NAMESPACE}${businessId}:${today}`;
     const written = await this.prisma.client.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
-      const stored = await tx.aiPlan.findFirst({ where: todaysBriefing, include: { steps: true } });
+      const stored = await tx.aiPlan.findFirst({ where: todaysBriefing, include: { steps: { orderBy: [{ order: 'asc' }, { id: 'asc' }] } } });
       if (stored) return { plan: stored, created: false };
       const created = await tx.aiPlan.create({
         data: {
@@ -176,7 +176,7 @@ export class MorningBriefingService implements OnModuleInit {
             })),
           },
         },
-        include: { steps: true },
+        include: { steps: { orderBy: [{ order: 'asc' }, { id: 'asc' }] } },
       });
       return { plan: created, created: true };
     }, BRIEFING_WRITE_TX_OPTIONS);
@@ -395,7 +395,7 @@ export class MorningBriefingService implements OnModuleInit {
     const today = new Date().toISOString().split('T')[0];
     const plan = await this.prisma.client.aiPlan.findFirst({
       where: { businessId, objective: { startsWith: `Daily Briefing — ${today}` } },
-      include: { steps: true },
+      include: { steps: { orderBy: [{ order: 'asc' }, { id: 'asc' }] } },
     });
     if (!plan) return null;
     return this.formatBriefingResult(plan);

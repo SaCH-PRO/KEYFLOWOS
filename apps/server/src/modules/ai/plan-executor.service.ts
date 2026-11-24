@@ -220,7 +220,7 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
     // Check if plan is complete
     const updatedPlan = await this.prisma.client.aiPlan.findUnique({
       where: { id: planId },
-      include: { steps: true },
+      include: { steps: { orderBy: [{ order: 'asc' }, { id: 'asc' }] } },
     });
 
     if (!updatedPlan) return;
