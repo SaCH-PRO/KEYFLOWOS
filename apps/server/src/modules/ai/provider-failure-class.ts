@@ -33,6 +33,8 @@ export type ProviderFailureClass =
   | 'server'
   | 'network'
   | 'timeout'
+  /** RR-STRUCTURED-PARSE-INVALID-STATE: the provider answered, but not with output that satisfies the expected contract. Neither a circuit nor a retry concern. */
+  | 'contract_violation'
   | 'unknown';
 
 /** An HTTP failure from a provider the gateway calls with fetch (Anthropic). The message is the text the logs always carried. */
@@ -120,6 +122,9 @@ function classifyMessage(message: string): ProviderFailureClass {
 export function classifyProviderFailure(err: unknown): ProviderFailureClass {
   const e = asErrorLike(err);
   if (!e) return 'unknown';
+
+  // The gateway's own typed contract violation (ai-output-contracts.ts): shape-tested, not imported, to keep this module a leaf.
+  if (e.code === 'contract_violation' && e.name === 'AiContractViolationError') return 'contract_violation';
 
   if (err instanceof OpenAI.APIUserAbortError || e.name === 'AbortError' || ABORT_CODES.has(codeOf(e) ?? '')) {
     return 'caller_aborted';

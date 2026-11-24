@@ -2005,7 +2005,7 @@
     "taxorder"
    ],
    "scope": "Shrunk: BUG-008 (part quantities) moves to DECIMALS-SERVER/DECIMALS-WEB under the decimals ruling. Under the taxorder ruling (ask the accountant; nothing changes until then) every preview (new/edit invoice, Sales composer, quotes-panel's billing-form-modal) computes tax on the pre-discount subtotal exactly as commerce/money.ts does, through one lib/finance/document-amounts.ts. The storefront's tax-after-discount inconsistency is logged, not changed.",
-   "definition_of_done": "Tests first with a recorded RED on the step-0 base; real-DB integration proof on Postgres for every server change; web unit tests for every screen change; typecheck and lint ratchet clean; `pnpm --filter server proof:release0` still MET. Done when these tests-first cases go RED then green: apps/web/src/app/app/commerce/invoices/__tests__/invoice-form-amounts.test.tsx (new): with tax+discount the preview equals the server rule (RED: 799.88 vs 809.75); 2.5 shows a whole-number error, nothing sent (RED: 2); cleared tax sends 0 (RED); + document-amounts parity test + browser e2e/sweep-invoice-amounts.spec.ts. Proof: RED->green: src/lib/finance src/app/app/commerce/invoices src/app/app/finance; web suite + typecheck + eslint and the sweep repro for BUG-018, BUG-019 no longer reproduces; journey spec step(s) for E that cover it turn green.",
+   "definition_of_done": "Tests first with a recorded RED on the step-0 base; real-DB integration proof on Postgres for every server change; web unit tests for every screen change; typecheck and lint ratchet clean; `pnpm --filter server proof:release0` still MET. Done when these tests-first cases go RED then green: apps/web/src/app/app/commerce/invoices/__tests__/invoice-form-amounts.test.tsx (new): with tax+discount the preview equals the server rule (RED: 799.88 vs 809.75); cleared tax sends 0 (RED); + document-amounts parity test + browser e2e/sweep-invoice-amounts.spec.ts. Proof: RED->green: src/lib/finance src/app/app/commerce/invoices src/app/app/finance; web suite + typecheck + eslint and the sweep repro for BUG-018, BUG-019 no longer reproduces; journey spec step(s) for E that cover it turn green.",
    "journeys": [
     "E"
    ],
@@ -2015,7 +2015,8 @@
    "track_reason": "serves journey E",
    "track_ruling": "D-263",
    "wedge_first": "invoice and quote totals agree everywhere",
-   "priority_before_wedge": "P1"
+   "priority_before_wedge": "P1",
+   "plan_text_corrected": "2026-11-24: dropped \"2.5 shows a whole-number error, nothing sent (RED: 2)\"; it contradicted the packet's own scope and D-166 (decimals on non-stock lines; DECIMALS-SERVER and DECIMALS-WEB own the quantity), as the packet's RETURN (#80 comment 7118763435) reported."
   },
   {
    "id": "SWP-INV-FORM-UX",
@@ -2816,8 +2817,8 @@
    "decisions": [
     "whatsapp"
    ],
-   "scope": "Unchanged from the sweep-fix plan: Invoice links: no customer link for a draft; a voided link says voided; the customer page shows tax, discount and the currency code. commerce.controller.ts: POST invoices/:id/payment-link refuses DRAFT/VOID with 409 INVOICE_NOT_SHAREABLE; GET public/invoice-link/:token answers reason 'voided' for a VOID invoice and its payload adds a sibling top-level block `totals` {subtotal, taxRate, taxAmount, discountAmount, total, currency} beside `invoice` (the pattern V1-48 used for `balance`); the `invoice` block keeps exactly its eleven keys (business, contact, currency, dueDate, id, invoiceNumber, issueDate, items, notes, status, total), so revenue-auth-001's PC-02 and public-invoice-link's INVOICE_BLOCK_KEYS pin hold unchanged; public/invoice/[token]/page.tsx renders tax/discount, currency code and human status labels. Operator-page link hiding is in SWP-INV-DETAIL.",
-   "definition_of_done": "Tests first with a recorded RED on the step-0 base; real-DB integration proof on Postgres for every server change; web unit tests for every screen change; typecheck and lint ratchet clean; `pnpm --filter server proof:release0` still MET. Done when these tests-first cases go RED then green: apps/server/test/public-invoice-link.integration.test.ts new cases (real DB, RED before): payment-link on DRAFT -> 409, no PaymentLink row; VOID token -> reason 'voided', no amounts; SENT payload carries subtotal/tax/discount; web public-invoice-states test. Proof: RED->green: test/public-invoice-link.integration.test.ts + web public-invoice-states; real Postgres; tsc + fixture-prefix-registry + release0-proof-coverage | keep green: revenue-authorization, payments-provider-callbacks (PC-02) and the sweep repro for BUG-053, BUG-087, BUG-091 no longer reproduces; journey spec step(s) for E that cover it turn green. Re-run revenue-auth-001 (PC-02 and RA-G5-01), payments-actor and pay-link-token-gate (TG-01/TG-11): all MET with no case edited; public-invoice-link.integration.test.ts asserts the totals block and the unchanged eleven invoice keys.",
+   "scope": "Unchanged from the sweep-fix plan: Invoice links: no customer link for a draft; a voided link says voided; the customer page shows tax, discount and the currency code. commerce.controller.ts: POST invoices/:id/payment-link already refuses DRAFT and VOID with a 409 (FU-PAY-LINK-STATUS-GATE, D-256; PAID and VOID keep R0-D3's message), so this packet adds no refusal code; GET public/invoice-link/:token answers reason 'voided' for a VOID invoice and its payload adds a sibling top-level block `totals` {subtotal, taxRate, taxAmount, discountAmount, total, currency} beside `invoice` (the pattern V1-48 used for `balance`); the `invoice` block keeps exactly its eleven keys (business, contact, currency, dueDate, id, invoiceNumber, issueDate, items, notes, status, total), so revenue-auth-001's PC-02 and public-invoice-link's INVOICE_BLOCK_KEYS pin hold unchanged; public/invoice/[token]/page.tsx renders tax/discount, currency code and human status labels. Operator-page link hiding is in SWP-INV-DETAIL.",
+   "definition_of_done": "Tests first with a recorded RED on the step-0 base; real-DB integration proof on Postgres for every server change; web unit tests for every screen change; typecheck and lint ratchet clean; `pnpm --filter server proof:release0` still MET. Done when these tests-first cases go RED then green: apps/server/test/public-invoice-link.integration.test.ts new cases (real DB, RED before): payment-link on DRAFT -> 409, no PaymentLink row (a control, not a RED: FU-PAY-LINK-STATUS-GATE already enforces it, PL-01); VOID token -> reason 'voided', no amounts; SENT payload carries subtotal/tax/discount; web public-invoice-states test. Proof: RED->green: test/public-invoice-link.integration.test.ts + web public-invoice-states; real Postgres; tsc + fixture-prefix-registry + release0-proof-coverage | keep green: revenue-authorization, payments-provider-callbacks (PC-02) and the sweep repro for BUG-053, BUG-087, BUG-091 no longer reproduces; journey spec step(s) for E that cover it turn green. Re-run revenue-auth-001 (PC-02 and RA-G5-01), payments-actor and pay-link-token-gate (TG-01/TG-11): all MET with no case edited; public-invoice-link.integration.test.ts asserts the totals block and the unchanged eleven invoice keys.",
    "journeys": [
     "E"
    ],
@@ -2825,7 +2826,8 @@
    "r0_impact": "KEEP: revenue-auth-001.json PC-02 (revenue-authorization.integration.test.ts:993, required List B: the token view's invoice block has exactly the eleven keys) holds because totals go in a sibling block; public-invoice-link's 'adds none' pin (INVOICE_BLOCK_KEYS) holds for the same reason; RA-G5-01 (an exclusion list of private business fields) and pay-link-token-gate TG-01/TG-11 hold (a DRAFT link is refused, as TG-11's bare-id read already 404s). Re-run revenue-auth-001, payments-actor and pay-link-token-gate.",
    "track": "launch",
    "track_reason": "serves journey E",
-   "track_ruling": "D-263"
+   "track_ruling": "D-263",
+   "plan_text_corrected": "2026-11-24: the scope named a 409 INVOICE_NOT_SHAREABLE that was never needed: FU-PAY-LINK-STATUS-GATE (D-256) already refuses a DRAFT or VOID invoice's pay link, as the packet's RETURN (#80 comment 7119206807) reported; the definition of done keeps the DRAFT case as a control."
   },
   {
    "id": "MIGRATION-SET-A",
@@ -10425,9 +10427,10 @@
    "scope": "REC-REFLECTION-PERSIST, the honest slice. Premise at 2c4e4bf2: reflection sessions already persist (KeyCortexMemory type reflection_session, persistSession; key-cortex-reflection-persistence.spec.ts) and validated or rejected hypotheses persist (persistHypothesisUpdate, :663, :670). What remains is dishonest reporting: runMaintenance appends 'Updated N temporal memory indices' (:505-506) though updateTemporalMemoryIndices only counts four periods and touches nothing (:1471-1474, 'KeyCortexEventService has no temporal index'), and 'Data integrity check passed' (:523-524) though checkDataIntegrity checks nothing (orphan count hard-coded 0 at :1485, nullConfidence hard-coded 0 at :1492). These lines are persisted with the session and served by getLastReflectionSession to the consciousness layer (key-cortex-consciousness.service.ts:1138). New dream hypotheses live only in an unbounded per-business in-process Map (:133, appended at :1202 with no cap) and validation can never confirm one (no evidence source, :653-655). Change: the two unimplemented steps report 'not run: <reason>' (and the metadata records indicesUpdated null, integrityChecked false) instead of success; the dream journal keeps at most a fixed number of hypotheses per business (oldest dropped) and getDreamJournal marks in-process entries persisted:false. Not in this packet (memory coordination, D-257): persisting new hypotheses. The approved memory design (KEYFLOW-MEMORY-SYSTEM-DESIGN-001.md section 3.3, branch docs/kf-memory-rnd-001) stores model-written reflections as kind HYPOTHESIS with authority AGENT_INFERRED in the T3 semantic store, which no v1 MEM packet builds; writing them to KeyCortexMemory now would add an unclassified memory class ahead of MEM-CLASS-READ. See owner question. This packet adds no memory write. Tenancy: unchanged (per-business keys). Schema: none. Backfill: none.",
    "definition_of_done": "RED: key-cortex-reflection.service.spec.ts: runMaintenance(biz).actionsTaken contains 'Updated 4 temporal memory indices' and 'Data integrity check passed' (RED: asserted absent; present on main); 200 dream cycles leave more hypotheses in the journal than the cap (RED: unbounded). GREEN: actionsTaken says the two steps did not run; metadata integrityChecked false; the journal is capped; key-cortex-reflection-persistence.spec.ts unchanged and green; negative control: cleanExpiredApprovals' real count is still reported. Server tsc and lint ratchet clean.",
    "fixture_prefix": null,
-   "track": "follow-on",
-   "track_reason": "journey K capability; follows launch",
-   "track_ruling": "D-263"
+   "track": "launch",
+   "track_reason": "KEY stays reachable from the header: a correctness fix on what KEY already does (its maintenance log states work it did not do, and KEY reads that log back; D-263 as ruled)",
+   "track_ruling": "D-263",
+   "track_moved": "follow-on to launch on 2026-11-24, follow-up to the PR #230 review (the written rule in wedge.correction_2026_11_24.rule)"
   },
   {
    "id": "RR-MIGRATION-CASH-TARGET",
@@ -12656,7 +12659,7 @@
    ],
    "r0_impact": "KEEP. Also KEEP: .env.example is closedBy evidence in release0-index.json (contains \"LISTEN_HOST=\") and is read by the identity-business-config and identity-local-auth suites; the line stays; re-run proof:release0 at the packet head (D-265: a manifest-bound file).",
    "scope": "D-272.4 (owner, #80 comment 7121024415), from KEY Builder research A section 5: tenant KEY's execute_custom_logic ran model-written JavaScript in a child process on the API host, and fell back to it silently when the remote sandbox was not configured. First confirm by a test that tenant KEY can reach the API host; then sandbox it or turn it off for tenants: no local execution path, no silent fallback, the remote sandbox only when it is configured with an https public API URL, a kill switch and a code length cap. Built in the Antigravity lane, claimed first (branch pkt/V1-SEC-KEY-CUSTOM-LOGIC).",
-   "definition_of_done": "RED: a tenant's execute_custom_logic call runs code in a child process on the API host, and an unconfigured sandbox falls back to it. GREEN: neither; the call is refused with a typed reason when no sandbox is configured; the kill switch and length cap hold; touched folders and tsc green; the full server suite and proof:release0 MET at the wave head (D-265).",
+   "definition_of_done": "RED: a tenant's execute_custom_logic call runs code in a child process on the API host, and an unconfigured sandbox falls back to it. GREEN: neither; the call is refused with a typed reason when no sandbox is configured; the kill switch and length cap hold; touched folders and tsc green; proof:release0 MET at the packet head (it edits a Release 0 bound file, r0_impact) and again at the wave head with the full server suite (D-265).",
    "fixture_prefix": null,
    "track": "launch",
    "track_reason": "KEY stays reachable from the header: a safety fix (D-272.4)",
@@ -12692,7 +12695,7 @@
    ],
    "r0_impact": "KEEP. Also KEEP: flow-orchestrator.service.ts holds the find strings of action-001-negative-controls.json mutation controls NC-P3-RESUBMISSION-PASSES-THROUGH, NC-P7-HANDLER-BYPASSES-THE-BOUNDARY; each stays byte-identical (a moved or reworded line breaks the control); re-run proof:release0 at the packet head (D-265: a manifest-bound file).",
    "scope": "A first-lane follow-up, ruled by D-272.3 (#80 comment 7121024415): a URL from the client (a chat attachment, a contract's document URL) was forwarded to the document model provider, which then fetched it. Resolve every document to an object the business owns (an uploaded object or a Drive-backed object), read it with a size cap, and refuse every other URL, external ones included: contracts are outside the v1 wedge, and an SSRF-safe fetcher may come later. Object paths are normalised (case of /objects/, repeated slashes) before the ownership check. Built in the Antigravity lane (branch pkt/V1-FU-OUTBOUND-ATTACHMENT-URL).",
-   "definition_of_done": "RED: a client URL reaches the document model; an external contract URL is fetched. GREEN: only owned objects are read, every other URL is refused before any request leaves the server, another business's object is not found; touched folders and tsc green; the full server suite and proof:release0 MET at the wave head (D-265).",
+   "definition_of_done": "RED: a client URL reaches the document model; an external contract URL is fetched. GREEN: only owned objects are read, every other URL is refused before any request leaves the server, another business's object is not found; touched folders and tsc green; proof:release0 MET at the packet head (it edits a Release 0 bound file, r0_impact) and again at the wave head with the full server suite (D-265).",
    "fixture_prefix": "v85u_",
    "track": "launch",
    "track_reason": "KEY stays reachable from the header: a safety fix (D-272.3)",
@@ -15215,8 +15218,8 @@
    "K (capability; KEY stays reachable from the header, its safety and correctness fixes stay on launch)"
   ],
   "counts": {
-   "launch_todo_or_proven": 220,
-   "follow_on": 53,
+   "launch_todo_or_proven": 221,
+   "follow_on": 52,
    "new": [
     "WEDGE-WA-INBOUND-CAPTURE",
     "WEDGE-HIDE-STORE",
@@ -15226,7 +15229,7 @@
    ],
    "launch_done_on_main": 6,
    "follow_on_done_on_main": 0,
-   "as_of": "V1-STATUS at main 142e5f9e"
+   "as_of": "V1-STATUS at main 05f04f2c"
   },
   "gate_deps_removed": {
    "SWEEP-RERUN-S4": [
@@ -15273,11 +15276,13 @@
     "FU-OPENAI-FINISH-REASON",
     "FU-CORTEX-EXECUTE-STRUCTURED-DTO",
     "RR-KEY-SAFETY-POLICY",
-    "RR-LEARNING-OUTCOME-SEMANTICS"
+    "RR-LEARNING-OUTCOME-SEMANTICS",
+    "RR-REFLECTION-HONEST"
    ],
    "kept_on_follow_on": "KEY capability, new mechanisms, ratchets, tooling and memory-system work (for example MEM-HONEST-RETRIEVAL, RR-UNDO-DURABLE); the owner may move any packet either way",
    "gate": "GATE-JOURNEY-RUN's definition of done is limited to the launch journeys as D-263 says, and it now waits for WEDGE-WA-INBOUND-CAPTURE, WEDGE-HIDE-STORE, SEC-KEY-CUSTOM-LOGIC and FU-OUTBOUND-ATTACHMENT-URL",
-   "precedence": "Where D-263 and D-264 differ on a research (D-261) or memory (D-254) packet that fixes KEY, D-263 is the more specific ruling for KEY and wins: KEY correctness fixes go to launch too (RR-INTENT-PARSER-ONE-TOOL-LIST, RR-CORTEX-TYPED-RESULT, RR-LEARNING-OUTCOME-SEMANTICS). Owner question 31 asks the owner to confirm."
+   "precedence": "Where D-263 and D-264 differ on a research (D-261) or memory (D-254) packet that fixes KEY, D-263 is the more specific ruling for KEY and wins, so KEY correctness fixes go to launch too. Seven moved packets rest on that precedence (correctness fixes with a D-261 decision): RR-INTENT-PARSER-ONE-TOOL-LIST, RR-CORTEX-TYPED-RESULT, RR-LEARNING-OUTCOME-SEMANTICS, RR-REFLECTION-HONEST, FU-FLOW-SAVE-EXECUTED-TOOL-TURN, FU-OPENAI-FINISH-REASON, FU-CORTEX-EXECUTE-STRUCTURED-DTO. The other ten are safety fixes, on launch under D-264 as well. Owner question 31 asks the owner to confirm.",
+   "rule": "A KEY correctness fix (launch): KEY already does or says something wrong that a person, a decision or KEY itself reads back: a duplicate, blind or dropped write; a false statement or figure shown or fed back; a refusal of a call its handler documents; a stream failure taken as success. KEY capability (follow-on): a new mechanism, policy table, catalogue, ratchet, budget, provider feature, observability or test tooling, or a fix on a path no person, decision or KEY reads (RR-RESPONSE-FORMAT-HONEST adds a provider JSON mode for Flow Studio: follow-on). A safety fix is on launch under both D-263 and D-264. Tiebreak, when a fix is both a correctness fix and capability (a safety fix is exempt: always launch): it is on launch only if it corrects the wrong output without a new store, table, migration, command or status channel (a new state surfaced to a reader or a prompt; a correction recorded in existing metadata, such as RR-CORTEX-TYPED-RESULT's parse state, is not one); otherwise follow-on. By it MEM-HONEST-RETRIEVAL (a new failure channel), MEM-TEMPORAL-EMBED-DEDUP (a new dedup command), MEM-CONSOLIDATION-CHECKPOINT (a new durable checkpoint) and RR-UNDO-DURABLE (a new table) stay on follow-on; owner question 31 lists them."
   },
   "gate_deps_removed_note": "15 edges: 8 point at follow-on packets and 7 at launch packets that each remain an ancestor of the same sweep re-run through another path, so no gate ordering is lost (PR #230 review)"
  }

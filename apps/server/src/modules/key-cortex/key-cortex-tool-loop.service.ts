@@ -16,6 +16,33 @@ import { AutonomyLevelService } from '../key-autonomy/autonomy-level.service';
  * canonical KeyCortexToolRegistry, records the execution via the lifecycle
  * service, and re-calls the model with the results to produce a final answer.
  */
+/**
+ * RR-TOOL-ARGS-MALFORMED-NEVER-RUN: the one parse step for a tool call's
+ * arguments (the same rule as flow-orchestrator.service.ts parseToolArguments,
+ * kept local so this module does not import the Flow orchestrator). A missing
+ * or empty string means no arguments ({}); anything else that is not a JSON
+ * object, whitespace alone included, is refused.
+ */
+function parseToolArguments(raw: string | null | undefined): { ok: true; args: Record<string, unknown> } | { ok: false } {
+  if (raw === undefined || raw === null || raw === '') return { ok: true, args: {} };
+  if (typeof raw !== 'string') return { ok: false };
+  try {
+    // JSON.parse tolerates whitespace around a value; whitespace alone is not a value and is refused.
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return { ok: true, args: parsed as Record<string, unknown> };
+    }
+  } catch {
+    // fall through: refused
+  }
+  return { ok: false };
+}
+
+/** The visible result of a refused call. Names the tool only: the broken arguments are never echoed. */
+function toolArgumentsRefusal(toolName: string): string {
+  return `not run: the arguments for ${toolName} were not valid JSON`;
+}
+
 @Injectable()
 export class KeyCortexToolLoopService {
   private readonly logger = new Logger(KeyCortexToolLoopService.name);
@@ -70,15 +97,24 @@ export class KeyCortexToolLoopService {
 
     for (const tc of toolCalls) {
       const toolName = tc.function?.name;
-      let args: Record<string, unknown> = {};
-      try {
-        args = JSON.parse(tc.function?.arguments ?? '{}');
-      } catch {
-        this.logger.warn(`[handleToolCalls] Failed to parse arguments for ${toolName}`);
-      }
-
       const startedAt = Date.now();
       let result: any;
+
+      // RR-TOOL-ARGS-MALFORMED-NEVER-RUN: arguments that do not parse to a JSON
+      // object refuse the call here, before the safety gate, the autonomy
+      // oracle and execution. The loop used to keep args = {} and run the tool
+      // with it: a call the model never made. The refusal goes back to the
+      // model as this call's tool message and to the member as an action with
+      // status error; it names the tool, never the broken text.
+      const parsed = parseToolArguments(tc.function?.arguments);
+      if (!parsed.ok) {
+        this.logger.warn(`[handleToolCalls] ${toolName} refused: arguments were not valid JSON`);
+        result = { success: false, error: toolArgumentsRefusal(toolName), notExecuted: true };
+        executedActions.push(this.buildActionResult(toolName, result));
+        toolMessages.push(this.buildToolMessage(tc, result));
+        continue;
+      }
+      const args: Record<string, unknown> = parsed.args;
 
       // 1. Global safety gate (kill switch, daily caps, tier ceiling)
       const tool = this.toolRegistry.getTool(toolName);

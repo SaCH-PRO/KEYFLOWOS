@@ -1,6 +1,6 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-24 ~07:45 UTC by the acting orchestrator (second-lane account, Claude Code), after PR #230 (M2) merged as 05f04f2c. Rewrite in place on every merge, packet return
+Last written: 2026-11-24 ~11:30 UTC by the acting orchestrator (second-lane account, Claude Code), after PR #229 (M3) merged as f6764f4c. Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -70,7 +70,7 @@ the next rulings commit.
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `05f04f2c` (PR #230, the rulings and the wedge re-cut, merged 2026-11-24 by the Claude lane under D-272; before it PR #228, merged by the Antigravity lane as 142e5f9e). Production runs `f5d58ef7` (16 Nov), 596 commits behind main: the owner
+Main is at `f6764f4c` (PR #229, wave 3m, money first, merged 2026-11-24 by the Claude lane under D-272; before it PR #230 as 05f04f2c and PR #228 as 142e5f9e). Production runs `f5d58ef7` (16 Nov), 596 commits behind main: the owner
 redeploys (D-266). Since 2026-11-23 the first orchestrator account is out of usage; the second-lane account acts as
 orchestrator and posts on #80. It runs on Opus (section 1).
 
@@ -78,15 +78,15 @@ orchestrator and posts on #80. It runs on Opus (section 1).
 | --- | --- | --- | --- |
 | Rulings and wedge re-cut (M2) | PR #230 | **Merged** as 05f04f2c (#80 7125117999). The reviewers' remaining minors are board row P16 | P16: a follow-up docs PR (Claude lane) |
 | Wave 3j (second lane) (M4) | `wave/3j-second-lane` @ a1e6a649: 16 packets | Proven at a1e6a649 (#80 7117144941); fails the 25/50 divergence gate and duplicates RR-REDACTION-BY-CONTENT with #228 | Antigravity splits it after M3 (board M4) |
-| MOUNT-QUOTES (P0, critical path) | `pkt/V1-MOUNT-QUOTES` @ 78567330 | Proven: suite 820/820, R0 MET; live journey D: D1, D2, D3, D6, D9 green at both widths; RETURN #80 7117999068 | In wave 3m, PR #229 (its open minors are listed there) |
-| SWP-INV-MATH (P0, critical path; BUG-018, BUG-019) | `pkt/V1-SWP-INV-MATH` @ 6ea50c09, stacked on MOUNT-QUOTES | Done and RETURNed (#80 7118763435). Both reviews accept, after one MAJOR (missing browser spec) was closed. Web suite 191/1745; live sweep RED at base, green at head | In wave 3m, PR #229 (its open minors are listed there) |
-| SWP-INV-PUBLIC-LINK (P0; BUG-053, 087, 091) | `pkt/V1-SWP-INV-PUBLIC-LINK` @ 8ae6abfa, stacked on SWP-INV-MATH | Done and RETURNed (#80, after D-270). Both reviews plus the confirmation accept. Suite 820/15287 passed, R0 MET 39/39 with an exact-head receipt at 8ae6abfa | In wave 3m, PR #229 (its open minors are listed there) |
-| SWP-QUOTE-PUBLIC-PAGE (P0; BUG-046, D4) | `pkt/V1-SWP-QUOTE-PUBLIC-PAGE` @ 0ab56399, stacked on SWP-INV-PUBLIC-LINK | Done and RETURNed (#80 7119917222). Both reviews accept. Mocked browser sweep RED at base, 7/7 green at head | In wave 3m, PR #229 (its open minors are listed there) |
-| SWP-INV-FORM-UX (P2, critical path; BUG-052, 090, 092, 093) | `pkt/V1-SWP-INV-FORM-UX` @ d7981a75, stacked on SWP-QUOTE-PUBLIC-PAGE | Done and RETURNed (#80, after 7120253245). Security ACCEPT WITH MINORS; correctness REJECT on F1, which is closed; confirmation ACCEPT WITH MINORS. Live: the sweep at 1440/1024/768/375, E1, sweep-invoice-amounts and release0-live (desktop) all green. Open minors: F2, security MINOR-2, N1 (the sidebar drawer open over the form) and N2 | In wave 3m, PR #229 (its open minors are listed there) |
-| SWP-QUOTE-COMPOSER-CONTACT (P2, critical path; BUG-095, 096, 097) | `pkt/V1-SWP-QUOTE-COMPOSER-CONTACT` @ d690bc41, stacked on SWP-INV-FORM-UX | Done and RETURNed (#80, after the 7120518541 claim). Security REJECT (SEC-QCC-1) and correctness REJECT (MAJOR-1 and MAJOR-2) both closed; confirmation ACCEPT WITH MINORS. Whole web suite exit 0 (197 / 1783); journey D live 12/18 unchanged; sweep-quote-to-invoice green | In wave 3m, PR #229 (its open minors are listed there) |
-| **Wave 3m (money-first; M3)** | PR #229, `wave/v1-wave-3m`: main 05f04f2c merged in, plus this state commit | Proven at 7bd2f445: server 820 files / 15287 tests, R0 MET 39/39 exact-head; web 197 files / 1784 tests exit 0, tsc 0, lint 25 of 26. GitGuardian incident 40952282 is a fake test token (renamed at d2958d88): the owner marks it a false positive | Re-prove the new head (CHECKLISTS C), a confirmation review of the merge, CI green at the exact head, merge (CHECKLISTS D) |
+| MOUNT-QUOTES (P0, critical path) | `pkt/V1-MOUNT-QUOTES` @ 78567330 | Proven: suite 820/820, R0 MET; live journey D: D1, D2, D3, D6, D9 green at both widths; RETURN #80 7117999068 | On main (wave 3m, f6764f4c) |
+| SWP-INV-MATH (P0, critical path; BUG-018, BUG-019) | `pkt/V1-SWP-INV-MATH` @ 6ea50c09, stacked on MOUNT-QUOTES | Done and RETURNed (#80 7118763435). Both reviews accept, after one MAJOR (missing browser spec) was closed. Web suite 191/1745; live sweep RED at base, green at head | On main (wave 3m, f6764f4c) |
+| SWP-INV-PUBLIC-LINK (P0; BUG-053, 087, 091) | `pkt/V1-SWP-INV-PUBLIC-LINK` @ 8ae6abfa, stacked on SWP-INV-MATH | Done and RETURNed (#80, after D-270). Both reviews plus the confirmation accept. Suite 820/15287 passed, R0 MET 39/39 with an exact-head receipt at 8ae6abfa | On main (wave 3m, f6764f4c) |
+| SWP-QUOTE-PUBLIC-PAGE (P0; BUG-046, D4) | `pkt/V1-SWP-QUOTE-PUBLIC-PAGE` @ 0ab56399, stacked on SWP-INV-PUBLIC-LINK | Done and RETURNed (#80 7119917222). Both reviews accept. Mocked browser sweep RED at base, 7/7 green at head | On main (wave 3m, f6764f4c) |
+| SWP-INV-FORM-UX (P2, critical path; BUG-052, 090, 092, 093) | `pkt/V1-SWP-INV-FORM-UX` @ d7981a75, stacked on SWP-QUOTE-PUBLIC-PAGE | Done and RETURNed (#80, after 7120253245). Security ACCEPT WITH MINORS; correctness REJECT on F1, which is closed; confirmation ACCEPT WITH MINORS. Live: the sweep at 1440/1024/768/375, E1, sweep-invoice-amounts and release0-live (desktop) all green. Open minors: F2, security MINOR-2, N1 (the sidebar drawer open over the form) and N2 | On main (wave 3m, f6764f4c) |
+| SWP-QUOTE-COMPOSER-CONTACT (P2, critical path; BUG-095, 096, 097) | `pkt/V1-SWP-QUOTE-COMPOSER-CONTACT` @ d690bc41, stacked on SWP-INV-FORM-UX | Done and RETURNed (#80, after the 7120518541 claim). Security REJECT (SEC-QCC-1) and correctness REJECT (MAJOR-1 and MAJOR-2) both closed; confirmation ACCEPT WITH MINORS. Whole web suite exit 0 (197 / 1783); journey D live 12/18 unchanged; sweep-quote-to-invoice green | On main (wave 3m, f6764f4c) |
+| **Wave 3m (money-first; M3)** | PR #229 | **Merged** as f6764f4c (#80 7129816643): MOUNT-QUOTES, SWP-INV-MATH, SWP-INV-PUBLIC-LINK, SWP-QUOTE-PUBLIC-PAGE, SWP-INV-FORM-UX, SWP-QUOTE-COMPOSER-CONTACT | - |
 | **Lanes since D-271 (2026-11-24, owner-relayed split)** | - | Two operators, `claude` and `antigravity`. Each claims atomically (CHECKLISTS B1) plus a CLAIM on #80 | Who owns what next: `BOARD.md` on `coord/board`, one owner per row. Claude: M2, M3, then P7, P8 and the P16 docs follow-up. Antigravity: SEC-KEY-CUSTOM-LOGIC, the autopilot switch-off, FU-VITEST-DECORATOR-METADATA's before/after, the first-lane WIP, FU-PENDING-OWED-SERVER and -WEB, and M4 |
-| Next v1 packets | - | Resumed by D-271 | The board (`coord/board`): P7 SWP-CONTACT-QUICKADD and P8 SWP-INV-LIST for the Claude lane after M3; unowned rows for any lane |
+| Next v1 packets | `pkt/V1-SWP-CONTACT-QUICKADD` @ d859ba0f, `pkt/V1-SWP-INV-LIST` @ 388925d9 | Both RETURNed (#80 7127632516, 7129398775): reviews and confirmations closed; live sweeps and journeys C1, C3, D8, E3, E11 green at their heads | Wave 3n: compact both onto main, wave-head proof (CHECKLISTS C), PR, merge. Then the board's next rows (P9 to P13, P17, P18) |
 | First lane, as it left them (2026-11-23 ~09:30 UTC) | `wave/v1-wave-3j` a2e9f3f0, `wave/v1-wave-3k` 88268a01; FU-INSIGHTS-SIGHT 28cdbccb; child sessions for FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-GENOME-SURFACES-REVENUE, FU-OUTBOUND-ATTACHMENT-URL, FU-AI-APPROVALS-MONEY-SIGHT | Proven or building when the account stopped; not re-verified since | Re-verify each head before it enters a wave |
 | FU-VITEST-DECORATOR-METADATA | @ 83b6dfc8 | Question 20 ruled by D-272.2: the AMEND only if the before/after shows a tightening | Antigravity shows the before/after (board P3) |
 
@@ -175,8 +175,12 @@ Format: `docs/development/agent-memory/OWNER-QUESTION-FORMAT.md`. Safe defaults 
     remount the modal? (Default: remove in a follow-up.)
 31. D-264: should the launch wait for the research (D-261) and memory (D-254) packets after all? (Default: no; they
     follow launch.) And confirm the precedence used in PR #230: where D-263 and D-264 differ on a research or
-    memory packet that fixes KEY, D-263 wins, so KEY correctness fixes are on launch (16 packets moved; the plan's
-    `wedge.correction_2026_11_24`). (Default: as applied.)
+    memory packet that fixes KEY, D-263 wins, so KEY correctness fixes are on launch. Seven packets rest on it:
+    RR-INTENT-PARSER-ONE-TOOL-LIST, RR-CORTEX-TYPED-RESULT, RR-LEARNING-OUTCOME-SEMANTICS, RR-REFLECTION-HONEST,
+    FU-FLOW-SAVE-EXECUTED-TOOL-TURN, FU-OPENAI-FINISH-REASON, FU-CORTEX-EXECUTE-STRUCTURED-DTO (the rule and all 17
+    moves: the plan's `wedge.correction_2026_11_24`). Under the same rule's tiebreak MEM-HONEST-RETRIEVAL,
+    MEM-TEMPORAL-EMBED-DEDUP, MEM-CONSOLIDATION-CHECKPOINT and RR-UNDO-DURABLE stay on follow-on; say if any should
+    be on launch. (Default: as applied.)
 
 ## 5. How to work here (learned the hard way)
 

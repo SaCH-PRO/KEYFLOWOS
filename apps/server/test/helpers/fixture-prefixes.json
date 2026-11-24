@@ -1182,6 +1182,11 @@
       "packet": "V1-72 (RR-ERASURE-BUSINESS-EVENTS)"
     },
     {
+      "prefix": "v72v_",
+      "owner": "apps/server/test/business-event-redaction.integration.test.ts",
+      "packet": "V1-72 (RR-BUSINESS-EVENT-REDACT)"
+    },
+    {
       "prefix": "v71w_",
       "owner": "apps/server/test/temporal-flow-inbox-scope.integration.test.ts",
       "packet": "V1-71 (FU-TEMPORAL-FLOW-INBOX-SCOPE)"

@@ -23,12 +23,14 @@ How each step is done is in `LIVE-PROOF-RUNBOOK.md` ("runbook") and `WAVE-RUNBOO
    - [ ] The packet has `"track": "launch"` in the plan (D-263), or the owner assigned it to you on #80 (the board
          only mirrors an owner's assignment; a lane never gives itself a follow-on packet).
    - [ ] `git ls-remote origin refs/heads/pkt/V1-<ID>` prints nothing.
-   - [ ] On the right base (main, or the stack top it depends on), make a claim commit no other lane can make:
-         `git commit --allow-empty -m "claim <ID> <lane> $(date -u +%FT%T.%NZ)"`.
-   - [ ] Push it so that it is refused if the branch exists: `git push --force-with-lease=refs/heads/pkt/V1-<ID>:
-         origin HEAD:refs/heads/pkt/V1-<ID>`. Then `git ls-remote origin refs/heads/pkt/V1-<ID>` must print your own
-         `git rev-parse HEAD`. If the push is refused, or the sha is not yours, another lane owns the packet: pick
-         another, and never delete or force-push its branch.
+   - [ ] Create the branch on the right base (main, or the stack top it depends on), and make a claim commit no
+         other lane can make:
+         `git switch -c pkt/V1-<ID> <base> && git commit --allow-empty -m "claim <ID> <lane> $(date -u +%FT%T.%NZ)"`
+   - [ ] Push it so that it is refused if the branch exists (one line):
+         `git push --force-with-lease=refs/heads/pkt/V1-<ID>: origin HEAD:refs/heads/pkt/V1-<ID>`
+   - [ ] `git ls-remote origin refs/heads/pkt/V1-<ID>` prints your own `git rev-parse HEAD`. If the push was refused,
+         or the sha is not yours, another lane owns the packet: pick another, and never delete or force-push its
+         branch.
    - [ ] Post a CLAIM on #80. Set the board row to your lane and `claimed`.
 2. **Read.**
    - [ ] Run `node scripts/agent-memory/bundle.mjs <ID> --ref <plan ref>`: scope, definition of done, write set,
@@ -45,7 +47,10 @@ How each step is done is in `LIVE-PROOF-RUNBOOK.md` ("runbook") and `WAVE-RUNBOO
 4. **Fix.**
    - [ ] Change only write-set files. Any other file is a departure: note it and say why.
    - [ ] The touched folders pass with **exit code 0**, and no "Errors" line.
-   - [ ] Web: `tsc --noEmit` (only the known 'next' type error allowed) and eslint 0 on changed files. Server: tsc.
+   - [ ] Web: a type check that really runs, with **0 errors**: `tsc --noEmit` in a real install, or
+         `tsc --noEmit -p tsconfig.json --types node` in a worktree with symlinked `node_modules`. There, plain
+         `tsc` stops at "Cannot find type definition file for 'next'" (TS2688) and checks nothing: on 2026-11-24 it
+         hid four real errors that broke the production build. eslint 0 on changed files. Server: tsc.
    - [ ] Commit the fix and push.
 5. **Prove (D-265).**
    - [ ] Every packet: the tests of every folder it touched (exit code 0) and the type check, at the final head.
