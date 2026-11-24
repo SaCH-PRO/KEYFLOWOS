@@ -142,10 +142,10 @@ function navHrefs(): string[] {
 
 /**
  * NAV-A1: the Settings screens' own menu (app/app/settings/layout.tsx navItems), shown beside every settings page.
- * Before NAV-A1 the nav named /app/settings, and the generous prefix rule counted every settings screen through it;
- * /app/settings only forwards (to /app/settings/billing), so the Settings hub names /app/settings/business, and the
- * screens are reached through the layout's menu. An explicit edge, read exactly: only when a nav href opens a
- * settings page.
+ * Before NAV-A1 the nav named /app/settings, and the generous prefix rule counted every settings screen through it
+ * while /app/settings only forwarded (to /app/settings/billing). Since NAV-A2 /app/settings is a real index and the
+ * Settings hub names it again, so the prefix rule counts the settings screens once more (a follow-up may match hub
+ * indexes exactly); this edge still adds the layout's menu, read exactly: only when a nav href opens a settings page.
  */
 function settingsMenuHrefs(hrefs: string[]): string[] {
   if (!hrefs.some((h) => h.startsWith('/app/settings/'))) return [];
@@ -250,7 +250,7 @@ describe('NAV-A1: every nav href is the final URL, and the redirect table only g
     expect(hops, 'name the destination in the nav instead').toEqual([]);
   });
 
-  /** The page file a route renders, following one-line re-exports (/app/money re-exports the finance page). */
+  /** The page file a route renders, following one-line re-exports (/app/money/revenue re-exports the Sales page). */
   const pageFile = (route: string, hops = 0): string | null => {
     const page = path.join(APP, ...route.replace(/^\/app\/?/, '').split('/').filter(Boolean), 'page.tsx');
     if (!fs.existsSync(page)) return null;
