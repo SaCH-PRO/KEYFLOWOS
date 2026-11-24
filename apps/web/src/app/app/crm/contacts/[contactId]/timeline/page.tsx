@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { fetchContactEvents } from "@/lib/client";
-import { eventLabel } from "@/lib/status-labels";
+import { eventLabel, plainLabel, statusLabel } from "@/lib/status-labels";
 import { Card } from "@keyflow/ui";
 import { Clock, Mail, Phone, MessageSquare, Calendar, DollarSign, FileText, Star, User, Zap, AlertTriangle, CheckCircle, Info } from "lucide-react";
 
@@ -47,7 +47,8 @@ function formatEventData(data: unknown): string {
   if (d.description && typeof d.description === "string") return d.description;
   if (d.body && typeof d.body === "string") return d.body;
   if (d.message && typeof d.message === "string") return d.message;
-  if (d.status && typeof d.status === "string") return d.status;
+  // A stored status in the owner's words ("Part-paid", not "PARTIALLY_PAID"; review CDC-4).
+  if (d.status && typeof d.status === "string") return plainLabel(d.status);
   return "";
 }
 
@@ -149,7 +150,7 @@ export default function ContactTimelinePage() {
                             {ev.actorType && (
                               <span className="flex items-center gap-1">
                                 <User className="h-3 w-3" />
-                                {ev.actorType}
+                                {statusLabel(ev.actorType)}
                               </span>
                             )}
                           </div>

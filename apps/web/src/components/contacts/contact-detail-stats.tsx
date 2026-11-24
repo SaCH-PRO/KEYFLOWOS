@@ -137,31 +137,12 @@ const SCORE_FACTORS = [
   { label: "Engagement frequency", points: 25 },
 ];
 
-const EVENT_LABELS: Record<string, string> = {
-  "contact.created": "Contact created",
-  "contact.updated": "Contact updated",
-  "invoice.created": "Invoice created",
-  "invoice.paid": "Invoice paid",
-  "booking.created": "Booking made",
-  "booking.completed": "Booking completed",
-  "quote.created": "Quote sent",
-  "quote.accepted": "Quote accepted",
-  "note.created": "Note added",
-  "task.created": "Task created",
-  "task.completed": "Task completed",
-  "email.sent": "Email sent",
-  "whatsapp.sent": "WhatsApp sent",
-  "message.copied": "Message copied",
-  "form.submitted": "Form submitted",
-  "followup.scheduled": "Follow-up set",
-};
-
 /**
- * An event type in plain words (BUG-129): this card's own wording for the codes it knows, matched whatever their case
- * ("Note.Created" is "note.created"), else eventLabel (lib/status-labels.ts). Never the raw code.
+ * An event type in plain words (BUG-129), the same words the contact's Timeline page uses (eventLabel,
+ * lib/status-labels.ts): "Note.Created" is "Note added". Never the raw code; nothing for no type.
  */
-function recentEventLabel(type: string): string {
-  return EVENT_LABELS[type.trim().toLowerCase()] ?? eventLabel(type);
+function recentEventLabel(type: string | null | undefined): string {
+  return eventLabel(type);
 }
 
 function CollapsibleCard({

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { MessageSquare, Sparkles, ChevronUp, ExternalLink } from "lucide-react";
+import { MessageSquare, Sparkles, ChevronUp, ArrowUpRight } from "lucide-react";
 import { toast } from "sonner";
 import type { CrossJourneyResponse } from "@/lib/client";
 import { apiPost, apiGet } from "@/lib/api";
@@ -265,8 +265,9 @@ export function ContactDetail({
     setConfirmState({
       open: true,
       title: "Forget this client?",
-      // contact-privacy.service.ts: the contact's personal data is purged once the business's grace period ends.
-      message: "Their personal data is erased for good once the grace period ends. This cannot be undone.",
+      // contact-privacy.service.ts: the contact is removed now and its personal data purged when the business's
+      // grace period ends (an operator can cancel the request until then, through the API: reviews CDC-2, m1).
+      message: "The client is removed now. Their personal data is erased for good when the grace period ends.",
       confirmLabel: "Forget",
       action: async () => {
         const t = toast.loading("Submitting forget request…");
@@ -311,9 +312,9 @@ export function ContactDetail({
         {/* BUG-062: the side panel is a summary; the contact's page holds the timeline, notes, tasks and money. */}
         <Link
           href={`/app/crm/contacts/${encodeURIComponent(contact.id)}/overview`}
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--kf-accent2))] hover:underline"
+          className="inline-flex items-center gap-1.5 min-h-[44px] sm:min-h-[32px] py-1.5 text-xs font-medium text-[hsl(var(--kf-accent2))] hover:underline"
         >
-          <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+          <ArrowUpRight className="w-3.5 h-3.5" aria-hidden="true" />
           Open {`${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "client"}&apos;s page
         </Link>
 
