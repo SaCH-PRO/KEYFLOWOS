@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2, MessageSquare, Dna, CheckCircle2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useKeyChat } from "./key-chat-store";
@@ -37,9 +37,16 @@ export function KeyChatHistory() {
   const { loadSessions, selectSession, createNewSession, deleteSession, sendMessage } = useKeyChatActions();
   const [genome, setGenome] = useState<GenomeIntegrityResult | null>(null);
 
+  // SWP-KEY-CHAT-WEB (BUG-042): load the sessions when the history opens, once. loadSessions is rebuilt on every
+  // chat change, and loading the sessions changes the chat, so an effect keyed on it read GET flow/sessions again
+  // and again. Later reloads come from the actions that change the list (delete, a finished turn).
+  const loadSessionsRef = useRef(loadSessions);
   useEffect(() => {
-    void loadSessions();
+    loadSessionsRef.current = loadSessions;
   }, [loadSessions]);
+  useEffect(() => {
+    void loadSessionsRef.current();
+  }, []);
 
   useEffect(() => {
     const businessId = getStoredBusinessId();

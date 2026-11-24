@@ -239,7 +239,9 @@ export function useKeyChatActions() {
         return;
       }
 
-      const messageText = (text ?? chat.input).trim();
+      // SWP-KEY-CHAT-WEB (BUG-040): only a string is a message; anything else (a click event a button handed over)
+      // means "send what is in the box".
+      const messageText = (typeof text === "string" ? text : chat.input).trim();
       const attachments: KeyChatAttachment[] = chat.attachments;
 
       if (!messageText && attachments.length === 0 && !opts?.pendingConfirmation) return;
@@ -460,7 +462,7 @@ export function useKeyChatActions() {
         return;
       }
 
-      const messageText = (text ?? chat.input).trim();
+      const messageText = (typeof text === "string" ? text : chat.input).trim();
       if (!messageText) return;
 
       if (processingRef.current) return;
