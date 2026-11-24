@@ -47,7 +47,10 @@ How each step is done is in `LIVE-PROOF-RUNBOOK.md` ("runbook") and `WAVE-RUNBOO
 4. **Fix.**
    - [ ] Change only write-set files. Any other file is a departure: note it and say why.
    - [ ] The touched folders pass with **exit code 0**, and no "Errors" line.
-   - [ ] Web: `tsc --noEmit` (only the known 'next' type error allowed) and eslint 0 on changed files. Server: tsc.
+   - [ ] Web: a type check that really runs, with **0 errors**: `tsc --noEmit` in a real install, or
+         `tsc --noEmit -p tsconfig.json --types node` in a worktree with symlinked `node_modules`. There, plain
+         `tsc` stops at "Cannot find type definition file for 'next'" (TS2688) and checks nothing: on 2026-11-24 it
+         hid four real errors that broke the production build. eslint 0 on changed files. Server: tsc.
    - [ ] Commit the fix and push.
 5. **Prove (D-265).**
    - [ ] Every packet: the tests of every folder it touched (exit code 0) and the type check, at the final head.

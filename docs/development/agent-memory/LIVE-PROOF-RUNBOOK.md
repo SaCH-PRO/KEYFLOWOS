@@ -81,7 +81,9 @@ test "$(git rev-parse HEAD)" = "$(git rev-parse $H)" || echo "HEAD MOVED: the ru
 cd $WT/apps/web
 npx vitest run <the packet's touched folders>
 npx eslint <changed files>
-NODE_OPTIONS=--max-old-space-size=6144 npx tsc --noEmit -p tsconfig.json   # one pre-existing error is allowed: "Cannot find type definition file for 'next'" in symlinked worktrees
+NODE_OPTIONS=--max-old-space-size=6144 npx tsc --noEmit -p tsconfig.json --types node   # must print no error at all
+# With symlinked node_modules, plain `tsc` stops at TS2688 ("Cannot find type definition file for 'next'") and checks
+# nothing (it hid four real errors on 2026-11-24); `--types node` makes it check. In a real install, plain tsc is fine.
 npx vitest run                                                              # the whole web suite, about 2 minutes
 ```
 
