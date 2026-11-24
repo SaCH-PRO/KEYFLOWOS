@@ -10,8 +10,6 @@ import { CrmService } from '../crm/crm.service';
 import { CommerceService } from '../commerce/commerce.service';
 import { DocumentParsingService } from '../ingestion/document-parsing.service';
 import { ObjectNotFoundError, ObjectStorageService } from '../../core/object-storage/objectStorage';
-import { isNonPublicAddress } from '../../core/security/outbound-address';
-import { isIP } from 'node:net';
 
 export interface DocumentExtractionRequest {
   businessId: string;
@@ -148,41 +146,6 @@ function isFinalRefusal(err: unknown): boolean {
   return status >= 400 && status < 500 && status !== HttpStatus.REQUEST_TIMEOUT && status !== HttpStatus.TOO_MANY_REQUESTS;
 }
 
-/**
- * FU-OUTBOUND-ATTACHMENT-URL: server-only options of extractFromDocument, never part of the request
- * (a request body spread into the request can not grant them).
- */
-export interface DocumentExtractionOptions {
-  /**
-   * Forward a URL that is not ours (an external document link) to the model as it is. Only contract
-   * term extraction passes it: its "Document URL" form and asset links take external documents today
-   * (an owner decision is open on whether they should). A URL of ours is held to the business rule
-   * whatever this says.
-   */
-  forwardExternalUrl?: boolean;
-}
-
-/**
- * FU-OUTBOUND-ATTACHMENT-URL review round 1 (S1-2): the external document link contract term extraction may
- * still forward: http or https, no credentials, no localhost name, and an IP literal only when it is public
- * (the static part of D-246's checkDocumentUrl; the provider, not this server, fetches it, so no name is
- * resolved here).
- */
-function isForwardableExternalUrl(raw: string): boolean {
-  let url: URL;
-  try {
-    url = new URL(raw.trim());
-  } catch {
-    return false;
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
-  if (url.username || url.password) return false;
-  const hostname = url.hostname.toLowerCase().replace(/^\[(.*)\]$/, '$1').replace(/\.$/, '');
-  if (!hostname || hostname === 'localhost' || hostname.endsWith('.localhost')) return false;
-  if (isIP(hostname) !== 0 && isNonPublicAddress(hostname)) return false;
-  return true;
-}
-
 /** True when `result` is extractFromDocument's answer for a read that failed, not a document it classified. */
 export function documentExtractionFailed(result: object): boolean {
   return FAILED_EXTRACTIONS.has(result);
@@ -231,11 +194,11 @@ export class DocumentIntelligenceService {
    *  - a URL naming one of our objects is read here, through resolveObjectForBusiness for
    *    req.businessId, and sent as content; another business's object, an object issued before
    *    uploads were bound to a business, and an absent object all answer null alike;
-   *  - any other URL answers null, unless the caller passed forwardExternalUrl (contracts only).
+   *  - any other URL answers null (review round 2: SEC-FUOAU-1/2/3 — arbitrary external URLs
+   *    are refused across every caller including contract term extraction).
    */
   private async resolveRequestSource(
     req: DocumentExtractionRequest,
-    opts: DocumentExtractionOptions,
   ): Promise<DocumentExtractionRequest | null | 'storage_failed'> {
     if (!req.url) return { ...req, url: undefined };
     if (req.base64Content) return { ...req, url: undefined };
@@ -253,19 +216,18 @@ export class DocumentIntelligenceService {
         return err instanceof ObjectNotFoundError ? null : 'storage_failed';
       }
     }
-    return opts.forwardExternalUrl === true && isForwardableExternalUrl(req.url) ? req : null;
+    return null;
   }
 
   async extractFromDocument(
     request: DocumentExtractionRequest,
-    opts: DocumentExtractionOptions = {},
   ): Promise<DocumentExtractionResult> {
     const startTime = Date.now();
 
     // FU-OUTBOUND-ATTACHMENT-URL: no client URL reaches the provider (resolveRequestSource). A source
     // that can not be read for this business answers as an absent file, before any model call; the
     // log names no URL or path.
-    const resolved = await this.resolveRequestSource(request, opts);
+    const resolved = await this.resolveRequestSource(request);
     if (resolved === 'storage_failed') {
       this.logger.warn(`Document source for ${request.source} could not be read from storage now; nothing was sent to the model.`);
       const failed: DocumentExtractionResult = { documentType: 'unknown', confidence: 0, rawText: '', suggestedActions: [] };

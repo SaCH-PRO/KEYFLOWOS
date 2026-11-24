@@ -299,9 +299,7 @@ export class ContractsService {
     const contract = await this.getContract(businessId, contractId);
 
     const request = await this.buildExtractionRequest(businessId, dto);
-    // FU-OUTBOUND-ATTACHMENT-URL: contract terms keep taking an external document link (its form and
-    // asset links do today; owner decision open). A URL of ours is still held to the business rule.
-    const result = await this.docIntel.extractFromDocument(request, { forwardExternalUrl: true });
+    const result = await this.docIntel.extractFromDocument(request);
 
     if (result.documentType !== 'contract' || !result.contractData) {
       // W11-DISPATCH-REFUSAL-FINAL review SEC2-1 (D-134): the same 400 either way, as the route answers
