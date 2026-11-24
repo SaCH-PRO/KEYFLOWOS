@@ -368,9 +368,14 @@ export function useContactActions({
       if (wasSelected) { setSelectedContactId(id); }
     };
 
+    // This delete's own state: its Undo reads only this, never another delete of the same customer.
+    let state: "pending" | "undone" | "sent" = "pending";
+
     // Sent at most once: whichever comes first (the window ends, or the page is left) takes the entry.
     const send = () => {
-      if (!pending.delete(id)) return;
+      if (state !== "pending") return;
+      state = "sent";
+      pending.delete(id);
       void (async () => {
         try {
           await deleteContact(id, businessId);
@@ -386,9 +391,15 @@ export function useContactActions({
       action: {
         label: "Undo",
         onClick: () => {
+          if (state === "sent") {
+            // The window passed while the toast stayed up (hovered): the delete went; Trash can bring it back.
+            toast.info("Already deleted — restore it from Trash");
+            return;
+          }
+          if (state !== "pending") return;
+          state = "undone";
           const entry = pending.get(id);
-          if (!entry) return;
-          clearTimeout(entry.timer);
+          if (entry) clearTimeout(entry.timer);
           pending.delete(id);
           restore();
           toast.success("Contact restored");
