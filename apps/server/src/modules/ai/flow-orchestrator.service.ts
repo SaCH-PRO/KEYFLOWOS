@@ -3969,9 +3969,16 @@ ${triage.standingContext}`;
       if (schema.type === 'string' && typeof value !== 'string') {
         throw new BadRequestException(`Field "${key}" for ${toolName} must be a string`);
       }
-      if (schema.type === 'number' && typeof value !== 'number') {
-        const num = Number(value);
-        if (isNaN(num)) throw new BadRequestException(`Field "${key}" for ${toolName} must be a number`);
+      if (schema.type === 'number') {
+        const num = typeof value === 'number' ? value : Number(value);
+        if (
+          value === null ||
+          typeof value === 'boolean' ||
+          (typeof value === 'string' && value.trim() === '') ||
+          !Number.isFinite(num)
+        ) {
+          throw new BadRequestException(`Field "${key}" for ${toolName} must be a number`);
+        }
         args[key] = num;
       }
       // W11-KEY-TRANSFER-INTEGER: 'integer' reads a number or a numeric string as the 'number'
@@ -7243,7 +7250,9 @@ ${triage.standingContext}`;
       case 'finance_cashflow_forecast': {
         const rawHorizon = args.horizonDays ?? 90;
         const horizonDays =
-          typeof rawHorizon === 'boolean' || rawHorizon === '' ? Number.NaN : Number(rawHorizon);
+          typeof rawHorizon === 'boolean' || (typeof rawHorizon === 'string' && rawHorizon.trim() === '')
+            ? Number.NaN
+            : Number(rawHorizon);
         if (!Number.isFinite(horizonDays) || horizonDays < 1 || horizonDays > 365) {
           throw new Error(`horizonDays must be between 1 and 365 — got ${JSON.stringify(args.horizonDays)}`);
         }
