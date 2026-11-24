@@ -740,13 +740,22 @@ describe('FU-GENOME-DNA-WRITES-AND-INTEGRITY (D-128, D-233, D-238)', () => {
 
   it('DW-20 RED (R4 SEC-DW-6): FINANCIAL_ORDER is linear (no ReDoS) and catches suffixed, periodic, colon and underscore/hyphen order phrases', async () => {
     const { isFinancialDnaWrite } = await import('../src/modules/blueprint/genome-write-scope');
-    for (const adversarial of ['1' + ' '.repeat(35_000) + 'x', 'orders' + ' '.repeat(35_000) + 'x', '1,'.repeat(20_000) + 'x']) {
+    for (const adversarial of [
+      '1' + ' '.repeat(35_000) + 'x',
+      'orders' + ' '.repeat(35_000) + 'x',
+      '1,'.repeat(20_000) + 'x',
+      ',1'.repeat(20_000) + 'x',
+      ','.repeat(35_000) + 'x',
+    ]) {
       const t0 = Date.now();
       expect(isFinancialDnaWrite('operations', { coreWorkflows: [adversarial] })).toBe(false);
       expect(Date.now() - t0, adversarial.slice(0, 20)).toBeLessThan(150);
     }
 
-    for (const phrase of ['500k orders', '1.5M orders', '500+ orders', '200 monthly orders', 'orders: 500', 'orders per month: 500', 'average_order_value', 'order-total']) {
+    for (const phrase of [
+      '500k orders', '1.5M orders', '.5M orders', '.5k monthly orders', 'Ship,500 orders', 'Goal...500 orders',
+      '500+ orders', '200 monthly orders', 'orders: 500', 'orders per month: 500', 'average_order_value', 'order-total',
+    ]) {
       expect(isFinancialDnaWrite('operations', { coreWorkflows: [phrase] }), phrase).toBe(true);
     }
     expect(isFinancialDnaWrite('operations', { coreWorkflows: ['take orders and pack orders'] })).toBe(false);
