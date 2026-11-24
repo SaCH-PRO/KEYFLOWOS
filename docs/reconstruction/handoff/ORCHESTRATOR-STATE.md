@@ -1,6 +1,6 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-24 00:40 UTC by the acting orchestrator (second-lane account, Claude Code). Rewrite in place on every merge, packet return
+Last written: 2026-11-24 01:40 UTC by the acting orchestrator (second-lane account, Claude Code), handing over to the next tool (the account reaches its usage limit). Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -64,7 +64,9 @@ orchestrator and posts on #80. Its Fable limit is spent until 2026-11-30; it run
 | Wedge re-cut | `pkt/V1-WEDGE-RECUT` @ this commit | Plan, BUILD-MAP rows, worker brief, status, this file | Joins the next wave PR with the rulings branch |
 | Wave 3j (second lane) | `wave/3j-second-lane` @ a1e6a649: 16 packets | Proven: suite 831/831, R0 MET at a1e6a649; summary #80 7117144941 | Owner's go: "open the wave PR" or "merge under D-239" |
 | MOUNT-QUOTES (P0, critical path) | `pkt/V1-MOUNT-QUOTES` @ 78567330 | Proven: suite 820/820, R0 MET; live journey D: D1, D2, D3, D6, D9 green at both widths; RETURN #80 7117999068 | Joins wave 3j or the next wave |
-| Next, money truth first | - | Not started | SWP-INV-MATH, SWP-QUOTE-PUBLIC-PAGE, TODAY-AGGREGATE, WEDGE-WA-INBOUND-CAPTURE, then the critical path |
+| SWP-INV-MATH (P0, critical path; BUG-018, BUG-019) | `pkt/V1-SWP-INV-MATH` @ 6ea50c09, stacked on MOUNT-QUOTES | Done and RETURNed (#80 7118763435). Both reviews accept, after one MAJOR (missing browser spec) was closed. Web suite 191/1745; live sweep RED at base, green at head | Run journeys D and E live at the wave head (my run was cut off). Plan text: drop the stale "2.5 whole-number error" line (D-166) |
+| SWP-INV-PUBLIC-LINK (P0; BUG-053, 087, 091) | `pkt/V1-SWP-INV-PUBLIC-LINK` @ 8ae6abfa, stacked on SWP-INV-MATH | Claimed (#80 7118397932). Round-1 findings closed tests-first: security ACCEPT WITH MINORS, correctness REJECT on one MAJOR (the E13 /pay/link voided leg), now fixed. Integration file 30/30. A confirmation review and the full server suite + Release 0 at 8ae6abfa were running when the account stopped (log in the session only) | Re-run tsc, build, the full server suite and `proof:release0 -- --skip-build` at 8ae6abfa; get a confirmation review of ac376476..8ae6abfa; then post its RETURN. Report there: (a) the DRAFT refusal was already done by FU-PAY-LINK-STATUS-GATE (its comment cites D-248/D-256) and is pinned by L-24; INVOICE_NOT_SHAREABLE was not added, because Release 0 pins VOID to CONFLICT plus its exact message, so correct the plan text; (b) outside the write set: `pay/link/[token]/page.tsx` (E13) and the formatter mirror in `public-invoice-projection.test.tsx` |
+| Next, money truth first | - | Not started | SWP-QUOTE-PUBLIC-PAGE (its dependencies are now built and unmerged), TODAY-AGGREGATE, WEDGE-WA-INBOUND-CAPTURE, then the critical path |
 | First lane, as it left them (2026-11-23 ~09:30 UTC) | `wave/v1-wave-3j` a2e9f3f0, `wave/v1-wave-3k` 88268a01; FU-INSIGHTS-SIGHT 28cdbccb; child sessions for FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-GENOME-SURFACES-REVENUE, FU-OUTBOUND-ATTACHMENT-URL, FU-AI-APPROVALS-MONEY-SIGHT | Proven or building when the account stopped; not re-verified since | Re-verify each head before it enters a wave |
 | FU-VITEST-DECORATOR-METADATA | @ 83b6dfc8 | Stopped on owner question 20 | Owner ruling |
 
