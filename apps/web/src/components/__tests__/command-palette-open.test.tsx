@@ -20,6 +20,9 @@
  *                       opens /app/crm/contacts/<id>
  *   CPO-05  RED-BEFORE  ArrowDown and Enter choose a result as before (that part passes at the base); the option under
  *                       the cursor is the selected one (aria-selected)
+ * Review round (confirmation MINOR-1):
+ *   CPO-06  RED-AT-daa64373  where KeyAgent is not mounted (onboarding, the Genome check), Ctrl+K is still kept from
+ *                       the browser, as before this packet: the hook leaves the key to KeyAgent but prevents its default
  *
  * Cmd/Ctrl+J (KEY's drawer) has the same two owners. It is not in this packet: the KEY_DISABLED smoke check
  * (keyUiFindings, e2e/journeys) counts a Ctrl+J that opens KEY's drawer, and nothing in the web app hides KEY under
@@ -30,7 +33,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { ReactNode } from "react";
-import { render, screen, waitFor, fireEvent, cleanup, act, within } from "@testing-library/react";
+import { render, renderHook, screen, waitFor, fireEvent, cleanup, act, within } from "@testing-library/react";
 
 const nav = vi.hoisted(() => ({
   pathname: "/app/command-center",
@@ -195,5 +198,21 @@ describe("FU-C4-CMDK-SEARCH: Cmd/Ctrl+K opens the palette, and the customer it f
     expect(selected.map((o) => o.textContent ?? ""), "one option is selected: the one under the cursor").toEqual([expect.stringContaining("Ben Links42b")]);
     fireEvent.keyDown(input, { key: "Enter" });
     expect(nav.router.push).toHaveBeenCalledWith(`/app/crm/contacts/${BEN.id}`);
+  });
+
+  it("CPO-06 RED-AT-daa64373: without KeyAgent mounted, Ctrl+K is still kept from the browser", () => {
+    nav.pathname = "/app/onboarding";
+    renderHook(() => useKeyboardShortcuts());
+    const opened: unknown[] = [];
+    const listen = (e: Event) => opened.push(e);
+    window.addEventListener("kf:open-key", listen);
+    try {
+      // fireEvent returns false when a listener called preventDefault.
+      expect(fireEvent.keyDown(window, { key: "k", ctrlKey: true }), "Ctrl+K's default is prevented").toBe(false);
+      expect(fireEvent.keyDown(window, { key: "k", metaKey: true }), "Cmd+K's default is prevented").toBe(false);
+      expect(opened, "the hook still sends nothing for Ctrl+K: KeyAgent owns it").toEqual([]);
+    } finally {
+      window.removeEventListener("kf:open-key", listen);
+    }
   });
 });
