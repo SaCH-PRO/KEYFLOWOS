@@ -97,11 +97,12 @@ export function ContactSelect({
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setOpen(false);
         setShowQuickAdd(false);
+        clearQuickAddError();
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  }, [clearQuickAddError]);
 
   useEffect(() => {
     setActiveIndex(-1);
@@ -114,8 +115,9 @@ export function ContactSelect({
       setOpen(false);
       setSearch("");
       setShowQuickAdd(false);
+      clearQuickAddError();
     },
-    [onChange, setSearch],
+    [onChange, setSearch, clearQuickAddError],
   );
 
   const handleClear = useCallback(() => {
@@ -129,6 +131,7 @@ export function ContactSelect({
       if (e.key === "Escape") {
         setOpen(false);
         setShowQuickAdd(false);
+        clearQuickAddError();
         return;
       }
       if (!open) {
@@ -151,7 +154,7 @@ export function ContactSelect({
         }
       }
     },
-    [open, results, activeIndex, handleSelect],
+    [open, results, activeIndex, handleSelect, clearQuickAddError],
   );
 
   useEffect(() => {

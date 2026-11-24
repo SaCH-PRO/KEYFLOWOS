@@ -481,8 +481,13 @@ export default function QuotesPanel({
     quoteSearch,
   );
 
+  // SWP-QUOTE-COMPOSER-CONTACT (BUG-095): the client field's error after a save with no client; cleared on a choice.
+  const [quoteContactError, setQuoteContactError] = useState<string | null>(null);
+
   async function handleSaveQuote() {
-    if (!businessId || !quoteForm.contactId) return;
+    if (!businessId) return;
+    // SWP-QUOTE-COMPOSER-CONTACT (BUG-095): a quote is to someone; say so at the client field and send nothing.
+    if (!quoteForm.contactId) { setQuoteContactError("Choose a client for this quote."); return; }
 
     for (const item of quoteForm.items) {
       if (item.isNewItem && item.addToCatalog && item.newItemName) {
@@ -837,7 +842,7 @@ export default function QuotesPanel({
     >
       <BillingFormModal
         open={showQuoteBuilder}
-        onClose={() => { setShowQuoteBuilder(false); resetQuoteForm(); }}
+        onClose={() => { setShowQuoteBuilder(false); resetQuoteForm(); setQuoteContactError(null); }}
         onSubmit={handleSaveQuote}
         docType="quote"
         isEditing={!!editingQuoteId}
@@ -845,7 +850,8 @@ export default function QuotesPanel({
         products={products}
         currency={currency}
         contactId={quoteForm.contactId}
-        onContactChange={(id) => setQuoteForm((f) => ({ ...f, contactId: id }))}
+        onContactChange={(id) => { setQuoteContactError(null); setQuoteForm((f) => ({ ...f, contactId: id })); }}
+        contactError={quoteContactError}
         dateValue={quoteForm.expiryDate}
         onDateChange={(v) => setQuoteForm((f) => ({ ...f, expiryDate: v }))}
         items={quoteForm.items}
