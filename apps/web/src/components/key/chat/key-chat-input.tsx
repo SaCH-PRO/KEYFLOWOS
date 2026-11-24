@@ -172,7 +172,8 @@ export function KeyChatInput({ onSend, onStop, onDeepThink, disabled }: KeyChatI
               <button
                 type="button"
                 disabled={!canSend}
-                onClick={onDeepThink}
+                // SWP-KEY-CHAT-WEB (BUG-040): call with no argument; the click event is not the message.
+                onClick={() => onDeepThink()}
                 title="Run the full reasoning pipeline and show the working"
                 className="flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
                 aria-label="Deep think"
@@ -196,7 +197,8 @@ export function KeyChatInput({ onSend, onStop, onDeepThink, disabled }: KeyChatI
             <button
               type="button"
               disabled={!canSend}
-              onClick={onSend}
+              // SWP-KEY-CHAT-WEB (BUG-040): call with no argument; the click event is not the message.
+              onClick={() => onSend()}
               className="flex h-8 w-8 items-center justify-center rounded-full bg-foreground text-background transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-30"
               aria-label="Send"
             >

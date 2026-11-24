@@ -34,8 +34,13 @@ export function KeyChatMessages({ onConfirmAction, onCardAdvance }: KeyChatMessa
   const isStreaming = status === "streaming";
   const isLoading = status === "loading";
 
+  // SWP-KEY-CHAT-WEB (BUG-043): scroll only this list's own container. scrollIntoView also scrolls every scrollable
+  // ancestor (the app root), which pushed onboarding's "Set up manually" (D-03) off screen.
   const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
-    endRef.current?.scrollIntoView({ behavior });
+    const el = containerRef.current;
+    if (!el) return;
+    if (typeof el.scrollTo === "function") el.scrollTo({ top: el.scrollHeight, behavior });
+    else el.scrollTop = el.scrollHeight;
   };
 
   useEffect(() => {
