@@ -22,7 +22,7 @@ import { AiMemoryService, MemoryCategory, summaryPatternKey } from './ai-memory.
 import { aiMemoryRowVisibleTo, type SemanticReader } from './semantic-memory-sight';
 import { classificationCost, dashboardFor, fieldsSightNeeds, insightNeeds, keepWithinBudget, readerHolds } from './insight-sight';
 import { sightedStrategic, strategicItemNeeds, STRATEGIC_ACTION_NEEDS } from './strategic-sight';
-import { memberModuleLevel } from '../../core/authority/module-vocabulary';
+import { memberModuleLevel, type CanonicalModule } from '../../core/authority/module-vocabulary';
 import { isFinancialProposal } from '../business-genome/key-genome/genome-finance-scope';
 import { readersModuleSight, readsDocumentExtractions } from '../key-cortex/key-cortex-prompt-context.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
@@ -1317,10 +1317,10 @@ export class AiController {
   private async strategicReaderOf(
     businessId: string,
     req: AuthenticatedRequest | undefined,
-    modules: readonly ('revenue' | 'expenses')[],
+    modules: readonly CanonicalModule[],
   ): Promise<SemanticReader> {
     const who = await this.memoryReaderOf(businessId, req);
-    const missing = modules.find((module) => !readerHolds(who, [module]));
+    const missing = modules.find((module) => who.reader === null || !who.sight(module));
     if (missing) {
       const membership = who.reader
         ? await this.prisma.client.membership.findUnique({ where: { userId_businessId: { userId: who.reader, businessId } } })
@@ -1634,17 +1634,22 @@ export class AiController {
     @Query('module') module: string,
     @Req() req?: AuthenticatedRequest,
   ) {
-    const validModules: readonly string[] = ['crm', 'revenue', 'bookings', 'marketing', 'projects', 'expenses', 'automations'];
-    if (!module || !validModules.includes(module)) {
+    const moduleScope: Readonly<Record<string, CanonicalModule>> = {
+      crm: 'crm',
+      revenue: 'revenue',
+      bookings: 'bookings',
+      marketing: 'content',
+      projects: 'projects',
+      expenses: 'expenses',
+      automations: 'automations',
+    };
+    const validModules = Object.keys(moduleScope);
+    if (!module || !Object.hasOwn(moduleScope, module)) {
       throw new BadRequestException(`Invalid module. Must be one of: ${validModules.join(', ')}`);
     }
-    // FU-STRATEGIC-ROUTES-SIGHT (D-100, D-146): the revenue and expenses workspaces need their module's read; in any
-    // workspace each recommendation is read whole (strategicItemNeeds: "Top client ... has generated TTD 4,000").
-    const who = await this.strategicReaderOf(
-      businessId,
-      req,
-      module === 'revenue' ? ['revenue'] : module === 'expenses' ? ['expenses'] : [],
-    );
+    // FU-STRATEGIC-ROUTES-SIGHT (D-100, D-146, SEC-SRS-2): every workspace module requires its own module read scope
+    // (refusing members without it and non-member SUPER_ADMIN); in any workspace each recommendation is read whole.
+    const who = await this.strategicReaderOf(businessId, req, [moduleScope[module]]);
     const recs = await this.workspaceRecs.getRecommendations(
       businessId,
       module as 'crm' | 'revenue' | 'bookings' | 'marketing' | 'projects' | 'expenses' | 'automations',
@@ -1674,12 +1679,17 @@ export class AiController {
     if (!entityType || !entityId) {
       throw new BadRequestException('entityType and entityId are required');
     }
-    // FU-STRATEGIC-ROUTES-SIGHT (security review round 1, OOS-1; D-100): a contact's invoices (number, status, amount)
-    // only at revenue read; without it the list is withheld whole (empty: an invoice's existence and status are money
-    // signals too). Bookings and projects state no money.
+    // FU-STRATEGIC-ROUTES-SIGHT (OOS-1, SEC-SRS-2; D-100): enforce each linked module's read scope (invoices at revenue,
+    // bookings at bookings, projects at projects); a non-member SUPER_ADMIN receives none.
     const who = await this.memoryReaderOf(businessId, req);
     const links = await this.workspaceRecs.getCrossModuleLinks(businessId, entityType, entityId);
-    return readerHolds(who, ['revenue']) ? links : { ...links, invoices: [] };
+    const canRead = (mod: CanonicalModule) => who.reader !== null && who.sight(mod);
+    return {
+      ...links,
+      invoices: canRead('revenue') ? links.invoices : [],
+      bookings: canRead('bookings') ? links.bookings : [],
+      projects: canRead('projects') ? links.projects : [],
+    };
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

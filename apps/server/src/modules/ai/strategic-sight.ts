@@ -17,17 +17,16 @@ const BOTH: readonly InsightSight[] = ['revenue', 'expenses'];
  * opex, outflows, and a cash flow or break-even however spelt ('cash_flow', 'Cash-flow').
  */
 const NET_WORDS =
-  /(?<![a-z])(?:un|non-?)?(profits?|profitab\w*|margins?|net|break[\s_-]?even|cash[\s_-]?flows?|ebitda|burn(?:ing|[\s_-]?rate)?|loss(?:es)?|losing[\s_-]?money|deficits?|surplus(?:es)?|in[\s_-]the[\s_-](?:red|black)|p\s*(?:&|and)\s*l|overspen\w*|opex|outflows?|bottom[\s_-]?lines?|insolven\w*|solven\w*|liquidity|runways?|underwater|payback)(?![a-z])/i;
-/** Review round 2 (SR2-4): revenue by its other names (turnover, takings, the top line). */
-const MONEY_WORDS = /(?<![a-z])(turnover|takings|top[\s_-]?lines?)(?![a-z])/i;
+  /(?<![a-z])(?:un|non-?)?(profits?|profitab\w*|margins?|net|break[\s_\-\u2013\u2014]?even|cash[\s_\-\u2013\u2014]?flows?|ebit(?:da)?|burn(?:ing|[\s_\-\u2013\u2014]?rate)?|loss(?:es)?|losing[\s_\-\u2013\u2014]?money|deficits?|surplus(?:es)?|in[\s_\-\u2013\u2014]the[\s_\-\u2013\u2014](?:red|black)|p\s*(?:&|and|\/)\s*l|overspen\w*|opex|capex|outflows?|bottom[\s_\-\u2013\u2014]?lines?|insolven\w*|solven\w*|liquidity|runways?|underwater|payback)(?![a-z])/i;
+/** Review round 2 (SR2-4) & round 4 (SEC-SRS-6): revenue by its other names. */
+const MONEY_WORDS = /(?<![a-z])(turnover|takings|top[\s_\-\u2013\u2014]?lines?|concentration|upsells?)(?![a-z])/i;
 
 /**
- * Review round 2 (SR2-1, SR2-3, CR2-3): the text as it reads: NFKC-folded (fullwidth and mathematical letters and
- * digits), soft hyphens and zero-width characters removed, and every script's decimal digits as ASCII digits.
+ * Review round 2 (SR2-1, SR2-3, CR2-3), round 3 (CR3-1, SR3-1), round 4 (SEC-SRS-4):
+ * every default-ignorable code point, all format/control characters (\p{Cf}, \p{Cc}), every combining mark,
+ * and the blank braille cell.
  */
-// Review round 3 (CR3-1, SR3-1): every default-ignorable code point (bidi marks, joiners, variation selectors, tag
-// characters, the Hangul filler), every combining mark, and the blank braille cell.
-const INVISIBLE = /[\p{Default_Ignorable_Code_Point}\p{Mn}\p{Me}\u2800]/gu;
+const INVISIBLE = /[\p{Default_Ignorable_Code_Point}\p{Cf}\p{Cc}\p{Mn}\p{Me}\u2800]/gu;
 function digitValue(ch: string): string {
   let code = ch.codePointAt(0)!;
   let start = code;
@@ -37,10 +36,25 @@ function digitValue(ch: string): string {
 function folded(text: string): string {
   return text.normalize('NFKC').replace(INVISIBLE, '').replace(/\p{Nd}/gu, (ch) => (/[0-9]/.test(ch) ? ch : digitValue(ch)));
 }
+/** Decode escapes BEFORE folding so JSON-escaped invisibles (\u200B, \u00AD) are stripped too (SEC-SRS-4). */
+function allReadings(text: string): string[] {
+  const out = new Set<string>();
+  for (const reading of readingsOf(text)) {
+    out.add(reading);
+    out.add(folded(reading));
+  }
+  const f = folded(text);
+  out.add(f);
+  for (const reading of readingsOf(f)) {
+    out.add(reading);
+    out.add(folded(reading));
+  }
+  return [...out];
+}
 const camelSplit = (text: string) => text.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
 function statesNet(text: string): boolean {
   if (text.length > MAX_FIELDS_CLASSIFIED) return true;
-  return readingsOf(text).some((reading) => NET_WORDS.test(reading) || NET_WORDS.test(camelSplit(reading)));
+  return allReadings(text).some((reading) => NET_WORDS.test(reading) || NET_WORDS.test(camelSplit(reading)));
 }
 
 /**
@@ -57,20 +71,19 @@ function statesFigure(text: string): boolean {
   if (text.length > MAX_FIELDS_CLASSIFIED) return true;
   const plain = folded(text);
   if (DATE_ALONE.test(plain)) return false;
-  return readingsOf(plain).some((reading) => FIGURE.test(reading));
+  return allReadings(text).some((reading) => FIGURE.test(reading));
 }
 
 /**
- * A text's sights, on the text as written and as it reads (folded): money and expenses by the AiMemory rule
- * (fieldsSightNeeds), revenue for a figure or revenue's other names, both for net profit.
+ * A text's sights, on the text as written and as it reads (decoded then folded): money and expenses by the AiMemory
+ * rule (fieldsSightNeeds), revenue for a figure or revenue's other names, both for net profit.
  */
 function textNeeds(text: string): readonly InsightSight[] {
-  const plain = folded(text);
-  const texts = plain === text ? [text] : [text, plain];
-  if (texts.some(statesNet)) return BOTH;
-  const needs = new Set<InsightSight>(fieldsSightNeeds(texts));
+  const readings = allReadings(text);
+  if (readings.some((reading) => NET_WORDS.test(reading) || NET_WORDS.test(camelSplit(reading)))) return BOTH;
+  const needs = new Set<InsightSight>(fieldsSightNeeds(readings));
   if (needs.size === 2) return BOTH;
-  if (statesFigure(text) || texts.some((t) => readingsOf(t).some((reading) => MONEY_WORDS.test(reading)))) needs.add('revenue');
+  if (statesFigure(text) || readings.some((reading) => MONEY_WORDS.test(reading))) needs.add('revenue');
   return (['revenue', 'expenses'] as const).filter((sight) => needs.has(sight));
 }
 
@@ -100,11 +113,16 @@ const STRATEGIC_KEY_NEEDS: Readonly<Record<string, readonly InsightSight[]>> = {
 const SHARED_NUMBER_KEYS: ReadonlySet<string> = new Set(['neglectedLeads']);
 
 /**
- * The scans' own schema keys the money rule takes for money ('opportunities' for a pipeline, a price): read as plain
- * keys. Every other key is read like text (review round 1, SR1-2): 'revenueTrend', 'topClientsByRevenue', a key that is
- * itself a figure.
+ * Optional numeric metric keys on a non-money card (e.g. an opportunity card's estimatedValue) that may be stripped
+ * without withholding the card itself; any other disallowed key on a nested object withholds the object whole (SEC-SRS-3).
  */
-const KEYS_NOT_MONEY: ReadonlySet<string> = new Set(['opportunities', 'bundleOpportunities', 'currentPrice', 'suggestedPrice', 'pricingPrinciples']);
+const DROPPABLE_NESTED_KEYS: ReadonlySet<string> = new Set(['estimatedValue']);
+
+/**
+ * The scans' own schema keys the money rule takes for money ('opportunities' for a pipeline): read as plain keys.
+ * Every other key (including price keys: SEC-SRS-5) is read like text (SR1-2).
+ */
+const KEYS_NOT_MONEY: ReadonlySet<string> = new Set(['opportunities', 'bundleOpportunities']);
 
 /** A key's sights: STRATEGIC_KEY_NEEDS' (own keys only: SR1-4), and its words' and figures' as text, camelCase split. */
 function keyNeeds(key: string): readonly InsightSight[] {
@@ -123,16 +141,24 @@ const DROPPED = Symbol('dropped');
 
 /**
  * A scan's answer as `who` may read it. A reader holding revenue and expenses read gets it unchanged. For any other:
- * - a key whose sights they do not hold is dropped (keyNeeds);
+ * - a key whose sights they do not hold is dropped at top level (or on DROPPABLE_NESTED_KEYS); on a nested object any
+ *   other disallowed key withholds the nested object whole (SEC-SRS-3);
  * - a string is kept only if they hold its sights (money, expenses, net profit: textNeeds);
  * - a figure is kept only at revenue read (or under a shared count key): it is dropped, not its item;
  * - a list keeps the items they may read;
+ * - a nested object whose keys are all dropped is itself dropped (never left as an empty {} ghost: SEC-SRS-3);
  * - an object inside the answer with a withheld string is withheld whole (its figures and the rest never stand alone);
- * - an answer over the classifier bound is withheld whole (fail closed).
+ * - an unserializable answer (e.g. BigInt, circular: CR-3) or one over the classifier bound is withheld whole (fail closed).
  */
 export function sightedStrategic<T>(answer: T, who: SemanticReader): T {
   if (readerHolds(who, BOTH)) return answer;
-  if ((JSON.stringify(answer) ?? '').length > MAX_FIELDS_CLASSIFIED) return (Array.isArray(answer) ? [] : {}) as T;
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(answer) ?? '';
+  } catch {
+    return (Array.isArray(answer) ? [] : {}) as T;
+  }
+  if (serialized.length > MAX_FIELDS_CLASSIFIED) return (Array.isArray(answer) ? [] : {}) as T;
   const readsRevenue = readerHolds(who, ['revenue']);
 
   const visit = (value: unknown, key: string | undefined, top: boolean): unknown => {
@@ -144,9 +170,13 @@ export function sightedStrategic<T>(answer: T, who: SemanticReader): T {
       return value.map((item) => visit(item, undefined, false)).filter((item) => item !== WITHHELD && item !== DROPPED);
     }
     if (value && typeof value === 'object') {
+      const entries = Object.entries(value as Record<string, unknown>);
       const out: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-        if (!readerHolds(who, keyNeeds(k))) continue;
+      for (const [k, v] of entries) {
+        if (!readerHolds(who, keyNeeds(k))) {
+          if (top || DROPPABLE_NESTED_KEYS.has(k)) continue;
+          return WITHHELD;
+        }
         const kept = visit(v, k, false);
         if (kept === DROPPED) continue;
         if (kept === WITHHELD) {
@@ -156,6 +186,7 @@ export function sightedStrategic<T>(answer: T, who: SemanticReader): T {
         // Defined, not assigned: a '__proto__' key from the model is a plain field (SR1-4), never the prototype.
         Object.defineProperty(out, k, { value: kept, enumerable: true, writable: true, configurable: true });
       }
+      if (!top && entries.length > 0 && Object.keys(out).length === 0) return DROPPED;
       return out;
     }
     return value;
@@ -167,14 +198,20 @@ export function sightedStrategic<T>(answer: T, who: SemanticReader): T {
 
 /**
  * A deterministic item (a strategic action, a workspace recommendation) read whole: its text's sights by the AiMemory
- * rule, and both for net profit ('Margin pressure detected').
+ * rule, MONEY_WORDS (SEC-SRS-6), and both for net profit ('Margin pressure detected'). Fails closed on unserializable
+ * values such as BigInt (CR-3).
  */
 export function strategicItemNeeds(item: unknown): InsightSight[] {
-  const json = JSON.stringify(item) ?? '';
-  // Review round 3 (SR3-3): read on its folded text too, as textNeeds reads.
-  const plain = folded(json);
-  const needs = new Set<InsightSight>(fieldsSightNeeds(plain === json ? [item] : [item, plain]));
-  if (needs.size === 2 || statesNet(json) || statesNet(plain)) return [...BOTH];
+  let json: string;
+  try {
+    json = JSON.stringify(item) ?? '';
+  } catch {
+    return [...BOTH];
+  }
+  const readings = allReadings(json);
+  const needs = new Set<InsightSight>(fieldsSightNeeds([item, ...readings]));
+  if (needs.size === 2 || readings.some((r) => NET_WORDS.test(r) || NET_WORDS.test(camelSplit(r)))) return [...BOTH];
+  if (readings.some((r) => MONEY_WORDS.test(r))) needs.add('revenue');
   return (['revenue', 'expenses'] as const).filter((sight) => needs.has(sight));
 }
 
