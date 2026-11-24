@@ -197,7 +197,9 @@ export const BillingFormModal = React.memo(function BillingFormModal({
     fetchDocumentTemplates(businessId ?? undefined).then((res) => {
       if (res.data) {
         const type = docType === "invoice" ? "invoice" : "quote";
-        const typeTemplates = res.data.templates.filter((t) => t.type === type);
+        // FU-BILLING-TEMPLATES-GUARD (P13): an answer may carry no templates list; read it as none, as the templates
+        // page does, so the sheet's default template still comes from the branding.
+        const typeTemplates = (Array.isArray(res.data.templates) ? res.data.templates : []).filter((t) => t.type === type);
         setTemplates(typeTemplates);
         const def = typeTemplates.find((t) => t.isDefault);
         const defaultId = def?.id ?? (docType === "invoice" ? res.data.branding?.invoiceTemplate : res.data.branding?.quoteTemplate) ?? "classic";
