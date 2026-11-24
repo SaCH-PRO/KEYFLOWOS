@@ -11,7 +11,7 @@
  *
  * The stream and the reasoning pipeline are stubbed at their hooks (what they are asked to send is under test, not
  * the network); the store, the actions and the screens are the real ones. RED-BEFORE cases fail on the packet's base
- * (04730333); CONTROL cases pass on both.
+ * (04730333); CONTROL cases pass on both; RED-AT-2c6fe0f0 cases fail at the first fix (review repairs).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React, { useEffect } from "react";
@@ -117,6 +117,36 @@ describe("BUG-040: Send and Deep think send the typed text", () => {
     expect((cognition.think.mock.calls[0] as unknown as [{ text: string }])[0].text).toBe("Why is cash slow?");
   });
 
+  it("RED-BEFORE (review finding 5): the Send and Deep think buttons call their handlers with no argument", async () => {
+    const onSend = vi.fn();
+    const onDeepThink = vi.fn();
+    function Typed() {
+      const { setInput } = useKeyChat();
+      useEffect(() => setInput("Hello"), [setInput]);
+      return <KeyChatInput onSend={onSend} onStop={vi.fn()} onDeepThink={onDeepThink} />;
+    }
+    render(<KeyChatProvider><Typed /></KeyChatProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Send" }));
+    fireEvent.click(screen.getByRole("button", { name: "Deep think" }));
+    expect(onSend.mock.calls).toEqual([[]]);
+    expect(onDeepThink.mock.calls).toEqual([[]]);
+  });
+
+  it("RED-BEFORE (review finding 5): deepThink takes only text too: an object sends the box's text", async () => {
+    function StrayThinker() {
+      const { deepThink } = useKeyChatActions();
+      const { setInput } = useKeyChat();
+      useEffect(() => setInput("Think about the box"), [setInput]);
+      return <button type="button" onClick={() => void deepThink({ type: "click" } as unknown as string)}>stray think</button>;
+    }
+    render(<KeyChatProvider><StrayThinker /></KeyChatProvider>);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "stray think" }));
+    });
+    await waitFor(() => expect(cognition.think).toHaveBeenCalledTimes(1));
+    expect((cognition.think.mock.calls[0] as unknown as [{ text: string }])[0].text).toBe("Think about the box");
+  });
+
   it("CONTROL: Enter still sends the typed text", async () => {
     render(<KeyChatProvider><Composer /></KeyChatProvider>);
     const box = screen.getByRole("textbox");
@@ -156,11 +186,57 @@ describe("BUG-042: the history loads its sessions once", () => {
       return { data: [{ id: "sess_1", messages: [], updatedAt: "2026-11-24T10:00:00Z", createdAt: "2026-11-24T10:00:00Z" }] };
     });
     render(<KeyChatProvider><KeyChatHistory /></KeyChatProvider>);
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 1_000));
-    });
+    // Stepped (review finding 3): one long act holds React's updates back until it ends, so it could only ever see
+    // one re-read; ten 100 ms steps let each answer land and show the loop for what it is.
+    for (let i = 0; i < 10; i++) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 100));
+      });
+    }
     expect(client.fetchFlowSessions).toHaveBeenCalledTimes(1);
   }, 10_000);
+
+  it("RED-BEFORE (review finding 1): loadSessions keeps its identity across chat changes, so no caller's effect loops", async () => {
+    // The full-page chat (/app/key/chat: key-full-chat-shell-v2.tsx) and the other shells load sessions in an effect
+    // keyed on [loadSessions, chatMode]; loadSessions was rebuilt on every chat change, so they looped as the drawer did.
+    const seen = new Set<unknown>();
+    function ShellLike() {
+      const { loadSessions } = useKeyChatActions();
+      const { setInput, chatMode } = useKeyChat();
+      seen.add(loadSessions);
+      useEffect(() => {
+        void loadSessions();
+      }, [loadSessions, chatMode]);
+      return <button type="button" onClick={() => setInput("typing")}>type</button>;
+    }
+    client.fetchFlowSessions.mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+      return { data: [{ id: "sess_1", messages: [], updatedAt: "2026-11-24T10:00:00Z", createdAt: "2026-11-24T10:00:00Z" }] };
+    });
+    render(<KeyChatProvider><ShellLike /></KeyChatProvider>);
+    for (let i = 0; i < 10; i++) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 100));
+      });
+    }
+    fireEvent.click(screen.getByRole("button", { name: "type" }));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 100));
+    });
+    expect(client.fetchFlowSessions, "a shell keyed on loadSessions reads the sessions once").toHaveBeenCalledTimes(1);
+    expect(seen.size, "loadSessions is one function across chat changes").toBe(1);
+  }, 10_000);
+
+  it("RED-AT-2c6fe0f0 (review finding 4): a change of chat mode reloads the list (the mount-only load dropped it)", async () => {
+    function ModeSwitch() {
+      const { setChatMode } = useKeyChat() as unknown as { setChatMode: (m: string) => void };
+      return <button type="button" onClick={() => setChatMode("finance")}>mode</button>;
+    }
+    render(<KeyChatProvider><KeyChatHistory /><ModeSwitch /></KeyChatProvider>);
+    await waitFor(() => expect(client.fetchFlowSessions).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "mode" }));
+    await waitFor(() => expect(client.fetchFlowSessions).toHaveBeenCalledTimes(2));
+  });
 
   it("CONTROL: the sessions it loaded are listed", async () => {
     render(<KeyChatProvider><KeyChatHistory /></KeyChatProvider>);
@@ -178,11 +254,15 @@ describe("BUG-043: the messages scroll only their own container", () => {
   it("RED-BEFORE: it scrolls the messages' own container to its end", async () => {
     render(<KeyChatProvider><MessagesOnPage messages={[msg(1), msg(2), msg(3)]} /></KeyChatProvider>);
     await screen.findByText("Message 3");
-    await waitFor(() => expect(scrollTo).toHaveBeenCalled());
+    // Where the container ends up, however it gets there (review finding 6): at its end (scrollHeight), whether by
+    // scrollTo or by setting scrollTop; and the page around it does not move.
     const root = screen.getByTestId("app-root");
-    for (const call of scrollTo.mock.contexts) {
-      expect(call, "only the messages' container scrolls").not.toBe(root);
-      expect((call as HTMLElement).className).toMatch(/overflow-y-auto/);
-    }
+    const container = root.querySelector<HTMLElement>(".overflow-y-auto")!;
+    expect(container, "the messages' own scrolling container").toBeTruthy();
+    await waitFor(() => {
+      const viaScrollTo = scrollTo.mock.calls.some((c, i) => scrollTo.mock.contexts[i] === container && (c[0] as ScrollToOptions)?.top === container.scrollHeight);
+      expect(viaScrollTo || container.scrollTop === container.scrollHeight, "the container is at its end").toBe(true);
+    });
+    expect(scrollTo.mock.contexts.filter((c) => c !== container), "nothing else scrolls").toEqual([]);
   });
 });
