@@ -88,7 +88,7 @@ export interface PipelineToolbarProps {
   onToggleSelectMode: () => void;
   onRefresh: () => void;
   onAddContact: () => void;
-  onQuickCreate?: (data: { firstName: string; lastName?: string; email?: string; phone?: string; ageGroup?: string }) => Promise<void>;
+  onQuickCreate?: (data: { firstName: string; lastName?: string; email?: string; phone?: string; companyName?: string; ageGroup?: string }) => Promise<string | null>;
   onImport?: () => void;
   onScanSuccess?: () => void;
   businessId?: string;
@@ -486,7 +486,7 @@ function AddContactControl({
   onQuickCreate,
   onOpenFullForm,
 }: {
-  onQuickCreate?: (data: { firstName: string; lastName?: string; email?: string; phone?: string; ageGroup?: string }) => Promise<void>;
+  onQuickCreate?: (data: { firstName: string; lastName?: string; email?: string; phone?: string; companyName?: string; ageGroup?: string }) => Promise<string | null>;
   onOpenFullForm: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -498,6 +498,8 @@ function AddContactControl({
   const [ageGroup, setAgeGroup] = useState<string>("");
   const [showMore, setShowMore] = useState(false);
   const [saving, setSaving] = useState(false);
+  // SWP-CONTACT-QUICKADD (BUG-009): the reason a save was refused, shown in the dialog; what was typed stays.
+  const [refusal, setRefusal] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const firstRef = useRef<HTMLInputElement | null>(null);
 
@@ -528,26 +530,35 @@ function AddContactControl({
     setCompany("");
     setAgeGroup("");
     setShowMore(false);
+    setRefusal(null);
   }, []);
 
   const handleQuick = useCallback(async () => {
     if (!onQuickCreate || saving) return;
     if (!firstName.trim() && !lastName.trim() && !email.trim() && !phone.trim()) return;
     setSaving(true);
+    setRefusal(null);
     try {
-      await onQuickCreate({
+      // onQuickCreate answers the refusal's reason, or null when the customer was saved (SWP-CONTACT-QUICKADD:
+      // a refused save keeps the dialog open with what was typed, BUG-009; Company is sent, BUG-034).
+      const refused = await onQuickCreate({
         firstName: firstName.trim() || lastName.trim() || email.trim() || phone.trim(),
         lastName: lastName.trim() || undefined,
         email: email.trim() || undefined,
         phone: phone.trim() || undefined,
+        companyName: company.trim() || undefined,
         ageGroup: ageGroup || undefined,
       });
+      if (refused) {
+        setRefusal(refused);
+        return;
+      }
       reset();
       setOpen(false);
     } finally {
       setSaving(false);
     }
-  }, [onQuickCreate, saving, firstName, lastName, email, phone, ageGroup, reset]);
+  }, [onQuickCreate, saving, firstName, lastName, email, phone, company, ageGroup, reset]);
 
   const onFieldKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -733,6 +744,11 @@ function AddContactControl({
               )}
             </AnimatePresence>
 
+            {refusal && (
+              <p role="alert" className="mt-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-500">
+                {refusal}
+              </p>
+            )}
             <button
               onClick={() => setShowMore((v) => !v)}
               className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground/70 hover:text-foreground transition-colors"

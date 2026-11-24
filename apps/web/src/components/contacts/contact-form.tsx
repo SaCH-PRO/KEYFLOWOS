@@ -105,7 +105,8 @@ interface DuplicateContact {
 }
 
 interface ContactFormProps {
-  onSubmit: (data: ContactFormData, customFieldValues?: Record<string, unknown>) => Promise<void>;
+  /** Answers false when the save was refused: the form then keeps what was typed (SWP-CONTACT-QUICKADD, BUG-009). */
+  onSubmit: (data: ContactFormData, customFieldValues?: Record<string, unknown>) => Promise<void | boolean>;
   onCancel: () => void;
   loading?: boolean;
   initialValues?: Partial<ContactFormData>;
@@ -245,7 +246,8 @@ function ContactFormInner({ onSubmit, onCancel, loading, initialValues, initialC
   };
 
   const doSubmit = async (data: ContactFormData) => {
-    await onSubmit(data, customFieldValues);
+    const saved = await onSubmit(data, customFieldValues);
+    if (saved === false) return;
     reset({ ...defaults });
     setCustomFieldValues({});
     setDuplicateDialog({ open: false, duplicates: [] });
