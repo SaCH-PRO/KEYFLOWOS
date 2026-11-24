@@ -54,7 +54,7 @@
 | P5 | First-lane WIP: FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-AI-APPROVALS-MONEY-SIGHT | antigravity | returned | — | 3/3 returned: `AI-APPROVALS` (#80 7121845152 @ `a0c650a6`), `STRATEGIC-SIGHT` (#80 7122456412 @ `b474ec39`), `DNA-WRITES` (@ `f616cf67`, both reviews CONFIRMED 0 findings; `SEC-DW-3a` flagged for R0 AMEND on `D11G-G04`). P6 unblocked |
 | P6 | FU-PENDING-OWED-SERVER, then FU-PENDING-OWED-WEB (money-first) | antigravity | claimed | — | `FU-PENDING-OWED-SERVER` **RETURNED** (#80 7127921193) on `pkt/V1-FU-PENDING-OWED-SERVER` @ `ae4bf75f` (834/834 server 15,434 passed, R0 39/39 MET, web CH-33 35/35, both R3 reviews CONFIRMED); now executing `FU-PENDING-OWED-WEB` (`pkt/V1-FU-PENDING-OWED-WEB` from `05f04f2c`) |
 | P7 | SWP-CONTACT-QUICKADD (BUG-009, 034, 035; journey C1's New > Contact): `pkt/V1-SWP-CONTACT-QUICKADD` @ d859ba0f, stacked on wave 3m. Two reviews + confirmation ACCEPT WITH MINORS. Live at d859ba0f: sweep 2/2, C1 and C3 green both widths (red at the base), release0-live green; C4/C6/C8 red at the base too | claude | returned | M3 | Enters the next wave after M3 (main merged in, wave-head proof) |
-| P8 | SWP-INV-LIST (P0; BUG-007, 050, 070, 089, 131, 047): `pkt/V1-SWP-INV-LIST` @ 388925d9, stacked on P7. Reviews: security ACCEPT WITH MINORS; correctness REJECT (R0-23 currency, hidden tsc errors) -> fixed; confirmations: ACCEPT WITH MINORS, then REJECT (dark-mode labels, sweep light pass) -> fixed. Live at 049fe735: sweep 2/2 (light and dark really switched), D8, E3, E11 green both projects (red at the base), release0-live green; whole web suite 199/1808; tsc --types node 0 | claude | in-review | — | Final confirmation running; then RETURN |
+| P8 | SWP-INV-LIST (P0; BUG-007, 050, 070, 089, 131, 047): `pkt/V1-SWP-INV-LIST` @ 388925d9, stacked on P7. Reviews and three confirmations closed (final ACCEPT WITH MINORS). Live at 049fe735: sweep 2/2 (dark and light), D8, E3, E11 green both projects (red at the base), release0-live green; web 199/1808; tsc --types node 0 | claude | returned | M3 | Enters the next wave with P7 after M3 (main merged in, wave-head proof) |
 | P9 | FU-WEB-PAYLINK-STATUS-BUTTONS | — | todo | — | Any lane may claim |
 | P10 | NAV-A2 (P0), NAV-A3 (unblocks 33) | — | todo | — | Any lane may claim; NAV-A3 first |
 | P11 | SWP-KEY-CHAT-WEB (P0, unblocks 33) | — | todo | — | Any lane may claim |
@@ -66,4 +66,4 @@
 | P14 | Owner: "Batch 2 safe defaults #5–#10" (not approved in D-272) | owner | blocked | the owner's review | The owner reviews the list |
 | P15 | Owner: redeploy production (D-266) | owner | blocked | M1–M4 | The owner deploys from main |
 
-Last updated: 2026-11-24 by the claude lane (P8 final confirmation running @ 388925d9; P18 follow-up added; M3 blocked on GitGuardian 40952282; P16 is PR #231).
+Last updated: 2026-11-24 by the claude lane (P7 and P8 returned; M3 blocked on GitGuardian 40952282; P16 is PR #231).
