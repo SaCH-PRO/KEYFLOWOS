@@ -145,7 +145,9 @@ async function staysOpen(get: () => HTMLElement | null, what: string) {
   expect(get(), `${what} is still open`).not.toBeNull();
 }
 
-describe("FU-C4-CMDK-SEARCH: Cmd/Ctrl+K opens the palette, and the customer it finds opens their page", () => {
+// The whole app shell renders in each case: its own waits (up to 4 s for the header, 2 s for a palette to stay open)
+// leave little of vitest's 5 s default under a loaded CI runner (confirmation review MINOR).
+describe("FU-C4-CMDK-SEARCH: Cmd/Ctrl+K opens the palette, and the customer it finds opens their page", { timeout: 15_000 }, () => {
   it("CPO-01 RED-BEFORE: in the app, Ctrl+K opens the palette and it stays open", async () => {
     await renderShell();
     fireEvent.keyDown(window, { key: "k", ctrlKey: true });
