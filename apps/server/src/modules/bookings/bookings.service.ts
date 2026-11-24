@@ -2057,9 +2057,20 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       input.storefrontSlugAsSent !== undefined ? input.storefrontSlugAsSent : input.storefrontSlug,
     );
 
-    const service = await this.prisma.client.service.findFirstOrThrow({
-      where: { id: input.serviceId, businessId: input.businessId, deletedAt: null, sourceProductId: null },
-    });
+    let service;
+    try {
+      service = await this.prisma.client.service.findFirstOrThrow({
+        where: { id: input.serviceId, businessId: input.businessId, deletedAt: null, sourceProductId: null },
+      });
+    } catch (err: unknown) {
+      if ((err as { code?: string })?.code === 'P2025') {
+        throw new NotFoundException('Service not found');
+      }
+      throw err;
+    }
+    if (!service) {
+      throw new NotFoundException('Service not found');
+    }
     await this.assertOwnedRefs(input);
 
     const start = new Date(input.startTime);
