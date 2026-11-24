@@ -1133,6 +1133,11 @@
       "packet": "V1-64 (SWP-BOOKING-PAYMENT-GATE)"
     },
     {
+      "prefix": "v64h_",
+      "owner": "apps/server/test/storefront-listing-membership.integration.test.ts",
+      "packet": "V1-64 (SWP-STORE-LISTING-SERVER)"
+    },
+    {
       "prefix": "v64e_",
       "owner": "apps/server/test/money-totals-partial-payments.integration.test.ts",
       "packet": "V1-64 (SWP-INV-MONEY-TOTALS)"
