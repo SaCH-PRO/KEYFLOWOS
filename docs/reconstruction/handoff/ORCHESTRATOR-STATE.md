@@ -1,6 +1,6 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-24 02:00 UTC by the acting orchestrator (second-lane account, Claude Code), at the D-268 pause. Rewrite in place on every merge, packet return
+Last written: 2026-11-24 02:00 UTC by the acting orchestrator (second-lane account, Claude Code), at D-271 (v1 resumes). Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -18,21 +18,16 @@ conversation that produced it. Read `docs/development/agent-memory/README.md` fi
 
 ## 1. Standing instructions from the owner
 
-- **D-268 (2026-11-24, #80 comment 7118970946): packet work is paused.** The owner's focus is now building KEY, as
-  versions of KEY that help produce v1, write code themselves and tend the product to its final version. In practice,
-  a builder KEY ("KEY Foreman", working name) orchestrates this programme the way the owner and the acting
-  orchestrator do now.
-  - Recommended to the owner, as the design starting point: internal tooling separate from the customer-facing KEY;
-    models called through APIs with spend limits, not by rotating consumer accounts; this section's rules turned into
-    hard gates in code.
-  - **Do not claim new v1 packets.** Finish only what section 3 lists, the same way.
-  - **D-269 (#80 comment 7119075149)** shapes it:
-    - Builder KEY is the owner's only; customers get business capability only.
-    - It must be reliable and reproducible, proven in Claude, Antigravity, ChatGPT, Kimi and Gemini, then reached
-      through KEYFLOW.
-    - Its first jobs are one packet end to end, then a parallel wave, then tending the final version.
-  - **The design to build from:** `docs/key-builder/KEY-BUILDER-DESIGN-001.md` on branch `ccr-1eadc8f4-aqfqne`. It
-    covers milestones M0 to M4 and packets KB-001 to KB-012, and its section 10 holds four owner questions.
+- **D-271 (2026-11-24): v1 is the priority. D-268's pause is lifted, and packet work resumes in the D-263 wedge
+  order.**
+  - The KEY Builder design and plan (D-268 to D-270) are parked until v1 is completed. They stay on branch
+    `ccr-1eadc8f4-aqfqne`: `docs/key-builder/KEY-BUILDER-DESIGN-001.md`, `KEY-BUILDER-PLAN-001.md` and `research/`.
+  - Open for v1, as recommendations to the owner:
+    - the Q4 wave (MOUNT-QUOTES + SWP-INV-MATH + SWP-INV-PUBLIC-LINK, built from 8ae6abfa);
+    - a P0 security packet, SEC-KEY-CUSTOM-LOGIC: tenant KEY's `execute_custom_logic` runs model-written JavaScript
+      in a child process on the API host (research A §5);
+    - switching off the agent-control autopilot's #80 posting.
+  - Sessions in other tools (Antigravity) claim through `git ls-remote` and a CLAIM on #80, like every lane.
 - Finish v1 (plan of record: `docs/reconstruction/V1-PLAN-RECUT.json`). Keep going until it is done.
 - **v1 is re-cut to one wedge (D-263, 2026-11-24, #80 comment 7118009265):** a Trinidad and Tobago service business
   gets paid faster from WhatsApp, in TTD. The launch gate runs on packets with `track: launch` only; `track:
@@ -81,7 +76,7 @@ orchestrator and posts on #80. Its Fable limit is spent until 2026-11-30; it run
 | MOUNT-QUOTES (P0, critical path) | `pkt/V1-MOUNT-QUOTES` @ 78567330 | Proven: suite 820/820, R0 MET; live journey D: D1, D2, D3, D6, D9 green at both widths; RETURN #80 7117999068 | Joins wave 3j or the next wave |
 | SWP-INV-MATH (P0, critical path; BUG-018, BUG-019) | `pkt/V1-SWP-INV-MATH` @ 6ea50c09, stacked on MOUNT-QUOTES | Done and RETURNed (#80 7118763435). Both reviews accept, after one MAJOR (missing browser spec) was closed. Web suite 191/1745; live sweep RED at base, green at head | Run journeys D and E live at the wave head (my run was cut off). Plan text: drop the stale "2.5 whole-number error" line (D-166) |
 | SWP-INV-PUBLIC-LINK (P0; BUG-053, 087, 091) | `pkt/V1-SWP-INV-PUBLIC-LINK` @ 8ae6abfa, stacked on SWP-INV-MATH | Done and RETURNed (#80, after D-270). Both reviews plus the confirmation accept. Suite 820/15287 passed, R0 MET 39/39 with an exact-head receipt at 8ae6abfa | Joins the next wave (build it from 8ae6abfa); run journey E live at the wave head. Plan text: drop INVOICE_NOT_SHAREABLE |
-| Next v1 packets | - | Paused by D-268 | When v1 packet work resumes: SWP-QUOTE-PUBLIC-PAGE, which D-270 chose as Builder KEY's M0 packet, then TODAY-AGGREGATE, WEDGE-WA-INBOUND-CAPTURE and the critical path |
+| Next v1 packets | - | Resumed by D-271 | SWP-QUOTE-PUBLIC-PAGE (stack it on 8ae6abfa), then TODAY-AGGREGATE, WEDGE-WA-INBOUND-CAPTURE and the critical path. SEC-KEY-CUSTOM-LOGIC if the owner adds it |
 | First lane, as it left them (2026-11-23 ~09:30 UTC) | `wave/v1-wave-3j` a2e9f3f0, `wave/v1-wave-3k` 88268a01; FU-INSIGHTS-SIGHT 28cdbccb; child sessions for FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-GENOME-SURFACES-REVENUE, FU-OUTBOUND-ATTACHMENT-URL, FU-AI-APPROVALS-MONEY-SIGHT | Proven or building when the account stopped; not re-verified since | Re-verify each head before it enters a wave |
 | FU-VITEST-DECORATOR-METADATA | @ 83b6dfc8 | Stopped on owner question 20 | Owner ruling |
 
