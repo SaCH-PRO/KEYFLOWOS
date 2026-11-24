@@ -50,6 +50,7 @@ vi.mock("sonner", () => ({
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }) }));
 
 import { useContactActions } from "../use-contact-actions";
+import { toast } from "sonner";
 
 const BIZ = "biz_dl";
 const A = { id: "c_a", firstName: "Ann", lastName: "Able" } as unknown as Contact;
@@ -85,6 +86,7 @@ beforeEach(() => {
   toasts.shown.length = 0;
   toasts.dismissed.length = 0;
   toasts.seq = 0;
+  for (const fn of [toast, toast.success, toast.error, toast.info, toast.dismiss]) vi.mocked(fn).mockClear();
 });
 afterEach(() => {
   cleanup();
@@ -181,7 +183,6 @@ describe("FU-CONTACT-DELETE-LEAVE: a single delete is sent once, whatever happen
   });
 
   it("DL-10 RED-AT-23d25b88: Undo pressed after the delete was sent says to restore it from Trash", async () => {
-    const { toast } = await import("sonner");
     const { result } = renderHook(() => useHarness());
     await act(async () => { await result.current.actions.handleDeleteContact(A); });
     await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
