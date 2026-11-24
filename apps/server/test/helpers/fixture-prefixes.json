@@ -1250,6 +1250,11 @@
       "prefix": "v75r_",
       "owner": "apps/server/test/memory-temporal-routes-sight.integration.test.ts",
       "packet": "V1-75 (MEM-TEMPORAL-MEMORY-ROUTES-SIGHT)"
+    },
+    {
+      "prefix": "v64i_",
+      "owner": "apps/server/test/storefront-oversell.integration.test.ts",
+      "packet": "V1-64 (SWP-STORE-OVERSELL)"
     }
   ],
   "pendingRenames": [],
