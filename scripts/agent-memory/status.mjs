@@ -70,7 +70,7 @@ function main() {
   const s = status.summary;
   console.log(`main ${status._generated.main_sha.slice(0, 8)}: ${s.packets} packets, ${s.points} points`);
   for (const [k, v] of Object.entries(s.by_status)) console.log(`  ${k}: ${v.packets} (${v.pct_by_points}% of points)`);
-  console.log(`  ready to start: ${s.todo_with_dependencies_met}; uncertain: ${s.uncertain.length}`);
+  console.log(`  ready to start: ${s.todo_with_dependencies_met} (launch track: ${s.todo_with_dependencies_met_launch}); uncertain: ${s.uncertain.length}`);
   console.log(`wrote ${STATUS_JSON_PATH} and ${STATUS_MD_PATH}`);
 }
 

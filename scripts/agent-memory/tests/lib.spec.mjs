@@ -208,7 +208,8 @@ test('buildStatus: each row carries its track, and ready_launch holds only launc
     validation: { critical_path: [] },
   };
   const s = buildStatus({ plan, prior: null, commits: [], branches: null, mainSha: 'f'.repeat(40), mainDate: '2026-11-24', baseSha: null });
-  assert.deepEqual(s.ready.map((r) => [r.id, r.track]), [['F1', 'follow-on'], ['L1', 'launch'], ['F2', 'follow-on'], ['U', null]]);
+  // L1 unblocks L2, so it ranks first.
+  assert.deepEqual(s.ready.map((r) => [r.id, r.track]), [['L1', 'launch'], ['F1', 'follow-on'], ['F2', 'follow-on'], ['U', null]]);
   assert.deepEqual(s.ready_launch.map((r) => r.id), ['L1']);
   assert.equal(s.summary.todo_with_dependencies_met_launch, 1);
   assert.deepEqual(s.summary.by_track, {
