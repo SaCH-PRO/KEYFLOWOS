@@ -34,7 +34,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import PublicInvoicePage from "../page";
 
-const TOKEN = "Pq9v8yX2Qp0wLr7mNc4tHb6sJd1aUe9f";
+// A fixture name, not a credential: the token view is answered by the stubbed fetch below.
+const TOKEN = "tok_public_invoice_states_fixture";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn(), prefetch: vi.fn() }),
