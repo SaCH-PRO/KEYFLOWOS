@@ -38,7 +38,7 @@
 
 | # | Row | What | Owner | Status | Waits on | Next step |
 | --- | --- | --- | --- | --- | --- | --- |
-| M1 | PR #228 | `wave/v1-wave-3j` (RR-REDACTION-BY-CONTENT, FU-KEY-GENOME-READS-RESIDUAL, MEM-TEMPORAL-MEMORY-ROUTES-SIGHT) plus the Codex P1 fix | antigravity | in-review | — | Finish the CODEX-228 confirmation; compact; merge main in; prove; CI green; merge |
+| M1 | PR #228 | `wave/v1-wave-3j` (RR-REDACTION-BY-CONTENT, FU-KEY-GENOME-READS-RESIDUAL, MEM-TEMPORAL-MEMORY-ROUTES-SIGHT) plus the Codex P1 fix | antigravity | pr-open | — | Head `70f5f374` (CODEX-228 confirmed, compacted, main merged, divergence OK); Run Tests rerun in CI (unrelated phone-voice flake); merge once CI green |
 | M2 | Rulings | `pkt/V1-RULINGS-3E` + `pkt/V1-WEDGE-RECUT`: D-255 to D-272, the wedge plan, the agent-memory docs (LIVE-PROOF-RUNBOOK, CHECKLISTS), the state file | claude | todo | M1 | Build a docs-only wave from both branches on main; regenerate status; PR; CI green; merge |
 | M3 | Wave 3m | `wave/v1-wave-3m`: MOUNT-QUOTES, SWP-INV-MATH, SWP-INV-PUBLIC-LINK, SWP-QUOTE-PUBLIC-PAGE, SWP-INV-FORM-UX, SWP-QUOTE-COMPOSER-CONTACT | claude | proving | M1, M2 | Wave-head proof (running at 7bd2f445); open the PR; after M2, merge main in, re-prove, merge |
 | M4 | Wave 3j split | `wave/3j-second-lane` (16 packets; fails 25/50; duplicates RR-REDACTION-BY-CONTENT with #228) | antigravity | todo | M3 | Split into parts within 25 commits / 50 files without the duplicate; prove each; PR; merge in turn |
@@ -50,8 +50,8 @@
 | P1 | SEC-KEY-CUSTOM-LOGIC (P0, D-272.4): tenant KEY's `execute_custom_logic` runs JS in a child process on the API host | antigravity | todo | — | CLAIM; a RED test that proves the reach; sandbox it or turn it off for tenants; full server suite + R0 |
 | P2 | Switch off the agent-control autopilot's #80 posting (D-272.4) | antigravity | todo | — | Find the posting workflow and step; turn off its posting (the smallest change); keep the modules and specs green |
 | P3 | FU-VITEST-DECORATOR-METADATA (Q20, D-272.2) | antigravity | blocked | the owner sees the diff | Show the before/after of the two expectations. If it is a tightening, AMEND per D-272.2; else hold |
-| P4 | FU-OUTBOUND-ATTACHMENT-URL (D-272.3) | antigravity | claimed | — | Refuse arbitrary external URLs on contract term extraction (an uploaded object or Drive file only) |
-| P5 | First-lane WIP: FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-AI-APPROVALS-MONEY-SIGHT | antigravity | claimed | — | Re-verify each head; finish its review rounds; RETURN |
+| P4 | FU-OUTBOUND-ATTACHMENT-URL (D-272.3) | antigravity | returned | — | Returned #80 (7121498630) @ `41e1a419` (RED `597b953b`, 7/7 84/84, tsc 0, both confirmation reviews CONFIRMED); ready for wave compaction |
+| P5 | First-lane WIP: FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-AI-APPROVALS-MONEY-SIGHT | antigravity | red | — | `FU-AI-APPROVALS-MONEY-SIGHT` active (`60945dbe` main merged, RED tests in progress); DNA-WRITES & STRATEGIC-SIGHT pre-reviewed and queued next |
 | P6 | FU-PENDING-OWED-SERVER, then FU-PENDING-OWED-WEB (money-first) | antigravity | todo | P5 | CLAIM; CHECKLISTS B |
 | P7 | SWP-CONTACT-QUICKADD (critical path, after SWP-QUOTE-COMPOSER-CONTACT) | claude | todo | M3 proof | CLAIM, stacked on d690bc41; CHECKLISTS B |
 | P8 | SWP-INV-LIST (critical path) | claude | todo | P7 | CLAIM; CHECKLISTS B |
@@ -63,4 +63,4 @@
 | P14 | Owner: "Batch 2 safe defaults #5–#10" (not approved in D-272) | owner | blocked | the owner's review | The owner reviews the list |
 | P15 | Owner: redeploy production (D-266) | owner | blocked | M1–M4 | The owner deploys from main |
 
-Last updated: 2026-11-24 by the claude lane (board created).
+Last updated: 2026-11-24 by the antigravity lane (ACK D-272; M1 @ 70f5f374, P4 returned @ 41e1a419, P5 active).
