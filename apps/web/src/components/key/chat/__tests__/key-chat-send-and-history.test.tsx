@@ -68,7 +68,7 @@ function MessagesOnPage({ messages }: { messages: KeyChatMessage[] }) {
     <div data-testid="app-root" style={{ overflowY: "auto", height: 400 }}>
       <div style={{ height: 300 }}>Set up manually</div>
       <div style={{ height: 300, display: "flex", flexDirection: "column" }}>
-        <KeyChatMessages />
+        <KeyChatMessages onConfirmAction={() => {}} />
       </div>
     </div>
   );
@@ -127,20 +127,22 @@ describe("BUG-040: Send and Deep think send the typed text", () => {
   });
 
   it("RED-BEFORE: the actions take only text: an object passed as the message never reaches .trim()", async () => {
-    let actions: ReturnType<typeof useKeyChatActions> | null = null;
-    function Grab() {
-      actions = useKeyChatActions();
+    /** A caller that hands sendMessage a stray event object (what onClick={onSend} handed over), not text. */
+    function StrayCaller() {
+      const { sendMessage } = useKeyChatActions();
       const { setInput } = useKeyChat();
       useEffect(() => setInput("From the box"), [setInput]);
-      return null;
+      return <button type="button" onClick={() => void sendMessage({ type: "click" } as unknown as string)}>stray</button>;
     }
-    render(<KeyChatProvider><Grab /></KeyChatProvider>);
-    await waitFor(() => expect(actions).not.toBeNull());
-    // A stray event object (what onClick={onSend} handed over) is not text: the box's text is sent instead.
+    render(<KeyChatProvider><StrayCaller /></KeyChatProvider>);
+    // The object is not text: the box's text is sent instead.
     await act(async () => {
-      await actions!.sendMessage({ type: "click" } as unknown as string);
+      fireEvent.click(screen.getByRole("button", { name: "stray" }));
     });
+    await waitFor(() => expect(stream.start).toHaveBeenCalledTimes(1));
     expect((stream.start.mock.calls[0] as unknown as [{ message: string }])[0].message).toBe("From the box");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(unhandled.map(String)).toEqual([]);
   });
 });
 
