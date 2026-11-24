@@ -1,8 +1,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as ts from 'typescript';
 import { describe, it, expect, vi } from 'vitest';
 import { KeyCortexPlannerService } from './key-cortex-planner.service';
 import { PlannerService } from '../ai/planner.service';
+import { MorningBriefingService } from '../ai/morning-briefing.service';
 
 /**
  * FU-PLANNER-STEP-ORDER (P25):
@@ -175,9 +177,105 @@ describe('FU-PLANNER-STEP-ORDER: every aiPlan include.steps query orders by orde
     assertOrderedStepsInclude(findFirst.mock.calls[0][0]?.include?.steps, 'PlannerService.approvePlan');
   });
 
-  it('RED-BEFORE: no aiPlan query under apps/server/src/modules/ uses unordered include: { steps: true }', () => {
+  it('RED-BEFORE (R1 MINOR-2): MorningBriefingService.executeAllBriefingCards orders pending steps by order asc', async () => {
+    const aiPlanFindFirst = vi.fn().mockResolvedValue({ id: 'plan_1', businessId: 'biz_1', status: 'approved', userId: 'user_1' });
+    const aiPlanStepFindMany = vi.fn().mockResolvedValue([]);
+    const noop = new Proxy({}, { get: () => vi.fn() });
+    const briefing = new MorningBriefingService(
+      { client: { aiPlan: { findFirst: aiPlanFindFirst }, aiPlanStep: { findMany: aiPlanStepFindMany } } } as never,
+      noop as never,
+      noop as never,
+      noop as never,
+      noop as never,
+      noop as never,
+      noop as never,
+    );
+
+    await briefing.executeAllBriefingCards('biz_1', 'plan_1', 'user_1');
+
+    expect(aiPlanStepFindMany).toHaveBeenCalledTimes(1);
+    assertOrderedStepsInclude(aiPlanStepFindMany.mock.calls[0][0], 'MorningBriefingService.executeAllBriefingCards');
+  });
+
+  it('RED-BEFORE (R1 MINOR-1): AST check — no aiPlan query under apps/server/src/modules/ includes or selects steps without orderBy', () => {
     const modulesDir = path.resolve(__dirname, '..');
+    const AI_PLAN_METHODS = new Set([
+      'findUnique',
+      'findUniqueOrThrow',
+      'findFirst',
+      'findFirstOrThrow',
+      'findMany',
+      'create',
+      'update',
+      'upsert',
+      'delete',
+    ]);
     const offenders: string[] = [];
+
+    function propName(name: ts.PropertyName): string | null {
+      if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name)) {
+        return name.text;
+      }
+      return null;
+    }
+
+    function getObjectProp(obj: ts.ObjectLiteralExpression, key: string): ts.Expression | null {
+      for (const prop of obj.properties) {
+        if (ts.isPropertyAssignment(prop) && propName(prop.name) === key) {
+          return prop.initializer;
+        }
+      }
+      return null;
+    }
+
+    function checkStepsNode(stepsExpr: ts.Expression, rel: string, sf: ts.SourceFile, method: string, containerKey: string) {
+      if (stepsExpr.kind === ts.SyntaxKind.TrueKeyword) {
+        const line = sf.getLineAndCharacterOfPosition(stepsExpr.getStart(sf)).line + 1;
+        offenders.push(`${rel}:${line} (aiPlan.${method} ${containerKey}.steps: true)`);
+        return;
+      }
+      if (ts.isObjectLiteralExpression(stepsExpr)) {
+        const orderBy = getObjectProp(stepsExpr, 'orderBy');
+        if (!orderBy) {
+          const line = sf.getLineAndCharacterOfPosition(stepsExpr.getStart(sf)).line + 1;
+          offenders.push(`${rel}:${line} (aiPlan.${method} ${containerKey}.steps object missing orderBy)`);
+        }
+      }
+    }
+
+    function inspectFile(full: string) {
+      const content = fs.readFileSync(full, 'utf8');
+      const sf = ts.createSourceFile(full, content, ts.ScriptTarget.Latest, true);
+      const rel = path.relative(modulesDir, full);
+
+      function visit(node: ts.Node) {
+        if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+          const method = node.expression.name.text;
+          const target = node.expression.expression;
+          if (
+            AI_PLAN_METHODS.has(method) &&
+            ts.isPropertyAccessExpression(target) &&
+            target.name.text === 'aiPlan' &&
+            node.arguments.length > 0 &&
+            ts.isObjectLiteralExpression(node.arguments[0])
+          ) {
+            const argObj = node.arguments[0];
+            for (const containerKey of ['include', 'select'] as const) {
+              const container = getObjectProp(argObj, containerKey);
+              if (container && ts.isObjectLiteralExpression(container)) {
+                const stepsExpr = getObjectProp(container, 'steps');
+                if (stepsExpr) {
+                  checkStepsNode(stepsExpr, rel, sf, method, containerKey);
+                }
+              }
+            }
+          }
+        }
+        ts.forEachChild(node, visit);
+      }
+
+      visit(sf);
+    }
 
     function walk(dir: string) {
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -185,26 +283,7 @@ describe('FU-PLANNER-STEP-ORDER: every aiPlan include.steps query orders by orde
         if (entry.isDirectory()) {
           walk(full);
         } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.spec.ts') && !entry.name.endsWith('.test.ts')) {
-          const content = fs.readFileSync(full, 'utf8');
-          // Find every aiPlan.<method>({ ... }) call and check its call window for bare `steps: true`.
-          const regex = /\.aiPlan\.(findUnique|findFirst|findMany|create|update)\s*\(/g;
-          let match: RegExpExecArray | null;
-          while ((match = regex.exec(content)) !== null) {
-            // Walk balanced parentheses from the opening `(` of the Prisma call.
-            let depth = 1;
-            let idx = match.index + match[0].length;
-            while (idx < content.length && depth > 0) {
-              if (content[idx] === '(') depth++;
-              else if (content[idx] === ')') depth--;
-              idx++;
-            }
-            const callBody = content.slice(match.index, idx);
-            if (/include\s*:\s*\{[^}]*\bsteps\s*:\s*true\b/.test(callBody)) {
-              const line = content.slice(0, match.index).split('\n').length;
-              const rel = path.relative(modulesDir, full);
-              offenders.push(`${rel}:${line} (${match[1]})`);
-            }
-          }
+          inspectFile(full);
         }
       }
     }
@@ -212,7 +291,7 @@ describe('FU-PLANNER-STEP-ORDER: every aiPlan include.steps query orders by orde
     walk(modulesDir);
     expect(
       offenders,
-      `Found aiPlan queries with unordered include: { steps: true }: ${offenders.join(', ')}`,
+      `Found aiPlan queries with unordered steps include/select: ${offenders.join(', ')}`,
     ).toEqual([]);
   });
 
