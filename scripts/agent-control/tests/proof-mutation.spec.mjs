@@ -67,7 +67,9 @@
  *                           control a worktree checked out under it, as main's fresh worktree per control did
  *   PM-25  RED-AT-621c779c  (A2) an empty directory a proof leaves in the worktree's git dir (rebase-merge) does not
  *                           survive
- *   PM-26  RED-AT-621c779c  (A3) modes a proof sets (a read-only directory and file) do not survive
+ *   PM-26  RED-AT-621c779c  (A3) modes a proof sets on a tracked directory and file do not survive (owner-writable
+ *                           modes, compared with an untouched twin: a read-only claim.txt stopped the proof's own
+ *                           mutation for a non-root user, as on the CI runners)
  *   PM-27  RED-AT-621c779c  (A4) a proof that rewrites .git to a relative path that still leads to the worktree: the
  *                           next control sees the .git a fresh worktree has
  *
@@ -118,6 +120,9 @@ function fixtureRepo() {
   fs.writeFileSync(path.join(dir, '\u00e9t\u00e9.txt'), 'summer\n');
   fs.mkdirSync(path.join(dir, 'sub'));
   fs.writeFileSync(path.join(dir, 'sub', 'inner.txt'), 'inner\n');
+  // A twin the proofs never touch: what a fresh checkout makes, whatever the umask (PM-26).
+  fs.mkdirSync(path.join(dir, 'sub2'));
+  fs.writeFileSync(path.join(dir, 'sub2', 'inner.txt'), 'inner\n');
   // The proof: logs where it ran (KF_PM_LOG, outside the repository), then passes only on a pristine exact tree whose
   // claim is good. Run as `node check.mjs litter` it also leaves every kind of debris behind it (an argument, not an
 // environment variable, so the command is the same under cmd.exe on the Windows runner).
@@ -138,7 +143,8 @@ function fixtureRepo() {
       "const bisecting = fs.existsSync(execSync('git rev-parse --git-path BISECT_LOG', { encoding: 'utf8' }).trim());",
       // Fourth repair review: no rebase state, owner-writable tracked paths, an absolute .git as a fresh worktree has.
       "const rebasing = fs.existsSync(execSync('git rev-parse --git-path rebase-merge', { encoding: 'utf8' }).trim());",
-      "const writable = ['sub', 'claim.txt'].every((p) => (fs.statSync(p).mode & 0o200) !== 0);",
+      "const modeOf = (p) => fs.statSync(p).mode & 0o7777;",
+      "const writable = modeOf('sub') === modeOf('sub2') && modeOf('sub/inner.txt') === modeOf('sub2/inner.txt');",
       "const dotGit = fs.readFileSync('.git', 'utf8').trim();",
       "const absoluteGit = dotGit.startsWith('gitdir: ') && (dotGit.slice(8).startsWith('/') || /^[A-Za-z]:[\\\\/]/.test(dotGit.slice(8)));",
       "const eolOk = !process.env.KF_PM_EXPECT_CRLF || fs.readFileSync(process.env.KF_PM_CRLF_FILE || 'claim.txt', 'utf8').includes('\\r\\n');",
@@ -193,8 +199,9 @@ function fixtureRepo() {
       "  fs.mkdirSync(execSync('git rev-parse --git-path rebase-merge', { encoding: 'utf8' }).trim());",
       "}",
       "if (process.argv[2] === 'chmod') {",
-      "  fs.chmodSync('sub', 0o555);",
-      "  fs.chmodSync('claim.txt', 0o444);",
+      // Modes a fresh checkout does not give (still owner-writable: the run must go on as a non-root user, as in CI).
+      "  fs.chmodSync('sub', 0o700);",
+      "  fs.chmodSync('sub/inner.txt', 0o600);",
       "}",
       "if (process.argv[2] === 'relgit') {",
       "  const target = fs.readFileSync('.git', 'utf8').trim().slice(8);",
