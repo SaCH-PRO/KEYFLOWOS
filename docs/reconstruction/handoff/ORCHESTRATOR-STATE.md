@@ -1,6 +1,6 @@
 # Orchestrator state (live checkpoint)
 
-Last written: 2026-11-24 ~17:40 UTC by the acting orchestrator (second-lane account, Claude Code), after M5 (PR #233, f664a411) and M6 (PR #235, c7fb73eb) merged and wave 3p opened as PR #236. Rewrite in place on every merge, packet return
+Last written: 2026-11-24 ~20:05 UTC by the acting orchestrator (second-lane account, Claude Code), after M7a (PR #237, 10e3c97e, Antigravity) merged, P29 returned and P32 was claimed. Rewrite in place on every merge, packet return
 or owner ruling; never append. What you remove stays in git history and on issue #80.
 
 Purpose: everything a fresh session, on any account or tool, needs to carry on the v1 programme without the
@@ -79,20 +79,17 @@ Every ruling to D-272 is on main (PR #230, merged 2026-11-24 as 05f04f2c). Given
 
 ## 3. Work in flight (what git on main cannot show)
 
-Main is at `c7fb73eb` (2026-11-24): M6 PR #235 (wave 3o) after M5 PR #233 (wave 3n, f664a411), M4b PR #234 (edd2fa15,
-Antigravity) and M4a PR #232 (054cac4b). M6 was the first merge under A8 (stacked heads): its head carried wave 3n, and
-`git merge-tree` of the new main and the head gave the head's own tree, so its CI ran alongside M5's. Production runs
-`f5d58ef7` (16 Nov), far behind main: the owner redeploys (D-266). The second-lane account acts as orchestrator and
-posts on #80. How we work faster (D-274: adopted rules A1-A10, owner proposals P1-P2, R&D, experiments):
-`docs/development/agent-memory/WORKFLOW-IMPROVEMENTS.md`.
+Main is at `10e3c97e` (2026-11-24): M7a PR #237 (Antigravity: P24 sharded CI, C3-C5; P25 planner step order; FU-PENDING-OWED-WEB) after M6 PR #235 (c7fb73eb). Production runs `f5d58ef7` (16 Nov), far behind main: the owner redeploys (D-266). The second-lane account acts as orchestrator and posts on #80. How we work faster (D-274: adopted rules A1-A10, owner proposals P1-P2, R&D, experiments): `docs/development/agent-memory/WORKFLOW-IMPROVEMENTS.md`. Who holds which row: `BOARD.md` on `coord/board`.
 
 | Work | Branch / head | State | Next action |
 | --- | --- | --- | --- |
-| **Wave 3p (M7, Claude lane)** | PR #236, `wave/v1-wave-3p` @ 0b9a4d65 on main c7fb73eb: FU-BILLING-TEMPLATES-GUARD (P13), FU-SETTINGS-MANUAL-STEP-FENCE (P19), FU-CI-NC-WORKTREE-REUSE (P23, C1), SWP-CONTACT-DETAIL (P20), FU-NAV-A3-CODEX-235. RETURNs #80 7135012909, 7135564507, 7138157579, 7138884562, 7137156301 | All five returned with two reviews accepted. Opened early (A2); CI running. Wave-head proof running (`scratchpad/chain-w3p.sh`, see LIVE-PROOF-RUNBOOK): server suite, R0, web, agent-control, then live sweep-contact-detail, journey C (C4, C6, C7) and release0-live. C6 should be green now that NAV-A3 is on main; C4's list step is pre-existing (FU-C4-FOCUS-OPEN). The PR's Windows job is C1's first real timing (expected about 20-30 min, was about 61) | Post the proof on #236; merge under D-239/D-272 when CI is green at the exact head |
-| `wave/v1-docs-p19` (Claude lane) | @ 463e862e | Plan corrections (pre-flight, A3), new follow-up rows, WORKFLOW-IMPROVEMENTS, this file; status regenerated | Open as a docs PR after M7, or ride the next wave |
-| **Antigravity lane** | see #80 | P12 SWP-STORE-LISTING-SERVER (owner approved the setup-only Release 0 AMEND); P25 FU-PLANNER-STEP-ORDER claimed (#80 7136855479); P17(d) FU-KEY-CONTACT-NAME and W1F-STORE-PAYPAL accepted from the split (#80 7135441240) | Their wave after M7 |
-| **Claude lane, next** | - | Proposed on #80 7136931971 (Antigravity to confirm): FU-CONTACT-DELETE-LEAVE, FU-CONTACT-PAGES-RAW-STATUS. Also: FU-C4-FOCUS-OPEN, FU-ESCAPE-OVERLAYS (P18a), FU-CONTACT-REFUSED-WRITES (P17a-c), C2 (shard the Windows controls) once C1 is on main. Pre-flight each before claiming (A3) | Claim atomically (CHECKLISTS B1) |
-| Server follow-up for the Antigravity lane | FU-NOTIFICATIONS-PREFS-GUARD (plan row) | Found in the FU-NAV-A3-CODEX-235 review: `customer-preferences` and `customer-log` have no module guard (any member can change the business's customer-email settings) | Antigravity to claim (server, P1) |
+| **M8: wave 3p (Claude lane)** | PR #236, `wave/v1-wave-3p` @ 68c9ed7e = 771bfc3c (P13, P19, P23/C1, P20, FU-NAV-A3-CODEX-235; CI was green there) + main 10e3c97e | Main merged in cleanly (divergence gate OK). CI at 68c9ed7e: green so far except **GitGuardian, red on a CI service-container password that P24 copied into the sharded job** (inherited from main, red on #237 too; owner question 35, #80 7142554825). Wave-head proof chain running (`scratchpad/chain-w3p2.sh`: server suite, R0, web, agent-control, then live sweep, journey C, release0-live) | When CI is complete and question 35 is answered, re-verify and merge under D-239/D-272 with the head pinned |
+| P27 FU-CONTACT-DELETE-LEAVE | `pkt/V1-FU-CONTACT-DELETE-LEAVE` @ 6f2cf8df | RETURNed (#80 7140922048), both reviews ACCEPT | Next Claude wave, after M8 |
+| P29 FU-C4-FOCUS-OPEN | `pkt/V1-FU-C4-FOCUS-OPEN` @ cdf2ac66 | RETURNed (#80 7142275052), both reviews ACCEPT; C4's list step live green, R0 live green; web suite 209/1887 | Next Claude wave, after M8 |
+| P32 FU-C4-CMDK-SEARCH | `pkt/V1-FU-C4-CMDK-SEARCH` @ daa64373 (claim 762e7c0f on 10e3c97e, RED 99c140c5) | CLAIM #80 7142322814. Root causes: Ctrl+K had two owners (the layout's useKeyboardShortcuts and KeyAgent's toggle; KeyAgent mounts after the Genome check, so one press opened and shut the palette), and the palette's results were plain buttons. Fix: KeyAgent alone owns Ctrl+K; combobox/listbox/option markup. CPO-01..05; two reviews running | Live C4 once the M8 live run frees the ports (A5); RETURN |
+| `wave/v1-docs-p19` (Claude lane) | this branch | Plan corrections (pre-flight, A3), follow-up rows, WORKFLOW-IMPROVEMENTS, this file; status regenerated | Open as a docs PR after M8, or ride the next wave |
+| **Antigravity lane** | see #80 and the board | P30 FU-NOTIFICATIONS-PREFS-GUARD claimed (#80 7142239879) on 10e3c97e; P21 W1F-STORE-PAYPAL next; P12 SWP-STORE-LISTING-SERVER (setup-only Release 0 AMEND approved); FU-SEARCH-MONEY-SCOPE (server) proposed | Their wave after M8 |
+| **Claude lane, next** | - | P28 FU-CONTACT-PAGES-RAW-STATUS and P31 FU-CONTACT-PANEL-PRUNE (read removal) after M8; FU-CONTACTS-OPEN-DOORS (P29 review: unencoded contactId in send_quote/payment_reminder, focus cards not keyboard-reachable, deals' `/app/crm?contactId=` loses the id); FU-KEY-CTRLJ-OWNERS (new, P32: Cmd/Ctrl+J has the same two owners; its fix makes Ctrl+J open KEY, which the KEY_DISABLED smoke check counts, and nothing in the web hides KEY under KEY_DISABLED, so it needs its own packet and a live check first); FU-ESCAPE-OVERLAYS; P17(a-c) FU-CONTACT-REFUSED-WRITES (with P27's silent refused DELETE); C2 (shard the Windows controls). Pre-flight each (A3) | Claim atomically (CHECKLISTS B1) |
 | First lane, as it left them (2026-11-23 ~09:30 UTC) | `wave/v1-wave-3j` a2e9f3f0, `wave/v1-wave-3k` 88268a01; FU-INSIGHTS-SIGHT 28cdbccb; child sessions for FU-STRATEGIC-ROUTES-SIGHT, FU-GENOME-DNA-WRITES-AND-INTEGRITY, FU-GENOME-SURFACES-REVENUE, FU-OUTBOUND-ATTACHMENT-URL, FU-AI-APPROVALS-MONEY-SIGHT | Proven or building when the account stopped; not re-verified since | Re-verify each head before it enters a wave |
 | FU-VITEST-DECORATOR-METADATA | @ 83b6dfc8 | Question 20 ruled by D-272.2: the AMEND only if the before/after shows a tightening | Antigravity shows the before/after (board P3) |
 
@@ -198,6 +195,11 @@ Format: `docs/development/agent-memory/OWNER-QUESTION-FORMAT.md`. Safe defaults 
     settings-only? (Default: yes, with the server guard.)
 34. P1 (WORKFLOW-IMPROVEMENTS): move the repository into a free GitHub organization to get the merge queue. P2: run the
     Windows worker proof only when its paths change. (Default: neither until ruled; with C1 and A8, P1 matters less.)
+35. GitGuardian is red on every head that carries main's `10e3c97e` (#237 merged over it; M8 #236 holds on it): it flags
+    `POSTGRES_PASSWORD` of CI's throwaway Postgres service container, which P24 copied into the sharded job (incident
+    32402479; #80 7142554825). Recommended: mark the incidents "test credential / false positive" in the GitGuardian
+    dashboard and re-run the check. Or rule that such a finding, confined to main-merge content already on main, does
+    not block a wave merge. Or move the password to a repository secret (its own CI packet). (Default: M8 holds.)
 
 ## 5. How to work here (learned the hard way)
 
